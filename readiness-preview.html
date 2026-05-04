@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureWorks — Shaun Readiness Board (Preview)</title>
+
+  <!-- ════════════════════════════════════════════════════════════
+       Preview safety lock — pattern mirrors sale-preview.html
+       (v9 baseline). connect-src is locked to 'none' because this
+       page is fixture-only and must NEVER touch Supabase / GHL /
+       Xero / Telegram / Resend / Twilio. The harness lives at
+       modules/ops-readiness-engine.test.html for assertions.
+       ════════════════════════════════════════════════════════════ -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; font-src 'self' data:">
+
+  <script>
+    window.SW_PREVIEW_NO_WRITES = true;
+    (function () {
+      'use strict';
+      // ── Hide the offline queue from this page only (matches
+      //    sale-preview pattern) ──
+      try {
+        var ls = window.localStorage;
+        if (ls && ls.getItem) {
+          var origGet = ls.getItem.bind(ls);
+          var origSet = ls.setItem.bind(ls);
+          var origRemove = ls.removeItem.bind(ls);
+          ls.getItem = function (k) {
+            if (k === 'sw_offline_queue') return null;
+            return origGet(k);
+          };
+          ls.setItem = function (k, v) {
+            if (k === 'sw_offline_queue') {
+              console.warn('[readiness-preview] BLOCKED localStorage.setItem("sw_offline_queue").');
+              return;
+            }
+            return origSet(k, v);
+          };
+          ls.removeItem = function (k) {
+            if (k === 'sw_offline_queue') return;
+            return origRemove(k);
+          };
+        }
+      } catch (e) { /* ignore */ }
+
+      // ── Hard fetch + XHR + sendBeacon overrides. The page is
+      //    fixture-only; any network call is a bug. ──
+      function refuse(reason) {
+        return function () {
+          throw new Error('[readiness-preview] BLOCKED ' + reason + ' — preview is fixture-only, no network calls allowed.');
+        };
+      }
+      try {
+        var blockedFetch = refuse('window.fetch');
+        Object.defineProperty(window, 'fetch', {
+          configurable: false, writable: false, value: blockedFetch
+        });
+      } catch (e) {
+        try { window.fetch = refuse('window.fetch'); } catch (e2) {}
+      }
+      try {
+        if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype) {
+          XMLHttpRequest.prototype.open = refuse('XMLHttpRequest.open');
+          XMLHttpRequest.prototype.send = refuse('XMLHttpRequest.send');
+        }
+      } catch (e) { /* ignore */ }
+      try {
+        if (navigator && navigator.sendBeacon) {
+          navigator.sendBeacon = refuse('navigator.sendBeacon');
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+
+  <style>
+    :root {
+      --sw-orange: #F15A29;
+      --sw-dark: #293C46;
+      --sw-mid: #4C6A7C;
+      --sw-bg: #f5f7f9;
+      --sw-card: #ffffff;
+      --sw-border: #e6ebef;
+      --sw-text: #1f2933;
+      --sw-muted: #5b6b78;
+      --green: #03543f;
+      --green-bg: #def7ec;
+      --red: #771d1d;
+      --red-bg: #fde2e2;
+      --amber: #92400e;
+      --amber-bg: #fef3c7;
+      --info: #1e3a8a;
+      --info-bg: #dbeafe;
+      --gap: #831843;
+      --gap-bg: #fce7f3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--sw-bg);
+      color: var(--sw-text);
+    }
+    header.bar {
+      background: var(--sw-dark);
+      color: #fff;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header.bar h1 { font-size: 16px; margin: 0; font-weight: 700; }
+    header.bar .sub { font-size: 12px; color: #c7d2da; }
+    .fixture-chip {
+      display: inline-block;
+      background: var(--sw-orange);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+    }
+    .banner {
+      background: var(--amber-bg);
+      color: var(--amber);
+      padding: 10px 20px;
+      font-size: 12px;
+      border-bottom: 1px solid #fce7a6;
+    }
+    .filters {
+      padding: 12px 20px;
+      background: #fff;
+      border-bottom: 1px solid var(--sw-border);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .filters .label { font-size: 12px; color: var(--sw-muted); margin-right: 4px; }
+    .filter-pill {
+      border: 1px solid var(--sw-border);
+      background: #fff;
+      color: var(--sw-text);
+      padding: 4px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .filter-pill[aria-pressed="true"] {
+      background: var(--sw-dark);
+      color: #fff;
+      border-color: var(--sw-dark);
+    }
+    main {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .col {
+      background: var(--sw-card);
+      border: 1px solid var(--sw-border);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 120px;
+    }
+    .col-head {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--sw-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--sw-muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .col-head .count {
+      background: var(--sw-bg);
+      color: var(--sw-text);
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+    .col-body { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .card {
+      border: 1px solid var(--sw-border);
+      border-left-width: 4px;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+      box-shadow: 0 1px 1px rgba(31,41,51,0.03);
+    }
+    .card.sev-red    { border-left-color: var(--red); }
+    .card.sev-amber  { border-left-color: var(--amber); }
+    .card.sev-green  { border-left-color: var(--green); }
+    .card.sev-info   { border-left-color: var(--info); }
+    .card.sev-terminal,
+    .card.sev-terminal-soft { border-left-color: var(--sw-mid); }
+    .card.sev-gap    { border-left-color: var(--gap); }
+    .card-row { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+    .card .num { font-weight: 700; }
+    .card .who { color: var(--sw-muted); font-size: 12px; }
+    .card .meta { color: var(--sw-muted); font-size: 11px; margin-top: 2px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .pill.green { background: var(--green-bg); color: var(--green); }
+    .pill.red   { background: var(--red-bg); color: var(--red); }
+    .pill.amber { background: var(--amber-bg); color: var(--amber); }
+    .pill.info  { background: var(--info-bg); color: var(--info); }
+    .pill.gap   { background: var(--gap-bg); color: var(--gap); }
+    .pill.terminal,
+    .pill.terminal-soft { background: #e6ebef; color: var(--sw-dark); }
+    .blocker-line {
+      margin-top: 6px;
+      font-size: 12px;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .blocker-line .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex: 0 0 auto;
+      background: var(--red);
+      margin-top: 5px;
+    }
+    .blocker-line.amber .dot { background: var(--amber); }
+    .next-action {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--sw-mid);
+      background: var(--sw-bg);
+      padding: 6px 8px;
+      border-radius: 6px;
+    }
+    .actions { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn {
+      border: 1px solid var(--sw-border);
+      background: #fff;
+      color: var(--sw-muted);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    .footer-bar {
+      padding: 12px 20px;
+      background: #fff;
+      border-top: 1px solid var(--sw-border);
+      font-size: 11px;
+      color: var(--sw-muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .gap-col .col-head { color: var(--gap); }
+    code { background: var(--sw-bg); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+    @media (max-width: 720px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <div>
+      <h1>Shaun Readiness Board <span class="fixture-chip">FIXTURE</span></h1>
+      <div class="sub">Cap 1 v1 · fixture-only · no live state · no network</div>
+    </div>
+    <div>
+      <span class="pill info" id="moduleVersion">module: …</span>
+      <span class="pill" id="testStatus">harness: open <a href="modules/ops-readiness-engine.test.html" style="color:inherit">test page</a> for asserts</span>
+    </div>
+  </header>
+
+  <div class="banner">
+    <strong>Pipeline visibility guard:</strong> jobs with unknown or unmapped backend statuses appear in the
+    <code>Status mapping gap</code> column with <code>confidence='low'</code>. They are <em>never</em> filtered out.
+  </div>
+
+  <div class="filters" role="toolbar" aria-label="Install window filter">
+    <span class="label">Install window:</span>
+    <button class="filter-pill" data-window="5"  aria-pressed="false" type="button" disabled>≤5 biz days</button>
+    <button class="filter-pill" data-window="14" aria-pressed="false" type="button" disabled>≤14 days</button>
+    <button class="filter-pill" data-window="all" aria-pressed="true"  type="button" disabled>All fixtures</button>
+    <span class="label" style="margin-left:auto">Filter buttons disabled in fixture preview</span>
+  </div>
+
+  <main id="board" aria-live="polite"></main>
+
+  <div id="action-log" hidden></div>
+
+  <div class="footer-bar">
+    <div>
+      Source contract: <code>cio/reports/2026-04-30-job-release-packet-v1/release-packet-contract-v1.md</code>
+      · Audit: <code>cio/reports/2026-04-29-cap-1-readiness-engine-audit/</code>
+      · Evidence: <code>cio/evidence/cap-1-shaun-readiness-2026-05-01/</code>
+    </div>
+    <div>
+      All buttons disabled. Stub log lines write to <code>#action-log</code> only. No <code>fetch</code>, no <code>XHR</code>, no <code>sendBeacon</code>.
+    </div>
+  </div>
+
+  <script src="modules/ops-readiness-engine.js"></script>
+  <script src="modules/ops-readiness-fixtures.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var ENGINE = window.SW_READINESS_ENGINE;
+    var FX = window.SW_READINESS_FIXTURES;
+    document.getElementById('moduleVersion').textContent = 'module: ' + ENGINE.VERSION;
+
+    // Column ordering for the Shaun board.
+    var COLUMNS = [
+      { id: 'col_blocked',              title: 'Blocked',             dataStates: ['BLOCKED'] },
+      { id: 'col_packet_incomplete',    title: 'Packet incomplete',   dataStates: ['PACKET_INCOMPLETE', 'ACCEPTED_NEEDS_PACKET'] },
+      { id: 'col_materials',            title: 'Materials',           dataStates: ['NEEDS_MATERIAL_ORDER', 'MATERIALS_PENDING'] },
+      { id: 'col_work_order',           title: 'Work order needed',   dataStates: ['WORK_ORDER_NEEDED'] },
+      { id: 'col_shaun_review',         title: 'For Shaun review',    dataStates: ['READY_FOR_SHAUN_REVIEW'] },
+      { id: 'col_ready',                title: 'Ready to schedule',   dataStates: ['READY_TO_SCHEDULE'] },
+      { id: 'col_waiting_client',       title: 'Waiting on client',   dataStates: ['QUOTED_WAITING_CLIENT', 'DECLINED'] },
+      { id: 'col_quote',                title: 'Quote / not released',dataStates: ['NOT_RELEASED'] },
+      { id: 'col_done',                 title: 'Done / archived',     dataStates: ['DONE'] },
+      { id: 'col_status_mapping_gap',   title: 'Status mapping gap',  dataStates: '*GAP*' }
+    ];
+
+    // Compute results for every fixture
+    var rows = FX.fixtures.map(function (fx) {
+      return {
+        fixture: fx,
+        result: ENGINE.evaluateReadiness(fx.packet, fx.supplemental, { now: FX.NOW_ISO })
+      };
+    });
+
+    // Bucket rows into columns. The status_mapping_gap column wins
+    // over any other state placement, so unmapped jobs always land
+    // in the visible diagnostic column.
+    var byCol = {};
+    COLUMNS.forEach(function (c) { byCol[c.id] = []; });
+    rows.forEach(function (row) {
+      var col;
+      if (row.result.frontend_bucket === 'status_mapping_gap') {
+        col = 'col_status_mapping_gap';
+      } else {
+        col = ENGINE.columnFor(row.result);
+        if (!byCol[col]) col = 'col_status_mapping_gap';
+      }
+      byCol[col].push(row);
+    });
+
+    function pillClass(sev) {
+      if (sev === 'terminal' || sev === 'terminal-soft') return 'terminal';
+      if (sev === 'gap') return 'gap';
+      return sev || 'info';
+    }
+    function escapeHtml(s) {
+      if (s == null) return '';
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function renderCard(row) {
+      var fx = row.fixture, r = row.result;
+      var sevForClass = (r.frontend_bucket === 'status_mapping_gap') ? 'gap' : r.severity;
+      var topBlocker = (r.blockers || []).find(function (b) { return b && (b.status === 'red' || b.status === 'amber'); });
+      var topAction = (r.next_actions || [])[0];
+      var customerName = (fx.packet.customer && fx.packet.customer.name) || '—';
+      var firstName = customerName.split(' ')[0];
+      var suburb = (fx.packet.site && fx.packet.site.suburb) || '—';
+      var jobNumber = (fx.packet.job && fx.packet.job.job_number) || fx.packet.job.id;
+      var scheduled = (fx.packet.work_order && fx.packet.work_order.scheduled_date) || (fx.packet.job && fx.packet.job.scheduled_date) || null;
+
+      var html = [
+        '<div class="card sev-', sevForClass, '">',
+        '<div class="card-row">',
+          '<span class="num">', escapeHtml(jobNumber), '</span>',
+          '<span class="pill ', pillClass(sevForClass), '">', escapeHtml(r.state), '</span>',
+        '</div>',
+        '<div class="card-row">',
+          '<span class="who">', escapeHtml(firstName), ' · ', escapeHtml(suburb), '</span>',
+          scheduled ? '<span class="meta">install ' + escapeHtml(scheduled.slice(0, 10)) + '</span>' : '<span class="meta">no install date</span>',
+        '</div>',
+        '<div class="meta">status: <code>', escapeHtml(r.source_status || '—'), '</code> → bucket <code>', escapeHtml(r.frontend_bucket), '</code> · confidence: ', escapeHtml(r.confidence), '</div>',
+        topBlocker ? '<div class="blocker-line ' + (topBlocker.status === 'amber' ? 'amber' : '') + '"><span class="dot"></span><span>' + escapeHtml(topBlocker.label) + ': ' + escapeHtml(topBlocker.reason) + '</span></div>' : '',
+        topAction ? '<div class="next-action">▶ ' + escapeHtml(topAction.label) + ' <span class="who">(' + escapeHtml(topAction.owner) + ')</span></div>' : '',
+        '<div class="actions">',
+          '<button type="button" class="btn" aria-disabled="true" data-stub="open-job">Open job</button>',
+          '<button type="button" class="btn" aria-disabled="true" data-stub="client-confirmed">Client confirmed</button>',
+          '<button type="button" class="btn" aria-disabled="true" data-stub="logistics-override">Logistics override</button>',
+        '</div>',
+        '</div>'
+      ].join('');
+      return html;
+    }
+    function renderColumn(col) {
+      var rowsInCol = byCol[col.id] || [];
+      var html = [
+        '<section class="col', col.id === 'col_status_mapping_gap' ? ' gap-col' : '', '">',
+        '<div class="col-head"><span>', escapeHtml(col.title), '</span><span class="count">', String(rowsInCol.length), '</span></div>',
+        '<div class="col-body">',
+          rowsInCol.length === 0
+            ? '<span style="color:var(--sw-muted);font-size:12px;padding:6px">No fixtures in this state.</span>'
+            : rowsInCol.map(renderCard).join(''),
+        '</div>',
+        '</section>'
+      ].join('');
+      return html;
+    }
+    document.getElementById('board').innerHTML = COLUMNS.map(renderColumn).join('');
+
+    // Stub-log click handler. Buttons stay aria-disabled, but a
+    // click writes one line to #action-log so reviewers can verify
+    // the no-op path.
+    document.getElementById('board').addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (t && t.matches && t.matches('button[data-stub]')) {
+        var log = document.getElementById('action-log');
+        log.hidden = false;
+        log.style.padding = '8px 14px';
+        log.style.background = '#1f2933';
+        log.style.color = '#aef0c4';
+        log.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+        log.style.fontSize = '11px';
+        var line = '[' + new Date().toISOString() + '] STUB ' + t.getAttribute('data-stub') + ' (no network call performed)\n';
+        log.textContent = (log.textContent || '') + line;
+        ev.preventDefault();
+      }
+    });
+
+    // Self-check: confirm window.fetch is blocked. If it isn't, the
+    // banner turns red.
+    try {
+      window.fetch('/_self_check_should_throw');
+      var b = document.querySelector('.banner');
+      b.style.background = 'var(--red-bg)';
+      b.style.color = 'var(--red)';
+      b.innerHTML = '<strong>SAFETY LOCK FAILED:</strong> window.fetch did not throw. Do not use this page.';
+    } catch (e) {
+      // expected — preview is properly locked
+    }
+  })();
+  </script>
+</body>
+</html>

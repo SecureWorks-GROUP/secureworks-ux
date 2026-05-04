@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>T6 readiness engine — test harness</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'">
+  <style>
+    body { font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; color: #1f2933; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .meta { color: #5b6b78; font-size: 12px; margin-bottom: 16px; }
+    .summary { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600; }
+    .summary.pass { background: #def7ec; color: #03543f; }
+    .summary.fail { background: #fde2e2; color: #771d1d; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e6ebef; vertical-align: top; font-size: 13px; }
+    th { background: #f5f7f9; font-weight: 600; }
+    td.pass { color: #03543f; }
+    td.fail { color: #771d1d; font-weight: 600; }
+    code { background: #f5f7f9; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    pre { background: #f5f7f9; padding: 8px 12px; border-radius: 6px; font-size: 11px; overflow-x: auto; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .pill.green { background: #def7ec; color: #03543f; }
+    .pill.red   { background: #fde2e2; color: #771d1d; }
+    .pill.amber { background: #fef3c7; color: #92400e; }
+    .pill.info  { background: #dbeafe; color: #1e3a8a; }
+    .pill.gap   { background: #fce7f3; color: #831843; }
+    details { margin: 4px 0; }
+    .footer { color: #5b6b78; font-size: 11px; margin-top: 32px; border-top: 1px solid #e6ebef; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>T6 — Cap 1 Shaun Readiness Engine harness</h1>
+  <div class="meta">
+    Pure module asserts over fixture release packets. No network. <code>window.fetch</code> blocked by CSP.
+    Module: <code>ops-readiness-engine.js</code> · Fixtures: <code>ops-readiness-fixtures.js</code>.
+  </div>
+
+  <div id="summary" class="summary">Running…</div>
+  <div id="results"></div>
+  <pre id="raw" hidden></pre>
+
+  <div class="footer">
+    Pipeline visibility guard active. Fixtures 9 + 10 prove that a known backend status historically dropped by the frontend pipeline (<code>schedule_install</code>) and an unknown future status (<code>waiting_on_new_stage</code>) both stay visible — never silently filtered.
+  </div>
+
+  <script src="ops-readiness-engine.js"></script>
+  <script src="ops-readiness-fixtures.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var ENGINE = window.SW_READINESS_ENGINE;
+    var FX = window.SW_READINESS_FIXTURES;
+    var fixtures = FX.fixtures;
+    var NOW_ISO = FX.NOW_ISO;
+
+    var results = [];
+    var passCount = 0;
+    var failCount = 0;
+
+    function assertEq(label, actual, expected) {
+      var ok = actual === expected;
+      return { label: label, actual: actual, expected: expected, ok: ok };
+    }
+
+    function assertIncludes(label, list, needles) {
+      var missing = needles.filter(function (n) { return list.indexOf(n) === -1; });
+      return { label: label, actual: list.join(','), expected: needles.join(','), ok: missing.length === 0, missing: missing };
+    }
+
+    fixtures.forEach(function (fx) {
+      var result = ENGINE.evaluateReadiness(fx.packet, fx.supplemental, { now: NOW_ISO });
+      var checks = [];
+      var blockerIds = result.blockers.map(function (b) { return b.id; });
+
+      if (fx.expected.state) {
+        checks.push(assertEq('state', result.state, fx.expected.state));
+      }
+      if (fx.expected.severity) {
+        checks.push(assertEq('severity', result.severity, fx.expected.severity));
+      }
+      if (fx.expected.owner) {
+        checks.push(assertEq('owner', result.owner, fx.expected.owner));
+      }
+      if (fx.expected.frontend_bucket) {
+        checks.push(assertEq('frontend_bucket', result.frontend_bucket, fx.expected.frontend_bucket));
+      }
+      if (fx.expected.normalized_status) {
+        checks.push(assertEq('normalized_status', result.normalized_status, fx.expected.normalized_status));
+      }
+      if (fx.expected.confidence) {
+        checks.push(assertEq('confidence', result.confidence, fx.expected.confidence));
+      }
+      if (fx.expected.blocker_ids_includes) {
+        checks.push(assertIncludes('blocker_ids_includes', blockerIds, fx.expected.blocker_ids_includes));
+      }
+      if (fx.expected.top_next_action_owner !== undefined) {
+        var top = result.next_actions[0] || null;
+        var actualOwner = top ? top.owner : null;
+        if (fx.expected.top_next_action_owner === null) {
+          // null/falsey owner is fine when there is no action
+        } else {
+          checks.push(assertEq('top_next_action_owner', actualOwner, fx.expected.top_next_action_owner));
+        }
+      }
+      if (fx.expected.visibility === 'must_be_visible') {
+        // Visibility guard: there must be at least one column we can
+        // place the card in (i.e., columnFor never returns null /
+        // undefined, and the engine returned a valid result).
+        var col = ENGINE.columnFor(result);
+        checks.push({
+          label: 'visibility',
+          actual: col || '(none)',
+          expected: 'a real column id',
+          ok: !!col
+        });
+      }
+
+      var allOk = checks.every(function (c) { return c.ok; });
+      if (allOk) passCount += 1; else failCount += 1;
+
+      results.push({
+        fixture: fx,
+        result: result,
+        checks: checks,
+        ok: allOk
+      });
+    });
+
+    // Render summary
+    var summaryEl = document.getElementById('summary');
+    summaryEl.className = 'summary ' + (failCount === 0 ? 'pass' : 'fail');
+    summaryEl.textContent = (failCount === 0 ? 'PASS — ' : 'FAIL — ') + passCount + '/' + fixtures.length + ' fixtures pass';
+
+    // Render table
+    var resultsEl = document.getElementById('results');
+    var rows = [
+      '<table>',
+      '<thead><tr>',
+      '<th style="width:40px">#</th>',
+      '<th>Fixture</th>',
+      '<th>State</th>',
+      '<th>Bucket</th>',
+      '<th>Conf</th>',
+      '<th>Blockers</th>',
+      '<th>Result</th>',
+      '</tr></thead>',
+      '<tbody>'
+    ];
+    results.forEach(function (r, i) {
+      var failingChecks = r.checks.filter(function (c) { return !c.ok; });
+      var statePill = '<span class="pill ' + pillClass(r.result.severity) + '">' + r.result.state + '</span>';
+      var bucketPill = '<span class="pill ' + (r.result.frontend_bucket === 'status_mapping_gap' ? 'gap' : 'info') + '">' + r.result.frontend_bucket + '</span>';
+      var confPill = '<span class="pill ' + (r.result.confidence === 'low' ? 'amber' : 'info') + '">' + r.result.confidence + '</span>';
+      var blockerCell = (r.result.blockers || []).map(function (b) { return '<code>' + b.id + '</code>'; }).join(' ') || '<span style="color:#5b6b78">—</span>';
+      var resultPill = r.ok
+        ? '<span class="pill green">PASS</span>'
+        : '<span class="pill red">FAIL</span>' + ' <details><summary>diffs</summary><pre>' + escapeHtml(JSON.stringify(failingChecks, null, 2)) + '</pre></details>';
+      rows.push('<tr>',
+        '<td>', String(i + 1), '</td>',
+        '<td><strong>', escapeHtml(r.fixture.id), '</strong><br><span style="color:#5b6b78;font-size:12px">', escapeHtml(r.fixture.label), '</span></td>',
+        '<td>', statePill, '</td>',
+        '<td>', bucketPill, '</td>',
+        '<td>', confPill, '</td>',
+        '<td>', blockerCell, '</td>',
+        '<td>', resultPill, '</td>',
+      '</tr>');
+    });
+    rows.push('</tbody></table>');
+    resultsEl.innerHTML = rows.join('');
+
+    // Expose for preview shell + copy/paste into evidence
+    window.__T6_RESULTS = {
+      pass: passCount,
+      fail: failCount,
+      total: fixtures.length,
+      results: results,
+      version: ENGINE.VERSION
+    };
+    document.getElementById('raw').textContent = JSON.stringify({
+      pass: passCount,
+      fail: failCount,
+      total: fixtures.length,
+      version: ENGINE.VERSION,
+      summary: results.map(function (r) {
+        return {
+          fixture: r.fixture.id,
+          state: r.result.state,
+          severity: r.result.severity,
+          frontend_bucket: r.result.frontend_bucket,
+          confidence: r.result.confidence,
+          blocker_ids: r.result.blockers.map(function (b) { return b.id; }),
+          ok: r.ok,
+          failing: r.checks.filter(function (c) { return !c.ok; })
+        };
+      })
+    }, null, 2);
+
+    function pillClass(sev) {
+      switch (sev) {
+        case 'green': return 'green';
+        case 'red':   return 'red';
+        case 'amber': return 'amber';
+        case 'info':  return 'info';
+        case 'terminal': return 'info';
+        case 'terminal-soft': return 'info';
+        default: return 'info';
+      }
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+  })();
+  </script>
+</body>
+</html>

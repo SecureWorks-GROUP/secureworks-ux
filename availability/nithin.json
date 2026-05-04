@@ -1,0 +1,30 @@
+{
+  "rep_first_name": "Nithin",
+  "starting_location": "Joondalup, WA 6027",
+  "max_scopes_per_day": 4,
+  "_brand": "fixture",
+  "_caveat": "fixture defaults — Marnin/Nithin to paint real availability via cockpit UI in Phase 2.",
+  "availability": [
+    { "day": "Mon", "blocks": [
+      { "start": "08:00", "end": "16:00", "zone": "orange" }
+    ]},
+    { "day": "Tue", "blocks": [
+      { "start": "08:00", "end": "16:00", "zone": "green" }
+    ]},
+    { "day": "Wed", "blocks": [
+      { "start": "08:00", "end": "16:00", "zone": "orange" }
+    ]},
+    { "day": "Thu", "blocks": [
+      { "start": "08:00", "end": "16:00", "zone": "green" }
+    ]},
+    { "day": "Fri", "blocks": [
+      { "start": "08:00", "end": "16:00", "zone": "orange" }
+    ]},
+    { "day": "Sat", "blocks": [
+      { "start": "00:00", "end": "23:59", "zone": "red" }
+    ]},
+    { "day": "Sun", "blocks": [
+      { "start": "00:00", "end": "23:59", "zone": "red" }
+    ]}
+  ]
+}

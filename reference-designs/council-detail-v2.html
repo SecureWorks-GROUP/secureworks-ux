@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Council Detail — SecureWorks Ops</title>
+<style>
+  :root {
+    --sw-orange: #F15A29;
+    --sw-orange-hover: #C4481F;
+    --sw-orange-tint: #FEF3EF;
+    --sw-dark: #293C46;
+    --sw-dark-deep: #1A272E;
+    --sw-mid: #4C6A7C;
+    --sw-light: #EDF1F4;
+    --sw-bg: #F8F6F3;
+    --sw-border: #D4DEE4;
+    --sw-text-sec: #8FA4B2;
+    --sw-green: #27AE60;
+    --sw-red: #E74C3C;
+    --sw-card: #FCFBFA;
+    --sw-warm-200: #F0ECE8;
+    --sw-font: 'Helvetica Neue', Helvetica, Arial, -apple-system, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sw-font);
+    background: var(--sw-bg);
+    color: var(--sw-dark);
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* ── Top Bar ── */
+  .top-bar {
+    position: sticky; top: 0; z-index: 10;
+    background: #fff;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--sw-border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .back-btn {
+    background: none; border: none; font-size: 14px;
+    color: var(--sw-orange); font-weight: 600; cursor: pointer;
+    padding: 4px 0; letter-spacing: -0.2px;
+  }
+  .top-bar-title { font-size: 15px; font-weight: 700; flex: 1; }
+  .top-bar-action {
+    font-size: 11px; padding: 5px 12px;
+    border: 1px solid var(--sw-border); background: #fff;
+    color: var(--sw-mid); cursor: pointer; font-weight: 500;
+  }
+
+  /* ── Progress Header ── */
+  .progress-header {
+    background: #fff;
+    padding: 16px 16px 14px;
+    border-bottom: 1px solid var(--sw-border);
+  }
+  .progress-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .progress-job { font-size: 11px; color: var(--sw-text-sec); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+  .progress-count { font-size: 11px; color: var(--sw-text-sec); }
+  .progress-bar { display: flex; gap: 3px; margin-bottom: 12px; }
+  .progress-seg {
+    flex: 1; height: 5px; background: var(--sw-light);
+    transition: background 0.4s ease;
+  }
+  .progress-seg.done { background: var(--sw-green); }
+  .progress-seg.active { background: var(--sw-orange); animation: seg-pulse 2s ease-in-out infinite; }
+  .progress-seg.blocked { background: var(--sw-red); }
+  @keyframes seg-pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
+
+  /* Current step + action */
+  .current-step {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .current-step-info { flex: 1; }
+  .current-step-label { font-size: 10px; color: var(--sw-orange); font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
+  .current-step-name { font-size: 17px; font-weight: 700; margin-top: 2px; line-height: 1.2; }
+  .current-step-vendor { font-size: 11px; color: var(--sw-text-sec); margin-top: 3px; }
+  .current-step-days { font-size: 11px; margin-top: 2px; }
+  .advance-btn {
+    padding: 8px 16px; background: var(--sw-green); color: #fff;
+    border: none; font-size: 12px; font-weight: 600; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* ── Collapsible Steps ── */
+  .steps-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: var(--sw-warm-200);
+    cursor: pointer; user-select: none;
+    border-bottom: 1px solid var(--sw-border);
+  }
+  .steps-toggle-label { font-size: 11px; font-weight: 700; color: var(--sw-mid); text-transform: uppercase; letter-spacing: 0.5px; }
+  .steps-toggle-arrow { font-size: 14px; color: var(--sw-mid); transition: transform 0.2s; }
+  .steps-toggle.open .steps-toggle-arrow { transform: rotate(180deg); }
+
+  .steps-drawer {
+    max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    background: #fff; border-bottom: 1px solid var(--sw-border);
+  }
+  .steps-drawer.open { max-height: 500px; }
+  .steps-list { padding: 8px 16px 12px; }
+
+  .step-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 0; position: relative;
+  }
+  .step-dot {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-dot.done { background: var(--sw-green); color: #fff; }
+  .step-dot.active { background: var(--sw-orange); color: #fff; box-shadow: 0 0 0 3px rgba(241,90,41,0.15); }
+  .step-dot.pending { background: none; border: 1.5px solid var(--sw-border); color: var(--sw-text-sec); }
+  .step-name { font-size: 12px; flex: 1; }
+  .step-name.done { color: var(--sw-text-sec); text-decoration: line-through; }
+  .step-name.active { font-weight: 700; }
+  .step-badge {
+    font-size: 9px; padding: 1px 6px; border-radius: 100px;
+    font-weight: 600;
+  }
+
+  /* ── Conversation ── */
+  .convo-section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  .convo-filters {
+    display: flex; gap: 6px; padding: 10px 16px;
+    background: #fff; border-bottom: 1px solid var(--sw-border);
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+  }
+  .filter-chip {
+    padding: 5px 14px; border-radius: 100px;
+    border: 1px solid var(--sw-border); background: #fff;
+    font-size: 11px; font-weight: 500; color: var(--sw-dark);
+    cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  }
+  .filter-chip.active {
+    background: var(--sw-dark); color: #fff; border-color: var(--sw-dark);
+  }
+
+  .convo-messages {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  }
+
+  /* Date separator */
+  .date-sep {
+    text-align: center; font-size: 10px; color: var(--sw-text-sec);
+    padding: 8px 0; letter-spacing: 0.3px;
+  }
+
+  /* Message wrapper */
+  .msg { display: flex; flex-direction: column; max-width: 82%; }
+  .msg.out { align-self: flex-end; align-items: flex-end; }
+  .msg.in { align-self: flex-start; align-items: flex-start; }
+
+  /* Step badge on message */
+  .msg-step-badge {
+    font-size: 9px; padding: 2px 8px; border-radius: 8px;
+    background: rgba(41,60,70,0.05); color: var(--sw-mid);
+    font-weight: 500; margin-bottom: 3px;
+  }
+
+  /* Sender/recipient info */
+  .msg-party { font-size: 10px; color: var(--sw-text-sec); margin-bottom: 2px; padding: 0 6px; }
+
+  /* Bubble */
+  .bubble {
+    padding: 10px 14px; font-size: 13px; line-height: 1.5;
+    word-wrap: break-word; position: relative;
+  }
+  .msg.out .bubble {
+    background: var(--sw-orange-tint);
+    border-radius: 14px 14px 3px 14px;
+  }
+  .msg.in .bubble {
+    background: var(--sw-warm-200);
+    border-radius: 14px 14px 14px 3px;
+  }
+  .bubble-subject { font-size: 11px; font-weight: 700; color: var(--sw-dark); margin-bottom: 3px; opacity: 0.7; }
+  .bubble-body { white-space: pre-wrap; word-break: break-word; }
+
+  /* Attachment inside bubble */
+  .bubble-att {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 10px; margin-top: 8px;
+    background: rgba(255,255,255,0.6); border: 1px solid var(--sw-border);
+    border-radius: 6px; font-size: 11px; font-weight: 600;
+    color: var(--sw-dark); text-decoration: none; cursor: pointer;
+  }
+  .bubble-att:hover { background: rgba(255,255,255,0.9); }
+
+  /* Timestamp */
+  .msg-time { font-size: 10px; color: var(--sw-text-sec); margin-top: 3px; padding: 0 6px; }
+
+  /* ── Compose Bar (sticky bottom) ── */
+  .compose-bar {
+    position: sticky; bottom: 0;
+    background: #fff;
+    border-top: 1px solid var(--sw-border);
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    flex-shrink: 0;
+  }
+  .compose-fields {
+    display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;
+  }
+  .compose-field {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px;
+  }
+  .compose-field label {
+    font-weight: 600; color: var(--sw-mid); width: 22px; text-align: right;
+    flex-shrink: 0;
+  }
+  .compose-field input {
+    flex: 1; border: none; outline: none; font-size: 12px;
+    font-family: var(--sw-font); color: var(--sw-dark); padding: 4px 0;
+    border-bottom: 1px solid var(--sw-light);
+  }
+  .compose-field input:focus { border-bottom-color: var(--sw-orange); }
+
+  .compose-row {
+    display: flex; align-items: flex-end; gap: 8px;
+  }
+  .compose-input {
+    flex: 1; padding: 8px 14px;
+    border: 1px solid var(--sw-border); border-radius: 20px;
+    font-size: 13px; font-family: var(--sw-font);
+    resize: none; outline: none; max-height: 100px; line-height: 1.4;
+    transition: border-color 0.15s;
+  }
+  .compose-input:focus { border-color: var(--sw-orange); }
+  .compose-send {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--sw-orange); border: none; color: #fff;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: transform 0.1s;
+  }
+  .compose-send:active { transform: scale(0.9); }
+  .compose-link {
+    text-align: center; margin-top: 4px;
+  }
+  .compose-link a {
+    font-size: 10px; color: var(--sw-text-sec); text-decoration: underline; cursor: pointer;
+  }
+
+  /* ── Responsive ── */
+  @media (min-width: 769px) {
+    body { max-width: 520px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+  <button class="back-btn">‹ Approvals</button>
+  <div style="flex:1;"></div>
+  <button class="top-bar-action">View Job</button>
+</div>
+
+<!-- Progress Header -->
+<div class="progress-header">
+  <div class="progress-meta">
+    <span class="progress-job">SWP-26022 — marnin stobbe</span>
+    <span class="progress-count">1 of 6</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-seg done"></div>
+    <div class="progress-seg active"></div>
+    <div class="progress-seg"></div>
+    <div class="progress-seg"></div>
+    <div class="progress-seg"></div>
+    <div class="progress-seg"></div>
+  </div>
+  <div class="current-step">
+    <div class="current-step-info">
+      <div class="current-step-label">Current Step</div>
+      <div class="current-step-name">Get Engineering Certification</div>
+      <div class="current-step-vendor">PS Engineering — jeffry@pseng.au</div>
+      <div class="current-step-days" style="color:#D97706; font-weight:600;">4 days in this step</div>
+    </div>
+    <button class="advance-btn">Complete ✓</button>
+  </div>
+</div>
+
+<!-- Collapsible Steps -->
+<div class="steps-toggle" onclick="this.classList.toggle('open');document.getElementById('stepsDrawer').classList.toggle('open')">
+  <span class="steps-toggle-label">All Steps</span>
+  <span class="steps-toggle-arrow">▾</span>
+</div>
+<div class="steps-drawer" id="stepsDrawer">
+  <div class="steps-list">
+    <div class="step-row">
+      <div class="step-dot done">✓</div>
+      <span class="step-name done">Get Plans Drawn</span>
+      <span class="step-badge" style="background:rgba(39,174,96,0.1);color:#27AE60;">Done</span>
+    </div>
+    <div class="step-row">
+      <div class="step-dot active">2</div>
+      <span class="step-name active">Get Engineering Certification</span>
+      <span class="step-badge" style="background:rgba(241,90,41,0.1);color:#F15A29;">4d</span>
+    </div>
+    <div class="step-row">
+      <div class="step-dot pending">3</div>
+      <span class="step-name">Get CDC</span>
+    </div>
+    <div class="step-row">
+      <div class="step-dot pending">4</div>
+      <span class="step-name">Submit Council Application</span>
+    </div>
+    <div class="step-row">
+      <div class="step-dot pending">5</div>
+      <span class="step-name">Respond to Council Queries</span>
+    </div>
+    <div class="step-row">
+      <div class="step-dot pending">6</div>
+      <span class="step-name">Building Permit Received</span>
+    </div>
+  </div>
+</div>
+
+<!-- Conversation -->
+<div class="convo-section">
+  <div class="convo-filters">
+    <button class="filter-chip active">All (3)</button>
+    <button class="filter-chip">PS Engineering (1)</button>
+    <button class="filter-chip">Council (1)</button>
+    <button class="filter-chip">Client (1)</button>
+  </div>
+
+  <div class="convo-messages">
+
+    <div class="date-sep">27 Mar 2026</div>
+
+    <!-- Outbound message -->
+    <div class="msg out">
+      <div class="msg-step-badge">Get Plans Drawn</div>
+      <div class="msg-party">To: marnin@secureworkswa.com.au</div>
+      <div class="bubble">
+        <div class="bubble-subject">SWP-26022 — Get Plans Drawn</div>
+        <div class="bubble-body">Hi,
+
+Regarding the Get Plans Drawn for SWP-26022 — marnin stobbe.
+
+Please send through the house plans when ready.
+
+Thanks,
+SecureWorks Group</div>
+        <a class="bubble-att" href="#">📎 House-Plans-Thompson.pdf</a>
+      </div>
+      <div class="msg-time">You · 27 Mar, 11:35am · Delivered ✓</div>
+    </div>
+
+    <div class="date-sep">28 Mar 2026</div>
+
+    <!-- Inbound reply -->
+    <div class="msg in">
+      <div class="msg-step-badge">Get Plans Drawn</div>
+      <div class="msg-party">From: jeffry@pseng.au</div>
+      <div class="bubble">
+        <div class="bubble-subject">Re: SWP-26022 — Get Plans Drawn</div>
+        <div class="bubble-body">Hi Marnin,
+
+Plans received. I'll have the engineering cert ready by end of next week. Will send through for your review.
+
+Cheers,
+Jeffry</div>
+        <a class="bubble-att" href="#">📎 Engineering-Quote-SWP26022.pdf</a>
+      </div>
+      <div class="msg-time">jeffry@pseng.au · 28 Mar, 2:30pm</div>
+    </div>
+
+    <div class="date-sep">Today</div>
+
+    <!-- Outbound follow-up -->
+    <div class="msg out">
+      <div class="msg-step-badge">Engineering Cert</div>
+      <div class="msg-party">To: jeffry@pseng.au · CC: admin@secureworkswa.com.au</div>
+      <div class="bubble">
+        <div class="bubble-body">Hi Jeffry,
+
+Just following up on the engineering certification for SWP-26022. Are we still on track for this week?
+
+Thanks</div>
+      </div>
+      <div class="msg-time">You · Today, 8:15am · Sent</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Compose Bar (sticky) -->
+<div class="compose-bar">
+  <div class="compose-fields">
+    <div class="compose-field">
+      <label>To</label>
+      <input type="text" value="jeffry@pseng.au" placeholder="Email address...">
+    </div>
+    <div class="compose-field">
+      <label>CC</label>
+      <input type="text" value="admin@secureworkswa.com.au" placeholder="CC (comma-separated)">
+    </div>
+  </div>
+  <div class="compose-row">
+    <textarea class="compose-input" rows="1" placeholder="Type a message..."></textarea>
+    <button class="compose-send">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+    </button>
+  </div>
+  <div class="compose-link"><a>Open full compose with attachments</a></div>
+</div>
+
+<script>
+// Filter chip interaction
+document.querySelectorAll('.filter-chip').forEach(function(chip) {
+  chip.addEventListener('click', function() {
+    document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); });
+    chip.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

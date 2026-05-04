@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureWorks — Evidence Health</title>
+  <meta name="sw-allowed-roles" content="admin,ops_manager">
+
+  <!--
+    T7 Loop 2 — Evidence Health admin page
+    Roadmap: secureworks-docs/cio/operations/2026-05-02-t7-evidence-capture-spine-roadmap.md (Section 9)
+    Read-only by design. Only call: GET ops-api?action=get_evidence_health.
+  -->
+
+  <meta http-equiv="Content-Security-Policy"
+        content="connect-src 'self' https://kevgrhcjxspbxgovpmfl.supabase.co https://cdn.jsdelivr.net">
+
+  <script>
+    // T7 Evidence Health safety lock — minimal, single-purpose.
+    // This page only ever fetches GET ops-api?action=get_evidence_health.
+    // Any other request is blocked.
+    (function() {
+      const ALLOWED_ACTION = 'get_evidence_health';
+      const OPS_API_PATH = '/functions/v1/ops-api';
+      const SAFE_ASSETS = /\/(rest|auth)\/v1\/|cdn\.jsdelivr\.net/;
+
+      function evaluate(method, urlString) {
+        const m = (method || 'GET').toUpperCase();
+        let url; try { url = new URL(urlString, location.origin); } catch { return false; }
+
+        // Same-origin static assets always OK.
+        if (url.origin === location.origin) return true;
+
+        // Whitelist Supabase auth and rest endpoints (signin / session).
+        if (SAFE_ASSETS.test(url.pathname) || SAFE_ASSETS.test(url.toString())) return true;
+
+        // Edge function: only ops-api?action=get_evidence_health, GET only.
+        if (url.pathname.endsWith(OPS_API_PATH)) {
+          if (m !== 'GET') return false;
+          return url.searchParams.get('action') === ALLOWED_ACTION;
+        }
+
+        // Default deny.
+        return false;
+      }
+
+      const origFetch = window.fetch.bind(window);
+      const wrapped = async function(input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const method = (init && init.method) || (typeof input !== 'string' && input?.method) || 'GET';
+        if (!evaluate(method, url)) {
+          console.warn('[evidence-health safety] blocked', method, url);
+          return new Response(JSON.stringify({ error: 'evidence-health: only GET get_evidence_health allowed' }),
+            { status: 451, headers: { 'Content-Type': 'application/json' } });
+        }
+        return origFetch(input, init);
+      };
+      Object.defineProperty(window, 'fetch', { value: wrapped, writable: false, configurable: false });
+    })();
+  </script>
+
+  <style>
+    /* Architectural Assurance — orange ONLY for the unhealthy alert dot. */
+    :root {
+      --orange-700: #F15A29;
+      --orange-100: #FDF2EE;
+      --blue-950: #1A272E;
+      --blue-800: #293C46;
+      --blue-600: #4C6A7C;
+      --blue-400: #8FA4B2;
+      --blue-200: #D4DEE4;
+      --blue-100: #EDF1F4;
+      --warm-100: #F8F6F3;
+      --warm-50:  #FCFBFA;
+      --ink:      rgba(26,39,46,0.92);
+      --ink-soft: rgba(26,39,46,0.65);
+      --ink-faint: rgba(26,39,46,0.40);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background: var(--warm-50);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Header — dark mass on top, asymmetric. */
+    header.t7-head {
+      background: var(--blue-950);
+      color: white;
+      padding: 36px 56px 28px;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 48px;
+      align-items: end;
+      position: relative;
+    }
+    header.t7-head::after {
+      content: '';
+      position: absolute;
+      left: 56px; right: 56px; bottom: 0;
+      height: 2px;
+      background: var(--orange-700);
+      opacity: 0.6;
+    }
+    header.t7-head h1 {
+      margin: 0;
+      font-weight: 800;
+      font-size: 34px;
+      letter-spacing: -0.5px;
+      line-height: 1.05;
+    }
+    header.t7-head .label {
+      font-size: 11px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      margin-bottom: 12px;
+    }
+    header.t7-head .meta {
+      font-size: 12px;
+      color: rgba(255,255,255,0.55);
+      text-align: right;
+    }
+    header.t7-head .meta .gen { color: rgba(255,255,255,0.85); }
+
+    /* Summary strip — large numerals (typography at extreme scales). */
+    section.summary {
+      padding: 32px 56px;
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 1px;
+      background: var(--blue-200);
+      margin: 0;
+    }
+    .summary .cell {
+      background: var(--warm-50);
+      padding: 24px 20px;
+    }
+    .summary .num {
+      font-size: 34px;
+      font-weight: 800;
+      color: var(--blue-950);
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .summary .label {
+      font-size: 10px;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--blue-600);
+    }
+    .summary .alert .num { color: var(--orange-700); }
+
+    /* Section blocks. */
+    main { padding: 0 56px 80px; }
+    section.block {
+      margin-top: 56px;
+    }
+    section.block h2 {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--blue-600);
+      font-weight: 700;
+      margin: 0 0 12px;
+    }
+    section.block .lede {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--blue-950);
+      letter-spacing: -0.2px;
+      margin: 0 0 24px;
+      max-width: 720px;
+    }
+
+    table.t7 {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: white;
+    }
+    table.t7 thead th {
+      text-align: left;
+      font-size: 10px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--blue-600);
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--blue-200);
+      background: var(--blue-100);
+      font-weight: 700;
+    }
+    table.t7 tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--blue-100);
+      vertical-align: top;
+    }
+    table.t7 tbody tr:hover td { background: var(--warm-100); }
+    table.t7 .num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.t7 .muted { color: var(--ink-faint); }
+    table.t7 .alert { color: var(--orange-700); font-weight: 700; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 100px;
+      font-size: 10px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .pill.ok       { background: var(--blue-100); color: var(--blue-800); }
+    .pill.warn     { background: var(--orange-100); color: var(--orange-700); }
+    .pill.dark     { background: var(--blue-800); color: white; }
+
+    .banner {
+      padding: 16px 20px;
+      background: var(--orange-100);
+      border-left: 3px solid var(--orange-700);
+      color: var(--blue-950);
+      margin-bottom: 24px;
+      font-size: 13px;
+    }
+    .banner strong { font-weight: 800; }
+
+    .empty {
+      padding: 40px 24px;
+      background: var(--warm-100);
+      color: var(--ink-faint);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .footer-note {
+      margin-top: 80px;
+      padding-top: 24px;
+      border-top: 1px solid var(--blue-200);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      color: var(--ink-faint);
+      text-transform: uppercase;
+    }
+
+    /* Loading shimmer. */
+    .shimmer {
+      background: linear-gradient(90deg, var(--blue-100) 0%, var(--blue-200) 50%, var(--blue-100) 100%);
+      background-size: 200% 100%;
+      animation: shim 2s linear infinite;
+      height: 14px;
+      border-radius: 0;
+    }
+    @keyframes shim { from { background-position: 0 0; } to { background-position: -200% 0; } }
+  </style>
+</head>
+<body>
+
+<header class="t7-head">
+  <div>
+    <div class="label">T7 — Evidence Capture Spine</div>
+    <h1>Evidence Health</h1>
+  </div>
+  <div class="meta">
+    <div class="gen" id="generated_at">—</div>
+    <div>Read-only · last 30 days</div>
+  </div>
+</header>
+
+<section class="summary" id="summary">
+  <div class="cell"><div class="num" id="s_total">—</div><div class="label">Spine rows · 30d</div></div>
+  <div class="cell"><div class="num" id="s_matched">—</div><div class="label">Matched %</div></div>
+  <div class="cell alert"><div class="num" id="s_unresolved">—</div><div class="label">Unresolved + Ambiguous</div></div>
+  <div class="cell"><div class="num" id="s_queue">—</div><div class="label">Queue pending</div></div>
+  <div class="cell alert"><div class="num" id="s_dead">—</div><div class="label">Queue dead-letter</div></div>
+  <div class="cell alert"><div class="num" id="s_stale">—</div><div class="label">Stale channels (24h)</div></div>
+</section>
+
+<main>
+  <div id="warnings"></div>
+
+  <section class="block">
+    <h2>By channel · direction · source</h2>
+    <p class="lede">Where evidence is landing, and where the envelope is still being filled in.</p>
+    <div id="channels_wrap"><div class="shimmer"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Extraction queue</h2>
+    <p class="lede">extraction_jobs by status. Empty until Loop 8 enqueuer ships.</p>
+    <div id="queue_wrap"><div class="shimmer"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Mailbox monitor</h2>
+    <p class="lede">Per-mailbox last-seen. Pre-Loop-8 derives from inbox_events.mailbox.</p>
+    <div id="mailbox_wrap"><div class="shimmer"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Proposed actions · evidence refs</h2>
+    <p class="lede">Closes T5-DEVQ-9. Loop 8 strict-mode flips this from baseline 0% to ~100%.</p>
+    <div id="proposals_wrap"><div class="shimmer"></div></div>
+  </section>
+
+  <section class="block">
+    <h2>Stale channels</h2>
+    <p class="lede">Channels that historically saw traffic but have zero rows in the last 24 hours.</p>
+    <div id="stale_wrap"><div class="shimmer"></div></div>
+  </section>
+
+  <div class="footer-note">
+    Source: ops-api?action=get_evidence_health · views: v_evidence_health, v_evidence_health_queue, v_evidence_health_mailbox, v_evidence_health_proposals, v_evidence_health_stale
+  </div>
+</main>
+
+<script type="module">
+  // Use the same Supabase config the rest of securedash uses.
+  const SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
+
+  // Pull the current session token from supabase-js if available, else cookie.
+  function getAuthToken() {
+    try {
+      const k = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+      const raw = localStorage.getItem(k);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.access_token || parsed?.currentSession?.access_token || null;
+    } catch { return null; }
+  }
+
+  async function loadHealth() {
+    const token = getAuthToken();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const url = `${SUPABASE_URL}/functions/v1/ops-api?action=get_evidence_health`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      throw new Error(`get_evidence_health: HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  function fmt(n) {
+    if (n === null || n === undefined) return '—';
+    if (typeof n === 'number') return n.toLocaleString();
+    return String(n);
+  }
+
+  function renderTable(headers, rows, mountId, emptyMsg) {
+    const mount = document.getElementById(mountId);
+    if (!rows || rows.length === 0) {
+      mount.innerHTML = `<div class="empty">${emptyMsg || 'No data.'}</div>`;
+      return;
+    }
+    const thead = headers.map(h => `<th class="${h.num ? 'num' : ''}">${h.label}</th>`).join('');
+    const tbody = rows.map(r => {
+      const cells = headers.map(h => {
+        const v = r[h.key];
+        const cls = [h.num ? 'num' : '', h.alertIf && h.alertIf(v, r) ? 'alert' : ''].filter(Boolean).join(' ');
+        if (h.render) return `<td class="${cls}">${h.render(v, r)}</td>`;
+        return `<td class="${cls}">${fmt(v)}</td>`;
+      }).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    mount.innerHTML = `<table class="t7"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+  }
+
+  function renderProposals(p) {
+    const mount = document.getElementById('proposals_wrap');
+    if (!p) { mount.innerHTML = '<div class="empty">No proposal data.</div>'; return; }
+    const pct = p.ref_coverage_pct ?? 0;
+    const pillCls = pct >= 95 ? 'ok' : (pct > 0 ? 'warn' : 'dark');
+    mount.innerHTML = `
+      <table class="t7">
+        <thead><tr>
+          <th>Total · 30d</th>
+          <th>With evidence_refs</th>
+          <th>Without</th>
+          <th>Exception (system)</th>
+          <th>Coverage</th>
+          <th>Latest</th>
+        </tr></thead>
+        <tbody><tr>
+          <td>${fmt(p.rows_30d)}</td>
+          <td>${fmt(p.with_evidence_refs)}</td>
+          <td class="${p.without_evidence_refs > 0 ? 'alert' : ''}">${fmt(p.without_evidence_refs)}</td>
+          <td>${fmt(p.with_exception_reason)}</td>
+          <td><span class="pill ${pillCls}">${pct.toFixed(1)}%</span></td>
+          <td class="muted">${p.latest_proposal_at ?? '—'}</td>
+        </tr></tbody>
+      </table>`;
+  }
+
+  function renderWarnings(warns) {
+    const mount = document.getElementById('warnings');
+    if (!warns || warns.length === 0) { mount.innerHTML = ''; return; }
+    const list = warns.map(w => `<div>· ${w}</div>`).join('');
+    mount.innerHTML = `<div class="banner">
+      <strong>${warns.length} warning${warns.length === 1 ? '' : 's'}.</strong>
+      Most likely the v_evidence_health* views are not yet applied (Loop 2 migration).
+      <div style="margin-top:8px;font-size:12px;">${list}</div>
+    </div>`;
+  }
+
+  function renderSummary(s, gen) {
+    document.getElementById('generated_at').textContent = gen ?? '—';
+    document.getElementById('s_total').textContent      = fmt(s.total_rows_30d);
+    document.getElementById('s_matched').textContent    = `${(s.matched_pct ?? 0).toFixed(1)}%`;
+    document.getElementById('s_unresolved').textContent = fmt(s.unresolved_count);
+    document.getElementById('s_queue').textContent      = fmt(s.queue_pending);
+    document.getElementById('s_dead').textContent       = fmt(s.queue_dead_letter);
+    document.getElementById('s_stale').textContent      = fmt(s.stale_channel_count);
+  }
+
+  (async function() {
+    try {
+      const data = await loadHealth();
+      renderWarnings(data.warnings);
+      renderSummary(data.summary, data.generated_at);
+
+      renderTable([
+        { key: 'channel',                       label: 'Channel' },
+        { key: 'direction',                     label: 'Direction' },
+        { key: 'source_table',                  label: 'Source table' },
+        { key: 'rows_30d',                      label: 'Rows · 30d', num: true },
+        { key: 'matched',                       label: 'Matched',    num: true },
+        { key: 'unresolved',                    label: 'Unresolved', num: true,
+          alertIf: (v) => v > 0 },
+        { key: 'ambiguous',                     label: 'Ambiguous',  num: true,
+          alertIf: (v) => v > 0 },
+        { key: 'missing_job',                   label: 'No job_id',  num: true,
+          alertIf: (v, r) => v > 0 && r.channel !== 'scope' },
+        { key: 'missing_envelope',              label: 'Legacy (no envelope)', num: true },
+        { key: 'preview_truncated_no_pointer',  label: 'Preview truncated', num: true,
+          alertIf: (v) => v > 0 },
+        { key: 'last_event_at',                 label: 'Last seen',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '<span class="muted">—</span>' },
+      ], data.channels, 'channels_wrap', 'No channel rows in 30 days.');
+
+      renderTable([
+        { key: 'status',              label: 'Status' },
+        { key: 'n',                   label: 'Count', num: true },
+        { key: 'oldest_created_at',   label: 'Oldest',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+        { key: 'newest_created_at',   label: 'Newest',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+        { key: 'newest_processed_at', label: 'Newest processed',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+      ], data.queue, 'queue_wrap', 'extraction_jobs is empty (no enqueuer wired yet — Loop 8).');
+
+      renderTable([
+        { key: 'mailbox',           label: 'Mailbox' },
+        { key: 'rows_24h',          label: '24h', num: true,
+          alertIf: (v, r) => v === 0 && r.rows_7d > 0 },
+        { key: 'rows_7d',           label: '7d',  num: true },
+        { key: 'rows_30d',          label: '30d', num: true },
+        { key: 'last_message_at',   label: 'Last message',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+        { key: 'last_processed_at', label: 'Last processed',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+      ], data.mailboxes, 'mailbox_wrap', 'No mailbox traffic in 30 days.');
+
+      renderProposals(data.proposals);
+
+      renderTable([
+        { key: 'channel',       label: 'Channel' },
+        { key: 'rows_24h',      label: '24h',  num: true, alertIf: (v) => v === 0 },
+        { key: 'rows_7d',       label: '7d',   num: true },
+        { key: 'last_event_at', label: 'Last seen',
+          render: (v) => v ? `<span class="muted">${v}</span>` : '—' },
+      ], data.stale_channels, 'stale_wrap', 'No stale channels — every channel with traffic in the last 7 days has fired in the last 24.');
+    } catch (e) {
+      console.error('[evidence-health] load failed', e);
+      const mount = document.getElementById('warnings');
+      mount.innerHTML = `<div class="banner"><strong>Failed to load.</strong> ${e.message ?? e}</div>`;
+    }
+  })();
+</script>
+</body>
+</html>

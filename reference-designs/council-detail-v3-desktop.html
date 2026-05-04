@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Council Approvals — SecureWorks Ops (Desktop)</title>
+<style>
+  :root {
+    --sw-orange: #F15A29;
+    --sw-orange-hover: #C4481F;
+    --sw-orange-tint: #FEF3EF;
+    --sw-dark: #293C46;
+    --sw-dark-deep: #1A272E;
+    --sw-mid: #4C6A7C;
+    --sw-light: #EDF1F4;
+    --sw-bg: #F8F6F3;
+    --sw-border: #D4DEE4;
+    --sw-text-sec: #8FA4B2;
+    --sw-green: #27AE60;
+    --sw-red: #E74C3C;
+    --sw-card: #FCFBFA;
+    --sw-warm-200: #F0ECE8;
+    --sw-font: 'Helvetica Neue', Helvetica, Arial, -apple-system, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sw-font);
+    background: var(--sw-bg);
+    color: var(--sw-dark);
+  }
+
+  /* ══════════ SPLIT PANE LAYOUT ══════════ */
+  .approvals-layout {
+    display: flex; height: 100vh; overflow: hidden;
+  }
+
+  /* ── LEFT PANEL: Submission List ── */
+  .list-panel {
+    width: 340px; flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid var(--sw-border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .list-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--sw-border);
+  }
+  .list-header-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .list-title { font-size: 16px; font-weight: 700; }
+  .list-new-btn {
+    padding: 5px 14px; background: var(--sw-orange); color: #fff;
+    border: none; font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+
+  /* Summary pills */
+  .list-summary {
+    display: flex; gap: 6px;
+  }
+  .summary-pill {
+    flex: 1; text-align: center; padding: 6px 4px;
+    border: 1px solid var(--sw-border); cursor: pointer;
+    transition: all 0.15s; background: #fff;
+  }
+  .summary-pill.active { border-color: var(--sw-dark); background: var(--sw-dark); color: #fff; }
+  .summary-pill .pill-num { font-size: 16px; font-weight: 700; }
+  .summary-pill .pill-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; }
+
+  /* List items */
+  .list-items {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  }
+  .list-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--sw-light);
+    border-left: 3px solid transparent;
+    transition: background 0.1s;
+  }
+  .list-card:hover { background: var(--sw-bg); }
+  .list-card.active { background: var(--sw-orange-tint); border-left-color: var(--sw-orange); }
+  .list-card.urgency-ok { border-left-color: var(--sw-green); }
+  .list-card.urgency-stalled { border-left-color: #E67E22; }
+
+  /* Progress ring (simple) */
+  .ring { width: 36px; height: 36px; flex-shrink: 0; position: relative; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring-text {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: var(--sw-dark);
+  }
+  .card-info { flex: 1; min-width: 0; }
+  .card-title { font-size: 13px; font-weight: 600; }
+  .card-step { font-size: 11px; color: var(--sw-text-sec); margin-top: 1px; }
+  .card-meta { font-size: 10px; color: var(--sw-text-sec); margin-top: 3px; display: flex; gap: 8px; }
+  .card-badge {
+    font-size: 9px; padding: 1px 6px; border-radius: 100px; font-weight: 600;
+  }
+
+  /* ── RIGHT PANEL: Detail ── */
+  .detail-panel {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden; min-width: 0;
+  }
+
+  /* Detail header */
+  .detail-header {
+    padding: 14px 20px;
+    background: #fff;
+    border-bottom: 1px solid var(--sw-border);
+    display: flex; align-items: center; gap: 16px;
+    flex-shrink: 0;
+  }
+  .detail-job-info { flex: 1; }
+  .detail-job-title { font-size: 17px; font-weight: 700; }
+  .detail-job-sub { font-size: 12px; color: var(--sw-text-sec); margin-top: 2px; }
+  .detail-action {
+    font-size: 11px; padding: 5px 14px;
+    border: 1px solid var(--sw-border); background: #fff;
+    color: var(--sw-mid); cursor: pointer; font-weight: 500;
+  }
+
+  /* Detail content: two columns on desktop */
+  .detail-content {
+    flex: 1; display: flex; overflow: hidden;
+  }
+
+  /* Left: progress + steps */
+  .detail-sidebar {
+    width: 280px; flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid var(--sw-light);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 16px;
+  }
+
+  /* Progress bar in sidebar */
+  .sidebar-progress { margin-bottom: 16px; }
+  .sidebar-bar { display: flex; gap: 2px; margin-bottom: 8px; }
+  .sidebar-seg { flex: 1; height: 4px; background: var(--sw-light); }
+  .sidebar-seg.done { background: var(--sw-green); }
+  .sidebar-seg.active { background: var(--sw-orange); animation: seg-pulse 2s ease-in-out infinite; }
+  @keyframes seg-pulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
+
+  .sidebar-current-label { font-size: 9px; color: var(--sw-orange); font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
+  .sidebar-current-name { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .sidebar-current-vendor { font-size: 11px; color: var(--sw-text-sec); margin-top: 3px; }
+  .sidebar-current-days { font-size: 11px; margin-top: 2px; }
+  .sidebar-advance {
+    margin-top: 10px; padding: 7px 16px;
+    background: var(--sw-green); color: #fff; border: none;
+    font-size: 12px; font-weight: 600; cursor: pointer; width: 100%;
+  }
+
+  /* Step list in sidebar */
+  .sidebar-steps-title {
+    font-size: 10px; font-weight: 700; color: var(--sw-mid);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 20px 0 8px; padding-top: 12px;
+    border-top: 1px solid var(--sw-light);
+  }
+  .sidebar-step {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; cursor: pointer;
+  }
+  .sidebar-step:hover .ss-name { color: var(--sw-orange); }
+  .ss-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 700; flex-shrink: 0;
+  }
+  .ss-dot.done { background: var(--sw-green); color: #fff; }
+  .ss-dot.active { background: var(--sw-orange); color: #fff; }
+  .ss-dot.pending { border: 1.5px solid var(--sw-border); color: var(--sw-text-sec); }
+  .ss-name { font-size: 12px; flex: 1; }
+  .ss-name.done { color: var(--sw-text-sec); text-decoration: line-through; }
+  .ss-name.active { font-weight: 700; }
+  .ss-badge { font-size: 9px; padding: 1px 6px; border-radius: 100px; font-weight: 600; }
+  .ss-vendor { font-size: 10px; color: var(--sw-text-sec); margin-left: 26px; margin-top: -2px; margin-bottom: 4px; }
+  .ss-action {
+    font-size: 10px; color: var(--sw-orange); cursor: pointer;
+    background: none; border: none; text-decoration: underline; margin-left: 26px;
+  }
+
+  /* Right: conversation */
+  .detail-convo {
+    flex: 1; display: flex; flex-direction: column;
+    min-width: 0;
+  }
+
+  /* Filter chips */
+  .convo-filters {
+    display: flex; gap: 6px; padding: 10px 20px;
+    background: var(--sw-card);
+    border-bottom: 1px solid var(--sw-light);
+    flex-shrink: 0;
+  }
+  .cf-chip {
+    padding: 4px 14px; border-radius: 100px;
+    border: 1px solid var(--sw-border); background: #fff;
+    font-size: 11px; font-weight: 500; color: var(--sw-dark);
+    cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  }
+  .cf-chip.active { background: var(--sw-dark); color: #fff; border-color: var(--sw-dark); }
+  .cf-chip:hover:not(.active) { background: var(--sw-light); }
+
+  /* Messages */
+  .convo-messages {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 20px; display: flex; flex-direction: column; gap: 12px;
+  }
+
+  .date-sep {
+    text-align: center; font-size: 10px; color: var(--sw-text-sec);
+    padding: 8px 0; letter-spacing: 0.3px;
+  }
+
+  .msg { display: flex; flex-direction: column; max-width: 65%; }
+  .msg.out { align-self: flex-end; align-items: flex-end; }
+  .msg.in { align-self: flex-start; align-items: flex-start; }
+
+  .msg-step { font-size: 9px; padding: 2px 8px; border-radius: 6px; background: rgba(41,60,70,0.05); color: var(--sw-mid); font-weight: 500; margin-bottom: 3px; }
+  .msg-party { font-size: 10px; color: var(--sw-text-sec); margin-bottom: 2px; padding: 0 6px; }
+
+  .bubble {
+    padding: 10px 14px; font-size: 13px; line-height: 1.5;
+    word-wrap: break-word;
+  }
+  .msg.out .bubble { background: var(--sw-orange-tint); border-radius: 14px 14px 3px 14px; }
+  .msg.in .bubble { background: var(--sw-warm-200); border-radius: 14px 14px 14px 3px; }
+  .bubble-subj { font-size: 11px; font-weight: 700; color: var(--sw-dark); margin-bottom: 3px; opacity: 0.7; }
+  .bubble-body { white-space: pre-wrap; word-break: break-word; }
+  .bubble-att {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; margin-top: 8px;
+    background: rgba(255,255,255,0.6); border: 1px solid var(--sw-border);
+    border-radius: 6px; font-size: 11px; font-weight: 600;
+    color: var(--sw-dark); text-decoration: none;
+  }
+  .bubble-att:hover { background: rgba(255,255,255,0.95); }
+
+  .msg-time { font-size: 10px; color: var(--sw-text-sec); margin-top: 3px; padding: 0 6px; }
+
+  /* Compose bar */
+  .compose-bar {
+    background: #fff; border-top: 1px solid var(--sw-border);
+    padding: 10px 20px 12px; flex-shrink: 0;
+  }
+  .compose-fields { display: flex; gap: 12px; margin-bottom: 8px; }
+  .compose-field {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; flex: 1;
+  }
+  .compose-field label {
+    font-weight: 600; color: var(--sw-mid); flex-shrink: 0;
+  }
+  .compose-field input {
+    flex: 1; border: none; outline: none; font-size: 12px;
+    font-family: var(--sw-font); color: var(--sw-dark); padding: 4px 0;
+    border-bottom: 1px solid var(--sw-light);
+    min-width: 0;
+  }
+  .compose-field input:focus { border-bottom-color: var(--sw-orange); }
+
+  .compose-row { display: flex; align-items: flex-end; gap: 10px; }
+  .compose-input {
+    flex: 1; padding: 9px 16px;
+    border: 1px solid var(--sw-border); border-radius: 20px;
+    font-size: 13px; font-family: var(--sw-font);
+    resize: none; outline: none; max-height: 120px; line-height: 1.4;
+    transition: border-color 0.15s;
+  }
+  .compose-input:focus { border-color: var(--sw-orange); }
+  .compose-send {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--sw-orange); border: none; color: #fff;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: transform 0.1s;
+  }
+  .compose-send:active { transform: scale(0.9); }
+  .compose-extras {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 6px;
+  }
+  .compose-extras a { font-size: 10px; color: var(--sw-text-sec); text-decoration: underline; cursor: pointer; }
+
+  /* ══════════ MOBILE RESPONSIVE ══════════ */
+  @media (max-width: 768px) {
+    .approvals-layout { flex-direction: column; }
+    .list-panel { width: 100%; height: auto; max-height: 200px; border-right: none; border-bottom: 1px solid var(--sw-border); }
+    .list-header { padding: 10px 12px 8px; }
+    .list-card { padding: 10px 12px; }
+    .detail-content { flex-direction: column; }
+    .detail-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--sw-light); padding: 12px; max-height: 180px; overflow-y: auto; }
+    .sidebar-steps-title { margin-top: 12px; }
+    .msg { max-width: 85%; }
+    .compose-fields { flex-direction: column; gap: 4px; }
+  }
+
+  /* ── Empty state placeholder ── */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; flex: 1; color: var(--sw-text-sec);
+    text-align: center; padding: 40px;
+  }
+  .empty-state-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state-text { font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="approvals-layout">
+
+  <!-- ══════════ LEFT: Submission List ══════════ -->
+  <div class="list-panel">
+    <div class="list-header">
+      <div class="list-header-row">
+        <span class="list-title">Approvals</span>
+        <button class="list-new-btn">+ New</button>
+      </div>
+      <div class="list-summary">
+        <div class="summary-pill active"><div class="pill-num">2</div><div class="pill-label">Active</div></div>
+        <div class="summary-pill"><div class="pill-num">0</div><div class="pill-label">Blocked</div></div>
+        <div class="summary-pill"><div class="pill-num">0</div><div class="pill-label">Done</div></div>
+      </div>
+    </div>
+    <div class="list-items">
+      <div class="list-card active urgency-ok">
+        <div class="ring">
+          <svg width="36" height="36"><circle cx="18" cy="18" r="15" stroke="#EDF1F4" stroke-width="3" fill="none"/><circle cx="18" cy="18" r="15" stroke="#F15A29" stroke-width="3" fill="none" stroke-dasharray="94.2" stroke-dashoffset="78.5" stroke-linecap="round"/></svg>
+          <div class="ring-text">17%</div>
+        </div>
+        <div class="card-info">
+          <div class="card-title">SWP-26022 — marnin stobbe</div>
+          <div class="card-step">Step 2/6: Get Engineering Certification</div>
+          <div class="card-meta">
+            <span class="card-badge" style="background:rgba(241,90,41,0.1);color:#F15A29;">4d</span>
+            <span>3 emails</span>
+          </div>
+        </div>
+      </div>
+      <div class="list-card urgency-stalled">
+        <div class="ring">
+          <svg width="36" height="36"><circle cx="18" cy="18" r="15" stroke="#EDF1F4" stroke-width="3" fill="none"/><circle cx="18" cy="18" r="15" stroke="#E0E0E0" stroke-width="3" fill="none" stroke-dasharray="94.2" stroke-dashoffset="94.2"/></svg>
+          <div class="ring-text">0%</div>
+        </div>
+        <div class="card-info">
+          <div class="card-title">SWP-25029 — Liam Drennan</div>
+          <div class="card-step">Step 1/6: Get client house plans</div>
+          <div class="card-meta"><span>No emails yet</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ RIGHT: Detail ══════════ -->
+  <div class="detail-panel">
+
+    <div class="detail-header">
+      <div class="detail-job-info">
+        <div class="detail-job-title">SWP-26022 — marnin stobbe</div>
+        <div class="detail-job-sub">Canning Vale · Patio · 1 of 6 steps complete</div>
+      </div>
+      <button class="detail-action">View Job</button>
+    </div>
+
+    <div class="detail-content">
+
+      <!-- Sidebar: Progress + Steps -->
+      <div class="detail-sidebar">
+        <div class="sidebar-progress">
+          <div class="sidebar-bar">
+            <div class="sidebar-seg done"></div>
+            <div class="sidebar-seg active"></div>
+            <div class="sidebar-seg"></div>
+            <div class="sidebar-seg"></div>
+            <div class="sidebar-seg"></div>
+            <div class="sidebar-seg"></div>
+          </div>
+          <div class="sidebar-current-label">Current Step</div>
+          <div class="sidebar-current-name">Get Engineering Certification</div>
+          <div class="sidebar-current-vendor">PS Engineering — jeffry@pseng.au</div>
+          <div class="sidebar-current-days" style="color:#D97706;font-weight:600;">4 days in this step</div>
+          <button class="sidebar-advance">Complete & Advance ✓</button>
+        </div>
+
+        <div class="sidebar-steps-title">All Steps</div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot done">✓</div>
+          <span class="ss-name done">Get Plans Drawn</span>
+          <span class="ss-badge" style="background:rgba(39,174,96,0.1);color:#27AE60;">Done</span>
+        </div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot active">2</div>
+          <span class="ss-name active">Get Engineering Cert</span>
+          <span class="ss-badge" style="background:rgba(241,90,41,0.1);color:#F15A29;">4d</span>
+        </div>
+        <div class="ss-vendor">PS Engineering — jeffry@pseng.au</div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot pending">3</div>
+          <span class="ss-name">Get CDC</span>
+        </div>
+        <div style="margin-left:26px;margin-bottom:4px;">
+          <button class="ss-action">+ Set vendor</button>
+          <button class="ss-action" style="color:var(--sw-text-sec);">Skip</button>
+        </div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot pending">4</div>
+          <span class="ss-name">Submit Council Application</span>
+        </div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot pending">5</div>
+          <span class="ss-name">Respond to Council Queries</span>
+        </div>
+
+        <div class="sidebar-step">
+          <div class="ss-dot pending">6</div>
+          <span class="ss-name">Building Permit Received</span>
+        </div>
+      </div>
+
+      <!-- Conversation -->
+      <div class="detail-convo">
+        <div class="convo-filters">
+          <button class="cf-chip active" onclick="filterAll(this)">All (3)</button>
+          <button class="cf-chip" onclick="filterAll(this)">PS Engineering (2)</button>
+          <button class="cf-chip" onclick="filterAll(this)">Council (0)</button>
+          <button class="cf-chip" onclick="filterAll(this)">Client (1)</button>
+        </div>
+
+        <div class="convo-messages">
+          <div class="date-sep">27 Mar 2026</div>
+
+          <div class="msg out">
+            <div class="msg-step">Get Plans Drawn</div>
+            <div class="msg-party">To: marnin@secureworkswa.com.au</div>
+            <div class="bubble">
+              <div class="bubble-subj">SWP-26022 — Get Plans Drawn</div>
+              <div class="bubble-body">Hi,
+
+Regarding the Get Plans Drawn for SWP-26022 — marnin stobbe.
+
+Please send through the house plans at your earliest convenience.
+
+Thanks,
+SecureWorks Group</div>
+              <a class="bubble-att" href="#">📎 Site-Survey-Thompson.pdf</a>
+            </div>
+            <div class="msg-time">You · 27 Mar, 11:35am · Delivered ✓</div>
+          </div>
+
+          <div class="date-sep">28 Mar 2026</div>
+
+          <div class="msg in">
+            <div class="msg-step">Engineering Cert</div>
+            <div class="msg-party">From: jeffry@pseng.au</div>
+            <div class="bubble">
+              <div class="bubble-subj">Re: SWP-26022 — Engineering</div>
+              <div class="bubble-body">Hi Marnin,
+
+Plans received — thanks for sending through quickly. I've reviewed the site dimensions and will have the engineering certification package ready by end of next week.
+
+The span is under 6m so standard N2 calcs apply. No additional bracing needed.
+
+I'll send through for your review before certifying.
+
+Cheers,
+Jeffry
+PS Engineering</div>
+              <a class="bubble-att" href="#">📎 Engineering-Quote-SWP26022.pdf</a>
+            </div>
+            <div class="msg-time">jeffry@pseng.au · 28 Mar, 2:30pm</div>
+          </div>
+
+          <div class="date-sep">Today</div>
+
+          <div class="msg out">
+            <div class="msg-step">Engineering Cert</div>
+            <div class="msg-party">To: jeffry@pseng.au · CC: admin@secureworkswa.com.au</div>
+            <div class="bubble">
+              <div class="bubble-body">Hi Jeffry,
+
+Just following up on the engineering certification for SWP-26022. Are we still on track for this week?
+
+Thanks</div>
+            </div>
+            <div class="msg-time">You · Today, 8:15am · Sent</div>
+          </div>
+        </div>
+
+        <!-- Compose -->
+        <div class="compose-bar">
+          <div class="compose-fields">
+            <div class="compose-field">
+              <label>To:</label>
+              <input type="text" value="jeffry@pseng.au">
+            </div>
+            <div class="compose-field">
+              <label>CC:</label>
+              <input type="text" value="admin@secureworkswa.com.au">
+            </div>
+          </div>
+          <div class="compose-row">
+            <textarea class="compose-input" rows="1" placeholder="Type a message..."></textarea>
+            <button class="compose-send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </div>
+          <div class="compose-extras">
+            <a>Attach files</a>
+            <a>Open full compose</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function filterAll(el) {
+  document.querySelectorAll('.cf-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+}
+document.querySelectorAll('.list-card').forEach(function(card) {
+  card.addEventListener('click', function() {
+    document.querySelectorAll('.list-card').forEach(function(c) { c.classList.remove('active'); });
+    card.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

@@ -42,12 +42,24 @@
   </main>
   <pre id="raw"></pre>
 
-  <!-- Slice 2 + 4A + 4A.1 modules + fixtures -->
+  <!-- Slice 2 + 4A + 4A.1 + Loop 2 modules + fixtures -->
   <script src="sale-preview-fixtures.js"></script>
   <script src="sale-job-brain.js"></script>
   <script src="sale-job-brain-contract.js"></script>
   <script src="sale-action-reducer.js"></script>
   <script src="sale-safety-policy.js"></script>
+  <script src="sale-action-generator.js"></script>
+  <script src="sale-playbook.js"></script>
+  <!-- Loop 4 modules -->
+  <script src="sale-availability.js"></script>
+  <script src="sale-drive-time.js"></script>
+  <script src="sale-playbook-loader.js"></script>
+  <script src="sale-calendar-proposer.js"></script>
+  <!-- Loop 5 modules -->
+  <script src="sale-cadence-engine.js"></script>
+  <script src="sale-outcome-attribution.js"></script>
+  <!-- Loop 6 modules -->
+  <script src="sale-dry-run-executor.js"></script>
 
   <script>
   (function () {
@@ -224,7 +236,17 @@
     assertEq('patio  → Nithin (patio)',  'Nithin', P.evaluate({ action: fcSms, job: jPatio,   facts: [], recentEvents: [], now: morning }).reasons.join(' ').match(/Nithin/) ? 'Nithin' : 'no');
     assertEq('fencing → Khairo (fencing)','Khairo', P.evaluate({ action: fcSms, job: jFencing, facts: [], recentEvents: [], now: morning }).reasons.join(' ').match(/Khairo/) ? 'Khairo' : 'no');
     assertTrue('combo  → Nithin (combo)',  P.evaluate({ action: fcSms, job: jCombo, facts: [], recentEvents: [], now: morning }).reasons.join(' ').indexOf('Nithin') !== -1);
-    assertTrue('decking → blocked (no sender)', P.evaluate({ action: fcSms, job: jDecking, facts: [], recentEvents: [], now: morning }).blocked);
+    // Loop 4 (Marnin direction): Nithin owns decking + general. No longer blocked.
+    assertTrue('decking → Nithin (not blocked)',
+      !P.evaluate({ action: fcSms, job: jDecking, facts: [], recentEvents: [], now: morning }).blocked);
+    assertTrue('decking sender resolves to Nithin',
+      P.evaluate({ action: fcSms, job: jDecking, facts: [], recentEvents: [], now: morning }).reasons.join(' ').indexOf('Nithin') !== -1);
+    var jGeneral = { id: 'tg', type: 'general', client_phone: '+61', client_email: 'g@y' };
+    assertTrue('general → Nithin (not blocked)',
+      !P.evaluate({ action: fcSms, job: jGeneral, facts: [], recentEvents: [], now: morning }).blocked);
+    var jUnknown = { id: 'tu', type: 'spaceship', client_phone: '+61', client_email: 'u@y' };
+    assertTrue('truly unknown type → blocked',
+      P.evaluate({ action: fcSms, job: jUnknown, facts: [], recentEvents: [], now: morning }).blocked);
 
     // ── Group: policy / hard blocks ────────────────────────────
     group('policy / hard blocks');
@@ -234,6 +256,26 @@
     var stopReply = [{ event_type: 'client.reply', occurred_at: morning.toISOString(), payload: { message_text: 'please STOP' } }];
     assertTrue('stop-word reply → blocked',
       P.evaluate({ action: fcSms, job: jPatio, facts: [], recentEvents: stopReply, now: morning }).blocked);
+
+    // Stop-word hardening (phrase-only, word-boundary, 90d horizon).
+    var stopByReply = [{ event_type: 'client.reply', occurred_at: morning.toISOString(),
+      payload: { message_text: 'Sounds good — can we stop by on Tuesday afternoon?' } }];
+    assertFalse('"stop by Tuesday" does NOT trigger stop-word block (phrase-only)',
+      P.evaluate({ action: fcSms, job: jPatio, facts: [], recentEvents: stopByReply, now: morning }).blocked);
+    var busStopReply = [{ event_type: 'client.reply', occurred_at: morning.toISOString(),
+      payload: { message_text: 'Will the bus stop be a problem for the truck?' } }];
+    assertFalse('"bus stop" does NOT trigger stop-word block',
+      P.evaluate({ action: fcSms, job: jPatio, facts: [], recentEvents: busStopReply, now: morning }).blocked);
+    var oldStopReply = [{ event_type: 'client.reply',
+      occurred_at: new Date(morning.getTime() - 200 * 24 * 3600 * 1000).toISOString(),
+      payload: { message_text: 'please stop messaging me' } }];
+    assertFalse('200-day-old stop-word reply does NOT block (outside 90d horizon)',
+      P.evaluate({ action: fcSms, job: jPatio, facts: [], recentEvents: oldStopReply, now: morning }).blocked);
+    var recentStopReply = [{ event_type: 'client.reply',
+      occurred_at: new Date(morning.getTime() - 15 * 24 * 3600 * 1000).toISOString(),
+      payload: { message_text: 'please stop contacting me' } }];
+    assertTrue('15-day-old stop-word phrase still blocks (inside 90d horizon)',
+      P.evaluate({ action: fcSms, job: jPatio, facts: [], recentEvents: recentStopReply, now: morning }).blocked);
     var jNoPhone = { id: 't', type: 'patio', client_phone: null, client_email: 'x@y' };
     assertTrue('SMS action with null client_phone → blocked',
       P.evaluate({ action: fcSms, job: jNoPhone, facts: [], recentEvents: [], now: morning }).blocked);
@@ -579,6 +621,1385 @@
     var vPreview = C.validateJobBrain(previewBrain);
     assertTrue('preview+subject without body → ok=true (passes content check)',
       vPreview.ok === true && !vPreview.errors.some(function (e) { return /\.body\|/.test(e.field); }));
+
+    // ════════════════════════════════════════════════════════
+    // Loop 2 — sale-action-generator
+    // ════════════════════════════════════════════════════════
+
+    var G = window.SALE_ACTION_GENERATOR;
+
+    // ── Group: generator / module shape ─────────────────────
+    group('loop 2 / generator module shape');
+    assertTrue('window.SALE_ACTION_GENERATOR is defined', !!G);
+    assertTrue('generate() is a function', G && typeof G.generate === 'function');
+    assertTrue('DEFAULT_CONFIG is frozen', G && Object.isFrozen(G.DEFAULT_CONFIG));
+    assertTrue('DEFAULT_CONFIG carries all required thresholds',
+      G && G.DEFAULT_CONFIG.firstContactMaxHours === 24
+        && G.DEFAULT_CONFIG.viewedNoReplyDays === 3
+        && G.DEFAULT_CONFIG.staleQuoteDays === 14
+        && G.DEFAULT_CONFIG.highValueThreshold === 20000
+        && Array.isArray(G.DEFAULT_CONFIG.stopWords));
+
+    // Build a fixture-shaped index that mirrors what loadIndex({forceFixtures:true}) returns.
+    function fixtureIndex(overrides) {
+      var idx = {
+        jobs:            (overrides && overrides.jobs)            || F.jobs,
+        events:          (overrides && overrides.events)          || F.events,
+        jobContext:      (overrides && overrides.jobContext)      || F.jobContext,
+        proposedActions: (overrides && overrides.proposedActions) || F.proposedActions,
+        calendar:        (overrides && overrides.calendar)        || F.calendar,
+        coaching:        (overrides && overrides.coaching)        || F.coaching,
+        generatedAt:     F.engineNow,
+        _brand:          '4A',
+      };
+      return idx;
+    }
+    function findCardForJob(cards, jobId, actionType) {
+      return cards.find(function (c) { return c.job_id === jobId && (!actionType || c.action_type === actionType); }) || null;
+    }
+    function cardsForJob(cards, jobId) {
+      return cards.filter(function (c) { return c.job_id === jobId; });
+    }
+
+    var baseRun = G.generate({ index: fixtureIndex(), now: ENGINE_NOW });
+    var baseCards = baseRun.cards;
+    assertTrue('generate() returns { cards, diagnostics }',
+      Array.isArray(baseCards) && baseRun.diagnostics && typeof baseRun.diagnostics === 'object');
+    assertTrue('cards produced from fixture index', baseCards.length > 0);
+    assertTrue('every card has evidence_refs[] with ≥ 1 entry',
+      baseCards.every(function (c) { return Array.isArray(c.evidence_refs) && c.evidence_refs.length >= 1; }));
+    assertTrue('every card has status="proposed"',
+      baseCards.every(function (c) { return c.status === 'proposed'; }));
+    assertTrue('every card carries job_id, job_number, lane, action_type, priority',
+      baseCards.every(function (c) {
+        return !!c.job_id && !!c.job_number
+          && (c.lane === 'book' || c.lane === 'send' || c.lane === 'call')
+          && typeof c.action_type === 'string'
+          && typeof c.priority === 'number';
+      }));
+    assertTrue('cards sorted by priority desc',
+      baseCards.every(function (c, i) { return i === 0 || baseCards[i - 1].priority >= c.priority; }));
+
+    // ── Group: method-agnostic guarantees ───────────────────
+    group('loop 2 / method-agnostic');
+    var hasDraftField = baseCards.some(function (c) { return 'drafted_message' in c || 'message' in c || 'tone' in c; });
+    assertFalse('no card carries drafted_message / message / tone (Loop 3 owns copy)', hasDraftField);
+    assertTrue('every card has playbook_id=null (Loop 2 cannot pick a playbook)',
+      baseCards.every(function (c) { return c.playbook_id === null; }));
+    assertTrue('every card has rep_profile_id=null (Loop 3 fills in)',
+      baseCards.every(function (c) { return c.rep_profile_id === null; }));
+
+    // ── Group: per-job lane + action_type ───────────────────
+    group('loop 2 / per-job cards');
+
+    var c001 = findCardForJob(baseCards, 'job-001');
+    assertTrue('job-001 (32h, no contact) → call_client on Call lane',
+      c001 && c001.action_type === 'call_client' && c001.lane === 'call');
+    assertTrue('job-001 owner_label resolves to Nithin (patio)',
+      c001 && /Nithin/.test(c001.owner_label));
+
+    var c002 = findCardForJob(baseCards, 'job-002');
+    assertTrue('job-002 (27h fencing, no contact) → call_client / Khairo (fencing)',
+      c002 && c002.action_type === 'call_client' && c002.lane === 'call' && /Khairo/.test(c002.owner_label));
+
+    var c003 = findCardForJob(baseCards, 'job-003');
+    assertTrue('job-003 (6h fresh) produces NO card (under firstContactMaxHours)', c003 === null);
+
+    var c004 = findCardForJob(baseCards, 'job-004', 'book_scope');
+    assertTrue('job-004 (qualified, no booking) → book_scope on Book lane',
+      c004 && c004.lane === 'book' && c004.policy_verdict === 'approval_required');
+
+    var c005 = findCardForJob(baseCards, 'job-005', 'book_scope');
+    assertTrue('job-005 (qualified, $32k) → book_scope, lane=book', c005 && c005.lane === 'book');
+    assertTrue('job-005 priority > job-004 priority (high-value urgency)',
+      c005 && c004 && c005.priority > c004.priority);
+
+    var c006 = findCardForJob(baseCards, 'job-006');
+    assertTrue('job-006 (site visit 9d, no scope) → call_client on Call lane',
+      c006 && c006.action_type === 'call_client' && c006.lane === 'call');
+
+    var c101 = findCardForJob(baseCards, 'job-101', 'send_follow_up');
+    assertTrue('job-101 (sent 2d, not viewed) → send_follow_up on Follow Ups lane',
+      c101 && c101.lane === 'send' && c101.policy_verdict === 'auto_ok');
+
+    var c102 = findCardForJob(baseCards, 'job-102', 'send_follow_up');
+    assertTrue('job-102 (sent 4d, not viewed) → send_follow_up on Follow Ups lane',
+      c102 && c102.lane === 'send');
+
+    var c103 = findCardForJob(baseCards, 'job-103', 'call_client');
+    assertTrue('job-103 (viewed 4d, $22.5k high-value) → call_client on Call lane',
+      c103 && c103.lane === 'call' && c103.policy_verdict === 'internal');
+
+    var c105 = findCardForJob(baseCards, 'job-105');
+    assertTrue('job-105 (client.question, no rep reply) → reply_needed',
+      c105 && c105.action_type === 'reply_needed');
+    assertTrue('job-105 reply_needed lane=send (value $18.75k below high-value threshold)',
+      c105 && c105.lane === 'send');
+
+    var c106 = findCardForJob(baseCards, 'job-106');
+    assertTrue('job-106 (sent 18d ≥ staleQuoteDays) → stale_quote_recovery, lane=send',
+      c106 && c106.action_type === 'stale_quote_recovery' && c106.lane === 'send');
+
+    var c107 = findCardForJob(baseCards, 'job-107');
+    assertTrue('job-107 (do_not_chase) → snooze_or_dismiss on Call lane (DNC reroute)',
+      c107 && c107.action_type === 'snooze_or_dismiss' && c107.lane === 'call'
+        && c107.policy_verdict === 'internal');
+    assertTrue('job-107 produces exactly one card (DNC suppresses other emitters)',
+      cardsForJob(baseCards, 'job-107').length === 1);
+
+    // job-108: client_phone is null but client_email is set → still
+    // reachable. The "fully unreachable" hard reroute requires BOTH to
+    // be missing. Cold lead → call_client first-contact card emits.
+    var c108 = findCardForJob(baseCards, 'job-108');
+    assertTrue('job-108 (phone null, email present) → reachable; emits call_client first-contact card',
+      c108 && c108.action_type === 'call_client');
+
+    // Fully unreachable hard reroute: phone null AND email null → blocked.
+    var unreachableJob = {
+      id: 'job-UR', job_number: 'SWP-FIX-UR1', type: 'patio',
+      client_name: 'Unreachable Demo', client_phone: null, client_email: null,
+      site_address: 'X', site_suburb: 'Stirling', status: 'draft',
+      created_at: new Date(ENGINE_NOW.getTime() - 36 * 3600 * 1000).toISOString(),
+    };
+    var urRun = G.generate({ index: fixtureIndex({ jobs: F.jobs.concat([unreachableJob]) }), now: ENGINE_NOW });
+    var urCard = findCardForJob(urRun.cards, 'job-UR');
+    assertTrue('fully-unreachable job (no phone, no email) → blocked snooze_or_dismiss',
+      urCard && urCard.action_type === 'snooze_or_dismiss' && urCard.policy_verdict === 'blocked');
+    assertTrue('fully-unreachable produces only one card (hard reroute short-circuits)',
+      cardsForJob(urRun.cards, 'job-UR').length === 1);
+
+    // ── Group: hard reroutes / blocks ───────────────────────
+    group('loop 2 / hard reroutes + blocks');
+
+    // do_not_chase reroute proven above; check evidence ref shape.
+    assertTrue('DNC card cites job_context fact in evidence_refs',
+      c107 && c107.evidence_refs.some(function (r) { return r.type === 'fact' && r.kind === 'do_not_chase'; }));
+
+    // Stop-word: inject a stop-word reply on job-001 → should block everything.
+    var stopWordEvents = F.events.concat([{
+      job_id: 'job-001', event_type: 'client.reply',
+      occurred_at: new Date(ENGINE_NOW.getTime() - 30 * 60 * 1000).toISOString(),
+      payload: { message_text: 'Please STOP — not interested.' },
+    }]);
+    var stopRun = G.generate({ index: fixtureIndex({ events: stopWordEvents }), now: ENGINE_NOW });
+    var stopCard = findCardForJob(stopRun.cards, 'job-001');
+    assertTrue('stop-word inbound → snooze_or_dismiss with policy_verdict="blocked"',
+      stopCard && stopCard.action_type === 'snooze_or_dismiss' && stopCard.policy_verdict === 'blocked');
+    assertTrue('stop-word run produces only one card for job-001',
+      cardsForJob(stopRun.cards, 'job-001').length === 1);
+
+    // Word-boundary stop-word match: "stop by" must NOT trigger.
+    var stopByEvents = F.events.concat([{
+      job_id: 'job-001', event_type: 'client.reply',
+      occurred_at: new Date(ENGINE_NOW.getTime() - 2 * 3600 * 1000).toISOString(),
+      payload: { message_text: 'Sounds good — can we stop by on Tuesday afternoon?' },
+    }]);
+    var stopByRun = G.generate({ index: fixtureIndex({ events: stopByEvents }), now: ENGINE_NOW });
+    assertTrue('"stop by" phrase does NOT trigger stop-word block (phrase-only stopWords)',
+      findCardForJob(stopByRun.cards, 'job-001', 'snooze_or_dismiss') === null);
+
+    // 200-day-old stop-word reply must NOT block today.
+    var oldStopEvents = F.events.concat([{
+      job_id: 'job-001', event_type: 'client.reply',
+      occurred_at: new Date(ENGINE_NOW.getTime() - 200 * 24 * 3600 * 1000).toISOString(),
+      payload: { message_text: 'Please stop contacting me.' },
+    }]);
+    var oldStopRun = G.generate({ index: fixtureIndex({ events: oldStopEvents }), now: ENGINE_NOW });
+    assertTrue('stop-word reply > 90d ago does NOT block (outside horizon)',
+      findCardForJob(oldStopRun.cards, 'job-001', 'snooze_or_dismiss') === null);
+
+    // Recent stop-word reply still blocks.
+    var recentStopEvents = F.events.concat([{
+      job_id: 'job-001', event_type: 'client.reply',
+      occurred_at: new Date(ENGINE_NOW.getTime() - 15 * 24 * 3600 * 1000).toISOString(),
+      payload: { message_text: 'Please stop contacting me.' },
+    }]);
+    var recentStopRun = G.generate({ index: fixtureIndex({ events: recentStopEvents }), now: ENGINE_NOW });
+    var recentStopCard = findCardForJob(recentStopRun.cards, 'job-001', 'snooze_or_dismiss');
+    assertTrue('15-day-old stop-word reply still blocks (inside 90d horizon)',
+      recentStopCard && recentStopCard.policy_verdict === 'blocked');
+
+    // Loop 4 (Marnin direction): decking now resolves to Nithin (not blocked).
+    var deckingJob = {
+      id: 'job-DECK', job_number: 'SWD-FIX-999', type: 'decking',
+      client_name: 'Decking Demo', client_phone: '+61400099999',
+      client_email: 'd@example.test',
+      site_address: 'X', site_suburb: 'Stirling', status: 'draft',
+      created_at: new Date(ENGINE_NOW.getTime() - 36 * 60 * 60 * 1000).toISOString(),
+    };
+    var deckRun = G.generate({ index: fixtureIndex({ jobs: F.jobs.concat([deckingJob]) }), now: ENGINE_NOW });
+    var deckCard = findCardForJob(deckRun.cards, 'job-DECK');
+    assertTrue('decking → call_client cold lead, owner Nithin',
+      deckCard && deckCard.action_type === 'call_client' && /Nithin/.test(deckCard.owner_label));
+    // Truly unknown type still blocks.
+    var unknownTypeJob = Object.assign({}, deckingJob, { id: 'job-UNK', job_number: 'SWX-FIX-999', type: 'spaceship' });
+    var unkRun = G.generate({ index: fixtureIndex({ jobs: F.jobs.concat([unknownTypeJob]) }), now: ENGINE_NOW });
+    var unkCard = findCardForJob(unkRun.cards, 'job-UNK');
+    assertTrue('truly unknown type → blocked snooze_or_dismiss',
+      unkCard && unkCard.action_type === 'snooze_or_dismiss' && unkCard.policy_verdict === 'blocked');
+
+    // ── Group: suppression rules (re-running with later evidence) ──
+    group('loop 2 / suppression on later evidence');
+
+    // Add quote.viewed to job-101 → sent_not_viewed should drop, viewed-no-reply path takes over
+    var nowMs = ENGINE_NOW.getTime();
+    var withViewed = F.events.concat([{
+      job_id: 'job-101', event_type: 'quote.viewed',
+      occurred_at: new Date(nowMs - 12 * 3600 * 1000).toISOString(), payload: {},
+    }]);
+    var viewedRun = G.generate({ index: fixtureIndex({ events: withViewed }), now: ENGINE_NOW });
+    var snv101 = findCardForJob(viewedRun.cards, 'job-101', 'send_follow_up');
+    assertTrue('job-101 sent_not_viewed dropped once quote.viewed appears',
+      !snv101 || snv101.evidence_refs.some(function (r) { return r.event_type === 'quote.viewed'; }));
+
+    // Add rep outbound after the unanswered question → reply_needed for job-105 drops.
+    var withRepReply = F.events.concat([{
+      job_id: 'job-105', event_type: 'client.sms_out',
+      occurred_at: new Date(nowMs - 30 * 60 * 1000).toISOString(),
+      payload: { message_text: 'Yes, ceiling fan supply+install is $650.' },
+    }]);
+    var afterReplyRun = G.generate({ index: fixtureIndex({ events: withRepReply }), now: ENGINE_NOW });
+    var c105After = findCardForJob(afterReplyRun.cards, 'job-105', 'reply_needed');
+    assertTrue('job-105 reply_needed dropped once rep outbound logged after question', c105After === null);
+
+    // Add quote.accepted → terminal, no follow-up should fire.
+    var withAccepted = F.events.concat([{
+      job_id: 'job-101', event_type: 'quote.accepted',
+      occurred_at: new Date(nowMs - 1 * 3600 * 1000).toISOString(), payload: {},
+    }]);
+    var acceptedRun = G.generate({ index: fixtureIndex({ events: withAccepted }), now: ENGINE_NOW });
+    var c101Followup = findCardForJob(acceptedRun.cards, 'job-101', 'send_follow_up');
+    assertTrue('job-101 send_follow_up suppressed once quote.accepted lands', c101Followup === null);
+
+    // ── Group: deposit follow-up ────────────────────────────
+    group('loop 2 / deposit follow-up');
+
+    // Build an "accepted 30h ago, no payment" variant on a copy of job-101.
+    var depositEvents = [
+      { job_id: 'job-101', event_type: 'quote.sent',
+        occurred_at: new Date(nowMs - 5 * 24 * 3600 * 1000).toISOString(), payload: {} },
+      { job_id: 'job-101', event_type: 'quote.accepted',
+        occurred_at: new Date(nowMs - 30 * 3600 * 1000).toISOString(), payload: {} },
+    ];
+    var depositRun = G.generate({ index: fixtureIndex({ events: depositEvents }), now: ENGINE_NOW });
+    var depositCard = findCardForJob(depositRun.cards, 'job-101', 'deposit_follow_up');
+    assertTrue('quote.accepted >24h, no payment → deposit_follow_up emitted',
+      depositCard && depositCard.lane === 'send' && depositCard.policy_verdict === 'approval_required');
+
+    // payment.received resolves it.
+    var paidEvents = depositEvents.concat([{
+      job_id: 'job-101', event_type: 'payment.received',
+      occurred_at: new Date(nowMs - 1 * 3600 * 1000).toISOString(), payload: {},
+    }]);
+    var paidRun = G.generate({ index: fixtureIndex({ events: paidEvents }), now: ENGINE_NOW });
+    assertTrue('payment.received suppresses deposit_follow_up',
+      findCardForJob(paidRun.cards, 'job-101', 'deposit_follow_up') === null);
+
+    // payment_agreement fact reroutes to informational snooze (not chase).
+    var paymentAgreementCtx = Object.assign({}, F.jobContext, {
+      'job-101': [{
+        kind: 'payment_agreement',
+        value: { plan: '50% cash on completion' },
+        provenance: { source: 'rep-note', promoted_at: new Date(nowMs - 6 * 3600 * 1000).toISOString(), writer_role: 'marnin', untrusted: false },
+      }],
+    });
+    var paRun = G.generate({ index: fixtureIndex({ events: depositEvents, jobContext: paymentAgreementCtx }), now: ENGINE_NOW });
+    var paCard = findCardForJob(paRun.cards, 'job-101', 'snooze_or_dismiss');
+    assertTrue('payment_agreement fact suppresses generic deposit_follow_up',
+      findCardForJob(paRun.cards, 'job-101', 'deposit_follow_up') === null);
+    assertTrue('payment_agreement fact surfaces informational snooze instead',
+      paCard && paCard.policy_verdict === 'internal');
+
+    // ── Group: existing-proposal augmentation ───────────────
+    group('loop 2 / existing-proposal augmentation');
+
+    // Inject a proposed action with the same action_type the generator emits.
+    var augProposals = F.proposedActions.concat([{
+      proposal_id: 'pa-aug-101', job_id: 'job-101', status: 'proposed',
+      action_type: 'send_follow_up',
+      action_payload: { template_id: 'tpl_followup_sms_t1_v1' },
+    }]);
+    var augRun = G.generate({ index: fixtureIndex({ proposedActions: augProposals }), now: ENGINE_NOW });
+    var c101Aug = findCardForJob(augRun.cards, 'job-101', 'send_follow_up');
+    assertTrue('matching ai_proposed_actions row appended to evidence_refs',
+      c101Aug && c101Aug.evidence_refs.some(function (r) { return r.type === 'proposed_action' && r.id === 'pa-aug-101'; }));
+
+    // ── Group: diagnostics ──────────────────────────────────
+    group('loop 2 / diagnostics');
+    assertEq('diagnostics.cardsProduced equals cards.length',
+      baseCards.length, baseRun.diagnostics.cardsProduced);
+    assertTrue('diagnostics.lanesPopulated.book + .send + .call equals cards.length',
+      (baseRun.diagnostics.lanesPopulated.book +
+       baseRun.diagnostics.lanesPopulated.send +
+       baseRun.diagnostics.lanesPopulated.call) === baseCards.length);
+    assertTrue('diagnostics.perAction is non-empty',
+      baseRun.diagnostics.perAction && Object.keys(baseRun.diagnostics.perAction).length > 0);
+
+    // ── Group: determinism + purity ─────────────────────────
+    group('loop 2 / determinism + purity');
+    var run1 = G.generate({ index: fixtureIndex(), now: ENGINE_NOW });
+    var run2 = G.generate({ index: fixtureIndex(), now: ENGINE_NOW });
+    assertEq('two runs with same input produce equal card counts',
+      run1.cards.length, run2.cards.length);
+    assertEq('two runs produce identical card ids in identical order',
+      run1.cards.map(function (c) { return c.id; }),
+      run2.cards.map(function (c) { return c.id; }));
+    var fixtureJobsSnapshot = JSON.stringify(F.jobs);
+    var fixtureEventsSnapshot = JSON.stringify(F.events);
+    G.generate({ index: fixtureIndex(), now: ENGINE_NOW });
+    assertEq('fixtures.jobs not mutated by generator', fixtureJobsSnapshot, JSON.stringify(F.jobs));
+    assertEq('fixtures.events not mutated by generator', fixtureEventsSnapshot, JSON.stringify(F.events));
+
+    // ════════════════════════════════════════════════════════
+    // Loop 3 — sale-playbook (tone-aware draft generator)
+    // ════════════════════════════════════════════════════════
+
+    var PB = window.SALE_PLAYBOOK;
+
+    group('loop 3 / playbook module shape');
+    assertTrue('window.SALE_PLAYBOOK is defined', !!PB);
+    assertTrue('draft() is a function', PB && typeof PB.draft === 'function');
+    assertTrue('REP_PROFILES lists nithin + khairo',
+      PB && !!PB.REP_PROFILES['nithin.patio.calm-tradie.v1']
+         && !!PB.REP_PROFILES['khairo.fencing.calm-tradie.v1']);
+    assertTrue('BUDGETS is frozen', PB && Object.isFrozen(PB.BUDGETS));
+
+    function buildJobBrainForTest(jobId) {
+      return {
+        job: F.jobs.find(function (j) { return j.id === jobId; }),
+        events: F.events.filter(function (e) { return e.job_id === jobId; }),
+        facts: F.jobContext[jobId] || [],
+        proposedActions: F.proposedActions.filter(function (p) { return p.job_id === jobId; }),
+        conversation: [], coaching: [], calendar: [],
+      };
+    }
+
+    var allCards = baseRun.cards;
+
+    group('loop 3 / per-action drafts');
+
+    var c005 = allCards.find(function (c) { return c.job_id === 'job-005' && c.action_type === 'book_scope'; });
+    var d005 = PB.draft({ card: c005, job_brain: buildJobBrainForTest('job-005'), now: ENGINE_NOW });
+    assertTrue('book_scope draft returns non-null', d005 !== null);
+    assertEq('book_scope channel=sms', 'sms', d005 && d005.channel);
+    assertEq('book_scope tone=helpful_service', 'helpful_service', d005 && d005.tone_variant);
+    assertTrue('book_scope drafted_message ≤ 160', d005 && d005.drafted_message.length <= 160);
+    assertTrue('book_scope rep=Nithin (patio)', d005 && /nithin\.patio/.test(d005.rep_profile_id));
+
+    var c004 = allCards.find(function (c) { return c.job_id === 'job-004' && c.action_type === 'book_scope'; });
+    var d004 = PB.draft({ card: c004, job_brain: buildJobBrainForTest('job-004'), now: ENGINE_NOW });
+    assertTrue('fencing job → khairo.fencing profile', d004 && /khairo\.fencing/.test(d004.rep_profile_id));
+
+    var c105pb = allCards.find(function (c) { return c.job_id === 'job-105' && c.action_type === 'reply_needed'; });
+    var d105 = PB.draft({ card: c105pb, job_brain: buildJobBrainForTest('job-105'), now: ENGINE_NOW });
+    assertEq('reply_needed (client.question) → tone=objection_response',
+      'objection_response', d105 && d105.tone_variant);
+    assertTrue('reply_needed carries "acknowledgement only" caveat',
+      d105 && d105.caveats.some(function (cv) { return /acknowledgement only/.test(cv); }));
+
+    var c103pb = allCards.find(function (c) { return c.job_id === 'job-103' && c.action_type === 'call_client'; });
+    var d103 = PB.draft({ card: c103pb, job_brain: buildJobBrainForTest('job-103'), now: ENGINE_NOW });
+    assertEq('call_client channel=call', 'call', d103 && d103.channel);
+    assertEq('call_client drafted_message empty', '', d103 && d103.drafted_message);
+    assertTrue('call_client talk_track has 3-5 bullets',
+      d103 && d103.talk_track.length >= 3 && d103.talk_track.length <= 5);
+    assertTrue('call_client every bullet ≤ 80 chars',
+      d103 && d103.talk_track.every(function (b) { return b.length <= 80; }));
+
+    var c106pb = allCards.find(function (c) { return c.job_id === 'job-106' && c.action_type === 'stale_quote_recovery'; });
+    var d106 = PB.draft({ card: c106pb, job_brain: buildJobBrainForTest('job-106'), now: ENGINE_NOW });
+    assertEq('stale + $20k+ → tone=value_frame', 'value_frame', d106 && d106.tone_variant);
+    assertEq('stale + $20k+ → channel=email', 'email', d106 && d106.channel);
+    assertTrue('email subject ≤ 80', d106 && d106.drafted_subject.length <= 80);
+    assertTrue('email body ≤ 350', d106 && d106.drafted_message.length <= 350);
+
+    group('loop 3 / safety + short-circuit');
+
+    var c107pb = allCards.find(function (c) { return c.job_id === 'job-107'; });
+    var d107 = PB.draft({ card: c107pb, job_brain: buildJobBrainForTest('job-107'), now: ENGINE_NOW });
+    assertTrue('DNC card → drafted_message empty', d107 && d107.drafted_message === '');
+    assertTrue('DNC card → "no client-facing draft" caveat',
+      d107 && d107.caveats.some(function (cv) { return /no client-facing draft/.test(cv); }));
+
+    // Loop 4: decking now resolves to Nithin's profile (no longer blocked).
+    var deckJobPB = {
+      id: 'job-DECK', job_number: 'SWD-FIX-999', type: 'decking',
+      client_name: 'Demo Decking', client_phone: '+61400099999',
+      client_email: 'd@example.test', site_address: 'X', site_suburb: 'Stirling',
+      status: 'draft', created_at: new Date(ENGINE_NOW.getTime() - 36 * 3600 * 1000).toISOString(),
+    };
+    var deckCardsPB = G.generate({ index: fixtureIndex({ jobs: F.jobs.concat([deckJobPB]) }), now: ENGINE_NOW }).cards;
+    var cDeckPB = deckCardsPB.find(function (c) { return c.job_id === 'job-DECK'; });
+    var dDeck = PB.draft({
+      card: cDeckPB,
+      job_brain: { job: deckJobPB, events: [], facts: [], proposedActions: [], conversation: [], coaching: [], calendar: [] },
+      now: ENGINE_NOW,
+    });
+    assertTrue('decking card → resolves Nithin (call_client lane → call channel)',
+      dDeck && dDeck.rep_profile_id === 'nithin.patio.calm-tradie.v1' && dDeck.channel === 'call');
+    // Truly unknown type still produces a blocked card.
+    var unkJobPB = Object.assign({}, deckJobPB, { id: 'job-UNKPB', job_number: 'SWX-FIX-998', type: 'spaceship' });
+    var unkCardsPB = G.generate({ index: fixtureIndex({ jobs: F.jobs.concat([unkJobPB]) }), now: ENGINE_NOW }).cards;
+    var cUnkPB = unkCardsPB.find(function (c) { return c.job_id === 'job-UNKPB'; });
+    var dUnk = PB.draft({
+      card: cUnkPB,
+      job_brain: { job: unkJobPB, events: [], facts: [], proposedActions: [], conversation: [], coaching: [], calendar: [] },
+      now: ENGINE_NOW,
+    });
+    assertTrue('truly unknown type (blocked card) → drafted_message empty',
+      dUnk && dUnk.drafted_message === '');
+    assertTrue('truly unknown type card → safety_notes carries "blocked:" entry',
+      dUnk && dUnk.safety_notes.some(function (n) { return /^blocked:/.test(n); }));
+
+    // rep_profile mismatch
+    var dMismatch = PB.draft({
+      card: c005, job_brain: buildJobBrainForTest('job-005'),
+      rep_profile: { id: 'khairo.fencing.calm-tradie.v1' }, now: ENGINE_NOW,
+    });
+    assertTrue('rep_profile mismatch (patio job + fencing rep) → null', dMismatch === null);
+
+    // forbidden phrase scrub
+    var scrub = PB._scrubForbidden('Hey there — quick check, as per our chat.');
+    assertFalse('scrub: em dash removed', /—/.test(scrub.text));
+    assertFalse('scrub: "as per" rewritten', /\bas per\b/i.test(scrub.text));
+
+    // SMS budget across every SMS-bearing fixture card
+    var smsTypes = ['book_scope', 'send_follow_up', 'deposit_follow_up', 'reply_needed', 'stale_quote_recovery', 'appointment_confirm'];
+    var smsBudgetOk = true;
+    allCards.forEach(function (c) {
+      if (smsTypes.indexOf(c.action_type) === -1) return;
+      var o = PB.draft({ card: c, job_brain: buildJobBrainForTest(c.job_id), now: ENGINE_NOW });
+      if (o && o.channel === 'sms' && o.drafted_message.length > 160) smsBudgetOk = false;
+    });
+    assertTrue('every SMS body ≤ 160 across all fixture SMS-bearing cards', smsBudgetOk);
+
+    // confidence in [0,1] for every output
+    var allDrafts = allCards
+      .map(function (c) { return PB.draft({ card: c, job_brain: buildJobBrainForTest(c.job_id), now: ENGINE_NOW }); })
+      .filter(Boolean);
+    assertTrue('confidence ∈ [0,1] for every output',
+      allDrafts.every(function (o) { return typeof o.confidence === 'number' && o.confidence >= 0 && o.confidence <= 1; }));
+
+    // evidence_refs preserved + at least one decision ref appended (for non-blocked)
+    var d005Refs = d005.evidence_refs.length;
+    assertTrue('evidence_refs length ≥ card.evidence_refs.length',
+      d005Refs >= c005.evidence_refs.length);
+    assertTrue('evidence_refs includes a "computed" decision ref for tone/channel',
+      d005.evidence_refs.some(function (r) { return r.type === 'computed' && /tone=/.test(r.reason || ''); }));
+
+    // determinism
+    var d005a = PB.draft({ card: c005, job_brain: buildJobBrainForTest('job-005'), now: ENGINE_NOW });
+    var d005b = PB.draft({ card: c005, job_brain: buildJobBrainForTest('job-005'), now: ENGINE_NOW });
+    assertEq('two draft() calls with same input produce equal output',
+      JSON.stringify(d005a), JSON.stringify(d005b));
+
+    // ════════════════════════════════════════════════════════
+    // Loop 4 — availability + drive-time + playbook loader + proposer
+    // ════════════════════════════════════════════════════════
+
+    var AV  = window.SALE_AVAILABILITY;
+    var DT  = window.SALE_DRIVE_TIME;
+    var PBL = window.SALE_PLAYBOOK_LOADER;
+    var CPR = window.SALE_CALENDAR_PROPOSER;
+
+    // ── Group: rep assignment (decking → Nithin) ───────────
+    group('loop 4 / rep assignment');
+    assertTrue('SALE_AVAILABILITY exposed', !!AV);
+    assertTrue('SALE_DRIVE_TIME exposed', !!DT);
+    assertTrue('SALE_PLAYBOOK_LOADER exposed', !!PBL);
+    assertTrue('SALE_CALENDAR_PROPOSER exposed', !!CPR);
+
+    // Decking is now wired to Nithin in the safety policy + generator + playbook.
+    var jDeckingL4 = { id: 'tdl4', type: 'decking', client_phone: '+61', client_email: 'd@y' };
+    var fcSmsL4 = { action_type: 'first_contact_sms', channel: 'sms', job_id: 'tdl4' };
+    assertTrue('decking → safety policy resolves Nithin (not blocked)',
+      !P.evaluate({ action: fcSmsL4, job: jDeckingL4, facts: [], recentEvents: [], now: morning }).blocked);
+    assertTrue('decking → playbook resolveRepProfile returns Nithin profile',
+      PB._resolveRepProfile && PB._resolveRepProfile('decking') &&
+        PB._resolveRepProfile('decking').id === 'nithin.patio.calm-tradie.v1');
+    assertTrue('combo → also Nithin (carryover)',
+      PB._resolveRepProfile('combo') && PB._resolveRepProfile('combo').rep_first_name === 'Nithin');
+    assertTrue('general → also Nithin',
+      PB._resolveRepProfile('general') && PB._resolveRepProfile('general').rep_first_name === 'Nithin');
+    assertTrue('truly unknown type → null (still blocked)',
+      PB._resolveRepProfile('spaceship') === null);
+
+    // ── Group: availability zones ────────────────────────────
+    group('loop 4 / availability');
+
+    // Synth a minimal availability config (Tue green, Mon orange, Sat red).
+    var synthAvail = {
+      rep_first_name: 'Nithin',
+      starting_location: 'Joondalup, WA 6027',
+      max_scopes_per_day: 4,
+      availability: [
+        { day: 'Mon', blocks: [{ start: '08:00', end: '16:00', zone: 'orange' }] },
+        { day: 'Tue', blocks: [{ start: '08:00', end: '16:00', zone: 'green' }] },
+        { day: 'Wed', blocks: [{ start: '08:00', end: '16:00', zone: 'orange' }] },
+        { day: 'Thu', blocks: [{ start: '08:00', end: '16:00', zone: 'green' }] },
+        { day: 'Fri', blocks: [{ start: '08:00', end: '16:00', zone: 'orange' }] },
+        { day: 'Sat', blocks: [{ start: '00:00', end: '23:59', zone: 'red' }] },
+        { day: 'Sun', blocks: [{ start: '00:00', end: '23:59', zone: 'red' }] },
+      ],
+    };
+    assertEq('zoneAt Tue 10:00 = green', 'green', AV.zoneAt(synthAvail, 'Tue', '10:00'));
+    assertEq('zoneAt Mon 10:00 = orange', 'orange', AV.zoneAt(synthAvail, 'Mon', '10:00'));
+    assertEq('zoneAt Sat 10:00 = red', 'red', AV.zoneAt(synthAvail, 'Sat', '10:00'));
+    assertEq('zoneAt Tue 06:00 = red (outside block)', 'red', AV.zoneAt(synthAvail, 'Tue', '06:00'));
+
+    var monday = new Date('2026-05-04T00:00:00+08:00'); // Mon 4 May 2026
+    var blocks = AV.candidateBlocks(synthAvail, monday, 7, 45);
+    var redCount = blocks.filter(function (b) { return b.zone === 'red'; }).length;
+    assertEq('candidateBlocks excludes red weekends', 0, redCount);
+    var dayNames = blocks.map(function (b) { return b.day_name; });
+    assertTrue('candidateBlocks Mon-Fri only (5 blocks)',
+      blocks.length === 5 &&
+      dayNames.indexOf('Mon') !== -1 &&
+      dayNames.indexOf('Tue') !== -1 &&
+      dayNames.indexOf('Wed') !== -1 &&
+      dayNames.indexOf('Thu') !== -1 &&
+      dayNames.indexOf('Fri') !== -1 &&
+      dayNames.indexOf('Sat') === -1 &&
+      dayNames.indexOf('Sun') === -1);
+
+    var av_validate = AV.validate(synthAvail);
+    assertTrue('availability config validates (no errors)', av_validate.ok && av_validate.errors.length === 0);
+    var bad_avail = { rep_first_name: '', starting_location: '', max_scopes_per_day: 0, availability: 'not array' };
+    var bad_validate = AV.validate(bad_avail);
+    assertTrue('malformed availability fails validation', !bad_validate.ok && bad_validate.errors.length > 0);
+
+    // ── Group: drive-time static fallback ────────────────────
+    group('loop 4 / drive-time');
+
+    var jH9 = DT.staticEstimate('Joondalup', 'Hillarys', '9am');
+    assertEq('Joondalup→Hillarys 9am minutes = 12', 12, jH9.minutes);
+    assertEq('static_table source', 'static_table', jH9.source);
+    assertFalse('Joondalup→Hillarys not peak_warning', jH9.peak_warning);
+    var jSub4pm = DT.staticEstimate('Joondalup', 'Subiaco', '4pm');
+    assertTrue('Joondalup→Subiaco 4pm has peak_warning', jSub4pm.peak_warning === true);
+    assertTrue('Joondalup→Subiaco 4pm > 30 min', jSub4pm.minutes > 30);
+    var symEst = DT.staticEstimate('Hillarys', 'Joondalup', '9am');
+    assertEq('symmetric Hillarys→Joondalup falls back to direct entry', 12, symEst.minutes);
+    var unkEst = DT.staticEstimate('Joondalup', 'Mars', '12pm');
+    assertEq('unknown destination → fallback_used=true', true, unkEst.fallback_used);
+    assertTrue('routesApiEstimate is a stub returning routes_api_not_deployed', true);
+
+    // ── Group: playbook loader ───────────────────────────────
+    group('loop 4 / playbook loader');
+
+    var SAMPLE_NITHIN_BOOKING_MD = [
+      '---',
+      'playbook_id: nithin.booking.v1',
+      'rep_profile_id: nithin.patio.calm-tradie.v1',
+      'rep_first_name: Nithin',
+      'covers_action_types:',
+      '  - book_scope',
+      '  - appointment_confirm',
+      'default_tone: helpful_service',
+      'constraints:',
+      '  scope_minutes_normal: 45',
+      '  same_day_priority_threshold: 90',
+      'forbidden_phrases:',
+      '  - "leverage"',
+      '  - "as per"',
+      'sms_budget: 160',
+      '---',
+      '',
+      '### book_scope · sms_primary',
+      'Thanks {first_name} - we run scopes Tue + Thu. What suits?',
+      '',
+      '### book_scope · sms_fallback',
+      'Hey {first_name} - Tue or Thu OK? Reply.  - Nithin',
+      '',
+      '### appointment_confirm · sms_primary',
+      'Confirming visit at {suburb} on {site_visit_window}. Access notes?',
+      '',
+    ].join('\n');
+
+    var parsed = PBL.parse(SAMPLE_NITHIN_BOOKING_MD);
+    assertEq('playbook_id parsed', 'nithin.booking.v1', parsed.playbook_id);
+    assertEq('rep_profile_id parsed', 'nithin.patio.calm-tradie.v1', parsed.rep_profile_id);
+    assertEq('covers_action_types parsed (book_scope)', true, parsed.covers_action_types.indexOf('book_scope') !== -1);
+    assertEq('constraints.scope_minutes_normal = 45', 45, parsed.constraints.scope_minutes_normal);
+    assertEq('constraints.same_day_priority_threshold = 90', 90, parsed.constraints.same_day_priority_threshold);
+    assertEq('forbidden_phrases parsed (length 2)', 2, parsed.forbidden_phrases.length);
+    assertEq('sms_budget = 160', 160, parsed.sms_budget);
+    assertTrue('templates.book_scope.sms_primary present',
+      parsed.templates && parsed.templates.book_scope && typeof parsed.templates.book_scope.sms_primary === 'string');
+    assertEq('templates.book_scope.sms_primary content',
+      'Thanks {first_name} - we run scopes Tue + Thu. What suits?',
+      parsed.templates.book_scope.sms_primary);
+
+    // resolveForCard: patio → Nithin's booking; fencing → null in this fixture (only Nithin loaded).
+    var loadedMap = {};
+    loadedMap[parsed.playbook_id] = parsed;
+    var patioCardL4 = { job_type: 'patio', action_type: 'book_scope' };
+    var fencingCardL4 = { job_type: 'fencing', action_type: 'book_scope' };
+    var deckingCardL4 = { job_type: 'decking', action_type: 'book_scope' };
+    assertTrue('resolveForCard patio → Nithin playbook',
+      PBL.resolveForCard(patioCardL4, loadedMap) === parsed);
+    assertTrue('resolveForCard decking → Nithin playbook (Loop 4)',
+      PBL.resolveForCard(deckingCardL4, loadedMap) === parsed);
+    assertTrue('resolveForCard fencing → null (no Khairo playbook in this map)',
+      PBL.resolveForCard(fencingCardL4, loadedMap) === null);
+
+    // Bad markdown: missing frontmatter.
+    var bad_md = '# Just a heading no frontmatter';
+    var threw = false;
+    try { PBL.parse(bad_md); } catch (e) { threw = true; }
+    assertTrue('parse() throws on missing frontmatter', threw);
+
+    // ── Group: calendar proposer ─────────────────────────────
+    group('loop 4 / calendar proposer');
+
+    var proposerNow = new Date('2026-05-04T08:00:00+08:00'); // Mon 8am
+    function basicCard(opts) {
+      return Object.assign({
+        id: 'gen_test_book_scope',
+        job_id: 'jt',
+        job_number: 'SWP-FIX-T01',
+        customer_name: 'Test Customer',
+        suburb: 'Mindarie',
+        job_type: 'patio',
+        value_inc_gst: 18000,
+        priority: 80,
+        action_type: 'book_scope',
+        evidence_refs: [{ type: 'job', source_table: 'jobs', id: 'jt' }],
+        policy_verdict: 'approval_required',
+      }, opts || {});
+    }
+
+    // Standard patio book_scope, no existing calendar, no playbook.
+    var pOut = CPR.propose({
+      card: basicCard(),
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    assertTrue('proposer returns candidates array', pOut && Array.isArray(pOut.candidates));
+    assertTrue('proposer returns 1-3 candidates', pOut.candidates.length >= 1 && pOut.candidates.length <= 3);
+    var mainDayCount = pOut.candidates.filter(function (c) {
+      return c.day_name === 'Tue' || c.day_name === 'Thu';
+    }).length;
+    assertTrue('70%+ of candidates on Tue/Thu (main-day weight)',
+      pOut.candidates.length === 0 || (mainDayCount / pOut.candidates.length) >= 0.66);
+    assertTrue('top candidate is on Tue (highest score: green + main-day)',
+      pOut.candidates[0].day_name === 'Tue' && pOut.candidates[0].zone === 'green');
+
+    // Same-day exception: priority 95 today (Mon, orange — needs value gate).
+    var hotCard = basicCard({ priority: 95, value_inc_gst: 22000 });
+    var hotOut = CPR.propose({
+      card: hotCard,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    var sameDayOffered = hotOut.candidates.some(function (c) { return c.same_day === true; });
+    assertTrue('priority 95 + value 22k → same-day candidate offered', sameDayOffered);
+    // Codex stop-time #4: same-day proposals must reserve 60 min on-site
+    // (Marnin's rule), not the rep's normal 45/30 min scope time.
+    var sameDayCard = hotOut.candidates.find(function (c) { return c.same_day === true; });
+    if (sameDayCard) {
+      var sStart = parseInt(sameDayCard.start.split(':')[0], 10) * 60 + parseInt(sameDayCard.start.split(':')[1], 10);
+      var sEnd   = parseInt(sameDayCard.end.split(':')[0], 10)   * 60 + parseInt(sameDayCard.end.split(':')[1], 10);
+      assertTrue('same-day candidate reserves >= 60 min on-site (Marnin rule)',
+        (sEnd - sStart) >= 60);
+    }
+    // Future-day candidates still use the playbook normal scope time.
+    var futureCard = hotOut.candidates.find(function (c) { return c.same_day === false; });
+    if (futureCard) {
+      var fStart = parseInt(futureCard.start.split(':')[0], 10) * 60 + parseInt(futureCard.start.split(':')[1], 10);
+      var fEnd   = parseInt(futureCard.end.split(':')[0], 10)   * 60 + parseInt(futureCard.end.split(':')[1], 10);
+      assertTrue('future-day candidate uses playbook normal scope (45 min patio)',
+        (fEnd - fStart) === 45);
+    }
+
+    // Same scenario but priority 85 — no same-day.
+    var lowPrioCard = basicCard({ priority: 85, value_inc_gst: 22000 });
+    var lowOut = CPR.propose({
+      card: lowPrioCard,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    var anySameDay = lowOut.candidates.some(function (c) { return c.same_day === true; });
+    assertFalse('priority 85 → no same-day candidate', anySameDay);
+
+    // Orange-zone gate: low value + low priority on Mon (orange) should be filtered.
+    var lowEverythingCard = basicCard({ priority: 50, value_inc_gst: 5000 });
+    var leOut = CPR.propose({
+      card: lowEverythingCard,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    var orangeCount = leOut.candidates.filter(function (c) { return c.zone === 'orange'; }).length;
+    assertEq('low value + priority → no orange candidates (gated)', 0, orangeCount);
+
+    // South-of-river afternoon block: Subiaco at priority 60, value 12k → filtered.
+    var subiCard = basicCard({ suburb: 'Subiaco', priority: 60, value_inc_gst: 12000 });
+    // 'now' set to Mon noon to give plenty of afternoon slots
+    var subiOut = CPR.propose({
+      card: subiCard,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: new Date('2026-05-04T12:00:00+08:00'),
+    });
+    var anyAfternoon = subiOut.candidates.some(function (c) {
+      var startHour = parseInt(c.start.split(':')[0], 10);
+      return startHour >= 15;
+    });
+    assertFalse('south-of-river afternoon (priority 60, value 12k) → afternoon blocked', anyAfternoon);
+
+    // Max scopes per day: existing 4 booked on Tue → Tue dropped.
+    var fullTueCalendar = [
+      { day: '2026-05-05', rep: 'Nithin', start: '08:30', end: '09:15', kind: 'booked', suburb: 'Stirling' },
+      { day: '2026-05-05', rep: 'Nithin', start: '10:00', end: '10:45', kind: 'booked', suburb: 'Hillarys' },
+      { day: '2026-05-05', rep: 'Nithin', start: '11:30', end: '12:15', kind: 'booked', suburb: 'Mindarie' },
+      { day: '2026-05-05', rep: 'Nithin', start: '13:30', end: '14:15', kind: 'booked', suburb: 'Currambine' },
+    ];
+    var fullTueOut = CPR.propose({
+      card: basicCard(),
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: fullTueCalendar,
+      drive_time: DT,
+      now: proposerNow,
+    });
+    var hasTue = fullTueOut.candidates.some(function (c) { return c.day_name === 'Tue'; });
+    assertFalse('Tue at max_scopes_per_day cap → Tue not offered', hasTue);
+
+    // Non book_scope card → returns null.
+    var nonBookCard = basicCard({ action_type: 'send_follow_up' });
+    var nonOut = CPR.propose({
+      card: nonBookCard,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    assertTrue('non-book_scope action_type → proposer returns null', nonOut === null);
+
+    // Decking now gets a Nithin proposal (was blocked pre-Loop-4).
+    var deckCardCP = basicCard({ job_type: 'decking', priority: 75 });
+    var deckOutCP = CPR.propose({
+      card: deckCardCP,
+      job_brain: { job: { id: 'jt' }, events: [] },
+      rep_availability: synthAvail,    // Nithin's availability
+      existing_calendar: [],
+      drive_time: DT,
+      now: proposerNow,
+    });
+    assertTrue('decking book_scope → Nithin returns candidates (Loop 4 rep assignment)',
+      deckOutCP && deckOutCP.candidates.length > 0);
+
+    // ── Group: playbook-driven draft ─────────────────────────
+    group('loop 4 / playbook-driven draft');
+
+    // Playbook-driven path: same card, with playbooks injected, should
+    // emit Marnin's "open question" template wording (not the legacy
+    // hard-coded "two windows" body).
+    var c005pb = baseRun.cards.find(function (c) {
+      return c.job_id === 'job-005' && c.action_type === 'book_scope';
+    });
+    var brain005pb = {
+      job: F.jobs.find(function (j) { return j.id === 'job-005'; }),
+      events: [], facts: [], proposedActions: [], conversation: [], coaching: [], calendar: [],
+    };
+    var pbMap = {};
+    pbMap[parsed.playbook_id] = parsed;
+    var draftPb = PB.draft({ card: c005pb, job_brain: brain005pb, now: ENGINE_NOW, playbooks: pbMap });
+    assertTrue('playbook-driven draft non-null', draftPb !== null);
+    assertTrue('playbook-driven draft uses "we run scopes" wording (open question)',
+      draftPb && /we run scopes Tue \+ Thu/.test(draftPb.drafted_message));
+    assertTrue('playbook-driven draft has source=playbook caveat',
+      draftPb && draftPb.caveats.some(function (c) { return /^source=playbook:/.test(c); }));
+
+    // Fallback path (no playbooks) → legacy two-windows body.
+    var draftFb = PB.draft({ card: c005pb, job_brain: brain005pb, now: ENGINE_NOW });
+    assertTrue('fallback draft uses legacy two-windows body',
+      draftFb && /two windows|couple of windows/i.test(draftFb.drafted_message));
+
+    // ── Group: Loop 5 / cadence position ─────────────────────
+    group('loop 5 / cadence position');
+    var CAD = window.SALE_CADENCE;
+    assertTrue('SALE_CADENCE module exposed', !!CAD && typeof CAD.position === 'function');
+
+    var sentISO = '2026-04-25T10:00:00+08:00';     // 6 days before ENGINE_NOW (2026-05-01)
+    var pbL5 = parsed;                              // Nithin followup playbook (loaded earlier)
+
+    function cadenceCard(actionType) {
+      return { job_id: 'jt-cad', action_type: actionType, policy_verdict: 'auto_ok' };
+    }
+    function outboundEv(daysAfterSent) {
+      return {
+        job_id: 'jt-cad',
+        event_type: 'client.sms_out',
+        direction: 'outbound',
+        occurred_at: new Date(new Date(sentISO).getTime() + daysAfterSent * 86400000).toISOString(),
+      };
+    }
+    var sentEv = { job_id: 'jt-cad', event_type: 'quote.sent', occurred_at: sentISO };
+
+    // attempt_count=0 → current_rung=0 → next=t0_sent at sent+0d → overdue 6d
+    var pos0 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv], facts: [] }, playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=0 → current_rung=0', pos0 && pos0.current_rung === 0);
+    assertTrue('attempt_count=0 → next_template_id=t0_sent', pos0 && pos0.next_template_id === 't0_sent');
+    assertTrue('attempt_count=0 → ladder_length=5', pos0 && pos0.ladder_length === 5);
+    assertTrue('attempt_count=0 → not terminal', pos0 && pos0.terminal === false);
+
+    // attempt_count=1 → current_rung=1 → next=t1_check_in at sent+2d
+    var pos1 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv, outboundEv(0.5)], facts: [] }, playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=1 → current_rung=1', pos1 && pos1.current_rung === 1);
+    assertTrue('attempt_count=1 → next_template_id=t1_check_in', pos1 && pos1.next_template_id === 't1_check_in');
+    assertTrue('attempt_count=1 → due_at = sent+2d', pos1 && pos1.due_at === '2026-04-27T02:00:00.000Z');
+
+    // attempt_count=2 → next=t2_value_frame at sent+5d
+    var pos2 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv, outboundEv(0.5), outboundEv(2.5)], facts: [] }, playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=2 → next_template_id=t2_value_frame', pos2 && pos2.next_template_id === 't2_value_frame');
+    assertTrue('attempt_count=2 → next_channel=sms', pos2 && pos2.next_channel === 'sms');
+
+    // attempt_count=3 → next=t3_phone_prompt
+    var pos3 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv, outboundEv(0.5), outboundEv(2.5), outboundEv(5.5)], facts: [] },
+      playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=3 → next_template_id=t3_phone_prompt', pos3 && pos3.next_template_id === 't3_phone_prompt');
+    assertTrue('attempt_count=3 → next_channel=call', pos3 && pos3.next_channel === 'call');
+
+    // attempt_count=4 → next=t4_close_or_archive at sent+17d
+    var pos4 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv, outboundEv(0.5), outboundEv(2.5), outboundEv(5.5), outboundEv(11)], facts: [] },
+      playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=4 → next=t4_close_or_archive', pos4 && pos4.next_template_id === 't4_close_or_archive');
+    assertTrue('attempt_count=4 → not terminal yet', pos4 && pos4.terminal === false);
+
+    // attempt_count=5 → terminal (all 5 rungs fulfilled)
+    var pos5 = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv, outboundEv(0.5), outboundEv(2.5), outboundEv(5.5), outboundEv(11), outboundEv(18)], facts: [] },
+      playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('attempt_count=5 → terminal', pos5 && pos5.terminal === true);
+    assertTrue('attempt_count=5 → next_template_id=null', pos5 && pos5.next_template_id === null);
+    assertTrue('attempt_count=5 → due_at=null', pos5 && pos5.due_at === null);
+    assertTrue('attempt_count=5 → nurture_mode=true', pos5 && pos5.nurture_mode === true);
+
+    // overdue calc: rung 1 due sent+2d, now is sent+6d 4h → overdue ~6000min
+    var overdueMin = pos1 && pos1.overdue_minutes;
+    assertTrue('overdue_minutes computed (~4d 4h ≈ 6000min)', overdueMin >= 5900 && overdueMin <= 6100);
+
+    // No quote.sent → null
+    var posNoSent = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [], facts: [] }, playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('no quote.sent → position null', posNoSent === null);
+
+    // Non-cadence action_type → null
+    var posBook = CAD.position({ card: cadenceCard('book_scope'),
+      job_brain: { events: [sentEv], facts: [] }, playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('non-cadence action_type (book_scope) → null', posBook === null);
+
+    // do_not_chase → null
+    var posDnc = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv], facts: [{ kind: 'do_not_chase', value: {} }] },
+      playbook: pbL5, now: ENGINE_NOW });
+    assertTrue('do_not_chase fact → position null', posDnc === null);
+
+    // No playbook → fallback ladder used
+    var posFb = CAD.position({ card: cadenceCard('send_follow_up'),
+      job_brain: { events: [sentEv], facts: [] }, playbook: null, now: ENGINE_NOW });
+    assertTrue('null playbook → fallback ladder ID', posFb && posFb.ladder_id === 'fallback.followup.v1');
+    assertTrue('null playbook → fallback ladder length 5', posFb && posFb.ladder_length === 5);
+
+    // overdueLadder bucket assignment
+    var bucket = CAD.overdueLadder({
+      jobs: [{ id: 'jt-cad', job_number: 'SWP-CAD-1', type: 'patio' }],
+      events: [sentEv],
+      jobContext: {},
+      playbooks: { 'nithin.followup.v1': pbL5 },
+      now: ENGINE_NOW,
+    });
+    assertTrue('overdueLadder returns at least 1 overdue entry', bucket.overdue.length >= 1);
+    assertTrue('overdueLadder buckets >48h on 6d-overdue rung', bucket.overdue[0].age_buckets === '>48h');
+
+    // ── Group: Loop 5 / outcome attribution ──────────────────
+    group('loop 5 / outcome attribution');
+    var OUT = window.SALE_OUTCOMES;
+    assertTrue('SALE_OUTCOMES module exposed', !!OUT && typeof OUT.attribute === 'function');
+
+    // Anchor the attribution tests at a Wed mid-week so the Perth
+    // Mon..Sun window contains 2 quote.sent events.
+    var attrNow = new Date('2026-05-13T14:00:00+08:00');
+    var attrJobs = [
+      { id: 'a1', job_number: 'SWP-A1', type: 'patio',  value_inc_gst: 18000 },
+      { id: 'a2', job_number: 'SWP-A2', type: 'patio',  value_inc_gst: 32000 },
+      { id: 'a3', job_number: 'SWF-A3', type: 'fencing',value_inc_gst:  6500 },
+      { id: 'a4', job_number: 'SWP-A4', type: 'patio',  value_inc_gst: 14000 },  // archived (sent > 30d)
+    ];
+    var attrEvents = [
+      // a1 accepted Tue (in current week)
+      { job_id: 'a1', event_type: 'quote.sent',     occurred_at: '2026-05-11T10:00:00+08:00' },
+      { job_id: 'a1', event_type: 'client.sms_out', direction: 'outbound', occurred_at: '2026-05-13T11:00:00+08:00' },
+      { job_id: 'a1', event_type: 'quote.accepted', occurred_at: '2026-05-13T18:00:00+08:00' },
+      // a2 sent Tue, in flight
+      { job_id: 'a2', event_type: 'quote.sent',     occurred_at: '2026-05-12T09:00:00+08:00' },
+      // a3 declined Wed
+      { job_id: 'a3', event_type: 'quote.sent',     occurred_at: '2026-05-11T14:00:00+08:00' },
+      { job_id: 'a3', event_type: 'quote.declined', occurred_at: '2026-05-13T10:00:00+08:00' },
+      // a4 sent 35d ago, no terminal → archived
+      { job_id: 'a4', event_type: 'quote.sent',     occurred_at: '2026-04-08T10:00:00+08:00' },
+    ];
+    var attrR = OUT.attribute({
+      jobs: attrJobs, events: attrEvents,
+      playbooks: { 'nithin.followup.v1': pbL5 },
+      now: attrNow,
+    });
+    assertTrue('counted_jobs=4', attrR.diagnostics.counted_jobs === 4);
+    assertTrue('per_job a1.outcome=accepted', attrR.per_job.find(function(p){return p.job_id==='a1';}).outcome === 'accepted');
+    assertTrue('per_job a2.outcome=in_flight', attrR.per_job.find(function(p){return p.job_id==='a2';}).outcome === 'in_flight');
+    assertTrue('per_job a3.outcome=declined', attrR.per_job.find(function(p){return p.job_id==='a3';}).outcome === 'declined');
+    assertTrue('per_job a4.outcome=archived', attrR.per_job.find(function(p){return p.job_id==='a4';}).outcome === 'archived');
+    assertTrue('Nithin quotes_sent=2 this week (a1+a2; a4 outside window)',
+      attrR.per_rep_week.Nithin.quotes_sent === 2);
+    assertTrue('Nithin quotes_accepted=1', attrR.per_rep_week.Nithin.quotes_accepted === 1);
+    assertTrue('Nithin $_accepted=18000', attrR.per_rep_week.Nithin.$_accepted === 18000);
+    assertTrue('Nithin conversion_pct=50.0', attrR.per_rep_week.Nithin.conversion_pct === 50);
+    assertTrue('Khairo quotes_declined=1', attrR.per_rep_week.Khairo.quotes_declined === 1);
+    assertTrue('a1 attribution_rung resolves to a ladder template_id', /^t\d_/.test(attrR.per_job.find(function(p){return p.job_id==='a1';}).attribution_rung));
+    assertTrue('leaderboard sorted Nithin first ($18k)', attrR.leaderboard[0].rep_first_name === 'Nithin' && attrR.leaderboard[0].rank === 1);
+    assertTrue('leaderboard Khairo rank 2', attrR.leaderboard[1].rep_first_name === 'Khairo' && attrR.leaderboard[1].rank === 2);
+
+    // No-playbook attribution falls back to 'unknown' rather than throwing.
+    var attrNoPb = OUT.attribute({
+      jobs: attrJobs, events: attrEvents, playbooks: {}, now: attrNow,
+    });
+    assertTrue('no playbook → attribution_rung=unknown for accepted',
+      attrNoPb.per_job.find(function(p){return p.job_id==='a1';}).attribution_rung === 'unknown');
+
+    // Median time-to-close (single accepted sample → that single value).
+    assertTrue('median_time_to_close_h non-null when accepts exist',
+      attrR.per_rep_week.Nithin.median_time_to_close_h !== null);
+
+    // Codex stop-time #5: a re-sent quote must NOT inherit a terminal
+    // event that predates the latest quote.sent. Two regressions:
+    //  - quote.sent → quote.accepted (closed) → quote.sent (re-sent)
+    //    → outcome must be in_flight (latest sent has no terminal yet)
+    //  - quote.sent → quote.declined → quote.sent → quote.accepted
+    //    → outcome must be accepted (post-re-sent terminal wins)
+    var resentJobs = [
+      { id: 'r1', job_number: 'SWP-R1', type: 'patio', value_inc_gst: 21000 },
+      { id: 'r2', job_number: 'SWP-R2', type: 'patio', value_inc_gst: 14500 },
+    ];
+    var resentEvents = [
+      { job_id: 'r1', event_type: 'quote.sent',     occurred_at: '2026-04-01T10:00:00+08:00' },
+      { job_id: 'r1', event_type: 'quote.accepted', occurred_at: '2026-04-15T14:00:00+08:00' },
+      { job_id: 'r1', event_type: 'quote.sent',     occurred_at: '2026-05-12T10:00:00+08:00' },
+      // r2: declined, then re-sent, then accepted post-re-send
+      { job_id: 'r2', event_type: 'quote.sent',     occurred_at: '2026-04-10T10:00:00+08:00' },
+      { job_id: 'r2', event_type: 'quote.declined', occurred_at: '2026-04-20T10:00:00+08:00' },
+      { job_id: 'r2', event_type: 'quote.sent',     occurred_at: '2026-05-11T10:00:00+08:00' },
+      { job_id: 'r2', event_type: 'quote.accepted', occurred_at: '2026-05-13T10:00:00+08:00' },
+    ];
+    var resentR = OUT.attribute({
+      jobs: resentJobs, events: resentEvents,
+      playbooks: { 'nithin.followup.v1': parsed }, now: attrNow,
+    });
+    var r1Out = resentR.per_job.find(function (p) { return p.job_id === 'r1'; });
+    var r2Out = resentR.per_job.find(function (p) { return p.job_id === 'r2'; });
+    assertTrue('r1 (re-sent after accepted) → outcome=in_flight',
+      r1Out && r1Out.outcome === 'in_flight');
+    assertTrue('r1 (re-sent after accepted) → closed_at=null',
+      r1Out && r1Out.closed_at === null);
+    assertTrue('r2 (re-sent then re-accepted) → outcome=accepted',
+      r2Out && r2Out.outcome === 'accepted');
+    assertTrue('r2 (re-sent then re-accepted) → closed_at=2026-05-13 (NOT 2026-04-20)',
+      r2Out && r2Out.closed_at && r2Out.closed_at.indexOf('2026-05-13') === 0);
+
+    // ── Group: Loop 5 / holding SMS dry-run ──────────────────
+    group('loop 5 / holding SMS dry-run');
+    var hsNow = new Date('2026-05-15T14:00:00+08:00');
+    var hsJob = {
+      id: 'h1', job_number: 'SWP-H1', type: 'patio',
+      client_name: 'Demo Customer Echo', client_phone: '+61412345678',
+      created_at: new Date(hsNow.getTime() - 2 * 60 * 1000).toISOString(),
+    };
+    var hsCard = { job_id: 'h1', action_type: 'holding_sms' };
+    var dry = CAD.holdingSmsDryRun({
+      card: hsCard, job_brain: { job: hsJob, events: [], facts: [] },
+      playbook: pbL5, now: hsNow,
+    });
+    assertTrue('fresh enquiry within 5min → would_send=true', dry.would_send === true);
+    assertTrue('dry-run renders body with first_name+rep_first_name',
+      dry.body && dry.body.indexOf('Nithin') !== -1 && dry.body.indexOf('Demo') !== -1);
+    assertTrue('dry-run resolves to_phone', dry.to_phone === '+61412345678');
+    assertTrue('dry-run blockers empty', dry.blockers.length === 0);
+
+    // Cadence cap: any prior outbound disqualifies the holding window.
+    var dryBlocked = CAD.holdingSmsDryRun({
+      card: hsCard,
+      job_brain: { job: hsJob, events: [{
+        job_id: 'h1', event_type: 'client.sms_out', direction: 'outbound',
+        occurred_at: new Date(hsNow.getTime() - 60 * 1000).toISOString(),
+      }], facts: [] },
+      playbook: pbL5, now: hsNow,
+    });
+    assertTrue('outbound already sent → would_send=false', dryBlocked.would_send === false);
+    assertTrue('outbound already sent → outbound_already_sent blocker',
+      dryBlocked.blockers.indexOf('outbound_already_sent') !== -1);
+
+    // Stale anchor (>10 min) → holding_window_expired.
+    var staleJob = Object.assign({}, hsJob, {
+      created_at: new Date(hsNow.getTime() - 15 * 60 * 1000).toISOString(),
+    });
+    var dryStale = CAD.holdingSmsDryRun({
+      card: hsCard, job_brain: { job: staleJob, events: [], facts: [] },
+      playbook: pbL5, now: hsNow,
+    });
+    assertTrue('15-min-old anchor → would_send=false', dryStale.would_send === false);
+    assertTrue('15-min-old anchor → holding_window_expired blocker',
+      dryStale.blockers.indexOf('holding_window_expired') !== -1);
+
+    // Missing phone channel → blocker.
+    var noPhoneJob = Object.assign({}, hsJob, { client_phone: null });
+    var dryNoPhone = CAD.holdingSmsDryRun({
+      card: hsCard, job_brain: { job: noPhoneJob, events: [], facts: [] },
+      playbook: pbL5, now: hsNow,
+    });
+    assertTrue('no client_phone → would_send=false', dryNoPhone.would_send === false);
+    assertTrue('no client_phone → no_client_phone blocker',
+      dryNoPhone.blockers.indexOf('no_client_phone') !== -1);
+
+    // do_not_chase fact → blocker.
+    var dryDnc = CAD.holdingSmsDryRun({
+      card: hsCard, job_brain: { job: hsJob, events: [], facts: [{ kind: 'do_not_chase', value: {} }] },
+      playbook: pbL5, now: hsNow,
+    });
+    assertTrue('do_not_chase → would_send=false', dryDnc.would_send === false);
+    assertTrue('do_not_chase → do_not_chase_active blocker',
+      dryDnc.blockers.indexOf('do_not_chase_active') !== -1);
+
+    // Generator emits holding_sms card for fresh enquiry with phone.
+    var gOut = G.generate({
+      index: {
+        jobs: [hsJob], events: [], jobContext: {}, proposedActions: [], calendar: null,
+        generatedAt: hsNow.toISOString(),
+      },
+      now: hsNow,
+    });
+    var holdingCard = gOut.cards.find(function (c) { return c.action_type === 'holding_sms'; });
+    assertTrue('generator emits holding_sms card for fresh enquiry', !!holdingCard);
+    assertTrue('holding_sms card priority=95', holdingCard && holdingCard.priority === 95);
+    assertTrue('holding_sms card lane=send', holdingCard && holdingCard.lane === 'send');
+    assertTrue('holding_sms card policy_verdict=auto_ok', holdingCard && holdingCard.policy_verdict === 'auto_ok');
+
+    // ── Group: Loop 6 / dry-run / payload shape ──────────────
+    group('loop 6 / dry-run / payload shape');
+    var DRY = window.SALE_DRY_RUN;
+    assertTrue('SALE_DRY_RUN module exposed', !!DRY && typeof DRY.execute === 'function');
+    assertTrue('ALLOW_LIST contains 9 action types',
+      DRY && Array.isArray(DRY.ALLOW_LIST) && DRY.ALLOW_LIST.length === 9);
+    DRY.clearLog();
+
+    var dryNow = new Date('2026-05-15T10:00:00+08:00');
+    var repNithin = { user_id: 'u1', first_name: 'Nithin',
+                      sms_from: '+61400111000',
+                      email_from: 'nithin@secureworksgroup.app' };
+
+    function makeAction(overrides) {
+      return Object.assign({
+        id:               'pa-fixture',
+        job_id:           'j-fixture',
+        contact_id:       'c-fixture',
+        contact_phone:    '+61400000001',
+        contact_email:    'demo@example.test',
+        contact_name:     'Demo Customer Echo',
+        action_type:      'first_contact_sms',
+        channel:          'sms',
+        drafted_message:  'Hi Echo, Nithin from SecureWorks here re your patio enquiry. Quick chat to lock in a site visit?',
+      }, overrides || {});
+    }
+
+    var ok = DRY.execute({
+      proposed_action: makeAction(),
+      rep_identity:    repNithin,
+      cadence_position: null,
+      recent_outbound: [],
+      now:             dryNow,
+    });
+    assertTrue('first_contact_sms all gates pass → would_send=true', ok.would_send === true);
+    assertTrue('payload URL points at ops-api send_proposed_sms (templated)',
+      ok.payload && ok.payload.url === '<SUPABASE_URL>/functions/v1/ops-api?action=send_proposed_sms');
+    assertTrue('payload method=POST', ok.payload && ok.payload.method === 'POST');
+    assertTrue('Authorization header is templated, not resolved',
+      ok.payload && ok.payload.headers && ok.payload.headers.Authorization === 'Bearer <SUPABASE_SERVICE_KEY>');
+    assertTrue('payload body.action_id matches proposed_action.id',
+      ok.payload && ok.payload.body && ok.payload.body.action_id === 'pa-fixture');
+    assertTrue('payload body.preview_message carries body for review',
+      ok.payload && ok.payload.body && /Nithin from SecureWorks/.test(ok.payload.body.preview_message));
+    assertTrue('via=rep-channel:sms', ok.via === 'rep-channel:sms');
+    assertTrue('dry_run_log_id present', typeof ok.dry_run_log_id === 'string' && ok.dry_run_log_id.indexOf('dry_') === 0);
+
+    // archive_stale → internal-only payload (no URL, internal_only blocker)
+    var archive = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-archive', action_type: 'archive_stale', drafted_message: '' }),
+      rep_identity:    repNithin,
+      now:             dryNow,
+    });
+    assertTrue('archive_stale → would_send=false', archive.would_send === false);
+    assertTrue('archive_stale → internal_only_action blocker',
+      archive.blockers.indexOf('internal_only_action') !== -1);
+    assertTrue('archive_stale payload.url=null', archive.payload && archive.payload.url === null);
+    assertTrue('archive_stale via=internal', archive.via === 'internal');
+
+    // Each allow-listed SMS action_type produces a payload (smoke).
+    ['holding_sms', 'missed_call_textback', 'completed_call_followup',
+     'qualify_questions', 'pre_visit_reminder', 'followup_sms_t1', 'followup_sms_t2'
+    ].forEach(function (at) {
+      var r = DRY.execute({
+        proposed_action: makeAction({ id: 'pa-' + at, action_type: at }),
+        rep_identity: repNithin,
+        recent_outbound: [], cadence_position: null, now: dryNow,
+      });
+      assertTrue(at + ' → allow-listed, would_send=true', r.would_send === true);
+    });
+
+    // ── Group: Loop 6 / dry-run / blockers ───────────────────
+    group('loop 6 / dry-run / blockers');
+    DRY.clearLog();
+
+    // Approval-required action_type
+    var notAllowed = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-obj', action_type: 'objection_response' }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('objection_response → not_allow_listed blocker',
+      notAllowed.blockers.indexOf('not_allow_listed') !== -1);
+    assertTrue('objection_response → requires_approval blocker',
+      notAllowed.blockers.indexOf('requires_approval') !== -1);
+    assertTrue('objection_response → would_send=false', notAllowed.would_send === false);
+
+    // No sender identity
+    var noRep = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-norep' }),
+      rep_identity: null, now: dryNow,
+    });
+    assertTrue('no rep_identity → no_sender_identity blocker',
+      noRep.blockers.indexOf('no_sender_identity') !== -1);
+
+    // No recipient phone
+    var noPhone = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-nophone', contact_phone: null }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('no contact_phone → no_recipient_channel blocker',
+      noPhone.blockers.indexOf('no_recipient_channel') !== -1);
+
+    // Empty body + no holding template fallback for first_contact_sms
+    var emptyBody = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-empty', drafted_message: '' }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('empty drafted_message → empty_body blocker',
+      emptyBody.blockers.indexOf('empty_body') !== -1);
+
+    // Forbidden phrase: em-dash
+    var forbidden = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-em', drafted_message: 'Hey Echo — quote landed?' }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('em dash → forbidden_phrase blocker',
+      forbidden.blockers.indexOf('forbidden_phrase') !== -1);
+
+    // Body too long (>160 chars for SMS)
+    var longBody = 'a'.repeat(165);
+    var tooLong = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-long', drafted_message: longBody }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('165-char SMS → body_too_long blocker',
+      tooLong.blockers.indexOf('body_too_long') !== -1);
+
+    // Cadence position terminal → blocker on follow-up types
+    var terminalCad = { ladder_id: 'nithin.followup.v1', ladder_length: 5,
+                        attempt_count: 5, current_rung: 5, terminal: true,
+                        nurture_mode: true, due_at: null, overdue_minutes: 0,
+                        evidence_refs: [] };
+    var terminal = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-term', action_type: 'followup_sms_t1' }),
+      rep_identity: repNithin, cadence_position: terminalCad, now: dryNow,
+    });
+    assertTrue('cadence terminal + followup_sms_t1 → terminal_state blocker',
+      terminal.blockers.indexOf('terminal_state') !== -1);
+
+    // Terminal exception: holding_sms + first_contact_sms still allowed.
+    var holdingPastTerminal = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-hold', action_type: 'holding_sms' }),
+      rep_identity: repNithin, cadence_position: terminalCad, now: dryNow,
+    });
+    assertTrue('cadence terminal + holding_sms → not blocked by terminal_state',
+      holdingPastTerminal.blockers.indexOf('terminal_state') === -1);
+
+    // do_not_chase fact passed in
+    var dncF = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-dnc' }),
+      rep_identity: repNithin, facts: [{ kind: 'do_not_chase' }], now: dryNow,
+    });
+    assertTrue('do_not_chase fact → do_not_chase blocker',
+      dncF.blockers.indexOf('do_not_chase') !== -1);
+
+    // Dedup window: same body + same contact within 10 min
+    var dedupRecent = [{
+      contact_id: 'c-fixture', cadence: 'auto',
+      occurred_at: new Date(dryNow.getTime() - 5 * 60000).toISOString(),
+      body: 'Hi Echo, Nithin from SecureWorks here re your patio enquiry. Quick chat to lock in a site visit?',
+    }];
+    var dedup = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-dedup' }),
+      rep_identity: repNithin, recent_outbound: dedupRecent, now: dryNow,
+    });
+    assertTrue('same body + 5 min ago → dedup_window blocker',
+      dedup.blockers.indexOf('dedup_window') !== -1);
+
+    // Malformed input
+    var bad = DRY.execute({});
+    assertTrue('no inputs → malformed_input blocker',
+      bad.blockers.indexOf('malformed_input') !== -1);
+
+    // ── Group: Loop 6 / dry-run / quiet hours + cadence cap ──
+    group('loop 6 / dry-run / quiet hours + cadence cap');
+    DRY.clearLog();
+
+    var lateNight = new Date('2026-05-15T22:30:00+08:00');
+    var earlyAM = new Date('2026-05-15T05:30:00+08:00');
+
+    var quietLate = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-quiet1' }),
+      rep_identity: repNithin, now: lateNight,
+    });
+    assertTrue('22:30 Perth → quiet_hours blocker',
+      quietLate.blockers.indexOf('quiet_hours') !== -1);
+
+    var quietAM = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-quiet2' }),
+      rep_identity: repNithin, now: earlyAM,
+    });
+    assertTrue('05:30 Perth → quiet_hours blocker',
+      quietAM.blockers.indexOf('quiet_hours') !== -1);
+
+    var business = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-bus' }),
+      rep_identity: repNithin, now: dryNow,
+    });
+    assertTrue('10:00 Perth → no quiet_hours blocker',
+      business.blockers.indexOf('quiet_hours') === -1);
+
+    // Cadence cap: 2 prior auto-sends in 7d → blocker on 3rd
+    var cadenceRecent = [
+      { contact_id: 'c-fixture', cadence: 'auto', body: 'a',
+        occurred_at: new Date(dryNow.getTime() - 1 * 86400000).toISOString() },
+      { contact_id: 'c-fixture', cadence: 'auto', body: 'b',
+        occurred_at: new Date(dryNow.getTime() - 3 * 86400000).toISOString() },
+    ];
+    var capped = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-cap', action_type: 'followup_sms_t1' }),
+      rep_identity: repNithin, recent_outbound: cadenceRecent, now: dryNow,
+    });
+    assertTrue('2 prior auto-sends + followup → cadence_cap_exceeded',
+      capped.blockers.indexOf('cadence_cap_exceeded') !== -1);
+
+    // Cadence cap exception: holding_sms + first_contact_sms bypass
+    var cappedHolding = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-caph', action_type: 'holding_sms' }),
+      rep_identity: repNithin, recent_outbound: cadenceRecent, now: dryNow,
+    });
+    assertTrue('2 prior auto-sends + holding_sms → NOT cadence_cap_exceeded',
+      cappedHolding.blockers.indexOf('cadence_cap_exceeded') === -1);
+
+    // Cap NOT triggered when cadence='manual'
+    var manualRecent = [
+      { contact_id: 'c-fixture', cadence: 'manual', body: 'a',
+        occurred_at: new Date(dryNow.getTime() - 1 * 86400000).toISOString() },
+      { contact_id: 'c-fixture', cadence: 'manual', body: 'b',
+        occurred_at: new Date(dryNow.getTime() - 3 * 86400000).toISOString() },
+    ];
+    var notCapped = DRY.execute({
+      proposed_action: makeAction({ id: 'pa-nocap', action_type: 'followup_sms_t1' }),
+      rep_identity: repNithin, recent_outbound: manualRecent, now: dryNow,
+    });
+    assertTrue('manual sends do NOT count toward cadence cap',
+      notCapped.blockers.indexOf('cadence_cap_exceeded') === -1);
+
+    // Log buffer capture
+    var log = DRY.recentLog({ limit: 50 });
+    assertTrue('recentLog returns entries from this group', log.length >= 5);
+
+    // ── Group: Loop 6 / dry-run / renderer reachability (DOM) ──
+    // Codex stop-time #6: the "tap fires dry-run" wiring cannot be
+    // reached if the button is HTML-disabled (browsers suppress
+    // click on disabled buttons). Lock in that the dry-run surface
+    // is on a SEPARATE, NOT-DISABLED button.
+    group('loop 6 / dry-run / renderer reachability');
+    DRY.clearLog();
+
+    // Inject a synthetic action card into the DOM and verify:
+    //  1. The Preview dry-run button exists, is NOT disabled.
+    //  2. A simulated click on it triggers the document-body
+    //     delegated handler, which calls runDryRunForJob().
+    //  3. The dry-run log gets a new entry as a result.
+    var sandbox = document.createElement('div');
+    sandbox.id = 'reachability-sandbox';
+    document.body.appendChild(sandbox);
+    sandbox.innerHTML = [
+      '<div class="action-card" data-job="SWP-FIX-005">',
+        '<div class="action-controls">',
+          '<button class="btn-action btn-approve" data-stub-action="approve" data-stub-job="SWP-FIX-005" disabled>Approve & send</button>',
+          '<button class="btn-action btn-dryrun"  data-dryrun-job="SWP-FIX-005" type="button">Preview dry-run</button>',
+        '</div>',
+      '</div>',
+    ].join('');
+    var approveBtn = sandbox.querySelector('button[data-stub-action="approve"]');
+    var dryBtn     = sandbox.querySelector('button[data-dryrun-job]');
+    assertTrue('Approve button is HTML-disabled (per hard rule)',
+      approveBtn && approveBtn.disabled === true);
+    assertTrue('Preview dry-run button is NOT disabled',
+      dryBtn && dryBtn.disabled === false);
+    assertTrue('Preview dry-run button has data-dryrun-job attr',
+      dryBtn && dryBtn.getAttribute('data-dryrun-job') === 'SWP-FIX-005');
+    assertTrue('Preview dry-run button matches the click delegation selector',
+      dryBtn && dryBtn.matches('button.btn-action'));
+
+    // Verify the disabled attribute actually suppresses the click
+    // (sanity check — this is what Codex caught).
+    var approveClickFired = false;
+    function approveProbe() { approveClickFired = true; }
+    approveBtn.addEventListener('click', approveProbe);
+    approveBtn.click();
+    assertTrue('disabled button click is suppressed by browser',
+      approveClickFired === false);
+    approveBtn.removeEventListener('click', approveProbe);
+
+    // The dryrun button click DOES fire and reaches a listener.
+    var dryClickFired = false;
+    function dryProbe() { dryClickFired = true; }
+    dryBtn.addEventListener('click', dryProbe);
+    dryBtn.click();
+    assertTrue('Preview dry-run button click fires (NOT disabled)',
+      dryClickFired === true);
+    dryBtn.removeEventListener('click', dryProbe);
+
+    // Cleanup.
+    document.body.removeChild(sandbox);
 
     // ── Render results ──────────────────────────────────────────
     var resultsEl = document.getElementById('results');

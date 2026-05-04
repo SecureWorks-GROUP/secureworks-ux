@@ -78,11 +78,19 @@
     // demotes to approval-required.
     autoMsgCapPerContact: 3,
     autoMsgCapWindowDays: 7,
-    // Stop words (case-insensitive substring match on inbound text).
+    // Stop words. Phrase-only entries; bare "stop" is too ambiguous in
+    // casual English ("stop by Tuesday", "bus stop", "had to stop and
+    // think") and would permanently block legitimate jobs on a false-
+    // positive substring match. Each entry must encode unambiguous
+    // opt-out intent. Matched as word-bounded tokens, bounded to the
+    // last `stopWordHorizonDays` (default 90) of inbound replies.
     stopWords: [
-      'stop', 'unsubscribe', 'not interested', 'please remove',
-      "don't contact", 'leave me alone', 'wrong number',
+      'unsubscribe', 'not interested', 'please remove',
+      "don't contact", 'do not contact', 'leave me alone', 'wrong number',
+      'please stop', 'stop messaging', 'stop contacting', 'stop sending',
+      'stop emailing', 'stop calling', 'lose my number',
     ],
+    stopWordHorizonDays: 90,
   });
 
   // ── Helpers ────────────────────────────────────────────────
@@ -104,10 +112,10 @@
     if (t === 'fencing') {
       return { name: 'Khairo', label: 'Khairo (fencing)', user_id: 'fix-khairo' };
     }
-    if (t === 'patio' || t === 'combo') {
+    if (t === 'patio' || t === 'combo' || t === 'decking' || t === 'general') {
       return { name: 'Nithin', label: 'Nithin (' + t + ')', user_id: 'fix-nithin' };
     }
-    // Decking / general / unknown — no default sender; outbound blocks.
+    // Truly unknown type → no default sender; outbound blocks.
     return null;
   }
 
@@ -122,16 +130,29 @@
     return hour >= qs && hour < qe;
   }
 
-  function inboundReplyHasStopWord(recentEvents, stopWords) {
+  // Word-boundary regexes per stop-word phrase. Substring matching
+  // ("stop" inside "stop by Tuesday" / "bus stop") is unsafe and would
+  // permanently block legitimate jobs.
+  function buildStopWordRegexes(stopWords) {
+    return (stopWords || []).map(function (s) {
+      var escaped = String(s).toLowerCase().replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      return new RegExp('(^|\\W)' + escaped + '(\\W|$)', 'i');
+    });
+  }
+  function inboundReplyHasStopWord(recentEvents, stopWords, now, horizonDays) {
     if (!Array.isArray(recentEvents)) return false;
-    var sw = (stopWords || []).map(function (s) { return s.toLowerCase(); });
+    var regexes = buildStopWordRegexes(stopWords);
+    var nowMs = +toDate(now);
+    var horizon = (typeof horizonDays === 'number' && horizonDays > 0) ? horizonDays : 90;
+    var horizonMs = isNaN(nowMs) ? null : nowMs - horizon * 24 * 3600 * 1000;
     for (var i = 0; i < recentEvents.length; i++) {
       var ev = recentEvents[i];
       if (!ev || ev.event_type !== 'client.reply') continue;
+      var occurredMs = +new Date(ev.occurred_at || ev.created_at || 0);
+      if (horizonMs !== null && !isNaN(occurredMs) && occurredMs < horizonMs) continue;
       var text = (ev.payload && (ev.payload.message_text || ev.payload.text)) || '';
-      var t = text.toLowerCase();
-      for (var j = 0; j < sw.length; j++) {
-        if (t.indexOf(sw[j]) !== -1) return true;
+      for (var j = 0; j < regexes.length; j++) {
+        if (regexes[j].test(text)) return true;
       }
     }
     return false;
@@ -259,7 +280,7 @@
     }
 
     // ── Hard blocks: stop-word reply ──
-    if (inboundReplyHasStopWord(recentEvents, config.stopWords)) {
+    if (inboundReplyHasStopWord(recentEvents, config.stopWords, now, config.stopWordHorizonDays)) {
       verdict.blocked = true; verdict.trust = 'red';
       reason('inbound stop-word reply detected — outbound blocked, alert human');
       return verdict;

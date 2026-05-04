@@ -470,52 +470,42 @@
     .btn-header-ghost:hover { background: rgba(255,255,255,0.2); }
 
     /* ════════════════════════════════════════════════════════════
-       REP PRODUCTION VIEW (Path B)
+       REP PRODUCTION SURFACE (was Path B "rep-view"; now the only view)
        ────────────────────────────────────────────────────────────
-       Calm rep-facing variant. Hides diagnostic / engineering UI
-       without touching data, fixtures, contracts, AI logic, or the
-       dev view's default rendering.
-
-       Toggle via any of:
-         • URL param ?view=rep (or ?view=dev)
-         • localStorage 'sale.view' = 'rep' | 'dev'
-         • The "View: Dev/Rep ▾" button in the header
-       Default is dev. Rep view is purely visual subtraction.
+       Diagnostic / engineering UI is hidden unconditionally. The dev
+       toggle was removed — this surface IS the production surface.
+       Engineering escape hatches still exist via:
+         • body.show-fixtures   → reveals .fixture-chip pills
+       No data, fixtures, contracts, or AI logic touched.
        ════════════════════════════════════════════════════════════ */
 
-    /* Whole sections that are dev-facing only — hidden in rep view */
-    body.rep-view #lifecycle-section,        /* "Action lifecycle states" debug grid */
-    body.rep-view #leadsource,               /* lead-source attribution — admin/CEO surface */
-    body.rep-view #disabled,                 /* "disabled tiles" container */
-    body.rep-view .preview-error,            /* error display — useful only for dev */
-    body.rep-view .disabled-tile {           /* "Per-rep view disabled" notes */
+    /* Whole sections that don't belong on the rep surface */
+    #lifecycle-section,        /* "Action lifecycle states" debug grid */
+    #leadsource,               /* lead-source attribution — admin/CEO surface */
+    #disabled,                 /* "disabled tiles" container */
+    .preview-error,            /* error display — engineering only */
+    .disabled-tile {           /* "Per-rep view disabled" notes */
       display: none !important;
     }
 
     /* Per-card chrome that exposes AI internals or engineering meta */
-    body.rep-view .action-type,              /* function name e.g. propose_booking_window */
-    body.rep-view .angle-chip,               /* intent label e.g. "helpful service" */
-    body.rep-view .action-sender,            /* "From: Nithin (patio)" — feels like AI internals */
-    body.rep-view .caveat-chip,              /* engineering caveat warnings */
-    body.rep-view .fixture-chip {            /* fixture markers — already hidden by default; reinforced here */
+    .action-type,              /* function name e.g. propose_booking_window */
+    .angle-chip,               /* intent label e.g. "helpful service" */
+    .action-sender,            /* "From: Nithin (patio)" — felt like AI internals */
+    .caveat-chip,              /* engineering caveat warnings */
+    .fixture-chip {            /* fixture markers — kept for body.show-fixtures escape hatch */
       display: none !important;
     }
 
-    /* Tighten the trust banner further in rep view — strip becomes near-invisible */
-    body.rep-view .trust-banner-summary { padding: 4px 16px; }
-    body.rep-view .trust-banner-title  { font-size: 10px; opacity: 0.75; }
-    body.rep-view .trust-banner-toggle { opacity: 0.6; }
+    /* Trust banner — near-invisible strip */
+    .trust-banner-summary { padding: 4px 16px; }
+    .trust-banner-title  { font-size: 10px; opacity: 0.75; }
+    .trust-banner-toggle { opacity: 0.6; }
 
-    /* Tighten card meta spacing now that fewer chips are visible */
-    body.rep-view .loop-card-head     { gap: 6px; }
-    body.rep-view .action-card-head   { gap: 6px; min-height: 22px; }
-    body.rep-view .verdict-reasons    { font-size: 11px; }
-
-    /* Active-state visual hint on the toggle button */
-    body.rep-view #viewToggleBtn {
-      background: rgba(241, 90, 41, 0.18);
-      color: var(--sw-orange);
-    }
+    /* Tighter card meta spacing now that fewer chips are visible */
+    .loop-card-head     { gap: 6px; }
+    .action-card-head   { gap: 6px; min-height: 22px; }
+    .verdict-reasons    { font-size: 11px; }
 
     /* ── Trust banner ── thin one-line strip + details/summary for the gate copy */
     .trust-banner {
@@ -1063,6 +1053,132 @@
       line-height: 1.5;
     }
     .action-why strong { color: var(--sw-text); font-weight: 600; }
+
+    /* Loop 5 — cadence position line under why_now on follow-up cards */
+    .cadence-position {
+      font-size: 12px; color: var(--sw-text-sec); margin-bottom: 8px;
+      padding: 6px 10px; line-height: 1.45;
+      background: rgba(76, 106, 124, 0.08);
+      border-left: 3px solid #6FB6E8;
+      border-radius: var(--sw-radius-sm);
+      font-variant-numeric: tabular-nums;
+    }
+    .cadence-position strong { color: var(--sw-text); font-weight: 600; }
+
+    /* Loop 5 — Performance tab outcomes block */
+    .perf-outcomes-head {
+      font-size: 13px; font-weight: 700; color: var(--sw-text); text-transform: uppercase;
+      letter-spacing: 0.04em; margin: 24px 0 10px;
+    }
+    .perf-outcomes-grid {
+      display: grid; gap: 12px; grid-template-columns: 1fr;
+    }
+    @media (min-width: 720px) {
+      .perf-outcomes-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .perf-rep-card {
+      background: rgba(242, 239, 235, 0.04);
+      border-radius: var(--sw-radius-sm);
+      padding: 12px 14px;
+      border-left: 3px solid var(--sw-orange);
+    }
+    .perf-rep-card.perf-rep-empty { border-left-color: rgba(76, 106, 124, 0.4); }
+    .perf-rep-name {
+      font-size: 13px; font-weight: 700; color: var(--sw-text);
+      letter-spacing: 0.03em; margin-bottom: 8px;
+    }
+    .perf-rep-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 12.5px; padding: 3px 0; color: var(--sw-text-sec);
+    }
+    .perf-rep-row strong { color: var(--sw-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .perf-rep-attribution {
+      margin-top: 8px; font-size: 11.5px; color: var(--sw-text-sec); line-height: 1.7;
+    }
+    .perf-rep-attribution-head {
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px;
+      margin-right: 4px;
+    }
+    .perf-rep-attribution-pill {
+      display: inline-block; padding: 2px 8px;
+      background: rgba(52, 152, 219, 0.08); color: #6FB6E8;
+      border-radius: 100px; font-size: 11px; margin-right: 4px;
+    }
+    .perf-leaderboard {
+      margin-top: 18px; padding: 12px 14px;
+      background: rgba(241, 90, 41, 0.05);
+      border-left: 3px solid var(--sw-orange);
+      border-radius: var(--sw-radius-sm);
+    }
+    .perf-leaderboard-head {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; margin-bottom: 8px; color: var(--sw-text);
+    }
+    .perf-leaderboard-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .perf-leaderboard-table th,
+    .perf-leaderboard-table td {
+      padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(76, 106, 124, 0.12);
+      font-variant-numeric: tabular-nums;
+    }
+    .perf-leaderboard-table th {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--sw-text-sec);
+    }
+
+    /* Loop 6 — Recent dry-runs expander */
+    .perf-dryrun {
+      margin-top: 18px; padding: 12px 14px;
+      background: rgba(76, 106, 124, 0.06);
+      border-left: 3px solid #6FB6E8;
+      border-radius: var(--sw-radius-sm);
+    }
+    .perf-dryrun-head {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; cursor: pointer; user-select: none;
+      color: var(--sw-text);
+    }
+    .perf-dryrun-empty {
+      margin-top: 10px; font-size: 11.5px; color: var(--sw-text-sec); font-style: italic;
+    }
+    .perf-dryrun-table {
+      width: 100%; border-collapse: collapse; margin-top: 10px;
+      font-size: 11.5px; font-variant-numeric: tabular-nums;
+    }
+    .perf-dryrun-table th,
+    .perf-dryrun-table td {
+      padding: 5px 8px; text-align: left;
+      border-bottom: 1px solid rgba(76, 106, 124, 0.12);
+    }
+    .perf-dryrun-table th {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--sw-text-sec);
+    }
+    .dryrun-verdict {
+      display: inline-block; padding: 1px 6px; border-radius: 100px;
+      font-size: 10px; font-weight: 700;
+    }
+    .dryrun-verdict-yes { background: rgba(39, 174, 96, 0.18); color: #4FCB87; }
+    .dryrun-verdict-no  { background: rgba(231, 76, 60, 0.18); color: #E66E5C; }
+
+    /* Loop 6 — Preview dry-run button. Reachable (not disabled).
+       Visually distinct from the disabled action buttons so reps know
+       this one only logs and never sends. */
+    .btn-action.btn-dryrun {
+      cursor: pointer;
+      background: rgba(111, 182, 232, 0.10);
+      color: #6FB6E8;
+      border-color: rgba(111, 182, 232, 0.40);
+    }
+    .btn-action.btn-dryrun:hover {
+      background: rgba(111, 182, 232, 0.18);
+    }
+    .verdict-chip.verdict-chip-flash {
+      animation: verdict-flash 0.6s ease-out;
+    }
+    @keyframes verdict-flash {
+      0%   { box-shadow: 0 0 0 0 rgba(111, 182, 232, 0.55); }
+      100% { box-shadow: 0 0 0 12px rgba(111, 182, 232, 0); }
+    }
     .action-msg {
       font-size: 13.5px; color: var(--sw-text); line-height: 1.55;
       background: rgba(242, 239, 235, 0.04);
@@ -1086,6 +1202,103 @@
       padding: 6px 10px; background: rgba(230, 126, 34, 0.10);
       border-radius: var(--sw-radius-sm); margin-bottom: 8px;
     }
+    /* Loop 4 — pre-scope context block (inline; no Telegram push). */
+    .pre-scope-context {
+      background: rgba(110, 182, 232, 0.04);
+      border: 1px dashed rgba(110, 182, 232, 0.30);
+      border-radius: var(--sw-radius-sm);
+      padding: 10px 12px;
+      margin: 8px 0;
+      font-size: 12.5px;
+      color: var(--sw-text);
+    }
+    .pre-scope-head {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px;
+      font-weight: 700; color: #6FB6E8; margin-bottom: 6px;
+    }
+    .pre-scope-row { margin-bottom: 4px; line-height: 1.45; }
+    .pre-scope-label {
+      display: inline-block; min-width: 96px; color: var(--sw-text-sec);
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .pre-scope-msg {
+      font-style: italic; opacity: 0.9; padding-left: 8px; border-left: 2px solid rgba(110, 182, 232, 0.4);
+      margin: 6px 0 6px 8px;
+    }
+    .pre-scope-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .pre-scope-actions .btn-action { font-size: 11px; padding: 4px 10px; }
+
+    /* Loop 4 — booking proposal card with zone dots + drive info. */
+    .booking-proposals {
+      background: rgba(143, 164, 178, 0.04);
+      border: 1px solid rgba(143, 164, 178, 0.20);
+      border-radius: var(--sw-radius-sm);
+      padding: 10px 12px;
+      margin: 8px 0;
+    }
+    .booking-proposals-head {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px;
+      font-weight: 700; color: var(--sw-text); margin-bottom: 6px;
+    }
+    .booking-proposal {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+      padding: 6px 0; border-top: 1px dashed rgba(143, 164, 178, 0.16);
+    }
+    .booking-proposal:first-of-type { border-top: none; }
+    .availability-zone-dot {
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      margin-right: 4px;
+    }
+    .availability-zone-green  { background: #5DBB85; box-shadow: 0 0 0 2px rgba(93, 187, 133, 0.20); }
+    .availability-zone-orange { background: #F1A55B; box-shadow: 0 0 0 2px rgba(241, 165, 91, 0.20); }
+    .availability-zone-red    { background: #D75F5F; box-shadow: 0 0 0 2px rgba(215, 95, 95, 0.20); }
+    .booking-proposal-when {
+      font-weight: 600; color: var(--sw-text); font-size: 13px;
+    }
+    .booking-proposal-meta {
+      font-size: 11.5px; color: var(--sw-text-sec); flex: 1 1 100%;
+    }
+    .booking-proposal-actions {
+      display: flex; gap: 6px; margin-left: auto;
+    }
+    .booking-proposal-actions .btn-action { font-size: 11px; padding: 4px 10px; }
+    .booking-same-day-tag {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+      background: rgba(241, 90, 41, 0.18); color: #F4A668;
+      padding: 1px 6px; border-radius: 100px; font-weight: 700;
+    }
+    .booking-rationale {
+      font-size: 11px; color: var(--sw-text-sec); font-style: italic;
+      margin-top: 6px;
+    }
+    .booking-proposals-empty {
+      font-size: 12px; color: var(--sw-text-sec); font-style: italic;
+    }
+
+    /* Loop 3 playbook preview block — read-only, fixture only. */
+    .playbook-preview {
+      font-size: 12.5px; color: var(--sw-text-sec);
+      background: rgba(143, 164, 178, 0.05);
+      padding: 10px 12px; border-radius: var(--sw-radius-sm);
+      border: 1px dashed rgba(143, 164, 178, 0.25);
+      margin: 8px 0;
+    }
+    .playbook-pre-head {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--sw-text-sec); margin-bottom: 6px;
+    }
+    .playbook-pre-label { font-weight: 700; color: var(--sw-text); }
+    .playbook-pre-tone, .playbook-pre-channel, .playbook-pre-conf {
+      font-weight: 500;
+    }
+    .playbook-pre-conf { margin-left: auto; opacity: 0.85; }
+    .playbook-pre-subject { font-weight: 600; color: var(--sw-text); margin-bottom: 4px; }
+    .playbook-pre-body { color: var(--sw-text); line-height: 1.5; white-space: pre-wrap; }
+    .playbook-pre-talk { margin: 0; padding-left: 18px; }
+    .playbook-pre-talk li { margin-bottom: 3px; line-height: 1.45; }
+    .playbook-pre-caveats { margin-top: 6px; font-style: italic; opacity: 0.8; }
+    .playbook-pre-safety { margin-top: 6px; color: #F4A668; }
     .action-controls {
       display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;
       padding-top: 10px; border-top: 1px solid var(--sw-border);
@@ -1600,7 +1813,6 @@
       </div>
       <div class="header-right">
         <span class="header-user" id="headerUser"></span>
-        <button class="btn-header-ghost" id="viewToggleBtn" type="button" title="Toggle calm rep-facing view (also via ?view=rep or localStorage 'sale.view')">View: Dev ▾</button>
         <a class="btn-header-ghost" href="index.html">Back</a>
         <button class="btn-header-ghost" id="signOutBtn" type="button">Sign out</button>
       </div>
@@ -1664,7 +1876,7 @@
         <!-- Lane chips (mobile only) -->
         <nav id="lane-chips" class="lane-chips" aria-label="Today lane">
           <button class="lane-chip" data-lane-chip="book" type="button" aria-pressed="true">Book<span class="lane-chip-count" data-lane-chip-count="book">0</span></button>
-          <button class="lane-chip" data-lane-chip="send" type="button" aria-pressed="false">Send<span class="lane-chip-count" data-lane-chip-count="send">0</span></button>
+          <button class="lane-chip" data-lane-chip="send" type="button" aria-pressed="false">Follow Ups<span class="lane-chip-count" data-lane-chip-count="send">0</span></button>
           <button class="lane-chip" data-lane-chip="call" type="button" aria-pressed="false">Call<span class="lane-chip-count" data-lane-chip-count="call">0</span></button>
         </nav>
 
@@ -1680,7 +1892,7 @@
             </div>
             <div class="lane-pane" data-lane="send" data-active="false">
               <div class="lane-pane-head">
-                <span class="lane-pane-title">Send</span>
+                <span class="lane-pane-title">Follow Ups</span>
                 <span class="lane-pane-count" data-lane-count="send">0</span>
               </div>
               <div data-lane-body="send"></div>
@@ -1813,6 +2025,18 @@
   <script src="modules/sale-job-brain.js"></script>
   <script src="modules/sale-action-reducer.js"></script>
   <script src="modules/sale-safety-policy.js"></script>
+  <script src="modules/sale-action-generator.js"></script>
+  <script src="modules/sale-playbook.js"></script>
+  <!-- Loop 4 modules: availability + drive-time + playbook loader + calendar proposer -->
+  <script src="modules/sale-availability.js"></script>
+  <script src="modules/sale-drive-time.js"></script>
+  <script src="modules/sale-playbook-loader.js"></script>
+  <script src="modules/sale-calendar-proposer.js"></script>
+  <!-- Loop 5 modules: cadence engine + outcome attribution -->
+  <script src="modules/sale-cadence-engine.js"></script>
+  <script src="modules/sale-outcome-attribution.js"></script>
+  <!-- Loop 6: dry-run send executor -->
+  <script src="modules/sale-dry-run-executor.js"></script>
   <script src="modules/sale-preview.js"></script>
   <script>
     // Light header-user wiring (mirrors the lightweight pattern in other pages).
@@ -1843,52 +2067,5 @@
     })();
   </script>
 
-  <!-- ════════════════════════════════════════════════════════════
-       REP PRODUCTION VIEW TOGGLE (Path B)
-       Pure visual layer. Reads URL ?view=, falls back to localStorage
-       'sale.view'. No data, no fetch, no contract changes.
-       ════════════════════════════════════════════════════════════ -->
-  <script>
-    (function () {
-      var KEY = 'sale.view';
-      var LABELS = { dev: 'View: Dev ▾', rep: 'View: Rep ▾' };
-
-      function readMode() {
-        var p, stored;
-        try { p = new URLSearchParams(location.search).get('view'); } catch (e) { p = null; }
-        try { stored = localStorage.getItem(KEY); } catch (e) { stored = null; }
-        var m = (p || stored || 'dev').toLowerCase();
-        return LABELS[m] ? m : 'dev';
-      }
-
-      function apply(mode) {
-        if (document.body) {
-          document.body.classList.toggle('rep-view', mode === 'rep');
-        }
-        var btn = document.getElementById('viewToggleBtn');
-        if (btn) btn.textContent = LABELS[mode];
-      }
-
-      var current = readMode();
-
-      function init() {
-        apply(current);
-        var btn = document.getElementById('viewToggleBtn');
-        if (btn) {
-          btn.addEventListener('click', function () {
-            current = current === 'rep' ? 'dev' : 'rep';
-            try { localStorage.setItem(KEY, current); } catch (e) {}
-            apply(current);
-          });
-        }
-      }
-
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-      } else {
-        init();
-      }
-    })();
-  </script>
 </body>
 </html>

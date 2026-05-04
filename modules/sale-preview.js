@@ -118,6 +118,237 @@
   }
 
   // ════════════════════════════════════════════════════════════
+  // Playbook (Loop 3) preview — read-only, fixture-only.
+  // Surfaces a tone-aware drafted body underneath the legacy
+  // proposed-action block so the rep can compare. No buttons,
+  // no network. Output rendered when SALE_PLAYBOOK is loaded
+  // and produces a non-blocked result.
+  // ════════════════════════════════════════════════════════════
+
+  // Map reducer-shape (state.name + bucket) to a synthesized Loop-2
+  // action_type so the playbook can pick the right template.
+  function mapBucketToActionType(bucket_id, state, lane) {
+    if (bucket_id === 'do_not_chase')          return 'snooze_or_dismiss';
+    if (bucket_id === 'no_first_contact')      return 'call_client';
+    if (bucket_id === 'qualified_no_booking')  return 'book_scope';
+    if (bucket_id === 'site_visit_no_scope')   return 'call_client';
+    if (bucket_id === 'sent_not_viewed')       return 'send_follow_up';
+    if (bucket_id === 'viewed_no_reply')       return lane === 'call' ? 'call_client' : 'send_follow_up';
+    if (bucket_id === 'question_unanswered')   return 'reply_needed';
+    if (bucket_id === 'stale_quote')           return 'stale_quote_recovery';
+    return null;
+  }
+
+  // Loop 6 — Stub-tap → dry-run executor preview. Composes the
+  // proposed_action + playbook + rep_identity + cadence_position
+  // for the given job and runs SALE_DRY_RUN.execute(). NO fetch.
+  // Returns the DryRunResult or null if executor unavailable.
+  function runDryRunForJob(jobNumber) {
+    if (!window.SALE_DRY_RUN || !jobNumber) return null;
+    var src = _activeDataSource();
+    var jobs = src.jobs || [];
+    var job = jobs.find(function (j) { return j && j.job_number === jobNumber; });
+    if (!job) return null;
+    var pa = (src.proposedActions || []).find(function (p) {
+      return p && p.job_id === job.id && p.status === 'proposed';
+    });
+    if (!pa) return null;
+    // Build a minimal proposed_action shape the executor expects.
+    var paInput = Object.assign({}, pa, {
+      contact_phone: pa.contact_phone || job.client_phone || null,
+      contact_email: pa.contact_email || job.client_email || null,
+      contact_name:  pa.contact_name  || job.client_name  || '',
+      job_number:    job.job_number,
+    });
+    var playbooks = ensurePlaybooksLoaded() || {};
+    var playbook = window.SALE_PLAYBOOK
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard({
+          job_type:   job.type,
+          action_type: pa.action_type,
+        }, playbooks);
+    var senderInfo = senderForType(job.type);
+    var repIdentity = senderInfo && senderInfo.user_id ? {
+      user_id:    senderInfo.user_id,
+      first_name: senderInfo.name,
+      sms_from:   senderInfo.sms_from || '+61400000000',  // fixture stand-in
+      email_from: senderInfo.email_from || (String(senderInfo.name || '').toLowerCase() + '@secureworksgroup.app'),
+    } : null;
+    var jobEvents = (src.events || []).filter(function (e) { return e && e.job_id === job.id; });
+    var cadencePos = null;
+    if (window.SALE_CADENCE && typeof window.SALE_CADENCE.position === 'function') {
+      try {
+        cadencePos = window.SALE_CADENCE.position({
+          card: { job_id: job.id, action_type: pa.action_type, policy_verdict: 'auto_ok' },
+          job_brain: { events: jobEvents, facts: (src.jobContext || {})[job.id] || [] },
+          playbook: playbook,
+          now: new Date(),
+        });
+      } catch (e) {
+        cadencePos = null;
+      }
+    }
+    var recentOutbound = jobEvents
+      .filter(function (e) {
+        return e && (e.event_type === 'client.sms_out'
+                  || e.event_type === 'client.email_out');
+      })
+      .map(function (e) {
+        return {
+          contact_id:  pa.contact_id || job.contact_id || job.id,
+          cadence:     'auto',
+          occurred_at: e.occurred_at,
+          body:        (e.payload && e.payload.message) || '',
+        };
+      });
+    return window.SALE_DRY_RUN.execute({
+      proposed_action:  paInput,
+      playbook:         playbook,
+      rep_identity:     repIdentity,
+      cadence_position: cadencePos,
+      recent_outbound:  recentOutbound,
+      facts:            (src.jobContext || {})[job.id] || [],
+      now:              new Date(),
+    });
+  }
+
+  // Loop 5 — cadence position line under why_now on follow-up cards.
+  // Reads SALE_CADENCE.position(); returns '' if cadence engine not
+  // loaded, card not cadence-governed, or no quote.sent anchor.
+  function cadencePositionHtml(card, pa) {
+    if (!window.SALE_CADENCE || typeof window.SALE_CADENCE.position !== 'function') return '';
+    var actionType = mapBucketToActionType(card.bucket_id, card.state, card.lane);
+    if (!actionType) return '';
+    var playbooks = ensurePlaybooksLoaded() || {};
+    var playbook = window.SALE_PLAYBOOK
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard({
+          job_type:   card.job.type,
+          action_type: actionType,
+        }, playbooks);
+    var pos;
+    try {
+      pos = window.SALE_CADENCE.position({
+        card: { job_id: card.job.id || card.job.job_number, action_type: actionType, policy_verdict: 'auto_ok' },
+        job_brain: { events: card._events || [], facts: card._facts || [] },
+        playbook: playbook,
+        now: new Date(),
+      });
+    } catch (e) {
+      return '';
+    }
+    if (!pos) return '';
+    var label;
+    if (pos.terminal) {
+      label = 'Ladder complete · ' + pos.attempt_count + '/' + pos.ladder_length + ' rungs done · ' + (pos.nurture_mode ? 'nurture mode' : 'manual escalation');
+    } else {
+      var dueLabel;
+      if (pos.overdue_minutes <= 0) {
+        var dueDelta = pos.due_at ? Math.max(0, Math.floor((+new Date(pos.due_at) - +new Date()) / 60000)) : 0;
+        dueLabel = dueDelta < 60 ? ('due in ' + dueDelta + 'min')
+                  : dueDelta < 1440 ? ('due in ' + Math.floor(dueDelta/60) + 'h')
+                  : ('due in ' + Math.floor(dueDelta/1440) + 'd');
+      } else {
+        dueLabel = pos.overdue_minutes < 60 ? ('overdue ' + pos.overdue_minutes + 'min')
+                  : pos.overdue_minutes < 1440 ? ('overdue ' + Math.floor(pos.overdue_minutes/60) + 'h')
+                  : ('overdue ' + Math.floor(pos.overdue_minutes/1440) + 'd');
+      }
+      label = dueLabel
+        + ' · attempt ' + (pos.current_rung + 1) + '/' + pos.ladder_length
+        + ' · next: ' + (pos.next_template_id || '(unknown)')
+        + (pos.nurture_mode ? ' · nurture mode' : '');
+    }
+    return '<div class="cadence-position" data-cadence-rung="' + pos.current_rung + '">'
+      + '<strong>Cadence:</strong> ' + esc(label)
+      + '</div>';
+  }
+
+  function playbookPreviewHtml(card, pa) {
+    if (!window.SALE_PLAYBOOK || typeof window.SALE_PLAYBOOK.draft !== 'function') return '';
+    var actionType = mapBucketToActionType(card.bucket_id, card.state, card.lane);
+    if (!actionType) return '';
+
+    var sender = (pa && pa.action_payload && pa.action_payload.sender) || senderForType(card.job.type);
+    var verdictMap = { auto_ok: 'auto_ok', approval_required: 'approval_required',
+                       blocked: 'blocked', internal_only: 'internal' };
+    var policyVerdict = card.verdict
+      ? (card.verdict.blocked ? 'blocked'
+         : card.verdict.internal_only ? 'internal'
+         : card.verdict.auto_ok ? 'auto_ok'
+         : 'approval_required')
+      : 'approval_required';
+    var synthCard = {
+      id:             'render-' + (card.job.id || card.job.job_number) + '-' + actionType,
+      job_id:         card.job.id || card.job.job_number,
+      job_number:     card.job.job_number,
+      owner_user_id:  sender && sender.user_id || null,
+      owner_label:    sender && sender.label || '',
+      lane:           card.lane,
+      action_type:    actionType,
+      priority:       card.urgency || 0,
+      due_at:         null,
+      customer_name:  card.job.client_name || '',
+      suburb:         card.job.site_suburb || card.job.suburb || '',
+      job_type:       card.job.type || 'unknown',
+      value_inc_gst:  typeof card.job.value_inc_gst === 'number' ? card.job.value_inc_gst : null,
+      why_now:        card.reason || '',
+      evidence_refs:  [{ type: 'job', source_table: 'jobs', id: card.job.id || null }],
+      policy_verdict: policyVerdict,
+      created_at:     new Date().toISOString(),
+      status:         'proposed',
+    };
+    var jobBrain = {
+      job:            card.job,
+      events:         (card._events || []).slice(),
+      facts:          (card._facts || []).slice(),
+      proposedActions: pa ? [pa] : [],
+      conversation:   [],
+      coaching:       [],
+      calendar:       [],
+    };
+    var out;
+    try {
+      out = window.SALE_PLAYBOOK.draft({ card: synthCard, job_brain: jobBrain, now: new Date() });
+    } catch (e) {
+      return '';
+    }
+    if (!out) return '';
+    if (!out.drafted_message && (!out.talk_track || !out.talk_track.length)) return '';
+
+    var subjLine = out.drafted_subject
+      ? '<div class="playbook-pre-subject"><strong>Subject:</strong> ' + esc(out.drafted_subject) + '</div>'
+      : '';
+    var bodyHtml = '';
+    if (out.channel === 'call' && out.talk_track && out.talk_track.length) {
+      bodyHtml = '<ul class="playbook-pre-talk">'
+        + out.talk_track.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('')
+        + '</ul>';
+    } else if (out.drafted_message) {
+      bodyHtml = '<div class="playbook-pre-body">' + esc(out.drafted_message) + '</div>';
+    }
+    var caveatsHtml = (out.caveats && out.caveats.length)
+      ? '<div class="playbook-pre-caveats">' + out.caveats.map(esc).join(' · ') + '</div>'
+      : '';
+    var safetyHtml = (out.safety_notes && out.safety_notes.length)
+      ? '<div class="playbook-pre-safety">⚠ ' + out.safety_notes.map(esc).join(' · ') + '</div>'
+      : '';
+    return [
+      '<div class="playbook-preview" data-tone="' + esc(out.tone_variant) + '" data-channel="' + esc(out.channel) + '">',
+        '<div class="playbook-pre-head">',
+          '<span class="playbook-pre-label">PLAYBOOK PREVIEW (Loop 3 · fixture)</span>',
+          '<span class="playbook-pre-tone">tone: ' + esc(out.tone_variant) + '</span>',
+          '<span class="playbook-pre-channel">channel: ' + esc(out.channel) + '</span>',
+          '<span class="playbook-pre-conf">' + Math.round((out.confidence || 0) * 100) + '%</span>',
+        '</div>',
+        subjLine,
+        bodyHtml,
+        caveatsHtml,
+        safetyHtml,
+      '</div>',
+    ].join('');
+  }
+
+  // ════════════════════════════════════════════════════════════
   // Stub action card — Approve / Edit / Dismiss / Snooze / Why?
   // All buttons HTML-disabled. Tap fires console.info only.
   // ════════════════════════════════════════════════════════════
@@ -159,6 +390,17 @@
     var why = (pa.action_payload && pa.action_payload.why) || '';
     var senderLabel = sender.label || sender.name || '';
 
+    var playbookBlock = playbookPreviewHtml(card, pa);
+    var cadenceBlock = cadencePositionHtml(card, pa);
+
+    // Loop 6 — dry-run preview button. Separate from the HTML-disabled
+    // Approve/Edit/Dismiss/Snooze controls (those stay disabled per
+    // hard rules). This button is reachable, never fetches, only logs
+    // the would-have-been-sent payload via SALE_DRY_RUN.execute().
+    var dryRunBtn = window.SALE_DRY_RUN
+      ? '<button class="btn-action btn-dryrun" data-dryrun-job="' + esc(card.job.job_number) + '" type="button">Preview dry-run</button>'
+      : '';
+
     return [
       '<div class="action-card" data-job="' + esc(card.job.job_number) + '">',
         verdictBlock,
@@ -166,17 +408,218 @@
           '<span class="action-sender" title="Sender identity (type-based, unconditional)">From: ' + esc(senderLabel) + '</span>',
         '</div>',
         why ? ('<div class="action-why"><strong>Why now:</strong> ' + esc(why) + '</div>') : '',
+        cadenceBlock,
         hasMsg ? ('<div class="action-msg">' + esc(msg) + '</div>') : '',
         talkBlock,
         noteBlock,
+        playbookBlock,
         '<div class="action-controls">',
           '<button class="btn-action btn-approve" data-stub-action="approve" data-stub-job="' + esc(card.job.job_number) + '" disabled>Approve & send</button>',
           '<button class="btn-action btn-edit"    data-stub-action="edit"    data-stub-job="' + esc(card.job.job_number) + '" disabled>Edit</button>',
           '<button class="btn-action btn-dismiss" data-stub-action="dismiss" data-stub-job="' + esc(card.job.job_number) + '" disabled>Dismiss</button>',
           '<button class="btn-action btn-snooze"  data-stub-action="snooze"  data-stub-job="' + esc(card.job.job_number) + '" disabled>Snooze</button>',
           '<button class="btn-action btn-why"     data-stub-action="why"     data-stub-job="' + esc(card.job.job_number) + '" disabled>Why?</button>',
+          dryRunBtn,
           '<button class="btn-action btn-open-job" data-open-job="' + esc(card.job.job_number) + '">Open job</button>',
         '</div>',
+      '</div>',
+    ].join('');
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Loop 4 — pre-scope context block + booking proposal card.
+  // Inline-only. No Telegram push. No network. Buttons disabled.
+  // ════════════════════════════════════════════════════════════
+
+  // Module-level cache for loaded playbooks + per-rep availability.
+  // Populated lazily on first laneCard render that needs them.
+  var _PLAYBOOKS_CACHE = null;
+  var _AVAILABILITY_CACHE = {}; // { [repFirstName]: RepAvailability }
+
+  // Triggers a re-render once an async load lands. Calls the
+  // module-level render() if it exists; safe no-op otherwise.
+  function rerenderLanes() {
+    if (typeof render === 'function') {
+      try { render(); } catch (e) { /* swallow render errors */ }
+    }
+  }
+
+  function ensurePlaybooksLoaded() {
+    if (_PLAYBOOKS_CACHE !== null) return _PLAYBOOKS_CACHE;
+    if (!window.SALE_PLAYBOOK_LOADER) return null;
+    // Kick off async load; render path uses fallback templates until
+    // load resolves, then a re-render picks up the playbook path.
+    _PLAYBOOKS_CACHE = {}; // sentinel: load in flight
+    window.SALE_PLAYBOOK_LOADER.loadAll().then(function (map) {
+      _PLAYBOOKS_CACHE = map;
+      rerenderLanes();
+    }).catch(function (err) {
+      console.warn('[sale-preview] playbook loader failed; falling back to inline templates', err);
+      _PLAYBOOKS_CACHE = {}; // empty map → fallback path
+    });
+    return _PLAYBOOKS_CACHE;
+  }
+
+  function ensureAvailabilityLoaded(repFirstName) {
+    if (!repFirstName) return null;
+    var cached = _AVAILABILITY_CACHE[repFirstName];
+    if (cached) return cached;
+    if (!window.SALE_AVAILABILITY) return null;
+    _AVAILABILITY_CACHE[repFirstName] = 'loading';
+    window.SALE_AVAILABILITY.load(repFirstName).then(function (avail) {
+      _AVAILABILITY_CACHE[repFirstName] = avail;
+      rerenderLanes();
+    }).catch(function (err) {
+      console.warn('[sale-preview] availability load failed for ' + repFirstName, err);
+      _AVAILABILITY_CACHE[repFirstName] = null;
+    });
+    return null;
+  }
+
+  // Pre-scope context: lightweight job-context surface on the card.
+  // Pulls last-message preview from card._events / job_brain if present;
+  // otherwise renders empty placeholder.
+  function preScopeContextHtml(card) {
+    var job = card.job || {};
+    var rows = [];
+    rows.push('<div class="pre-scope-row"><span class="pre-scope-label">Customer</span>' + esc(job.client_name || '') + '</div>');
+    rows.push('<div class="pre-scope-row"><span class="pre-scope-label">Address</span>' + esc(job.site_address || '') + ', ' + esc(job.site_suburb || '') + '</div>');
+    rows.push('<div class="pre-scope-row"><span class="pre-scope-label">Job type</span>' + esc(job.type || 'unknown') + (typeof job.value_inc_gst === 'number' ? ' · ' + fmtCurrency(job.value_inc_gst) + ' inc' : '') + '</div>');
+    if (typeof card.urgency === 'number') {
+      rows.push('<div class="pre-scope-row"><span class="pre-scope-label">Priority</span>' + esc(String(Math.round(card.urgency))) + '</div>');
+    }
+    // Last message preview: pull most recent client.* event from card._events if present.
+    var events = (card._events || []);
+    var lastInbound = null;
+    for (var i = events.length - 1; i >= 0; i--) {
+      var ev = events[i];
+      if (!ev) continue;
+      if (ev.event_type === 'client.reply' || ev.event_type === 'client.question') {
+        lastInbound = ev; break;
+      }
+    }
+    if (lastInbound) {
+      var t = (lastInbound.payload && (lastInbound.payload.message_text || lastInbound.payload.text)) || '';
+      if (t) {
+        rows.push('<div class="pre-scope-msg">"' + esc(t.length > 140 ? (t.slice(0, 140) + '…') : t) + '"</div>');
+      }
+    }
+    // Access notes / important facts from card._facts (set by Slice 4B
+    // live-mode index) — fall through silently if not present.
+    var facts = (card._facts || []);
+    var importantKinds = ['access_note', 'client_preference', 'availability_window', 'unusual_scope', 'payment_agreement'];
+    var factLines = [];
+    facts.forEach(function (f) {
+      if (!f || importantKinds.indexOf(f.kind) === -1) return;
+      var summary = f.value && (f.value.text || f.value.window || f.value.plan)
+        || (f.value ? JSON.stringify(f.value) : '');
+      factLines.push('<li><strong>' + esc(f.kind) + ':</strong> ' + esc(String(summary).slice(0, 100)) + '</li>');
+    });
+    if (factLines.length) {
+      rows.push('<div class="pre-scope-row"><span class="pre-scope-label">Notes</span><ul style="margin:4px 0 0;padding-left:18px">' + factLines.join('') + '</ul></div>');
+    }
+    return [
+      '<div class="pre-scope-context">',
+        '<div class="pre-scope-head">PRE-SCOPE CONTEXT</div>',
+        rows.join(''),
+        '<div class="pre-scope-actions">',
+          '<button class="btn-action" data-stub-action="open_conversation" data-stub-job="' + esc(job.job_number) + '" disabled>Open conversation</button>',
+          '<button class="btn-action" data-stub-action="ask_jarvis" data-stub-job="' + esc(job.job_number) + '" disabled>Ask JARVIS</button>',
+        '</div>',
+      '</div>',
+    ].join('');
+  }
+
+  // Booking proposal card: top 2-3 ranked candidate windows from
+  // SALE_CALENDAR_PROPOSER. Renders as zone-dot rows with Approve/
+  // Edit/Reject buttons (all HTML-disabled in Loop 4).
+  function bookingProposalsHtml(card) {
+    if (!window.SALE_CALENDAR_PROPOSER || !window.SALE_DRIVE_TIME) return '';
+    if (!card.job) return '';
+    // Resolve rep first name from job type.
+    var sender = senderForType(card.job.type);
+    var repName = sender && sender.name;
+    if (!repName) return '';
+    var repAvail = ensureAvailabilityLoaded(repName);
+    if (!repAvail) return [
+      '<div class="booking-proposals">',
+        '<div class="booking-proposals-head">PROPOSED SCOPES</div>',
+        '<div class="booking-proposals-empty">Loading availability for ' + esc(repName) + '...</div>',
+      '</div>',
+    ].join('');
+    var playbooks = ensurePlaybooksLoaded() || {};
+    var playbook = window.SALE_PLAYBOOK
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard
+      && window.SALE_PLAYBOOK._resolvePlaybookForCard({
+          job_type: card.job.type,
+          action_type: 'book_scope',
+        }, playbooks);
+    var synthCard = {
+      id: 'render-' + (card.job.id || card.job.job_number),
+      job_id: card.job.id || card.job.job_number,
+      job_number: card.job.job_number,
+      customer_name: card.job.client_name || '',
+      suburb: card.job.site_suburb || card.job.suburb || '',
+      job_type: card.job.type || 'unknown',
+      value_inc_gst: typeof card.job.value_inc_gst === 'number' ? card.job.value_inc_gst : null,
+      priority: typeof card.urgency === 'number' ? card.urgency : 50,
+      action_type: 'book_scope',
+      evidence_refs: [{ type: 'job', source_table: 'jobs', id: card.job.id || null }],
+      policy_verdict: 'approval_required',
+    };
+    var existingCalendar = (window.SALE_PREVIEW_FIXTURES
+      && window.SALE_PREVIEW_FIXTURES.calendar
+      && Array.isArray(window.SALE_PREVIEW_FIXTURES.calendar.slots))
+      ? window.SALE_PREVIEW_FIXTURES.calendar.slots
+      : [];
+    var out;
+    try {
+      out = window.SALE_CALENDAR_PROPOSER.propose({
+        card: synthCard,
+        job_brain: { job: card.job, events: card._events || [] },
+        rep_availability: repAvail,
+        existing_calendar: existingCalendar,
+        drive_time: window.SALE_DRIVE_TIME,
+        playbook: playbook,
+        now: new Date(),
+      });
+    } catch (e) {
+      console.warn('[sale-preview] proposer threw', e);
+      return '';
+    }
+    if (!out || !out.candidates) return '';
+    if (!out.candidates.length) {
+      return [
+        '<div class="booking-proposals">',
+          '<div class="booking-proposals-head">PROPOSED SCOPES</div>',
+          '<div class="booking-proposals-empty">No availability windows fit. Check ' + esc(repName) + "'s availability.</div>",
+        '</div>',
+      ].join('');
+    }
+    var rows = out.candidates.map(function (c) {
+      var dot = '<span class="availability-zone-dot availability-zone-' + esc(c.zone) + '"></span>';
+      var sameDay = c.same_day ? '<span class="booking-same-day-tag">SAME-DAY</span>' : '';
+      var when = c.day_name + ' ' + c.date.slice(5) + ' · ' + c.start + '–' + c.end;
+      var meta = 'drive ' + c.drive_minutes_in + 'm in / ' + c.drive_minutes_out + 'm out · ' + c.zone + ' zone · ' + c.why + ' · score ' + c.rank_score;
+      return [
+        '<div class="booking-proposal">',
+          dot,
+          '<span class="booking-proposal-when">', esc(when), '</span>',
+          sameDay,
+          '<div class="booking-proposal-actions">',
+            '<button class="btn-action" data-stub-action="book_approve" data-stub-job="' + esc(card.job.job_number) + '" disabled>Approve</button>',
+            '<button class="btn-action" data-stub-action="book_edit"    data-stub-job="' + esc(card.job.job_number) + '" disabled>Edit</button>',
+            '<button class="btn-action" data-stub-action="book_reject"  data-stub-job="' + esc(card.job.job_number) + '" disabled>Reject</button>',
+          '</div>',
+          '<div class="booking-proposal-meta">', esc(meta), '</div>',
+        '</div>',
+      ].join('');
+    });
+    return [
+      '<div class="booking-proposals">',
+        '<div class="booking-proposals-head">PROPOSED SCOPES (rank-ordered)</div>',
+        rows.join(''),
+        '<div class="booking-rationale">' + esc(out.rationale || '') + '</div>',
       '</div>',
     ].join('');
   }
@@ -192,6 +635,16 @@
     var caveat = job.source_caveat === 'quick_quote' ? quickQuoteChip() : '';
     var stateChip = card.state ? ('<span class="state-chip state-' + esc(card.state) + '">' + esc(card.state) + '</span>') : '';
     var dncChip = card.do_not_chase ? '<span class="caveat-chip" title="job_context.do_not_chase set">DO NOT CHASE</span>' : '';
+
+    // Loop 4 — pre-scope context block + booking proposal card surface
+    // for book_scope and appointment_confirm bucket cards. Both are
+    // inline-only, read-only, no Telegram push, all buttons stubbed.
+    var preScopeBlock = '';
+    var bookingProposalsBlock = '';
+    if (card.bucket_id === 'qualified_no_booking' || card.bucket_id === 'site_visit_no_scope') {
+      preScopeBlock = preScopeContextHtml(card);
+      bookingProposalsBlock = bookingProposalsHtml(card);
+    }
 
     return [
       '<div class="loop-card" data-lane-card data-job-number="' + esc(job.job_number) + '">',
@@ -209,6 +662,8 @@
           '<div class="loop-card-suburb">', esc(job.site_suburb || job.suburb || ''), '</div>',
           '<div class="loop-card-reason">', esc(card.reason || ''), '</div>',
         '</div>',
+        preScopeBlock,
+        bookingProposalsBlock,
         stubActionCard(card),
       '</div>',
     ].join('');
@@ -434,6 +889,124 @@
         + '</div>');
     }
 
+    // Loop 5 — outcome attribution snapshot. Read-only.
+    html.push(renderOutcomeAttribution());
+
+    return html.join('');
+  }
+
+  // Loop 5 — Outcome attribution + leaderboard. Reads
+  // SALE_OUTCOMES.attribute() over the JobBrain index. All values
+  // are derived; nothing is sent or written.
+  function renderOutcomeAttribution() {
+    if (!window.SALE_OUTCOMES || typeof window.SALE_OUTCOMES.attribute !== 'function') return '';
+    var src = _activeDataSource();
+    var jobs = src.jobs || [];
+    var events = src.events || [];
+    var playbooks = _PLAYBOOKS_CACHE || {};
+    var nowIso = (src.generatedAt || src.engineNow || new Date().toISOString());
+    var nowDate = new Date(nowIso);
+    var attr;
+    try {
+      attr = window.SALE_OUTCOMES.attribute({
+        jobs:      jobs,
+        events:    events,
+        playbooks: playbooks,
+        now:       nowDate,
+      });
+    } catch (e) {
+      console.warn('[sale-preview] outcome attribution threw', e);
+      return '';
+    }
+    if (!attr) return '';
+    var html = [];
+    html.push('<div class="perf-outcomes-head">Per-rep this week <span class="fixture-chip">LOOP 5</span></div>');
+    html.push('<div class="perf-outcomes-grid">');
+    var reps = ['Nithin', 'Khairo'];
+    reps.forEach(function (rep) {
+      var w = attr.per_rep_week[rep];
+      if (!w) {
+        html.push('<div class="perf-rep-card perf-rep-empty">'
+          + '<div class="perf-rep-name">' + esc(rep) + '</div>'
+          + '<div class="perf-rep-empty-text">No quotes in window.</div>'
+          + '</div>');
+        return;
+      }
+      html.push('<div class="perf-rep-card">');
+      html.push('<div class="perf-rep-name">' + esc(rep) + '</div>');
+      html.push('<div class="perf-rep-row"><span>Quotes sent</span><strong>' + w.quotes_sent + '</strong></div>');
+      html.push('<div class="perf-rep-row"><span>Accepted</span><strong>' + w.quotes_accepted + ' · ' + fmtCurrency(w.$_accepted) + '</strong></div>');
+      html.push('<div class="perf-rep-row"><span>Declined</span><strong>' + w.quotes_declined + '</strong></div>');
+      html.push('<div class="perf-rep-row"><span>In flight</span><strong>' + w.in_flight + '</strong></div>');
+      html.push('<div class="perf-rep-row"><span>Conversion</span><strong>' + w.conversion_pct.toFixed(1) + '%</strong></div>');
+      var ttc = w.median_time_to_close_h;
+      var ttcLabel = ttc === null ? '–'
+        : ttc < 24 ? (ttc.toFixed(1) + 'h')
+        : (Math.floor(ttc / 24) + 'd ' + Math.round(ttc % 24) + 'h');
+      html.push('<div class="perf-rep-row"><span>Median time-to-close</span><strong>' + esc(ttcLabel) + '</strong></div>');
+      var ab = w.attribution_breakdown || {};
+      var abKeys = Object.keys(ab);
+      if (abKeys.length) {
+        html.push('<div class="perf-rep-attribution">');
+        html.push('<span class="perf-rep-attribution-head">Attribution rung:</span> ');
+        html.push(abKeys.map(function (k) {
+          return '<span class="perf-rep-attribution-pill" data-rung="' + esc(k) + '">' + esc(k) + ' · ' + ab[k] + '</span>';
+        }).join(' '));
+        html.push('</div>');
+      }
+      html.push('</div>');
+    });
+    html.push('</div>');
+
+    // Loop 6 — Recent dry-runs expander (Marnin-only).
+    if (window.SALE_DRY_RUN && typeof window.SALE_DRY_RUN.recentLog === 'function') {
+      var recent = window.SALE_DRY_RUN.recentLog({ limit: 20 });
+      html.push('<details class="perf-dryrun">');
+      html.push('<summary class="perf-dryrun-head">Recent dry-runs <span class="fixture-chip">marnin-only · ' + recent.length + '</span></summary>');
+      if (recent.length === 0) {
+        html.push('<div class="perf-dryrun-empty">No dry-runs logged this session. Tap an Approve / Edit button on a follow-up card to log one.</div>');
+      } else {
+        html.push('<table class="perf-dryrun-table"><thead><tr>'
+          + '<th>When</th><th>action_id</th><th>Would send</th><th>Blockers</th>'
+          + '</tr></thead><tbody>');
+        recent.forEach(function (entry) {
+          var when = entry.created_at ? entry.created_at.slice(11, 19) : '–';
+          var verdict = entry.would_send
+            ? '<span class="dryrun-verdict dryrun-verdict-yes">YES</span>'
+            : '<span class="dryrun-verdict dryrun-verdict-no">NO</span>';
+          var blockers = (entry.blockers || []).join(', ') || '—';
+          html.push('<tr>'
+            + '<td>' + esc(when) + '</td>'
+            + '<td>' + esc(entry.action_id || '—') + '</td>'
+            + '<td>' + verdict + '</td>'
+            + '<td>' + esc(blockers) + '</td>'
+            + '</tr>');
+        });
+        html.push('</tbody></table>');
+      }
+      html.push('</details>');
+    }
+
+    if (attr.leaderboard && attr.leaderboard.length) {
+      html.push('<div class="perf-leaderboard">');
+      html.push('<div class="perf-leaderboard-head">CEO leaderboard <span class="fixture-chip">marnin-only</span></div>');
+      html.push('<table class="perf-leaderboard-table"><thead><tr>'
+        + '<th>Rank</th><th>Rep</th><th>$ Won</th><th>Conversion</th><th>Δ vs prior week</th>'
+        + '</tr></thead><tbody>');
+      attr.leaderboard.forEach(function (row) {
+        var deltaTxt = row.delta_vs_prior_week === 0 ? '—'
+          : (row.delta_vs_prior_week > 0 ? '↑ ' : '↓ ') + fmtCurrency(Math.abs(row.delta_vs_prior_week));
+        html.push('<tr>'
+          + '<td>' + row.rank + '</td>'
+          + '<td>' + esc(row.rep_first_name) + '</td>'
+          + '<td>' + fmtCurrency(row.$_accepted_this_week) + '</td>'
+          + '<td>' + row.conversion_pct.toFixed(1) + '%</td>'
+          + '<td>' + esc(deltaTxt) + '</td>'
+          + '</tr>');
+      });
+      html.push('</tbody></table>');
+      html.push('</div>');
+    }
     return html.join('');
   }
 
@@ -765,7 +1338,7 @@
       var hint = (coaching || []).find(function (c) {
         return c && c.scope === 'lane' && c.related_lane === lane;
       });
-      var laneLabel = lane.charAt(0).toUpperCase() + lane.slice(1);
+      var laneLabel = lane === 'send' ? 'Follow Ups' : (lane.charAt(0).toUpperCase() + lane.slice(1));
       if (!hint) {
         return [
           '<div class="coaching-card" data-lane="' + esc(lane) + '">',
@@ -1020,24 +1593,31 @@
   // real PostgREST events/facts; the verdicts must be evaluated
   // against the SAME data, not fixture residue.
   function attachVerdicts(lanes, dataSource, now) {
-    if (!window.SALE_POLICY || typeof window.SALE_POLICY.evaluate !== 'function') return lanes;
     var ds = dataSource || {};
     function decorate(bucket) {
       bucket.items = bucket.items.map(function (card) {
+        var jobId = card.job && card.job.id;
+        var facts = (ds.jobContext && ds.jobContext[jobId]) || [];
+        var recent = (ds.events || []).filter(function (e) { return e && e.job_id === jobId; });
+        // Loop 4: stash on the card so the pre-scope context block + the
+        // booking proposal card can read them without re-querying.
+        card._facts = facts;
+        card._events = recent;
         if (!card.proposed_action) {
           card.verdict = null;
           return card;
         }
-        var jobId = card.job && card.job.id;
-        var facts = (ds.jobContext && ds.jobContext[jobId]) || [];
-        var recent = (ds.events || []).filter(function (e) { return e && e.job_id === jobId; });
-        card.verdict = window.SALE_POLICY.evaluate({
-          action: card.proposed_action,
-          job: card.job,
-          facts: facts,
-          recentEvents: recent,
-          now: now,
-        });
+        if (window.SALE_POLICY && typeof window.SALE_POLICY.evaluate === 'function') {
+          card.verdict = window.SALE_POLICY.evaluate({
+            action: card.proposed_action,
+            job: card.job,
+            facts: facts,
+            recentEvents: recent,
+            now: now,
+          });
+        } else {
+          card.verdict = null;
+        }
         return card;
       });
       return bucket;
@@ -1155,6 +1735,35 @@
           openConversationPeek(openJob);
           e.preventDefault();
           return;
+        }
+        // Loop 6 — "Preview dry-run" button (reachable; not disabled).
+        // Runs SALE_DRY_RUN.execute() and console.info logs the
+        // would-have-been-sent payload. NO fetch, NO state mutation.
+        var dryRunJob = t.getAttribute('data-dryrun-job');
+        if (dryRunJob && window.SALE_DRY_RUN) {
+          var dry = runDryRunForJob(dryRunJob);
+          if (dry) {
+            console.info('[sale-preview] dry-run', {
+              job: dryRunJob,
+              would_send: dry.would_send,
+              blockers: dry.blockers,
+              payload: dry.payload,
+              via: dry.via,
+              dry_run_log_id: dry.dry_run_log_id,
+            });
+            // Visual ack: flash the verdict chip on this card so Marnin
+            // sees the dry-run was logged. No state change.
+            try {
+              var card = t.closest && t.closest('.action-card');
+              var chip = card && card.querySelector && card.querySelector('.verdict-chip');
+              if (chip) {
+                chip.classList.add('verdict-chip-flash');
+                setTimeout(function () { chip.classList.remove('verdict-chip-flash'); }, 600);
+              }
+            } catch (_) { /* visual ack is best-effort */ }
+            e.preventDefault();
+            return;
+          }
         }
         console.info('[sale-preview] stub tap', {
           job: t.getAttribute('data-stub-job'),
@@ -1297,7 +1906,7 @@
     var sendBody = $('[data-lane-body="send"]');
     var callBody = $('[data-lane-body="call"]');
     if (bookBody) bookBody.innerHTML = lanes.book.map(laneBucketHtml).join('') || '<div class="bucket-empty">Nothing in Book today.</div>';
-    if (sendBody) sendBody.innerHTML = lanes.send.map(laneBucketHtml).join('') || '<div class="bucket-empty">Nothing in Send today.</div>';
+    if (sendBody) sendBody.innerHTML = lanes.send.map(laneBucketHtml).join('') || '<div class="bucket-empty">Nothing in Follow Ups today.</div>';
     if (callBody) callBody.innerHTML = lanes.call.map(laneBucketHtml).join('') || '<div class="bucket-empty">Nothing in Call today.</div>';
 
     // Lane counts (header pill + mobile chips)

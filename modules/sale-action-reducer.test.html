@@ -224,7 +224,7 @@
     assertEq('patio  → Nithin (patio)',  'Nithin', P.evaluate({ action: fcSms, job: jPatio,   facts: [], recentEvents: [], now: morning }).reasons.join(' ').match(/Nithin/) ? 'Nithin' : 'no');
     assertEq('fencing → Khairo (fencing)','Khairo', P.evaluate({ action: fcSms, job: jFencing, facts: [], recentEvents: [], now: morning }).reasons.join(' ').match(/Khairo/) ? 'Khairo' : 'no');
     assertTrue('combo  → Nithin (combo)',  P.evaluate({ action: fcSms, job: jCombo, facts: [], recentEvents: [], now: morning }).reasons.join(' ').indexOf('Nithin') !== -1);
-    assertTrue('decking → blocked (no sender)', P.evaluate({ action: fcSms, job: jDecking, facts: [], recentEvents: [], now: morning }).blocked);
+    assertTrue('decking → Nithin (decking)', P.evaluate({ action: fcSms, job: jDecking, facts: [], recentEvents: [], now: morning }).reasons.join(' ').indexOf('Nithin') !== -1);
 
     // ── Group: policy / hard blocks ────────────────────────────
     group('policy / hard blocks');

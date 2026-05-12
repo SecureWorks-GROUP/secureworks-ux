@@ -27,9 +27,8 @@
 //
 // Slice 2 amendments encoded:
 //   • Sender identity is unconditional and type-based:
-//       patio  → Nithin
-//       fencing → Khairo
-//       combo  → Nithin (default until decking has its own owner)
+  //       patio/decking/combo → Nithin
+  //       fencing             → Khairo
 //     jobs.created_by is metrics/ownership only and never routes sends.
 //   • archive_stale is internal-only (proposal that opens a nurture
 //     follow-up draft for human approval; never auto-changes job state).
@@ -98,16 +97,18 @@
 
   // Sender identity is unconditional and type-based. See Slice 1
   // amendment §3 in cio/evidence/secure-sale-cockpit-2026-04-30/README.md.
+  // Decking inherits the patio/Nithin sales lane until it has its own
+  // approved sales voice.
   function senderForJob(job) {
     if (!job || typeof job !== 'object') return null;
     var t = (job.type || '').toLowerCase();
     if (t === 'fencing') {
       return { name: 'Khairo', label: 'Khairo (fencing)', user_id: 'fix-khairo' };
     }
-    if (t === 'patio' || t === 'combo') {
+    if (t === 'patio' || t === 'decking' || t === 'combo') {
       return { name: 'Nithin', label: 'Nithin (' + t + ')', user_id: 'fix-nithin' };
     }
-    // Decking / general / unknown — no default sender; outbound blocks.
+    // General / unknown — no default sender; outbound blocks.
     return null;
   }
 
@@ -246,7 +247,7 @@
     var sender = senderForJob(job);
     if (!sender) {
       verdict.blocked = true; verdict.trust = 'red';
-      reason('cannot resolve sender for job.type="' + (job.type || '') + '" (only patio/combo→Nithin and fencing→Khairo are wired)');
+      reason('cannot resolve sender for job.type="' + (job.type || '') + '" (only patio/decking/combo→Nithin and fencing→Khairo are wired)');
       return verdict;
     }
     reason('sender resolved: ' + sender.label);

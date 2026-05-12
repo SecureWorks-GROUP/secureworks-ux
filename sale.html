@@ -939,7 +939,7 @@
     /* ── Lanes (desktop = 4 cols, mobile = single via chip switch) ── */
     .lanes {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 1px;
       background: var(--rule);
       padding: 0 24px 80px;
@@ -968,7 +968,7 @@
     .lane[data-lane="book"]     .lane-title { color: var(--blue); }
     .lane[data-lane="followup"] .lane-title { color: var(--green); }
     .lane[data-lane="call"]     .lane-title { color: var(--amber); }
-    .lane[data-lane="hygiene"]  .lane-title { color: var(--orange); }
+    .lane[data-lane="hygiene"]  .lane-title { color: var(--text-muted); }
     .lane-count {
       font-size: 9px;
       font-weight: 700;
@@ -1001,7 +1001,7 @@
     .lane[data-lane="book"]     .lcard { border-left-color: var(--blue); }
     .lane[data-lane="followup"] .lcard { border-left-color: var(--green); }
     .lane[data-lane="call"]     .lcard { border-left-color: var(--amber); }
-    .lane[data-lane="hygiene"]  .lcard { border-left-color: var(--orange); }
+    .lane[data-lane="hygiene"]  .lcard { border-left-color: var(--rule-strong); }
     .lcard.urgent { border-left-color: var(--orange); }
 
     .lcard-top {
@@ -1270,6 +1270,7 @@
     .m-chip[data-lane="book"][data-active="true"]     { box-shadow: inset 0 -2px 0 var(--blue); }
     .m-chip[data-lane="followup"][data-active="true"] { box-shadow: inset 0 -2px 0 var(--green); }
     .m-chip[data-lane="call"][data-active="true"]     { box-shadow: inset 0 -2px 0 var(--amber); }
+    .m-chip[data-lane="hygiene"][data-active="true"]  { box-shadow: inset 0 -2px 0 var(--text-muted); }
     .m-chip[data-lane="hygiene"][data-active="true"]  { box-shadow: inset 0 -2px 0 var(--orange); }
 
     /* ── Mobile FAB (hidden on desktop) ── */
@@ -3511,12 +3512,9 @@ function renderCounts(buckets) {
   document.getElementById('laneBarMeta').textContent = (b + f + c + h) + ' LEADS';
 }
 
-// ops-api/list_proposed_actions has a hard-coded .limit(50) at the source,
-// so the cockpit cannot see proposals 51+ until Terminal A ships ticket
-// SECURE-SALE-LIST-PROPOSED-LIMIT-BUMP. Detect when we received the cap
-// and surface that visibly so reps know they may have a hidden tail of
-// JARVIS proposals queued.
-var OPS_API_LIST_PROPOSED_LIMIT = 200;
+// ops-api/list_proposed_actions defaults to 1000 after the cap bump. Keep a
+// visible guard so we catch hidden tails if the proposal queue outgrows that.
+var OPS_API_LIST_PROPOSED_LIMIT = 1000;
 
 function renderSourceMeta(allCards, proposals) {
   var el = document.getElementById('laneBarMeta');
@@ -3551,16 +3549,17 @@ function renderSourceMeta(allCards, proposals) {
     // proposals queued beyond what the API returned this load.
     var warn = document.createElement('span');
     warn.style.cssText = 'margin-left:10px;color:var(--amber);font-size:9px;letter-spacing:1px;text-transform:uppercase;font-weight:700;';
-    warn.textContent = '⚠ at API limit · server returns max ' + OPS_API_LIST_PROPOSED_LIMIT + ' (SECURE-SALE-LIST-PROPOSED-LIMIT-BUMP)';
+    warn.textContent = 'at API limit · server returns max ' + OPS_API_LIST_PROPOSED_LIMIT;
     el.appendChild(warn);
   }
 }
 
 function renderHero(allCards, buckets) {
-  var total = buckets.book.length + buckets.followup.length + buckets.call.length;
+  var h = (buckets.hygiene || []).length;
+  var total = buckets.book.length + buckets.followup.length + buckets.call.length + h;
   document.getElementById('heroCount').textContent = total;
   document.getElementById('heroSub').textContent = total === 0 ? 'You are clear.'
-    : (buckets.book.length + ' to book · ' + buckets.followup.length + ' to follow up · ' + buckets.call.length + ' to call');
+    : (buckets.book.length + ' to book · ' + buckets.followup.length + ' to follow up · ' + buckets.call.length + ' to call · ' + h + ' hygiene');
 
   // Pipeline value + quotes-out come ONLY from follow-up cards (Supabase jobs
   // have pricing_json + status). Booking cards from GHL have no $ figure here.
@@ -4045,10 +4044,11 @@ var FAB_LABELS_BY_LANE = {
   book:     function (top) { return top ? 'BOOK ' + String(top.customer_name || '').split(' ')[0].toUpperCase()      : 'BOOK — CLEAR'; },
   followup: function (top) { return top ? 'FOLLOW UP ' + String(top.customer_name || '').split(' ')[0].toUpperCase() : 'FOLLOW UP — CLEAR'; },
   call:     function (top) { return top ? 'DIAL ' + String(top.customer_name || '').split(' ')[0].toUpperCase()      : 'CALL — CLEAR'; },
+  hygiene:  function (top) { return top ? 'REVIEW ' + String(top.customer_name || '').split(' ')[0].toUpperCase()    : 'HYGIENE — CLEAR'; },
 };
 
 var _activeLane = 'book';
-var _bucketCache = { book: [], followup: [], call: [] };
+var _bucketCache = { book: [], followup: [], call: [], hygiene: [] };
 
 function setActiveLane(lane) {
   _activeLane = lane;
@@ -4061,14 +4061,15 @@ function refreshFab() {
   var fab = document.getElementById('mFab');
   if (!fab) return;
   var top = (_bucketCache[_activeLane] || [])[0];
-  fab.textContent = FAB_LABELS_BY_LANE[_activeLane](top);
+  var labelFn = FAB_LABELS_BY_LANE[_activeLane] || FAB_LABELS_BY_LANE.book;
+  fab.textContent = labelFn(top);
   fab.dataset.disabled = top ? 'false' : 'true';
   fab.onclick = function () {
     if (!top) { showStubToast('No leads in lane'); return; }
     if (_activeLane === 'call' && top.phone) {
       window.location.href = 'tel:' + String(top.phone).replace(/[^+0-9]/g, '');
     } else {
-      showStubToast(FAB_LABELS_BY_LANE[_activeLane](top));
+      showStubToast(labelFn(top));
     }
   };
 }

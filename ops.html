@@ -3529,8 +3529,8 @@
     <div id="quickAllocateJobLabel" style="font-size:13px;color:var(--sw-text-sec);margin-bottom:12px;"></div>
     <input type="hidden" id="quickAllocateJobId" />
     <div class="form-group">
-      <label class="form-label">Assign To</label>
-      <div id="quickAllocateCrewContainer"><select class="form-input" id="quickAllocateCrew"><option value="">Loading...</option></select></div>
+      <label class="form-label">Who's on this job</label>
+      <div id="quickAllocateCrewContainer" style="display:flex;flex-wrap:wrap;gap:6px;"><span style="font-size:12px;color:var(--sw-text-sec);">Loading crew...</span></div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -9079,7 +9079,7 @@ function renderMakesafeCard(j, status) {
   html += renderMakesafeStatusIcons(j, status);
 
   if (status === 'new' || getMakesafeSubstatus(j) === 'pending_allocation') {
-    html += '<button onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')" style="width:100%;font-size:11px;padding:6px 8px;background:#E67E22;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:800;margin-top:8px;">Allocate for tomorrow</button>';
+    html += '<button onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')" style="width:100%;font-size:11px;padding:6px 8px;background:#E67E22;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:800;margin-top:8px;">Allocate</button>';
   }
   html += '</div>';
   return html;
@@ -9109,18 +9109,24 @@ async function openQuickAllocateModal(jobId, clientName) {
   document.getElementById('quickAllocateSubmitBtn').disabled = false;
   document.getElementById('quickAllocateModal').classList.add('active');
   await loadCrewList();
-  document.getElementById('quickAllocateCrewContainer').innerHTML = renderCrewDropdown('quickAllocateCrew', '');
+  // Flat people picker — tick whoever is on the job (no lead/helper distinction in the UI).
+  document.getElementById('quickAllocateCrewContainer').innerHTML = renderMemberCheckboxes('');
 }
 
 async function submitQuickAllocate() {
   var jobId = document.getElementById('quickAllocateJobId').value;
-  var crewUserId = getCrewSelectId('quickAllocateCrew');
-  var crewName = getCrewSelectName('quickAllocateCrew');
   var date = document.getElementById('quickAllocateDate').value;
   var startTime = document.getElementById('quickAllocateTime').value || '07:00';
   var notes = document.getElementById('quickAllocateNotes').value || null;
 
-  if (!crewUserId) { alert('Please select a trade to assign.'); return; }
+  // Everyone ticked in the people picker. One assignment row per person — first is written
+  // as lead_installer, the rest as helper (role is invisible in this UI but the data model
+  // and the calendar/trade-app reads still expect one lead per job).
+  var people = Array.prototype.slice
+    .call(document.querySelectorAll('#quickAllocateModal .assign-member-cb:checked'))
+    .map(function(cb) { return { id: cb.value, name: cb.getAttribute('data-name') }; });
+
+  if (!people.length) { alert('Please pick at least one person.'); return; }
   if (!date) { alert('Please select a date.'); return; }
 
   var btn = document.getElementById('quickAllocateSubmitBtn');
@@ -9128,19 +9134,21 @@ async function submitQuickAllocate() {
   btn.textContent = 'Allocating...';
 
   try {
-    // 1. Create assignment (auto-moves job from accepted -> scheduled)
-    await opsPost('create_assignment', {
-      jobId: jobId,
-      scheduledDate: date,
-      scheduledEnd: date,
-      startTime: startTime,
-      endTime: '15:00',
-      assignmentType: 'install',
-      crewName: crewName,
-      userId: crewUserId,
-      role: 'lead_installer',
-      notes: notes
-    });
+    // 1. Create one assignment per person (first creation auto-moves job accepted -> scheduled)
+    for (var i = 0; i < people.length; i++) {
+      await opsPost('create_assignment', {
+        jobId: jobId,
+        scheduledDate: date,
+        scheduledEnd: date,
+        startTime: startTime,
+        endTime: '15:00',
+        assignmentType: 'install',
+        crewName: people[i].name,
+        userId: people[i].id,
+        role: i === 0 ? 'lead_installer' : 'helper',
+        notes: notes
+      });
+    }
 
     // 2. Move job status to scheduled (backend auto-sets 'processing' but kanban needs 'scheduled')
     try {
@@ -9156,7 +9164,10 @@ async function submitQuickAllocate() {
     } catch (e) { console.log('Substatus update skipped:', e.message); }
 
     closeModal('quickAllocateModal');
-    showToast('Allocated to ' + crewName, 'success');
+    var msg = people.length === 1
+      ? 'Allocated to ' + people[0].name
+      : 'Allocated to ' + people.length + ' people';
+    showToast(msg, 'success');
     loadJobs(); // Refresh kanban
   } catch (e) {
     alert('Failed to allocate: ' + e.message);

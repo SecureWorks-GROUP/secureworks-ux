@@ -3701,7 +3701,8 @@
     api('my_jobs', params).then(function(data) {
       clearTimeout(slowTimer);
       renderMyJobs(data);
-      loadMakesafePoolJobs(data);
+      // Open MakeSafe pool removed — visibility is strictly allocation-based now.
+      // (loadMakesafePoolJobs is intentionally not called.)
       // Check for active server-side clock (survives app reinstall / device switch)
       checkServerClockRecovery(data);
     }).catch(function(err) {
@@ -4100,6 +4101,12 @@
       html += '</div>';
     }
 
+    // MakeSafe visibility is strictly allocation-based for trades: a regular trade only
+    // sees a make-safe once it is allocated to them. The open "Open MakeSafe Jobs" pool is
+    // dispatcher-only — the backend (my_jobs) populates data.makesafePool just for
+    // dispatchers (admin / ops_manager), so this section stays empty (and is skipped, see
+    // the `filtered.length === 0` guard) for everyone else. The client-side fallback that
+    // used to rebuild this pool for any trade via search_all_jobs has been disabled.
     var sections = [
       { key: 'today', label: 'Today' },
       { key: 'makesafePool', label: 'Open MakeSafe Jobs' },

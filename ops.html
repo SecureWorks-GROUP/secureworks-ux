@@ -8880,6 +8880,19 @@ function makesafeAssignmentName(v) {
   if (typeof v === 'string') return v;
   return v.crew_label || v.crew_name || v.assigned_trade || v.assigned_to || v.trade_name || v.user_name || v.name || (v.user && (v.user.name || v.user.email)) || '';
 }
+// A "ghost" is the ops manager (Shaun), attached to make-safes for oversight but not
+// actually on-site crew. They are kept on the job (so they still see it) but excluded
+// from the crew label so it shows only the people doing the work.
+function isGhostCrewName(name) {
+  if (!name) return false;
+  var clean = cleanCrewName(String(name).trim()).toLowerCase();
+  if (!clean) return false;
+  var u = (_crewList || []).find(function(c) { return String(c.name || '').toLowerCase() === clean; });
+  if (u && u.role === 'ops_manager') return true;
+  if (clean.indexOf('shaun') !== -1) return true; // backstop if the crew list isn't loaded yet
+  return false;
+}
+
 function getMakesafeCrewLabel(j) {
   var names = [];
   if (Array.isArray(j.assigned_trades)) names = names.concat(j.assigned_trades.map(makesafeAssignmentName));
@@ -8891,9 +8904,25 @@ function getMakesafeCrewLabel(j) {
   if (j.assigned_trade) names.push(j.assigned_trade);
   if (j.crew_name) names.push(j.crew_name);
   if (j.assigned_crew) names.push(j.assigned_crew);
-  names = names.filter(Boolean).map(function(v) { return String(v).trim(); }).filter(Boolean);
-  names = names.filter(function(v, i, a) { return a.indexOf(v) === i; });
-  return names.join(' + ');
+  // The label is stitched from several overlapping crew fields, some joined with "+",
+  // some with commas, in mixed casing. Split on every separator, canonicalise each name,
+  // drop ghosts, and dedupe by name so a person can only appear once.
+  var flat = [];
+  var seen = {};
+  names.filter(Boolean).forEach(function(v) {
+    String(v).split(/\s*[+,&]\s*/).forEach(function(p) {
+      // Some fields bake a date onto the name ("Nithin — 2026-06-16" / "Hugo - 12 June").
+      // Strip from the first separator that is followed by a digit, so it dedupes by name.
+      var raw = String(p).replace(/\s*[—–·\-]\s*\d.*$/, '').trim();
+      var name = cleanCrewName(raw);
+      if (!name || isGhostCrewName(name)) return;
+      var key = name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      flat.push(name);
+    });
+  });
+  return flat.join(' + ');
 }
 function getMakesafeAssignmentCount(j) {
   var count = Number(j.assignment_count || j.assignments_count || 0);
@@ -8914,6 +8943,19 @@ function getMakesafeDayLabel(j) {
   if (!dates.length) return '';
   if (dates.length === 1) return fmtDate(dates[0]);
   return fmtDate(dates[0]) + ' +' + (dates.length - 1);
+}
+// Earliest scheduled date for the card's "Assignment:" line, as DD/MM/YYYY.
+function getMakesafeAssignmentDateDMY(j) {
+  var dates = [];
+  ['scheduled_date', 'first_scheduled_date', 'next_scheduled_date', 'assignment_date'].forEach(function(k) { if (j[k]) dates.push(j[k]); });
+  getMakesafeAssignmentRows(j).forEach(function(a) {
+    ['scheduled_date', 'scheduled_start', 'date'].forEach(function(k) { if (a[k]) dates.push(a[k]); });
+  });
+  dates = dates.filter(Boolean).map(function(d) { return String(d).slice(0, 10); }).filter(Boolean).sort();
+  if (!dates.length) return '';
+  var p = dates[0].split('-'); // YYYY-MM-DD
+  if (p.length !== 3) return '';
+  return p[2] + '/' + p[1] + '/' + p[0];
 }
 function getMakesafeReportLabel(j, status) {
   var sub = getMakesafeSubstatus(j);
@@ -9062,15 +9104,23 @@ function renderMakesafeCard(j, status) {
   html += '</div>';
 
   if (builder) html += '<div style="font-size:12px;color:#D97706;font-weight:800;margin-top:5px;line-height:1.25;">' + escapeHtml(builder) + '</div>';
-  if (j.external_ref || j.job_number) {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px;">' + escapeHtml([j.external_ref, j.job_number].filter(Boolean).join(' · ')) + '</div>';
+  // Client work order number (external_ref) is the key reference on the board — show it big
+  // and bold. The internal SWMS job number stays small underneath.
+  if (j.external_ref) {
+    html += '<div style="margin-top:4px;"><span style="display:inline-block;background:var(--sw-dark);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;letter-spacing:0.3px;">' + escapeHtml(j.external_ref) + '</span></div>';
+  }
+  if (j.job_number) {
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px;">' + escapeHtml(j.job_number) + '</div>';
   }
   if (j.client_name) html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:3px;">Client: ' + escapeHtml(j.client_name) + '</div>';
   html += '<div style="font-size:11px;color:var(--sw-text);margin-top:6px;display:flex;flex-direction:column;gap:2px;">';
   html += '<span>Intake: <strong>' + escapeHtml(intakeLabel) + '</strong></span>';
-  html += '<span>Crew/day: <strong>' + escapeHtml([crew || 'unallocated', day].filter(Boolean).join(' · ')) + '</strong></span>';
-  var assignmentCount = getMakesafeAssignmentCount(j);
-  if (assignmentCount > 1) html += '<span>Individuals: <strong>' + escapeHtml(crew || (assignmentCount + ' assigned')) + '</strong></span>';
+  // Crew + assignment date — only shown once someone is allocated (hidden otherwise).
+  if (crew) {
+    html += '<span>Crew: <strong>' + escapeHtml(crew) + '</strong></span>';
+    var assignDate = getMakesafeAssignmentDateDMY(j);
+    if (assignDate) html += '<span>Assignment: <strong>' + escapeHtml(assignDate) + '</strong></span>';
+  }
   html += '</div>';
 
   // Compact, scannable status icon row (WO / Report / SWMS / Invoice / Sent),
@@ -9078,8 +9128,9 @@ function renderMakesafeCard(j, status) {
   // whole column reads at a glance. See renderMakesafeStatusIcons for state mapping.
   html += renderMakesafeStatusIcons(j, status);
 
-  if (status === 'new' || getMakesafeSubstatus(j) === 'pending_allocation') {
-    html += '<button onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')" style="width:100%;font-size:11px;padding:6px 8px;background:#E67E22;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:800;margin-top:8px;">Allocate</button>';
+  if (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation') {
+    var allocLabel = status === 'allocated' ? 'Reassign' : 'Allocate';
+    html += '<button onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')" style="width:100%;font-size:11px;padding:6px 8px;background:#E67E22;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:800;margin-top:8px;">' + allocLabel + '</button>';
   }
   html += '</div>';
   return html;
@@ -9098,19 +9149,49 @@ async function advanceMakesafeSubstatus(jobId, newSubstatus) {
 }
 
 // ── Quick Allocate (Make-Safe) ──
+// Active assignments on the job when the modal was opened: [{ id, userId, role, sched }].
+// Drives pre-ticking the current crew and lets submit delete anyone removed.
+var _quickAllocateExisting = [];
+
 async function openQuickAllocateModal(jobId, clientName) {
   document.getElementById('quickAllocateJobId').value = jobId;
   document.getElementById('quickAllocateJobLabel').textContent = clientName || 'Make-Safe Job';
-  var tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  document.getElementById('quickAllocateDate').value = localDateStr(tomorrow);
+  // Default to today (editable). Reassignment keeps the job's existing day if it has one.
+  document.getElementById('quickAllocateDate').value = localDateStr(new Date());
   document.getElementById('quickAllocateTime').value = '07:00';
   document.getElementById('quickAllocateNotes').value = '';
   document.getElementById('quickAllocateSubmitBtn').disabled = false;
+  document.getElementById('quickAllocateSubmitBtn').textContent = 'Allocate';
   document.getElementById('quickAllocateModal').classList.add('active');
+  _quickAllocateExisting = [];
   await loadCrewList();
   // Flat people picker — tick whoever is on the job (no lead/helper distinction in the UI).
   document.getElementById('quickAllocateCrewContainer').innerHTML = renderMemberCheckboxes('');
+
+  // Reassignment support: load the job's current active assignments so we can pre-tick the
+  // people already on it (and hold their assignment ids, to delete anyone who gets removed).
+  try {
+    var detail = await opsFetch('job_detail', { jobId: jobId });
+    var active = (detail.assignments || []).filter(function(a) {
+      var s = String(a.status || '').toLowerCase();
+      return s !== 'cancelled' && s !== 'complete' && s !== 'completed';
+    });
+    _quickAllocateExisting = active.map(function(a) {
+      return { id: a.id, userId: a.user_id || (a.users && a.users.id) || '', role: a.role || '', sched: a.scheduled_date || '' };
+    }).filter(function(a) { return a.id && a.userId; });
+
+    _quickAllocateExisting.forEach(function(a) {
+      var cb = document.querySelector('#quickAllocateModal .assign-member-cb[value="' + a.userId + '"]');
+      if (cb) cb.checked = true;
+    });
+
+    // Keep the job's existing scheduled day if it has one; otherwise today's default stands.
+    var existingDate = _quickAllocateExisting.map(function(a) { return String(a.sched).slice(0, 10); }).filter(Boolean).sort()[0];
+    if (existingDate) document.getElementById('quickAllocateDate').value = existingDate;
+    if (_quickAllocateExisting.length) document.getElementById('quickAllocateSubmitBtn').textContent = 'Save changes';
+  } catch (e) {
+    console.log('Quick-allocate: could not load existing assignments:', e && e.message);
+  }
 }
 
 async function submitQuickAllocate() {
@@ -9119,23 +9200,80 @@ async function submitQuickAllocate() {
   var startTime = document.getElementById('quickAllocateTime').value || '07:00';
   var notes = document.getElementById('quickAllocateNotes').value || null;
 
-  // Everyone ticked in the people picker. One assignment row per person — first is written
-  // as lead_installer, the rest as helper (role is invisible in this UI but the data model
-  // and the calendar/trade-app reads still expect one lead per job).
+  // Everyone ticked in the people picker.
   var people = Array.prototype.slice
     .call(document.querySelectorAll('#quickAllocateModal .assign-member-cb:checked'))
     .map(function(cb) { return { id: cb.value, name: cb.getAttribute('data-name') }; });
 
-  if (!people.length) { alert('Please pick at least one person.'); return; }
+  var existing = _quickAllocateExisting || [];
+
+  // Remove-all: if the job already had crew and everyone is now unticked, treat it as an
+  // unassign — delete every assignment (which drops it off their trade apps) and send the
+  // card back to New.
+  if (!people.length) {
+    // Safety net: if the open-time load missed the assignments, pull them fresh now so
+    // "remove all" still works.
+    var toClear = existing.slice();
+    if (!toClear.length) {
+      try {
+        var d2 = await opsFetch('job_detail', { jobId: jobId });
+        toClear = (d2.assignments || []).filter(function(a) {
+          var s = String(a.status || '').toLowerCase();
+          return a.id && s !== 'cancelled' && s !== 'complete' && s !== 'completed';
+        }).map(function(a) { return { id: a.id }; });
+      } catch (e) { console.log('Remove-all: assignment re-fetch failed:', e && e.message); }
+    }
+    if (!toClear.length) { alert('Please pick at least one person.'); return; }
+    if (!confirm('Remove all crew from this make-safe and send it back to New?')) return;
+    var rbtn = document.getElementById('quickAllocateSubmitBtn');
+    rbtn.disabled = true;
+    rbtn.textContent = 'Removing...';
+    try {
+      for (var r = 0; r < toClear.length; r++) {
+        await opsPost('delete_assignment', { assignmentId: toClear[r].id });
+      }
+      try { await opsPost('update_job_status', { jobId: jobId, status: 'accepted' }); } catch (e) { console.log('Status revert skipped:', e.message); }
+      try { await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'pending_allocation' }); } catch (e) { console.log('Substatus revert skipped:', e.message); }
+      closeModal('quickAllocateModal');
+      showToast('All crew removed — back to New', 'success');
+      loadJobs();
+    } catch (e) {
+      alert('Failed to remove crew: ' + e.message);
+      rbtn.disabled = false;
+      rbtn.textContent = 'Save changes';
+    }
+    return;
+  }
+
   if (!date) { alert('Please select a date.'); return; }
 
+  // Diff against who was already on the job (set when the modal opened). Remove people who
+  // were unticked, add people newly ticked, and leave the rest in place. Deleting a removed
+  // person's assignment row is what drops the job off their trade app.
+  var finalIds = people.map(function(p) { return p.id; });
+  var existingIds = existing.map(function(e) { return e.userId; });
+  var toDelete = existing.filter(function(e) { return finalIds.indexOf(e.userId) === -1; });
+  var toAdd = people.filter(function(p) { return existingIds.indexOf(p.id) === -1; });
+  var kept = existing.filter(function(e) { return finalIds.indexOf(e.userId) !== -1; });
+  // The job needs exactly one lead. If nobody who stayed is already the lead, the first new
+  // person becomes lead; otherwise new people are helpers (role stays invisible in the UI).
+  var keptHasLead = kept.some(function(e) { return e.role === 'lead_installer'; });
+  var openedDate = existing.map(function(e) { return String(e.sched).slice(0, 10); }).filter(Boolean).sort()[0] || '';
+  var dateChanged = existing.length > 0 && date !== openedDate;
+
   var btn = document.getElementById('quickAllocateSubmitBtn');
+  var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Allocating...';
+  btn.textContent = 'Saving...';
 
   try {
-    // 1. Create one assignment per person (first creation auto-moves job accepted -> scheduled)
-    for (var i = 0; i < people.length; i++) {
+    // 1. Remove anyone unticked — deletes their assignment so the job leaves their trade app.
+    for (var d = 0; d < toDelete.length; d++) {
+      await opsPost('delete_assignment', { assignmentId: toDelete[d].id });
+    }
+
+    // 2. Add anyone newly ticked (first creation auto-moves job accepted -> scheduled).
+    for (var i = 0; i < toAdd.length; i++) {
       await opsPost('create_assignment', {
         jobId: jobId,
         scheduledDate: date,
@@ -9143,36 +9281,39 @@ async function submitQuickAllocate() {
         startTime: startTime,
         endTime: '15:00',
         assignmentType: 'install',
-        crewName: people[i].name,
-        userId: people[i].id,
-        role: i === 0 ? 'lead_installer' : 'helper',
+        crewName: toAdd[i].name,
+        userId: toAdd[i].id,
+        role: (!keptHasLead && i === 0) ? 'lead_installer' : 'helper',
         notes: notes
       });
     }
 
-    // 2. Move job status to scheduled (backend auto-sets 'processing' but kanban needs 'scheduled')
+    // 3. If the date changed on a reassignment, move the people who stayed too.
+    if (dateChanged) {
+      for (var k = 0; k < kept.length; k++) {
+        try {
+          await opsPost('update_assignment', { assignmentId: kept[k].id, scheduled_date: date, scheduled_end: date });
+        } catch (e) { console.log('Kept assignment date update skipped:', e.message); }
+      }
+    }
+
+    // 4. Keep the job in the allocated state (status + makesafe substatus).
     try {
       await opsPost('update_job_status', { jobId: jobId, status: 'scheduled' });
     } catch (e) { console.log('Status update skipped:', e.message); }
-
-    // 3. Move substatus from pending_allocation to waiting_on_trade_report
     try {
-      await opsPost('update_makesafe_substatus', {
-        jobId: jobId,
-        substatus: 'waiting_on_trade_report'
-      });
+      await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'waiting_on_trade_report' });
     } catch (e) { console.log('Substatus update skipped:', e.message); }
 
     closeModal('quickAllocateModal');
-    var msg = people.length === 1
-      ? 'Allocated to ' + people[0].name
-      : 'Allocated to ' + people.length + ' people';
+    var msg = 'Allocated to ' + people.length + ' ' + (people.length === 1 ? 'person' : 'people');
+    if (toDelete.length) msg += ' (' + toDelete.length + ' removed)';
     showToast(msg, 'success');
     loadJobs(); // Refresh kanban
   } catch (e) {
     alert('Failed to allocate: ' + e.message);
     btn.disabled = false;
-    btn.textContent = 'Allocate';
+    btn.textContent = origLabel || 'Allocate';
   }
 }
 
@@ -16311,6 +16452,29 @@ function openAssignmentModalForJob(jobId) {
 var _hoverTimer = null;
 var _hoverPopover = null;
 var _hoverJobId = null;
+var _hoverCopyData = null; // structured details of the job in the hover popover (for copy)
+
+// Copy button in the hover popover copies a tidy block of the make-safe's key details:
+// work order number, type, client, address, suburb, crew, assignment date. Falls back to
+// the full job-info copy for jobs without this context.
+function copyHoverWoRef(jobId) {
+  var d = _hoverCopyData;
+  if (d && (d.wo || d.client)) {
+    var lines = [];
+    if (d.wo) lines.push('Work Order: ' + d.wo);
+    if (d.type) lines.push('Type: ' + d.type);
+    if (d.client) lines.push('Client: ' + d.client);
+    if (d.address) lines.push('Address: ' + d.address);
+    if (d.suburb) lines.push('Suburb: ' + d.suburb);
+    if (d.crew) lines.push('Crew: ' + d.crew);
+    if (d.assignment) lines.push('Assignment: ' + d.assignment);
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+      showToast('Copied job details', 'success');
+    });
+    return;
+  }
+  copyJobInfo(jobId);
+}
 
 function hoverJobCard(event, jobId) {
   // Skip on touch devices, while dragging, or when hovering icons
@@ -16394,9 +16558,21 @@ async function showHoverPopover(anchor, jobId) {
     if (_hoverJobId !== jobId) { pop.remove(); return; }
     var j = data.job;
 
+    // Client work order number (external_ref) — bold, before the SWMS number, same font/size.
+    var woRef = j.external_ref || (data.makesafe_details && data.makesafe_details.external_ref) || (j.metadata && j.metadata.external_ref) || '';
+    _hoverCopyData = {
+      wo: woRef,
+      type: getMakesafeTypeLabel(j, data.makesafe_details),
+      client: j.client_name || '',
+      address: j.site_address || '',
+      suburb: j.site_suburb || '',
+      crew: getMakesafeCrewLabel({ assignments: (data.assignments || []).map(function(a) { return { crew_name: a.crew_name || (a.users && a.users.name) || a.user_name || '' }; }) }),
+      assignment: getMakesafeAssignmentDateDMY({ assignments: data.assignments || [] }),
+    };
+    var refLine = [woRef ? '<strong>' + escapeHtml(woRef) + '</strong>' : '', j.job_number ? escapeHtml(j.job_number) : '', j.site_suburb ? escapeHtml(j.site_suburb) : ''].filter(Boolean).join(' &middot; ');
     var html = '<div class="jd-qv-header" style="display:flex;justify-content:space-between;align-items:flex-start;"><div><strong style="font-size:14px;">' + escapeHtml(j.client_name || 'Unknown') + '</strong>' +
-      '<div style="font-size:12px;color:var(--sw-text-sec);">' + (j.job_number || '') + ' &middot; ' + escapeHtml(j.site_suburb || '') + '</div></div>' +
-      '<button onclick="event.stopPropagation();copyJobInfo(\'' + j.id + '\')" title="Copy job info" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--sw-text-sec,#8896A6);display:flex;align-items:center;border-radius:6px;transition:all 0.15s;" onmouseenter="this.style.background=\'var(--sw-bg,#f0f0f0)\'" onmouseleave="this.style.background=\'none\'">' +
+      '<div style="font-size:12px;color:var(--sw-text-sec);">' + refLine + '</div></div>' +
+      '<button onclick="event.stopPropagation();copyHoverWoRef(\'' + j.id + '\')" title="Copy work order number" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--sw-text-sec,#8896A6);display:flex;align-items:center;border-radius:6px;transition:all 0.15s;" onmouseenter="this.style.background=\'var(--sw-bg,#f0f0f0)\'" onmouseleave="this.style.background=\'none\'">' +
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>';
     html += '<div class="jd-qv-body">';
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></div>';

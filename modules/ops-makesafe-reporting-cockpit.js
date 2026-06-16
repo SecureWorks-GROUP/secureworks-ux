@@ -241,6 +241,11 @@ function showMsReportingDetail(jobId) {
   html += renderMsReportingPdf('Draft invoice', d.invoice_pdf_url);
   html += '</div>';
 
+  // DRAFT FEEDBACK NOTES (Wave 3) - threaded notes + re-run, before the approve
+  // button. Populated by loadMsNotes (ops-makesafe-feedback-notes.js) at the end
+  // of this render. Draft-stage only; does not send or authorise.
+  html += '<div id="msNotesPanel-' + safeId + '" style="margin-bottom:18px;"></div>';
+
   // APPROVE - the live authorise + send
   html += '<div style="border-top:1px solid #EEF2F5;padding-top:14px;display:flex;flex-direction:column;gap:8px;">';
   var canSend = !!d.recipient_email && !!inv;
@@ -258,6 +263,12 @@ function showMsReportingDetail(jobId) {
   html += '</div>'; // end scroll body
 
   panel.innerHTML = html;
+
+  // Wave 3: load the draft-feedback notes thread into its placeholder. Guarded so
+  // the cockpit still works if the feedback-notes module is not loaded.
+  if (typeof loadMsNotes === 'function') {
+    loadMsNotes(d.job_id, 'msNotesPanel-' + d.job_id);
+  }
 }
 
 /**

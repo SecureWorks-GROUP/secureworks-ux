@@ -14259,7 +14259,7 @@ function buildMakesafeDocList(data) {
     var url = getDocOpenUrl(d);
     if (!url) return;
     seen[d.id] = true;
-    list.push({ label: d.file_name || d.name || d.type || 'Document', doc: d, url: url, kind: msafeDocKind(url, d) });
+    list.push({ label: String(d.file_name || d.name || d.type || 'Document'), doc: d, url: url, kind: msafeDocKind(url, d) });
   });
   return list;
 }

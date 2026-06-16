@@ -3617,8 +3617,14 @@
       <div id="inboxList"></div>
     </div>
 
-    <div id="viewApprovals" class="view" style="height:calc(100vh - var(--jarvis-bar-height) - 56px);overflow:hidden;">
-      <div class="approvals-layout">
+    <div id="viewApprovals" class="view" style="height:calc(100vh - var(--jarvis-bar-height) - 56px);overflow:hidden;display:flex;flex-direction:column;">
+      <!-- Tab switcher -->
+      <div id="approvalsTabBar" style="display:flex;gap:0;border-bottom:2px solid var(--sw-border);background:#fff;flex-shrink:0;">
+        <button id="approvalsTabCouncil" onclick="switchApprovalsTab('council')" style="padding:10px 20px;font-size:13px;font-weight:600;border:none;background:none;border-bottom:2px solid #F15A29;color:#F15A29;cursor:pointer;margin-bottom:-2px;">Council</button>
+        <button id="approvalsTabMakesafe" onclick="switchApprovalsTab('makesafe')" style="padding:10px 20px;font-size:13px;font-weight:600;border:none;background:none;border-bottom:2px solid transparent;color:var(--sw-text-sec);cursor:pointer;margin-bottom:-2px;">MakeSafe Intake <span id="msIntakeBadge" style="display:none;background:#F15A29;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:4px;vertical-align:middle;"></span></button>
+      </div>
+      <!-- Council layout (shown by default) -->
+      <div id="approvalsCouncilPane" style="display:flex;flex:1;overflow:hidden;">
         <div class="approvals-list-panel" id="approvalsListPanel">
           <!-- Rendered by ops-council.js: header + summary pills + card list -->
         </div>
@@ -3626,6 +3632,22 @@
           <div class="approvals-empty-state">
             <div style="font-size:36px;opacity:0.3;margin-bottom:12px;">🏛️</div>
             <div style="font-size:13px;color:var(--sw-text-sec);">Select a submission to view details</div>
+          </div>
+        </div>
+      </div>
+      <!-- MakeSafe Intake pane (hidden by default) -->
+      <div id="approvalsMakesafePane" style="display:none;flex:1;overflow:hidden;">
+        <div style="width:340px;flex-shrink:0;background:#fff;border-right:1px solid var(--sw-border);display:flex;flex-direction:column;overflow:hidden;">
+          <div style="padding:14px 16px 10px;border-bottom:1px solid var(--sw-border);display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:15px;font-weight:700;">MakeSafe Intake</span>
+            <button onclick="scanMsIntakeCockpit()" style="padding:5px 12px;background:#D97706;color:#fff;border:none;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px;">Scan Now</button>
+          </div>
+          <div id="msIntakeListBody" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;" id="msIntakeDetailPanel">
+          <div class="approvals-empty-state">
+            <div style="font-size:36px;opacity:0.3;margin-bottom:12px;">&#9993;</div>
+            <div style="font-size:13px;color:var(--sw-text-sec);">Select a draft to review</div>
           </div>
         </div>
       </div>
@@ -4700,6 +4722,7 @@
 
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
+<script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
@@ -5666,6 +5689,37 @@ function showView(view) {
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
   // Update Jarvis bar context
   setTimeout(updateJarvisSummary, 500);
+}
+
+var _approvalsActiveTab = 'council';
+function switchApprovalsTab(tab) {
+  _approvalsActiveTab = tab;
+  var councilPane = document.getElementById('approvalsCouncilPane');
+  var makesafePane = document.getElementById('approvalsMakesafePane');
+  var tabCouncil = document.getElementById('approvalsTabCouncil');
+  var tabMakesafe = document.getElementById('approvalsTabMakesafe');
+  if (!councilPane || !makesafePane) return;
+  if (tab === 'council') {
+    councilPane.style.display = 'flex';
+    makesafePane.style.display = 'none';
+    if (tabCouncil) { tabCouncil.style.borderBottomColor = '#F15A29'; tabCouncil.style.color = '#F15A29'; }
+    if (tabMakesafe) { tabMakesafe.style.borderBottomColor = 'transparent'; tabMakesafe.style.color = 'var(--sw-text-sec)'; }
+  } else {
+    councilPane.style.display = 'none';
+    makesafePane.style.display = 'flex';
+    if (tabCouncil) { tabCouncil.style.borderBottomColor = 'transparent'; tabCouncil.style.color = 'var(--sw-text-sec)'; }
+    if (tabMakesafe) { tabMakesafe.style.borderBottomColor = '#F15A29'; tabMakesafe.style.color = '#F15A29'; }
+    if (typeof loadMakesafeIntakeCockpit === 'function') loadMakesafeIntakeCockpit();
+  }
+}
+function scanMsIntakeCockpit() {
+  showToast('Scanning SES inbox...', 'info');
+  opsPost('scan_ses_makesafes', {}).then(function(data) {
+    showToast('Scanned ' + data.scanned + ' emails, found ' + data.new_count + ' new make-safe drafts', 'success');
+    if (typeof loadMakesafeIntakeCockpit === 'function') loadMakesafeIntakeCockpit();
+  }).catch(function(e) {
+    showToast('Scan failed: ' + (e.message || e), 'error');
+  });
 }
 
 function restoreTab() {

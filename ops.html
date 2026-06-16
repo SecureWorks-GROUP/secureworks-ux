@@ -17215,15 +17215,15 @@ var _hoverCopyData = null; // structured details of the job in the hover popover
 // the full job-info copy for jobs without this context.
 function copyHoverWoRef(jobId) {
   var d = _hoverCopyData;
-  if (d && (d.wo || d.client)) {
+  if (d && (d.client || d.jobNumber || d.wo || d.address)) {
     var lines = [];
-    if (d.wo) lines.push('Work Order: ' + d.wo);
     if (d.type) lines.push('Type: ' + d.type);
     if (d.client) lines.push('Client: ' + d.client);
+    if (d.jobNumber) lines.push('Job Number: ' + d.jobNumber);
+    if (d.wo) lines.push('Work Order: ' + d.wo);
     if (d.address) lines.push('Address: ' + d.address);
-    if (d.suburb) lines.push('Suburb: ' + d.suburb);
-    if (d.crew) lines.push('Crew: ' + d.crew);
-    if (d.assignment) lines.push('Assignment: ' + d.assignment);
+    if (d.phone) lines.push('Phone: ' + d.phone);
+    if (d.email) lines.push('Email: ' + d.email);
     navigator.clipboard.writeText(lines.join('\n')).then(function() {
       showToast('Copied job details', 'success');
     });
@@ -17318,17 +17318,23 @@ async function showHoverPopover(anchor, jobId) {
     var woRef = j.external_ref || (data.makesafe_details && data.makesafe_details.external_ref) || (j.metadata && j.metadata.external_ref) || '';
     _hoverCopyData = {
       wo: woRef,
-      type: getMakesafeTypeLabel(j, data.makesafe_details),
+      // Use the job's REAL type (fencing/patio/decking) for non-make-safe jobs.
+      // getMakesafeTypeLabel is a make-safe-only classifier that falls back to the
+      // literal "Make Safe" for anything it doesn't recognise, which mislabels every
+      // fencing/patio job — so only use it when this is actually a make-safe.
+      type: data.makesafe_details
+        ? getMakesafeTypeLabel(j, data.makesafe_details)
+        : (j.type ? String(j.type).replace(/[_-]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : ''),
+      jobNumber: j.job_number || '',
       client: j.client_name || '',
       address: j.site_address || '',
-      suburb: j.site_suburb || '',
-      crew: getMakesafeCrewLabel({ assignments: (data.assignments || []).map(function(a) { return { crew_name: a.crew_name || (a.users && a.users.name) || a.user_name || '' }; }) }),
-      assignment: getMakesafeAssignmentDateDMY({ assignments: data.assignments || [] }),
+      phone: j.client_phone || '',
+      email: j.client_email || '',
     };
     var refLine = [woRef ? '<strong>' + escapeHtml(woRef) + '</strong>' : '', j.job_number ? escapeHtml(j.job_number) : '', j.site_suburb ? escapeHtml(j.site_suburb) : ''].filter(Boolean).join(' &middot; ');
     var html = '<div class="jd-qv-header" style="display:flex;justify-content:space-between;align-items:flex-start;"><div><strong style="font-size:14px;">' + escapeHtml(j.client_name || 'Unknown') + '</strong>' +
       '<div style="font-size:12px;color:var(--sw-text-sec);">' + refLine + '</div></div>' +
-      '<button onclick="event.stopPropagation();copyHoverWoRef(\'' + j.id + '\')" title="Copy work order number" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--sw-text-sec,#8896A6);display:flex;align-items:center;border-radius:6px;transition:all 0.15s;" onmouseenter="this.style.background=\'var(--sw-bg,#f0f0f0)\'" onmouseleave="this.style.background=\'none\'">' +
+      '<button onclick="event.stopPropagation();copyHoverWoRef(\'' + j.id + '\')" title="Copy job details" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--sw-text-sec,#8896A6);display:flex;align-items:center;border-radius:6px;transition:all 0.15s;" onmouseenter="this.style.background=\'var(--sw-bg,#f0f0f0)\'" onmouseleave="this.style.background=\'none\'">' +
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>';
     html += '<div class="jd-qv-body">';
     html += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></div>';

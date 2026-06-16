@@ -9334,8 +9334,10 @@ function renderMakesafeStatusIcons(j, status) {
   else tiles.push(renderMakesafeStatusTile('W', 'pending', 'Work order: not yet attached'));
 
   // 2) Make-safe report (R)
+  var reportStatus = String(j.report_status || '').toLowerCase();
   if (j.has_report_doc) tiles.push(renderMakesafeStatusTile('R', 'done', 'Report: attached'));
   else if (missing.report) tiles.push(renderMakesafeStatusTile('R', 'missing', 'Report: missing (expected)'));
+  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') tiles.push(renderMakesafeStatusTile('R', 'missing', 'Report submitted: PDF missing'));
   else tiles.push(renderMakesafeStatusTile('R', 'pending', 'Report: awaiting trade report'));
 
   // 3) SWMS (S) — only relevant for MLB; neutral/faded for everyone else.
@@ -14372,9 +14374,91 @@ function parseMakesafeSendLog(events) {
   });
   return result;
 }
+function getMakesafeRawReport(data) {
+  var reports = (data && (data.service_reports || (data.serviceReport ? [data.serviceReport] : []))) || [];
+  return reports[0] || null;
+}
+function makesafeRawReportValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join(', ');
+  if (value === true) return 'Yes';
+  if (value === false) return 'No';
+  if (value === null || value === undefined || value === '') return 'not recorded';
+  return String(value);
+}
+function renderMakesafeRawReportField(label, value, multiline) {
+  var text = makesafeRawReportValue(value);
+  var color = text === 'not recorded' ? 'var(--sw-text-sec)' : 'var(--sw-text)';
+  return '<div style="border-bottom:1px solid var(--sw-border);padding:8px 0;">'
+    + '<div style="font-size:10px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.35px;margin-bottom:3px;">' + escapeHtml(label) + '</div>'
+    + '<div style="font-size:13px;color:' + color + ';' + (multiline ? 'white-space:pre-wrap;line-height:1.45;' : '') + '">' + escapeHtml(text) + '</div>'
+    + '</div>';
+}
+function openMakesafeRawTradeReport() {
+  var data = _currentJobData || {};
+  var report = getMakesafeRawReport(data);
+  if (!report) {
+    showToast('No trade-app report submitted yet', 'warning');
+    return;
+  }
+  var checklist = report.checklist_json || {};
+  var md = data.makesafe_details || {};
+  var j = data.job || {};
+  var media = data.media || [];
+  var submittedType = checklist.job_type === 'Other'
+    ? (checklist.job_type_detail || checklist.makesafe_type_detail || 'Other')
+    : checklist.job_type;
+  var modal = document.getElementById('makesafeRawReportModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.id = 'makesafeRawReportModal';
+    modal.setAttribute('onclick', "if(event.target===this)closeModal('makesafeRawReportModal')");
+    document.body.appendChild(modal);
+  }
+  var html = '<div class="modal" style="max-width:760px;max-height:90vh;overflow-y:auto;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">';
+  html += '<div><div class="modal-title" style="margin-bottom:3px;">Raw trade-app report</div>';
+  html += '<div style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(j.job_number || md.external_ref || 'MakeSafe job') + (j.site_suburb ? ' · ' + escapeHtml(j.site_suburb) : '') + '</div></div>';
+  html += '<button class="btn btn-secondary btn-sm" onclick="closeModal(\'makesafeRawReportModal\')">Close</button>';
+  html += '</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px;">';
+  html += renderMakesafeRawReportField('Submitted at', report.submitted_at ? fmtMakesafeSendDate(report.submitted_at) : report.created_at, false);
+  html += renderMakesafeRawReportField('Submitted by', report.submitted_by || report.submitted_by_name || 'trade app', false);
+  html += renderMakesafeRawReportField('Report status', report.status || 'submitted', false);
+  html += renderMakesafeRawReportField('Arrival time', checklist.arrival_time, false);
+  html += renderMakesafeRawReportField('MakeSafe type', submittedType, false);
+  html += renderMakesafeRawReportField('Damage cause', checklist.damage_cause, false);
+  html += renderMakesafeRawReportField('Labour', checklist.labour_hours ? checklist.labour_hours + ' hours' : '', false);
+  html += renderMakesafeRawReportField('Trade count', checklist.trade_count, false);
+  html += '</div>';
+  html += renderMakesafeRawReportField('Damage description', checklist.damage_description, true);
+  html += renderMakesafeRawReportField('Work completed', checklist.work_done || report.notes, true);
+  html += renderMakesafeRawReportField('Materials / equipment', checklist.materials_used, true);
+  html += renderMakesafeRawReportField('Access issues', checklist.access_issues, true);
+  html += renderMakesafeRawReportField('Invoice / admin notes', checklist.invoice_notes, true);
+  html += '<div style="font-size:10px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.35px;margin:14px 0 6px;">Photos (' + media.length + ')</div>';
+  if (media.length) {
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;">';
+    media.slice(0, 30).forEach(function(m) {
+      var src = m.thumbnail_url || m.storage_url || '';
+      var full = m.storage_url || m.thumbnail_url || '';
+      html += '<button type="button" onclick="openOpsLightbox(\'' + escapeHtml(full).replace(/'/g, "\\'") + '\')" style="padding:0;border:0;background:transparent;cursor:pointer;text-align:left;">'
+        + '<img src="' + escapeHtml(src) + '" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--sw-border);">'
+        + '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(m.phase || m.label || 'photo') + '</div>'
+        + '</button>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);">No photos returned in this job detail payload.</div>';
+  }
+  html += '</div>';
+  modal.innerHTML = html;
+  modal.classList.add('active');
+}
 // Build the documents + send-log panel for a make-safe job's detail view.
 function renderMakesafeDocsSendLogPanel(data) {
   var documents = data.documents || [];
+  var rawReport = getMakesafeRawReport(data);
   var docRows = [
     { label: 'Work Order', doc: pickLatestMakesafeDoc(documents, isMakesafeWorkOrderDoc) },
     { label: 'Make Safe Report', doc: pickLatestMakesafeDoc(documents, isMakesafeReportDoc) },
@@ -14406,18 +14490,22 @@ function renderMakesafeDocsSendLogPanel(data) {
     }
     html += '</div>';
   });
+  if (rawReport && !docRows[1].doc) {
+    html += '<div style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:8px 10px;margin:8px 0;font-size:12px;font-weight:800;">Trade report saved, but Make Safe Report document is not attached yet.</div>';
+  }
 
-  // ── Future placeholder: raw trade-app report ──
-  // TODO(makesafe): surface the original report the trades submitted from the app.
-  // Marnin wants to see the raw trade-app submission here later. Do NOT build the
-  // fetch/render logic yet — this disabled row is only the hook + label so the slot
-  // is visible. When implemented, resolve the raw report (likely data.service_reports
-  // or a dedicated job_document) and replace the disabled state with a View link.
-  html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--sw-border);font-size:13px;opacity:0.55;" title="Coming soon">';
-  html += '<span style="font-size:16px;opacity:0.4;">&#128196;</span>';
-  html += '<span style="font-weight:800;min-width:124px;color:var(--sw-text-sec);">Raw trade-app report</span>';
-  html += '<span style="flex:1;color:var(--sw-text-sec);font-size:12px;font-style:italic;">coming soon</span>';
-  html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;" disabled>View</button>';
+  // ── Raw trade-app report ──
+  html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--sw-border);font-size:13px;' + (rawReport ? '' : 'opacity:0.55;') + '">';
+  html += '<span style="font-size:16px;' + (rawReport ? '' : 'opacity:0.4;') + '">&#128196;</span>';
+  html += '<span style="font-weight:800;min-width:124px;color:' + (rawReport ? 'var(--sw-text)' : 'var(--sw-text-sec)') + ';">Raw trade-app report</span>';
+  if (rawReport) {
+    var rawWhen = rawReport.submitted_at ? fmtMakesafeSendDate(rawReport.submitted_at) : 'submitted';
+    html += '<span style="flex:1;color:var(--sw-text-sec);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Saved app report · ' + escapeHtml(rawWhen) + '</span>';
+    html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;" onclick="openMakesafeRawTradeReport()">View</button>';
+  } else {
+    html += '<span style="flex:1;color:var(--sw-text-sec);font-size:12px;font-style:italic;">not submitted</span>';
+    html += '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;" disabled>View</button>';
+  }
   html += '</div>';
 
   // ── Send log ──

@@ -2463,7 +2463,7 @@
           <button id="adminToggleMine" onclick="setAdminView(false)" style="flex:1;padding:7px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-dark);color:#fff;transition:all 0.2s">My Assignments</button>
         </div>
       </div>
-      <input type="text" id="jobSearchInput" placeholder="Search jobs — name, suburb, job number..." oninput="filterMyJobs()">
+      <input type="text" id="jobSearchInput" placeholder="Search assigned jobs — switch to All to search every job, including old/completed..." oninput="filterMyJobs()">
       <div class="job-filter-chips">
         <button class="filter-chip active" data-filter="today" onclick="setJobFilter('today')">Today</button>
         <button class="filter-chip" data-filter="all" onclick="setJobFilter('all')">All</button>
@@ -3763,6 +3763,7 @@
   // ── Job Search & Filter State ──
   var _jobFilter = 'today';
   var _lastJobData = null;
+  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], timer: null, token: 0 };
   var TODAY_RUN_LIST_STORAGE_PREFIX = 'sw_today_run_list_v1';
 
   function getTodayRunListId(a) {
@@ -3935,6 +3936,9 @@
   };
 
   window.filterMyJobs = function() {
+    var q = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
+    if (_jobFilter === 'all') requestGlobalJobSearch(q);
+    else requestGlobalJobSearch('');
     if (_lastJobData) renderMyJobs(_lastJobData);
   };
 
@@ -4013,6 +4017,125 @@
     });
   }
 
+
+  function requestGlobalJobSearch(q) {
+    q = String(q || '').toLowerCase().trim();
+    clearTimeout(_globalJobSearch.timer);
+    if (q.length < 2) {
+      _globalJobSearch.q = q;
+      _globalJobSearch.loading = false;
+      _globalJobSearch.loaded = false;
+      _globalJobSearch.results = [];
+      return;
+    }
+    if (_globalJobSearch.q === q && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
+    _globalJobSearch.q = q;
+    _globalJobSearch.loading = true;
+    _globalJobSearch.loaded = false;
+    _globalJobSearch.results = [];
+    var token = ++_globalJobSearch.token;
+    _globalJobSearch.timer = setTimeout(function() {
+      api('search_all_jobs', { q: q }).then(function(res) {
+        if (token !== _globalJobSearch.token || _globalJobSearch.q !== q) return;
+        var results = [];
+        (res.jobs || []).forEach(function(job) {
+          if (!job || !job.id) return;
+          results.push(job);
+        });
+        _globalJobSearch.loading = false;
+        _globalJobSearch.loaded = true;
+        _globalJobSearch.results = results.slice(0, 25);
+        if (_lastJobData) renderMyJobs(_lastJobData);
+      }).catch(function(err) {
+        if (token !== _globalJobSearch.token) return;
+        console.warn('[trade] Global job search failed:', err && (err.message || err));
+        _globalJobSearch.loading = false;
+        _globalJobSearch.loaded = true;
+        _globalJobSearch.results = [];
+        if (_lastJobData) renderMyJobs(_lastJobData);
+      });
+    }, 300);
+  }
+
+  function findAssignmentForGlobalJob(data, jobId) {
+    if (!data || !jobId) return null;
+    var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'];
+    for (var g = 0; g < groups.length; g++) {
+      var items = data[groups[g]] || [];
+      for (var i = 0; i < items.length; i++) {
+        if (((items[i].jobs || {}).id) === jobId) return items[i];
+      }
+    }
+    return null;
+  }
+
+  function getGlobalJobDisplayStatus(job) {
+    var raw = String((job && job.status) || '').toLowerCase().trim();
+    if ((job && job.completed_at) || ['complete', 'completed', 'archived', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1) return 'Completed';
+    if (!raw) return 'Status unknown';
+    return raw.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  }
+
+  function renderGlobalJobSearchCard(job, data, idx) {
+    var assignment = findAssignmentForGlobalJob(data, job.id);
+    var type = getTradeJobType(job, assignment);
+    var statusLabel = getGlobalJobDisplayStatus(job);
+    var statusClass = String((job.status || statusLabel || 'unknown')).toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+    var isOpenMakesafe = type === 'makesafe' && isOpenMakesafePoolJob(job);
+    var clickable = !!assignment || isOpenMakesafe;
+    var assignmentArg = assignment ? (assignment.id || '') : '';
+    var openAction = type === 'makesafe'
+      ? "openJobReport('" + job.id + "', '" + assignmentArg + "')"
+      : "openJob('" + job.id + "', '" + assignmentArg + "')";
+    var attrs = clickable
+      ? ' onclick="' + openAction + '" style="cursor:pointer"'
+      : ' style="cursor:default"';
+    var note = '';
+    if (isOpenMakesafe && !assignment) note = 'Open MakeSafe · tap to start/report';
+    else if (assignment) note = 'Allocated to you · tap to open';
+    else note = statusLabel === 'Completed' ? 'Historical completed job' : 'Search result only · not allocated to you';
+
+    var h = '<div class="job-card" data-type="' + esc(type) + '"' + attrs + '>';
+    h += '  <div class="job-card-top">';
+    h += '    <div>';
+    h += '      <div class="job-card-client">' + esc(getTradeCardTitle(job, type)) + '</div>';
+    h += '      <div class="job-card-address">' + esc(getTradeCardLine(job, type));
+    if (job.job_number) h += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.job_number) + '</span>';
+    if (job.external_ref) h += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.external_ref) + '</span>';
+    h += '</div>';
+    h += '    </div>';
+    h += '    <span class="job-card-badge badge-' + esc(type) + '">' + esc(type) + '</span>';
+    h += '  </div>';
+    h += '  <div class="job-card-meta">';
+    h += '    <span class="status-pill status-' + esc(statusClass) + '">' + esc(statusLabel) + '</span>';
+    if (job.completed_at) h += '<span>Completed ' + esc(formatDate(job.completed_at)) + '</span>';
+    else if (job.created_at) h += '<span>Created ' + esc(formatDate(job.created_at)) + '</span>';
+    h += '<span>' + esc(note) + '</span>';
+    h += '  </div>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderGlobalJobSearchResults(data, query) {
+    if (!query || query.length < 2) return '';
+    var h = '<div class="section-label">All database · all jobs</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px;line-height:1.4">All tab search includes old, completed and archived jobs across the board, including jobs allocated to other trades. Today and allocated views still show only your live assigned jobs.</div>';
+    if (_globalJobSearch.loading && _globalJobSearch.q === query) {
+      h += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
+      return h;
+    }
+    var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
+    if (!results.length) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">No jobs match this All-tab search.</div>';
+      return h;
+    }
+    results.forEach(function(job, idx) {
+      cacheTradeJob(job, findAssignmentForGlobalJob(data, job.id));
+      h += renderGlobalJobSearchCard(job, data, idx);
+    });
+    return h;
+  }
+
   function submitTradeAdminNote(jobId) {
     if (!jobId) return;
     var text = prompt('Note for Shaun/admin (not sent to the client):');
@@ -4064,6 +4187,7 @@
     if (searchBar) searchBar.style.display = 'block';
 
     var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
+    if (_jobFilter === 'all' && query.length >= 2) requestGlobalJobSearch(query);
 
     var todayRunListState = getTodayRunListState(data.today || []);
     var todayJobs = todayRunListState.items;
@@ -4101,12 +4225,11 @@
       html += '</div>';
     }
 
-    // MakeSafe visibility is strictly allocation-based for trades: a regular trade only
-    // sees a make-safe once it is allocated to them. The open "Open MakeSafe Jobs" pool is
-    // dispatcher-only — the backend (my_jobs) populates data.makesafePool just for
-    // dispatchers (admin / ops_manager), so this section stays empty (and is skipped, see
-    // the `filtered.length === 0` guard) for everyone else. The client-side fallback that
-    // used to rebuild this pool for any trade via search_all_jobs has been disabled.
+    // Today/allocated sections remain assignment-based for trades. The separate All-tab search
+    // below is the deliberate exception: it reaches the full historical job database across
+    // crews/statuses, including old completed/archived jobs.
+    if (_jobFilter === 'all' && query.length >= 2) html += renderGlobalJobSearchResults(data, query);
+
     var sections = [
       { key: 'today', label: 'Today' },
       { key: 'makesafePool', label: 'Open MakeSafe Jobs' },

@@ -16901,11 +16901,92 @@ function renderFilesView(data) {
     });
   }
 
+  // ── Quote History ──
+  var quoteDocs = (data.documents || []).filter(function(d) { return d.type === 'quote'; });
+  quoteDocs.sort(function(a, b) { return (b.version || 0) - (a.version || 0); });
+  if (quoteDocs.length > 0) {
+    var reQuoted = quoteDocs.length > 1;
+    html += '<div style="margin-top:16px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+    html += '<div style="font-size:14px;font-weight:700;">Quote History</div>';
+    if (reQuoted) {
+      html += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:2px 7px;border-radius:10px;background:#F59E0B20;color:#D97706;border:1px solid #F59E0B40;">Re-quoted</span>';
+    }
+    html += '</div>';
+    html += '<div id="jdQuoteHistory" style="border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+    html += '<thead><tr style="background:var(--sw-light);border-bottom:1px solid var(--sw-border);">';
+    html += '<th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);">Ver</th>';
+    html += '<th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);">Date</th>';
+    html += '<th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);">Total</th>';
+    html += '<th style="padding:7px 10px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);">Status</th>';
+    html += '<th style="padding:7px 10px;"></th>';
+    html += '</tr></thead><tbody>';
+    quoteDocs.forEach(function(doc, idx) {
+      var verLabel = 'v' + (doc.version || 1);
+      var dateStr = '';
+      if (doc.created_at) {
+        dateStr = new Date(doc.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+      }
+      var isCurrent = idx === 0;
+      var isAccepted = !!doc.accepted_at;
+      var statusLabel = isAccepted ? 'Accepted' : (doc.sent_to_client ? 'Sent' : 'Draft');
+      var statusColor = isAccepted ? '#22C55E' : (doc.sent_to_client ? 'var(--sw-orange)' : 'var(--sw-text-sec)');
+      var rowStyle = isCurrent ? 'background:var(--sw-card);' : 'background:var(--sw-light);opacity:0.75;';
+      html += '<tr style="border-bottom:1px solid var(--sw-border);' + rowStyle + '" data-qr-doc-id="' + escapeHtml(doc.id) + '">';
+      html += '<td style="padding:8px 10px;font-weight:' + (isCurrent ? '700' : '500') + ';color:var(--sw-dark);">' + verLabel;
+      if (isCurrent) html += ' <span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:var(--sw-orange)20;color:var(--sw-orange);text-transform:uppercase;">Current</span>';
+      html += '</td>';
+      html += '<td style="padding:8px 10px;color:var(--sw-text);">' + (dateStr || '&mdash;') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;color:var(--sw-text-sec);font-style:italic;" class="qr-total" data-doc-id="' + escapeHtml(doc.id) + '">&mdash;</td>';
+      html += '<td style="padding:8px 10px;text-align:center;"><span style="font-size:10px;font-weight:700;color:' + statusColor + ';">' + statusLabel + '</span></td>';
+      var pdfUrl = doc.pdf_url || doc.url || '';
+      html += '<td style="padding:8px 10px;text-align:right;">';
+      if (pdfUrl) {
+        html += '<a href="' + escapeHtml(pdfUrl) + '" target="_blank" class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 7px;">PDF</a>';
+      } else {
+        html += '<span style="color:var(--sw-text-sec);font-size:10px;">No PDF</span>';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  }
+
   if (!readiness && jobPhotos.length === 0 && receiptPhotos.length === 0 && (data.documents || []).length === 0 && workOrders.length === 0) {
     html = '<div class="empty-state"><div class="empty-state-icon">&#128247;</div><div class="empty-state-text">No files yet</div></div>';
   }
 
   document.getElementById('jdFiles').innerHTML = html;
+
+  // Async: backfill totals from quote_revisions (requires ops-api job_quote_revisions action)
+  if (quoteDocs && quoteDocs.length > 0 && data.job && data.job.id) {
+    var _qhJobId = data.job.id;
+    opsFetch('job_quote_revisions', { jobId: _qhJobId }).then(function(resp) {
+      // Stale-response guard: abort if the user has navigated to a different job
+      if (_currentJobId !== _qhJobId) return;
+      var revisions = resp && resp.revisions ? resp.revisions : [];
+      // Build lookup: doc_id -> total
+      var totalByDocId = {};
+      revisions.forEach(function(r) {
+        if (r.job_document_id && r.totals_snapshot_json) {
+          var t = r.totals_snapshot_json;
+          var total = t.totalIncGST || t.total_inc_gst || t.total || null;
+          if (total != null) totalByDocId[r.job_document_id] = total;
+        }
+      });
+      // Update total cells only if still in Files tab for the same job
+      var cells = document.querySelectorAll('#jdFiles .qr-total[data-doc-id]');
+      cells.forEach(function(cell) {
+        var docId = cell.getAttribute('data-doc-id');
+        if (totalByDocId[docId] != null) {
+          cell.style.fontStyle = 'normal';
+          cell.style.color = 'var(--sw-dark)';
+          cell.textContent = '$' + Number(totalByDocId[docId]).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        }
+      });
+    }).catch(function() { /* action not yet deployed — totals remain as dashes */ });
+  }
 }
 
 window.handleDocDrop = function(e) {

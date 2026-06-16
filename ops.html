@@ -1347,6 +1347,166 @@
     }
     .kanban-substage-header.collapsed::before { transform: rotate(-90deg); }
     .kanban-substage-group.collapsed { display: none; }
+
+    /* ════════════════════════════════════════════════════════════
+       MAKE-SAFE BOARD — Two-zone v2 card + board chrome + legend.
+       On-brand: identity band in dark blue, orange = accent/action.
+       The card keeps the .kanban-card class (drag/click hooks) but
+       .ms-card-v2 overrides the glassmorphic base for the two-zone look.
+       ════════════════════════════════════════════════════════════ */
+    .kanban-card.ms-card-v2 {
+      background: var(--sw-card);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      border-radius: 12px;
+      padding: 0;                 /* zones own their own padding */
+      border: none;
+      box-shadow: 0 2px 8px rgba(41,60,70,0.10), 0 0 0 1px rgba(41,60,70,0.05);
+      overflow: hidden;
+    }
+    .kanban-card.ms-card-v2::before,
+    .kanban-card.ms-card-v2::after { display: none; }
+    .kanban-card.ms-card-v2:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(41,60,70,0.16), 0 0 0 1px rgba(41,60,70,0.06);
+      background: var(--sw-card);
+      border-color: transparent;
+    }
+    /* thin status spine on the very left edge = age health */
+    .ms-card-v2 .ms-spine {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 3;
+    }
+    /* ── ZONE 1 — Identity band ── */
+    .ms-card-v2 .ms-id-band {
+      background: linear-gradient(135deg, var(--sw-dark) 0%, #324A57 100%);
+      padding: 11px 14px 12px 16px;
+      color: #fff;
+    }
+    .ms-card-v2 .ms-id-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .ms-card-v2 .ms-id-type {
+      font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--sw-orange); margin-bottom: 1px;
+    }
+    .ms-card-v2 .ms-id-suburb { font-weight: 800; font-size: 16px; color: #fff; line-height: 1.1; letter-spacing: -0.1px; }
+    .ms-card-v2 .ms-id-builder { font-size: 11.5px; color: #CFE0EA; font-weight: 600; margin-top: 3px; }
+    .ms-card-v2 .ms-age-badge {
+      font-size: 9.5px; padding: 2px 8px; border-radius: 20px; font-weight: 800; white-space: nowrap;
+      letter-spacing: 0.2px; flex-shrink: 0;
+    }
+    .ms-card-v2 .ms-age-badge.green { background: rgba(39,174,96,0.22); color: #9BE8BC; }
+    .ms-card-v2 .ms-age-badge.amber { background: rgba(243,156,18,0.24); color: #FBD89A; }
+    .ms-card-v2 .ms-age-badge.red   { background: rgba(231,76,60,0.26); color: #F4B0A8; }
+    .ms-card-v2 .ms-age-badge.neutral { background: rgba(255,255,255,0.14); color: #CFE0EA; }
+    /* BOTH job numbers — clearly labelled, side by side */
+    .ms-card-v2 .ms-jobnums { display: flex; gap: 9px; margin-top: 9px; }
+    .ms-card-v2 .ms-jobnum {
+      flex: 1; min-width: 0;
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 6px; padding: 4px 8px;
+    }
+    .ms-card-v2 .ms-jn-lbl {
+      font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 800;
+      color: #9FB6C2; line-height: 1.2;
+    }
+    .ms-card-v2 .ms-jn-val {
+      font-size: 12px; font-weight: 800; color: #fff; line-height: 1.25; margin-top: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* our own number gets the brand-orange hairline so it's distinct */
+    .ms-card-v2 .ms-jobnum.ours { border-color: rgba(241,90,41,0.55); background: rgba(241,90,41,0.14); }
+    .ms-card-v2 .ms-jobnum.ours .ms-jn-lbl { color: #F6A98C; }
+    /* ── ZONE 2 — Progress body (white) ── */
+    .ms-card-v2 .ms-body { padding: 11px 14px 13px 16px; }
+    .ms-card-v2 .ms-meta {
+      display: flex; justify-content: space-between; gap: 8px;
+      font-size: 10.5px; color: var(--sw-text-sec); margin-bottom: 9px; flex-wrap: wrap;
+    }
+    .ms-card-v2 .ms-meta b { color: var(--sw-mid); font-weight: 700; }
+    .ms-card-v2 .ms-crew { font-size: 12px; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .ms-card-v2 .ms-crew.unalloc { color: var(--sw-red); }
+    .ms-card-v2 .ms-crew.alloc { color: var(--sw-dark); }
+    .ms-card-v2 .ms-crew .ms-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .ms-card-v2 .ms-crew.alloc .ms-dot { background: var(--sw-green); }
+    .ms-card-v2 .ms-crew.unalloc .ms-dot { background: var(--sw-red); }
+    .ms-card-v2 .ms-crew .ms-crew-day { color: var(--sw-mid); font-weight: 600; font-size: 11px; }
+    /* ── Chip strip (Treatment 1: fill = done, outline = pending) ── */
+    .ms-card-v2 .ms-chips, .ms-legend .ms-chips { display: flex; gap: 5px; align-items: center; }
+    .ms-chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 23px; height: 23px; border-radius: 6px; font-size: 11px; font-weight: 800; line-height: 1;
+      position: relative; font-family: var(--sw-font); cursor: default;
+    }
+    .ms-chip.done { background: var(--sw-green); color: #fff; }
+    .ms-chip.done::after {
+      content: '\2713'; position: absolute; top: -3px; right: -3px;
+      width: 11px; height: 11px; border-radius: 50%; background: var(--sw-green); color: #fff;
+      font-size: 7px; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1.5px var(--sw-card); font-weight: 900;
+    }
+    .ms-chip.pending { background: #fff; color: var(--sw-yellow); border: 1.5px dashed var(--sw-yellow); }
+    .ms-chip.missing { background: var(--sw-red); color: #fff; border: 1.5px solid var(--sw-red); }
+    .ms-chip.missing::after {
+      content: '!'; position: absolute; top: -4px; right: -4px;
+      width: 12px; height: 12px; border-radius: 50%; background: #fff; color: var(--sw-red);
+      font-size: 9px; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 1.5px var(--sw-red); font-weight: 900;
+    }
+    .ms-chip.na { background: transparent; color: var(--sw-text-sec); border: 1.5px dotted #C7D3DA; opacity: 0.5; }
+    /* legend chips inside a dark band need a dark-safe done-tick ring */
+    .ms-legend .ms-chip.done::after { box-shadow: 0 0 0 1.5px var(--sw-card); }
+    /* ── Buttons ── */
+    .ms-card-v2 .ms-btn-alloc {
+      width: 100%; font-size: 11.5px; padding: 8px; background: var(--sw-orange); color: #fff;
+      border: none; border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 11px; letter-spacing: 0.2px;
+    }
+    .ms-card-v2 .ms-btn-alloc:hover { background: var(--sw-orange-hover); }
+    .ms-card-v2 .ms-btn-reassign {
+      width: 100%; font-size: 11px; padding: 7px; background: #fff; color: var(--sw-mid);
+      border: 1.5px solid var(--sw-border); border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 11px;
+    }
+    .ms-card-v2 .ms-btn-reassign:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
+
+    /* ── Board-level legend (one per board, above the columns) ── */
+    .ms-legend {
+      background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: 12px;
+      padding: 12px 16px; margin: 0 0 12px; flex-shrink: 0;
+    }
+    .ms-legend-head {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--sw-mid);
+      font-weight: 800; margin-bottom: 11px;
+    }
+    .ms-legend-grp { display: flex; gap: 34px; flex-wrap: wrap; }
+    .ms-legend-col { flex: 1; min-width: 240px; }
+    .ms-legend-col h4 {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sw-text-sec);
+      margin: 0 0 8px; font-weight: 800;
+    }
+    .ms-legend-row { display: flex; flex-direction: column; gap: 7px; }
+    .ms-legend-item { display: flex; gap: 9px; align-items: center; font-size: 12px; color: var(--sw-text); }
+    .ms-legend-item b { color: var(--sw-dark); }
+    .ms-legend-toggle {
+      background: none; border: none; color: var(--sw-mid); font-size: 11px; font-weight: 700;
+      cursor: pointer; padding: 0; letter-spacing: 0.3px; float: right;
+    }
+    .ms-legend-toggle:hover { color: var(--sw-orange); }
+    .ms-legend.collapsed .ms-legend-grp { display: none; }
+    .ms-legend.collapsed .ms-legend-head { margin-bottom: 0; }
+
+    /* ── Board chrome: elevated make-safe columns ── */
+    .ms-board .kanban-col { min-width: 248px; flex: 0 0 248px; }
+    .ms-board .kanban-col-header {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.6px; color: var(--sw-dark);
+      padding: 13px 14px 11px;
+    }
+    .ms-board .kanban-col-header .count {
+      background: #fff; color: var(--sw-mid); font-weight: 800; box-shadow: 0 0 0 1px var(--sw-border);
+    }
+    .ms-board .kanban-empty {
+      text-align: center; padding: 26px 12px; color: var(--sw-text-sec); font-size: 11.5px;
+      border: 1px dashed var(--sw-border); border-radius: 10px; margin: 4px;
+    }
+
     .next-step-bar {
       background: var(--sw-warm-100, #F8F6F3);
       border-left: 3px solid var(--sw-orange);
@@ -8834,7 +8994,9 @@ function renderMakesafeKanban(container, columns) {
   };
   var uiColumns = buildMakesafeColumns(columns);
 
-  var html = '<div style="display:flex;gap:8px;height:100%;">';
+  var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
+  html += renderMakesafeLegend();
+  html += '<div style="display:flex;gap:8px;flex:1;min-height:0;">';
   html += '<div class="kanban-container" style="flex:1;">';
 
   MAKESAFES_STAGES.forEach(function(status) {
@@ -8845,7 +9007,7 @@ function renderMakesafeKanban(container, columns) {
     html += '<div class="kanban-body">';
 
     if (jobs.length === 0) {
-      html += '<div style="text-align:center; padding:20px; color:var(--sw-text-sec); font-size:12px;">No jobs</div>';
+      html += '<div class="kanban-empty">No jobs</div>';
     } else {
       jobs.forEach(function(j) {
         html += renderMakesafeCard(j, status);
@@ -8856,8 +9018,43 @@ function renderMakesafeKanban(container, columns) {
   });
 
   html += '</div></div>';
+  html += '</div>';
   container.innerHTML = html;
   setupKanbanHorizontalScroll();
+}
+
+// One board-level legend explaining the 5 chip glyphs + the 4 states. Collapsible
+// so it doesn't permanently eat board height once the ops team knows the key.
+var _makesafeLegendCollapsed = false;
+function toggleMakesafeLegend() {
+  _makesafeLegendCollapsed = !_makesafeLegendCollapsed;
+  var el = document.getElementById('msLegend');
+  if (el) el.classList.toggle('collapsed', _makesafeLegendCollapsed);
+}
+function renderMakesafeLegend() {
+  function chip(state, glyph) { return '<span class="ms-chip ' + state + '">' + glyph + '</span>'; }
+  var html = '<div id="msLegend" class="ms-legend' + (_makesafeLegendCollapsed ? ' collapsed' : '') + '">';
+  html += '<div class="ms-legend-head">'
+    + '<button type="button" class="ms-legend-toggle" onclick="toggleMakesafeLegend()">' + (_makesafeLegendCollapsed ? 'Show key' : 'Hide key') + '</button>'
+    + 'Card chip key &mdash; glyph = the document, colour + shape = the state</div>';
+  html += '<div class="ms-legend-grp">';
+  // The 5 glyphs
+  html += '<div class="ms-legend-col"><h4>The 5 glyphs (left &rarr; right)</h4><div class="ms-legend-row">';
+  html += '<div class="ms-legend-item">' + chip('done', 'W') + '<span><b>Work order</b> attached</span></div>';
+  html += '<div class="ms-legend-item">' + chip('pending', 'R') + '<span><b>Report</b> from trade</span></div>';
+  html += '<div class="ms-legend-item">' + chip('na', 'S') + '<span><b>SWMS</b> (MLB only; faded = N/A elsewhere)</span></div>';
+  html += '<div class="ms-legend-item">' + chip('pending', '$') + '<span><b>Invoice</b> raised / sent</span></div>';
+  html += '<div class="ms-legend-item">' + chip('pending', '&#10148;') + '<span><b>Sent</b> &mdash; pack emailed to builder</span></div>';
+  html += '</div></div>';
+  // The 4 states
+  html += '<div class="ms-legend-col"><h4>The 4 states</h4><div class="ms-legend-row">';
+  html += '<div class="ms-legend-item">' + chip('done', '&nbsp;') + '<span><b>Done</b> &mdash; solid green + tick</span></div>';
+  html += '<div class="ms-legend-item">' + chip('pending', '&nbsp;') + '<span><b>Pending</b> &mdash; hollow dashed amber (not yet)</span></div>';
+  html += '<div class="ms-legend-item">' + chip('missing', '&nbsp;') + '<span><b>Missing</b> &mdash; solid red + "!" (expected, absent)</span></div>';
+  html += '<div class="ms-legend-item">' + chip('na', '&nbsp;') + '<span><b>N/A</b> &mdash; faded dotted (not required)</span></div>';
+  html += '</div></div>';
+  html += '</div></div>';
+  return html;
 }
 
 function getMakesafeSubstatus(j) {
@@ -8929,11 +9126,36 @@ function getMakesafeStage(j, rawStatus) {
   if (sub === 'waiting_on_trade_report' || rawStatus === 'scheduled' || rawStatus === 'in_progress') return 'allocated';
   return 'new';
 }
+// Best-available completion timestamp for a make-safe, for the "Completed This
+// Week" window. Mirrors the backend makesafeCompletedAt precedence (invoice date,
+// then invoice_ready, then job.completed_at, then updated_at) using the fields the
+// board list payload actually carries.
+function getMakesafeCompletedAt(j) {
+  var md = j.makesafe_details || {};
+  return j.invoice_date || j.invoice_created_at || md.invoice_ready_at
+    || j.completed_at || j.updated_at || null;
+}
+// True when a completed make-safe falls inside the rolling current-week window
+// (< 7 days since completion). Unknown/unparseable dates stay in "completed" (same
+// fail-open as the backend) so a card is never silently lost to a missing date.
+function isMakesafeCompletedThisWeek(j) {
+  var raw = getMakesafeCompletedAt(j);
+  if (!raw) return true;
+  var t = new Date(raw).getTime();
+  if (isNaN(t)) return true;
+  return (Date.now() - t) < 7 * 86400000;
+}
 function buildMakesafeColumns(columns) {
   var out = { new: [], allocated: [], report_ready: [], completed: [], archive: [] };
   Object.keys(columns || {}).forEach(function(rawStatus) {
     (columns[rawStatus] || []).forEach(function(j) {
       var stage = getMakesafeStage(j, rawStatus);
+      // "Completed This Week" must window to a rolling current week. The backend
+      // board_stage already does a 7-day split, but the board defends against an
+      // un-windowed payload (e.g. an older deployed edge fn): anything routed to
+      // `completed` whose completion date is 7+ days old rolls to `archive`, so
+      // the column only ever shows this week's closes.
+      if (stage === 'completed' && !isMakesafeCompletedThisWeek(j)) stage = 'archive';
       if (!out[stage]) out[stage] = [];
       j._makesafe_raw_status = rawStatus;
       out[stage].push(j);
@@ -9080,17 +9302,13 @@ function makesafeMissingDocsSet(j) {
   if (Array.isArray(raw)) raw.forEach(function(d) { set[String(d).toLowerCase()] = true; });
   return set;
 }
+// state -> ms-chip class. Two-zone v2 treatment: done = solid fill + corner tick,
+// pending = hollow dashed amber, missing = solid red + "!", na = faded dotted.
+// Glyph = type, shape+colour = state (shape carries it for colour-blind safety),
+// tooltip = full words. See the board-level legend (renderMakesafeLegend).
 function renderMakesafeStatusTile(glyph, state, label) {
-  var color = MAKESAFE_ICON_STATE_COLORS[state] || MAKESAFE_ICON_STATE_COLORS.na;
-  var faded = state === 'na';
-  // Glyph = type, colour = state, tooltip = words; NA tiles are also faded so
-  // colour is never the sole signal. role=img + aria-label/title give screen-reader
-  // + hover text. cursor:default so it doesn't look separately clickable.
-  return '<span role="img" aria-label="' + escapeHtml(label) + '" title="' + escapeHtml(label) + '"'
-    + ' style="display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;'
-    + 'border-radius:6px;font-size:11px;font-weight:800;line-height:1;cursor:default;'
-    + 'background:' + color + (faded ? '14' : '22') + ';'
-    + 'color:' + color + ';opacity:' + (faded ? '0.55' : '1') + ';">' + glyph + '</span>';
+  var cls = ({ done: 'done', pending: 'pending', missing: 'missing', na: 'na' })[state] || 'na';
+  return '<span class="ms-chip ' + cls + '" role="img" aria-label="' + escapeHtml(label) + '" title="' + escapeHtml(label) + '">' + glyph + '</span>';
 }
 function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);
@@ -9138,7 +9356,7 @@ function renderMakesafeStatusIcons(j, status) {
   if (processed) tiles.push(renderMakesafeStatusTile('&#10148;', 'done', 'Pack sent to builder (open card for send log)'));
   else tiles.push(renderMakesafeStatusTile('&#10148;', 'pending', 'Not yet emailed to builder'));
 
-  return '<div role="group" aria-label="Make-safe document and send status" style="display:flex;gap:5px;align-items:center;margin-top:8px;">' + tiles.join('') + '</div>';
+  return '<div class="ms-chips" role="group" aria-label="Make-safe document and send status" style="margin-top:8px;">' + tiles.join('') + '</div>';
 }
 function makesafeUiStageLabel(stage) {
   return ({ new: 'New', allocated: 'Allocated', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
@@ -9157,55 +9375,67 @@ async function moveMakesafeUiStage(jobId, stage) {
   await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: target.substatus });
 }
 
+// Two-zone v2 card: a dark identity band (job type, suburb, builder, BOTH job
+// numbers, age badge) over a clean white progress body (intake/client meta,
+// crew-status line, chip strip, Allocate/Reassign). On-brand: band in sw-dark,
+// orange = accent + action only. See the locked mockup card-ui-twozone-v2.
 function renderMakesafeCard(j, status) {
   var builder = getMakesafeBuilder(j);
   var suburb = j.site_suburb || j.suburb || '';
   var age = getMakesafeAgeParts(j, status);
+  var ageClass = ({ green: 'green', yellow: 'amber', red: 'red' })[age.health] || 'neutral';
   var intake = getMakesafeIntakeDate(j);
-  var intakeLabel = intake ? fmtDate(String(intake).slice(0, 10)) : 'Intake n/a';
+  var intakeLabel = intake ? fmtDate(String(intake).slice(0, 10)) : 'n/a';
   var crew = getMakesafeCrewLabel(j);
-  var day = getMakesafeDayLabel(j);
-  var html = '<div class="kanban-card" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)" style="border-left:4px solid ' + age.color + ';">';
-
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">';
-  html += '<div style="min-width:0;flex:1;">';
   var typeLabel = getMakesafeTypeLabel(j);
-  html += '<div style="font-size:10px;font-weight:800;color:#D97706;text-transform:uppercase;letter-spacing:0.35px;">' + escapeHtml(typeLabel) + '</div>';
-  html += '<div style="font-weight:800;font-size:15px;color:var(--sw-dark);line-height:1.15;">' + escapeHtml(suburb || 'Suburb TBC') + '</div>';
-  html += '</div>';
-  html += renderMakesafeTinyBadge(age.label, age.color);
-  html += '</div>';
+  var assignDate = getMakesafeAssignmentDateDMY(j);
 
-  if (builder) html += '<div style="font-size:12px;color:#D97706;font-weight:800;margin-top:5px;line-height:1.25;">' + escapeHtml(builder) + '</div>';
-  // Client work order number (external_ref) is the key reference on the board — show it big
-  // and bold. The internal SWMS job number stays small underneath.
-  if (j.external_ref) {
-    html += '<div style="margin-top:4px;"><span style="display:inline-block;background:var(--sw-dark);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;letter-spacing:0.3px;">' + escapeHtml(j.external_ref) + '</span></div>';
-  }
-  if (j.job_number) {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px;">' + escapeHtml(j.job_number) + '</div>';
-  }
-  if (j.client_name) html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:3px;">Client: ' + escapeHtml(j.client_name) + '</div>';
-  html += '<div style="font-size:11px;color:var(--sw-text);margin-top:6px;display:flex;flex-direction:column;gap:2px;">';
-  html += '<span>Intake: <strong>' + escapeHtml(intakeLabel) + '</strong></span>';
-  // Crew + assignment date — only shown once someone is allocated (hidden otherwise).
+  var html = '<div class="kanban-card ms-card-v2" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
+  // status spine = age health
+  html += '<div class="ms-spine" style="background:' + age.color + ';"></div>';
+
+  // ── ZONE 1: identity band ──
+  html += '<div class="ms-id-band">';
+  html += '<div class="ms-id-top"><div style="min-width:0;flex:1;">';
+  html += '<div class="ms-id-type">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</div>';
+  html += '<div class="ms-id-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';
+  if (builder) html += '<div class="ms-id-builder">' + escapeHtml(String(builder)) + '</div>';
+  html += '</div>';
+  html += '<span class="ms-age-badge ' + ageClass + '">' + escapeHtml(String(age.label || '')) + '</span>';
+  html += '</div>';
+  // BOTH job numbers, clearly labelled. Builder ref = external_ref, our internal =
+  // job_number (gets the brand-orange hairline so it reads as ours).
+  html += '<div class="ms-jobnums">';
+  html += '<div class="ms-jobnum builder"><div class="ms-jn-lbl">Builder ref</div><div class="ms-jn-val">' + escapeHtml(String(j.external_ref || '—')) + '</div></div>';
+  html += '<div class="ms-jobnum ours"><div class="ms-jn-lbl">Our job #</div><div class="ms-jn-val">' + escapeHtml(String(j.job_number || '—')) + '</div></div>';
+  html += '</div>';
+  html += '</div>'; // /id-band
+
+  // ── ZONE 2: progress body ──
+  html += '<div class="ms-body">';
+  html += '<div class="ms-meta">';
+  html += '<span><b>Intake</b> ' + escapeHtml(String(intakeLabel)) + '</span>';
+  if (j.client_name) html += '<span><b>Client</b> ' + escapeHtml(String(j.client_name)) + '</span>';
+  html += '</div>';
+  // crew status line — headline of the body
   if (crew) {
-    html += '<span>Crew: <strong>' + escapeHtml(crew) + '</strong></span>';
-    var assignDate = getMakesafeAssignmentDateDMY(j);
-    if (assignDate) html += '<span>Assignment: <strong>' + escapeHtml(assignDate) + '</strong></span>';
+    html += '<div class="ms-crew alloc"><span class="ms-dot"></span>' + escapeHtml(String(crew));
+    if (assignDate) html += ' <span class="ms-crew-day">&middot; ' + escapeHtml(String(assignDate)) + '</span>';
+    html += '</div>';
+  } else {
+    html += '<div class="ms-crew unalloc"><span class="ms-dot"></span>No crew yet</div>';
   }
-  html += '</div>';
-
-  // Compact, scannable status icon row (WO / Report / SWMS / Invoice / Sent),
-  // colour-coded with hover tooltips — replaces the old verbose pill stack so a
-  // whole column reads at a glance. See renderMakesafeStatusIcons for state mapping.
+  // chip strip (WO / Report / SWMS / Invoice / Sent)
   html += renderMakesafeStatusIcons(j, status);
 
   if (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation') {
-    var allocLabel = status === 'allocated' ? 'Reassign' : 'Allocate';
-    html += '<button onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')" style="width:100%;font-size:11px;padding:6px 8px;background:#E67E22;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:800;margin-top:8px;">' + allocLabel + '</button>';
+    var isReassign = status === 'allocated';
+    var allocLabel = isReassign ? 'Reassign crew' : 'Allocate';
+    var btnCls = isReassign ? 'ms-btn-reassign' : 'ms-btn-alloc';
+    html += '<button class="' + btnCls + '" onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')">' + allocLabel + '</button>';
   }
-  html += '</div>';
+  html += '</div>'; // /body
+  html += '</div>'; // /card
   return html;
 }
 

@@ -9308,7 +9308,9 @@ function makesafeMissingDocsSet(j) {
 // tooltip = full words. See the board-level legend (renderMakesafeLegend).
 function renderMakesafeStatusTile(glyph, state, label) {
   var cls = ({ done: 'done', pending: 'pending', missing: 'missing', na: 'na' })[state] || 'na';
-  return '<span class="ms-chip ' + cls + '" role="img" aria-label="' + escapeHtml(label) + '" title="' + escapeHtml(label) + '">' + glyph + '</span>';
+  // escapeAttr (not escapeHtml) for the attribute context: label embeds builder/job
+  // data, and escapeHtml leaves quotes intact which could break out of the attribute.
+  return '<span class="ms-chip ' + cls + '" role="img" aria-label="' + escapeAttr(label) + '" title="' + escapeAttr(label) + '">' + glyph + '</span>';
 }
 function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);

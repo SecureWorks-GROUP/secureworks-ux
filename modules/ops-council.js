@@ -38,7 +38,15 @@ async function loadApprovals() {
       var still = _councilSubmissions.find(function(s) { return s.id === _councilDetailSubId; });
       if (still) selectApproval(_councilDetailSubId);
     }
+
+    // Load intake count for badge
+    if (typeof loadMakesafeIntakeCockpit === 'function') {
+      loadMakesafeIntakeCockpit().then(function(count) {
+        if (typeof refreshMsIntakeBadge === 'function') refreshMsIntakeBadge(count || 0);
+      }).catch(function() {});
+    }
   } catch (e) {
+    if (typeof refreshMsIntakeBadge === 'function') refreshMsIntakeBadge(0);
     console.error('loadApprovals error:', e);
     var lp = document.getElementById('approvalsListPanel');
     if (lp) lp.innerHTML = '<div style="text-align:center;padding:40px;color:#8FA4B2;">Failed to load council submissions.</div>';

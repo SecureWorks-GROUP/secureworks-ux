@@ -35,6 +35,13 @@
       --sw-text: #1A272E;
       --sw-text-sec: #8FA4B2;
       --sw-green: #27AE60;
+      /* Refined make-safe "done" green — a muted sage/forest set that replaces
+         the harsh neon #27AE60 on the make-safe board only (calmer, premium).
+         --sw-sage = done fills/icons, --sw-sage-deep = green text, --sw-sage-tint
+         = the soft chip background behind a done icon. */
+      --sw-sage: #5E8B6E;
+      --sw-sage-deep: #4A7259;
+      --sw-sage-tint: #E7EFE8;
       --sw-red: #E74C3C;
       --sw-yellow: #E67E22;
       --sw-blue: #3498DB;
@@ -1349,133 +1356,199 @@
     .kanban-substage-group.collapsed { display: none; }
 
     /* ════════════════════════════════════════════════════════════
-       MAKE-SAFE BOARD — Two-zone v2 card + board chrome + legend.
-       On-brand: identity band in dark blue, orange = accent/action.
+       MAKE-SAFE BOARD — OPT1 card ("C refined") + board chrome + legend.
+       Approved minimalist design (2026-06-16): light warm card, a 3px
+       type-coloured top-border + small type-tag pill, navy as text, brand
+       orange reserved for the Allocate action. Doc-completeness is a row of
+       5 line-icon chips with done / pending / missing / N/A states, plus a
+       small X/5 count. Refined sage green replaces the old neon.
        The card keeps the .kanban-card class (drag/click hooks) but
-       .ms-card-v2 overrides the glassmorphic base for the two-zone look.
+       .ms-card-v2 overrides the glassmorphic base for the OPT1 look.
        ════════════════════════════════════════════════════════════ */
     .kanban-card.ms-card-v2 {
       background: var(--sw-card);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
-      border-radius: 11px;
-      padding: 0;                 /* zones own their own padding */
-      border: none;
-      box-shadow: 0 2px 8px rgba(41,60,70,0.10), 0 0 0 1px rgba(41,60,70,0.05);
-      overflow: hidden;
+      border: 1px solid var(--sw-border);
+      border-top: 3px solid var(--ms-type, var(--sw-mid));
+      border-radius: 12px;
+      padding: 11px 13px 13px;
+      box-shadow: 0 1px 2px rgba(41,60,70,0.05);
+      overflow: visible;
     }
     .kanban-card.ms-card-v2::before,
     .kanban-card.ms-card-v2::after { display: none; }
     .kanban-card.ms-card-v2:hover {
       transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(41,60,70,0.16), 0 0 0 1px rgba(41,60,70,0.06);
+      box-shadow: 0 6px 16px rgba(41,60,70,0.12);
       background: var(--sw-card);
-      border-color: transparent;
+      border-color: var(--sw-border);
+      border-top-color: var(--ms-type, var(--sw-mid));
     }
-    /* thin status spine on the very left edge = age health */
-    .ms-card-v2 .ms-spine {
-      position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 3;
+    /* type tint — colour appears only on the top-border + the type tag */
+    .ms-card-v2.t-roof    { --ms-type: var(--sw-orange); }
+    .ms-card-v2.t-fence   { --ms-type: var(--sw-mid); }
+    .ms-card-v2.t-ceiling { --ms-type: #8E44AD; }
+    .ms-card-v2.t-board   { --ms-type: var(--sw-blue); }
+    .ms-card-v2.t-struct  { --ms-type: var(--sw-dark); }
+    .ms-card-v2.t-default { --ms-type: var(--sw-mid); }
+
+    /* ── Top line: type tag + age pill ── */
+    .ms-card-v2 .ms-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ms-card-v2 .ms-ttag {
+      font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+      color: var(--ms-type, var(--sw-mid));
+      background: color-mix(in srgb, var(--ms-type, var(--sw-mid)) 12%, #fff);
+      padding: 2px 8px; border-radius: 100px; white-space: nowrap;
     }
-    /* ── ZONE 1 — Identity band ── */
-    .ms-card-v2 .ms-id-band {
-      background: linear-gradient(135deg, var(--sw-dark) 0%, #324A57 100%);
-      padding: 8px 12px 9px 14px;
-      color: #fff;
+    /* age / KPI pill — muted age inside the KPI, escalating with health */
+    .ms-card-v2 .ms-age-pill {
+      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+      font-size: 10px; font-weight: 800; letter-spacing: 0.2px;
+      padding: 2px 8px; border-radius: 100px;
+      background: var(--sw-warm-200); color: var(--sw-mid); flex-shrink: 0;
     }
-    .ms-card-v2 .ms-id-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 7px; }
-    .ms-card-v2 .ms-id-type {
-      font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
-      color: var(--sw-orange); margin-bottom: 1px;
+    .ms-card-v2 .ms-age-pill.green   { background: var(--sw-warm-200); color: var(--sw-mid); }
+    .ms-card-v2 .ms-age-pill.amber   { background: color-mix(in srgb, var(--sw-yellow) 14%, #fff); color: var(--sw-yellow); }
+    .ms-card-v2 .ms-age-pill.red     { background: color-mix(in srgb, var(--sw-red) 14%, #fff); color: var(--sw-red); }
+    .ms-card-v2 .ms-age-pill.over    { background: var(--sw-red); color: #fff; }
+    .ms-card-v2 .ms-age-pill.neutral { background: var(--sw-warm-200); color: var(--sw-mid); }
+    .ms-card-v2 .ms-age-pill .ms-warn-ic { font-size: 9px; font-weight: 900; }
+
+    /* ── Identity: suburb + builder ── */
+    .ms-card-v2 .ms-suburb { font-size: 15px; font-weight: 800; color: var(--sw-dark); margin-top: 8px; letter-spacing: -0.25px; line-height: 1.05; }
+    .ms-card-v2 .ms-builder { font-size: 11.5px; color: var(--sw-mid); font-weight: 600; margin-top: 2px; }
+
+    /* ── Refined dual job-number block (Marnin's tweak): cleaner, tighter,
+       lighter labels, less boxy — a soft inset row rather than two heavy
+       boxes. Builder ref + Our job # stay clearly distinct. ── */
+    .ms-card-v2 .ms-refs {
+      display: flex; align-items: stretch; gap: 0;
+      margin-top: 8px; border-radius: 7px;
+      background: var(--sw-warm-100);
+      box-shadow: inset 0 0 0 1px var(--sw-border);
     }
-    .ms-card-v2 .ms-id-suburb { font-weight: 800; font-size: 14px; color: #fff; line-height: 1.1; letter-spacing: -0.1px; }
-    .ms-card-v2 .ms-id-builder { font-size: 10.5px; color: #CFE0EA; font-weight: 600; margin-top: 2px; }
-    .ms-card-v2 .ms-age-badge {
-      font-size: 9px; padding: 2px 7px; border-radius: 20px; font-weight: 800; white-space: nowrap;
-      letter-spacing: 0.2px; flex-shrink: 0;
+    .ms-card-v2 .ms-ref { flex: 1; min-width: 0; padding: 5px 9px; }
+    .ms-card-v2 .ms-ref + .ms-ref { border-left: 1px solid var(--sw-border); }
+    .ms-card-v2 .ms-ref-lbl {
+      font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+      color: var(--sw-text-sec); line-height: 1.2;
     }
-    .ms-card-v2 .ms-age-badge.green { background: rgba(39,174,96,0.22); color: #9BE8BC; }
-    .ms-card-v2 .ms-age-badge.amber { background: rgba(243,156,18,0.24); color: #FBD89A; }
-    .ms-card-v2 .ms-age-badge.red   { background: rgba(231,76,60,0.26); color: #F4B0A8; }
-    .ms-card-v2 .ms-age-badge.neutral { background: rgba(255,255,255,0.14); color: #CFE0EA; }
-    /* BOTH job numbers — clearly labelled, side by side */
-    .ms-card-v2 .ms-jobnums { display: flex; gap: 7px; margin-top: 7px; }
-    .ms-card-v2 .ms-jobnum {
-      flex: 1; min-width: 0;
-      background: rgba(255,255,255,0.10);
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 6px; padding: 3px 7px;
-    }
-    .ms-card-v2 .ms-jn-lbl {
-      font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 800;
-      color: #9FB6C2; line-height: 1.2;
-    }
-    .ms-card-v2 .ms-jn-val {
-      font-size: 11px; font-weight: 800; color: #fff; line-height: 1.25; margin-top: 1px;
+    .ms-card-v2 .ms-ref-val {
+      font-size: 12px; font-weight: 800; color: var(--sw-dark); line-height: 1.25; margin-top: 1px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    /* our own number gets the brand-orange hairline so it's distinct */
-    .ms-card-v2 .ms-jobnum.ours { border-color: rgba(241,90,41,0.55); background: rgba(241,90,41,0.14); }
-    .ms-card-v2 .ms-jobnum.ours .ms-jn-lbl { color: #F6A98C; }
-    /* ── ZONE 2 — Progress body (white) ──
-       min-height keeps every card a uniform footprint regardless of state:
-       cards without an Allocate/Reassign button fill to roughly match cards
-       that have one, so a column reads even rather than ragged. */
-    .ms-card-v2 .ms-body {
-      padding: 8px 12px 10px 14px;
-      display: flex; flex-direction: column;
-      min-height: 92px;
-    }
+    /* our own number tinted in brand orange so "which is which" is instant */
+    .ms-card-v2 .ms-ref.ours .ms-ref-lbl { color: var(--sw-orange); }
+
+    /* ── Meta line: intake / client ── */
     .ms-card-v2 .ms-meta {
-      display: flex; justify-content: space-between; gap: 8px;
-      font-size: 10px; color: var(--sw-text-sec); margin-bottom: 6px; flex-wrap: wrap;
+      display: flex; gap: 12px; flex-wrap: wrap;
+      font-size: 10.5px; color: var(--sw-text-sec); margin-top: 7px;
     }
     .ms-card-v2 .ms-meta b { color: var(--sw-mid); font-weight: 700; }
-    .ms-card-v2 .ms-crew { font-size: 11.5px; font-weight: 800; margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
-    .ms-card-v2 .ms-crew.unalloc { color: var(--sw-red); }
-    .ms-card-v2 .ms-crew.alloc { color: var(--sw-dark); }
-    .ms-card-v2 .ms-crew .ms-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-    .ms-card-v2 .ms-crew.alloc .ms-dot { background: var(--sw-green); }
-    .ms-card-v2 .ms-crew.unalloc .ms-dot { background: var(--sw-red); }
-    .ms-card-v2 .ms-crew .ms-crew-day { color: var(--sw-mid); font-weight: 600; font-size: 11px; }
-    /* ── Chip strip (Treatment 1: fill = done, outline = pending) ──
-       margin-top:auto pins the strip (and the button below it) to the bottom of
-       the flex body so the min-height fills evenly across all card states. */
-    .ms-card-v2 .ms-chips { margin-top: auto; gap: 4px; }
-    .ms-card-v2 .ms-chips, .ms-legend .ms-chips { display: flex; gap: 5px; align-items: center; }
-    .ms-chip {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 20px; height: 20px; border-radius: 6px; font-size: 10.5px; font-weight: 800; line-height: 1;
-      position: relative; font-family: var(--sw-font); cursor: default;
+
+    /* ── Loud "past SLA" banner (the approved breach treatment) ── */
+    .ms-card-v2 .ms-sla-banner {
+      display: flex; align-items: center; gap: 7px; margin-top: 9px;
+      background: color-mix(in srgb, var(--sw-red) 10%, #fff); color: var(--sw-red);
+      font-size: 10.5px; font-weight: 800; padding: 6px 9px; border-radius: 7px;
     }
-    .ms-chip.done { background: var(--sw-green); color: #fff; }
-    .ms-chip.done::after {
-      content: '\2713'; position: absolute; top: -3px; right: -3px;
-      width: 11px; height: 11px; border-radius: 50%; background: var(--sw-green); color: #fff;
-      font-size: 7px; display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 0 0 1.5px var(--sw-card); font-weight: 900;
+    .ms-card-v2 .ms-sla-banner .ms-sla-ic {
+      width: 14px; height: 14px; border-radius: 4px; background: var(--sw-red); color: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 900; flex-shrink: 0;
     }
-    .ms-chip.pending { background: #fff; color: var(--sw-yellow); border: 1.5px dashed var(--sw-yellow); }
-    .ms-chip.missing { background: var(--sw-red); color: #fff; border: 1.5px solid var(--sw-red); }
-    .ms-chip.missing::after {
-      content: '!'; position: absolute; top: -4px; right: -4px;
-      width: 12px; height: 12px; border-radius: 50%; background: #fff; color: var(--sw-red);
-      font-size: 9px; display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 0 0 1.5px var(--sw-red); font-weight: 900;
+
+    /* ── 2A crew chip (avatar initials + name + assign date) ── */
+    .ms-card-v2 .ms-block { margin-top: 10px; border-top: 1px solid var(--sw-light); padding-top: 10px; }
+    .ms-card-v2 .ms-crew-chip { display: flex; align-items: center; gap: 9px; }
+    .ms-card-v2 .ms-avatars { display: flex; flex-shrink: 0; }
+    .ms-card-v2 .ms-av {
+      width: 23px; height: 23px; border-radius: 50%; background: var(--sw-mid);
+      color: #fff; font-size: 9.5px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 2px var(--sw-card); margin-left: -7px;
     }
-    .ms-chip.na { background: transparent; color: var(--sw-text-sec); border: 1.5px dotted #C7D3DA; opacity: 0.5; }
-    /* legend chips inside a dark band need a dark-safe done-tick ring */
-    .ms-legend .ms-chip.done::after { box-shadow: 0 0 0 1.5px var(--sw-card); }
-    /* ── Buttons ── */
+    .ms-card-v2 .ms-av:first-child { margin-left: 0; }
+    .ms-card-v2 .ms-crew-txt { line-height: 1.15; min-width: 0; }
+    .ms-card-v2 .ms-crew-name { font-size: 12.5px; font-weight: 800; color: var(--sw-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ms-card-v2 .ms-crew-when { font-size: 10px; font-weight: 600; color: var(--sw-text-sec); }
+    .ms-card-v2 .ms-crew-chip.off .ms-av-empty {
+      width: 23px; height: 23px; border-radius: 50%; background: transparent; flex-shrink: 0;
+      box-shadow: inset 0 0 0 1.5px var(--sw-mid-light);
+      display: flex; align-items: center; justify-content: center; color: var(--sw-mid-light); font-size: 13px; font-weight: 800;
+    }
+    .ms-card-v2 .ms-crew-chip.off .ms-crew-name { color: var(--sw-mid-light); }
+
+    /* ════════════════════════════════════════════════════════════
+       DOC-COMPLETENESS ICON ROW (OPT1 — line icons in soft square chips)
+       5 icons, fixed order: WO · Report · SWMS · Invoice · Sent. State reads
+       at a glance from the chip: done = sage tint + forest glyph + tiny check;
+       pending = neutral warm chip; missing = soft-red chip + red "!"; N/A =
+       faint dashed outline. A small X/5 count keeps the "complete?" feel.
+       ════════════════════════════════════════════════════════════ */
+    .ms-card-v2 .ms-doc-wrap { margin-top: 10px; }
+    .ms-doc-top { display: flex; align-items: baseline; justify-content: space-between; }
+    .ms-doc-lbl { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sw-mid-light); }
+    .ms-doc-count { font-size: 11px; font-weight: 800; color: var(--sw-dark); }
+    .ms-doc-count.complete { color: var(--sw-sage-deep); }
+    .ms-doc-icons { display: flex; gap: 7px; margin-top: 7px; }
+    .ms-doc { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .ms-doc-chip {
+      width: 100%; aspect-ratio: 1 / 1; max-width: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; position: relative;
+    }
+    .ms-doc-chip svg { width: 16px; height: 16px; display: block; }
+    .ms-doc-chip svg path, .ms-doc-chip svg line, .ms-doc-chip svg polyline,
+    .ms-doc-chip svg rect, .ms-doc-chip svg circle, .ms-doc-chip svg polygon { stroke-width: 1.7; }
+    /* state: DONE */
+    .ms-doc.done .ms-doc-chip { background: var(--sw-sage-tint); }
+    .ms-doc.done .ms-doc-chip svg { stroke: var(--sw-sage-deep); }
+    .ms-doc.done .ms-doc-chip::after {
+      content: ""; position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px;
+      border-radius: 50%; background: var(--sw-sage); box-shadow: 0 0 0 2px var(--sw-card);
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+      background-size: 8px 8px; background-repeat: no-repeat; background-position: center;
+    }
+    /* state: PENDING */
+    .ms-doc.pending .ms-doc-chip { background: var(--sw-warm-200); }
+    .ms-doc.pending .ms-doc-chip svg { stroke: var(--sw-mid-light); }
+    /* state: MISSING (expected but absent) */
+    .ms-doc.missing .ms-doc-chip { background: color-mix(in srgb, var(--sw-red) 10%, #fff); }
+    .ms-doc.missing .ms-doc-chip svg { stroke: var(--sw-red); }
+    .ms-doc.missing .ms-doc-chip::after {
+      content: "!"; position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px;
+      border-radius: 50%; background: var(--sw-red); color: #fff; box-shadow: 0 0 0 2px var(--sw-card);
+      font-size: 8px; font-weight: 900; display: flex; align-items: center; justify-content: center; line-height: 1;
+    }
+    /* state: N/A */
+    .ms-doc.na .ms-doc-chip { background: transparent; box-shadow: inset 0 0 0 1.4px #E2E9ED; }
+    .ms-doc.na .ms-doc-chip svg { stroke: #C3CED5; }
+    .ms-doc-name { font-size: 7.5px; font-weight: 800; letter-spacing: 0.2px; text-transform: uppercase; color: var(--sw-mid-light); }
+    .ms-doc.done .ms-doc-name    { color: var(--sw-sage-deep); }
+    .ms-doc.missing .ms-doc-name { color: var(--sw-red); }
+    .ms-doc.na .ms-doc-name      { color: #C3CED5; }
+
+    /* ── Action buttons ── */
     .ms-card-v2 .ms-btn-alloc {
-      width: 100%; font-size: 11px; padding: 6px; background: var(--sw-orange); color: #fff;
-      border: none; border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 8px; letter-spacing: 0.2px;
+      width: 100%; font-size: 12px; padding: 8px; background: var(--sw-orange); color: #fff;
+      border: none; border-radius: 7px; cursor: pointer; font-weight: 800; margin-top: 11px; letter-spacing: 0.2px;
     }
     .ms-card-v2 .ms-btn-alloc:hover { background: var(--sw-orange-hover); }
     .ms-card-v2 .ms-btn-reassign {
-      width: 100%; font-size: 11px; padding: 6px; background: #fff; color: var(--sw-mid);
-      border: 1.5px solid var(--sw-border); border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 8px;
+      width: 100%; font-size: 12px; padding: 8px; background: #fff; color: var(--sw-mid);
+      border: 1.5px solid var(--sw-border); border-radius: 7px; cursor: pointer; font-weight: 800; margin-top: 11px;
     }
     .ms-card-v2 .ms-btn-reassign:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
+
+    /* ── Legend mini icon chips (reuse the doc states at small size) ── */
+    .ms-legend .ms-lg-mini {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 6px; vertical-align: middle; margin-right: 8px;
+      position: relative; flex-shrink: 0;
+    }
+    .ms-legend .ms-lg-mini svg { width: 12px; height: 12px; }
+    .ms-legend .ms-lg-mini svg path, .ms-legend .ms-lg-mini svg line,
+    .ms-legend .ms-lg-mini svg polyline, .ms-legend .ms-lg-mini svg circle { stroke-width: 1.8; }
 
     /* ── Board-level legend (one per board, above the columns) ── */
     .ms-legend {
@@ -9042,26 +9115,42 @@ function toggleMakesafeLegend() {
   if (el) el.classList.toggle('collapsed', _makesafeLegendCollapsed);
 }
 function renderMakesafeLegend() {
-  function chip(state, glyph) { return '<span class="ms-chip ' + state + '">' + glyph + '</span>'; }
+  // A mini state chip echoing the card's doc-icon states (sage tint / neutral /
+  // soft-red / dashed), holding the given glyph key.
+  function glyphChip(state, key) {
+    return '<span class="ms-doc ' + state + '" style="display:inline-flex;width:auto;flex:none;">'
+      + '<span class="ms-doc-chip ms-lg-mini" style="max-width:22px;">' + makesafeDocGlyph(key) + '</span></span>';
+  }
+  function stateChip(state, key) {
+    return '<span class="ms-doc ' + state + '" style="display:inline-flex;width:auto;flex:none;">'
+      + '<span class="ms-doc-chip ms-lg-mini" style="max-width:22px;">' + makesafeDocGlyph(key) + '</span></span>';
+  }
   var html = '<div id="msLegend" class="ms-legend' + (_makesafeLegendCollapsed ? ' collapsed' : '') + '">';
   html += '<div class="ms-legend-head">'
     + '<button type="button" class="ms-legend-toggle" onclick="toggleMakesafeLegend()">' + (_makesafeLegendCollapsed ? 'Show key' : 'Hide key') + '</button>'
-    + 'Card chip key &mdash; glyph = the document, colour + shape = the state</div>';
+    + 'Card key &mdash; icon = the document, chip = the state</div>';
   html += '<div class="ms-legend-grp">';
-  // The 5 glyphs
-  html += '<div class="ms-legend-col"><h4>The 5 glyphs (left &rarr; right)</h4><div class="ms-legend-row">';
-  html += '<div class="ms-legend-item">' + chip('done', 'W') + '<span><b>Work order</b> attached</span></div>';
-  html += '<div class="ms-legend-item">' + chip('pending', 'R') + '<span><b>Report</b> from trade</span></div>';
-  html += '<div class="ms-legend-item">' + chip('na', 'S') + '<span><b>SWMS</b> (MLB only; faded = N/A elsewhere)</span></div>';
-  html += '<div class="ms-legend-item">' + chip('pending', '$') + '<span><b>Invoice</b> raised / sent</span></div>';
-  html += '<div class="ms-legend-item">' + chip('pending', '&#10148;') + '<span><b>Sent</b> &mdash; pack emailed to builder</span></div>';
+  // The 5 doc icons
+  html += '<div class="ms-legend-col"><h4>The 5 doc icons (left &rarr; right)</h4><div class="ms-legend-row">';
+  html += '<div class="ms-legend-item">' + glyphChip('done', 'wo') + '<span><b>WO</b> &mdash; work order attached</span></div>';
+  html += '<div class="ms-legend-item">' + glyphChip('pending', 'report') + '<span><b>Rep</b> &mdash; make-safe report from trade</span></div>';
+  html += '<div class="ms-legend-item">' + glyphChip('na', 'swms') + '<span><b>SWMS</b> &mdash; MLB only (N/A elsewhere)</span></div>';
+  html += '<div class="ms-legend-item">' + glyphChip('pending', 'invoice') + '<span><b>Inv</b> &mdash; invoice raised / sent</span></div>';
+  html += '<div class="ms-legend-item">' + glyphChip('pending', 'sent') + '<span><b>Sent</b> &mdash; pack emailed to builder</span></div>';
   html += '</div></div>';
   // The 4 states
   html += '<div class="ms-legend-col"><h4>The 4 states</h4><div class="ms-legend-row">';
-  html += '<div class="ms-legend-item">' + chip('done', '&nbsp;') + '<span><b>Done</b> &mdash; solid green + tick</span></div>';
-  html += '<div class="ms-legend-item">' + chip('pending', '&nbsp;') + '<span><b>Pending</b> &mdash; hollow dashed amber (not yet)</span></div>';
-  html += '<div class="ms-legend-item">' + chip('missing', '&nbsp;') + '<span><b>Missing</b> &mdash; solid red + "!" (expected, absent)</span></div>';
-  html += '<div class="ms-legend-item">' + chip('na', '&nbsp;') + '<span><b>N/A</b> &mdash; faded dotted (not required)</span></div>';
+  html += '<div class="ms-legend-item">' + stateChip('done', 'report') + '<span><b>Done</b> &mdash; sage tint + check</span></div>';
+  html += '<div class="ms-legend-item">' + stateChip('pending', 'report') + '<span><b>Pending</b> &mdash; neutral (not yet, fine)</span></div>';
+  html += '<div class="ms-legend-item">' + stateChip('missing', 'report') + '<span><b>Missing</b> &mdash; soft-red + "!" (expected, absent)</span></div>';
+  html += '<div class="ms-legend-item">' + stateChip('na', 'report') + '<span><b>N/A</b> &mdash; faint dashed (not required)</span></div>';
+  html += '<div class="ms-legend-item" style="margin-top:2px;"><span style="font-size:11px;color:var(--sw-text-sec);">Header shows an <b style="color:var(--sw-dark);">X / N</b> completeness count.</span></div>';
+  html += '</div></div>';
+  // KPI / SLA
+  html += '<div class="ms-legend-col"><h4>Age &amp; SLA</h4><div class="ms-legend-row">';
+  html += '<div class="ms-legend-item"><span class="ms-age-pill neutral" style="margin-right:8px;">3d</span><span><b>Age pill</b> &mdash; muted days in stage</span></div>';
+  html += '<div class="ms-legend-item"><span class="ms-age-pill amber" style="margin-right:8px;">6d</span><span><b>Watch</b> &mdash; nearing the stage SLA</span></div>';
+  html += '<div class="ms-legend-item"><span class="ms-age-pill over" style="margin-right:8px;"><span class="ms-warn-ic">&#9888;</span>9d</span><span><b>Past SLA</b> &mdash; a red banner appears on the card</span></div>';
   html += '</div></div>';
   html += '</div></div>';
   return html;
@@ -9301,76 +9390,133 @@ function renderMakesafeTinyBadge(label, color) {
 // States: done=green, pending=amber (normal, not yet), missing=red (expected but
 // absent, per missing_docs), na=grey/faded (not applicable, e.g. SWMS for non-MLB).
 var MAKESAFE_ICON_STATE_COLORS = {
-  done:    '#27AE60', // --sw-green
-  pending: '#E67E22', // --sw-yellow (amber)
-  missing: '#E74C3C', // --sw-red
-  na:      '#8FA4B2'  // --sw-text-sec (grey)
+  done:    '#5E8B6E', // --sw-sage (refined done green)
+  pending: '#8FA4B2', // --sw-mid-light (neutral, "not yet, fine")
+  missing: '#E74C3C', // --sw-red (expected but absent)
+  na:      '#C3CED5'  // dim (not applicable)
 };
+
+// ── Make-safe SLA / "too old" thresholds (CALIBRATABLE) ──────────────────
+// Days a make-safe may sit in its current board stage before the card shows a
+// loud red "past SLA" banner. These are sensible defaults; Marnin will tune the
+// exact numbers later. `default` applies to any stage not listed. Edit here.
+var MAKESAFE_SLA_DAYS = {
+  new:          3,  // unallocated should be picked up fast
+  allocated:    7,  // crew on it, report should land within a week
+  report_ready: 4,  // report in, just needs sending/invoicing
+  _default:     7
+};
+// "Watch" band: cards within this many days of the breach threshold get the
+// amber age pill (heads-up before it goes red). Calibratable.
+var MAKESAFE_SLA_WATCH_DAYS = 1;
+
+// Days-in-stage for a card, with breach/watch flags vs the threshold above.
+// Reuses the existing age logic (getMakesafeAgeParts -> days since intake) as a
+// pragmatic proxy for "days in stage": the board list payload does not carry a
+// per-stage entered-at timestamp, so age-since-intake is the available signal.
+// When a real stage-entered timestamp lands on the payload, swap `days` here.
+function getMakesafeSlaParts(j, status) {
+  var age = getMakesafeAgeParts(j, status);
+  var days = (age && age.days != null) ? age.days : null;
+  var threshold = (MAKESAFE_SLA_DAYS[status] != null) ? MAKESAFE_SLA_DAYS[status] : MAKESAFE_SLA_DAYS._default;
+  // Completed / archived cards never breach (no live SLA).
+  var live = status !== 'completed' && status !== 'archive';
+  var breached = live && days != null && days >= threshold;
+  var watch = live && !breached && days != null && days >= (threshold - MAKESAFE_SLA_WATCH_DAYS);
+  return { days: days, threshold: threshold, breached: breached, watch: watch, live: live };
+}
+
+// Inline SVG line glyph for each of the 5 tracked documents. 1.7px line weight
+// (set in CSS) so they read as a tasteful set. Keys: wo, report, swms, invoice, sent.
+function makesafeDocGlyph(key) {
+  var G = {
+    wo:      '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a2 2 0 0 1 2 2v0M9 4a2 2 0 0 0-2 2v0M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M7 6h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>',
+    report:  '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="8.5" y1="13" x2="15.5" y2="13"/><line x1="8.5" y1="16.5" x2="13.5" y2="16.5"/></svg>',
+    swms:    '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.2-2.9 7.6-7 8.7C7.9 18.6 5 15.2 5 11V6z"/><polyline points="9.2 11.5 11.2 13.5 15 9.5"/></svg>',
+    invoice: '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10a1 1 0 0 1 1 1v17l-3-1.6L12 21l-3-1.6L6 21V4a1 1 0 0 1 1-1z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>',
+    sent:    '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="4" x2="9.5" y2="14.5"/><polygon points="20 4 14 21 11 13 3 10 20 4"/></svg>'
+  };
+  return G[key] || G.report;
+}
+
 function makesafeMissingDocsSet(j) {
   var raw = j.missing_docs;
   var set = {};
   if (Array.isArray(raw)) raw.forEach(function(d) { set[String(d).toLowerCase()] = true; });
   return set;
 }
-// state -> ms-chip class. Two-zone v2 treatment: done = solid fill + corner tick,
-// pending = hollow dashed amber, missing = solid red + "!", na = faded dotted.
-// Glyph = type, shape+colour = state (shape carries it for colour-blind safety),
-// tooltip = full words. See the board-level legend (renderMakesafeLegend).
-function renderMakesafeStatusTile(glyph, state, label) {
+// One doc icon (OPT1): a line glyph in a soft square chip whose state reads at a
+// glance — done = sage tint + check, pending = neutral, missing = soft-red + "!",
+// na = faint dashed. Glyph = the document, chip = the state; full-words tooltip +
+// aria-label so colour is never the sole signal (colour-blind safe).
+// escapeAttr (not escapeHtml) for the attribute context: label may embed builder
+// data, and escapeHtml leaves quotes intact which could break out of the attribute.
+function renderMakesafeDocIcon(key, state, shortName, label) {
   var cls = ({ done: 'done', pending: 'pending', missing: 'missing', na: 'na' })[state] || 'na';
-  // escapeAttr (not escapeHtml) for the attribute context: label embeds builder/job
-  // data, and escapeHtml leaves quotes intact which could break out of the attribute.
-  return '<span class="ms-chip ' + cls + '" role="img" aria-label="' + escapeAttr(label) + '" title="' + escapeAttr(label) + '">' + glyph + '</span>';
+  return '<div class="ms-doc ' + cls + '">'
+    + '<span class="ms-doc-chip" role="img" aria-label="' + escapeAttr(label) + '" title="' + escapeAttr(label) + '">' + makesafeDocGlyph(key) + '</span>'
+    + '<span class="ms-doc-name">' + escapeHtml(shortName) + '</span>'
+    + '</div>';
 }
 function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);
   var slug = String(j.requesting_company_slug || '').toLowerCase();
   var builder = getMakesafeBuilder(j) || 'this builder';
-  var tiles = [];
+  var icons = [];
+  var done = 0;     // count of "done" docs
+  var applicable = 0; // docs that count toward the X / N (N/A excluded)
 
-  // 1) Work Order (W)
-  if (j.has_wo) tiles.push(renderMakesafeStatusTile('W', 'done', 'Work order: attached'));
-  else if (missing.wo || missing.work_order) tiles.push(renderMakesafeStatusTile('W', 'missing', 'Work order: missing'));
-  else tiles.push(renderMakesafeStatusTile('W', 'pending', 'Work order: not yet attached'));
-
-  // 2) Make-safe report (R)
-  var reportStatus = String(j.report_status || '').toLowerCase();
-  if (j.has_report_doc) tiles.push(renderMakesafeStatusTile('R', 'done', 'Report: attached'));
-  else if (missing.report) tiles.push(renderMakesafeStatusTile('R', 'missing', 'Report: missing (expected)'));
-  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') tiles.push(renderMakesafeStatusTile('R', 'missing', 'Report submitted: PDF missing'));
-  else tiles.push(renderMakesafeStatusTile('R', 'pending', 'Report: awaiting trade report'));
-
-  // 3) SWMS (S) — only relevant for MLB; neutral/faded for everyone else.
-  if (slug !== 'mlb') {
-    tiles.push(renderMakesafeStatusTile('S', 'na', 'SWMS: not required for ' + builder));
-  } else if (j.has_swms_doc) {
-    tiles.push(renderMakesafeStatusTile('S', 'done', 'SWMS: attached'));
-  } else if (missing.swms) {
-    tiles.push(renderMakesafeStatusTile('S', 'missing', 'SWMS: missing (required for MLB)'));
-  } else {
-    tiles.push(renderMakesafeStatusTile('S', 'pending', 'SWMS: needed for MLB'));
+  function add(key, state, shortName, label) {
+    if (state === 'done') done++;
+    if (state !== 'na') applicable++;
+    icons.push(renderMakesafeDocIcon(key, state, shortName, label));
   }
 
-  // 4) Invoice ($) — driven by invoice_status, escalated to missing if flagged.
+  // 1) Work Order
+  if (j.has_wo) add('wo', 'done', 'WO', 'Work order: attached');
+  else if (missing.wo || missing.work_order) add('wo', 'missing', 'WO', 'Work order: missing (expected)');
+  else add('wo', 'pending', 'WO', 'Work order: not yet attached');
+
+  // 2) Make-safe report
+  var reportStatus = String(j.report_status || '').toLowerCase();
+  if (j.has_report_doc) add('report', 'done', 'Rep', 'Report: attached');
+  else if (missing.report) add('report', 'missing', 'Rep', 'Report: missing (expected)');
+  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') add('report', 'missing', 'Rep', 'Report submitted: PDF missing');
+  else add('report', 'pending', 'Rep', 'Report: awaiting trade report');
+
+  // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
+  if (slug !== 'mlb') add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
+  else if (j.has_swms_doc) add('swms', 'done', 'SWMS', 'SWMS: attached');
+  else if (missing.swms) add('swms', 'missing', 'SWMS', 'SWMS: missing (required for MLB)');
+  else add('swms', 'pending', 'SWMS', 'SWMS: needed for MLB');
+
+  // 4) Invoice — driven by invoice_status, escalated to missing if flagged.
   var inv = String(j.invoice_status || '').toLowerCase();
-  if (inv === 'paid') tiles.push(renderMakesafeStatusTile('$', 'done', 'Invoice: paid'));
-  else if (inv === 'invoiced') tiles.push(renderMakesafeStatusTile('$', 'done', 'Invoice: invoiced'));
-  else if (missing.invoice) tiles.push(renderMakesafeStatusTile('$', 'missing', 'Invoice: missing (expected)'));
-  else if (inv === 'draft' || inv === 'report_ready') tiles.push(renderMakesafeStatusTile('$', 'pending', 'Invoice: draft / not sent'));
-  else if (!inv || inv === 'not_ready') tiles.push(renderMakesafeStatusTile('$', 'na', 'Invoice: not ready yet'));
-  else tiles.push(renderMakesafeStatusTile('$', 'pending', 'Invoice: ' + inv));
+  if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
+  else if (inv === 'invoiced') add('invoice', 'done', 'Inv', 'Invoice: invoiced');
+  else if (missing.invoice) add('invoice', 'missing', 'Inv', 'Invoice: missing (expected)');
+  else if (inv === 'draft' || inv === 'report_ready') add('invoice', 'pending', 'Inv', 'Invoice: draft / not sent');
+  else if (!inv || inv === 'not_ready') add('invoice', 'na', 'Inv', 'Invoice: not ready yet');
+  else add('invoice', 'pending', 'Inv', 'Invoice: ' + inv);
 
-  // 5) Emailed to builder / sent (➤). The precise per-send timestamp lives in the
-  // job's send log (MAKESAFE_PACK_SENT marker in events[]) which is NOT in the board
-  // list payload, so the board uses the lifecycle proxy report_status==='processed'
-  // (the state a job reaches once the report+invoice pack is sent). Tooltip is
-  // explicit; open the card to see the exact send log. (See PR: a dedicated
-  // pack_sent_at on the pipeline payload would make this exact rather than a proxy.)
-  var processed = String(j.report_status || '').toLowerCase() === 'processed';
-  if (processed) tiles.push(renderMakesafeStatusTile('&#10148;', 'done', 'Pack sent to builder (open card for send log)'));
-  else tiles.push(renderMakesafeStatusTile('&#10148;', 'pending', 'Not yet emailed to builder'));
+  // 5) Sent to builder. The precise per-send timestamp lives in the job's send log
+  // (MAKESAFE_PACK_SENT marker in events[]) which is NOT in the board list payload,
+  // so the board uses the lifecycle proxy report_status==='processed' (the state a
+  // job reaches once the report+invoice pack is sent). Open the card for the exact
+  // send log. (A dedicated pack_sent_at on the pipeline payload would make this exact.)
+  var processed = (String(j.report_status || '').toLowerCase() === 'processed') || j.pack_sent === true;
+  if (processed) add('sent', 'done', 'Sent', 'Pack sent to builder (open card for send log)');
+  else add('sent', 'pending', 'Sent', 'Not yet emailed to builder');
 
-  return '<div class="ms-chips" role="group" aria-label="Make-safe document and send status">' + tiles.join('') + '</div>';
+  var complete = (done === applicable && applicable > 0);
+  var countTxt = done + ' / ' + applicable + (complete ? ' &middot; complete' : '');
+
+  var html = '<div class="ms-doc-wrap">';
+  html += '<div class="ms-doc-top"><span class="ms-doc-lbl">Reporting</span>'
+    + '<span class="ms-doc-count' + (complete ? ' complete' : '') + '">' + countTxt + '</span></div>';
+  html += '<div class="ms-doc-icons" role="group" aria-label="Make-safe document and send status">' + icons.join('') + '</div>';
+  html += '</div>';
+  return html;
 }
 function makesafeUiStageLabel(stage) {
   return ({ new: 'New', allocated: 'Allocated', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
@@ -9389,66 +9535,102 @@ async function moveMakesafeUiStage(jobId, stage) {
   await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: target.substatus });
 }
 
-// Two-zone v2 card: a dark identity band (job type, suburb, builder, BOTH job
-// numbers, age badge) over a clean white progress body (intake/client meta,
-// crew-status line, chip strip, Allocate/Reassign). On-brand: band in sw-dark,
-// orange = accent + action only. See the locked mockup card-ui-twozone-v2.
+// Type label -> type-tint class (drives the 3px top-border colour + the type tag).
+function makesafeTypeTintClass(typeLabel) {
+  var t = String(typeLabel || '').toLowerCase();
+  if (/fenc/.test(t)) return 't-fence';
+  if (/roof/.test(t)) return 't-roof';
+  if (/ceiling|collapse|cornice/.test(t)) return 't-ceiling';
+  if (/board|window|glass|door/.test(t)) return 't-board';
+  if (/struct|tree|storm|brace|prop/.test(t)) return 't-struct';
+  return 't-default';
+}
+// Up-to-two avatar initials from a "Nithin + Hugo" style crew label.
+function makesafeCrewInitials(crew) {
+  return String(crew || '').split(/\s*\+\s*/).filter(Boolean).slice(0, 2).map(function(n) {
+    return n.trim().charAt(0).toUpperCase();
+  });
+}
+
+// OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
+// type-coloured top-border + small type-tag pill, navy as text, brand orange
+// reserved for the Allocate action. Payload: type, suburb, builder, BOTH job
+// numbers (refined dual-ref block), intake/client, a muted age/KPI pill, a red
+// past-SLA banner when breached, the 2A crew chip, the doc-icon row, and
+// Allocate/Reassign. All behaviour (drag, click-in, allocate/reassign) kept.
 function renderMakesafeCard(j, status) {
   var builder = getMakesafeBuilder(j);
   var suburb = j.site_suburb || j.suburb || '';
-  var age = getMakesafeAgeParts(j, status);
-  var ageClass = ({ green: 'green', yellow: 'amber', red: 'red' })[age.health] || 'neutral';
   var intake = getMakesafeIntakeDate(j);
   var intakeLabel = intake ? fmtDate(String(intake).slice(0, 10)) : 'n/a';
   var crew = getMakesafeCrewLabel(j);
   var typeLabel = getMakesafeTypeLabel(j);
   var assignDate = getMakesafeAssignmentDateDMY(j);
+  var tintCls = makesafeTypeTintClass(typeLabel);
 
-  var html = '<div class="kanban-card ms-card-v2" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
-  // status spine = age health
-  html += '<div class="ms-spine" style="background:' + age.color + ';"></div>';
+  // Age + SLA: muted age inside the KPI pill, red "past SLA" banner on breach.
+  var sla = getMakesafeSlaParts(j, status);
+  var age = getMakesafeAgeParts(j, status);
+  var ageClass = sla.breached ? 'over' : (sla.watch ? 'amber' : (({ green: 'green', yellow: 'amber', red: 'red' })[age.health] || 'neutral'));
+  var ageTxt = (sla.days != null) ? (sla.days + 'd') : String(age.label || '');
 
-  // ── ZONE 1: identity band ──
-  html += '<div class="ms-id-band">';
-  html += '<div class="ms-id-top"><div style="min-width:0;flex:1;">';
-  html += '<div class="ms-id-type">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</div>';
-  html += '<div class="ms-id-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';
-  if (builder) html += '<div class="ms-id-builder">' + escapeHtml(String(builder)) + '</div>';
-  html += '</div>';
-  html += '<span class="ms-age-badge ' + ageClass + '">' + escapeHtml(String(age.label || '')) + '</span>';
-  html += '</div>';
-  // BOTH job numbers, clearly labelled. Builder ref = external_ref, our internal =
-  // job_number (gets the brand-orange hairline so it reads as ours).
-  html += '<div class="ms-jobnums">';
-  html += '<div class="ms-jobnum builder"><div class="ms-jn-lbl">Builder ref</div><div class="ms-jn-val">' + escapeHtml(String(j.external_ref || '—')) + '</div></div>';
-  html += '<div class="ms-jobnum ours"><div class="ms-jn-lbl">Our job #</div><div class="ms-jn-val">' + escapeHtml(String(j.job_number || '—')) + '</div></div>';
-  html += '</div>';
-  html += '</div>'; // /id-band
+  var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
-  // ── ZONE 2: progress body ──
-  html += '<div class="ms-body">';
+  // top line: type tag + age/KPI pill
+  html += '<div class="ms-top">';
+  html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
+  html += '<span class="ms-age-pill ' + ageClass + '">'
+    + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')
+    + escapeHtml(String(ageTxt)) + '</span>';
+  html += '</div>';
+
+  // identity
+  html += '<div class="ms-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';
+  if (builder) html += '<div class="ms-builder">' + escapeHtml(String(builder)) + '</div>';
+
+  // refined dual job-number block. Builder ref = external_ref, our internal = job_number.
+  html += '<div class="ms-refs">';
+  html += '<div class="ms-ref"><div class="ms-ref-lbl">Builder ref</div><div class="ms-ref-val">' + escapeHtml(String(j.external_ref || '—')) + '</div></div>';
+  html += '<div class="ms-ref ours"><div class="ms-ref-lbl">Our job #</div><div class="ms-ref-val">' + escapeHtml(String(j.job_number || '—')) + '</div></div>';
+  html += '</div>';
+
+  // meta: intake / client
   html += '<div class="ms-meta">';
   html += '<span><b>Intake</b> ' + escapeHtml(String(intakeLabel)) + '</span>';
   if (j.client_name) html += '<span><b>Client</b> ' + escapeHtml(String(j.client_name)) + '</span>';
   html += '</div>';
-  // crew status line — headline of the body
-  if (crew) {
-    html += '<div class="ms-crew alloc"><span class="ms-dot"></span>' + escapeHtml(String(crew));
-    if (assignDate) html += ' <span class="ms-crew-day">&middot; ' + escapeHtml(String(assignDate)) + '</span>';
-    html += '</div>';
-  } else {
-    html += '<div class="ms-crew unalloc"><span class="ms-dot"></span>No crew yet</div>';
+
+  // loud red past-SLA banner on breach
+  if (sla.breached) {
+    html += '<div class="ms-sla-banner"><span class="ms-sla-ic">&#9888;</span>'
+      + sla.days + ' days in stage &mdash; past SLA, action overdue</div>';
   }
-  // chip strip (WO / Report / SWMS / Invoice / Sent)
+
+  // 2A crew chip
+  html += '<div class="ms-block">';
+  if (crew) {
+    var initials = makesafeCrewInitials(crew);
+    html += '<div class="ms-crew-chip"><div class="ms-avatars">';
+    initials.forEach(function(ini) { html += '<span class="ms-av">' + escapeHtml(ini) + '</span>'; });
+    html += '</div><div class="ms-crew-txt"><div class="ms-crew-name">' + escapeHtml(String(crew)) + '</div>';
+    html += '<div class="ms-crew-when">' + (assignDate ? 'Assigned ' + escapeHtml(String(assignDate)) : 'On the job') + '</div>';
+    html += '</div></div>';
+  } else {
+    html += '<div class="ms-crew-chip off"><div class="ms-av-empty">+</div>';
+    html += '<div class="ms-crew-txt"><div class="ms-crew-name">Unassigned &middot; no crew yet</div>';
+    html += '<div class="ms-crew-when">Needs allocation</div></div></div>';
+  }
+
+  // doc-icon row (WO / Report / SWMS / Invoice / Sent) + X/5 count
   html += renderMakesafeStatusIcons(j, status);
+  html += '</div>'; // /block
 
   if (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation') {
     var isReassign = status === 'allocated';
-    var allocLabel = isReassign ? 'Reassign crew' : 'Allocate';
+    var allocLabel = isReassign ? 'Reassign crew' : 'Allocate crew';
     var btnCls = isReassign ? 'ms-btn-reassign' : 'ms-btn-alloc';
     html += '<button class="' + btnCls + '" onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')">' + allocLabel + '</button>';
   }
-  html += '</div>'; // /body
   html += '</div>'; // /card
   return html;
 }

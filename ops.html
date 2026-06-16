@@ -2618,6 +2618,79 @@
       margin-bottom: 8px;
     }
 
+    /* MakeSafe job-detail inline document viewer (WO-first carousel) */
+    .ms-docviewer-card {
+      background: var(--sw-card);
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: var(--sw-shadow);
+    }
+    .ms-docviewer-head {
+      font-size: 11px; font-weight: 850; color: var(--sw-mid);
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;
+    }
+    .ms-docviewer-bar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .ms-docviewer-arrow {
+      flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+      border: 1px solid var(--sw-border); background: #fff; color: var(--sw-dark);
+      font-size: 20px; line-height: 1; font-weight: 800; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .ms-docviewer-arrow:hover:not(:disabled) {
+      background: var(--sw-orange); color: #fff; border-color: var(--sw-orange);
+    }
+    .ms-docviewer-arrow:disabled { opacity: 0.35; cursor: default; }
+    .ms-docviewer-chips {
+      flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0;
+    }
+    .ms-docviewer-chip {
+      border: 1px solid var(--sw-border); background: #fff; color: var(--sw-mid);
+      font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 999px;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .ms-docviewer-chip:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
+    .ms-docviewer-chip.active {
+      background: var(--sw-orange); color: #fff; border-color: var(--sw-orange);
+    }
+    .ms-docviewer-chip.muted { opacity: 0.55; font-style: italic; }
+    .ms-docviewer-chip.muted.active { background: var(--sw-mid-light); border-color: var(--sw-mid-light); }
+    .ms-docviewer-meta {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 8px; margin-bottom: 6px;
+    }
+    .ms-docviewer-label { font-size: 14px; font-weight: 850; color: var(--sw-dark); }
+    .ms-docviewer-count { font-size: 12px; font-weight: 800; color: var(--sw-text-sec); }
+    .ms-docviewer-stage {
+      height: min(70vh, calc(100vh - var(--jarvis-bar-height) - 240px));
+      min-height: 320px;
+      border: 1px solid var(--sw-border); border-radius: 10px; overflow: hidden;
+      background: #F3F6F8; position: relative;
+    }
+    .ms-docviewer-frame { width: 100%; height: 100%; border: 0; display: block; }
+    .ms-docviewer-imgwrap {
+      width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+      overflow: auto;
+    }
+    .ms-docviewer-imgwrap img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
+    .ms-docviewer-empty {
+      width: 100%; height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; padding: 24px;
+    }
+    .ms-docviewer-foot {
+      display: flex; align-items: center; gap: 10px; margin-top: 8px;
+    }
+    .ms-docviewer-fname {
+      font-size: 12px; color: var(--sw-text-sec);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    @media (max-width: 700px) {
+      .ms-docviewer-stage { height: 60vh; min-height: 260px; }
+    }
+
     @media (max-width: 900px) {
       .msi-review-shell { overflow-y: auto; }
       .msi-review-grid { display: flex; flex-direction: column; overflow: visible; }
@@ -14133,6 +14206,172 @@ function renderMakesafeDocsSendLogPanel(data) {
   return html;
 }
 
+// ── MakeSafe job-detail inline document viewer (WO-first carousel) ──────────
+// State for the current job's document carousel. Reset on every
+// renderMakesafeOpsDetail so switching jobs never leaks the prior doc list.
+var _msafeDocViewer = { docs: [], idx: 0 };
+
+// Classify a renderable doc URL so we know how to embed it inline.
+function msafeDocKind(url, doc) {
+  var name = String((doc && (doc.file_name || doc.name)) || '');
+  var u = String(url || '');
+  var probe = (u.split('?')[0] + ' ' + name).toLowerCase();
+  if (/\.pdf(\b|$)/.test(probe) || /\.pdf$/.test(name.toLowerCase())) return 'pdf';
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|heic)(\b|$)/.test(probe)) return 'image';
+  return 'other';
+}
+
+// Build the ordered, de-duped document list for the viewer.
+// Order: Work Order first (Marnin's lead), then Make Safe Report, Invoice, SWMS,
+// then any other attached document with a renderable URL not already listed.
+// Each entry: { label, doc, url, kind }. A null doc => an honest "not attached" slot
+// (only the Work Order slot is shown when missing, so ops notices the gap).
+function buildMakesafeDocList(data) {
+  var documents = (data && data.documents) || [];
+  var picks = [
+    { label: 'Work Order', doc: pickLatestMakesafeDoc(documents, isMakesafeWorkOrderDoc) },
+    { label: 'Make Safe Report', doc: pickLatestMakesafeDoc(documents, isMakesafeReportDoc) },
+    { label: 'Invoice', doc: pickLatestMakesafeDoc(documents, isMakesafeInvoiceDoc) },
+    { label: 'SWMS', doc: pickLatestMakesafeDoc(documents, isMakesafeSwmsDoc) }
+  ];
+  var seen = {};
+  var list = [];
+  picks.forEach(function(p) {
+    if (p.doc) {
+      var url = getDocOpenUrl(p.doc);
+      if (p.doc.id) seen[p.doc.id] = true;
+      list.push({ label: p.label, doc: p.doc, url: url, kind: url ? msafeDocKind(url, p.doc) : 'missing' });
+    } else if (p.label === 'Work Order') {
+      // Keep the Work Order slot visible even when missing — it must lead, and
+      // an absent WO is operationally important to see on click-in.
+      list.push({ label: p.label, doc: null, url: '', kind: 'missing' });
+    }
+  });
+  // Append any other attached document with a renderable URL (e.g. extra photos,
+  // supplier quotes) that isn't already one of the four named slots. Docs that
+  // match a named matcher (e.g. a second Work Order copy) are skipped here so the
+  // viewer shows one WO/report/invoice/SWMS, not duplicates.
+  function matchesNamedSlot(d) {
+    return isMakesafeWorkOrderDoc(d) || isMakesafeReportDoc(d) || isMakesafeInvoiceDoc(d) || isMakesafeSwmsDoc(d);
+  }
+  documents.forEach(function(d) {
+    if (!d || (d.id && seen[d.id]) || matchesNamedSlot(d)) return;
+    var url = getDocOpenUrl(d);
+    if (!url) return;
+    seen[d.id] = true;
+    list.push({ label: d.file_name || d.name || d.type || 'Document', doc: d, url: url, kind: msafeDocKind(url, d) });
+  });
+  return list;
+}
+
+// Render the inline frame (iframe for PDF, img+lightbox for image, link fallback
+// for other, empty state for missing) for the doc at the active index.
+function renderMakesafeDocViewerFrame(entry) {
+  if (!entry || entry.kind === 'missing' || !entry.url) {
+    return '<div class="ms-docviewer-empty">' +
+      '<div style="font-size:28px;opacity:0.4;">&#128196;</div>' +
+      '<div style="font-weight:800;color:var(--sw-text-sec);margin-top:6px;">' + escapeHtml((entry && entry.label) || 'Document') + ' not attached yet</div>' +
+      '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;">It will appear here once synced or uploaded.</div>' +
+      '</div>';
+  }
+  if (entry.kind === 'pdf') {
+    return '<iframe class="ms-docviewer-frame" title="' + escapeAttr(entry.label) + '" src="' + escapeAttr(entry.url) + '"></iframe>';
+  }
+  if (entry.kind === 'image') {
+    return '<div class="ms-docviewer-imgwrap"><img src="' + escapeAttr(entry.url) + '" alt="' + escapeAttr(entry.label) + '" ' +
+      'data-full-url="' + escapeAttr(entry.url) + '" onclick="openOpsLightbox(this.getAttribute(\'data-full-url\') || this.src)"></div>';
+  }
+  // other: cannot embed safely — offer an explicit open action.
+  return '<div class="ms-docviewer-empty">' +
+    '<div style="font-size:28px;opacity:0.4;">&#128196;</div>' +
+    '<div style="font-weight:800;color:var(--sw-text);margin-top:6px;">' + escapeHtml(entry.label) + '</div>' +
+    '<a href="' + escapeAttr(entry.url) + '" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="margin-top:10px;text-decoration:none;">Open in new tab &#8599;</a>' +
+    '</div>';
+}
+
+// Re-render only the chips/counter/frame in place (no job re-fetch) for index idx.
+function renderMakesafeDocViewerInner() {
+  var v = _msafeDocViewer;
+  var docs = v.docs || [];
+  var idx = v.idx || 0;
+  if (idx < 0) idx = 0;
+  if (idx > docs.length - 1) idx = Math.max(0, docs.length - 1);
+  v.idx = idx;
+  var entry = docs[idx];
+  var html = '';
+  // Chips row + arrows.
+  html += '<div class="ms-docviewer-bar">';
+  html += '<button type="button" class="ms-docviewer-arrow" aria-label="Previous document" ' +
+    (idx <= 0 ? 'disabled ' : '') + 'onclick="msafeDocViewerGo(-1)">&#8249;</button>';
+  html += '<div class="ms-docviewer-chips">';
+  docs.forEach(function(d, i) {
+    var active = (i === idx);
+    var muted = (d.kind === 'missing');
+    html += '<button type="button" class="ms-docviewer-chip' + (active ? ' active' : '') + (muted ? ' muted' : '') + '" ' +
+      'onclick="msafeDocViewerJump(' + i + ')" title="' + escapeAttr(d.doc && (d.doc.file_name || d.doc.name) || d.label) + '">' +
+      escapeHtml(d.label) + (muted ? ' · not attached' : '') + '</button>';
+  });
+  html += '</div>';
+  html += '<button type="button" class="ms-docviewer-arrow" aria-label="Next document" ' +
+    (idx >= docs.length - 1 ? 'disabled ' : '') + 'onclick="msafeDocViewerGo(1)">&#8250;</button>';
+  html += '</div>';
+  // Label + counter.
+  html += '<div class="ms-docviewer-meta">';
+  html += '<span class="ms-docviewer-label">' + escapeHtml(entry ? entry.label : 'Document') + '</span>';
+  html += '<span class="ms-docviewer-count">' + (docs.length ? (idx + 1) + ' / ' + docs.length : '0 / 0') + '</span>';
+  html += '</div>';
+  // Frame.
+  html += '<div class="ms-docviewer-stage">' + renderMakesafeDocViewerFrame(entry) + '</div>';
+  // Footer: filename + full-screen for renderable docs.
+  if (entry && entry.url && entry.kind !== 'missing') {
+    var fname = (entry.doc && (entry.doc.file_name || entry.doc.name)) || entry.label;
+    html += '<div class="ms-docviewer-foot">';
+    html += '<a href="' + escapeAttr(entry.url) + '" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="text-decoration:none;">Open full-screen &#8599;</a>';
+    html += '<span class="ms-docviewer-fname" title="' + escapeAttr(fname) + '">' + escapeHtml(fname) + '</span>';
+    html += '</div>';
+  }
+  return html;
+}
+
+// Carousel navigation — update index and re-render the inner viewer only.
+function msafeDocViewerGo(delta) {
+  var v = _msafeDocViewer;
+  if (!v.docs || !v.docs.length) return;
+  var next = (v.idx || 0) + delta;
+  if (next < 0) next = 0;
+  if (next > v.docs.length - 1) next = v.docs.length - 1;
+  v.idx = next;
+  var el = document.getElementById('msafeDocViewerInner');
+  if (el) el.innerHTML = renderMakesafeDocViewerInner();
+}
+function msafeDocViewerJump(idx) {
+  var v = _msafeDocViewer;
+  if (!v.docs || !v.docs.length) return;
+  v.idx = Math.max(0, Math.min(idx, v.docs.length - 1));
+  var el = document.getElementById('msafeDocViewerInner');
+  if (el) el.innerHTML = renderMakesafeDocViewerInner();
+}
+
+// Build the whole viewer card (called from renderMakesafeOpsDetail). Resets state.
+function renderMakesafeDocViewer(data) {
+  var docs = buildMakesafeDocList(data);
+  _msafeDocViewer = { docs: docs, idx: 0 };
+  var renderable = docs.filter(function(d) { return d.kind !== 'missing'; });
+  var html = '<div class="ms-docviewer-card">';
+  html += '<div class="ms-docviewer-head">Documents</div>';
+  if (!docs.length || !renderable.length) {
+    html += '<div class="ms-docviewer-stage"><div class="ms-docviewer-empty">' +
+      '<div style="font-size:28px;opacity:0.4;">&#128196;</div>' +
+      '<div style="font-weight:800;color:var(--sw-text-sec);margin-top:6px;">No documents attached to this job yet</div>' +
+      '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;">The work order, report and invoice appear here once synced or uploaded.</div>' +
+      '</div></div>';
+  } else {
+    html += '<div id="msafeDocViewerInner">' + renderMakesafeDocViewerInner() + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function renderMakesafeOpsDetail(data) {
   var j = data.job || {};
   var md = data.makesafe_details || j.makesafe_details || j.metadata || {};
@@ -14209,6 +14448,11 @@ function renderMakesafeOpsDetail(data) {
     if (adminNotes.length > 2) html += '<div style="font-size:11px;margin-top:4px;">+' + (adminNotes.length - 2) + ' more in History</div>';
     html += '</div>';
   }
+
+  // ── WO-first inline document viewer + prev/next carousel (Marnin's click-in ground-truth) ──
+  // The work order leads; invoice / make-safe report / SWMS / any other attached PDF are one
+  // arrow-click away, each rendered inline. Reads data.documents only (no backend call).
+  html += renderMakesafeDocViewer(data);
 
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px;">';
 

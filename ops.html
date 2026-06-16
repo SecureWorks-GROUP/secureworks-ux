@@ -1358,7 +1358,7 @@
       background: var(--sw-card);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
-      border-radius: 12px;
+      border-radius: 11px;
       padding: 0;                 /* zones own their own padding */
       border: none;
       box-shadow: 0 2px 8px rgba(41,60,70,0.10), 0 0 0 1px rgba(41,60,70,0.05);
@@ -1379,18 +1379,18 @@
     /* ── ZONE 1 — Identity band ── */
     .ms-card-v2 .ms-id-band {
       background: linear-gradient(135deg, var(--sw-dark) 0%, #324A57 100%);
-      padding: 11px 14px 12px 16px;
+      padding: 8px 12px 9px 14px;
       color: #fff;
     }
-    .ms-card-v2 .ms-id-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .ms-card-v2 .ms-id-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 7px; }
     .ms-card-v2 .ms-id-type {
-      font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
+      font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
       color: var(--sw-orange); margin-bottom: 1px;
     }
-    .ms-card-v2 .ms-id-suburb { font-weight: 800; font-size: 16px; color: #fff; line-height: 1.1; letter-spacing: -0.1px; }
-    .ms-card-v2 .ms-id-builder { font-size: 11.5px; color: #CFE0EA; font-weight: 600; margin-top: 3px; }
+    .ms-card-v2 .ms-id-suburb { font-weight: 800; font-size: 14px; color: #fff; line-height: 1.1; letter-spacing: -0.1px; }
+    .ms-card-v2 .ms-id-builder { font-size: 10.5px; color: #CFE0EA; font-weight: 600; margin-top: 2px; }
     .ms-card-v2 .ms-age-badge {
-      font-size: 9.5px; padding: 2px 8px; border-radius: 20px; font-weight: 800; white-space: nowrap;
+      font-size: 9px; padding: 2px 7px; border-radius: 20px; font-weight: 800; white-space: nowrap;
       letter-spacing: 0.2px; flex-shrink: 0;
     }
     .ms-card-v2 .ms-age-badge.green { background: rgba(39,174,96,0.22); color: #9BE8BC; }
@@ -1398,43 +1398,53 @@
     .ms-card-v2 .ms-age-badge.red   { background: rgba(231,76,60,0.26); color: #F4B0A8; }
     .ms-card-v2 .ms-age-badge.neutral { background: rgba(255,255,255,0.14); color: #CFE0EA; }
     /* BOTH job numbers — clearly labelled, side by side */
-    .ms-card-v2 .ms-jobnums { display: flex; gap: 9px; margin-top: 9px; }
+    .ms-card-v2 .ms-jobnums { display: flex; gap: 7px; margin-top: 7px; }
     .ms-card-v2 .ms-jobnum {
       flex: 1; min-width: 0;
       background: rgba(255,255,255,0.10);
       border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 6px; padding: 4px 8px;
+      border-radius: 6px; padding: 3px 7px;
     }
     .ms-card-v2 .ms-jn-lbl {
-      font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 800;
+      font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 800;
       color: #9FB6C2; line-height: 1.2;
     }
     .ms-card-v2 .ms-jn-val {
-      font-size: 12px; font-weight: 800; color: #fff; line-height: 1.25; margin-top: 1px;
+      font-size: 11px; font-weight: 800; color: #fff; line-height: 1.25; margin-top: 1px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     /* our own number gets the brand-orange hairline so it's distinct */
     .ms-card-v2 .ms-jobnum.ours { border-color: rgba(241,90,41,0.55); background: rgba(241,90,41,0.14); }
     .ms-card-v2 .ms-jobnum.ours .ms-jn-lbl { color: #F6A98C; }
-    /* ── ZONE 2 — Progress body (white) ── */
-    .ms-card-v2 .ms-body { padding: 11px 14px 13px 16px; }
+    /* ── ZONE 2 — Progress body (white) ──
+       min-height keeps every card a uniform footprint regardless of state:
+       cards without an Allocate/Reassign button fill to roughly match cards
+       that have one, so a column reads even rather than ragged. */
+    .ms-card-v2 .ms-body {
+      padding: 8px 12px 10px 14px;
+      display: flex; flex-direction: column;
+      min-height: 92px;
+    }
     .ms-card-v2 .ms-meta {
       display: flex; justify-content: space-between; gap: 8px;
-      font-size: 10.5px; color: var(--sw-text-sec); margin-bottom: 9px; flex-wrap: wrap;
+      font-size: 10px; color: var(--sw-text-sec); margin-bottom: 6px; flex-wrap: wrap;
     }
     .ms-card-v2 .ms-meta b { color: var(--sw-mid); font-weight: 700; }
-    .ms-card-v2 .ms-crew { font-size: 12px; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .ms-card-v2 .ms-crew { font-size: 11.5px; font-weight: 800; margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
     .ms-card-v2 .ms-crew.unalloc { color: var(--sw-red); }
     .ms-card-v2 .ms-crew.alloc { color: var(--sw-dark); }
     .ms-card-v2 .ms-crew .ms-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .ms-card-v2 .ms-crew.alloc .ms-dot { background: var(--sw-green); }
     .ms-card-v2 .ms-crew.unalloc .ms-dot { background: var(--sw-red); }
     .ms-card-v2 .ms-crew .ms-crew-day { color: var(--sw-mid); font-weight: 600; font-size: 11px; }
-    /* ── Chip strip (Treatment 1: fill = done, outline = pending) ── */
+    /* ── Chip strip (Treatment 1: fill = done, outline = pending) ──
+       margin-top:auto pins the strip (and the button below it) to the bottom of
+       the flex body so the min-height fills evenly across all card states. */
+    .ms-card-v2 .ms-chips { margin-top: auto; gap: 4px; }
     .ms-card-v2 .ms-chips, .ms-legend .ms-chips { display: flex; gap: 5px; align-items: center; }
     .ms-chip {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 23px; height: 23px; border-radius: 6px; font-size: 11px; font-weight: 800; line-height: 1;
+      width: 20px; height: 20px; border-radius: 6px; font-size: 10.5px; font-weight: 800; line-height: 1;
       position: relative; font-family: var(--sw-font); cursor: default;
     }
     .ms-chip.done { background: var(--sw-green); color: #fff; }
@@ -1457,13 +1467,13 @@
     .ms-legend .ms-chip.done::after { box-shadow: 0 0 0 1.5px var(--sw-card); }
     /* ── Buttons ── */
     .ms-card-v2 .ms-btn-alloc {
-      width: 100%; font-size: 11.5px; padding: 8px; background: var(--sw-orange); color: #fff;
-      border: none; border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 11px; letter-spacing: 0.2px;
+      width: 100%; font-size: 11px; padding: 6px; background: var(--sw-orange); color: #fff;
+      border: none; border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 8px; letter-spacing: 0.2px;
     }
     .ms-card-v2 .ms-btn-alloc:hover { background: var(--sw-orange-hover); }
     .ms-card-v2 .ms-btn-reassign {
-      width: 100%; font-size: 11px; padding: 7px; background: #fff; color: var(--sw-mid);
-      border: 1.5px solid var(--sw-border); border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 11px;
+      width: 100%; font-size: 11px; padding: 6px; background: #fff; color: var(--sw-mid);
+      border: 1.5px solid var(--sw-border); border-radius: 6px; cursor: pointer; font-weight: 800; margin-top: 8px;
     }
     .ms-card-v2 .ms-btn-reassign:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
 
@@ -9358,7 +9368,7 @@ function renderMakesafeStatusIcons(j, status) {
   if (processed) tiles.push(renderMakesafeStatusTile('&#10148;', 'done', 'Pack sent to builder (open card for send log)'));
   else tiles.push(renderMakesafeStatusTile('&#10148;', 'pending', 'Not yet emailed to builder'));
 
-  return '<div class="ms-chips" role="group" aria-label="Make-safe document and send status" style="margin-top:8px;">' + tiles.join('') + '</div>';
+  return '<div class="ms-chips" role="group" aria-label="Make-safe document and send status">' + tiles.join('') + '</div>';
 }
 function makesafeUiStageLabel(stage) {
   return ({ new: 'New', allocated: 'Allocated', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;

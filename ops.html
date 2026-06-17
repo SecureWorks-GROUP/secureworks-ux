@@ -9956,7 +9956,17 @@ function renderMakesafeCard(j, status) {
   // A Report Ready card whose report pack is DRAFTED (substatus admin_to_send_report)
   // is the one a click can review-and-send. Surface that distinctly so ops know which
   // report-ready cards are actionable now vs still waiting on the draft to render.
-  var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report';
+  // Gate on the AUTHORITATIVE backend verdict, not the locally re-derived stage: the
+  // local mapper coerces a not-yet-drafted `trade_report_in` job (substatus
+  // admin_to_send_report) into the report_ready column, so the substatus check alone
+  // would falsely advertise it as ready-to-send even though no pack is drafted (the
+  // cockpit feed excludes it → "no pack found"). The backend's drafted-not-sent verdict
+  // is board_stage === 'report_ready'; a report-in-but-undrafted job is 'trade_report_in'.
+  // Fallback: if a pre-#193 payload carries no board_stage, keep the old substatus-only
+  // behaviour so nothing regresses.
+  var backendStage = j.board_stage || j.makesafe_stage || '';
+  var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
+    && (backendStage ? backendStage === 'report_ready' : true);
 
   var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
@@ -9965,6 +9975,11 @@ function renderMakesafeCard(j, status) {
   html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="Report pack drafted — click Review &amp; send pack to authorise the invoice and email the builder" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#0E7C7B;color:#fff;text-transform:uppercase;white-space:nowrap;">Ready to send</span>';
+  } else if (backendStage === 'trade_report_in') {
+    // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).
+    // Neutral chip — deliberately NOT teal/"ready" — so the card reads honestly while
+    // it sits in Report Ready awaiting the draft. Cosmetic only.
+    html += '<span title="Trade report received — pack not yet drafted" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#4C6A7C;color:#fff;text-transform:uppercase;white-space:nowrap;">Report in</span>';
   }
   html += '<span class="ms-age-pill ' + ageClass + '">'
     + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')

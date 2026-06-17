@@ -15248,7 +15248,15 @@ function renderMakesafeDocViewerFrame(entry) {
       '</div>';
   }
   if (entry.kind === 'pdf') {
-    return '<iframe class="ms-docviewer-frame" title="' + escapeAttr(entry.label) + '" src="' + escapeAttr(entry.url) + '"></iframe>';
+    // Default the native PDF viewer to FIT-THE-PAGE so the whole page is visible
+    // (Marnin's report PDFs were opening zoomed-in/wide, unreadable without Chrome
+    // at 50%). #view=Fit fits the whole page; #zoom=page-fit is the Chromium
+    // synonym. The fragment (#...) sits after any ?query in a signed URL, so it
+    // never disturbs Supabase storage auth params. Strip any pre-existing #frag
+    // first so we don't double up.
+    var pdfBase = String(entry.url || '').split('#')[0];
+    var pdfSrc = pdfBase + '#view=Fit&zoom=page-fit';
+    return '<iframe class="ms-docviewer-frame" title="' + escapeAttr(entry.label) + '" src="' + escapeAttr(pdfSrc) + '"></iframe>';
   }
   if (entry.kind === 'image') {
     return '<div class="ms-docviewer-imgwrap"><img src="' + escapeAttr(entry.url) + '" alt="' + escapeAttr(entry.label) + '" ' +

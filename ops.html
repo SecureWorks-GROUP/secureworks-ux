@@ -3360,6 +3360,7 @@
         <button class="btn btn-sm" id="btnMakesafeIntake" onclick="loadMakesafeIntake()" style="display:none;background:#4C6A7C;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Intake</button>
         <button class="btn btn-sm" id="btnMakesafeMap" onclick="toggleMakesafeMap()" style="display:none;background:#293C46;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Map</button>
         <button class="btn btn-sm" id="btnMakesafeCrewDay" onclick="toggleMakesafeCrewDay()" style="display:none;background:#4C6A7C;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Crew Week</button>
+        <button class="btn btn-sm" id="btnMakesafeArchive" onclick="toggleMakesafeArchive()" style="display:none;background:#64748B;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Archive</button>
         <div style="flex:1;"></div>
         <div id="jobsDateDisplay" style="font-size:12px;font-weight:600;color:var(--sw-text-sec);letter-spacing:0.3px;white-space:nowrap;"></div>
         <button class="btn btn-secondary btn-sm" id="btnKanban" onclick="setJobView('kanban')" style="font-weight:600;">Kanban</button>
@@ -8637,10 +8638,12 @@ function setPipelineTab(tab) {
   var btnIntake = document.getElementById('btnMakesafeIntake');
   var btnMap = document.getElementById('btnMakesafeMap');
   var btnCrewDay = document.getElementById('btnMakesafeCrewDay');
+  var btnArchive = document.getElementById('btnMakesafeArchive');
   if (btnNew) btnNew.style.display = isMakesafe ? '' : 'none';
   if (btnIntake) btnIntake.style.display = isMakesafe ? '' : 'none';
   if (btnMap) btnMap.style.display = isMakesafe ? '' : 'none';
   if (btnCrewDay) btnCrewDay.style.display = isMakesafe ? '' : 'none';
+  if (btnArchive) btnArchive.style.display = isMakesafe ? '' : 'none';
   // Close make-safe overlays if switching away from makesafes
   if (!isMakesafe && document.getElementById('makesafeMapContainer')) {
     document.getElementById('makesafeMapContainer').remove();
@@ -9128,20 +9131,57 @@ function renderMakesafeKanban(container, columns) {
   };
   var uiColumns = buildMakesafeColumns(columns);
 
+  // Sync the Archive button's active appearance on every render
+  var archBtn = document.getElementById('btnMakesafeArchive');
+  if (archBtn) {
+    archBtn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
+    archBtn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
+  }
+
   var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
   html += renderMakesafeLegend();
+
+  // Archive search bar — only shown when archive is visible
+  if (_makesafeArchiveVisible) {
+    var archiveTotal = (uiColumns.archive || []).length;
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 4px;">'
+      + '<input id="msArchiveSearch" type="text" placeholder="Search archive — client, suburb, builder, ref…"'
+      + ' value="' + escapeHtml(_makesafeArchiveSearch) + '"'
+      + ' oninput="makesafeArchiveSearchInput(this.value)"'
+      + ' style="flex:1;max-width:380px;padding:5px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:12px;color:#293C46;background:#fff;outline:none;" />'
+      + '<span style="font-size:11px;color:#64748B;">' + archiveTotal + ' total record' + (archiveTotal === 1 ? '' : 's') + '</span>'
+      + '</div>';
+  }
+
   html += '<div style="display:flex;gap:8px;flex:1;min-height:0;">';
   html += '<div class="kanban-container" style="flex:1;">';
 
-  MAKESAFES_STAGES.forEach(function(status) {
-    var jobs = uiColumns[status] || [];
+  // Stages to render — exclude archive when it is hidden
+  var stagesToRender = MAKESAFES_STAGES.filter(function(s) {
+    return s !== 'archive' || _makesafeArchiveVisible;
+  });
+
+  stagesToRender.forEach(function(status) {
+    var allJobs = uiColumns[status] || [];
+    // Apply live search filter only to the archive column
+    var jobs = (status === 'archive' && _makesafeArchiveSearch)
+      ? allJobs.filter(function(j) { return makesafeArchiveJobMatches(j, _makesafeArchiveSearch); })
+      : allJobs;
+
     var stageColor = STAGE_COLORS[status] || '#8FA4B2';
+    var colHeader = STAGE_LABELS[status] || status;
+    // When filtering archive, show filtered/total counts
+    var countBadge = (status === 'archive' && _makesafeArchiveSearch)
+      ? (jobs.length + '/' + allJobs.length)
+      : jobs.length;
+
     html += '<div class="kanban-col" data-status="' + status + '" ondragover="kanbanDragOver(event)" ondragleave="kanbanDragLeave(event)" ondrop="kanbanDrop(event)">';
-    html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">' + (STAGE_LABELS[status] || status) + '<span class="count">' + jobs.length + '</span></div>';
+    html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">' + colHeader + '<span class="count">' + countBadge + '</span></div>';
     html += '<div class="kanban-body">';
 
     if (jobs.length === 0) {
-      html += '<div class="kanban-empty">No jobs</div>';
+      var emptyMsg = (status === 'archive' && _makesafeArchiveSearch) ? 'No matches' : 'No jobs';
+      html += '<div class="kanban-empty">' + emptyMsg + '</div>';
     } else {
       jobs.forEach(function(j) {
         html += renderMakesafeCard(j, status);
@@ -9154,12 +9194,56 @@ function renderMakesafeKanban(container, columns) {
   html += '</div></div>';
   html += '</div>';
   container.innerHTML = html;
+  // Re-focus the archive search input after re-render if it was in use
+  if (_makesafeArchiveVisible && _makesafeArchiveSearch) {
+    var inp = document.getElementById('msArchiveSearch');
+    if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  }
   setupKanbanHorizontalScroll();
 }
 
 // One board-level legend explaining the 5 chip glyphs + the 4 states. Collapsible
 // so it doesn't permanently eat board height once the ops team knows the key.
 var _makesafeLegendCollapsed = false;
+var _makesafeArchiveVisible = false;   // archive column hidden by default
+var _makesafeArchiveSearch = '';       // live filter applied when archive is open
+
+function toggleMakesafeArchive() {
+  _makesafeArchiveVisible = !_makesafeArchiveVisible;
+  if (!_makesafeArchiveVisible) _makesafeArchiveSearch = '';
+  // Update button appearance to reflect active state
+  var btn = document.getElementById('btnMakesafeArchive');
+  if (btn) {
+    btn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
+    btn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
+  }
+  // Re-render with current data (no new fetch needed)
+  if (_pipelineData) renderJobs(_pipelineData);
+}
+
+function makesafeArchiveSearchInput(val) {
+  _makesafeArchiveSearch = (val || '').toLowerCase().trim();
+  if (_pipelineData) renderJobs(_pipelineData);
+}
+
+// Returns true when a job matches the archive search query.
+function makesafeArchiveJobMatches(j, query) {
+  if (!query) return true;
+  var md = j.makesafe_details || j.metadata || {};
+  var fields = [
+    j.client_name,
+    j.site_suburb || j.suburb,
+    j.site_address,
+    getMakesafeBuilder(j),
+    j.external_ref,
+    j.job_number,
+    md.builder_ref || md.external_ref,
+  ];
+  return fields.some(function(f) {
+    return f && String(f).toLowerCase().indexOf(query) !== -1;
+  });
+}
+
 function toggleMakesafeLegend() {
   _makesafeLegendCollapsed = !_makesafeLegendCollapsed;
   var el = document.getElementById('msLegend');

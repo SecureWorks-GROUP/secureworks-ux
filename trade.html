@@ -6866,12 +6866,14 @@
         if (typeof item === 'string') {
           h += '<tr style="border-bottom:1px solid var(--sw-border)"><td colspan="4" style="padding:8px 4px">' + esc(item) + '</td></tr>';
         } else {
-          var lineTotal = item.total || (item.qty && item.rate ? item.qty * item.rate : 0);
+          var effectiveRate = item.unit_price || item.rate || 0;
+          var effectiveQty = item.quantity || item.qty || 1;
+          var lineTotal = item.total || (effectiveQty * effectiveRate) || 0;
           woTotal += lineTotal;
           h += '<tr style="border-bottom:1px solid var(--sw-border)">';
           h += '<td style="padding:8px 4px;color:var(--sw-text)">' + esc(item.item || item.description || item.name || '') + '</td>';
-          h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (item.qty || '') + (item.unit ? ' ' + esc(item.unit) : '') + '</td>';
-          h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (item.rate ? '$' + Number(item.rate).toLocaleString() : '') + '</td>';
+          h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (item.qty || item.quantity || '') + (item.unit ? ' ' + esc(item.unit) : '') + '</td>';
+          h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (effectiveRate ? '$' + Number(effectiveRate).toLocaleString() : '') + '</td>';
           h += '<td style="padding:8px 4px;text-align:right;font-weight:700;color:var(--sw-text)">' + (lineTotal ? '$' + Number(lineTotal).toLocaleString() : '') + '</td>';
           h += '</tr>';
         }

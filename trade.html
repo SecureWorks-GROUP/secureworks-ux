@@ -3935,10 +3935,26 @@
     if (_lastJobData) renderMyJobs(_lastJobData);
   };
 
+  // Returns true if the query looks like a builder/job reference (e.g. "AJ66934", "AJBR 66934", "SWMS-26438").
+  // These refs contain digits and are typically ≥4 chars after stripping spaces/dashes.
+  function _looksLikeRef(q) {
+    if (!q || q.length < 3) return false;
+    // Must contain at least one digit
+    if (!/\d/.test(q)) return false;
+    // Must look like an alphanumeric ref: letters+digits (with optional spaces/dashes)
+    return /^[a-z0-9][a-z0-9\s\-_/]*$/i.test(q.trim());
+  }
+
   window.filterMyJobs = function() {
     var q = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    if (_jobFilter === 'all') requestGlobalJobSearch(q);
-    else requestGlobalJobSearch('');
+    if (_jobFilter === 'all') {
+      requestGlobalJobSearch(q);
+    } else if (q.length >= 2 && _looksLikeRef(q)) {
+      // On non-All tabs, route ref-like queries to global search so builder/job refs always resolve.
+      requestGlobalJobSearch(q);
+    } else {
+      requestGlobalJobSearch('');
+    }
     if (_lastJobData) renderMyJobs(_lastJobData);
   };
 
@@ -4082,7 +4098,10 @@
     var statusLabel = getGlobalJobDisplayStatus(job);
     var statusClass = String((job.status || statusLabel || 'unknown')).toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
     var isOpenMakesafe = type === 'makesafe' && isOpenMakesafePoolJob(job);
-    var clickable = !!assignment || isOpenMakesafe;
+    // Make-safe results are always openable (read-only view when not assigned).
+    // Non-makesafe non-assigned jobs remain un-tappable (search reference only).
+    var isMakesafe = type === 'makesafe';
+    var clickable = !!assignment || isMakesafe;
     var assignmentArg = assignment ? (assignment.id || '') : '';
     var openAction = type === 'makesafe'
       ? "openJobReport('" + job.id + "', '" + assignmentArg + "')"
@@ -4091,8 +4110,9 @@
       ? ' onclick="' + openAction + '" style="cursor:pointer"'
       : ' style="cursor:default"';
     var note = '';
-    if (isOpenMakesafe && !assignment) note = 'Open MakeSafe · tap to start/report';
+    if (isOpenMakesafe && !assignment) note = 'Open MakeSafe · tap to view/report';
     else if (assignment) note = 'Allocated to you · tap to open';
+    else if (isMakesafe) note = 'MakeSafe job · tap to view (read-only)';
     else note = statusLabel === 'Completed' ? 'Historical completed job' : 'Search result only · not allocated to you';
 
     var h = '<div class="job-card" data-type="' + esc(type) + '"' + attrs + '>';
@@ -4187,7 +4207,8 @@
     if (searchBar) searchBar.style.display = 'block';
 
     var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    if (_jobFilter === 'all' && query.length >= 2) requestGlobalJobSearch(query);
+    var _needsGlobalSearch = query.length >= 2 && (_jobFilter === 'all' || _looksLikeRef(query));
+    if (_needsGlobalSearch) requestGlobalJobSearch(query);
 
     var todayRunListState = getTodayRunListState(data.today || []);
     var todayJobs = todayRunListState.items;
@@ -4228,7 +4249,8 @@
     // Today/allocated sections remain assignment-based for trades. The separate All-tab search
     // below is the deliberate exception: it reaches the full historical job database across
     // crews/statuses, including old completed/archived jobs.
-    if (_jobFilter === 'all' && query.length >= 2) html += renderGlobalJobSearchResults(data, query);
+    // On non-All tabs, also surface global results when the query looks like a builder/job ref.
+    if (_needsGlobalSearch) html += renderGlobalJobSearchResults(data, query);
 
     var sections = [
       { key: 'today', label: 'Today' },
@@ -12827,7 +12849,16 @@
         extra_items: extraItems,
         notes: _invNotes
       }).then(function(result) {
-        if (result.error) { toast(result.error, true); loadHoursView(); return; }
+        // Handle both legacy { error } and new structured { ok:false, code, userMessage } contracts.
+        if (result.ok === false || result.error) {
+          var msg = result.userMessage || result.error || 'Invoice submission failed';
+          toast(msg, true);
+          if (result.code === 'RATE_NOT_CONFIGURED') {
+            toast('Go to Profile to set your hourly rate, then try again.', true);
+          }
+          loadHoursView();
+          return;
+        }
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
@@ -13119,25 +13150,31 @@
   };
 
   window.submitInvoiceFromBuilder = function() {
-    _syncRowsFromDOM();
-    var isExpense = _invoiceBuilderMode === 'expense';
-    var validRows = _invRows.filter(function(r) { return r.hours > 0 || r.description || r.job_text; });
-    var manualRows = _manualInvoiceRows(validRows);
-    if (validRows.length === 0) { toast('Add at least one line item with hours or a description', true); return; }
-    // Validate only manual extras/adjustments. Clocked rows are server-owned base labour.
-    var errors = [];
-    manualRows.forEach(function(r, idx) {
-      if (r._source === 'edited') errors.push('Edited clocked rows cannot be submitted as base hours — add a misc adjustment instead');
-      if (!r.division) errors.push('Extra row ' + (idx + 1) + ': select type of work');
-      if (!r.job_text) errors.push('Extra row ' + (idx + 1) + ': select a job number');
-      if (!r.description) errors.push('Extra row ' + (idx + 1) + ': enter a description');
-      if (!(Number(r.hours) > 0)) errors.push('Extra row ' + (idx + 1) + ': enter hours');
-      if (!(Number(r.rate) > 0)) errors.push('Extra row ' + (idx + 1) + ': enter rate');
-    });
-    if (errors.length > 0) { toast(errors[0], true); return; }
-
-    var t = _calcInvTotals();
-    if (t.subtotal <= 0) { toast('Invoice total must be greater than $0', true); return; }
+    // Guard: if any pre-confirm prep throws, the button stays enabled (no spinner shown yet).
+    var isExpense, validRows, manualRows, errors, t;
+    try {
+      _syncRowsFromDOM();
+      isExpense = _invoiceBuilderMode === 'expense';
+      validRows = _invRows.filter(function(r) { return r.hours > 0 || r.description || r.job_text; });
+      manualRows = _manualInvoiceRows(validRows);
+      if (validRows.length === 0) { toast('Add at least one line item with hours or a description', true); return; }
+      // Validate only manual extras/adjustments. Clocked rows are server-owned base labour.
+      errors = [];
+      manualRows.forEach(function(r, idx) {
+        if (r._source === 'edited') errors.push('Edited clocked rows cannot be submitted as base hours — add a misc adjustment instead');
+        if (!r.division) errors.push('Extra row ' + (idx + 1) + ': select type of work');
+        if (!r.job_text) errors.push('Extra row ' + (idx + 1) + ': select a job number');
+        if (!r.description) errors.push('Extra row ' + (idx + 1) + ': enter a description');
+        if (!(Number(r.hours) > 0)) errors.push('Extra row ' + (idx + 1) + ': enter hours');
+        if (!(Number(r.rate) > 0)) errors.push('Extra row ' + (idx + 1) + ': enter rate');
+      });
+      if (errors.length > 0) { toast(errors[0], true); return; }
+      t = _calcInvTotals();
+      if (t.subtotal <= 0) { toast('Invoice total must be greater than $0', true); return; }
+    } catch (prepErr) {
+      toast('Could not prepare invoice: ' + friendlyError(prepErr), true);
+      return;
+    }
 
     showConfirm(
       'Submit Invoice',
@@ -13157,7 +13194,22 @@
         extra_items: extraItems,
         notes: _invNotes
       }).then(function(result) {
-        if (result.error) { toast(result.error, true); loadHoursView(); return; }
+        // Handle both legacy { error } and new structured { ok:false, code, userMessage } contracts.
+        // Exception: XERO_PUSH_FAILED means the invoice WAS saved — treat as a partial success below.
+        if ((result.ok === false || result.error) && result.code !== 'XERO_PUSH_FAILED') {
+          var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
+          toast(msg, true);
+          if (result.code === 'RATE_NOT_CONFIGURED') {
+            // Guide the trade to the Profile view where they can set their hourly rate.
+            showConfirm(
+              'Set Your Rate',
+              'Your hourly rate is not configured. Go to Profile now to set it, then come back and resubmit.',
+              'Go to Profile'
+            ).then(function(go) { if (go) showView('profile'); });
+          }
+          loadHoursView();
+          return;
+        }
 
         // Generate PDF for the trade's records
         var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: false, total: t };
@@ -13188,7 +13240,9 @@
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + result.invoice_number + '</div>';
-        if (result.xero_bill_number) {
+        if (result.code === 'XERO_PUSH_FAILED') {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + (result.userMessage || 'Invoice saved — Xero sync pending. Admin will sync manually.') + '</div>';
+        } else if (result.xero_bill_number) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero as draft bill</div>';
@@ -13839,13 +13893,28 @@
       var btn = document.getElementById('woBtn' + workOrderId);
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
 
+      function _reEnableBtn() {
+        if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
+      }
+
       api('submit_work_order_invoice', null, { work_order_id: workOrderId }).then(function(result) {
-        if (result.success) {
+        // Handle both legacy { success, error } and new structured { ok, code, userMessage } contracts.
+        var succeeded = result.ok === true || result.success === true;
+        var failed = result.ok === false || (result.success === false && !succeeded);
+        if (succeeded) {
           toast('Invoice created: ' + (result.xero_bill_number || '') + ' — $' + Number(result.total || 0).toFixed(2));
           openWorkOrderHub(); // Refresh to show invoiced state
+        } else if (failed) {
+          var msg = result.userMessage || result.error || 'Invoice failed — please try again';
+          toast(msg, true);
+          if (result.code === 'RATE_NOT_CONFIGURED') {
+            showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then try again.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
+          }
+          _reEnableBtn();
         } else {
-          toast('Invoice failed: ' + (result.error || 'Unknown error'), true);
-          if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
+          // Unexpected shape — treat as success if no explicit failure indicator.
+          toast('Invoice submitted', false);
+          openWorkOrderHub();
         }
       }).catch(function(err) {
         if (!navigator.onLine) {
@@ -13854,7 +13923,7 @@
           if (btn) { btn.disabled = true; btn.textContent = 'Queued (offline)'; }
         } else {
           toast(friendlyError(err), true);
-          if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
+          _reEnableBtn();
         }
       });
     });

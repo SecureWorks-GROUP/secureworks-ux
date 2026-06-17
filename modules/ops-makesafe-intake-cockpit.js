@@ -163,6 +163,12 @@ function showMsIntakeDetail(draftId) {
   html += '<div style="flex:1;overflow:hidden;display:flex;min-height:0;">';
 
   // LEFT: source evidence / PDF
+  // BUG 2 (DISPLAY): a recorded pdf_url can point at a job-documents object that was
+  // never actually uploaded (the MLB Balcatta case) — the iframe then renders the raw
+  // {"statusCode":"404","Object not found"} JSON. We (a) skip backend-flagged
+  // unavailable PDFs in intakeFirstPdfUrl, and (b) when a URL IS present, render the
+  // iframe but PROBE the object at runtime; if it is missing / not a real PDF we swap
+  // in a graceful fallback that links to the source email. Never show raw JSON.
   html += '<div style="width:48%;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--sw-border);background:#F7FAFB;">';
   html += '<div style="padding:12px 16px;flex-shrink:0;border-bottom:1px solid var(--sw-border);">';
   html += '<div style="font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Source work order</div>';
@@ -171,13 +177,16 @@ function showMsIntakeDetail(draftId) {
     html += '<a href="' + escapeAttr(pdfUrl) + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;background:#4C6A7C;color:#fff;text-decoration:none;padding:6px 12px;border-radius:6px;font-weight:700;font-size:12px;">Open PDF</a>';
   }
   html += '</div>';
+  html += '<div id="msCockpitPdfPane" style="flex:1;min-height:0;display:flex;flex-direction:column;">';
   if (pdfUrl) {
-    html += '<div style="flex:1;min-height:0;">';
-    html += '<iframe title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;display:block;"></iframe>';
-    html += '</div>';
+    html += '<iframe id="msCockpitPdfFrame" title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;display:block;"></iframe>';
   } else {
-    html += '<div style="padding:24px 16px;color:#B91C1C;background:#FFF7ED;margin:16px;border:1px dashed #FED7AA;border-radius:8px;font-size:13px;">No PDF preview URL found. Hold or reject unless a work order is attached elsewhere.</div>';
+    // No usable PDF URL at all (none recorded, or all flagged unavailable).
+    html += msCockpitPdfFallbackHtml(d, attachments.length === 0
+      ? 'No work order PDF was captured for this draft.'
+      : 'The work order PDF is not available (it was not stored).');
   }
+  html += '</div>';
   if (d.body_preview) {
     html += '<details style="padding:12px 16px;flex-shrink:0;border-top:1px solid var(--sw-border);"><summary style="cursor:pointer;font-weight:700;color:#48697A;font-size:12px;">Email body preview</summary><div style="white-space:pre-wrap;font-size:12px;color:#4B5563;margin-top:8px;">' + escapeHtml(d.body_preview) + '</div></details>';
   }
@@ -212,6 +221,53 @@ function showMsIntakeDetail(draftId) {
 
   panel.innerHTML = html;
   updateMsCockpitReviewStatus();
+  // BUG 2 (DISPLAY): if a PDF URL was rendered, verify the object actually exists.
+  // A 404 from Storage returns JSON the iframe would display verbatim, so we probe
+  // and swap to the graceful fallback when the object is missing / not a PDF.
+  if (pdfUrl) { msCockpitProbePdf(d, pdfUrl); }
+}
+
+/**
+ * Graceful "no PDF" panel for the cockpit's left column. Never shows raw JSON.
+ * Tells the reviewer the WO PDF is unavailable and how to recover (open the source
+ * email in the ses@ mailbox), plus a direct link if a (possibly-stale) URL exists.
+ */
+function msCockpitPdfFallbackHtml(d, reason) {
+  var from = (d && (d.from_name || d.from_email)) || '';
+  var subj = (d && d.subject) || '';
+  var html = '<div style="margin:16px;padding:18px 16px;background:#FFF7ED;border:1px dashed #FED7AA;border-radius:10px;font-size:13px;color:#7C2D12;">';
+  html += '<div style="font-weight:800;margin-bottom:6px;">Work order PDF not available</div>';
+  html += '<div style="color:#9A3412;margin-bottom:10px;">' + escapeHtml(reason || 'The work order PDF could not be loaded.') + ' Open the source email to view or re-download the work order.</div>';
+  if (subj) html += '<div style="font-size:12px;color:#7C2D12;margin-top:4px;"><strong>Email:</strong> ' + escapeHtml(subj) + '</div>';
+  if (from) html += '<div style="font-size:12px;color:#7C2D12;margin-top:2px;"><strong>From:</strong> ' + escapeHtml(from) + '</div>';
+  html += '<div style="font-size:12px;color:#9A3412;margin-top:10px;">Find this in the <strong>ses@secureworkswa.com.au</strong> mailbox, then hold or reject this draft unless the work order is confirmed elsewhere.</div>';
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Probe a recorded pdf_url. Storage returns a 404 (or a JSON error body) for a
+ * missing object; in that case swap the iframe for the graceful fallback. Best-effort
+ * and non-blocking: a network/CORS failure leaves the iframe as-is (the user can
+ * still try Open PDF). Guarded so a late response from a previous draft never clobbers
+ * the currently-open one.
+ */
+function msCockpitProbePdf(d, pdfUrl) {
+  var pane = document.getElementById('msCockpitPdfPane');
+  var frame = document.getElementById('msCockpitPdfFrame');
+  if (!pane || !frame) return;
+  var draftId = d && d.id;
+  fetch(pdfUrl, { method: 'GET', headers: { 'Range': 'bytes=0-1023' } }).then(function(resp) {
+    var ct = (resp.headers.get('content-type') || '').toLowerCase();
+    var ok = resp.ok && ct.indexOf('pdf') !== -1;
+    if (ok) return; // real PDF — leave the iframe
+    // Missing object / JSON error / non-PDF -> swap to the fallback (if still on this draft).
+    var stillOpen = _msCockpitDraftCache[draftId] && document.getElementById('msCockpitPdfFrame') === frame;
+    if (!stillOpen) return;
+    pane.innerHTML = msCockpitPdfFallbackHtml(d, 'The stored work order PDF could not be found (it may not have uploaded).');
+  }).catch(function() {
+    // Network/CORS error: do nothing — the iframe + Open PDF link remain available.
+  });
 }
 
 /**

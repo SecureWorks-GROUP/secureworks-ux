@@ -10113,6 +10113,11 @@ function intakeFieldValue(d, field) {
 function intakeFirstPdfUrl(d) {
   var atts = intakeAttachments(d);
   for (var i = 0; i < atts.length; i++) {
+    // BUG 2 (DISPLAY): skip attachments the backend flagged as unavailable (the
+    // re-upload to job-documents failed, so any recorded pdf_url would 404). Returning
+    // their URL would render the raw {"statusCode":"404","Object not found"} JSON in
+    // the cockpit iframe. Treat them as "no usable PDF" so the graceful fallback shows.
+    if (atts[i] && atts[i].pdf_unavailable) continue;
     var url = atts[i].pdf_url || atts[i].public_url || atts[i].url || '';
     if (url) return url;
   }
@@ -10130,7 +10135,13 @@ function intakeMissingFields(d, reviewedFields) {
   if (!val('external_ref')) missing.push('external_ref');
   if (!val('client_name')) missing.push('client_name');
   if (!val('site_address')) missing.push('site_address');
-  if (intakeAttachments(d).length === 0) missing.push('work_order_pdf');
+  // BUG 2 (DISPLAY): require a SERVABLE work-order PDF — an attachment flagged
+  // pdf_unavailable (re-upload to storage failed) must NOT count, so the approve gate
+  // does not go green when the only "PDF" 404s. Mirrors the backend approval check.
+  var servablePdfs = intakeAttachments(d).filter(function(a) {
+    return a && !a.pdf_unavailable && (a.pdf_url || a.storage_url || a.public_url || a.url);
+  });
+  if (servablePdfs.length === 0) missing.push('work_order_pdf');
   return missing;
 }
 

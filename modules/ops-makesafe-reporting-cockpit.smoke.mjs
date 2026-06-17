@@ -55,6 +55,17 @@ const behaviour = {
   postResult: { success: true, status: 'sent', invoice_number: 'INV-1' },
   confirmReturns: true,
 };
+// The carousel renderer + global state live in ops.html. The module reuses them
+// at runtime; here we provide a faithful-enough stub so showMsReportingDetail
+// exercises its real carousel-feed path. The stub mirrors the entry shape
+// ({label,url,kind}) and emits the urls into the panel so the doc assertions hold.
+const _msafeDocViewer = { docs: [], idx: 0 };
+function renderMakesafeDocViewerInner() {
+  return _msafeDocViewer.docs.map((d) => {
+    if (d.kind === 'pdf') return '<iframe src="' + d.url + '" title="' + d.label + '"></iframe>';
+    return '<img src="' + d.url + '" alt="' + d.label + '">';
+  }).join('');
+}
 const sandbox = {
   document: documentStub,
   opsFetch: (action, params) => { calls.opsFetch.push({ action, params }); return Promise.resolve(behaviour.fetchResult); },
@@ -63,6 +74,8 @@ const sandbox = {
   confirm: (msg) => { calls.confirms.push(msg); return behaviour.confirmReturns; },
   escapeHtml: (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
   escapeAttr: (s) => String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/&/g, '&amp;'),
+  _msafeDocViewer,
+  renderMakesafeDocViewerInner,
   module: undefined,
   console,
 };
@@ -73,9 +86,11 @@ const exposed = [
   'loadMakesafeReportingCockpit',
   'renderMsReportingCard',
   'showMsReportingDetail',
-  'renderMsReportingPdf',
   'showMsReportingDetailEmpty',
   'approveMakesafeReportPack',
+  'finishMakesafeCloseOut',
+  'resolveMakesafeSendState',
+  'resetMakesafeFailedPack',
   'refreshMsReportingBadge',
   '_msReportingSubjectHasReviewMarker',
 ];
@@ -121,6 +136,16 @@ const fixture = {
   },
   report_pdf_url: 'https://example.com/report.pdf',
   invoice_pdf_url: 'https://example.com/invoice.pdf',
+  cc: ['ses@secureworkswa.com.au'],
+  resume_action: 'send',
+  draft_docs: [
+    { label: 'Make safe report', url: 'https://example.com/report.pdf', kind: 'pdf' },
+    { label: 'Draft invoice', url: 'https://example.com/invoice.pdf', kind: 'pdf' },
+  ],
+  source_docs: [
+    { label: 'Work order', url: 'https://example.com/wo.pdf', kind: 'pdf' },
+    { label: 'front', url: 'https://example.com/p1.jpg', kind: 'image' },
+  ],
   photos: [{ url: 'https://example.com/p1.jpg', thumbnail_url: 'https://example.com/p1t.jpg', label: 'front' }],
   default_subject: 'Make Safe Completion - MLB-25248 - 12 Smith Street, Joondalup',
   default_html_body: '<p>hello builder</p>',
@@ -137,13 +162,15 @@ check('a card is rendered into the list body for the loaded pack',
 
 mod.showMsReportingDetail('job-1');
 const detailHtml = elements['msReportingDetailPanel']._html || '';
-check('detail renders the evidence photo url', detailHtml.includes('https://example.com/p1') );
+check('detail carousel renders the source photo url', detailHtml.includes('https://example.com/p1') );
+check('detail carousel renders the work-order url', detailHtml.includes('https://example.com/wo.pdf'));
 check('detail renders the invoice line item description', detailHtml.includes('Temp fence hire'));
-check('detail renders the report PDF url in an iframe', detailHtml.includes('https://example.com/report.pdf') && detailHtml.includes('<iframe'));
-check('detail renders the invoice PDF url', detailHtml.includes('https://example.com/invoice.pdf'));
+check('detail carousel renders the report PDF url in an iframe', detailHtml.includes('https://example.com/report.pdf') && detailHtml.includes('<iframe'));
+check('detail carousel renders the invoice PDF url', detailHtml.includes('https://example.com/invoice.pdf'));
 check('detail shows the recipient email', detailHtml.includes('accounts@mlb.com.au'));
+check('detail shows the CC recipient', detailHtml.includes('ses@secureworkswa.com.au'));
 check('detail shows the inc-GST total', detailHtml.includes('$110.00'));
-check('detail has an Approve and send pack button', detailHtml.includes('Approve and send pack'));
+check('detail has an Approve & send pack button (resume_action=send)', detailHtml.includes('Approve &amp; send pack') || detailHtml.includes('Approve & send pack'));
 
 // ── 5. Approve fires makesafe_send_pack with the gate-passing default subject ──
 await mod.approveMakesafeReportPack('job-1');
@@ -184,6 +211,88 @@ check('approve surfaces an error toast on the refusal', calls.toasts.some((t) =>
 const offending = ['"TEST', 'TEST"', '"DRAFT', '"REVIEW', '"PREVIEW', '"INTERNAL', '"ROUND'];
 check('module source does not hardcode a review-marker literal in copy',
   !offending.some((s) => code.includes(s)));
+
+// ── 8. STATE-AWARE RESUME ACTIONS (Phase 1b) ──────────────────────────────
+// 8a. finish_send keeps the UNCHANGED makesafe_send_pack call (re-emails once).
+calls.opsPost.length = 0; calls.confirms.length = 0;
+const jobFinishSend = Object.assign({}, fixture, { job_id: 'job-fs', resume_action: 'finish_send' });
+behaviour.fetchResult = { drafts: [jobFinishSend] };
+await mod.loadMakesafeReportingCockpit();
+const fsHtml = (() => { mod.showMsReportingDetail('job-fs'); return elements['msReportingDetailPanel']._html || ''; })();
+check('finish_send renders a "Finish send" button', fsHtml.includes('Finish send'));
+await mod.approveMakesafeReportPack('job-fs');
+check('finish_send still calls makesafe_send_pack (unchanged signature)',
+  calls.opsPost.some((c) => c.action === 'makesafe_send_pack'));
+check('finish_send confirm mentions already-authorised wording',
+  calls.confirms.some((m) => /already authorised/i.test(m)));
+
+// 8b. finish_close_out -> makesafe_resume_close (NO send_pack).
+calls.opsPost.length = 0; calls.confirms.length = 0;
+const jobClose = Object.assign({}, fixture, { job_id: 'job-cl', resume_action: 'finish_close_out' });
+behaviour.fetchResult = { drafts: [jobClose] };
+await mod.loadMakesafeReportingCockpit();
+const clHtml = (() => { mod.showMsReportingDetail('job-cl'); return elements['msReportingDetailPanel']._html || ''; })();
+check('finish_close_out renders a "Finish close-out" button', clHtml.includes('Finish close-out'));
+await mod.finishMakesafeCloseOut('job-cl');
+check('finish_close_out calls opsPost(makesafe_resume_close)',
+  calls.opsPost.some((c) => c.action === 'makesafe_resume_close'));
+check('finish_close_out NEVER calls makesafe_send_pack',
+  !calls.opsPost.some((c) => c.action === 'makesafe_send_pack'));
+
+// 8c. resolve_send_state -> two explicit choices; both go via makesafe_send_pack
+//     WITH sending_resolution, never auto-picked.
+calls.opsPost.length = 0; calls.confirms.length = 0;
+const jobResolve = Object.assign({}, fixture, {
+  job_id: 'job-rs', resume_action: 'resolve_send_state',
+  pack_status: { status: 'authorised_not_sent', send_started_at: new Date(Date.now() - 600000).toISOString(), in_flight_stale: true },
+});
+behaviour.fetchResult = { drafts: [jobResolve] };
+await mod.loadMakesafeReportingCockpit();
+const rsHtml = (() => { mod.showMsReportingDetail('job-rs'); return elements['msReportingDetailPanel']._html || ''; })();
+check('resolve_send_state shows the Sent-Items-first verify prompt', /Sent Items/i.test(rsHtml));
+check('resolve_send_state offers BOTH explicit choices', /WAS sent/i.test(rsHtml) && /was NOT sent/i.test(rsHtml));
+await mod.resolveMakesafeSendState('job-rs', 'confirmed_sent');
+const resolveCall = calls.opsPost.find((c) => c.action === 'makesafe_send_pack');
+check('resolve(confirmed_sent) calls makesafe_send_pack with sending_resolution',
+  !!resolveCall && resolveCall.body.sending_resolution === 'confirmed_sent');
+
+// 8d. failed pack -> blocked state, NO send button, optional reset action.
+calls.opsPost.length = 0; calls.confirms.length = 0;
+const jobFailed = Object.assign({}, fixture, {
+  job_id: 'job-fail', resume_action: undefined,
+  pack_status: { status: 'failed', failed_step: 'authorise_invoice', error_detail: 'Xero 400' },
+});
+behaviour.fetchResult = { drafts: [jobFailed] };
+await mod.loadMakesafeReportingCockpit();
+const failHtml = (() => { mod.showMsReportingDetail('job-fail'); return elements['msReportingDetailPanel']._html || ''; })();
+check('failed pack shows a blocked/needs-ops state', /Blocked/i.test(failHtml) && /needs ops/i.test(failHtml));
+check('failed pack has NO send/approve primary button',
+  !/Approve (&amp;|&) send pack/.test(failHtml) && !/Finish send/.test(failHtml));
+await mod.resetMakesafeFailedPack('job-fail');
+check('reset calls opsPost(makesafe_reset_failed_pack)',
+  calls.opsPost.some((c) => c.action === 'makesafe_reset_failed_pack'));
+
+// ── 9. needs_money_review HOOK — DEFENSIVE ────────────────────────────────
+// 9a. Flagged: amber card chip + highlighted invoice line.
+const jobMoney = Object.assign({}, fixture, {
+  job_id: 'job-mr', needs_money_review: true,
+  money_review: { reason: 'Unit price above rate card', flagged_lines: [{ line_index: 0, description: 'Temp fence hire', confidence: 0.82, note: 'check rate' }] },
+});
+const moneyCardHtml = mod.renderMsReportingCard(jobMoney);
+check('money-review card renders the CHECK PRICING chip', moneyCardHtml.includes('CHECK PRICING'));
+behaviour.fetchResult = { drafts: [jobMoney] };
+await mod.loadMakesafeReportingCockpit();
+const moneyDetail = (() => { mod.showMsReportingDetail('job-mr'); return elements['msReportingDetailPanel']._html || ''; })();
+check('money-review panel shows the pricing-flagged banner', /Pricing flagged/i.test(moneyDetail));
+check('money-review panel shows the flagged line note', moneyDetail.includes('check rate'));
+
+// 9b. Defensive: absent needs_money_review -> NO chip, no banner.
+const cleanCard = mod.renderMsReportingCard(fixture);
+check('absent needs_money_review -> NO card chip', !cleanCard.includes('CHECK PRICING'));
+behaviour.fetchResult = { drafts: [fixture] };
+await mod.loadMakesafeReportingCockpit();
+const cleanDetail = (() => { mod.showMsReportingDetail('job-1'); return elements['msReportingDetailPanel']._html || ''; })();
+check('absent needs_money_review -> NO panel pricing banner', !/Pricing flagged/i.test(cleanDetail));
 
 console.log('');
 if (failures) {

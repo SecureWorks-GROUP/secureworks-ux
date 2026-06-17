@@ -8798,7 +8798,7 @@ function __renderedStagesFor(typeKey) {
 var FENCING_STAGES = __renderedStagesFor('fencing');
 var PATIO_STAGES = __renderedStagesFor('patio');
 var DECKING_STAGES = __renderedStagesFor('decking');
-var MAKESAFES_STAGES = ['new', 'allocated', 'report_ready', 'completed', 'archive'];
+var MAKESAFES_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive'];
 
 // Status Mapping Gap diagnostic column key — synthetic, not a real jobs.status value.
 // Pipeline Visibility Guard requires this column to render even when empty so an operator
@@ -9152,6 +9152,7 @@ function renderMakesafeKanban(container, columns) {
   var STAGE_LABELS = {
     new: 'New',
     allocated: 'Allocated',
+    trade_report_in: 'Trade Report In',
     report_ready: 'Report Ready',
     completed: 'Completed This Week',
     archive: 'Archive',
@@ -9159,6 +9160,7 @@ function renderMakesafeKanban(container, columns) {
   var STAGE_COLORS = {
     new: '#3498DB',
     allocated: '#E67E22',
+    trade_report_in: '#0E7C7B',
     report_ready: '#9B59B6',
     completed: '#7F8C8D',
     archive: '#64748B',
@@ -9595,7 +9597,7 @@ function getMakesafeStage(j, rawStatus) {
   var sub = getMakesafeSubstatus(j);
   var reportStatus = j.report_status || j.service_report_status || (j.service_report && j.service_report.status) || '';
   var backendStage = j.board_stage || j.makesafe_stage || '';
-  if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'report_ready' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
+  if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
   if (rawStatus === 'new' || rawStatus === 'allocated' || rawStatus === 'report_ready' || rawStatus === 'completed' || rawStatus === 'archive') return rawStatus;
   if (rawStatus === 'to_invoice') return 'report_ready';
   if (sub === 'complete' || rawStatus === 'invoiced' || rawStatus === 'completed') return 'completed';
@@ -9624,7 +9626,7 @@ function isMakesafeCompletedThisWeek(j) {
   return (Date.now() - t) < 7 * 86400000;
 }
 function buildMakesafeColumns(columns) {
-  var out = { new: [], allocated: [], report_ready: [], completed: [], archive: [] };
+  var out = { new: [], allocated: [], trade_report_in: [], report_ready: [], completed: [], archive: [] };
   Object.keys(columns || {}).forEach(function(rawStatus) {
     (columns[rawStatus] || []).forEach(function(j) {
       var stage = getMakesafeStage(j, rawStatus);
@@ -9780,10 +9782,11 @@ var MAKESAFE_ICON_STATE_COLORS = {
 // loud red "past SLA" banner. These are sensible defaults; Marnin will tune the
 // exact numbers later. `default` applies to any stage not listed. Edit here.
 var MAKESAFE_SLA_DAYS = {
-  new:          3,  // unallocated should be picked up fast
-  allocated:    7,  // crew on it, report should land within a week
-  report_ready: 4,  // report in, just needs sending/invoicing
-  _default:     7
+  new:             3,  // unallocated should be picked up fast
+  allocated:       7,  // crew on it, report should land within a week
+  trade_report_in: 4,  // trade report received, admin should draft the pack promptly
+  report_ready:    4,  // pack drafted, just needs sending/invoicing
+  _default:        7
 };
 // "Watch" band: cards within this many days of the breach threshold get the
 // amber age pill (heads-up before it goes red). Calibratable.
@@ -9898,19 +9901,27 @@ function renderMakesafeStatusIcons(j, status) {
   return html;
 }
 function makesafeUiStageLabel(stage) {
-  return ({ new: 'New', allocated: 'Allocated', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
+  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
 }
 async function moveMakesafeUiStage(jobId, stage) {
+  // MONEY-SAFETY: a drag into the two report columns must move the SUBSTATUS only,
+  // never the job/pack status. The reporting pack lifecycle (drafted → authorised →
+  // sent → closed) is owned by the backend send routine; nudging jobs.status from a
+  // board drag could wrongly imply the pack advanced. So for trade_report_in and
+  // report_ready we send substatus-only (substatusOnly:true) and skip update_job_status.
   var map = {
     new: { status: 'accepted', substatus: 'company_contact_required' },
     allocated: { status: 'scheduled', substatus: 'waiting_on_trade_report' },
-    report_ready: { status: 'complete', substatus: 'admin_to_send_report' },
+    trade_report_in: { substatus: 'waiting_on_trade_report', substatusOnly: true },
+    report_ready: { substatus: 'admin_to_send_report', substatusOnly: true },
     completed: { status: 'invoiced', substatus: 'complete' },
     archive: { status: 'archived', substatus: 'complete' },
   };
   var target = map[stage];
   if (!target) throw new Error('Unknown make-safe stage: ' + stage);
-  await opsPost('update_job_status', { jobId: jobId, status: target.status });
+  if (!target.substatusOnly && target.status) {
+    await opsPost('update_job_status', { jobId: jobId, status: target.status });
+  }
   await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: target.substatus });
 }
 
@@ -9929,6 +9940,25 @@ function makesafeCrewInitials(crew) {
   return String(crew || '').split(/\s*\+\s*/).filter(Boolean).slice(0, 2).map(function(n) {
     return n.trim().charAt(0).toUpperCase();
   });
+}
+
+// Resume-aware chip for a Report Ready card. Maps the per-job resume_action the
+// backend supplies to a short chip label + colour. Falls back to the neutral
+// "Ready to send" when resume_action is absent (pre-#201 payload). The failed
+// state (resume_action absent but pack_status.status === 'failed') reads as a
+// blocked/needs-ops chip — there is no board send action for it.
+function makesafeResumeChip(resumeAction, packStatus) {
+  var map = {
+    send:               { label: 'Ready to send',     bg: '#0E7C7B', title: 'Report pack drafted — Review & send pack to authorise the invoice and email the builder.' },
+    finish_send:        { label: 'Finish send',       bg: '#B45309', title: 'Invoice already authorised — Finish send re-emails the pack once (no re-authorise).' },
+    finish_close_out:   { label: 'Finish close-out',  bg: '#6D28D9', title: 'Pack already emailed — Finish close-out only marks the job complete (no re-send, no re-charge).' },
+    resolve_send_state: { label: 'Resolve send state', bg: '#B91C1C', title: 'Send state unclear — verify the Sent Items folder, then confirm whether it was sent.' }
+  };
+  if (resumeAction && map[resumeAction]) return map[resumeAction];
+  if (packStatus && packStatus.status === 'failed') {
+    return { label: 'Blocked', bg: '#991B1B', title: 'Pack send failed — needs ops to reset before it can be sent.' };
+  }
+  return map.send;
 }
 
 // OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
@@ -9967,6 +9997,10 @@ function renderMakesafeCard(j, status) {
   var backendStage = j.board_stage || j.makesafe_stage || '';
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
     && (backendStage ? backendStage === 'report_ready' : true);
+  // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
+  // drafts feed supplies (mirrored onto the board payload by the backend). Drives the
+  // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
+  var resumeChip = makesafeResumeChip(j.resume_action, j.pack_status);
 
   var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
@@ -9974,12 +10008,17 @@ function renderMakesafeCard(j, status) {
   html += '<div class="ms-top">';
   html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
-    html += '<span title="Report pack drafted — click Review &amp; send pack to authorise the invoice and email the builder" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#0E7C7B;color:#fff;text-transform:uppercase;white-space:nowrap;">Ready to send</span>';
-  } else if (backendStage === 'trade_report_in') {
+    html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
+  } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
     // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).
     // Neutral chip — deliberately NOT teal/"ready" — so the card reads honestly while
     // it sits in Report Ready awaiting the draft. Cosmetic only.
     html += '<span title="Trade report received — pack not yet drafted" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#4C6A7C;color:#fff;text-transform:uppercase;white-space:nowrap;">Report in</span>';
+  }
+  // Money-review cue (Task 4): amber "Check pricing" chip when the backend flags the
+  // pack's invoice for a pricing review. Defensive — absent field renders nothing.
+  if (j.needs_money_review === true) {
+    html += '<span title="Invoice pricing flagged for review — open the pack to check the flagged lines" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;text-transform:uppercase;white-space:nowrap;">Check pricing</span>';
   }
   html += '<span class="ms-age-pill ' + ageClass + '">'
     + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')
@@ -10638,6 +10677,7 @@ function getMakesafeMapVisual(j) {
   if (j.on_road) { allocationState = 'on_road'; allocationLabel = 'On road'; }
   else if (stage === 'completed') { allocationState = 'completed'; allocationLabel = 'Completed'; }
   else if (stage === 'archive') { allocationState = 'archive'; allocationLabel = 'Archive'; }
+  else if (stage === 'trade_report_in') { allocationState = 'trade_report_in'; allocationLabel = 'Trade report in'; }
   else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Report ready'; }
   else if (assigned) { allocationState = 'allocated'; allocationLabel = 'Direct allocated'; }
   else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1 || j.released_to_trades || j.ring_the_bell) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
@@ -10646,6 +10686,7 @@ function getMakesafeMapVisual(j) {
     rung: '#F59E0B',
     allocated: '#E67E22',
     on_road: '#111827',
+    trade_report_in: '#0E7C7B',
     report_ready: '#9B59B6',
     completed: '#7F8C8D',
     archive: '#64748B'
@@ -10711,7 +10752,7 @@ function toggleMakesafeMap() {
     + '<button onclick="loadMakesafeMapData(\'waiting_report\');makesafeMapSetStatusFilter(\'allocated\')" class="btn btn-sm" style="font-size:11px;background:#F39C12;color:#fff;">Waiting report</button>'
     + '<button onclick="loadMakesafeMapData(\'report_ready\');makesafeMapSetStatusFilter(\'report_ready\')" class="btn btn-sm" style="font-size:11px;background:#9B59B6;color:#fff;">Report ready</button>'
     + '<button onclick="loadMakesafeMapData(\'completed\');makesafeMapSetStatusFilter(\'completed\')" class="btn btn-sm" style="font-size:11px;background:#7F8C8D;color:#fff;">Completed this week</button>'
-    + '<select id="makesafeMapStatusFilter" onchange="makesafeMapSetStatusFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All stages/actions</option><option value="unassigned">Needs allocation</option><option value="allocated">Waiting report</option><option value="report_ready">Report ready</option><option value="completed">Completed this week</option><option value="archive">Archive</option><option value="on_road">On road</option><option value="late">Late/risky</option></select>'
+    + '<select id="makesafeMapStatusFilter" onchange="makesafeMapSetStatusFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All stages/actions</option><option value="unassigned">Needs allocation</option><option value="allocated">Waiting report</option><option value="trade_report_in">Trade report in</option><option value="report_ready">Report ready</option><option value="completed">Completed this week</option><option value="archive">Archive</option><option value="on_road">On road</option><option value="late">Late/risky</option></select>'
     + '<select id="makesafeMapCrewFilter" onchange="makesafeMapSetCrewFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All crews</option></select>'
     + '<span style="flex:1;"></span><span style="font-size:11px;color:var(--sw-text-sec);font-weight:700;">Geocode only appears for missing map pins.</span>'
     + '</div>'

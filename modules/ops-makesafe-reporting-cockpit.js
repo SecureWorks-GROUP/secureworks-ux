@@ -128,9 +128,9 @@ function renderMsReportingCard(d) {
  * job header, evidence photos, invoice line items + totals, BOTH PDFs inline,
  * the recipient the pack goes to, and the approve button.
  */
-function showMsReportingDetail(jobId) {
+function showMsReportingDetail(jobId, targetPanelId) {
   var d = _msReportingCache[jobId];
-  var panel = document.getElementById('msReportingDetailPanel');
+  var panel = document.getElementById(targetPanelId || 'msReportingDetailPanel');
   if (!panel) return;
   if (!d) {
     panel.innerHTML = '<div style="padding:20px;color:#E74C3C;font-size:13px;">Pack not loaded. <button onclick="loadMakesafeReportingCockpit()" style="margin-left:8px;">Reload</button></div>';
@@ -140,12 +140,16 @@ function showMsReportingDetail(jobId) {
   var safeId = escapeAttr(d.job_id);
   var builder = d.builder || d.requesting_company_name || '(no builder)';
   var inv = d.invoice || null;
+  // When hosted in the board overlay, Back/Hold should close the overlay rather
+  // than empty the (off-screen) inline approvals panel.
+  var isOverlay = !!(targetPanelId && targetPanelId !== 'msReportingDetailPanel');
+  var dismissAction = isOverlay ? 'closeMakesafeReportingOverlay()' : 'showMsReportingDetailEmpty()';
 
   var html = '';
 
   // Header
   html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:14px 18px;background:#fff;border-bottom:1px solid var(--sw-border);">';
-  html += '<button onclick="showMsReportingDetailEmpty()" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
+  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
   html += '<div style="flex:1;min-width:0;">';
   html += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(builder) + (d.external_ref ? ' &middot; ' + escapeHtml(d.external_ref) : '') + '</div>';
   var headerBits = [];
@@ -252,7 +256,7 @@ function showMsReportingDetail(jobId) {
   } else {
     html += '<div style="font-size:11px;color:var(--sw-text-sec);">This authorises the invoice in Xero and emails the pack to ' + escapeHtml(d.recipient_email) + '.</div>';
   }
-  html += '<button onclick="showMsReportingDetailEmpty()" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+  html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
   html += '</div>';
 
   html += '</div>'; // end scroll body
@@ -339,14 +343,29 @@ async function approveMakesafeReportPack(jobId) {
     } else {
       showToast('Pack sent to ' + d.recipient_email + (result && result.invoice_number ? ' (invoice ' + result.invoice_number + ')' : ''), 'success');
     }
-    loadMakesafeReportingCockpit();
-    showMsReportingDetailEmpty();
+    _msReportingAfterSend();
   } catch (e) {
     // Backend returns clear fail-closed errors (client send gate failed,
     // conflict: pack already sending, preflight failed). Surface verbatim.
     showToast('Send failed: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Approve and send pack'; }
   }
+}
+
+/**
+ * Refresh whichever surface hosts the reporting review after a successful send.
+ * Board overlay: close it and reload the unified kanban (the card moves out of
+ * Report Ready). Inline approvals tab: reload the cockpit list + reset the detail
+ * panel (legacy fallback behaviour, unchanged).
+ */
+function _msReportingAfterSend() {
+  if (typeof closeMakesafeReportingOverlay === 'function' && document.getElementById('makesafeReportingOverlay')) {
+    closeMakesafeReportingOverlay();
+    if (typeof loadJobs === 'function') loadJobs();
+    return;
+  }
+  loadMakesafeReportingCockpit();
+  showMsReportingDetailEmpty();
 }
 
 // Whole-token review-marker check mirroring the backend gate. Used for the

@@ -8641,6 +8641,11 @@ async function loadJobs() {
     var data = await opsFetch(endpoint, params);
     _pipelineData = data;
     renderJobs(data);
+    // Unified kanban: load the INTAKE column's drafts (separate endpoint) and
+    // re-render once they arrive. Fire-and-forget so the board paints immediately.
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
+      loadMakesafeBoardIntakeDrafts();
+    }
   } catch (e) {
     console.error('loadJobs error:', e);
     showToast('Failed to load jobs', 'warning', [
@@ -8675,6 +8680,11 @@ function setPipelineTab(tab) {
   if (!isMakesafe && document.getElementById('makesafeCrewDayContainer')) {
     document.getElementById('makesafeCrewDayContainer').remove();
   }
+  // Close the unified-kanban review overlays + reset the INTAKE column state so a
+  // fresh load (with spinner) happens when the make-safe board is re-entered.
+  if (typeof closeMakesafeIntakeOverlay === 'function') closeMakesafeIntakeOverlay();
+  if (typeof closeMakesafeReportingOverlay === 'function') closeMakesafeReportingOverlay();
+  if (!isMakesafe) { _makesafeIntakeDrafts = []; _makesafeIntakeDraftsLoaded = false; }
   loadJobs();
 }
 
@@ -9180,6 +9190,14 @@ function renderMakesafeKanban(container, columns) {
   html += '<div style="display:flex;gap:8px;flex:1;min-height:0;">';
   html += '<div class="kanban-container" style="flex:1;">';
 
+  // ── INTAKE column (leftmost) ──
+  // The make-safe lifecycle now starts ON the board: work-order emails arrive as
+  // intake drafts (list_intake_drafts) and a click opens the existing intake review
+  // panel to approve (-> creates a live job in NEW) or reject. Not a job column, so
+  // it is not a drop target. Data is loaded async by loadMakesafeBoardIntakeDrafts
+  // and cached in _makesafeIntakeDrafts; this render uses whatever is cached.
+  html += renderMakesafeIntakeColumn();
+
   // Stages to render — exclude archive when it is hidden
   var stagesToRender = MAKESAFES_STAGES.filter(function(s) {
     return s !== 'archive' || _makesafeArchiveVisible;
@@ -9224,6 +9242,208 @@ function renderMakesafeKanban(container, columns) {
     if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   }
   setupKanbanHorizontalScroll();
+}
+
+// ════════════════════════════════════════════════════════════
+// UNIFIED KANBAN: INTAKE COLUMN + ON-BOARD REVIEW ENTRY POINTS
+// The make-safe lifecycle is one board left-to-right:
+//   INTAKE -> NEW -> ALLOCATED -> REPORT READY -> COMPLETED THIS WEEK -> (ARCHIVE)
+// INTAKE and the report-ready send action both open the EXISTING approvals-cockpit
+// review panels (ops-makesafe-intake-cockpit.js / ops-makesafe-reporting-cockpit.js)
+// inside an overlay — the panels are reused verbatim, only the entry point changed.
+// ════════════════════════════════════════════════════════════
+
+// Intake drafts cached for the board's INTAKE column. Loaded async (separate
+// endpoint from the makesafe pipeline) so the board re-renders once they arrive.
+var _makesafeIntakeDrafts = [];
+var _makesafeIntakeDraftsLoaded = false;
+
+/**
+ * Load intake drafts (work-order emails awaiting review) for the board INTAKE
+ * column. Populates _makesafeIntakeDrafts and mirrors them into the intake
+ * cockpit's cache (_msCockpitDraftCache) so a card click can open the existing
+ * review panel by id. Re-renders the board on success. Fire-and-forget from
+ * loadJobs(); failures degrade to an empty INTAKE column (board still works).
+ */
+async function loadMakesafeBoardIntakeDrafts() {
+  try {
+    var data = await opsFetch('list_intake_drafts', { status: 'draft,needs_review' });
+    var drafts = (data && data.drafts) || [];
+    // needs_review first, then draft; newest first within each group.
+    drafts.sort(function(a, b) {
+      var rank = function(s) { return (s === 'needs_review') ? 0 : 1; };
+      var ra = rank(a.status), rb = rank(b.status);
+      if (ra !== rb) return ra - rb;
+      var ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      var tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
+    });
+    _makesafeIntakeDrafts = drafts;
+    _makesafeIntakeDraftsLoaded = true;
+    // Mirror into the cockpit cache so showMsIntakeDetail finds the draft by id.
+    if (typeof _msCockpitDraftCache !== 'undefined') {
+      drafts.forEach(function(d) { _msCockpitDraftCache[d.id] = d; });
+    }
+    // Re-render only if we are still on the make-safe board.
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+      renderJobs(_pipelineData);
+    }
+  } catch (e) {
+    _makesafeIntakeDraftsLoaded = true;
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+      renderJobs(_pipelineData);
+    }
+  }
+}
+
+/**
+ * Render the leftmost INTAKE column: a non-job (no-drop) column of intake-draft
+ * cards with a count badge in the header. Uses the cached _makesafeIntakeDrafts.
+ */
+function renderMakesafeIntakeColumn() {
+  var drafts = _makesafeIntakeDrafts || [];
+  var stageColor = '#D97706'; // make-safe intake amber, matches the +New / Scan accents
+  var html = '<div class="kanban-col" data-status="intake">';
+  html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">Intake<span class="count">' + (drafts.length) + '</span></div>';
+  html += '<div class="kanban-body">';
+  if (!_makesafeIntakeDraftsLoaded) {
+    html += '<div class="kanban-empty">Loading intake…</div>';
+  } else if (drafts.length === 0) {
+    html += '<div class="kanban-empty">No pending intake</div>';
+  } else {
+    drafts.forEach(function(d) { html += renderMakesafeBoardIntakeCard(d); });
+  }
+  html += '</div></div>';
+  return html;
+}
+
+/**
+ * One intake-draft card for the board INTAKE column. Shows builder, external ref,
+ * client, suburb, confidence, a WO-PDF indicator, and a missing-fields warning.
+ * Clicking opens the existing intake review panel (PDF vs extracted fields).
+ */
+function renderMakesafeBoardIntakeCard(d) {
+  var statusKey = (d.status === 'needs_review') ? 'needs_review' : 'draft';
+  var statusBg = statusKey === 'needs_review' ? '#0E7C7B' : '#9CA3AF';
+  var statusLabel = statusKey === 'needs_review' ? 'NEEDS REVIEW' : 'DRAFT';
+  var builder = intakeFieldValue(d, 'requesting_company_name') || d.from_name || '';
+  var ref = intakeFieldValue(d, 'external_ref');
+  var client = intakeFieldValue(d, 'client_name');
+  var suburb = intakeFieldValue(d, 'site_suburb');
+  var confColor = intakeConfidenceColor(d.confidence);
+  var missing = intakeMissingFields(d);
+  var hasPdf = !!intakeFirstPdfUrl(d);
+  var safeId = escapeAttr(d.id);
+
+  var html = '<div class="kanban-card ms-card-v2" data-intake-id="' + safeId + '" onclick="openMakesafeIntakeDraft(\'' + safeId + '\')" style="cursor:pointer;border-left:4px solid ' + statusBg + ';">';
+
+  // top row: status + confidence + WO-PDF indicator
+  html += '<div class="ms-top" style="gap:5px;">';
+  html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:#fff;">' + statusLabel + '</span>';
+  html += '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:' + confColor + ';color:#fff;text-transform:uppercase;">' + escapeHtml(d.confidence || 'low') + '</span>';
+  html += '</div>';
+
+  // builder + suburb identity
+  html += '<div class="ms-suburb" style="margin-top:6px;">' + escapeHtml(String(builder || '(no builder)')) + '</div>';
+  if (suburb) html += '<div class="ms-builder">' + escapeHtml(String(suburb)) + '</div>';
+
+  // detail lines
+  html += '<div class="ms-meta" style="margin-top:6px;">';
+  html += '<span><b>Ref</b> ' + escapeHtml(String(ref || '—')) + '</span>';
+  if (client) html += '<span><b>Client</b> ' + escapeHtml(String(client)) + '</span>';
+  html += '</div>';
+
+  // WO-PDF indicator
+  html += '<div style="margin-top:7px;font-size:11px;font-weight:700;color:' + (hasPdf ? '#15803D' : '#B45309') + ';">'
+    + (hasPdf ? '✓ Work order PDF attached' : '⚠ No work order PDF') + '</div>';
+
+  // missing-fields warning
+  if (missing.length > 0) {
+    html += '<div style="font-size:11px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:5px 8px;margin-top:7px;">Missing: ' + escapeHtml(missing.join(', ')) + '</div>';
+  }
+
+  // primary action — opens the existing intake review panel
+  html += '<button class="ms-btn-alloc" style="background:#1F3A44;" onclick="event.stopPropagation();openMakesafeIntakeDraft(\'' + safeId + '\')">Review work order</button>';
+
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Open the EXISTING intake review panel (PDF vs extracted fields, approve/reject)
+ * for one draft in a board overlay. Reuses showMsIntakeDetail verbatim — only the
+ * host container changes. Loads drafts first if the cache is cold.
+ */
+async function openMakesafeIntakeDraft(draftId) {
+  if (typeof _msCockpitDraftCache === 'undefined' || typeof showMsIntakeDetail !== 'function') {
+    showToast('Intake review module not loaded.', 'error');
+    return;
+  }
+  if (!_msCockpitDraftCache[draftId]) {
+    await loadMakesafeBoardIntakeDrafts();
+  }
+  openMakesafeReviewOverlay('makesafeIntakeOverlay', 'msIntakeDetailPanelBoard', 'MakeSafe intake review');
+  showMsIntakeDetail(draftId, 'msIntakeDetailPanelBoard');
+}
+
+function closeMakesafeIntakeOverlay() {
+  var el = document.getElementById('makesafeIntakeOverlay');
+  if (el) el.remove();
+}
+
+/**
+ * Open the EXISTING reporting review panel (photos + line items + amount + both
+ * PDFs inline + "Approve and send pack") for one job in a board overlay. Reuses
+ * showMsReportingDetail verbatim. Loads the report-drafts feed first so the pack
+ * (cache keyed by job_id) is available.
+ */
+async function openMakesafeReportingForJob(jobId) {
+  if (typeof loadMakesafeReportingCockpit !== 'function' || typeof showMsReportingDetail !== 'function') {
+    showToast('Reporting review module not loaded.', 'error');
+    return;
+  }
+  // Always refresh the report-drafts feed: it carries the recipient, invoice lines,
+  // PDFs and gate-passing subject/body that the send needs, none of which are on
+  // the board payload.
+  if (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId]) {
+    await loadMakesafeReportingCockpit();
+  }
+  if (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId]) {
+    showToast('No drafted report pack found for this job yet. Open the card for status.', 'info');
+    return;
+  }
+  openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
+  showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
+}
+
+function closeMakesafeReportingOverlay() {
+  var el = document.getElementById('makesafeReportingOverlay');
+  if (el) el.remove();
+}
+
+/**
+ * Mount a board overlay that hosts a cockpit detail panel. The overlay covers
+ * #jobsBody (same pattern as the map/crew-week overlays). The inner panel uses a
+ * BOARD-SPECIFIC id (e.g. msReportingDetailPanelBoard) passed straight through to
+ * the cockpit's show*Detail(targetPanelId) — distinct from the inline approvals
+ * panel id so getElementById never resolves to the (earlier-in-DOM) hidden copy.
+ */
+function openMakesafeReviewOverlay(overlayId, panelId, title) {
+  // Close any sibling overlay first so two cockpit panels never share an id.
+  closeMakesafeIntakeOverlay();
+  closeMakesafeReportingOverlay();
+  closeMakesafeMapIfOpen();
+  closeMakesafeCrewDayIfOpen();
+  var container = document.getElementById('jobsBody');
+  if (!container) return;
+  var overlay = document.createElement('div');
+  overlay.id = overlayId;
+  overlay.style.cssText = 'position:absolute;inset:0;z-index:120;background:#fff;display:flex;flex-direction:column;';
+  var closeFn = (overlayId === 'makesafeIntakeOverlay') ? 'closeMakesafeIntakeOverlay()' : 'closeMakesafeReportingOverlay()';
+  overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board — approve here moves the card to the next stage. The Approvals tab remains available as a fallback.', closeFn)
+    + '<div id="' + panelId + '" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fff;"></div>';
+  container.style.position = 'relative';
+  container.appendChild(overlay);
 }
 
 // One board-level legend explaining the 5 chip glyphs + the 4 states. Collapsible
@@ -9733,11 +9953,19 @@ function renderMakesafeCard(j, status) {
   var ageClass = sla.breached ? 'over' : (sla.watch ? 'amber' : (({ green: 'green', yellow: 'amber', red: 'red' })[age.health] || 'neutral'));
   var ageTxt = (sla.days != null) ? (sla.days + 'd') : String(age.label || '');
 
+  // A Report Ready card whose report pack is DRAFTED (substatus admin_to_send_report)
+  // is the one a click can review-and-send. Surface that distinctly so ops know which
+  // report-ready cards are actionable now vs still waiting on the draft to render.
+  var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report';
+
   var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
-  // top line: type tag + age/KPI pill
+  // top line: type tag + ready-to-send chip + age/KPI pill
   html += '<div class="ms-top">';
   html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
+  if (readyToSend) {
+    html += '<span title="Report pack drafted — click Review &amp; send pack to authorise the invoice and email the builder" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#0E7C7B;color:#fff;text-transform:uppercase;white-space:nowrap;">Ready to send</span>';
+  }
   html += '<span class="ms-age-pill ' + ageClass + '">'
     + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')
     + escapeHtml(String(ageTxt)) + '</span>';
@@ -9790,6 +10018,12 @@ function renderMakesafeCard(j, status) {
     var allocLabel = isReassign ? 'Reassign crew' : 'Allocate crew';
     var btnCls = isReassign ? 'ms-btn-reassign' : 'ms-btn-alloc';
     html += '<button class="' + btnCls + '" onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')">' + allocLabel + '</button>';
+  }
+  // Report-ready & drafted: a primary action that opens the EXISTING reporting review
+  // panel (photos + line items + amount + both PDFs + "Approve and send pack") in an
+  // overlay, so the send decision happens from the board card.
+  if (readyToSend) {
+    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" onclick="event.stopPropagation();openMakesafeReportingForJob(\'' + j.id + '\')">Review &amp; send pack</button>';
   }
   html += '</div>'; // /card
   return html;
@@ -10113,6 +10347,11 @@ function intakeFieldValue(d, field) {
 function intakeFirstPdfUrl(d) {
   var atts = intakeAttachments(d);
   for (var i = 0; i < atts.length; i++) {
+    // GRACEFUL PDF: skip attachments the backend flagged as unavailable (the
+    // re-upload to job-documents failed, so any recorded pdf_url would 404).
+    // Returning their URL would render the raw {"statusCode":"404"} JSON in the
+    // cockpit iframe. Treat them as "no usable PDF" so the graceful fallback shows.
+    if (atts[i] && atts[i].pdf_unavailable) continue;
     var url = atts[i].pdf_url || atts[i].public_url || atts[i].url || '';
     if (url) return url;
   }
@@ -10130,7 +10369,13 @@ function intakeMissingFields(d, reviewedFields) {
   if (!val('external_ref')) missing.push('external_ref');
   if (!val('client_name')) missing.push('client_name');
   if (!val('site_address')) missing.push('site_address');
-  if (intakeAttachments(d).length === 0) missing.push('work_order_pdf');
+  // GRACEFUL PDF: require a SERVABLE work-order PDF — an attachment flagged
+  // pdf_unavailable (re-upload to storage failed) must NOT count, so the approve
+  // gate does not go green when the only "PDF" 404s. Mirrors the backend check.
+  var servablePdfs = intakeAttachments(d).filter(function(a) {
+    return a && !a.pdf_unavailable && (a.pdf_url || a.storage_url || a.public_url || a.url);
+  });
+  if (servablePdfs.length === 0) missing.push('work_order_pdf');
   return missing;
 }
 

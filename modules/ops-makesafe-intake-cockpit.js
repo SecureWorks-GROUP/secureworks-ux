@@ -134,11 +134,13 @@ function renderMsCockpitInput(field, label, value, required, multiline, helper) 
 }
 
 /**
- * Render the full review panel for a draft into #msIntakeDetailPanel.
+ * Render the full review panel for a draft. Writes into #msIntakeDetailPanel by
+ * default, or into `targetPanelId` when the same panel is hosted elsewhere (e.g.
+ * the unified-kanban board overlay reuses this exact panel via its own container).
  */
-function showMsIntakeDetail(draftId) {
+function showMsIntakeDetail(draftId, targetPanelId) {
   var d = _msCockpitDraftCache[draftId];
-  var panel = document.getElementById('msIntakeDetailPanel');
+  var panel = document.getElementById(targetPanelId || 'msIntakeDetailPanel');
   if (!panel) return;
   if (!d) {
     panel.innerHTML = '<div style="padding:20px;color:#E74C3C;font-size:13px;">Draft not loaded. <button onclick="loadMakesafeIntakeCockpit()" style="margin-left:8px;">Reload</button></div>';
@@ -148,12 +150,17 @@ function showMsIntakeDetail(draftId) {
   var attachments = intakeAttachments(d);
   var pdfUrl = intakeFirstPdfUrl(d);
   var safeId = escapeAttr(d.id);
+  // When hosted in the board overlay, Back/Hold should close the overlay rather
+  // than empty the (off-screen) inline approvals panel. The board sets a global
+  // close handler name; fall back to the inline empty-state everywhere else.
+  var isOverlay = !!(targetPanelId && targetPanelId !== 'msIntakeDetailPanel');
+  var dismissAction = isOverlay ? 'closeMakesafeIntakeOverlay()' : 'showMsIntakeDetailEmpty()';
 
   var html = '';
 
   // Header
   html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:14px 18px;background:#fff;border-bottom:1px solid var(--sw-border);">';
-  html += '<button onclick="showMsIntakeDetailEmpty()" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
+  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
   html += '<div style="flex:1;min-width:0;">';
   html += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(d.subject || '(no subject)') + '</div>';
   html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;">From: ' + escapeHtml(d.from_name || d.from_email || '') + '</div>';
@@ -171,13 +178,20 @@ function showMsIntakeDetail(draftId) {
     html += '<a href="' + escapeAttr(pdfUrl) + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;background:#4C6A7C;color:#fff;text-decoration:none;padding:6px 12px;border-radius:6px;font-weight:700;font-size:12px;">Open PDF</a>';
   }
   html += '</div>';
+  // GRACEFUL PDF: render the iframe only when a URL survived intakeFirstPdfUrl
+  // (flagged-unavailable attachments are already filtered out). When there is no
+  // usable URL, show a friendly fallback that points at the source email — never a
+  // raw JSON error. A present URL is still probed at runtime (see tail) in case the
+  // stored object 404s.
+  html += '<div id="msCockpitPdfPane" style="flex:1;min-height:0;display:flex;flex-direction:column;">';
   if (pdfUrl) {
-    html += '<div style="flex:1;min-height:0;">';
-    html += '<iframe title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;display:block;"></iframe>';
-    html += '</div>';
+    html += '<iframe id="msCockpitPdfFrame" title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;display:block;"></iframe>';
   } else {
-    html += '<div style="padding:24px 16px;color:#B91C1C;background:#FFF7ED;margin:16px;border:1px dashed #FED7AA;border-radius:8px;font-size:13px;">No PDF preview URL found. Hold or reject unless a work order is attached elsewhere.</div>';
+    html += msCockpitPdfFallbackHtml(d, attachments.length === 0
+      ? 'No work order PDF was captured for this draft.'
+      : 'The work order PDF is not available (it was not stored).');
   }
+  html += '</div>';
   if (d.body_preview) {
     html += '<details style="padding:12px 16px;flex-shrink:0;border-top:1px solid var(--sw-border);"><summary style="cursor:pointer;font-weight:700;color:#48697A;font-size:12px;">Email body preview</summary><div style="white-space:pre-wrap;font-size:12px;color:#4B5563;margin-top:8px;">' + escapeHtml(d.body_preview) + '</div></details>';
   }
@@ -204,7 +218,7 @@ function showMsIntakeDetail(draftId) {
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;border-top:1px solid #EEF2F5;padding-top:14px;">';
   html += '<button id="msCockpitApproveBtn" onclick="approveMsIntakeDraftCockpit(\'' + safeId + '\', true)" style="background:#27AE60;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">Approve + create MakeSafe</button>';
   html += '<button onclick="rejectMsIntakeDraftCockpit(\'' + safeId + '\')" style="background:#E74C3C;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">Reject</button>';
-  html += '<button onclick="showMsIntakeDetailEmpty()" style="background:#E5EEF3;color:#1F3A44;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+  html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
   html += '</div>';
 
   html += '</div>'; // end right column
@@ -212,6 +226,53 @@ function showMsIntakeDetail(draftId) {
 
   panel.innerHTML = html;
   updateMsCockpitReviewStatus();
+  // GRACEFUL PDF: if a URL was rendered, verify the object actually exists. A 404
+  // from Storage returns JSON the iframe would display verbatim, so we probe and
+  // swap to the graceful fallback when the object is missing / not a PDF.
+  if (pdfUrl) { msCockpitProbePdf(d, pdfUrl); }
+}
+
+/**
+ * Graceful "no PDF" panel for the cockpit's left column. Never shows raw JSON.
+ * Tells the reviewer the WO PDF is unavailable and how to recover (open the source
+ * email), plus the email subject/sender for fast lookup.
+ */
+function msCockpitPdfFallbackHtml(d, reason) {
+  var from = (d && (d.from_name || d.from_email)) || '';
+  var subj = (d && d.subject) || '';
+  var html = '<div style="margin:16px;padding:18px 16px;background:#FFF7ED;border:1px dashed #FED7AA;border-radius:10px;font-size:13px;color:#7C2D12;">';
+  html += '<div style="font-weight:800;margin-bottom:6px;">Work order PDF not available</div>';
+  html += '<div style="color:#9A3412;margin-bottom:10px;">' + escapeHtml(reason || 'The work order PDF could not be loaded.') + ' Open the source email to view or re-download the work order.</div>';
+  if (subj) html += '<div style="font-size:12px;color:#7C2D12;margin-top:4px;"><strong>Email:</strong> ' + escapeHtml(subj) + '</div>';
+  if (from) html += '<div style="font-size:12px;color:#7C2D12;margin-top:2px;"><strong>From:</strong> ' + escapeHtml(from) + '</div>';
+  html += '<div style="font-size:12px;color:#9A3412;margin-top:10px;">Find this in the SES make-safe mailbox, then hold or reject this draft unless the work order is confirmed elsewhere.</div>';
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Probe a recorded pdf_url. Storage returns a 404 (or a JSON error body) for a
+ * missing object; in that case swap the iframe for the graceful fallback. Best-effort
+ * and non-blocking: a network/CORS failure leaves the iframe as-is (the user can
+ * still try Open PDF). Guarded so a late response from a previous draft never clobbers
+ * the currently-open one.
+ */
+function msCockpitProbePdf(d, pdfUrl) {
+  var pane = document.getElementById('msCockpitPdfPane');
+  var frame = document.getElementById('msCockpitPdfFrame');
+  if (!pane || !frame) return;
+  var draftId = d && d.id;
+  fetch(pdfUrl, { method: 'GET', headers: { 'Range': 'bytes=0-1023' } }).then(function(resp) {
+    var ct = (resp.headers.get('content-type') || '').toLowerCase();
+    var ok = resp.ok && ct.indexOf('pdf') !== -1;
+    if (ok) return; // real PDF — leave the iframe
+    // Missing object / JSON error / non-PDF -> swap to the fallback (if still on this draft).
+    var stillOpen = _msCockpitDraftCache[draftId] && document.getElementById('msCockpitPdfFrame') === frame;
+    if (!stillOpen) return;
+    pane.innerHTML = msCockpitPdfFallbackHtml(d, 'The stored work order PDF could not be found (it may not have uploaded).');
+  }).catch(function() {
+    // Network/CORS error: do nothing — the iframe + Open PDF link remain available.
+  });
 }
 
 /**
@@ -285,11 +346,27 @@ async function approveMsIntakeDraftCockpit(draftId, fromReview) {
       review_notes: 'Approved after comparing source work order/PDF to SecureSuite fields.'
     });
     showToast('Job created: ' + (result.job && result.job.job_number || ''), 'success');
-    loadMakesafeIntakeCockpit();
-    showMsIntakeDetailEmpty();
+    _msIntakeAfterAction();
   } catch (e) {
     showToast('Approve failed: ' + (e.message || e), 'error');
   }
+}
+
+/**
+ * Refresh whichever surface is hosting the intake review after an approve/reject.
+ * Board overlay: close it and reload the unified kanban (the approved job moves to
+ * NEW, the rejected draft disappears). Inline approvals tab: reload the cockpit
+ * list + reset the detail panel (legacy fallback behaviour, unchanged).
+ */
+function _msIntakeAfterAction() {
+  if (typeof closeMakesafeIntakeOverlay === 'function' && document.getElementById('makesafeIntakeOverlay')) {
+    closeMakesafeIntakeOverlay();
+    if (typeof loadMakesafeBoardIntakeDrafts === 'function') loadMakesafeBoardIntakeDrafts();
+    if (typeof loadJobs === 'function') loadJobs();
+    return;
+  }
+  loadMakesafeIntakeCockpit();
+  showMsIntakeDetailEmpty();
 }
 
 /**
@@ -301,8 +378,7 @@ async function rejectMsIntakeDraftCockpit(draftId) {
   try {
     await opsPost('reject_intake_draft', { draft_id: draftId, rejected_by: 'ops_dashboard', review_notes: notes || null });
     showToast('Draft rejected', 'success');
-    loadMakesafeIntakeCockpit();
-    showMsIntakeDetailEmpty();
+    _msIntakeAfterAction();
   } catch (e) {
     showToast('Reject failed: ' + (e.message || e), 'error');
   }

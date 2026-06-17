@@ -12849,12 +12849,17 @@
         extra_items: extraItems,
         notes: _invNotes
       }).then(function(result) {
-        // Handle both legacy { error } and new structured { ok:false, code, userMessage } contracts.
-        if (result.ok === false || result.error) {
-          var msg = result.userMessage || result.error || 'Invoice submission failed';
+        // Backend contract (PR #196): branch on code FIRST.
+        // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
+        //   it just didn't reach Xero. Run the normal success path, show userMessage as a yellow banner.
+        // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
+        //   is a HARD block — invoice NOT created. Toast userMessage, keep them on the form, re-enable.
+        var xeroWarn = result.code === 'XERO_PUSH_FAILED';
+        if (!xeroWarn && (result.ok === false || result.error)) {
+          var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
-            toast('Go to Profile to set your hourly rate, then try again.', true);
+            showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then resubmit.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
           }
           loadHoursView();
           return;
@@ -12863,7 +12868,9 @@
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + esc(result.invoice_number) + '</div>';
-        if (result.pending_ops_review) {
+        if (xeroWarn) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.') + '</div>';
+        } else if (result.pending_ops_review) {
           successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:8px">Sent to the office for verification. You will be paid once approved.</div>';
         } else if (result.xero_bill_number || result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to the bookkeepers</div>';
@@ -13194,13 +13201,17 @@
         extra_items: extraItems,
         notes: _invNotes
       }).then(function(result) {
-        // Handle both legacy { error } and new structured { ok:false, code, userMessage } contracts.
-        // Exception: XERO_PUSH_FAILED means the invoice WAS saved — treat as a partial success below.
-        if ((result.ok === false || result.error) && result.code !== 'XERO_PUSH_FAILED') {
+        // Backend contract (PR #196): branch on code FIRST.
+        // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
+        //   it just didn't reach Xero. Fall through to the success path; the yellow banner below
+        //   surfaces userMessage. Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE /
+        //   ALREADY_INVOICED) is a HARD block — invoice NOT created; toast, re-enable, keep on form.
+        var xeroWarn = result.code === 'XERO_PUSH_FAILED';
+        if (!xeroWarn && (result.ok === false || result.error)) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
-            // Guide the trade to the Profile view where they can set their hourly rate.
+            // Guide the trade to the Profile view where they can set their hourly rate (manual-rate path).
             showConfirm(
               'Set Your Rate',
               'Your hourly rate is not configured. Go to Profile now to set it, then come back and resubmit.',
@@ -13240,8 +13251,8 @@
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + result.invoice_number + '</div>';
-        if (result.code === 'XERO_PUSH_FAILED') {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + (result.userMessage || 'Invoice saved — Xero sync pending. Admin will sync manually.') + '</div>';
+        if (xeroWarn) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. Admin will sync manually.') + '</div>';
         } else if (result.xero_bill_number) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
@@ -13898,23 +13909,32 @@
       }
 
       api('submit_work_order_invoice', null, { work_order_id: workOrderId }).then(function(result) {
-        // Handle both legacy { success, error } and new structured { ok, code, userMessage } contracts.
+        // Backend contract (PR #196): branch on code FIRST.
+        // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach
+        //   Xero. Show userMessage as a warning toast and refresh as a success (invoice is fine).
+        // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
+        //   is a HARD block — invoice NOT created; toast userMessage, re-enable the button.
+        if (result.code === 'XERO_PUSH_FAILED') {
+          toast(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.', false);
+          openWorkOrderHub(); // Invoice exists; refresh to show invoiced state
+          return;
+        }
         var succeeded = result.ok === true || result.success === true;
-        var failed = result.ok === false || (result.success === false && !succeeded);
-        if (succeeded) {
-          toast('Invoice created: ' + (result.xero_bill_number || '') + ' — $' + Number(result.total || 0).toFixed(2));
-          openWorkOrderHub(); // Refresh to show invoiced state
-        } else if (failed) {
+        var failed = result.ok === false || result.success === false || !!result.error;
+        if (failed && !succeeded) {
           var msg = result.userMessage || result.error || 'Invoice failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
             showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then try again.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
           }
           _reEnableBtn();
+        } else if (succeeded) {
+          toast('Invoice created: ' + (result.xero_bill_number || '') + ' — $' + Number(result.total || 0).toFixed(2));
+          openWorkOrderHub(); // Refresh to show invoiced state
         } else {
-          // Unexpected shape — treat as success if no explicit failure indicator.
-          toast('Invoice submitted', false);
-          openWorkOrderHub();
+          // Unexpected shape — re-enable so the trade can retry; never leave a dead button.
+          toast('Could not confirm invoice status — please check and retry if needed', true);
+          _reEnableBtn();
         }
       }).catch(function(err) {
         if (!navigator.onLine) {

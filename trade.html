@@ -3503,8 +3503,8 @@
       // Restore last navigation state (survives iOS background kill / page reload)
       var _restored = false;
       try {
-        var saved = JSON.parse(sessionStorage.getItem('sw_trade_state') || 'null');
-        if (saved && (Date.now() - saved.ts) < 14400000) { // 4-hour expiry
+        var saved = JSON.parse(localStorage.getItem('sw_trade_state') || 'null');
+        if (saved && (Date.now() - saved.ts) < 28800000) { // 8-hour expiry
           if (saved.view === 'job' && saved.jobId) {
             _pendingJobTab = saved.jobTab || null;
             _currentJobTab = saved.jobTab || null;
@@ -3680,24 +3680,35 @@
   window.loadMyJobs = function loadMyJobs() {
     if (!_user || _sessionExpired) return;
     var container = document.getElementById('myJobsList');
-    container.innerHTML = '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>' +
-      '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>' +
-      '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div>';
+
+    // Cache-first: show cached jobs immediately, then refresh in background
+    var cached = loadJobListCache();
+    if (cached) {
+      renderMyJobs(cached);
+    } else {
+      // No cache — show skeleton while waiting for network
+      container.innerHTML = '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>' +
+        '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>' +
+        '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div>';
+    }
 
     // Show admin toggle if admin
     var adminToggle = document.getElementById('adminJobToggle');
     if (adminToggle) adminToggle.style.display = _isAdmin ? 'block' : 'none';
 
-    // Slow connection hint after 8 seconds
+    // Slow connection hint after 8 seconds (only shown when no cache)
     var slowTimer = setTimeout(function() {
-      var msg = document.getElementById('myJobsLoadMsg');
-      if (msg) msg.textContent = 'Still loading... check your connection';
+      if (!cached) {
+        var msg = document.getElementById('myJobsLoadMsg');
+        if (msg) msg.textContent = 'Still loading... check your connection';
+      }
     }, 8000);
 
     // Pass mode param for admin users
     var params = {};
     if (_isAdmin) params.mode = _adminViewAll ? 'all' : 'mine';
 
+    // Always fetch fresh data — if cache was shown, this is a background refresh
     api('my_jobs', params).then(function(data) {
       clearTimeout(slowTimer);
       renderMyJobs(data);
@@ -3708,7 +3719,16 @@
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);
-      container.innerHTML = '<div class="empty-state">Error loading jobs: ' + friendlyError(err) + '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="loadMyJobs()">Retry</button></div>';
+      if (cached) {
+        // Cache was shown — show a subtle inline warning at the top, leave the list in place
+        var list = container.querySelector('[id]') || container.firstChild;
+        var warn = document.createElement('div');
+        warn.style.cssText = 'text-align:center;font-size:12px;color:#E67E22;padding:8px 0';
+        warn.textContent = 'Could not refresh — showing last known jobs';
+        container.insertBefore(warn, container.firstChild);
+      } else {
+        container.innerHTML = '<div class="empty-state">Error loading jobs: ' + friendlyError(err) + '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="loadMyJobs()">Retry</button></div>';
+      }
     });
   };
 
@@ -3764,6 +3784,18 @@
   var _jobFilter = 'today';
   var _lastJobData = null;
   var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], timer: null, token: 0 };
+
+  function saveJobListCache(data) {
+    try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
+  }
+
+  function loadJobListCache() {
+    try {
+      var raw = JSON.parse(localStorage.getItem('sw_jobs_cache') || 'null');
+      if (raw && raw.data && (Date.now() - raw.ts) < 1800000) return raw.data; // 30-min expiry
+    } catch(e) {}
+    return null;
+  }
   var TODAY_RUN_LIST_STORAGE_PREFIX = 'sw_today_run_list_v1';
 
   function getTodayRunListId(a) {
@@ -4199,6 +4231,7 @@
 
   function renderMyJobs(data) {
     _lastJobData = data;
+    saveJobListCache(data);
     var container = document.getElementById('myJobsList');
     var html = '';
 
@@ -4529,7 +4562,7 @@
 
   function persistTradeState() {
     try {
-      sessionStorage.setItem('sw_trade_state', JSON.stringify({
+      localStorage.setItem('sw_trade_state', JSON.stringify({
         view: _currentView,
         jobId: _currentJobId,
         assignmentId: _currentAssignment,
@@ -6712,6 +6745,26 @@
 
     container.innerHTML = html;
 
+    // ── Restore note draft if any ──
+    (function() {
+      try {
+        var noteEl = document.getElementById('bottomNoteInput');
+        if (!noteEl || !_currentJobId) return;
+        // Restore saved draft
+        var draft = localStorage.getItem('sw_note_draft_' + _currentJobId);
+        if (draft) noteEl.value = draft;
+        // Wire up debounced save on input
+        var _noteDraftTimer = null;
+        noteEl.addEventListener('input', function() {
+          clearTimeout(_noteDraftTimer);
+          var val = noteEl.value;
+          _noteDraftTimer = setTimeout(function() {
+            try { localStorage.setItem('sw_note_draft_' + _currentJobId, val); } catch(e) {}
+          }, 500);
+        });
+      } catch(e) {}
+    })();
+
     // ── Activate last-used tab (or default to workorder for Tier 2+, scope for Tier 1) ──
     var defaultTab = canMessage() ? 'workorder' : 'scope';
     var lastTab = _pendingJobTab || _currentJobTab || defaultTab;
@@ -8226,6 +8279,7 @@
     }).then(function() {
       input.value = '';
       input.disabled = false;
+      try { localStorage.removeItem('sw_note_draft_' + _currentJobId); } catch(e) {}
       toast('Note saved');
       // Also refresh the Log tab so it stays in sync
       var logContent = document.getElementById('jdTab_log');

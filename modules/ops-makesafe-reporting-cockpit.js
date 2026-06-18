@@ -147,10 +147,19 @@ function _msReportingCardBadge(resumeAction, packStatus) {
 // ────────────────────────────────────────────────────────────
 
 /**
- * Render the full informed-approve content gate for a pack into
- * #msReportingDetailPanel. Everything needed to decide is visible here:
- * job header, evidence photos, invoice line items + totals, BOTH PDFs inline,
- * the recipient the pack goes to, and the approve button.
+ * Render the integrated review-and-send pack (design ref state A) into the target
+ * panel. Top-to-bottom: job header (type chip + status chip), doc tabs (Report /
+ * Invoice / SWMS) with a fit-to-page PDF stage, trade notes, recipient + per-builder
+ * note, photos-at-bottom with the mandatory approval gate, then the per-builder
+ * send/submit action block.
+ *
+ * Works in BOTH hosts: the board overlay (targetPanelId = ...Board) and the inline
+ * Approvals-tab panel (targetPanelId = 'msReportingDetailPanel' / undefined).
+ *
+ * All money-safety behaviour is preserved: the photo-approval gate, the send-disabled
+ * states, the resume_action branches (finish_send / finish_close_out /
+ * resolve_send_state), and the money-review banner all flow through the reused
+ * _msReportingActionBlock + _msRenderPhotoApproval helpers.
  */
 function showMsReportingDetail(jobId, targetPanelId) {
   var d = _msReportingCache[jobId];
@@ -162,63 +171,66 @@ function showMsReportingDetail(jobId, targetPanelId) {
   }
 
   var safeId = escapeAttr(d.job_id);
+  var safeJobKey = _msDocTabKey(d.job_id);
   var builder = d.builder || d.requesting_company_name || '(no builder)';
   var inv = d.invoice || null;
   // When hosted in the board overlay, Back/Hold should close the overlay rather
   // than empty the (off-screen) inline approvals panel.
   var isOverlay = !!(targetPanelId && targetPanelId !== 'msReportingDetailPanel');
   var dismissAction = isOverlay ? 'closeMakesafeReportingOverlay()' : 'showMsReportingDetailEmpty()';
+  var isPortal = _msIsPortalBuilder(d);
 
-  // ── CAROUSEL FEED ────────────────────────────────────────────────────────
-  // Build the doc-viewer entry list from the feed: drafted outputs first (report,
-  // invoice, SWMS if present), then the source docs (work order, photos). Each
-  // entry is {label, url, kind} — the shape renderMakesafeDocViewerFrame expects
-  // (doc:null is fine; the footer/chip title fall back to the label).
-  // Reuse: the job-detail carousel uses the SAME global _msafeDocViewer + the fixed
-  // element id 'msafeDocViewerInner'. Only one doc viewer is visible at a time (the
-  // review overlay sits over the board; the job-detail viewer is a different screen),
-  // so we re-init the shared global here on open. msafeDocViewerGo/Jump operate on
-  // that global and re-render #msafeDocViewerInner — which is exactly the node this
-  // panel mounts — so navigation works without a second instance. Opening a job-detail
-  // afterwards calls renderMakesafeDocViewer(data) which re-inits the global, so no leak.
-  var carouselDocs = _msReportingBuildCarouselDocs(d);
-  if (typeof _msafeDocViewer !== 'undefined') {
-    _msafeDocViewer.docs = carouselDocs;
-    _msafeDocViewer.idx = 0;
-  }
+  // ── DOC TABS SOURCE ───────────────────────────────────────────────────────
+  // Only the drafted outputs (report / invoice / SWMS) become tabs; source docs
+  // (work order, photos) are not tabbed (photos render in the approval grid below).
+  // _msReportingDocTabs filters _msReportingBuildCarouselDocs(d) to report/invoice/
+  // SWMS PDFs. The SWMS tab appears only when a SWMS doc exists.
+  var docTabs = _msReportingDocTabs(d);
+  // Reset the active tab to the first doc on each fresh open of this job.
+  _msActiveDocTab[d.job_id] = 0;
 
   // Initialize photo approval state for this job (all photos approved by default on first open)
   var allPhotosForInit = _msGetAllPhotos(d);
   _msGetPhotoApprovalState(d.job_id, allPhotosForInit);
 
+  // Status chip on the right: send-ready vs resume vs portal.
+  var statusChip = _msReportingStatusChip(d);
+
   var html = '';
 
-  // Header
-  html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:14px 18px;background:#fff;border-bottom:1px solid var(--sw-border);">';
-  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
+  // ── JOB HEADER ─────────────────────────────────────────────────────────────
+  var typeLabel = (d.makesafe_type || d.makesafe_type_detail || d.job_type || 'Make safe');
+  typeLabel = String(typeLabel).toUpperCase();
+  html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:16px 20px;background:#fff;border-bottom:1px solid var(--sw-border);">';
+  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:700;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
   html += '<div style="flex:1;min-width:0;">';
-  html += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(builder) + (d.external_ref ? ' &middot; ' + escapeHtml(d.external_ref) : '') + '</div>';
+  html += '<div style="font-size:17px;font-weight:700;color:var(--sw-dark);display:flex;align-items:center;flex-wrap:wrap;gap:8px;">';
+  html += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">' + escapeHtml(builder) + (d.external_ref ? ' &middot; ' + escapeHtml(d.external_ref) : '') + '</span>';
+  html += '<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:#FDEBE4;color:var(--sw-orange);">' + escapeHtml(typeLabel) + '</span>';
+  html += '</div>';
   var headerBits = [];
   if (d.job_number) headerBits.push('Job ' + d.job_number);
   if (d.client_name) headerBits.push(d.client_name);
   if (d.site_address) headerBits.push(d.site_address);
   else if (d.site_suburb) headerBits.push(d.site_suburb);
-  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;">' + escapeHtml(headerBits.join('  ·  ')) + '</div>';
-  html += '</div></div>';
+  html += '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:3px;">' + escapeHtml(headerBits.join('  ·  ')) + '</div>';
+  html += '</div>';
+  html += '<div style="flex-shrink:0;"><span style="display:inline-block;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:' + statusChip.bg + ';color:' + statusChip.fg + ';white-space:nowrap;">' + escapeHtml(statusChip.label) + '</span></div>';
+  html += '</div>';
 
   // Scrollable body (single scroll column - everything visible without leaving the panel)
-  html += '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 18px;background:#F7FAFB;">';
+  html += '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 0 16px;background:#F7FAFB;">';
 
   // Pack-status / resume banner (only when there is something to flag)
   if (d.pack_status && d.pack_status.status && d.pack_status.status !== 'drafted' && d.pack_status.status !== 'admin_to_send_report') {
     var ps = d.pack_status;
     var isFailed = ps.status === 'failed';
-    html += '<div style="margin-bottom:14px;padding:10px 14px;border-radius:8px;border:1px solid ' + (isFailed ? '#FECACA' : '#FDE68A') + ';background:' + (isFailed ? '#FEF2F2' : '#FFFBEB') + ';font-size:12px;color:' + (isFailed ? '#991B1B' : '#92400E') + ';">';
+    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid ' + (isFailed ? '#FECACA' : '#FDE68A') + ';background:' + (isFailed ? '#FEF2F2' : '#FFFBEB') + ';font-size:12px;color:' + (isFailed ? '#991B1B' : '#92400E') + ';">';
     html += '<strong>Pack state:</strong> ' + escapeHtml(ps.status);
     if (ps.failed_step) html += ' (last step: ' + escapeHtml(ps.failed_step) + ')';
     if (ps.error_detail) html += '<div style="margin-top:4px;">' + escapeHtml(ps.error_detail) + '</div>';
     if (ps.send_started_at) {
-      html += '<div style="margin-top:4px;">Send started ' + escapeHtml(_msReportingAgeText(ps.send_started_at)) + (ps.in_flight_stale ? ' — flagged STALE.' : '.') + '</div>';
+      html += '<div style="margin-top:4px;">Send started ' + escapeHtml(_msReportingAgeText(ps.send_started_at)) + (ps.in_flight_stale ? ' - flagged STALE.' : '.') + '</div>';
     }
     if (!isFailed) {
       html += '<div style="margin-top:4px;">Resuming is safe: an authorised invoice is not re-authorised, a sent pack is not re-sent.</div>';
@@ -230,106 +242,203 @@ function showMsReportingDetail(jobId, targetPanelId) {
   // absent needs_money_review renders nothing.
   if (d.needs_money_review === true) {
     var mr = d.money_review || {};
-    html += '<div style="margin-bottom:14px;padding:10px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;font-size:12px;color:#92400E;">';
+    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;font-size:12px;color:#92400E;">';
     html += '<strong>&#9888; Pricing flagged for review.</strong>';
     if (mr.reason) html += ' ' + escapeHtml(mr.reason);
     if (mr.flagged_lines && mr.flagged_lines.length) {
-      html += '<div style="margin-top:4px;">' + mr.flagged_lines.length + ' invoice line' + (mr.flagged_lines.length === 1 ? '' : 's') + ' highlighted below — confirm pricing before you send.</div>';
+      html += '<div style="margin-top:4px;">' + mr.flagged_lines.length + ' invoice line' + (mr.flagged_lines.length === 1 ? '' : 's') + ' flagged. Open the Draft Invoice tab and confirm pricing before you send.</div>';
     }
     html += '</div>';
   }
 
-  // Trade notes (raw submission notes from the trade — shown when present)
+  // ── DOCUMENTS — CLICK THROUGH (doc tabs + fit-to-page PDF stage) ───────────
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Documents &mdash; click through</div>';
+  if (docTabs.length) {
+    // Tab buttons.
+    html += '<div id="msDocTabs_' + safeJobKey + '" style="display:flex;gap:8px;padding:0 20px 10px;flex-wrap:wrap;">';
+    docTabs.forEach(function(t, i) {
+      var active = (i === 0);
+      var bg = active ? 'var(--sw-orange)' : '#fff';
+      var fg = active ? '#fff' : 'var(--sw-dark)';
+      var bd = active ? 'var(--sw-orange)' : 'var(--sw-border)';
+      html += '<button type="button" data-tabidx="' + i + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')" style="border:1px solid ' + bd + ';background:' + bg + ';color:' + fg + ';padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">' + escapeHtml(t.tabLabel) + '</button>';
+    });
+    html += '</div>';
+    // PDF stage (fit-to-page). Stable id so _msSwitchDocTab can re-render just this.
+    html += '<div id="msDocStage_' + safeJobKey + '" style="margin:0 20px;">' + _msRenderDocStage(docTabs, 0) + '</div>';
+  } else {
+    html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">No drafted documents attached to this pack yet.</div>';
+  }
+
+  // ── TRADE NOTES (raw from submission) ──────────────────────────────────────
   if (d.trade_notes && d.trade_notes.trim()) {
-    html += '<div style="margin-bottom:16px;padding:12px 14px;border-radius:8px;background:#F8FAFC;border:1px solid #CBD5E1;">';
-    html += '<div style="font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;margin-bottom:8px;">Trade notes (raw from submission)</div>';
-    html += '<div style="font-size:13px;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(d.trade_notes) + '</div>';
-    html += '</div>';
+    html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Trade notes (raw from submission)</div>';
+    html += '<div style="margin:0 20px 4px;background:#F7FAFC;border:1px solid var(--sw-border);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(d.trade_notes) + '</div>';
   }
 
-  // Recipient - who gets this pack (recipient + CC)
-  html += '<div style="margin-bottom:16px;padding:12px 14px;border-radius:8px;border:1px solid ' + (d.recipient_email ? '#BBF7D0' : '#FECACA') + ';background:' + (d.recipient_email ? '#F0FDF4' : '#FEF2F2') + ';">';
-  html += '<div style="font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Pack will be emailed to</div>';
-  if (d.recipient_email) {
-    html += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-top:4px;">' + escapeHtml(d.recipient_email) + '</div>';
-    var ccList = Array.isArray(d.cc) ? d.cc.filter(Boolean) : [];
-    if (ccList.length) {
-      html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;">CC ' + escapeHtml(ccList.join(', ')) + '</div>';
+  // ── RECIPIENT + PER-BUILDER NOTE ───────────────────────────────────────────
+  var builderNote = _msReportingBuilderNote(d);
+  if (isPortal) {
+    // Portal builders (Western / Builderwest): no recipient email — submit manually.
+    html += '<div style="margin:14px 20px 4px;background:#EAF4F4;border:1px solid #BBE0DF;border-radius:8px;padding:12px 14px;font-size:13px;">';
+    html += '<b style="display:block;font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Submit on portal</b>';
+    html += 'Western Building / Builderwest use their Prime-system portal. Submit the pack manually.';
+    html += '</div>';
+  } else {
+    html += '<div style="margin:14px 20px 4px;background:#F1F8F3;border:1px solid #CFE6D6;border-radius:8px;padding:12px 14px;font-size:13px;' + (d.recipient_email ? '' : 'border-color:#FECACA;background:#FEF2F2;') + '">';
+    html += '<b style="display:block;font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Pack will be emailed to</b>';
+    if (d.recipient_email) {
+      html += '<span style="font-weight:700;color:var(--sw-dark);">' + escapeHtml(d.recipient_email) + '</span>';
+      var ccList = Array.isArray(d.cc) ? d.cc.filter(Boolean) : [];
+      if (ccList.length) {
+        html += ' &nbsp; <span style="color:var(--sw-text-sec);">CC ' + escapeHtml(ccList.join(', ')) + '</span>';
+      }
+    } else {
+      html += '<span style="font-weight:700;color:#B91C1C;">No builder email on file. The send cannot proceed until a recipient is set.</span>';
     }
-  } else {
-    html += '<div style="font-size:13px;font-weight:700;color:#B91C1C;margin-top:4px;">No builder email on file. The send cannot proceed until a recipient is set.</div>';
-  }
-  html += '</div>';
-
-  // DOCUMENT CAROUSEL — report, invoice, SWMS, work order, photos (one viewer, swipe
-  // through). Reuses the ops.html .ms-docviewer-* CSS + the shared carousel renderer.
-  html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Documents &amp; evidence</div>';
-  html += '<div style="margin-bottom:18px;">';
-  if (carouselDocs.length && typeof renderMakesafeDocViewerInner === 'function') {
-    html += '<div class="ms-docviewer-card" style="margin-bottom:0;"><div id="msafeDocViewerInner">' + renderMakesafeDocViewerInner() + '</div></div>';
-  } else {
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">No documents or evidence attached to this pack yet.</div>';
-  }
-  html += '</div>';
-
-  // PHOTO APPROVAL (MANDATORY gate — all start approved, opt-out model)
-  html += _msRenderPhotoApproval(d, d.job_id);
-
-  // INVOICE LINE ITEMS + totals (with money-review line highlights)
-  html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Invoice</div>';
-  if (inv) {
-    var flaggedByIndex = _msReportingFlaggedLineMap(d);
-    html += '<div style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;margin-bottom:18px;">';
-    html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-bottom:1px solid var(--sw-border);font-size:12px;color:var(--sw-text-sec);">';
-    html += '<span>' + escapeHtml(inv.invoice_number || '(draft, no number yet)') + (inv.status ? ' &middot; ' + escapeHtml(inv.status) : '') + '</span>';
-    html += '</div>';
-    if (inv.lines && inv.lines.length) {
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-      html += '<thead><tr style="background:#293C46;color:#fff;">'
-        + '<th style="text-align:left;padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Description</th>'
-        + '<th style="text-align:right;padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Qty</th>'
-        + '<th style="text-align:right;padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Unit</th>'
-        + '<th style="text-align:right;padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;">Line total</th>'
-        + '</tr></thead><tbody>';
-      inv.lines.forEach(function(li, idx) {
-        var flag = _msReportingLineFlag(flaggedByIndex, idx, li);
-        var rowStyle = flag ? 'border-bottom:1px solid #e5e7eb;background:#FFFBEB;' : 'border-bottom:1px solid #e5e7eb;';
-        html += '<tr style="' + rowStyle + '">'
-          + '<td style="padding:7px 12px;">' + (flag ? '<span style="color:#B45309;font-weight:800;margin-right:4px;">&#9888;</span>' : '') + escapeHtml(li.description || '') + '</td>'
-          + '<td style="padding:7px 12px;text-align:right;">' + escapeHtml(String(li.quantity)) + '</td>'
-          + '<td style="padding:7px 12px;text-align:right;">' + _msFmtAud(li.unit_price) + '</td>'
-          + '<td style="padding:7px 12px;text-align:right;">' + _msFmtAud(li.line_total) + '</td>'
-          + '</tr>';
-        if (flag) {
-          var note = [];
-          if (flag.confidence != null) note.push('confidence ' + escapeHtml(String(flag.confidence)));
-          if (flag.note) note.push(escapeHtml(flag.note));
-          html += '<tr style="background:#FFFBEB;"><td colspan="4" style="padding:0 12px 7px 12px;font-size:11px;color:#92400E;">'
-            + (note.length ? note.join(' · ') : 'Flagged for pricing review.') + '</td></tr>';
-        }
-      });
-      html += '</tbody></table>';
-    } else if (inv.lines_unavailable) {
-      html += '<div style="padding:12px;font-size:12px;color:#92400E;background:#FFFBEB;">' + escapeHtml(inv.lines_note || 'Line detail in the invoice PDF in the carousel above.') + '</div>';
+    if (builderNote) {
+      html += '<br/><span style="color:var(--sw-text-sec);font-size:12px;">' + escapeHtml(builderNote) + '</span>';
     }
-    // Totals
-    html += '<div style="padding:10px 12px;border-top:2px solid #293C46;display:flex;flex-direction:column;gap:3px;">';
-    html += '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--sw-text-sec);"><span>Total ex GST</span><span>' + _msFmtAud(inv.total_ex_gst) + '</span></div>';
-    html += '<div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;color:var(--sw-dark);"><span>Total inc GST</span><span>' + _msFmtAud(inv.total_inc_gst) + '</span></div>';
     html += '</div>';
-    html += '</div>';
-  } else {
-    html += '<div style="font-size:12px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px;margin-bottom:18px;">No Xero invoice is linked to this job. The send will fail preflight until a draft invoice exists.</div>';
   }
 
-  // STATE-AWARE PRIMARY ACTION (Task 2): label + handler key off resume_action.
-  html += '<div style="border-top:1px solid #EEF2F5;padding-top:14px;display:flex;flex-direction:column;gap:8px;">';
+  // ── PHOTOS AT THE BOTTOM (mandatory approval gate) ─────────────────────────
+  // Reuses _msRenderPhotoApproval (grid + approve/exclude + count + send gate).
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; approve which go in the pack (mandatory)</div>';
+  html += '<div style="padding:0 20px;">' + _msRenderPhotoApprovalBody(d, d.job_id) + '</div>';
+
+  // ── ACTION BLOCK (per-builder send / submit) ──────────────────────────────
+  // Reuses _msReportingActionBlock — keeps all resume_action + portal + failed
+  // branches and the money-safety send gate intact.
+  html += '<div style="margin-top:16px;padding:16px 20px;border-top:1px solid var(--sw-border);background:#fff;display:flex;flex-direction:column;gap:8px;">';
   html += _msReportingActionBlock(d, safeId, inv, dismissAction);
   html += '</div>';
 
   html += '</div>'; // end scroll body
 
   panel.innerHTML = html;
+}
+
+// ── DOC TABS (report / invoice / SWMS) ───────────────────────────────────────
+// Module state: the active doc-tab index per job_id (default 0 = first doc).
+var _msActiveDocTab = {};
+
+// A DOM-safe key for element ids derived from a job id (no hyphens that break selectors).
+function _msDocTabKey(jobId) {
+  return String(jobId || '').replace(/[^A-Za-z0-9]/g, '_');
+}
+
+/**
+ * Build the doc-tab list for a pack: the drafted outputs only (Make Safe Report /
+ * Draft Invoice / SWMS). Source docs (work order, photos) are intentionally excluded
+ * — photos render in the approval grid, the work order is not part of the send pack.
+ * The SWMS tab appears only when a SWMS doc is present in the feed.
+ * Each entry: { tabLabel, url, kind } where url already carries #view=FitH for PDFs
+ * (via _msReportingBuildCarouselDocs) and keeps the versioned ?v= query intact.
+ */
+function _msReportingDocTabs(d) {
+  var docs = _msReportingBuildCarouselDocs(d);
+  var out = [];
+  docs.forEach(function(doc) {
+    var label = String(doc.label || '').toLowerCase();
+    var tabLabel = null;
+    if (/report/.test(label)) tabLabel = 'Make Safe Report';
+    else if (/invoice/.test(label)) tabLabel = 'Draft Invoice';
+    else if (/swms/.test(label)) tabLabel = 'SWMS';
+    if (!tabLabel) return; // skip work order / photos / other source docs
+    // De-dupe by tab label (one report, one invoice, one SWMS).
+    if (out.some(function(o) { return o.tabLabel === tabLabel; })) return;
+    out.push({ tabLabel: tabLabel, url: doc.url, kind: doc.kind });
+  });
+  // Order: Report, Invoice, SWMS (so SWMS is always the trailing optional tab).
+  // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
+  var order = { 'Make Safe Report': 0, 'Draft Invoice': 1, 'SWMS': 2 };
+  out.sort(function(a, b) {
+    var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : 9;
+    var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : 9;
+    return oa - ob;
+  });
+  return out;
+}
+
+/**
+ * Render the fit-to-page PDF stage for the doc at index idx. Dark stage with the
+ * PDF page centered + a "fit to page" badge in the corner (matches the design ref
+ * .pdfstage / .pdffit). For PDFs we embed an iframe with the FitH-fragment URL; for
+ * an image we render it contained; for anything else, an open-in-new-tab fallback.
+ */
+function _msRenderDocStage(docTabs, idx) {
+  var t = docTabs[idx];
+  var inner;
+  if (!t || !t.url) {
+    inner = '<div style="color:#cdd8df;font-size:13px;">Document not available.</div>';
+  } else if (t.kind === 'image') {
+    inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);">';
+  } else if (t.kind === 'pdf') {
+    inner = '<iframe title="' + escapeAttr(t.tabLabel) + '" src="' + escapeAttr(t.url) + '" style="width:74%;height:94%;border:none;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);background:#fff;"></iframe>';
+  } else {
+    inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
+  }
+  return '<div style="background:#3a464d;border-radius:8px;height:520px;display:flex;align-items:center;justify-content:center;position:relative;">'
+    + '<div style="position:absolute;top:8px;right:14px;font-size:11px;color:#cdd8df;background:rgba(0,0,0,.3);padding:2px 8px;border-radius:5px;">fit to page</div>'
+    + inner
+    + '</div>';
+}
+
+/**
+ * Switch the active doc tab: update tab button styling + re-render just the PDF stage.
+ * Re-resolves the buttons + stage from the live panel so it works in BOTH hosts.
+ */
+function _msSwitchDocTab(jobId, idx, panelId) {
+  var d = _msReportingCache[jobId];
+  if (!d) return;
+  var docTabs = _msReportingDocTabs(d);
+  if (idx < 0 || idx >= docTabs.length) return;
+  _msActiveDocTab[jobId] = idx;
+  var key = _msDocTabKey(jobId);
+  var tabsWrap = document.getElementById('msDocTabs_' + key);
+  if (tabsWrap) {
+    var btns = tabsWrap.querySelectorAll('button[data-tabidx]');
+    for (var i = 0; i < btns.length; i++) {
+      var active = (Number(btns[i].getAttribute('data-tabidx')) === idx);
+      btns[i].style.background = active ? 'var(--sw-orange)' : '#fff';
+      btns[i].style.color = active ? '#fff' : 'var(--sw-dark)';
+      btns[i].style.borderColor = active ? 'var(--sw-orange)' : 'var(--sw-border)';
+    }
+  }
+  var stage = document.getElementById('msDocStage_' + key);
+  if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx);
+}
+
+/**
+ * The right-hand status chip for the header: maps resume_action / pack state /
+ * portal builder to a {label, bg, fg}. Teal "first draft ready" for the send case.
+ */
+function _msReportingStatusChip(d) {
+  var action = d.resume_action || '';
+  var packStatus = d.pack_status ? (d.pack_status.status || '') : '';
+  if (_msIsPortalBuilder(d)) return { label: 'READY TO SUBMIT', bg: '#0E7C7B', fg: '#fff' };
+  if (!action && packStatus === 'failed') return { label: 'BLOCKED', bg: '#991B1B', fg: '#fff' };
+  if (action === 'resolve_send_state') return { label: 'SEND STATE UNCLEAR', bg: '#B91C1C', fg: '#fff' };
+  if (action === 'finish_close_out') return { label: 'FINISH CLOSE-OUT', bg: '#6D28D9', fg: '#fff' };
+  if (action === 'finish_send') return { label: 'FINISH SEND', bg: '#B45309', fg: '#fff' };
+  return { label: 'FIRST DRAFT READY', bg: '#0E7C7B', fg: '#fff' };
+}
+
+/**
+ * The per-builder note shown under the recipient line. AJS and MLB send two emails
+ * (email 1 = the pack, email 2 = the approved photos individually); MLB's pack also
+ * includes the SWMS. Returns '' when there is no specific note (no em dashes).
+ */
+function _msReportingBuilderNote(d) {
+  var name = String((d.builder || d.requesting_company_name || '')).toLowerCase();
+  var slug = String(d.requesting_company_slug || '').toLowerCase();
+  var ref = String(d.external_ref || '').toUpperCase();
+  var isMlb = slug.indexOf('mlb') >= 0 || name.indexOf('mlb') >= 0 || ref.indexOf('MLB') === 0;
+  var isAjs = slug.indexOf('ajs') >= 0 || name.indexOf('ajs') >= 0 || ref.indexOf('AJS') === 0 || ref.indexOf('AJBR') === 0;
+  if (isMlb) return 'MLB: email 1 = report + invoice + SWMS, email 2 = the approved photos individually.';
+  if (isAjs) return 'AJS: email 1 = report + invoice, email 2 = the approved photos individually.';
+  return '';
 }
 
 // ── CAROUSEL + MONEY-REVIEW HELPERS ─────────────────────────────────────────
@@ -449,12 +558,12 @@ function _msReportingActionBlock(d, safeId, inv, dismissAction) {
 
   // Portal builders (Western Building / Builderwest): manual portal submission, no email button.
   if (_msIsPortalBuilder(d)) {
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #BBF7D0;background:#F0FDF4;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#166534;">Ready to submit on portal</div>';
-    html += '<div style="font-size:12px;color:#166534;margin-top:4px;">This builder uses a secure portal (Prime system) for report submission. The pack (report + invoice + SWMS) has been prepared. Submit manually on their portal link.</div>';
+    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #BBE0DF;background:#EAF4F4;">';
+    html += '<div style="font-size:13px;font-weight:800;color:#0E5F5E;">Ready to submit on portal</div>';
+    html += '<div style="font-size:12px;color:#0E5F5E;margin-top:4px;">This builder uses a secure portal (Prime system) for report submission. The pack (report + invoice + SWMS) has been prepared. Submit manually on their portal link.</div>';
     html += '</div>';
-    html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')" style="background:#166534;color:#fff;border:none;padding:12px 16px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;">Mark as portal submitted</button>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">This marks the pack as portal-ready and records your approval. No email is sent.</div>';
+    html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')" style="width:100%;background:#0E7C7B;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">Mark as portal submitted</button>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">This marks the pack as portal-ready and records your approval. No email is sent.</div>';
     html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
     return html;
   }
@@ -505,13 +614,13 @@ function _msReportingActionBlock(d, safeId, inv, dismissAction) {
   var label = isFinishSend ? 'Finish send' : 'Approve & send pack';
   html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')"'
     + (canSend ? '' : ' disabled')
-    + ' style="background:' + (isFinishSend ? '#B45309' : '#27AE60') + ';color:#fff;border:none;padding:12px 16px;border-radius:8px;font-size:14px;font-weight:800;cursor:' + (canSend ? 'pointer' : 'not-allowed') + ';opacity:' + (canSend ? '1' : '.45') + ';">' + label + '</button>';
+    + ' style="width:100%;background:' + (isFinishSend ? '#B45309' : '#27AE60') + ';color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:' + (canSend ? 'pointer' : 'not-allowed') + ';opacity:' + (canSend ? '1' : '.45') + ';">' + label + '</button>';
   if (!canSend) {
-    html += '<div style="font-size:12px;color:#B91C1C;">' + (!d.recipient_email ? 'A builder recipient email is required. ' : '') + (!inv ? 'A linked invoice is required.' : '') + '</div>';
+    html += '<div style="font-size:12px;color:#B91C1C;text-align:center;">' + (!d.recipient_email ? 'A builder recipient email is required. ' : '') + (!inv ? 'A linked invoice is required.' : '') + '</div>';
   } else if (isFinishSend) {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">The invoice is already authorised. This finishes the send by re-emailing the pack once to ' + escapeHtml(d.recipient_email) + ' (no re-authorise).</div>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">The invoice is already authorised. This finishes the send by re-emailing the pack once to ' + escapeHtml(d.recipient_email) + ' (no re-authorise).</div>';
   } else {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">This authorises the invoice in Xero and emails the pack to ' + escapeHtml(d.recipient_email) + '.</div>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">Authorises the invoice in Xero and emails the pack to ' + escapeHtml(d.recipient_email) + '. Your click, every time.</div>';
   }
   html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
   return html;
@@ -830,32 +939,32 @@ function _msRenderPhotoApprovalInner(d, jobId) {
   }
   var state = _msGetPhotoApprovalState(jobId, allPhotos);
   var approvedCount = Object.keys(state.approved).length;
+  var excludedCount = allPhotos.length - approvedCount;
   var html = '';
-  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;">';
-  html += approvedCount + ' of ' + allPhotos.length + ' photos approved. ';
+  // Count line (matches the ref .photocount).
+  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">';
+  html += approvedCount + ' of ' + allPhotos.length + ' photos approved';
+  if (excludedCount > 0) html += ' &middot; ' + excludedCount + ' excluded';
+  html += '. ';
   if (approvedCount === 0) {
     html += '<strong style="color:#B91C1C;">At least one photo must be approved to send.</strong>';
-  } else if (approvedCount < allPhotos.length) {
-    html += (allPhotos.length - approvedCount) + ' excluded.';
   }
   html += '</div>';
-  html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+  // Wider tiles (120x88) with green outline (approved) / red outline + dimmed
+  // (excluded) and a corner marker — matches the ref .ph / .ph.ok / .ph.no.
+  html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
   allPhotos.forEach(function(p) {
     var isApproved = !!state.approved[p.url];
     var safeUrl = escapeAttr(p.url);
     var safeJobId = escapeAttr(jobId);
-    html += '<div style="position:relative;width:80px;height:80px;border-radius:6px;overflow:hidden;border:2px solid '
-      + (isApproved ? '#22C55E' : '#E5E7EB') + ';cursor:pointer;flex-shrink:0;"'
+    var outline = isApproved ? '3px solid #5E8B6E' : '3px solid #E74C3C';
+    var opacity = isApproved ? '1' : '0.5';
+    html += '<div style="position:relative;width:120px;height:88px;border-radius:8px;overflow:hidden;outline:' + outline + ';opacity:' + opacity + ';cursor:pointer;flex-shrink:0;background:#5b6b73;"'
       + ' onclick="_msTogglePhotoApproval(\'' + safeJobId + '\',\'' + safeUrl + '\')"'
       + ' title="' + (isApproved ? 'Click to exclude' : 'Click to include') + '">';
     html += '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
-    if (!isApproved) {
-      html += '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">'
-        + '<span style="color:#fff;font-size:20px;">&#10005;</span></div>';
-    } else {
-      html += '<div style="position:absolute;top:3px;right:3px;background:#22C55E;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;">'
-        + '<span style="color:#fff;font-size:10px;font-weight:900;">&#10003;</span></div>';
-    }
+    html += '<div style="position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;background:' + (isApproved ? '#5E8B6E' : '#E74C3C') + ';">'
+      + (isApproved ? '&#10003;' : '&times;') + '</div>';
     html += '</div>';
   });
   html += '</div>';
@@ -864,20 +973,29 @@ function _msRenderPhotoApprovalInner(d, jobId) {
 
 /**
  * Build the outer photo-approval container (heading + section div with id for re-render).
+ * Kept for any caller that wants the labelled card; the integrated review screen uses
+ * _msRenderPhotoApprovalBody instead (it supplies its own section label).
  */
 function _msRenderPhotoApproval(d, jobId) {
   var allPhotos = _msGetAllPhotos(d);
-  var safeJobIdAttr = escapeAttr(jobId).replace(/-/g, '_');
   var html = '';
   html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Photo approval';
   if (allPhotos.length > 0) {
     html += ' <span style="font-size:10px;font-weight:600;color:#B91C1C;">(mandatory)</span>';
   }
   html += '</div>';
-  html += '<div id="msPhotoApprovalSection_' + safeJobIdAttr + '" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin-bottom:18px;">';
-  html += _msRenderPhotoApprovalInner(d, jobId);
-  html += '</div>';
+  html += _msRenderPhotoApprovalBody(d, jobId);
   return html;
+}
+
+/**
+ * The photo-approval section body only (no heading) — the re-renderable container
+ * with the stable section id. Used by the integrated review screen which supplies its
+ * own "Photos — approve which go in the pack (mandatory)" section label.
+ */
+function _msRenderPhotoApprovalBody(d, jobId) {
+  var safeJobIdAttr = escapeAttr(jobId).replace(/-/g, '_');
+  return '<div id="msPhotoApprovalSection_' + safeJobIdAttr + '">' + _msRenderPhotoApprovalInner(d, jobId) + '</div>';
 }
 
 /**
@@ -894,6 +1012,9 @@ function _msUpdateSendButtonPhotoGate(jobId) {
   var hasApproved = approvedCount > 0;
   var btn = document.getElementById('msReportingApproveBtn');
   if (!btn) return;
+  // Portal builders submit manually (no email) — the portal button is never gated on
+  // recipient/invoice, only on the photo gate (the photos still go in the pack).
+  var isPortal = _msIsPortalBuilder(d);
   // If photos exist but none approved, disable send
   if (hasPhotos && !hasApproved) {
     btn.disabled = true;
@@ -901,7 +1022,7 @@ function _msUpdateSendButtonPhotoGate(jobId) {
     btn.style.cursor = 'not-allowed';
     btn.title = 'Approve at least one photo to send';
   } else {
-    var canSend = !!d.recipient_email && !!d.invoice;
+    var canSend = isPortal ? true : (!!d.recipient_email && !!d.invoice);
     btn.disabled = !canSend;
     btn.style.opacity = canSend ? '1' : '0.45';
     btn.style.cursor = canSend ? 'pointer' : 'not-allowed';

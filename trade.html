@@ -12915,7 +12915,9 @@
           if (result.code === 'RATE_NOT_CONFIGURED') {
             showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then resubmit.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
           }
-          loadHoursView();
+          // Re-paint from intact _jobCards — do NOT call loadHoursView() which would
+          // follow the sessionStorage path and lose in-memory job cards.
+          renderInvoiceBuilder();
           return;
         }
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
@@ -12942,7 +12944,9 @@
         } else {
           toast('Failed: ' + friendlyError(err), true);
         }
-        loadHoursView();
+        // Re-paint from intact _jobCards — do NOT call loadHoursView() which would
+        // follow the sessionStorage path and lose in-memory job cards.
+        renderInvoiceBuilder();
       });
     });
   };
@@ -13272,7 +13276,8 @@
               'Go to Profile'
             ).then(function(go) { if (go) showView('profile'); });
           }
-          loadHoursView();
+          // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
+          renderInvoiceBuilder();
           return;
         }
 
@@ -13338,7 +13343,8 @@
         } else {
           toast('Failed: ' + friendlyError(err), true);
         }
-        loadHoursView();
+        // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
+        renderInvoiceBuilder();
       });
     });
   };

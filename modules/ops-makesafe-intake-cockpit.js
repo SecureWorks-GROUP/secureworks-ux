@@ -29,7 +29,7 @@ async function loadMakesafeIntakeCockpit() {
     body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading intake drafts...</div>';
   }
   try {
-    var data = await opsFetch('list_intake_drafts', { status: 'draft,needs_review' });
+    var data = await opsFetch('list_intake_drafts', { status: 'draft,needs_review,reopen_candidate' });
     var drafts = (data && data.drafts) || [];
     _msCockpitDraftCache = {};
     drafts.forEach(function(d) { _msCockpitDraftCache[d.id] = d; });
@@ -74,9 +74,10 @@ async function loadMakesafeIntakeCockpit() {
  * Render a single intake draft card for the cockpit column.
  */
 function renderMsIntakeCard(d) {
-  var status = (d.status === 'needs_review') ? 'needs_review' : 'draft';
-  var statusBg = status === 'needs_review' ? '#0E7C7B' : '#9CA3AF';
-  var statusLabel = status === 'needs_review' ? 'NEEDS REVIEW' : 'DRAFT';
+  var isReopen = (d.status === 'reopen_candidate');
+  var status = isReopen ? 'reopen_candidate' : (d.status === 'needs_review') ? 'needs_review' : 'draft';
+  var statusBg = isReopen ? '#7C3AED' : (status === 'needs_review' ? '#0E7C7B' : '#9CA3AF');
+  var statusLabel = isReopen ? 'REOPEN CANDIDATE' : (status === 'needs_review' ? 'NEEDS REVIEW' : 'DRAFT');
 
   var builder = intakeFieldValue(d, 'requesting_company_name') || d.from_name || '';
   var ref = intakeFieldValue(d, 'external_ref');
@@ -102,14 +103,22 @@ function renderMsIntakeCard(d) {
   if (client) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;"><strong>Client:</strong> ' + escapeHtml(client) + '</div>';
   if (suburb) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;"><strong>Suburb:</strong> ' + escapeHtml(suburb) + '</div>';
 
-  // Missing fields warning
-  if (missing.length > 0) {
+  // Reopen candidate: show match note instead of missing-fields warning
+  if (isReopen) {
+    var matchRef = d.external_ref || ref || '';
+    html += '<div style="font-size:11px;color:#5B21B6;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px;margin-top:8px;">Matches existing job' + (matchRef ? ': ' + escapeHtml(matchRef) : '') + '</div>';
+  } else if (missing.length > 0) {
     html += '<div style="font-size:11px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:5px 8px;margin-top:8px;">Missing: ' + escapeHtml(missing.join(', ')) + '</div>';
   }
 
-  // Review button
+  // Action button
   html += '<div style="margin-top:10px;">';
-  html += '<button onclick="event.stopPropagation();showMsIntakeDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review</button>';
+  if (isReopen) {
+    var safeJobId = escapeAttr(d.reopen_job_id || '');
+    html += '<button onclick="event.stopPropagation();reopenMsIntakeDraftCockpit(\'' + safeId + '\',\'' + safeJobId + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Reopen job</button>';
+  } else {
+    html += '<button onclick="event.stopPropagation();showMsIntakeDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review</button>';
+  }
   html += '</div>';
 
   html += '</div>';
@@ -381,6 +390,25 @@ async function rejectMsIntakeDraftCockpit(draftId) {
     _msIntakeAfterAction();
   } catch (e) {
     showToast('Reject failed: ' + (e.message || e), 'error');
+  }
+}
+
+/**
+ * Reopen an existing make-safe job from a reopen_candidate intake draft.
+ */
+async function reopenMsIntakeDraftCockpit(draftId, jobId) {
+  var reason = prompt('Reason for reopening this job (leave blank to use default):');
+  if (reason === null) return;
+  try {
+    await opsPost('reopen_makesafe', {
+      job_id: jobId,
+      reason: reason || 'Reopened via intake: new work order received from builder.',
+      draft_id: draftId
+    });
+    showToast('Job reopened', 'success');
+    _msIntakeAfterAction();
+  } catch (e) {
+    showToast('Reopen failed: ' + (e.message || e), 'error');
   }
 }
 

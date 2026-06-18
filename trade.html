@@ -12367,6 +12367,106 @@
     return Math.round((jcSub + extraSub) * 100) / 100;
   }
 
+  function _jobCardAmount(c) {
+    if (!c) return 0;
+    if (c.commission_mode) return Math.round((Number(c.commission_amount) || 0) * 100) / 100;
+    if (c.wo_mode) return Math.round(_woNet(c) * 100) / 100;
+    return Math.round((Number(c.hours || 0) * Number(c.rate || 0)) * 100) / 100;
+  }
+
+  function _jobCentricPdfRows(cards, manualRows) {
+    var rows = [];
+    (cards || []).forEach(function(c) {
+      if (!c || !c.included) return;
+      var amount = _jobCardAmount(c);
+      var hours = 0;
+      var rate = 0;
+      var desc = c.description || '';
+      var division = c.job_type || c.division || 'Make Safe';
+      if (c.commission_mode) {
+        hours = 1;
+        rate = amount;
+        division = 'Commission';
+        desc = 'Commission — ' + (c.job_number || '') + ' — ' + (c.client_name || '');
+      } else if (c.wo_mode) {
+        hours = 1;
+        rate = amount;
+        division = 'Work Order';
+        desc = _woBreakdownText(c) + (desc ? ' — ' + desc : '');
+      } else {
+        hours = Number(c.hours || 0);
+        rate = Number(c.rate || 0);
+      }
+      rows.push({
+        date: c.scheduled_date || '',
+        job_text: c.job_number || '',
+        description: desc,
+        division: division,
+        hours: hours,
+        rate: rate,
+        amount: amount,
+        client_name: c.client_name || '',
+        site_address: c.site_address || ''
+      });
+    });
+    (manualRows || []).forEach(function(r) {
+      if (!r) return;
+      rows.push({
+        date: r.date || '',
+        job_text: r.job_text || '',
+        description: r.description || '',
+        division: r.division || 'General Labour',
+        hours: Number(r.hours || 0),
+        rate: Number(r.rate || 0),
+        amount: Math.round((Number(r.amount || 0)) * 100) / 100,
+        client_name: r.client_name || '',
+        site_address: r.site_address || ''
+      });
+    });
+    return rows;
+  }
+
+  function _invoicePdfTotals(rows, resultTotal) {
+    var subtotal = (rows || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+    subtotal = Math.round(subtotal * 100) / 100;
+    var total = resultTotal != null ? Math.round(Number(resultTotal) * 100) / 100 : subtotal;
+    return { subtotal: subtotal, gst: Math.round((total - subtotal) * 100) / 100, total: total };
+  }
+
+  function _attachInvoicePdfToXero(result, pdfData) {
+    if (!result || !result.xero_bill_id) return Promise.resolve({ attached: false, skipped: true });
+    try {
+      var pdfDoc = _generateInvoicePDF(pdfData);
+      if (!pdfDoc) return Promise.resolve({ attached: false, error: 'PDF generation failed' });
+      var pdfBase64 = pdfDoc.output('datauristring').split(',')[1]; // strip data:application/pdf;base64,
+      return api('attach_invoice_pdf', null, {
+        xero_bill_id: result.xero_bill_id,
+        pdf_base64: pdfBase64,
+        filename: (result.invoice_number || 'invoice') + '.pdf'
+      }).then(function(resp) {
+        if (resp && resp.success === false) {
+          console.warn('[trade] PDF attachment failed (non-blocking):', resp.error || resp.message || resp);
+          return { attached: false, error: resp.error || resp.message || 'PDF attachment failed' };
+        } else {
+          console.log('[trade] PDF attached to Xero bill');
+          return { attached: true };
+        }
+      }).catch(function(e) {
+        console.warn('[trade] PDF attachment failed (non-blocking):', e.message);
+        return { attached: false, error: e.message };
+      });
+    } catch (e) {
+      console.warn('[trade] PDF gen for Xero failed:', e);
+      return Promise.resolve({ attached: false, error: e.message || String(e) });
+    }
+  }
+
+  window.__SW_TRADE_INVOICE_PDF_TESTS = {
+    _jobCentricPdfRows: _jobCentricPdfRows,
+    _invoicePdfTotals: _invoicePdfTotals,
+    _attachInvoicePdfToXero: _attachInvoicePdfToXero
+  };
+
   // ── Job-card DOM sync (daybug fix) ─────────────────────────────────────
   // Reads current input values from the DOM back into _jobCards before any
   // full re-render. This prevents hours/rate entered by the trade from being
@@ -12886,7 +12986,8 @@
     var manualAssignments = built.manualAssignments;
     // Extras (manual adjustments) still ride along — path preserved.
     _syncRowsFromDOM();
-    var legacyExtras = _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; }).map(_rowToExtraItem);
+    var legacyManualRows = _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; });
+    var legacyExtras = legacyManualRows.map(_rowToExtraItem);
     var extraItems = built.cardExtraItems.concat(legacyExtras);
     if (built.includedCount === 0 && extraItems.length === 0) { toast('Select a job or add an extra', true); return; }
 
@@ -12920,6 +13021,16 @@
           renderInvoiceBuilder();
           return;
         }
+        var pdfRows = _jobCentricPdfRows(_jobCards, legacyManualRows);
+        var pdfData = {
+          invoiceNumber: result.invoice_number,
+          rows: pdfRows,
+          notes: _invNotes,
+          gst: false,
+          total: _invoicePdfTotals(pdfRows, result.total_inc)
+        };
+        _lastInvoicePdfData = pdfData;
+        return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
@@ -12931,12 +13042,19 @@
         } else if (result.xero_bill_number || result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to the bookkeepers</div>';
         }
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
+        }
         var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : (Math.round(sub * 100) / 100).toFixed(2);
         successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
-        successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="max-width:280px;margin:16px auto 0">Done</button>';
+        successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
+        successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
+        successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
+        successHtml += '</div>';
         successHtml += '</div>';
         container.innerHTML = successHtml;
         _jobCards = []; _invRows = []; _clearInvDraft();
+        });
       }).catch(function(err) {
         if (!navigator.onLine) {
           queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes });
@@ -13290,24 +13408,7 @@
         var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: false, total: t };
         _lastInvoicePdfData = pdfData;
 
-        // Attach PDF to Xero bill (non-blocking)
-        if (result.xero_bill_id) {
-          try {
-            var pdfDoc = _generateInvoicePDF(pdfData);
-            if (pdfDoc) {
-              var pdfBase64 = pdfDoc.output('datauristring').split(',')[1]; // strip data:application/pdf;base64,
-              api('attach_invoice_pdf', null, {
-                xero_bill_id: result.xero_bill_id,
-                pdf_base64: pdfBase64,
-                filename: (result.invoice_number || 'invoice') + '.pdf'
-              }).then(function() {
-                console.log('[trade] PDF attached to Xero bill');
-              }).catch(function(e) {
-                console.warn('[trade] PDF attachment failed (non-blocking):', e.message);
-              });
-            }
-          } catch (e) { console.warn('[trade] PDF gen for Xero failed:', e); }
-        }
+        return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
 
         // Show success
         var successHtml = '';
@@ -13324,6 +13425,9 @@
         } else {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
         }
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
+        }
         var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : t.total.toFixed(2);
         successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
         successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + '</div>';
@@ -13337,6 +13441,7 @@
         _invRows = [];
         _invExtraLines = [];
         _clearInvDraft();
+        });
       }).catch(function(err) {
         if (!navigator.onLine) {
           queueOfflineAction('generate_trade_invoice', {

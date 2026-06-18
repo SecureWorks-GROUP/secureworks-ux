@@ -9454,10 +9454,16 @@ async function openMakesafeJob(jobId) {
       && (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId])) {
     try { await loadMakesafeReportingCockpit(); } catch (e) { /* fall through to canonical */ }
   }
-  // A pack present in the drafts feed (cache keyed by job_id) means it is
-  // ready/resumable -> open the integrated review screen.
-  if (typeof _msReportingCache !== 'undefined' && _msReportingCache[jobId]
-      && typeof showMsReportingDetail === 'function') {
+  // Open the integrated review screen ONLY when the cached pack is genuinely
+  // actionable: it must carry a resume_action (the feed sets one of send /
+  // finish_send / finish_close_out / resolve_send_state for every sendable or
+  // resumable pack) OR be a portal builder (Western/Builderwest prep, which is
+  // review-and-submit). A bare/stale/failed cache entry with no resume_action falls
+  // through to the canonical job view instead of opening an empty review screen.
+  var pack = (typeof _msReportingCache !== 'undefined') ? _msReportingCache[jobId] : null;
+  var isPortalPack = pack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
+  var isActionable = pack && (pack.resume_action || isPortalPack);
+  if (isActionable && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;

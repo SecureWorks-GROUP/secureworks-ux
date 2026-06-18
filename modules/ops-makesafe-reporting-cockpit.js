@@ -18,6 +18,23 @@
 var _msReportingCache = {};
 var _msPhotoApprovalState = {};
 
+// JS-STRING escape for values interpolated INSIDE a single-quoted JS string in an
+// inline onclick handler. escapeAttr/escapeHtml are HTML-context escapes (entities
+// are decoded by the parser BEFORE the handler runs), so they do NOT protect the JS
+// string boundary. This escapes the chars that break out of a '...'-quoted JS string
+// (backslash, single quote) so a value carrying a quote can never inject handler JS.
+// (job_ids are UUIDs and our photo URLs are clean, but this fails closed against any
+// future field that isn't.) Pair with escapeAttr when the result also sits in an
+// HTML attribute: jsAttr(v) = escapeAttr applied to the JS-escaped value.
+function _msJsStr(s) {
+  return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+function _msJsAttr(s) {
+  // Safe for: onclick="fn('<HERE>')" — JS-escape first, then HTML-attr-escape so the
+  // double-quoted attribute and the single-quoted JS string are both intact.
+  return escapeAttr(_msJsStr(s));
+}
+
 // ────────────────────────────────────────────────────────────
 // 1. LIST PANEL - load + render the reporting column
 // ────────────────────────────────────────────────────────────
@@ -396,7 +413,15 @@ function _msSwitchDocTab(jobId, idx, panelId) {
   if (idx < 0 || idx >= docTabs.length) return;
   _msActiveDocTab[jobId] = idx;
   var key = _msDocTabKey(jobId);
-  var tabsWrap = document.getElementById('msDocTabs_' + key);
+  // Scope the lookup to the HOST PANEL so the inline approvals panel and the board
+  // overlay (which can both contain the same job's msDocStage_<key>) never collide:
+  // getElementById would return whichever is first in the DOM, so an overlay tab
+  // click could update the hidden inline copy. Resolve within the panel passed from
+  // the click (the same id used to render this panel); fall back to document scope.
+  var root = (panelId && document.getElementById(panelId)) || document;
+  var tabsWrap = root.querySelector
+    ? (root.querySelector('#msDocTabs_' + key) || document.getElementById('msDocTabs_' + key))
+    : document.getElementById('msDocTabs_' + key);
   if (tabsWrap) {
     var btns = tabsWrap.querySelectorAll('button[data-tabidx]');
     for (var i = 0; i < btns.length; i++) {
@@ -406,7 +431,7 @@ function _msSwitchDocTab(jobId, idx, panelId) {
       btns[i].style.borderColor = active ? 'var(--sw-orange)' : 'var(--sw-border)';
     }
   }
-  var stage = document.getElementById('msDocStage_' + key);
+  var stage = (root.querySelector && root.querySelector('#msDocStage_' + key)) || document.getElementById('msDocStage_' + key);
   if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx);
 }
 
@@ -650,26 +675,48 @@ function showMsReportingDetailEmpty() {
 async function approveMakesafeReportPack(jobId) {
   var d = _msReportingCache[jobId];
   if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
-  if (!d.recipient_email) { showToast('No builder recipient email on file; cannot send.', 'error'); return; }
+  var isPortal = (typeof _msIsPortalBuilder === 'function') && _msIsPortalBuilder(d);
+
+  // Email builders (AJS / MLB) MUST have a recipient. Portal builders (Western /
+  // Builderwest) intentionally have NONE — they prep the pack for manual portal
+  // submission, so the recipient/subject/body checks are skipped for them.
+  if (!isPortal && !d.recipient_email) { showToast('No builder recipient email on file; cannot send.', 'error'); return; }
+
+  // FAIL-CLOSED PHOTO GATE (defence in depth — not just the disabled button). The
+  // mandatory rule: ONLY approved photos go out, and at least one must be approved
+  // when photos were submitted. Refuse the call if photos exist but none approved,
+  // so a stale handler / direct invocation can never send a photo-less pack or
+  // (for the follow-up) an empty photo set. Applies to BOTH email + portal.
+  var allPhotos = _msGetAllPhotos(d);
+  var photoState = _msPhotoApprovalState[d.job_id] || { approved: {} };
+  var approvedPhotos = allPhotos.filter(function(p) { return !!photoState.approved[p.url]; });
+  if (allPhotos.length > 0 && approvedPhotos.length === 0) {
+    showToast('Approve at least one photo before sending (only approved photos go in the pack).', 'error');
+    return;
+  }
 
   var subject = d.default_subject || '';
   var htmlBody = d.default_html_body || '';
-  // Defence in depth: never send a subject carrying a review/test marker. The
-  // backend gate also enforces this, but we refuse to even attempt the call.
-  if (_msReportingSubjectHasReviewMarker(subject)) {
-    showToast('Refusing to send: the subject contains a review/test marker.', 'error');
-    return;
-  }
-  if (!subject || !htmlBody) {
-    showToast('Missing subject or body for this pack; reload the list.', 'error');
-    return;
+  if (!isPortal) {
+    // Defence in depth: never send a subject carrying a review/test marker. The
+    // backend gate also enforces this, but we refuse to even attempt the call.
+    if (_msReportingSubjectHasReviewMarker(subject)) {
+      showToast('Refusing to send: the subject contains a review/test marker.', 'error');
+      return;
+    }
+    if (!subject || !htmlBody) {
+      showToast('Missing subject or body for this pack; reload the list.', 'error');
+      return;
+    }
   }
 
-  // State-aware confirm: finish_send resumes an already-authorised invoice (re-emails
-  // once, no re-authorise); the normal send authorises + emails. The makesafe_send_pack
-  // call below is UNCHANGED in either case — only the operator wording differs.
+  // State-aware confirm. Portal = prep-for-portal (no email). finish_send resumes an
+  // already-authorised invoice (re-emails once, no re-authorise). Normal = authorise
+  // + email. The makesafe_send_pack call below is the same shape; only wording differs.
   var confirmMsg;
-  if (d.resume_action === 'finish_send') {
+  if (isPortal) {
+    confirmMsg = 'This prepares the pack (report + invoice + SWMS) for manual submission on the builder portal and records your approval. NO email is sent. Continue?';
+  } else if (d.resume_action === 'finish_send') {
     confirmMsg = 'This finishes sending the pack to ' + d.recipient_email + ' (the invoice is already authorised; it will not be re-authorised). Send now?';
   } else {
     confirmMsg = 'This authorises the invoice and emails the builder. Send now?';
@@ -677,23 +724,23 @@ async function approveMakesafeReportPack(jobId) {
   if (!confirm(confirmMsg)) return;
 
   var btn = document.getElementById('msReportingApproveBtn');
-  var origLabel = btn ? btn.textContent : 'Approve & send pack';
-  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+  var origLabel = btn ? btn.textContent : (isPortal ? 'Mark as portal submitted' : 'Approve & send pack');
+  if (btn) { btn.disabled = true; btn.textContent = isPortal ? 'Preparing...' : 'Sending...'; }
 
   try {
-    // Collect approved photos from the photo-approval gate
-    var allPhotos = _msGetAllPhotos(d);
-    var photoState = _msPhotoApprovalState[d.job_id] || { approved: {} };
-    var approvedPhotos = allPhotos.filter(function(p) { return !!photoState.approved[p.url]; });
-
-    var result = await opsPost('makesafe_send_pack', {
+    // Portal builders send NO recipient/subject/body — the backend detects the
+    // portal builder, prepares the pack and returns { portal_ready: true } (no email).
+    var payload = {
       job_id: jobId,
       pack_kind: 'main',
-      recipient_email: d.recipient_email,
-      subject: subject,
-      html_body: htmlBody,
       approved_photos: approvedPhotos
-    });
+    };
+    if (!isPortal) {
+      payload.recipient_email = d.recipient_email;
+      payload.subject = subject;
+      payload.html_body = htmlBody;
+    }
+    var result = await opsPost('makesafe_send_pack', payload);
     if (result && result.portal_ready) {
       showToast('Pack marked as ready for portal submission.', 'success');
     } else if (result && result.already_sent) {
@@ -955,12 +1002,13 @@ function _msRenderPhotoApprovalInner(d, jobId) {
   html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
   allPhotos.forEach(function(p) {
     var isApproved = !!state.approved[p.url];
-    var safeUrl = escapeAttr(p.url);
-    var safeJobId = escapeAttr(jobId);
+    var safeUrl = escapeAttr(p.url);          // for src="..." (HTML attribute context)
+    var jsUrl = _msJsAttr(p.url);             // for onclick fn('...') (JS-string-in-attr)
+    var jsJobId = _msJsAttr(jobId);           // UUID, but escaped fail-closed
     var outline = isApproved ? '3px solid #5E8B6E' : '3px solid #E74C3C';
     var opacity = isApproved ? '1' : '0.5';
     html += '<div style="position:relative;width:120px;height:88px;border-radius:8px;overflow:hidden;outline:' + outline + ';opacity:' + opacity + ';cursor:pointer;flex-shrink:0;background:#5b6b73;"'
-      + ' onclick="_msTogglePhotoApproval(\'' + safeJobId + '\',\'' + safeUrl + '\')"'
+      + ' onclick="_msTogglePhotoApproval(\'' + jsJobId + '\',\'' + jsUrl + '\')"'
       + ' title="' + (isApproved ? 'Click to exclude' : 'Click to include') + '">';
     html += '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
     html += '<div style="position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;background:' + (isApproved ? '#5E8B6E' : '#E74C3C') + ';">'
@@ -1039,10 +1087,18 @@ function _msUpdateSendButtonPhotoGate(jobId) {
  * instead of the normal email button.
  */
 function _msIsPortalBuilder(d) {
+  // MUST mirror the backend _isMakesafeWesternCompany (ops-api index.ts) exactly so
+  // the UI and the send path agree on who is a portal builder. Backend matches:
+  //   slug: builderwest / western-building
+  //   name: builderwest / western building
+  //   ref:  BWCWA* or WB-<digit> / WB <digit>
   var name = String((d.builder || d.requesting_company_name || '')).toLowerCase();
   var slug = String(d.requesting_company_slug || '').toLowerCase();
-  return slug.includes('builderwest') || slug.includes('western-building')
-    || name.includes('builderwest') || name.includes('western building');
+  var ref = String(d.external_ref || '').toUpperCase();
+  if (slug.indexOf('builderwest') >= 0 || slug.indexOf('western-building') >= 0) return true;
+  if (name.indexOf('builderwest') >= 0 || name.indexOf('western building') >= 0) return true;
+  if (ref.indexOf('BWCWA') === 0 || /\bWB[-\s]?\d/.test(ref)) return true;
+  return false;
 }
 
 // SMOKE TEST (manual, run in browser console):

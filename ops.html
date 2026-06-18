@@ -131,7 +131,18 @@
     #viewCalendar.active {
       display: flex !important; flex-direction: row; overflow: hidden;
       position: fixed; top: 56px; left: 0; right: 0; bottom: var(--jarvis-bar-height); z-index: 50;
+      background: var(--sw-bg); /* opaque — fixed overlay must fully cover other tabs' DOM behind it */
     }
+    /* Calendar loading state — fills the body so it never reads as a frozen/old page while data fetches */
+    .cal-loading {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; min-height: 320px; color: var(--sw-text-sec); font-size: 13px;
+    }
+    .cal-loading .spinner {
+      width: 28px; height: 28px; border: 3px solid var(--sw-border);
+      border-top-color: var(--sw-orange); border-radius: 50%; animation: calspin 0.8s linear infinite;
+    }
+    @keyframes calspin { to { transform: rotate(360deg); } }
 
     /* ── Calendar Left Sidebar ── */
     .cal-sidebar {
@@ -6895,15 +6906,14 @@ function toggleCalUnsched() {
 
 async function loadCalendar() {
   var range = getCalRange();
-  try {
-    var fetches = [
-      opsFetch('calendar', { from: range.from, to: range.to }),
-      opsFetch('pipeline'),
-      opsFetch('get_crew_availability', { from: range.from, to: range.to }),
-    ];
 
-    var results = await Promise.all(fetches);
-    var data = results[0];
+  // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
+  var bodyEl = document.getElementById('calendarBody');
+  if (bodyEl) bodyEl.innerHTML = '<div class="cal-loading"><div class="spinner"></div><div>Loading calendar…</div></div>';
+
+  try {
+    // ── Grid-critical fetch ── the grid only needs the calendar events; draw it as soon as they arrive.
+    var data = await opsFetch('calendar', { from: range.from, to: range.to });
     _calEvents = (data.events || []).filter(function(ev) {
       // Filter out legacy GHL imports and completed-without-job-number ghosts
       if (ev.legacy === true) return false;
@@ -6914,30 +6924,33 @@ async function loadCalendar() {
     _calReadiness = data.readiness || {};
     _calOrgEvents = data.orgEvents || [];
     initCalEventFilterChips();
+    renderCalendar(); // first paint — grid is visible now, before the slower enrichment calls return
 
-    // Extract unscheduled jobs (accepted status, no scheduled assignments)
-    if (results[1]) {
-      var cols = results[1].columns || {};
-      _unschedJobs = (cols.accepted || []);
-    }
+    // ── Enrichment fetches ── these don't gate the grid; patch in when they resolve.
+    // Unscheduled sidebar (from pipeline)
+    opsFetch('pipeline').then(function(p) {
+      if (!p) return;
+      _unschedJobs = ((p.columns || {}).accepted || []);
+      if (typeof renderCalUnschedSidebar === 'function') renderCalUnschedSidebar();
+      if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
+    }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
 
-    // Parse crew availability → keyed by "CrewName_date"
-    _calAvailability = {};
-    if (results[2] && Array.isArray(results[2])) {
-      // Build userId→name lookup from crew list
-      var userIdToName = {};
-      _crewList.forEach(function(u) { userIdToName[u.id] = u.name; });
-      results[2].forEach(function(a) {
-        var name = userIdToName[a.user_id];
-        if (name) {
-          _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
-        }
-      });
-    }
-
-    renderCalendar();
+    // Crew availability shading
+    opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
+      _calAvailability = {};
+      if (av && Array.isArray(av)) {
+        var userIdToName = {};
+        _crewList.forEach(function(u) { userIdToName[u.id] = u.name; });
+        av.forEach(function(a) {
+          var name = userIdToName[a.user_id];
+          if (name) _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
+        });
+        renderCalendar(); // re-paint with availability backgrounds
+      }
+    }).catch(function(e) { console.error('calendar availability enrich failed:', e); });
   } catch (e) {
     console.error('loadCalendar error:', e);
+    if (bodyEl) bodyEl.innerHTML = '';
     showToast('Failed to load calendar', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadCalendar()' }
     ]);

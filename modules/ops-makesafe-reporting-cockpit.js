@@ -16,6 +16,7 @@
 // ════════════════════════════════════════════════════════════
 
 var _msReportingCache = {};
+var _msPhotoApprovalState = {};
 
 // ────────────────────────────────────────────────────────────
 // 1. LIST PANEL - load + render the reporting column
@@ -89,11 +90,17 @@ function renderMsReportingCard(d) {
   var safeId = escapeAttr(d.job_id);
   var html = '<div onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + statusBg + ';">';
 
-  // Top row: status badge (+ amber money-review chip when flagged)
+  // Top row: status badge (+ amber money-review chip when flagged + first-draft chip)
+  var action = d.resume_action || '';
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
   html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:#fff;">' + statusLabel + '</span>';
   if (d.needs_money_review === true) {
     html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;">CHECK PRICING</span>';
+  }
+  var isFirstDraft = d.first_draft_ready === true ||
+    (action === 'send' && (!packStatus || packStatus === 'drafted' || packStatus === 'admin_to_send_report'));
+  if (isFirstDraft) {
+    html += '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#0E7C7B;color:#fff;opacity:0.75;">FIRST DRAFT</span>';
   }
   html += '</div>';
 
@@ -180,6 +187,10 @@ function showMsReportingDetail(jobId, targetPanelId) {
     _msafeDocViewer.idx = 0;
   }
 
+  // Initialize photo approval state for this job (all photos approved by default on first open)
+  var allPhotosForInit = _msGetAllPhotos(d);
+  _msGetPhotoApprovalState(d.job_id, allPhotosForInit);
+
   var html = '';
 
   // Header
@@ -228,6 +239,14 @@ function showMsReportingDetail(jobId, targetPanelId) {
     html += '</div>';
   }
 
+  // Trade notes (raw submission notes from the trade — shown when present)
+  if (d.trade_notes && d.trade_notes.trim()) {
+    html += '<div style="margin-bottom:16px;padding:12px 14px;border-radius:8px;background:#F8FAFC;border:1px solid #CBD5E1;">';
+    html += '<div style="font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;margin-bottom:8px;">Trade notes (raw from submission)</div>';
+    html += '<div style="font-size:13px;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(d.trade_notes) + '</div>';
+    html += '</div>';
+  }
+
   // Recipient - who gets this pack (recipient + CC)
   html += '<div style="margin-bottom:16px;padding:12px 14px;border-radius:8px;border:1px solid ' + (d.recipient_email ? '#BBF7D0' : '#FECACA') + ';background:' + (d.recipient_email ? '#F0FDF4' : '#FEF2F2') + ';">';
   html += '<div style="font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Pack will be emailed to</div>';
@@ -252,6 +271,9 @@ function showMsReportingDetail(jobId, targetPanelId) {
     html += '<div style="font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">No documents or evidence attached to this pack yet.</div>';
   }
   html += '</div>';
+
+  // PHOTO APPROVAL (MANDATORY gate — all start approved, opt-out model)
+  html += _msRenderPhotoApproval(d, d.job_id);
 
   // INVOICE LINE ITEMS + totals (with money-review line highlights)
   html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Invoice</div>';
@@ -326,7 +348,12 @@ function _msReportingBuildCarouselDocs(d) {
     if (seen[url]) return;
     seen[url] = true;
     var k = kind || _msReportingDocKind(url);
-    out.push({ label: label || 'Document', url: url, kind: k, doc: null });
+    // For PDFs, append #view=FitH so iframe renders fit-to-page (only when no fragment already present).
+    var displayUrl = url;
+    if (k === 'pdf' && url.indexOf('#') === -1) {
+      displayUrl = url + '#view=FitH';
+    }
+    out.push({ label: label || 'Document', url: displayUrl, kind: k, doc: null });
   }
   // Drafted outputs first.
   if (Array.isArray(d.draft_docs)) {
@@ -419,6 +446,18 @@ function _msReportingActionBlock(d, safeId, inv, dismissAction) {
   var html = '';
   var action = d.resume_action || '';
   var packStatus = d.pack_status ? (d.pack_status.status || '') : '';
+
+  // Portal builders (Western Building / Builderwest): manual portal submission, no email button.
+  if (_msIsPortalBuilder(d)) {
+    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #BBF7D0;background:#F0FDF4;">';
+    html += '<div style="font-size:13px;font-weight:800;color:#166534;">Ready to submit on portal</div>';
+    html += '<div style="font-size:12px;color:#166534;margin-top:4px;">This builder uses a secure portal (Prime system) for report submission. The pack (report + invoice + SWMS) has been prepared. Submit manually on their portal link.</div>';
+    html += '</div>';
+    html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')" style="background:#166534;color:#fff;border:none;padding:12px 16px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;">Mark as portal submitted</button>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);">This marks the pack as portal-ready and records your approval. No email is sent.</div>';
+    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+    return html;
+  }
 
   // Blocked / failed: no send action — needs ops. Optional understated reset button.
   if (!action && packStatus === 'failed') {
@@ -533,14 +572,22 @@ async function approveMakesafeReportPack(jobId) {
   if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
 
   try {
+    // Collect approved photos from the photo-approval gate
+    var allPhotos = _msGetAllPhotos(d);
+    var photoState = _msPhotoApprovalState[d.job_id] || { approved: {} };
+    var approvedPhotos = allPhotos.filter(function(p) { return !!photoState.approved[p.url]; });
+
     var result = await opsPost('makesafe_send_pack', {
       job_id: jobId,
       pack_kind: 'main',
       recipient_email: d.recipient_email,
       subject: subject,
-      html_body: htmlBody
+      html_body: htmlBody,
+      approved_photos: approvedPhotos
     });
-    if (result && result.already_sent) {
+    if (result && result.portal_ready) {
+      showToast('Pack marked as ready for portal submission.', 'success');
+    } else if (result && result.already_sent) {
       showToast('Pack was already sent for this job (marker present); nothing re-sent.', 'info');
     } else if (result && result.status === 'sent_not_closed') {
       showToast('Pack sent. Note: the make-safe close did not apply; resume to reconcile.', 'info');
@@ -709,6 +756,172 @@ function refreshMsReportingBadge(count) {
     badge.textContent = '';
     badge.style.display = 'none';
   }
+}
+
+// ── PHOTO APPROVAL HELPERS ───────────────────────────────────────────────────
+
+/**
+ * Collect all photos from d.source_docs (kind=image) or d.photos[] as a fallback.
+ * Returns [{url, label}] — used by the photo approval section and the send gate.
+ */
+function _msGetAllPhotos(d) {
+  var photos = [];
+  if (Array.isArray(d.source_docs)) {
+    d.source_docs.forEach(function(sd) {
+      if (sd && (sd.kind === 'image' || _msReportingDocKind(sd.url || '') === 'image')) {
+        photos.push({ url: sd.url, label: sd.label || 'Photo' });
+      }
+    });
+  }
+  if (!photos.length && Array.isArray(d.photos)) {
+    d.photos.forEach(function(p, i) {
+      if (p && (p.url || p.thumbnail_url)) {
+        photos.push({ url: p.url || p.thumbnail_url, label: p.label || ('Photo ' + (i + 1)) });
+      }
+    });
+  }
+  return photos;
+}
+
+/**
+ * Get (or initialize) photo approval state for a job. On first access, all photos
+ * start as approved (opt-out model per the contract).
+ */
+function _msGetPhotoApprovalState(jobId, allPhotos) {
+  if (!_msPhotoApprovalState[jobId]) {
+    var approvedSet = {};
+    allPhotos.forEach(function(p) { if (p && p.url) approvedSet[p.url] = true; });
+    _msPhotoApprovalState[jobId] = { approved: approvedSet };
+  }
+  return _msPhotoApprovalState[jobId];
+}
+
+/**
+ * Toggle a single photo's approval state, then re-render the approval section
+ * and update the send button gate.
+ */
+function _msTogglePhotoApproval(jobId, photoUrl) {
+  if (!_msPhotoApprovalState[jobId]) return;
+  var state = _msPhotoApprovalState[jobId];
+  if (state.approved[photoUrl]) {
+    delete state.approved[photoUrl];
+  } else {
+    state.approved[photoUrl] = true;
+  }
+  // Re-render just the photo approval section
+  var safeJobIdAttr = jobId.replace(/-/g, '_');
+  var section = document.getElementById('msPhotoApprovalSection_' + safeJobIdAttr);
+  if (section) {
+    var d = _msReportingCache[jobId];
+    if (d) section.innerHTML = _msRenderPhotoApprovalInner(d, jobId);
+  }
+  // Also update the send button state
+  _msUpdateSendButtonPhotoGate(jobId);
+}
+
+/**
+ * Render the inner content of the photo-approval section (photo grid + count summary).
+ * Called on first render and on each toggle.
+ */
+function _msRenderPhotoApprovalInner(d, jobId) {
+  var allPhotos = _msGetAllPhotos(d);
+  if (!allPhotos.length) {
+    return '<div style="font-size:12px;color:var(--sw-text-sec);">No photos submitted with this report.</div>';
+  }
+  var state = _msGetPhotoApprovalState(jobId, allPhotos);
+  var approvedCount = Object.keys(state.approved).length;
+  var html = '';
+  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;">';
+  html += approvedCount + ' of ' + allPhotos.length + ' photos approved. ';
+  if (approvedCount === 0) {
+    html += '<strong style="color:#B91C1C;">At least one photo must be approved to send.</strong>';
+  } else if (approvedCount < allPhotos.length) {
+    html += (allPhotos.length - approvedCount) + ' excluded.';
+  }
+  html += '</div>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+  allPhotos.forEach(function(p) {
+    var isApproved = !!state.approved[p.url];
+    var safeUrl = escapeAttr(p.url);
+    var safeJobId = escapeAttr(jobId);
+    html += '<div style="position:relative;width:80px;height:80px;border-radius:6px;overflow:hidden;border:2px solid '
+      + (isApproved ? '#22C55E' : '#E5E7EB') + ';cursor:pointer;flex-shrink:0;"'
+      + ' onclick="_msTogglePhotoApproval(\'' + safeJobId + '\',\'' + safeUrl + '\')"'
+      + ' title="' + (isApproved ? 'Click to exclude' : 'Click to include') + '">';
+    html += '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
+    if (!isApproved) {
+      html += '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">'
+        + '<span style="color:#fff;font-size:20px;">&#10005;</span></div>';
+    } else {
+      html += '<div style="position:absolute;top:3px;right:3px;background:#22C55E;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;">'
+        + '<span style="color:#fff;font-size:10px;font-weight:900;">&#10003;</span></div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Build the outer photo-approval container (heading + section div with id for re-render).
+ */
+function _msRenderPhotoApproval(d, jobId) {
+  var allPhotos = _msGetAllPhotos(d);
+  var safeJobIdAttr = escapeAttr(jobId).replace(/-/g, '_');
+  var html = '';
+  html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Photo approval';
+  if (allPhotos.length > 0) {
+    html += ' <span style="font-size:10px;font-weight:600;color:#B91C1C;">(mandatory)</span>';
+  }
+  html += '</div>';
+  html += '<div id="msPhotoApprovalSection_' + safeJobIdAttr + '" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin-bottom:18px;">';
+  html += _msRenderPhotoApprovalInner(d, jobId);
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Update the send button's disabled state based on photo approval gate.
+ * If photos exist but none are approved, the send button is disabled.
+ */
+function _msUpdateSendButtonPhotoGate(jobId) {
+  var d = _msReportingCache[jobId];
+  if (!d) return;
+  var allPhotos = _msGetAllPhotos(d);
+  var state = _msPhotoApprovalState[jobId] || { approved: {} };
+  var approvedCount = Object.keys(state.approved).length;
+  var hasPhotos = allPhotos.length > 0;
+  var hasApproved = approvedCount > 0;
+  var btn = document.getElementById('msReportingApproveBtn');
+  if (!btn) return;
+  // If photos exist but none approved, disable send
+  if (hasPhotos && !hasApproved) {
+    btn.disabled = true;
+    btn.style.opacity = '0.45';
+    btn.style.cursor = 'not-allowed';
+    btn.title = 'Approve at least one photo to send';
+  } else {
+    var canSend = !!d.recipient_email && !!d.invoice;
+    btn.disabled = !canSend;
+    btn.style.opacity = canSend ? '1' : '0.45';
+    btn.style.cursor = canSend ? 'pointer' : 'not-allowed';
+    btn.title = '';
+  }
+}
+
+// ── PORTAL BUILDER DETECTION ─────────────────────────────────────────────────
+
+/**
+ * Returns true if this job belongs to a portal-submission builder
+ * (Western Building or Builderwest). These builders use a secure portal
+ * (e.g. Prime) rather than email, so we show "Ready to submit on portal"
+ * instead of the normal email button.
+ */
+function _msIsPortalBuilder(d) {
+  var name = String((d.builder || d.requesting_company_name || '')).toLowerCase();
+  var slug = String(d.requesting_company_slug || '').toLowerCase();
+  return slug.includes('builderwest') || slug.includes('western-building')
+    || name.includes('builderwest') || name.includes('western building');
 }
 
 // SMOKE TEST (manual, run in browser console):

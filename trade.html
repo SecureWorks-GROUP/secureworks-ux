@@ -13111,6 +13111,11 @@
     html += '<div style="height:96px"></div>';
 
     container.innerHTML = html;
+    // In job-centric mode _calcInvTotals() only covers extras/misc rows, not
+    // job-card hours — _updateInvTotals() applies the correct _grandInvTotal()
+    // so the footer "Total" and submit-button amount are always consistent after
+    // a full re-render (including the error re-paint on failed submit). [FIX-TOTAL-RECOMPUTE]
+    _updateInvTotals();
     _saveInvDraft(); // persist draft to sessionStorage
 
     loadInvoiceJobOptions('');

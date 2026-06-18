@@ -9437,6 +9437,42 @@ function closeMakesafeReportingOverlay() {
 }
 
 /**
+ * ONE adaptive entry for a make-safe board card. A single click opens ONE screen
+ * that ADAPTS to the pack state:
+ *   - if a draft pack is READY/resumable (it appears in the report-drafts feed) ->
+ *     the integrated review-and-send pack (showMsReportingDetail in a board overlay),
+ *   - else -> the canonical full job view (openJobDetail), which already shows
+ *     status / crew / work order (design ref state B).
+ * Same door, the screen adapts. Used by the make-safe card click + the explicit
+ * "Review & send pack" button so there is a single code path.
+ */
+async function openMakesafeJob(jobId) {
+  // Refresh the report-drafts feed if this job isn't already cached. The feed
+  // carries the recipient, invoice lines, PDFs and gate-passing subject/body the
+  // review screen needs, none of which are on the board payload.
+  if (typeof loadMakesafeReportingCockpit === 'function'
+      && (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId])) {
+    try { await loadMakesafeReportingCockpit(); } catch (e) { /* fall through to canonical */ }
+  }
+  // Open the integrated review screen ONLY when the cached pack is genuinely
+  // actionable: it must carry a resume_action (the feed sets one of send /
+  // finish_send / finish_close_out / resolve_send_state for every sendable or
+  // resumable pack) OR be a portal builder (Western/Builderwest prep, which is
+  // review-and-submit). A bare/stale/failed cache entry with no resume_action falls
+  // through to the canonical job view instead of opening an empty review screen.
+  var pack = (typeof _msReportingCache !== 'undefined') ? _msReportingCache[jobId] : null;
+  var isPortalPack = pack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
+  var isActionable = pack && (pack.resume_action || isPortalPack);
+  if (isActionable && typeof showMsReportingDetail === 'function') {
+    openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
+    showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
+    return;
+  }
+  // No pack ready -> the canonical job view (status / crew / work order).
+  openJobDetail(jobId);
+}
+
+/**
  * Mount a board overlay that hosts a cockpit detail panel. The overlay covers
  * #jobsBody (same pattern as the map/crew-week overlays). The inner panel uses a
  * BOARD-SPECIFIC id (e.g. msReportingDetailPanelBoard) passed straight through to
@@ -10015,7 +10051,7 @@ function renderMakesafeCard(j, status) {
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
   var resumeChip = makesafeResumeChip(j.resume_action, j.pack_status);
 
-  var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
+  var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openMakesafeJob(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
   // top line: type tag + ready-to-send chip + age/KPI pill
   html += '<div class="ms-top">';
@@ -10090,7 +10126,7 @@ function renderMakesafeCard(j, status) {
   // panel (photos + line items + amount + both PDFs + "Approve and send pack") in an
   // overlay, so the send decision happens from the board card.
   if (readyToSend) {
-    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" onclick="event.stopPropagation();openMakesafeReportingForJob(\'' + j.id + '\')">Review &amp; send pack</button>';
+    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review &amp; send pack</button>';
   }
   html += '</div>'; // /card
   return html;

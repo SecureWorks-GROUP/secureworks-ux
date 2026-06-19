@@ -5,8 +5,9 @@
 // its own tab. Renders into #msReportingListBody (left column) and
 // #msReportingDetailPanel (right detail).
 //
-// MONEY/COMMS critical. The approve button here triggers a LIVE authorise + send
-// (makesafe_send_pack authorises the Xero invoice and emails the builder), so the
+// MONEY/COMMS critical. The approve button can trigger a LIVE authorise + builder
+// send once canary mode is disabled. While canary mode is enabled, it sends the
+// same pack to Marnin only and does NOT authorise/close/mark sent. Either way the
 // detail panel MUST show enough for an informed human decision BEFORE the click:
 // the report photos, the invoice line items + totals, BOTH PDFs inline (report +
 // draft invoice), and the exact builder recipient the pack will go to.
@@ -17,6 +18,8 @@
 
 var _msReportingCache = {};
 var _msPhotoApprovalState = {};
+var _MS_REPORTING_CANARY_MODE = true;
+var _MS_REPORTING_CANARY_RECIPIENT = 'marnin@secureworkswa.com.au';
 
 // JS-STRING escape for values interpolated INSIDE a single-quoted JS string in an
 // inline onclick handler. escapeAttr/escapeHtml are HTML-context escapes (entities
@@ -739,17 +742,20 @@ function _msReportingActionBlock(d, safeId, inv, dismissAction) {
     return html;
   }
 
-  // send / finish_send / (absent + drafted): both go through approveMakesafeReportPack
-  // -> makesafe_send_pack (UNCHANGED signature). finish_send re-emails once (backend
-  // resumes; no re-authorise). The confirm wording differs per action.
+  // send / finish_send / (absent + drafted): both go through approveMakesafeReportPack.
+  // While canary mode is enabled, approveMakesafeReportPack calls makesafe_send_pack
+  // with canary_mode=true: Marnin-only, no authorise, no builder marker/close.
   var canSend = !!d.recipient_email && !!inv;
   var isFinishSend = action === 'finish_send';
-  var label = isFinishSend ? 'Finish send' : 'Approve & send pack';
+  var isCanary = _MS_REPORTING_CANARY_MODE === true;
+  var label = isCanary ? 'Send canary to Marnin' : (isFinishSend ? 'Finish send' : 'Approve & send pack');
   html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')"'
     + (canSend ? '' : ' disabled')
-    + ' style="width:100%;background:' + (isFinishSend ? '#B45309' : '#27AE60') + ';color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:' + (canSend ? 'pointer' : 'not-allowed') + ';opacity:' + (canSend ? '1' : '.45') + ';">' + label + '</button>';
+    + ' style="width:100%;background:' + (isCanary ? '#F97316' : (isFinishSend ? '#B45309' : '#27AE60')) + ';color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:' + (canSend ? 'pointer' : 'not-allowed') + ';opacity:' + (canSend ? '1' : '.45') + ';">' + label + '</button>';
   if (!canSend) {
     html += '<div style="font-size:12px;color:#B91C1C;text-align:center;">' + (!d.recipient_email ? 'A builder recipient email is required. ' : '') + (!inv ? 'A linked invoice is required.' : '') + '</div>';
+  } else if (isCanary) {
+    html += '<div style="font-size:12px;color:#9A3412;text-align:center;">Canary mode: emails this pack to ' + escapeHtml(_MS_REPORTING_CANARY_RECIPIENT) + ' only. Intended builder recipient: ' + escapeHtml(d.recipient_email) + '. It will NOT authorise the invoice, email the builder, mark sent, or close the job.</div>';
   } else if (isFinishSend) {
     html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">The invoice is already authorised. This finishes the send by re-emailing the pack once to ' + escapeHtml(d.recipient_email) + ' (no re-authorise).</div>';
   } else {
@@ -827,12 +833,14 @@ async function approveMakesafeReportPack(jobId) {
     }
   }
 
-  // State-aware confirm. Portal = prep-for-portal (no email). finish_send resumes an
-  // already-authorised invoice (re-emails once, no re-authorise). Normal = authorise
-  // + email. The makesafe_send_pack call below is the same shape; only wording differs.
+  // State-aware confirm. Portal = prep-for-portal (no email). Canary = Marnin-only
+  // proving lane (no authorise / marker / close). finish_send resumes an
+  // already-authorised invoice only once canary mode is disabled.
   var confirmMsg;
   if (isPortal) {
     confirmMsg = 'This prepares the pack (report + invoice + SWMS) for manual submission on the builder portal and records your approval. NO email is sent. Continue?';
+  } else if (_MS_REPORTING_CANARY_MODE === true) {
+    confirmMsg = 'Send a CANARY copy to ' + _MS_REPORTING_CANARY_RECIPIENT + ' only? It will NOT authorise the invoice, email the builder, mark the pack sent, or close the job. Intended builder recipient later: ' + d.recipient_email + '.';
   } else if (d.resume_action === 'finish_send') {
     confirmMsg = 'This finishes sending the pack to ' + d.recipient_email + ' (the invoice is already authorised; it will not be re-authorised). Send now?';
   } else {
@@ -842,7 +850,7 @@ async function approveMakesafeReportPack(jobId) {
 
   var btn = document.getElementById('msReportingApproveBtn');
   var origLabel = btn ? btn.textContent : (isPortal ? 'Mark as portal submitted' : 'Approve & send pack');
-  if (btn) { btn.disabled = true; btn.textContent = isPortal ? 'Preparing...' : 'Sending...'; }
+  if (btn) { btn.disabled = true; btn.textContent = isPortal ? 'Preparing...' : (_MS_REPORTING_CANARY_MODE === true ? 'Sending canary...' : 'Sending...'); }
 
   try {
     // Portal builders send NO recipient/subject/body — the backend detects the
@@ -856,10 +864,15 @@ async function approveMakesafeReportPack(jobId) {
       payload.recipient_email = d.recipient_email;
       payload.subject = subject;
       payload.html_body = htmlBody;
+      payload.canary_mode = _MS_REPORTING_CANARY_MODE === true;
     }
     var result = await opsPost('makesafe_send_pack', payload);
     if (result && result.portal_ready) {
       showToast('Pack marked as ready for portal submission.', 'success');
+    } else if (result && result.canary_sent) {
+      showToast('Canary sent to ' + _MS_REPORTING_CANARY_RECIPIENT + '. Builder was NOT emailed; invoice/job remain open.', 'success');
+      if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+      return;
     } else if (result && result.already_sent) {
       showToast('Pack was already sent for this job (marker present); nothing re-sent.', 'info');
     } else if (result && result.status === 'sent_not_closed') {

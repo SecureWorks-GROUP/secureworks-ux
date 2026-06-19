@@ -56,7 +56,7 @@ const documentStub = {
 // reference; the wrappers delegate to the holder, which the test can repoint).
 const behaviour = {
   fetchResult: { drafts: [] },
-  postResult: { success: true, status: "sent", invoice_number: "INV-1" },
+  postResult: { success: true, canary_sent: true, sent: false, builder_not_sent: true },
   confirmReturns: true,
 };
 // The carousel renderer + global state live in ops.html. The module reuses them
@@ -283,12 +283,15 @@ check(
 );
 check("detail shows the inc-GST total", detailHtml.includes("$110.00"));
 check(
-  "detail has an Approve & send pack button (resume_action=send)",
-  detailHtml.includes("Approve &amp; send pack") ||
-    detailHtml.includes("Approve & send pack"),
+  "detail has a Send canary to Marnin button (canary mode)",
+  detailHtml.includes("Send canary to Marnin"),
+);
+check(
+  "detail explains builder is not emailed in canary mode",
+  /NOT authorise/i.test(detailHtml) && /email the builder/i.test(detailHtml),
 );
 
-// ── 5. Approve fires makesafe_send_pack with the gate-passing default subject ──
+// ── 5. Approve fires makesafe_send_pack in canary mode with selected photos ──
 await mod.approveMakesafeReportPack("job-1");
 const sendCall = calls.opsPost.find((c) => c.action === "makesafe_send_pack");
 check("approve calls opsPost(makesafe_send_pack)", !!sendCall);
@@ -303,6 +306,7 @@ if (sendCall) {
     "send body carries a subject + html_body",
     !!sendCall.body.subject && !!sendCall.body.html_body,
   );
+  check("send body carries canary_mode=true", sendCall.body.canary_mode === true);
   check(
     "send body carries approved_photos only for selected photos",
     Array.isArray(sendCall.body.approved_photos) &&
@@ -310,6 +314,9 @@ if (sendCall) {
       sendCall.body.approved_photos[0].url === "https://example.com/p1.jpg",
   );
 }
+check("canary success toast says builder was not emailed",
+  calls.toasts.some((t) => /Builder was NOT emailed/i.test(t.msg || "")),
+);
 
 // ── 6. GATE ANTIDOTE - the composer refuses a review-marker subject ──
 const REVIEW_MARKERS = [
@@ -390,17 +397,19 @@ const fsHtml = (() => {
   return elements["msReportingDetailPanel"]._html || "";
 })();
 check(
-  'finish_send renders a "Finish send" button',
-  fsHtml.includes("Finish send"),
+  "finish_send renders the canary button while canary mode is enabled",
+  fsHtml.includes("Send canary to Marnin"),
 );
 await mod.approveMakesafeReportPack("job-fs");
 check(
-  "finish_send still calls makesafe_send_pack (unchanged signature)",
+  "finish_send canary still calls makesafe_send_pack",
   calls.opsPost.some((c) => c.action === "makesafe_send_pack"),
 );
 check(
-  "finish_send confirm mentions already-authorised wording",
-  calls.confirms.some((m) => /already authorised/i.test(m)),
+  "finish_send confirm is canary-safe (no builder/authorise/close)",
+  calls.confirms.some((m) =>
+    /CANARY/i.test(m) && /NOT authorise/i.test(m) && /NOT .*builder/i.test(m)
+  ),
 );
 
 // 8b. finish_close_out -> makesafe_resume_close (NO send_pack).

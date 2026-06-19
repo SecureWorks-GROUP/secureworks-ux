@@ -4753,6 +4753,7 @@
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
 <script src="modules/ops-makesafe-reporting-cockpit.js?v=1"></script>
+<script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
@@ -9437,6 +9438,43 @@ function closeMakesafeReportingOverlay() {
 }
 
 /**
+ * ONE adaptive entry for a make-safe board card. A single click opens ONE screen
+ * that ADAPTS to the pack state:
+ *   - if a draft pack is READY/resumable (it appears in the report-drafts feed) ->
+ *     the integrated review-and-send pack (showMsReportingDetail in a board overlay),
+ *   - else -> the canonical full job view (openJobDetail), which already shows
+ *     status / crew / work order (design ref state B).
+ * Same door, the screen adapts. Used by the make-safe card click + the explicit
+ * "Review job pack" button so there is a single code path.
+ */
+async function openMakesafeJob(jobId) {
+  // Refresh the report-drafts feed if this job isn't already cached. The feed
+  // carries the recipient, invoice lines, PDFs and gate-passing subject/body the
+  // review screen needs, none of which are on the board payload.
+  if (typeof loadMakesafeReportingCockpit === 'function'
+      && (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId])) {
+    try { await loadMakesafeReportingCockpit(); } catch (e) { /* fall through to canonical */ }
+  }
+  // Open the integrated review screen ONLY when the cached pack is genuinely
+  // actionable: it must carry a resume_action (the feed sets one of send /
+  // finish_send / finish_close_out / resolve_send_state for every sendable or
+  // resumable pack) OR be a portal builder (Western/Builderwest prep, which is
+  // review-and-submit). A bare/stale/failed cache entry with no resume_action falls
+  // through to the canonical job view instead of opening an empty review screen.
+  var pack = (typeof _msReportingCache !== 'undefined') ? _msReportingCache[jobId] : null;
+  var isFailedPack = !!(pack && pack.pack_status && pack.pack_status.status === 'failed');
+  var isPortalPack = pack && !isFailedPack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
+  var isActionable = pack && !isFailedPack && (pack.resume_action || isPortalPack);
+  if (isActionable && typeof showMsReportingDetail === 'function') {
+    openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
+    showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
+    return;
+  }
+  // No pack ready -> the canonical job view (status / crew / work order).
+  openJobDetail(jobId);
+}
+
+/**
  * Mount a board overlay that hosts a cockpit detail panel. The overlay covers
  * #jobsBody (same pattern as the map/crew-week overlays). The inner panel uses a
  * BOARD-SPECIFIC id (e.g. msReportingDetailPanelBoard) passed straight through to
@@ -9962,7 +10000,7 @@ function makesafeCrewInitials(crew) {
 // blocked/needs-ops chip — there is no board send action for it.
 function makesafeResumeChip(resumeAction, packStatus) {
   var map = {
-    send:               { label: 'Ready to send',     bg: '#0E7C7B', title: 'Report pack drafted — Review & send pack to authorise the invoice and email the builder.' },
+    send:               { label: 'Ready to send',     bg: '#0E7C7B', title: 'Report pack drafted — Review job pack to authorise the invoice and email the builder.' },
     finish_send:        { label: 'Finish send',       bg: '#B45309', title: 'Invoice already authorised — Finish send re-emails the pack once (no re-authorise).' },
     finish_close_out:   { label: 'Finish close-out',  bg: '#6D28D9', title: 'Pack already emailed — Finish close-out only marks the job complete (no re-send, no re-charge).' },
     resolve_send_state: { label: 'Resolve send state', bg: '#B91C1C', title: 'Send state unclear — verify the Sent Items folder, then confirm whether it was sent.' }
@@ -10015,7 +10053,7 @@ function renderMakesafeCard(j, status) {
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
   var resumeChip = makesafeResumeChip(j.resume_action, j.pack_status);
 
-  var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
+  var html = '<div class="kanban-card ms-card-v2 ' + tintCls + '" draggable="true" data-job-id="' + j.id + '" data-status="' + status + '" onclick="openMakesafeJob(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" ondragstart="kanbanDragStart(event)" ondragend="kanbanDragEnd(event)">';
 
   // top line: type tag + ready-to-send chip + age/KPI pill
   html += '<div class="ms-top">';
@@ -10090,7 +10128,7 @@ function renderMakesafeCard(j, status) {
   // panel (photos + line items + amount + both PDFs + "Approve and send pack") in an
   // overlay, so the send decision happens from the board card.
   if (readyToSend) {
-    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" onclick="event.stopPropagation();openMakesafeReportingForJob(\'' + j.id + '\')">Review &amp; send pack</button>';
+    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the same approval/reporting pack used by the Approvals tab" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
   }
   html += '</div>'; // /card
   return html;

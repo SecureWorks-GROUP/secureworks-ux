@@ -12503,19 +12503,13 @@ async function loadQuotes() {
 // Data source: ops-api action 'job_financials' (list, GET) and
 //              'job_financials_detail' (single job, GET with jobId param).
 //
-// BACKEND-WIRING FLAG: The ops-api edge function (secureworks-backend
-// supabase/functions/ops-api/index.ts) does NOT yet have a 'job_financials'
-// action handler. The DB function get_job_financials(uuid) and the
-// job_financials view exist in the STAGED migration (M1 — DO NOT apply until
-// Marnin approves the M1 gate). M3 is building the panel now so it is ready
-// to light up the moment M1 is applied AND a small ops-api action wrapper is
-// added (two cases):
-//   case 'job_financials':  (list) SELECT * FROM job_financials ORDER BY ...
-//   case 'job_financials_detail': (single) SELECT * FROM get_job_financials($jobId)
-// These are read-only SELECTs, SECURITY DEFINER, no RLS issues. Tiny wrapper.
+// BACKEND CONTRACT: ops-api is the service-role read path for job_financials
+// and get_job_financials(uuid). The DB objects explicitly revoke direct
+// anon/authenticated access; do not call these views/RPCs from a public client.
 //
-// Make-safe filter is v1 scope (the view already gates on j.type='makesafe').
-// Panel renders suppression honestly: NULL margin = "costs incomplete" + reason.
+// Make-safe filter is v1 scope (the view gates on j.type='makesafe').
+// Panel renders suppression honestly: net_margin_ex === null means the DB has
+// withheld profitability because one or more source-confidence flags need review.
 // ════════════════════════════════════════════════════════════
 
 var _pnlData = [];          // full list from ops-api job_financials
@@ -12525,15 +12519,18 @@ var _pnlSortAsc = true;
 
 // FLAG_LABELS: translate db flag values to human-readable text
 var PNL_COST_FLAG_LABELS = {
-  ok:                     '',
-  no_labour_linked:       'No labour linked yet',
+  ok:                       '',
+  no_labour_linked:         'No labour linked yet',
   incomplete_invoice_lines: 'A trade invoice has zero/mismatched lines',
-  unclassified_lines:     'Unclassified trade lines',
-  text_matched_lines:     'Job matched by job# (not UUID)'
+  unclassified_lines:       'Unclassified trade lines',
+  text_matched_lines:       'Job matched by job# (review before margin)',
+  description_matched_lines:'Job matched from line description (review before margin)',
+  test_lines_excluded:      'QA/delete test lines excluded'
 };
 var PNL_REV_FLAG_LABELS = {
-  ok:                     '',
-  missing_client_invoice: 'No client invoice linked'
+  ok:                       '',
+  missing_client_invoice:   'No client invoice linked',
+  job_number_matched_revenue:'Invoice matched by exact job# (not UUID)'
 };
 
 async function loadJobPnl() {
@@ -12602,9 +12599,10 @@ function renderPnlTable(rows) {
   }
   var html = '';
   rows.forEach(function(j) {
-    var hasRev = j.revenue_flag === 'ok';
-    var hasCost = j.cost_flag === 'ok' || j.cost_flag === 'text_matched_lines';
-    var marginOk = j.net_margin_ex != null && hasRev && hasCost;
+    var hasRev = Number(j.client_invoiced_ex || 0) > 0;
+    var hasCost = j.cost_flag === 'ok';
+    var marginOk = j.net_margin_ex != null
+      && (!j.source_confidence || j.source_confidence.margin !== 'suppressed_until_flags_clear');
 
     // Revenue cell
     var revCell = hasRev
@@ -12632,10 +12630,8 @@ function renderPnlTable(rows) {
     if (j.revenue_flag && j.revenue_flag !== 'ok') {
       flags += '<span class="pnl-flag-err" title="' + (PNL_REV_FLAG_LABELS[j.revenue_flag] || j.revenue_flag) + '">&#9888; Rev</span> ';
     }
-    if (j.cost_flag && j.cost_flag !== 'ok' && j.cost_flag !== 'text_matched_lines') {
+    if (j.cost_flag && j.cost_flag !== 'ok') {
       flags += '<span class="pnl-flag-warn" title="' + (PNL_COST_FLAG_LABELS[j.cost_flag] || j.cost_flag) + '">&#9888; Cost</span>';
-    } else if (j.cost_flag === 'text_matched_lines') {
-      flags += '<span class="pnl-flag-info" title="' + PNL_COST_FLAG_LABELS.text_matched_lines + '">&#8505; Matched</span>';
     }
 
     html += '<tr class="pnl-row" onclick="openJobPnlDetail(\'' + j.job_id + '\')">';
@@ -12675,9 +12671,10 @@ function closeJobPnlDetail() {
 function renderJobPnlDetail(j) {
   if (!j || !j.job_id) return '<div class="pnl-detail-card"><div style="color:var(--sw-text-sec);font-size:12px;">No data returned.</div></div>';
 
-  var hasRev  = j.revenue_flag === 'ok';
-  var hasCost = j.cost_flag === 'ok' || j.cost_flag === 'text_matched_lines';
-  var marginOk = j.net_margin_ex != null && hasRev && hasCost;
+  var hasRev  = Number(j.client_invoiced_ex || 0) > 0;
+  var hasCost = j.cost_flag === 'ok';
+  var marginOk = j.net_margin_ex != null
+    && (!j.source_confidence || j.source_confidence.margin !== 'suppressed_until_flags_clear');
 
   var html = '<div class="pnl-detail-card">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
@@ -12753,6 +12750,12 @@ function renderJobPnlDetail(j) {
     var incReasons = [];
     if (!hasRev) incReasons.push(PNL_REV_FLAG_LABELS[j.revenue_flag] || j.revenue_flag);
     if (!hasCost && j.cost_flag) incReasons.push(PNL_COST_FLAG_LABELS[j.cost_flag] || j.cost_flag);
+    if (Array.isArray(j.data_quality_flags)) {
+      j.data_quality_flags.forEach(function(f) {
+        var label = PNL_COST_FLAG_LABELS[f] || PNL_REV_FLAG_LABELS[f] || f;
+        if (label && incReasons.indexOf(label) < 0) incReasons.push(label);
+      });
+    }
     if (incReasons.length) {
       html += '<div class="pnl-inc-detail">' + incReasons.join(' &bull; ') + '</div>';
     }
@@ -12771,12 +12774,26 @@ function renderJobPnlDetail(j) {
   html += '<div class="pnl-row"><span class="pnl-label">Cost flag</span>';
   if (j.cost_flag === 'ok') {
     html += '<span class="pnl-flag-ok">&#10003; ok</span>';
-  } else if (j.cost_flag === 'text_matched_lines') {
-    html += '<span class="pnl-flag-info">&#8505; ' + j.cost_flag + '</span>';
   } else {
     html += '<span class="pnl-flag-warn">&#9888; ' + (j.cost_flag || '—') + '</span>';
   }
   html += '</div>';
+
+  if (Array.isArray(j.data_quality_flags) && j.data_quality_flags.length) {
+    html += '<div class="pnl-row"><span class="pnl-label">Quality flags</span>';
+    html += '<span style="font-size:11px;color:var(--sw-text-sec);text-align:right;max-width:60%;">'
+      + j.data_quality_flags.map(function(f) { return escapeHtml(PNL_COST_FLAG_LABELS[f] || PNL_REV_FLAG_LABELS[f] || f); }).join(' &bull; ')
+      + '</span></div>';
+  }
+
+  if (j.source_confidence) {
+    html += '<div class="pnl-row"><span class="pnl-label">Source confidence</span>';
+    html += '<span style="font-size:11px;color:var(--sw-text-sec);text-align:right;max-width:60%;">'
+      + 'revenue: ' + escapeHtml(j.source_confidence.revenue || '—')
+      + ' &bull; labour: ' + escapeHtml(j.source_confidence.labour || '—')
+      + ' &bull; margin: ' + escapeHtml(j.source_confidence.margin || '—')
+      + '</span></div>';
+  }
 
   // COST LINE DETAIL (from lines jsonb array)
   var lines = j.lines;

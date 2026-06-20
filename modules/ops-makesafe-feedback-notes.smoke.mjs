@@ -39,7 +39,20 @@ const documentStub = { getElementById: (id) => (elements[id] ||= makeEl()) };
 const behaviour = {
   fetchResult: { notes: [] },
   postResult: { note: { id: "n1" } },
+  postResults: null,
 };
+function seedJob9Cache() {
+  sandbox._msReportingCache["job-9"] = {
+    job_id: "job-9",
+    source_docs: [
+      { kind: "image", url: "https://example.com/keep.jpg", label: "Keep" },
+      { kind: "image", url: "https://example.com/hide.jpg", label: "Hide" },
+    ],
+  };
+  sandbox._msPhotoApprovalState["job-9"] = {
+    approved: { "https://example.com/keep.jpg": true },
+  };
+}
 const sandbox = {
   document: documentStub,
   opsFetch: (action, params) => {
@@ -48,11 +61,16 @@ const sandbox = {
   },
   opsPost: (action, body) => {
     calls.opsPost.push({ action, body });
+    if (Array.isArray(behaviour.postResults) && behaviour.postResults.length) {
+      return Promise.resolve(behaviour.postResults.shift());
+    }
     return Promise.resolve(behaviour.postResult);
   },
   showToast: (msg, kind) => calls.toasts.push({ msg, kind }),
-  _msReportingHideJobFromActiveList: (jobId, reason) =>
-    calls.hidden.push({ jobId, reason }),
+  _msReportingHideJobFromActiveList: (jobId, reason) => {
+    calls.hidden.push({ jobId, reason });
+    delete sandbox._msReportingCache[jobId];
+  },
   escapeHtml: (s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;"),
@@ -75,6 +93,7 @@ const sandbox = {
   module: undefined,
   console,
 };
+seedJob9Cache();
 
 const exposed = [
   "loadMsNotes",
@@ -211,6 +230,43 @@ check(
 check(
   "successful Revise Pack request hides the job from the active review queue",
   calls.hidden.some((h) => h.jobId === "job-9" && /fresh draft/i.test(h.reason || "")),
+);
+
+seedJob9Cache();
+calls.opsPost = [];
+calls.hidden = [];
+behaviour.postResults = [
+  { note: { id: "n2" } },
+  { rerun: true, addressed_count: 1 },
+];
+elements["msNoteInput-job-9"] = makeEl();
+elements["msNoteInput-job-9"].value = "combined note with photo selection";
+elements["msReviseBtn-job-9"] = makeEl();
+await mod.addMsNoteAndRerun("job-9");
+const combinedRerunCall = calls.opsPost.find((c) =>
+  c.action === "rerun_draft_report"
+);
+check(
+  "Save feedback + Revise Pack preserves selected photos before hiding the card",
+  combinedRerunCall &&
+    combinedRerunCall.body.selected_photo_urls.length === 1 &&
+    combinedRerunCall.body.selected_photo_urls[0] ===
+      "https://example.com/keep.jpg",
+);
+check(
+  "Save feedback + Revise Pack hides only after a queued revise pass",
+  calls.hidden.length === 1 && calls.hidden[0].jobId === "job-9",
+);
+
+seedJob9Cache();
+calls.opsPost = [];
+calls.hidden = [];
+behaviour.postResults = null;
+behaviour.postResult = { skipped: true };
+await mod.triggerMsRerun("job-9");
+check(
+  "skipped Revise Pack response does not hide the active review card",
+  calls.hidden.length === 0,
 );
 
 console.log("");

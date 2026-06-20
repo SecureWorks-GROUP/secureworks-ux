@@ -118,8 +118,14 @@ async function addMsNoteAndRerun(jobId) {
     return;
   }
   if (btn) btn.textContent = "Requesting Revise Pack...";
-  _msNotifyRevisionInFlight(jobId);
-  await triggerMsRerun(jobId, { alreadyHidden: true });
+  var selectedPhotoUrls = _msSelectedPhotoUrlsForFeedback(jobId);
+  var rerunResult = await triggerMsRerun(jobId, { selectedPhotoUrls: selectedPhotoUrls });
+  if (!rerunResult || rerunResult.skipped) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Save feedback + Revise Pack";
+    }
+  }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -164,7 +170,9 @@ async function triggerMsRerun(jobId, opts) {
     btn.textContent = "Requesting Revise Pack...";
   }
   try {
-    var selectedPhotoUrls = _msSelectedPhotoUrlsForFeedback(jobId);
+    var selectedPhotoUrls = Object.prototype.hasOwnProperty.call(opts, "selectedPhotoUrls")
+      ? (opts.selectedPhotoUrls || [])
+      : _msSelectedPhotoUrlsForFeedback(jobId);
     var result = await opsPost("rerun_draft_report", {
       job_id: jobId,
       draft_kind: "makesafe_report",
@@ -175,8 +183,12 @@ async function triggerMsRerun(jobId, opts) {
         "Nothing to revise: no unaddressed feedback on this draft.",
         "info",
       );
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Revise Pack now";
+      }
     } else {
-      if (!opts.alreadyHidden) _msNotifyRevisionInFlight(jobId);
+      _msNotifyRevisionInFlight(jobId);
       showToast(
         "Revise Pack requested from " +
           ((result && result.addressed_count) || 0) +
@@ -185,6 +197,7 @@ async function triggerMsRerun(jobId, opts) {
       );
     }
     await loadMsNotes(jobId, "msNotesPanel-" + jobId);
+    return result || true;
   } catch (e) {
     showToast("Revise Pack failed: " + (e.message || e), "error");
     if (btn) {
@@ -194,6 +207,7 @@ async function triggerMsRerun(jobId, opts) {
     if (typeof loadMakesafeReportingCockpit === "function") {
       loadMakesafeReportingCockpit();
     }
+    return false;
   }
 }
 

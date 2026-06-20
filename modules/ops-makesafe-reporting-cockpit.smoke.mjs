@@ -638,6 +638,7 @@ const jobMoney = Object.assign({}, fixture, {
   job_id: "job-mr",
   needs_money_review: true,
   money_review: {
+    needs_money_review: true,
     reason: "Unit price above rate card",
     flagged_lines: [{
       line_index: 0,
@@ -665,6 +666,34 @@ check(
 check(
   "money-review panel shows the flagged line note",
   moneyDetail.includes("check rate"),
+);
+
+const nestedOnlyMoney = Object.assign({}, fixture, {
+  job_id: "job-mr-nested",
+  needs_money_review: false,
+  money_review: {
+    needs_money_review: true,
+    reason: "one or more invoice lines have $0 pricing",
+    flagged_lines: [{ line_index: 0, description: "Labour", flag: "zero_unit_price" }],
+  },
+});
+check(
+  "nested money_review.needs_money_review renders CHECK PRICING chip",
+  mod.renderMsReportingCard(nestedOnlyMoney).includes("CHECK PRICING"),
+);
+behaviour.fetchResult = { drafts: [nestedOnlyMoney] };
+await mod.loadMakesafeReportingCockpit();
+const nestedMoneyDetail = (() => {
+  mod.showMsReportingDetail("job-mr-nested");
+  return elements["msReportingDetailPanel"]._html || "";
+})();
+check(
+  "nested money_review.needs_money_review renders pricing banner",
+  /Pricing flagged/i.test(nestedMoneyDetail),
+);
+check(
+  "nested money_review.needs_money_review blocks approve/send action",
+  /Fix pricing before send/i.test(nestedMoneyDetail),
 );
 
 // 9b. Defensive: absent needs_money_review -> NO chip, no banner.

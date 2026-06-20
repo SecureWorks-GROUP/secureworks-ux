@@ -130,7 +130,7 @@ function renderMsReportingCard(d) {
   var action = d.resume_action || '';
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
   html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:#fff;">' + statusLabel + '</span>';
-  if (d.needs_money_review === true) {
+  if (_msNeedsMoneyReview(d)) {
     html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;">CHECK PRICING</span>';
   }
   var isFirstDraft = d.first_draft_ready === true ||
@@ -275,8 +275,9 @@ function showMsReportingDetail(jobId, targetPanelId) {
   }
 
   // Money-review banner (Task 4) — only when the backend flags pricing. Defensive:
-  // absent needs_money_review renders nothing.
-  if (d.needs_money_review === true) {
+  // absent needs_money_review renders nothing. Supports both the legacy top-level
+  // flag and the current nested money_review.needs_money_review feed shape.
+  if (_msNeedsMoneyReview(d)) {
     var mr = d.money_review || {};
     html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;font-size:12px;color:#92400E;">';
     html += '<strong>&#9888; Pricing flagged for review.</strong>';
@@ -645,6 +646,11 @@ function _msReportingBuildCarouselDocs(d) {
   return out;
 }
 
+function _msNeedsMoneyReview(d) {
+  return !!(d && (d.needs_money_review === true ||
+    (d.money_review && d.money_review.needs_money_review === true)));
+}
+
 // Normalise a feed kind ('pdf'|'image'|'html') to the viewer's kind vocabulary.
 // Unknown kinds get classified by URL.
 function _msReportingNormaliseKind(kind) {
@@ -762,7 +768,7 @@ function _msRenderSourceEvidence(d) {
 // absent money_review / flagged_lines returns an empty map (no highlights).
 function _msReportingFlaggedLineMap(d) {
   var map = {};
-  if (!d || !d.needs_money_review || !d.money_review) return map;
+  if (!_msNeedsMoneyReview(d) || !d.money_review) return map;
   var lines = d.money_review.flagged_lines;
   if (!Array.isArray(lines)) return map;
   lines.forEach(function(fl) {
@@ -824,6 +830,18 @@ function _msReportingActionBlock(d, safeId, inv, dismissAction) {
     html += '<div style="font-size:12px;color:#991B1B;margin-top:4px;">This pack failed' + (ps.failed_step ? ' at step <strong>' + escapeHtml(ps.failed_step) + '</strong>' : '') + '. It cannot be sent from here until it is reset.</div>';
     html += '</div>';
     html += '<button onclick="resetMakesafeFailedPack(\'' + safeId + '\')" style="background:#fff;color:#991B1B;border:1px solid #FECACA;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Reset &amp; retry (ops)</button>';
+    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+    return html;
+  }
+
+  // Money-review blocks any approve/send/portal-submit action. The operator should
+  // revise the draft first so Xero and the report pack are corrected before approval.
+  if (_msNeedsMoneyReview(d)) {
+    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;">';
+    html += '<div style="font-size:13px;font-weight:800;color:#92400E;">Check pricing before approval</div>';
+    html += '<div style="font-size:12px;color:#92400E;margin-top:4px;">This pack has invoice lines flagged by the backend. Revise/fix the draft invoice before sending or portal submission.</div>';
+    html += '</div>';
+    html += '<button id="msReportingApproveBtn" disabled style="width:100%;background:#B45309;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:not-allowed;opacity:.45;">Fix pricing before send</button>';
     html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
     return html;
   }
@@ -925,6 +943,10 @@ async function approveMakesafeReportPack(jobId) {
   var d = _msReportingCache[jobId];
   if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
   var isPortal = (typeof _msIsPortalBuilder === 'function') && _msIsPortalBuilder(d);
+  if (_msNeedsMoneyReview(d)) {
+    showToast('Pricing is flagged for review. Revise/fix the draft invoice before approving.', 'error');
+    return;
+  }
 
   // Email builders (AJS / MLB) MUST have a recipient. Portal builders (Western /
   // Builderwest) intentionally have NONE — they prep the pack for manual portal
@@ -1361,11 +1383,11 @@ function _msUpdateSendButtonPhotoGate(jobId) {
     btn.style.cursor = 'not-allowed';
     btn.title = 'Approve at least one photo to send';
   } else {
-    var canSend = isPortal ? true : (!!d.recipient_email && !!d.invoice);
+    var canSend = !_msNeedsMoneyReview(d) && (isPortal ? true : (!!d.recipient_email && !!d.invoice));
     btn.disabled = !canSend;
     btn.style.opacity = canSend ? '1' : '0.45';
     btn.style.cursor = canSend ? 'pointer' : 'not-allowed';
-    btn.title = '';
+    btn.title = _msNeedsMoneyReview(d) ? 'Fix pricing before approving' : '';
   }
 }
 

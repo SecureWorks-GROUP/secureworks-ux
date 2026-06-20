@@ -269,7 +269,7 @@ check(
 );
 check(
   "a card is rendered into the list body for the loaded pack",
-  (elements["msReportingListBody"]._html || "").includes("MLB Constructions"),
+  (elements["msReportingListBody"]._html || "").includes("Major Loss Builders"),
 );
 
 mod.showMsReportingDetail("job-1");
@@ -682,6 +682,18 @@ const cleanDetail = (() => {
 check(
   "absent needs_money_review -> NO panel pricing banner",
   !/Pricing flagged/i.test(cleanDetail),
+);
+
+const mlbCard = mod.renderMsReportingCard({
+  ...fixture,
+  job_id: "job-mlb",
+  builder: "ML Builders",
+  requesting_company_name: "ML Builders",
+  external_ref: "MLB-26003",
+});
+check(
+  "ML Builders legacy label renders as Major Loss Builders for MLB refs",
+  mlbCard.includes("Major Loss Builders") && !mlbCard.includes(">ML Builders<"),
 );
 
 mod._msReportingHideJobFromActiveList("job-1", "Revision requested");

@@ -36,6 +36,23 @@ function _msJsAttr(s) {
   return escapeAttr(_msJsStr(s));
 }
 
+function _msReportingCanonicalBuilderName(d) {
+  var name = d && (d.builder || d.requesting_company_name || d.builder_company || '');
+  var ref = String(d && (d.external_ref || d.builder_ref || d.reference || '') || '').toUpperCase();
+  var norm = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (
+    /(^|[^A-Z0-9])MLB[-\s]*\d+/.test(ref) ||
+    ref.indexOf('MLB-') === 0 ||
+    norm === 'mlbuilders' ||
+    norm === 'mlbuilder' ||
+    norm === 'majorlossbuilder' ||
+    norm === 'majorlossbuilders'
+  ) {
+    return 'Major Loss Builders';
+  }
+  return name || '(no builder)';
+}
+
 // ────────────────────────────────────────────────────────────
 // 1. LIST PANEL - load + render the reporting column
 // ────────────────────────────────────────────────────────────
@@ -93,7 +110,7 @@ function _msFmtAud(n) {
  * Render a single report-draft card for the cockpit column.
  */
 function renderMsReportingCard(d) {
-  var builder = d.builder || d.requesting_company_name || '(no builder)';
+  var builder = _msReportingCanonicalBuilderName(d);
   var ref = d.external_ref;
   var suburb = d.site_suburb;
   var incGst = d.invoice ? d.invoice.total_inc_gst : null;
@@ -191,7 +208,7 @@ function showMsReportingDetail(jobId, targetPanelId) {
 
   var safeId = escapeAttr(d.job_id);
   var safeJobKey = _msDocTabKey(d.job_id);
-  var builder = d.builder || d.requesting_company_name || '(no builder)';
+  var builder = _msReportingCanonicalBuilderName(d);
   var inv = d.invoice || null;
   // When hosted in the board overlay, Back/Hold should close the overlay rather
   // than empty the (off-screen) inline approvals panel.

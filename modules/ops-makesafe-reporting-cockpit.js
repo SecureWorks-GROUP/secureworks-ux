@@ -106,7 +106,8 @@ function renderMsReportingCard(d) {
   var statusLabel = badge.label;
 
   var safeId = escapeAttr(d.job_id);
-  var html = '<div onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + statusBg + ';">';
+  var cardKey = _msDocTabKey(d.job_id);
+  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '" onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + statusBg + ';">';
 
   // Top row: status badge (+ amber money-review chip when flagged + first-draft chip)
   var action = d.resume_action || '';
@@ -376,10 +377,12 @@ function _msDocTabKey(jobId) {
 }
 
 /**
- * Build the doc-tab list for a pack: the drafted outputs only (Make Safe Report /
- * Draft Invoice / SWMS). Source docs (work order, photos) are intentionally excluded
- * — photos render in the approval grid, the work order is not part of the send pack.
- * The SWMS tab appears only when a SWMS doc is present in the feed.
+ * Build the doc-tab list for a pack: drafted outputs first (Make Safe Report /
+ * Draft Invoice / SWMS), then source inputs (Trade Report / Work Order).
+ * Photos remain in the approval grid because they have a separate include/exclude
+ * gate; source PDFs are first-class click-throughs so the operator can compare
+ * the generated pack against the raw trade report + insurer/builder work order.
+ * The SWMS tab appears only when a SWMS doc exists in the feed.
  * Each entry: { tabLabel, url, kind } where url already carries #view=Fit for PDFs
  * (via _msReportingBuildCarouselDocs) and keeps the versioned ?v= query intact.
  */
@@ -389,17 +392,31 @@ function _msReportingDocTabs(d) {
   docs.forEach(function(doc) {
     var label = String(doc.label || '').toLowerCase();
     var tabLabel = null;
-    if (/report/.test(label)) tabLabel = 'Make Safe Report';
+    if (doc.kind === 'image') return; // photos stay in the approval grid
+    if (/raw/.test(label) && /trade|service|report/.test(label)) tabLabel = 'Raw Trade Report';
+    else if (/trade|service/.test(label) && /pdf/.test(label)) tabLabel = 'Trade Report PDF';
+    else if (/trade|service|raw/.test(label)) tabLabel = 'Trade Report';
+    else if (/work\s*order|^wo$/.test(label)) tabLabel = 'Work Order';
+    else if (/make\s*safe|completion/.test(label) && /report/.test(label)) tabLabel = 'Make Safe Report';
     else if (/invoice/.test(label)) tabLabel = 'Draft Invoice';
     else if (/swms/.test(label)) tabLabel = 'SWMS';
-    if (!tabLabel) return; // skip work order / photos / other source docs
+    else if (/report/.test(label)) tabLabel = 'Trade Report';
+    else tabLabel = doc.label || 'Document';
     // De-dupe by tab label (one report, one invoice, one SWMS).
     if (out.some(function(o) { return o.tabLabel === tabLabel; })) return;
-    out.push({ tabLabel: tabLabel, url: doc.url, kind: doc.kind });
+    out.push({
+      tabLabel: tabLabel,
+      url: doc.url,
+      kind: doc.kind,
+      created_at: doc.created_at || null,
+      received_at: doc.received_at || null,
+      source_type: doc.source_type || null,
+      raw_report: doc.raw_report || null,
+    });
   });
-  // Order: Report, Invoice, SWMS (so SWMS is always the trailing optional tab).
+  // Order: generated pack first, source evidence after it.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
-  var order = { 'Make Safe Report': 0, 'Draft Invoice': 1, 'SWMS': 2 };
+  var order = { 'Make Safe Report': 0, 'Draft Invoice': 1, 'SWMS': 2, 'Raw Trade Report': 3, 'Trade Report': 4, 'Trade Report PDF': 5, 'Work Order': 6 };
   out.sort(function(a, b) {
     var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : 9;
     var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : 9;
@@ -416,9 +433,22 @@ function _msReportingDocTabs(d) {
  */
 function _msRenderDocStage(docTabs, idx) {
   var t = docTabs[idx];
+  var metaBits = [];
+  if (t && t.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(t.received_at));
+  if (t && t.created_at && t.created_at !== t.received_at) metaBits.push('Created ' + _msReportingFormatTimestamp(t.created_at));
+  var metaHtml = metaBits.length
+    ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 8px;color:var(--sw-text-sec);font-size:11px;">'
+      + '<span style="font-weight:800;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.4px;">' + escapeHtml(t.tabLabel || 'Document') + '</span>'
+      + metaBits.map(function(m) { return '<span style="background:#fff;border:1px solid var(--sw-border);border-radius:999px;padding:3px 8px;">' + escapeHtml(m) + '</span>'; }).join('')
+      + '</div>'
+    : '';
   var inner;
   if (!t || !t.url) {
-    inner = '<div style="color:#cdd8df;font-size:13px;">Document not available.</div>';
+    if (t && (t.kind === 'html' || t.raw_report)) {
+      inner = _msRenderRawTradeReportDoc(t);
+    } else {
+      inner = '<div style="color:#cdd8df;font-size:13px;">Document not available.</div>';
+    }
   } else if (t.kind === 'image') {
     inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);">';
   } else if (t.kind === 'pdf') {
@@ -426,9 +456,54 @@ function _msRenderDocStage(docTabs, idx) {
   } else {
     inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
-  return '<div style="background:#3a464d;border-radius:8px;height:clamp(680px,78vh,900px);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">'
+  return metaHtml + '<div style="background:#3a464d;border-radius:8px;height:clamp(680px,78vh,900px);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">'
     + '<div style="position:absolute;top:8px;right:14px;font-size:11px;color:#cdd8df;background:rgba(0,0,0,.3);padding:2px 8px;border-radius:5px;">whole page</div>'
     + inner
+    + '</div>';
+}
+
+function _msRenderRawTradeReportDoc(t) {
+  var raw = (t && t.raw_report) || {};
+  var cl = raw.checklist_json || {};
+  var rows = [];
+  function add(label, value) {
+    if (value == null || value === '') return;
+    if (Array.isArray(value)) value = value.join(', ');
+    rows.push('<div style="display:grid;grid-template-columns:150px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid #edf1f3;font-size:13px;">'
+      + '<div style="font-weight:800;color:#4C6A7C;">' + escapeHtml(label) + '</div>'
+      + '<div style="white-space:pre-wrap;color:#1A2332;">' + escapeHtml(String(value)) + '</div>'
+      + '</div>');
+  }
+  if (raw.status) add('Status', raw.status);
+  if (raw.submitted_at) add('Submitted', _msReportingFormatTimestamp(raw.submitted_at));
+  if (raw.signature_name) add('Signature', raw.signature_name);
+  if (cl && !Array.isArray(cl) && typeof cl === 'object') {
+    add('Arrival', cl.arrival_time);
+    add('Labour', cl.labour_hours ? String(cl.labour_hours) + ' hrs x ' + (cl.trade_count || 1) + ' trades' : '');
+    add('Make-safe type', cl.job_type || cl.makesafe_type);
+    add('Damage', cl.damage_description);
+    add('Cause', cl.damage_cause);
+    add('Work completed', cl.work_done);
+    add('Materials', cl.materials_used);
+    add('Extra notes', cl.extra_notes || cl.access_issues || cl.invoice_notes);
+  } else if (Array.isArray(cl)) {
+    var items = cl.map(function(item) {
+      if (!item) return '';
+      var tick = item.checked ? '&#10003;' : '&#8212;';
+      return '<li style="padding:5px 0;border-bottom:1px solid #edf1f3;">' + tick + ' ' + escapeHtml(item.label || String(item)) + '</li>';
+    }).join('');
+    if (items) rows.push('<div style="padding:7px 0;font-size:13px;"><div style="font-weight:800;color:#4C6A7C;margin-bottom:4px;">Checklist</div><ul style="list-style:none;padding:0;margin:0;">' + items + '</ul></div>');
+  }
+  if (raw.notes) add('Notes', raw.notes);
+  if (!rows.length) {
+    rows.push('<pre style="white-space:pre-wrap;font-size:12px;background:#f7f8fa;padding:12px;border-radius:8px;overflow:auto;">' + escapeHtml(JSON.stringify(raw, null, 2)) + '</pre>');
+  }
+  return '<div style="width:min(92%,720px);height:96%;background:#fff;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);overflow:auto;padding:26px 30px;text-align:left;">'
+    + '<div style="border-top:6px solid var(--sw-orange);padding-top:14px;margin-bottom:16px;">'
+    + '<div style="font-size:22px;font-weight:900;color:#1A2332;">Raw Trade Report</div>'
+    + '<div style="font-size:12px;color:#7C8898;margin-top:4px;">Trade-submitted source data before the AI close-out pack.</div>'
+    + '</div>'
+    + rows.join('')
     + '</div>';
 }
 
@@ -509,28 +584,39 @@ function _msReportingBuilderNote(d) {
 function _msReportingBuildCarouselDocs(d) {
   var out = [];
   var seen = {};
-  function add(label, url, kind) {
-    if (!url) return;
-    if (seen[url]) return;
-    seen[url] = true;
+  function add(label, url, kind, meta) {
+    meta = meta || {};
+    if (!url && !meta.raw_report && kind !== 'html') return;
+    var dedupeKey = url || [label || 'Document', meta.source_type || kind || '', meta.received_at || meta.created_at || ''].join('|');
+    if (seen[dedupeKey]) return;
+    seen[dedupeKey] = true;
     var k = kind || _msReportingDocKind(url);
     // For PDFs, append #view=Fit so the iframe opens to the whole page, not fit-width.
     var displayUrl = url;
     if (k === 'pdf' && url.indexOf('#') === -1) {
       displayUrl = url + '#view=Fit';
     }
-    out.push({ label: label || 'Document', url: displayUrl, kind: k, doc: null });
+    out.push({
+      label: label || 'Document',
+      url: displayUrl,
+      kind: k,
+      doc: null,
+      created_at: meta.created_at || null,
+      received_at: meta.received_at || meta.created_at || null,
+      source_type: meta.source_type || null,
+      raw_report: meta.raw_report || null,
+    });
   }
   // Drafted outputs first.
   if (Array.isArray(d.draft_docs)) {
-    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind)); });
+    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd); });
   } else {
     add('Make safe report', d.report_pdf_url, 'pdf');
     add('Draft invoice', d.invoice_pdf_url, 'pdf');
   }
   // Source docs next (work order, photos, etc.).
   if (Array.isArray(d.source_docs)) {
-    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind)); });
+    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd); });
   }
   // Legacy photos[] fallback if no source_docs supplied them.
   if (!Array.isArray(d.source_docs) && Array.isArray(d.photos)) {
@@ -542,10 +628,10 @@ function _msReportingBuildCarouselDocs(d) {
   return out;
 }
 
-// Normalise a feed kind ('pdf'|'image') to the viewer's kind vocabulary
-// ('pdf'|'image'|'other'). Unknown kinds get classified by URL.
+// Normalise a feed kind ('pdf'|'image'|'html') to the viewer's kind vocabulary.
+// Unknown kinds get classified by URL.
 function _msReportingNormaliseKind(kind) {
-  if (kind === 'pdf' || kind === 'image') return kind;
+  if (kind === 'pdf' || kind === 'image' || kind === 'html') return kind;
   return null;
 }
 
@@ -555,6 +641,19 @@ function _msReportingDocKind(url) {
   if (/\.pdf$/.test(u)) return 'pdf';
   if (/\.(png|jpe?g|gif|webp|bmp|svg|heic)$/.test(u)) return 'image';
   return 'other';
+}
+
+function _msReportingFormatTimestamp(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // Render the draft invoice facts inside the review panel so Marnin can check the
@@ -616,7 +715,7 @@ function _msRenderInvoiceReview(d) {
 function _msRenderSourceEvidence(d) {
   if (!d || !Array.isArray(d.source_docs)) return '';
   var docs = d.source_docs.filter(function(sd) {
-    if (!sd || !sd.url) return false;
+    if (!sd || (!sd.url && !sd.raw_report && sd.kind !== 'html')) return false;
     var kind = sd.kind || _msReportingDocKind(sd.url || '');
     return kind !== 'image';
   });
@@ -626,7 +725,17 @@ function _msRenderSourceEvidence(d) {
   html += '<div style="margin:0 20px 4px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;font-size:12px;">';
   docs.forEach(function(sd) {
     var label = sd.label || 'Source document';
-    html += '<a href="' + escapeAttr(sd.url) + '" target="_blank" rel="noopener" data-source-url="' + escapeAttr(sd.url) + '" style="color:var(--sw-orange);font-weight:700;text-decoration:none;word-break:break-all;">' + escapeHtml(label) + ' ↗</a>';
+    var metaBits = [];
+    if (sd.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(sd.received_at));
+    if (sd.created_at && sd.created_at !== sd.received_at) metaBits.push('Created ' + _msReportingFormatTimestamp(sd.created_at));
+    html += '<div style="display:flex;flex-direction:column;gap:2px;">';
+    if (sd.url) {
+      html += '<a href="' + escapeAttr(sd.url) + '" target="_blank" rel="noopener" data-source-url="' + escapeAttr(sd.url) + '" style="color:var(--sw-orange);font-weight:700;text-decoration:none;word-break:break-all;">' + escapeHtml(label) + ' ↗</a>';
+    } else {
+      html += '<div style="color:var(--sw-dark);font-weight:800;">' + escapeHtml(label) + '</div>';
+    }
+    if (metaBits.length) html += '<div style="color:var(--sw-text-sec);font-size:11px;">' + escapeHtml(metaBits.join(' · ')) + '</div>';
+    html += '</div>';
   });
   html += '</div>';
   return html;
@@ -1006,6 +1115,45 @@ function _msReportingAfterSend() {
   }
   loadMakesafeReportingCockpit();
   showMsReportingDetailEmpty();
+}
+
+/**
+ * Hide a job from the active human-decision queue once it has been handed back
+ * to the draft agent for a revise pass. This is intentionally UI-side and
+ * reversible: a failed request reloads the feed; a successful request only
+ * returns when makesafe_report_drafts surfaces a new actionable draft.
+ */
+function _msReportingHideJobFromActiveList(jobId, reason) {
+  var safeId = _msDocTabKey(jobId);
+  var card = document.querySelector('[data-ms-reporting-card="' + safeId + '"]');
+  if (card && card.parentNode) card.parentNode.removeChild(card);
+  if (_msReportingCache && _msReportingCache[jobId]) delete _msReportingCache[jobId];
+
+  var count = _msReportingCache ? Object.keys(_msReportingCache).length : 0;
+  refreshMsReportingBadge(count);
+
+  var listBody = document.getElementById('msReportingListBody');
+  if (listBody && count === 0) {
+    listBody.innerHTML = '<div style="padding:40px 20px;text-align:center;">'
+      + '<div style="font-size:36px;opacity:0.3;margin-bottom:12px;">&#9203;</div>'
+      + '<div style="font-size:14px;font-weight:600;color:var(--sw-dark);">No report drafts waiting for your tick</div>'
+      + '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px;">Revision requests are hidden until the draft agent returns the next pack.</div>'
+      + '</div>';
+  }
+
+  var panel = document.getElementById('msReportingDetailPanel');
+  if (panel) {
+    panel.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--sw-text-sec);">'
+      + '<div style="font-size:36px;opacity:0.35;margin-bottom:12px;">&#9889;</div>'
+      + '<div style="font-size:15px;font-weight:800;color:var(--sw-dark);">Revision handed back to MakeSafe Agent</div>'
+      + '<div style="font-size:12px;line-height:1.45;margin-top:8px;">' + escapeHtml(reason || 'This pack is hidden from the active review list until the next draft is ready.') + '</div>'
+      + '</div>';
+  }
+
+  if (typeof closeMakesafeReportingOverlay === 'function' && document.getElementById('makesafeReportingOverlay')) {
+    closeMakesafeReportingOverlay();
+    if (typeof loadJobs === 'function') loadJobs();
+  }
 }
 
 // Whole-token review-marker check mirroring the backend gate. Used for the

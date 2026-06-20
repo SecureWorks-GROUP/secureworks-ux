@@ -44,11 +44,14 @@ function makeEl() {
     get innerHTML() {
       return this._html;
     },
+    querySelector: () => null,
+    querySelectorAll: () => [],
   };
 }
 const elements = {};
 const documentStub = {
   getElementById: (id) => (elements[id] ||= makeEl()),
+  querySelector: () => null,
 };
 
 // Mutable behaviour holders so the test can swap what opsFetch returns AFTER
@@ -118,6 +121,8 @@ const exposed = [
   "resolveMakesafeSendState",
   "resetMakesafeFailedPack",
   "refreshMsReportingBadge",
+  "_msReportingHideJobFromActiveList",
+  "_msSwitchDocTab",
   "_msReportingSubjectHasReviewMarker",
   "_msTogglePhotoApproval",
 ];
@@ -193,17 +198,49 @@ const fixture = {
       label: "Make safe report",
       url: "https://example.com/report.pdf",
       kind: "pdf",
+      created_at: "2026-06-20T01:00:00.000Z",
     },
     {
       label: "Draft invoice",
       url: "https://example.com/invoice.pdf",
       kind: "pdf",
+      created_at: "2026-06-20T01:05:00.000Z",
     },
   ],
   source_docs: [
-    { label: "Work order", url: "https://example.com/wo.pdf", kind: "pdf" },
-    { label: "front", url: "https://example.com/p1.jpg", kind: "image" },
-    { label: "hallway", url: "https://example.com/p2.jpg", kind: "image" },
+    {
+      label: "Raw Trade Report",
+      url: "",
+      kind: "html",
+      received_at: "2026-06-20T02:00:00.000Z",
+      created_at: "2026-06-20T01:50:00.000Z",
+      raw_report: {
+        status: "submitted",
+        checklist_json: {
+          labour_hours: 3,
+          trade_count: 1,
+          work_done: "Made safe and propped wall.",
+        },
+        notes: "Raw note from trade",
+        submitted_at: "2026-06-20T02:00:00.000Z",
+      },
+    },
+    {
+      label: "Trade Report PDF",
+      url: "https://example.com/trade-report.pdf",
+      kind: "pdf",
+      received_at: "2026-06-20T02:00:00.000Z",
+      created_at: "2026-06-20T01:50:00.000Z",
+    },
+    {
+      label: "Work order",
+      url: "https://example.com/wo.pdf",
+      kind: "pdf",
+      received_at: "2026-06-19T08:30:00.000Z",
+      created_at: "2026-06-19T08:30:00.000Z",
+    },
+    { label: "front", url: "https://example.com/p1.jpg", kind: "image", received_at: "2026-06-20T02:10:00.000Z" },
+    { label: "hallway", url: "https://example.com/p2.jpg", kind: "image", received_at: "2026-06-20T02:11:00.000Z" },
   ],
   photos: [
     {
@@ -255,6 +292,29 @@ check(
 check(
   "detail carousel renders the work-order url",
   detailHtml.includes("https://example.com/wo.pdf"),
+);
+check(
+  "detail click-through tabs include the raw trade report",
+  detailHtml.includes("Raw Trade Report"),
+);
+mod._msSwitchDocTab("job-1", 2, "msReportingDetailPanel");
+check(
+  "raw trade report tab renders the trade-submitted source body",
+  (elements["msDocStage_job_1"]._html || "").includes("Made safe and propped wall"),
+);
+check(
+  "detail click-through tabs include the trade report PDF",
+  detailHtml.includes("Trade Report PDF") &&
+    detailHtml.includes("https://example.com/trade-report.pdf#view=Fit"),
+);
+check(
+  "detail click-through tabs include the insurer/builder work order",
+  detailHtml.includes("Work Order") &&
+    detailHtml.includes("https://example.com/wo.pdf#view=Fit"),
+);
+check(
+  "detail renders received timestamp metadata for source documents",
+  detailHtml.includes("Received") && detailHtml.includes("20 June 2026"),
 );
 check(
   "detail renders the invoice line item description",
@@ -622,6 +682,13 @@ const cleanDetail = (() => {
 check(
   "absent needs_money_review -> NO panel pricing banner",
   !/Pricing flagged/i.test(cleanDetail),
+);
+
+mod._msReportingHideJobFromActiveList("job-1", "Revision requested");
+check(
+  "revision-in-flight hides the job from the active reporting list",
+  (elements["msReportingListBody"]._html || "").includes("No report drafts waiting for your tick") &&
+    (elements["msReportingDetailPanel"]._html || "").includes("Revision handed back"),
 );
 
 console.log("");

@@ -18,7 +18,7 @@ function check(name, cond) {
   }
 }
 
-const calls = { opsPost: [], opsFetch: [], toasts: [] };
+const calls = { opsPost: [], opsFetch: [], toasts: [], hidden: [] };
 function makeEl() {
   return {
     _html: "",
@@ -51,6 +51,8 @@ const sandbox = {
     return Promise.resolve(behaviour.postResult);
   },
   showToast: (msg, kind) => calls.toasts.push({ msg, kind }),
+  _msReportingHideJobFromActiveList: (jobId, reason) =>
+    calls.hidden.push({ jobId, reason }),
   escapeHtml: (s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;"),
@@ -205,6 +207,10 @@ check(
   "rerun_draft_report carries selected_photo_urls only for included photos",
   rerunCall && rerunCall.body.selected_photo_urls.length === 1 &&
     rerunCall.body.selected_photo_urls[0] === "https://example.com/keep.jpg",
+);
+check(
+  "successful Revise Pack request hides the job from the active review queue",
+  calls.hidden.some((h) => h.jobId === "job-9" && /fresh draft/i.test(h.reason || "")),
 );
 
 console.log("");

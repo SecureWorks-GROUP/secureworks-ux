@@ -118,7 +118,8 @@ async function addMsNoteAndRerun(jobId) {
     return;
   }
   if (btn) btn.textContent = "Requesting Revise Pack...";
-  await triggerMsRerun(jobId);
+  _msNotifyRevisionInFlight(jobId);
+  await triggerMsRerun(jobId, { alreadyHidden: true });
 }
 
 // ────────────────────────────────────────────────────────────
@@ -146,7 +147,17 @@ function _msSelectedPhotoUrlsForFeedback(jobId) {
   }
 }
 
-async function triggerMsRerun(jobId) {
+function _msNotifyRevisionInFlight(jobId) {
+  if (typeof _msReportingHideJobFromActiveList === "function") {
+    _msReportingHideJobFromActiveList(
+      jobId,
+      "Feedback saved. The pack is with the MakeSafe Agent for a revise pass and will return here when a fresh draft is ready.",
+    );
+  }
+}
+
+async function triggerMsRerun(jobId, opts) {
+  opts = opts || {};
   var btn = document.getElementById("msRerunBtn-" + jobId);
   if (btn) {
     btn.disabled = true;
@@ -165,6 +176,7 @@ async function triggerMsRerun(jobId) {
         "info",
       );
     } else {
+      if (!opts.alreadyHidden) _msNotifyRevisionInFlight(jobId);
       showToast(
         "Revise Pack requested from " +
           ((result && result.addressed_count) || 0) +
@@ -178,6 +190,9 @@ async function triggerMsRerun(jobId) {
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Revise Pack now";
+    }
+    if (typeof loadMakesafeReportingCockpit === "function") {
+      loadMakesafeReportingCockpit();
     }
   }
 }

@@ -1069,28 +1069,40 @@
       overflow-y: auto;
       padding-bottom: 56px;
     }
-    #jobsBody .ms-board {
-      min-height: 0;
-      overflow: hidden;
-    }
-    #jobsBody .ms-board-scrollwrap {
-      flex: 1;
-      min-height: 0;
-      overflow: hidden;
-    }
-    #jobsBody .ms-board .kanban-container {
-      min-height: 0;
-      overflow-x: auto;
-      overflow-y: hidden;
-    }
-    #jobsBody .ms-board .kanban-col {
-      height: 100%;
-      min-height: 0;
+    #jobsBody.jobs-body-makesafes {
       overflow-x: hidden;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      padding-bottom: 28px;
     }
-    #jobsBody .ms-board .kanban-col-header {
+    #jobsBody.jobs-body-makesafes .ms-board {
+      height: auto !important;
+      min-height: 100%;
+      overflow: visible;
+      padding-bottom: 40px;
+    }
+    #jobsBody.jobs-body-makesafes .ms-board-scrollwrap {
+      flex: 0 0 auto;
+      min-height: 0;
+      overflow-x: auto !important;
+      overflow-y: visible !important;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 12px;
+    }
+    #jobsBody.jobs-body-makesafes .ms-board .kanban-container {
+      height: auto !important;
+      min-height: 0;
+      align-items: flex-start;
+      overflow-x: auto;
+      overflow-y: visible;
+    }
+    #jobsBody.jobs-body-makesafes .ms-board .kanban-col {
+      height: auto !important;
+      min-height: 0;
+      max-height: none;
+      overflow: visible;
+    }
+    #jobsBody.jobs-body-makesafes .ms-board .kanban-col-header {
       position: sticky;
       top: 0;
       z-index: 2;
@@ -1099,9 +1111,11 @@
       -webkit-backdrop-filter: blur(8px);
       flex-shrink: 0;
     }
-    #jobsBody .ms-board .kanban-body {
+    #jobsBody.jobs-body-makesafes .ms-board .kanban-body {
+      flex: 0 0 auto;
       overflow: visible;
       max-height: none;
+      padding-bottom: 24px;
     }
     /* ── Job P&L Panel ── */
     #subJobpnl .pnl-search-bar {
@@ -8677,12 +8691,53 @@ function updateJobsDate() {
   el.textContent = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
 }
 
+function makesafeAutoIntakeSweepEnabled() {
+  try {
+    var params = new URLSearchParams(window.location.search || '');
+    return params.get('noAutoIntake') !== '1' && params.get('autoIntake') !== '0';
+  } catch (_) {
+    return true;
+  }
+}
+
+var _makesafeAutoIntakeSweepInFlight = false;
+var _makesafeAutoIntakeSweepLastRun = 0;
+
+async function autoApproveCleanMakesafeIntakeDraftsIfNeeded() {
+  if (!makesafeAutoIntakeSweepEnabled()) return null;
+  if (_makesafeAutoIntakeSweepInFlight) return null;
+  var now = Date.now();
+  if (now - _makesafeAutoIntakeSweepLastRun < 30000) return null;
+  _makesafeAutoIntakeSweepInFlight = true;
+  _makesafeAutoIntakeSweepLastRun = now;
+  try {
+    var result = await opsPost('auto_approve_clean_intake_drafts', {
+      limit: 60,
+      triggered_by: 'ops_board_autoload'
+    });
+    var count = Number(result && result.auto_approved_count || 0);
+    if (count > 0) {
+      showToast('Auto-moved ' + count + ' clean MakeSafe intake ' + (count === 1 ? 'job' : 'jobs') + ' to New', 'success');
+    }
+    return result;
+  } catch (e) {
+    console.warn('MakeSafe clean intake auto-approval skipped:', e);
+    return null;
+  } finally {
+    _makesafeAutoIntakeSweepInFlight = false;
+  }
+}
+
 async function loadJobs() {
   updateJobsDate();
   try {
     var params = {};
     if (_jobFilter) params.type = _jobFilter;
     if (_jobSearch) params.search = _jobSearch;
+
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
+      await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
+    }
 
     // Make-safe tab uses dedicated enriched pipeline endpoint
     var endpoint = (_pipelineTab === 'makesafes') ? 'makesafe_pipeline' : 'pipeline';
@@ -8871,6 +8926,10 @@ function __extractGapJobs(columns) {
 
 function renderJobs(data) {
   var container = document.getElementById('jobsBody');
+  if (container) {
+    container.style.overflow = '';
+    container.classList.toggle('jobs-body-makesafes', _pipelineTab === 'makesafes' && _jobView === 'kanban');
+  }
   if (_jobView === 'kanban') {
     if (_pipelineTab === 'fencing') {
       renderFencingKanban(container, data.columns);
@@ -8992,6 +9051,11 @@ function renderPatioKanban(container, columns) {
 
 // Convert vertical scroll → horizontal scroll on kanban background (not inside column bodies)
 function setupKanbanHorizontalScroll() {
+  // MakeSafe has a whole-board vertical scroller (#jobsBody) plus native horizontal
+  // overflow on .ms-board-scrollwrap. Do not hijack vertical wheel into horizontal
+  // motion there — that was the cause of the board feeling “zoomed in” and unable
+  // to scroll down as a whole.
+  if (_pipelineTab === 'makesafes') return;
   var kc = document.querySelector('#jobsBody .kanban-container');
   if (!kc || kc._hscrollBound) return;
   kc._hscrollBound = true;
@@ -10710,7 +10774,10 @@ async function scanSesInbox() {
   showToast('Scanning SES inbox...', 'info');
   try {
     var data = await opsPost('scan_ses_makesafes', {});
-    showToast('Scanned ' + data.scanned + ' emails, found ' + data.new_count + ' new make-safe drafts', 'success');
+    var promoted = Number(data.auto_approved_count || 0);
+    var msg = 'Scanned ' + data.scanned + ' emails, found ' + data.new_count + ' new make-safe drafts';
+    if (promoted > 0) msg += ', auto-moved ' + promoted + ' clean ' + (promoted === 1 ? 'job' : 'jobs') + ' to New';
+    showToast(msg, 'success');
     loadMakesafeIntake();
   } catch (e) {
     showToast('Scan failed: ' + (e.message || e), 'error');

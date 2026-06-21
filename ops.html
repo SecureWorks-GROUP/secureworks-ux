@@ -1069,6 +1069,24 @@
       overflow-y: auto;
       padding-bottom: 56px;
     }
+    #jobsBody .ms-board {
+      min-height: 0;
+      overflow: hidden;
+    }
+    #jobsBody .ms-board-scrollwrap {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #jobsBody .ms-board .kanban-container {
+      min-height: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    #jobsBody .ms-board .kanban-col {
+      max-height: 100%;
+      min-height: 0;
+    }
     /* ── Job P&L Panel ── */
     #subJobpnl .pnl-search-bar {
       display: flex;
@@ -9203,8 +9221,8 @@ function renderMakesafeKanban(container, columns) {
       + '</div>';
   }
 
-  html += '<div style="display:flex;gap:8px;flex:1;min-height:0;">';
-  html += '<div class="kanban-container" style="flex:1;">';
+  html += '<div class="ms-board-scrollwrap" style="display:flex;gap:8px;flex:1;min-height:0;overflow:hidden;">';
+  html += '<div class="kanban-container" style="flex:1;min-height:0;">';
 
   // ── INTAKE column (leftmost) ──
   // The make-safe lifecycle now starts ON the board: work-order emails arrive as
@@ -9501,7 +9519,14 @@ function openMakesafeReviewOverlay(overlayId, panelId, title) {
 
 // One board-level legend explaining the 5 chip glyphs + the 4 states. Collapsible
 // so it doesn't permanently eat board height once the ops team knows the key.
-var _makesafeLegendCollapsed = false;
+var _makesafeLegendCollapsed = (function() {
+  try {
+    var stored = localStorage.getItem('sw_makesafe_legend_collapsed');
+    if (stored === 'false') return false;
+    if (stored === 'true') return true;
+  } catch (_) {}
+  return true;
+})();
 var _makesafeArchiveVisible = false;   // archive column hidden by default
 var _makesafeArchiveSearch = '';       // live filter applied when archive is open
 
@@ -9543,8 +9568,11 @@ function makesafeArchiveJobMatches(j, query) {
 
 function toggleMakesafeLegend() {
   _makesafeLegendCollapsed = !_makesafeLegendCollapsed;
+  try { localStorage.setItem('sw_makesafe_legend_collapsed', _makesafeLegendCollapsed ? 'true' : 'false'); } catch (_) {}
   var el = document.getElementById('msLegend');
   if (el) el.classList.toggle('collapsed', _makesafeLegendCollapsed);
+  var btn = el && el.querySelector('.ms-legend-toggle');
+  if (btn) btn.textContent = _makesafeLegendCollapsed ? 'Show key' : 'Hide key';
 }
 function renderMakesafeLegend() {
   // A mini state chip echoing the card's doc-icon states (sage tint / neutral /

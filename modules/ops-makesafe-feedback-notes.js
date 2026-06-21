@@ -230,9 +230,14 @@ async function triggerMsRerun(jobId, opts) {
       btn.disabled = false;
       btn.textContent = "Revise Pack now";
     }
-    if (typeof loadMakesafeReportingCockpit === "function") {
-      loadMakesafeReportingCockpit();
+    try {
+      if (typeof loadMakesafeReportingCockpit === "function") {
+        await loadMakesafeReportingCockpit();
+      }
+    } catch (_) {
+      // Keep the explicit failure toast above and still refresh the notes panel.
     }
+    await loadMsNotes(jobId, "msNotesPanel-" + jobId);
     return false;
   }
 }

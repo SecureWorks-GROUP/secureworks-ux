@@ -6584,6 +6584,28 @@
     return out;
   }
 
+  function getMakesafeBuilderEmailText(ms) {
+    ms = ms || {};
+    var source = ms.source_email || {};
+    var candidates = [
+      ms.builder_email_text_for_trade,
+      ms.original_builder_email_text_for_trade,
+      ms.sanitized_builder_email_text_for_trade,
+      ms.original_sanitized_email_text_for_trade,
+      ms.builder_email_instructions_for_trade,
+      source.builder_email_text_for_trade,
+      source.original_builder_email_text_for_trade,
+      source.sanitized_text_for_trade,
+      source.text_for_trade,
+      source.body_text_for_trade
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var value = String(candidates[i] || '').trim();
+      if (value) return value;
+    }
+    return '';
+  }
+
   function firstMakesafeEmail(ms, job) {
     var source = ms && ms.source_email;
     var company = (ms && (ms.makesafe_companies || ms.requesting_company)) || {};
@@ -6614,6 +6636,7 @@
     var companyName = ms.requesting_company_name || (msCompany && msCompany.name) || (ms.requesting_company && ms.requesting_company.name) || job.client_name || '';
     var email = firstMakesafeEmail(ms, job);
     var source = ms.source_email || {};
+    var emailText = getMakesafeBuilderEmailText(ms);
     var emailLabel = source.from_email ? 'Original email' : 'Builder email';
     var links = normaliseTradeExternalLinks(ms.external_links || ms.links || ms.attachments || ms.source_links);
     var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
@@ -6623,6 +6646,7 @@
     if (email) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>' + emailLabel + ':</strong> <a href="mailto:' + esc(email) + '" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px">' + esc(email) + '</a></div>';
     if (source.subject) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Source subject:</strong> ' + esc(source.subject) + '</div>';
     if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
+    if (emailText) h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;"><strong>Original email instructions:</strong><br>' + esc(emailText) + '</div>';
     if (ms.special_instructions) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + esc(ms.special_instructions) + '</div>';
     if (ms.safety_requirements) h += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + esc(ms.safety_requirements) + '</div>';
     if (ms.substatus && subLabels[ms.substatus]) {
@@ -8875,6 +8899,10 @@
     var company = ms.requesting_company_name || (ms.requesting_company && ms.requesting_company.name) || (ms.makesafe_companies && ms.makesafe_companies.name) || job.client_name || '';
     if (company) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>From:</strong> ' + esc(company) + '</div>';
     if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
+    var builderEmailText = getMakesafeBuilderEmailText(ms);
+    if (builderEmailText) {
+      h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Original email instructions:</strong><br>' + esc(builderEmailText) + '</div>';
+    }
     if (wo.special_instructions || ms.special_instructions || job.notes) {
       h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px">' + esc(wo.special_instructions || ms.special_instructions || job.notes) + '</div>';
     }
@@ -8888,7 +8916,7 @@
       if (wo.scope_items.length > 8) h += '<div style="font-size:12px;color:var(--sw-text-sec);padding-top:4px">+' + (wo.scope_items.length - 8) + ' more item(s) — open full WO above.</div>';
       h += '</div>';
     } else if (!woUrl) {
-      h += '<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:8px;margin-top:8px">No work order PDF/details were returned for this MakeSafe job yet.</div>';
+      h += '<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:8px;margin-top:8px">No builder work order PDF was returned yet. Use the original email instructions above when available, then complete the MakeSafe report below.</div>';
     }
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">Report form is below — scroll after reading the work order.</div>';
     h += '</div>';

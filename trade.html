@@ -5920,7 +5920,8 @@
     h += '  <div class="client-name">' + esc(job.client_name || 'Unknown') + '</div>';
     h += '  <div class="client-address">' + esc(addr) + '</div>';
     if (job.client_email && canSeePricing()) {
-      h += '  <div style="color:var(--sw-mid);font-size:13px;margin:4px 0">' + esc(job.client_email) + '</div>';
+      var clientEmail = String(job.client_email || '').trim();
+      h += '  <div style="color:var(--sw-mid);font-size:13px;margin:4px 0"><a href="mailto:' + esc(clientEmail) + '" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px">' + esc(clientEmail) + '</a></div>';
     }
 
     // Crew summary with initials
@@ -6556,6 +6557,88 @@
     return h;
   }
 
+  function normaliseTradeExternalLinks(raw) {
+    var out = [];
+    function add(label, url) {
+      url = String(url || '').trim();
+      if (!url) return;
+      if (/^www\./i.test(url)) url = 'https://' + url;
+      if (!/^(https?:|mailto:|tel:)/i.test(url)) return;
+      out.push({ label: String(label || 'Open link').trim() || 'Open link', url: url });
+    }
+    if (Array.isArray(raw)) {
+      raw.forEach(function(item, idx) {
+        if (!item) return;
+        if (typeof item === 'string') add('Link ' + (idx + 1), item);
+        else add(item.label || item.name || item.title || ('Link ' + (idx + 1)), item.url || item.href || item.link);
+      });
+    } else if (raw && typeof raw === 'object') {
+      Object.keys(raw).forEach(function(label) {
+        var item = raw[label];
+        if (item && typeof item === 'object') add(item.label || item.name || label, item.url || item.href || item.link);
+        else add(label, item);
+      });
+    } else if (typeof raw === 'string') {
+      add('Open link', raw);
+    }
+    return out;
+  }
+
+  function firstMakesafeEmail(ms, job) {
+    var source = ms && ms.source_email;
+    var company = (ms && (ms.makesafe_companies || ms.requesting_company)) || {};
+    var candidates = [
+      source && source.from_email,
+      ms && ms.original_builder_email,
+      ms && ms.source_from_email,
+      ms && ms.builder_email,
+      ms && ms.requesting_email,
+      ms && ms.contact_email,
+      ms && ms.invoice_email,
+      company && company.invoice_email,
+      company && company.email,
+      job && job.client_email
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var value = String(candidates[i] || '').trim();
+      if (value && value.indexOf('@') !== -1) return value;
+    }
+    return '';
+  }
+
+  function renderMakesafeBuilderPanel(data) {
+    var job = data.job || {};
+    var ms = data.makesafe_details || job.makesafe_details || job.metadata || {};
+    if (getTradeJobType(job) !== 'makesafe') return '';
+    var msCompany = ms.makesafe_companies || ms.requesting_company || null;
+    var companyName = ms.requesting_company_name || (msCompany && msCompany.name) || (ms.requesting_company && ms.requesting_company.name) || job.client_name || '';
+    var email = firstMakesafeEmail(ms, job);
+    var source = ms.source_email || {};
+    var emailLabel = source.from_email ? 'Original email' : 'Builder email';
+    var links = normaliseTradeExternalLinks(ms.external_links || ms.links || ms.attachments || ms.source_links);
+    var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
+    var h = '<div class="detail-section" style="margin:0 16px 12px;padding:14px;background:var(--sw-light);border-radius:12px;border-left:4px solid var(--sw-red);">';
+    h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Make-Safe Details</div>';
+    if (companyName) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>From:</strong> ' + esc(companyName) + '</div>';
+    if (email) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>' + emailLabel + ':</strong> <a href="mailto:' + esc(email) + '" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px">' + esc(email) + '</a></div>';
+    if (source.subject) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Source subject:</strong> ' + esc(source.subject) + '</div>';
+    if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
+    if (ms.special_instructions) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + esc(ms.special_instructions) + '</div>';
+    if (ms.safety_requirements) h += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + esc(ms.safety_requirements) + '</div>';
+    if (ms.substatus && subLabels[ms.substatus]) {
+      h += '<div style="font-size:12px;margin-top:6px;"><span style="padding:2px 8px;border-radius:10px;background:var(--sw-orange);color:#fff;font-weight:600;">' + subLabels[ms.substatus] + '</span></div>';
+    }
+    if (links.length) {
+      h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+      links.forEach(function(link) {
+        h += '<a href="' + esc(link.url) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--sw-mid);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;min-height:36px;">' + esc(link.label) + ' &#8599;</a>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   // ══════════════════════════════════════════════════
   // NEW renderJobDetail — Phase-Aware Dispatcher
   // ══════════════════════════════════════════════════
@@ -6651,31 +6734,7 @@
     html += renderAcknowledgeBanner(data, phase);
 
     // ── Make-Safe Info Panel (for makesafe jobs) ──
-    if (type === 'makesafe') {
-      var ms = data.makesafe_details || job.metadata || {};
-      var msCompany = ms.makesafe_companies || ms.requesting_company || null;
-      html += '<div class="detail-section" style="margin:0 16px 12px;padding:14px;background:var(--sw-light);border-radius:12px;border-left:4px solid var(--sw-red);">';
-      html += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Make-Safe Details</div>';
-      var companyName = ms.requesting_company_name || (msCompany && msCompany.name) || (ms.requesting_company && ms.requesting_company.name) || '';
-      if (companyName) html += '<div style="font-size:13px;margin-bottom:4px;"><strong>From:</strong> ' + esc(companyName) + '</div>';
-      if (ms.external_ref) html += '<div style="font-size:13px;margin-bottom:4px;"><strong>Ref:</strong> ' + esc(ms.external_ref) + '</div>';
-      if (ms.special_instructions) html += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + esc(ms.special_instructions) + '</div>';
-      if (ms.safety_requirements) html += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + esc(ms.safety_requirements) + '</div>';
-      // Substatus indicator
-      var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
-      if (ms.substatus && subLabels[ms.substatus]) {
-        html += '<div style="font-size:12px;margin-top:6px;"><span style="padding:2px 8px;border-radius:10px;background:var(--sw-orange);color:#fff;font-weight:600;">' + subLabels[ms.substatus] + '</span></div>';
-      }
-      var links = ms.external_links;
-      if (links && typeof links === 'object' && !Array.isArray(links) && Object.keys(links).length > 0) {
-        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
-        Object.keys(links).forEach(function(label) {
-          html += '<a href="' + esc(links[label]) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--sw-mid);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;min-height:36px;">' + esc(label) + ' &#8599;</a>';
-        });
-        html += '</div>';
-      }
-      html += '</div>';
-    }
+    html += renderMakesafeBuilderPanel(data);
 
     // ── Tab Bar ──
     var mediaCount = (data.media || []).length;

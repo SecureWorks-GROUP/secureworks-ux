@@ -124,6 +124,7 @@ const exposed = [
   "_msReportingHideJobFromActiveList",
   "_msSwitchDocTab",
   "_msReportingSubjectHasReviewMarker",
+  "_msGetReportPhotos",
   "_msGetPhotoApprovalState",
   "_msTogglePhotoApproval",
 ];
@@ -255,6 +256,15 @@ const fixture = {
       label: "hallway",
     },
   ],
+  report_photos: [
+    {
+      url: "https://example.com/p1.jpg",
+      thumbnail_url: "https://example.com/p1t.jpg",
+      label: "front",
+    },
+  ],
+  report_photo_urls: ["https://example.com/p1.jpg"],
+  report_photo_limit: 8,
   default_subject:
     "Make Safe Completion - MLB-25248 - 12 Smith Street, Joondalup",
   default_html_body: "<p>hello builder</p>",
@@ -280,32 +290,33 @@ check(
   detailHtml.includes("https://example.com/p1"),
 );
 check(
-  "detail renders all submitted photos selected by default",
-  detailHtml.includes("2 of 2 photos approved") &&
+  "detail renders only report photos selected by default",
+  detailHtml.includes("1 of 1 report photos approved") &&
+    detailHtml.includes("1 extra source photo kept as evidence only") &&
     mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"] &&
-    mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
+    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
 );
 check(
   "photo approval copy explains the report PDF eight-photo cap",
   detailHtml.includes("approve send photos (report PDF capped at 8)") &&
     detailHtml.includes("Report PDF includes up to 8 photos"),
 );
-mod._msTogglePhotoApproval("job-1", "https://example.com/p2.jpg");
+mod._msTogglePhotoApproval("job-1", "https://example.com/p1.jpg");
 check(
   "clicking a photo excludes it from the selected set",
-  !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
+  !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"],
 );
 mod._msGetPhotoApprovalState("job-1", [
   { url: "https://example.com/p1.jpg?v=fresh" },
-  { url: "https://example.com/p2.jpg?v=fresh" },
 ]);
 check(
   "photo approval state reconciles refreshed urls without re-approving excluded photos",
-  Object.keys(mod._msPhotoApprovalState["job-1"].approved).length === 1 &&
-    mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg?v=fresh"] &&
-    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg?v=fresh"] &&
+  Object.keys(mod._msPhotoApprovalState["job-1"].approved).length === 0 &&
+    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg?v=fresh"] &&
     !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"],
 );
+
+mod._msTogglePhotoApproval("job-1", "https://example.com/p1.jpg?v=fresh");
 check(
   "detail carousel renders the work-order url",
   detailHtml.includes("https://example.com/wo.pdf"),

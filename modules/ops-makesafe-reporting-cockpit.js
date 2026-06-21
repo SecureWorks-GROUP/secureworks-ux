@@ -229,9 +229,11 @@ function showMsReportingDetail(jobId, targetPanelId) {
   // Reset the active tab to the first doc on each fresh open of this job.
   _msActiveDocTab[d.job_id] = 0;
 
-  // Initialize photo approval state for this job (all photos approved by default on first open)
-  var allPhotosForInit = _msGetAllPhotos(d);
-  _msGetPhotoApprovalState(d.job_id, allPhotosForInit);
+  // Initialize photo approval state for this job. Default approval is limited
+  // to the report-photo set, not every raw/source photo, so the follow-up email
+  // aligns with the report PDF.
+  var reportPhotosForInit = _msGetReportPhotos(d);
+  _msGetPhotoApprovalState(d.job_id, reportPhotosForInit);
 
   // Status chip on the right: send-ready vs resume vs portal.
   var statusChip = _msReportingStatusChip(d);
@@ -926,13 +928,13 @@ function showMsReportingDetailEmpty() {
 
 
 function _msApprovedPhotosOrBlock(jobId, d) {
-  var allPhotos = _msGetAllPhotos(d);
-  var state = _msGetPhotoApprovalState(jobId, allPhotos);
-  var approvedPhotos = allPhotos.filter(function(p) {
+  var reportPhotos = _msGetReportPhotos(d);
+  var state = _msGetPhotoApprovalState(jobId, reportPhotos);
+  var approvedPhotos = reportPhotos.filter(function(p) {
     return p && p.url && !!state.approved[p.url];
   });
-  if (allPhotos.length > 0 && approvedPhotos.length === 0) {
-    showToast('Approve at least one photo before sending (only approved photos go in the pack).', 'error');
+  if (reportPhotos.length > 0 && approvedPhotos.length === 0) {
+    showToast('Approve at least one report photo before sending (only approved report photos go in the follow-up).', 'error');
     return null;
   }
   return approvedPhotos;
@@ -1257,6 +1259,43 @@ function _msGetAllPhotos(d) {
 }
 
 /**
+ * Return the report-photo set used by the approval/send flow. Prefer the
+ * backend's report_photos/report_photo_urls (the same capped set as the report
+ * PDF). For older feed payloads, mirror the report renderer fallback by taking
+ * the first capped source photos instead of all raw photos.
+ */
+function _msGetReportPhotos(d) {
+  var photos = [];
+  if (Array.isArray(d && d.report_photos)) {
+    d.report_photos.forEach(function(p, i) {
+      if (p && (p.url || p.thumbnail_url)) {
+        photos.push({ url: p.url || p.thumbnail_url, label: p.label || ('Report photo ' + (i + 1)) });
+      }
+    });
+  }
+  if (!photos.length && Array.isArray(d && d.report_photo_urls)) {
+    d.report_photo_urls.forEach(function(url, i) {
+      if (url) photos.push({ url: url, label: 'Report photo ' + (i + 1) });
+    });
+  }
+  if (!photos.length) {
+    photos = _msGetAllPhotos(d).slice(0, _msReportPhotoLimit(d));
+  }
+  return _msDedupePhotosByUrl(photos);
+}
+
+function _msDedupePhotosByUrl(photos) {
+  var seen = {};
+  var out = [];
+  (photos || []).forEach(function(p) {
+    if (!p || !p.url || seen[p.url]) return;
+    seen[p.url] = true;
+    out.push(p);
+  });
+  return out;
+}
+
+/**
  * Get (or initialize) photo approval state for a job. On first access, all photos
  * start as approved (opt-out model per the contract).
  */
@@ -1339,21 +1378,25 @@ function _msTogglePhotoApproval(jobId, photoUrl) {
  */
 function _msRenderPhotoApprovalInner(d, jobId) {
   var allPhotos = _msGetAllPhotos(d);
-  if (!allPhotos.length) {
+  var reportPhotos = _msGetReportPhotos(d);
+  if (!reportPhotos.length) {
     return '<div style="font-size:12px;color:var(--sw-text-sec);">No photos submitted with this report.</div>';
   }
-  var state = _msGetPhotoApprovalState(jobId, allPhotos);
+  var state = _msGetPhotoApprovalState(jobId, reportPhotos);
   var approvedCount = Object.keys(state.approved).length;
-  var excludedCount = allPhotos.length - approvedCount;
+  var excludedCount = reportPhotos.length - approvedCount;
+  var sourceExtraCount = Math.max(0, allPhotos.length - reportPhotos.length);
   var reportLimit = _msReportPhotoLimit(d);
   var reportIncludedCount = Math.min(approvedCount, reportLimit);
   var html = '';
   // Count line (matches the ref .photocount).
   html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">';
-  html += approvedCount + ' of ' + allPhotos.length + ' photos approved for send/review';
+  html += approvedCount + ' of ' + reportPhotos.length + ' report photos approved for send/review';
   if (excludedCount > 0) html += ' &middot; ' + excludedCount + ' excluded';
   html += '. Report PDF includes up to ' + reportLimit + ' photos';
-  if (approvedCount > reportLimit) {
+  if (sourceExtraCount > 0) {
+    html += ' &middot; ' + sourceExtraCount + ' extra source photo' + (sourceExtraCount === 1 ? '' : 's') + ' kept as evidence only (not in follow-up). ';
+  } else if (approvedCount > reportLimit) {
     html += ' (' + reportIncludedCount + ' in the report PDF; extras remain photo evidence/follow-up). ';
   } else {
     html += '. ';
@@ -1365,7 +1408,7 @@ function _msRenderPhotoApprovalInner(d, jobId) {
   // Wider tiles (120x88) with green outline (approved) / red outline + dimmed
   // (excluded) and a corner marker — matches the ref .ph / .ph.ok / .ph.no.
   html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
-  allPhotos.forEach(function(p) {
+  reportPhotos.forEach(function(p) {
     var isApproved = !!state.approved[p.url];
     var safeUrl = escapeAttr(p.url);          // for src="..." (HTML attribute context)
     var jsUrl = _msJsAttr(p.url);             // for onclick fn('...') (JS-string-in-attr)
@@ -1399,7 +1442,7 @@ function _msReportPhotoLimit(d) {
  * _msRenderPhotoApprovalBody instead (it supplies its own section label).
  */
 function _msRenderPhotoApproval(d, jobId) {
-  var allPhotos = _msGetAllPhotos(d);
+  var allPhotos = _msGetReportPhotos(d);
   var html = '';
   html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Photo approval';
   if (allPhotos.length > 0) {
@@ -1427,7 +1470,7 @@ function _msRenderPhotoApprovalBody(d, jobId) {
 function _msUpdateSendButtonPhotoGate(jobId) {
   var d = _msReportingCache[jobId];
   if (!d) return;
-  var allPhotos = _msGetAllPhotos(d);
+  var allPhotos = _msGetReportPhotos(d);
   var state = _msGetPhotoApprovalState(jobId, allPhotos);
   var approvedCount = Object.keys(state.approved).length;
   var hasPhotos = allPhotos.length > 0;

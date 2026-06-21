@@ -18,7 +18,7 @@ function check(name, cond) {
   }
 }
 
-const calls = { opsPost: [], opsFetch: [], toasts: [], hidden: [] };
+const calls = { opsPost: [], opsFetch: [], toasts: [], hidden: [], reloads: [], detail: [] };
 function makeEl() {
   return {
     _html: "",
@@ -71,6 +71,12 @@ const sandbox = {
     calls.hidden.push({ jobId, reason });
     delete sandbox._msReportingCache[jobId];
   },
+  loadMakesafeReportingCockpit: async () => {
+    calls.reloads.push({});
+    seedJob9Cache();
+    return 1;
+  },
+  showMsReportingDetail: (jobId) => calls.detail.push(jobId),
   escapeHtml: (s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;"),
@@ -90,6 +96,7 @@ const sandbox = {
   _msPhotoApprovalState: {
     "job-9": { approved: { "https://example.com/keep.jpg": true } },
   },
+  _msActiveDocTab: {},
   module: undefined,
   console,
 };
@@ -231,10 +238,24 @@ check(
   "successful Revise Pack request hides the job from the active review queue",
   calls.hidden.some((h) => h.jobId === "job-9" && /fresh draft/i.test(h.reason || "")),
 );
+check(
+  "successful Revise Pack request reloads the reporting feed",
+  calls.reloads.length >= 1,
+);
+check(
+  "successful Revise Pack request reopens the fresh detail when returned by feed",
+  calls.detail.includes("job-9"),
+);
+check(
+  "successful Revise Pack request reports fresh PDFs",
+  calls.toasts.some((t) => /fresh PDFs/i.test(t.msg || "")),
+);
 
 seedJob9Cache();
 calls.opsPost = [];
 calls.hidden = [];
+calls.reloads = [];
+calls.detail = [];
 behaviour.postResults = [
   { note: { id: "n2" } },
   { rerun: true, addressed_count: 1 },
@@ -261,6 +282,8 @@ check(
 seedJob9Cache();
 calls.opsPost = [];
 calls.hidden = [];
+calls.reloads = [];
+calls.detail = [];
 behaviour.postResults = null;
 behaviour.postResult = { skipped: true };
 await mod.triggerMsRerun("job-9");

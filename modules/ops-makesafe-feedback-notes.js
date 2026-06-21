@@ -142,7 +142,9 @@ function _msSelectedPhotoUrlsForFeedback(jobId) {
     var d = _msReportingCache[jobId];
     if (!d) return [];
     var allPhotos = _msGetAllPhotos(d) || [];
-    var state = _msPhotoApprovalState[jobId] || { approved: {} };
+    var state = (typeof _msGetPhotoApprovalState === "function")
+      ? _msGetPhotoApprovalState(jobId, allPhotos)
+      : (_msPhotoApprovalState[jobId] || { approved: {} });
     return allPhotos.filter(function (p) {
       return p && p.url && !!state.approved[p.url];
     }).map(function (p) {
@@ -160,6 +162,27 @@ function _msNotifyRevisionInFlight(jobId) {
       "Feedback saved. The pack is with the MakeSafe Agent for a revise pass and will return here when a fresh draft is ready.",
     );
   }
+}
+
+
+async function _msRefreshReportingAfterRevision(jobId) {
+  if (typeof loadMakesafeReportingCockpit !== "function") return false;
+  try {
+    await loadMakesafeReportingCockpit();
+    if (
+      typeof _msReportingCache !== "undefined" &&
+      _msReportingCache &&
+      _msReportingCache[jobId] &&
+      typeof showMsReportingDetail === "function"
+    ) {
+      if (typeof _msActiveDocTab !== "undefined") _msActiveDocTab[jobId] = 0;
+      showMsReportingDetail(jobId);
+      return true;
+    }
+  } catch (_e) {
+    return false;
+  }
+  return false;
 }
 
 async function triggerMsRerun(jobId, opts) {
@@ -189,10 +212,13 @@ async function triggerMsRerun(jobId, opts) {
       }
     } else {
       _msNotifyRevisionInFlight(jobId);
+      var refreshed = await _msRefreshReportingAfterRevision(jobId);
       showToast(
-        "Revise Pack requested from " +
-          ((result && result.addressed_count) || 0) +
-          " feedback note(s).",
+        refreshed
+          ? "Revised pack loaded with fresh PDFs."
+          : ("Revise Pack requested from " +
+            ((result && result.addressed_count) || 0) +
+            " feedback note(s)."),
         "success",
       );
     }

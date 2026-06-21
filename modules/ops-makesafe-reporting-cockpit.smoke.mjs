@@ -124,6 +124,7 @@ const exposed = [
   "_msReportingHideJobFromActiveList",
   "_msSwitchDocTab",
   "_msReportingSubjectHasReviewMarker",
+  "_msGetPhotoApprovalState",
   "_msTogglePhotoApproval",
 ];
 const wrapped = '"use strict";\n' + code + "\nreturn { " +
@@ -288,6 +289,17 @@ mod._msTogglePhotoApproval("job-1", "https://example.com/p2.jpg");
 check(
   "clicking a photo excludes it from the selected set",
   !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
+);
+mod._msGetPhotoApprovalState("job-1", [
+  { url: "https://example.com/p1.jpg?v=fresh" },
+  { url: "https://example.com/p2.jpg?v=fresh" },
+]);
+check(
+  "photo approval state reconciles refreshed urls without re-approving excluded photos",
+  Object.keys(mod._msPhotoApprovalState["job-1"].approved).length === 1 &&
+    mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg?v=fresh"] &&
+    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg?v=fresh"] &&
+    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"],
 );
 check(
   "detail carousel renders the work-order url",

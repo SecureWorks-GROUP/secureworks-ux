@@ -36,6 +36,10 @@ function _msJsAttr(s) {
   return escapeAttr(_msJsStr(s));
 }
 
+function _msPhotoApprovalKey(url) {
+  return String(url == null ? '' : url).split('?')[0].split('#')[0].trim();
+}
+
 function _msReportingCanonicalBuilderName(d) {
   var name = d && (d.builder || d.requesting_company_name || d.builder_company || '');
   var ref = String(d && (d.external_ref || d.builder_ref || d.reference || '') || '').toUpperCase();
@@ -1257,10 +1261,46 @@ function _msGetAllPhotos(d) {
  * start as approved (opt-out model per the contract).
  */
 function _msGetPhotoApprovalState(jobId, allPhotos) {
-  if (!_msPhotoApprovalState[jobId]) {
-    var approvedSet = {};
-    allPhotos.forEach(function(p) { if (p && p.url) approvedSet[p.url] = true; });
-    _msPhotoApprovalState[jobId] = { approved: approvedSet };
+  allPhotos = allPhotos || [];
+  var existing = _msPhotoApprovalState[jobId] || null;
+  var previousApproved = (existing && existing.approved) || {};
+  var previousKnown = (existing && existing.known) || {};
+  var previousKnownKeys = (existing && existing.knownKeys) || {};
+  var previousApprovedKeys = {};
+  Object.keys(previousApproved).forEach(function(url) {
+    var key = _msPhotoApprovalKey(url);
+    if (key) previousApprovedKeys[key] = previousApproved[url] === true;
+  });
+
+  var approvedSet = {};
+  var knownSet = {};
+  var knownKeys = {};
+  allPhotos.forEach(function(p) {
+    if (!p || !p.url) return;
+    var url = p.url;
+    var key = _msPhotoApprovalKey(url);
+    knownSet[url] = true;
+    if (key) knownKeys[key] = true;
+
+    if (Object.prototype.hasOwnProperty.call(previousApproved, url)) {
+      if (previousApproved[url]) approvedSet[url] = true;
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(previousKnown, url)) {
+      // Seen before and absent from approved => operator excluded it.
+      return;
+    }
+    if (key && Object.prototype.hasOwnProperty.call(previousKnownKeys, key)) {
+      // Same underlying photo with a fresh signed/cache-busted URL. Carry the
+      // previous decision across without keeping stale URL keys in the count.
+      if (previousApprovedKeys[key]) approvedSet[url] = true;
+      return;
+    }
+    approvedSet[url] = true;
+  });
+
+  if (!existing || existing.approved !== approvedSet) {
+    _msPhotoApprovalState[jobId] = { approved: approvedSet, known: knownSet, knownKeys: knownKeys };
   }
   return _msPhotoApprovalState[jobId];
 }
@@ -1272,6 +1312,11 @@ function _msGetPhotoApprovalState(jobId, allPhotos) {
 function _msTogglePhotoApproval(jobId, photoUrl) {
   if (!_msPhotoApprovalState[jobId]) return;
   var state = _msPhotoApprovalState[jobId];
+  state.known = state.known || {};
+  state.knownKeys = state.knownKeys || {};
+  state.known[photoUrl] = true;
+  var key = _msPhotoApprovalKey(photoUrl);
+  if (key) state.knownKeys[key] = true;
   if (state.approved[photoUrl]) {
     delete state.approved[photoUrl];
   } else {
@@ -1367,7 +1412,7 @@ function _msUpdateSendButtonPhotoGate(jobId) {
   var d = _msReportingCache[jobId];
   if (!d) return;
   var allPhotos = _msGetAllPhotos(d);
-  var state = _msPhotoApprovalState[jobId] || { approved: {} };
+  var state = _msGetPhotoApprovalState(jobId, allPhotos);
   var approvedCount = Object.keys(state.approved).length;
   var hasPhotos = allPhotos.length > 0;
   var hasApproved = approvedCount > 0;

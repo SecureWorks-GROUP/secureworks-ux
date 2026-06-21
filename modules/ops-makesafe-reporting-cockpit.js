@@ -361,7 +361,7 @@ function showMsReportingDetail(jobId, targetPanelId) {
 
   // ── PHOTOS AT THE BOTTOM (mandatory approval gate) ─────────────────────────
   // Reuses _msRenderPhotoApproval (grid + approve/exclude + count + send gate).
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; approve which go in the pack (mandatory)</div>';
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; approve send photos (report PDF capped at 8)</div>';
   html += '<div style="padding:0 20px;">' + _msRenderPhotoApprovalBody(d, d.job_id) + '</div>';
 
   // ── DRAFT FEEDBACK / REVISE PACK ─────────────────────────────────────────
@@ -1345,12 +1345,19 @@ function _msRenderPhotoApprovalInner(d, jobId) {
   var state = _msGetPhotoApprovalState(jobId, allPhotos);
   var approvedCount = Object.keys(state.approved).length;
   var excludedCount = allPhotos.length - approvedCount;
+  var reportLimit = _msReportPhotoLimit(d);
+  var reportIncludedCount = Math.min(approvedCount, reportLimit);
   var html = '';
   // Count line (matches the ref .photocount).
   html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">';
-  html += approvedCount + ' of ' + allPhotos.length + ' photos approved';
+  html += approvedCount + ' of ' + allPhotos.length + ' photos approved for send/review';
   if (excludedCount > 0) html += ' &middot; ' + excludedCount + ' excluded';
-  html += '. ';
+  html += '. Report PDF includes up to ' + reportLimit + ' photos';
+  if (approvedCount > reportLimit) {
+    html += ' (' + reportIncludedCount + ' in the report PDF; extras remain photo evidence/follow-up). ';
+  } else {
+    html += '. ';
+  }
   if (approvedCount === 0) {
     html += '<strong style="color:#B91C1C;">At least one photo must be approved to send.</strong>';
   }
@@ -1377,6 +1384,15 @@ function _msRenderPhotoApprovalInner(d, jobId) {
   return html;
 }
 
+function _msReportPhotoLimit(d) {
+  var raw = d && (d.report_photo_limit || d.photo_limit ||
+    (d.report && d.report.photo_limit) ||
+    (d.draft_pack && d.draft_pack.report && d.draft_pack.report.photo_limit));
+  var n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) n = 8;
+  return Math.max(1, Math.min(8, Math.round(n)));
+}
+
 /**
  * Build the outer photo-approval container (heading + section div with id for re-render).
  * Kept for any caller that wants the labelled card; the integrated review screen uses
@@ -1397,7 +1413,7 @@ function _msRenderPhotoApproval(d, jobId) {
 /**
  * The photo-approval section body only (no heading) — the re-renderable container
  * with the stable section id. Used by the integrated review screen which supplies its
- * own "Photos — approve which go in the pack (mandatory)" section label.
+ * own "Photos — approve send photos (report PDF capped at 8)" section label.
  */
 function _msRenderPhotoApprovalBody(d, jobId) {
   var safeJobIdAttr = escapeAttr(jobId).replace(/-/g, '_');

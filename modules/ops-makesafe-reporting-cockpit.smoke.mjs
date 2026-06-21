@@ -285,6 +285,11 @@ check(
     mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"] &&
     mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
 );
+check(
+  "photo approval copy explains the report PDF eight-photo cap",
+  detailHtml.includes("approve send photos (report PDF capped at 8)") &&
+    detailHtml.includes("Report PDF includes up to 8 photos"),
+);
 mod._msTogglePhotoApproval("job-1", "https://example.com/p2.jpg");
 check(
   "clicking a photo excludes it from the selected set",

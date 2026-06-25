@@ -4690,6 +4690,11 @@
     job = job || {};
     var detail = job.makesafe_details || {};
     var md = job.metadata || {};
+    var family = job.makesafe_job_family || job.makesafeJobFamily || detail.makesafe_job_family || detail.makesafeJobFamily || md.makesafe_job_family || md.makesafeJobFamily || '';
+    if (family === 'assessment_report_quote') return 'Assessment / quote';
+    if (family === 'roof_report') return 'Roof report';
+    if (family === 'temp_fence_makesafe') return 'Temp fence';
+    if (family === 'general_makesafe') return 'Make Safe';
     var direct = job.makesafe_type_detail || job.makesafe_type_other || job.custom_makesafe_type || job.make_safe_type_detail || job.makesafe_type || job.job_type || job.scope_type || job.work_type || job.service_type || job.damage_type || job.make_safe_type ||
       detail.makesafe_type_detail || detail.makesafe_type_other || detail.custom_makesafe_type || detail.make_safe_type_detail || detail.makesafe_type || detail.job_type || detail.scope_type || detail.work_type || detail.service_type || detail.damage_type || detail.category || detail.make_safe_type ||
       md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || md.makesafe_type || md.job_type || md.scope_type || md.work_type || md.service_type || md.damage_type || md.category || md.make_safe_type;
@@ -6584,6 +6589,44 @@
     return out;
   }
 
+  function mergeTradeExternalLinks() {
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < arguments.length; i++) {
+      normaliseTradeExternalLinks(arguments[i]).forEach(function(link) {
+        var key = String(link.url || '').trim();
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        out.push(link);
+      });
+    }
+    return out;
+  }
+
+  function linkifyTradeBodyText(text) {
+    text = String(text || '');
+    if (!text) return '';
+    var re = /((?:https?:\/\/|www\.)[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/ig;
+    var out = '';
+    var last = 0;
+    var match;
+    while ((match = re.exec(text))) {
+      out += esc(text.slice(last, match.index));
+      var raw = match[0];
+      var trailing = '';
+      while (/[),.;!?]$/.test(raw)) {
+        trailing = raw.slice(-1) + trailing;
+        raw = raw.slice(0, -1);
+      }
+      var href = raw.indexOf('@') !== -1 && !/^https?:\/\//i.test(raw) && !/^www\./i.test(raw) ? ('mailto:' + raw) : raw;
+      if (/^www\./i.test(href)) href = 'https://' + href;
+      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px;word-break:break-all">' + esc(raw) + '</a>' + esc(trailing);
+      last = re.lastIndex;
+    }
+    out += esc(text.slice(last));
+    return out;
+  }
+
   function getMakesafeBuilderEmailText(ms) {
     ms = ms || {};
     var source = ms.source_email || {};
@@ -6598,6 +6641,29 @@
       source.sanitized_text_for_trade,
       source.text_for_trade,
       source.body_text_for_trade
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var value = String(candidates[i] || '').trim();
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function getMakesafeSourceReceivedAt(ms, job) {
+    ms = ms || {};
+    job = job || {};
+    var source = ms.source_email || {};
+    var candidates = [
+      ms.builder_email_received_at,
+      ms.source_email_received_at,
+      ms.received_at,
+      ms.receivedAt,
+      source.received_at,
+      source.receivedAt,
+      source.created_at,
+      job.received_at,
+      job.intake_date,
+      job.created_at
     ];
     for (var i = 0; i < candidates.length; i++) {
       var value = String(candidates[i] || '').trim();
@@ -6637,16 +6703,20 @@
     var email = firstMakesafeEmail(ms, job);
     var source = ms.source_email || {};
     var emailText = getMakesafeBuilderEmailText(ms);
+    var receivedAt = getMakesafeSourceReceivedAt(ms, job);
+    var familyLabel = getTradeMakesafeTypeLabel(Object.assign({}, job, { makesafe_details: ms }));
     var emailLabel = source.from_email ? 'Original email' : 'Builder email';
-    var links = normaliseTradeExternalLinks(ms.external_links || ms.links || ms.attachments || ms.source_links);
+    var links = mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, source.links, source.source_email_links, source.portal_links, ms.portal_links);
     var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
     var h = '<div class="detail-section" style="margin:0 16px 12px;padding:14px;background:var(--sw-light);border-radius:12px;border-left:4px solid var(--sw-red);">';
     h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Make-Safe Details</div>';
+    if (familyLabel) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Family:</strong> ' + esc(familyLabel) + '</div>';
     if (companyName) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>From:</strong> ' + esc(companyName) + '</div>';
     if (email) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>' + emailLabel + ':</strong> <a href="mailto:' + esc(email) + '" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px">' + esc(email) + '</a></div>';
     if (source.subject) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Source subject:</strong> ' + esc(source.subject) + '</div>';
+    if (receivedAt) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Received:</strong> ' + esc(formatDateTime(receivedAt)) + '</div>';
     if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
-    if (emailText) h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;"><strong>Original email instructions:</strong><br>' + esc(emailText) + '</div>';
+    if (emailText) h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;"><strong>Source builder email (untrusted):</strong><br>' + linkifyTradeBodyText(emailText) + '</div>';
     if (ms.special_instructions) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + esc(ms.special_instructions) + '</div>';
     if (ms.safety_requirements) h += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + esc(ms.safety_requirements) + '</div>';
     if (ms.substatus && subLabels[ms.substatus]) {
@@ -6655,7 +6725,7 @@
     if (links.length) {
       h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
       links.forEach(function(link) {
-        h += '<a href="' + esc(link.url) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--sw-mid);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;min-height:36px;">' + esc(link.label) + ' &#8599;</a>';
+        h += '<a href="' + esc(link.url) + '" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--sw-mid);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;min-height:36px;">' + esc(link.label) + ' &#8599;</a>';
       });
       h += '</div>';
     }
@@ -8897,11 +8967,23 @@
     var addr = [job.site_address, job.site_suburb].filter(Boolean).join(', ');
     if (addr) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Site:</strong> ' + esc(addr) + '</div>';
     var company = ms.requesting_company_name || (ms.requesting_company && ms.requesting_company.name) || (ms.makesafe_companies && ms.makesafe_companies.name) || job.client_name || '';
+    var familyLabel = getTradeMakesafeTypeLabel(Object.assign({}, job, { makesafe_details: ms }));
+    var receivedAt = getMakesafeSourceReceivedAt(ms, job);
+    if (familyLabel) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Family:</strong> ' + esc(familyLabel) + '</div>';
     if (company) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>From:</strong> ' + esc(company) + '</div>';
+    if (receivedAt) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:6px"><strong>Received:</strong> ' + esc(formatDateTime(receivedAt)) + '</div>';
     if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
     var builderEmailText = getMakesafeBuilderEmailText(ms);
     if (builderEmailText) {
-      h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Original email instructions:</strong><br>' + esc(builderEmailText) + '</div>';
+      h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Source builder email (untrusted):</strong><br>' + linkifyTradeBodyText(builderEmailText) + '</div>';
+    }
+    var sourceLinks = mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, ms.portal_links, ms.source_email && ms.source_email.links, ms.source_email && ms.source_email.portal_links);
+    if (sourceLinks.length) {
+      h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+      sourceLinks.forEach(function(link) {
+        h += '<a href="' + esc(link.url) + '" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--sw-mid);color:#fff;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;min-height:36px;">' + esc(link.label) + ' &#8599;</a>';
+      });
+      h += '</div>';
     }
     if (wo.special_instructions || ms.special_instructions || job.notes) {
       h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px">' + esc(wo.special_instructions || ms.special_instructions || job.notes) + '</div>';

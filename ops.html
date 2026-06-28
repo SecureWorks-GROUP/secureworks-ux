@@ -9715,8 +9715,22 @@ function _makesafeTextFromValue(value) {
   }
   return String(value || '');
 }
+function getMakesafeFamilyLabel(family) {
+  family = String(family || '').trim();
+  if (family === 'assessment_report_quote') return 'Assessment / Quote Report';
+  if (family === 'roof_report') return 'Roof Report';
+  if (family === 'temp_fence_makesafe') return 'Temporary Fence MakeSafe';
+  if (family === 'general_makesafe') return 'MakeSafe';
+  return '';
+}
 function getMakesafeTypeLabel(j, mdOverride) {
   var md = mdOverride || j.makesafe_details || j.metadata || {};
+  // Prefer the canonical intake family saved by the backend. Notes often contain
+  // words like “fence” for assessment/quote report jobs, which made Ops detail
+  // mislabel report-only cards as TEMP FENCE even though the live job family was
+  // assessment_report_quote.
+  var familyLabel = md.makesafe_job_family_label || j.makesafe_job_family_label || getMakesafeFamilyLabel(md.makesafe_job_family || j.makesafe_job_family);
+  if (familyLabel) return familyLabel;
   var direct = j.makesafe_type_detail || j.makesafe_type_other || j.custom_makesafe_type || j.make_safe_type_detail || j.makesafe_type || j.job_type || j.scope_type || j.work_type || j.service_type || md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || md.makesafe_type || md.job_type || md.scope_type || md.work_type || md.service_type || md.damage_type || md.category;
   var customType = md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || '';
   if (/^other$/i.test(String(direct || '').trim()) && customType) direct = customType;
@@ -9812,7 +9826,9 @@ function getMakesafeAssignmentRows(j) {
 function makesafeAssignmentName(v) {
   if (!v) return '';
   if (typeof v === 'string') return v;
-  return v.crew_label || v.crew_name || v.assigned_trade || v.assigned_to || v.trade_name || v.user_name || v.name || (v.user && (v.user.name || v.user.email)) || '';
+  return v.crew_label || v.crew_name || v.assigned_trade || v.assigned_to || v.trade_name || v.user_name || v.name
+    || (v.users && (v.users.name || v.users.email))
+    || (v.user && (v.user.name || v.user.email)) || '';
 }
 // A "ghost" is the ops manager (Shaun), attached to make-safes for oversight but not
 // actually on-site crew. They are kept on the job (so they still see it) but excluded
@@ -15507,6 +15523,34 @@ function renderMakesafeDocViewer(data) {
   return html;
 }
 
+function renderMakesafeOpsExternalLinks(md) {
+  var links = [];
+  function add(item, fallbackLabel) {
+    if (!item) return;
+    var url = typeof item === 'string' ? item : (item.url || item.href || item.link || '');
+    url = String(url || '').trim();
+    if (!url || !/^(https?:|mailto:|tel:)/i.test(url)) return;
+    var label = typeof item === 'string' ? fallbackLabel : (item.label || item.name || item.title || fallbackLabel || 'Open link');
+    var key = url.toLowerCase();
+    if (links.some(function(l) { return l.key === key; })) return;
+    links.push({ key: key, label: label, url: url });
+  }
+  [md.external_links, md.source_links, md.source_email_links, md.portal_links].forEach(function(raw) {
+    if (Array.isArray(raw)) raw.forEach(function(item, idx) { add(item, 'Link ' + (idx + 1)); });
+    else if (raw && typeof raw === 'object') Object.keys(raw).forEach(function(label) { add(raw[label], label); });
+    else if (raw) add(raw, 'Open link');
+  });
+  if (!links.length) return '';
+  var html = '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);border-left:4px solid #0E7C7B;">';
+  html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Builder links</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+  links.forEach(function(link) {
+    html += '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="text-decoration:none;font-size:12px;">' + escapeHtml(link.label || 'Open link') + ' &#8599;</a>';
+  });
+  html += '</div></div>';
+  return html;
+}
+
 function renderMakesafeOpsDetail(data) {
   var j = data.job || {};
   var md = data.makesafe_details || j.makesafe_details || j.metadata || {};
@@ -15515,7 +15559,7 @@ function renderMakesafeOpsDetail(data) {
   var age = getMakesafeAgeParts(j, stage);
   var builder = getMakesafeBuilder(Object.assign({}, j, { makesafe_details: md })) || 'Builder TBC';
   var suburb = j.site_suburb || j.suburb || 'Suburb TBC';
-  var typeLabel = getMakesafeTypeLabel(j, md);
+  var typeLabel = getMakesafeTypeLabel(Object.assign({}, j, { makesafe_job_family_label: md.makesafe_job_family_label, makesafe_job_family: md.makesafe_job_family }), md);
   var docs = data.documents || [];
   var workOrders = data.work_orders || [];
   var workOrderDocs = docs.filter(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; });
@@ -15526,7 +15570,7 @@ function renderMakesafeOpsDetail(data) {
   var invoices = (data.invoices || []).filter(function(inv) { return inv.invoice_type === 'ACCREC' && ['VOIDED','DELETED'].indexOf(inv.status) < 0; });
   var invoiceDocs = docs.filter(isMakesafeInvoiceDoc);
   var intake = getMakesafeIntakeDate(j);
-  var crew = getMakesafeCrewLabel(j) || 'unallocated';
+  var crew = getMakesafeCrewLabel(Object.assign({}, j, { assignments: data.assignments || j.assignments || [], job_assignments: data.job_assignments || j.job_assignments || [] })) || 'unallocated';
   var day = getMakesafeDayLabel(j);
   function makesafeAdminNoteText(ev) {
     var d = ev && ev.detail_json;
@@ -15572,6 +15616,8 @@ function renderMakesafeOpsDetail(data) {
   if (j.site_address) html += '<a href="https://maps.google.com/?q=' + encodeURIComponent((j.site_address||'') + (suburb ? ', ' + suburb : '')) + '" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none;">Navigate</a>';
   html += '</div>';
   html += '</div>';
+
+  html += renderMakesafeOpsExternalLinks(md);
 
   if (adminNotes.length) {
     html += '<div style="background:#F5F3FF;border:1px solid #DDD6FE;color:#4C1D95;padding:10px 12px;margin-bottom:12px;font-size:12px;box-shadow:var(--sw-shadow);">';

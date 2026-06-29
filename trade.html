@@ -4691,10 +4691,10 @@
     var detail = job.makesafe_details || {};
     var md = job.metadata || {};
     var family = job.makesafe_job_family || job.makesafeJobFamily || detail.makesafe_job_family || detail.makesafeJobFamily || md.makesafe_job_family || md.makesafeJobFamily || '';
-    if (family === 'assessment_report_quote') return 'Assessment / quote';
-    if (family === 'roof_report') return 'Roof report';
-    if (family === 'temp_fence_makesafe') return 'Temp fence';
-    if (family === 'general_makesafe') return 'Make Safe';
+    if (family === 'assessment_report_quote') return 'Assessment / Quote Report';
+    if (family === 'roof_report') return 'Roof Report';
+    if (family === 'temp_fence_makesafe') return 'Temporary Fence MakeSafe';
+    if (family === 'general_makesafe') return 'MakeSafe';
     var direct = job.makesafe_type_detail || job.makesafe_type_other || job.custom_makesafe_type || job.make_safe_type_detail || job.makesafe_type || job.job_type || job.scope_type || job.work_type || job.service_type || job.damage_type || job.make_safe_type ||
       detail.makesafe_type_detail || detail.makesafe_type_other || detail.custom_makesafe_type || detail.make_safe_type_detail || detail.makesafe_type || detail.job_type || detail.scope_type || detail.work_type || detail.service_type || detail.damage_type || detail.category || detail.make_safe_type ||
       md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || md.makesafe_type || md.job_type || md.scope_type || md.work_type || md.service_type || md.damage_type || md.category || md.make_safe_type;
@@ -4702,13 +4702,10 @@
     if (/^other$/i.test(String(direct || '').trim()) && customType) direct = customType;
     var text = tradeMakesafeTextFromValue(direct) || tradeMakesafeTextFromValue(detail) || tradeMakesafeTextFromValue(md.scope) || tradeMakesafeTextFromValue(md.scope_json) || tradeMakesafeTextFromValue(job.scope_json) || tradeMakesafeTextFromValue(job.description) || tradeMakesafeTextFromValue(job.notes) || '';
     var lower = text.toLowerCase();
-    if (/temp(orary)?\s+fenc|make\s*safe\s*fenc|\bfenc(e|ing)?\b/.test(lower)) return 'Temp fence';
-    if (/roof|tile|tarp|sheeting|water ingress/.test(lower)) return 'Roof make safe';
-    if (/ceiling|collapse|cornice|gyprock|plaster/.test(lower)) return 'Ceiling collapse';
-    if (/board[-\s]?up|board up|window|glazier|glass|door/.test(lower)) return 'Board up';
-    if (/tree|storm|impact|structural|prop|brace/.test(lower)) return 'Structural make safe';
-    if (typeof direct === 'string' && direct.trim()) return direct.trim().replace(/[_-]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-    return 'Make Safe';
+    if (/temp(orary)?\s+fenc|fenc(e|ing)?\s*(collect|pickup|pick\s*up|retriev)|collect\s+.*fenc|pick\s*up\s+.*fenc|pickup\s+.*fenc|retriev\w*\s+.*fenc/.test(lower)) return 'Temporary Fence MakeSafe';
+    if (/\b(roof\s+(report|assessment\s*report|inspection\s*report)|report\s+.*\broof\b|prime\s+roof\s+report|single\s+storey\s+roof\s+report|two\s+storey\s+roof\s+report|cause\s+of\s+damage\/point\s+of\s+water\s+entry)\b/.test(lower)) return 'Roof Report';
+    if (/\b(assessment\s*(report)?|assess\s+and\s+quote|inspect\s+and\s+(provide\s+)?quote|inspection\s+and\s+assessment|contractor\s+(inspection|assessment)|quote\s*(request|link|report)?|quotation|scope\s+of\s+works?)\b/.test(lower)) return 'Assessment / Quote Report';
+    return 'MakeSafe';
   }
 
   function getTradeStandardTypeLabel(job, type) {
@@ -12241,7 +12238,7 @@
     if (jn.startsWith('SWP')) return 'Patio';
     if (jn.startsWith('SWF')) return 'Fencing';
     if (jn.startsWith('SWD')) return 'Decking';
-    if (jn.startsWith('SWM')) return 'Make Safe';
+    if (jn.startsWith('SWM')) return 'MakeSafe';
     return 'General Labour';
   }
 

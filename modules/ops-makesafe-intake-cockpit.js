@@ -219,7 +219,7 @@ function showMsIntakeDetail(draftId, targetPanelId) {
   html += renderMsCockpitInput('site_suburb', 'Suburb', intakeFieldValue(d, 'site_suburb'), false, false);
   html += '</div>';
   html += renderMsCockpitInput('site_address', 'Site address', intakeFieldValue(d, 'site_address'), true, false);
-  html += renderMsCockpitInput('makesafe_type', 'MakeSafe type', intakeFieldValue(d, 'makesafe_type'), false, false, 'Example: temp fence, roof make safe, ceiling collapse, structural make safe.');
+  html += renderMsCockpitInput('makesafe_type', 'Scope detail', intakeFieldValue(d, 'makesafe_type'), false, false, 'Describe the work if useful. Canonical family is limited to Assessment / Quote Report, Roof Report, Temporary Fence MakeSafe, or MakeSafe.');
   html += renderMsCockpitInput('description', 'Scope / work-order summary', intakeFieldValue(d, 'description'), false, true);
   html += renderMsCockpitInput('safety_requirements', 'Safety / access notes', intakeFieldValue(d, 'safety_requirements'), false, true);
 

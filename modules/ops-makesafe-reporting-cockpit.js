@@ -241,7 +241,12 @@ function showMsReportingDetail(jobId, targetPanelId) {
   var html = '';
 
   // ── JOB HEADER ─────────────────────────────────────────────────────────────
-  var typeLabel = (d.makesafe_type || d.makesafe_type_detail || d.job_type || 'Make safe');
+  // Prefer the stored family (consistent with getMakesafeTypeLabel in ops.html).
+  var _rawFamily = d.makesafe_job_family;
+  var _familyLabel = d.makesafe_job_family_label ||
+    (typeof getMakesafeFamilyLabel === 'function' ? getMakesafeFamilyLabel(_rawFamily) : '') ||
+    (_rawFamily ? String(_rawFamily).replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : '');
+  var typeLabel = _familyLabel || d.makesafe_type || d.makesafe_type_detail || d.job_type || 'Make safe';
   typeLabel = String(typeLabel).toUpperCase();
   html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:16px 20px;background:#fff;border-bottom:1px solid var(--sw-border);">';
   html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:700;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';

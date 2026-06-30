@@ -14962,7 +14962,10 @@ function renderHealthBar(data) {
   html += '<span class="jd-job-id">' + (j.job_number || '') + '</span>';
   html += '<span class="jd-client-name">' + escapeHtml(j.client_name || 'Unknown') + '</span>';
   html += '<span class="jd-suburb">' + escapeHtml(j.site_suburb || '') + '</span>';
-  html += '<span class="jd-type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
+  // For makesafe jobs use the specific family label (e.g. "Assessment / Quote Report"),
+  // not the generic job_type string "makesafe" that typeBadgeLabel would produce.
+  var _jdTypeText = j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type);
+  html += '<span class="jd-type-badge ' + j.type + '">' + _jdTypeText + '</span>';
   html += '<span class="jd-status-badge" style="background:transparent;color:' + (STATUS_COLORS[j.status] || '#999') + ';border:1px solid ' + (STATUS_COLORS[j.status] || '#999') + '40">' + (STATUS_LABELS[j.status] || j.status) + '</span>';
   document.getElementById('jdHealthTop').innerHTML = html;
 }
@@ -15609,7 +15612,10 @@ function renderMakesafeOpsDetail(data) {
   var age = getMakesafeAgeParts(j, stage);
   var builder = getMakesafeBuilder(Object.assign({}, j, { makesafe_details: md })) || 'Builder TBC';
   var suburb = j.site_suburb || j.suburb || 'Suburb TBC';
-  var typeLabel = getMakesafeTypeLabel(Object.assign({}, j, { makesafe_job_family_label: md.makesafe_job_family_label, makesafe_job_family: md.makesafe_job_family }), md);
+  // Call without md override so getMakesafeTypeLabel can fall through to j.metadata,
+  // where job_detail places makesafe_job_family_label (data.makesafe_details has neither
+  // family field, so passing it as override squashes the j.metadata fallback).
+  var typeLabel = getMakesafeTypeLabel(j);
   var docs = data.documents || [];
   var workOrders = data.work_orders || [];
   var workOrderDocs = docs.filter(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; });

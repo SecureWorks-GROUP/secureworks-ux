@@ -1431,7 +1431,7 @@
       border: 1px solid var(--sw-border);
       border-top: 3px solid var(--ms-type, var(--sw-mid));
       border-radius: 12px;
-      padding: 9px 12px 10px;
+      padding: 7px 10px 7px;
       box-shadow: 0 1px 2px rgba(41,60,70,0.05);
       overflow: visible;
     }
@@ -1453,18 +1453,18 @@
     .ms-card-v2.t-default { --ms-type: var(--sw-mid); }
 
     /* ── Top line: type tag + age pill ── */
-    .ms-card-v2 .ms-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ms-card-v2 .ms-top { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
     .ms-card-v2 .ms-ttag {
-      font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+      font-size: 8px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
       color: var(--ms-type, var(--sw-mid));
       background: color-mix(in srgb, var(--ms-type, var(--sw-mid)) 12%, #fff);
-      padding: 2px 8px; border-radius: 100px; white-space: nowrap;
+      padding: 1px 6px; border-radius: 100px; white-space: nowrap;
     }
     /* age / KPI pill — muted age inside the KPI, escalating with health */
     .ms-card-v2 .ms-age-pill {
-      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
-      font-size: 10px; font-weight: 800; letter-spacing: 0.2px;
-      padding: 2px 8px; border-radius: 100px;
+      display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;
+      font-size: 9px; font-weight: 800; letter-spacing: 0.2px;
+      padding: 1px 6px; border-radius: 100px;
       background: var(--sw-warm-200); color: var(--sw-mid); flex-shrink: 0;
     }
     .ms-card-v2 .ms-age-pill.green   { background: var(--sw-warm-200); color: var(--sw-mid); }
@@ -1475,23 +1475,23 @@
     .ms-card-v2 .ms-age-pill .ms-warn-ic { font-size: 9px; font-weight: 900; }
 
     /* ── Identity: suburb + builder ── */
-    .ms-card-v2 .ms-suburb { font-size: 15px; font-weight: 800; color: var(--sw-dark); margin-top: 6px; letter-spacing: -0.25px; line-height: 1.0; }
-    .ms-card-v2 .ms-builder { font-size: 11.5px; color: var(--sw-mid); font-weight: 600; margin-top: 1px; }
+    .ms-card-v2 .ms-suburb { font-size: 12px; font-weight: 800; color: var(--sw-dark); margin-top: 3px; letter-spacing: -0.1px; line-height: 1.15; }
+    .ms-card-v2 .ms-builder { font-size: 9px; color: var(--sw-mid); font-weight: 600; margin-top: 0; }
 
     /* ── Inline job-number row (condensed): builder ref + our # on a single
        line, no box. Smaller footprint than the old inset panel; "our #"
        label tinted brand orange so which-is-which reads instantly. ── */
     .ms-card-v2 .ms-refs-inline {
-      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-      margin-top: 7px; line-height: 1.15;
+      display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+      margin-top: 2px; line-height: 1.15;
     }
-    .ms-card-v2 .ms-ri { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+    .ms-card-v2 .ms-ri { display: inline-flex; align-items: baseline; gap: 3px; min-width: 0; }
     .ms-card-v2 .ms-ri-lbl {
-      font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+      font-size: 7px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
       color: var(--sw-text-sec); flex-shrink: 0;
     }
     .ms-card-v2 .ms-ri-val {
-      font-size: 12px; font-weight: 800; color: var(--sw-dark);
+      font-size: 10px; font-weight: 800; color: var(--sw-dark);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .ms-card-v2 .ms-ri.ours .ms-ri-lbl { color: var(--sw-orange); }
@@ -1499,39 +1499,39 @@
 
     /* ── Meta line: intake / client ── */
     .ms-card-v2 .ms-meta {
-      display: flex; gap: 10px; flex-wrap: wrap;
-      font-size: 10.5px; color: var(--sw-text-sec); margin-top: 6px;
+      display: flex; gap: 6px; flex-wrap: wrap;
+      font-size: 9px; color: var(--sw-text-sec); margin-top: 2px;
     }
     .ms-card-v2 .ms-meta b { color: var(--sw-mid); font-weight: 700; }
 
     /* ── Loud "past SLA" banner (the approved breach treatment) ── */
     .ms-card-v2 .ms-sla-banner {
-      display: flex; align-items: center; gap: 7px; margin-top: 9px;
+      display: flex; align-items: center; gap: 5px; margin-top: 4px;
       background: color-mix(in srgb, var(--sw-red) 10%, #fff); color: var(--sw-red);
-      font-size: 10.5px; font-weight: 800; padding: 6px 9px; border-radius: 7px;
+      font-size: 9px; font-weight: 800; padding: 3px 6px; border-radius: 5px;
     }
     .ms-card-v2 .ms-sla-banner .ms-sla-ic {
-      width: 14px; height: 14px; border-radius: 4px; background: var(--sw-red); color: #fff;
-      display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 900; flex-shrink: 0;
+      width: 11px; height: 11px; border-radius: 3px; background: var(--sw-red); color: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 7px; font-weight: 900; flex-shrink: 0;
     }
 
     /* ── 2A crew chip (avatar initials + name + assign date) ── */
-    .ms-card-v2 .ms-block { margin-top: 8px; border-top: 1px solid var(--sw-light); padding-top: 8px; }
-    .ms-card-v2 .ms-crew-chip { display: flex; align-items: center; gap: 9px; }
+    .ms-card-v2 .ms-block { margin-top: 5px; border-top: 1px solid var(--sw-light); padding-top: 5px; }
+    .ms-card-v2 .ms-crew-chip { display: flex; align-items: center; gap: 6px; }
     .ms-card-v2 .ms-avatars { display: flex; flex-shrink: 0; }
     .ms-card-v2 .ms-av {
-      width: 23px; height: 23px; border-radius: 50%; background: var(--sw-mid);
-      color: #fff; font-size: 9.5px; font-weight: 800; display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 0 0 2px var(--sw-card); margin-left: -7px;
+      width: 18px; height: 18px; border-radius: 50%; background: var(--sw-mid);
+      color: #fff; font-size: 7.5px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 2px var(--sw-card); margin-left: -5px;
     }
     .ms-card-v2 .ms-av:first-child { margin-left: 0; }
-    .ms-card-v2 .ms-crew-txt { line-height: 1.15; min-width: 0; }
-    .ms-card-v2 .ms-crew-name { font-size: 12.5px; font-weight: 800; color: var(--sw-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ms-card-v2 .ms-crew-when { font-size: 10px; font-weight: 600; color: var(--sw-text-sec); }
+    .ms-card-v2 .ms-crew-txt { line-height: 1.1; min-width: 0; }
+    .ms-card-v2 .ms-crew-name { font-size: 10.5px; font-weight: 800; color: var(--sw-dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ms-card-v2 .ms-crew-when { font-size: 8px; font-weight: 600; color: var(--sw-text-sec); }
     .ms-card-v2 .ms-crew-chip.off .ms-av-empty {
-      width: 23px; height: 23px; border-radius: 50%; background: transparent; flex-shrink: 0;
+      width: 18px; height: 18px; border-radius: 50%; background: transparent; flex-shrink: 0;
       box-shadow: inset 0 0 0 1.5px var(--sw-mid-light);
-      display: flex; align-items: center; justify-content: center; color: var(--sw-mid-light); font-size: 13px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center; color: var(--sw-mid-light); font-size: 11px; font-weight: 800;
     }
     .ms-card-v2 .ms-crew-chip.off .ms-crew-name { color: var(--sw-mid-light); }
 
@@ -1542,28 +1542,28 @@
        pending = neutral warm chip; missing = soft-red chip + red "!"; N/A =
        faint dashed outline. A small X/5 count keeps the "complete?" feel.
        ════════════════════════════════════════════════════════════ */
-    .ms-card-v2 .ms-doc-wrap { margin-top: 8px; }
+    .ms-card-v2 .ms-doc-wrap { margin-top: 4px; }
     .ms-doc-top { display: flex; align-items: baseline; justify-content: space-between; }
-    .ms-doc-lbl { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sw-mid-light); }
-    .ms-doc-count { font-size: 11px; font-weight: 800; color: var(--sw-dark); }
+    .ms-doc-lbl { font-size: 7px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sw-mid-light); }
+    .ms-doc-count { font-size: 9px; font-weight: 800; color: var(--sw-dark); }
     .ms-doc-count.complete { color: var(--sw-sage-deep); }
-    .ms-doc-icons { display: flex; gap: 6px; margin-top: 6px; }
-    .ms-doc { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .ms-doc-icons { display: flex; gap: 4px; margin-top: 3px; }
+    .ms-doc { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .ms-doc-chip {
-      width: 100%; aspect-ratio: 1 / 1; max-width: 32px; border-radius: 8px;
+      width: 100%; aspect-ratio: 1 / 1; max-width: 24px; border-radius: 6px;
       display: flex; align-items: center; justify-content: center; position: relative;
     }
-    .ms-doc-chip svg { width: 16px; height: 16px; display: block; }
+    .ms-doc-chip svg { width: 11px; height: 11px; display: block; }
     .ms-doc-chip svg path, .ms-doc-chip svg line, .ms-doc-chip svg polyline,
     .ms-doc-chip svg rect, .ms-doc-chip svg circle, .ms-doc-chip svg polygon { stroke-width: 1.7; }
     /* state: DONE */
     .ms-doc.done .ms-doc-chip { background: var(--sw-sage-tint); }
     .ms-doc.done .ms-doc-chip svg { stroke: var(--sw-sage-deep); }
     .ms-doc.done .ms-doc-chip::after {
-      content: ""; position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px;
-      border-radius: 50%; background: var(--sw-sage); box-shadow: 0 0 0 2px var(--sw-card);
+      content: ""; position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--sw-sage); box-shadow: 0 0 0 1.5px var(--sw-card);
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
-      background-size: 8px 8px; background-repeat: no-repeat; background-position: center;
+      background-size: 6px 6px; background-repeat: no-repeat; background-position: center;
     }
     /* state: PENDING */
     .ms-doc.pending .ms-doc-chip { background: var(--sw-warm-200); }
@@ -1572,27 +1572,27 @@
     .ms-doc.missing .ms-doc-chip { background: color-mix(in srgb, var(--sw-red) 10%, #fff); }
     .ms-doc.missing .ms-doc-chip svg { stroke: var(--sw-red); }
     .ms-doc.missing .ms-doc-chip::after {
-      content: "!"; position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px;
-      border-radius: 50%; background: var(--sw-red); color: #fff; box-shadow: 0 0 0 2px var(--sw-card);
-      font-size: 8px; font-weight: 900; display: flex; align-items: center; justify-content: center; line-height: 1;
+      content: "!"; position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--sw-red); color: #fff; box-shadow: 0 0 0 1.5px var(--sw-card);
+      font-size: 6px; font-weight: 900; display: flex; align-items: center; justify-content: center; line-height: 1;
     }
     /* state: N/A */
     .ms-doc.na .ms-doc-chip { background: transparent; box-shadow: inset 0 0 0 1.4px #E2E9ED; }
     .ms-doc.na .ms-doc-chip svg { stroke: #C3CED5; }
-    .ms-doc-name { font-size: 7.5px; font-weight: 800; letter-spacing: 0.2px; text-transform: uppercase; color: var(--sw-mid-light); }
+    .ms-doc-name { font-size: 7px; font-weight: 800; letter-spacing: 0.2px; text-transform: uppercase; color: var(--sw-mid-light); }
     .ms-doc.done .ms-doc-name    { color: var(--sw-sage-deep); }
     .ms-doc.missing .ms-doc-name { color: var(--sw-red); }
     .ms-doc.na .ms-doc-name      { color: #C3CED5; }
 
     /* ── Action buttons ── */
     .ms-card-v2 .ms-btn-alloc {
-      width: 100%; font-size: 12px; padding: 7px; background: var(--sw-orange); color: #fff;
-      border: none; border-radius: 7px; cursor: pointer; font-weight: 800; margin-top: 8px; letter-spacing: 0.2px;
+      width: 100%; font-size: 10px; padding: 4px; background: var(--sw-orange); color: #fff;
+      border: none; border-radius: 5px; cursor: pointer; font-weight: 800; margin-top: 4px; letter-spacing: 0.2px;
     }
     .ms-card-v2 .ms-btn-alloc:hover { background: var(--sw-orange-hover); }
     .ms-card-v2 .ms-btn-reassign {
-      width: 100%; font-size: 12px; padding: 7px; background: #fff; color: var(--sw-mid);
-      border: 1.5px solid var(--sw-border); border-radius: 7px; cursor: pointer; font-weight: 800; margin-top: 8px;
+      width: 100%; font-size: 10px; padding: 4px; background: #fff; color: var(--sw-mid);
+      border: 1.5px solid var(--sw-border); border-radius: 5px; cursor: pointer; font-weight: 800; margin-top: 4px;
     }
     .ms-card-v2 .ms-btn-reassign:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
 

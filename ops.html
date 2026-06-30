@@ -8733,7 +8733,8 @@ async function loadJobs() {
   try {
     var params = {};
     if (_jobFilter) params.type = _jobFilter;
-    if (_jobSearch) params.search = _jobSearch;
+    // makesafe_pipeline does not support a search param; board search is client-side
+    if (_jobSearch && _pipelineTab !== 'makesafes') params.search = _jobSearch;
 
     if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
       await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
@@ -8787,7 +8788,7 @@ function setPipelineTab(tab) {
   // fresh load (with spinner) happens when the make-safe board is re-entered.
   if (typeof closeMakesafeIntakeOverlay === 'function') closeMakesafeIntakeOverlay();
   if (typeof closeMakesafeReportingOverlay === 'function') closeMakesafeReportingOverlay();
-  if (!isMakesafe) { _makesafeIntakeDrafts = []; _makesafeIntakeDraftsLoaded = false; }
+  if (!isMakesafe) { _makesafeIntakeDrafts = []; _makesafeIntakeDraftsLoaded = false; _makesafeBoardSearch = ''; }
   loadJobs();
 }
 
@@ -8799,6 +8800,12 @@ function setJobView(view) {
 }
 
 function searchJobs(q) {
+  // Make-safe kanban: instant client-side filter, no server round-trip
+  if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
+    _makesafeBoardSearch = (q || '').toLowerCase().trim();
+    if (_pipelineData) renderJobs(_pipelineData);
+    return;
+  }
   _jobSearch = q;
   clearTimeout(window._jobSearchTimer);
   window._jobSearchTimer = setTimeout(function() { loadJobs(); }, 300);
@@ -9319,15 +9326,18 @@ function renderMakesafeKanban(container, columns) {
 
   stagesToRender.forEach(function(status) {
     var allJobs = uiColumns[status] || [];
-    // Apply live search filter only to the archive column
-    var jobs = (status === 'archive' && _makesafeArchiveSearch)
-      ? allJobs.filter(function(j) { return makesafeArchiveJobMatches(j, _makesafeArchiveSearch); })
-      : allJobs;
+    // Board-wide search takes precedence; archive search applies only to the archive column
+    var jobs = allJobs;
+    if (_makesafeBoardSearch) {
+      jobs = allJobs.filter(function(j) { return makesafeBoardJobMatches(j, _makesafeBoardSearch); });
+    } else if (status === 'archive' && _makesafeArchiveSearch) {
+      jobs = allJobs.filter(function(j) { return makesafeArchiveJobMatches(j, _makesafeArchiveSearch); });
+    }
 
     var stageColor = STAGE_COLORS[status] || '#8FA4B2';
     var colHeader = STAGE_LABELS[status] || status;
-    // When filtering archive, show filtered/total counts
-    var countBadge = (status === 'archive' && _makesafeArchiveSearch)
+    // Show filtered/total count when a filter is active and cards are hidden
+    var countBadge = ((_makesafeBoardSearch || (status === 'archive' && _makesafeArchiveSearch)) && jobs.length !== allJobs.length)
       ? (jobs.length + '/' + allJobs.length)
       : jobs.length;
 
@@ -9609,6 +9619,7 @@ var _makesafeLegendCollapsed = (function() {
 })();
 var _makesafeArchiveVisible = false;   // archive column hidden by default
 var _makesafeArchiveSearch = '';       // live filter applied when archive is open
+var _makesafeBoardSearch = '';         // instant client-side filter for all active board columns
 
 function toggleMakesafeArchive() {
   _makesafeArchiveVisible = !_makesafeArchiveVisible;
@@ -9626,6 +9637,24 @@ function toggleMakesafeArchive() {
 function makesafeArchiveSearchInput(val) {
   _makesafeArchiveSearch = (val || '').toLowerCase().trim();
   if (_pipelineData) renderJobs(_pipelineData);
+}
+
+// Returns true when a job matches ALL space-separated tokens in the board search query.
+// Searches: client name, suburb, address, builder company, builder ref (external_ref), our ref (job_number).
+function makesafeBoardJobMatches(j, query) {
+  if (!query) return true;
+  var md = j.makesafe_details || j.metadata || {};
+  var haystack = [
+    j.client_name,
+    j.site_suburb || j.suburb,
+    j.site_address,
+    getMakesafeBuilder(j),
+    j.external_ref,
+    j.job_number,
+    md.builder_ref || md.external_ref,
+  ].filter(Boolean).map(function(f) { return String(f).toLowerCase(); }).join(' ');
+  var tokens = query.split(/\s+/).filter(Boolean);
+  return tokens.every(function(t) { return haystack.indexOf(t) !== -1; });
 }
 
 // Returns true when a job matches the archive search query.
@@ -9738,6 +9767,13 @@ function getMakesafeTypeLabel(j, mdOverride) {
   // plain MakeSafe; they are scope details, not board taxonomy.
   var familyLabel = md.makesafe_job_family_label || j.makesafe_job_family_label || getMakesafeFamilyLabel(md.makesafe_job_family || j.makesafe_job_family);
   if (familyLabel) return familyLabel;
+  // If a family value exists but is unrecognised by getMakesafeFamilyLabel, humanise
+  // it rather than falling through to the text/regex heuristic which can mislabel
+  // (e.g. an assessment job whose notes mention "roof" would be wrongly labelled "Roof").
+  var rawFamily = String(md.makesafe_job_family || j.makesafe_job_family || '').trim();
+  if (rawFamily) {
+    return rawFamily.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  }
   var direct = j.makesafe_type_detail || j.makesafe_type_other || j.custom_makesafe_type || j.make_safe_type_detail || j.makesafe_type || j.job_type || j.scope_type || j.work_type || j.service_type || md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || md.makesafe_type || md.job_type || md.scope_type || md.work_type || md.service_type || md.damage_type || md.category;
   var customType = md.makesafe_type_detail || md.makesafe_type_other || md.custom_makesafe_type || md.make_safe_type_detail || '';
   if (/^other$/i.test(String(direct || '').trim()) && customType) direct = customType;
@@ -15524,13 +15560,27 @@ function renderMakesafeDocViewer(data) {
 }
 
 function renderMakesafeOpsExternalLinks(md) {
+  var KIND_LABELS = {
+    roof_report: 'Roof Report',
+    assessment_report: 'Assessment Report',
+    photos: 'Photo Schedule',
+    quote: 'Quote',
+    builder_portal: 'Builder Portal',
+    work_order: 'Work Order'
+  };
   var links = [];
   function add(item, fallbackLabel) {
     if (!item) return;
     var url = typeof item === 'string' ? item : (item.url || item.href || item.link || '');
     url = String(url || '').trim();
     if (!url || !/^(https?:|mailto:|tel:)/i.test(url)) return;
-    var label = typeof item === 'string' ? fallbackLabel : (item.label || item.name || item.title || fallbackLabel || 'Open link');
+    var label;
+    if (typeof item === 'string') {
+      label = fallbackLabel;
+    } else {
+      var kind = String(item.kind || '').trim().toLowerCase();
+      label = (kind && KIND_LABELS[kind]) || item.label || item.name || item.title || fallbackLabel || 'Open link';
+    }
     var key = url.toLowerCase();
     if (links.some(function(l) { return l.key === key; })) return;
     links.push({ key: key, label: label, url: url });

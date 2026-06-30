@@ -5852,7 +5852,7 @@ function globalJobSearch(query) {
           html += '<div style="color:var(--sw-text-sec);font-size:12px">';
           if (j.job_number) html += j.job_number + ' · ';
           html += (j.site_suburb || j.site_address || '') + ' · ';
-          html += '<span class="type-badge ' + (j.type || '') + '" style="font-size:10px;padding:1px 6px">' + typeBadgeLabel(j.type) + '</span>';
+          html += '<span class="type-badge ' + (j.type || '') + '" style="font-size:10px;padding:1px 6px">' + (j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type)) + '</span>';
           if (j.match_source && j.match_source !== 'job') html += ' · <span style="color:var(--sw-blue,#3498DB);font-style:italic">' + j.match_source + '</span>';
           html += '</div></div>';
         });
@@ -8229,7 +8229,11 @@ function openCalJobPopup(event, assignmentId) {
       headerDiv.appendChild(copyBtn);
     }
 
-    h += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></div>';
+    // For make-safe, show specific family label (Assessment / Quote Report, Roof Report, etc.)
+    // not the generic type string 'makesafe'. j = data.job from job_detail; family label is
+    // in j.metadata (same source as renderHealthBar fix).
+    var _calPopupTypeText = j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type);
+    h += '<div class="jd-qv-row"><span class="jd-qv-label">Type</span><span class="type-badge ' + j.type + '">' + _calPopupTypeText + '</span></div>';
     h += '<div class="jd-qv-row"><span class="jd-qv-label">Status</span><span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span></div>';
 
     var quoteVal = j.pricing_json?.totalIncGST || j.pricing_json?.total || 0;
@@ -11950,7 +11954,8 @@ function renderJobList(container, columns) {
     html += '<tr onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" style="cursor:pointer;">';
     html += '<td><strong>' + (j.client_name || 'Unknown') + '</strong></td>';
     html += '<td>' + (j.site_suburb || '') + '</td>';
-    html += '<td><span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span></td>';
+    // List view: make-safe jobs carry makesafe_job_family_label directly from makesafe_pipeline.
+    html += '<td><span class="type-badge ' + j.type + '">' + (j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type)) + '</span></td>';
     html += '<td><span class="status-badge ' + j.status + '">' + STATUS_LABELS[j.status] + '</span></td>';
     html += '<td style="font-family:var(--sw-font-num);">' + (j.value ? fmt$(j.value) : '-') + '</td>';
     html += '<td>' + j.days_in_stage + 'd</td>';
@@ -13643,7 +13648,8 @@ function renderJobPeek(data) {
   // Job info + external links
   html += '<div style="margin-bottom:16px;">';
   html += '<div style="display:flex; gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">';
-  html += '<span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
+  // Slide panel peek: j = data.job from job_detail; family label in j.metadata.
+  html += '<span class="type-badge ' + j.type + '">' + (j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type)) + '</span>';
   html += '<span class="status-badge ' + j.status + '">' + (STATUS_LABELS[j.status] || j.status) + '</span>';
   // External link buttons
   if (j.ghl_opportunity_id) {

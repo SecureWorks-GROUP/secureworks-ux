@@ -10096,13 +10096,18 @@ function renderMakesafeStatusIcons(j, status) {
   else if (!inv || inv === 'not_ready') add('invoice', 'na', 'Inv', 'Invoice: not ready yet');
   else add('invoice', 'pending', 'Inv', 'Invoice: ' + inv);
 
-  // 5) Sent to builder. The precise per-send timestamp lives in the job's send log
-  // (MAKESAFE_PACK_SENT marker in events[]) which is NOT in the board list payload,
-  // so the board uses the lifecycle proxy report_status==='processed' (the state a
-  // job reaches once the report+invoice pack is sent). Open the card for the exact
-  // send log. (A dedicated pack_sent_at on the pipeline payload would make this exact.)
-  var processed = (String(j.report_status || '').toLowerCase() === 'processed') || j.pack_sent === true;
-  if (processed) add('sent', 'done', 'Sent', 'Pack sent to builder (open card for send log)');
+  // 5) Sent to builder. CHIP-TRUTH (audit F5): green ONLY on a real send record.
+  // The backend now supplies `sent_to_builder` — TRUE only with a MAKESAFE_PACK_SENT
+  // marker (events[]) OR a durable makesafe_report_packs sent-status. It is NOT the
+  // completed/archive column proxy report_status==='processed' (which greened every
+  // completed card whether or not a pack ever went out). A completed card with no
+  // send record now honestly reads "not yet emailed". Fallback (older payloads with
+  // no sent_to_builder field, e.g. a UX deploy ahead of the backend): use the legacy
+  // proxy so no truly-sent card silently blanks during the deploy skew.
+  var sentToBuilder = (typeof j.sent_to_builder === 'boolean')
+    ? j.sent_to_builder
+    : ((String(j.report_status || '').toLowerCase() === 'processed') || j.pack_sent === true);
+  if (sentToBuilder) add('sent', 'done', 'Sent', 'Pack sent to builder (open card for send log)');
   else add('sent', 'pending', 'Sent', 'Not yet emailed to builder');
 
   var complete = (done === applicable && applicable > 0);

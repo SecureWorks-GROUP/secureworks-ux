@@ -13004,12 +13004,12 @@
   // — the prompt is unmissable but NEVER blocks submit (empty = unjustified).
   function _makesafeJustHtml(c, idx) {
     return '<div data-cardjustwrap="' + idx + '" style="margin-top:8px;padding:8px 10px;background:rgba(241,90,41,0.07);border:1px solid rgba(241,90,41,0.3);border-radius:8px">'
-      + '<div style="font-size:11px;font-weight:700;color:#c0392b;margin-bottom:4px">Job is allocated 2 hours — please give an explanation for the variation</div>'
+      + '<div style="font-size:11px;font-weight:700;color:#c0392b;margin-bottom:4px">Job is allocated 2 hours - please give an explanation for the variation</div>'
       + '<input type="text" data-cardjust="' + idx + '" value="' + esc(c.justification || '') + '" '
       + 'placeholder="Explanation for the variation" '
       + 'onchange="setJobCardJustification(' + idx + ',this.value)" '
       + 'style="width:100%;padding:6px 8px;border:1px solid rgba(241,90,41,0.4);border-radius:6px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box;background:#fff">'
-      + '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px">You can still submit — the office will review before payment.</div>'
+      + '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px">You can still submit - the office will review before payment.</div>'
       + '</div>';
   }
 

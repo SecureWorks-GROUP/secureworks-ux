@@ -12407,6 +12407,9 @@
         client_name: job.client_name || '',
         site_suburb: job.site_suburb || '',
         job_type: job.type || '',
+        // [M4 U2] structured make-safe flag via the app's canonical detector
+        // (type/division/metadata) — drives the over-allowance variation prompt.
+        is_makesafe: getTradeJobType(job, a) === 'makesafe',
         // FIX5: store external_ref from assignment or joined job when present.
         external_ref: a.external_ref || job.external_ref || '',
         scheduled_date: a.scheduled_date || '',
@@ -12599,6 +12602,10 @@
         } else if (!c.hours_prefilled && cardMode === 'hours') {
           html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">Not clocked — enter the hours you worked.</div>';
         }
+        // [M4 U2] Over-allowance make-safe variation prompt (hours mode only). Capture, never blocks.
+        if (_isMakesafeCard(c) && cardMode === 'hours' && Number(c.hours) > 2) {
+          html += _makesafeJustHtml(c, c._idx);
+        }
         html += '</div></div></div>';
       });
       html += '</div>';
@@ -12776,6 +12783,9 @@
       // Description is rendered as a plain input — read it back.
       var descEls = document.querySelectorAll('.jc-card[data-card="' + idx + '"] input[type="text"][onchange*="setJobCardDescription"]');
       if (descEls.length > 0) c.description = descEls[0].value || '';
+      // [M4 U2] Sync the over-allowance make-safe variation justification if its prompt is visible.
+      var justEl = document.querySelector('[data-cardjust="' + idx + '"]');
+      if (justEl) c.justification = justEl.value || '';
     });
     var n = document.getElementById('invNotes');
     if (n) _invNotes = n.value;
@@ -12873,6 +12883,8 @@
       client_name: j.client_name || '',
       site_suburb: j.site_suburb || '',
       job_type: j.type || '',
+      // [M4 U2] structured make-safe flag via the app's canonical detector.
+      is_makesafe: getTradeJobType(j) === 'makesafe',
       // FIX5: carry external_ref from search result when the backend returns it.
       external_ref: j.external_ref || '',
       scheduled_date: dk,
@@ -12993,6 +13005,11 @@
     var c = _jobCards[idx]; if (!c) return;
     c.description = val || '';
   };
+  // [M4 U2] Over-allowance make-safe variation justification — captured, never blocks submit.
+  window.setJobCardJustification = function(idx, val) {
+    var c = _jobCards[idx]; if (!c) return;
+    c.justification = val || '';
+  };
   window.toggleJobCard = function(idx, on) {
     var c = _jobCards[idx]; if (!c) return;
     c.included = !!on;
@@ -13044,6 +13061,21 @@
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
       if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');
+      // [M4 U2] Show/hide the over-allowance make-safe variation prompt as the trade types hours.
+      if (c && _isMakesafeCard(c)) {
+        var jWrap = document.querySelector('[data-cardjustwrap="' + idx + '"]');
+        if (jWrap) {
+          jWrap.style.display = (Number(c.hours) > 2) ? 'block' : 'none';
+        } else if (Number(c.hours) > 2) {
+          // Prompt not yet in the DOM (hours crossed 2 without a full re-render) — inject it
+          // immediately after the description input, matching the static render.
+          var card = document.querySelector('.jc-card[data-card="' + idx + '"]');
+          if (card && !card.querySelector('[data-cardjustwrap="' + idx + '"]')) {
+            var inner = card.querySelector('div[style*="flex:1"]');
+            if (inner) inner.insertAdjacentHTML('beforeend', _makesafeJustHtml(c, idx));
+          }
+        }
+      }
     }
     var tot = document.getElementById('jcRunningTotal');
     if (tot) tot.textContent = _jobCardsTotalStr();
@@ -13056,6 +13088,34 @@
       var invSubBtn = document.getElementById('invSubmitBtn');
       if (invSubBtn) invSubBtn.textContent = 'Submit Invoice — $' + grand.toFixed(2);
     }
+  }
+
+  // [M4 U2] True when a job card is a make-safe job. Uses the flag stamped at
+  // card-build time from the app's own canonical getTradeJobType() structured
+  // check (job type / division / metadata); falls back to the card's structured
+  // job_type/division for any card built elsewhere. The SWMS- job-number prefix
+  // is only corroborating inside getTradeJobType — a make-safe job with no such
+  // prefix still flags via its structured type. Never the required filter.
+  function _isMakesafeCard(c) {
+    if (!c) return false;
+    if (c.is_makesafe != null) return !!c.is_makesafe;
+    var t = String(c.job_type || c.division || '').toLowerCase().replace(/[-_\s]/g, '');
+    return t === 'makesafe';
+  }
+
+  // [M4 U2] Inline variation prompt for an over-allowance make-safe hours card.
+  // v1 client-side allowance is a fixed 2h; the backend resolver (M4 U1) sets the
+  // authoritative allowance and flags the line. Captures a plain-text justification
+  // — the prompt is unmissable but NEVER blocks submit (empty = unjustified).
+  function _makesafeJustHtml(c, idx) {
+    return '<div data-cardjustwrap="' + idx + '" style="margin-top:8px;padding:8px 10px;background:rgba(241,90,41,0.07);border:1px solid rgba(241,90,41,0.3);border-radius:8px">'
+      + '<div style="font-size:11px;font-weight:700;color:#c0392b;margin-bottom:4px">Job is allocated 2 hours - please give an explanation for the variation</div>'
+      + '<input type="text" data-cardjust="' + idx + '" value="' + esc(c.justification || '') + '" '
+      + 'placeholder="Explanation for the variation" '
+      + 'onchange="setJobCardJustification(' + idx + ',this.value)" '
+      + 'style="width:100%;padding:6px 8px;border:1px solid rgba(241,90,41,0.4);border-radius:6px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box;background:#fff">'
+      + '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px">You can still submit - the office will review before payment.</div>'
+      + '</div>';
   }
 
   // [JC-PAYLOAD-BUILD-START] — pure payload builder for the job-centric submit.
@@ -13208,7 +13268,9 @@
           manually_added: true,
           source: 'manual_job_search',
           rate_source: 'client_entered',
-          client_rate_entered: true
+          client_rate_entered: true,
+          // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
+          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
         });
       } else {
         subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
@@ -13218,7 +13280,9 @@
           rate: Number(c.rate || 0),
           rate_source: c.rate_source || 'server_resolved',
           description: c.description || '',
-          manually_added: false
+          manually_added: false,
+          // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
+          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
         });
       }
     });

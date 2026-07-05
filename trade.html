@@ -29,26 +29,66 @@
 
   <style>
     /* ══════════════════════════════════════════════════
-       CSS VARIABLES — matches main dashboard
+       IBM Plex Mono — self-hosted (Briefing ops chrome, offline-first PWA)
+       ══════════════════════════════════════════════════ */
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('fonts/ibm-plex-mono/ibm-plex-mono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+      src: url('fonts/ibm-plex-mono/ibm-plex-mono-600.woff2') format('woff2');
+    }
+
+    /* ══════════════════════════════════════════════════
+       CSS VARIABLES — Briefing skin (blue owns chrome, cool paper, orange = action)
        ══════════════════════════════════════════════════ */
     :root {
+      /* action / urgency — orange, reserved */
       --sw-orange: #F15A29;
+      --sw-orange-deep: #C7431B;
+      --sw-orange-tint: #FBEEE6;
+      --sw-orange-line: #F1C7AF;
+      --sw-on-orange: #FFF4EC;
+      /* command blue — owns app bar + bottom nav + classification headers */
       --sw-dark: #293C46;
+      --sw-bar-ink: #F5F7F8;
+      --sw-bar-sub: #9DB2BD;
+      --sw-bar-line: rgba(245,247,248,0.14);
+      /* cool paper surfaces + ink scale */
       --sw-mid: #4C6A7C;
-      --sw-light: #F0F4F7;
-      --sw-bg: #f5f6f8;
-      --sw-border: #e8eaed;
-      --sw-text: #1A2332;
-      --sw-text-sec: #6b7280;
+      --sw-light: #EBEFF1;
+      --sw-bg: #F5F7F8;
+      --sw-frame: #EBEFF1;
+      --sw-seg-bg: #E8EDEF;
+      --sw-border: #E2E9EC;
+      --sw-line-2: #C6D1D7;
+      --sw-text: #22333D;
+      --sw-text-sec: #6B7A83;
+      --sw-ink-3: #7C8B94;
+      /* semantic (unchanged) */
       --sw-green: #27AE60;
       --sw-red: #E74C3C;
       --sw-yellow: #E67E22;
       --sw-blue: #3498DB;
       --sw-card: #FFFFFF;
-      --sw-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
-      --sw-shadow-hover: 0 10px 40px rgba(0,0,0,0.08);
-      --sw-radius: 12px;
+      /* soft cool shadows */
+      --sw-shadow: 0 1px 3px rgba(41,60,70,0.05), 0 1px 2px rgba(41,60,70,0.06);
+      --sw-shadow-hover: 0 10px 40px rgba(41,60,70,0.10);
+      /* radii tiers (Briefing 14 / 10 / 5) */
+      --sw-radius: 14px;
+      --sw-r-card: 14px;
+      --sw-r-ctl: 10px;
+      --sw-r-chip: 5px;
+      /* type — sans for headings/body, mono for ops chrome */
       --sw-font: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', sans-serif;
+      --sw-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
     /* ══════════════════════════════════════════════════
@@ -70,9 +110,9 @@
        ══════════════════════════════════════════════════ */
     .header {
       background: var(--sw-dark);
-      color: #fff;
-      padding: 12px 16px;
-      padding-top: max(12px, env(safe-area-inset-top));
+      color: var(--sw-bar-ink);
+      padding: 13px 16px;
+      padding-top: max(13px, env(safe-area-inset-top));
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -84,16 +124,28 @@
       font-size: 16px;
       font-weight: 700;
       letter-spacing: -0.3px;
+      color: var(--sw-bar-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .header-brand span { font-weight: 400; opacity: 0.7; }
+    .header-brand span { font-weight: 400; color: var(--sw-bar-sub); opacity: 1; }
     .header-user {
-      font-size: 13px;
-      opacity: 0.8;
+      font-family: var(--sw-mono);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: var(--sw-bar-sub);
+      opacity: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .header-back {
       background: none;
       border: none;
-      color: #fff;
+      color: var(--sw-bar-ink);
       font-size: 22px;
       padding: 8px 12px;
       min-width: 44px;
@@ -102,7 +154,7 @@
       display: none; /* shown via JS when in sub-view */
       margin-right: 4px;
     }
-    .header-left { display: flex; align-items: center; gap: 4px; }
+    .header-left { display: flex; align-items: center; gap: 4px; min-width: 0; }
 
     /* ══════════════════════════════════════════════════
        BOTTOM NAV
@@ -115,40 +167,53 @@
       background: var(--sw-dark);
       display: flex;
       z-index: 100;
-      padding: 6px 4px;
-      padding-bottom: max(6px, env(safe-area-inset-bottom));
+      padding: 8px 6px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
       gap: 4px;
+      border-top: 1px solid var(--sw-bar-line);
     }
     .bottom-nav button {
       flex: 1;
-      padding: 8px 4px;
+      min-width: 0;
+      padding: 5px 0;
       min-height: 48px;
-      background: rgba(255,255,255,0.08);
+      background: none;
       border: none;
-      border-radius: 8px;
-      color: rgba(255,255,255,0.5);
+      border-radius: var(--sw-r-ctl);
+      color: var(--sw-bar-sub);
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 2px;
-      transition: all 0.15s;
+      gap: 4px;
+      transition: color 0.16s;
     }
     .bottom-nav button.active {
-      background: var(--sw-orange);
-      color: #fff;
+      background: none;
+      color: var(--sw-bar-ink);
+      font-weight: 600;
     }
     .bottom-nav button:disabled {
       opacity: 0.35;
       cursor: default;
     }
     .bottom-nav button svg {
-      width: 20px;
-      height: 20px;
+      width: 44px;
+      height: 26px;
+      padding: 3px 12px;
+      border-radius: var(--sw-r-ctl);
       fill: currentColor;
+      transition: background-color 0.16s;
+    }
+    .bottom-nav button.active svg {
+      background: var(--sw-orange);
+      fill: var(--sw-on-orange);
     }
 
     /* ══════════════════════════════════════════════════
@@ -210,7 +275,7 @@
       gap: 6px;
       padding: 12px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: var(--sw-r-ctl);
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
@@ -220,7 +285,7 @@
     }
     .btn-primary {
       background: var(--sw-orange);
-      color: #fff;
+      color: var(--sw-on-orange);
     }
     .btn-primary:active { transform: scale(0.97); }
     .btn-primary:disabled {
@@ -229,7 +294,7 @@
       cursor: default;
     }
     .btn-secondary {
-      background: var(--sw-light);
+      background: var(--sw-seg-bg);
       color: var(--sw-dark);
     }
     .btn-danger {
@@ -246,11 +311,12 @@
        JOB CARDS (My Jobs list)
        ══════════════════════════════════════════════════ */
     .section-label {
-      font-size: 12px;
-      font-weight: 700;
+      font-family: var(--sw-mono);
+      font-size: 11px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--sw-text-sec);
+      letter-spacing: 0.16em;
+      color: var(--sw-mid);
       margin: 20px 0 8px;
     }
     .section-label:first-child { margin-top: 0; }
@@ -274,19 +340,22 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 8px;
+      flex-wrap: wrap;
     }
     .job-card-client {
       font-size: 15px;
       font-weight: 600;
       color: var(--sw-dark);
+      min-width: 0;
     }
     .job-card-badge {
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.08em;
       padding: 3px 8px;
-      border-radius: 4px;
+      border-radius: var(--sw-r-chip);
       white-space: nowrap;
     }
     .badge-fencing { background: #fff0eb; color: var(--sw-orange); }
@@ -318,12 +387,13 @@
     .job-card-meta span { display: flex; align-items: center; gap: 3px; }
 
     .status-pill {
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      padding: 2px 8px;
-      border-radius: 10px;
+      letter-spacing: 0.08em;
+      padding: 3px 8px;
+      border-radius: var(--sw-r-chip);
       display: inline-block;
     }
     .status-scheduled { background: #ebf4ff; color: var(--sw-blue); }
@@ -355,11 +425,12 @@
       margin-bottom: 12px;
     }
     .detail-section h3 {
-      font-size: 13px;
-      font-weight: 700;
+      font-family: var(--sw-mono);
+      font-size: 11px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      color: var(--sw-text-sec);
+      letter-spacing: 0.16em;
+      color: var(--sw-mid);
       margin-bottom: 12px;
     }
 
@@ -493,7 +564,7 @@
       text-transform: uppercase;
       margin-top: 4px;
     }
-    .hours-badge.patio { background: rgba(241,90,41,0.1); color: #F15A29; }
+    .hours-badge.patio { background: rgba(241,90,41,0.1); color: var(--sw-orange); }
     .hours-badge.fencing { background: rgba(52,152,219,0.1); color: #3498DB; }
     .hours-badge.decking { background: rgba(39,174,96,0.1); color: #27AE60; }
     .hours-submit-btn {
@@ -611,7 +682,7 @@
     .inv-header { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
     .inv-header-row { display: flex; justify-content: space-between; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,0.7); }
     .inv-header-row.title { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }
-    .inv-section-label { font-size: 12px; font-weight: 700; color: var(--sw-mid); text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 6px; }
+    .inv-section-label { font-family: var(--sw-mono); font-size: 11px; font-weight: 500; color: var(--sw-mid); text-transform: uppercase; letter-spacing: 0.14em; margin: 16px 0 6px; }
     .inv-line { background: var(--sw-card); border-radius: 10px; padding: 12px; margin-bottom: 8px; box-shadow: var(--sw-shadow); }
     .inv-line-top { display: flex; justify-content: space-between; align-items: flex-start; }
     .inv-line-desc { font-size: 14px; font-weight: 600; color: var(--sw-dark); flex: 1; }
@@ -620,9 +691,9 @@
     .inv-line-type { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
     .inv-line-type.labour { background: rgba(52,152,219,0.1); color: #3498DB; }
     .inv-line-type.travel { background: rgba(155,89,182,0.1); color: #9B59B6; }
-    .inv-line-type.materials { background: rgba(241,90,41,0.1); color: #F15A29; }
+    .inv-line-type.materials { background: rgba(241,90,41,0.1); color: var(--sw-orange); }
     .inv-line-type.equipment { background: rgba(39,174,96,0.1); color: #27AE60; }
-    .inv-line-type.other { background: rgba(107,114,128,0.1); color: #6B7280; }
+    .inv-line-type.other { background: rgba(107,114,128,0.1); color: var(--sw-text-sec); }
     .inv-add-btn { width: 100%; padding: 12px; background: var(--sw-light); border: 2px dashed var(--sw-border); border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--sw-mid); cursor: pointer; margin-bottom: 8px; }
     .inv-add-btn:active { background: var(--sw-border); }
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
@@ -631,7 +702,7 @@
     .inv-history-item { background: var(--sw-card); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--sw-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .inv-history-item:active { background: var(--sw-light); }
     .inv-status { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
-    .inv-status.draft { background: rgba(107,114,128,0.1); color: #6B7280; }
+    .inv-status.draft { background: rgba(107,114,128,0.1); color: var(--sw-text-sec); }
     .inv-status.submitted, .inv-status.pending_ops_review { background: rgba(52,152,219,0.1); color: #3498DB; }
     .inv-status.acknowledged, .inv-status.approved { background: rgba(39,174,96,0.1); color: #27AE60; }
     .inv-status.pushed_to_xero { background: rgba(52,152,219,0.1); color: #3498DB; }
@@ -1191,7 +1262,7 @@
     }
     .weather-warning-heat {
       background: rgba(241, 90, 41, 0.15);
-      color: #F15A29;
+      color: var(--sw-orange);
     }
     .weather-badge {
       display: inline-flex;
@@ -1301,14 +1372,14 @@
     .ms-state.st-done { background: #eafaf1; color: #15803d; }
     .ms-headrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ms-head-l { display: flex; align-items: center; min-width: 0; }
-    .ms-type { font-size: 16px; font-weight: 800; color: var(--sw-dark); text-transform: uppercase; letter-spacing: .04em; line-height: 1.15; }
+    .ms-type { font-family: var(--sw-mono); font-size: 15px; font-weight: 600; color: var(--sw-dark); text-transform: uppercase; letter-spacing: .1em; line-height: 1.15; }
     .ms-crew { font-size: 12px; color: var(--sw-orange); font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 5px; }
     .ms-divider { height: 1px; background: var(--sw-border); margin: 10px 0; }
     .ms-home { font-size: 14px; font-weight: 750; color: var(--sw-dark); }
     .ms-refs { margin-top: 6px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-    .ms-chip { font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 6px; letter-spacing: .01em; }
-    .ms-chip-theirs { background: var(--sw-dark); color: #fff; }
-    .ms-chip-ours { background: #fff; color: var(--sw-mid); border: 1px solid #d7dde3; font-weight: 700; }
+    .ms-chip { font-family: var(--sw-mono); font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--sw-r-chip); letter-spacing: .04em; }
+    .ms-chip-theirs { background: var(--sw-dark); color: var(--sw-bar-ink); }
+    .ms-chip-ours { background: var(--sw-card); color: var(--sw-mid); border: 1px solid var(--sw-line-2); font-weight: 600; }
     .ms-addr { font-size: 12.5px; color: var(--sw-text-sec); margin-top: 6px; display: flex; align-items: flex-start; gap: 5px; }
     .ms-addr svg { width: 13px; height: 13px; fill: var(--sw-mid); flex: 0 0 auto; margin-top: 1px; }
     .ms-wonote { display: flex; margin-top: 9px; padding: 8px 10px; background: #f1f4f6; border-radius: 8px; }
@@ -1770,20 +1841,23 @@
     }
     .job-hero-badge {
       display: inline-block;
-      font-size: 11px;
-      font-weight: 800;
+      font-family: var(--sw-mono);
+      font-size: 10.5px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.08em;
       color: #fff;
       background: var(--job-color, var(--sw-orange));
-      padding: 3px 10px;
-      border-radius: 100px;
+      padding: 4px 9px;
+      border-radius: var(--sw-r-chip);
       margin-right: 8px;
     }
     .job-hero-number {
+      font-family: var(--sw-mono);
       font-size: 12px;
       color: var(--sw-text-sec);
-      font-weight: 600;
+      font-weight: 500;
+      letter-spacing: 0.02em;
       vertical-align: middle;
     }
     .job-hero-client {
@@ -2400,7 +2474,7 @@
     <button class="header-back" id="btnBack" onclick="goBack()">&#8592;</button>
     <div class="header-brand">SecureWorks <span>Trade</span></div>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;">
+  <div style="display:flex;align-items:center;gap:8px;min-width:0;">
     <span id="syncDot" onclick="showSyncStatus()" style="width:10px;height:10px;border-radius:50%;background:var(--sw-green);cursor:pointer;flex-shrink:0;display:none;" title="Sync status"></span>
     <div class="header-user" id="headerUser" onclick="toggleUserMenu()"></div>
   </div>
@@ -2518,6 +2592,13 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════
+     BOARD VIEW (managers only — M1 placeholder, allocation lands in M3)
+     ══════════════════════════════════════════════════ -->
+<div id="viewBoard" class="view">
+  <div class="container" id="boardContent"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
      SCHEDULE VIEW
      ══════════════════════════════════════════════════ -->
 <div id="viewSchedule" class="view">
@@ -2590,18 +2671,18 @@
      BOTTOM NAV — 5 tabs
      ══════════════════════════════════════════════════ -->
 <div class="bottom-nav" id="bottomNav" style="display:none">
-  <button class="active" data-view="myJobs" onclick="showView('myJobs')">
-    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
-    Jobs
-  </button>
-  <button data-view="activity" onclick="showView('activity')">
-    <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
-    Activity
-  </button>
-  <button data-view="schedule" onclick="showView('schedule')" style="position:relative">
+  <button class="active" data-view="schedule" onclick="showView('schedule')" style="position:relative">
     <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
     Calendar
     <span class="nav-badge" id="scheduleBadge" style="display:none">0</span>
+  </button>
+  <button data-view="myJobs" onclick="showView('myJobs')">
+    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+    Jobs
+  </button>
+  <button id="navBoard" data-view="board" onclick="showView('board')" style="display:none">
+    <svg viewBox="0 0 24 24"><path d="M3 3h7v9H3V3zm0 11h7v7H3v-7zm11 0h7v7h-7v-7zm0-11h7v5h-7V3z"/></svg>
+    Board
   </button>
   <button data-view="hours" onclick="showView('hours')" style="position:relative">
     <svg viewBox="0 0 24 24"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
@@ -3469,6 +3550,15 @@
     document.getElementById('bottomNav').style.display = 'flex';
     document.getElementById('viewLogin').classList.remove('active');
 
+    // Board tab: admins + managers (display-only gate; server authz is independent).
+    // Shown for _isAdmin (admin/ops_manager) or a non-empty managed_verticals array (A2).
+    var _boardBtn = document.getElementById('navBoard');
+    if (_boardBtn) {
+      var _mv = _user.managed_verticals;
+      var _showBoard = _isAdmin || (Array.isArray(_mv) && _mv.length > 0);
+      _boardBtn.style.display = _showBoard ? '' : 'none';
+    }
+
     // Show Team tab for Tier 2+
     var teamTab = document.getElementById('subTabTeam');
     if (teamTab && _userTier >= 2) teamTab.style.display = '';
@@ -3511,7 +3601,7 @@
             openJob(saved.jobId, saved.assignmentId);
             restoreScrollSoon(saved.scrollY || 0);
             _restored = true;
-          } else if (['hours','activity','schedule','profile','report'].indexOf(saved.view) !== -1) {
+          } else if (['hours','schedule','profile','report'].indexOf(saved.view) !== -1) {
             if (saved.jobId) { _currentJobId = saved.jobId; _currentAssignment = saved.assignmentId || null; }
             _reportMode = saved.reportMode || null;
             _currentJobTab = saved.jobTab || _currentJobTab;
@@ -3522,8 +3612,9 @@
         }
       } catch(e) {}
       if (!_restored) {
-        showView('myJobs');
-        loadMyJobs();
+        // D1: Calendar (schedule view) is the opening tab. A persisted 'activity'
+        // view is no longer in the allowlist above, so it lands here -> opening tab.
+        showView('schedule');
       }
     }
   }
@@ -3569,8 +3660,10 @@
   var _skipPopState = false; // avoid infinite loop when handling popstate
   var _lastViewChangeTime = 0;
 
-  // Main tabs (show in bottom nav) vs sub-views (accessed from job cards)
-  var _mainTabs = ['myJobs', 'activity', 'schedule', 'hours', 'profile'];
+  // Main tabs (show in bottom nav) vs sub-views (accessed from job cards).
+  // 'activity' is off-nav (reachable from Profile) so it inherits sub-view back
+  // treatment; 'board' is manager-gated (nav button hidden for non-managers).
+  var _mainTabs = ['schedule', 'myJobs', 'board', 'hours', 'profile'];
 
   window.showView = function(view, skipHistory) {
     // Warn if leaving report with unsaved changes
@@ -3608,6 +3701,7 @@
     // Lazy-load data (skip reload if same job already loaded)
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
+    if (view === 'board') renderBoardView();
     if (view === 'schedule') { loadTeamCalendar(); renderScheduleView(); }
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
@@ -4409,14 +4503,14 @@
 
         // Internal / job-less entry
         if (!job.id) {
-          html += '<div class="job-card' + todayClass + '" data-type="internal" style="border-left-color:#6B7280">';
+          html += '<div class="job-card' + todayClass + '" data-type="internal" style="border-left-color:var(--sw-text-sec)">';
           html += '  <div class="job-card-top">';
           if (sec.key === 'today') html += '    <span class="run-list-order-badge">' + (idx + 1) + '</span>';
           html += '    <div>';
           html += '      <div class="job-card-client">' + esc(a.label || 'Internal Event') + '</div>';
-          html += '      <div class="job-card-address" style="color:#6B7280;font-style:italic">Internal · No job</div>';
+          html += '      <div class="job-card-address" style="color:var(--sw-text-sec);font-style:italic">Internal · No job</div>';
           html += '    </div>';
-          html += '    <span class="job-card-badge" style="background:#6B7280;color:#fff">internal</span>';
+          html += '    <span class="job-card-badge" style="background:var(--sw-text-sec);color:#fff">internal</span>';
           html += '  </div>';
           html += '  <div class="job-card-meta">';
           html += '    <span>' + formatDate(a.scheduled_date) + '</span>';
@@ -7085,7 +7179,7 @@
 
     // ── 2. CREW WORK ORDER — scope_items table ──
     if (wo && wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
-      h += '<div class="detail-section" style="background:#F8F6F3;padding:14px 16px">';
+      h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark)">Crew Work Order</div>';
       if (wo.wo_number) h += '<span style="font-size:11px;font-weight:700;color:var(--sw-text-sec);background:var(--sw-border);padding:2px 8px">' + esc(wo.wo_number) + '</span>';
@@ -7123,7 +7217,7 @@
       h += '</table>';
       h += '</div>';
     } else {
-      h += '<div class="detail-section" style="background:#F8F6F3;padding:14px 16px">';
+      h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Crew Work Order</div>';
       h += '<div style="padding:16px;text-align:center;color:var(--sw-text-sec);font-size:13px">No work order assigned yet</div>';
       h += '</div>';
@@ -7217,7 +7311,7 @@
         var hasRetaining = panels.some(function(p) { return (p.slopePlinths||0) + (p.retaining/150) > 0; });
 
         // Run header
-        h += '<div style="background:#F8F6F3;border-left:3px solid var(--sw-dark);padding:10px 12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);border-left:3px solid var(--sw-dark);padding:10px 12px;margin-bottom:8px">';
         h += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">' + esc(run.name || 'Run') + ' (' + panelCount + ' panels, ' + (run.length || 0) + 'm)';
         if (patioTubes > 0) h += ' <span style="color:var(--sw-orange);font-weight:700">[' + patioTubes + ' patio tubes]</span>';
         h += '</div>';
@@ -7259,7 +7353,7 @@
           var gp = g.type === 'double' ? 4 : 2;
           woGatePosts += gp;
           var desc = g.type === 'double' ? 'Double swing gate' : 'Pedestrian gate ' + (g.width || 900) + 'mm';
-          h += '<div style="background:#F8F6F3;padding:8px 12px;margin-bottom:4px;font-size:13px">' + esc(desc) + ' \u2014 90\u00D790mm SHS posts</div>';
+          h += '<div style="background:var(--sw-frame);padding:8px 12px;margin-bottom:4px;font-size:13px">' + esc(desc) + ' \u2014 90\u00D790mm SHS posts</div>';
         });
         h += '</div>';
       }
@@ -7288,7 +7382,7 @@
       // Removal info
       var removal = scopeJob.removal || {};
       if (removal.removalRequired && removal.existingFenceType) {
-        h += '<div style="background:#F8F6F3;border-left:3px solid var(--sw-mid);padding:10px 12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);border-left:3px solid var(--sw-mid);padding:10px 12px;margin-bottom:8px">';
         h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--sw-mid);margin-bottom:4px">Removal</div>';
         h += '<div style="font-size:13px;color:var(--sw-text)">' + esc(removal.existingFenceType.charAt(0).toUpperCase() + removal.existingFenceType.slice(1)) + ' fence \u2014 ' + (removal.existingFenceLength || 0) + 'm</div>';
         if (removal.existingFenceType === 'asbestos') h += '<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:4px">ASBESTOS: Licensed removal required. Do NOT break sheets.</div>';
@@ -7388,7 +7482,7 @@
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Materials Pickup</div>';
       pos.forEach(function(po, poIdx) {
         var statusColor = (po.status === 'confirmed') ? 'var(--sw-green)' : 'var(--sw-amber)';
-        h += '<div style="background:#F8F6F3;padding:12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);padding:12px;margin-bottom:8px">';
         h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
         h += '<span style="font-weight:700;font-size:14px;color:var(--sw-dark)">' + esc(po.supplier_name || '') + '</span>';
         h += '<span style="font-size:11px;font-weight:700;padding:2px 8px;background:' + statusColor + ';color:#fff;text-transform:uppercase;letter-spacing:0.3px">' + esc((po.status || 'pending').toUpperCase()) + '</span>';
@@ -7561,7 +7655,7 @@
         ? !!(cfg3d.totalLength || cfg3d.length || (scope3d.job && scope3d.job.runs && scope3d.job.runs.length > 0))
         : !!(cfg3d.length || cfg3d.projection);
       if (!has3dData) return;
-      h += '<div onclick="open3DViewer()" style="margin:4px 0 12px;padding:14px;background:linear-gradient(135deg,#1a1a2e,#293C46);border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:12px">';
+      h += '<div onclick="open3DViewer()" style="margin:4px 0 12px;padding:14px;background:linear-gradient(135deg,#1a1a2e,var(--sw-dark));border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:12px">';
       h += '<div style="font-size:28px">&#128306;</div>';
       h += '<div><div style="font-size:14px;font-weight:700;color:#fff">View 3D Model</div>';
       h += '<div style="font-size:11px;color:rgba(255,255,255,0.5)">Interactive model viewer</div></div>';
@@ -14042,6 +14136,26 @@
   // PROFILE VIEW — User info + sign out + rate + invoices
   // ══════════════════════════════════════════════════
 
+  // BOARD VIEW — M1 placeholder (manager-gated). Allocation UI lands in M3.
+  function renderBoardView() {
+    var container = document.getElementById('boardContent');
+    if (!container) return;
+    var mv = (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
+    var vertsLine = mv.length
+      ? 'Your verticals · ' + mv.map(function(v) { return esc(String(v)); }).join(' · ')
+      : (_isAdmin ? 'All verticals' : '');
+    var html = '';
+    html += '<div style="margin-top:8px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:var(--sw-r-card);box-shadow:var(--sw-shadow);overflow:hidden">';
+    html += '  <div style="background:var(--sw-dark);color:var(--sw-bar-ink);font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;padding:9px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Board</div>';
+    html += '  <div style="padding:22px 18px">';
+    html += '    <div style="font-size:17px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">Allocation arrives in M3</div>';
+    html += '    <div style="font-size:13.5px;color:var(--sw-text-sec);line-height:1.5">The manager allocation board is being built. For now, keep assigning from the Calendar and Jobs tabs.</div>';
+    if (vertsLine) html += '<div style="margin-top:14px;font-family:var(--sw-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--sw-mid)">' + vertsLine + '</div>';
+    html += '  </div>';
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
   function renderProfileView() {
     var container = document.getElementById('profileContent');
     if (!_user) { container.innerHTML = ''; return; }
@@ -14058,6 +14172,16 @@
     if (_user.role) html += '<div style="font-size:12px;color:var(--sw-mid);text-transform:capitalize;margin-top:4px">' + esc(_user.role.replace(/_/g, ' ')) + '</div>';
     html += '  <div style="margin-top:8px"><span class="tier-badge tier-' + _userTier + '">Tier ' + _userTier + ' — ' + esc(tierLabel(_userTier)) + '</span></div>';
     html += '</div>';
+
+    // ── Activity (off-nav in M1: quick Note/Photo/Issue + daily timeline) ──
+    html += '<button onclick="showView(\'activity\')" style="width:100%;display:flex;align-items:center;gap:12px;margin-top:8px;padding:14px 16px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:var(--sw-r-card);box-shadow:var(--sw-shadow);cursor:pointer;text-align:left;font-family:var(--sw-font)">';
+    html += '  <span style="width:40px;height:40px;border-radius:var(--sw-r-ctl);background:var(--sw-seg-bg);display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto">&#128203;</span>';
+    html += '  <span style="flex:1;min-width:0">';
+    html += '    <span style="display:block;font-size:15px;font-weight:700;color:var(--sw-dark)">Activity</span>';
+    html += '    <span style="display:block;font-size:12px;color:var(--sw-text-sec);margin-top:1px">Notes, photos, issues, timeline</span>';
+    html += '  </span>';
+    html += '  <span style="flex:0 0 auto;color:var(--sw-ink-3);font-size:22px;line-height:1">&#8250;</span>';
+    html += '</button>';
 
     // ── Hourly Rate ──
     html += '<div style="margin-top:24px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';

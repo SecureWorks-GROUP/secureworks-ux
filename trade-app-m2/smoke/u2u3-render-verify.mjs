@@ -84,12 +84,58 @@ test('CP1 finding — crewed-but-untimed jobs land in a "No time set" section (n
   ok(dayJobs.indexOf('No time set') >= 0, 'Day×Jobs shows the No-time-set section too');
 });
 
-test('CP1 finding — reconcile: every crewed job for a day renders (timed grid + untimed section)', () => {
-  const s = st({ date: '2026-07-06', scale: 'day', axis: 'jobs' });
-  const assigned = jobBlocks.filter((b) => b.date === '2026-07-06' && b.crew);
-  const outIds = new Set((CR.render(M, s).match(/data-job="([^"]+)"/g) || []).map((m) => m.slice(10, -1)));
-  const missing = assigned.filter((b) => !outIds.has(b.id));
-  eq(missing.length, 0, 'no crewed job dropped from Day×Jobs (all ' + assigned.length + ' render)');
+const idToJob = new Map(jobBlocks.map((b) => [b.id, b._jobId]));
+function renderedIds(out) { return (out.match(/data-job="([^"]+)"/g) || []).map((m) => m.slice(10, -1)); }
+// a date with a genuine multi-crew job+date (drives the dedupe assertions)
+function multiCrewDate() {
+  const byKey = {};
+  jobBlocks.forEach((b) => { if (b.crew) { const k = b._jobId + '|' + b.date; (byKey[k] ||= new Set()).add(b.crew); } });
+  const k = Object.keys(byKey).find((k) => byKey[k].size > 1);
+  return k ? k.split('|')[1] : '2026-07-06';
+}
+
+test('FIX2 — jobs-axis dedupes by job+date (no job dropped, no duplicate blocks)', () => {
+  const d = '2026-07-06';
+  const s = st({ date: d, scale: 'day', axis: 'jobs' });
+  const assigned = jobBlocks.filter((b) => b.date === d && b.crew);
+  const uniqueJobs = new Set(assigned.map((b) => b._jobId));
+  const ids = renderedIds(CR.render(M, s));
+  const renderedJobs = new Set(ids.map((id) => idToJob.get(id)));
+  eq([...uniqueJobs].filter((j) => !renderedJobs.has(j)).length, 0, 'every job renders (none dropped)');
+  eq(ids.length, uniqueJobs.size, 'one block/row per job+date (deduped): ' + ids.length + ' rendered == ' + uniqueJobs.size + ' unique jobs (from ' + assigned.length + ' assignments)');
+});
+
+test('FIX2 — a genuine multi-crew job renders ONCE with a crew-count disc (Day×Jobs)', () => {
+  const d = multiCrewDate();
+  const byKey = {};
+  jobBlocks.forEach((b) => { if (b.crew && b.date === d) { (byKey[b._jobId] ||= new Set()).add(b.crew); } });
+  const jobId = Object.keys(byKey).find((j) => byKey[j].size > 1);
+  ok(jobId, 'found a multi-crew job on ' + d);
+  const assignmentsForJob = jobBlocks.filter((b) => b._jobId === jobId && b.date === d && b.crew);
+  ok(assignmentsForJob.length > 1, jobId + ' has ' + assignmentsForJob.length + ' crew');
+  const out = CR.render(M, st({ date: d, scale: 'day', axis: 'jobs' }));
+  const ids = renderedIds(out).filter((id) => idToJob.get(id) === jobId);
+  eq(ids.length, 1, 'the multi-crew job renders exactly once (was ' + assignmentsForJob.length + ' assignments)');
+  // count disc: crewDisc renders the crew count for a deduped multi-crew block
+  ok(out.indexOf('class="bav" title=') >= 0, 'multi-crew block shows a count disc (bav with title)');
+});
+
+test('FIX2 — dedupeByJobDate is live (not dead code): join produces "A + B" crew', () => {
+  const d = multiCrewDate();
+  const rows = CA.dedupeByJobDate(jobBlocks.filter((b) => b.date === d && b.crew));
+  const joined = rows.find((r) => r.crewList && r.crewList.length > 1);
+  ok(joined, 'a deduped row has >1 crew');
+  ok(joined.crew.indexOf(' + ') >= 0, 'crew names joined with " + " (' + joined.crew + ')');
+});
+
+test('crew-axis UNCHANGED — Timeline still renders per-assignment (job on each crew column)', () => {
+  const d = multiCrewDate();
+  const byKey = {};
+  jobBlocks.forEach((b) => { if (b.crew && b.date === d) { (byKey[b._jobId] ||= []).push(b); } });
+  const jobId = Object.keys(byKey).find((j) => byKey[j].length > 1);
+  const out = CR.render(M, st({ date: d, scale: 'day', axis: 'crew' })); // Timeline
+  const ids = renderedIds(out).filter((id) => idToJob.get(id) === jobId);
+  ok(ids.length >= 2, 'crew-axis Timeline keeps one block per assignment (' + ids.length + ' for the multi-crew job) — not deduped');
 });
 
 test('type:"other" survives — neutral block, never crashes', () => {

@@ -3606,6 +3606,39 @@
 
     <!-- ═══════════ MATERIALS TAB ═══════════ -->
     <div id="viewMaterials" class="view">
+
+      <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
+           Ops worklist that drains U3's materials_reconciliation_queue by hand.
+           accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
+           closes the row with no fact. Every action is auditable (who + when + manual marker). -->
+      <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
+          <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
+          <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
+          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
+          <div style="flex:1;"></div>
+          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
+          <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
+        </div>
+        <div class="data-table-wrap" style="overflow-x:auto;">
+          <table class="pnl-table" style="width:100%; font-size:12px;">
+            <thead>
+              <tr>
+                <th>Supplier</th>
+                <th>Invoice #</th>
+                <th style="text-align:right;">Amount (inc)</th>
+                <th>Date</th>
+                <th>Suggested job</th>
+                <th style="min-width:280px;">Assign to job</th>
+              </tr>
+            </thead>
+            <tbody id="matReconTableBody">
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         Materials Pipeline <span class="badge" id="materialsCount">0</span>
         <div style="flex:1;"></div>
@@ -5763,7 +5796,7 @@ function showView(view) {
   if (view === 'calendar') loadCalendar();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
-  if (view === 'materials') loadMaterials();
+  if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
   if (view === 'inbox') loadInbox();
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
   // Update Jarvis bar context
@@ -13262,6 +13295,139 @@ async function loadMaterials() {
       { label: 'Retry', primary: true, onclick: 'loadMaterials()' }
     ]);
   }
+}
+
+// ════════════════════════════════════════════════════════════
+// M2/U4 — Bill Reconciliation queue (ops worklist)
+//
+// Surfaces U3's materials_reconciliation_queue (unmatched, non-mirror ACCPAY
+// bills, status=open) and drains it by hand. Three auditable actions, each via
+// opsPost (which injects operator_email = the logged-in user, recorded as the
+// manual assigner):
+//   accept-suggestion   → materials_recon_assign { use_suggestion:true }
+//   assign-to-job        → materials_recon_assign { job_number:<typed> }
+//   mark-not-job-related → materials_recon_not_job_related
+// accept/assign land a high_manual materials fact; not-job-related writes none.
+// Depends on the U3 migration (job_materials_facts + materials_reconciliation_queue)
+// AND the ops-api materials_recon_* actions; until both ship, the panel shows a
+// wiring note instead of failing loudly.
+// ════════════════════════════════════════════════════════════
+var _matReconRows = [];
+
+var MAT_RECON_REASON_LABELS = {
+  no_ref_no_po:            'No reference, no matching PO',
+  ref_no_job:             'Reference found, no matching job',
+  no_po_match:            'Supplier PO exists, no amount/date match',
+  ambiguous_po_competitor: 'Multiple POs matched — pick one',
+  ambiguous_po:           'Ambiguous PO match'
+};
+
+async function loadMaterialsRecon() {
+  var tbody = document.getElementById('matReconTableBody');
+  var statusEl = document.getElementById('matReconStatus');
+  if (!tbody) return;
+  if (statusEl) statusEl.textContent = '';
+  try {
+    var data = await opsFetch('materials_recon_queue', { status: 'open' });
+    _matReconRows = data.rows || [];
+    renderMaterialsRecon(data);
+  } catch (e) {
+    console.error('loadMaterialsRecon error:', e);
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:18px;color:var(--sw-text-sec);font-size:11px;">'
+      + 'Reconciliation queue unavailable: ' + escapeHtml(e && e.message ? e.message : 'unknown error')
+      + '<br>Backend actions <code>materials_recon_*</code> + the U3 migration may not be applied yet (M2 gate).</td></tr>';
+    var cnt = document.getElementById('matReconOpenCount');
+    if (cnt) cnt.textContent = '—';
+  }
+}
+
+function renderMaterialsRecon(data) {
+  var tbody = document.getElementById('matReconTableBody');
+  var cntEl = document.getElementById('matReconOpenCount');
+  var drainEl = document.getElementById('matReconDrain');
+  if (!tbody) return;
+  var rows = (data && data.rows) || [];
+  var stats = (data && data.stats) || {};
+
+  if (cntEl) cntEl.textContent = (stats.open != null ? stats.open : rows.length);
+  if (drainEl) {
+    var bits = [];
+    if (stats.open_total_inc != null && stats.open > 0) bits.push(fmt$(stats.open_total_inc) + ' unmatched');
+    if (stats.assigned != null) bits.push(stats.assigned + ' assigned');
+    if (stats.not_job_related != null) bits.push(stats.not_job_related + ' filed');
+    drainEl.textContent = bits.length ? '· ' + bits.join(' · ') : '';
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">'
+      + 'Queue clear — every supplier bill is matched to a job or filed as not-job-related.</td></tr>';
+    return;
+  }
+
+  var html = '';
+  rows.forEach(function(r) {
+    var reason = MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason || '';
+    var suggestCell;
+    if (r.suggested_job_number) {
+      suggestCell = '<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 9px;" '
+        + 'onclick="matReconAccept(\'' + r.id + '\', \'' + escapeHtml(r.suggested_job_number) + '\')">'
+        + 'Accept ' + escapeHtml(r.suggested_job_number) + '</button>'
+        + (reason ? '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px;">' + escapeHtml(reason) + '</div>' : '');
+    } else {
+      suggestCell = '<span style="color:var(--sw-text-sec);font-size:11px;">'
+        + (reason ? escapeHtml(reason) : 'No suggestion') + '</span>';
+    }
+    var jobInputId = 'matReconJob_' + r.id;
+    var assignCell = '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">'
+      + '<input id="' + jobInputId + '" class="form-input" placeholder="e.g. SWF-25010" '
+      + 'style="width:120px;font-size:11px;padding:3px 6px;" onkeydown="if(event.key===\'Enter\')matReconAssignInput(\'' + r.id + '\')">'
+      + '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 9px;" onclick="matReconAssignInput(\'' + r.id + '\')">Assign</button>'
+      + '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 9px;color:var(--sw-text-sec);" '
+      + 'onclick="matReconNotJobRelated(\'' + r.id + '\')" title="File as not job-related (no materials fact)">Not job-related</button>'
+      + '</div>';
+
+    html += '<tr>'
+      + '<td>' + escapeHtml(r.contact_name || '(unknown supplier)') + '</td>'
+      + '<td style="font-size:11px;">' + escapeHtml(r.invoice_number || '—') + '</td>'
+      + '<td style="text-align:right;font-family:var(--sw-font-num,monospace);">' + fmt$(r.total != null ? r.total : (r.sub_total || 0)) + '</td>'
+      + '<td style="font-size:11px;white-space:nowrap;">' + escapeHtml(r.invoice_date || '—') + '</td>'
+      + '<td>' + suggestCell + '</td>'
+      + '<td>' + assignCell + '</td>'
+      + '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+// accept-suggestion — land the advisory suggested job as a manual fact.
+function matReconAccept(queueId, jobNumber) {
+  if (!confirm('Assign this bill to ' + jobNumber + '?\nThis records a materials cost on that job (manual).')) return;
+  _matReconAction('materials_recon_assign', { queue_id: queueId, use_suggestion: true },
+    'Assigned to ' + jobNumber);
+}
+
+// assign-to-job — the operator typed an explicit job number.
+function matReconAssignInput(queueId) {
+  var input = document.getElementById('matReconJob_' + queueId);
+  var jobNumber = (input && input.value || '').trim();
+  if (!jobNumber) { showToast('Type a job number first (e.g. SWF-25010)', 'warning'); if (input) input.focus(); return; }
+  if (!confirm('Assign this bill to ' + jobNumber + '?\nThis records a materials cost on that job (manual).')) return;
+  _matReconAction('materials_recon_assign', { queue_id: queueId, job_number: jobNumber },
+    'Assigned to ' + jobNumber);
+}
+
+// mark-not-job-related — file the bill, write no fact.
+function matReconNotJobRelated(queueId) {
+  if (!confirm('File this bill as NOT job-related?\nNo materials cost is recorded. You can revisit it later.')) return;
+  _matReconAction('materials_recon_not_job_related', { queue_id: queueId }, 'Filed as not job-related');
+}
+
+function _matReconAction(action, body, okMsg) {
+  opsPost(action, body).then(function(res) {
+    showToast(okMsg, 'success');
+    loadMaterialsRecon();
+  }).catch(function(e) {
+    showToast('Failed: ' + (e && e.message ? e.message : 'unknown error'), 'error');
+  });
 }
 
 async function loadPendingPrices() {

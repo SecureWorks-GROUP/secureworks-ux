@@ -10990,6 +10990,10 @@
     function jobsForAgenda(M, st, d) {
       var out = assignedForDate(M, st, d);
       if (showUnassigned(st)) out = out.concat(unassignedForDate(M, st, d));
+      // JOBS axis (Month×Jobs day-list + dots): dedupe to one row per job+date so all
+      // three jobs-axis views (day/week/month) behave uniformly per §2a. crewList drives
+      // the count disc; untimed deduped rows still show once. Crew-axis is unaffected.
+      out = CalAdapterCore.dedupeByJobDate(out);
       return out.sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
     }
 

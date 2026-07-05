@@ -128,6 +128,17 @@ test('FIX2 — dedupeByJobDate is live (not dead code): join produces "A + B" cr
   ok(joined.crew.indexOf(' + ') >= 0, 'crew names joined with " + " (' + joined.crew + ')');
 });
 
+test('FIX2 consistency — Month×Jobs day-list also dedupes by job+date', () => {
+  const d = multiCrewDate();
+  const byKey = {};
+  jobBlocks.forEach((b) => { if (b.crew && b.date === d) { (byKey[b._jobId] ||= new Set()).add(b.crew); } });
+  const jobId = Object.keys(byKey).find((j) => byKey[j].size > 1);
+  ok(jobId, 'multi-crew job on ' + d);
+  const out = CR.render(M, st({ date: d, month: d.slice(0, 8) + '01', scale: 'month', axis: 'jobs' }));
+  const ids = renderedIds(out).filter((id) => idToJob.get(id) === jobId);
+  eq(ids.length, 1, 'Month×Jobs day-list shows the multi-crew job once (day-list agenda rows)');
+});
+
 test('crew-axis UNCHANGED — Timeline still renders per-assignment (job on each crew column)', () => {
   const d = multiCrewDate();
   const byKey = {};

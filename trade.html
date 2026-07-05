@@ -2726,6 +2726,10 @@
     .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
     .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
     .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
+    /* U4 · Classic-calendar hatch row (in the filter sheet) */
+    .ncal .nc-classic-row{display:flex;justify-content:space-between;align-items:center;width:100%;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);padding:14px 15px;font-size:15px;font-weight:700;color:var(--ink)}
+    .ncal .nc-classic-row .uarrow{color:var(--ink-3);font-size:18px;font-weight:800}
+    .ncal .nc-classic-note{font-size:12px;color:var(--ink-3);margin-top:6px}
   </style>
 </head>
 <body>
@@ -2910,6 +2914,12 @@
       <div class="nc-sheetfoot" id="ncSheetFoot"></div>
     </div>
     <div class="nc-toast" id="ncToast"></div>
+  </div>
+
+  <!-- U4 · return bar shown while the Classic calendar hatch is open -->
+  <div id="ncClassicBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:var(--sw-orange-tint);border-bottom:1px solid var(--sw-border)">
+    <span style="font-family:var(--sw-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-orange-deep)">Classic calendar</span>
+    <button onclick="ncShowNew()" style="background:var(--sw-dark);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;min-height:40px">&larr; New calendar</button>
   </div>
 
   <div class="container">
@@ -11196,7 +11206,7 @@
   // ── DOM wiring for the new calendar (U2/U3). Uses CalRender (pure) + the U1
   //    adapter fetch. Additive: the old calendar functions stay defined and the
   //    old #viewSchedule .container is hidden (not removed); U4 adds the hatch. ──
-  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false };
+  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, classic: false };
 
   function ncBoardAllowed() { var mv = _user && _user.managed_verticals; return !!(_isAdmin || (Array.isArray(mv) && mv.length > 0)); }
   function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
@@ -11209,18 +11219,40 @@
   }
   function ncInRange(d) { return NC.fetchFrom && NC.fetchTo && d >= NC.fetchFrom && d <= NC.fetchTo; }
 
+  // U4 · Classic-calendar hatch reveal/return. The old cluster is never removed;
+  // this un-hides it and boots it via the untouched showScheduleSubTab('calendar').
+  function ncOldContainer() { var s = document.getElementById('viewSchedule'); return s ? s.querySelector(':scope > .container') : null; }
+  function ncShowClassic() {
+    NC.classic = true;
+    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'none';
+    var oc = ncOldContainer(); if (oc) oc.style.display = '';
+    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'flex';
+    ncCloseSheet();
+    if (typeof showScheduleSubTab === 'function') showScheduleSubTab('calendar'); // boots loadTeamCalendar + old sub-tabs
+  }
+  function ncShowNew() {
+    NC.classic = false;
+    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
+    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'none';
+    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'flex';
+    if (NC.model) ncPaint(); else renderNewCalendar();
+  }
+  window.ncShowNew = ncShowNew;
+
   async function renderNewCalendar() {
     var root = document.getElementById('ncalRoot');
     if (!root) return;
-    // Show the new system; hide the old calendar container (kept in DOM for U4).
-    root.style.display = 'flex';
-    var sched = document.getElementById('viewSchedule');
-    if (sched) Array.prototype.forEach.call(sched.children, function (c) { if (c !== root) c.style.display = 'none'; });
-
     if (!NC.date) { NC.date = awstDateStr(); NC.month = NC.date.slice(0, 8) + '01'; }
     if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
     if (!ncBoardAllowed()) NC.scope = 'mine';
     ncWireOnce();
+    // If the user parked in the Classic calendar this session, keep them there.
+    // Boot default is still the NEW system (NC.classic starts false on load).
+    if (NC.classic) { ncShowClassic(); return; }
+    // Show the new system; hide the old container + classic bar (kept in DOM).
+    root.style.display = 'flex';
+    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
+    var cbar = document.getElementById('ncClassicBar'); if (cbar) cbar.style.display = 'none';
 
     var host = document.getElementById('ncCalhost');
     if (!NC.model || !ncInRange(NC.date) || !ncInRange(NC.month)) {
@@ -11326,14 +11358,19 @@
       return '<div class="sh-kick">Filter the calendar</div>'
         + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
         + '<div class="fgroup"><div class="sh-lab">Trade</div><div class="fchips">' + chips + '</div></div>'
-        + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>';
+        + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>'
+        + '<div class="fgroup"><div class="sh-lab">Other</div>'
+        + '<button class="nc-classic-row" data-classic="1"><span>Classic calendar</span><span class="uarrow">&rsaquo;</span></button>'
+        + '<div class="nc-classic-note">The old Calendar, Team and Availability views, exactly as before.</div></div>';
     }
     body.innerHTML = content();
     body.onclick = function (e) {
       var c = e.target.closest('[data-ftype]');
       if (c) { NC.type = c.getAttribute('data-ftype'); body.innerHTML = content(); ncPaint(); return; }
       var sc = e.target.closest('[data-fscope]');
-      if (sc) { NC.scope = sc.getAttribute('data-fscope'); body.innerHTML = content(); ncPaint(); }
+      if (sc) { NC.scope = sc.getAttribute('data-fscope'); body.innerHTML = content(); ncPaint(); return; }
+      var cl = e.target.closest('[data-classic]');
+      if (cl) { ncShowClassic(); }
     };
     document.getElementById('ncSheetFoot').innerHTML = '<button class="btn ghost" id="ncResetBtn">Reset</button><button class="btn dark" id="ncDoneBtn">Done</button>';
     document.getElementById('ncResetBtn').addEventListener('click', function () { NC.type = 'all'; NC.scope = ncBoardAllowed() ? 'everyone' : 'mine'; body.innerHTML = content(); ncPaint(); });

@@ -12599,6 +12599,17 @@
         } else if (!c.hours_prefilled && cardMode === 'hours') {
           html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:2px">Not clocked — enter the hours you worked.</div>';
         }
+        // Over-2hr make-safe justification prompt — capture only, never blocks.
+        if (_isMakesafeCard(c) && cardMode === 'hours' && Number(c.hours) > 2) {
+          html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(241,90,41,0.07);border:1px solid rgba(241,90,41,0.3);border-radius:8px">';
+          html += '<div style="font-size:11px;font-weight:700;color:#c0392b;margin-bottom:4px">Over the 2hr minimum</div>';
+          html += '<input type="text" data-cardjust="' + c._idx + '" value="' + esc(c.justification || '') + '" '
+            + 'placeholder="Reason for the extra time? Did you get approval from Marnin?" '
+            + 'onchange="setJobCardJustification(' + c._idx + ',this.value)" '
+            + 'style="width:100%;padding:6px 8px;border:1px solid rgba(241,90,41,0.4);border-radius:6px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box;background:#fff">';
+          html += '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px">Leave blank if you do not have approval — the office will follow up before payment.</div>';
+          html += '</div>';
+        }
         html += '</div></div></div>';
       });
       html += '</div>';
@@ -12776,6 +12787,9 @@
       // Description is rendered as a plain input — read it back.
       var descEls = document.querySelectorAll('.jc-card[data-card="' + idx + '"] input[type="text"][onchange*="setJobCardDescription"]');
       if (descEls.length > 0) c.description = descEls[0].value || '';
+      // Sync over-2hr make-safe justification if the prompt is visible.
+      var justEl = document.querySelector('[data-cardjust="' + idx + '"]');
+      if (justEl) c.justification = justEl.value || '';
     });
     var n = document.getElementById('invNotes');
     if (n) _invNotes = n.value;
@@ -12993,6 +13007,11 @@
     var c = _jobCards[idx]; if (!c) return;
     c.description = val || '';
   };
+  // Over-2hr make-safe justification — captured, never blocks submit.
+  window.setJobCardJustification = function(idx, val) {
+    var c = _jobCards[idx]; if (!c) return;
+    c.justification = val || '';
+  };
   window.toggleJobCard = function(idx, on) {
     var c = _jobCards[idx]; if (!c) return;
     c.included = !!on;
@@ -13044,6 +13063,30 @@
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
       if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');
+      // Show/hide the over-2hr justification prompt as the trade types hours.
+      if (c && _isMakesafeCard(c) && !c.wo_mode && !c.commission_mode) {
+        var justBlock = document.querySelector('[data-cardjust="' + idx + '"]');
+        if (justBlock) {
+          // Prompt already rendered — just toggle its parent wrapper.
+          justBlock.parentElement.style.display = (Number(c.hours) > 2) ? 'block' : 'none';
+        } else if (Number(c.hours) > 2) {
+          // Prompt not yet in DOM (trade entered >2h without a prior re-render) —
+          // inject it immediately after the description input.
+          var card = document.querySelector('.jc-card[data-card="' + idx + '"]');
+          if (card && !card.querySelector('[data-cardjust="' + idx + '"]')) {
+            var wrap = document.createElement('div');
+            wrap.style.cssText = 'margin-top:8px;padding:8px 10px;background:rgba(241,90,41,0.07);border:1px solid rgba(241,90,41,0.3);border-radius:8px';
+            wrap.innerHTML = '<div style="font-size:11px;font-weight:700;color:#c0392b;margin-bottom:4px">Over the 2hr minimum</div>'
+              + '<input type="text" data-cardjust="' + idx + '" value="' + esc(c.justification || '') + '" '
+              + 'placeholder="Reason for the extra time? Did you get approval from Marnin?" '
+              + 'onchange="setJobCardJustification(' + idx + ',this.value)" '
+              + 'style="width:100%;padding:6px 8px;border:1px solid rgba(241,90,41,0.4);border-radius:6px;font-size:12px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box;background:#fff">'
+              + '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px">Leave blank if you do not have approval — the office will follow up before payment.</div>';
+            var inner = card.querySelector('div[style*="flex:1"]');
+            if (inner) inner.appendChild(wrap);
+          }
+        }
+      }
     }
     var tot = document.getElementById('jcRunningTotal');
     if (tot) tot.textContent = _jobCardsTotalStr();
@@ -13056,6 +13099,16 @@
       var invSubBtn = document.getElementById('invSubmitBtn');
       if (invSubBtn) invSubBtn.textContent = 'Submit Invoice — $' + grand.toFixed(2);
     }
+  }
+
+  // Returns true when a job card belongs to the make-safe division.
+  // Mirrors the backend's check: division='Make Safe' OR line_type='make safe'.
+  function _isMakesafeCard(c) {
+    var t = String(c.job_type || '').toLowerCase().replace(/[_\s]/g, '');
+    if (t === 'makesafe') return true;
+    var jn = String(c.job_number || '');
+    if (jn.startsWith('SWM')) return true;
+    return false;
   }
 
   // [JC-PAYLOAD-BUILD-START] — pure payload builder for the job-centric submit.
@@ -13208,7 +13261,9 @@
           manually_added: true,
           source: 'manual_job_search',
           rate_source: 'client_entered',
-          client_rate_entered: true
+          client_rate_entered: true,
+          // Carry justification for make-safe over-2hr lines (empty = unjustified, flagged by backend).
+          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
         });
       } else {
         subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
@@ -13218,7 +13273,9 @@
           rate: Number(c.rate || 0),
           rate_source: c.rate_source || 'server_resolved',
           description: c.description || '',
-          manually_added: false
+          manually_added: false,
+          // Carry justification for make-safe over-2hr lines (empty = unjustified, flagged by backend).
+          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
         });
       }
     });

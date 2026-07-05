@@ -5,13 +5,15 @@
 // API calls always go to network (no stale data for job lists).
 // ════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'sw-trade-v17'
+const CACHE_NAME = 'sw-trade-v18'
 
 // App shell — these files are cached for instant load
 const SHELL_FILES = [
   '/secureworks-ux/trade.html',
   '/secureworks-ux/shared/brand.js',
   '/secureworks-ux/shared/cloud.js',
+  '/secureworks-ux/fonts/ibm-plex-mono/ibm-plex-mono-400.woff2',
+  '/secureworks-ux/fonts/ibm-plex-mono/ibm-plex-mono-600.woff2',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
 ]
 
@@ -43,8 +45,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
 
-  // Only handle trade.html and its assets — let other pages (ops, ceo, sale) pass through
-  if (!url.pathname.includes('trade') && !url.pathname.includes('/shared/') && !SHELL_FILES.includes(url.href)) {
+  // Only handle trade.html and its assets — let other pages (ops, ceo, sale) pass through.
+  // '/fonts/' is included so the self-hosted IBM Plex Mono woff2 files are served
+  // cache-first (they render the Briefing ops chrome offline).
+  if (!url.pathname.includes('trade') && !url.pathname.includes('/shared/') && !url.pathname.includes('/fonts/') && !SHELL_FILES.includes(url.href)) {
     return // Not a trade app resource — don't intercept
   }
 

@@ -125,6 +125,9 @@
       font-weight: 700;
       letter-spacing: -0.3px;
       color: var(--sw-bar-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .header-brand span { font-weight: 400; color: var(--sw-bar-sub); opacity: 1; }
     .header-user {
@@ -134,6 +137,10 @@
       letter-spacing: 0.02em;
       color: var(--sw-bar-sub);
       opacity: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .header-back {
       background: none;
@@ -147,7 +154,7 @@
       display: none; /* shown via JS when in sub-view */
       margin-right: 4px;
     }
-    .header-left { display: flex; align-items: center; gap: 4px; }
+    .header-left { display: flex; align-items: center; gap: 4px; min-width: 0; }
 
     /* ══════════════════════════════════════════════════
        BOTTOM NAV
@@ -167,6 +174,7 @@
     }
     .bottom-nav button {
       flex: 1;
+      min-width: 0;
       padding: 5px 0;
       min-height: 48px;
       background: none;
@@ -177,6 +185,7 @@
       font-size: 10px;
       font-weight: 500;
       letter-spacing: 0.04em;
+      white-space: nowrap;
       cursor: pointer;
       display: flex;
       flex-direction: column;
@@ -331,11 +340,13 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 8px;
+      flex-wrap: wrap;
     }
     .job-card-client {
       font-size: 15px;
       font-weight: 600;
       color: var(--sw-dark);
+      min-width: 0;
     }
     .job-card-badge {
       font-family: var(--sw-mono);
@@ -553,7 +564,7 @@
       text-transform: uppercase;
       margin-top: 4px;
     }
-    .hours-badge.patio { background: rgba(241,90,41,0.1); color: #F15A29; }
+    .hours-badge.patio { background: rgba(241,90,41,0.1); color: var(--sw-orange); }
     .hours-badge.fencing { background: rgba(52,152,219,0.1); color: #3498DB; }
     .hours-badge.decking { background: rgba(39,174,96,0.1); color: #27AE60; }
     .hours-submit-btn {
@@ -680,9 +691,9 @@
     .inv-line-type { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
     .inv-line-type.labour { background: rgba(52,152,219,0.1); color: #3498DB; }
     .inv-line-type.travel { background: rgba(155,89,182,0.1); color: #9B59B6; }
-    .inv-line-type.materials { background: rgba(241,90,41,0.1); color: #F15A29; }
+    .inv-line-type.materials { background: rgba(241,90,41,0.1); color: var(--sw-orange); }
     .inv-line-type.equipment { background: rgba(39,174,96,0.1); color: #27AE60; }
-    .inv-line-type.other { background: rgba(107,114,128,0.1); color: #6B7280; }
+    .inv-line-type.other { background: rgba(107,114,128,0.1); color: var(--sw-text-sec); }
     .inv-add-btn { width: 100%; padding: 12px; background: var(--sw-light); border: 2px dashed var(--sw-border); border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--sw-mid); cursor: pointer; margin-bottom: 8px; }
     .inv-add-btn:active { background: var(--sw-border); }
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
@@ -691,7 +702,7 @@
     .inv-history-item { background: var(--sw-card); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--sw-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .inv-history-item:active { background: var(--sw-light); }
     .inv-status { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
-    .inv-status.draft { background: rgba(107,114,128,0.1); color: #6B7280; }
+    .inv-status.draft { background: rgba(107,114,128,0.1); color: var(--sw-text-sec); }
     .inv-status.submitted, .inv-status.pending_ops_review { background: rgba(52,152,219,0.1); color: #3498DB; }
     .inv-status.acknowledged, .inv-status.approved { background: rgba(39,174,96,0.1); color: #27AE60; }
     .inv-status.pushed_to_xero { background: rgba(52,152,219,0.1); color: #3498DB; }
@@ -1251,7 +1262,7 @@
     }
     .weather-warning-heat {
       background: rgba(241, 90, 41, 0.15);
-      color: #F15A29;
+      color: var(--sw-orange);
     }
     .weather-badge {
       display: inline-flex;
@@ -2463,7 +2474,7 @@
     <button class="header-back" id="btnBack" onclick="goBack()">&#8592;</button>
     <div class="header-brand">SecureWorks <span>Trade</span></div>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;">
+  <div style="display:flex;align-items:center;gap:8px;min-width:0;">
     <span id="syncDot" onclick="showSyncStatus()" style="width:10px;height:10px;border-radius:50%;background:var(--sw-green);cursor:pointer;flex-shrink:0;display:none;" title="Sync status"></span>
     <div class="header-user" id="headerUser" onclick="toggleUserMenu()"></div>
   </div>
@@ -4491,14 +4502,14 @@
 
         // Internal / job-less entry
         if (!job.id) {
-          html += '<div class="job-card' + todayClass + '" data-type="internal" style="border-left-color:#6B7280">';
+          html += '<div class="job-card' + todayClass + '" data-type="internal" style="border-left-color:var(--sw-text-sec)">';
           html += '  <div class="job-card-top">';
           if (sec.key === 'today') html += '    <span class="run-list-order-badge">' + (idx + 1) + '</span>';
           html += '    <div>';
           html += '      <div class="job-card-client">' + esc(a.label || 'Internal Event') + '</div>';
-          html += '      <div class="job-card-address" style="color:#6B7280;font-style:italic">Internal · No job</div>';
+          html += '      <div class="job-card-address" style="color:var(--sw-text-sec);font-style:italic">Internal · No job</div>';
           html += '    </div>';
-          html += '    <span class="job-card-badge" style="background:#6B7280;color:#fff">internal</span>';
+          html += '    <span class="job-card-badge" style="background:var(--sw-text-sec);color:#fff">internal</span>';
           html += '  </div>';
           html += '  <div class="job-card-meta">';
           html += '    <span>' + formatDate(a.scheduled_date) + '</span>';
@@ -7167,7 +7178,7 @@
 
     // ── 2. CREW WORK ORDER — scope_items table ──
     if (wo && wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
-      h += '<div class="detail-section" style="background:#F8F6F3;padding:14px 16px">';
+      h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark)">Crew Work Order</div>';
       if (wo.wo_number) h += '<span style="font-size:11px;font-weight:700;color:var(--sw-text-sec);background:var(--sw-border);padding:2px 8px">' + esc(wo.wo_number) + '</span>';
@@ -7205,7 +7216,7 @@
       h += '</table>';
       h += '</div>';
     } else {
-      h += '<div class="detail-section" style="background:#F8F6F3;padding:14px 16px">';
+      h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Crew Work Order</div>';
       h += '<div style="padding:16px;text-align:center;color:var(--sw-text-sec);font-size:13px">No work order assigned yet</div>';
       h += '</div>';
@@ -7299,7 +7310,7 @@
         var hasRetaining = panels.some(function(p) { return (p.slopePlinths||0) + (p.retaining/150) > 0; });
 
         // Run header
-        h += '<div style="background:#F8F6F3;border-left:3px solid var(--sw-dark);padding:10px 12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);border-left:3px solid var(--sw-dark);padding:10px 12px;margin-bottom:8px">';
         h += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">' + esc(run.name || 'Run') + ' (' + panelCount + ' panels, ' + (run.length || 0) + 'm)';
         if (patioTubes > 0) h += ' <span style="color:var(--sw-orange);font-weight:700">[' + patioTubes + ' patio tubes]</span>';
         h += '</div>';
@@ -7341,7 +7352,7 @@
           var gp = g.type === 'double' ? 4 : 2;
           woGatePosts += gp;
           var desc = g.type === 'double' ? 'Double swing gate' : 'Pedestrian gate ' + (g.width || 900) + 'mm';
-          h += '<div style="background:#F8F6F3;padding:8px 12px;margin-bottom:4px;font-size:13px">' + esc(desc) + ' \u2014 90\u00D790mm SHS posts</div>';
+          h += '<div style="background:var(--sw-frame);padding:8px 12px;margin-bottom:4px;font-size:13px">' + esc(desc) + ' \u2014 90\u00D790mm SHS posts</div>';
         });
         h += '</div>';
       }
@@ -7370,7 +7381,7 @@
       // Removal info
       var removal = scopeJob.removal || {};
       if (removal.removalRequired && removal.existingFenceType) {
-        h += '<div style="background:#F8F6F3;border-left:3px solid var(--sw-mid);padding:10px 12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);border-left:3px solid var(--sw-mid);padding:10px 12px;margin-bottom:8px">';
         h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--sw-mid);margin-bottom:4px">Removal</div>';
         h += '<div style="font-size:13px;color:var(--sw-text)">' + esc(removal.existingFenceType.charAt(0).toUpperCase() + removal.existingFenceType.slice(1)) + ' fence \u2014 ' + (removal.existingFenceLength || 0) + 'm</div>';
         if (removal.existingFenceType === 'asbestos') h += '<div style="color:#dc2626;font-weight:700;font-size:13px;margin-top:4px">ASBESTOS: Licensed removal required. Do NOT break sheets.</div>';
@@ -7470,7 +7481,7 @@
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Materials Pickup</div>';
       pos.forEach(function(po, poIdx) {
         var statusColor = (po.status === 'confirmed') ? 'var(--sw-green)' : 'var(--sw-amber)';
-        h += '<div style="background:#F8F6F3;padding:12px;margin-bottom:8px">';
+        h += '<div style="background:var(--sw-frame);padding:12px;margin-bottom:8px">';
         h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
         h += '<span style="font-weight:700;font-size:14px;color:var(--sw-dark)">' + esc(po.supplier_name || '') + '</span>';
         h += '<span style="font-size:11px;font-weight:700;padding:2px 8px;background:' + statusColor + ';color:#fff;text-transform:uppercase;letter-spacing:0.3px">' + esc((po.status || 'pending').toUpperCase()) + '</span>';
@@ -7643,7 +7654,7 @@
         ? !!(cfg3d.totalLength || cfg3d.length || (scope3d.job && scope3d.job.runs && scope3d.job.runs.length > 0))
         : !!(cfg3d.length || cfg3d.projection);
       if (!has3dData) return;
-      h += '<div onclick="open3DViewer()" style="margin:4px 0 12px;padding:14px;background:linear-gradient(135deg,#1a1a2e,#293C46);border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:12px">';
+      h += '<div onclick="open3DViewer()" style="margin:4px 0 12px;padding:14px;background:linear-gradient(135deg,#1a1a2e,var(--sw-dark));border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:12px">';
       h += '<div style="font-size:28px">&#128306;</div>';
       h += '<div><div style="font-size:14px;font-weight:700;color:#fff">View 3D Model</div>';
       h += '<div style="font-size:11px;color:rgba(255,255,255,0.5)">Interactive model viewer</div></div>';
@@ -14132,7 +14143,7 @@
     var verts = mv.length ? mv.map(function(v) { return esc(String(v)); }).join(' · ') : '';
     var html = '';
     html += '<div style="margin-top:8px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:var(--sw-r-card);box-shadow:var(--sw-shadow);overflow:hidden">';
-    html += '  <div style="background:var(--sw-dark);color:var(--sw-bar-ink);font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;padding:9px 14px">Board</div>';
+    html += '  <div style="background:var(--sw-dark);color:var(--sw-bar-ink);font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;padding:9px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Board</div>';
     html += '  <div style="padding:22px 18px">';
     html += '    <div style="font-size:17px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">Allocation arrives in M3</div>';
     html += '    <div style="font-size:13.5px;color:var(--sw-text-sec);line-height:1.5">The manager allocation board is being built. For now, keep assigning from the Calendar and Jobs tabs.</div>';

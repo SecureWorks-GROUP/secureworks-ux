@@ -29,26 +29,66 @@
 
   <style>
     /* ══════════════════════════════════════════════════
-       CSS VARIABLES — matches main dashboard
+       IBM Plex Mono — self-hosted (Briefing ops chrome, offline-first PWA)
+       ══════════════════════════════════════════════════ */
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('fonts/ibm-plex-mono/ibm-plex-mono-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'IBM Plex Mono';
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+      src: url('fonts/ibm-plex-mono/ibm-plex-mono-600.woff2') format('woff2');
+    }
+
+    /* ══════════════════════════════════════════════════
+       CSS VARIABLES — Briefing skin (blue owns chrome, cool paper, orange = action)
        ══════════════════════════════════════════════════ */
     :root {
+      /* action / urgency — orange, reserved */
       --sw-orange: #F15A29;
+      --sw-orange-deep: #C7431B;
+      --sw-orange-tint: #FBEEE6;
+      --sw-orange-line: #F1C7AF;
+      --sw-on-orange: #FFF4EC;
+      /* command blue — owns app bar + bottom nav + classification headers */
       --sw-dark: #293C46;
+      --sw-bar-ink: #F5F7F8;
+      --sw-bar-sub: #9DB2BD;
+      --sw-bar-line: rgba(245,247,248,0.14);
+      /* cool paper surfaces + ink scale */
       --sw-mid: #4C6A7C;
-      --sw-light: #F0F4F7;
-      --sw-bg: #f5f6f8;
-      --sw-border: #e8eaed;
-      --sw-text: #1A2332;
-      --sw-text-sec: #6b7280;
+      --sw-light: #EBEFF1;
+      --sw-bg: #F5F7F8;
+      --sw-frame: #EBEFF1;
+      --sw-seg-bg: #E8EDEF;
+      --sw-border: #E2E9EC;
+      --sw-line-2: #C6D1D7;
+      --sw-text: #22333D;
+      --sw-text-sec: #6B7A83;
+      --sw-ink-3: #7C8B94;
+      /* semantic (unchanged) */
       --sw-green: #27AE60;
       --sw-red: #E74C3C;
       --sw-yellow: #E67E22;
       --sw-blue: #3498DB;
       --sw-card: #FFFFFF;
-      --sw-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
-      --sw-shadow-hover: 0 10px 40px rgba(0,0,0,0.08);
-      --sw-radius: 12px;
+      /* soft cool shadows */
+      --sw-shadow: 0 1px 3px rgba(41,60,70,0.05), 0 1px 2px rgba(41,60,70,0.06);
+      --sw-shadow-hover: 0 10px 40px rgba(41,60,70,0.10);
+      /* radii tiers (Briefing 14 / 10 / 5) */
+      --sw-radius: 14px;
+      --sw-r-card: 14px;
+      --sw-r-ctl: 10px;
+      --sw-r-chip: 5px;
+      /* type — sans for headings/body, mono for ops chrome */
       --sw-font: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', sans-serif;
+      --sw-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
     /* ══════════════════════════════════════════════════
@@ -70,9 +110,9 @@
        ══════════════════════════════════════════════════ */
     .header {
       background: var(--sw-dark);
-      color: #fff;
-      padding: 12px 16px;
-      padding-top: max(12px, env(safe-area-inset-top));
+      color: var(--sw-bar-ink);
+      padding: 13px 16px;
+      padding-top: max(13px, env(safe-area-inset-top));
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -84,16 +124,21 @@
       font-size: 16px;
       font-weight: 700;
       letter-spacing: -0.3px;
+      color: var(--sw-bar-ink);
     }
-    .header-brand span { font-weight: 400; opacity: 0.7; }
+    .header-brand span { font-weight: 400; color: var(--sw-bar-sub); opacity: 1; }
     .header-user {
-      font-size: 13px;
-      opacity: 0.8;
+      font-family: var(--sw-mono);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: var(--sw-bar-sub);
+      opacity: 1;
     }
     .header-back {
       background: none;
       border: none;
-      color: #fff;
+      color: var(--sw-bar-ink);
       font-size: 22px;
       padding: 8px 12px;
       min-width: 44px;
@@ -115,40 +160,51 @@
       background: var(--sw-dark);
       display: flex;
       z-index: 100;
-      padding: 6px 4px;
-      padding-bottom: max(6px, env(safe-area-inset-bottom));
+      padding: 8px 6px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
       gap: 4px;
+      border-top: 1px solid var(--sw-bar-line);
     }
     .bottom-nav button {
       flex: 1;
-      padding: 8px 4px;
+      padding: 5px 0;
       min-height: 48px;
-      background: rgba(255,255,255,0.08);
+      background: none;
       border: none;
-      border-radius: 8px;
-      color: rgba(255,255,255,0.5);
+      border-radius: var(--sw-r-ctl);
+      color: var(--sw-bar-sub);
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 500;
+      letter-spacing: 0.04em;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 2px;
-      transition: all 0.15s;
+      gap: 4px;
+      transition: color 0.16s;
     }
     .bottom-nav button.active {
-      background: var(--sw-orange);
-      color: #fff;
+      background: none;
+      color: var(--sw-bar-ink);
+      font-weight: 600;
     }
     .bottom-nav button:disabled {
       opacity: 0.35;
       cursor: default;
     }
     .bottom-nav button svg {
-      width: 20px;
-      height: 20px;
+      width: 44px;
+      height: 26px;
+      padding: 3px 12px;
+      border-radius: var(--sw-r-ctl);
       fill: currentColor;
+      transition: background-color 0.16s;
+    }
+    .bottom-nav button.active svg {
+      background: var(--sw-orange);
+      fill: var(--sw-on-orange);
     }
 
     /* ══════════════════════════════════════════════════
@@ -210,7 +266,7 @@
       gap: 6px;
       padding: 12px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: var(--sw-r-ctl);
       font-size: 15px;
       font-weight: 600;
       cursor: pointer;
@@ -220,7 +276,7 @@
     }
     .btn-primary {
       background: var(--sw-orange);
-      color: #fff;
+      color: var(--sw-on-orange);
     }
     .btn-primary:active { transform: scale(0.97); }
     .btn-primary:disabled {
@@ -229,7 +285,7 @@
       cursor: default;
     }
     .btn-secondary {
-      background: var(--sw-light);
+      background: var(--sw-seg-bg);
       color: var(--sw-dark);
     }
     .btn-danger {
@@ -246,11 +302,12 @@
        JOB CARDS (My Jobs list)
        ══════════════════════════════════════════════════ */
     .section-label {
-      font-size: 12px;
-      font-weight: 700;
+      font-family: var(--sw-mono);
+      font-size: 11px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--sw-text-sec);
+      letter-spacing: 0.16em;
+      color: var(--sw-mid);
       margin: 20px 0 8px;
     }
     .section-label:first-child { margin-top: 0; }
@@ -281,12 +338,13 @@
       color: var(--sw-dark);
     }
     .job-card-badge {
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.08em;
       padding: 3px 8px;
-      border-radius: 4px;
+      border-radius: var(--sw-r-chip);
       white-space: nowrap;
     }
     .badge-fencing { background: #fff0eb; color: var(--sw-orange); }
@@ -318,12 +376,13 @@
     .job-card-meta span { display: flex; align-items: center; gap: 3px; }
 
     .status-pill {
+      font-family: var(--sw-mono);
       font-size: 10px;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      padding: 2px 8px;
-      border-radius: 10px;
+      letter-spacing: 0.08em;
+      padding: 3px 8px;
+      border-radius: var(--sw-r-chip);
       display: inline-block;
     }
     .status-scheduled { background: #ebf4ff; color: var(--sw-blue); }
@@ -355,11 +414,12 @@
       margin-bottom: 12px;
     }
     .detail-section h3 {
-      font-size: 13px;
-      font-weight: 700;
+      font-family: var(--sw-mono);
+      font-size: 11px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      color: var(--sw-text-sec);
+      letter-spacing: 0.16em;
+      color: var(--sw-mid);
       margin-bottom: 12px;
     }
 
@@ -611,7 +671,7 @@
     .inv-header { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
     .inv-header-row { display: flex; justify-content: space-between; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,0.7); }
     .inv-header-row.title { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }
-    .inv-section-label { font-size: 12px; font-weight: 700; color: var(--sw-mid); text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 6px; }
+    .inv-section-label { font-family: var(--sw-mono); font-size: 11px; font-weight: 500; color: var(--sw-mid); text-transform: uppercase; letter-spacing: 0.14em; margin: 16px 0 6px; }
     .inv-line { background: var(--sw-card); border-radius: 10px; padding: 12px; margin-bottom: 8px; box-shadow: var(--sw-shadow); }
     .inv-line-top { display: flex; justify-content: space-between; align-items: flex-start; }
     .inv-line-desc { font-size: 14px; font-weight: 600; color: var(--sw-dark); flex: 1; }
@@ -1301,14 +1361,14 @@
     .ms-state.st-done { background: #eafaf1; color: #15803d; }
     .ms-headrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ms-head-l { display: flex; align-items: center; min-width: 0; }
-    .ms-type { font-size: 16px; font-weight: 800; color: var(--sw-dark); text-transform: uppercase; letter-spacing: .04em; line-height: 1.15; }
+    .ms-type { font-family: var(--sw-mono); font-size: 15px; font-weight: 600; color: var(--sw-dark); text-transform: uppercase; letter-spacing: .1em; line-height: 1.15; }
     .ms-crew { font-size: 12px; color: var(--sw-orange); font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 5px; }
     .ms-divider { height: 1px; background: var(--sw-border); margin: 10px 0; }
     .ms-home { font-size: 14px; font-weight: 750; color: var(--sw-dark); }
     .ms-refs { margin-top: 6px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-    .ms-chip { font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 6px; letter-spacing: .01em; }
-    .ms-chip-theirs { background: var(--sw-dark); color: #fff; }
-    .ms-chip-ours { background: #fff; color: var(--sw-mid); border: 1px solid #d7dde3; font-weight: 700; }
+    .ms-chip { font-family: var(--sw-mono); font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--sw-r-chip); letter-spacing: .04em; }
+    .ms-chip-theirs { background: var(--sw-dark); color: var(--sw-bar-ink); }
+    .ms-chip-ours { background: var(--sw-card); color: var(--sw-mid); border: 1px solid var(--sw-line-2); font-weight: 600; }
     .ms-addr { font-size: 12.5px; color: var(--sw-text-sec); margin-top: 6px; display: flex; align-items: flex-start; gap: 5px; }
     .ms-addr svg { width: 13px; height: 13px; fill: var(--sw-mid); flex: 0 0 auto; margin-top: 1px; }
     .ms-wonote { display: flex; margin-top: 9px; padding: 8px 10px; background: #f1f4f6; border-radius: 8px; }
@@ -1770,20 +1830,23 @@
     }
     .job-hero-badge {
       display: inline-block;
-      font-size: 11px;
-      font-weight: 800;
+      font-family: var(--sw-mono);
+      font-size: 10.5px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.08em;
       color: #fff;
       background: var(--job-color, var(--sw-orange));
-      padding: 3px 10px;
-      border-radius: 100px;
+      padding: 4px 9px;
+      border-radius: var(--sw-r-chip);
       margin-right: 8px;
     }
     .job-hero-number {
+      font-family: var(--sw-mono);
       font-size: 12px;
       color: var(--sw-text-sec);
-      font-weight: 600;
+      font-weight: 500;
+      letter-spacing: 0.02em;
       vertical-align: middle;
     }
     .job-hero-client {

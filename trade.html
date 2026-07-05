@@ -3550,12 +3550,13 @@
     document.getElementById('bottomNav').style.display = 'flex';
     document.getElementById('viewLogin').classList.remove('active');
 
-    // Board tab: managers only (display-only gate; server authz is independent).
-    // Shown when the profile payload carries a non-empty managed_verticals array.
+    // Board tab: admins + managers (display-only gate; server authz is independent).
+    // Shown for _isAdmin (admin/ops_manager) or a non-empty managed_verticals array (A2).
     var _boardBtn = document.getElementById('navBoard');
     if (_boardBtn) {
       var _mv = _user.managed_verticals;
-      _boardBtn.style.display = (Array.isArray(_mv) && _mv.length > 0) ? '' : 'none';
+      var _showBoard = _isAdmin || (Array.isArray(_mv) && _mv.length > 0);
+      _boardBtn.style.display = _showBoard ? '' : 'none';
     }
 
     // Show Team tab for Tier 2+
@@ -14140,14 +14141,16 @@
     var container = document.getElementById('boardContent');
     if (!container) return;
     var mv = (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
-    var verts = mv.length ? mv.map(function(v) { return esc(String(v)); }).join(' · ') : '';
+    var vertsLine = mv.length
+      ? 'Your verticals · ' + mv.map(function(v) { return esc(String(v)); }).join(' · ')
+      : (_isAdmin ? 'All verticals' : '');
     var html = '';
     html += '<div style="margin-top:8px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:var(--sw-r-card);box-shadow:var(--sw-shadow);overflow:hidden">';
     html += '  <div style="background:var(--sw-dark);color:var(--sw-bar-ink);font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;padding:9px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Board</div>';
     html += '  <div style="padding:22px 18px">';
     html += '    <div style="font-size:17px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">Allocation arrives in M3</div>';
     html += '    <div style="font-size:13.5px;color:var(--sw-text-sec);line-height:1.5">The manager allocation board is being built. For now, keep assigning from the Calendar and Jobs tabs.</div>';
-    if (verts) html += '<div style="margin-top:14px;font-family:var(--sw-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--sw-mid)">Your verticals · ' + verts + '</div>';
+    if (vertsLine) html += '<div style="margin-top:14px;font-family:var(--sw-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--sw-mid)">' + vertsLine + '</div>';
     html += '  </div>';
     html += '</div>';
     container.innerHTML = html;

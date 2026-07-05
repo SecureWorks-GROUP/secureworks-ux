@@ -4287,6 +4287,7 @@
 
     var sections = [
       { key: 'today', label: 'Today' },
+      { key: 'recent', label: 'Needs Report' },
       { key: 'makesafePool', label: 'Open MakeSafe Jobs' },
       { key: 'thisWeek', label: 'This Week' },
       { key: 'upcoming', label: 'Upcoming' },
@@ -4341,11 +4342,13 @@
       if (items.length === 0) return;
       // Apply filter: if filter is 'today' only show today section, 'thisWeek' only today+thisWeek.
       // Exception: on the Today view we still surface the crew's own allocated make-safes
-      // (future-dated named assignments) so an allocation is never hidden behind the filter.
+      // (future-dated named assignments) and past-dated make-safes still needing a report
+      // (the 'recent' bucket) so neither an allocation nor an owed report is hidden behind the
+      // filter. The open make-safe pool renders in full on Today too (it has its own label/note).
       var makesafeOnly = false;
       if (_jobFilter === 'today' && sec.key !== 'today') {
-        if (sec.key === 'thisWeek' || sec.key === 'upcoming') makesafeOnly = true;
-        else return;
+        if (sec.key === 'thisWeek' || sec.key === 'upcoming' || sec.key === 'recent') makesafeOnly = true;
+        else if (sec.key !== 'makesafePool') return;
       }
       if (_jobFilter === 'thisWeek' && sec.key !== 'today' && sec.key !== 'thisWeek') return;
       // Apply search + status filter
@@ -4376,13 +4379,21 @@
         filtered = Object.keys(byJob).map(function(k) { return byJob[k]; });
       }
       hasAny = true;
-      var baseLabel = makesafeOnly
-        ? ('Allocated Make-Safe · ' + sec.label)
-        : (_jobFilter === 'today' && sec.key === 'today' ? 'Today Route' : sec.label);
+      var baseLabel;
+      if (makesafeOnly && sec.key === 'recent') {
+        baseLabel = 'Needs Report · Make-Safe';
+      } else if (makesafeOnly) {
+        baseLabel = 'Allocated Make-Safe · ' + sec.label;
+      } else {
+        baseLabel = (_jobFilter === 'today' && sec.key === 'today') ? 'Today Route' : sec.label;
+      }
       var sectionLabel = baseLabel + ' (' + filtered.length + ')';
       html += '<div class="section-label">' + sectionLabel + '</div>';
       if (sec.key === 'makesafePool') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Open MakeSafe pool. Tap a card to open the report when ops has released/left it open.</div>';
+      }
+      if (sec.key === 'recent') {
+        html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Past-dated jobs still waiting on your report. They stay here until the report is submitted.</div>';
       }
       if (_jobFilter === 'today' && sec.key === 'today') {
         html += '<div class="run-list-note">Execution order is saved on this device for you/crew/today. Use the compact ↑/↓ buttons to resequence the run; Call, Text, Note, Navigate and card tap stay on each job.</div>';

@@ -10274,6 +10274,292 @@
     return new Date(d.getFullYear(), d.getMonth(), diff);
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // M2 U1 — CALENDAR DATA ADAPTER (trade-app-redesign · The Calendar System)
+  // Additive: transforms api('calendar') events into the approved prototype's
+  // render model. Does NOT touch loadTeamCalendar / renderScheduleView / any
+  // old-calendar path. Contract:
+  //   coding/work/missions/trade-app-m2-calendar-2026-07-05/CONTRACT.md §2a
+  //
+  // The pure core (below, between the sentinels) has NO DOM/network dependency
+  // and is the SINGLE SOURCE OF TRUTH for the duration/status/type/desc/colour/
+  // dedupe rules. The CP1 fixture script (smoke/cp1-adapter-tests.mjs) extracts
+  // this exact text and asserts against these real functions — do not duplicate
+  // the logic anywhere.
+  // ══════════════════════════════════════════════════════════════════════
+  // <calendar-adapter-core>
+  var CalAdapterCore = (function () {
+    'use strict';
+
+    // DA-6 · assignment_status (calendar_events.assignment_status = job_assignments.status)
+    // → prototype token onsite|booked|done. Live vocabulary is the schema CHECK
+    // (job_assignments_status_check, migration 2026-03-22):
+    //   scheduled, confirmed, in_progress, complete, cancelled, submitted, verified, draft, disputed
+    // 'cancelled' is filtered out server-side by api('calendar') (.neq assignment_status
+    // 'cancelled') and never reaches the client; mapped here defensively. Unknown/future
+    // tokens map to null so the caller records + guards them — NEVER a silent 'booked'.
+    var STATUS_MAP = {
+      scheduled:   'booked',
+      confirmed:   'booked',
+      draft:       'booked',   // tentative / unpublished schedule block
+      in_progress: 'onsite',   // clock_event sets status=in_progress on clock_on/travel/arrive
+      complete:    'done',
+      submitted:   'done',     // physical work finished; hours/report submitted
+      verified:    'done',     // finished + verified
+      disputed:    'done',     // finished; dispute is financial, not a scheduling state
+      cancelled:   null        // excluded by the feed; explicit so it is never rendered
+    };
+    function mapStatus(raw) {
+      var k = String(raw == null ? '' : raw).toLowerCase().trim();
+      if (Object.prototype.hasOwnProperty.call(STATUS_MAP, k)) return STATUS_MAP[k];
+      return null; // unmapped — caller records it; renderer must not invent 'booked'
+    }
+
+    // DA-3 · jobs.type (calendar_events.job_type = j.type — the uniform server
+    // classifier) → chip bucket. jobs_type_check (migration 2026-06-01):
+    //   fencing, patio, combo, decking, renovation, insurance, roofing,
+    //   miscellaneous, general, makesafe.
+    // Chips are Make-safe / Fencing / Patio; every other value → neutral 'other'
+    // (visible under the All lens only). Direct classifier pass-through — the fuzzy
+    // isTradeMakesafeJob text-matcher is deliberately NOT used for chips.
+    function mapType(jobType) {
+      var k = String(jobType == null ? '' : jobType).toLowerCase().trim();
+      if (k === 'makesafe') return 'makesafe';
+      if (k === 'fencing') return 'fencing';
+      if (k === 'patio') return 'patio';
+      return 'other';
+    }
+    function isMakesafe(jobType) {
+      return String(jobType == null ? '' : jobType).toLowerCase().trim() === 'makesafe';
+    }
+    function typeLabel(mappedType) {
+      if (mappedType === 'makesafe') return 'Make-safe';
+      if (mappedType === 'fencing') return 'Fencing';
+      if (mappedType === 'patio') return 'Patio';
+      return 'Job';
+    }
+
+    // "HH:MM[:SS]" → decimal hours (7.5 === 07:30). null when absent/unparseable.
+    function parseTime(t) {
+      if (t == null) return null;
+      var m = String(t).trim().match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+      if (isNaN(h) || isNaN(mm)) return null;
+      return h + mm / 60;
+    }
+
+    // DA-1 · Block duration — Captain's rule (Marnin, 2026-07-05): a real end wins;
+    // otherwise make-safe jobs block start+1h and all other jobs block start+8h.
+    // Returns { end, est } where est=true means the end was derived (no real end).
+    // Real-end field: calendar_events.end_time (a `time`). scheduled_end is a DATE
+    // (multi-day span end), not a within-day time, so it is NOT used for block end.
+    function deriveBlock(startHour, endTimeStr, jobType) {
+      if (startHour == null) return { end: null, est: false }; // unscheduled — no block
+      var realEnd = parseTime(endTimeStr);
+      if (realEnd != null && realEnd > startHour) return { end: realEnd, est: false };
+      return { end: startHour + (isMakesafe(jobType) ? 1 : 8), est: true };
+    }
+
+    // DA-2 · Deterministic crew colour: stable FNV-1a hash of the identity key
+    // (user_id when present, else crew name) → hue, in a Briefing-compatible oklch
+    // band. Same key → same colour on every device, no schema change.
+    function crewHue(key) {
+      var s = String(key == null ? '' : key), h = 0x811c9dc5;
+      for (var i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return h % 360;
+    }
+    function crewColour(key) { return 'oklch(0.5 0.065 ' + crewHue(key) + ')'; }
+
+    function initials(name) {
+      var n = String(name == null ? '' : name).trim();
+      if (!n) return '?';
+      var p = n.split(/\s+/);
+      return (p.length >= 2 ? (p[0][0] + p[1][0]) : n.slice(0, 2)).toUpperCase();
+    }
+
+    // desc chain: label / assignment_notes → scope_json summary → job-type label.
+    // U1 FINDING: api('calendar') currently delivers NONE of label / assignment_notes
+    // / scope_json (calSelect omits label + notes; lightEvents strips scope_json), so
+    // on the live feed this resolves to the type label. The earlier branches are kept
+    // truthful + future-proof for an enriched feed. Never blank.
+    function scopeSummary(scopeJson) {
+      if (!scopeJson || typeof scopeJson !== 'object') return '';
+      var cfg = scopeJson.config || scopeJson, bits = [];
+      if (cfg.fence_type) bits.push(String(cfg.fence_type));
+      if (cfg.length_m || cfg.total_length) bits.push((cfg.length_m || cfg.total_length) + ' m');
+      if (cfg.patio_type) bits.push(String(cfg.patio_type));
+      if (!bits.length && typeof scopeJson.summary === 'string') return scopeJson.summary;
+      return bits.join(' ');
+    }
+    function desc(ev, mappedType) {
+      var label = ev.label || ev.assignment_notes;
+      if (label && String(label).trim()) return String(label).trim();
+      var ss = scopeSummary(ev.scope_json);
+      if (ss && ss.trim()) return ss.trim();
+      return typeLabel(mappedType); // never blank
+    }
+
+    // One calendar_events row → one per-assignment render block.
+    function eventToBlock(ev) {
+      var mt = mapType(ev.job_type);
+      var startH = parseTime(ev.start_time);
+      var blk = deriveBlock(startH, ev.end_time, ev.job_type);
+      var crewName = ev.assigned_to || ev.crew_name || null; // display name (u.name join, else free-text)
+      var crewKey = ev.user_id || ev.crew_name || null;      // stable identity/colour key
+      var addr = ev.site_address || '';
+      if (ev.site_suburb && addr.indexOf(ev.site_suburb) < 0) {
+        addr = addr ? (addr + ', ' + ev.site_suburb) : ev.site_suburb;
+      }
+      return {
+        // ── approved-prototype public model ──
+        id:   ev.assignment_id || (String(ev.job_id) + '|' + ev.scheduled_date + '|' + (crewKey || '')),
+        sub:  ev.site_suburb || '',
+        ref:  ev.job_number || '',
+        type: mt,
+        crew: crewName,
+        date: ev.scheduled_date || null,
+        start: startH,
+        end:  blk.end,
+        status: mapStatus(ev.assignment_status),
+        addr: addr,
+        desc: desc(ev, mt),
+        // ── adapter metadata (renderers read only the fields above) ──
+        _est: blk.est,
+        _crewKey: crewKey,
+        _userId: ev.user_id || null,
+        _jobId: ev.job_id || null,
+        _rawType: ev.job_type || null,
+        _rawStatus: ev.assignment_status || null
+      };
+    }
+
+    // Adapt an events array → { blocks, reconciliation counts, unmappedStatuses }.
+    // One block per assignment row (no grouping) — reconciles 1:1 (no dropped rows).
+    function adaptEvents(events) {
+      var list = Array.isArray(events) ? events : [];
+      var blocks = [], unmapped = {};
+      for (var i = 0; i < list.length; i++) {
+        var b = eventToBlock(list[i]);
+        if (b.status == null && list[i] && list[i].assignment_status != null) {
+          var tok = String(list[i].assignment_status).toLowerCase().trim();
+          if (tok && tok !== 'cancelled') unmapped[tok] = (unmapped[tok] || 0) + 1;
+        }
+        blocks.push(b);
+      }
+      return {
+        blocks: blocks,
+        inputCount: list.length,
+        outputCount: blocks.length,
+        unmappedStatuses: Object.keys(unmapped)
+      };
+    }
+
+    // DA-4 · Mine/Everyone client filter over blocks. Server scoping is untouched;
+    // 'mine' keeps blocks assigned to the logged-in user (by user_id, else name).
+    function filterLens(blocks, mode, me) {
+      if (mode !== 'mine') return (blocks || []).slice();
+      me = me || {};
+      var myId = me.id != null ? String(me.id) : null;
+      var myName = me.name ? String(me.name).toLowerCase() : null;
+      return (blocks || []).filter(function (b) {
+        if (myId && b._userId != null && String(b._userId) === myId) return true;
+        if (myName && b.crew && String(b.crew).toLowerCase() === myName) return true;
+        return false;
+      });
+    }
+
+    // Jobs-axis dedupe: group per-assignment blocks by job+date, join crew names,
+    // span the time to cover all crew, and reconcile every assignment id. Crew-axis
+    // views use the per-assignment blocks directly (native). Status precedence:
+    // any on-site → onsite; else all done → done; else booked.
+    function dedupeByJobDate(blocks) {
+      var order = [], byKey = {};
+      (blocks || []).forEach(function (b) {
+        var key = (b._jobId || b.ref || b.id) + '|' + b.date;
+        if (!byKey[key]) {
+          var row = {};
+          for (var k in b) if (Object.prototype.hasOwnProperty.call(b, k)) row[k] = b[k];
+          row.crewList = []; row._assignmentIds = []; row._statuses = [];
+          byKey[key] = row; order.push(key);
+        }
+        var r = byKey[key];
+        r._assignmentIds.push(b.id);
+        r._statuses.push(b.status);
+        if (b.crew && r.crewList.indexOf(b.crew) < 0) r.crewList.push(b.crew);
+        if (b.start != null && (r.start == null || b.start < r.start)) r.start = b.start;
+        if (b.end != null && (r.end == null || b.end > r.end)) r.end = b.end;
+        if (b._est) r._est = true;
+      });
+      return order.map(function (key) {
+        var r = byKey[key];
+        r.crew = r.crewList.length ? r.crewList.join(' + ') : null;
+        var hasOnsite = false, doneCount = 0, total = r._statuses.length;
+        r._statuses.forEach(function (s) { if (s === 'onsite') hasOnsite = true; if (s === 'done') doneCount++; });
+        r.status = hasOnsite ? 'onsite' : (total > 0 && doneCount === total ? 'done' : 'booked');
+        return r;
+      });
+    }
+
+    // PEOPLE colour map from the crew roster (list_users) ∪ crews present in blocks.
+    function buildPeople(rosterUsers, blocks) {
+      var seen = {}, people = [];
+      function add(key, name) {
+        var k = key != null ? String(key) : ('name:' + String(name || ''));
+        if (!name || seen[k]) return;
+        seen[k] = true;
+        people.push({ key: k, name: name, initials: initials(name), av: crewColour(k), userId: (key && key !== name) ? key : null });
+      }
+      (rosterUsers || []).forEach(function (u) { add(u.id || u.name, u.name); });
+      (blocks || []).forEach(function (b) { if (b.crew) add(b._crewKey || b.crew, b.crew); });
+      return people;
+    }
+
+    return {
+      STATUS_MAP: STATUS_MAP, mapStatus: mapStatus, mapType: mapType, isMakesafe: isMakesafe,
+      typeLabel: typeLabel, parseTime: parseTime, deriveBlock: deriveBlock, crewHue: crewHue,
+      crewColour: crewColour, initials: initials, scopeSummary: scopeSummary, desc: desc,
+      eventToBlock: eventToBlock, adaptEvents: adaptEvents, filterLens: filterLens,
+      dedupeByJobDate: dedupeByJobDate, buildPeople: buildPeople
+    };
+  })();
+  // </calendar-adapter-core>
+
+  // Network layer for the U1 adapter (uses the existing api()). Fetches only from
+  // the sanctioned actions — calendar (block model), list_users (crew roster/colours)
+  // and get_crew_availability (crew-view overlay). my_jobs is intentionally NOT called:
+  // DA-4 makes Mine/Everyone a client-side filter over calendar events, and my_jobs'
+  // own `mode` is left untouched. No new endpoints, no schema change.
+  async function caFetchCalendarModel(fromStr, toStr) {
+    var calData = await api('calendar', { from: fromStr, to: toStr });
+    var events = (calData && calData.events) || [];
+    var roster = [];
+    try {
+      var u = await api('list_users', {});
+      roster = ((u && (u.users || u)) || []).filter(function (x) {
+        return ['crew', 'lead_installer', 'admin', 'ops_manager'].indexOf(x.role) >= 0;
+      });
+    } catch (e) { console.log('[cal-adapter] roster load failed:', e); }
+    var avail = [];
+    try {
+      var a = await api('get_crew_availability', { start_date: fromStr, end_date: toStr });
+      avail = (a && a.availability) || [];
+    } catch (e) { console.log('[cal-adapter] availability load failed:', e); }
+    var adapted = CalAdapterCore.adaptEvents(events);
+    return {
+      blocks: adapted.blocks,
+      people: CalAdapterCore.buildPeople(roster, adapted.blocks),
+      availability: avail,
+      roster: roster,
+      unmappedStatuses: adapted.unmappedStatuses,
+      inputCount: adapted.inputCount,
+      outputCount: adapted.outputCount
+    };
+  }
+
   async function loadTeamCalendar() {
     if (!_calWeekStart) _calWeekStart = getMonday(new Date());
 

@@ -11278,7 +11278,13 @@
   function ncBoardAllowed() { var mv = _user && _user.managed_verticals; return !!(_isAdmin || (Array.isArray(mv) && mv.length > 0)); }
   function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
   function ncState() {
-    return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, me: NC.me, boardAllowed: ncBoardAllowed(), lens: ncBoardAllowed() ? 'manager' : 'installer' };
+    // date + month MUST be included: every CalRender view reads st.date (day/week/agenda/run,
+    // 21 sites) and month views read st.month. Omitting them makes parse(undefined) -> Invalid Date
+    // -> "NaN undefined" period label + "UNDEFINED NAN" columns across the whole grid. Default to
+    // today/this-month so a direct ncPaint (e.g. via ncShowNew before renderNewCalendar's default) is safe.
+    var d = NC.date || awstDateStr();
+    var mo = NC.month || (d.slice(0, 8) + '01');
+    return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, date: d, month: mo, me: NC.me, boardAllowed: ncBoardAllowed(), lens: ncBoardAllowed() ? 'manager' : 'installer' };
   }
   function ncSyncSeg(id, attr, val) {
     var seg = document.getElementById(id); if (!seg) return;

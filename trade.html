@@ -2462,6 +2462,313 @@
       display: flex;
       flex-direction: column;
     }
+
+    /* ══════════════════════════════════════════════════════════════════
+       M2 · NEW CALENDAR SYSTEM (trade-app-redesign) — scoped under .ncal
+       Ported from the approved prototype (pixel truth). Design tokens are
+       defined locally on .ncal so they never collide with the app's --sw-*
+       vars or the old calendar. Offline-first: --head maps to the app's
+       system font stack (prototype's Google Poppins is not pulled — no
+       external fonts / CSP-safe). Old calendar styles are untouched.
+       ══════════════════════════════════════════════════════════════════ */
+    .ncal{
+      --paper:#F5F7F8; --card:#FFFFFF;
+      --ink:#22333D; --ink-2:#4C6A7C; --ink-3:#7C8B94;
+      --line:#E2E9EC; --line-2:#C6D1D7; --on:#F5F7F8;
+      --nc-scrim:rgba(34,51,61,.42); --seg-bg:#E8EDEF;
+      --bar:#293C46; --bar-ink:#F5F7F8; --bar-sub:#9DB2BD; --bar-line:rgba(245,247,248,.14);
+      --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+      --head:var(--sw-font);
+      --r-card:14px; --r-ctl:10px; --r-chip:5px;
+      --orange:oklch(0.665 0.185 38); --orange-deep:oklch(0.58 0.185 38);
+      --orange-tint:oklch(0.95 0.04 45); --orange-line:oklch(0.82 0.09 45); --on-orange:#FFF4EC;
+      --ms:oklch(0.575 0.125 41); --ms-ink:oklch(0.5 0.13 40);
+      --fc:oklch(0.50 0.062 235); --fc-tint:oklch(0.93 0.022 235); --fc-ink:oklch(0.46 0.06 235);
+      --pt:oklch(0.52 0.088 155); --pt-ink:oklch(0.46 0.085 155);
+      --quiet:oklch(0.86 0.012 236);
+      --nt:oklch(0.60 0.012 236); --nt-ink:oklch(0.46 0.012 236);
+      display:flex; flex-direction:column; height:calc(100dvh - 132px); min-height:460px;
+      color:var(--ink); font-family:var(--sw-font);
+    }
+    .ncal button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+    .ncal .time,.ncal .glab,.ncal .dcell b,.ncal .mcell .mn,.ncal .igcell b{font-variant-numeric:tabular-nums}
+    /* segmented controls */
+    .ncal .seg{display:flex;gap:4px;background:var(--seg-bg);border-radius:13px;padding:4px}
+    .ncal .segbtn{flex:1;text-align:center;font-size:13.5px;font-weight:750;color:var(--ink-2);padding:10.5px 10px;border-radius:10px;white-space:nowrap;transition:background-color 150ms,color 150ms}
+    .ncal .segbtn.on{background:var(--ink);color:var(--on)}
+    .ncal .seg.lite .segbtn.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px oklch(0.32 0.035 240 / .14)}
+    .ncal .ctlrow{display:flex;align-items:center;gap:8px;padding:0 12px 8px;flex:0 0 auto}
+    .ncal .ctlrow[hidden]{display:none}
+    .ncal .ctlrow .seg{flex:1;min-width:0}
+    .ncal .ctlrow .seg.axis{flex:0 0 auto}
+    .ncal .fbtn{position:relative;flex:0 0 auto;width:44px;height:42px;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
+    .ncal .fbtn svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+    .ncal .fbadge{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;border-radius:9px;background:var(--orange);color:var(--on-orange);font-family:var(--mono);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px}
+    .ncal .fbadge[hidden]{display:none}
+    /* period bar */
+    .ncal .periodbar{display:flex;align-items:center;gap:8px;padding:0 12px 8px;flex:0 0 auto}
+    .ncal .periodbar[hidden]{display:none}
+    .ncal .pbtn{flex:0 0 auto;width:44px;height:42px;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:var(--ink-2)}
+    .ncal .plab{flex:1;text-align:center;font-family:var(--mono);font-size:14.5px;font-weight:600;letter-spacing:.02em}
+    /* day rail */
+    .ncal .dayrail{display:flex;align-items:stretch;gap:4px;padding:2px 10px 10px;flex:0 0 auto}
+    .ncal .dayrail[hidden]{display:none}
+    .ncal .railbtn{flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:var(--ink-3);border-radius:10px}
+    .ncal .dcell{flex:1;text-align:center;padding:7px 0 6px;border-radius:14px;color:var(--ink-2);position:relative;transition:background-color 150ms,color 150ms}
+    .ncal .dcell small{display:block;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase}
+    .ncal .dcell b{display:block;font-family:var(--mono);font-size:19px;font-weight:600;line-height:1.15}
+    .ncal .dcell .load{display:flex;gap:2.5px;justify-content:center;margin-top:3px;min-height:5px}
+    .ncal .dcell .load i{width:4.5px;height:4.5px;border-radius:50%;background:var(--ink-3)}
+    .ncal .dcell .load i.hot{background:var(--orange)}
+    .ncal .dcell .tdot{position:absolute;top:5px;right:9px;width:5px;height:5px;border-radius:50%;background:var(--orange)}
+    .ncal .dcell.sel{background:var(--ink);color:var(--on)}
+    .ncal .dcell.sel .load i{background:oklch(0.8 0.02 236)} .ncal .dcell.sel .load i.hot{background:var(--orange)}
+    .ncal .dcell.sel .tdot{display:none}
+    /* unassigned strip */
+    .ncal .unstrip{display:flex;align-items:center;gap:10px;margin:0 12px 8px;background:var(--orange-tint);border:1.5px solid var(--orange-line);border-radius:var(--r-ctl);padding:8px 12px;flex:0 0 auto;width:calc(100% - 24px)}
+    .ncal .unstrip[hidden]{display:none}
+    .ncal .unstrip .ucount{flex:0 0 auto;background:var(--orange);color:var(--on-orange);font-family:var(--mono);font-size:12.5px;font-weight:600;border-radius:var(--r-chip);padding:3px 8px}
+    .ncal .unstrip .um{flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--orange-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .unstrip .uarrow{flex:0 0 auto;color:var(--orange-deep);font-size:18px;font-weight:800}
+    /* calendar host — vertical scroller for the whole render */
+    .ncal .calhost{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+    .ncal .fadein{animation:ncfade 190ms ease-out}
+    @keyframes ncfade{from{opacity:0}to{opacity:1}}
+    .ncal .emptyview{padding:34px 20px;color:var(--ink-3);font-size:14px;text-align:center}
+    .ncal .emptyview b{display:block;color:var(--ink-2);font-size:16px;font-weight:750;margin-bottom:4px}
+    /* timeline (crew × day) */
+    .ncal .tlscroll{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;position:relative}
+    .ncal .tlscroll::-webkit-scrollbar{display:none}
+    .ncal .tlinner{display:flex;position:relative;min-width:100%}
+    .ncal .tgutter{flex:0 0 38px;position:sticky;left:0;z-index:4;background:var(--paper)}
+    .ncal .tgutter .ghead{height:46px;background:var(--paper)}
+    .ncal .tgutter .glab{height:60px;font-family:var(--mono);font-size:10px;font-weight:500;color:var(--ink-3);text-align:right;padding-right:6px}
+    .ncal .tlcol{flex:0 0 132px;box-shadow:inset 1px 0 0 var(--line);position:relative}
+    .ncal .tlinner.solo .tlcol{flex:1 1 auto;min-width:0}
+    .ncal .chead{height:46px;display:flex;align-items:center;gap:8px;padding:0 8px;background:var(--paper);border-bottom:1px solid var(--line)}
+    .ncal .chead .av{width:26px;height:26px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
+    .ncal .chead .cn{min-width:0}
+    .ncal .chead .cnm{font-family:var(--head);font-size:13.5px;font-weight:600;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .chead .cc{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--ink-3)}
+    .ncal .lane{position:relative}
+    .ncal .lane .hr{position:absolute;left:0;right:0;height:1px;background:var(--line)}
+    .ncal .blk{position:absolute;left:4px;right:4px;border-radius:10px;padding:6px 8px;overflow:hidden;color:var(--on)}
+    .ncal .blk .bs{font-family:var(--head);font-size:13px;font-weight:600;line-height:1.1}
+    .ncal .blk .bm{font-size:10px;font-weight:600;color:oklch(0.985 0.008 60 / .82);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .blk.ms{background:var(--ms)} .ncal .blk.fc{background:var(--fc)} .ncal .blk.pt{background:var(--pt)} .ncal .blk.nt{background:var(--nt)}
+    .ncal .blk.onsite{box-shadow:inset 0 0 0 2px var(--orange)}
+    .ncal .blk.done{background:var(--quiet);color:var(--ink-2)}
+    .ncal .blk.done .bm{color:var(--ink-3)}
+    .ncal .blk.done .bs .tk{color:var(--pt-ink);font-weight:900}
+    .ncal .blk .typedot{position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%}
+    .ncal .blk.done.ms .typedot{background:var(--ms)} .ncal .blk.done.fc .typedot{background:var(--fc)} .ncal .blk.done.pt .typedot{background:var(--pt)} .ncal .blk.done.nt .typedot{background:var(--nt)}
+    .ncal .nowline{position:absolute;height:2px;background:var(--orange);z-index:2;pointer-events:none}
+    .ncal .nowline::before{content:"";position:absolute;left:-2px;top:-4px;width:9px;height:9px;border-radius:50%;background:var(--orange)}
+    /* week × jobs */
+    .ncal .dhead .ddisc{width:26px;height:26px;border-radius:9px;background:var(--seg-bg);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12.5px;font-weight:600;flex:0 0 auto}
+    .ncal .dhead.today .ddisc{background:var(--ink);color:var(--on)}
+    .ncal .wkcol{box-shadow:inset 2px 0 0 var(--line-2)}
+    .ncal .wkcol.alt .lane,.ncal .wkcol.alt .chead{background:oklch(0.958 0.01 236)}
+    .ncal .wkb{position:absolute;border-radius:9px;padding:5px 6px;overflow:hidden;color:var(--on)}
+    .ncal .wkb .bs{font-family:var(--head);font-size:11px;font-weight:600;line-height:1.15;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+    .ncal .wkb .bm{font-size:9px;font-weight:600;color:oklch(0.985 0.008 60 / .82);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .wkb.ms{background:var(--ms)} .ncal .wkb.fc{background:var(--fc)} .ncal .wkb.pt{background:var(--pt)} .ncal .wkb.nt{background:var(--nt)}
+    .ncal .wkb.onsite{box-shadow:inset 0 0 0 2px var(--orange)}
+    .ncal .wkb.done{background:var(--quiet);color:var(--ink-2)}
+    .ncal .wkb .bav{position:absolute;bottom:4px;right:4px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;color:var(--on);box-shadow:0 0 0 1.5px oklch(0.99 0.005 236 / .6)}
+    .ncal .wkb.big .bs{font-size:12.5px}
+    .ncal .wkb.big .bav{width:20px;height:20px;font-size:8.5px}
+    /* agenda */
+    .ncal .agscroll{padding:2px 14px 18px}
+    .ncal .aghead{display:flex;align-items:baseline;gap:8px;padding:14px 2px 7px}
+    .ncal .aghead b{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+    .ncal .aghead.today b{color:var(--orange-deep)}
+    .ncal .aghead .agn{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-3)}
+    .ncal .agrow{display:flex;gap:12px;align-items:center;width:100%;padding:12px 4px;border-bottom:1px solid var(--line)}
+    .ncal .agrow:last-child{border-bottom:0}
+    .ncal .agrow .time{flex:0 0 48px;font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink-2)}
+    .ncal .agrow .time small{display:block;font-family:var(--mono);font-size:10px;font-weight:500;color:var(--ink-3)}
+    .ncal .agrow .w{flex:1;min-width:0}
+    .ncal .agrow .sub{font-family:var(--head);font-size:17.5px;font-weight:600;line-height:1.12;letter-spacing:-.01em}
+    .ncal .agrow .m{font-size:12px;color:var(--ink-2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .tico{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:baseline}
+    .ncal .tico.ms{background:var(--ms)} .ncal .tico.fc{background:var(--fc)} .ncal .tico.pt{background:var(--pt)} .ncal .tico.nt{background:var(--nt)}
+    .ncal .agrow .av{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
+    .ncal .agrow .nocrew{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-deep);background:var(--orange-tint);border-radius:var(--r-chip);padding:5px 8px}
+    .ncal .aghint{font-size:12.5px;color:var(--ink-3);padding:6px 2px 0}
+    /* untimed section (crewed-but-no-time — CP1 finding; deliberate placement) */
+    .ncal .nc-untimed{margin:6px 14px 18px;border:1.4px dashed var(--orange-line);border-radius:var(--r-ctl);background:oklch(0.985 0.01 60);padding:2px 12px 6px}
+    .ncal .nc-untimed .nc-uh{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-deep);padding:11px 2px 4px}
+    .ncal .nc-untimed .nc-uh .ucount{background:var(--orange);color:var(--on-orange);border-radius:var(--r-chip);padding:2px 7px;font-size:11px}
+    /* run sheet */
+    .ncal .runscroll{padding:2px 14px 18px}
+    .ncal .crewsec{margin-bottom:16px}
+    .ncal .crewsec .ch{display:flex;align-items:center;gap:9px;padding:10px 2px 8px}
+    .ncal .crewsec .ch .av{width:26px;height:26px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
+    .ncal .crewsec .ch .cnm{font-family:var(--head);font-size:14px;font-weight:600;letter-spacing:.01em}
+    .ncal .crewsec .ch .cinfo{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-left:auto}
+    .ncal .run{border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;background:var(--card)}
+    .ncal .rrow{display:flex;gap:12px;padding:12px 13px;border-bottom:1px solid var(--line);align-items:center;width:100%;min-height:58px}
+    .ncal .rrow:last-child{border-bottom:0}
+    .ncal .rrow .time{flex:0 0 46px;font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--ink-2)}
+    .ncal .rrow .time small{display:block;font-family:var(--mono);font-size:9px;font-weight:500;color:var(--ink-3);letter-spacing:.04em}
+    .ncal .rrow .rw{flex:1;min-width:0}
+    .ncal .rrow .sub{font-family:var(--head);font-size:18px;font-weight:600;line-height:1.15;letter-spacing:-.01em}
+    .ncal .rrow .meta{font-size:12px;color:var(--ink-2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .runhint{font-size:12.5px;color:var(--ink-3);padding:2px 2px 10px}
+    .ncal .stag{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;border-radius:var(--r-chip);padding:4px 8px;background:transparent;border:1.4px solid currentColor}
+    .ncal .stag.onsite{color:var(--orange-deep)}
+    .ncal .stag.done{color:var(--pt-ink)}
+    .ncal .stag.booked{color:var(--fc-ink)}
+    /* week × crew load grid */
+    .ncal .wkscroll{padding:2px 12px 16px}
+    .ncal .wkhead{display:grid;grid-template-columns:92px repeat(6,1fr);gap:4px;margin-bottom:4px}
+    .ncal .wkhead .wkd{text-align:center;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:4px 0}
+    .ncal .wkhead .wkd b{display:block;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink)}
+    .ncal .wkhead .wkd.today b{color:var(--orange-deep)}
+    .ncal .wkrow{display:grid;grid-template-columns:92px repeat(6,1fr);gap:4px;margin-bottom:4px}
+    .ncal .wkcrew{display:flex;align-items:center;gap:7px;min-width:0;padding:4px 2px}
+    .ncal .wkcrew .av{width:24px;height:24px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:800;color:var(--on)}
+    .ncal .wkcrew .nm{font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .wkcell{min-height:52px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:5px 4px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+    .ncal .wkcell.empty{background:transparent;border-style:dashed;border-color:var(--line)}
+    .ncal .wkcell .wn{font-family:var(--mono);font-size:15px;font-weight:600;line-height:1}
+    .ncal .wkcell .wsegs{display:flex;gap:2px;flex-wrap:wrap;justify-content:center}
+    .ncal .wkcell .wsegs i{width:10px;height:4.5px;border-radius:3px}
+    .ncal .wkrow.unrow .wkcrew .nm{color:var(--orange-deep)}
+    .ncal .wkcell.un{background:var(--orange-tint);border-color:var(--orange-line)}
+    .ncal .wkcell.un .wn{color:var(--orange-deep)}
+    .ncal .seg-ms{background:var(--ms)} .ncal .seg-fc{background:var(--fc)} .ncal .seg-pt{background:var(--pt)} .ncal .seg-nt{background:var(--nt)}
+    .ncal .wkcrew .av[data-un]{background:var(--orange)}
+    /* month × crew load board */
+    .ncal .monthscroll{padding:4px 12px 16px}
+    .ncal .mhead{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:5px}
+    .ncal .mhead div{text-align:center;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .mgrid{display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:1fr;gap:5px}
+    .ncal .mcell{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;min-height:88px;padding:7px 6px 6px;display:flex;flex-direction:column}
+    .ncal .mcell.out{background:transparent;border-color:transparent}
+    .ncal .mcell.out .mn{color:var(--ink-3);opacity:.5}
+    .ncal .mcell .mn{font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--ink);line-height:1}
+    .ncal .mcell.today{box-shadow:inset 0 0 0 2px var(--ink)}
+    .ncal .mcell.heavy{background:oklch(0.955 0.014 236);border-color:var(--line-2)}
+    .ncal .mcell .mbig{margin-top:auto;font-family:var(--mono);font-size:22px;font-weight:600;color:var(--ink);line-height:1}
+    .ncal .mcell .mbig small{font-size:11px;font-weight:700;color:var(--ink-3)}
+    .ncal .mcell.heavy .mbig{color:var(--ms-ink)}
+    .ncal .mcell .segs{display:flex;flex-wrap:wrap;gap:2.5px;margin-top:5px;min-height:5px}
+    .ncal .mcell .segs i{width:12px;height:5px;border-radius:3px}
+    .ncal .mcell .undot{position:absolute;top:6px;right:6px;display:flex;align-items:center;gap:2px;background:var(--orange);color:var(--on);border-radius:8px;font-size:10px;font-weight:800;padding:1px 5px}
+    .ncal .monthkey{display:flex;gap:14px;flex-wrap:wrap;padding:12px 4px 2px;font-size:11.5px;color:var(--ink-2)}
+    .ncal .monthkey span{display:inline-flex;align-items:center;gap:6px}
+    .ncal .monthkey i{width:11px;height:6px;border-radius:3px}
+    .ncal .monthkey .undotk{width:auto;height:auto;background:var(--orange);color:var(--on);border-radius:7px;font-size:9.5px;font-weight:800;padding:1px 5px}
+    /* inline month (jobs axis) */
+    .ncal .igbar{flex:0 0 auto;padding:0 12px 6px}
+    .ncal .dcell .load i.t-ms{background:var(--ms)} .ncal .dcell .load i.t-fc{background:var(--fc)} .ncal .dcell .load i.t-pt{background:var(--pt)} .ncal .dcell .load i.t-nt{background:var(--nt)}
+    .ncal .dcell .load i.t-un{background:var(--orange)}
+    .ncal .ighead{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
+    .ncal .ighead div{text-align:center;font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .iggrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+    .ncal .igcell{position:relative;border-radius:10px;text-align:center;padding:5px 0 4px;color:var(--ink-2);transition:background-color 150ms,color 150ms}
+    .ncal .igcell b{display:block;font-family:var(--mono);font-size:14px;font-weight:600;line-height:1.2;color:var(--ink)}
+    .ncal .igcell .igdots{display:flex;gap:2.5px;justify-content:center;margin-top:2px;min-height:5px}
+    .ncal .igcell .igdots i{width:4.5px;height:4.5px;border-radius:50%}
+    .ncal .igcell .igdots i.t-ms{background:var(--ms)} .ncal .igcell .igdots i.t-fc{background:var(--fc)} .ncal .igcell .igdots i.t-pt{background:var(--pt)} .ncal .igcell .igdots i.t-nt{background:var(--nt)}
+    .ncal .igcell .igdots i.t-un{background:var(--orange);width:5.5px;height:5.5px}
+    .ncal .igcell.out{opacity:.35;pointer-events:none}
+    .ncal .igcell.today{box-shadow:inset 0 0 0 1.6px var(--ink-3)}
+    .ncal .igcell.sel{background:var(--ink)}
+    .ncal .igcell.sel b{color:var(--on)}
+    .ncal .igcell.sel .igdots i.t-ms,.ncal .igcell.sel .igdots i.t-fc,.ncal .igcell.sel .igdots i.t-pt,.ncal .igcell.sel .igdots i.t-nt{background:oklch(0.8 0.02 236)}
+    .ncal .igsplit{border-top:1px solid var(--line);margin:2px 12px 0;flex:0 0 auto}
+    /* bottom sheet + scrim + toast (fixed to viewport, above bottom nav) */
+    .ncal .nc-scrim{position:fixed;inset:0;background:var(--nc-scrim);opacity:0;pointer-events:none;transition:opacity 200ms;z-index:190}
+    .ncal .nc-scrim.on{opacity:1;pointer-events:auto}
+    .ncal .nc-sheet{position:fixed;left:0;right:0;bottom:0;background:var(--paper);border-radius:24px 24px 0 0;transform:translateY(103%);transition:transform 230ms ease-out;max-height:88%;display:flex;flex-direction:column;z-index:200;box-shadow:0 -14px 44px oklch(0.32 0.035 240 / .22)}
+    .ncal .nc-sheet.on{transform:translateY(0)}
+    .ncal .nc-grab{width:42px;height:5px;border-radius:3px;background:var(--line-2);margin:10px auto 4px;flex:0 0 auto}
+    .ncal .nc-sheetscroll{overflow-y:auto;scrollbar-width:none;padding:8px 20px 4px}
+    .ncal .nc-sheetscroll::-webkit-scrollbar{display:none}
+    .ncal .sh-kick{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2);margin-bottom:6px}
+    .ncal .sh-kick.un{color:var(--orange-deep)}
+    .ncal .sh-sub{font-family:var(--head);font-size:25px;font-weight:600;line-height:1.08;letter-spacing:-.015em}
+    .ncal .sh-ref{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);margin-top:4px}
+    .ncal .sh-type{font-size:13.5px;color:var(--ink-3);margin:2px 0 14px}
+    .ncal .sh-note{font-size:13px;color:var(--ink-2);background:var(--orange-tint);border-radius:12px;padding:11px 13px;margin-bottom:12px}
+    .ncal .sh-note b{color:var(--orange-deep)}
+    .ncal .sh-lab{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+    .ncal .sh-rows{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px 0;margin:6px 0 14px}
+    .ncal .sh-r{display:flex;justify-content:space-between;gap:14px;padding:9px 0;font-size:14.5px;border-bottom:1px solid var(--line)}
+    .ncal .sh-r:last-child{border-bottom:0}
+    .ncal .sh-r .k{color:var(--ink-3);flex:0 0 auto}
+    .ncal .sh-r .v{color:var(--ink);font-weight:600;text-align:right}
+    .ncal .ujob{display:flex;align-items:center;gap:11px;padding:12px 2px;border-bottom:1px solid var(--line);width:100%}
+    .ncal .ujob:last-child{border-bottom:0}
+    .ncal .ujob .utico{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+    .ncal .utico.ms{background:var(--ms)} .ncal .utico.fc{background:var(--fc)} .ncal .utico.pt{background:var(--pt)} .ncal .utico.nt{background:var(--nt)}
+    .ncal .ujob .uw{min-width:0}
+    .ncal .ujob .usub{font-family:var(--head);font-size:17px;font-weight:600;line-height:1.1}
+    .ncal .ujob .umeta{font-size:12px;color:var(--ink-2);margin-top:1px}
+    .ncal .nc-sheetfoot{flex:0 0 auto;padding:12px 20px calc(14px + env(safe-area-inset-bottom));display:flex;gap:10px;border-top:1px solid var(--line);background:var(--paper)}
+    .ncal .btn{flex:1;text-align:center;border-radius:var(--r-ctl);padding:15px 12px;font-size:15px;font-weight:700}
+    .ncal .btn.dark{background:var(--ink);color:var(--on)}
+    .ncal .btn.primary{background:var(--orange);color:var(--on-orange)}
+    .ncal .btn.ghost{flex:0 0 auto;background:transparent;border:1.4px solid var(--line-2);color:var(--ink-2);padding:15px 18px}
+    .ncal .nc-toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,8px);background:var(--ink);color:var(--on);font-size:13px;font-weight:650;padding:11px 16px;border-radius:13px;max-width:82%;text-align:center;opacity:0;pointer-events:none;transition:opacity 190ms,transform 190ms;z-index:210;box-shadow:0 8px 24px oklch(0.32 0.035 240 / .28)}
+    .ncal .nc-toast.on{opacity:1;transform:translate(-50%,0)}
+    /* filter chips */
+    .ncal .fgroup{margin-bottom:16px}
+    .ncal .fchips{display:flex;gap:7px;flex-wrap:wrap}
+    .ncal .chip{font-size:13px;font-weight:750;color:var(--ink-2);border:1.4px solid var(--line-2);background:var(--card);border-radius:11px;padding:10px 14px;transition:background-color 150ms,color 150ms,border-color 150ms}
+    .ncal .chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)}
+    .ncal .chip.on{color:var(--on);border-color:transparent}
+    .ncal .chip.on.all{background:var(--ink)}
+    .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
+    .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
+    .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
+    /* U4 · Classic-calendar hatch row (in the filter sheet) */
+    .ncal .nc-classic-row{display:flex;justify-content:space-between;align-items:center;width:100%;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);padding:14px 15px;font-size:15px;font-weight:700;color:var(--ink)}
+    .ncal .nc-classic-row .uarrow{color:var(--ink-3);font-size:18px;font-weight:800}
+    .ncal .nc-classic-note{font-size:12px;color:var(--ink-3);margin-top:6px}
+    /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
+    .ncal .nc-stack{padding:6px 14px 14px}
+    .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
+    .ncal .nc-cols::-webkit-scrollbar{display:none}
+    .ncal .nc-col{flex:0 0 300px;max-width:88vw;min-width:0;padding:0 6px;scroll-snap-align:start}
+    .ncal .nc-cols.solo{overflow-x:visible} .ncal .nc-col.solo{flex:1 1 auto;max-width:none}
+    .ncal .nc-colhead{display:flex;align-items:center;gap:8px;padding:6px 4px 10px;position:sticky;top:0;background:var(--paper);z-index:2;width:100%}
+    .ncal .nc-colhead .av{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
+    .ncal .nc-colhead .ddisc{width:30px;height:30px;border-radius:9px;background:var(--seg-bg);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:14px;font-weight:600;flex:0 0 auto}
+    .ncal .nc-colhead.today .ddisc{background:var(--ink);color:var(--on)}
+    .ncal .nc-colhead .cnm{font-family:var(--head);font-size:15px;font-weight:650;line-height:1.05}
+    .ncal .nc-colhead .cc{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--ink-3)}
+    .ncal .nc-col-empty{font-size:12.5px;color:var(--ink-3);padding:10px 6px;font-style:italic}
+    .ncal .ncard{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--nt);border-radius:12px;padding:10px 12px;margin-bottom:9px}
+    .ncal .ncard:active{background:oklch(0.968 0.008 236)}
+    .ncal .ncard.ms{border-left-color:var(--ms)} .ncal .ncard.fc{border-left-color:var(--fc)} .ncal .ncard.pt{border-left-color:var(--pt)} .ncal .ncard.nt{border-left-color:var(--nt)}
+    .ncal .ncard.onsite{border-color:var(--orange);box-shadow:inset 0 0 0 1px var(--orange)}
+    .ncal .ncard.done{opacity:.6}
+    .ncal .nc-c-top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+    .ncal .nc-c-top .tico{margin-right:0}
+    .ncal .nc-c-type{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .nc-c-type.ms{color:var(--ms-ink)} .ncal .nc-c-type.fc{color:var(--fc-ink)} .ncal .nc-c-type.pt{color:var(--pt-ink)} .ncal .nc-c-type.nt{color:var(--nt-ink)}
+    .ncal .nc-c-stag{margin-left:auto}
+    .ncal .nc-c-sub{font-family:var(--head);font-size:18px;font-weight:650;line-height:1.1;letter-spacing:-.01em}
+    .ncal .nc-c-ref{font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .nc-c-party{font-size:13px;color:var(--ink);margin-top:4px}
+    .ncal .nc-c-party .k,.ncal .ag-party .k,.ncal .rw-party .k{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-right:6px}
+    .ncal .nc-c-party b{font-weight:750}
+    .ncal .nc-c-pending{color:var(--ink-3)}
+    .ncal .nc-c-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+    .ncal .nc-c-time{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink-2)}
+    .ncal .nc-c-time small{color:var(--ink-3);font-weight:500;font-size:10px}
+    .ncal .nc-c-trade{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:750;color:var(--ink);min-width:0}
+    .ncal .nc-c-trade span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .nc-c-trade .av{width:22px;height:22px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:800;color:var(--on)}
+    .ncal .nc-c-trade.un{color:var(--orange-deep);font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+    /* party line on agenda + run rows */
+    .ncal .ag-party{font-size:12px;color:var(--ink-2);margin-top:2px}
+    .ncal .rw-party{font-size:12px;color:var(--ink-2);margin-top:2px}
   </style>
 </head>
 <body>
@@ -2602,6 +2909,58 @@
      SCHEDULE VIEW
      ══════════════════════════════════════════════════ -->
 <div id="viewSchedule" class="view">
+  <!-- ══════════════════════════════════════════════════
+       M2 NEW CALENDAR SYSTEM (U2 renderers + U3 filters/strip).
+       Sibling of the old .container (which stays fully intact below);
+       showView('schedule') shows this and hides the old container.
+       U4 adds the "Classic calendar" hatch to reach the old one again.
+       ══════════════════════════════════════════════════ -->
+  <div id="ncalRoot" class="ncal" style="display:none">
+    <div class="ctlrow">
+      <div class="seg" id="ncViewseg">
+        <button class="segbtn on" data-cv="cal">Calendar</button>
+        <button class="segbtn" data-cv="run">Run Sheet</button>
+      </div>
+      <button class="fbtn" id="ncFbtn" aria-label="Filter the calendar">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+        <span class="fbadge" id="ncFbadge" hidden></span>
+      </button>
+    </div>
+    <div class="ctlrow" id="ncRowScale">
+      <div class="seg lite" id="ncScaleseg">
+        <button class="segbtn on" data-sc="day">Day</button>
+        <button class="segbtn" data-sc="week">Week</button>
+        <button class="segbtn" data-sc="month">Month</button>
+      </div>
+      <div class="seg lite axis" id="ncAxisseg">
+        <button class="segbtn on" data-ax="crew">Crew</button>
+        <button class="segbtn" data-ax="jobs">Jobs</button>
+      </div>
+    </div>
+    <div class="periodbar" id="ncPeriodbar" hidden>
+      <button class="pbtn" id="ncPPrev" aria-label="Previous period">&lsaquo;</button>
+      <span class="plab" id="ncPLab"></span>
+      <button class="pbtn" id="ncPNext" aria-label="Next period">&rsaquo;</button>
+    </div>
+    <div class="dayrail" id="ncDayrail" hidden></div>
+    <button class="unstrip" id="ncUnstrip" hidden></button>
+    <div class="calhost" id="ncCalhost"></div>
+    <!-- bottom sheet (filter / job detail / unassigned) — inside .ncal for token inheritance -->
+    <div class="nc-scrim" id="ncScrim"></div>
+    <div class="nc-sheet" id="ncSheet" role="dialog" aria-modal="true">
+      <div class="nc-grab"></div>
+      <div class="nc-sheetscroll"><div id="ncSheetBody"></div></div>
+      <div class="nc-sheetfoot" id="ncSheetFoot"></div>
+    </div>
+    <div class="nc-toast" id="ncToast"></div>
+  </div>
+
+  <!-- U4 · return bar shown while the Classic calendar hatch is open -->
+  <div id="ncClassicBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:var(--sw-orange-tint);border-bottom:1px solid var(--sw-border)">
+    <span style="font-family:var(--sw-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-orange-deep)">Classic calendar</span>
+    <button onclick="ncShowNew()" style="background:var(--sw-dark);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;min-height:40px">&larr; New calendar</button>
+  </div>
+
   <div class="container">
     <!-- Sub-tabs: Calendar | Availability -->
     <div id="scheduleSubTabs" style="display:flex;gap:2px;background:var(--sw-light);border-radius:8px;padding:2px;margin-bottom:12px;">
@@ -3616,6 +3975,12 @@
         // view is no longer in the allowlist above, so it lands here -> opening tab.
         showView('schedule');
       }
+      // Restored M1 F1 fix (lost in M1's squash-merge): warm my_jobs on every
+      // non-deep-link boot path so checkServerClockRecovery ALWAYS fires at boot —
+      // even now that the app opens on the Calendar by default (M2). loadMyJobs
+      // guards on !_user/_sessionExpired and is idempotent; it renders into the
+      // (hidden) My Jobs container and calls checkServerClockRecovery internally.
+      if (_currentView !== 'myJobs') loadMyJobs();
     }
   }
 
@@ -3702,7 +4067,7 @@
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
     if (view === 'board') renderBoardView();
-    if (view === 'schedule') { loadTeamCalendar(); renderScheduleView(); }
+    if (view === 'schedule') { renderNewCalendar(); } // M2: Calendar tab renders the new system (old fns retained for U4 hatch)
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
@@ -10273,6 +10638,838 @@
     var diff = d.getDate() - day + (day === 0 ? -6 : 1);
     return new Date(d.getFullYear(), d.getMonth(), diff);
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // M2 U1 — CALENDAR DATA ADAPTER (trade-app-redesign · The Calendar System)
+  // Additive: transforms api('calendar') events into the approved prototype's
+  // render model. Does NOT touch loadTeamCalendar / renderScheduleView / any
+  // old-calendar path. Contract:
+  //   coding/work/missions/trade-app-m2-calendar-2026-07-05/CONTRACT.md §2a
+  //
+  // The pure core (below, between the sentinels) has NO DOM/network dependency
+  // and is the SINGLE SOURCE OF TRUTH for the duration/status/type/desc/colour/
+  // dedupe rules. The CP1 fixture script (smoke/cp1-adapter-tests.mjs) extracts
+  // this exact text and asserts against these real functions — do not duplicate
+  // the logic anywhere.
+  // ══════════════════════════════════════════════════════════════════════
+  // <calendar-adapter-core>
+  var CalAdapterCore = (function () {
+    'use strict';
+
+    // DA-6 · assignment_status (calendar_events.assignment_status = job_assignments.status)
+    // → prototype token onsite|booked|done. Live vocabulary is the schema CHECK
+    // (job_assignments_status_check, migration 2026-03-22):
+    //   scheduled, confirmed, in_progress, complete, cancelled, submitted, verified, draft, disputed
+    // 'cancelled' is filtered out server-side by api('calendar') (.neq assignment_status
+    // 'cancelled') and never reaches the client; mapped here defensively. Unknown/future
+    // tokens map to null so the caller records + guards them — NEVER a silent 'booked'.
+    var STATUS_MAP = {
+      scheduled:   'booked',
+      confirmed:   'booked',
+      draft:       'booked',   // tentative / unpublished schedule block
+      in_progress: 'onsite',   // clock_event sets status=in_progress on clock_on/travel/arrive
+      complete:    'done',
+      submitted:   'done',     // physical work finished; hours/report submitted
+      verified:    'done',     // finished + verified
+      disputed:    'done',     // finished; dispute is financial, not a scheduling state
+      cancelled:   null        // excluded by the feed; explicit so it is never rendered
+    };
+    function mapStatus(raw) {
+      var k = String(raw == null ? '' : raw).toLowerCase().trim();
+      if (Object.prototype.hasOwnProperty.call(STATUS_MAP, k)) return STATUS_MAP[k];
+      return null; // unmapped — caller records it; renderer must not invent 'booked'
+    }
+
+    // DA-3 · jobs.type (calendar_events.job_type = j.type — the uniform server
+    // classifier) → chip bucket. jobs_type_check (migration 2026-06-01):
+    //   fencing, patio, combo, decking, renovation, insurance, roofing,
+    //   miscellaneous, general, makesafe.
+    // Chips are Make-safe / Fencing / Patio; every other value → neutral 'other'
+    // (visible under the All lens only). Direct classifier pass-through — the fuzzy
+    // isTradeMakesafeJob text-matcher is deliberately NOT used for chips.
+    function mapType(jobType) {
+      var k = String(jobType == null ? '' : jobType).toLowerCase().trim();
+      if (k === 'makesafe') return 'makesafe';
+      if (k === 'fencing') return 'fencing';
+      if (k === 'patio') return 'patio';
+      return 'other';
+    }
+    function isMakesafe(jobType) {
+      return String(jobType == null ? '' : jobType).toLowerCase().trim() === 'makesafe';
+    }
+    function typeLabel(mappedType) {
+      if (mappedType === 'makesafe') return 'Make-safe';
+      if (mappedType === 'fencing') return 'Fencing';
+      if (mappedType === 'patio') return 'Patio';
+      return 'Job';
+    }
+
+    // "HH:MM[:SS]" → decimal hours (7.5 === 07:30). null when absent/unparseable.
+    function parseTime(t) {
+      if (t == null) return null;
+      var m = String(t).trim().match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+      if (isNaN(h) || isNaN(mm)) return null;
+      return h + mm / 60;
+    }
+
+    // DA-1 · Block duration — Captain's rule (Marnin, 2026-07-05): a real end wins;
+    // otherwise make-safe jobs block start+1h and all other jobs block start+8h.
+    // Returns { end, est } where est=true means the end was derived (no real end).
+    // Real-end field: calendar_events.end_time (a `time`). scheduled_end is a DATE
+    // (multi-day span end), not a within-day time, so it is NOT used for block end.
+    function deriveBlock(startHour, endTimeStr, jobType) {
+      if (startHour == null) return { end: null, est: false }; // unscheduled — no block
+      var realEnd = parseTime(endTimeStr);
+      if (realEnd != null && realEnd > startHour) return { end: realEnd, est: false };
+      return { end: Math.min(startHour + (isMakesafe(jobType) ? 1 : 8), 24), est: true }; // cap derived end at midnight — never spill past the day
+    }
+
+    // DA-2 · Deterministic crew colour: stable FNV-1a hash of the identity key
+    // (user_id when present, else crew name) → hue, in a Briefing-compatible oklch
+    // band. Same key → same colour on every device, no schema change.
+    function crewHue(key) {
+      var s = String(key == null ? '' : key), h = 0x811c9dc5;
+      for (var i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return h % 360;
+    }
+    function crewColour(key) { return 'oklch(0.5 0.065 ' + crewHue(key) + ')'; }
+
+    function initials(name) {
+      var n = String(name == null ? '' : name).trim();
+      if (!n) return '?';
+      var p = n.split(/\s+/);
+      return (p.length >= 2 ? (p[0][0] + p[1][0]) : n.slice(0, 2)).toUpperCase();
+    }
+
+    // desc chain: label / assignment_notes → scope_json summary → job-type label.
+    // U1 FINDING: api('calendar') currently delivers NONE of label / assignment_notes
+    // / scope_json (calSelect omits label + notes; lightEvents strips scope_json), so
+    // on the live feed this resolves to the type label. The earlier branches are kept
+    // truthful + future-proof for an enriched feed. Never blank.
+    function scopeSummary(scopeJson) {
+      if (!scopeJson || typeof scopeJson !== 'object') return '';
+      var cfg = scopeJson.config || scopeJson, bits = [];
+      if (cfg.fence_type) bits.push(String(cfg.fence_type));
+      if (cfg.length_m || cfg.total_length) bits.push((cfg.length_m || cfg.total_length) + ' m');
+      if (cfg.patio_type) bits.push(String(cfg.patio_type));
+      if (!bits.length && typeof scopeJson.summary === 'string') return scopeJson.summary;
+      return bits.join(' ');
+    }
+    function desc(ev, mappedType) {
+      var label = ev.label || ev.assignment_notes;
+      if (label && String(label).trim()) return String(label).trim();
+      var ss = scopeSummary(ev.scope_json);
+      if (ss && ss.trim()) return ss.trim();
+      return typeLabel(mappedType); // never blank
+    }
+
+    // One calendar_events row → one per-assignment render block.
+    function eventToBlock(ev) {
+      var mt = mapType(ev.job_type);
+      var startH = parseTime(ev.start_time);
+      var blk = deriveBlock(startH, ev.end_time, ev.job_type);
+      var crewName = ev.assigned_to || ev.crew_name || null; // display name (u.name join, else free-text)
+      var crewKey = ev.user_id || ev.crew_name || null;      // stable identity/colour key
+      var addr = ev.site_address || '';
+      if (ev.site_suburb && addr.indexOf(ev.site_suburb) < 0) {
+        addr = addr ? (addr + ', ' + ev.site_suburb) : ev.site_suburb;
+      }
+      return {
+        // ── approved-prototype public model ──
+        id:   ev.assignment_id || (String(ev.job_id) + '|' + ev.scheduled_date + '|' + (crewKey || '')),
+        sub:  ev.site_suburb || '',
+        ref:  ev.job_number || '',
+        type: mt,
+        crew: crewName,
+        date: ev.scheduled_date || null,
+        start: startH,
+        end:  blk.end,
+        status: mapStatus(ev.assignment_status),
+        addr: addr,
+        desc: desc(ev, mt),
+        client: ev.client_name || '', // homeowner (fence/patio party line). Builder is a
+                                      // separate backend field not yet in the feed — see partyLabel.
+        // ── adapter metadata (renderers read only the fields above) ──
+        _est: blk.est,
+        _crewKey: crewKey,
+        _userId: ev.user_id || null,
+        _jobId: ev.job_id || null,
+        _rawType: ev.job_type || null,
+        _rawStatus: ev.assignment_status || null
+      };
+    }
+
+    // Adapt an events array → { blocks, reconciliation counts, unmappedStatuses }.
+    // One block per assignment row (no grouping) — reconciles 1:1 (no dropped rows).
+    function adaptEvents(events) {
+      var list = Array.isArray(events) ? events : [];
+      var blocks = [], unmapped = {};
+      for (var i = 0; i < list.length; i++) {
+        var b = eventToBlock(list[i]);
+        if (b.status == null && list[i] && list[i].assignment_status != null) {
+          var tok = String(list[i].assignment_status).toLowerCase().trim();
+          if (tok && tok !== 'cancelled') unmapped[tok] = (unmapped[tok] || 0) + 1;
+        }
+        blocks.push(b);
+      }
+      return {
+        blocks: blocks,
+        inputCount: list.length,
+        outputCount: blocks.length,
+        unmappedStatuses: Object.keys(unmapped)
+      };
+    }
+
+    // DA-4 · Mine/Everyone client filter over blocks. Server scoping is untouched;
+    // 'mine' keeps blocks assigned to the logged-in user (by user_id, else name).
+    function filterLens(blocks, mode, me) {
+      if (mode !== 'mine') return (blocks || []).slice();
+      me = me || {};
+      var myId = me.id != null ? String(me.id) : null;
+      var myName = me.name ? String(me.name).toLowerCase() : null;
+      return (blocks || []).filter(function (b) {
+        if (myId && b._userId != null && String(b._userId) === myId) return true;
+        if (myName && b.crew && String(b.crew).toLowerCase() === myName) return true;
+        return false;
+      });
+    }
+
+    // Jobs-axis dedupe: group per-assignment blocks by job+date, join crew names,
+    // span the time to cover all crew, and reconcile every assignment id. Crew-axis
+    // views use the per-assignment blocks directly (native). Status precedence:
+    // any on-site → onsite; else all done → done; else booked.
+    function dedupeByJobDate(blocks) {
+      var order = [], byKey = {};
+      (blocks || []).forEach(function (b) {
+        var key = (b._jobId || b.ref || b.id) + '|' + b.date;
+        if (!byKey[key]) {
+          var row = {};
+          for (var k in b) if (Object.prototype.hasOwnProperty.call(b, k)) row[k] = b[k];
+          row.crewList = []; row._assignmentIds = []; row._statuses = [];
+          byKey[key] = row; order.push(key);
+        }
+        var r = byKey[key];
+        r._assignmentIds.push(b.id);
+        r._statuses.push(b.status);
+        if (b.crew && r.crewList.indexOf(b.crew) < 0) r.crewList.push(b.crew);
+        if (b.start != null && (r.start == null || b.start < r.start)) r.start = b.start;
+        if (b.end != null && (r.end == null || b.end > r.end)) r.end = b.end;
+        if (b._est) r._est = true;
+      });
+      return order.map(function (key) {
+        var r = byKey[key];
+        r.crew = r.crewList.length ? r.crewList.join(' + ') : null;
+        var hasOnsite = false, doneCount = 0, total = r._statuses.length;
+        r._statuses.forEach(function (s) { if (s === 'onsite') hasOnsite = true; if (s === 'done') doneCount++; });
+        r.status = hasOnsite ? 'onsite' : (total > 0 && doneCount === total ? 'done' : 'booked');
+        return r;
+      });
+    }
+
+    // PEOPLE colour map from the crew roster (list_users) ∪ crews present in blocks.
+    function buildPeople(rosterUsers, blocks) {
+      var seen = {}, people = [];
+      function add(key, name) {
+        var k = key != null ? String(key) : ('name:' + String(name || ''));
+        if (!name || seen[k]) return;
+        seen[k] = true;
+        people.push({ key: k, name: name, initials: initials(name), av: crewColour(k), userId: (key && key !== name) ? key : null });
+      }
+      (rosterUsers || []).forEach(function (u) { add(u.id || u.name, u.name); });
+      (blocks || []).forEach(function (b) { if (b.crew) add(b._crewKey || b.crew, b.crew); });
+      return people;
+    }
+
+    return {
+      STATUS_MAP: STATUS_MAP, mapStatus: mapStatus, mapType: mapType, isMakesafe: isMakesafe,
+      typeLabel: typeLabel, parseTime: parseTime, deriveBlock: deriveBlock, crewHue: crewHue,
+      crewColour: crewColour, initials: initials, scopeSummary: scopeSummary, desc: desc,
+      eventToBlock: eventToBlock, adaptEvents: adaptEvents, filterLens: filterLens,
+      dedupeByJobDate: dedupeByJobDate, buildPeople: buildPeople
+    };
+  })();
+  // </calendar-adapter-core>
+
+  // Network layer for the U1 adapter (uses the existing api()). Fetches only from
+  // the sanctioned actions — calendar (block model), list_users (crew roster/colours)
+  // and get_crew_availability (crew-view overlay). my_jobs is intentionally NOT called:
+  // DA-4 makes Mine/Everyone a client-side filter over calendar events, and my_jobs'
+  // own `mode` is left untouched. No new endpoints, no schema change.
+  async function caFetchCalendarModel(fromStr, toStr) {
+    var calData = await api('calendar', { from: fromStr, to: toStr });
+    var events = (calData && calData.events) || [];
+    var roster = [];
+    try {
+      var u = await api('list_users', {});
+      roster = ((u && (u.users || u)) || []).filter(function (x) {
+        return ['crew', 'lead_installer', 'admin', 'ops_manager'].indexOf(x.role) >= 0;
+      });
+    } catch (e) { console.log('[cal-adapter] roster load failed:', e); }
+    var avail = [];
+    try {
+      var a = await api('get_crew_availability', { start_date: fromStr, end_date: toStr });
+      avail = (a && a.availability) || [];
+    } catch (e) { console.log('[cal-adapter] availability load failed:', e); }
+    var adapted = CalAdapterCore.adaptEvents(events);
+    return {
+      blocks: adapted.blocks,
+      people: CalAdapterCore.buildPeople(roster, adapted.blocks),
+      availability: avail,
+      roster: roster,
+      unmappedStatuses: adapted.unmappedStatuses,
+      inputCount: adapted.inputCount,
+      outputCount: adapted.outputCount
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // M2 U2 — CALENDAR RENDERERS (ported from the approved prototype).
+  // PURE string builders: (model, state) in → HTML string out. No DOM reads,
+  // no globals, no network — safe to extract + run in Node (CP2 smoke does
+  // exactly that via the sentinels below).
+  //   model = { blocks: <U1 job blocks>, people: <U1 PEOPLE>, today: 'YYYY-MM-DD', now: <decimal hours> }
+  //   state = { calView:'cal'|'run', scale:'day'|'week'|'month', axis:'crew'|'jobs',
+  //             type:'all'|'makesafe'|'fencing'|'patio', scope:'mine'|'everyone',
+  //             me:{id,name}, boardAllowed:<bool> }
+  // Null-start jobs (crewed-but-untimed, ~36% of live rows — CP1 finding) never
+  // touch the time grid; each grid renderer lands them in a "No time set" section.
+  // type:'other' is handled by the neutral TYPE entry (never crashes).
+  // ══════════════════════════════════════════════════════════════════════
+  // <calendar-renderers>
+  var CalRender = (function () {
+    'use strict';
+    var H0 = 7, H1 = 16, HPX = 60, HEAD = 46, LANE = (H1 - H0) * HPX;
+    var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var MOF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    var TYPE = {
+      makesafe: { cls: 'ms', label: 'Make-safe' }, fencing: { cls: 'fc', label: 'Fencing' },
+      patio: { cls: 'pt', label: 'Patio' }, other: { cls: 'nt', label: 'Other' }
+    };
+    function TY(t) { return TYPE[t] || TYPE.other; }
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+    function parse(d) { var p = String(d).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+    function iso(dt) { var m = dt.getMonth() + 1, d = dt.getDate(); return dt.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d; }
+    function addDays(d, n) { var dt = parse(d); dt.setDate(dt.getDate() + n); return iso(dt); }
+    function addMonths(d, n) { var dt = parse(d); dt.setMonth(dt.getMonth() + n, 1); return iso(dt); }
+    function mondayOf(d) { var dt = parse(d); var off = (dt.getDay() + 6) % 7; return addDays(d, -off); }
+    function weekDays(d) { var m = mondayOf(d), out = []; for (var i = 0; i < 6; i++) out.push(addDays(m, i)); return out; }
+    function fmtDay(d) { var dt = parse(d); return WD[dt.getDay()] + ' ' + dt.getDate() + ' ' + MO[dt.getMonth()]; }
+    function fmtTime(h) { if (h == null) return ''; var hh = Math.floor(h) % 24, mm = Math.round((h - Math.floor(h)) * 60); var disp = hh % 12; if (disp === 0) disp = 12; return disp + ':' + (mm < 10 ? '0' : '') + mm; }
+    function ampm(h) { if (h == null) return ''; var hh = Math.floor(h) % 24; return hh < 12 ? 'am' : 'pm'; }
+    function weekLabel(d) { var m = mondayOf(d), s = addDays(m, 5), a = parse(m), b = parse(s); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + MO[a.getMonth()]) + ' to ' + b.getDate() + ' ' + MO[b.getMonth()]; }
+    function monthLabel(m) { var dt = parse(m); return MOF[dt.getMonth()] + ' ' + dt.getFullYear(); }
+
+    function person(M, name) { var ps = M.people || []; for (var i = 0; i < ps.length; i++) if (ps[i].name === name) return ps[i]; return { name: name || '?', initials: String(name || '?').slice(0, 2).toUpperCase(), av: 'var(--nt)' }; }
+    function av(M, name, cls) { var p = person(M, name); return '<span class="av' + (cls ? ' ' + cls : '') + '" style="background:' + p.av + '">' + esc(p.initials) + '</span>'; }
+
+    /* ---- filtering (scope = DA-4 client filter; server scoping already applied upstream) ---- */
+    function passType(st, j) { return st.type === 'all' || j.type === st.type; }
+    function matchMe(st, j) {
+      var me = st.me || {};
+      if (me.id != null && j._userId != null && String(j._userId) === String(me.id)) return true;
+      if (me.name && j.crew && String(j.crew) === String(me.name)) return true;
+      return false;
+    }
+    function forDate(M, st, d) { return (M.blocks || []).filter(function (j) { return j.date === d && passType(st, j); }); }
+    function assignedForDate(M, st, d) { return forDate(M, st, d).filter(function (j) { return j.crew && (st.scope === 'everyone' || matchMe(st, j)); }); }
+    function unassignedForDate(M, st, d) { return forDate(M, st, d).filter(function (j) { return !j.crew; }); }
+    function timedForDate(M, st, d) { return assignedForDate(M, st, d).filter(function (j) { return j.start != null; }); }
+    function untimedForDate(M, st, d) { return assignedForDate(M, st, d).filter(function (j) { return j.start == null; }); }
+    function showUnassigned(st) { return !!st.boardAllowed && st.scope === 'everyone'; }
+    function crewsTimed(M, st, d) {
+      var t = timedForDate(M, st, d), seen = {}, out = [];
+      (M.people || []).forEach(function (p) { if (t.some(function (j) { return j.crew === p.name; })) { out.push(p.name); seen[p.name] = 1; } });
+      t.forEach(function (j) { if (j.crew && !seen[j.crew]) { seen[j.crew] = 1; out.push(j.crew); } });
+      return out;
+    }
+    function crewsAssigned(M, st, d) {
+      var a = assignedForDate(M, st, d), seen = {}, out = [];
+      (M.people || []).forEach(function (p) { if (a.some(function (j) { return j.crew === p.name; })) { out.push(p.name); seen[p.name] = 1; } });
+      a.forEach(function (j) { if (j.crew && !seen[j.crew]) { seen[j.crew] = 1; out.push(j.crew); } });
+      return out;
+    }
+
+    /* ---- enriched job card (CP3: blocks were information-starved) + agenda rows ---- */
+    // PROBLEM 3 seam: make-safe shows BUILDER (a backend field not yet in the feed —
+    // placeholder '—' until wired); fence/patio show the CLIENT (homeowner, client_name).
+    // When the adapter gains j.builder, this picks it up with no renderer change.
+    var NO_PARTY = '—'; // em-dash sentinel for a not-yet-known party (builder pending)
+    function partyLabel(j) {
+      if (j.type === 'makesafe') return { k: 'Builder', v: j.builder || NO_PARTY };
+      return { k: 'Client', v: j.client || NO_PARTY };
+    }
+    function partyValHTML(p) { return p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : esc(p.v); }
+    function timeLabel(j) {
+      if (j.start == null) return 'No time set';
+      return fmtTime(j.start) + ampm(j.start) + (j.end != null ? '&ndash;' + fmtTime(j.end) + ampm(j.end) : '') + (j._est ? ' <small>est.</small>' : '');
+    }
+    function stagOf(j) {
+      var s = j.status || 'booked';
+      var lab = s === 'onsite' ? 'On site' : (s === 'done' ? 'Done' : (j.start == null ? 'No time' : 'Booked'));
+      return '<span class="nc-c-stag stag ' + s + '">' + lab + '</span>';
+    }
+    // The one card used across every jobs list + the stacked grid views. Shows suburb,
+    // type, status, ref (+desc), the party line (client/builder), time, and assigned trade.
+    function jcard(M, j) {
+      var t = TY(j.type), p = partyLabel(j);
+      var trade = j.crew
+        ? '<span class="nc-c-trade">' + crewDisc(M, j, 'av') + '<span>' + esc(j.crew) + '</span></span>'
+        : '<span class="nc-c-trade un">Unassigned</span>';
+      var descLine = (j.desc && j.desc !== t.label) ? ' &middot; ' + esc(j.desc) : '';
+      var partyVal = p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : '<b>' + esc(p.v) + '</b>';
+      return '<button class="ncard ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '') + '" data-job="' + esc(j.id) + '">'
+        + '<div class="nc-c-top"><span class="tico ' + t.cls + '"></span><span class="nc-c-type ' + t.cls + '">' + esc(t.label) + '</span>' + stagOf(j) + '</div>'
+        + '<div class="nc-c-sub">' + esc(j.sub) + '</div>'
+        + '<div class="nc-c-ref">' + esc(j.ref) + descLine + '</div>'
+        + '<div class="nc-c-party"><span class="k">' + p.k + '</span>' + partyVal + '</div>'
+        + '<div class="nc-c-foot"><span class="nc-c-time">' + timeLabel(j) + '</span>' + trade + '</div>'
+        + '</button>';
+    }
+    // Crew disc for a block/row: a per-crew avatar, or a count disc when a job+date
+    // was deduped across multiple crew (crewList set by CalAdapterCore.dedupeByJobDate).
+    function crewDisc(M, j, cls) {
+      var list = j.crewList || (j.crew ? [j.crew] : []);
+      if (list.length > 1) return '<span class="' + cls + '" title="' + esc(j.crew) + '" style="background:var(--ink-3)">' + list.length + '</span>';
+      if (list.length === 1) { var p = person(M, list[0]); return '<span class="' + cls + '" style="background:' + p.av + '">' + esc(p.initials) + '</span>'; }
+      return '';
+    }
+    function agRow(M, j) {
+      var timeCell = j.start != null
+        ? '<span class="time">' + fmtTime(j.start) + '<small>' + ampm(j.start) + (j._est ? ' est' : '') + '</small></span>'
+        : '<span class="time">TBC<small>no time</small></span>';
+      var right = (j.crewList && j.crewList.length > 1) ? crewDisc(M, j, 'av') : (j.crew ? av(M, j.crew) : '<span class="nocrew">No crew</span>');
+      var p = partyLabel(j);
+      var partyLine = '<div class="ag-party"><span class="k">' + p.k + '</span>' + partyValHTML(p) + '</div>';
+      return '<button class="agrow" data-job="' + esc(j.id) + '">' + timeCell
+        + '<div class="w"><div class="sub">' + esc(j.sub) + '</div><div class="m"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>' + partyLine + '</div>'
+        + right + '</button>';
+    }
+    // CP1 finding: crewed-but-untimed jobs land here, visible + deliberate.
+    function untimedSection(M, jobs) {
+      if (!jobs.length) return '';
+      jobs = jobs.slice().sort(function (a, b) { return String(a.ref).localeCompare(String(b.ref)); });
+      return '<div class="nc-untimed"><div class="nc-uh"><span class="ucount">' + jobs.length + '</span>No time set &middot; needs a start time</div>' + jobs.map(function (j) { return agRow(M, j); }).join('') + '</div>';
+    }
+    function jobsForAgenda(M, st, d) {
+      var out = assignedForDate(M, st, d);
+      if (showUnassigned(st)) out = out.concat(unassignedForDate(M, st, d));
+      // JOBS axis (Month×Jobs day-list + dots): dedupe to one row per job+date so all
+      // three jobs-axis views (day/week/month) behave uniformly per §2a. crewList drives
+      // the count disc; untimed deduped rows still show once. Crew-axis is unaffected.
+      out = CalAdapterCore.dedupeByJobDate(out);
+      return out.sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
+    }
+
+    /* ---- the six renderers + Run Sheet ---- */
+    // Day × Crew. CP3: placeholder-time data made time-proportional bars overlap and
+    // hide each other, so we render each crew's jobs as a compact STACK of enriched
+    // cards (all legible, uses the vertical space) instead of bars. Per-assignment
+    // (crew-axis is never deduped). Swipe across crew columns; untimed jobs below.
+    function renderTimeline(M, st) {
+      var crews = crewsTimed(M, st, st.date), untimed = untimedForDate(M, st, st.date);
+      if (!crews.length && !untimed.length) {
+        return '<div class="emptyview fadein"><b>No one booked</b>' + (st.scope === 'mine' ? 'You have nothing on ' + fmtDay(st.date) + '.' : 'Nothing scheduled for ' + fmtDay(st.date) + '.') + '</div>';
+      }
+      var solo = crews.length === 1;
+      var cols = crews.map(function (name) {
+        var jobs = timedForDate(M, st, st.date).filter(function (j) { return j.crew === name; }).sort(function (a, b) { return a.start - b.start; });
+        return '<div class="nc-col' + (solo ? ' solo' : '') + '"><div class="nc-colhead">' + av(M, name) + '<div class="cn"><div class="cnm">' + esc(name) + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></div>'
+          + jobs.map(function (j) { return jcard(M, j); }).join('') + '</div>';
+      }).join('');
+      var grid = crews.length ? '<div class="nc-cols' + (solo ? ' solo' : '') + '">' + cols + '</div>' : '';
+      return '<div class="fadein">' + grid + untimedSection(M, untimed) + '</div>';
+    }
+
+    // Day × Jobs (deduped to one row per job+date). CP3: a single readable stack of
+    // enriched cards (was overlapping time-bars). Untimed jobs in the section below.
+    function renderDayJobs(M, st) {
+      var deduped = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, st.date));
+      var jobs = deduped.filter(function (j) { return j.start != null; }).sort(function (a, b) { return a.start - b.start; });
+      var untimed = deduped.filter(function (j) { return j.start == null; });
+      if (!jobs.length && !untimed.length) {
+        return '<div class="emptyview fadein"><b>Nothing on ' + fmtDay(st.date) + '</b>Try another day on the rail.</div>';
+      }
+      var list = jobs.length ? '<div class="nc-stack">' + jobs.map(function (j) { return jcard(M, j); }).join('') + '</div>' : '';
+      return '<div class="fadein">' + list + untimedSection(M, untimed) + '</div>';
+    }
+
+    function renderWeekCrew(M, st) {
+      var days = weekDays(st.date);
+      var head = '<div class="wkhead"><div></div>' + days.map(function (d) { var dt = parse(d); return '<div class="wkd' + (d === M.today ? ' today' : '') + '">' + WD[dt.getDay()] + '<b>' + dt.getDate() + '</b></div>'; }).join('') + '</div>';
+      var rows = '';
+      if (showUnassigned(st)) {
+        var anyUn = false, unCells = days.map(function (d) { var n = unassignedForDate(M, st, d).length; if (n) { anyUn = true; return '<button class="wkcell un" data-undate="' + d + '"><span class="wn">' + n + '</span></button>'; } return '<div class="wkcell empty"></div>'; }).join('');
+        if (anyUn) rows += '<div class="wkrow unrow"><div class="wkcrew"><span class="av" data-un="1" style="background:var(--orange)">!</span><span class="nm">No crew</span></div>' + unCells + '</div>';
+      }
+      var crews = st.scope === 'mine' ? [st.me && st.me.name] : (M.people || []).map(function (p) { return p.name; });
+      crews.forEach(function (name) {
+        if (!name) return;
+        var has = false;
+        var cells = days.map(function (d) {
+          var jobs = assignedForDate(M, st, d).filter(function (j) { return j.crew === name; });
+          if (!jobs.length) return '<div class="wkcell empty"></div>';
+          has = true;
+          var segs = jobs.slice(0, 4).map(function (j) { return '<i class="seg-' + TY(j.type).cls + '"></i>'; }).join('');
+          return '<button class="wkcell" data-date="' + d + '"><span class="wn">' + jobs.length + '</span><span class="wsegs">' + segs + '</span></button>';
+        }).join('');
+        if (has) rows += '<div class="wkrow"><div class="wkcrew">' + av(M, name) + '<span class="nm">' + esc(name) + '</span></div>' + cells + '</div>';
+      });
+      if (!rows) rows = '<div class="emptyview"><b>Quiet week</b>Nothing matches the filter this week.</div>';
+      return '<div class="wkscroll fadein">' + head + rows + '<div class="aghint">Tap a cell to open that day. Counts include jobs still to be timed.</div></div>';
+    }
+
+    // Week × Jobs (each day deduped to one row per job+date). CP3: per-day columns of
+    // stacked enriched cards (was overlapping time-bars). Swipe across days; the week's
+    // untimed jobs in the section below.
+    function renderWeekJobs(M, st) {
+      var days = weekDays(st.date), any = false, untimedAll = [];
+      var cols = days.map(function (d) {
+        var dt = parse(d);
+        var deduped = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, d));
+        var jobs = deduped.filter(function (j) { return j.start != null; }).sort(function (a, b) { return a.start - b.start; });
+        untimedAll = untimedAll.concat(deduped.filter(function (j) { return j.start == null; }));
+        if (jobs.length) any = true;
+        return '<div class="nc-col"><button class="nc-colhead dhead' + (d === M.today ? ' today' : '') + '" data-date="' + d + '"><span class="ddisc">' + dt.getDate() + '</span><div class="cn"><div class="cnm">' + WD[dt.getDay()] + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></button>'
+          + (jobs.length ? jobs.map(function (j) { return jcard(M, j); }).join('') : '<div class="nc-col-empty">Nothing timed</div>') + '</div>';
+      }).join('');
+      if (!any && !untimedAll.length) return '<div class="emptyview fadein"><b>Quiet week</b>Nothing matches the filter this week.</div>';
+      return '<div class="fadein"><div class="nc-cols">' + cols + '</div>' + untimedSection(M, untimedAll) + '</div>';
+    }
+
+    function typeDots(M, st, d) {
+      var dots = jobsForAgenda(M, st, d).filter(function (j) { return j.crew; }).slice(0, 4).map(function (j) { return '<i class="t-' + TY(j.type).cls + '"></i>'; }).join('');
+      if (showUnassigned(st) && unassignedForDate(M, st, d).length) dots += '<i class="t-un"></i>';
+      return dots;
+    }
+    function selectedDayList(M, st) {
+      var jobs = jobsForAgenda(M, st, st.date);
+      if (!jobs.length) return '<div class="emptyview"><b>Nothing on ' + fmtDay(st.date) + '</b>Tap another day above.</div>';
+      var html = '<div class="aghead' + (st.date === M.today ? ' today' : '') + '"><b>' + fmtDay(st.date) + '</b><span class="agn">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</span></div>';
+      return html + jobs.map(function (j) { return agRow(M, j); }).join('');
+    }
+
+    function renderMonthCrew(M, st) {
+      var firstMon = mondayOf(st.month), mIdx = parse(st.month).getMonth();
+      var html = '<div class="mhead">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) { return '<div>' + w + '</div>'; }).join('') + '</div><div class="mgrid">';
+      for (var i = 0; i < 42; i++) {
+        var d = addDays(firstMon, i), dt = parse(d), inMonth = dt.getMonth() === mIdx;
+        if (!inMonth) { html += '<div class="mcell out"><div class="mn">' + dt.getDate() + '</div></div>'; continue; }
+        var assigned = assignedForDate(M, st, d), un = showUnassigned(st) ? unassignedForDate(M, st, d).length : 0, total = assigned.length + un, heavy = total >= 4;
+        var segs = assigned.slice(0, 5).map(function (j) { return '<i class="seg-' + TY(j.type).cls + '"></i>'; }).join('');
+        var cls = 'mcell' + (d === M.today ? ' today' : '') + (heavy ? ' heavy' : '') + (total > 0 ? ' tappable' : '');
+        html += '<button class="' + cls + '" data-date="' + d + '"' + (total > 0 ? '' : ' disabled') + '><div class="mn">' + dt.getDate() + '</div>'
+          + (un > 0 ? '<span class="undot">' + un + '</span>' : '')
+          + (total > 0 ? '<div class="mbig">' + total + ' <small>' + (total === 1 ? 'job' : 'jobs') + '</small></div><div class="segs">' + segs + '</div>' : '') + '</button>';
+      }
+      html += '</div><div class="monthkey"><span><i class="seg-ms"></i>Make-safe</span><span><i class="seg-fc"></i>Fencing</span><span><i class="seg-pt"></i>Patio</span><span><i class="seg-nt"></i>Other</span>'
+        + (showUnassigned(st) ? '<span><i class="undotk">3</i>Without a crew</span>' : '') + '</div>';
+      return '<div class="monthscroll fadein">' + html + '</div>';
+    }
+
+    function renderMonthJobs(M, st) {
+      var firstMon = mondayOf(st.month), mIdx = parse(st.month).getMonth();
+      var head = '<div class="ighead">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) { return '<div>' + w + '</div>'; }).join('') + '</div>';
+      var cells = '';
+      for (var i = 0; i < 42; i++) {
+        var d = addDays(firstMon, i), dt = parse(d), inMonth = dt.getMonth() === mIdx;
+        var cls = 'igcell' + (inMonth ? '' : ' out') + (d === M.today ? ' today' : '') + (d === st.date ? ' sel' : '');
+        cells += '<button class="' + cls + '" data-seldate="' + d + '"' + (inMonth ? '' : ' disabled') + '><b>' + dt.getDate() + '</b><div class="igdots">' + (inMonth ? typeDots(M, st, d) : '') + '</div></button>';
+      }
+      return '<div class="igbar fadein">' + head + '<div class="iggrid">' + cells + '</div></div><div class="igsplit"></div><div class="agscroll">' + selectedDayList(M, st) + '</div>';
+    }
+
+    function renderRun(M, st) {
+      var crews = crewsAssigned(M, st, st.date);
+      if (!crews.length) return '<div class="emptyview fadein"><b>No runs</b>Nobody is booked on ' + fmtDay(st.date) + '.</div>';
+      var html = '<div class="runhint">' + fmtDay(st.date) + ', in run order. Status only, no changes here.</div>';
+      crews.forEach(function (name) {
+        var jobs = assignedForDate(M, st, st.date).filter(function (j) { return j.crew === name; }).sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
+        var first = jobs[0] ? jobs[0].sub : '';
+        html += '<div class="crewsec"><div class="ch">' + av(M, name) + '<span class="cnm">' + esc(name) + '</span><span class="cinfo">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + (first ? ' &middot; ' + esc(first) + ' first' : '') + '</span></div><div class="run">';
+        jobs.forEach(function (j) {
+          var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
+          var tcell = j.start != null ? fmtTime(j.start) : '&mdash;<small>no time</small>';
+          var rp = partyLabel(j);
+          html += '<button class="rrow" data-job="' + esc(j.id) + '"><span class="time">' + tcell + '</span>'
+            + '<div class="rw"><div class="sub">' + esc(j.sub) + '</div><div class="meta"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>'
+            + '<div class="rw-party"><span class="k">' + rp.k + '</span>' + partyValHTML(rp) + '</div></div>'
+            + '<span class="stag ' + (j.status || 'booked') + '">' + stlab + '</span></button>';
+        });
+        html += '</div></div>';
+      });
+      return '<div class="runscroll fadein">' + html + '</div>';
+    }
+
+    /* ---- dispatch + chrome ---- */
+    function render(M, st) {
+      if (st.calView === 'run') return renderRun(M, st);
+      if (st.scale === 'day') return st.axis === 'crew' ? renderTimeline(M, st) : renderDayJobs(M, st);
+      if (st.scale === 'week') return st.axis === 'crew' ? renderWeekCrew(M, st) : renderWeekJobs(M, st);
+      return st.axis === 'crew' ? renderMonthCrew(M, st) : renderMonthJobs(M, st);
+    }
+    function periodLabel(M, st) {
+      if (st.calView === 'run' || st.scale === 'day') return fmtDay(st.date);
+      if (st.scale === 'week') return weekLabel(st.date);
+      return monthLabel(st.month);
+    }
+    function railHTML(M, st) {
+      var mon = mondayOf(st.date), cells = '';
+      for (var i = 0; i < 6; i++) {
+        var d = addDays(mon, i), dt = parse(d), n = assignedForDate(M, st, d).length, dots = '', shown = Math.min(n, 6), hot = n >= 4;
+        for (var k = 0; k < shown; k++) dots += '<i' + (hot ? ' class="hot"' : '') + '></i>';
+        cells += '<button class="dcell' + (d === st.date ? ' sel' : '') + '" data-date="' + d + '">' + (d === M.today ? '<span class="tdot"></span>' : '') + '<small>' + WD[dt.getDay()] + '</small><b>' + dt.getDate() + '</b><div class="load">' + dots + '</div></button>';
+      }
+      return '<button class="railbtn" data-shift="-7" aria-label="Previous week">&lsaquo;</button>' + cells + '<button class="railbtn" data-shift="7" aria-label="Next week">&rsaquo;</button>';
+    }
+    function unassignedForPeriod(M, st) {
+      if (!showUnassigned(st)) return [];
+      if (st.calView === 'run' || st.scale === 'day') return unassignedForDate(M, st, st.date);
+      if (st.scale === 'week') { var out = []; weekDays(st.date).forEach(function (d) { out = out.concat(unassignedForDate(M, st, d)); }); return out; }
+      return [];
+    }
+    function chrome(M, st) {
+      var railVisible = st.calView === 'run' || st.scale === 'day';
+      var periodbarHidden = !(st.calView === 'cal' && st.scale !== 'day');
+      var defScope = st.boardAllowed ? 'everyone' : 'mine';
+      var badge = (st.type !== 'all' ? 1 : 0) + (st.scope !== defScope ? 1 : 0);
+      var un = unassignedForPeriod(M, st);
+      var stripVisible = un.length > 0 && !(st.calView === 'cal' && st.scale === 'month');
+      var stripHTML = '';
+      if (stripVisible) {
+        var subs = [], seen = {};
+        un.forEach(function (j) { if (!seen[j.sub]) { seen[j.sub] = 1; subs.push(j.sub); } });
+        var shown = subs.slice(0, 3).join(', '); if (subs.length > 3) shown += ' +' + (subs.length - 3);
+        stripHTML = '<span class="ucount">' + un.length + '</span><span class="um">Without a crew &middot; ' + esc(shown) + '</span><span class="uarrow">&rsaquo;</span>';
+      }
+      return {
+        periodLabel: periodLabel(M, st), badgeCount: badge,
+        railVisible: railVisible, railHTML: railVisible ? railHTML(M, st) : '',
+        periodbarHidden: periodbarHidden,
+        unstrip: { visible: stripVisible, html: stripHTML }
+      };
+    }
+
+    return {
+      render: render, chrome: chrome,
+      renderTimeline: renderTimeline, renderDayJobs: renderDayJobs, renderWeekCrew: renderWeekCrew,
+      renderWeekJobs: renderWeekJobs, renderMonthCrew: renderMonthCrew, renderMonthJobs: renderMonthJobs, renderRun: renderRun,
+      periodLabel: periodLabel, railHTML: railHTML, unassignedForPeriod: unassignedForPeriod,
+      assignedForDate: assignedForDate, unassignedForDate: unassignedForDate, timedForDate: timedForDate, untimedForDate: untimedForDate,
+      jobsForAgenda: jobsForAgenda, showUnassigned: showUnassigned, TYPE: TYPE,
+      partyLabel: partyLabel, jcard: jcard,
+      fmtDay: fmtDay, fmtTime: fmtTime, weekLabel: weekLabel, monthLabel: monthLabel,
+      addDays: addDays, addMonths: addMonths, mondayOf: mondayOf, iso: iso, parse: parse, person: person, av: av
+    };
+  })();
+  // </calendar-renderers>
+
+  // ── DOM wiring for the new calendar (U2/U3). Uses CalRender (pure) + the U1
+  //    adapter fetch. Additive: the old calendar functions stay defined and the
+  //    old #viewSchedule .container is hidden (not removed); U4 adds the hatch. ──
+  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, classic: false };
+
+  function ncBoardAllowed() { var mv = _user && _user.managed_verticals; return !!(_isAdmin || (Array.isArray(mv) && mv.length > 0)); }
+  function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
+  function ncState() {
+    return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, me: NC.me, boardAllowed: ncBoardAllowed(), lens: ncBoardAllowed() ? 'manager' : 'installer' };
+  }
+  function ncSyncSeg(id, attr, val) {
+    var seg = document.getElementById(id); if (!seg) return;
+    Array.prototype.forEach.call(seg.children, function (b) { b.classList.toggle('on', b.getAttribute(attr) === val); });
+  }
+  function ncInRange(d) { return NC.fetchFrom && NC.fetchTo && d >= NC.fetchFrom && d <= NC.fetchTo; }
+
+  // U4 · Classic-calendar hatch reveal/return. The old cluster is never removed;
+  // this un-hides it and boots it via the untouched showScheduleSubTab('calendar').
+  function ncOldContainer() { var s = document.getElementById('viewSchedule'); return s ? s.querySelector(':scope > .container') : null; }
+  function ncShowClassic() {
+    NC.classic = true;
+    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'none';
+    var oc = ncOldContainer(); if (oc) oc.style.display = '';
+    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'flex';
+    ncCloseSheet();
+    if (typeof showScheduleSubTab === 'function') showScheduleSubTab('calendar'); // boots loadTeamCalendar + old sub-tabs
+  }
+  function ncShowNew() {
+    NC.classic = false;
+    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
+    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'none';
+    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'flex';
+    if (NC.model) ncPaint(); else renderNewCalendar();
+  }
+  window.ncShowNew = ncShowNew;
+
+  async function renderNewCalendar() {
+    var root = document.getElementById('ncalRoot');
+    if (!root) return;
+    if (!NC.date) { NC.date = awstDateStr(); NC.month = NC.date.slice(0, 8) + '01'; }
+    if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
+    if (!ncBoardAllowed()) NC.scope = 'mine';
+    ncWireOnce();
+    // If the user parked in the Classic calendar this session, keep them there.
+    // Boot default is still the NEW system (NC.classic starts false on load).
+    if (NC.classic) { ncShowClassic(); return; }
+    // Show the new system; hide the old container + classic bar (kept in DOM).
+    root.style.display = 'flex';
+    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
+    var cbar = document.getElementById('ncClassicBar'); if (cbar) cbar.style.display = 'none';
+
+    var host = document.getElementById('ncCalhost');
+    if (!NC.model || !ncInRange(NC.date) || !ncInRange(NC.month)) {
+      if (host && !NC.model) host.innerHTML = '<div class="emptyview"><b>Loading calendar…</b></div>';
+      var anchor = NC.scale === 'month' ? NC.month : NC.date;
+      var from = CalRender.addDays(CalRender.mondayOf(anchor), -7);
+      var to = CalRender.addDays(from, 55);
+      NC.loading = true;
+      try {
+        var data = await caFetchCalendarModel(from, to);
+        var jobBlocks = (data.blocks || []).filter(function (b) { return b._jobId; }); // org/meeting rows (no job_id) stay in the classic calendar
+        NC.model = { blocks: jobBlocks, people: data.people || [], today: awstDateStr(), now: ncNowDecimal(), _unmapped: data.unmappedStatuses || [] };
+        NC.fetchFrom = from; NC.fetchTo = to;
+      } catch (e) {
+        NC.loading = false;
+        if (host) host.innerHTML = '<div class="emptyview"><b>Could not load the calendar</b>' + esc(e && e.message ? e.message : e) + '</div>';
+        return;
+      }
+      NC.loading = false;
+    }
+    ncPaint();
+  }
+
+  function ncPaint() {
+    var M = NC.model; if (!M) return;
+    var st = ncState();
+    var host = document.getElementById('ncCalhost');
+    if (host) host.innerHTML = CalRender.render(M, st);
+    ncSyncSeg('ncViewseg', 'data-cv', NC.calView);
+    ncSyncSeg('ncScaleseg', 'data-sc', NC.scale);
+    ncSyncSeg('ncAxisseg', 'data-ax', NC.axis);
+    var rowScale = document.getElementById('ncRowScale'); if (rowScale) rowScale.hidden = NC.calView !== 'cal';
+    var ch = CalRender.chrome(M, st);
+    var rail = document.getElementById('ncDayrail'); if (rail) { rail.hidden = !ch.railVisible; if (ch.railVisible) rail.innerHTML = ch.railHTML; }
+    var pb = document.getElementById('ncPeriodbar'); if (pb) { pb.hidden = ch.periodbarHidden; var pl = document.getElementById('ncPLab'); if (!ch.periodbarHidden && pl) pl.textContent = ch.periodLabel; }
+    var fbadge = document.getElementById('ncFbadge'); if (fbadge) { fbadge.hidden = ch.badgeCount === 0; fbadge.textContent = ch.badgeCount; }
+    var us = document.getElementById('ncUnstrip'); if (us) { us.hidden = !ch.unstrip.visible; if (ch.unstrip.visible) us.innerHTML = ch.unstrip.html; }
+  }
+
+  function ncRepaintForDate() { if (!ncInRange(NC.date) || !ncInRange(NC.month)) { NC.model = null; renderNewCalendar(); } else ncPaint(); }
+  function ncCycle(dir) {
+    if (NC.calView === 'cal' && NC.scale === 'month') { NC.month = CalRender.addMonths(NC.month, dir); NC.date = NC.month; }
+    else if (NC.calView === 'cal' && NC.scale === 'week') { NC.date = CalRender.addDays(NC.date, 7 * dir); }
+    else { NC.date = CalRender.addDays(NC.date, dir); }
+    ncRepaintForDate();
+  }
+
+  function ncToast(msg) { var t = document.getElementById('ncToast'); if (!t) return; t.textContent = msg; t.classList.add('on'); setTimeout(function () { t.classList.remove('on'); }, 2200); }
+  function ncOpenSheet() { document.getElementById('ncScrim').classList.add('on'); document.getElementById('ncSheet').classList.add('on'); }
+  function ncCloseSheet() { document.getElementById('ncScrim').classList.remove('on'); document.getElementById('ncSheet').classList.remove('on'); var b = document.getElementById('ncSheetBody'); if (b) b.onclick = null; }
+
+  function ncJobById(id) { var bs = (NC.model && NC.model.blocks) || []; for (var i = 0; i < bs.length; i++) if (bs[i].id === id) return bs[i]; return null; }
+
+  function ncOpenJobSheet(id) {
+    var j = ncJobById(id); if (!j) return;
+    var M = NC.model, t = CalRender.TYPE[j.type] || CalRender.TYPE.other;
+    var whenTime = j.start != null ? (CalRender.fmtTime(j.start) + (j.end != null ? ' to ' + CalRender.fmtTime(j.end) : '') + (j._est ? ' (est.)' : '')) : 'Not timed yet';
+    var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
+    var party = CalRender.partyLabel(j);
+    var body = document.getElementById('ncSheetBody');
+    body.onclick = null;
+    body.innerHTML = '<div class="sh-kick" style="color:var(--' + t.cls + '-ink)">' + esc(t.label) + '</div>'
+      + '<div class="sh-sub">' + esc(j.sub) + '</div>'
+      + '<div class="sh-ref">' + esc(j.ref) + '</div>'
+      + '<div class="sh-type">' + esc(j.desc) + '</div>'
+      + '<div class="sh-rows">'
+      + '<div class="sh-r"><span class="k">' + party.k + '</span><span class="v">' + (party.v === '—' ? 'Pending' : esc(party.v)) + '</span></div>'
+      + '<div class="sh-r"><span class="k">When</span><span class="v">' + CalRender.fmtDay(j.date) + ', ' + whenTime + '</span></div>'
+      + '<div class="sh-r"><span class="k">Crew</span><span class="v">' + (j.crew ? esc(j.crew) : 'Without a crew') + '</span></div>'
+      + '<div class="sh-r"><span class="k">Status</span><span class="v">' + stlab + '</span></div>'
+      + '<div class="sh-r"><span class="k">Address</span><span class="v">' + esc(j.addr) + '</span></div>'
+      + '</div>';
+    document.getElementById('ncSheetFoot').innerHTML = '<button class="btn dark" onclick="ncCloseSheet()">Close</button>';
+    ncOpenSheet();
+  }
+
+  function ncOpenUnassignedSheet(d) {
+    var M = NC.model, st = ncState();
+    var un = CalRender.unassignedForDate(M, st, d);
+    var rows = un.map(function (j) {
+      return '<button class="ujob" data-unjob="' + esc(j.id) + '"><span class="utico ' + (CalRender.TYPE[j.type] || CalRender.TYPE.other).cls + '"></span>'
+        + '<div class="uw"><div class="usub">' + esc(j.sub) + '</div><div class="umeta">' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div></div></button>';
+    }).join('');
+    var body = document.getElementById('ncSheetBody');
+    body.innerHTML = '<div class="sh-kick un">' + un.length + ' without a crew &middot; ' + CalRender.fmtDay(d) + '</div>'
+      + '<div class="sh-note">The calendar shows unassigned work so nothing gets missed. <b>Allocating crew happens on the Board.</b></div>' + rows;
+    body.onclick = function (e) { var r = e.target.closest('[data-unjob]'); if (r) ncOpenJobSheet(r.getAttribute('data-unjob')); };
+    var foot = document.getElementById('ncSheetFoot');
+    foot.innerHTML = '<button class="btn ghost" onclick="ncCloseSheet()">Close</button><button class="btn primary" id="ncBoardBtn">Open the Board &rsaquo;</button>';
+    document.getElementById('ncBoardBtn').addEventListener('click', function () {
+      ncCloseSheet();
+      if (ncBoardAllowed()) showView('board'); else ncToast('The Board is a manager view.');
+    });
+    ncOpenSheet();
+  }
+
+  function ncOpenFilterSheet() {
+    var body = document.getElementById('ncSheetBody');
+    function content() {
+      var trades = [['all', 'All', 'all'], ['makesafe', 'Make-safe', 'ms dot-ms'], ['fencing', 'Fencing', 'fc dot-fc'], ['patio', 'Patio', 'pt dot-pt']];
+      var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
+      var scope = '<div class="seg lite" style="max-width:240px">'
+        + '<button class="segbtn' + (NC.scope === 'mine' ? ' on' : '') + '" data-fscope="mine">Mine</button>'
+        + '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">Everyone</button></div>';
+      return '<div class="sh-kick">Filter the calendar</div>'
+        + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
+        + '<div class="fgroup"><div class="sh-lab">Trade</div><div class="fchips">' + chips + '</div></div>'
+        + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>'
+        + '<div class="fgroup"><div class="sh-lab">Other</div>'
+        + '<button class="nc-classic-row" data-classic="1"><span>Classic calendar</span><span class="uarrow">&rsaquo;</span></button>'
+        + '<div class="nc-classic-note">The old Calendar, Team and Availability views, exactly as before.</div></div>';
+    }
+    body.innerHTML = content();
+    body.onclick = function (e) {
+      var c = e.target.closest('[data-ftype]');
+      if (c) { NC.type = c.getAttribute('data-ftype'); body.innerHTML = content(); ncPaint(); return; }
+      var sc = e.target.closest('[data-fscope]');
+      if (sc) { NC.scope = sc.getAttribute('data-fscope'); body.innerHTML = content(); ncPaint(); return; }
+      var cl = e.target.closest('[data-classic]');
+      if (cl) { ncShowClassic(); }
+    };
+    document.getElementById('ncSheetFoot').innerHTML = '<button class="btn ghost" id="ncResetBtn">Reset</button><button class="btn dark" id="ncDoneBtn">Done</button>';
+    document.getElementById('ncResetBtn').addEventListener('click', function () { NC.type = 'all'; NC.scope = ncBoardAllowed() ? 'everyone' : 'mine'; body.innerHTML = content(); ncPaint(); });
+    document.getElementById('ncDoneBtn').addEventListener('click', ncCloseSheet);
+    ncOpenSheet();
+  }
+  window.ncCloseSheet = ncCloseSheet;
+
+  function ncWireOnce() {
+    if (NC.wired) return; NC.wired = true;
+    document.getElementById('ncViewseg').addEventListener('click', function (e) { var b = e.target.closest('.segbtn'); if (!b) return; NC.calView = b.getAttribute('data-cv'); ncPaint(); });
+    document.getElementById('ncScaleseg').addEventListener('click', function (e) { var b = e.target.closest('.segbtn'); if (!b) return; NC.scale = b.getAttribute('data-sc'); if (NC.scale === 'month' && (!NC.month || NC.month.slice(0, 7) !== NC.date.slice(0, 7))) NC.month = NC.date.slice(0, 8) + '01'; ncRepaintForDate(); });
+    document.getElementById('ncAxisseg').addEventListener('click', function (e) { var b = e.target.closest('.segbtn'); if (!b) return; NC.axis = b.getAttribute('data-ax'); ncPaint(); });
+    document.getElementById('ncFbtn').addEventListener('click', ncOpenFilterSheet);
+    document.getElementById('ncPPrev').addEventListener('click', function () { ncCycle(-1); });
+    document.getElementById('ncPNext').addEventListener('click', function () { ncCycle(1); });
+    document.getElementById('ncDayrail').addEventListener('click', function (e) {
+      var s = e.target.closest('[data-shift]'); if (s) { NC.date = CalRender.addDays(NC.date, +s.getAttribute('data-shift')); ncRepaintForDate(); return; }
+      var c = e.target.closest('[data-date]'); if (c) { NC.date = c.getAttribute('data-date'); ncRepaintForDate(); }
+    });
+    document.getElementById('ncUnstrip').addEventListener('click', function () { ncOpenUnassignedSheet(NC.date); });
+    document.getElementById('ncCalhost').addEventListener('click', function (e) {
+      var jb = e.target.closest('[data-job]'); if (jb) { ncOpenJobSheet(jb.getAttribute('data-job')); return; }
+      var ud = e.target.closest('[data-undate]'); if (ud) { ncOpenUnassignedSheet(ud.getAttribute('data-undate')); return; }
+      var sd = e.target.closest('[data-seldate]'); if (sd) { NC.date = sd.getAttribute('data-seldate'); ncPaint(); return; }
+      var dd = e.target.closest('[data-date]'); if (dd) { NC.date = dd.getAttribute('data-date'); NC.scale = 'day'; NC.calView = 'cal'; ncRepaintForDate(); }
+    });
+    document.getElementById('ncScrim').addEventListener('click', ncCloseSheet);
+  }
+  window.renderNewCalendar = renderNewCalendar;
 
   async function loadTeamCalendar() {
     if (!_calWeekStart) _calWeekStart = getMonday(new Date());

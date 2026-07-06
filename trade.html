@@ -10723,7 +10723,7 @@
       if (startHour == null) return { end: null, est: false }; // unscheduled — no block
       var realEnd = parseTime(endTimeStr);
       if (realEnd != null && realEnd > startHour) return { end: realEnd, est: false };
-      return { end: startHour + (isMakesafe(jobType) ? 1 : 8), est: true };
+      return { end: Math.min(startHour + (isMakesafe(jobType) ? 1 : 8), 24), est: true }; // cap derived end at midnight — never spill past the day
     }
 
     // DA-2 · Deterministic crew colour: stable FNV-1a hash of the identity key
@@ -10961,8 +10961,8 @@
     function mondayOf(d) { var dt = parse(d); var off = (dt.getDay() + 6) % 7; return addDays(d, -off); }
     function weekDays(d) { var m = mondayOf(d), out = []; for (var i = 0; i < 6; i++) out.push(addDays(m, i)); return out; }
     function fmtDay(d) { var dt = parse(d); return WD[dt.getDay()] + ' ' + dt.getDate() + ' ' + MO[dt.getMonth()]; }
-    function fmtTime(h) { if (h == null) return ''; var hh = Math.floor(h), mm = Math.round((h - hh) * 60); var disp = hh > 12 ? hh - 12 : hh; return disp + ':' + (mm < 10 ? '0' : '') + mm; }
-    function ampm(h) { return h == null ? '' : (h < 12 ? 'am' : 'pm'); }
+    function fmtTime(h) { if (h == null) return ''; var hh = Math.floor(h) % 24, mm = Math.round((h - Math.floor(h)) * 60); var disp = hh % 12; if (disp === 0) disp = 12; return disp + ':' + (mm < 10 ? '0' : '') + mm; }
+    function ampm(h) { if (h == null) return ''; var hh = Math.floor(h) % 24; return hh < 12 ? 'am' : 'pm'; }
     function weekLabel(d) { var m = mondayOf(d), s = addDays(m, 5), a = parse(m), b = parse(s); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + MO[a.getMonth()]) + ' to ' + b.getDate() + ' ' + MO[b.getMonth()]; }
     function monthLabel(m) { var dt = parse(m); return MOF[dt.getMonth()] + ' ' + dt.getFullYear(); }
 

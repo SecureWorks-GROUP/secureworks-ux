@@ -196,6 +196,14 @@ test('eventToBlock derives the block when no real end (est=true)', () => {
   eq(b.status, 'onsite', 'in_progress → onsite');
   eq(b.type, 'makesafe', 'make-safe type');
 });
+test('derived end is capped at midnight — a late start never spills past 24:00 (fmtTime garbage guard)', () => {
+  const late = CA.eventToBlock({ assignment_id: 'as-late', job_id: 'job-late', job_number: 'SWF-99001', site_suburb: 'Lateburb', scheduled_date: '2026-07-07', start_time: '17:00', crew_name: 'Bob', assigned_to: 'Bob', assignment_status: 'scheduled', job_type: 'fencing' });
+  eq(late.end, 24, '5pm fencing + 8h caps at 24 (midnight), not 25');
+  eq(late._est, true, 'still estimated');
+  const four = CA.eventToBlock({ assignment_id: 'as-4', job_id: 'job-4', job_number: 'SWF-99002', site_suburb: 'Four', scheduled_date: '2026-07-07', start_time: '16:00', crew_name: 'Bob', assigned_to: 'Bob', assignment_status: 'scheduled', job_type: 'fencing' });
+  eq(four.end, 24, '4pm fencing + 8h caps at 24, not 24-rendered-as-noon');
+  // a real end past a huge value is still honoured only when > start and sane; derived path is the guard
+});
 test('unassigned row (no crew, no time) → crew null, no block', () => {
   const b = CA.eventToBlock({
     assignment_id: 'as-3', job_id: 'job-3', job_number: 'SWF-26860', site_suburb: 'Yanchep',

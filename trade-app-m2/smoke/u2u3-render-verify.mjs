@@ -117,7 +117,7 @@ test('FIX2 — a genuine multi-crew job renders ONCE with a crew-count disc (Day
   const ids = renderedIds(out).filter((id) => idToJob.get(id) === jobId);
   eq(ids.length, 1, 'the multi-crew job renders exactly once (was ' + assignmentsForJob.length + ' assignments)');
   // count disc: crewDisc renders the crew count for a deduped multi-crew block
-  ok(out.indexOf('class="bav" title=') >= 0, 'multi-crew block shows a count disc (bav with title)');
+  ok(out.indexOf('class="av" title=') >= 0, 'multi-crew card shows a count disc (av with title)');
 });
 
 test('FIX2 — dedupeByJobDate is live (not dead code): join produces "A + B" crew', () => {
@@ -149,13 +149,49 @@ test('crew-axis UNCHANGED — Timeline still renders per-assignment (job on each
   ok(ids.length >= 2, 'crew-axis Timeline keeps one block per assignment (' + ids.length + ' for the multi-crew job) — not deduped');
 });
 
+test('CP3 partyLabel — make-safe→Builder(pending, never homeowner); fence/patio→Client', () => {
+  eq(CA.eventToBlock({ job_id: 'j', client_name: 'G. Hart', job_type: 'fencing', scheduled_date: '2026-07-06' }).client, 'G. Hart', 'client mapped from client_name');
+  eq(CR.partyLabel({ type: 'makesafe', client: 'MLB Group' }), { k: 'Builder', v: '—' }, 'make-safe never shows the homeowner as builder');
+  eq(CR.partyLabel({ type: 'makesafe', builder: 'Builderwest' }), { k: 'Builder', v: 'Builderwest' }, 'future builder field picked up with no renderer change');
+  eq(CR.partyLabel({ type: 'fencing', client: 'G. Hart' }), { k: 'Client', v: 'G. Hart' }, 'fence shows the client');
+  eq(CR.partyLabel({ type: 'patio', client: '' }), { k: 'Client', v: '—' }, 'missing client → dash');
+});
+
+test('CP3 enriched card — shows suburb, type, ref, party, time, trade (readable at a glance)', () => {
+  const fc = jobBlocks.find((b) => b.type === 'fencing' && b.client && b.crew && b.start != null)
+    || jobBlocks.find((b) => b.type === 'fencing' && b.crew);
+  ok(fc, 'a fencing job exists');
+  const card = CR.jcard(M, fc);
+  ok(card.indexOf('nc-c-sub') >= 0 && card.indexOf(fc.sub) >= 0, 'suburb');
+  ok(card.indexOf('nc-c-type') >= 0 && card.indexOf('Fencing') >= 0, 'type label');
+  ok(card.indexOf('nc-c-ref') >= 0 && card.indexOf(fc.ref) >= 0, 'job number');
+  ok(card.indexOf('nc-c-party') >= 0 && card.indexOf('Client') >= 0, 'client party line');
+  ok(card.indexOf('nc-c-time') >= 0, 'time');
+  ok(card.indexOf('nc-c-trade') >= 0, 'assigned trade');
+  ok(card.indexOf('data-job="' + fc.id + '"') >= 0, 'tappable (data-job preserved)');
+  const ms = jobBlocks.find((b) => b.type === 'makesafe' && b.crew);
+  if (ms) ok(CR.jcard(M, ms).indexOf('Builder') >= 0, 'make-safe card shows Builder label (placeholder until backend field)');
+});
+
+test('CP3 grid density — day×crew renders every job as a card (no hidden overlaps)', () => {
+  // pick a crew with multiple timed jobs on a day; all must appear as cards
+  const d = '2026-07-06';
+  const s = st({ date: d, scale: 'day', axis: 'crew' });
+  const byCrew = {};
+  jobBlocks.forEach((b) => { if (b.crew && b.date === d && b.start != null) (byCrew[b.crew] ||= []).push(b); });
+  const busy = Object.keys(byCrew).sort((a, b) => byCrew[b].length - byCrew[a].length)[0];
+  const out = CR.render(M, s);
+  const shown = byCrew[busy].filter((b) => out.indexOf('data-job="' + b.id + '"') >= 0).length;
+  eq(shown, byCrew[busy].length, busy + "'s " + byCrew[busy].length + ' timed jobs all render as cards (none swallowed by an overlapping bar)');
+});
+
 test('type:"other" survives — neutral block, never crashes', () => {
   const evt = { assignment_id: 'ot1', job_id: 'jX', job_number: 'GEN-1', site_suburb: 'Midland', scheduled_date: '2026-07-06', start_time: '08:00', crew_name: 'Deng', assigned_to: 'Deng', assignment_status: 'scheduled', job_type: 'combo' };
   const blk = CA.eventToBlock(evt);
   eq(blk.type, 'other', 'combo → other');
   const m2 = { blocks: [blk], people: CA.buildPeople([], [blk]), today: '2026-07-06', now: 11.25 };
   const out = clean(CR.render(m2, st({ date: '2026-07-06', scale: 'day', axis: 'crew' })));
-  ok(out.indexOf('blk nt') >= 0, 'neutral block uses the nt class');
+  ok(out.indexOf('ncard nt') >= 0, 'neutral card uses the nt class');
   // and it only appears under the All lens (not under a specific chip)
   const underFencing = CR.render(m2, st({ date: '2026-07-06', scale: 'day', axis: 'crew', type: 'fencing' }));
   ok(underFencing.indexOf('data-job="ot1"') < 0, 'type:other hidden under a specific trade chip (All-only)');

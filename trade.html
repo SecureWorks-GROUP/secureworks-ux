@@ -2730,6 +2730,45 @@
     .ncal .nc-classic-row{display:flex;justify-content:space-between;align-items:center;width:100%;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);padding:14px 15px;font-size:15px;font-weight:700;color:var(--ink)}
     .ncal .nc-classic-row .uarrow{color:var(--ink-3);font-size:18px;font-weight:800}
     .ncal .nc-classic-note{font-size:12px;color:var(--ink-3);margin-top:6px}
+    /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
+    .ncal .nc-stack{padding:6px 14px 14px}
+    .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
+    .ncal .nc-cols::-webkit-scrollbar{display:none}
+    .ncal .nc-col{flex:0 0 300px;max-width:88vw;min-width:0;padding:0 6px;scroll-snap-align:start}
+    .ncal .nc-cols.solo{overflow-x:visible} .ncal .nc-col.solo{flex:1 1 auto;max-width:none}
+    .ncal .nc-colhead{display:flex;align-items:center;gap:8px;padding:6px 4px 10px;position:sticky;top:0;background:var(--paper);z-index:2;width:100%}
+    .ncal .nc-colhead .av{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
+    .ncal .nc-colhead .ddisc{width:30px;height:30px;border-radius:9px;background:var(--seg-bg);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:14px;font-weight:600;flex:0 0 auto}
+    .ncal .nc-colhead.today .ddisc{background:var(--ink);color:var(--on)}
+    .ncal .nc-colhead .cnm{font-family:var(--head);font-size:15px;font-weight:650;line-height:1.05}
+    .ncal .nc-colhead .cc{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--ink-3)}
+    .ncal .nc-col-empty{font-size:12.5px;color:var(--ink-3);padding:10px 6px;font-style:italic}
+    .ncal .ncard{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--nt);border-radius:12px;padding:10px 12px;margin-bottom:9px}
+    .ncal .ncard:active{background:oklch(0.968 0.008 236)}
+    .ncal .ncard.ms{border-left-color:var(--ms)} .ncal .ncard.fc{border-left-color:var(--fc)} .ncal .ncard.pt{border-left-color:var(--pt)} .ncal .ncard.nt{border-left-color:var(--nt)}
+    .ncal .ncard.onsite{border-color:var(--orange);box-shadow:inset 0 0 0 1px var(--orange)}
+    .ncal .ncard.done{opacity:.6}
+    .ncal .nc-c-top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+    .ncal .nc-c-top .tico{margin-right:0}
+    .ncal .nc-c-type{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .nc-c-type.ms{color:var(--ms-ink)} .ncal .nc-c-type.fc{color:var(--fc-ink)} .ncal .nc-c-type.pt{color:var(--pt-ink)} .ncal .nc-c-type.nt{color:var(--nt-ink)}
+    .ncal .nc-c-stag{margin-left:auto}
+    .ncal .nc-c-sub{font-family:var(--head);font-size:18px;font-weight:650;line-height:1.1;letter-spacing:-.01em}
+    .ncal .nc-c-ref{font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .nc-c-party{font-size:13px;color:var(--ink);margin-top:4px}
+    .ncal .nc-c-party .k,.ncal .ag-party .k,.ncal .rw-party .k{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-right:6px}
+    .ncal .nc-c-party b{font-weight:750}
+    .ncal .nc-c-pending{color:var(--ink-3)}
+    .ncal .nc-c-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+    .ncal .nc-c-time{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink-2)}
+    .ncal .nc-c-time small{color:var(--ink-3);font-weight:500;font-size:10px}
+    .ncal .nc-c-trade{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:750;color:var(--ink);min-width:0}
+    .ncal .nc-c-trade span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .nc-c-trade .av{width:22px;height:22px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:800;color:var(--on)}
+    .ncal .nc-c-trade.un{color:var(--orange-deep);font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+    /* party line on agenda + run rows */
+    .ncal .ag-party{font-size:12px;color:var(--ink-2);margin-top:2px}
+    .ncal .rw-party{font-size:12px;color:var(--ink-2);margin-top:2px}
   </style>
 </head>
 <body>
@@ -10753,6 +10792,8 @@
         status: mapStatus(ev.assignment_status),
         addr: addr,
         desc: desc(ev, mt),
+        client: ev.client_name || '', // homeowner (fence/patio party line). Builder is a
+                                      // separate backend field not yet in the feed — see partyLabel.
         // ── adapter metadata (renderers read only the fields above) ──
         _est: blk.est,
         _crewKey: crewKey,
@@ -10955,14 +10996,41 @@
       return out;
     }
 
-    /* ---- block + agenda rows ---- */
-    function blockHTML(j) {
-      var top = (j.start - H0) * HPX, h = Math.max((j.end - j.start) * HPX, 34);
-      var t = TY(j.type), cls = 'blk ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '');
-      var tk = j.status === 'done' ? ' <span class="tk">&#10003;</span>' : '';
-      var meta = h >= 48 ? '<div class="bm">' + esc(j.ref) + ' &middot; ' + esc(j.desc) + (j._est ? ' &middot; est.' : '') + '</div>' : '';
-      var dot = j.status === 'done' ? '<span class="typedot"></span>' : '';
-      return '<button class="' + cls + '" data-job="' + esc(j.id) + '" style="top:' + top + 'px;height:' + h + 'px">' + dot + '<div class="bs">' + esc(j.sub) + tk + '</div>' + meta + '</button>';
+    /* ---- enriched job card (CP3: blocks were information-starved) + agenda rows ---- */
+    // PROBLEM 3 seam: make-safe shows BUILDER (a backend field not yet in the feed —
+    // placeholder '—' until wired); fence/patio show the CLIENT (homeowner, client_name).
+    // When the adapter gains j.builder, this picks it up with no renderer change.
+    var NO_PARTY = '—'; // em-dash sentinel for a not-yet-known party (builder pending)
+    function partyLabel(j) {
+      if (j.type === 'makesafe') return { k: 'Builder', v: j.builder || NO_PARTY };
+      return { k: 'Client', v: j.client || NO_PARTY };
+    }
+    function partyValHTML(p) { return p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : esc(p.v); }
+    function timeLabel(j) {
+      if (j.start == null) return 'No time set';
+      return fmtTime(j.start) + ampm(j.start) + (j.end != null ? '&ndash;' + fmtTime(j.end) + ampm(j.end) : '') + (j._est ? ' <small>est.</small>' : '');
+    }
+    function stagOf(j) {
+      var s = j.status || 'booked';
+      var lab = s === 'onsite' ? 'On site' : (s === 'done' ? 'Done' : (j.start == null ? 'No time' : 'Booked'));
+      return '<span class="nc-c-stag stag ' + s + '">' + lab + '</span>';
+    }
+    // The one card used across every jobs list + the stacked grid views. Shows suburb,
+    // type, status, ref (+desc), the party line (client/builder), time, and assigned trade.
+    function jcard(M, j) {
+      var t = TY(j.type), p = partyLabel(j);
+      var trade = j.crew
+        ? '<span class="nc-c-trade">' + crewDisc(M, j, 'av') + '<span>' + esc(j.crew) + '</span></span>'
+        : '<span class="nc-c-trade un">Unassigned</span>';
+      var descLine = (j.desc && j.desc !== t.label) ? ' &middot; ' + esc(j.desc) : '';
+      var partyVal = p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : '<b>' + esc(p.v) + '</b>';
+      return '<button class="ncard ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '') + '" data-job="' + esc(j.id) + '">'
+        + '<div class="nc-c-top"><span class="tico ' + t.cls + '"></span><span class="nc-c-type ' + t.cls + '">' + esc(t.label) + '</span>' + stagOf(j) + '</div>'
+        + '<div class="nc-c-sub">' + esc(j.sub) + '</div>'
+        + '<div class="nc-c-ref">' + esc(j.ref) + descLine + '</div>'
+        + '<div class="nc-c-party"><span class="k">' + p.k + '</span>' + partyVal + '</div>'
+        + '<div class="nc-c-foot"><span class="nc-c-time">' + timeLabel(j) + '</span>' + trade + '</div>'
+        + '</button>';
     }
     // Crew disc for a block/row: a per-crew avatar, or a count disc when a job+date
     // was deduped across multiple crew (crewList set by CalAdapterCore.dedupeByJobDate).
@@ -10977,8 +11045,10 @@
         ? '<span class="time">' + fmtTime(j.start) + '<small>' + ampm(j.start) + (j._est ? ' est' : '') + '</small></span>'
         : '<span class="time">TBC<small>no time</small></span>';
       var right = (j.crewList && j.crewList.length > 1) ? crewDisc(M, j, 'av') : (j.crew ? av(M, j.crew) : '<span class="nocrew">No crew</span>');
+      var p = partyLabel(j);
+      var partyLine = '<div class="ag-party"><span class="k">' + p.k + '</span>' + partyValHTML(p) + '</div>';
       return '<button class="agrow" data-job="' + esc(j.id) + '">' + timeCell
-        + '<div class="w"><div class="sub">' + esc(j.sub) + '</div><div class="m"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div></div>'
+        + '<div class="w"><div class="sub">' + esc(j.sub) + '</div><div class="m"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>' + partyLine + '</div>'
         + right + '</button>';
     }
     // CP1 finding: crewed-but-untimed jobs land here, visible + deliberate.
@@ -10998,51 +11068,36 @@
     }
 
     /* ---- the six renderers + Run Sheet ---- */
+    // Day × Crew. CP3: placeholder-time data made time-proportional bars overlap and
+    // hide each other, so we render each crew's jobs as a compact STACK of enriched
+    // cards (all legible, uses the vertical space) instead of bars. Per-assignment
+    // (crew-axis is never deduped). Swipe across crew columns; untimed jobs below.
     function renderTimeline(M, st) {
       var crews = crewsTimed(M, st, st.date), untimed = untimedForDate(M, st, st.date);
       if (!crews.length && !untimed.length) {
         return '<div class="emptyview fadein"><b>No one booked</b>' + (st.scope === 'mine' ? 'You have nothing on ' + fmtDay(st.date) + '.' : 'Nothing scheduled for ' + fmtDay(st.date) + '.') + '</div>';
       }
-      var solo = crews.length === 1, lines = '', labs = '';
-      for (var h = H0; h <= H1; h++) { var top = (h - H0) * HPX; lines += '<div class="hr" style="top:' + top + 'px"></div>'; if (h < H1) { var disp = h > 12 ? h - 12 : h; labs += '<div class="glab" style="height:' + HPX + 'px">' + disp + '</div>'; } }
-      var cols = '<div class="tgutter"><div class="ghead"></div>' + labs + '</div>';
-      crews.forEach(function (name) {
+      var solo = crews.length === 1;
+      var cols = crews.map(function (name) {
         var jobs = timedForDate(M, st, st.date).filter(function (j) { return j.crew === name; }).sort(function (a, b) { return a.start - b.start; });
-        cols += '<div class="tlcol"><div class="chead">' + av(M, name) + '<div class="cn"><div class="cnm">' + esc(name) + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></div>'
-          + '<div class="lane" style="height:' + LANE + 'px">' + lines + jobs.map(blockHTML).join('') + '</div></div>';
-      });
-      var now = st.date === M.today ? '<div class="nowline" style="top:' + (HEAD + (M.now - H0) * HPX) + 'px;left:38px;right:0"></div>' : '';
-      var grid = crews.length ? '<div class="tlscroll"><div class="tlinner' + (solo ? ' solo' : '') + '">' + cols + now + '</div></div>' : '';
+        return '<div class="nc-col' + (solo ? ' solo' : '') + '"><div class="nc-colhead">' + av(M, name) + '<div class="cn"><div class="cnm">' + esc(name) + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></div>'
+          + jobs.map(function (j) { return jcard(M, j); }).join('') + '</div>';
+      }).join('');
+      var grid = crews.length ? '<div class="nc-cols' + (solo ? ' solo' : '') + '">' + cols + '</div>' : '';
       return '<div class="fadein">' + grid + untimedSection(M, untimed) + '</div>';
     }
 
+    // Day × Jobs (deduped to one row per job+date). CP3: a single readable stack of
+    // enriched cards (was overlapping time-bars). Untimed jobs in the section below.
     function renderDayJobs(M, st) {
-      // JOBS axis: dedupe per-assignment blocks to one row per job+date (crew joined),
-      // via the CP1-tested CalAdapterCore.dedupeByJobDate — no duplicate blocks.
       var deduped = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, st.date));
       var jobs = deduped.filter(function (j) { return j.start != null; }).sort(function (a, b) { return a.start - b.start; });
       var untimed = deduped.filter(function (j) { return j.start == null; });
       if (!jobs.length && !untimed.length) {
         return '<div class="emptyview fadein"><b>Nothing on ' + fmtDay(st.date) + '</b>Try another day on the rail.</div>';
       }
-      var lines = '', labs = '';
-      for (var h = H0; h <= H1; h++) { var top = (h - H0) * HPX; lines += '<div class="hr" style="top:' + top + 'px"></div>'; if (h < H1) { var disp = h > 12 ? h - 12 : h; labs += '<div class="glab" style="height:' + HPX + 'px">' + disp + '</div>'; } }
-      var laneEnd = [], placed = [];
-      jobs.forEach(function (j) { var li = -1; for (var i = 0; i < laneEnd.length; i++) { if (j.start >= laneEnd[i] - 0.001) { li = i; break; } } if (li < 0) { li = laneEnd.length; laneEnd.push(j.end); } else laneEnd[li] = j.end; placed.push({ j: j, lane: li }); });
-      var lanes = Math.max(laneEnd.length, 1);
-      var blks = placed.map(function (p) {
-        var j = p.j, top = (j.start - H0) * HPX, bh = Math.max((j.end - j.start) * HPX, 30), w = 100 / lanes, left = p.lane * w, t = TY(j.type);
-        var cls = 'wkb big ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '');
-        var meta = (bh >= 50 && lanes <= 3) ? '<div class="bm">' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>' : '';
-        var disc = crewDisc(M, j, 'bav');
-        return '<button class="' + cls + '" data-job="' + esc(j.id) + '" style="top:' + top + 'px;height:' + bh + 'px;left:calc(' + left + '% + 3px);width:calc(' + w + '% - 6px)">' + '<div class="bs">' + esc(j.sub) + '</div>' + meta + disc + '</button>';
-      }).join('');
-      var now = st.date === M.today ? '<div class="nowline" style="top:' + ((M.now - H0) * HPX) + 'px;left:0;right:0"></div>' : '';
-      var grid = jobs.length ? '<div class="tlscroll"><div class="tlinner solo">'
-        + '<div class="tgutter"><div class="ghead" style="height:6px"></div>' + labs + '</div>'
-        + '<div class="tlcol" style="flex:1 1 auto;min-width:0"><div style="height:6px"></div><div class="lane" style="height:' + LANE + 'px">' + lines + blks + now + '</div></div>'
-        + '</div></div>' : '';
-      return '<div class="fadein">' + grid + untimedSection(M, untimed) + '</div>';
+      var list = jobs.length ? '<div class="nc-stack">' + jobs.map(function (j) { return jcard(M, j); }).join('') + '</div>' : '';
+      return '<div class="fadein">' + list + untimedSection(M, untimed) + '</div>';
     }
 
     function renderWeekCrew(M, st) {
@@ -11070,36 +11125,22 @@
       return '<div class="wkscroll fadein">' + head + rows + '<div class="aghint">Tap a cell to open that day. Counts include jobs still to be timed.</div></div>';
     }
 
+    // Week × Jobs (each day deduped to one row per job+date). CP3: per-day columns of
+    // stacked enriched cards (was overlapping time-bars). Swipe across days; the week's
+    // untimed jobs in the section below.
     function renderWeekJobs(M, st) {
-      var days = weekDays(st.date), any = false, lines = '', labs = '', untimedAll = [];
-      for (var h = H0; h <= H1; h++) { var top = (h - H0) * HPX; lines += '<div class="hr" style="top:' + top + 'px"></div>'; if (h < H1) { var disp = h > 12 ? h - 12 : h; labs += '<div class="glab" style="height:' + HPX + 'px">' + disp + '</div>'; } }
-      var cols = '<div class="tgutter"><div class="ghead"></div>' + labs + '</div>';
-      days.forEach(function (d) {
+      var days = weekDays(st.date), any = false, untimedAll = [];
+      var cols = days.map(function (d) {
         var dt = parse(d);
-        // JOBS axis: dedupe to one row per job+date (crew joined) before placing blocks.
         var deduped = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, d));
         var jobs = deduped.filter(function (j) { return j.start != null; }).sort(function (a, b) { return a.start - b.start; });
         untimedAll = untimedAll.concat(deduped.filter(function (j) { return j.start == null; }));
         if (jobs.length) any = true;
-        var laneEnd = [], placed = [];
-        jobs.forEach(function (j) { var li = -1; for (var i = 0; i < laneEnd.length; i++) { if (j.start >= laneEnd[i] - 0.001) { li = i; break; } } if (li < 0) { li = laneEnd.length; laneEnd.push(j.end); } else laneEnd[li] = j.end; placed.push({ j: j, lane: li }); });
-        var lanes = Math.max(laneEnd.length, 1), colW = Math.max(132, 64 * lanes);
-        var blks = placed.map(function (p) {
-          var j = p.j, top = (j.start - H0) * HPX, bh = Math.max((j.end - j.start) * HPX, 30), w = 100 / lanes, left = p.lane * w, t = TY(j.type);
-          var cls = 'wkb ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '');
-          var meta = (bh >= 52 && lanes <= 2) ? '<div class="bm">' + esc(j.ref) + '</div>' : '';
-          var disc = crewDisc(M, j, 'bav');
-          return '<button class="' + cls + '" data-job="' + esc(j.id) + '" style="top:' + top + 'px;height:' + bh + 'px;left:calc(' + left + '% + 3px);width:calc(' + w + '% - 6px)">' + '<div class="bs">' + esc(j.sub) + '</div>' + meta + disc + '</button>';
-        }).join('');
-        var now = d === M.today ? '<div class="nowline" style="top:' + ((M.now - H0) * HPX) + 'px;left:0;right:0"></div>' : '';
-        cols += '<div class="tlcol wkcol' + (parse(d).getDay() % 2 === 0 ? ' alt' : '') + '" style="flex:0 0 ' + colW + 'px">'
-          + '<button class="chead dhead' + (d === M.today ? ' today' : '') + '" data-date="' + d + '" style="width:100%">'
-          + '<span class="ddisc">' + dt.getDate() + '</span><div class="cn"><div class="cnm">' + WD[dt.getDay()] + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></button>'
-          + '<div class="lane" style="height:' + LANE + 'px">' + lines + blks + now + '</div></div>';
-      });
+        return '<div class="nc-col"><button class="nc-colhead dhead' + (d === M.today ? ' today' : '') + '" data-date="' + d + '"><span class="ddisc">' + dt.getDate() + '</span><div class="cn"><div class="cnm">' + WD[dt.getDay()] + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></button>'
+          + (jobs.length ? jobs.map(function (j) { return jcard(M, j); }).join('') : '<div class="nc-col-empty">Nothing timed</div>') + '</div>';
+      }).join('');
       if (!any && !untimedAll.length) return '<div class="emptyview fadein"><b>Quiet week</b>Nothing matches the filter this week.</div>';
-      var grid = any ? '<div class="tlscroll"><div class="tlinner">' + cols + '</div></div>' : '';
-      return '<div class="fadein">' + grid + untimedSection(M, untimedAll) + '</div>';
+      return '<div class="fadein"><div class="nc-cols">' + cols + '</div>' + untimedSection(M, untimedAll) + '</div>';
     }
 
     function typeDots(M, st, d) {
@@ -11155,8 +11196,10 @@
         jobs.forEach(function (j) {
           var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
           var tcell = j.start != null ? fmtTime(j.start) : '&mdash;<small>no time</small>';
+          var rp = partyLabel(j);
           html += '<button class="rrow" data-job="' + esc(j.id) + '"><span class="time">' + tcell + '</span>'
-            + '<div class="rw"><div class="sub">' + esc(j.sub) + '</div><div class="meta"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div></div>'
+            + '<div class="rw"><div class="sub">' + esc(j.sub) + '</div><div class="meta"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>'
+            + '<div class="rw-party"><span class="k">' + rp.k + '</span>' + partyValHTML(rp) + '</div></div>'
             + '<span class="stag ' + (j.status || 'booked') + '">' + stlab + '</span></button>';
         });
         html += '</div></div>';
@@ -11220,6 +11263,7 @@
       periodLabel: periodLabel, railHTML: railHTML, unassignedForPeriod: unassignedForPeriod,
       assignedForDate: assignedForDate, unassignedForDate: unassignedForDate, timedForDate: timedForDate, untimedForDate: untimedForDate,
       jobsForAgenda: jobsForAgenda, showUnassigned: showUnassigned, TYPE: TYPE,
+      partyLabel: partyLabel, jcard: jcard,
       fmtDay: fmtDay, fmtTime: fmtTime, weekLabel: weekLabel, monthLabel: monthLabel,
       addDays: addDays, addMonths: addMonths, mondayOf: mondayOf, iso: iso, parse: parse, person: person, av: av
     };
@@ -11334,6 +11378,7 @@
     var M = NC.model, t = CalRender.TYPE[j.type] || CalRender.TYPE.other;
     var whenTime = j.start != null ? (CalRender.fmtTime(j.start) + (j.end != null ? ' to ' + CalRender.fmtTime(j.end) : '') + (j._est ? ' (est.)' : '')) : 'Not timed yet';
     var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
+    var party = CalRender.partyLabel(j);
     var body = document.getElementById('ncSheetBody');
     body.onclick = null;
     body.innerHTML = '<div class="sh-kick" style="color:var(--' + t.cls + '-ink)">' + esc(t.label) + '</div>'
@@ -11341,6 +11386,7 @@
       + '<div class="sh-ref">' + esc(j.ref) + '</div>'
       + '<div class="sh-type">' + esc(j.desc) + '</div>'
       + '<div class="sh-rows">'
+      + '<div class="sh-r"><span class="k">' + party.k + '</span><span class="v">' + (party.v === '—' ? 'Pending' : esc(party.v)) + '</span></div>'
       + '<div class="sh-r"><span class="k">When</span><span class="v">' + CalRender.fmtDay(j.date) + ', ' + whenTime + '</span></div>'
       + '<div class="sh-r"><span class="k">Crew</span><span class="v">' + (j.crew ? esc(j.crew) : 'Without a crew') + '</span></div>'
       + '<div class="sh-r"><span class="k">Status</span><span class="v">' + stlab + '</span></div>'

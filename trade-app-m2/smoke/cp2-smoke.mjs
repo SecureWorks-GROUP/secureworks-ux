@@ -20,6 +20,11 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, '../..');            // worktree root (trade.html lives here)
+// Compare against the BRANCH BASE (merge-base), not the moving origin/main tip — origin/main
+// can advance under us mid-mission (other work landing), which would spuriously fail the
+// additive-discipline diff. The merge-base is where this branch actually forked.
+let BASE = 'origin/main';
+try { BASE = execSync(`git -C ${REPO} merge-base HEAD origin/main`, { encoding: 'utf8' }).trim() || 'origin/main'; } catch (e) { /* git optional */ }
 const TRADE_HTML = resolve(__dirname, '../../trade.html');
 const FIXTURE = resolve(__dirname, 'fixtures/live-week-2026-07-06.json');
 const HTML = readFileSync(TRADE_HTML, 'utf8');
@@ -236,20 +241,20 @@ test('3c reveal state machine round-trips both ways (structural)', () => {
 });
 // byte-identity vs origin/main (git-guarded; core blocking check of item 3)
 let gitOK = true; let numstat = '';
-try { numstat = execSync(`git -C ${REPO} diff --numstat origin/main -- trade.html`, { encoding: 'utf8' }).trim(); }
+try { numstat = execSync(`git -C ${REPO} diff --numstat ${BASE} -- trade.html`, { encoding: 'utf8' }).trim(); }
 catch (e) { gitOK = false; }
 test('3d additive discipline: exactly 1 deletion vs origin/main (the schedule dispatch line only)', () => {
   ok(gitOK, 'git available');
   const parts = numstat.split(/\s+/); // "<add>\t<del>\ttrade.html"
   eq(parts[1], '1', `deletions == 1 (got numstat: ${numstat})`);
-  const del = execSync(`git -C ${REPO} diff origin/main -- trade.html`, { encoding: 'utf8' })
+  const del = execSync(`git -C ${REPO} diff ${BASE} -- trade.html`, { encoding: 'utf8' })
     .split('\n').filter(l => /^-[^-]/.test(l));
   eq(del.length, 1, 'exactly one deleted line in the diff');
   ok(/view === 'schedule'.*loadTeamCalendar\(\); renderScheduleView\(\);/.test(del[0]), 'the deleted line is the old schedule dispatch');
 });
 test('3e the six old functions are byte-identical to origin/main (0 old-calendar bytes changed)', () => {
   ok(gitOK, 'git available');
-  const main = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' });
+  const main = execSync(`git -C ${REPO} show ${BASE}:trade.html`, { encoding: 'utf8' });
   OLD_FNS.forEach(fn => {
     // extract each function's source slice from an anchor to the next 'function ' at col 2, from both files
     const grab = (src) => {
@@ -300,7 +305,7 @@ test('5a the ONLY boot/dispatch change is showView(schedule) → renderNewCalend
 });
 test('5b clock-recovery warm-load RESTORED (FIX 1): fires at Calendar-first boot; recovery fn bodies unchanged', () => {
   ok(gitOK, 'git available');
-  const main = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' });
+  const main = execSync(`git -C ${REPO} show ${BASE}:trade.html`, { encoding: 'utf8' });
   // (i) the recovery fn + its trigger fn BODIES are still byte-identical — FIX 1 added a call site, not a body change
   const grab = (src, anchor, n) => { const i = src.indexOf(anchor); ok(i >= 0, anchor + ' present'); return src.slice(i, i + n); };
   eq(grab(HTML, 'function checkServerClockRecovery(data)', 1600), grab(main, 'function checkServerClockRecovery(data)', 1600), 'checkServerClockRecovery body identical');
@@ -317,7 +322,7 @@ test('5b clock-recovery warm-load RESTORED (FIX 1): fires at Calendar-first boot
   const deepIdx = onLogin.indexOf('openJob(deepJobId)');
   ok(deepIdx >= 0 && deepIdx < iWarm, 'deep-link openJob path precedes (and bypasses) the warm-load');
   // (iv) the ONLY clock-recovery-related diff line is exactly this one added call (+ its comment); nothing removed
-  const diff = execSync(`git -C ${REPO} diff origin/main -- trade.html`, { encoding: 'utf8' });
+  const diff = execSync(`git -C ${REPO} diff ${BASE} -- trade.html`, { encoding: 'utf8' });
   const changed = diff.split('\n').filter(l => /^[+-][^+-]/.test(l));
   const removedRecovery = changed.filter(l => l[0] === '-' && /(checkServerClockRecovery|loadMyJobs|loadTimerState|clocked_on_at)/.test(l));
   eq(removedRecovery, [], 'no clock-recovery code line REMOVED by M2');
@@ -333,7 +338,7 @@ test('5c renderNewCalendar cannot throw-and-block boot before recovery (guarded 
 
 // ── FINDING (resolved): M1's boot warm-load was lost in the squash; M2 restores it ──
 try {
-  const mainWarm = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' }).includes('Restored M1 F1 fix') || execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' }).includes('Warm my_jobs');
+  const mainWarm = execSync(`git -C ${REPO} show ${BASE}:trade.html`, { encoding: 'utf8' }).includes('Restored M1 F1 fix') || execSync(`git -C ${REPO} show ${BASE}:trade.html`, { encoding: 'utf8' }).includes('Warm my_jobs');
   const wtWarm = HTML.includes("if (_currentView !== 'myJobs') loadMyJobs();");
   console.log(`\n  [FINDING — RESOLVED] origin/main carries a boot warm-load: ${mainWarm}; this M2 branch restores it: ${wtWarm}`);
   console.log('           The M1 F1 clock-recovery boot fix did NOT survive M1\'s squash-merge (absent from origin/main =');

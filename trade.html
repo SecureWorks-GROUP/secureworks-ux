@@ -2769,6 +2769,75 @@
     /* party line on agenda + run rows */
     .ncal .ag-party{font-size:12px;color:var(--ink-2);margin-top:2px}
     .ncal .rw-party{font-size:12px;color:var(--ink-2);margin-top:2px}
+
+    /* ══════════ M3 (trade-app-redesign) — Jobs re-dress + Board.
+       The M2 calendar grammar tokens (--ms/--fc/--pt/--nt/--mono/--head/--ink…)
+       live under .ncal only, so these surfaces (#myJobsList, #boardContent)
+       redeclare the Briefing type palette locally and reuse it for the shared
+       card grammar (.tjc-*) + the Board kanban (.tjb-*). Additive: no existing
+       rule touched, the old .job-card path still works. ══════════ */
+    #myJobsList, #boardContent{
+      --tj-ms:oklch(0.575 0.125 41); --tj-ms-ink:oklch(0.5 0.13 40);
+      --tj-fc:oklch(0.50 0.062 235); --tj-fc-ink:oklch(0.46 0.06 235); --tj-fc-tint:oklch(0.93 0.022 235);
+      --tj-pt:oklch(0.52 0.088 155); --tj-pt-ink:oklch(0.46 0.085 155);
+      --tj-nt:oklch(0.60 0.012 236); --tj-nt-ink:oklch(0.46 0.012 236);
+      --tj-orange:oklch(0.665 0.185 38); --tj-orange-deep:oklch(0.58 0.185 38);
+    }
+    /* shared card grammar (Jobs standard card, history card, Board card) */
+    .tjc-top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+    .tjc-tico{display:inline-block;width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:var(--tj-nt)}
+    .tjc-tico.ms{background:var(--tj-ms)} .tjc-tico.fc{background:var(--tj-fc)} .tjc-tico.pt{background:var(--tj-pt)} .tjc-tico.nt{background:var(--tj-nt)}
+    .tjc-type{font-family:var(--sw-mono);font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--tj-nt-ink)}
+    .tjc-type.ms{color:var(--tj-ms-ink)} .tjc-type.fc{color:var(--tj-fc-ink)} .tjc-type.pt{color:var(--tj-pt-ink)} .tjc-type.nt{color:var(--tj-nt-ink)}
+    .tjc-stag{margin-left:auto;flex:0 0 auto;font-family:var(--sw-mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:3px 8px;background:transparent;border:1.4px solid currentColor;color:var(--tj-fc-ink)}
+    .tjc-stag.onsite{color:var(--tj-orange-deep)} .tjc-stag.done{color:var(--tj-pt-ink)} .tjc-stag.booked{color:var(--tj-fc-ink)} .tjc-stag.cancelled{color:var(--tj-nt-ink)}
+    .tjc-sub{font-family:var(--sw-font);font-size:18px;font-weight:650;line-height:1.1;letter-spacing:-.01em;color:var(--sw-dark)}
+    .tjc-ref{font-family:var(--sw-mono);font-size:11px;color:var(--sw-mid);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tjc-ref .tjc-ref-k{color:var(--tj-nt-ink);font-weight:600;margin-right:4px}
+    .tjc-ref .tjc-ref-sep{opacity:.5;margin:0 5px}
+    .tjc-party{font-size:13px;color:var(--sw-dark);margin-top:4px}
+    .tjc-party .k{font-family:var(--sw-mono);font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tj-nt-ink);margin-right:6px}
+    .tjc-party b{font-weight:750}
+    .tjc-party .tjc-pending{color:var(--tj-nt-ink)}
+    .tjc-info{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--sw-border);font-size:12.5px;color:var(--sw-mid)}
+    .tjc-info .tjc-time{font-family:var(--sw-mono);font-weight:600;color:var(--sw-dark)}
+    .tjc-info .tjc-time.notime{color:var(--sw-yellow)}
+    .tjc-info .tjc-crew{display:inline-flex;align-items:center;gap:4px;font-weight:700;color:var(--sw-dark)}
+    .tjc-info .tjc-crew.un{color:var(--tj-orange-deep);font-family:var(--sw-mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:600}
+    .tjc-info .tjc-ico{width:13px;height:13px;opacity:.7;vertical-align:-2px}
+
+    /* Jobs segmented filter control */
+    .tj-seg{display:flex;gap:4px;background:var(--sw-light);border-radius:10px;padding:3px;margin-bottom:8px}
+    .tj-seg .filter-chip{flex:1;text-align:center;border-radius:7px;margin:0}
+    .tj-seg2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+    .tj-seg2-label{font-family:var(--sw-mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--sw-text-sec)}
+
+    /* ══ Board kanban ══ */
+    .tjb-wrap{display:flex;flex-direction:column;min-height:0}
+    .tjb-verts{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0 10px}
+    .tjb-verts::-webkit-scrollbar{display:none}
+    .tjb-vert{flex:0 0 auto;font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:7px 13px;border-radius:999px;border:1.4px solid var(--sw-border);background:var(--sw-card);color:var(--sw-mid);cursor:pointer}
+    .tjb-vert.sel{background:var(--sw-dark);border-color:var(--sw-dark);color:#fff}
+    .tjb-strip{display:flex;gap:5px;padding:0 0 12px;flex:0 0 auto}
+    .tjb-stripcell{flex:1;min-width:0;border-radius:10px;padding:8px 2px 7px;text-align:center;background:var(--sw-card);border:1px solid var(--sw-border)}
+    .tjb-stripcell .n{display:block;font-family:var(--sw-mono);font-size:18px;font-weight:600;line-height:1;color:var(--sw-dark)}
+    .tjb-stripcell .l{display:block;font-family:var(--sw-mono);font-size:9px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--sw-text-sec);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tjb-stripcell.hot .n{color:var(--tj-orange-deep)}
+    .tjb-pager{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:2px 4px 10px;scrollbar-width:none}
+    .tjb-pager::-webkit-scrollbar{display:none}
+    .tjb-col{flex:0 0 82%;scroll-snap-align:center;display:flex;flex-direction:column;min-width:0}
+    .tjb-colhead{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;flex:0 0 auto;background:var(--sw-dark);border-radius:10px;margin-bottom:9px}
+    .tjb-colhead b{font-family:var(--sw-mono);font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#fff;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tjb-colhead .cc{font-family:var(--sw-mono);font-size:13px;font-weight:600;color:rgba(255,255,255,.7);flex:0 0 auto;padding-left:8px}
+    .tjb-colhead.hot{background:var(--tj-orange-deep)} .tjb-colhead.hot .cc{color:rgba(255,255,255,.85)}
+    .tjb-colcards{min-height:40px;padding-bottom:8px}
+    .tjb-empty{font-size:13px;color:var(--sw-text-sec);padding:14px 6px}
+    .tjb-card{display:block;width:100%;text-align:left;background:var(--sw-card);border:1px solid var(--sw-border);border-left:4px solid var(--tj-nt);border-radius:12px;padding:12px 13px;margin-bottom:10px;cursor:pointer;font-family:inherit}
+    .tjb-card.ms{border-left-color:var(--tj-ms)} .tjb-card.fc{border-left-color:var(--tj-fc)} .tjb-card.pt{border-left-color:var(--tj-pt)} .tjb-card.nt{border-left-color:var(--tj-nt)}
+    .tjb-card:active{background:var(--sw-light)}
+    .tjb-note{font-size:12px;color:var(--sw-text-sec);margin:-2px 0 10px}
+    .tjb-warn{font-size:12px;color:#B45309;background:#FEF3C7;border-radius:8px;padding:8px 10px;margin:6px 0}
+    .tjb-manageronly{text-align:center;padding:40px 20px;color:var(--sw-text-sec);font-size:14px}
   </style>
 </head>
 <body>
@@ -2845,9 +2914,16 @@
         </div>
       </div>
       <input type="text" id="jobSearchInput" placeholder="Search assigned jobs — switch to All to search every job, including old/completed..." oninput="filterMyJobs()">
-      <div class="job-filter-chips">
+      <!-- M3 D7: primary segments Today / Assigned / All. The This Week / Active /
+           History capabilities are preserved as secondary controls (no internal
+           filter key renamed; 'assigned' is additive). -->
+      <div class="tj-seg" role="tablist">
         <button class="filter-chip active" data-filter="today" onclick="setJobFilter('today')">Today</button>
+        <button class="filter-chip" data-filter="assigned" onclick="setJobFilter('assigned')">Assigned</button>
         <button class="filter-chip" data-filter="all" onclick="setJobFilter('all')">All</button>
+      </div>
+      <div class="tj-seg2">
+        <span class="tj-seg2-label">More</span>
         <button class="filter-chip" data-filter="thisWeek" onclick="setJobFilter('thisWeek')">This Week</button>
         <button class="filter-chip" data-filter="active" onclick="setJobFilter('active')">Active</button>
         <button class="filter-chip" data-filter="history" onclick="setJobFilter('history')">History</button>
@@ -4770,22 +4846,15 @@
           cacheTradeJob(job, a);
           var type = getTradeJobType(job, a);
           var openAction = type === 'makesafe' ? 'openJobReport' : 'openJob';
-          html += '<div class="job-card" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + a.id + '\')">';
-          html += '  <div class="job-card-top">';
-          html += '    <div>';
-          html += '      <div class="job-card-client">' + esc(getTradeCardTitle(job, type)) + '</div>';
-          html += '      <div class="job-card-address">' + esc(getTradeCardLine(job, type));
-          if (job.job_number) html += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.job_number) + '</span>';
-          html += '</div>';
-          html += '    </div>';
-          html += '    <span class="job-card-badge badge-' + type + '">' + type + '</span>';
-          html += '  </div>';
-          var scopeSummary = job.scope_summary || buildScopeSummary(job.scope_json, type);
-          html += '  <div style="font-size:12px;color:var(--sw-mid);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(scopeSummary) + '</div>';
-          html += '  <div class="job-card-meta">';
-          html += '    <span>' + formatDate(a.scheduled_date) + '</span>';
-          html += '    <span class="status-pill ' + statusClass + '">' + (a.status || 'scheduled').replace(/_/g, ' ') + '</span>';
-          html += '  </div>';
+          // History card re-dressed to the M2 grammar (DA-M3-2) for consistency.
+          var _histCard = TradeJobCard.buildModel(job, a, {
+            type: type,
+            dateLabel: formatDate(a.scheduled_date),
+            desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+            crew: getTradeAssignmentCrewLabel(a)
+          });
+          html += '<div class="job-card tjcard" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + a.id + '\')">';
+          html += TradeJobCard.cardBodyHTML(_histCard);
           html += '</div>';
         });
       } else {
@@ -4810,6 +4879,9 @@
         else if (sec.key !== 'makesafePool') return;
       }
       if (_jobFilter === 'thisWeek' && sec.key !== 'today' && sec.key !== 'thisWeek') return;
+      // M3 D7 (DA-M3-1 / ledger item 1): "Assigned" = the viewer's real assignment
+      // buckets (today/thisWeek/upcoming/recent), EXCLUDING the unassigned open pool.
+      if (_jobFilter === 'assigned' && sec.key === 'makesafePool') return;
       // Apply search + status filter
       var filtered = items.filter(function(a) {
         return matchesSearch(a, query) && matchesFilter(a, _jobFilter);
@@ -4899,34 +4971,28 @@
           html += renderMakesafeRunCard(job, a, idx, filtered, sec, todayComplete, runListId);
           return;
         }
-        html += '<div class="job-card' + todayClass + '" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + assignmentArg + '\')">';
-        html += '  <div class="job-card-top">';
-        if (sec.key === 'today') html += '    <span class="run-list-order-badge">' + (idx + 1) + '</span>';
-        html += '    <div>';
-        html += '      <div class="job-card-client">' + esc(getTradeCardTitle(job, type)) + '</div>';
-        html += '      <div class="job-card-address">' + esc(getTradeCardLine(job, type));
-        if (job.job_number) html += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.job_number) + '</span>';
-        html += '</div>';
-        html += '    </div>';
-        html += '    <span class="job-card-badge badge-' + type + '">' + type + '</span>';
-        html += '  </div>';
-        // Admin view: show crew names once, cleanly, when multiple people are on the job.
-        var adminCrewShown = false;
-        if (data._adminView) {
-          var crewList = a._allCrew || [{ name: (a.user && a.user.name) || a.crew_name || '', status: a.status }];
-          var crewDisplay = crewList.filter(function(c) { return c.name; }).map(function(c) { return esc(c.name); });
-          if (crewDisplay.length > 0) {
-            adminCrewShown = true;
-            html += '  <div style="font-size:12px;color:var(--sw-orange);font-weight:700;margin-top:6px;display:flex;align-items:center;gap:4px">&#128100; ' + crewDisplay.join(' + ') + '</div>';
-          }
-        }
-        // Pickup vs Delivery badge + Materials status
+        // M3 U1 (DA-M3-2): card internals re-dressed to the M2 card grammar via
+        // TradeJobCard. Injected impure values keep app UX (relative date via
+        // formatDate, scope summary, the app crew label incl. admin _allCrew join).
+        // The job-card shell, onclick, run-list badge, PO badges + action row are
+        // preserved (carry-forward ledger). Weather span (data-weather-date) is
+        // emitted inside the card body.
+        var _tjCard = TradeJobCard.buildModel(job, a, {
+          type: type,
+          dateLabel: formatDate(a.scheduled_date),
+          desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+          crew: getTradeAssignmentCrewLabel(a)
+        });
+        html += '<div class="job-card tjcard' + todayClass + '" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + assignmentArg + '\')">';
+        if (sec.key === 'today') html += '<span class="run-list-order-badge">' + (idx + 1) + '</span>';
+        html += TradeJobCard.cardBodyHTML(_tjCard);
+        // Pickup vs Delivery badge + Materials status (preserved)
         var poInfo = job.po_info;
         if (poInfo) {
           if (poInfo.delivery_method === 'pickup') {
-            html += '<div class="badge-delivery pickup">&#128230; PICKUP — ' + esc(poInfo.pickup_location || 'TBC') + '</div>';
+            html += '<div class="badge-delivery pickup" style="margin-top:8px">&#128230; PICKUP — ' + esc(poInfo.pickup_location || 'TBC') + '</div>';
           } else {
-            html += '<div class="badge-delivery delivery">&#128666; DELIVERY' + (poInfo.delivery_date ? ' — ' + formatDate(poInfo.delivery_date) : '') + '</div>';
+            html += '<div class="badge-delivery delivery" style="margin-top:8px">&#128666; DELIVERY' + (poInfo.delivery_date ? ' — ' + formatDate(poInfo.delivery_date) : '') + '</div>';
           }
           if (poInfo.materials_confirmed) {
             html += ' <span class="badge-materials confirmed">&#9989; Materials confirmed</span>';
@@ -4934,7 +5000,7 @@
             html += ' <span class="badge-materials pending">&#9888; Materials not confirmed</span>';
           }
         }
-        html += renderTradeCardCompactSummary(job, a, type, statusClass, todayComplete, adminCrewShown);
+        if (todayComplete) html += '<div style="margin-top:8px"><span class="run-list-complete-pill">Report submitted</span></div>';
         // Financial display removed — customer quote/sell price not shown to installers
         // Quick action buttons (Call, Text, Navigate)
         html += '  <div style="display:flex;gap:6px;margin-top:8px">';
@@ -5115,6 +5181,177 @@
     if (!job || !job.id) return;
     _tradeJobCacheById[job.id] = { job: job, assignment: assignment || null };
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // M3 U1 — TRADE JOB CARD (re-dress to the M2 calendar card grammar).
+  // PURE, self-contained string builders: (job, assignment) -> card model ->
+  // HTML fragment. No DOM reads, no globals, no network — the CP1 smoke
+  // extracts the block between the sentinels below and evals the REAL shipped
+  // code, so the test can never drift from what ships (M2 pattern).
+  //   buildModel(job, a, opts) is THE GLUE — it must fill every field the
+  //   renderer reads (no undefined -> "undefined"/"NaN" in output, the M2
+  //   ncState() lesson). cardBodyHTML(model) is the pure renderer.
+  // Reuses the M2 partyLabel seam: make-safe -> Builder, fence/patio -> Client.
+  // Emits <div> fragments (not a <button>) so the caller's job-card shell keeps
+  // its onclick + Call/Text/Note/Navigate action row + run-list controls.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-jobcard>
+  var TradeJobCard = (function () {
+    'use strict';
+    var NO_PARTY = '—'; // em-dash sentinel for a not-yet-known party
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+    function titleCase(s) { return String(s == null ? '' : s).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+    // DA-M3-2 · jobs.type -> chip bucket (the clean classifier, NOT the fuzzy
+    // text matcher). Every value outside makesafe/fencing/patio -> neutral 'other'.
+    function mapType(rawType) {
+      var k = String(rawType == null ? '' : rawType).toLowerCase().trim();
+      if (k === 'makesafe' || k === 'make_safe' || k === 'make-safe') return 'makesafe';
+      if (k === 'fencing') return 'fencing';
+      if (k === 'patio') return 'patio';
+      return 'other';
+    }
+    var TYPE = {
+      makesafe: { cls: 'ms', label: 'Make-safe' }, fencing: { cls: 'fc', label: 'Fencing' },
+      patio: { cls: 'pt', label: 'Patio' }, other: { cls: 'nt', label: 'Other' }
+    };
+    // 'other' keeps the real type name (e.g. Decking, Renovation) but neutral styling,
+    // so no information is lost while honouring DA-M3-2's "neutral other".
+    function typeMeta(mapped, rawType) {
+      var m = TYPE[mapped] || TYPE.other;
+      if (mapped === 'other') {
+        var lbl = titleCase(rawType);
+        return { cls: 'nt', label: lbl || 'Job' };
+      }
+      return { cls: m.cls, label: m.label };
+    }
+
+    // Assignment status -> render token (colour) + honest label. Covers every live
+    // job_assignments status token + the synthetic open-pool 'available'.
+    var STATUS_MAP = {
+      scheduled: 'booked', confirmed: 'booked', draft: 'booked', available: 'booked',
+      in_progress: 'onsite',
+      complete: 'done', submitted: 'done', verified: 'done', disputed: 'done',
+      cancelled: 'cancelled'
+    };
+    function statusOf(rawStatus) {
+      var k = String(rawStatus == null ? '' : rawStatus).toLowerCase().trim();
+      var token = Object.prototype.hasOwnProperty.call(STATUS_MAP, k) ? STATUS_MAP[k] : 'booked';
+      var label = k ? titleCase(k) : 'Scheduled';
+      return { token: token, label: label };
+    }
+
+    function fmtTime(t) {
+      if (t == null) return null;
+      var m = String(t).trim().match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+      if (isNaN(h) || isNaN(mm)) return null;
+      var disp = h % 12; if (disp === 0) disp = 12;
+      return disp + ':' + (mm < 10 ? '0' : '') + mm + (h < 12 ? 'am' : 'pm');
+    }
+    var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function fmtDateLocal(iso) {
+      var m = String(iso == null ? '' : iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return '';
+      var d = new Date(+m[1], +m[2] - 1, +m[3]);
+      if (isNaN(d.getTime())) return '';
+      return WD[d.getDay()] + ' ' + d.getDate() + ' ' + MO[d.getMonth()];
+    }
+
+    // Builder name for a make-safe job's party line (the seam value).
+    function builderName(job) {
+      job = job || {};
+      var md = job.makesafe_details || job.metadata || {};
+      var co = md.makesafe_companies || {};
+      return String(md.requesting_company_name || co.name || job.builder || '').trim();
+    }
+    // Crew label from an assignment, self-contained (mirror of the app helper,
+    // pure). Admin dedupe crews (_allCrew) join with ' + '.
+    function crewLabel(a) {
+      a = a || {};
+      if (a._allCrew && a._allCrew.length) {
+        return a._allCrew.filter(function (c) { return c && c.name; }).map(function (c) { return c.name; }).join(' + ');
+      }
+      var cands = [a.crew_name, a.assigned_to, (a.user && a.user.name), a.trade_name, a.label];
+      for (var i = 0; i < cands.length; i++) { var v = String(cands[i] == null ? '' : cands[i]).trim(); if (v) return v; }
+      return '';
+    }
+
+    // THE GLUE. job + assignment (+opts) -> a fully-populated model. Every field
+    // the renderer reads is set here; opts lets the caller inject app-specific,
+    // impure values (relative date via global formatDate, scope summary, an
+    // empty-crew label for the Board) without the module depending on them.
+    function buildModel(job, a, opts) {
+      job = job || {}; a = a || {}; opts = opts || {};
+      var rawType = (opts.type != null && opts.type !== '') ? opts.type : job.type;
+      var mapped = mapType(rawType);
+      var tm = typeMeta(mapped, rawType);
+      var st = statusOf(a.status);
+      var isMs = mapped === 'makesafe';
+      var party = isMs
+        ? { k: 'Builder', v: builderName(job) || NO_PARTY }
+        : { k: 'Client', v: (String(job.client_name || '').trim()) || NO_PARTY };
+      var sub = String(job.site_suburb || '').trim()
+        || (String(job.site_address || '').trim().split(',')[0])
+        || 'Site TBC';
+      var desc = (opts.desc != null ? String(opts.desc) : String(job.scope_summary || '')).trim();
+      if (!desc || desc.toLowerCase() === tm.label.toLowerCase()) desc = '';
+      return {
+        type: mapped, typeCls: tm.cls, typeLabel: tm.label,
+        sub: sub,
+        ref: String(job.job_number || '').trim(),
+        desc: desc,
+        party: party,
+        statusToken: st.token, statusLabel: st.label,
+        dateLabel: (opts.dateLabel != null && opts.dateLabel !== '') ? String(opts.dateLabel) : fmtDateLocal(a.scheduled_date),
+        weatherDate: String(a.scheduled_date || ''),
+        timeText: fmtTime(a.start_time),
+        crew: (opts.crew != null ? String(opts.crew) : crewLabel(a)),
+        crewEmptyLabel: String(opts.crewEmptyLabel || '')
+      };
+    }
+
+    var CAL_ICO = '<svg class="tjc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>';
+    var CREW_ICO = '<svg class="tjc-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg>';
+
+    // Pure renderer: model -> the M2-grammar card body (a <div> fragment). The
+    // caller wraps it in the job-card / board-card shell and appends the action row.
+    function cardBodyHTML(model) {
+      var m = model || {};
+      var cls = m.typeCls || 'nt';
+      var h = '<div class="tjc-top"><span class="tjc-tico ' + cls + '"></span>'
+        + '<span class="tjc-type ' + cls + '">' + esc(m.typeLabel || 'Job') + '</span>'
+        + '<span class="tjc-stag ' + (m.statusToken || 'booked') + '">' + esc(m.statusLabel || 'Scheduled') + '</span></div>';
+      h += '<div class="tjc-sub">' + esc(m.sub || 'Site TBC') + '</div>';
+      if (m.ref || m.desc) {
+        h += '<div class="tjc-ref">' + esc(m.ref || '');
+        if (m.ref && m.desc) h += '<span class="tjc-ref-sep">&middot;</span>';
+        if (m.desc) h += esc(m.desc);
+        h += '</div>';
+      }
+      var pv = (m.party && m.party.v) || NO_PARTY;
+      h += '<div class="tjc-party"><span class="k">' + esc((m.party && m.party.k) || 'Client') + '</span>'
+        + (pv === NO_PARTY ? '<span class="tjc-pending">&mdash;</span>' : '<b>' + esc(pv) + '</b>') + '</div>';
+      h += '<div class="tjc-info">' + CAL_ICO + '<span>' + esc(m.dateLabel || '') + '</span>'
+        + '<span data-weather-date="' + esc(m.weatherDate || '') + '"></span>';
+      if (m.timeText) h += '<span class="tjc-time">' + esc(m.timeText) + '</span>';
+      else h += '<span class="tjc-time notime">No time set</span>';
+      if (m.crew) h += '<span class="tjc-crew">' + CREW_ICO + esc(m.crew) + '</span>';
+      else if (m.crewEmptyLabel) h += '<span class="tjc-crew un">' + esc(m.crewEmptyLabel) + '</span>';
+      h += '</div>';
+      return h;
+    }
+
+    return {
+      mapType: mapType, typeMeta: typeMeta, statusOf: statusOf,
+      fmtTime: fmtTime, fmtDateLocal: fmtDateLocal, builderName: builderName, crewLabel: crewLabel,
+      buildModel: buildModel, cardBodyHTML: cardBodyHTML,
+      NO_PARTY: NO_PARTY, TYPE: TYPE, STATUS_MAP: STATUS_MAP
+    };
+  })();
+  // </trade-jobcard>
 
   function isTradeMakesafeJob(job, assignment) {
     if (!job && !assignment) return false;
@@ -15403,24 +15640,283 @@
   // PROFILE VIEW — User info + sign out + rate + invoices
   // ══════════════════════════════════════════════════
 
-  // BOARD VIEW — M1 placeholder (manager-gated). Allocation UI lands in M3.
+  // ══════════════════════════════════════════════════════════════════════
+  // M3 U2 — BOARD CORE (the manager's vertical kanban, READ surface).
+  // PURE, self-contained: (my_jobs payload, opts) -> a structured board object.
+  // No DOM/global/network — the CP1 board smoke extracts the block between the
+  // sentinels and evals the REAL shipped code. DA-M3-3: ONE explicit column
+  // ⇽ status map, STOP (record, never invent a column) on an unmappable token.
+  // DA-M3-4: source is api('my_jobs',{mode:'all'}) — assigned buckets for the
+  // stage columns + the generic per-vertical open pool (makesafePool) for the
+  // "Needs allocation" column. Card models are injected via opts.makeCard so
+  // BoardCore stays decoupled from TradeJobCard + fully testable.
+  // NO write path — allocation (U3) is a later checkpoint.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-board>
+  var BoardCore = (function () {
+    'use strict';
+    var VERTICALS = ['makesafe', 'fencing', 'patio', 'decking'];
+    var VERT_LABEL = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', other: 'Other' };
+    function vertLabel(v) { return VERT_LABEL[v] || 'Other'; }
+    function vertOf(rawType) {
+      var k = String(rawType == null ? '' : rawType).toLowerCase().trim();
+      if (k === 'makesafe' || k === 'make_safe' || k === 'make-safe') return 'makesafe';
+      if (k === 'fencing') return 'fencing';
+      if (k === 'patio') return 'patio';
+      if (k === 'decking') return 'decking';
+      return 'other';
+    }
+    // DA-M3-3 · the ONE explicit column⇽status map (every live job_assignments
+    // status token). A token absent here is UNMAPPED — recorded + surfaced, the
+    // row is NOT force-placed into a wrong column (M2 DA-6 discipline).
+    var COLUMN_MAP = {
+      scheduled: 'scheduled', confirmed: 'scheduled', draft: 'scheduled',
+      in_progress: 'onsite',
+      complete: 'done', submitted: 'done', verified: 'done',
+      disputed: 'attention',
+      cancelled: 'cancelled'
+    };
+    var COLUMNS = [
+      { key: 'needs', label: 'Needs allocation', hot: true },
+      { key: 'scheduled', label: 'Scheduled', hot: false },
+      { key: 'onsite', label: 'On site', hot: false },
+      { key: 'done', label: 'Done', hot: false },
+      { key: 'attention', label: 'Attention', hot: false },
+      { key: 'cancelled', label: 'Cancelled', hot: false }
+    ];
+    function columnOf(status) {
+      var k = String(status == null ? '' : status).toLowerCase().trim();
+      return Object.prototype.hasOwnProperty.call(COLUMN_MAP, k) ? COLUMN_MAP[k] : null;
+    }
+    // A synthetic open-pool row (unassigned job needing allocation).
+    function isPoolRow(r) {
+      r = r || {};
+      if (r._makesafePool) return true;
+      if (String(r.status || '').toLowerCase() === 'available') return true;
+      return /_open$/.test(String(r.assignment_type || ''));
+    }
+
+    // Status priority for de-duping multiple assignments of one job to one card.
+    var PRIO = { in_progress: 6, disputed: 5, submitted: 4, verified: 4, confirmed: 3, scheduled: 3, draft: 2, complete: 2, cancelled: 0, available: 0 };
+    function prio(s) { return PRIO[String(s == null ? '' : s).toLowerCase()] || 0; }
+
+    // my_jobs payload + opts -> board object. opts = { verticals, isAdmin, makeCard }.
+    function buildBoard(data, opts) {
+      data = data || {}; opts = opts || {};
+      var makeCard = typeof opts.makeCard === 'function' ? opts.makeCard : function (job, row, vert) { return { job: job, row: row, vertical: vert }; };
+      var assignedRows = [];
+      ['today', 'thisWeek', 'upcoming', 'recent'].forEach(function (b) {
+        (data[b] || []).forEach(function (r) { if (!isPoolRow(r)) assignedRows.push(r); });
+      });
+      // pool rows can arrive inside makesafePool OR flagged inside any bucket
+      var poolRows = [];
+      ['makesafePool', 'today', 'thisWeek', 'upcoming', 'recent'].forEach(function (b) {
+        (data[b] || []).forEach(function (r) { if (isPoolRow(r)) poolRows.push(r); });
+      });
+      var inputCount = assignedRows.length + poolRows.length;
+
+      var jobless = 0, assignedWithJob = [];
+      assignedRows.forEach(function (r) { if ((r.jobs || {}).id) assignedWithJob.push(r); else jobless++; });
+
+      // dedupe assigned to one row per job.id (keep highest-priority status)
+      var byJob = {};
+      assignedWithJob.forEach(function (r) {
+        var jid = (r.jobs || {}).id;
+        if (!byJob[jid] || prio(r.status) > prio(byJob[jid].status)) byJob[jid] = r;
+      });
+      var assignedFinal = Object.keys(byJob).map(function (k) { return byJob[k]; });
+      var dedupedAssigned = assignedWithJob.length - assignedFinal.length;
+
+      // pool rows already assigned (to anyone we can see) collapse into the assigned card
+      var poolFinal = poolRows.filter(function (r) { var jid = (r.jobs || {}).id; return !(jid && byJob[jid]); });
+      var poolMerged = poolRows.length - poolFinal.length;
+
+      // which verticals to show
+      var showVerts;
+      if (opts.isAdmin) {
+        var seen = {};
+        assignedFinal.concat(poolFinal).forEach(function (r) { seen[vertOf((r.jobs || {}).type)] = true; });
+        showVerts = VERTICALS.filter(function (v) { return seen[v]; });
+        if (seen.other) showVerts.push('other');
+        if (!showVerts.length) showVerts = VERTICALS.slice();
+      } else {
+        var owned = {};
+        (opts.verticals || []).forEach(function (v) { owned[String(v).toLowerCase().trim()] = true; });
+        showVerts = VERTICALS.filter(function (v) { return owned[v]; });
+        if (owned.other) showVerts.push('other');
+      }
+      var showSet = {}; showVerts.forEach(function (v) { showSet[v] = true; });
+
+      var unmapped = {}, placed = 0, scopedOut = 0, unmappedDropped = 0;
+      var verticals = showVerts.map(function (vert) {
+        var cols = COLUMNS.map(function (c) { return { key: c.key, label: c.label, hot: c.hot, cards: [] }; });
+        var colByKey = {}; cols.forEach(function (c) { colByKey[c.key] = c; });
+        poolFinal.forEach(function (r) {
+          var job = r.jobs || {}; if (vertOf(job.type) !== vert) return;
+          colByKey.needs.cards.push(makeCard(job, r, vert)); placed++;
+        });
+        assignedFinal.forEach(function (r) {
+          var job = r.jobs || {}; if (vertOf(job.type) !== vert) return;
+          var colk = columnOf(r.status);
+          if (colk == null) { unmapped[String(r.status || '').toLowerCase()] = true; unmappedDropped++; return; }
+          colByKey[colk].cards.push(makeCard(job, r, vert)); placed++;
+        });
+        var total = cols.reduce(function (n, c) { return n + c.cards.length; }, 0);
+        return { vertical: vert, label: vertLabel(vert), columns: cols, total: total };
+      });
+
+      // rows whose vertical isn't shown (intentional scoping, not a silent drop)
+      assignedFinal.forEach(function (r) { if (!showSet[vertOf((r.jobs || {}).type)]) scopedOut++; });
+      poolFinal.forEach(function (r) { if (!showSet[vertOf((r.jobs || {}).type)]) scopedOut++; });
+
+      return {
+        verticals: verticals,
+        unmappedStatuses: Object.keys(unmapped),
+        inputCount: inputCount,
+        placedCount: placed,
+        scopedOut: scopedOut,
+        joblessSkipped: jobless,
+        dedupedAssigned: dedupedAssigned,
+        poolMergedIntoAssigned: poolMerged,
+        unmappedDropped: unmappedDropped
+        // reconciliation identity (asserted by the smoke — no silent drops):
+        //   inputCount === placedCount + scopedOut + joblessSkipped
+        //               + dedupedAssigned + poolMergedIntoAssigned + unmappedDropped
+      };
+    }
+
+    return {
+      VERTICALS: VERTICALS, COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
+      vertOf: vertOf, vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
+      buildBoard: buildBoard
+    };
+  })();
+  // </trade-board>
+
+  // BOARD VIEW — M3 U2 read surface. Manager-gated vertical kanban on live
+  // my_jobs (mode:all) + list_users roster. READ ONLY — no allocate write yet
+  // (that is U3 / CP2+). The old M1 placeholder is replaced.
+  var _boardCache = null;   // { board, roster } cached across vertical switches
+  var _boardVert = null;    // active vertical key
+
+  function _boardManagerVerticals() {
+    return (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
+  }
+  function _boardAllowed() {
+    return !!(_isAdmin || (_boardManagerVerticals().length > 0));
+  }
+
   function renderBoardView() {
     var container = document.getElementById('boardContent');
     if (!container) return;
-    var mv = (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
-    var vertsLine = mv.length
-      ? 'Your verticals · ' + mv.map(function(v) { return esc(String(v)); }).join(' · ')
-      : (_isAdmin ? 'All verticals' : '');
-    var html = '';
-    html += '<div style="margin-top:8px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:var(--sw-r-card);box-shadow:var(--sw-shadow);overflow:hidden">';
-    html += '  <div style="background:var(--sw-dark);color:var(--sw-bar-ink);font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;padding:9px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Board</div>';
-    html += '  <div style="padding:22px 18px">';
-    html += '    <div style="font-size:17px;font-weight:700;color:var(--sw-dark);margin-bottom:6px">Allocation arrives in M3</div>';
-    html += '    <div style="font-size:13.5px;color:var(--sw-text-sec);line-height:1.5">The manager allocation board is being built. For now, keep assigning from the Calendar and Jobs tabs.</div>';
-    if (vertsLine) html += '<div style="margin-top:14px;font-family:var(--sw-mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--sw-mid)">' + vertsLine + '</div>';
-    html += '  </div>';
+    // Display-only gate (server authz is independent). The nav button is already
+    // manager-gated; this guards a direct route in.
+    if (!_boardAllowed()) {
+      container.innerHTML = '<div class="tjb-manageronly">The Board is a manager view.</div>';
+      return;
+    }
+    container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading the board...</div>';
+    _loadBoard();
+  }
+
+  function _loadBoard() {
+    var container = document.getElementById('boardContent');
+    Promise.all([
+      api('my_jobs', { mode: 'all' }),
+      api('list_users', {}).catch(function () { return null; })
+    ]).then(function (res) {
+      var data = res[0] || {};
+      var roster = ((res[1] && (res[1].users || res[1])) || []);
+      var board = BoardCore.buildBoard(data, {
+        verticals: _boardManagerVerticals(),
+        isAdmin: _isAdmin,
+        makeCard: function (job, row) {
+          var mm = TradeJobCard.buildModel(job, row, { crewEmptyLabel: 'Needs crew' });
+          mm._boardRow = row; mm._boardJob = job;
+          return mm;
+        }
+      });
+      _boardCache = { board: board, roster: roster };
+      // default active vertical
+      if (!_boardVert || !board.verticals.some(function (v) { return v.vertical === _boardVert; })) {
+        _boardVert = board.verticals.length ? board.verticals[0].vertical : null;
+      }
+      _renderBoard();
+    }).catch(function (err) {
+      if (!container) return;
+      container.innerHTML = '<div class="empty-state">Could not load the board: ' + esc(friendlyError(err)) +
+        '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="renderBoardView()">Retry</button></div>';
+    });
+  }
+
+  window.setBoardVertical = function (v) { _boardVert = v; _renderBoard(); };
+
+  function _boardCardHTML(model) {
+    var row = model._boardRow || {};
+    var job = model._boardJob || row.jobs || {};
+    var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
+    var arg = row._makesafePool ? '' : (row.id || '');
+    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
+      TradeJobCard.cardBodyHTML(model) + '</button>';
+  }
+
+  function _renderBoard() {
+    var container = document.getElementById('boardContent');
+    if (!container || !_boardCache) return;
+    var board = _boardCache.board, roster = _boardCache.roster || [];
+    if (!board.verticals.length) {
+      container.innerHTML = '<div class="empty-state"><p>No jobs on your board yet</p>' +
+        '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">Jobs appear here once they exist in your vertical(s).</div></div>';
+      return;
+    }
+    var active = null;
+    for (var i = 0; i < board.verticals.length; i++) { if (board.verticals[i].vertical === _boardVert) { active = board.verticals[i]; break; } }
+    if (!active) active = board.verticals[0];
+
+    var html = '<div class="tjb-wrap">';
+    // Unmapped-status guard (STOP surfaced, never a silent wrong column)
+    if (board.unmappedStatuses.length) {
+      html += '<div class="tjb-warn">Unmapped status token(s): ' + esc(board.unmappedStatuses.join(', ')) +
+        '. These jobs are held out of the columns pending a column-map amendment.</div>';
+    }
+    // vertical selector (only when the manager owns more than one)
+    if (board.verticals.length > 1) {
+      html += '<div class="tjb-verts">';
+      board.verticals.forEach(function (v) {
+        html += '<button class="tjb-vert' + (v.vertical === active.vertical ? ' sel' : '') + '" onclick="setBoardVertical(\'' + esc(v.vertical) + '\')">' +
+          esc(v.label) + ' <span style="opacity:.7">' + v.total + '</span></button>';
+      });
+      html += '</div>';
+    }
+    // roster line (crew from list_users)
+    var crewNames = roster.filter(function (u) { return u && u.name && ['crew', 'lead_installer', 'admin', 'ops_manager'].indexOf(u.role) >= 0; })
+      .map(function (u) { return u.name; });
+    if (crewNames.length) {
+      html += '<div class="tjb-note">Crew (' + crewNames.length + ') · ' + esc(crewNames.slice(0, 6).join(', ')) + (crewNames.length > 6 ? ' +' + (crewNames.length - 6) : '') + '</div>';
+    }
+    // status strip for the active vertical
+    html += '<div class="tjb-strip">';
+    active.columns.forEach(function (c) {
+      html += '<div class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') + '"><span class="n">' + c.cards.length + '</span><span class="l">' + esc(c.label) + '</span></div>';
+    });
+    html += '</div>';
+    // pager of columns
+    html += '<div class="tjb-pager">';
+    active.columns.forEach(function (c) {
+      html += '<div class="tjb-col"><div class="tjb-colhead' + (c.hot ? ' hot' : '') + '"><b>' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
+      html += '<div class="tjb-colcards">';
+      if (c.cards.length) {
+        c.cards.forEach(function (m) { html += _boardCardHTML(m); });
+      } else {
+        html += '<div class="tjb-empty">Nothing here.</div>';
+      }
+      html += '</div></div>';
+    });
+    html += '</div>';
+    html += '<div class="tjb-note" style="text-align:center;margin-top:6px">Read-only board. Tap a job to open it. Allocation arrives next.</div>';
     html += '</div>';
     container.innerHTML = html;
+    if (weatherData) renderWeatherBadges();
   }
 
   function renderProfileView() {

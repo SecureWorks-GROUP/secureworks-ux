@@ -57,6 +57,17 @@ function rawTimedOn(d) { return rawJobEvents.filter(e => e.scheduled_date === d 
 function rawUntimedOn(d) { return rawJobEvents.filter(e => e.scheduled_date === d && parseT(e.start_time) == null).length; }
 function rawAssignedOn(d) { return rawJobEvents.filter(e => e.scheduled_date === d).length; } // all real jobs have crew
 const rawDates = [...new Set(rawJobEvents.map(e => e.scheduled_date))].sort();
+// ── UNIQUE (job_id, date) truth, derived INDEPENDENTLY from raw (not via the adapter) ──
+// Jobs-axis views (day/week/month) dedupe by job+date and join crew names (§2a). So the
+// rendered jobs-axis block count must reconcile to DISTINCT job_id per date, NOT the raw
+// per-assignment count. These helpers compute that expectation from the raw fixture alone.
+function uniqJobsOn(d) { return [...new Set(rawJobEvents.filter(e => e.scheduled_date === d).map(e => e.job_id))]; }
+function rawUniqueOn(d) { return uniqJobsOn(d).length; }
+function rawUniqueUntimedOn(d) {
+  return uniqJobsOn(d).filter(jid =>
+    rawJobEvents.filter(e => e.scheduled_date === d && e.job_id === jid).every(r => parseT(r.start_time) == null)
+  ).length;
+}
 
 // ── build the SHIPPED model exactly as renderNewCalendar does ────────────────
 const adapted = CA.adaptEvents(EV);
@@ -99,12 +110,19 @@ test('1c per-type on job blocks matches raw classifier (fencing30/patio8/makesaf
   const by = {}; jobBlocks.forEach(b => { by[b.type] = (by[b.type] || 0) + 1; });
   eq(by, { fencing: 30, patio: 8, makesafe: 4 }, 'job blocks carry only the three real chip types');
 });
-test('1d DAY×jobs rendered job-button count == raw (timed+untimed) for every real date', () => {
+test('1d-pre no (job_id,date) pair has mixed timed/untimed rows (dedupe expectation is unambiguous)', () => {
+  const mixed = rawDates.flatMap(d => uniqJobsOn(d).filter(jid => {
+    const starts = rawJobEvents.filter(e => e.scheduled_date === d && e.job_id === jid).map(r => parseT(r.start_time) == null);
+    return new Set(starts).size > 1;
+  }).map(jid => `${jid}@${d}`));
+  eq(mixed, [], 'every job+date is uniformly timed or uniformly untimed');
+});
+test('1d DAY×jobs rendered count == UNIQUE job+date (dedupe truth, FIX 2) for every real date', () => {
   rawDates.forEach(d => {
     const html = CR.renderDayJobs(M, st({ scale: 'day', axis: 'jobs', date: d, month: d.slice(0, 8) + '01' }));
-    const expect = rawTimedOn(d) + rawUntimedOn(d);
-    eq(countJobBtns(html), expect, `day×jobs ${d}: rendered buttons == raw ${expect}`);
-    eq(ucount(html), rawUntimedOn(d), `day×jobs ${d}: untimed section count == raw untimed`);
+    const expect = rawUniqueOn(d);   // distinct job_id on the date — jobs-axis dedupes multi-crew to one block
+    eq(countJobBtns(html), expect, `day×jobs ${d}: rendered buttons == unique job+date ${expect} (raw per-assignment was ${rawAssignedOn(d)})`);
+    eq(ucount(html), rawUniqueUntimedOn(d), `day×jobs ${d}: untimed section count == unique untimed`);
     ok(clean(html), `day×jobs ${d}: no undefined/NaN`);
   });
 });
@@ -154,14 +172,27 @@ test('2 controls-active: rail on day only; period bar on week/month cal; badge t
   eq(CR.chrome(M, st({ scale: 'day', date: TODAY, type: 'all', scope: 'everyone' })).badgeCount, 0, 'default filters → badge 0');
   eq(CR.chrome(M, st({ scale: 'day', date: TODAY, type: 'fencing', scope: 'mine' })).badgeCount, 2, 'type+scope changed → badge 2');
 });
-test('2 WEEK×jobs rendered count reconciles to raw across the anchor week', () => {
+test('2 WEEK×jobs rendered count reconciles to UNIQUE job+date across the anchor week (FIX 2)', () => {
   const mon = CR.mondayOf(TODAY);
   const days = []; for (let i = 0; i < 6; i++) days.push(CR.addDays(mon, i));
-  const rawWeek = days.reduce((n, d) => n + rawTimedOn(d) + rawUntimedOn(d), 0);
-  const rawWeekUn = days.reduce((n, d) => n + rawUntimedOn(d), 0);
+  const rawWeekUnique = days.reduce((n, d) => n + rawUniqueOn(d), 0);        // e.g. 21 (was 30 per-assignment)
+  const rawWeekPerAsg = days.reduce((n, d) => n + rawAssignedOn(d), 0);
+  const rawWeekUn = days.reduce((n, d) => n + rawUniqueUntimedOn(d), 0);
   const html = CR.renderWeekJobs(M, st({ scale: 'week', axis: 'jobs', date: TODAY }));
-  eq(countJobBtns(html), rawWeek, 'week×jobs buttons == raw week (timed+untimed)');
-  eq(ucount(html), rawWeekUn, 'week×jobs untimed section == raw week untimed');
+  eq(countJobBtns(html), rawWeekUnique, `week×jobs buttons == unique job+date ${rawWeekUnique} (raw per-assignment was ${rawWeekPerAsg})`);
+  eq(ucount(html), rawWeekUn, 'week×jobs untimed section == unique untimed');
+});
+test('2 crew-axis is NOT deduped: a multi-crew job appears once PER crew column (dedupe did not leak)', () => {
+  // find a date with a job assigned to >1 crew in the raw fixture
+  const d = rawDates.find(dd => uniqJobsOn(dd).some(jid =>
+    rawJobEvents.filter(e => e.scheduled_date === dd && e.job_id === jid).length > 1));
+  ok(d, 'precondition: some date has a multi-crew job');
+  const crewHtml = CR.renderTimeline(M, st({ scale: 'day', axis: 'crew', date: d }));
+  const jobsHtml = CR.renderDayJobs(M, st({ scale: 'day', axis: 'jobs', date: d }));
+  // crew-axis renders per-assignment; jobs-axis dedupes → crew-axis count strictly greater on a multi-crew day
+  ok(countJobBtns(crewHtml) > countJobBtns(jobsHtml),
+    `crew-axis per-assignment (${countJobBtns(crewHtml)}) > jobs-axis unique (${countJobBtns(jobsHtml)}) on ${d}`);
+  eq(countJobBtns(jobsHtml), rawUniqueOn(d), `jobs-axis == unique ${rawUniqueOn(d)} on ${d}`);
 });
 test('2 null-start real jobs land in the "No time set" affordance (not on the grid, not dropped)', () => {
   // choose a real date that has at least one untimed real job
@@ -267,19 +298,31 @@ console.log('\nITEM 5 — clock-recovery pre-merge guard (static boot trace)');
 test('5a the ONLY boot/dispatch change is showView(schedule) → renderNewCalendar()', () => {
   ok(/if \(view === 'schedule'\) \{ renderNewCalendar\(\); \}/.test(HTML), 'schedule dispatch now renders the new calendar');
 });
-test('5b clock-recovery code paths are byte-identical to origin/main (M2 severs nothing)', () => {
+test('5b clock-recovery warm-load RESTORED (FIX 1): fires at Calendar-first boot; recovery fn bodies unchanged', () => {
   ok(gitOK, 'git available');
   const main = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' });
-  // (i) the recovery fn + its trigger fn are unchanged
+  // (i) the recovery fn + its trigger fn BODIES are still byte-identical — FIX 1 added a call site, not a body change
   const grab = (src, anchor, n) => { const i = src.indexOf(anchor); ok(i >= 0, anchor + ' present'); return src.slice(i, i + n); };
-  eq(grab(HTML, 'function checkServerClockRecovery(data)', 1600), grab(main, 'function checkServerClockRecovery(data)', 1600), 'checkServerClockRecovery identical');
-  eq(grab(HTML, 'window.loadMyJobs = function loadMyJobs()', 1800), grab(main, 'window.loadMyJobs = function loadMyJobs()', 1800), 'loadMyJobs identical');
-  eq(grab(HTML, 'function onLogin(profile)', 3000), grab(main, 'function onLogin(profile)', 3000), 'onLogin boot sequence identical');
-  // (ii) the M2 diff touches NO clock-recovery line (only the one dispatch line + additive block)
+  eq(grab(HTML, 'function checkServerClockRecovery(data)', 1600), grab(main, 'function checkServerClockRecovery(data)', 1600), 'checkServerClockRecovery body identical');
+  eq(grab(HTML, 'window.loadMyJobs = function loadMyJobs()', 1800), grab(main, 'window.loadMyJobs = function loadMyJobs()', 1800), 'loadMyJobs body identical');
+  // (ii) the warm-load is PRESENT in onLogin's non-deep-link boot path (positive proof)
+  const onLogin = grab(HTML, 'function onLogin(profile)', 6000);
+  ok(/if \(_currentView !== 'myJobs'\) loadMyJobs\(\);/.test(onLogin), 'warm-load call present in onLogin');
+  ok(/Restored M1 F1 fix/.test(onLogin), 'documented as the restored M1 F1 fix');
+  // (iii) it sits AFTER the default showView('schedule') dispatch (so it warms my_jobs on a Calendar-first boot)…
+  const iSched = onLogin.indexOf("showView('schedule')");
+  const iWarm = onLogin.indexOf("if (_currentView !== 'myJobs') loadMyJobs();");
+  ok(iSched >= 0 && iWarm > iSched, 'warm-load runs after the default schedule dispatch');
+  // …and NOT on the deep-link path (which returns via openJob before the restore/default block)
+  const deepIdx = onLogin.indexOf('openJob(deepJobId)');
+  ok(deepIdx >= 0 && deepIdx < iWarm, 'deep-link openJob path precedes (and bypasses) the warm-load');
+  // (iv) the ONLY clock-recovery-related diff line is exactly this one added call (+ its comment); nothing removed
   const diff = execSync(`git -C ${REPO} diff origin/main -- trade.html`, { encoding: 'utf8' });
   const changed = diff.split('\n').filter(l => /^[+-][^+-]/.test(l));
-  const touchesRecovery = changed.filter(l => /(checkServerClockRecovery|loadMyJobs|loadTimerState|clocked_on_at)/.test(l) && !/^\+.*\/\//.test(l));
-  eq(touchesRecovery, [], 'no clock-recovery code line added or removed by M2');
+  const removedRecovery = changed.filter(l => l[0] === '-' && /(checkServerClockRecovery|loadMyJobs|loadTimerState|clocked_on_at)/.test(l));
+  eq(removedRecovery, [], 'no clock-recovery code line REMOVED by M2');
+  const addedRecoveryCode = changed.filter(l => l[0] === '+' && /(checkServerClockRecovery|loadMyJobs|loadTimerState|clocked_on_at)/.test(l) && !/^\+\s*\/\//.test(l));
+  eq(addedRecoveryCode, ["+      if (_currentView !== 'myJobs') loadMyJobs();"], 'the only added recovery code line is the restored warm-load');
 });
 test('5c renderNewCalendar cannot throw-and-block boot before recovery (guarded + async + not on the recovery path)', () => {
   const rn = HTML.slice(HTML.indexOf('async function renderNewCalendar()'), HTML.indexOf('async function renderNewCalendar()') + 1600);
@@ -288,13 +331,14 @@ test('5c renderNewCalendar cannot throw-and-block boot before recovery (guarded 
   ok(!/loadMyJobs|checkServerClockRecovery|loadTimerState/.test(rn), 'render path does not touch clock recovery at all');
 });
 
-// ── FINDING (not a gate assertion): baseline warm-load absent from origin/main ──
+// ── FINDING (resolved): M1's boot warm-load was lost in the squash; M2 restores it ──
 try {
-  const mainWarm = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' }).includes('Warm my_jobs');
-  console.log(`\n  [FINDING] origin/main contains the M1 boot warm-load ("Warm my_jobs"): ${mainWarm}`);
-  console.log('           If false: the M1 F1 clock-recovery boot fix (present in M1 branch tip f6a89f7) did NOT');
-  console.log('           survive the M1 squash-merge — a pre-existing production gap, OUT OF M2 SCOPE, that M2');
-  console.log('           neither caused nor worsens (M2 is byte-identical to origin/main on all recovery paths).');
+  const mainWarm = execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' }).includes('Restored M1 F1 fix') || execSync(`git -C ${REPO} show origin/main:trade.html`, { encoding: 'utf8' }).includes('Warm my_jobs');
+  const wtWarm = HTML.includes("if (_currentView !== 'myJobs') loadMyJobs();");
+  console.log(`\n  [FINDING — RESOLVED] origin/main carries a boot warm-load: ${mainWarm}; this M2 branch restores it: ${wtWarm}`);
+  console.log('           The M1 F1 clock-recovery boot fix did NOT survive M1\'s squash-merge (absent from origin/main =');
+  console.log('           a live pay-path gap: recovery deferred to first My-Jobs visit). M2 makes Calendar-first permanent,');
+  console.log('           so per the contract amendment (§6, 2026-07-05) FIX 1 restores the one-line warm-load — proven above (5b).');
 } catch (e) { /* git optional */ }
 
 // ── summary ─────────────────────────────────────────────────────────────────

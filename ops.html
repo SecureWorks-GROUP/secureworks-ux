@@ -8935,8 +8935,11 @@ async function loadJobs() {
     renderJobs(data);
     // Unified kanban: load the INTAKE column's drafts (separate endpoint) and
     // re-render once they arrive. Fire-and-forget so the board paints immediately.
+    // W3-E: also load the reconciler (W3-A) story surface for the truth strip +
+    // per-card verdict badges — same fire-and-forget, read-only, never blocks paint.
     if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
       loadMakesafeBoardIntakeDrafts();
+      loadMakesafeBoardStory();
     }
   } catch (e) {
     console.error('loadJobs error:', e);
@@ -8976,7 +8979,7 @@ function setPipelineTab(tab) {
   // fresh load (with spinner) happens when the make-safe board is re-entered.
   if (typeof closeMakesafeIntakeOverlay === 'function') closeMakesafeIntakeOverlay();
   if (typeof closeMakesafeReportingOverlay === 'function') closeMakesafeReportingOverlay();
-  if (!isMakesafe) { _makesafeIntakeDrafts = []; _makesafeIntakeDraftsLoaded = false; _makesafeBoardSearch = ''; }
+  if (!isMakesafe) { _makesafeIntakeDrafts = []; _makesafeIntakeDraftsLoaded = false; _makesafeBoardSearch = ''; _makesafeStoryByJob = {}; _makesafeStorySummary = null; _makesafeStoryLoaded = false; }
   loadJobs();
 }
 
@@ -9485,6 +9488,7 @@ function renderMakesafeKanban(container, columns) {
 
   var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
   html += renderMakesafeLegend();
+  html += renderMakesafeTruthStrip();
 
   // Archive search bar — only shown when archive is visible
   if (_makesafeArchiveVisible) {
@@ -9608,6 +9612,180 @@ async function loadMakesafeBoardIntakeDrafts() {
       renderJobs(_pipelineData);
     }
   }
+}
+
+// ════════════════════════════════════════════════════════════
+// W3-E — Board truth strip + per-card verdict badges.
+// Read-only display of the W3-A reconciler surface (the makesafe_audit payload's
+// per-job story_* fields + top-level `story` count summary + recheck_queue_depth).
+// A SEPARATE compact read joined to the board by job_id; the board itself never
+// depends on it. Degrades to an amber DEGRADED strip when the surface is absent
+// (pre-deploy payload / older backend) or stale (>24h) — never a crash, never a
+// fake zero. NO writes, NO new endpoints, NO polling.
+//   _makesafeStoryByJob   : job_id -> { verdict, needs_agent, evidence_gaps, blockers, computed_at }
+//   _makesafeStorySummary : { available, verdict_counts, needs_agent, total,
+//                             recheck_queue_depth, latest_computed_at, oldest_computed_at }
+//   _makesafeStoryLoaded  : the async read has returned once (strip renders nothing
+//                           until then, so the board paints immediately).
+// ════════════════════════════════════════════════════════════
+var _makesafeStoryByJob = {};
+var _makesafeStorySummary = null;
+var _makesafeStoryLoaded = false;
+
+async function loadMakesafeBoardStory() {
+  try {
+    var data = await opsFetch('makesafe_audit', {});
+    var jobs = (data && data.jobs) || [];
+    var byJob = {};
+    var oldest = null;
+    jobs.forEach(function(j) {
+      if (!j || !j.job_id) return;
+      var v = j.story_verdict || null;
+      // A card with neither a verdict nor a computed_at has no story row (cleanly
+      // closed / no cheap-pass concern) — skip it so it carries no badge.
+      if (!v && !j.story_computed_at) return;
+      byJob[j.job_id] = {
+        verdict: v,
+        needs_agent: j.story_needs_agent === true,
+        evidence_gaps: Array.isArray(j.story_evidence_gaps) ? j.story_evidence_gaps : [],
+        blockers: Array.isArray(j.story_blockers) ? j.story_blockers : [],
+        computed_at: j.story_computed_at || null,
+      };
+      if (j.story_computed_at) {
+        var t = new Date(j.story_computed_at).getTime();
+        // Freshness governed by the STALEST verdict (oldest computed_at).
+        if (!isNaN(t) && (oldest === null || t < oldest)) oldest = t;
+      }
+    });
+    // The top-level `story` object exists only on the post-W3-A payload. Its
+    // absence is the pre-deploy signal that drives the DEGRADED strip.
+    var story = data && data.story;
+    _makesafeStoryByJob = byJob;
+    _makesafeStorySummary = story ? {
+      available: true,
+      verdict_counts: story.verdict_counts || {},
+      needs_agent: Number(story.needs_agent || 0),
+      total: Number(story.total || 0),
+      recheck_queue_depth: Number((data && data.recheck_queue_depth) || 0),
+      latest_computed_at: story.computed_at || null,
+      oldest_computed_at: oldest != null ? new Date(oldest).toISOString() : null,
+    } : { available: false };
+    _makesafeStoryLoaded = true;
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+      renderJobs(_pipelineData);
+    }
+  } catch (e) {
+    // Endpoint error / backend without the surface — degrade, never break the board.
+    _makesafeStoryByJob = {};
+    _makesafeStorySummary = { available: false };
+    _makesafeStoryLoaded = true;
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+      renderJobs(_pipelineData);
+    }
+  }
+}
+
+// Relative "x ago" for the truth strip (self-contained — no shared helper dep).
+function _makesafeTruthAgo(ts) {
+  if (!ts) return '';
+  var diff = Date.now() - new Date(ts).getTime();
+  if (isNaN(diff) || diff < 0) return 'just now';
+  var mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  var days = Math.floor(hrs / 24);
+  return days + 'd ago';
+}
+
+// The truth strip: a compact band above the board showing the reconciler's hard
+// verdict counts, the recheck-queue depth, and truth freshness. Amber DEGRADED
+// band when the surface is unavailable (pre-deploy) or stale (>24h).
+function renderMakesafeTruthStrip() {
+  // Not loaded yet — render nothing; the strip appears on the async story load
+  // (mirrors the INTAKE column). The board never waits on it.
+  if (!_makesafeStoryLoaded) return '';
+
+  var s = _makesafeStorySummary;
+  var amberTxt = '#B45309', amberBg = '#FEF3E7', amberBd = '#F5C889';
+  var wrapBase = 'display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;'
+    + 'padding:7px 12px;margin:0 0 8px;border-radius:8px;font-size:11px;';
+
+  // DEGRADED — the reconciler surface is entirely absent (pre-deploy payload or an
+  // older backend). No counts exist, so we say so rather than paint fake zeros.
+  if (!s || !s.available) {
+    return '<div class="ms-truth-strip degraded" style="' + wrapBase
+      + 'background:' + amberBg + ';border:1px solid ' + amberBd + ';color:' + amberTxt + ';">'
+      + '<span style="font-weight:800;text-transform:uppercase;letter-spacing:.04em;">&#9888; Truth engine</span>'
+      + '<span style="color:#7A4A12;">Reconciler surface unavailable &mdash; story verdicts not yet live. The board is still accurate; truth-freshness appears once the reconciler deploys.</span>'
+      + '</div>';
+  }
+
+  // Freshness from the OLDEST computed card — the stalest verdict governs trust.
+  var oldest = s.oldest_computed_at ? new Date(s.oldest_computed_at).getTime() : null;
+  var ageMs = (oldest != null && !isNaN(oldest)) ? (Date.now() - oldest) : null;
+  var stale = (ageMs != null) && (ageMs > 24 * 3600 * 1000);
+
+  var vc = s.verdict_counts || {};
+  function n(k) { return Number(vc[k] || 0); }
+  var chips = [
+    { label: 'Decision needed', n: n('DECISION_NEEDED'), bg: 'var(--sw-orange)' },
+    { label: 'Sent, unrecorded', n: n('SENT-UNRECORDED'), bg: '#9B2C2C' },
+    { label: 'Cancel conflict', n: n('CANCELLED-CONFLICT'), bg: '#C0392B' },
+    { label: 'Needs agent', n: (s.needs_agent || n('UNVERIFIED-needs-agent')), bg: 'var(--sw-mid)' },
+    { label: 'Recheck queue', n: s.recheck_queue_depth, bg: 'var(--sw-mid)' },
+  ];
+
+  var bg = stale ? amberBg : '#fff';
+  var bd = stale ? amberBd : 'var(--sw-border)';
+  var html = '<div class="ms-truth-strip' + (stale ? ' stale' : '') + '" style="' + wrapBase
+    + 'background:' + bg + ';border:1px solid ' + bd + ';">';
+  html += '<span title="Backend reconciliation verdicts (read-only)" style="font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--sw-dark);">Truth engine</span>';
+
+  chips.forEach(function(c) {
+    var active = c.n > 0;
+    var chipBg = active ? c.bg : '#EEF2F4';
+    var chipCol = active ? '#fff' : 'var(--sw-text-sec)';
+    html += '<span title="' + escapeAttr(c.label) + '" style="display:inline-flex;align-items:center;gap:5px;'
+      + 'padding:2px 9px;border-radius:11px;background:' + chipBg + ';color:' + chipCol + ';'
+      + 'font-weight:700;white-space:nowrap;' + (active ? '' : 'opacity:.7;') + '">'
+      + '<b style="font-size:12px;">' + c.n + '</b>' + escapeHtml(c.label) + '</span>';
+  });
+
+  // Freshness on the right.
+  var rightTxt;
+  if (s.total === 0) rightTxt = 'all clear';
+  else if (s.oldest_computed_at) rightTxt = 'updated ' + _makesafeTruthAgo(s.oldest_computed_at);
+  else rightTxt = 'freshness unknown';
+  html += '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:'
+    + (stale ? amberTxt : 'var(--sw-text-sec)') + ';font-weight:' + (stale ? '700' : '600') + ';">';
+  if (stale) html += '<span>&#9888; Truth stale (&gt;24h)</span>';
+  html += '<span>' + escapeHtml(rightTxt) + '</span></span>';
+
+  html += '</div>';
+  return html;
+}
+
+// A per-card badge for the HARD reconciler verdicts only (DECISION_NEEDED /
+// SENT-UNRECORDED / CANCELLED-CONFLICT). Soft verdicts (NOT-STARTED / CANCELLED /
+// UNVERIFIED-needs-agent) get no card badge — they live in the strip counts. The
+// tooltip carries the blockers/evidence gaps so a hover explains the flag.
+function makesafeStoryBadge(j) {
+  var st = _makesafeStoryByJob[j && j.id];
+  if (!st || !st.verdict) return '';
+  var map = {
+    'DECISION_NEEDED':    { label: 'Decision needed', bg: 'var(--sw-orange)', tip: 'Reconciler needs a human decision — often a sibling/bleed invoice under the same builder ref not linked to this job.' },
+    'SENT-UNRECORDED':    { label: 'Sent, unrecorded', bg: '#9B2C2C', tip: 'A send/settlement was proven but the board has not closed on it (double-send guard).' },
+    'CANCELLED-CONFLICT': { label: 'Cancel conflict', bg: '#C0392B', tip: 'Card is cancelled but evidence of work/invoice exists — needs reconciling.' },
+  };
+  var m = map[st.verdict];
+  if (!m) return '';
+  var detail = [].concat(st.blockers || [], st.evidence_gaps || []).filter(Boolean).slice(0, 3).join(' · ');
+  var tip = m.tip + (detail ? ('  [' + detail + ']') : '');
+  return '<span title="' + escapeAttr(tip) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;'
+    + 'padding:2px 7px;border-radius:10px;background:' + m.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">'
+    + escapeHtml(m.label) + '</span>';
 }
 
 /**
@@ -10448,6 +10626,8 @@ function renderMakesafeCard(j, status) {
   if (j.needs_money_review === true) {
     html += '<span title="Invoice pricing flagged for review — open the pack to check the flagged lines" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;text-transform:uppercase;white-space:nowrap;">Check pricing</span>';
   }
+  // W3-E: reconciler hard-verdict badge (read-only; absent story renders nothing).
+  html += makesafeStoryBadge(j);
   html += '<span class="ms-age-pill ' + ageClass + '">'
     + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')
     + escapeHtml(String(ageTxt)) + '</span>';

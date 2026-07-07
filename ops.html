@@ -1476,6 +1476,7 @@
 
     /* ── Identity: suburb + builder ── */
     .ms-card-v2 .ms-suburb { font-size: 12px; font-weight: 800; color: var(--sw-dark); margin-top: 3px; letter-spacing: -0.1px; line-height: 1.15; }
+    .ms-card-v2 .ms-addr { font-size: 9px; color: var(--sw-mid); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* M3b U5: full site address */
     .ms-card-v2 .ms-builder { font-size: 9px; color: var(--sw-mid); font-weight: 600; margin-top: 0; }
 
     /* ── Inline job-number row (condensed): builder ref + our # on a single
@@ -9309,7 +9310,9 @@ function renderMakesafeKanban(container, columns) {
     new: 'New',
     allocated: 'Allocated',
     trade_report_in: 'Trade Report In',
-    report_ready: 'Report Ready',
+    // M3b U5 (D7/G2, Marnin 2026-07-07): this lane means "completion docs
+    // drafted, ready to review/send" — NOT "trade reported". Renamed.
+    report_ready: 'Docs Ready',
     completed: 'Completed This Week',
     archive: 'Archive',
   };
@@ -9988,8 +9991,8 @@ function getMakesafeAssignmentDateDMY(j) {
 }
 function getMakesafeReportLabel(j, status) {
   var sub = getMakesafeSubstatus(j);
-  if (sub === 'admin_to_send_report' || status === 'report_ready') return { label: 'Report ready', color: '#9B59B6' };
-  if (sub === 'ready_to_invoice') return { label: 'Report ready', color: '#9B59B6' };
+  if (sub === 'admin_to_send_report' || status === 'report_ready') return { label: 'Docs ready', color: '#9B59B6' }; // M3b U5 (G2)
+  if (sub === 'ready_to_invoice') return { label: 'Docs ready', color: '#9B59B6' }; // M3b U5 (G2)
   if (sub === 'complete' || status === 'completed' || status === 'archive') return { label: 'Report processed', color: '#7F8C8D' };
   if (sub === 'waiting_on_trade_report' || status === 'allocated') return { label: 'Report needed', color: '#F39C12' };
   return { label: 'No report yet', color: '#8FA4B2' };
@@ -10160,7 +10163,7 @@ function renderMakesafeStatusIcons(j, status) {
   return html;
 }
 function makesafeUiStageLabel(stage) {
-  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Report Ready', completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
+  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
 }
 async function moveMakesafeUiStage(jobId, stage) {
   // MONEY-SAFETY: a drag into the two report columns must move the SUBSTATUS only,
@@ -10218,6 +10221,22 @@ function makesafeResumeChip(resumeAction, packStatus) {
     return { label: 'Blocked', bg: '#991B1B', title: 'Pack send failed — needs ops to reset before it can be sent.' };
   }
   return map.send;
+}
+
+// M3b U5 (D7) · what the TRADE app's Board shows for this job — the shared
+// stage language (New / Allocated / Trade Report In / Docs Ready). Derived
+// CLIENT-SIDE from fields already on the card's payload: the backend stage
+// verdict (board_stage/makesafe_stage) first, then substatus, then crew
+// presence. Display-only; completed/archived cards show no chip.
+function makesafeTradeStageLabel(j, status) {
+  j = j || {};
+  var stage = String(j.board_stage || j.makesafe_stage || status || '').toLowerCase();
+  if (stage === 'completed' || stage === 'archive') return '';
+  var sub = getMakesafeSubstatus(j);
+  if (stage === 'report_ready' || sub === 'ready_to_invoice') return 'Docs Ready';
+  if (stage === 'trade_report_in' || sub === 'admin_to_send_report') return 'Trade Report In';
+  if (getMakesafeCrewLabel(j)) return 'Allocated';
+  return 'New';
 }
 
 // OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
@@ -10286,6 +10305,10 @@ function renderMakesafeCard(j, status) {
 
   // identity
   html += '<div class="ms-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';
+  // M3b U5 (D7): full site address near the suburb (was suburb-only). Defensive —
+  // absent field renders nothing.
+  var msAddr = String(j.site_address || '').trim();
+  if (msAddr && msAddr !== suburb) html += '<div class="ms-addr">' + escapeHtml(msAddr) + '</div>';
   if (builder) html += '<div class="ms-builder">' + escapeHtml(String(builder)) + '</div>';
 
   // inline job-number row. Builder ref = external_ref, our internal = job_number.
@@ -10295,10 +10318,15 @@ function renderMakesafeCard(j, status) {
   html += '<span class="ms-ri ours"><span class="ms-ri-lbl">Our #</span><span class="ms-ri-val">' + escapeHtml(String(j.job_number || '—')) + '</span></span>';
   html += '</div>';
 
-  // meta: intake / client
+  // meta: intake / client / trade-stage
   html += '<div class="ms-meta">';
   html += '<span><b>Intake</b> ' + escapeHtml(String(intakeLabel)) + '</span>';
   if (j.client_name) html += '<span><b>Client</b> ' + escapeHtml(String(j.client_name)) + '</span>';
+  // M3b U5 (D7): the TRADE Board's stage for this job — shared language chip.
+  // Display-only, derived from fields ALREADY on the card's payload (backend
+  // stage verdict, substatus, crew presence). No new fetches, no logic change.
+  var tradeStage = makesafeTradeStageLabel(j, status);
+  if (tradeStage) html += '<span><b>Trade</b> ' + escapeHtml(tradeStage) + '</span>';
   html += '</div>';
 
   // loud red past-SLA banner on breach
@@ -10940,7 +10968,7 @@ function getMakesafeMapVisual(j) {
   else if (stage === 'completed') { allocationState = 'completed'; allocationLabel = 'Completed'; }
   else if (stage === 'archive') { allocationState = 'archive'; allocationLabel = 'Archive'; }
   else if (stage === 'trade_report_in') { allocationState = 'trade_report_in'; allocationLabel = 'Trade report in'; }
-  else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Report ready'; }
+  else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Docs ready'; } // M3b U5 (G2)
   else if (assigned) { allocationState = 'allocated'; allocationLabel = 'Direct allocated'; }
   else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1 || j.released_to_trades || j.ring_the_bell) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
   var colors = {
@@ -11099,7 +11127,7 @@ function renderMakesafeMapSidePanel(jobs, noLocation, filter) {
   var html = '<div style="padding:12px;">';
   html += '<div style="font-size:12px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Allocation picture</div>';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
-  [ ['Unassigned', counts.unassigned, '#E74C3C'], ['Allocated', counts.allocated, '#E67E22'], ['Report ready', counts.reportReady, '#9B59B6'], ['Completed this week', counts.completed, '#7F8C8D'] ].forEach(function(c) {
+  [ ['Unassigned', counts.unassigned, '#E74C3C'], ['Allocated', counts.allocated, '#E67E22'], ['Docs ready' /* M3b U5 (G2) */, counts.reportReady, '#9B59B6'], ['Completed this week', counts.completed, '#7F8C8D'] ].forEach(function(c) {
     html += '<div style="background:var(--sw-light);border-radius:8px;padding:8px;border-left:4px solid ' + c[2] + ';"><div style="font-size:20px;font-weight:850;color:' + c[2] + ';">' + c[1] + '</div><div style="font-size:11px;color:var(--sw-text-sec);">' + c[0] + '</div></div>';
   });
   html += '</div>';

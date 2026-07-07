@@ -8945,18 +8945,46 @@
       var sub = String(detail.substatus || '').toLowerCase().trim();
       return sub === 'admin_to_send_report' || sub === 'ready_to_invoice' || sub === 'complete';
     }
-    // Builder portal link, canonical home first (external_links.builder_portal_url).
+    function _httpUrl(v) {
+      var u = String(v == null ? '' : v).trim();
+      return /^https?:\/\//i.test(u) ? u : '';
+    }
+    // Backend shape (ship-review FIX 2): external_links is an ARRAY of
+    // {label,url,kind}; the U6 marker appends {label:'Builder Portal', url,
+    // kind:'builder_portal'}. Match by kind first, then label — never guess
+    // from an unrelated link. http(s) only.
+    function _portalFromArray(arr) {
+      if (!Array.isArray(arr)) return '';
+      var i, e, u;
+      for (i = 0; i < arr.length; i++) {
+        e = arr[i] || {};
+        if (String(e.kind || '').toLowerCase().trim() === 'builder_portal') {
+          u = _httpUrl(e.url); if (u) return u;
+        }
+      }
+      for (i = 0; i < arr.length; i++) {
+        e = arr[i] || {};
+        if (/builder\s*portal/i.test(String(e.label || ''))) {
+          u = _httpUrl(e.url); if (u) return u;
+        }
+      }
+      return '';
+    }
+    // Builder portal link: the backend ARRAY shape wins; the legacy OBJECT
+    // shape (external_links.builder_portal_url) is kept as a fallback.
     // http(s) only — anything else is dropped, never rendered.
     function portalUrl(detail, md) {
       detail = detail || {}; md = md || {};
+      var fromArr = _portalFromArray(detail.external_links) || _portalFromArray(md.external_links);
+      if (fromArr) return fromArr;
       var cands = [
-        detail.external_links && detail.external_links.builder_portal_url,
-        md.external_links && md.external_links.builder_portal_url,
+        detail.external_links && !Array.isArray(detail.external_links) && detail.external_links.builder_portal_url,
+        md.external_links && !Array.isArray(md.external_links) && md.external_links.builder_portal_url,
         detail.builder_portal_url, md.builder_portal_url
       ];
       for (var i = 0; i < cands.length; i++) {
-        var u = String(cands[i] == null ? '' : cands[i]).trim();
-        if (/^https?:\/\//i.test(u)) return u;
+        var u = _httpUrl(cands[i]);
+        if (u) return u;
       }
       return '';
     }
@@ -15897,6 +15925,32 @@
       if (k === 'decking') return 'decking';
       return 'other';
     }
+    // Job classifier mirroring the backend's _jobVertical/isMakesafeAccessJob
+    // EXACTLY (ship-review FIX 1): type normalised by stripping space/_/- ===
+    // 'makesafe' OR an SWMS- job number → makesafe (legacy imports whose
+    // jobs.type was never normalised), else the plain type map. Without the
+    // SWMS- override those legacy rows classified 'other' and were scoped off
+    // a make-safe manager's board — dropped jobs.
+    function vertOfJob(job) {
+      job = job || {};
+      var t = String(job.type == null ? '' : job.type).toLowerCase().replace(/[\s_-]+/g, '');
+      if (t === 'makesafe') return 'makesafe';
+      if (/^SWMS-/i.test(String(job.job_number || ''))) return 'makesafe';
+      return vertOf(job.type);
+    }
+    // Row classifier: a POOL row carries the backend's own vertical tag
+    // (assignment_type '<vertical>_open' — ops-api myJobs sets 'makesafe_open'
+    // on the make-safe pool incl. its legacy-import backstop, '<vertical>_open'
+    // on the generic pools), which wins over the job's possibly-unnormalised
+    // type. Assigned rows (and pool rows missing the tag) classify from the
+    // job via the SWMS-aware vertOfJob.
+    function vertOfRow(r) {
+      r = r || {};
+      var m = /^(makesafe|fencing|patio|decking)_open$/.exec(String(r.assignment_type || '').toLowerCase().trim());
+      if (m) return m[1];
+      if (r._makesafePool) return 'makesafe';
+      return vertOfJob(r.jobs || {});
+    }
     // DA-M3-3 · the ONE explicit column⇽status map (every live job_assignments
     // status token). A token absent here is UNMAPPED — recorded + surfaced, the
     // row is NOT force-placed into a wrong column (M2 DA-6 discipline).
@@ -15966,7 +16020,7 @@
       var showVerts;
       if (opts.isAdmin) {
         var seen = {};
-        assignedFinal.concat(poolFinal).forEach(function (r) { seen[vertOf((r.jobs || {}).type)] = true; });
+        assignedFinal.concat(poolFinal).forEach(function (r) { seen[vertOfRow(r)] = true; });
         showVerts = VERTICALS.filter(function (v) { return seen[v]; });
         if (seen.other) showVerts.push('other');
         if (!showVerts.length) showVerts = VERTICALS.slice();
@@ -15983,11 +16037,11 @@
         var cols = COLUMNS.map(function (c) { return { key: c.key, label: c.label, hot: c.hot, cards: [] }; });
         var colByKey = {}; cols.forEach(function (c) { colByKey[c.key] = c; });
         poolFinal.forEach(function (r) {
-          var job = r.jobs || {}; if (vertOf(job.type) !== vert) return;
+          var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
           colByKey.needs.cards.push(makeCard(job, r, vert)); placed++;
         });
         assignedFinal.forEach(function (r) {
-          var job = r.jobs || {}; if (vertOf(job.type) !== vert) return;
+          var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
           var colk = columnOf(r.status);
           if (colk == null) { unmapped[String(r.status || '').toLowerCase()] = true; unmappedDropped++; return; }
           colByKey[colk].cards.push(makeCard(job, r, vert)); placed++;
@@ -15997,8 +16051,8 @@
       });
 
       // rows whose vertical isn't shown (intentional scoping, not a silent drop)
-      assignedFinal.forEach(function (r) { if (!showSet[vertOf((r.jobs || {}).type)]) scopedOut++; });
-      poolFinal.forEach(function (r) { if (!showSet[vertOf((r.jobs || {}).type)]) scopedOut++; });
+      assignedFinal.forEach(function (r) { if (!showSet[vertOfRow(r)]) scopedOut++; });
+      poolFinal.forEach(function (r) { if (!showSet[vertOfRow(r)]) scopedOut++; });
 
       return {
         verticals: verticals,
@@ -16018,7 +16072,8 @@
 
     return {
       VERTICALS: VERTICALS, COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
-      vertOf: vertOf, vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
+      vertOf: vertOf, vertOfJob: vertOfJob, vertOfRow: vertOfRow,
+      vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
       buildBoard: buildBoard
     };
   })();

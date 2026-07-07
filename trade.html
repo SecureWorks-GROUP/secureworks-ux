@@ -2714,11 +2714,17 @@
     .ncal .ujob .uw{min-width:0}
     .ncal .ujob .usub{font-family:var(--head);font-size:17px;font-weight:600;line-height:1.1}
     .ncal .ujob .umeta{font-size:12px;color:var(--ink-2);margin-top:1px}
-    .ncal .nc-sheetfoot{flex:0 0 auto;padding:12px 20px calc(14px + env(safe-area-inset-bottom));display:flex;gap:10px;border-top:1px solid var(--line);background:var(--paper)}
-    .ncal .btn{flex:1;text-align:center;border-radius:var(--r-ctl);padding:15px 12px;font-size:15px;font-weight:700}
+    .ncal .nc-sheetfoot{flex:0 0 auto;padding:12px 20px calc(14px + env(safe-area-inset-bottom));display:flex;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);background:var(--paper)}
+    /* Sheet-foot buttons SHARE the row. The global .btn sets width:100% (built for a
+       single full-width Close); a growing button (flex:1 → basis 0) ignores it, but a
+       ghost with flex:0 0 auto + basis auto inherited width:100% → hogged the whole
+       footer and pushed every later button off-screen (M3c hotfix). Ghosts now size to
+       content (width:auto) so the primary/dark button fills the rest; flex-wrap on the
+       foot is the safety net so nothing can ever land off-viewport at phone width. */
+    .ncal .btn{flex:1;text-align:center;border-radius:var(--r-ctl);padding:15px 12px;font-size:15px;font-weight:700;white-space:nowrap}
     .ncal .btn.dark{background:var(--ink);color:var(--on)}
     .ncal .btn.primary{background:var(--orange);color:var(--on-orange)}
-    .ncal .btn.ghost{flex:0 0 auto;background:transparent;border:1.4px solid var(--line-2);color:var(--ink-2);padding:15px 18px}
+    .ncal .btn.ghost{flex:0 1 auto;width:auto;background:transparent;border:1.4px solid var(--line-2);color:var(--ink-2);padding:15px 18px}
     .ncal .nc-toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,8px);background:var(--ink);color:var(--on);font-size:13px;font-weight:650;padding:11px 16px;border-radius:13px;max-width:82%;text-align:center;opacity:0;pointer-events:none;transition:opacity 190ms,transform 190ms;z-index:210;box-shadow:0 8px 24px oklch(0.32 0.035 240 / .28)}
     .ncal .nc-toast.on{opacity:1;transform:translate(-50%,0)}
     /* filter chips */

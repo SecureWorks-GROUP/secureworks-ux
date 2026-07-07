@@ -9972,13 +9972,93 @@
 
   function renderMakesafeReportDirect(data, limited) {
     var container = document.getElementById('reportContent');
-    container.innerHTML = '<div style="padding:0 0 12px"><button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button><div id="makesafeWorkOrderDirect"></div>' +
+    container.innerHTML = '<div style="padding:0 0 12px"><button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button>' +
+      '<div id="makesafeReattendBar">' + makesafeReattendBarHTML(data) + '</div>' +
+      '<div id="makesafeWorkOrderDirect"></div>' +
       (limited ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#92400E;">Limited details loaded. You can still open the MakeSafe report; refresh if photos or saved report data are missing.</div>' : '') +
       '<div id="makesafeReportDirectContent"></div></div>';
     var woContainer = document.getElementById('makesafeWorkOrderDirect');
     if (woContainer) woContainer.innerHTML = renderMakesafeWorkOrderInline(data);
     renderJobTab_makesafeReport(data, deriveJobPhase(data), document.getElementById('makesafeReportDirectContent'));
   }
+
+  // ── Re-attendance (M-C) ──────────────────────────────────────────────────────
+  // Managers only: send an already-reported make-safe back to the trade for a
+  // second visit on the SAME work order (no new WO). Mirrors the tap-to-allocate
+  // posture — a display-only gate here; the server (reattend_makesafe) re-checks
+  // that the caller is a dispatcher or a manager of the job's vertical.
+  function _canManageMakesafeReattend() {
+    var mv = _user && _user.managed_verticals;
+    return !!(_isAdmin || (Array.isArray(mv) && mv.indexOf('makesafe') !== -1));
+  }
+  // A card is re-attendable once it has a submitted report (full form OR portal
+  // done) — i.e. there is a first visit to send back. Not offered pre-report.
+  function _makesafeIsReported(data) {
+    var report = data && data.serviceReport;
+    if (report && ['submitted', 'approved'].indexOf(String(report.status || '')) !== -1) return true;
+    var ms = (data && data.makesafe_details) || {};
+    var sub = String(ms.substatus || '');
+    if (ms.report_received_at) return true;
+    if (['admin_to_send_report', 'ready_to_invoice', 'complete'].indexOf(sub) !== -1) return true;
+    var st = String((data && data.job && data.job.status) || '');
+    return ['complete', 'completed', 'invoiced', 'paid', 'closed'].indexOf(st) !== -1;
+  }
+  function makesafeReattendBarHTML(data) {
+    var ms = (data && data.makesafe_details) || {};
+    var count = Number(ms.reattend_count || 0);
+    var jobId = (data && data.job && data.job.id) || _currentJobId || '';
+    var h = '';
+    // Visible re-attend marker (visit count) — shown to everyone, not just managers.
+    if (count > 0) {
+      h += '<div style="display:flex;align-items:center;gap:8px;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px;color:#3730A3;font-weight:600;">' +
+        '<span>&#8635; Re-attend &middot; visit ' + (count + 1) + '</span>' +
+        (ms.last_reattend_reason ? '<span style="font-weight:400;color:#4338CA;">— ' + esc(ms.last_reattend_reason) + '</span>' : '') +
+        '</div>';
+    }
+    // Manager action: send it back for another visit (only on a reported card).
+    if (_canManageMakesafeReattend() && _makesafeIsReported(data)) {
+      h += '<div id="reattendPanel" style="background:#fff;border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--sw-text);margin-bottom:6px;">Builder asked for a re-attend?</div>' +
+        '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">Send this job back to the trade for another visit on the same work order. The current report is kept.</div>' +
+        '<button id="reattendAskBtn" onclick="reattendAsk()" style="width:100%;background:var(--sw-mid);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;min-height:46px;font-family:var(--sw-font);">Send back for re-attend</button>' +
+        '<div id="reattendConfirmRow" style="display:none;margin-top:10px;">' +
+        '<input id="reattendReason" type="text" placeholder="Reason (e.g. temp fence blew down again)" style="width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;box-sizing:border-box;font-family:var(--sw-font);margin-bottom:8px;">' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="reattendCancel()" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-light);color:var(--sw-text);font-family:var(--sw-font);">Cancel</button>' +
+        '<button id="reattendYesBtn" onclick="reattendConfirm(\'' + esc(jobId) + '\')" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-orange);color:#fff;font-family:var(--sw-font);">Confirm re-attend</button>' +
+        '</div></div></div>';
+    }
+    return h;
+  }
+  window.reattendAsk = function () {
+    var row = document.getElementById('reattendConfirmRow');
+    var btn = document.getElementById('reattendAskBtn');
+    if (row) row.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+    var input = document.getElementById('reattendReason');
+    if (input) input.focus();
+  };
+  window.reattendCancel = function () {
+    var row = document.getElementById('reattendConfirmRow');
+    var btn = document.getElementById('reattendAskBtn');
+    if (row) row.style.display = 'none';
+    if (btn) btn.style.display = 'block';
+  };
+  window.reattendConfirm = function (jobId) {
+    if (!jobId) { toast('Missing job reference', true); return; }
+    var input = document.getElementById('reattendReason');
+    var reason = input ? String(input.value || '').trim() : '';
+    if (!reason) { toast('Add a short reason first', true); if (input) input.focus(); return; }
+    var yes = document.getElementById('reattendYesBtn');
+    if (yes) { yes.disabled = true; yes.textContent = 'Sending back...'; }
+    api('reattend_makesafe', null, { job_id: jobId, reason: reason }).then(function (res) {
+      toast('Sent back for re-attend — now allocated (visit ' + ((res && res.reattend_count ? res.reattend_count : 1) + 1) + ')');
+      showView('board');
+    }).catch(function (err) {
+      if (yes) { yes.disabled = false; yes.textContent = 'Confirm re-attend'; }
+      toast('Could not re-attend: ' + friendlyError(err), true);
+    });
+  };
 
   window.loadMakesafeReport = function loadMakesafeReport(jobId) {
     var container = document.getElementById('reportContent');

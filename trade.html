@@ -9022,6 +9022,9 @@
       }
       h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:8px;">' + esc(m.label) + '</div>';
       h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">The report for this job is completed on the <strong>builder\'s portal</strong> &mdash; there is no photo report in this app. Open the work order above, do the report on the portal, then mark it done here.</div>';
+      // FIX C (D10): the escalation path every make-safe report surface has —
+      // same affordance + submit path as the normal form, verbatim.
+      h += '<button onclick="submitTradeAdminNote(\'' + esc(m.jobId) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:16px;">&#128221; Note for admin</button>';
       if (m.portalUrl) {
         h += '<a href="' + esc(m.portalUrl) + '" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;background:var(--sw-dark);color:#fff;border-radius:8px;padding:13px;margin-bottom:10px;text-decoration:none;font-size:14px;font-weight:800;min-height:48px;">Open builder report portal &#8599;</a>';
       } else {
@@ -15981,6 +15984,18 @@
       return /_open$/.test(String(r.assignment_type || ''));
     }
 
+    // Terminal cards must never open the allocate write (ship-review FIX B):
+    // reassigning a completed/submitted assignment corrupts pay attribution,
+    // silently. Allocation is offered ONLY for pool rows and rows whose status
+    // maps to the live schedule-stage columns; anything else (done / attention
+    // / cancelled / unmapped) fails CLOSED.
+    function canAllocate(row) {
+      row = row || {};
+      if (isPoolRow(row)) return true;
+      var col = columnOf(row.status);
+      return col === 'scheduled' || col === 'onsite';
+    }
+
     // Status priority for de-duping multiple assignments of one job to one card.
     var PRIO = { in_progress: 6, disputed: 5, submitted: 4, verified: 4, confirmed: 3, scheduled: 3, draft: 2, complete: 2, cancelled: 0, available: 0 };
     function prio(s) { return PRIO[String(s == null ? '' : s).toLowerCase()] || 0; }
@@ -16074,7 +16089,7 @@
       VERTICALS: VERTICALS, COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
       vertOf: vertOf, vertOfJob: vertOfJob, vertOfRow: vertOfRow,
       vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
-      buildBoard: buildBoard
+      canAllocate: canAllocate, buildBoard: buildBoard
     };
   })();
   // </trade-board>
@@ -16142,9 +16157,19 @@
   window.setBoardVertical = function (v) { _boardVert = v; _renderBoard(); };
 
   function _boardCardHTML(model, cardId) {
-    // M3 U3: tapping a Board card opens the allocation sheet (pick crew -> confirm
-    // -> allocate_job). The "Open job" read affordance is preserved inside the sheet.
-    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
+    var row = model._boardRow || {};
+    if (BoardCore.canAllocate(row)) {
+      // M3 U3: tapping a live Board card opens the allocation sheet (pick crew
+      // -> confirm -> allocate_job). "Open job" is preserved inside the sheet.
+      return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
+        TradeJobCard.cardBodyHTML(model) + '</button>';
+    }
+    // FIX B: terminal cards (Done / Attention / Cancelled) open the job
+    // directly — the allocate write is not offered on a finished assignment.
+    var job = model._boardJob || row.jobs || {};
+    var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
+    var arg = row._makesafePool ? '' : (row.id || '');
+    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
       TradeJobCard.cardBodyHTML(model) + '</button>';
   }
 
@@ -16268,6 +16293,25 @@
       }
       return { mode: 'reassign', assignmentId: row.id, userId: userId };
     }
+    // After a successful NEW allocation, patch the underlying row so the
+    // board's in-memory truth matches the server EVEN IF the silent refresh
+    // never lands (offline blip — its failure is deliberately swallowed).
+    // The row stops being a pool row and carries the real assignment id, so a
+    // RE-TAP builds a REASSIGN context — never a second create + second
+    // notify (ship-review FIX A). If the server response somehow carries no
+    // assignment, the row still stops being a pool row: the worst re-tap
+    // outcome is then an honest 404 on a reassign, never a duplicate create.
+    function applyCreateResult(model, res, userId) {
+      var row = (model && model._boardRow) || null;
+      if (!row) return;
+      var a = (res && res.assignment) || {};
+      if (a.id) row.id = a.id;
+      row.status = a.status || 'scheduled';
+      row.assignment_type = a.assignment_type || 'install';
+      if (a.scheduled_date) row.scheduled_date = a.scheduled_date;
+      row.user_id = a.user_id || userId || row.user_id;
+      if (row._makesafePool) delete row._makesafePool;
+    }
     // Rebind a sheet-open context to the finally-chosen crew member. Keeps the
     // EXACT scheduledDate the confirm line showed (no midnight drift between
     // open and confirm) and keeps reassign silent (no crewName/scheduledDate).
@@ -16363,6 +16407,9 @@
         .then(function (res) {
           guard.busy = false;
           var out = { ok: true, mode: (res && res.mode) || null, deduped: !!(res && res.deduped) };
+          // FIX A: commit the server truth onto the row BEFORE any refresh,
+          // so a re-tap is correct even if the refresh never lands.
+          if (deps.applyResult) { try { deps.applyResult(res || {}); } catch (e) {} }
           if (deps.onSuccess) { try { deps.onSuccess(res || {}); } catch (e) {} }
           return out;
         })
@@ -16385,7 +16432,8 @@
     return {
       awstToday: awstToday, isPoolRow: isPoolRow, scheduledDateFor: scheduledDateFor,
       buildContext: buildContext, withUser: withUser, buildPayload: buildPayload, crewName: crewName,
-      applyOptimistic: applyOptimistic, isSuccess: isSuccess, run: run, fmtDate: fmtDate
+      applyOptimistic: applyOptimistic, applyCreateResult: applyCreateResult,
+      isSuccess: isSuccess, run: run, fmtDate: fmtDate
     };
   })();
   // </trade-allocate>
@@ -16394,6 +16442,8 @@
   window.openAllocateSheet = function (cardId) {
     var entry = _boardCardById[cardId];
     if (!entry || !_boardCache) return;
+    // FIX B defense-in-depth: terminal cards never open the allocate write.
+    if (!BoardCore.canAllocate(entry.model._boardRow || {})) return;
     var model = entry.model;
     var ctx = AllocateCore.buildContext(model, null, { now: new Date() });
     _allocSel = { model: model, cardId: cardId, ctx: ctx, userId: null, crew: null };
@@ -16470,6 +16520,7 @@
       guard: _allocGuard,
       transport: function (payload) { return api('allocate_job', null, payload); },
       applyOptimistic: function () { return AllocateCore.applyOptimistic(board, sel.model, sel.crew, ctx); },
+      applyResult: function (res) { if (ctx.mode === 'create') AllocateCore.applyCreateResult(sel.model, res, sel.userId); },
       onOptimistic: function () { if (btn) { btn.disabled = true; btn.textContent = 'Assigning...'; } _renderBoard(); },
       onSuccess: function (res) {
         closeAllocateSheet();

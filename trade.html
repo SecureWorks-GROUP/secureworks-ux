@@ -2505,6 +2505,12 @@
     .ncal .fbtn svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
     .ncal .fbadge{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;border-radius:9px;background:var(--orange);color:var(--on-orange);font-family:var(--mono);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px}
     .ncal .fbadge[hidden]{display:none}
+    /* U-T3 freshness stamp ("Updated h:mm") — sits between the view seg and the header buttons */
+    .ncal .nc-fresh{flex:0 1 auto;min-width:0;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.02em;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+    /* U-T4 tap-to-set-time editor (job sheet) */
+    .ncal .nc-edit{display:grid;gap:12px;margin-top:16px}
+    .ncal .nc-edit label{display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .nc-edit input{font-family:var(--head);font-size:16px;padding:11px 12px;border:1.4px solid var(--line-2);border-radius:12px;background:var(--card);color:var(--ink);width:100%}
     /* period bar */
     .ncal .periodbar{display:flex;align-items:center;gap:8px;padding:0 12px 8px;flex:0 0 auto}
     .ncal .periodbar[hidden]{display:none}
@@ -2622,11 +2628,11 @@
     .ncal .stag.booked{color:var(--fc-ink)}
     /* week × crew load grid */
     .ncal .wkscroll{padding:2px 12px 16px}
-    .ncal .wkhead{display:grid;grid-template-columns:92px repeat(6,1fr);gap:4px;margin-bottom:4px}
+    .ncal .wkhead{display:grid;grid-template-columns:92px repeat(7,1fr);gap:4px;margin-bottom:4px}
     .ncal .wkhead .wkd{text-align:center;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:4px 0}
     .ncal .wkhead .wkd b{display:block;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink)}
     .ncal .wkhead .wkd.today b{color:var(--orange-deep)}
-    .ncal .wkrow{display:grid;grid-template-columns:92px repeat(6,1fr);gap:4px;margin-bottom:4px}
+    .ncal .wkrow{display:grid;grid-template-columns:92px repeat(7,1fr);gap:4px;margin-bottom:4px}
     .ncal .wkcrew{display:flex;align-items:center;gap:7px;min-width:0;padding:4px 2px}
     .ncal .wkcrew .av{width:24px;height:24px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:800;color:var(--on)}
     .ncal .wkcrew .nm{font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2753,6 +2759,9 @@
     .ncal .nc-c-type{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
     .ncal .nc-c-type.ms{color:var(--ms-ink)} .ncal .nc-c-type.fc{color:var(--fc-ink)} .ncal .nc-c-type.pt{color:var(--pt-ink)} .ncal .nc-c-type.nt{color:var(--nt-ink)}
     .ncal .nc-c-stag{margin-left:auto}
+    /* U-T2 multi-day span chip ("Day 2 of 3") */
+    .ncal .nc-c-span{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);background:var(--line);border-radius:999px;padding:2px 7px;white-space:nowrap}
+    .ncal .agrow .nc-c-span{margin-left:6px;vertical-align:middle}
     .ncal .nc-c-sub{font-family:var(--head);font-size:18px;font-weight:650;line-height:1.1;letter-spacing:-.01em}
     .ncal .nc-c-ref{font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ncal .nc-c-party{font-size:13px;color:var(--ink);margin-top:4px}
@@ -3029,6 +3038,10 @@
         <button class="segbtn on" data-cv="cal">Calendar</button>
         <button class="segbtn" data-cv="run">Run Sheet</button>
       </div>
+      <span class="nc-fresh" id="ncFreshStamp" aria-live="polite"></span>
+      <button class="fbtn" id="ncRefreshBtn" aria-label="Refresh the calendar" title="Refresh">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.6 3M20 5v6h-6"/></svg>
+      </button>
       <button class="fbtn" id="ncFbtn" aria-label="Filter the calendar">
         <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
         <span class="fbadge" id="ncFbadge" hidden></span>
@@ -4192,7 +4205,7 @@
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
     if (view === 'board') renderBoardView();
-    if (view === 'schedule') { renderNewCalendar(); } // M2: Calendar tab renders the new system (old fns retained for U4 hatch)
+    if (view === 'schedule') { renderNewCalendar(); } // M2: Calendar tab renders the new system (old fns retained for U4 hatch). U-T3: renderNewCalendar's staleness gate (dirty flag / TTL) refetches on entry when the cached model is out of date.
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
@@ -11406,12 +11419,80 @@
         _userId: ev.user_id || null,
         _jobId: ev.job_id || null,    // kept for pre-M3b readers
         _rawType: ev.job_type || null,
-        _rawStatus: ev.assignment_status || null
+        _rawStatus: ev.assignment_status || null,
+        _assignmentId: ev.assignment_id || null, // U-T4: real assignment id — gates "Edit schedule"; a synthesized id can't be written back
+        _editDate: ev.scheduled_date || null     // U-T2/U-T4: the row's REAL date (span START for multi-day). The edit payload prefills this, never a per-day expanded date, so a time edit never collapses the span.
       };
     }
 
+    // U-T2 · multi-day span expansion. A calendar_events row can carry a
+    // scheduled_end DATE (a span — e.g. a 3-day fence job as ONE assignment row).
+    // eventToBlock places the block on scheduled_date only, so days 2..n were
+    // invisible on the calendar. Expand such a row into one block per calendar
+    // day: same public fields, distinct ids (base id for day 0, base|dN after),
+    // a "Day X of Y" spanLabel, and the real span-start date preserved in
+    // _editDate so a later time edit never collapses the span. Single-day rows
+    // return [blk] byte-identical (no span fields added). Arithmetic ported from
+    // the retired classic calendar's "Day X of Y" (not the code).
+    function _spanParse(s) { var p = String(s == null ? '' : s).split('-'); var dt = new Date(+p[0], +p[1] - 1, +p[2]); return isNaN(dt.getTime()) ? null : dt; }
+    function _spanIso(dt) { var m = dt.getMonth() + 1, d = dt.getDate(); return dt.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d; }
+    function _spanAddDays(s, n) { var dt = _spanParse(s); if (!dt) return s; dt.setDate(dt.getDate() + n); return _spanIso(dt); }
+    var SPAN_MAX_DAYS = 31; // defensive cap so a bad scheduled_end can't fan out unbounded
+    // Inclusive day count of a scheduled_date..scheduled_end span; 1 when absent,
+    // equal, reversed or unparseable.
+    function spanDayCount(startDate, endDate) {
+      var a = _spanParse(startDate), b = _spanParse(endDate);
+      if (!a || !b) return 1;
+      var diff = Math.round((b - a) / 86400000);
+      if (diff <= 0) return 1;
+      return Math.min(diff + 1, SPAN_MAX_DAYS);
+    }
+    function expandBlock(blk, ev) {
+      var total = spanDayCount(ev && ev.scheduled_date, ev && ev.scheduled_end);
+      if (total <= 1) return [blk]; // single-day: byte-identical to today
+      var out = [];
+      for (var n = 0; n < total; n++) {
+        var day = {};
+        for (var k in blk) if (Object.prototype.hasOwnProperty.call(blk, k)) day[k] = blk[k];
+        day.date = _spanAddDays(ev.scheduled_date, n);
+        day.id = (n === 0) ? blk.id : (blk.id + '|d' + n); // day 0 keeps the base id; later days distinct
+        day.spanLabel = 'Day ' + (n + 1) + ' of ' + total;
+        day._spanDay = n + 1;
+        day._spanTotal = total;
+        out.push(day);
+      }
+      return out;
+    }
+
+    // U-T3 · freshness predicate (pure). The calendar caches its model for the
+    // fetched window; refetch when there is no model, an explicit dirty flag
+    // (set after a Board write), or the model aged past the TTL.
+    function shouldRefetch(o) {
+      o = o || {};
+      if (!o.hasModel) return true;
+      if (o.dirty) return true;
+      var ttl = o.ttlMs != null ? o.ttlMs : 90000;
+      return (o.ageMs != null && o.ageMs > ttl);
+    }
+
+    // U-T4 · optimistic schedule patch on a CALENDAR block (the block-model twin
+    // of the board's applyEditOptimistic). Patches start/end/date and returns an
+    // undo; a real end clears _est. A date change is applied only to single-day
+    // blocks — a multi-day block's per-day date is owned by the span, so the
+    // server refetch (invalidate-on-success) reconciles it.
+    function applyBlockEdit(block, payload) {
+      block = block || {}; payload = payload || {};
+      var prev = { date: block.date, start: block.start, end: block.end, _est: block._est };
+      if (payload.start_time) block.start = parseTime(payload.start_time);
+      if (payload.end_time) { block.end = parseTime(payload.end_time); block._est = false; }
+      if (payload.scheduled_date && !(block._spanTotal > 1)) block.date = payload.scheduled_date;
+      return { undo: function () { block.date = prev.date; block.start = prev.start; block.end = prev.end; block._est = prev._est; } };
+    }
+
     // Adapt an events array → { blocks, reconciliation counts, unmappedStatuses }.
-    // One block per assignment row (no grouping) — reconciles 1:1 (no dropped rows).
+    // One block per assignment DAY: single-day rows reconcile 1:1; a multi-day
+    // row (scheduled_end > scheduled_date) fans out to one block per day (U-T2),
+    // so outputCount ≥ inputCount. No row is ever dropped.
     function adaptEvents(events) {
       var list = Array.isArray(events) ? events : [];
       var blocks = [], unmapped = {};
@@ -11421,7 +11502,8 @@
           var tok = String(list[i].assignment_status).toLowerCase().trim();
           if (tok && tok !== 'cancelled') unmapped[tok] = (unmapped[tok] || 0) + 1;
         }
-        blocks.push(b);
+        var days = expandBlock(b, list[i]); // U-T2: [b] for single-day; N blocks for a span
+        for (var e = 0; e < days.length; e++) blocks.push(days[e]);
       }
       return {
         blocks: blocks,
@@ -11496,7 +11578,9 @@
       typeLabel: typeLabel, parseTime: parseTime, deriveBlock: deriveBlock, crewHue: crewHue,
       crewColour: crewColour, initials: initials, scopeSummary: scopeSummary, desc: desc,
       eventToBlock: eventToBlock, adaptEvents: adaptEvents, filterLens: filterLens,
-      dedupeByJobDate: dedupeByJobDate, buildPeople: buildPeople
+      dedupeByJobDate: dedupeByJobDate, buildPeople: buildPeople,
+      spanDayCount: spanDayCount, expandBlock: expandBlock,      // U-T2
+      shouldRefetch: shouldRefetch, applyBlockEdit: applyBlockEdit // U-T3 / U-T4
     };
   })();
   // </calendar-adapter-core>
@@ -11565,11 +11649,11 @@
     function addDays(d, n) { var dt = parse(d); dt.setDate(dt.getDate() + n); return iso(dt); }
     function addMonths(d, n) { var dt = parse(d); dt.setMonth(dt.getMonth() + n, 1); return iso(dt); }
     function mondayOf(d) { var dt = parse(d); var off = (dt.getDay() + 6) % 7; return addDays(d, -off); }
-    function weekDays(d) { var m = mondayOf(d), out = []; for (var i = 0; i < 6; i++) out.push(addDays(m, i)); return out; }
+    function weekDays(d) { var m = mondayOf(d), out = []; for (var i = 0; i < 7; i++) out.push(addDays(m, i)); return out; } // U-T1: Mon–Sun (was Mon–Sat) so Sunday work is never hidden
     function fmtDay(d) { var dt = parse(d); return WD[dt.getDay()] + ' ' + dt.getDate() + ' ' + MO[dt.getMonth()]; }
     function fmtTime(h) { if (h == null) return ''; var hh = Math.floor(h) % 24, mm = Math.round((h - Math.floor(h)) * 60); var disp = hh % 12; if (disp === 0) disp = 12; return disp + ':' + (mm < 10 ? '0' : '') + mm; }
     function ampm(h) { if (h == null) return ''; var hh = Math.floor(h) % 24; return hh < 12 ? 'am' : 'pm'; }
-    function weekLabel(d) { var m = mondayOf(d), s = addDays(m, 5), a = parse(m), b = parse(s); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + MO[a.getMonth()]) + ' to ' + b.getDate() + ' ' + MO[b.getMonth()]; }
+    function weekLabel(d) { var m = mondayOf(d), s = addDays(m, 6), a = parse(m), b = parse(s); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + MO[a.getMonth()]) + ' to ' + b.getDate() + ' ' + MO[b.getMonth()]; } // U-T1: label spans Mon→Sun
     function monthLabel(m) { var dt = parse(m); return MOF[dt.getMonth()] + ' ' + dt.getFullYear(); }
 
     function person(M, name) { var ps = M.people || []; for (var i = 0; i < ps.length; i++) if (ps[i].name === name) return ps[i]; return { name: name || '?', initials: String(name || '?').slice(0, 2).toUpperCase(), av: 'var(--nt)' }; }
@@ -11621,6 +11705,9 @@
       var lab = s === 'onsite' ? 'On site' : (s === 'done' ? 'Done' : (j.start == null ? 'No time' : 'Booked'));
       return '<span class="nc-c-stag stag ' + s + '">' + lab + '</span>';
     }
+    // U-T2: multi-day span chip ("Day 2 of 3") — rendered on every day a span now
+    // appears (card + agenda row + job sheet) so the span reads honestly.
+    function spanChip(j) { return j.spanLabel ? '<span class="nc-c-span">' + esc(j.spanLabel) + '</span>' : ''; }
     // The one card used across every jobs list + the stacked grid views. Shows suburb,
     // type, status, ref (+desc), the party line (client/builder), time, and assigned trade.
     function jcard(M, j) {
@@ -11631,7 +11718,7 @@
       var descLine = (j.desc && j.desc !== t.label) ? ' &middot; ' + esc(j.desc) : '';
       var partyVal = p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : '<b>' + esc(p.v) + '</b>';
       return '<button class="ncard ' + t.cls + (j.status === 'done' ? ' done' : '') + (j.status === 'onsite' ? ' onsite' : '') + '" data-job="' + esc(j.id) + '">'
-        + '<div class="nc-c-top"><span class="tico ' + t.cls + '"></span><span class="nc-c-type ' + t.cls + '">' + esc(t.label) + '</span>' + stagOf(j) + '</div>'
+        + '<div class="nc-c-top"><span class="tico ' + t.cls + '"></span><span class="nc-c-type ' + t.cls + '">' + esc(t.label) + '</span>' + stagOf(j) + spanChip(j) + '</div>'
         + '<div class="nc-c-sub">' + esc(j.sub) + '</div>'
         + '<div class="nc-c-ref">' + esc(j.ref) + descLine + '</div>'
         + '<div class="nc-c-party"><span class="k">' + p.k + '</span>' + partyVal + '</div>'
@@ -11654,7 +11741,7 @@
       var p = partyLabel(j);
       var partyLine = '<div class="ag-party"><span class="k">' + p.k + '</span>' + partyValHTML(p) + '</div>';
       return '<button class="agrow" data-job="' + esc(j.id) + '">' + timeCell
-        + '<div class="w"><div class="sub">' + esc(j.sub) + '</div><div class="m"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>' + partyLine + '</div>'
+        + '<div class="w"><div class="sub">' + esc(j.sub) + spanChip(j) + '</div><div class="m"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>' + partyLine + '</div>'
         + right + '</button>';
     }
     // CP1 finding: crewed-but-untimed jobs land here, visible + deliberate.
@@ -11827,7 +11914,7 @@
     }
     function railHTML(M, st) {
       var mon = mondayOf(st.date), cells = '';
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 7; i++) { // U-T1: rail shows Mon–Sun (was Mon–Sat)
         var d = addDays(mon, i), dt = parse(d), n = assignedForDate(M, st, d).length, dots = '', shown = Math.min(n, 6), hot = n >= 4;
         for (var k = 0; k < shown; k++) dots += '<i' + (hot ? ' class="hot"' : '') + '></i>';
         cells += '<button class="dcell' + (d === st.date ? ' sel' : '') + '" data-date="' + d + '">' + (d === M.today ? '<span class="tdot"></span>' : '') + '<small>' + WD[dt.getDay()] + '</small><b>' + dt.getDate() + '</b><div class="load">' + dots + '</div></button>';
@@ -11879,7 +11966,10 @@
   // ── DOM wiring for the new calendar (U2/U3). Uses CalRender (pure) + the U1
   //    adapter fetch. Additive: the old calendar functions stay defined and the
   //    old #viewSchedule .container is hidden (not removed); U4 adds the hatch. ──
-  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, classic: false };
+  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, classic: false, dirty: false, loadedAt: 0 };
+  // U-T3 freshness: dirty = a Board write happened, refetch on next entry;
+  // loadedAt = when the model was last fetched (drives the TTL + "Updated" stamp).
+  var NC_TTL_MS = 90000;
 
   function ncBoardAllowed() { var mv = _user && _user.managed_verticals; return !!(_isAdmin || (Array.isArray(mv) && mv.length > 0)); }
   function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
@@ -11934,7 +12024,13 @@
     var cbar = document.getElementById('ncClassicBar'); if (cbar) cbar.style.display = 'none';
 
     var host = document.getElementById('ncCalhost');
-    if (!NC.model || !ncInRange(NC.date) || !ncInRange(NC.month)) {
+    // U-T3 freshness: refetch when the model is missing, an out-of-window date is
+    // requested, OR the model is stale — a Board write set NC.dirty, or it aged
+    // past the TTL (so re-entering the Schedule view pulls server truth). The
+    // predicate is the pure CalAdapterCore.shouldRefetch (smoke-tested).
+    var ageMs = NC.loadedAt ? (Date.now() - NC.loadedAt) : null;
+    var stale = CalAdapterCore.shouldRefetch({ hasModel: !!NC.model, dirty: NC.dirty, ageMs: ageMs, ttlMs: NC_TTL_MS });
+    if (stale || !ncInRange(NC.date) || !ncInRange(NC.month)) {
       if (host && !NC.model) host.innerHTML = '<div class="emptyview"><b>Loading calendar…</b></div>';
       var anchor = NC.scale === 'month' ? NC.month : NC.date;
       var from = CalRender.addDays(CalRender.mondayOf(anchor), -7);
@@ -11945,6 +12041,7 @@
         var jobBlocks = (data.blocks || []).filter(function (b) { return b._jobId; }); // org/meeting rows (no job_id) stay in the classic calendar
         NC.model = { blocks: jobBlocks, people: data.people || [], today: awstDateStr(), now: ncNowDecimal(), _unmapped: data.unmappedStatuses || [] };
         NC.fetchFrom = from; NC.fetchTo = to;
+        NC.loadedAt = Date.now(); NC.dirty = false; // model is now fresh
       } catch (e) {
         NC.loading = false;
         if (host) host.innerHTML = '<div class="emptyview"><b>Could not load the calendar</b>' + esc(e && e.message ? e.message : e) + '</div>';
@@ -11969,6 +12066,20 @@
     var pb = document.getElementById('ncPeriodbar'); if (pb) { pb.hidden = ch.periodbarHidden; var pl = document.getElementById('ncPLab'); if (!ch.periodbarHidden && pl) pl.textContent = ch.periodLabel; }
     var fbadge = document.getElementById('ncFbadge'); if (fbadge) { fbadge.hidden = ch.badgeCount === 0; fbadge.textContent = ch.badgeCount; }
     var us = document.getElementById('ncUnstrip'); if (us) { us.hidden = !ch.unstrip.visible; if (ch.unstrip.visible) us.innerHTML = ch.unstrip.html; }
+    var fs = document.getElementById('ncFreshStamp'); if (fs) fs.textContent = ncFreshText(); // U-T3: "Updated h:mm"
+  }
+
+  // U-T3 · freshness stamp text from NC.loadedAt (AWST). Blank until first load.
+  // NOTE (U-T3 d, flagged to First Mate): the contract asked for a "now-line in
+  // today's column", but the CP3 day views are stacked CARDS with no time axis to
+  // position a line on. This honest "Updated h:mm" freshness signal serves the
+  // same intent (is what I'm looking at current?) and is deliverable without a
+  // fictional axis. The literal now-line is deferred pending a render-model call.
+  function ncFreshText() {
+    if (!NC.loadedAt) return '';
+    var d = new Date(NC.loadedAt + 8 * 3600 * 1000); // AWST
+    var h = d.getUTCHours(), m = d.getUTCMinutes(), ap = h < 12 ? 'am' : 'pm', hh = h % 12; if (hh === 0) hh = 12;
+    return 'Updated ' + hh + ':' + (m < 10 ? '0' : '') + m + ap;
   }
 
   function ncRepaintForDate() { if (!ncInRange(NC.date) || !ncInRange(NC.month)) { NC.model = null; renderNewCalendar(); } else ncPaint(); }
@@ -12000,6 +12111,7 @@
       + '<div class="sh-rows">'
       + '<div class="sh-r"><span class="k">' + party.k + '</span><span class="v">' + (party.v === '—' ? 'Pending' : esc(party.v)) + '</span></div>'
       + '<div class="sh-r"><span class="k">When</span><span class="v">' + CalRender.fmtDay(j.date) + ', ' + whenTime + '</span></div>'
+      + (j.spanLabel ? '<div class="sh-r"><span class="k">Span</span><span class="v">' + esc(j.spanLabel) + ' &middot; multi-day booking</span></div>' : '')
       + '<div class="sh-r"><span class="k">Crew</span><span class="v">' + (j.crew ? esc(j.crew) : 'Without a crew') + '</span></div>'
       + '<div class="sh-r"><span class="k">Status</span><span class="v">' + stlab + '</span></div>'
       + '<div class="sh-r"><span class="k">Address</span><span class="v">' + esc(j.addr) + '</span></div>'
@@ -12007,15 +12119,84 @@
     // M3b U6 (D8): the sheet no longer dead-ends — Open job routes to the
     // real job view (make-safe jobs land on their report, like the Board).
     var foot = document.getElementById('ncSheetFoot');
+    // U-T4: "Edit schedule" appears only for blocks carrying a REAL assignment id
+    // (synthesized-id blocks can't be written back). It reuses the M3b silent
+    // update_assignment write path (no crew key, ever).
+    var editBtn = j._assignmentId ? '<button class="btn ghost" onclick="ncOpenScheduleEdit(\'' + esc(j.id) + '\')">Edit schedule</button>' : '';
     if (j.job_id) {
       var openFn = (j.type === 'makesafe') ? 'openJobReport' : 'openJob';
       foot.innerHTML = '<button class="btn ghost" onclick="ncCloseSheet()">Close</button>'
+        + editBtn
         + '<button class="btn primary" onclick="ncCloseSheet();' + openFn + '(\'' + esc(j.job_id) + '\', \'\')">Open job</button>';
     } else {
       foot.innerHTML = '<button class="btn dark" onclick="ncCloseSheet()">Close</button>';
     }
     ncOpenSheet();
   }
+
+  // U-T4 · tap-to-set-time editor. Reuses the M3b <trade-allocate> exports
+  // (buildEditPayload/editHasChanges/runEdit — silent update_assignment) and the
+  // pure CalAdapterCore.applyBlockEdit for the optimistic patch + rollback. The
+  // payload NEVER carries a crew/user key: editing time cannot move a job between
+  // people. On success the model is invalidated (U-T3) so the grid shows truth.
+  // Single source for the schedule write. Both the Board's confirmScheduleEdit
+  // and the calendar's ncSaveScheduleEdit go through here, so there is exactly
+  // ONE update_assignment call site (silent, allow-list scheduled_date/start/end).
+  function apiUpdateAssignment(payload) { return api('update_assignment', null, payload); }
+  var _ncEditGuard = { busy: false };
+  function _ncHHMM(h) { if (h == null) return ''; var hh = Math.floor(h), mm = Math.round((h - hh) * 60); if (mm === 60) { hh += 1; mm = 0; } return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm; }
+  function _ncReadEdit() {
+    return { date: (document.getElementById('ncEditDate') || {}).value || '', start: (document.getElementById('ncEditStart') || {}).value || '', end: (document.getElementById('ncEditEnd') || {}).value || '' };
+  }
+  function ncOpenScheduleEdit(id) {
+    var j = ncJobById(id); if (!j || !j._assignmentId) return;
+    var prefDate = j._editDate || j.date || '';        // REAL row date (span start for multi-day)
+    var prefStart = (j.start != null) ? _ncHHMM(j.start) : '';
+    var prefEnd = (j.end != null && !j._est) ? _ncHHMM(j.end) : ''; // never prefill an ESTIMATED end
+    var body = document.getElementById('ncSheetBody');
+    body.onclick = null;
+    body.innerHTML = '<div class="sh-kick">Edit schedule</div>'
+      + '<div class="sh-sub">' + esc(j.sub) + '</div>'
+      + '<div class="sh-ref">' + esc(j.ref) + '</div>'
+      + (j.spanLabel ? '<div class="sh-note">Multi-day booking (' + esc(j.spanLabel) + '). Saving updates the whole booking, not just this day.</div>' : '')
+      + '<div class="nc-edit">'
+      + '<label>Date<input type="date" id="ncEditDate" value="' + esc(prefDate) + '"></label>'
+      + '<label>Start<input type="time" id="ncEditStart" value="' + esc(prefStart) + '"></label>'
+      + '<label>End<input type="time" id="ncEditEnd" value="' + esc(prefEnd) + '"></label>'
+      + '</div>';
+    var foot = document.getElementById('ncSheetFoot');
+    foot.innerHTML = '<button class="btn ghost" onclick="ncOpenScheduleEditBack(\'' + esc(j.id) + '\')">Back</button>'
+      + '<button class="btn primary" id="ncEditSaveBtn">Save schedule</button>';
+    document.getElementById('ncEditSaveBtn').addEventListener('click', function () { ncSaveScheduleEdit(j); });
+    ncOpenSheet();
+  }
+  function ncOpenScheduleEditBack(id) { ncOpenJobSheet(id); }
+  function ncSaveScheduleEdit(j) {
+    if (!j || !j._assignmentId) return;
+    var payload = AllocateCore.buildEditPayload(j._assignmentId, _ncReadEdit());
+    if (!AllocateCore.editHasChanges(payload)) { ncToast('No schedule change to save'); return; }
+    var btn = document.getElementById('ncEditSaveBtn');
+    var p = AllocateCore.runEdit(payload, {
+      guard: _ncEditGuard,
+      transport: function (pl) { return apiUpdateAssignment(pl); },
+      applyOptimistic: function () { return CalAdapterCore.applyBlockEdit(j, payload); },
+      onPending: function () { if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; } ncPaint(); },
+      onSuccess: function () {
+        ncCloseSheet();
+        ncToast('Schedule updated');
+        NC.dirty = true;      // U-T3: pull server truth…
+        renderNewCalendar();  // …now (dirty ⇒ shouldRefetch true; model stays up so no blank)
+      },
+      onError: function () {
+        ncPaint();            // reflect the rollback applyBlockEdit already did
+        if (btn) { btn.disabled = false; btn.textContent = 'Save schedule'; }
+        ncToast('Could not update the schedule');
+      }
+    });
+    if (p) p.catch(function () {}); // runEdit rethrows after onError — already surfaced
+  }
+  window.ncOpenScheduleEdit = ncOpenScheduleEdit;
+  window.ncOpenScheduleEditBack = ncOpenScheduleEditBack;
 
   function ncOpenUnassignedSheet(d) {
     var M = NC.model, st = ncState();
@@ -12075,6 +12256,9 @@
     document.getElementById('ncScaleseg').addEventListener('click', function (e) { var b = e.target.closest('.segbtn'); if (!b) return; NC.scale = b.getAttribute('data-sc'); if (NC.scale === 'month' && (!NC.month || NC.month.slice(0, 7) !== NC.date.slice(0, 7))) NC.month = NC.date.slice(0, 8) + '01'; ncRepaintForDate(); });
     document.getElementById('ncAxisseg').addEventListener('click', function (e) { var b = e.target.closest('.segbtn'); if (!b) return; NC.axis = b.getAttribute('data-ax'); ncPaint(); });
     document.getElementById('ncFbtn').addEventListener('click', ncOpenFilterSheet);
+    // U-T3 · manual refresh: force a full refetch of the calendar model.
+    var _rb = document.getElementById('ncRefreshBtn');
+    if (_rb) _rb.addEventListener('click', function () { NC.model = null; NC.loadedAt = 0; NC.dirty = false; renderNewCalendar(); });
     document.getElementById('ncPPrev').addEventListener('click', function () { ncCycle(-1); });
     document.getElementById('ncPNext').addEventListener('click', function () { ncCycle(1); });
     document.getElementById('ncDayrail').addEventListener('click', function (e) {
@@ -16880,13 +17064,14 @@
     var btn = document.getElementById('allocSaveSchedBtn');
     var p = AllocateCore.runEdit(payload, {
       guard: _allocEditGuard || (_allocEditGuard = { busy: false }),
-      transport: function (pl) { return api('update_assignment', null, pl); },
+      transport: function (pl) { return apiUpdateAssignment(pl); },
       applyOptimistic: function () { return AllocateCore.applyEditOptimistic(sel.model, payload); },
       onPending: function () { if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; } _renderBoard(); },
       onSuccess: function () {
         closeAllocateSheet();
         toast('Schedule updated');
         _refreshBoardSilent();
+        NC.dirty = true; // U-T3: a Board schedule edit changes the calendar — refetch on next entry
       },
       onError: function (err) {
         _renderBoard();  // reflect the rollback
@@ -16916,6 +17101,7 @@
         closeAllocateSheet();
         toast(res && res.deduped ? 'Already assigned' : (ctx.mode === 'reassign' ? 'Crew reassigned' : 'Job allocated'));
         _refreshBoardSilent();
+        NC.dirty = true; // U-T3: a Board allocation changes the calendar — refetch on next entry
       },
       onError: function (err) {
         _renderBoard();  // reflect the rollback

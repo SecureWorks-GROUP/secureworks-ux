@@ -8909,11 +8909,203 @@
   };
 
   // ── Make-Safe Report Tab ──
+  // ══════════════════════════════════════════════════════════════════════
+  // M3 U6 (Amendment A2) — REPORT-DONE CORE. Report-type make-safes
+  // (roof_report / assessment_report_quote) produce their report on the
+  // BUILDER's portal — the in-app 5-photo report form does not fit them.
+  // This module is PURE + self-contained (no DOM/global/network): detection,
+  // the exact {job_id} payload, the done-state view model, the panel HTML,
+  // and the guarded run orchestration all live INSIDE the sentinel so the
+  // CP2 smoke extracts and tests the REAL shipped glue (M2 lesson).
+  // Detection is DISPLAY-only — the server re-checks report_type
+  // authoritatively in mark_makesafe_portal_report_done.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-reportdone>
+  var ReportDoneCore = (function () {
+    'use strict';
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    var REPORT_FAMILIES = { roof_report: 'Roof Report', assessment_report_quote: 'Assessment / Quote Report' };
+    // Same family fallback chain getTradeMakesafeTypeLabel reads (job -> detail -> metadata).
+    function familyOf(job, detail) {
+      job = job || {}; detail = detail || job.makesafe_details || {}; var md = job.metadata || {};
+      return String(job.makesafe_job_family || job.makesafeJobFamily ||
+        detail.makesafe_job_family || detail.makesafeJobFamily ||
+        md.makesafe_job_family || md.makesafeJobFamily || '').toLowerCase().trim();
+    }
+    function isReportType(job, detail) {
+      return Object.prototype.hasOwnProperty.call(REPORT_FAMILIES, familyOf(job, detail));
+    }
+    function familyLabel(job, detail) { return REPORT_FAMILIES[familyOf(job, detail)] || 'Report'; }
+    // The trade's portal step is already marked done (the B4 marker writes
+    // report_on_portal + report_received_at + substatus admin_to_send_report).
+    function isMarkedDone(detail) {
+      detail = detail || {};
+      if (detail.report_on_portal === true) return true;
+      if (String(detail.report_received_at || '').trim()) return true;
+      var sub = String(detail.substatus || '').toLowerCase().trim();
+      return sub === 'admin_to_send_report' || sub === 'ready_to_invoice' || sub === 'complete';
+    }
+    // Builder portal link, canonical home first (external_links.builder_portal_url).
+    // http(s) only — anything else is dropped, never rendered.
+    function portalUrl(detail, md) {
+      detail = detail || {}; md = md || {};
+      var cands = [
+        detail.external_links && detail.external_links.builder_portal_url,
+        md.external_links && md.external_links.builder_portal_url,
+        detail.builder_portal_url, md.builder_portal_url
+      ];
+      for (var i = 0; i < cands.length; i++) {
+        var u = String(cands[i] == null ? '' : cands[i]).trim();
+        if (/^https?:\/\//i.test(u)) return u;
+      }
+      return '';
+    }
+    // data (trade_job_detail / cached fallback shape) -> the panel view model.
+    function buildViewModel(data) {
+      data = data || {}; var job = data.job || {};
+      var detail = data.makesafe_details || job.makesafe_details || {};
+      return {
+        jobId: String(job.id || ''),
+        label: familyLabel(job, detail),
+        done: isMarkedDone(detail),
+        portalUrl: portalUrl(detail, job.metadata || {})
+      };
+    }
+    // The EXACT mark_makesafe_portal_report_done payload — job_id, nothing else.
+    function buildPayload(jobId) { return { job_id: jobId }; }
+    function isSuccess(res) { res = res || {}; return res.ok === true || res.success === true; }
+    // Idempotent repeat (already marked) is a SUCCESS, not an error.
+    function isAlready(res) {
+      res = res || {};
+      return !!(res.already === true || res.already_done === true || res.deduped === true || res.idempotent === true || res.mode === 'idempotent');
+    }
+    // Panel HTML (pure). Not-done: portal link + ask button + hidden explicit
+    // confirm row. Done: honest confirmation state, no button.
+    function panelHTML(m) {
+      m = m || {};
+      var h = '<div id="reportDonePanel">';
+      if (m.done) {
+        h += '<div style="background:#D4EDDA;border:1px solid #C3E6CB;border-radius:8px;padding:12px;margin-bottom:12px;">';
+        h += '<div style="font-weight:700;color:#155724;">Report completed on builder portal &#10003;</div>';
+        h += '<div style="font-size:12px;color:#155724;margin-top:4px;">Marked done &mdash; office will invoice the builder. Nothing else to do on this job\'s report.</div>';
+        h += '</div>';
+        h += '</div>';
+        return h;
+      }
+      h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:8px;">' + esc(m.label) + '</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">The report for this job is completed on the <strong>builder\'s portal</strong> &mdash; there is no photo report in this app. Open the work order above, do the report on the portal, then mark it done here.</div>';
+      if (m.portalUrl) {
+        h += '<a href="' + esc(m.portalUrl) + '" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;background:var(--sw-dark);color:#fff;border-radius:8px;padding:13px;margin-bottom:10px;text-decoration:none;font-size:14px;font-weight:800;min-height:48px;">Open builder report portal &#8599;</a>';
+      } else {
+        h += '<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:8px 10px;margin-bottom:10px;">No portal link is attached to this job &mdash; use the link in the builder\'s work order or email above.</div>';
+      }
+      h += '<button id="reportDoneAskBtn" onclick="reportDoneAsk()" style="width:100%;background:var(--sw-orange);color:#fff;border:none;padding:14px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer;min-height:50px;">Report completed on builder portal</button>';
+      h += '<div id="reportDoneConfirmRow" style="display:none;margin-top:10px;">';
+      h += '<div style="font-size:13px;color:var(--sw-dark);text-align:center;margin-bottom:8px;">Confirm: the report for this job is finished on the builder\'s portal?</div>';
+      h += '<div style="display:flex;gap:10px;">';
+      h += '<button onclick="reportDoneCancel()" style="flex:1;padding:14px;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;background:var(--sw-light);color:var(--sw-text);font-family:var(--sw-font);">Cancel</button>';
+      h += '<button id="reportDoneYesBtn" onclick="reportDoneConfirm(\'' + esc(m.jobId) + '\')" style="flex:1;padding:14px;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;background:var(--sw-orange);color:#fff;font-family:var(--sw-font);">Yes, mark done</button>';
+      h += '</div></div>';
+      h += '</div>';
+      return h;
+    }
+    // Orchestrator: double-fire guard -> exact payload -> transport ->
+    // success (incl. idempotent-already) | honest error. Same shape as
+    // AllocateCore.run; no optimistic board move here (state lives server-side,
+    // the DOM glue swaps the panel to the done state on confirmed success).
+    function run(jobId, deps) {
+      deps = deps || {};
+      var guard = deps.guard || {};
+      if (guard.busy) return null;                    // exactly-one-dispatch guard
+      guard.busy = true;
+      var payload = buildPayload(jobId);
+      if (deps.onPending) { try { deps.onPending(); } catch (e) {} }
+      return Promise.resolve()
+        .then(function () { return deps.transport(payload); })
+        .then(function (res) {
+          if (!isSuccess(res)) throw new Error((res && (res.error || res.message)) || 'Could not mark the report done');
+          guard.busy = false;
+          var out = { ok: true, already: isAlready(res) };
+          if (deps.onSuccess) { try { deps.onSuccess(res || {}); } catch (e) {} }
+          return out;
+        })
+        .catch(function (err) {
+          guard.busy = false;
+          if (deps.onError) { try { deps.onError(err); } catch (e) {} }
+          throw err;
+        });
+    }
+    return {
+      familyOf: familyOf, isReportType: isReportType, familyLabel: familyLabel,
+      isMarkedDone: isMarkedDone, portalUrl: portalUrl, buildViewModel: buildViewModel,
+      buildPayload: buildPayload, isSuccess: isSuccess, isAlready: isAlready,
+      panelHTML: panelHTML, run: run
+    };
+  })();
+  // </trade-reportdone>
+
+  // ── Report-done DOM glue (report-type make-safes only) ──
+  var _reportDoneCtx = null;    // { jobId, model } set when the panel renders
+  var _reportDoneGuard = null;  // per-render double-fire guard
+
+  window.reportDoneAsk = function () {
+    var row = document.getElementById('reportDoneConfirmRow');
+    var btn = document.getElementById('reportDoneAskBtn');
+    if (row) row.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+  };
+  window.reportDoneCancel = function () {
+    var row = document.getElementById('reportDoneConfirmRow');
+    var btn = document.getElementById('reportDoneAskBtn');
+    if (row) row.style.display = 'none';
+    if (btn) btn.style.display = 'block';
+  };
+  window.reportDoneConfirm = function (jobId) {
+    // Explicit id from the rendered panel (U4 discipline — no implicit globals).
+    if (!jobId && _reportDoneCtx) jobId = _reportDoneCtx.jobId;
+    if (!jobId) { toast('No job loaded', true); return; }
+    var yes = document.getElementById('reportDoneYesBtn');
+    var p = ReportDoneCore.run(jobId, {
+      guard: _reportDoneGuard || (_reportDoneGuard = { busy: false }),
+      transport: function (payload) { return api('mark_makesafe_portal_report_done', null, payload); },
+      onPending: function () { if (yes) { yes.disabled = true; yes.textContent = 'Marking...'; } },
+      onSuccess: function (res) {
+        // Honest confirmation state immediately, then refresh from server truth.
+        var panel = document.getElementById('reportDonePanel');
+        if (panel && _reportDoneCtx) {
+          panel.outerHTML = ReportDoneCore.panelHTML(Object.assign({}, _reportDoneCtx.model, { done: true }));
+        }
+        toast(ReportDoneCore.isAlready(res) ? 'Already marked done' : 'Marked done — office will invoice');
+        if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(jobId);
+        else refreshJobTab('ms_report');
+      },
+      onError: function (err) {
+        if (yes) { yes.disabled = false; yes.textContent = 'Yes, mark done'; }
+        toast('Could not mark done: ' + friendlyError(err), true);
+      }
+    });
+    // run() rethrows after onError (pure API) — already surfaced, swallow here.
+    if (p) p.catch(function () {});
+  };
+
   function renderJobTab_makesafeReport(data, phase, container) {
     var job = data.job;
     var report = data.serviceReport;
     var msDetails = data.makesafe_details || {};
     var h = '';
+
+    // M3 U6 (Amendment A2): report-type make-safes get the portal-done flow —
+    // the 5-photo report form below is UNTOUCHED for normal make-safes (D10).
+    // Detection is display-only; the server re-checks report_type on the write.
+    if (ReportDoneCore.isReportType(job, msDetails)) {
+      if (!container || container.id !== 'makesafeReportDirectContent') h += renderMakesafeWorkOrderInline(data);
+      var _rdModel = ReportDoneCore.buildViewModel(data);
+      _reportDoneCtx = { jobId: _rdModel.jobId, model: _rdModel };
+      _reportDoneGuard = { busy: false };
+      h += ReportDoneCore.panelHTML(_rdModel);
+      container.innerHTML = h;
+      return;
+    }
 
     function msrTodayDate() {
       var d = new Date();

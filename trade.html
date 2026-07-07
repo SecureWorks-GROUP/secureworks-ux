@@ -2838,6 +2838,28 @@
     .tjb-note{font-size:12px;color:var(--sw-text-sec);margin:-2px 0 10px}
     .tjb-warn{font-size:12px;color:#B45309;background:#FEF3C7;border-radius:8px;padding:8px 10px;margin:6px 0}
     .tjb-manageronly{text-align:center;padding:40px 20px;color:var(--sw-text-sec);font-size:14px}
+    /* M3 U3 — allocation sheet: tap a board card -> pick crew -> confirm -> allocate_job */
+    .alloc-overlay{position:fixed;inset:0;z-index:560;background:rgba(0,0,0,0.5);display:none;align-items:flex-end;justify-content:center}
+    .alloc-overlay.active{display:flex}
+    .alloc-sheet{background:var(--sw-card);border-radius:16px 16px 0 0;width:100%;max-width:480px;padding:18px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:82vh;overflow-y:auto;font-family:var(--sw-font)}
+    .alloc-head{margin-bottom:12px}
+    .alloc-head .at{font-size:17px;font-weight:700;color:var(--sw-dark)}
+    .alloc-head .as{font-size:13px;color:var(--sw-text-sec);margin-top:2px}
+    .alloc-head .ameta{font-family:var(--sw-mono);font-size:11px;letter-spacing:.05em;color:var(--sw-mid);margin-top:4px}
+    .alloc-openjob{margin-top:8px;font-size:12px;font-weight:600;color:var(--sw-mid);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-family:inherit}
+    .alloc-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sw-text-sec);margin:6px 0 8px}
+    .alloc-crew{display:block;width:100%;padding:13px 14px;margin-bottom:8px;background:var(--sw-light);border:2px solid transparent;border-radius:10px;font-size:15px;font-weight:600;color:var(--sw-text);cursor:pointer;text-align:left;font-family:var(--sw-font)}
+    .alloc-crew .role{display:block;font-size:11px;font-weight:500;color:var(--sw-text-sec);text-transform:capitalize;margin-top:1px}
+    .alloc-crew.sel{border-color:var(--sw-orange);background:#FFF8F0}
+    .alloc-crew.cur{opacity:.55}
+    .alloc-empty{font-size:13px;color:var(--sw-text-sec);padding:10px 4px}
+    .alloc-confirm{margin-top:8px}
+    .alloc-confirm .cline{font-size:13px;color:var(--sw-dark);text-align:center;margin-bottom:10px;min-height:18px}
+    .alloc-actions{display:flex;gap:10px}
+    .alloc-actions button{flex:1;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--sw-font)}
+    .alloc-cancel{background:var(--sw-light);color:var(--sw-text)}
+    .alloc-ok{background:var(--sw-orange);color:#fff}
+    .alloc-ok:disabled{opacity:.45}
   </style>
 </head>
 <body>
@@ -3200,6 +3222,22 @@
     <div class="issue-actions">
       <button class="issue-btn-cancel" onclick="closeIssueOverlay()">Cancel</button>
       <button class="issue-btn-submit" id="issueSubmitBtn" onclick="submitIssue()" disabled>Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- M3 U3 — Allocation sheet (manager Board: tap a job -> pick crew -> confirm -> allocate_job) -->
+<div class="alloc-overlay" id="allocOverlay" onclick="if(event.target===this)closeAllocateSheet()">
+  <div class="alloc-sheet">
+    <div class="alloc-head" id="allocHead"></div>
+    <div class="alloc-label">Assign to crew</div>
+    <div id="allocRoster"></div>
+    <div class="alloc-confirm">
+      <div class="cline" id="allocConfirmLine"></div>
+      <div class="alloc-actions">
+        <button class="alloc-cancel" onclick="closeAllocateSheet()">Cancel</button>
+        <button class="alloc-ok" id="allocConfirmBtn" onclick="confirmAllocate()" disabled>Confirm</button>
+      </div>
     </div>
   </div>
 </div>
@@ -10694,10 +10732,11 @@
   };
 
   window.activityQuickIssue = function() {
+    // U4 (M3): pass the job id EXPLICITLY — no _currentJobId global mutation
+    // (which could silently repoint clock state / job-detail context).
     var targetJob = _findCurrentJob();
-    if (!targetJob) { toast('No active job to report issue on', true); return; }
-    _currentJobId = targetJob.id;
-    openIssueOverlay();
+    if (!targetJob || !targetJob.id) { toast('No active job to report issue on', true); return; }
+    openIssueOverlay(targetJob.id);
   };
 
   // Find current clocked-on job, or most recent today's job
@@ -15798,6 +15837,10 @@
   // (that is U3 / CP2+). The old M1 placeholder is replaced.
   var _boardCache = null;   // { board, roster } cached across vertical switches
   var _boardVert = null;    // active vertical key
+  var _boardCardById = {};  // cardId -> { model, vertical }; rebuilt each _renderBoard (the tap-target registry)
+  var _boardCardSeq = 0;
+  var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
+  var _allocGuard = null;   // per-open double-fire guard { busy }
 
   function _boardManagerVerticals() {
     return (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
@@ -15851,12 +15894,10 @@
 
   window.setBoardVertical = function (v) { _boardVert = v; _renderBoard(); };
 
-  function _boardCardHTML(model) {
-    var row = model._boardRow || {};
-    var job = model._boardJob || row.jobs || {};
-    var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
-    var arg = row._makesafePool ? '' : (row.id || '');
-    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
+  function _boardCardHTML(model, cardId) {
+    // M3 U3: tapping a Board card opens the allocation sheet (pick crew -> confirm
+    // -> allocate_job). The "Open job" read affordance is preserved inside the sheet.
+    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
       TradeJobCard.cardBodyHTML(model) + '</button>';
   }
 
@@ -15864,6 +15905,7 @@
     var container = document.getElementById('boardContent');
     if (!container || !_boardCache) return;
     var board = _boardCache.board, roster = _boardCache.roster || [];
+    _boardCardById = {}; _boardCardSeq = 0;   // rebuild the tap-target registry each render
     if (!board.verticals.length) {
       container.innerHTML = '<div class="empty-state"><p>No jobs on your board yet</p>' +
         '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">Jobs appear here once they exist in your vertical(s).</div></div>';
@@ -15906,17 +15948,320 @@
       html += '<div class="tjb-col"><div class="tjb-colhead' + (c.hot ? ' hot' : '') + '"><b>' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
       html += '<div class="tjb-colcards">';
       if (c.cards.length) {
-        c.cards.forEach(function (m) { html += _boardCardHTML(m); });
+        c.cards.forEach(function (m) {
+          var cid = 'bc' + (_boardCardSeq++);
+          _boardCardById[cid] = { model: m, vertical: active.vertical };
+          html += _boardCardHTML(m, cid);
+        });
       } else {
         html += '<div class="tjb-empty">Nothing here.</div>';
       }
       html += '</div></div>';
     });
     html += '</div>';
-    html += '<div class="tjb-note" style="text-align:center;margin-top:6px">Read-only board. Tap a job to open it. Allocation arrives next.</div>';
+    html += '<div class="tjb-note" style="text-align:center;margin-top:6px">Tap a job to allocate it to a crew member.</div>';
     html += '</div>';
     container.innerHTML = html;
     if (weatherData) renderWeatherBadges();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // M3 U3 — ALLOCATE CORE (the first LIVE write path: allocate_job).
+  // PURE + self-contained (no DOM/global/network). The CP2 fetch-intercept
+  // smoke extracts the block between the sentinels, evals the REAL shipped
+  // code, and proves the EXACT payload, the scheduledDate default, the
+  // optimistic apply/rollback GLUE, the success/error branches, idempotent-as-
+  // success, and the double-fire guard — all with fetch fully stubbed (zero
+  // network). Lesson from M2: the STATE/PARAM glue lives INSIDE the sentinel
+  // (buildContext/buildPayload/applyOptimistic/run), not just pure leaf fns.
+  //
+  //   NEW allocation (pool card):  { jobId, userId, scheduledDate } (+ optionals)
+  //   REASSIGNMENT (assigned card): { assignmentId, userId } — SILENT path,
+  //     crewName/scheduledDate DELIBERATELY OMITTED (including them = GHL/notify).
+  // Success: { ok:true, mode:'create'|'reassign'|'idempotent', deduped? }.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-allocate>
+  var AllocateCore = (function () {
+    'use strict';
+    // AWST (UTC+8) today as YYYY-MM-DD — mirrors the app's awstDateStr so the
+    // default scheduledDate matches every other date the app computes.
+    function awstToday(now) {
+      var base = (now instanceof Date) ? now : (now != null ? new Date(now) : new Date());
+      return new Date(base.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    }
+    // A synthetic open-pool row (unassigned job needing allocation) — same test
+    // BoardCore uses, duplicated here so this module extracts standalone.
+    function isPoolRow(r) {
+      r = r || {};
+      if (r._makesafePool) return true;
+      if (String(r.status || '').toLowerCase() === 'available') return true;
+      return /_open$/.test(String(r.assignment_type || ''));
+    }
+    var DATE_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+    // Default scheduledDate for a NEW allocation: a preferred/requested date the
+    // pool row/job already carries, else AWST today. (§U3: date-EDITING is M3b —
+    // this only DEFAULTS the date and shows it honestly in the confirm step.)
+    function scheduledDateFor(row, now) {
+      row = row || {}; var job = row.jobs || {};
+      var cands = [row.scheduled_date, row.requested_date, row.preferred_date,
+                   job.scheduled_date, job.requested_date, job.preferred_date, job.install_date];
+      for (var i = 0; i < cands.length; i++) {
+        var m = String(cands[i] == null ? '' : cands[i]).match(DATE_RE);
+        if (m) return m[1] + '-' + m[2] + '-' + m[3];
+      }
+      return awstToday(now);
+    }
+    // model + chosen userId -> the allocation context (mode + ids + date).
+    function buildContext(model, userId, opts) {
+      opts = opts || {};
+      var row = (model && model._boardRow) || {};
+      var job = (model && model._boardJob) || row.jobs || {};
+      if (isPoolRow(row)) {
+        return { mode: 'create', jobId: job.id, userId: userId, scheduledDate: scheduledDateFor(row, opts.now) };
+      }
+      return { mode: 'reassign', assignmentId: row.id, userId: userId };
+    }
+    // Rebind a sheet-open context to the finally-chosen crew member. Keeps the
+    // EXACT scheduledDate the confirm line showed (no midnight drift between
+    // open and confirm) and keeps reassign silent (no crewName/scheduledDate).
+    function withUser(ctx, userId) {
+      ctx = ctx || {};
+      if (ctx.mode === 'reassign') return { mode: 'reassign', assignmentId: ctx.assignmentId, userId: userId };
+      return { mode: 'create', jobId: ctx.jobId, userId: userId, scheduledDate: ctx.scheduledDate };
+    }
+    // ctx -> the EXACT allocate_job payload. Nothing extra; reassign omits
+    // crewName/scheduledDate (the silent-path proof the smoke asserts).
+    function buildPayload(ctx) {
+      ctx = ctx || {};
+      if (ctx.mode === 'reassign') {
+        return { assignmentId: ctx.assignmentId, userId: ctx.userId };
+      }
+      var p = { jobId: ctx.jobId, userId: ctx.userId, scheduledDate: ctx.scheduledDate };
+      ['startTime', 'endTime', 'assignmentType', 'crewName', 'role', 'notes'].forEach(function (k) {
+        if (ctx[k] != null && ctx[k] !== '') p[k] = ctx[k];
+      });
+      return p;
+    }
+    function crewName(crew) {
+      if (!crew) return 'Assigned';
+      return String(crew.name || crew.crew_name || crew.email || 'Assigned');
+    }
+    function _locate(board, model) {
+      var vs = (board && board.verticals) || [];
+      for (var vi = 0; vi < vs.length; vi++) {
+        var cols = vs[vi].columns || [];
+        for (var ci = 0; ci < cols.length; ci++) {
+          var idx = cols[ci].cards.indexOf(model);
+          if (idx >= 0) return { vert: vs[vi], col: cols[ci], cardIdx: idx };
+        }
+      }
+      return null;
+    }
+    function _colByKey(vert, key) {
+      var cols = (vert && vert.columns) || [];
+      for (var i = 0; i < cols.length; i++) { if (cols[i].key === key) return cols[i]; }
+      return null;
+    }
+    // OPTIMISTIC GLUE over the in-memory board model. Returns an undo token so a
+    // failed write rolls the EXACT change back. create: pool card needs->scheduled
+    // + crew label. reassign: crew label change in place.
+    function applyOptimistic(board, model, crew, ctx) {
+      var loc = _locate(board, model);
+      if (!loc) return { undo: function () {} };
+      var name = crewName(crew);
+      var prev = {
+        crew: model.crew, crewEmptyLabel: model.crewEmptyLabel,
+        statusToken: model.statusToken, statusLabel: model.statusLabel,
+        fromCol: loc.col, fromIdx: loc.cardIdx
+      };
+      if (ctx && ctx.mode === 'create') {
+        var target = _colByKey(loc.vert, 'scheduled') || loc.col;
+        loc.col.cards.splice(loc.cardIdx, 1);
+        model.crew = name; model.crewEmptyLabel = '';
+        model.statusToken = 'booked'; model.statusLabel = 'Scheduled';
+        target.cards.push(model);
+        return { undo: function () {
+          var i = target.cards.indexOf(model); if (i >= 0) target.cards.splice(i, 1);
+          model.crew = prev.crew; model.crewEmptyLabel = prev.crewEmptyLabel;
+          model.statusToken = prev.statusToken; model.statusLabel = prev.statusLabel;
+          prev.fromCol.cards.splice(Math.min(prev.fromIdx, prev.fromCol.cards.length), 0, model);
+        } };
+      }
+      model.crew = name;
+      return { undo: function () { model.crew = prev.crew; } };
+    }
+    function isSuccess(res) {
+      res = res || {};
+      return res.ok === true || res.mode === 'create' || res.mode === 'reassign' || res.mode === 'idempotent';
+    }
+    // Orchestrator: double-fire guard -> build payload -> optimistic apply ->
+    // transport -> success(refresh) | error(rollback + honest message). Idempotent
+    // (deduped:true) is a SUCCESS. deps = { guard, transport, applyOptimistic,
+    // onOptimistic, onSuccess, onError }.
+    function run(ctx, deps) {
+      ctx = ctx || {}; deps = deps || {};
+      var guard = deps.guard || {};
+      if (guard.busy) return null;                    // exactly-one-dispatch guard
+      guard.busy = true;
+      var payload = buildPayload(ctx);
+      var undo = null;
+      try { if (deps.applyOptimistic) undo = deps.applyOptimistic(); } catch (e) { undo = null; }
+      if (deps.onOptimistic) { try { deps.onOptimistic(); } catch (e) {} }
+      return Promise.resolve()
+        .then(function () { return deps.transport(payload); })
+        .then(function (res) {
+          if (!isSuccess(res)) throw new Error((res && (res.error || res.message)) || 'Allocation failed');
+          return res;
+        })
+        .then(function (res) {
+          guard.busy = false;
+          var out = { ok: true, mode: (res && res.mode) || null, deduped: !!(res && res.deduped) };
+          if (deps.onSuccess) { try { deps.onSuccess(res || {}); } catch (e) {} }
+          return out;
+        })
+        .catch(function (err) {
+          guard.busy = false;
+          if (undo && typeof undo.undo === 'function') { try { undo.undo(); } catch (e) {} }
+          if (deps.onError) { try { deps.onError(err); } catch (e) {} }
+          throw err;
+        });
+    }
+    var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function fmtDate(iso) {
+      var m = String(iso == null ? '' : iso).match(DATE_RE);
+      if (!m) return String(iso || '');
+      var d = new Date(+m[1], +m[2] - 1, +m[3]);
+      if (isNaN(d.getTime())) return String(iso || '');
+      return WD[d.getDay()] + ' ' + d.getDate() + ' ' + MO[d.getMonth()];
+    }
+    return {
+      awstToday: awstToday, isPoolRow: isPoolRow, scheduledDateFor: scheduledDateFor,
+      buildContext: buildContext, withUser: withUser, buildPayload: buildPayload, crewName: crewName,
+      applyOptimistic: applyOptimistic, isSuccess: isSuccess, run: run, fmtDate: fmtDate
+    };
+  })();
+  // </trade-allocate>
+
+  // ── Allocation sheet DOM glue (tap a Board card -> pick crew -> confirm) ──
+  window.openAllocateSheet = function (cardId) {
+    var entry = _boardCardById[cardId];
+    if (!entry || !_boardCache) return;
+    var model = entry.model;
+    var ctx = AllocateCore.buildContext(model, null, { now: new Date() });
+    _allocSel = { model: model, cardId: cardId, ctx: ctx, userId: null, crew: null };
+    _allocGuard = { busy: false };
+
+    var row = model._boardRow || {};
+    var job = model._boardJob || row.jobs || {};
+    var reassign = ctx.mode === 'reassign';
+    var ref = model.ref || '';
+    var curCrew = model.crew || '';
+    var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
+    var openArg = row._makesafePool ? '' : (row.id || '');
+    document.getElementById('allocHead').innerHTML =
+      '<div class="at">' + esc(model.sub || 'Site TBC') + '</div>' +
+      '<div class="as">' + esc(model.typeLabel || 'Job') + (ref ? ' &middot; ' + esc(ref) : '') + '</div>' +
+      '<div class="ameta">' + (reassign
+        ? ('Reassign' + (curCrew ? ' &middot; now ' + esc(curCrew) : ''))
+        : ('New allocation &middot; ' + esc(AllocateCore.fmtDate(ctx.scheduledDate)))) + '</div>' +
+      '<button class="alloc-openjob" onclick="closeAllocateSheet();' + openAction + '(\'' + esc(job.id || '') + '\',\'' + esc(openArg) + '\')">Open job details</button>';
+
+    var roster = (_boardCache.roster || []).filter(function (u) {
+      return u && u.id && u.name && ['crew', 'lead_installer', 'admin', 'ops_manager'].indexOf(u.role) >= 0;
+    });
+    var mount = document.getElementById('allocRoster');
+    if (!roster.length) {
+      mount.innerHTML = '<div class="alloc-empty">No crew found on the roster.</div>';
+    } else {
+      var curId = row.user_id || (row.user && row.user.id) || null;
+      mount.innerHTML = roster.map(function (u) {
+        var isCur = reassign && curId && String(u.id) === String(curId);
+        return '<button class="alloc-crew' + (isCur ? ' cur' : '') + '" onclick="selectAllocCrew(this,\'' + esc(u.id) + '\')">' +
+          esc(u.name) + (isCur ? ' (current)' : '') +
+          '<span class="role">' + esc(String(u.role || '').replace(/_/g, ' ')) + '</span></button>';
+      }).join('');
+    }
+    document.getElementById('allocConfirmLine').textContent = '';
+    var btn = document.getElementById('allocConfirmBtn');
+    btn.disabled = true; btn.textContent = 'Confirm';
+    document.getElementById('allocOverlay').classList.add('active');
+  };
+
+  window.selectAllocCrew = function (btn, userId) {
+    if (!_allocSel || !_boardCache) return;
+    var roster = _boardCache.roster || [];
+    var crew = null;
+    for (var i = 0; i < roster.length; i++) { if (String(roster[i].id) === String(userId)) { crew = roster[i]; break; } }
+    _allocSel.userId = userId; _allocSel.crew = crew;
+    var opts = document.querySelectorAll('#allocRoster .alloc-crew');
+    for (var j = 0; j < opts.length; j++) opts[j].classList.remove('sel');
+    btn.classList.add('sel');
+    var model = _allocSel.model, ctx = _allocSel.ctx;
+    var name = crew ? (crew.name || 'crew') : 'crew';
+    var what = model.ref || model.sub || 'job';
+    document.getElementById('allocConfirmLine').textContent = (ctx.mode === 'reassign')
+      ? ('Reassign ' + what + ' to ' + name)
+      : ('Assign ' + what + ' to ' + name + ' · ' + AllocateCore.fmtDate(ctx.scheduledDate));
+    document.getElementById('allocConfirmBtn').disabled = false;
+  };
+
+  window.closeAllocateSheet = function () {
+    var ov = document.getElementById('allocOverlay');
+    if (ov) ov.classList.remove('active');
+    _allocSel = null; _allocGuard = null;
+  };
+
+  window.confirmAllocate = function () {
+    if (!_allocSel || !_allocSel.userId || !_boardCache) return;
+    var sel = _allocSel, board = _boardCache.board;
+    // Rebind inside the sentinel (withUser): same scheduledDate the confirm line
+    // showed, reassign stays silent (no crewName/scheduledDate).
+    var ctx = AllocateCore.withUser(sel.ctx, sel.userId);
+    var btn = document.getElementById('allocConfirmBtn');
+    var p = AllocateCore.run(ctx, {
+      guard: _allocGuard,
+      transport: function (payload) { return api('allocate_job', null, payload); },
+      applyOptimistic: function () { return AllocateCore.applyOptimistic(board, sel.model, sel.crew, ctx); },
+      onOptimistic: function () { if (btn) { btn.disabled = true; btn.textContent = 'Assigning...'; } _renderBoard(); },
+      onSuccess: function (res) {
+        closeAllocateSheet();
+        toast(res && res.deduped ? 'Already assigned' : (ctx.mode === 'reassign' ? 'Crew reassigned' : 'Job allocated'));
+        _refreshBoardSilent();
+      },
+      onError: function (err) {
+        _renderBoard();  // reflect the rollback
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+        toast('Could not allocate: ' + friendlyError(err), true);
+      }
+    });
+    // run() rethrows after onError (pure API) — onError already surfaced it, so
+    // swallow here to avoid an unhandled rejection. null = double-tap no-op.
+    if (p) p.catch(function () {});
+  };
+
+  // Silent board refresh (server truth) after a write — no spinner swap; keeps the
+  // optimistic view if the refresh itself fails.
+  function _refreshBoardSilent() {
+    Promise.all([
+      api('my_jobs', { mode: 'all' }),
+      api('list_users', {}).catch(function () { return null; })
+    ]).then(function (res) {
+      var data = res[0] || {};
+      var roster = ((res[1] && (res[1].users || res[1])) || (_boardCache && _boardCache.roster) || []);
+      var board = BoardCore.buildBoard(data, {
+        verticals: _boardManagerVerticals(), isAdmin: _isAdmin,
+        makeCard: function (job, row) {
+          var mm = TradeJobCard.buildModel(job, row, { crewEmptyLabel: 'Needs crew' });
+          mm._boardRow = row; mm._boardJob = job; return mm;
+        }
+      });
+      _boardCache = { board: board, roster: roster };
+      if (!_boardVert || !board.verticals.some(function (v) { return v.vertical === _boardVert; })) {
+        _boardVert = board.verticals.length ? board.verticals[0].vertical : null;
+      }
+      _renderBoard();
+    }).catch(function () { /* keep the optimistic view on refresh failure */ });
   }
 
   function renderProfileView() {
@@ -19500,7 +19845,15 @@
 
   var _selectedIssue = null;
 
-  function openIssueOverlay() {
+  // U4 (M3): the issue overlay carries an EXPLICIT job id. Callers pass the id;
+  // absent one it falls back to the open job-detail context — but it no longer
+  // depends on a caller having mutated the _currentJob/_currentJobId globals.
+  var _issueJobId = null;
+  function openIssueOverlay(jobId) {
+    _issueJobId = jobId
+      || (_currentJob && _currentJob.job && _currentJob.job.id)
+      || _currentJobId || null;
+    if (!_issueJobId) { toast('No active job to report issue on', true); return; }
     _selectedIssue = null;
     var overlay = document.getElementById('issueOverlay');
     // Reset state
@@ -19515,6 +19868,7 @@
   window.closeIssueOverlay = function() {
     document.getElementById('issueOverlay').classList.remove('active');
     _selectedIssue = null;
+    _issueJobId = null;
   };
 
   window.selectIssue = function(btn, type) {
@@ -19535,14 +19889,16 @@
   }
 
   window.submitIssue = function() {
-    if (!_selectedIssue || !_currentJob) return;
+    // U4 (M3): submit against the EXPLICIT id the overlay was opened with —
+    // never the implicit _currentJob global (which could be a different job).
+    if (!_selectedIssue || !_issueJobId) return;
     var detail = document.getElementById('issueDetail').value.trim();
     var btn = document.getElementById('issueSubmitBtn');
     btn.disabled = true;
     btn.textContent = 'Submitting...';
 
     api('create_trade_alert', null, {
-      jobId: _currentJob.id,
+      jobId: _issueJobId,
       issueType: _selectedIssue,
       detail: detail || null
     }).then(function(res) {

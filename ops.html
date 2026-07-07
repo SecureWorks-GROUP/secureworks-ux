@@ -591,6 +591,7 @@
     .cal-summary-bar .stat { font-weight: 600; }
     .cal-summary-bar .stat-val { color: var(--sw-dark); font-family: var(--sw-font-num); }
     .cal-summary-bar .conflict-warn { color: var(--sw-red); cursor: pointer; font-weight: 700; }
+    .cal-summary-bar .cal-trunc-warn { color: #fff; background: var(--sw-red, #EF4444); border-radius: 8px; padding: 2px 8px; font-weight: 700; margin-right: 10px; }
 
     /* Swimlane layout */
     .cal-swimlane-wrap {
@@ -7019,6 +7020,7 @@ async function loadCalendar() {
     _calDeliveries = data.deliveries || [];
     _calReadiness = data.readiness || {};
     _calOrgEvents = data.orgEvents || [];
+    _calTruncated = data.truncated === true; // U-O3(e): feed hit the 500-row cap
     initCalEventFilterChips();
     renderCalendar(); // first paint — grid is visible now, before the slower enrichment calls return
 
@@ -7136,14 +7138,23 @@ var CalOpsCore = (function () {
     if (upcoming === total) return total + ' event' + (total === 1 ? '' : 's') + ' ' + scope;
     return upcoming + ' upcoming of ' + total + ' ' + scope;
   }
+  // U-O3(e): the loud banner the summary bar shows when the feed hit the 500-row
+  // cap — the FE half of the truncated flag (the silent cap is the exact thing
+  // the contract kills). Empty string when not truncated so it prepends cleanly.
+  function truncationNotice(truncated) {
+    if (!truncated) return '';
+    return '<span class="cal-trunc-warn" title="The calendar feed is capped at 500 events; some are not shown. Switch to a shorter range to see everything.">⚠ View truncated at 500 events — narrow the window</span>';
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
-    partitionCellEntries: partitionCellEntries, calCountLabel: calCountLabel
+    partitionCellEntries: partitionCellEntries, calCountLabel: calCountLabel,
+    truncationNotice: truncationNotice
   };
 })();
 // </calendar-ops-core>
 var _calShowDone = (function () { try { return localStorage.getItem('sw_cal_show_done') === '1'; } catch (e) { return false; } })();
+var _calTruncated = false; // U-O3(e): set from the feed's truncated flag; drives the summary-bar banner
 
 function getCalRange() {
   // U-O3(b): today-forward window (see CalOpsCore.calWindowRange). Back-nav still
@@ -7651,7 +7662,8 @@ function renderCalSummary(range) {
   }
   // U-O3(c): global affordance to reveal/hide completed jobs folded in the cells.
   html += '<span class="cal-done-toggle" onclick="toggleCalShowDone()">' + (_calShowDone ? 'Hide completed' : 'Show completed') + '</span>';
-  bar.innerHTML = html;
+  // U-O3(e): loud truncation banner prepended when the feed was capped at 500.
+  bar.innerHTML = CalOpsCore.truncationNotice(_calTruncated) + html;
 }
 
 function setCalViewMode(mode) {

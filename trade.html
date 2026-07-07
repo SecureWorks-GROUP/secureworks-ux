@@ -2860,6 +2860,16 @@
     .alloc-cancel{background:var(--sw-light);color:var(--sw-text)}
     .alloc-ok{background:var(--sw-orange);color:#fff}
     .alloc-ok:disabled{opacity:.45}
+    /* M3b U3 — schedule pickers in the allocation sheet */
+    .alloc-sched{display:flex;gap:8px;margin-bottom:10px}
+    .alloc-sched input{flex:1;min-width:0;padding:10px 8px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;font-family:var(--sw-font);color:var(--sw-text);background:var(--sw-card);box-sizing:border-box}
+    .alloc-sched input[type=date]{flex:1.4}
+    .alloc-savesched{display:block;width:100%;padding:12px;margin-bottom:10px;border:1.4px solid var(--sw-mid);border-radius:8px;background:var(--sw-card);color:var(--sw-mid);font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font)}
+    .alloc-savesched:disabled{opacity:.5}
+    /* M3b U4 — ops-style board card extras */
+    .tjb-age{font-family:var(--sw-mono);font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--tj-orange-deep,#C2410C);background:#FFF1E7;border-radius:6px;padding:2px 6px;flex:0 0 auto}
+    .tjb-adr{font-size:12px;color:var(--sw-text-sec);margin:2px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tjb-desc{font-size:12px;color:var(--sw-text-sec);margin:1px 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   </style>
 </head>
 <body>
@@ -3232,6 +3242,7 @@
     <div class="alloc-head" id="allocHead"></div>
     <div class="alloc-label">Assign to crew</div>
     <div id="allocRoster"></div>
+    <div id="allocSchedule"></div>
     <div class="alloc-confirm">
       <div class="cline" id="allocConfirmLine"></div>
       <div class="alloc-actions">
@@ -9209,13 +9220,21 @@
     }
 
     if (!container || container.id !== 'makesafeReportDirectContent') h += renderMakesafeWorkOrderInline(data);
-    h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:8px;">Make-Safe Report</div>';
-    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">Open the work order above, then complete the report before moving to the next MakeSafe.</div>';
-    h += '<div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#9A3412;line-height:1.4;"><strong>Quick rule:</strong> date/time, what failed, what you made safe, labour, materials and clear photos.</div>';
-    h += '<button onclick="submitTradeAdminNote(\'' + esc(job.id) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:16px;">&#128221; Note for admin</button>';
+    h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:6px;">Make-Safe Report</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.45;">Open the work order above, then complete the report before moving to the next MakeSafe.</div>';
+    h += '<div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#9A3412;line-height:1.45;"><strong>Quick rule:</strong> date/time, what failed, what you made safe, labour, materials and clear photos.</div>';
+    h += '<button onclick="submitTradeAdminNote(\'' + esc(job.id) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:4px;">&#128221; Note for admin</button>';
 
     var cl = (report && report.checklist_json) || {};
     var arrivalParts = parseArrival(cl.arrival_time);
+
+    // M3b U7 polish: section kickers group the form (Briefing grammar); every
+    // field / id / handler / gate below is byte-identical — layout only.
+    // (G4: a further Marnin-named item may slot into a section here later.)
+    function msrKick(label, first) {
+      return '<div style="font-family:var(--sw-mono);font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-text-sec);margin:' + (first ? '14px' : '20px') + ' 0 10px;padding-top:' + (first ? '0' : '14px') + ';border-top:' + (first ? 'none' : '1px solid var(--sw-border)') + ';">' + label + '</div>';
+    }
+    h += msrKick('The visit', true);
 
     // Make-safe type
     h += '<div style="margin-bottom:14px;">';
@@ -9245,6 +9264,7 @@
     h += '<div style="flex:1;"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Trades on site *</label><input id="msrTradeCount" type="number" min="1" value="' + (cl.trade_count || '2') + '" style="width:100%;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;box-sizing:border-box;"></div>';
     h += '</div>';
 
+    h += msrKick('What happened');
     var cleanDamageDescription = (cl.damage_description || '').replace(/^Make-safe type:\s*[^\n]+\nDamage:\s*/i, '');
     h += '<div style="margin-bottom:14px;"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Damage found *</label><textarea id="msrDamageDesc" rows="3" placeholder="Plain notes: what failed, where, how many panels/areas, any safety risk." style="width:100%;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;resize:vertical;font-family:var(--sw-font);box-sizing:border-box;">' + esc(cleanDamageDescription) + '</textarea></div>';
 
@@ -9264,6 +9284,7 @@
 
     h += '<div style="margin-bottom:14px;"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Work completed *</label><textarea id="msrWorkDone" rows="3" placeholder="What you did: moved/stacked fallen material, tarped, installed temp fence, made area safe." style="width:100%;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;resize:vertical;font-family:var(--sw-font);box-sizing:border-box;">' + esc(cl.work_done || '') + '</textarea></div>';
 
+    h += msrKick('Materials & notes');
     h += '<div style="margin-bottom:14px;">';
     h += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Materials / equipment used *</label>';
     h += '<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;font-size:11px;color:var(--sw-text-sec);padding:0 4px 4px;">Item</th><th style="text-align:left;font-size:11px;color:var(--sw-text-sec);padding:0 4px 4px;width:92px;">Qty</th></tr></thead><tbody>' + renderMaterialRows(cl.materials_used || []) + '</tbody></table>';
@@ -9274,6 +9295,7 @@
     h += '<div style="margin-bottom:16px;"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Extra notes</label><textarea id="msrExtraNotes" rows="2" placeholder="Anything admin needs to know: access issue, unsafe area, return visit, invoice detail, or None." style="width:100%;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;resize:vertical;font-family:var(--sw-font);box-sizing:border-box;">' + esc(extraNotes) + '</textarea></div>';
 
     // ── Photo Upload Section (single control, internally categorised) ──
+    h += msrKick('Photos');
     var allMedia = data.media || [];
     var jobPhotos = allMedia.filter(function(m) { return !m.type || m.type === 'photo'; });
     window._msrPhotoCounts = { total: jobPhotos.length };
@@ -11230,6 +11252,9 @@
   // dedupe rules. The CP1 fixture script (smoke/cp1-adapter-tests.mjs) extracts
   // this exact text and asserts against these real functions — do not duplicate
   // the logic anywhere.
+  // M3b U6 (D8): the block PUBLIC model gained `job_id` (the raw jobs.id) so
+  // the job bottom-sheet can route to the real job view via openJob/
+  // openJobReport. `_jobId` is retained for pre-M3b readers.
   // ══════════════════════════════════════════════════════════════════════
   // <calendar-adapter-core>
   var CalAdapterCore = (function () {
@@ -11373,11 +11398,13 @@
         desc: desc(ev, mt),
         client: ev.client_name || '', // homeowner (fence/patio party line). Builder is a
                                       // separate backend field not yet in the feed — see partyLabel.
+        job_id: ev.job_id || null,    // M3b U6 (D8): PUBLIC — the job sheet's
+                                      // "Open job" routes to the real job view.
         // ── adapter metadata (renderers read only the fields above) ──
         _est: blk.est,
         _crewKey: crewKey,
         _userId: ev.user_id || null,
-        _jobId: ev.job_id || null,
+        _jobId: ev.job_id || null,    // kept for pre-M3b readers
         _rawType: ev.job_type || null,
         _rawStatus: ev.assignment_status || null
       };
@@ -11977,7 +12004,16 @@
       + '<div class="sh-r"><span class="k">Status</span><span class="v">' + stlab + '</span></div>'
       + '<div class="sh-r"><span class="k">Address</span><span class="v">' + esc(j.addr) + '</span></div>'
       + '</div>';
-    document.getElementById('ncSheetFoot').innerHTML = '<button class="btn dark" onclick="ncCloseSheet()">Close</button>';
+    // M3b U6 (D8): the sheet no longer dead-ends — Open job routes to the
+    // real job view (make-safe jobs land on their report, like the Board).
+    var foot = document.getElementById('ncSheetFoot');
+    if (j.job_id) {
+      var openFn = (j.type === 'makesafe') ? 'openJobReport' : 'openJob';
+      foot.innerHTML = '<button class="btn ghost" onclick="ncCloseSheet()">Close</button>'
+        + '<button class="btn primary" onclick="ncCloseSheet();' + openFn + '(\'' + esc(j.job_id) + '\', \'\')">Open job</button>';
+    } else {
+      foot.innerHTML = '<button class="btn dark" onclick="ncCloseSheet()">Close</button>';
+    }
     ncOpenSheet();
   }
 
@@ -16044,16 +16080,42 @@
       disputed: 'attention',
       cancelled: 'cancelled'
     };
-    var COLUMNS = [
-      { key: 'needs', label: 'Needs allocation', hot: true },
+    // M3b U4 (D3): make-safe reads in ops language. The trade finishing +
+    // submitting their assignment IS the "trade report in" signal.
+    // HONESTY NOTE (contracted STOP check, 2026-07-07): the my_jobs
+    // assigned-row jobs embed carries NO makesafe_details / substatus /
+    // report facts (ops-api ASSIGNMENT_SELECT_*: id, type, status, client*,
+    // site*, notes, job_number only), so the JOB-level report-submitted fact
+    // is not derivable client-side. Trade report in therefore maps from the
+    // ASSIGNMENT facts (complete/submitted) — the contracted else-path. If
+    // the feed ever carries the substatus fact, prefer it here.
+    var MS_COLUMN_OVERRIDE = { complete: 'reportin', submitted: 'reportin' };
+    // D3 · per-family column language. Make-safe: New / Allocated / On site /
+    // Trade report in (+ Done / Attention / Cancelled). Fencing/patio/decking:
+    // field language, first column "Ready" — honest to the backend U1
+    // ready-gate (order_confirmed / schedule_install / crewless scheduled).
+    var COLUMNS_FIELD = [
+      { key: 'needs', label: 'Ready', hot: true },
       { key: 'scheduled', label: 'Scheduled', hot: false },
       { key: 'onsite', label: 'On site', hot: false },
       { key: 'done', label: 'Done', hot: false },
       { key: 'attention', label: 'Attention', hot: false },
       { key: 'cancelled', label: 'Cancelled', hot: false }
     ];
-    function columnOf(status) {
+    var COLUMNS_MAKESAFE = [
+      { key: 'needs', label: 'New', hot: true },
+      { key: 'scheduled', label: 'Allocated', hot: false },
+      { key: 'onsite', label: 'On site', hot: false },
+      { key: 'reportin', label: 'Trade report in', hot: false },
+      { key: 'done', label: 'Done', hot: false },
+      { key: 'attention', label: 'Attention', hot: false },
+      { key: 'cancelled', label: 'Cancelled', hot: false }
+    ];
+    function columnsFor(vert) { return vert === 'makesafe' ? COLUMNS_MAKESAFE : COLUMNS_FIELD; }
+    var COLUMNS = COLUMNS_FIELD; // back-compat alias (pre-M3b callers/smokes)
+    function columnOf(status, vert) {
       var k = String(status == null ? '' : status).toLowerCase().trim();
+      if (vert === 'makesafe' && Object.prototype.hasOwnProperty.call(MS_COLUMN_OVERRIDE, k)) return MS_COLUMN_OVERRIDE[k];
       return Object.prototype.hasOwnProperty.call(COLUMN_MAP, k) ? COLUMN_MAP[k] : null;
     }
     // A synthetic open-pool row (unassigned job needing allocation).
@@ -16129,7 +16191,7 @@
 
       var unmapped = {}, placed = 0, scopedOut = 0, unmappedDropped = 0;
       var verticals = showVerts.map(function (vert) {
-        var cols = COLUMNS.map(function (c) { return { key: c.key, label: c.label, hot: c.hot, cards: [] }; });
+        var cols = columnsFor(vert).map(function (c) { return { key: c.key, label: c.label, hot: c.hot, cards: [] }; });
         var colByKey = {}; cols.forEach(function (c) { colByKey[c.key] = c; });
         poolFinal.forEach(function (r) {
           var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
@@ -16137,7 +16199,7 @@
         });
         assignedFinal.forEach(function (r) {
           var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
-          var colk = columnOf(r.status);
+          var colk = columnOf(r.status, vert);
           if (colk == null) { unmapped[String(r.status || '').toLowerCase()] = true; unmappedDropped++; return; }
           colByKey[colk].cards.push(makeCard(job, r, vert)); placed++;
         });
@@ -16165,11 +16227,79 @@
       };
     }
 
+    // ── M3b U4 (D6) · full ops-style card, phone-sized ──
+    var ESC2 = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+    function esc2(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ESC2[c]; }); }
+    function _ageDays(createdAt, now) {
+      var t = Date.parse(String(createdAt || ''));
+      if (isNaN(t)) return null;
+      var ref = (now instanceof Date) ? now.getTime() : (typeof now === 'number' ? now : Date.now());
+      var d = Math.floor((ref - t) / 86400000);
+      return d < 0 ? 0 : d;
+    }
+    // Intake age ("today" / "3d") — only where the feed carries created_at
+    // (pool rows do; assigned-row jobs embeds do not — render nothing there).
+    function ageLabel(createdAt, now) {
+      var d = _ageDays(createdAt, now);
+      if (d == null) return '';
+      return d === 0 ? 'today' : (d + 'd');
+    }
+    // Add the ops-card fields to a TradeJobCard model (pure). Fields absent
+    // from the feed simply render nothing: assigned rows carry no
+    // makesafe_details / metadata / created_at (see the HONESTY NOTE above),
+    // so builder/extRef/age light up on pool cards and stay quiet elsewhere.
+    function enrichCardModel(m, job, row, opts) {
+      m = m || {}; job = job || {}; opts = opts || {};
+      var md = job.makesafe_details || job.metadata || {};
+      var co = md.makesafe_companies || {};
+      m.builder = String(md.requesting_company_name || co.name || '').trim();
+      m.client = String(job.client_name || '').trim();
+      m.address = String(job.site_address || '').trim();
+      m.extRef = String(md.external_ref || '').trim();
+      m.ageLabel = ageLabel(job.created_at, opts.now);
+      return m;
+    }
+    var CAL_ICO2 = '<svg class="tjc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>';
+    var CREW_ICO2 = '<svg class="tjc-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg>';
+    // Pure ops-anatomy card body: type+age+status / suburb / BUILDER·OURS mono
+    // refs / desc / Builder / Client / address / date·weather·time·crew chips.
+    function opsCardHTML(m) {
+      m = m || {};
+      var cls = m.typeCls || 'nt';
+      var h = '<div class="tjc-top"><span class="tjc-tico ' + cls + '"></span>'
+        + '<span class="tjc-type ' + cls + '">' + esc2(m.typeLabel || 'Job') + '</span>';
+      if (m.ageLabel) h += '<span class="tjb-age" title="Intake age">' + esc2(m.ageLabel) + '</span>';
+      h += '<span class="tjc-stag ' + (m.statusToken || 'booked') + '">' + esc2(m.statusLabel || 'Scheduled') + '</span></div>';
+      h += '<div class="tjc-sub">' + esc2(m.sub || 'Site TBC') + '</div>';
+      if (m.extRef || m.ref) {
+        h += '<div class="tjc-ref">' + esc2(m.extRef || '');
+        if (m.extRef && m.ref) h += '<span class="tjc-ref-sep">&middot;</span>';
+        h += esc2(m.ref || '') + '</div>';
+      }
+      if (m.desc) h += '<div class="tjb-desc">' + esc2(m.desc) + '</div>';
+      if (m.builder) h += '<div class="tjc-party"><span class="k">Builder</span><b>' + esc2(m.builder) + '</b></div>';
+      if (m.client && m.client !== m.builder) h += '<div class="tjc-party"><span class="k">Client</span><b>' + esc2(m.client) + '</b></div>';
+      if (!m.builder && !m.client) {
+        h += '<div class="tjc-party"><span class="k">' + esc2((m.party && m.party.k) || 'Client') + '</span><span class="tjc-pending">&mdash;</span></div>';
+      }
+      if (m.address && m.address !== m.sub) h += '<div class="tjb-adr">' + esc2(m.address) + '</div>';
+      h += '<div class="tjc-info">' + CAL_ICO2 + '<span>' + esc2(m.dateLabel || '') + '</span>'
+        + '<span data-weather-date="' + esc2(m.weatherDate || '') + '"></span>';
+      if (m.timeText) h += '<span class="tjc-time">' + esc2(m.timeText) + '</span>';
+      else h += '<span class="tjc-time notime">No time set</span>';
+      if (m.crew) h += '<span class="tjc-crew">' + CREW_ICO2 + esc2(m.crew) + '</span>';
+      else if (m.crewEmptyLabel) h += '<span class="tjc-crew un">' + esc2(m.crewEmptyLabel) + '</span>';
+      h += '</div>';
+      return h;
+    }
+
     return {
       VERTICALS: VERTICALS, COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
+      COLUMNS_FIELD: COLUMNS_FIELD, COLUMNS_MAKESAFE: COLUMNS_MAKESAFE, columnsFor: columnsFor,
       vertOf: vertOf, vertOfJob: vertOfJob, vertOfRow: vertOfRow,
       vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
-      canAllocate: canAllocate, buildBoard: buildBoard
+      canAllocate: canAllocate, buildBoard: buildBoard,
+      ageLabel: ageLabel, enrichCardModel: enrichCardModel, opsCardHTML: opsCardHTML
     };
   })();
   // </trade-board>
@@ -16183,6 +16313,7 @@
   var _boardCardSeq = 0;
   var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
   var _allocGuard = null;   // per-open double-fire guard { busy }
+  var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
 
   function _boardManagerVerticals() {
     return (_user && Array.isArray(_user.managed_verticals)) ? _user.managed_verticals : [];
@@ -16217,6 +16348,7 @@
         isAdmin: _isAdmin,
         makeCard: function (job, row) {
           var mm = TradeJobCard.buildModel(job, row, { crewEmptyLabel: 'Needs crew' });
+          BoardCore.enrichCardModel(mm, job, row);   // M3b U4: ops-card fields
           mm._boardRow = row; mm._boardJob = job;
           return mm;
         }
@@ -16242,7 +16374,7 @@
       // M3 U3: tapping a live Board card opens the allocation sheet (pick crew
       // -> confirm -> allocate_job). "Open job" is preserved inside the sheet.
       return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
-        TradeJobCard.cardBodyHTML(model) + '</button>';
+        BoardCore.opsCardHTML(model) + '</button>';
     }
     // FIX B: terminal cards (Done / Attention / Cancelled) open the job
     // directly — the allocate write is not offered on a finished assignment.
@@ -16250,7 +16382,7 @@
     var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
     var arg = row._makesafePool ? '' : (row.id || '');
     return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
-      TradeJobCard.cardBodyHTML(model) + '</button>';
+      BoardCore.opsCardHTML(model) + '</button>';
   }
 
   function _renderBoard() {
@@ -16509,11 +16641,111 @@
       if (isNaN(d.getTime())) return String(iso || '');
       return WD[d.getDay()] + ' ' + d.getDate() + ' ' + MO[d.getMonth()];
     }
+
+    // ══ M3b U3 (D5) · time-editing: schedule pickers + update_assignment ══
+    function normDate(v) {
+      var m = String(v == null ? '' : v).trim().match(DATE_RE);
+      return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+    }
+    function normTime(v) {
+      var m = String(v == null ? '' : v).trim().match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return '';
+      var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+      if (isNaN(h) || h > 23 || isNaN(mm) || mm > 59) return '';
+      return (h < 10 ? '0' : '') + h + ':' + m[2];
+    }
+    function fmtClock(t) {
+      var m = String(t == null ? '' : t).match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return null;
+      var h = +m[1], disp = h % 12; if (disp === 0) disp = 12;
+      return disp + ':' + m[2] + (h < 12 ? 'am' : 'pm');
+    }
+    // Fold the sheet's schedule inputs onto a CREATE context: a picked date
+    // wins (else the M3 default stays); startTime/endTime ride ONLY when set
+    // (the §2a-backend contracted optionals). A REASSIGN context is returned
+    // UNTOUCHED — the silent path never grows keys.
+    function withSchedule(ctx, sched) {
+      ctx = ctx || {}; sched = sched || {};
+      if (ctx.mode !== 'create') return ctx;
+      var out = { mode: 'create', jobId: ctx.jobId, userId: ctx.userId, scheduledDate: normDate(sched.date) || ctx.scheduledDate };
+      var st = normTime(sched.start), en = normTime(sched.end);
+      if (st) out.startTime = st;
+      if (en) out.endTime = en;
+      return out;
+    }
+    // EDIT-schedule payload (update_assignment, allow-list scheduled_date/
+    // start_time/end_time — scout-confirmed fully SILENT): {assignment_id} +
+    // ONLY the schedule fields actually set. NEVER a crew/user key — editing
+    // time must never move a job between people.
+    function buildEditPayload(assignmentId, sched) {
+      sched = sched || {};
+      var p = { assignment_id: assignmentId };
+      var d = normDate(sched.date); if (d) p.scheduled_date = d;
+      var st = normTime(sched.start); if (st) p.start_time = st;
+      var en = normTime(sched.end); if (en) p.end_time = en;
+      return p;
+    }
+    function editHasChanges(p) { return !!p && Object.keys(p).length > 1; }
+    // Success predicate for the EDIT write ONLY. The real ops-api
+    // updateAssignment returns { assignment, all_complete, suggest_status,
+    // job_id } — NO ok/mode key, ever (First Mate CP1 read, 2026-07-07).
+    // Judging the edit response with isSuccess (allocate_job's strict
+    // contract, untouched) would throw on every REAL success, roll back the
+    // optimistic patch and toast an error while the write had landed in prod
+    // — a silent UI/truth divergence. A response with NEITHER ok nor
+    // assignment is a FAILURE (fails closed).
+    function isEditSuccess(res) {
+      res = res || {};
+      return res.ok === true || !!res.assignment;
+    }
+    // Optimistic schedule patch on the card model + row; undo restores exactly.
+    function applyEditOptimistic(model, p) {
+      model = model || {}; p = p || {};
+      var row = model._boardRow || {};
+      var prev = { dateLabel: model.dateLabel, weatherDate: model.weatherDate, timeText: model.timeText, rowDate: row.scheduled_date, rowStart: row.start_time };
+      if (p.scheduled_date) { model.dateLabel = fmtDate(p.scheduled_date); model.weatherDate = p.scheduled_date; row.scheduled_date = p.scheduled_date; }
+      if (p.start_time) { model.timeText = fmtClock(p.start_time); row.start_time = p.start_time; }
+      return { undo: function () {
+        model.dateLabel = prev.dateLabel; model.weatherDate = prev.weatherDate; model.timeText = prev.timeText;
+        row.scheduled_date = prev.rowDate; row.start_time = prev.rowStart;
+      } };
+    }
+    // Same orchestration skeleton as run() (guard -> optimistic -> transport
+    // -> success | rollback + honest error), for the EDIT write whose payload
+    // is already built. Double-fire guarded; rethrows after onError.
+    function runEdit(payload, deps) {
+      deps = deps || {};
+      var guard = deps.guard || {};
+      if (guard.busy) return null;                    // exactly-one-dispatch guard
+      guard.busy = true;
+      var undo = null;
+      try { if (deps.applyOptimistic) undo = deps.applyOptimistic(); } catch (e) { undo = null; }
+      if (deps.onPending) { try { deps.onPending(); } catch (e) {} }
+      return Promise.resolve()
+        .then(function () { return deps.transport(payload); })
+        .then(function (res) {
+          if (!isEditSuccess(res)) throw new Error((res && (res.error || res.message)) || 'Schedule update failed');
+          guard.busy = false;
+          if (deps.onSuccess) { try { deps.onSuccess(res || {}); } catch (e) {} }
+          return { ok: true };
+        })
+        .catch(function (err) {
+          guard.busy = false;
+          if (undo && typeof undo.undo === 'function') { try { undo.undo(); } catch (e) {} }
+          if (deps.onError) { try { deps.onError(err); } catch (e) {} }
+          throw err;
+        });
+    }
+
     return {
       awstToday: awstToday, isPoolRow: isPoolRow, scheduledDateFor: scheduledDateFor,
       buildContext: buildContext, withUser: withUser, buildPayload: buildPayload, crewName: crewName,
       applyOptimistic: applyOptimistic, applyCreateResult: applyCreateResult,
-      isSuccess: isSuccess, run: run, fmtDate: fmtDate
+      isSuccess: isSuccess, run: run, fmtDate: fmtDate,
+      normDate: normDate, normTime: normTime, fmtClock: fmtClock,
+      withSchedule: withSchedule, buildEditPayload: buildEditPayload,
+      editHasChanges: editHasChanges, isEditSuccess: isEditSuccess,
+      applyEditOptimistic: applyEditOptimistic, runEdit: runEdit
     };
   })();
   // </trade-allocate>
@@ -16528,6 +16760,7 @@
     var ctx = AllocateCore.buildContext(model, null, { now: new Date() });
     _allocSel = { model: model, cardId: cardId, ctx: ctx, userId: null, crew: null };
     _allocGuard = { busy: false };
+    _allocEditGuard = { busy: false };
 
     var row = model._boardRow || {};
     var job = model._boardJob || row.jobs || {};
@@ -16559,11 +16792,65 @@
           '<span class="role">' + esc(String(u.role || '').replace(/_/g, ' ')) + '</span></button>';
       }).join('');
     }
+    // M3b U3 (D5): schedule pickers. NEW allocation -> date (M3 default) +
+    // optional start/end riding the allocate_job payload. Assigned card ->
+    // EDIT the existing assignment's schedule via update_assignment (silent).
+    var schedMount = document.getElementById('allocSchedule');
+    if (reassign) {
+      // NOTE: the End picker starts BLANK by design — the my_jobs feed's
+      // ASSIGNMENT_SELECT carries start_time but NOT end_time (verified
+      // 2026-07-07), so there is nothing to prefill. Blank ≠ bug; saving a
+      // value writes end_time via the update_assignment allow-list.
+      schedMount.innerHTML =
+        '<div class="alloc-label">Schedule (saves separately)</div>' +
+        '<div class="alloc-sched">' +
+        '<input type="date" id="allocDate" value="' + esc(String(row.scheduled_date || '').slice(0, 10)) + '">' +
+        '<input type="time" id="allocStart" value="' + esc(String(row.start_time || '').slice(0, 5)) + '" placeholder="Start">' +
+        '<input type="time" id="allocEnd" placeholder="End">' +
+        '</div>' +
+        '<button class="alloc-savesched" id="allocSaveSchedBtn" onclick="confirmScheduleEdit(\'' + esc(row.id || '') + '\')">Save schedule</button>';
+    } else {
+      schedMount.innerHTML =
+        '<div class="alloc-label">Schedule</div>' +
+        '<div class="alloc-sched">' +
+        '<input type="date" id="allocDate" value="' + esc(ctx.scheduledDate || '') + '" onchange="allocScheduleChanged()">' +
+        '<input type="time" id="allocStart" onchange="allocScheduleChanged()" placeholder="Start">' +
+        '<input type="time" id="allocEnd" onchange="allocScheduleChanged()" placeholder="End">' +
+        '</div>';
+    }
     document.getElementById('allocConfirmLine').textContent = '';
     var btn = document.getElementById('allocConfirmBtn');
     btn.disabled = true; btn.textContent = 'Confirm';
     document.getElementById('allocOverlay').classList.add('active');
   };
+
+  function _readAllocSchedule() {
+    return {
+      date: (document.getElementById('allocDate') || {}).value || '',
+      start: (document.getElementById('allocStart') || {}).value || '',
+      end: (document.getElementById('allocEnd') || {}).value || ''
+    };
+  }
+
+  // The confirm line always shows the EFFECTIVE date/time the write will carry
+  // (sentinel withSchedule — honest even after the manager edits the pickers).
+  function _allocUpdateConfirmLine() {
+    if (!_allocSel || !_allocSel.userId) return;
+    var model = _allocSel.model, ctx = _allocSel.ctx;
+    var name = _allocSel.crew ? (_allocSel.crew.name || 'crew') : 'crew';
+    var what = model.ref || model.sub || 'job';
+    var lineEl = document.getElementById('allocConfirmLine');
+    if (ctx.mode === 'reassign') {
+      lineEl.textContent = 'Reassign ' + what + ' to ' + name;
+    } else {
+      var eff = AllocateCore.withSchedule(ctx, _readAllocSchedule());
+      var line = 'Assign ' + what + ' to ' + name + ' · ' + AllocateCore.fmtDate(eff.scheduledDate);
+      if (eff.startTime) line += ' · ' + (AllocateCore.fmtClock(eff.startTime) || eff.startTime);
+      lineEl.textContent = line;
+    }
+    document.getElementById('allocConfirmBtn').disabled = false;
+  }
+  window.allocScheduleChanged = function () { _allocUpdateConfirmLine(); };
 
   window.selectAllocCrew = function (btn, userId) {
     if (!_allocSel || !_boardCache) return;
@@ -16574,27 +16861,50 @@
     var opts = document.querySelectorAll('#allocRoster .alloc-crew');
     for (var j = 0; j < opts.length; j++) opts[j].classList.remove('sel');
     btn.classList.add('sel');
-    var model = _allocSel.model, ctx = _allocSel.ctx;
-    var name = crew ? (crew.name || 'crew') : 'crew';
-    var what = model.ref || model.sub || 'job';
-    document.getElementById('allocConfirmLine').textContent = (ctx.mode === 'reassign')
-      ? ('Reassign ' + what + ' to ' + name)
-      : ('Assign ' + what + ' to ' + name + ' · ' + AllocateCore.fmtDate(ctx.scheduledDate));
-    document.getElementById('allocConfirmBtn').disabled = false;
+    _allocUpdateConfirmLine();
   };
 
   window.closeAllocateSheet = function () {
     var ov = document.getElementById('allocOverlay');
     if (ov) ov.classList.remove('active');
-    _allocSel = null; _allocGuard = null;
+    _allocSel = null; _allocGuard = null; _allocEditGuard = null;
+  };
+
+  // M3b U3 (D5): save a schedule edit on an EXISTING assignment. Silent
+  // update_assignment — the payload NEVER carries a crew/user key.
+  window.confirmScheduleEdit = function (assignmentId) {
+    if (!_allocSel || !_boardCache) return;
+    var sel = _allocSel;
+    var payload = AllocateCore.buildEditPayload(assignmentId || (sel.model._boardRow || {}).id || '', _readAllocSchedule());
+    if (!AllocateCore.editHasChanges(payload)) { toast('No schedule change to save', true); return; }
+    var btn = document.getElementById('allocSaveSchedBtn');
+    var p = AllocateCore.runEdit(payload, {
+      guard: _allocEditGuard || (_allocEditGuard = { busy: false }),
+      transport: function (pl) { return api('update_assignment', null, pl); },
+      applyOptimistic: function () { return AllocateCore.applyEditOptimistic(sel.model, payload); },
+      onPending: function () { if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; } _renderBoard(); },
+      onSuccess: function () {
+        closeAllocateSheet();
+        toast('Schedule updated');
+        _refreshBoardSilent();
+      },
+      onError: function (err) {
+        _renderBoard();  // reflect the rollback
+        if (btn) { btn.disabled = false; btn.textContent = 'Save schedule'; }
+        toast('Could not update the schedule: ' + friendlyError(err), true);
+      }
+    });
+    // runEdit rethrows after onError — already surfaced, swallow. null = double-tap.
+    if (p) p.catch(function () {});
   };
 
   window.confirmAllocate = function () {
     if (!_allocSel || !_allocSel.userId || !_boardCache) return;
     var sel = _allocSel, board = _boardCache.board;
-    // Rebind inside the sentinel (withUser): same scheduledDate the confirm line
-    // showed, reassign stays silent (no crewName/scheduledDate).
-    var ctx = AllocateCore.withUser(sel.ctx, sel.userId);
+    // Rebind inside the sentinel: withUser (same silent-reassign discipline)
+    // + withSchedule (the pickers' date/times — create mode only; the picked
+    // date/time is exactly what the confirm line showed).
+    var ctx = AllocateCore.withSchedule(AllocateCore.withUser(sel.ctx, sel.userId), _readAllocSchedule());
     var btn = document.getElementById('allocConfirmBtn');
     var p = AllocateCore.run(ctx, {
       guard: _allocGuard,
@@ -16631,6 +16941,7 @@
         verticals: _boardManagerVerticals(), isAdmin: _isAdmin,
         makeCard: function (job, row) {
           var mm = TradeJobCard.buildModel(job, row, { crewEmptyLabel: 'Needs crew' });
+          BoardCore.enrichCardModel(mm, job, row);   // M3b U4: ops-card fields
           mm._boardRow = row; mm._boardJob = job; return mm;
         }
       });

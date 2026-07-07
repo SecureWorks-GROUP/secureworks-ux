@@ -11040,9 +11040,9 @@ function toggleMakesafeMap() {
     + '<button onclick="loadMakesafeMapData(\'today\');makesafeMapSetStatusFilter(\'all\')" class="btn btn-sm" style="font-size:11px;">Today</button>'
     + '<button onclick="loadMakesafeMapData(\'unassigned\');makesafeMapSetStatusFilter(\'unassigned\')" class="btn btn-sm" style="font-size:11px;background:#E74C3C;color:#fff;">Needs allocation</button>'
     + '<button onclick="loadMakesafeMapData(\'waiting_report\');makesafeMapSetStatusFilter(\'allocated\')" class="btn btn-sm" style="font-size:11px;background:#F39C12;color:#fff;">Waiting report</button>'
-    + '<button onclick="loadMakesafeMapData(\'report_ready\');makesafeMapSetStatusFilter(\'report_ready\')" class="btn btn-sm" style="font-size:11px;background:#9B59B6;color:#fff;">Report ready</button>'
+    + '<button onclick="loadMakesafeMapData(\'report_ready\');makesafeMapSetStatusFilter(\'report_ready\')" class="btn btn-sm" style="font-size:11px;background:#9B59B6;color:#fff;">Docs ready</button>'
     + '<button onclick="loadMakesafeMapData(\'completed\');makesafeMapSetStatusFilter(\'completed\')" class="btn btn-sm" style="font-size:11px;background:#7F8C8D;color:#fff;">Completed this week</button>'
-    + '<select id="makesafeMapStatusFilter" onchange="makesafeMapSetStatusFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All stages/actions</option><option value="unassigned">Needs allocation</option><option value="allocated">Waiting report</option><option value="trade_report_in">Trade report in</option><option value="report_ready">Report ready</option><option value="completed">Completed this week</option><option value="archive">Archive</option><option value="on_road">On road</option><option value="late">Late/risky</option></select>'
+    + '<select id="makesafeMapStatusFilter" onchange="makesafeMapSetStatusFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All stages/actions</option><option value="unassigned">Needs allocation</option><option value="allocated">Waiting report</option><option value="trade_report_in">Trade report in</option><option value="report_ready">Docs ready</option><option value="completed">Completed this week</option><option value="archive">Archive</option><option value="on_road">On road</option><option value="late">Late/risky</option></select>'
     + '<select id="makesafeMapCrewFilter" onchange="makesafeMapSetCrewFilter(this.value)" style="font-size:11px;border:1px solid var(--sw-border);border-radius:5px;padding:4px 6px;background:#fff;"><option value="all">All crews</option></select>'
     + '<span style="flex:1;"></span><span style="font-size:11px;color:var(--sw-text-sec);font-weight:700;">Geocode only appears for missing map pins.</span>'
     + '</div>'
@@ -11137,7 +11137,7 @@ function renderMakesafeMapSidePanel(jobs, noLocation, filter) {
     + '<span style="color:#E74C3C;font-weight:800;">● Held / unassigned</span>'
     + '<span style="color:#F59E0B;font-weight:800;">● Rung / claimable</span>'
     + '<span style="color:#E67E22;font-weight:800;">● Direct allocated</span>'
-    + '<span style="color:#9B59B6;font-weight:800;">● Report ready</span>'
+    + '<span style="color:#9B59B6;font-weight:800;">● Docs ready</span>'
     + '<span style="color:#7F8C8D;font-weight:800;">● Completed this week</span>'
     + '<span style="color:#64748B;font-weight:800;">● Archive</span>'
     + '<span style="color:#111827;font-weight:800;">● On road</span>'
@@ -15971,7 +15971,7 @@ function renderMakesafeOpsDetail(data) {
     html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">Invoice document attached</div>';
     invoiceDocs.slice(0, 3).forEach(function(doc) { html += renderMakesafeDocPreview(doc); });
   } else {
-    html += '<div style="font-size:14px;font-weight:850;color:' + (stage === 'report_ready' ? '#9B59B6' : '#8FA4B2') + ';margin-bottom:6px;">' + (stage === 'report_ready' ? 'Report ready for admin/reporting skill' : 'No invoice yet') + '</div>';
+    html += '<div style="font-size:14px;font-weight:850;color:' + (stage === 'report_ready' ? '#9B59B6' : '#8FA4B2') + ';margin-bottom:6px;">' + (stage === 'report_ready' ? 'Docs ready for admin/reporting skill' : 'No invoice yet') + '</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">The reporting skill/admin process should produce the final report and invoice, then mark this completed.</div>';
   }
   html += '</div>';
@@ -15982,7 +15982,7 @@ function renderMakesafeOpsDetail(data) {
 
   var subActions = [];
   if (sub === 'pending_allocation' || sub === 'company_contact_required' || sub === 'company_contact_done') subActions.push({ to: 'waiting_on_trade_report', label: 'Allocated / waiting report', color: '#F39C12' });
-  if (sub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Report ready', color: '#9B59B6' });
+  if (sub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Docs ready', color: '#9B59B6' }); // M3b U5 (G2)
   if (sub === 'admin_to_send_report') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
   if (sub === 'ready_to_invoice') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
   html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
@@ -16085,7 +16085,7 @@ function renderOverviewView(data) {
     html += '<div style="font-size:11px;font-weight:700;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Make-Safe Status</div>';
 
     // Current substatus badge
-    var subLabels = { pending_allocation: 'Needs Allocation', company_contact_required: 'New', company_contact_done: 'Allocated', waiting_on_trade_report: 'Waiting on Trade Report', admin_to_send_report: 'Report Ready', ready_to_invoice: 'Report Ready', complete: 'Complete' };
+    var subLabels = { pending_allocation: 'Needs Allocation', company_contact_required: 'New', company_contact_done: 'Allocated', waiting_on_trade_report: 'Waiting on Trade Report', admin_to_send_report: 'Docs Ready', ready_to_invoice: 'Docs Ready', /* M3b U5 (G2) */ complete: 'Complete' };
     var subColors = { pending_allocation: '#3498DB', company_contact_required: '#3498DB', company_contact_done: '#F39C12', waiting_on_trade_report: '#F39C12', admin_to_send_report: '#9B59B6', ready_to_invoice: '#9B59B6', complete: '#8FA4B2' };
     html += '<div style="margin-bottom:12px;"><span style="font-size:12px;padding:4px 12px;border-radius:10px;background:' + (subColors[msSub] || '#8FA4B2') + ';color:#fff;font-weight:600;">' + (subLabels[msSub] || msSub) + '</span></div>';
     var msAdminNotes = (data.events || []).filter(function(ev) { if (isMakesafePackSentMarker(ev)) return false; var d = ev.detail_json || {}; var t = typeof d === 'string' ? d : (d.text || d.note || d.note_text || ''); return ev.event_type === 'note' && (/^Trade admin note:/i.test(String(t)) || d.visibility === 'internal_only'); });
@@ -16102,7 +16102,7 @@ function renderOverviewView(data) {
     // Substatus action buttons
     var subActions = [];
     if (msSub === 'pending_allocation' || msSub === 'company_contact_required' || msSub === 'company_contact_done') subActions.push({ to: 'waiting_on_trade_report', label: 'Mark Waiting on Report', color: '#F39C12' });
-    if (msSub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Report Ready', color: '#9B59B6' });
+    if (msSub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Docs Ready', color: '#9B59B6' }); // M3b U5 (G2)
     if (msSub === 'admin_to_send_report' || msSub === 'ready_to_invoice') subActions.push({ to: 'complete', label: 'Mark Completed', color: '#8FA4B2' });
 
     if (subActions.length > 0) {

@@ -16606,6 +16606,18 @@
       return p;
     }
     function editHasChanges(p) { return !!p && Object.keys(p).length > 1; }
+    // Success predicate for the EDIT write ONLY. The real ops-api
+    // updateAssignment returns { assignment, all_complete, suggest_status,
+    // job_id } — NO ok/mode key, ever (First Mate CP1 read, 2026-07-07).
+    // Judging the edit response with isSuccess (allocate_job's strict
+    // contract, untouched) would throw on every REAL success, roll back the
+    // optimistic patch and toast an error while the write had landed in prod
+    // — a silent UI/truth divergence. A response with NEITHER ok nor
+    // assignment is a FAILURE (fails closed).
+    function isEditSuccess(res) {
+      res = res || {};
+      return res.ok === true || !!res.assignment;
+    }
     // Optimistic schedule patch on the card model + row; undo restores exactly.
     function applyEditOptimistic(model, p) {
       model = model || {}; p = p || {};
@@ -16632,7 +16644,7 @@
       return Promise.resolve()
         .then(function () { return deps.transport(payload); })
         .then(function (res) {
-          if (!isSuccess(res)) throw new Error((res && (res.error || res.message)) || 'Schedule update failed');
+          if (!isEditSuccess(res)) throw new Error((res && (res.error || res.message)) || 'Schedule update failed');
           guard.busy = false;
           if (deps.onSuccess) { try { deps.onSuccess(res || {}); } catch (e) {} }
           return { ok: true };
@@ -16652,7 +16664,8 @@
       isSuccess: isSuccess, run: run, fmtDate: fmtDate,
       normDate: normDate, normTime: normTime, fmtClock: fmtClock,
       withSchedule: withSchedule, buildEditPayload: buildEditPayload,
-      editHasChanges: editHasChanges, applyEditOptimistic: applyEditOptimistic, runEdit: runEdit
+      editHasChanges: editHasChanges, isEditSuccess: isEditSuccess,
+      applyEditOptimistic: applyEditOptimistic, runEdit: runEdit
     };
   })();
   // </trade-allocate>
@@ -16704,6 +16717,10 @@
     // EDIT the existing assignment's schedule via update_assignment (silent).
     var schedMount = document.getElementById('allocSchedule');
     if (reassign) {
+      // NOTE: the End picker starts BLANK by design — the my_jobs feed's
+      // ASSIGNMENT_SELECT carries start_time but NOT end_time (verified
+      // 2026-07-07), so there is nothing to prefill. Blank ≠ bug; saving a
+      // value writes end_time via the update_assignment allow-list.
       schedMount.innerHTML =
         '<div class="alloc-label">Schedule (saves separately)</div>' +
         '<div class="alloc-sched">' +

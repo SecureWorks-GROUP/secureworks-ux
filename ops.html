@@ -9636,11 +9636,17 @@ function openMakesafeReviewOverlay(overlayId, panelId, title) {
   if (!container) return;
   var overlay = document.createElement('div');
   overlay.id = overlayId;
-  overlay.style.cssText = 'position:absolute;inset:0;z-index:120;background:#fff;display:flex;flex-direction:column;';
+  // #jobsBody is a tall vertical scroll container on the make-safe board (its content
+  // runs to several thousand px). An absolutely-positioned overlay is anchored to the
+  // TOP of that scroll content, so once the board is scrolled it slides out from under
+  // the viewport and the kanban bleeds through beneath the review panel. Pin the overlay
+  // to the viewport rect of #jobsBody with position:fixed so it always fully covers the
+  // visible board area regardless of scroll position.
+  var rect = container.getBoundingClientRect();
+  overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;z-index:120;background:#fff;display:flex;flex-direction:column;';
   var closeFn = (overlayId === 'makesafeIntakeOverlay') ? 'closeMakesafeIntakeOverlay()' : 'closeMakesafeReportingOverlay()';
   overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board — approve here moves the card to the next stage. The Approvals tab remains available as a fallback.', closeFn)
     + '<div id="' + panelId + '" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fff;"></div>';
-  container.style.position = 'relative';
   container.appendChild(overlay);
 }
 

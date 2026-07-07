@@ -682,6 +682,18 @@
     .cal-job-block.completed {
       border: 1px solid rgba(39,174,96,0.3); opacity: 0.5;
     }
+    /* U-O3(c): folded-completed pill + reveal toggle */
+    .cal-done-pill {
+      display: inline-block; margin-top: 2px; padding: 1px 6px; border-radius: 8px;
+      font-size: 9px; font-weight: 700; line-height: 1.4; cursor: pointer;
+      color: var(--sw-text-sec, #6b7280); background: rgba(120,120,120,0.14);
+      border: 1px dashed rgba(120,120,120,0.4);
+    }
+    .cal-done-pill:hover { background: rgba(120,120,120,0.24); }
+    .cal-done-toggle {
+      margin-left: 12px; font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--sw-mid, #4C6A7C); text-decoration: underline; white-space: nowrap;
+    }
     /* ── Readiness = card background fill (loudest signal) ── */
     .cal-job-block.readiness-ready { background: rgba(34,197,94,0.08) !important; }
     .cal-job-block.readiness-at_risk { background: rgba(245,158,11,0.10) !important; }
@@ -6885,6 +6897,7 @@ async function submitAddEvent() {
         role: 'lead_installer', notes: notes, label: jobId ? null : title,
         visible_to_trades: document.getElementById('eventVisibleToTrades').checked,
         recurrence_rule: recRule2,
+        confirmationStatus: 'tentative', // G3: calendar planning entry stays silent
       });
     }
     closeModal('addEventModal');
@@ -7040,21 +7053,102 @@ async function loadCalendar() {
   }
 }
 
-function getCalRange() {
-  var d = new Date(_calDate);
-  var day = d.getDay() || 7;
-  d.setDate(d.getDate() - day + 1); // Monday
-  var from = localDateStr(d);
-  if (_calRangeMode === '2w') {
-    d.setDate(d.getDate() + 13);
-  } else if (_calRangeMode === 'month') {
-    var y = _calDate.getFullYear(), m = _calDate.getMonth();
-    from = localDateStr(new Date(y, m, 1));
-    d = new Date(y, m + 1, 0);
-  } else {
-    d.setDate(d.getDate() + 6);
+// <calendar-ops-core>
+// M3c calendar 80/20 — pure, dependency-free helpers, extracted verbatim by the
+// mission smoke suites (smoke/cp-ops-*.mjs) via `new Function`. No DOM, no
+// globals, no fetch: everything is passed in, so the block round-trips cleanly.
+var CalOpsCore = (function () {
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function fmt(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function addDaysStr(dateStr, days) {
+    var d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + (days | 0));
+    return fmt(d);
   }
-  return { from: from, to: localDateStr(d) };
+  function dateDeltaDays(fromStr, toStr) {
+    var a = new Date(fromStr + 'T00:00:00'), b = new Date(toStr + 'T00:00:00');
+    return Math.round((b - a) / 86400000);
+  }
+  // U-O3(b): 1w/2w windows are anchored today-FORWARD (focus date = column 1),
+  // not snapped back to Monday. Month stays the calendar month.
+  function calWindowRange(focusStr, mode) {
+    if (mode === 'month') {
+      var d0 = new Date(focusStr + 'T00:00:00');
+      var y = d0.getFullYear(), m = d0.getMonth();
+      return { from: fmt(new Date(y, m, 1)), to: fmt(new Date(y, m + 1, 0)) };
+    }
+    var span = mode === '2w' ? 13 : 6;
+    return { from: focusStr, to: addDaysStr(focusStr, span) };
+  }
+  // U-O1: what a drag writes. Same installer + new date => a SILENT
+  // update_assignment carrying the span shifted by the same delta as the start.
+  // A DIFFERENT installer => a reassignment routed through the createAssignment
+  // allocation path (delete old + create new, NO tentative) so the new installer
+  // gets the allocation SMS (G2); the span is preserved on the recreate.
+  function buildMovePayload(ev, newCrew, newUserId, newDate) {
+    var oldDate = ev.scheduled_date;
+    var oldEnd = ev.scheduled_end || null;
+    var delta = dateDeltaDays(oldDate, newDate);
+    var newEnd = oldEnd ? addDaysStr(oldEnd, delta) : null;
+    var oldUserId = ev.user_id || null;
+    var crewChanged = !!newUserId && String(newUserId) !== String(oldUserId);
+    if (crewChanged) {
+      var create = {
+        jobId: ev.job_id || null,
+        scheduledDate: newDate,
+        scheduledEnd: newEnd,
+        startTime: ev.start_time || null,
+        endTime: ev.end_time || null,
+        assignmentType: ev.assignment_type || 'install',
+        crewName: newCrew,
+        userId: newUserId,
+        role: ev.role || 'lead_installer',
+        label: ev.label || null,
+        jobType: ev.job_type || null
+        // NO confirmationStatus: drag-to-a-different-installer is an allocation
+        // act (G2), so createAssignment's existing SMS texts the new installer.
+      };
+      return { mode: 'reassign', deleteId: ev.assignment_id, create: create };
+    }
+    var update = { assignmentId: ev.assignment_id, crew_name: newCrew, scheduled_date: newDate };
+    if (oldEnd) update.scheduled_end = newEnd; // U-O1(a): shift the span with the start
+    return { mode: 'move', update: update };
+  }
+  // U-O3(c): split a cell's entries into what shows now and how many finished
+  // jobs to fold behind an "N done" pill. Done = assignment_status 'complete'.
+  function partitionCellEntries(entries, showDone) {
+    var active = [], done = [];
+    (entries || []).forEach(function (e) {
+      var st = (e && e.ev && e.ev.assignment_status) || '';
+      if (st === 'complete') done.push(e); else active.push(e);
+    });
+    return { visible: showDone ? active.concat(done) : active, doneCount: done.length, doneHidden: !showDone && done.length > 0 };
+  }
+  // U-O3(d): an honest count. UPCOMING (ends on/after today) vs total in view,
+  // and it names the ACTUAL window instead of always saying "this week".
+  function calCountLabel(events, mode, todayStr) {
+    var total = (events || []).length;
+    var upcoming = (events || []).filter(function (e) {
+      var end = (e && (e.scheduled_end || e.scheduled_date)) || '';
+      return end >= todayStr;
+    }).length;
+    var scope = mode === 'month' ? 'this month' : mode === '2w' ? 'in this fortnight' : 'this week';
+    if (upcoming === total) return total + ' event' + (total === 1 ? '' : 's') + ' ' + scope;
+    return upcoming + ' upcoming of ' + total + ' ' + scope;
+  }
+  return {
+    pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
+    calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
+    partitionCellEntries: partitionCellEntries, calCountLabel: calCountLabel
+  };
+})();
+// </calendar-ops-core>
+var _calShowDone = (function () { try { return localStorage.getItem('sw_cal_show_done') === '1'; } catch (e) { return false; } })();
+
+function getCalRange() {
+  // U-O3(b): today-forward window (see CalOpsCore.calWindowRange). Back-nav still
+  // shifts _calDate, so the past is one calPrev away.
+  return CalOpsCore.calWindowRange(localDateStr(_calDate), _calRangeMode);
 }
 
 function getCalDays(range) {
@@ -7368,10 +7462,14 @@ function renderSwimlaneView(container, range) {
       }
 
       // Layer 2 & 3: Job blocks + meetings/reminders
-      var entries = (crewData.events[dateStr] || []).slice().sort(function(a, b) {
+      var _allEntries = (crewData.events[dateStr] || []).slice().sort(function(a, b) {
         var ta = a.ev.start_time || '99:99', tb = b.ev.start_time || '99:99';
         return ta.localeCompare(tb);
       });
+      // U-O3(c): finished jobs fold behind an "N done" pill (shown dimmed when
+      // expanded) so a day cell reads as live work, not a stack of completed cards.
+      var _donePart = CalOpsCore.partitionCellEntries(_allEntries, _calShowDone);
+      var entries = _donePart.visible;
       entries.forEach(function(entry) {
         var ev = entry.ev;
         var aType = ev.assignment_type || 'install';
@@ -7433,6 +7531,10 @@ function renderSwimlaneView(container, range) {
         }
         html += '</div>';
       });
+
+      if (_donePart.doneHidden) {
+        html += '<div class="cal-done-pill" title="' + _donePart.doneCount + ' completed on this day — click to show" onclick="event.stopPropagation();toggleCalShowDone()">' + _donePart.doneCount + ' done</div>';
+      }
 
       html += '</div>';
     });
@@ -7507,11 +7609,15 @@ function renderCalSummary(range) {
       if (!countedJobs[ev.job_id]) {
         countedJobs[ev.job_id] = true;
         var cs = ev.confirmation_status || 'tentative';
-        var isLocked = cs === 'confirmed' || ev.assignment_status === 'in_progress';
+        var isComplete = ev.assignment_status === 'complete';
+        var isLocked = !isComplete && (cs === 'confirmed' || ev.assignment_status === 'in_progress');
         var rd = _calReadiness[ev.job_id];
         var isReady = rd && rd.status === 'ready';
 
-        if (isLocked && isReady) lockedReady++;
+        // U-O3(d): completed work is not schedule health — keep it out of the
+        // Confirmed & Ready / Not Ready / Planned tallies.
+        if (isComplete) { /* done — not counted */ }
+        else if (isLocked && isReady) lockedReady++;
         else if (isLocked && !isReady) lockedExposed++;
         else tentativeCount++;
 
@@ -7543,6 +7649,8 @@ function renderCalSummary(range) {
   if (conflictCount > 0) {
     html += '<span class="conflict-warn" onclick="highlightConflicts()">&#9888; ' + conflictCount + ' conflict' + (conflictCount > 1 ? 's' : '') + '</span>';
   }
+  // U-O3(c): global affordance to reveal/hide completed jobs folded in the cells.
+  html += '<span class="cal-done-toggle" onclick="toggleCalShowDone()">' + (_calShowDone ? 'Hide completed' : 'Show completed') + '</span>';
   bar.innerHTML = html;
 }
 
@@ -7552,6 +7660,13 @@ function setCalViewMode(mode) {
   document.querySelectorAll('.cal-view-btn').forEach(function(b) {
     b.classList.toggle('active', b.id === 'btnView' + mode.charAt(0).toUpperCase() + mode.slice(1));
   });
+  renderCalendar();
+}
+
+// U-O3(c): reveal/hide completed jobs that are folded behind the "N done" pills.
+function toggleCalShowDone() {
+  _calShowDone = !_calShowDone;
+  try { localStorage.setItem('sw_cal_show_done', _calShowDone ? '1' : '0'); } catch (e) {}
   renderCalendar();
 }
 
@@ -8145,6 +8260,7 @@ async function submitScheduleFromModal(jobId) {
       scheduled_end: endStr,
       role: 'lead_installer',
       assignment_type: 'install',
+      confirmation_status: 'tentative', // G3: calendar planning entry stays silent
     });
     closeScheduleModal();
     showToast('Assignment created (tentative)', 'success');
@@ -8182,13 +8298,35 @@ async function moveAssignment(assignmentId, newCrew, newDate) {
 }
 
 async function doMoveAssignment(assignmentId, newCrew, newDate) {
+  var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
+  if (!ev) {
+    // No cached event — fall back to the minimal silent date move.
+    try {
+      await opsPost('update_assignment', { assignmentId: assignmentId, crew_name: newCrew, scheduled_date: newDate });
+      showToast('Assignment moved', 'success');
+      loadCalendar();
+    } catch (e) { showToast('Error: ' + e.message, 'warning'); }
+    return;
+  }
+  // Resolve the target swimlane row to a real installer (the grid groups by
+  // user_id first, so a crew change MUST carry the new user_id or the block
+  // snaps back to the original person).
+  var target = _crewList.find(function(u) { return u.name === newCrew; })
+            || _crewList.find(function(u) { return u.name && u.name.toLowerCase() === String(newCrew || '').toLowerCase(); });
+  var newUserId = target ? target.id : null;
+  var plan = CalOpsCore.buildMovePayload(ev, newCrew, newUserId, newDate);
   try {
-    await opsPost('update_assignment', {
-      assignmentId: assignmentId,
-      crew_name: newCrew,
-      scheduled_date: newDate,
-    });
-    showToast('Assignment moved', 'success');
+    if (plan.mode === 'reassign') {
+      // Crew change = an allocation act (G2): delete the old row and create the
+      // new one through create_assignment so the new installer gets the SMS.
+      await opsPost('delete_assignment', { assignmentId: plan.deleteId });
+      await opsPost('create_assignment', plan.create);
+      showToast('Reassigned to ' + newCrew, 'success');
+    } else {
+      // Same installer, new date: silent update carrying the shifted span.
+      await opsPost('update_assignment', plan.update);
+      showToast('Assignment moved', 'success');
+    }
     loadCalendar();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');
@@ -19459,23 +19597,42 @@ async function submitAssignment() {
     var notes = document.getElementById('assignNotes').value || null;
 
     if (_editAssignmentId) {
-      // Delete old assignment and create new one (update_assignment doesn't support crew changes)
       var editEv = _calEvents.find(function(e) { return e.assignment_id === _editAssignmentId; });
-      await opsPost('delete_assignment', { assignmentId: _editAssignmentId });
-      await opsPost('create_assignment', {
-        jobId: jobId || null,
-        scheduledDate: date,
-        scheduledEnd: endDate,
-        startTime: startTime,
-        endTime: endTime,
-        assignmentType: assignType,
-        crewName: crewName || null,
-        userId: crewUserId || null,
-        role: 'lead_installer',
-        notes: notes,
-        label: label,
-        jobType: jobType,
-      });
+      var crewUnchanged = editEv && String(editEv.user_id || '') === String(crewUserId || '');
+      if (crewUnchanged) {
+        // U-O2 (M3c): a NON-crew edit (dates/times/notes/type) updates IN PLACE —
+        // preserves the assignment id + clock history (clocked_on/off, arrived_at)
+        // and stays SILENT. No delete+recreate, no "New job assigned" re-text.
+        await opsPost('update_assignment', {
+          assignmentId: _editAssignmentId,
+          scheduled_date: date,
+          scheduled_end: endDate,
+          start_time: startTime,
+          end_time: endTime,
+          assignment_type: assignType,
+          notes: notes,
+        });
+      } else {
+        // Crew CHANGED: still delete+recreate, but the modal is a PLANNING surface
+        // (G3) — recreate as tentative so it stays SILENT. The Board allocation /
+        // drag-to-installer is the act that texts the crew.
+        await opsPost('delete_assignment', { assignmentId: _editAssignmentId });
+        await opsPost('create_assignment', {
+          jobId: jobId || null,
+          scheduledDate: date,
+          scheduledEnd: endDate,
+          startTime: startTime,
+          endTime: endTime,
+          assignmentType: assignType,
+          crewName: crewName || null,
+          userId: crewUserId || null,
+          role: 'lead_installer',
+          notes: notes,
+          label: label,
+          jobType: jobType,
+          confirmationStatus: 'tentative',
+        });
+      }
 
       // Sync dates to sibling assignments (other crew on same job)
       if (editEv && editEv.job_id) {
@@ -19496,7 +19653,7 @@ async function submitAssignment() {
       _editAssignmentId = null;
       var totalAssigned = 1;
     } else {
-      // Create lead assignment
+      // Create lead assignment — G3: ops-calendar planning is SILENT (tentative).
       await opsPost('create_assignment', {
         jobId: jobId || null,
         scheduledDate: date,
@@ -19510,6 +19667,7 @@ async function submitAssignment() {
         notes: notes,
         label: label,
         jobType: jobType,
+        confirmationStatus: 'tentative',
       });
 
       // Create helper assignments for checked team members
@@ -19530,6 +19688,7 @@ async function submitAssignment() {
           notes: notes,
           label: label,
           jobType: jobType,
+          confirmationStatus: 'tentative',
         });
       }
       var totalAssigned = 1 + memberCbs.length;
@@ -20384,7 +20543,7 @@ function updateJarvisSummary() {
     var active = _jobsCache.filter(function(j) { return j.status !== 'cancelled' && j.status !== 'complete'; }).length;
     text = active + ' active jobs in pipeline';
   } else if (view === 'calendar' && _calEvents) {
-    text = _calEvents.length + ' events this week';
+    text = CalOpsCore.calCountLabel(_calEvents, _calRangeMode, localDateStr(new Date()));
   } else if (view === 'financials') {
     if (_invoiceSummaryCache) {
       var s = _invoiceSummaryCache;

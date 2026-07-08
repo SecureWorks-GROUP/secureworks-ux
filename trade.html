@@ -2622,6 +2622,15 @@
     .ncal .rrow .sub{font-family:var(--head);font-size:18px;font-weight:600;line-height:1.15;letter-spacing:-.01em}
     .ncal .rrow .meta{font-size:12px;color:var(--ink-2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ncal .runhint{font-size:12.5px;color:var(--ink-3);padding:2px 2px 10px}
+    /* Run Sheet grouped-by-job header + per-row crew chips ("Henry + Jan") */
+    .ncal .runsec{margin-bottom:16px}
+    .ncal .runsh{display:flex;align-items:center;padding:8px 2px 8px}
+    .ncal .runsn{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+    .ncal .rrow-crew{display:flex;align-items:center;gap:5px;margin-top:6px}
+    .ncal .rrow-crew .rrow-avs{display:inline-flex}
+    .ncal .rrow-crew .av{width:22px;height:22px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:var(--on);margin-right:-5px;box-shadow:0 0 0 1.5px var(--card)}
+    .ncal .rrow-crew .rrow-nm{font-family:var(--head);font-size:13px;font-weight:600;color:var(--ink-2);margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ncal .rrow-crew.un{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
     .ncal .stag{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;border-radius:var(--r-chip);padding:4px 8px;background:transparent;border:1.4px solid currentColor}
     .ncal .stag.onsite{color:var(--orange-deep)}
     .ncal .stag.done{color:var(--pt-ink)}
@@ -11884,25 +11893,39 @@
       return '<div class="igbar fadein">' + head + '<div class="iggrid">' + cells + '</div></div><div class="igsplit"></div><div class="agscroll">' + selectedDayList(M, st) + '</div>';
     }
 
+    // Run-row crew line: one avatar per assigned crew + their names ("Henry + Jan").
+    function runCrew(M, j) {
+      var list = j.crewList || (j.crew ? [j.crew] : []);
+      if (!list.length) return '<div class="rrow-crew un">Unassigned</div>';
+      var avs = list.map(function (name) { var p = person(M, name); return '<span class="av" style="background:' + p.av + '">' + esc(p.initials) + '</span>'; }).join('');
+      return '<div class="rrow-crew"><span class="rrow-avs">' + avs + '</span><span class="rrow-nm">' + esc(list.join(' + ')) + '</span></div>';
+    }
+    // Run Sheet. FIX (Marnin, 2026-07-08): the day's work is grouped by JOB
+    // (job_id+date) via dedupeByJobDate — the Jobs-axis prior art that joins the
+    // crew, spans the time (earliest start), and takes the most-advanced status.
+    // ONE entry per job with all crew shown together, so a job worked by two crew
+    // (e.g. SWF-26075 Morley: Henry + Jan) is a SINGLE run row instead of printing
+    // once per assignment under per-crew sections (which read as double-ups). A
+    // multi-day job groups PER DAY, so its "Day X of Y" chip shows once. Single-
+    // person scope ("Mine") flows through the same grouping — identical output, no
+    // dupes possible. Run order: timed first by earliest start, then untimed.
     function renderRun(M, st) {
-      var crews = crewsAssigned(M, st, st.date);
-      if (!crews.length) return '<div class="emptyview fadein"><b>No runs</b>Nobody is booked on ' + fmtDay(st.date) + '.</div>';
+      var jobs = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, st.date))
+        .sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
+      if (!jobs.length) return '<div class="emptyview fadein"><b>No runs</b>Nobody is booked on ' + fmtDay(st.date) + '.</div>';
       var html = '<div class="runhint">' + fmtDay(st.date) + ', in run order. Status only, no changes here.</div>';
-      crews.forEach(function (name) {
-        var jobs = assignedForDate(M, st, st.date).filter(function (j) { return j.crew === name; }).sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
-        var first = jobs[0] ? jobs[0].sub : '';
-        html += '<div class="crewsec"><div class="ch">' + av(M, name) + '<span class="cnm">' + esc(name) + '</span><span class="cinfo">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + (first ? ' &middot; ' + esc(first) + ' first' : '') + '</span></div><div class="run">';
-        jobs.forEach(function (j) {
-          var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
-          var tcell = j.start != null ? fmtTime(j.start) : '&mdash;<small>no time</small>';
-          var rp = partyLabel(j);
-          html += '<button class="rrow" data-job="' + esc(j.id) + '"><span class="time">' + tcell + '</span>'
-            + '<div class="rw"><div class="sub">' + esc(j.sub) + '</div><div class="meta"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>'
-            + '<div class="rw-party"><span class="k">' + rp.k + '</span>' + partyValHTML(rp) + '</div></div>'
-            + '<span class="stag ' + (j.status || 'booked') + '">' + stlab + '</span></button>';
-        });
-        html += '</div></div>';
+      html += '<div class="runsec"><div class="runsh"><span class="runsn">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + ' today</span></div><div class="run">';
+      jobs.forEach(function (j) {
+        var stlab = j.status === 'onsite' ? 'On site' : (j.status === 'done' ? 'Done' : 'Booked');
+        var tcell = j.start != null ? fmtTime(j.start) : '&mdash;<small>no time</small>';
+        var rp = partyLabel(j);
+        html += '<button class="rrow" data-job="' + esc(j.id) + '"><span class="time">' + tcell + '</span>'
+          + '<div class="rw"><div class="sub">' + esc(j.sub) + spanChip(j) + '</div><div class="meta"><span class="tico ' + TY(j.type).cls + '"></span>' + esc(j.ref) + ' &middot; ' + esc(j.desc) + '</div>'
+          + '<div class="rw-party"><span class="k">' + rp.k + '</span>' + partyValHTML(rp) + '</div>'
+          + runCrew(M, j) + '</div>'
+          + '<span class="stag ' + (j.status || 'booked') + '">' + stlab + '</span></button>';
       });
+      html += '</div></div>';
       return '<div class="runscroll fadein">' + html + '</div>';
     }
 

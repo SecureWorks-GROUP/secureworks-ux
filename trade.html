@@ -16331,6 +16331,27 @@
       if (vert === 'makesafe' && Object.prototype.hasOwnProperty.call(MS_COLUMN_OVERRIDE, k)) return MS_COLUMN_OVERRIDE[k];
       return Object.prototype.hasOwnProperty.call(COLUMN_MAP, k) ? COLUMN_MAP[k] : null;
     }
+    // DA-M3d · JOB-level truth wins over assignment-derived placement. Finished
+    // and dead jobs whose assignments were never closed (510 stale scheduled/
+    // confirmed/draft rows on terminal work, 2026-07-08 audit) must land in
+    // Done / Cancelled by the JOB's status, not the (stale) assignment status.
+    // jobs.status IS in the assigned-row jobs embed (ASSIGNMENT_SELECT: id,
+    // type, status, ...) so this is derivable client-side with no backend dep.
+    // This override wins over COLUMN_MAP *and* MS_COLUMN_OVERRIDE: a finished
+    // make-safe job lands in Done, NOT Trade report in. Make-safe substatus is
+    // NOT in this embed (see HONESTY NOTE above), so only jobs.status drives it.
+    var JOB_DEAD = { cancelled: 1, lost: 1, deleted: 1, duplicate: 1, duplicated: 1, void: 1, voided: 1 };
+    var JOB_FINISHED = { complete: 1, completed: 1, invoiced: 1, paid: 1, closed: 1, archived: 1 };
+    // The terminal column a row's JOB status forces, or null if the job is live
+    // (live jobs keep the exact prior assignment-status behaviour incl. the
+    // unmapped-token discipline). status may be null / mixed case — normalise.
+    function jobTerminalColumn(row) {
+      var job = (row || {}).jobs || {};
+      var s = String(job.status == null ? '' : job.status).toLowerCase().trim();
+      if (Object.prototype.hasOwnProperty.call(JOB_DEAD, s)) return 'cancelled';
+      if (Object.prototype.hasOwnProperty.call(JOB_FINISHED, s)) return 'done';
+      return null;
+    }
     // A synthetic open-pool row (unassigned job needing allocation).
     function isPoolRow(r) {
       r = r || {};
@@ -16346,6 +16367,10 @@
     // / cancelled / unmapped) fails CLOSED.
     function canAllocate(row) {
       row = row || {};
+      // DA-M3d: a card on a finished/dead JOB is never allocatable, even if its
+      // assignment status still reads scheduled (the exact stale-row case) or it
+      // is a pool row — the job is over. This must precede the pool/status paths.
+      if (jobTerminalColumn(row)) return false;
       if (isPoolRow(row)) return true;
       var col = columnOf(row.status);
       return col === 'scheduled' || col === 'onsite';
@@ -16408,11 +16433,17 @@
         var colByKey = {}; cols.forEach(function (c) { colByKey[c.key] = c; });
         poolFinal.forEach(function (r) {
           var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
-          colByKey.needs.cards.push(makeCard(job, r, vert)); placed++;
+          // DA-M3d belt: a pool row on a terminal job lands in Done/Cancelled,
+          // never New (the backend pool filter should already exclude these —
+          // this is the client-side backstop). Live pool rows keep New.
+          colByKey[jobTerminalColumn(r) || 'needs'].cards.push(makeCard(job, r, vert)); placed++;
         });
         assignedFinal.forEach(function (r) {
           var job = r.jobs || {}; if (vertOfRow(r) !== vert) return;
-          var colk = columnOf(r.status, vert);
+          // DA-M3d: JOB truth overrides the assignment-derived column (and the
+          // make-safe report-in override) for finished/dead jobs. Live jobs fall
+          // through to columnOf + the unmapped-token discipline, unchanged.
+          var colk = jobTerminalColumn(r) || columnOf(r.status, vert);
           if (colk == null) { unmapped[String(r.status || '').toLowerCase()] = true; unmappedDropped++; return; }
           colByKey[colk].cards.push(makeCard(job, r, vert)); placed++;
         });
@@ -16511,7 +16542,7 @@
       COLUMNS_FIELD: COLUMNS_FIELD, COLUMNS_MAKESAFE: COLUMNS_MAKESAFE, columnsFor: columnsFor,
       vertOf: vertOf, vertOfJob: vertOfJob, vertOfRow: vertOfRow,
       vertLabel: vertLabel, columnOf: columnOf, isPoolRow: isPoolRow,
-      canAllocate: canAllocate, buildBoard: buildBoard,
+      jobTerminalColumn: jobTerminalColumn, canAllocate: canAllocate, buildBoard: buildBoard,
       ageLabel: ageLabel, enrichCardModel: enrichCardModel, opsCardHTML: opsCardHTML
     };
   })();

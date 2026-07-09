@@ -3434,6 +3434,7 @@
         <button class="btn btn-sm" id="btnMakesafeMap" onclick="toggleMakesafeMap()" style="display:none;background:#293C46;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Map</button>
         <button class="btn btn-sm" id="btnMakesafeCrewDay" onclick="toggleMakesafeCrewDay()" style="display:none;background:#4C6A7C;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Crew Week</button>
         <button class="btn btn-sm" id="btnMakesafeArchive" onclick="toggleMakesafeArchive()" style="display:none;background:#64748B;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Archive</button>
+        <button class="btn btn-sm" id="btnMakesafeCancelled" onclick="toggleMakesafeCancelled()" style="display:none;background:#B91C1C;color:#fff;font-weight:600;font-size:11px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;">Cancelled</button>
         <div style="flex:1;"></div>
         <div id="jobsDateDisplay" style="font-size:12px;font-weight:600;color:var(--sw-text-sec);letter-spacing:0.3px;white-space:nowrap;"></div>
         <button class="btn btn-secondary btn-sm" id="btnKanban" onclick="setJobView('kanban')" style="font-weight:600;">Kanban</button>
@@ -5143,6 +5144,27 @@ function renderWeatherBanner() {
   }
 }
 
+// M-F — cached signed-in operator email. cloud.auth.getUser() is async, but
+// opsPost builds its body synchronously, so we cache the email on auth-state
+// change (see initApp) and read the cached value here. Additive: null -> value.
+var _opsUserEmail = null;
+// M-F (D2) — admin allow-list permitted to cancel/reopen a make-safe from ops.
+// Client-side gate only (honest trusted-ops posture): attribution + UI guard,
+// NOT server authorization. Marnin + Shaun only (Jan excluded).
+var MAKESAFE_CANCEL_ADMINS = ['marnin@secureworkswa.com.au', 'shaun@secureworkswa.com.au'];
+function _canAdminCancelMakesafe() {
+  return !!(_opsUserEmail && MAKESAFE_CANCEL_ADMINS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
+}
+// M-F — cancel reason set (codes = backend allow-list; labels = Marnin's copy).
+var MS_CANCEL_REASONS_OPS = [
+  { code: 'builder_recalled', label: 'Builder recalled/cancelled' },
+  { code: 'reallocated', label: 'Reallocated to another trade' },
+  { code: 'sent_in_error', label: 'Sent in error / mistake' },
+  { code: 'duplicate', label: 'Duplicate' },
+  { code: 'other', label: 'Other' }
+];
+var MS_CANCEL_REASON_LABELS_OPS = MS_CANCEL_REASONS_OPS.reduce(function(m, r) { m[r.code] = r.label; return m; }, {});
+
 function opsFetch(action, params, options) {
   options = options || {};
   var url = _opsApiBase + '?action=' + action;
@@ -5164,7 +5186,7 @@ function opsFetch(action, params, options) {
 }
 
 function opsPost(action, body) {
-  body = Object.assign({}, body, { operator_email: (cloud && cloud.user && cloud.user.email) || null });
+  body = Object.assign({}, body, { operator_email: _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null });
   return fetch(_opsApiBase + '?action=' + action, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY, 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY },
@@ -8963,11 +8985,13 @@ function setPipelineTab(tab) {
   var btnMap = document.getElementById('btnMakesafeMap');
   var btnCrewDay = document.getElementById('btnMakesafeCrewDay');
   var btnArchive = document.getElementById('btnMakesafeArchive');
+  var btnCancelled = document.getElementById('btnMakesafeCancelled');
   if (btnNew) btnNew.style.display = isMakesafe ? '' : 'none';
   if (btnIntake) btnIntake.style.display = isMakesafe ? '' : 'none';
   if (btnMap) btnMap.style.display = isMakesafe ? '' : 'none';
   if (btnCrewDay) btnCrewDay.style.display = isMakesafe ? '' : 'none';
   if (btnArchive) btnArchive.style.display = isMakesafe ? '' : 'none';
+  if (btnCancelled) btnCancelled.style.display = isMakesafe ? '' : 'none';
   // Close make-safe overlays if switching away from makesafes
   if (!isMakesafe && document.getElementById('makesafeMapContainer')) {
     document.getElementById('makesafeMapContainer').remove();
@@ -9099,7 +9123,7 @@ function __renderedStagesFor(typeKey) {
 var FENCING_STAGES = __renderedStagesFor('fencing');
 var PATIO_STAGES = __renderedStagesFor('patio');
 var DECKING_STAGES = __renderedStagesFor('decking');
-var MAKESAFES_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive'];
+var MAKESAFES_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive', 'cancelled'];
 
 // Status Mapping Gap diagnostic column key — synthetic, not a real jobs.status value.
 // Pipeline Visibility Guard requires this column to render even when empty so an operator
@@ -9468,6 +9492,7 @@ function renderMakesafeKanban(container, columns) {
     report_ready: 'Docs Ready',
     completed: 'Completed This Week',
     archive: 'Archive',
+    cancelled: 'Cancelled',
   };
   var STAGE_COLORS = {
     new: '#3498DB',
@@ -9476,6 +9501,7 @@ function renderMakesafeKanban(container, columns) {
     report_ready: '#9B59B6',
     completed: '#7F8C8D',
     archive: '#64748B',
+    cancelled: '#B91C1C',
   };
   var uiColumns = buildMakesafeColumns(columns);
 
@@ -9484,6 +9510,12 @@ function renderMakesafeKanban(container, columns) {
   if (archBtn) {
     archBtn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
     archBtn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
+  }
+  // Sync the Cancelled button's active appearance on every render
+  var cancBtn = document.getElementById('btnMakesafeCancelled');
+  if (cancBtn) {
+    cancBtn.style.background = _makesafeCancelledVisible ? '#7F1D1D' : '#B91C1C';
+    cancBtn.style.fontWeight = _makesafeCancelledVisible ? '700' : '600';
   }
 
   var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
@@ -9513,9 +9545,11 @@ function renderMakesafeKanban(container, columns) {
   // and cached in _makesafeIntakeDrafts; this render uses whatever is cached.
   html += renderMakesafeIntakeColumn();
 
-  // Stages to render — exclude archive when it is hidden
+  // Stages to render — exclude archive/cancelled columns when hidden (collapsed)
   var stagesToRender = MAKESAFES_STAGES.filter(function(s) {
-    return s !== 'archive' || _makesafeArchiveVisible;
+    if (s === 'archive') return _makesafeArchiveVisible;
+    if (s === 'cancelled') return _makesafeCancelledVisible;
+    return true;
   });
 
   stagesToRender.forEach(function(status) {
@@ -9994,6 +10028,7 @@ var _makesafeLegendCollapsed = (function() {
 var _makesafeArchiveVisible = false;   // archive column hidden by default
 var _makesafeArchiveSearch = '';       // live filter applied when archive is open
 var _makesafeBoardSearch = '';         // instant client-side filter for all active board columns
+var _makesafeCancelledVisible = false; // M-F W1-E(c) — Cancelled column hidden (collapsed) by default
 
 function toggleMakesafeArchive() {
   _makesafeArchiveVisible = !_makesafeArchiveVisible;
@@ -10005,6 +10040,17 @@ function toggleMakesafeArchive() {
     btn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
   }
   // Re-render with current data (no new fetch needed)
+  if (_pipelineData) renderJobs(_pipelineData);
+}
+
+// M-F W1-E(c) — mirror the Archive toggle for the Cancelled column.
+function toggleMakesafeCancelled() {
+  _makesafeCancelledVisible = !_makesafeCancelledVisible;
+  var btn = document.getElementById('btnMakesafeCancelled');
+  if (btn) {
+    btn.style.background = _makesafeCancelledVisible ? '#7F1D1D' : '#B91C1C';
+    btn.style.fontWeight = _makesafeCancelledVisible ? '700' : '600';
+  }
   if (_pipelineData) renderJobs(_pipelineData);
 }
 
@@ -10180,6 +10226,9 @@ function getMakesafeStage(j, rawStatus) {
   var sub = getMakesafeSubstatus(j);
   var reportStatus = j.report_status || j.service_report_status || (j.service_report && j.service_report.status) || '';
   var backendStage = j.board_stage || j.makesafe_stage || '';
+  // M-F W1-E(c) — a cancelled make-safe buckets to the Cancelled column before
+  // anything else (job status wins even if a stale board_stage lingers).
+  if (backendStage === 'cancelled' || rawStatus === 'cancelled' || String(j.status || '').toLowerCase() === 'cancelled') return 'cancelled';
   if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
   if (rawStatus === 'new' || rawStatus === 'allocated' || rawStatus === 'report_ready' || rawStatus === 'completed' || rawStatus === 'archive') return rawStatus;
   if (rawStatus === 'to_invoice') return 'report_ready';
@@ -10209,7 +10258,7 @@ function isMakesafeCompletedThisWeek(j) {
   return (Date.now() - t) < 7 * 86400000;
 }
 function buildMakesafeColumns(columns) {
-  var out = { new: [], allocated: [], trade_report_in: [], report_ready: [], completed: [], archive: [] };
+  var out = { new: [], allocated: [], trade_report_in: [], report_ready: [], completed: [], archive: [], cancelled: [] };
   Object.keys(columns || {}).forEach(function(rawStatus) {
     (columns[rawStatus] || []).forEach(function(j) {
       var stage = getMakesafeStage(j, rawStatus);
@@ -10684,7 +10733,7 @@ function renderMakesafeCard(j, status) {
   html += renderMakesafeStatusIcons(j, status);
   html += '</div>'; // /block
 
-  if (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation') {
+  if (status !== 'cancelled' && (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation')) {
     var isReassign = status === 'allocated';
     var allocLabel = isReassign ? 'Reassign crew' : 'Allocate crew';
     var btnCls = isReassign ? 'ms-btn-reassign' : 'ms-btn-alloc';
@@ -10695,6 +10744,26 @@ function renderMakesafeCard(j, status) {
   // overlay, so the send decision happens from the board card.
   if (readyToSend) {
     html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the same approval/reporting pack used by the Approvals tab" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
+  }
+  // M-F W2-C — cancelled card: reason/who/date + admin-only Reopen. The cancel_*
+  // fields ride on the make-safe payload; absent fields render nothing.
+  if (status === 'cancelled') {
+    var cmd = j.makesafe_details || j.metadata || {};
+    var creason = MS_CANCEL_REASON_LABELS_OPS[cmd.cancel_reason || j.cancel_reason] || cmd.cancel_reason || j.cancel_reason || 'Cancelled';
+    var cnote = cmd.cancel_note || j.cancel_note || '';
+    var cby = cmd.cancelled_by || j.cancelled_by || '';
+    var cat = cmd.cancelled_at || j.cancelled_at || '';
+    html += '<div style="margin-top:6px;padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;font-size:11px;color:#991B1B;">';
+    html += '<div><b>Cancelled:</b> ' + escapeHtml(String(creason)) + '</div>';
+    if (cnote) html += '<div style="margin-top:2px;">' + escapeHtml(String(cnote)) + '</div>';
+    var cmeta = [];
+    if (cby) cmeta.push(escapeHtml(String(cby)));
+    if (cat) cmeta.push(escapeHtml(String(cat).slice(0, 10)));
+    if (cmeta.length) html += '<div style="margin-top:2px;opacity:0.85;">' + cmeta.join(' &middot; ') + '</div>';
+    html += '</div>';
+    if (_canAdminCancelMakesafe()) {
+      html += '<button class="ms-btn-alloc" style="background:#4C6A7C;margin-top:6px;" onclick="event.stopPropagation();reopenMakesafeJob(\'' + j.id + '\')">&#8635; Reopen job</button>';
+    }
   }
   html += '</div>'; // /card
   return html;
@@ -14797,6 +14866,14 @@ var _currentJobId = null;
 var _jobDetailRequestSeq = 0;
 var _jobDetailAbort = null;
 
+// M-F — re-render the open make-safe overview once the async operator email
+// resolves, so the admin Cancel button appears without needing a reopen.
+function rerenderJobDetailOverviewIfMakesafe() {
+  if (!_currentJobData || !_currentJobData.job || _currentJobData.job.type !== 'makesafe') return;
+  var ov = document.getElementById('jdOverview');
+  if (ov && ov.classList.contains('active')) renderOverviewView(_currentJobData);
+}
+
 function configureJobDetailTabsForJob(job) {
   var isMakesafe = job && job.type === 'makesafe';
   var labels = { overview: isMakesafe ? 'MakeSafe' : 'Overview', money: 'Money', build: 'Build', files: 'Files', comms: 'Comms', history: 'History', jarvis: 'JARVIS' };
@@ -16321,6 +16398,26 @@ function renderMakesafeOpsDetail(data) {
     subActions.forEach(function(sa) { html += '<button onclick="advanceMakesafeSubstatus(\'' + j.id + '\',\'' + sa.to + '\')" class="btn btn-sm" style="background:' + sa.color + ';color:#fff;margin-right:6px;margin-bottom:6px;">' + sa.label + '</button>'; });
   } else {
     html += '<div style="font-size:13px;color:var(--sw-green);font-weight:800;">MakeSafe flow complete.</div>';
+  }
+  // M-F W1-E(b)/W2-C — admin-only cancel / reopen for this make-safe. Gated by
+  // the client admin allow-list (Marnin + Shaun). A live invoice blocks cancel
+  // server-side; a cancelled job shows Reopen instead.
+  if (_canAdminCancelMakesafe()) {
+    var jStatus = String(j.status || '').toLowerCase().trim();
+    if (jStatus === 'cancelled') {
+      var crl = MS_CANCEL_REASON_LABELS_OPS[md.cancel_reason] || md.cancel_reason || 'Cancelled';
+      html += '<div style="margin-top:10px;padding:8px 10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;font-size:12px;color:#991B1B;">';
+      html += '<div><b>Cancelled:</b> ' + escapeHtml(String(crl)) + '</div>';
+      if (md.cancel_note) html += '<div style="margin-top:2px;">' + escapeHtml(String(md.cancel_note)) + '</div>';
+      var cm = [];
+      if (md.cancelled_by) cm.push(escapeHtml(String(md.cancelled_by)));
+      if (md.cancelled_at) cm.push(escapeHtml(String(md.cancelled_at).slice(0, 10)));
+      if (cm.length) html += '<div style="margin-top:2px;opacity:0.85;">' + cm.join(' &middot; ') + '</div>';
+      html += '</div>';
+      html += '<button onclick="reopenMakesafeJob(\'' + j.id + '\')" class="btn btn-sm" style="margin-top:10px;background:var(--sw-mid);color:#fff;">&#8635; Reopen job</button>';
+    } else {
+      html += '<button onclick="openMakesafeCancelModal(\'' + j.id + '\')" class="btn btn-sm" style="margin-top:10px;background:#B91C1C;color:#fff;">Cancel job</button>';
+    }
   }
   html += '</div>';
   html += '</div>';
@@ -19389,6 +19486,94 @@ async function markJobLost(jobId) {
     refreshActiveView();
   } catch (e) {
     alert('Failed to mark job as lost: ' + e.message);
+  }
+}
+
+// ── M-F Cancel / Reopen a make-safe (ops, admin-only) ──────────────────────
+// Dropdown-reason modal (reuses markJobLost's intent, but a real <select> + a
+// required note, not a numbered prompt) → danger double-confirm → cancel_makesafe.
+function openMakesafeCancelModal(jobId) {
+  if (!_canAdminCancelMakesafe()) { showToast('Only Marnin or Shaun can cancel a make-safe', 'error'); return; }
+  var old = document.getElementById('msCancelBackdrop');
+  if (old) old.remove();
+  var opts = MS_CANCEL_REASONS_OPS.map(function(r) { return '<option value="' + r.code + '">' + escapeHtml(r.label) + '</option>'; }).join('');
+  var el = document.createElement('div');
+  el.id = 'msCancelBackdrop';
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  el.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:420px;width:100%;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:inherit;">' +
+      '<h3 style="margin:0 0 6px;font-size:17px;color:#293C46;">Cancel this make-safe?</h3>' +
+      '<p style="margin:0 0 14px;font-size:13px;color:#64748B;">The job leaves the active board and lands in Cancelled. It stays on record and can be reopened.</p>' +
+      '<label style="display:block;font-size:11px;font-weight:800;color:#4C6A7C;text-transform:uppercase;margin-bottom:4px;">Reason</label>' +
+      '<select id="msCancelReason" style="width:100%;padding:10px;border:1px solid #CBD5E1;border-radius:8px;font-size:14px;margin-bottom:12px;color:#293C46;background:#fff;box-sizing:border-box;">' + opts + '</select>' +
+      '<label style="display:block;font-size:11px;font-weight:800;color:#4C6A7C;text-transform:uppercase;margin-bottom:4px;">Note (required)</label>' +
+      '<textarea id="msCancelNote" rows="3" oninput="_msCancelNoteInput()" placeholder="e.g. builder rang, job pulled" style="width:100%;padding:10px;border:1px solid #CBD5E1;border-radius:8px;font-size:14px;margin-bottom:6px;box-sizing:border-box;resize:vertical;font-family:inherit;color:#293C46;"></textarea>' +
+      '<div id="msCancelErr" style="display:none;font-size:12px;color:#B91C1C;margin-bottom:8px;"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
+        '<button onclick="closeMakesafeCancelModal()" class="btn btn-secondary btn-sm">Cancel</button>' +
+        '<button id="msCancelProceed" disabled onclick="submitMakesafeCancel(\'' + jobId + '\')" class="btn btn-sm" style="background:#B91C1C;color:#fff;opacity:0.5;">Cancel this job</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(el);
+  var note = document.getElementById('msCancelNote');
+  if (note) note.focus();
+}
+function _msCancelNoteInput() {
+  var note = document.getElementById('msCancelNote');
+  var btn = document.getElementById('msCancelProceed');
+  var has = !!(note && String(note.value || '').trim());
+  if (btn) { btn.disabled = !has; btn.style.opacity = has ? '1' : '0.5'; }
+}
+function closeMakesafeCancelModal() {
+  var el = document.getElementById('msCancelBackdrop');
+  if (el) el.remove();
+}
+function submitMakesafeCancel(jobId) {
+  var sel = document.getElementById('msCancelReason');
+  var note = document.getElementById('msCancelNote');
+  var reasonCode = sel ? String(sel.value || '') : '';
+  var noteVal = note ? String(note.value || '').trim() : '';
+  var err = document.getElementById('msCancelErr');
+  if (!noteVal) {
+    if (err) { err.textContent = 'Add a note before cancelling.'; err.style.display = 'block'; }
+    if (note) note.focus();
+    return;
+  }
+  if (!reasonCode) {
+    if (err) { err.textContent = 'Pick a reason.'; err.style.display = 'block'; }
+    return;
+  }
+  closeMakesafeCancelModal();
+  var who = _opsUserEmail || 'you';
+  showConfirmModal(
+    'Cancel this make-safe?',
+    'You, <strong>' + escapeHtml(who) + '</strong>, want to cancel this job — confirm?',
+    'Yes, cancel job',
+    function() { _doMakesafeCancel(jobId, reasonCode, noteVal); },
+    { danger: true }
+  );
+}
+async function _doMakesafeCancel(jobId, reasonCode, note) {
+  try {
+    await opsPost('cancel_makesafe', { job_id: jobId, reason_code: reasonCode, note: note });
+    showToast('Make-safe cancelled', 'info');
+    loadJobs();
+  } catch (e) {
+    if (/live[_ ]?invoice/i.test(String((e && e.message) || ''))) {
+      showToast('This job has a live invoice — see admin.', 'error');
+    } else {
+      showToast('Could not cancel: ' + (e && e.message ? e.message : 'unknown error'), 'error');
+    }
+  }
+}
+async function reopenMakesafeJob(jobId) {
+  if (!_canAdminCancelMakesafe()) { showToast('Only Marnin or Shaun can reopen a make-safe', 'error'); return; }
+  try {
+    await opsPost('reopen_makesafe', { job_id: jobId, reason: 'reopen after cancel' });
+    showToast('Make-safe reopened — back in New', 'info');
+    loadJobs();
+  } catch (e) {
+    showToast('Could not reopen: ' + (e && e.message ? e.message : 'unknown error'), 'error');
   }
 }
 
@@ -22992,6 +23177,19 @@ function togglePOEmailThread(poId, toggleEl) {
 
 function initApp() {
   cloud = window.SECUREWORKS_CLOUD;
+  // M-F W1-E(a) — cache the signed-in operator email so opsPost can attach it
+  // synchronously (getUser() is a Promise). Also drives the admin cancel gate.
+  try {
+    if (cloud && cloud.supabase && cloud.supabase.auth) {
+      cloud.supabase.auth.getUser().then(function(res) {
+        _opsUserEmail = (res && res.data && res.data.user && res.data.user.email) || _opsUserEmail;
+        if (typeof rerenderJobDetailOverviewIfMakesafe === 'function') rerenderJobDetailOverviewIfMakesafe();
+      }).catch(function() {});
+      cloud.supabase.auth.onAuthStateChange(function(_event, session) {
+        _opsUserEmail = (session && session.user && session.user.email) || _opsUserEmail;
+      });
+    }
+  } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
   loadCrewList(); // Pre-cache crew list for dropdowns
   restoreTab();
   // Initialize Jarvis bar summary after data loads

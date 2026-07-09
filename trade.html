@@ -3344,6 +3344,18 @@
   var _isAdmin = false;       // set true when user role === 'admin'
   var _adminViewAll = false;  // admin toggle: true = all jobs, false = my assignments only
 
+  // ── M-F Cancel a make-safe (W1-D / W2-C) ──────────────────────────────────
+  // Fixed reason set shared by the trade cancel form + the cancelled-card labels.
+  // Codes are the backend cancel_makesafe allow-list; labels are Marnin's copy.
+  var MS_CANCEL_REASONS = [
+    { code: 'builder_recalled', label: 'Builder recalled/cancelled' },
+    { code: 'reallocated', label: 'Reallocated to another trade' },
+    { code: 'sent_in_error', label: 'Sent in error / mistake' },
+    { code: 'duplicate', label: 'Duplicate' },
+    { code: 'other', label: 'Other' }
+  ];
+  var MS_CANCEL_REASON_LABELS = MS_CANCEL_REASONS.reduce(function (m, r) { m[r.code] = r.label; return m; }, {});
+
   // ── Availability state ──
   var _weeklyPattern = [1, 1, 1, 1, 1, 0, 0]; // Mon=0..Sun=6, 1=available
   var _exceptions = {};           // { '2026-03-20': { available: false, note: 'Dentist' } }
@@ -10026,6 +10038,7 @@
     var container = document.getElementById('reportContent');
     container.innerHTML = '<div style="padding:0 0 12px"><button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button>' +
       '<div id="makesafeReattendBar">' + makesafeReattendBarHTML(data) + '</div>' +
+      '<div id="makesafeCancelBar">' + makesafeCancelBarHTML(data) + '</div>' +
       '<div id="makesafeWorkOrderDirect"></div>' +
       (limited ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#92400E;">Limited details loaded. You can still open the MakeSafe report; refresh if photos or saved report data are missing.</div>' : '') +
       '<div id="makesafeReportDirectContent"></div></div>';
@@ -10109,6 +10122,114 @@
     }).catch(function (err) {
       if (yes) { yes.disabled = false; yes.textContent = 'Confirm re-attend'; }
       toast('Could not re-attend: ' + friendlyError(err), true);
+    });
+  };
+
+  // ── Cancel a make-safe (M-F W1-D) ────────────────────────────────────────
+  // Managers only (same gate as re-attend): retire a recalled/mistaken work
+  // order from the active board. Flow mirrors the re-attend expand pattern but
+  // requires a dropdown reason + a typed note, then a personalised second
+  // confirm before the write. The server (cancel_makesafe) re-checks authz and
+  // blocks the cancel if a live invoice exists.
+  function makesafeCancelBarHTML(data) {
+    if (!_canManageMakesafeReattend()) return '';
+    var jobId = (data && data.job && data.job.id) || _currentJobId || '';
+    var opts = MS_CANCEL_REASONS.map(function (r) {
+      return '<option value="' + esc(r.code) + '">' + esc(r.label) + '</option>';
+    }).join('');
+    var h = '<div id="cancelPanel" style="background:#fff;border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">';
+    h += '<div style="font-size:13px;font-weight:600;color:var(--sw-text);margin-bottom:6px;">Builder recalled or cancelled this job?</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">Retire this make-safe from the active board. The job stays on record with your reason and can be reopened later.</div>';
+    h += '<button id="cancelAskBtn" onclick="cancelMakesafeAsk()" style="width:100%;background:#B91C1C;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;min-height:46px;font-family:var(--sw-font);">Cancel job</button>';
+    // Step 1 — reason + required note
+    h += '<div id="cancelFormRow" style="display:none;margin-top:10px;">';
+    h += '<select id="cancelReasonSel" style="width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;box-sizing:border-box;font-family:var(--sw-font);margin-bottom:8px;background:#fff;color:var(--sw-text);">' + opts + '</select>';
+    h += '<textarea id="cancelNote" rows="2" oninput="cancelMakesafeNoteInput()" placeholder="Add a note (required) — e.g. builder rang, job pulled" style="width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;box-sizing:border-box;font-family:var(--sw-font);margin-bottom:8px;resize:vertical;"></textarea>';
+    h += '<div id="cancelInlineMsg" style="display:none;font-size:12px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:8px;margin-bottom:8px;"></div>';
+    h += '<div style="display:flex;gap:8px;">';
+    h += '<button onclick="cancelMakesafeAbort()" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-light);color:var(--sw-text);font-family:var(--sw-font);">Back</button>';
+    h += '<button id="cancelProceedBtn" disabled onclick="cancelMakesafeProceed(\'' + esc(jobId) + '\')" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:#B91C1C;color:#fff;opacity:0.5;font-family:var(--sw-font);">Cancel this job</button>';
+    h += '</div></div>';
+    // Step 2 — personalised confirm
+    h += '<div id="cancelConfirmRow" style="display:none;margin-top:10px;">';
+    h += '<div id="cancelConfirmMsg" style="font-size:13px;font-weight:600;color:var(--sw-text);margin-bottom:8px;"></div>';
+    h += '<div style="display:flex;gap:8px;">';
+    h += '<button onclick="cancelMakesafeBackToForm()" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-light);color:var(--sw-text);font-family:var(--sw-font);">Back</button>';
+    h += '<button id="cancelYesBtn" onclick="cancelMakesafeConfirm(\'' + esc(jobId) + '\')" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:#B91C1C;color:#fff;font-family:var(--sw-font);">Yes, cancel this job</button>';
+    h += '</div></div>';
+    h += '</div>';
+    return h;
+  }
+  function _cancelShowInline(msg) {
+    var el = document.getElementById('cancelInlineMsg');
+    if (!el) return;
+    if (msg) { el.textContent = msg; el.style.display = 'block'; }
+    else { el.textContent = ''; el.style.display = 'none'; }
+  }
+  window.cancelMakesafeAsk = function () {
+    var row = document.getElementById('cancelFormRow');
+    var btn = document.getElementById('cancelAskBtn');
+    var confirmRow = document.getElementById('cancelConfirmRow');
+    if (confirmRow) confirmRow.style.display = 'none';
+    if (row) row.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+    _cancelShowInline('');
+    var note = document.getElementById('cancelNote');
+    if (note) note.focus();
+  };
+  window.cancelMakesafeAbort = function () {
+    var row = document.getElementById('cancelFormRow');
+    var btn = document.getElementById('cancelAskBtn');
+    if (row) row.style.display = 'none';
+    if (btn) btn.style.display = 'block';
+    _cancelShowInline('');
+  };
+  window.cancelMakesafeNoteInput = function () {
+    var note = document.getElementById('cancelNote');
+    var btn = document.getElementById('cancelProceedBtn');
+    var has = !!(note && String(note.value || '').trim());
+    if (btn) { btn.disabled = !has; btn.style.opacity = has ? '1' : '0.5'; }
+    if (has) _cancelShowInline('');
+  };
+  window.cancelMakesafeProceed = function (jobId) {
+    var note = document.getElementById('cancelNote');
+    var noteVal = note ? String(note.value || '').trim() : '';
+    if (!noteVal) { _cancelShowInline('Add a note before cancelling.'); if (note) note.focus(); return; }
+    var row = document.getElementById('cancelFormRow');
+    var confirmRow = document.getElementById('cancelConfirmRow');
+    var msg = document.getElementById('cancelConfirmMsg');
+    var who = (_user && _user.name) || (_user && _user.email) || 'you';
+    if (msg) msg.textContent = 'You, ' + who + ', want to cancel this job — confirm?';
+    if (row) row.style.display = 'none';
+    if (confirmRow) confirmRow.style.display = 'block';
+  };
+  window.cancelMakesafeBackToForm = function () {
+    var row = document.getElementById('cancelFormRow');
+    var confirmRow = document.getElementById('cancelConfirmRow');
+    if (confirmRow) confirmRow.style.display = 'none';
+    if (row) row.style.display = 'block';
+  };
+  window.cancelMakesafeConfirm = function (jobId) {
+    if (!jobId) { toast('Missing job reference', true); return; }
+    var sel = document.getElementById('cancelReasonSel');
+    var note = document.getElementById('cancelNote');
+    var reasonCode = sel ? String(sel.value || '') : '';
+    var noteVal = note ? String(note.value || '').trim() : '';
+    if (!reasonCode) { cancelMakesafeBackToForm(); _cancelShowInline('Pick a reason.'); return; }
+    if (!noteVal) { cancelMakesafeBackToForm(); _cancelShowInline('Add a note before cancelling.'); if (note) note.focus(); return; }
+    var yes = document.getElementById('cancelYesBtn');
+    if (yes) { yes.disabled = true; yes.textContent = 'Cancelling...'; }
+    api('cancel_makesafe', null, { job_id: jobId, reason_code: reasonCode, note: noteVal }).then(function () {
+      toast('Job cancelled');
+      showView('board');
+    }).catch(function (err) {
+      if (yes) { yes.disabled = false; yes.textContent = 'Yes, cancel this job'; }
+      cancelMakesafeBackToForm();
+      if (/live[_ ]?invoice/i.test(String((err && err.message) || ''))) {
+        _cancelShowInline('This job has a live invoice — see admin.');
+      } else {
+        _cancelShowInline('Could not cancel: ' + friendlyError(err));
+      }
     });
   };
 
@@ -16503,6 +16624,12 @@
       m.address = String(job.site_address || '').trim();
       m.extRef = String(md.external_ref || '').trim();
       m.ageLabel = ageLabel(job.created_at, opts.now);
+      // M-F W2-C: cancelled-card attribution (reason/note/who/date). Present only
+      // on cards fed by the windowed cancelled feed; absent renders nothing.
+      m.cancelReason = String(md.cancel_reason || job.cancel_reason || '').trim();
+      m.cancelNote = String(md.cancel_note || job.cancel_note || '').trim();
+      m.cancelledBy = String(md.cancelled_by || job.cancelled_by || '').trim();
+      m.cancelledAt = String(md.cancelled_at || job.cancelled_at || '').trim();
       return m;
     }
     var CAL_ICO2 = '<svg class="tjc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>';
@@ -16536,6 +16663,18 @@
       if (m.crew) h += '<span class="tjc-crew">' + CREW_ICO2 + esc2(m.crew) + '</span>';
       else if (m.crewEmptyLabel) h += '<span class="tjc-crew un">' + esc2(m.crewEmptyLabel) + '</span>';
       h += '</div>';
+      // M-F W2-C: cancelled-card reason/who/date block.
+      if (m.cancelReason || m.cancelledBy || m.cancelledAt) {
+        var rl = MS_CANCEL_REASON_LABELS[m.cancelReason] || m.cancelReason || 'Cancelled';
+        h += '<div style="margin-top:6px;padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;font-size:11px;color:#991B1B;">';
+        h += '<div><b>Cancelled:</b> ' + esc2(rl) + '</div>';
+        if (m.cancelNote) h += '<div style="margin-top:2px;">' + esc2(m.cancelNote) + '</div>';
+        var cmeta = [];
+        if (m.cancelledBy) cmeta.push(esc2(m.cancelledBy));
+        if (m.cancelledAt) cmeta.push(esc2(String(m.cancelledAt).slice(0, 10)));
+        if (cmeta.length) h += '<div style="margin-top:2px;opacity:0.85;">' + cmeta.join(' &middot; ') + '</div>';
+        h += '</div>';
+      }
       return h;
     }
 
@@ -16558,6 +16697,24 @@
   var _boardCardById = {};  // cardId -> { model, vertical }; rebuilt each _renderBoard (the tap-target registry)
   var _boardCardSeq = 0;
   var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
+  var _boardCancelledVisible = false; // M-F W2-D — Cancelled column collapsed by default
+  // M-F W2-C — reopen a cancelled make-safe from the trade board. Same gate as
+  // cancel/re-attend; passes the backend's required default reason (the user is
+  // not asked for one). On success the board reloads and the card lands in New.
+  window.reopenMakesafeCard = function (ev, jobId) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    if (!jobId) { toast('Missing job reference', true); return; }
+    var btn = ev && ev.currentTarget;
+    if (btn) { btn.disabled = true; btn.textContent = 'Reopening...'; }
+    api('reopen_makesafe', null, { job_id: jobId, reason: 'reopen after cancel' }).then(function () {
+      toast('Job reopened — back in New');
+      showView('board');
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '&#8635; Reopen job'; }
+      toast('Could not reopen: ' + friendlyError(err), true);
+    });
+  };
+  window.toggleBoardCancelled = function () { _boardCancelledVisible = !_boardCancelledVisible; _renderBoard(); };
   var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
   var _allocGuard = null;   // per-open double-fire guard { busy }
   var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
@@ -16632,6 +16789,17 @@
     var job = model._boardJob || row.jobs || {};
     var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
     var arg = row._makesafePool ? '' : (row.id || '');
+    // M-F W2-C: a cancelled make-safe card gets a Reopen affordance (managers/
+    // admins). Rendered as a tappable <div> (not a <button>) so the inner Reopen
+    // <button> is valid markup; the card still opens the job on tap. Keeps the
+    // .tjb-card class so filterBoard()'s show/hide still applies.
+    var jobStatus = String(job.status || '').toLowerCase().trim();
+    if (model.type === 'makesafe' && jobStatus === 'cancelled' && _canManageMakesafeReattend()) {
+      return '<div class="tjb-card ' + (model.typeCls || 'nt') + '" data-search="' + searchStr + '" style="cursor:pointer;" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
+        BoardCore.opsCardHTML(model) +
+        '<button onclick="reopenMakesafeCard(event,\'' + esc(job.id || '') + '\')" style="margin-top:8px;width:100%;padding:10px;border:none;border-radius:8px;background:var(--sw-mid);color:#fff;font-weight:700;font-size:13px;cursor:pointer;font-family:var(--sw-font);">&#8635; Reopen job</button>' +
+        '</div>';
+    }
     return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" data-search="' + searchStr + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
       BoardCore.opsCardHTML(model) + '</button>';
   }
@@ -16677,15 +16845,30 @@
     if (crewNames.length) {
       html += '<div class="tjb-note">Crew (' + crewNames.length + ') · ' + esc(crewNames.slice(0, 6).join(', ')) + (crewNames.length > 6 ? ' +' + (crewNames.length - 6) : '') + '</div>';
     }
+    // M-F W2-D — collapse the terminal Cancelled column behind a toggle so the
+    // active view reads through to Done/Completed; managers open it on demand.
+    // Trade has no Archive column, so Cancelled is the only "dead" column to
+    // collapse here (Done stays visible — it is trade's Completed column).
+    var _cancelledCol = null;
+    active.columns.forEach(function (c) { if (c.key === 'cancelled') _cancelledCol = c; });
+    var _cancelledCount = _cancelledCol ? _cancelledCol.cards.length : 0;
+    function _showCol(c) { return !(c.key === 'cancelled' && !_boardCancelledVisible); }
+    if (_cancelledCol) {
+      html += '<div style="display:flex;justify-content:flex-end;margin:0 0 8px;">' +
+        '<button onclick="toggleBoardCancelled()" style="background:' + (_boardCancelledVisible ? 'var(--sw-mid)' : 'var(--sw-light)') + ';color:' + (_boardCancelledVisible ? '#fff' : 'var(--sw-text)') + ';border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;padding:7px 12px;cursor:pointer;font-family:var(--sw-font);">' +
+        (_boardCancelledVisible ? 'Hide cancelled' : 'Show cancelled') + (_cancelledCount ? ' (' + _cancelledCount + ')' : '') + '</button></div>';
+    }
     // status strip for the active vertical
     html += '<div class="tjb-strip">';
     active.columns.forEach(function (c) {
+      if (!_showCol(c)) return;
       html += '<div class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') + '"><span class="n">' + c.cards.length + '</span><span class="l">' + esc(c.label) + '</span></div>';
     });
     html += '</div>';
     // pager of columns
     html += '<div class="tjb-pager">';
     active.columns.forEach(function (c) {
+      if (!_showCol(c)) return;
       html += '<div class="tjb-col"><div class="tjb-colhead' + (c.hot ? ' hot' : '') + '"><b>' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
       html += '<div class="tjb-colcards">';
       if (c.cards.length) {

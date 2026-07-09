@@ -2475,7 +2475,7 @@
     .ops-notes-popup {
       position: fixed; z-index: 180;
       background: var(--sw-card); border-radius: 12px;
-      width: 340px; max-width: 90vw; max-height: 60vh;
+      width: 340px; max-width: 90vw; max-height: calc(100vh - var(--jarvis-bar-height) - 16px);
       box-shadow: 0 12px 40px rgba(0,0,0,0.2);
       border: 1px solid var(--sw-border);
       display: flex; flex-direction: column;
@@ -18836,15 +18836,21 @@ async function openOpsNotesPopup(event, jobId) {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) stageOpsNoteFile(e.dataTransfer.files[0]);
   });
 
-  // Position near the click
+  // Position near the click. The popup's bottom edge is pinned above the
+  // Jarvis bar at all times — if the note list is too long to fit, it grows
+  // upward instead of extending down behind the bar.
+  var jarvisH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--jarvis-bar-height')) || 48;
+  var margin = 8;
   var rect = event.currentTarget.getBoundingClientRect();
   var left = rect.right + 8;
   if (left + 340 > window.innerWidth) left = rect.left - 348;
   if (left < 4) left = 4;
-  var top = rect.top - 40;
-  if (top + 300 > window.innerHeight) top = Math.max(4, window.innerHeight - 320);
+  var bottom = window.innerHeight - rect.top - 260;
+  if (bottom < jarvisH + margin) bottom = jarvisH + margin;
   pop.style.left = left + 'px';
-  pop.style.top = top + 'px';
+  pop.style.top = 'auto';
+  pop.style.bottom = bottom + 'px';
+  pop.style.maxHeight = Math.min(window.innerHeight - bottom - margin, window.innerHeight - jarvisH - 16) + 'px';
 
   // Close on outside click
   setTimeout(function() {

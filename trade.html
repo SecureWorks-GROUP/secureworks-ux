@@ -2870,7 +2870,9 @@
     .alloc-head .at{font-size:17px;font-weight:700;color:var(--sw-dark)}
     .alloc-head .as{font-size:13px;color:var(--sw-text-sec);margin-top:2px}
     .alloc-head .ameta{font-family:var(--sw-mono);font-size:11px;letter-spacing:.05em;color:var(--sw-mid);margin-top:4px}
-    .alloc-openjob{margin-top:8px;font-size:12px;font-weight:600;color:var(--sw-mid);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-family:inherit}
+    .alloc-openjob{display:inline-flex;align-items:center;gap:6px;margin-top:10px;min-height:40px;padding:0 15px;font-size:13px;font-weight:600;color:var(--sw-orange);background:var(--sw-orange-tint);border:1px solid var(--sw-orange-line);border-radius:10px;cursor:pointer;text-decoration:none;font-family:inherit;transition:background .15s,border-color .15s}
+    .alloc-openjob:active{background:var(--sw-orange-line)}
+    .alloc-openjob .ar{font-size:15px;line-height:1;font-weight:700}
     .alloc-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sw-text-sec);margin:6px 0 8px}
     .alloc-crew{display:block;width:100%;padding:13px 14px;margin-bottom:8px;background:var(--sw-light);border:2px solid transparent;border-radius:10px;font-size:15px;font-weight:600;color:var(--sw-text);cursor:pointer;text-align:left;font-family:var(--sw-font)}
     .alloc-crew .role{display:block;font-size:11px;font-weight:500;color:var(--sw-text-sec);text-transform:capitalize;margin-top:1px}
@@ -16555,6 +16557,7 @@
   var _boardVert = null;    // active vertical key
   var _boardCardById = {};  // cardId -> { model, vertical }; rebuilt each _renderBoard (the tap-target registry)
   var _boardCardSeq = 0;
+  var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
   var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
   var _allocGuard = null;   // per-open double-fire guard { busy }
   var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
@@ -16614,10 +16617,14 @@
 
   function _boardCardHTML(model, cardId) {
     var row = model._boardRow || {};
+    // M3d — searchable haystack for filterBoard(): ref, external ref, client,
+    // builder, address and suburb, lowercased + space-joined + esc()'d.
+    var searchStr = esc([model.ref, model.extRef, model.client, model.builder, model.address, model.sub, model.desc]
+      .filter(function (s) { return s; }).join(' ').toLowerCase());
     if (BoardCore.canAllocate(row)) {
       // M3 U3: tapping a live Board card opens the allocation sheet (pick crew
       // -> confirm -> allocate_job). "Open job" is preserved inside the sheet.
-      return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
+      return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" data-search="' + searchStr + '" onclick="openAllocateSheet(\'' + esc(cardId) + '\')">' +
         BoardCore.opsCardHTML(model) + '</button>';
     }
     // FIX B: terminal cards (Done / Attention / Cancelled) open the job
@@ -16625,7 +16632,7 @@
     var job = model._boardJob || row.jobs || {};
     var openAction = (model.type === 'makesafe') ? 'openJobReport' : 'openJob';
     var arg = row._makesafePool ? '' : (row.id || '');
-    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
+    return '<button class="tjb-card ' + (model.typeCls || 'nt') + '" data-search="' + searchStr + '" onclick="' + openAction + '(\'' + esc(job.id || '') + '\', \'' + esc(arg) + '\')">' +
       BoardCore.opsCardHTML(model) + '</button>';
   }
 
@@ -16649,6 +16656,12 @@
       html += '<div class="tjb-warn">Unmapped status token(s): ' + esc(board.unmappedStatuses.join(', ')) +
         '. These jobs are held out of the columns pending a column-map amendment.</div>';
     }
+    // M3d — client-side search over the board cards (name / suburb / ref).
+    html += '<input id="boardSearchInput" type="search" oninput="filterBoard()" autocomplete="off" ' +
+      'placeholder="Search make-safes by name, suburb or ref" ' +
+      'style="width:100%;box-sizing:border-box;margin:2px 0 10px;padding:11px 13px;font-size:14px;' +
+      'font-family:inherit;color:var(--sw-text);background:var(--sw-card);' +
+      'border:1px solid var(--sw-border);border-radius:10px;outline:none">';
     // vertical selector (only when the manager owns more than one)
     if (board.verticals.length > 1) {
       html += '<div class="tjb-verts">';
@@ -16691,7 +16704,28 @@
     html += '</div>';
     container.innerHTML = html;
     if (weatherData) renderWeatherBadges();
+    // M3d — a background reload rebuilds innerHTML; re-apply any active filter
+    // so the input value + visible-card set survive the re-render (no focus
+    // loss because filterBoard toggles display only, never innerHTML).
+    if (_boardSearchQuery) {
+      var _bsi = document.getElementById('boardSearchInput');
+      if (_bsi) { _bsi.value = _boardSearchQuery; filterBoard(); }
+    }
   }
+
+  // M3d — filter visible Board cards client-side by the search box (name /
+  // suburb / ref). Toggles card display only — no re-fetch, no innerHTML
+  // rebuild, so the input keeps focus while typing.
+  window.filterBoard = function () {
+    var input = document.getElementById('boardSearchInput');
+    var q = input ? String(input.value || '').toLowerCase().trim() : '';
+    _boardSearchQuery = q;
+    var cards = document.querySelectorAll('#boardContent .tjb-card');
+    for (var i = 0; i < cards.length; i++) {
+      var hay = cards[i].getAttribute('data-search') || '';
+      cards[i].style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    }
+  };
 
   // ══════════════════════════════════════════════════════════════════════
   // M3 U3 — ALLOCATE CORE (the first LIVE write path: allocate_job).
@@ -17019,7 +17053,7 @@
       '<div class="ameta">' + (reassign
         ? ('Reassign' + (curCrew ? ' &middot; now ' + esc(curCrew) : ''))
         : ('New allocation &middot; ' + esc(AllocateCore.fmtDate(ctx.scheduledDate)))) + '</div>' +
-      '<button class="alloc-openjob" onclick="closeAllocateSheet();' + openAction + '(\'' + esc(job.id || '') + '\',\'' + esc(openArg) + '\')">Open job details</button>';
+      '<button class="alloc-openjob" onclick="closeAllocateSheet();' + openAction + '(\'' + esc(job.id || '') + '\',\'' + esc(openArg) + '\')">Open job details <span class="ar" aria-hidden="true">&#8599;</span></button>';
 
     var roster = (_boardCache.roster || []).filter(function (u) {
       return u && u.id && u.name && ['crew', 'lead_installer', 'admin', 'ops_manager'].indexOf(u.role) >= 0;

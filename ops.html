@@ -2517,6 +2517,14 @@
     }
     .ops-note-btn.has-notes svg { fill: rgba(52,152,219,0.3); }
     .ops-note-btn { position: relative; }
+    .ops-comms-btn { position: relative; }
+    .ops-comms-btn.has-notes svg { stroke: var(--sw-orange); }
+    .ops-comms-msg { padding: 8px 0; border-bottom: 1px solid var(--sw-border); }
+    .ops-comms-msg:last-child { border-bottom: none; }
+    .ops-comms-msg-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--sw-text-sec); margin-bottom: 2px; }
+    .ops-comms-msg-author { font-weight: 700; color: var(--sw-text); }
+    .ops-comms-msg-office { font-size: 10px; background: var(--sw-blue, #4C6A7C); color: #fff; padding: 1px 5px; border-radius: 4px; }
+    .ops-comms-msg-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
     .ops-notes-popup-footer .ops-note-staged {
       display: flex; align-items: center; gap: 6px; padding: 4px 8px;
       background: var(--sw-light); border-radius: 6px; font-size: 11px; color: var(--sw-text-sec);
@@ -12267,6 +12275,14 @@ function renderKanbanCard(j, status) {
     + '<svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z" fill="none"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="12" y2="13"/></svg>'
     + notesBadge
     + '</button>';
+  // Trade comms icon — the two-way trade<->ops thread (job_events notes). Badge =
+  // comms_notes_count (human notes only; from list_jobs). Distinct from the ops
+  // scratchpad notes above.
+  var commsBadge = j.comms_notes_count > 0 ? '<span class="ops-note-badge">' + j.comms_notes_count + '</span>' : '';
+  iconRow += '<button class="kanban-icon-btn ops-comms-btn' + (j.comms_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openJobComms(event,\'' + j.id + '\')" title="Trade comms">'
+    + '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none"/></svg>'
+    + commsBadge
+    + '</button>';
   if (iconRow) {
     html += '<div class="kanban-icon-row" onmouseenter="clearTimeout(_hoverTimer);hideJobHover()">' + iconRow + '</div>';
   }
@@ -15821,6 +15837,23 @@ function isMakesafePackSentMarker(ev) {
   var text = (dj && (dj.text || dj.note || dj.note_text)) || '';
   return String(text || '').trim().indexOf('MAKESAFE_PACK_SENT') === 0;
 }
+
+// Trade<->ops comms thread membership. A job_events note belongs to the comms
+// thread iff it is a human note (note/note_added/site_note) and NOT a system/
+// audit marker (MAKESAFE_PACK_SENT / MAKESAFE_AGENT_REPLY). Mirrors the backend
+// noteIsSystemMarker filter.
+function isOpsCommsNote(ev) {
+  if (!ev) return false;
+  var et = ev.event_type;
+  if (et !== 'note' && et !== 'note_added' && et !== 'site_note') return false;
+  var dj = ev.detail_json;
+  if (typeof dj === 'string') {
+    try { dj = JSON.parse(dj); } catch (e) { dj = { text: dj }; }
+  }
+  var text = String((dj && (dj.text || dj.note || dj.note_text)) || '').trim();
+  if (text.indexOf('MAKESAFE_PACK_SENT') === 0 || text.indexOf('MAKESAFE_AGENT_REPLY') === 0) return false;
+  return true;
+}
 // Parse MAKESAFE_PACK_SENT markers from the job's note events. Marker format:
 //   MAKESAFE_PACK_SENT | <main|photo> | <invoice_no or -> | to=<email> | <ISO8601> | msgid=<id>
 // Matching follows the send script: a note whose text starts with the prefix; the
@@ -18046,7 +18079,7 @@ function matchMaterialStatus(category, purchaseOrders) {
 // ── Shared Notes Section (appended to Overview, Money, Build, Files) ──
 
 function buildNotesHTML(data) {
-  var noteEvents = (data.events || []).filter(function(ev) { return (ev.event_type === 'note' || ev.event_type === 'note_added' || ev.event_type === 'site_note') && !isMakesafePackSentMarker(ev); });
+  var noteEvents = (data.events || []).filter(isOpsCommsNote);
   var h = '<div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--sw-border);">';
   h += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Notes</div>';
   if (noteEvents.length > 0) {
@@ -18054,7 +18087,10 @@ function buildNotesHTML(data) {
     noteEvents.forEach(function(ev) {
       h += '<div class="jd-note-item" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">';
       h += '<div style="flex:1;min-width:0;">';
-      h += '<div style="font-size:11px;color:var(--sw-text-sec);">' + (ev.users?.name || '') + ' &middot; ' + new Date(ev.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) + '</div>';
+      var _fromOps = ev.detail_json && ev.detail_json.from_ops === true;
+      var _author = _fromOps ? 'Office' : ((ev.users?.name || '').trim() || 'Trade');
+      var _officeTag = _fromOps ? ' <span style="font-size:10px;background:var(--sw-blue,#4C6A7C);color:#fff;padding:1px 5px;border-radius:4px;">Office</span>' : '';
+      h += '<div style="font-size:11px;color:var(--sw-text-sec);">' + escapeHtml(_author) + _officeTag + ' &middot; ' + new Date(ev.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) + '</div>';
       h += '<div>' + escapeHtml(ev.detail_json?.text || ev.detail_json?.note || '') + '</div>';
       h += '</div>';
       h += '<button onclick="deleteJobNote(\'' + ev.id + '\')" title="Delete note" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:14px;padding:2px 4px;border-radius:4px;flex-shrink:0;line-height:1;" onmouseover="this.style.color=\'var(--sw-red)\'" onmouseout="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
@@ -18505,7 +18541,9 @@ async function submitJobNote() {
   var text = input ? input.value.trim() : '';
   if (!text || !_currentJobId) return;
   try {
-    await opsPost('add_note', { job_id: _currentJobId, text: text });
+    // Ops-authored comms note: internal_only (never syncs to the client CRM) and
+    // from_ops so it shows as "Office" in the trade app's notes thread.
+    await opsPost('add_note', { job_id: _currentJobId, text: text, visibility: 'internal_only', from_ops: true });
     input.value = '';
     showToast('Note added', 'success');
     refreshJobDetail();
@@ -19128,6 +19166,136 @@ async function refreshOpsNotesBadge(jobId) {
         } else {
           btn.insertAdjacentHTML('beforeend', '<span class="ops-note-badge">' + count + '</span>');
         }
+      } else {
+        btn.classList.remove('has-notes');
+        if (badge) badge.remove();
+      }
+    });
+  } catch(e) { /* silent */ }
+}
+
+// ── Trade <-> Ops Comms Popup (two-way job_events note thread) ──
+// Distinct from the ops-notes scratchpad above: this is the conversation with
+// the trade in the field. Reads job_events notes (comms only, markers stripped)
+// and lets ops reply. Replies are internal_only + from_ops so they never sync to
+// the client CRM and show as "Office" in the trade app.
+
+var _opsCommsPopup = null;
+var _opsCommsJobId = null;
+
+function closeOpsCommsPopup() {
+  if (_opsCommsPopup) { _opsCommsPopup.remove(); _opsCommsPopup = null; _opsCommsJobId = null; }
+}
+
+function _opsCommsOutsideClick(e) {
+  if (_opsCommsPopup && !_opsCommsPopup.contains(e.target)) {
+    closeOpsCommsPopup();
+    document.removeEventListener('mousedown', _opsCommsOutsideClick);
+  }
+}
+
+async function openJobComms(event, jobId) {
+  closeOpsCommsPopup();
+  _opsCommsJobId = jobId;
+  var pop = document.createElement('div');
+  pop.className = 'ops-notes-popup';
+  pop.innerHTML = '<div class="ops-notes-popup-header"><span>Trade Comms</span><button onclick="closeOpsCommsPopup()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--sw-text-sec);">&times;</button></div>'
+    + '<div class="ops-notes-popup-body"><div class="loading" style="padding:12px;">Loading...</div></div>'
+    + '<div class="ops-notes-popup-footer">'
+    + '<textarea id="opsCommsInput" placeholder="Reply to the trade..."></textarea>'
+    + '<button onclick="submitJobComms()">Send</button>'
+    + '</div>';
+  document.body.appendChild(pop);
+  _opsCommsPopup = pop;
+
+  // Position near the click, mirroring the ops-notes popup: pinned above the
+  // Jarvis bar, growing upward when the thread is long.
+  var jarvisH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--jarvis-bar-height')) || 48;
+  var margin = 8;
+  var anchor = (event && event.currentTarget) ? event.currentTarget : (event && event.target);
+  if (anchor && anchor.getBoundingClientRect) {
+    var rect = anchor.getBoundingClientRect();
+    var left = rect.right + 8;
+    if (left + 340 > window.innerWidth) left = rect.left - 348;
+    if (left < 4) left = 4;
+    var bottom = window.innerHeight - rect.top - 260;
+    if (bottom < jarvisH + margin) bottom = jarvisH + margin;
+    pop.style.left = left + 'px';
+    pop.style.top = 'auto';
+    pop.style.bottom = bottom + 'px';
+    pop.style.maxHeight = Math.min(window.innerHeight - bottom - margin, window.innerHeight - jarvisH - 16) + 'px';
+  }
+
+  loadJobComms(jobId);
+  setTimeout(function() { document.addEventListener('mousedown', _opsCommsOutsideClick); }, 50);
+  var input = pop.querySelector('#opsCommsInput');
+  if (input) input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJobComms(); }
+  });
+}
+
+async function loadJobComms(jobId) {
+  if (!_opsCommsPopup) return;
+  try {
+    var data = await opsFetch('job_detail', { jobId: jobId });
+    if (!_opsCommsPopup || _opsCommsJobId !== jobId) return;
+    var body = _opsCommsPopup.querySelector('.ops-notes-popup-body');
+    var notes = (data.events || []).filter(isOpsCommsNote).sort(function(a, b) {
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+    if (notes.length === 0) {
+      body.innerHTML = '<div style="padding:12px;color:var(--sw-text-sec);font-size:13px;">No messages yet. Start the conversation with the trade below.</div>';
+      return;
+    }
+    var html = '';
+    notes.forEach(function(n) {
+      var dj = n.detail_json;
+      if (typeof dj === 'string') { try { dj = JSON.parse(dj); } catch(e) { dj = { text: dj }; } }
+      dj = dj || {};
+      var fromOps = dj.from_ops === true;
+      var author = fromOps ? 'Office' : (((n.users && n.users.name) || '').trim() || 'Trade');
+      var office = fromOps ? '<span class="ops-comms-msg-office">Office</span>' : '';
+      var when = n.created_at ? new Date(n.created_at).toLocaleString('en-AU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+      html += '<div class="ops-comms-msg">'
+        + '<div class="ops-comms-msg-head"><span class="ops-comms-msg-author">' + escapeHtml(author) + '</span>' + office + '<span style="flex:1"></span><span>' + escapeHtml(when) + '</span></div>'
+        + '<div class="ops-comms-msg-text">' + escapeHtml(dj.text || dj.note || '') + '</div>'
+        + '</div>';
+    });
+    body.innerHTML = html;
+  } catch(e) {
+    if (_opsCommsPopup) {
+      _opsCommsPopup.querySelector('.ops-notes-popup-body').innerHTML = '<div style="color:var(--sw-red);padding:12px;font-size:13px;">Error: ' + e.message + '</div>';
+    }
+  }
+}
+
+async function submitJobComms() {
+  var input = document.getElementById('opsCommsInput');
+  var text = input ? input.value.trim() : '';
+  if (!text || !_opsCommsJobId) return;
+  var jobId = _opsCommsJobId;
+  try {
+    await opsPost('add_note', { job_id: jobId, text: text, visibility: 'internal_only', from_ops: true });
+    if (input) input.value = '';
+    if (_opsCommsJobId === jobId) loadJobComms(jobId);
+    refreshCommsBadge(jobId);
+  } catch(e) {
+    showToast('Failed to send: ' + e.message, 'error');
+  }
+}
+
+// Recompute the kanban comms badge after ops replies (live, without a board reload).
+async function refreshCommsBadge(jobId) {
+  try {
+    var data = await opsFetch('job_detail', { jobId: jobId });
+    var count = (data.events || []).filter(isOpsCommsNote).length;
+    var btns = document.querySelectorAll('.ops-comms-btn[data-job-id="' + jobId + '"]');
+    btns.forEach(function(btn) {
+      var badge = btn.querySelector('.ops-note-badge');
+      if (count > 0) {
+        btn.classList.add('has-notes');
+        if (badge) { badge.textContent = count; }
+        else { btn.insertAdjacentHTML('beforeend', '<span class="ops-note-badge">' + count + '</span>'); }
       } else {
         btn.classList.remove('has-notes');
         if (badge) badge.remove();

@@ -813,6 +813,49 @@
     }
     .note-input-row textarea:focus { border-color: var(--sw-orange); }
 
+    /* Quick-notes sheet (open the trade<->ops comms thread from any job card) */
+    .quick-notes-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(41, 60, 70, 0.45);
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    .quick-notes-sheet {
+      background: var(--sw-card, #fff);
+      width: 100%; max-width: 560px;
+      border-radius: 16px 16px 0 0;
+      display: flex; flex-direction: column;
+      max-height: 82vh;
+      box-shadow: 0 -8px 30px rgba(0,0,0,0.18);
+      animation: quickNotesUp 0.18s ease-out;
+    }
+    @keyframes quickNotesUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+    .quick-notes-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      padding: 16px; border-bottom: 1px solid var(--sw-border);
+    }
+    .quick-notes-close {
+      background: none; border: none; font-size: 26px; line-height: 1;
+      color: var(--sw-text-sec); cursor: pointer;
+      min-width: 44px; min-height: 44px;
+    }
+    .quick-notes-body { padding: 8px 16px; overflow-y: auto; flex: 1; }
+    .quick-notes-input {
+      display: flex; gap: 8px; padding: 12px 16px;
+      border-top: 1px solid var(--sw-border);
+      padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+    .quick-notes-input textarea {
+      flex: 1; padding: 10px 12px; border: 1px solid var(--sw-border);
+      border-radius: 10px; font-size: 16px; font-family: var(--sw-font);
+      outline: none; resize: none; min-height: 44px; max-height: 120px;
+    }
+    .quick-notes-input textarea:focus { border-color: var(--sw-orange); }
+    .quick-notes-input button {
+      background: var(--sw-orange); color: #fff; border: none;
+      border-radius: 10px; padding: 0 18px; font-size: 14px; font-weight: 700;
+      cursor: pointer; min-height: 44px;
+    }
+
     /* Upload area */
     .upload-area {
       border: 2px dashed var(--sw-border);
@@ -4159,7 +4202,7 @@
     var synced = 0;
     var failed = [];
     pending.forEach(function(note) {
-      api('add_note', null, { jobId: note.jobId, text: note.text }).then(function() {
+      api('add_note', null, { jobId: note.jobId, text: note.text, userId: (_user && _user.id) || null, visibility: 'internal_only' }).then(function() {
         synced++;
         if (synced + failed.length === pending.length) finishSync();
       }).catch(function() {
@@ -5112,10 +5155,9 @@
             html += '      Text</button>';
           }
         }
-        if (type === 'makesafe') {
-          html += '    <button onclick="event.stopPropagation();submitTradeAdminNote(\'' + esc(job.id) + '\')" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
-          html += '      &#128221; Note for admin</button>';
-        }
+        html += '    <button onclick="event.stopPropagation();openJobNotes(\'' + esc(job.id) + '\', \'' + esc(getTradeCardTitle(job, type)) + '\')" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-card);color:var(--sw-mid);border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
+        html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+        html += '      Notes</button>';
         if (job.site_address || job.site_suburb) {
           var navUrl = getMapsUrl(job.site_address, job.site_suburb);
           html += '    <a href="' + navUrl + '" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-mid);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
@@ -5163,6 +5205,10 @@
     api('add_note', null, {
       jobId: _currentJobId,
       text: text,
+      // Attribute to the signed-in trade so ops sees the author, and keep it
+      // internal_only so a trade<->ops note never syncs to the client's CRM.
+      userId: _user ? _user.id : null,
+      visibility: 'internal_only',
       eventType: 'site_note',
       metadata: { user_id: _user ? _user.id : null, user_name: _user ? _user.name : null }
     }).then(function() {
@@ -6660,8 +6706,8 @@
     var modal = document.getElementById('onsiteNoteModal');
     if (modal) modal.remove();
 
-    // Call add_note API directly
-    api('add_note', null, { jobId: _currentJobId, text: noteText }).then(function() {
+    // Call add_note API directly (attributed + internal-only trade<->ops note)
+    api('add_note', null, { jobId: _currentJobId, text: noteText, userId: (_user && _user.id) || null, visibility: 'internal_only' }).then(function() {
       toast('Note added');
       if (_currentJob) renderJobDetail(_currentJob);
     }).catch(function() {
@@ -7627,7 +7673,7 @@
 
     // ── Tab Bar ──
     var mediaCount = (data.media || []).length;
-    var noteCount = (data.notes || []).length;
+    var noteCount = tradeCommsNotes(data.notes).length;
     html += '<div class="jd-tabs">';
     if (canMessage()) {
       html += '<button class="jd-tab" data-tab="workorder" onclick="switchJobTab(\'workorder\')">&#128203; Work Order</button>';
@@ -7664,7 +7710,7 @@
     // ── Notes Section (always visible below tabs) ──
     html += '<div style="margin-top:20px;padding:16px;border-top:1px solid var(--sw-border);">';
     html += '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">Notes</div>';
-    var allNotes = (data.notes || []).filter(function(n) { return n.event_type === 'note' || n.event_type === 'note_added' || n.event_type === 'site_note'; });
+    var allNotes = tradeCommsNotes(data.notes);
     if (allNotes.length > 0) {
       html += '<div id="bottomNotesList">';
       allNotes.forEach(function(n) {
@@ -8948,6 +8994,10 @@
     api('add_note', null, {
       jobId: _currentJobId,
       text: text,
+      // Attribute to the signed-in trade so ops sees the author, and keep it
+      // internal_only so a trade<->ops note never syncs to the client's CRM.
+      userId: _user ? _user.id : null,
+      visibility: 'internal_only',
       eventType: 'site_note',
       metadata: { user_id: _user ? _user.id : null, user_name: _user ? _user.name : null }
     }).then(function() {
@@ -9456,6 +9506,10 @@
     api('add_note', null, {
       jobId: _currentJobId,
       text: text,
+      // Attribute to the signed-in trade so ops sees the author, and keep it
+      // internal_only so a trade<->ops note never syncs to the client's CRM.
+      userId: _user ? _user.id : null,
+      visibility: 'internal_only',
       eventType: 'site_note',
       metadata: { user_id: _user ? _user.id : null, user_name: _user ? _user.name : null }
     }).then(function() {
@@ -9485,6 +9539,94 @@
     }).catch(function(err) {
       toast('Error: ' + (err.message || 'Could not delete'));
     });
+  };
+
+  // ── Quick Notes sheet (open the trade<->ops comms thread from ANY job card,
+  // in any view, without loading the full job detail) ──────────────────────
+  var _quickNotesJobId = null;
+
+  window.closeJobNotes = function() {
+    var ov = document.getElementById('quickNotesOverlay');
+    if (ov) ov.remove();
+    _quickNotesJobId = null;
+  };
+
+  function _renderQuickNotes(notes) {
+    var body = document.getElementById('quickNotesBody');
+    if (!body) return;
+    var list = tradeCommsNotes(notes).sort(function(a, b) {
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+    if (!list.length) {
+      body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--sw-text-sec);font-size:13px;">No notes yet. Start the conversation with the office below.</div>';
+      return;
+    }
+    var h = '';
+    list.forEach(function(n) {
+      var dj = n.detail_json || {};
+      var fromOps = dj.from_ops === true;
+      var author = fromOps ? 'Office' : (((n.users && n.users.name) || '').trim() || 'Trade');
+      var offBadge = fromOps ? '<span style="font-size:10px;background:var(--sw-blue);color:#fff;padding:1px 5px;border-radius:4px;margin-left:4px">Office</span>' : '';
+      h += '<div class="note-item">';
+      h += '  <div style="display:flex;align-items:center;gap:4px"><span class="note-author">' + esc(author) + '</span>' + offBadge + '<span style="flex:1"></span><span class="note-time">' + esc(timeAgo(n.created_at)) + '</span></div>';
+      h += '  <div class="note-text">' + esc(dj.text || dj.note || '') + '</div>';
+      h += '</div>';
+    });
+    body.innerHTML = h;
+  }
+
+  function _loadQuickNotes(jobId) {
+    api('trade_job_detail', { jobId: jobId }).then(function(data) {
+      if (_quickNotesJobId !== jobId) return;
+      _renderQuickNotes((data && data.notes) || []);
+    }).catch(function() {
+      var body = document.getElementById('quickNotesBody');
+      if (body) body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--sw-red);font-size:13px;">Could not load notes. Check your connection.</div>';
+    });
+  }
+
+  window.submitQuickNote = function() {
+    var input = document.getElementById('quickNoteInput');
+    if (!input) return;
+    var text = input.value.trim();
+    if (!text || !_quickNotesJobId) return;
+    var jobId = _quickNotesJobId;
+    input.value = '';
+    api('add_note', null, {
+      jobId: jobId,
+      text: text,
+      userId: (_user && _user.id) || null,
+      visibility: 'internal_only'
+    }).then(function() {
+      toast('Note sent');
+      if (_quickNotesJobId === jobId) _loadQuickNotes(jobId);
+    }).catch(function() {
+      drafts.queueNote(jobId, text);
+      toast('Saved offline. It will sync when you are back online.');
+      if (_quickNotesJobId === jobId) closeJobNotes();
+    });
+  };
+
+  window.openJobNotes = function(jobId, label) {
+    if (!jobId) return;
+    closeJobNotes();
+    _quickNotesJobId = jobId;
+    var ov = document.createElement('div');
+    ov.id = 'quickNotesOverlay';
+    ov.className = 'quick-notes-overlay';
+    ov.onclick = function(e) { if (e.target === ov) closeJobNotes(); };
+    var h = '<div class="quick-notes-sheet" onclick="event.stopPropagation()">';
+    h += '  <div class="quick-notes-head"><div><div style="font-size:15px;font-weight:700">Notes</div>' + (label ? '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(label) + '</div>' : '') + '</div><button class="quick-notes-close" onclick="closeJobNotes()" aria-label="Close">&times;</button></div>';
+    h += '  <div id="quickNotesBody" class="quick-notes-body"><div style="padding:18px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading...</div></div>';
+    h += '  <div class="quick-notes-input">';
+    h += '    <textarea id="quickNoteInput" placeholder="Message the office..." rows="1" maxlength="2000" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();submitQuickNote()}"></textarea>';
+    h += '    <button onclick="submitQuickNote()">Send</button>';
+    h += '  </div>';
+    h += '</div>';
+    ov.innerHTML = h;
+    document.body.appendChild(ov);
+    _loadQuickNotes(jobId);
+    setTimeout(function() { var i = document.getElementById('quickNoteInput'); if (i) i.focus(); }, 50);
   };
 
   // Live timer updater — ticks every 30s while on job detail
@@ -20975,6 +21117,25 @@
     var d = new Date(str);
     return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) +
            ' ' + d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Trade<->ops comms thread membership. A job_events note is shown iff it is a
+  // human note (event_type note/note_added/site_note) and NOT a system/audit
+  // marker (MAKESAFE_PACK_SENT / MAKESAFE_AGENT_REPLY). Mirrors the backend
+  // noteIsSystemMarker filter so markers never clutter the trade thread even
+  // before the server-side filter is deployed.
+  function tradeIsSystemMarkerNote(n) {
+    var dj = n && n.detail_json;
+    if (typeof dj === 'string') { try { dj = JSON.parse(dj); } catch(e) { dj = { text: dj }; } }
+    var body = String((dj && (dj.text || dj.note || dj.note_text)) || '').trim();
+    return body.indexOf('MAKESAFE_PACK_SENT') === 0 || body.indexOf('MAKESAFE_AGENT_REPLY') === 0;
+  }
+  function tradeCommsNotes(list) {
+    return (list || []).filter(function(n) {
+      var et = n && n.event_type;
+      if (et !== 'note' && et !== 'note_added' && et !== 'site_note') return false;
+      return !tradeIsSystemMarkerNote(n);
+    });
   }
 
   function timeAgo(str) {

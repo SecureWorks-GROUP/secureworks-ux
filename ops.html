@@ -19205,12 +19205,29 @@ async function openJobComms(event, jobId) {
     + '<textarea id="opsCommsInput" placeholder="Reply to the trade..."></textarea>'
     + '<button onclick="submitJobComms()">Send</button>'
     + '</div>';
-  var anchor = event && event.currentTarget ? event.currentTarget : (event && event.target);
   document.body.appendChild(pop);
   _opsCommsPopup = pop;
-  if (anchor && anchor.getBoundingClientRect) { _repositionPopover(pop, anchor); }
+
+  // Position near the click, mirroring the ops-notes popup: pinned above the
+  // Jarvis bar, growing upward when the thread is long.
+  var jarvisH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--jarvis-bar-height')) || 48;
+  var margin = 8;
+  var anchor = (event && event.currentTarget) ? event.currentTarget : (event && event.target);
+  if (anchor && anchor.getBoundingClientRect) {
+    var rect = anchor.getBoundingClientRect();
+    var left = rect.right + 8;
+    if (left + 340 > window.innerWidth) left = rect.left - 348;
+    if (left < 4) left = 4;
+    var bottom = window.innerHeight - rect.top - 260;
+    if (bottom < jarvisH + margin) bottom = jarvisH + margin;
+    pop.style.left = left + 'px';
+    pop.style.top = 'auto';
+    pop.style.bottom = bottom + 'px';
+    pop.style.maxHeight = Math.min(window.innerHeight - bottom - margin, window.innerHeight - jarvisH - 16) + 'px';
+  }
+
   loadJobComms(jobId);
-  setTimeout(function() { document.addEventListener('mousedown', _opsCommsOutsideClick); }, 0);
+  setTimeout(function() { document.addEventListener('mousedown', _opsCommsOutsideClick); }, 50);
   var input = pop.querySelector('#opsCommsInput');
   if (input) input.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJobComms(); }

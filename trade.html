@@ -5155,7 +5155,9 @@
             html += '      Text</button>';
           }
         }
-        html += '    <button onclick="event.stopPropagation();openJobNotes(\'' + esc(job.id) + '\', \'' + esc(getTradeCardTitle(job, type)) + '\')" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-card);color:var(--sw-mid);border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
+        // Title goes through encodeURIComponent so an apostrophe (O'Connor, client names)
+        // cannot break the inline onclick JS string and silently kill the click.
+        html += '    <button onclick="event.stopPropagation();openJobNotes(\'' + esc(job.id) + '\', decodeURIComponent(\'' + encodeURIComponent(getTradeCardTitle(job, type)) + '\'))" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-card);color:var(--sw-mid);border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
         html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
         html += '      Notes</button>';
         if (job.site_address || job.site_suburb) {

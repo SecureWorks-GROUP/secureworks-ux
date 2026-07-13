@@ -5,7 +5,7 @@
 // API calls always go to network (no stale data for job lists).
 // ════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'sw-trade-v29'
+const CACHE_NAME = 'sw-trade-v30'
 
 // App shell — these files are cached for instant load
 const SHELL_FILES = [

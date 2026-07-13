@@ -4859,22 +4859,9 @@
 
   function submitTradeAdminNote(jobId) {
     if (!jobId) return;
-    var text = prompt('Note for Shaun/admin (not sent to the client):');
-    if (text === null) return;
-    text = String(text || '').trim();
-    if (!text) { toast('Note is empty'); return; }
-    if (text.length > 600) text = text.slice(0, 600);
-    api('add_note', null, {
-      jobId: jobId,
-      text: 'Trade admin note: ' + text,
-      visibility: 'internal_only',
-      sync_to_ghl: false,
-      metadata: { source: 'trade_app', kind: 'trade_admin_note', user_name: _user ? _user.name : null }
-    }).then(function() {
-      toast('Note sent to admin');
-    }).catch(function(err) {
-      toast('Could not save admin note: ' + friendlyError(err), true);
-    });
+    var cached = getCachedTradeJob(jobId);
+    var label = cached ? getTradeCardTitle(cached.job, cached.job.type || 'makesafe') : '';
+    openJobNotes(jobId, label);
   }
   window.submitTradeAdminNote = submitTradeAdminNote;
 

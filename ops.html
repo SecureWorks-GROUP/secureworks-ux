@@ -12280,7 +12280,7 @@ function renderKanbanCard(j, status) {
   // scratchpad notes above.
   var commsBadge = j.comms_notes_count > 0 ? '<span class="ops-note-badge">' + j.comms_notes_count + '</span>' : '';
   iconRow += '<button class="kanban-icon-btn ops-comms-btn' + (j.comms_notes_count > 0 ? ' has-notes' : '') + '" data-job-id="' + j.id + '" onclick="event.stopPropagation();openJobComms(event,\'' + j.id + '\')" title="Trade comms">'
-    + '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none"/></svg>'
+    + '<svg viewBox="0 0 24 24"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" fill="none"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" fill="none"/></svg>'
     + commsBadge
     + '</button>';
   if (iconRow) {

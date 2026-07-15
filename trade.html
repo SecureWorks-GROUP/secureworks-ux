@@ -4648,10 +4648,9 @@
 
   window.filterMyJobs = function() {
     var q = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    if (_jobFilter === 'all') {
-      requestGlobalJobSearch(q);
-    } else if (q.length >= 2 && _looksLikeRef(q)) {
-      // On non-All tabs, route ref-like queries to global search so builder/job refs always resolve.
+    if (q.length >= 2) {
+      // Route ANY query (ref-like or plain client name/address/suburb) to global search so
+      // unassigned jobs across all crews/statuses resolve, not just the user's own assignments.
       requestGlobalJobSearch(q);
     } else {
       requestGlobalJobSearch('');
@@ -4896,7 +4895,7 @@
     if (searchBar) searchBar.style.display = 'block';
 
     var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    var _needsGlobalSearch = query.length >= 2 && (_jobFilter === 'all' || _looksLikeRef(query));
+    var _needsGlobalSearch = query.length >= 2;
     if (_needsGlobalSearch) requestGlobalJobSearch(query);
 
     var todayRunListState = getTodayRunListState(data.today || []);

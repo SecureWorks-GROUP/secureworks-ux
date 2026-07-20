@@ -4452,8 +4452,20 @@
   var _lastJobData = null;
   var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, error: false, errorMsg: '', timer: null, token: 0 };
 
+  var TRANSIENT_JOB_FLAGS = ['_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg'];
+
+  function stripTransientJobFlags(data) {
+    if (!data || typeof data !== 'object') return data;
+    var out = {};
+    Object.keys(data).forEach(function(k) {
+      if (TRANSIENT_JOB_FLAGS.indexOf(k) !== -1) return; // in-flight/error state must not survive a reload
+      out[k] = data[k];
+    });
+    return out;
+  }
+
   function saveJobListCache(data) {
-    try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
+    try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: stripTransientJobFlags(data) })); } catch(e) {}
   }
 
   function loadJobListCache() {
@@ -4710,8 +4722,8 @@
     if (_lastJobData === data) renderMyJobs(data);
 
     api('search_all_jobs', {}).then(function(res) {
-      if (_lastJobData !== data) return;
       data._makesafePoolLoading = false;
+      if (_lastJobData !== data) return;
       var pool = [];
       (res.jobs || []).forEach(function(job) {
         if (!job || !job.id) return;
@@ -4733,8 +4745,8 @@
       renderMyJobs(data);
     }).catch(function(err) {
       console.warn('[trade] MakeSafe pool unavailable:', err && (err.message || err));
-      if (_lastJobData !== data) return;
       data._makesafePoolLoading = false;
+      if (_lastJobData !== data) return;
       data._makesafePoolError = true;
       data._makesafePoolErrorMsg = (err && (err.message || String(err))) || 'Unknown error';
       delete data.makesafePool;
@@ -4751,7 +4763,6 @@
     _lastJobData._makesafePoolErrorMsg = '';
     delete _lastJobData.makesafePool;
     loadMakesafePoolJobs(_lastJobData);
-    renderMyJobs(_lastJobData);
   }
   window.retryMakesafePoolLoad = retryMakesafePoolLoad;
 

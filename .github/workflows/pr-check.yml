@@ -57,3 +57,6 @@ jobs:
             node --check "$file"
             echo "✅ $file: JS syntax OK"
           done
+
+      - name: Test make-safe Trade v5 feed and contact actions
+        run: node scripts/test-makesafe-trade-v5.js

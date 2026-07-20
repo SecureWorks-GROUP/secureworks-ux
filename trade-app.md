@@ -81,6 +81,33 @@
 - Session expiry detection (401/403 → auto sign-out + redirect to login)
 - Prices stripped from PO line items (trades see items + quantities, not costs)
 
+## Make-Safe Board (Trade v5)
+The make-safe experience is driven by a single canonical read model — the `makesafe_board` feed fetched with `api('makesafe_board', { projection: 'trade' })`, contract `makesafe-board.v1`. The `MakesafeTradeV5` module in `trade.html` (delimited by the `// <makesafe-trade-v5>` markers) validates and renders it. All view state is server-owned; the client never derives columns, visibility, or action rights from assignment status or from role/name logic.
+
+### Board
+- Exactly four columns from the feed: **New**, **Allocated**, **Complete**, **Archive** (no client-side column override; the old assignment-derived `MS_COLUMN_OVERRIDE` / `COLUMNS_MAKESAFE` paths are retired). The server-supplied `column` wins even if an assignment reads `complete`.
+- Cards show make-safe type, suburb, full address, builder/client, refs, primary assignment date/time, crew (or "Nobody allocated"), and latest note. No pricing or other trades' invoice data is ever rendered on Trade v5 surfaces.
+- `validate()` is a hard gate: it rejects a feed whose `contract_version`/`projection` don't match, whose `parity.ok` is not `true`, whose columns don't match the four, that contains a duplicate card id or a column mismatch, or that carries a broken/unstated contact action.
+- Load failure is a distinct, retryable state ("Could not load the make-safe board" + Retry), kept separate from a genuine empty board.
+
+### Calendar
+- Reads only the make-safe feed (`caFetchCalendarModel` no longer calls the legacy `api('calendar')` feed).
+- Crew-axis and job-axis modes, each at Day / Week / Month scale, plus a run sheet. Job-based **Today** is the boot default (`NC = { calView: 'cal', scale: 'day', axis: 'jobs', ... }`).
+- Keeps a **Nobody** row and surfaces undated work as "no day set" without inventing a date.
+- Crew, day, and arrival time are set through the guarded **Allocate** sheet; the calendar repaints on allocate.
+
+### Contact actions (Call / Navigate / Text)
+- Every board card, job detail, and calendar card/sheet renders the exact `contact.actions` links supplied by the feed (`call` → `tel:`, `text` → `sms:`, `navigate` → an `https:` maps URL), tagged `data-feed-href="true"`.
+- When an action is unavailable the feed's explicit `unavailable_reason` is shown on a disabled (`aria-disabled`) control — the client never fabricates a link.
+- Roof-report portal links render via `portalHTML()` only when the feed exposes a report portal URL.
+
+### Permissions
+- Action rights come from `permissions` on the feed: board buttons key off `_boardCache.permissions.can_allocate`, calendar actions off `NC.model.permissions` (`ncBoardAllowed()`). A server-filtered `allocated-only` trade still sees the board.
+- Visibility (`allocated_only` / `all_makesafes`), `can_allocate`, and view-only flags (e.g. Khairo's fencing view-only, `can_allocate=false`) are honoured as delivered — never recomputed client-side.
+
+### Tests
+- `scripts/test-makesafe-trade-v5.js` exercises the feed contract, column ordering, contact-action rendering across every surface, calendar modes, permission gating, and the duplicate/parity/broken-action failure gates. It runs in PR CI (`.github/workflows/pr-check.yml`).
+
 ## ops-api Trade Endpoints (JWT auth required)
 | Action | Method | Purpose |
 |--------|--------|---------|

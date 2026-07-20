@@ -4454,6 +4454,13 @@
 
   var TRANSIENT_JOB_FLAGS = ['_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg'];
 
+  // User-facing load-failure hint. Backend detail stays in console.warn — never in the trade UI.
+  function loadFailureHint() {
+    return (typeof navigator !== 'undefined' && navigator.onLine === false)
+      ? 'You appear to be offline.'
+      : '';
+  }
+
   function stripTransientJobFlags(data) {
     if (!data || typeof data !== 'object') return data;
     var out = {};
@@ -4740,7 +4747,13 @@
           _makesafePool: true
         });
       });
+      // The pool is derived from an unfiltered search. Only claim it is complete when the
+      // API reports a total matching the rows it returned; otherwise flag possible truncation.
+      var apiTotal = (res && typeof res.total === 'number') ? res.total
+        : (res && typeof res.count === 'number') ? res.count
+        : null;
       data.makesafePool = pool;
+      data._makesafePoolIncomplete = apiTotal !== null && apiTotal > (res.jobs || []).length;
       data._makesafePoolError = false;
       renderMyJobs(data);
     }).catch(function(err) {
@@ -4748,8 +4761,9 @@
       data._makesafePoolLoading = false;
       if (_lastJobData !== data) return;
       data._makesafePoolError = true;
-      data._makesafePoolErrorMsg = (err && (err.message || String(err))) || 'Unknown error';
+      data._makesafePoolErrorMsg = loadFailureHint();
       delete data.makesafePool;
+      delete data._makesafePoolIncomplete;
       // Allow retryMakesafePoolLoad to re-run the fetch
       data._makesafePoolLoaded = false;
       renderMyJobs(data);
@@ -4761,6 +4775,7 @@
     _lastJobData._makesafePoolLoaded = false;
     _lastJobData._makesafePoolError = false;
     _lastJobData._makesafePoolErrorMsg = '';
+    delete _lastJobData._makesafePoolIncomplete;
     delete _lastJobData.makesafePool;
     loadMakesafePoolJobs(_lastJobData);
   }
@@ -4822,7 +4837,7 @@
         _globalJobSearch.total = 0;
         _globalJobSearch.totalKnown = false;
         _globalJobSearch.error = true;
-        _globalJobSearch.errorMsg = (err && (err.message || String(err))) || 'Unknown error';
+        _globalJobSearch.errorMsg = loadFailureHint();
         if (_lastJobData) renderMyJobs(_lastJobData);
       });
     }, 300);
@@ -5103,6 +5118,15 @@
         html += '</div>';
         return;
       }
+      if (sec.key === 'makesafePool' && items.length === 0 && data._makesafePoolIncomplete) {
+        if (query) return;
+        if (_jobFilter === 'assigned') return;
+        if (_jobFilter === 'thisWeek') return;
+        hasAny = true;
+        html += '<div class="section-label">Open MakeSafe Jobs</div>';
+        html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">No open MakeSafe jobs in the rows we could read, but the job database returned more than one request can hold — this is not a confirmed empty pool. Check with ops.</div>';
+        return;
+      }
       if (items.length === 0) return;
       // Apply filter: if filter is 'today' only show today section, 'thisWeek' only today+thisWeek.
       // Exception: on the Today view we still surface the crew's own allocated make-safes
@@ -5158,6 +5182,9 @@
       html += '<div class="section-label">' + sectionLabel + '</div>';
       if (sec.key === 'makesafePool') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Open MakeSafe pool. Tap a card to open the report when ops has released/left it open.</div>';
+        if (data._makesafePoolIncomplete) {
+          html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin:-4px 0 10px;line-height:1.4">This pool may be incomplete — the job database returned more rows than could be read in one request. Check with ops before treating it as the full list.</div>';
+        }
       }
       if (sec.key === 'recent') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Past-dated jobs still waiting on your report. They stay here until the report is submitted.</div>';
@@ -12386,8 +12413,6 @@
   }
   function ncInRange(d) { return NC.fetchFrom && NC.fetchTo && d >= NC.fetchFrom && d <= NC.fetchTo; }
 
-  // Legacy schedule .container (old calendar / Availability markup) — always keep hidden.
-  function ncOldContainer() { var s = document.getElementById('viewSchedule'); return s ? s.querySelector(':scope > .container') : null; }
   async function renderNewCalendar() {
     var root = document.getElementById('ncalRoot');
     if (!root) return;
@@ -12395,9 +12420,8 @@
     if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
     if (!ncBoardAllowed()) NC.scope = 'mine';
     ncWireOnce();
-    // .ncal is the only calendar — migrate any prior classic session and hide the old cluster.
+    // .ncal is the only calendar.
     root.style.display = 'flex';
-    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
 
     var host = document.getElementById('ncCalhost');
     // U-T3 freshness: refetch when the model is missing, an out-of-window date is

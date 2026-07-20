@@ -4450,7 +4450,7 @@
   // ── Job Search & Filter State ──
   var _jobFilter = 'today';
   var _lastJobData = null;
-  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, timer: null, token: 0 };
+  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, timer: null, token: 0 };
 
   function saveJobListCache(data) {
     try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
@@ -4706,9 +4706,11 @@
     data._makesafePoolLoaded = true;
     data._makesafePoolError = false;
     if (Array.isArray(data.makesafePool)) return;
+    data._makesafePoolLoading = true;
 
     api('search_all_jobs', {}).then(function(res) {
       if (_lastJobData !== data) return;
+      data._makesafePoolLoading = false;
       var pool = [];
       (res.jobs || []).forEach(function(job) {
         if (!job || !job.id) return;
@@ -4731,6 +4733,7 @@
     }).catch(function(err) {
       console.warn('[trade] MakeSafe pool unavailable:', err && (err.message || err));
       if (_lastJobData !== data) return;
+      data._makesafePoolLoading = false;
       data._makesafePoolError = true;
       data._makesafePoolErrorMsg = (err && (err.message || String(err))) || 'Unknown error';
       data.makesafePool = data.makesafePool || [];
@@ -4744,8 +4747,10 @@
     if (!_lastJobData) return;
     _lastJobData._makesafePoolLoaded = false;
     _lastJobData._makesafePoolError = false;
+    _lastJobData._makesafePoolErrorMsg = '';
     delete _lastJobData.makesafePool;
     loadMakesafePoolJobs(_lastJobData);
+    renderMyJobs(_lastJobData);
   }
   window.retryMakesafePoolLoad = retryMakesafePoolLoad;
 
@@ -4759,6 +4764,7 @@
       _globalJobSearch.loaded = false;
       _globalJobSearch.results = [];
       _globalJobSearch.total = 0;
+      _globalJobSearch.totalKnown = false;
       return;
     }
     if (_globalJobSearch.q === q && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
@@ -4767,6 +4773,7 @@
     _globalJobSearch.loaded = false;
     _globalJobSearch.results = [];
     _globalJobSearch.total = 0;
+    _globalJobSearch.totalKnown = false;
     var token = ++_globalJobSearch.token;
     _globalJobSearch.timer = setTimeout(function() {
       api('search_all_jobs', { q: q }).then(function(res) {
@@ -4777,14 +4784,16 @@
           results.push(job);
         });
         // No silent cap: show every job the signed-in role may see (incl. cancelled/archived).
-        // If the API reports a larger total than returned rows, keep that for the count line.
+        // Only claim completeness when the API actually reports a total; otherwise the row
+        // count alone cannot distinguish a full result set from a server-side truncation.
         var apiTotal = (res && typeof res.total === 'number') ? res.total
           : (res && typeof res.count === 'number') ? res.count
-          : results.length;
+          : null;
         _globalJobSearch.loading = false;
         _globalJobSearch.loaded = true;
         _globalJobSearch.results = results;
-        _globalJobSearch.total = Math.max(apiTotal, results.length);
+        _globalJobSearch.totalKnown = apiTotal !== null;
+        _globalJobSearch.total = apiTotal !== null ? Math.max(apiTotal, results.length) : results.length;
         if (_lastJobData) renderMyJobs(_lastJobData);
       }).catch(function(err) {
         if (token !== _globalJobSearch.token) return;
@@ -4793,6 +4802,7 @@
         _globalJobSearch.loaded = true;
         _globalJobSearch.results = [];
         _globalJobSearch.total = 0;
+        _globalJobSearch.totalKnown = false;
         if (_lastJobData) renderMyJobs(_lastJobData);
       });
     }, 300);
@@ -4872,12 +4882,15 @@
     var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
     var shown = results.length;
     var total = (_globalJobSearch.q === query ? _globalJobSearch.total : shown) || shown;
+    var totalKnown = _globalJobSearch.q === query && !!_globalJobSearch.totalKnown;
     // Always state the count — never silent truncation.
     if (shown === 0) {
       h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">0 matches — showing all 0. No jobs match this All-tab search.</div>';
       return h;
     }
-    if (shown >= total) {
+    if (!totalKnown) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' match' + (shown === 1 ? '' : 'es') + '</div>';
+    } else if (shown >= total) {
       h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + total + ' match' + (total === 1 ? '' : 'es') + ' — showing all ' + shown + '</div>';
     } else {
       h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">Showing ' + shown + ' of ' + total + ' matches</div>';
@@ -5021,6 +5034,14 @@
     sections.forEach(function(sec) {
       var items = sec.key === 'today' ? todayJobs : (data[sec.key] || []);
       // Pool load failure: show a visible failed state (empty and broken must never look alike).
+      if (sec.key === 'makesafePool' && data._makesafePoolLoading) {
+        if (_jobFilter === 'assigned') return;
+        if (_jobFilter === 'thisWeek') return;
+        hasAny = true;
+        html += '<div class="section-label">Open MakeSafe Jobs</div>';
+        html += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
+        return;
+      }
       if (sec.key === 'makesafePool' && data._makesafePoolError) {
         if (_jobFilter === 'assigned') return;
         if (_jobFilter === 'thisWeek') return;
@@ -5029,6 +5050,9 @@
         html += '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
         html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Could not load open MakeSafe jobs</div>';
         html += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">This is not “no work available” — the pool failed to load. Check your connection and retry.</div>';
+        if (data._makesafePoolErrorMsg) {
+          html += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(data._makesafePoolErrorMsg) + '</div>';
+        }
         html += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="retryMakesafePoolLoad()">Retry</button>';
         html += '</div>';
         return;
@@ -12318,13 +12342,6 @@
 
   // Legacy schedule .container (old calendar / Availability markup) — always keep hidden.
   function ncOldContainer() { var s = document.getElementById('viewSchedule'); return s ? s.querySelector(':scope > .container') : null; }
-  function ncShowNew() {
-    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
-    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'flex';
-    if (NC.model) ncPaint(); else renderNewCalendar();
-  }
-  window.ncShowNew = ncShowNew;
-
   async function renderNewCalendar() {
     var root = document.getElementById('ncalRoot');
     if (!root) return;

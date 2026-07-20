@@ -3101,6 +3101,9 @@
         <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
         <span class="fbadge" id="ncFbadge" hidden></span>
       </button>
+      <button class="fbtn" id="ncAvailBtn" aria-label="Set your availability" title="Availability">
+        <svg viewBox="0 0 24 24"><path d="M8 3v3M16 3v3M3.5 9.5h17M5 5.5h14a1.8 1.8 0 0 1 1.8 1.8v11.4A1.8 1.8 0 0 1 19 20.5H5a1.8 1.8 0 0 1-1.8-1.8V7.3A1.8 1.8 0 0 1 5 5.5z"/><path d="m9 14.5 2 2 4-4"/></svg>
+      </button>
     </div>
     <div class="ctlrow" id="ncRowScale">
       <div class="seg lite" id="ncScaleseg">
@@ -3173,13 +3176,17 @@
       </div>
     </div>
 
-    <!-- Availability sub-view (existing functionality) -->
-    <div id="scheduleAvailView" style="display:none;">
+  </div>
+
+  <!-- Availability panel — re-homed out of the hidden legacy container so it stays
+       reachable from the .ncal chrome (ncAvailBtn). .ncal remains the only calendar. -->
+  <div class="container" id="scheduleAvailPanel" style="display:none">
+    <button onclick="showAvailabilityPanel(false)" style="background:none;border:none;padding:8px 0;margin-bottom:4px;font-family:var(--sw-font);font-size:13px;font-weight:600;color:var(--sw-mid);cursor:pointer">&lsaquo; Calendar</button>
+    <div id="scheduleAvailView">
       <div id="scheduleContent">
         <div class="loading-screen"><div class="spinner"></div>Loading schedule...</div>
       </div>
     </div>
-
   </div>
 </div>
 
@@ -4271,7 +4278,7 @@
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
     if (view === 'board') renderBoardView();
-    if (view === 'schedule') { renderNewCalendar(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
+    if (view === 'schedule') { var _ap = document.getElementById('scheduleAvailPanel'); if (_ap) _ap.style.display = 'none'; renderNewCalendar(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
@@ -4524,6 +4531,9 @@
   }
 
   function saveJobListCache(data) {
+    // A logout already in flight must not be undone by a request that settles
+    // during the sign-out window — _user is still set, so the key still resolves.
+    if (_sessionExpired) return;
     var key = jobListCacheKey();
     if (!key) return;
     pruneJobListCaches(key);
@@ -12742,8 +12752,28 @@
       var dd = e.target.closest('[data-date]'); if (dd) { NC.date = dd.getAttribute('data-date'); NC.scale = 'day'; NC.calView = 'cal'; ncRepaintForDate(); }
     });
     document.getElementById('ncScrim').addEventListener('click', ncCloseSheet);
+    var _ab = document.getElementById('ncAvailBtn');
+    if (_ab) _ab.addEventListener('click', function () { showAvailabilityPanel(true); });
   }
   window.renderNewCalendar = renderNewCalendar;
+
+  // Availability lives beside .ncal, not inside it: the two swap places within the
+  // Schedule view so .ncal stays the only calendar.
+  window.showAvailabilityPanel = function (show) {
+    var root = document.getElementById('ncalRoot');
+    var panel = document.getElementById('scheduleAvailPanel');
+    if (!panel) return;
+    if (show) {
+      if (root) root.style.display = 'none';
+      panel.style.display = '';
+      var view = document.getElementById('scheduleAvailView');
+      if (view) view.style.display = '';
+      renderScheduleView();
+    } else {
+      panel.style.display = 'none';
+      renderNewCalendar();
+    }
+  };
 
   async function loadTeamCalendar() {
     if (!_calWeekStart) _calWeekStart = getMonday(new Date());

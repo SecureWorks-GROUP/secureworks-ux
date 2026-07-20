@@ -4551,6 +4551,27 @@
     _globalJobSearch.errorMsg = '';
     _cachedMyJobs = [];
     _tradeJobCacheById = {};
+    resetCalendarSession();
+  }
+
+  // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
+  // NC.scope is forced to 'mine' for non-managers, and NC.model holds the outgoing
+  // user's job blocks. Left alone, an in-page user switch renders user A's calendar
+  // filtered by user A's id until a refetch lands, and forever if it fails.
+  function resetCalendarSession() {
+    if (typeof NC === 'undefined' || !NC) return;
+    NC.me = { id: null, name: null };
+    NC.model = null;
+    NC.loadedAt = 0;
+    NC.fetchFrom = null;
+    NC.fetchTo = null;
+    NC.date = null;
+    NC.month = null;
+    NC.scope = 'everyone';
+    NC.dirty = false;
+    NC.loading = false;
+    var host = document.getElementById('ncCalhost');
+    if (host) host.innerHTML = '';
   }
 
   function saveJobListCache(data) {

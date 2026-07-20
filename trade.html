@@ -3725,7 +3725,7 @@
       cloud.supabase.auth.signOut().catch(function() {});
     }
 
-    clearJobListCache();
+    resetJobListSession();
 
     setTimeout(function() {
       _user = null;
@@ -4528,6 +4528,27 @@
       localStorage.removeItem('sw_jobs_cache');
       if (key) localStorage.removeItem(key);
     } catch(e) {}
+  }
+
+  // Sign-out teardown: storage plus the in-memory render state. Kept as one call so a
+  // logout path cannot clear the cache and leave the outgoing user's jobs live in
+  // _lastJobData, where a late-settling request would repaint and re-cache them under
+  // whoever signs in next.
+  function resetJobListSession() {
+    clearJobListCache();
+    _lastJobData = null;
+    if (_globalJobSearch.timer) clearTimeout(_globalJobSearch.timer);
+    _globalJobSearch.timer = null;
+    _globalJobSearch.token++;
+    _globalJobSearch.q = '';
+    _globalJobSearch.loading = false;
+    _globalJobSearch.loaded = false;
+    _globalJobSearch.results = [];
+    _globalJobSearch.total = 0;
+    _globalJobSearch.totalKnown = false;
+    _globalJobSearch.truncated = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
   }
 
   function saveJobListCache(data) {
@@ -21475,7 +21496,7 @@
     });
 
     cloud.on('auth:logout', function() {
-      clearJobListCache();
+      resetJobListSession();
       _user = null;
       _currentJobId = null;
       _currentJob = null;

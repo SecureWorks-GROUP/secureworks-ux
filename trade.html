@@ -4452,13 +4452,24 @@
   var _lastJobData = null;
   var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, truncated: false, error: false, errorMsg: '', timer: null, token: 0 };
 
-  var TRANSIENT_JOB_FLAGS = ['_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg'];
+  var TRANSIENT_JOB_FLAGS = ['_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete'];
 
   // User-facing load-failure hint. Backend detail stays in console.warn — never in the trade UI.
   function loadFailureHint() {
     return (typeof navigator !== 'undefined' && navigator.onLine === false)
       ? 'You appear to be offline.'
       : '';
+  }
+
+  // Single source of truth for "this failed to load, it is not empty" cards.
+  function loadFailureCard(title, body, msg, retryFn) {
+    var h = '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
+    h += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">' + esc(title) + '</div>';
+    h += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">' + esc(body) + '</div>';
+    if (msg) h += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(msg) + '</div>';
+    h += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="' + esc(retryFn) + '()">Retry</button>';
+    h += '</div>';
+    return h;
   }
 
   function stripTransientJobFlags(data) {
@@ -4479,22 +4490,48 @@
     return uid ? 'sw_jobs_cache_' + uid : '';
   }
 
+  var JOB_LIST_CACHE_PREFIX = 'sw_jobs_cache_';
+
+  // Only the signed-in user's cache may live on disk. Every other entry (a previous
+  // installer on a shared device, plus the legacy unscoped key) is job data we must
+  // not retain and storage we would otherwise leak until quota kills caching entirely.
+  var _prunedForKey = null;
+  function pruneJobListCaches(keepKey) {
+    if (_prunedForKey === keepKey) return; // once per signed-in user, not once per render
+    _prunedForKey = keepKey;
+    try {
+      localStorage.removeItem('sw_jobs_cache'); // legacy unscoped cache
+      Object.keys(localStorage).forEach(function(k) {
+        if (k.indexOf(JOB_LIST_CACHE_PREFIX) !== 0 || k === keepKey) return;
+        localStorage.removeItem(k);
+      });
+    } catch(e) {}
+  }
+
   function saveJobListCache(data) {
     var key = jobListCacheKey();
     if (!key) return;
+    pruneJobListCaches(key);
+    var payload = JSON.stringify({ ts: Date.now(), data: stripTransientJobFlags(data) });
     try {
-      localStorage.removeItem('sw_jobs_cache'); // legacy unscoped cache
-      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: stripTransientJobFlags(data) }));
-    } catch(e) {}
+      localStorage.setItem(key, payload);
+    } catch(e) {
+      // Quota: drop our own stale entry and try once more, so caching cannot wedge off permanently.
+      try {
+        localStorage.removeItem(key);
+        localStorage.setItem(key, payload);
+      } catch(e2) {}
+    }
   }
 
   function loadJobListCache() {
     var key = jobListCacheKey();
     if (!key) return null;
+    pruneJobListCaches(key);
     try {
-      localStorage.removeItem('sw_jobs_cache'); // legacy unscoped cache
       var raw = JSON.parse(localStorage.getItem(key) || 'null');
       if (raw && raw.data && (Date.now() - raw.ts) < 1800000) return raw.data; // 30-min expiry
+      if (raw) localStorage.removeItem(key); // expired job data must not linger on disk
     } catch(e) {}
     return null;
   }
@@ -4951,14 +4988,11 @@
       return h;
     }
     if (_globalJobSearch.q === query && _globalJobSearch.error) {
-      h += '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
-      h += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Could not search the job database</div>';
-      h += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">This is not “no matches” — the search failed. Check your connection and retry.</div>';
-      if (_globalJobSearch.errorMsg) {
-        h += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(_globalJobSearch.errorMsg) + '</div>';
-      }
-      h += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="retryGlobalJobSearch()">Retry</button>';
-      h += '</div>';
+      h += loadFailureCard(
+        'Could not search the job database',
+        'This is not “no matches” — the search failed. Check your connection and retry.',
+        _globalJobSearch.errorMsg,
+        'retryGlobalJobSearch');
       return h;
     }
     var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
@@ -5131,14 +5165,11 @@
         if (poolState === 'loading') {
           html += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
         } else if (poolState === 'error') {
-          html += '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
-          html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Could not load open MakeSafe jobs</div>';
-          html += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">This is not “no work available” — the pool failed to load. Check your connection and retry.</div>';
-          if (data._makesafePoolErrorMsg) {
-            html += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(data._makesafePoolErrorMsg) + '</div>';
-          }
-          html += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="retryMakesafePoolLoad()">Retry</button>';
-          html += '</div>';
+          html += loadFailureCard(
+            'Could not load open MakeSafe jobs',
+            'This is not “no work available” — the pool failed to load. Check your connection and retry.',
+            data._makesafePoolErrorMsg,
+            'retryMakesafePoolLoad');
         } else {
           html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">No open MakeSafe jobs in the rows we could read, but the job database returned more than one request can hold — this is not a confirmed empty pool. Check with ops.</div>';
         }

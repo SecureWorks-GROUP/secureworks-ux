@@ -4450,7 +4450,7 @@
   // ── Job Search & Filter State ──
   var _jobFilter = 'today';
   var _lastJobData = null;
-  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, timer: null, token: 0 };
+  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, error: false, errorMsg: '', timer: null, token: 0 };
 
   function saveJobListCache(data) {
     try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
@@ -4707,6 +4707,7 @@
     data._makesafePoolError = false;
     if (Array.isArray(data.makesafePool)) return;
     data._makesafePoolLoading = true;
+    if (_lastJobData === data) renderMyJobs(data);
 
     api('search_all_jobs', {}).then(function(res) {
       if (_lastJobData !== data) return;
@@ -4765,6 +4766,8 @@
       _globalJobSearch.results = [];
       _globalJobSearch.total = 0;
       _globalJobSearch.totalKnown = false;
+      _globalJobSearch.error = false;
+      _globalJobSearch.errorMsg = '';
       return;
     }
     if (_globalJobSearch.q === q && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
@@ -4774,6 +4777,8 @@
     _globalJobSearch.results = [];
     _globalJobSearch.total = 0;
     _globalJobSearch.totalKnown = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
     var token = ++_globalJobSearch.token;
     _globalJobSearch.timer = setTimeout(function() {
       api('search_all_jobs', { q: q }).then(function(res) {
@@ -4794,6 +4799,8 @@
         _globalJobSearch.results = results;
         _globalJobSearch.totalKnown = apiTotal !== null;
         _globalJobSearch.total = apiTotal !== null ? Math.max(apiTotal, results.length) : results.length;
+        _globalJobSearch.error = false;
+        _globalJobSearch.errorMsg = '';
         if (_lastJobData) renderMyJobs(_lastJobData);
       }).catch(function(err) {
         if (token !== _globalJobSearch.token) return;
@@ -4803,10 +4810,25 @@
         _globalJobSearch.results = [];
         _globalJobSearch.total = 0;
         _globalJobSearch.totalKnown = false;
+        _globalJobSearch.error = true;
+        _globalJobSearch.errorMsg = (err && (err.message || String(err))) || 'Unknown error';
         if (_lastJobData) renderMyJobs(_lastJobData);
       });
     }, 300);
   }
+
+  function retryGlobalJobSearch() {
+    var q = _globalJobSearch.q;
+    if (!q || q.length < 2) return;
+    _globalJobSearch.q = '';
+    _globalJobSearch.loading = false;
+    _globalJobSearch.loaded = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
+    requestGlobalJobSearch(q);
+    if (_lastJobData) renderMyJobs(_lastJobData);
+  }
+  window.retryGlobalJobSearch = retryGlobalJobSearch;
 
   function findAssignmentForGlobalJob(data, jobId) {
     if (!data || !jobId) return null;
@@ -4877,6 +4899,17 @@
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px;line-height:1.4">All tab search includes old, completed and archived jobs across the board, including jobs allocated to other trades. Today and allocated views still show only your live assigned jobs.</div>';
     if (_globalJobSearch.loading && _globalJobSearch.q === query) {
       h += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
+      return h;
+    }
+    if (_globalJobSearch.q === query && _globalJobSearch.error) {
+      h += '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
+      h += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">Could not search the job database</div>';
+      h += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">This is not “no matches” — the search failed. Check your connection and retry.</div>';
+      if (_globalJobSearch.errorMsg) {
+        h += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(_globalJobSearch.errorMsg) + '</div>';
+      }
+      h += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="retryGlobalJobSearch()">Retry</button>';
+      h += '</div>';
       return h;
     }
     var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];

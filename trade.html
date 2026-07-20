@@ -4549,6 +4549,8 @@
     _globalJobSearch.truncated = false;
     _globalJobSearch.error = false;
     _globalJobSearch.errorMsg = '';
+    _cachedMyJobs = [];
+    _tradeJobCacheById = {};
   }
 
   function saveJobListCache(data) {
@@ -12525,8 +12527,11 @@
     if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
     if (!ncBoardAllowed()) NC.scope = 'mine';
     ncWireOnce();
-    // .ncal is the only calendar.
-    root.style.display = 'flex';
+    // .ncal is the only calendar. The Availability panel owns the Schedule surface
+    // while it is open, so a late-settling repaint must not un-hide the calendar
+    // underneath it.
+    var availPanel = document.getElementById('scheduleAvailPanel');
+    if (!availPanel || availPanel.style.display === 'none') root.style.display = 'flex';
 
     var host = document.getElementById('ncCalhost');
     // U-T3 freshness: refetch when the model is missing, an out-of-window date is

@@ -13070,6 +13070,11 @@
       var sd = e.target.closest('[data-seldate]'); if (sd) { NC.date = sd.getAttribute('data-seldate'); ncPaint(); return; }
       var dd = e.target.closest('[data-date]'); if (dd) { NC.date = dd.getAttribute('data-date'); NC.scale = 'day'; NC.calView = 'cal'; ncRepaintForDate(); }
     });
+    document.getElementById('ncCalhost').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      var t = e.target.closest('[role="button"]'); if (!t || !this.contains(t)) return;
+      e.preventDefault(); t.click();
+    });
     document.getElementById('ncScrim').addEventListener('click', ncCloseSheet);
     var _ab = document.getElementById('ncAvailBtn');
     if (_ab) _ab.addEventListener('click', function () { showAvailabilityPanel(true); });
@@ -17702,6 +17707,7 @@
         toast('Schedule updated');
         _refreshBoardSilent();
         NC.dirty = true; // U-T3: a Board schedule edit changes the calendar — refetch on next entry
+        if (_currentView === 'schedule') renderNewCalendar();
       },
       onError: function (err) {
         _renderBoard();  // reflect the rollback
@@ -17732,6 +17738,7 @@
         toast(res && res.deduped ? 'Already assigned' : (ctx.mode === 'reassign' ? 'Crew reassigned' : 'Job allocated'));
         _refreshBoardSilent();
         NC.dirty = true; // U-T3: a Board allocation changes the calendar — refetch on next entry
+        if (_currentView === 'schedule') renderNewCalendar();
       },
       onError: function (err) {
         _renderBoard();  // reflect the rollback

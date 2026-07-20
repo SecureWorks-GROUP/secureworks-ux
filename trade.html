@@ -3718,6 +3718,8 @@
       cloud.supabase.auth.signOut().catch(function() {});
     }
 
+    clearJobListCache();
+
     setTimeout(function() {
       _user = null;
       _currentJobId = null;
@@ -4452,7 +4454,9 @@
   var _lastJobData = null;
   var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, truncated: false, error: false, errorMsg: '', timer: null, token: 0 };
 
-  var TRANSIENT_JOB_FLAGS = ['_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete'];
+  // The pool itself travels with its "may be incomplete" verdict; caching the rows without
+  // that caveat would replay a known-truncated pool as a definitive list on the next launch.
+  var TRANSIENT_JOB_FLAGS = ['makesafePool', '_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete'];
 
   // User-facing load-failure hint. Backend detail stays in console.warn — never in the trade UI.
   function loadFailureHint() {
@@ -4508,6 +4512,17 @@
     } catch(e) {}
   }
 
+  // Sign-out must not leave the outgoing user's job list on a shared device. Call while
+  // _user is still set — the key is derived from it.
+  function clearJobListCache() {
+    var key = jobListCacheKey();
+    _prunedForKey = null;
+    try {
+      localStorage.removeItem('sw_jobs_cache');
+      if (key) localStorage.removeItem(key);
+    } catch(e) {}
+  }
+
   function saveJobListCache(data) {
     var key = jobListCacheKey();
     if (!key) return;
@@ -4516,11 +4531,17 @@
     try {
       localStorage.setItem(key, payload);
     } catch(e) {
-      // Quota: drop our own stale entry and try once more, so caching cannot wedge off permanently.
+      // Quota: reclaim our own stale entry and retry, but restore it if the retry also
+      // fails — dropping a valid cache for nothing degrades the next launch to skeletons.
       try {
+        var previous = localStorage.getItem(key);
         localStorage.removeItem(key);
-        localStorage.setItem(key, payload);
-      } catch(e2) {}
+        try {
+          localStorage.setItem(key, payload);
+        } catch(e2) {
+          if (previous !== null) localStorage.setItem(key, previous);
+        }
+      } catch(e3) {}
     }
   }
 
@@ -5002,7 +5023,12 @@
     var truncated = _globalJobSearch.q === query && !!_globalJobSearch.truncated;
     // Always state the count — never silent truncation.
     if (shown === 0) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">0 matches — showing all 0. No jobs match this All-tab search.</div>';
+      var emptyCopy = truncated
+        ? 'Showing 0 of ' + total + ' matches — none could be displayed.'
+        : totalKnown
+          ? '0 matches. No jobs match this All-tab search.'
+          : 'No jobs match this All-tab search.';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">' + emptyCopy + '</div>';
       return h;
     }
     if (!totalKnown) {
@@ -21419,6 +21445,7 @@
     });
 
     cloud.on('auth:logout', function() {
+      clearJobListCache();
       _user = null;
       _currentJobId = null;
       _currentJob = null;

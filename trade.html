@@ -2790,10 +2790,6 @@
     .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
     .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
     .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
-    /* U4 · Classic-calendar hatch row (in the filter sheet) */
-    .ncal .nc-classic-row{display:flex;justify-content:space-between;align-items:center;width:100%;border:1.4px solid var(--line-2);background:var(--card);border-radius:var(--r-ctl);padding:14px 15px;font-size:15px;font-weight:700;color:var(--ink)}
-    .ncal .nc-classic-row .uarrow{color:var(--ink-3);font-size:18px;font-weight:800}
-    .ncal .nc-classic-note{font-size:12px;color:var(--ink-3);margin-top:6px}
     /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
     .ncal .nc-stack{padding:6px 14px 14px}
     .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
@@ -3087,10 +3083,9 @@
      ══════════════════════════════════════════════════ -->
 <div id="viewSchedule" class="view">
   <!-- ══════════════════════════════════════════════════
-       M2 NEW CALENDAR SYSTEM (U2 renderers + U3 filters/strip).
-       Sibling of the old .container (which stays fully intact below);
-       showView('schedule') shows this and hides the old container.
-       U4 adds the "Classic calendar" hatch to reach the old one again.
+       M2 CALENDAR SYSTEM (U2 renderers + U3 filters/strip).
+       The only calendar. Legacy .container below stays in DOM but is
+       permanently hidden (classic hatch removed 2026-07-20).
        ══════════════════════════════════════════════════ -->
   <div id="ncalRoot" class="ncal" style="display:none">
     <div class="ctlrow">
@@ -3105,6 +3100,9 @@
       <button class="fbtn" id="ncFbtn" aria-label="Filter the calendar">
         <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
         <span class="fbadge" id="ncFbadge" hidden></span>
+      </button>
+      <button class="fbtn" id="ncAvailBtn" aria-label="Set your availability" title="Availability">
+        <svg viewBox="0 0 24 24"><path d="M8 3v3M16 3v3M3.5 9.5h17M5 5.5h14a1.8 1.8 0 0 1 1.8 1.8v11.4A1.8 1.8 0 0 1 19 20.5H5a1.8 1.8 0 0 1-1.8-1.8V7.3A1.8 1.8 0 0 1 5 5.5z"/><path d="m9 14.5 2 2 4-4"/></svg>
       </button>
     </div>
     <div class="ctlrow" id="ncRowScale">
@@ -3136,13 +3134,10 @@
     <div class="nc-toast" id="ncToast"></div>
   </div>
 
-  <!-- U4 · return bar shown while the Classic calendar hatch is open -->
-  <div id="ncClassicBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:var(--sw-orange-tint);border-bottom:1px solid var(--sw-border)">
-    <span style="font-family:var(--sw-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--sw-orange-deep)">Classic calendar</span>
-    <button onclick="ncShowNew()" style="background:var(--sw-dark);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;min-height:40px">&larr; New calendar</button>
-  </div>
-
-  <div class="container">
+  <!-- Legacy schedule container (Availability / old calendar JS). Permanently hidden:
+       the .ncal system is the only calendar. Kept in DOM so Availability markup
+       remains addressable if re-homed later; classic hatch removed 2026-07-20. -->
+  <div class="container" style="display:none">
     <!-- Sub-tabs: Calendar | Availability -->
     <div id="scheduleSubTabs" style="display:flex;gap:2px;background:var(--sw-light);border-radius:8px;padding:2px;margin-bottom:12px;">
       <button class="schedule-sub-tab active" id="subTabCalendar" onclick="showScheduleSubTab('calendar')" style="flex:1;padding:8px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-dark);color:#fff;transition:all 0.2s">Calendar</button>
@@ -3181,13 +3176,17 @@
       </div>
     </div>
 
-    <!-- Availability sub-view (existing functionality) -->
-    <div id="scheduleAvailView" style="display:none;">
+  </div>
+
+  <!-- Availability panel — re-homed out of the hidden legacy container so it stays
+       reachable from the .ncal chrome (ncAvailBtn). .ncal remains the only calendar. -->
+  <div class="container" id="scheduleAvailPanel" style="display:none">
+    <button onclick="showAvailabilityPanel(false)" style="background:none;border:none;padding:8px 0;margin-bottom:4px;font-family:var(--sw-font);font-size:13px;font-weight:600;color:var(--sw-mid);cursor:pointer">&lsaquo; Calendar</button>
+    <div id="scheduleAvailView">
       <div id="scheduleContent">
         <div class="loading-screen"><div class="spinner"></div>Loading schedule...</div>
       </div>
     </div>
-
   </div>
 </div>
 
@@ -3725,6 +3724,8 @@
     if (cloud && cloud.supabase) {
       cloud.supabase.auth.signOut().catch(function() {});
     }
+
+    resetJobListSession();
 
     setTimeout(function() {
       _user = null;
@@ -4277,7 +4278,7 @@
     if (view === 'myJobs') loadMyJobs();
     if (view === 'activity') renderActivityView();
     if (view === 'board') renderBoardView();
-    if (view === 'schedule') { renderNewCalendar(); } // M2: Calendar tab renders the new system (old fns retained for U4 hatch). U-T3: renderNewCalendar's staleness gate (dirty flag / TTL) refetches on entry when the cached model is out of date.
+    if (view === 'schedule') { var _ap = document.getElementById('scheduleAvailPanel'); if (_ap) _ap.style.display = 'none'; renderNewCalendar(); } // .ncal only (classic hatch removed). U-T3: staleness gate (dirty / TTL) refetches on entry when the cached model is out of date.
     if (view === 'hours') loadHoursView();
     if (view === 'profile') renderProfileView();
     if (view === 'job' && _currentJobId) {
@@ -4381,8 +4382,14 @@
     api('my_jobs', params).then(function(data) {
       clearTimeout(slowTimer);
       renderMyJobs(data);
-      // Open MakeSafe pool removed — visibility is strictly allocation-based now.
-      // (loadMakesafePoolJobs is intentionally not called.)
+      // Open MakeSafe pool is dispatcher-only (backend supplies makesafePool for
+      // admin/ops_manager). Client fallback runs when that array is absent so a
+      // partial payload still surfaces work; failure must render visibly.
+      // Regular trades stay allocation-based — they never call this.
+      var mv = _user && _user.managed_verticals;
+      if (_isAdmin || (Array.isArray(mv) && mv.length > 0)) {
+        loadMakesafePoolJobs(data);
+      }
       // Check for active server-side clock (survives app reinstall / device switch)
       checkServerClockRecovery(data);
     }).catch(function(err) {
@@ -4452,16 +4459,154 @@
   // ── Job Search & Filter State ──
   var _jobFilter = 'today';
   var _lastJobData = null;
-  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], timer: null, token: 0 };
+  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, truncated: false, error: false, errorMsg: '', timer: null, token: 0 };
+
+  // The pool itself travels with its "may be incomplete" verdict; caching the rows without
+  // that caveat would replay a known-truncated pool as a definitive list on the next launch.
+  var TRANSIENT_JOB_FLAGS = ['makesafePool', '_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete'];
+
+  // User-facing load-failure hint. Backend detail stays in console.warn — never in the trade UI.
+  function loadFailureHint() {
+    return (typeof navigator !== 'undefined' && navigator.onLine === false)
+      ? 'You appear to be offline.'
+      : '';
+  }
+
+  // Single source of truth for "this failed to load, it is not empty" cards.
+  function loadFailureCard(title, body, msg, retryFn) {
+    var h = '<div style="border:1px solid #E67E22;background:#FFF8F0;border-radius:10px;padding:14px 16px;margin-bottom:12px">';
+    h += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">' + esc(title) + '</div>';
+    h += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">' + esc(body) + '</div>';
+    if (msg) h += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:10px;word-break:break-word">' + esc(msg) + '</div>';
+    h += '  <button type="button" class="btn btn-secondary btn-small" style="width:auto" onclick="' + esc(retryFn) + '()">Retry</button>';
+    h += '</div>';
+    return h;
+  }
+
+  function stripTransientJobFlags(data) {
+    if (!data || typeof data !== 'object') return data;
+    var out = {};
+    Object.keys(data).forEach(function(k) {
+      if (TRANSIENT_JOB_FLAGS.indexOf(k) !== -1) return; // in-flight/error state must not survive a reload
+      out[k] = data[k];
+    });
+    return out;
+  }
+
+  // Cached job lists carry per-viewer data (allocations, and for dispatchers the open
+  // MakeSafe pool). Key the cache to the signed-in user so a shared device never shows
+  // one user's jobs to the next.
+  function jobListCacheKey() {
+    var uid = (_user && (_user.id || _user.email)) || '';
+    return uid ? 'sw_jobs_cache_' + uid : '';
+  }
+
+  var JOB_LIST_CACHE_PREFIX = 'sw_jobs_cache_';
+
+  // Only the signed-in user's cache may live on disk. Every other entry (a previous
+  // installer on a shared device, plus the legacy unscoped key) is job data we must
+  // not retain and storage we would otherwise leak until quota kills caching entirely.
+  var _prunedForKey = null;
+  function pruneJobListCaches(keepKey) {
+    if (_prunedForKey === keepKey) return; // once per signed-in user, not once per render
+    _prunedForKey = keepKey;
+    try {
+      localStorage.removeItem('sw_jobs_cache'); // legacy unscoped cache
+      Object.keys(localStorage).forEach(function(k) {
+        if (k.indexOf(JOB_LIST_CACHE_PREFIX) !== 0 || k === keepKey) return;
+        localStorage.removeItem(k);
+      });
+    } catch(e) {}
+  }
+
+  // Sign-out must not leave the outgoing user's job list on a shared device. Call while
+  // _user is still set — the key is derived from it.
+  function clearJobListCache() {
+    var key = jobListCacheKey();
+    _prunedForKey = null;
+    try {
+      localStorage.removeItem('sw_jobs_cache');
+      if (key) localStorage.removeItem(key);
+    } catch(e) {}
+  }
+
+  // Sign-out teardown: storage plus the in-memory render state. Kept as one call so a
+  // logout path cannot clear the cache and leave the outgoing user's jobs live in
+  // _lastJobData, where a late-settling request would repaint and re-cache them under
+  // whoever signs in next.
+  function resetJobListSession() {
+    clearJobListCache();
+    _lastJobData = null;
+    if (_globalJobSearch.timer) clearTimeout(_globalJobSearch.timer);
+    _globalJobSearch.timer = null;
+    _globalJobSearch.token++;
+    _globalJobSearch.q = '';
+    _globalJobSearch.loading = false;
+    _globalJobSearch.loaded = false;
+    _globalJobSearch.results = [];
+    _globalJobSearch.total = 0;
+    _globalJobSearch.totalKnown = false;
+    _globalJobSearch.truncated = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
+    _cachedMyJobs = [];
+    _tradeJobCacheById = {};
+    resetCalendarSession();
+  }
+
+  // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
+  // NC.scope is forced to 'mine' for non-managers, and NC.model holds the outgoing
+  // user's job blocks. Left alone, an in-page user switch renders user A's calendar
+  // filtered by user A's id until a refetch lands, and forever if it fails.
+  function resetCalendarSession() {
+    if (typeof NC === 'undefined' || !NC) return;
+    NC.me = { id: null, name: null };
+    NC.model = null;
+    NC.loadedAt = 0;
+    NC.fetchFrom = null;
+    NC.fetchTo = null;
+    NC.date = null;
+    NC.month = null;
+    NC.scope = 'everyone';
+    NC.dirty = false;
+    NC.loading = false;
+    var host = document.getElementById('ncCalhost');
+    if (host) host.innerHTML = '';
+  }
 
   function saveJobListCache(data) {
-    try { localStorage.setItem('sw_jobs_cache', JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
+    // A logout already in flight must not be undone by a request that settles
+    // during the sign-out window — _user is still set, so the key still resolves.
+    if (_sessionExpired) return;
+    var key = jobListCacheKey();
+    if (!key) return;
+    pruneJobListCaches(key);
+    var payload = JSON.stringify({ ts: Date.now(), data: stripTransientJobFlags(data) });
+    try {
+      localStorage.setItem(key, payload);
+    } catch(e) {
+      // Quota: reclaim our own stale entry and retry, but restore it if the retry also
+      // fails — dropping a valid cache for nothing degrades the next launch to skeletons.
+      try {
+        var previous = localStorage.getItem(key);
+        localStorage.removeItem(key);
+        try {
+          localStorage.setItem(key, payload);
+        } catch(e2) {
+          if (previous !== null) localStorage.setItem(key, previous);
+        }
+      } catch(e3) {}
+    }
   }
 
   function loadJobListCache() {
+    var key = jobListCacheKey();
+    if (!key) return null;
+    pruneJobListCaches(key);
     try {
-      var raw = JSON.parse(localStorage.getItem('sw_jobs_cache') || 'null');
+      var raw = JSON.parse(localStorage.getItem(key) || 'null');
       if (raw && raw.data && (Date.now() - raw.ts) < 1800000) return raw.data; // 30-min expiry
+      if (raw) localStorage.removeItem(key); // expired job data must not linger on disk
     } catch(e) {}
     return null;
   }
@@ -4702,13 +4847,18 @@
   }
 
   function loadMakesafePoolJobs(data) {
-    // MVP access rule: any logged-in trade can see/open unassigned MakeSafe jobs.
-    // Prefer a backend-supplied pool if present; otherwise use the trade-safe search endpoint.
+    // Dispatcher open-pool: prefer backend-supplied pool; otherwise trade-safe search fallback.
+    // Regular trades do not call this (allocation-based visibility). Failure must never look like empty.
     if (!data || data._makesafePoolLoaded) return;
     data._makesafePoolLoaded = true;
+    data._makesafePoolError = false;
     if (Array.isArray(data.makesafePool)) return;
+    data._makesafePoolLoading = true;
+    if (_lastJobData === data) renderMyJobs(data);
 
     api('search_all_jobs', {}).then(function(res) {
+      data._makesafePoolLoading = false;
+      if (_lastJobData !== data) return;
       var pool = [];
       (res.jobs || []).forEach(function(job) {
         if (!job || !job.id) return;
@@ -4725,13 +4875,39 @@
           _makesafePool: true
         });
       });
-      if (pool.length === 0 || _lastJobData !== data) return;
+      // The pool is derived from an unfiltered search. Only claim it is complete when the
+      // API reports a total matching the rows it returned; otherwise flag possible truncation.
+      var apiTotal = (res && typeof res.total === 'number') ? res.total
+        : (res && typeof res.count === 'number') ? res.count
+        : null;
       data.makesafePool = pool;
+      data._makesafePoolIncomplete = apiTotal !== null && apiTotal > (res.jobs || []).length;
+      data._makesafePoolError = false;
       renderMyJobs(data);
     }).catch(function(err) {
       console.warn('[trade] MakeSafe pool unavailable:', err && (err.message || err));
+      data._makesafePoolLoading = false;
+      if (_lastJobData !== data) return;
+      data._makesafePoolError = true;
+      data._makesafePoolErrorMsg = loadFailureHint();
+      delete data.makesafePool;
+      delete data._makesafePoolIncomplete;
+      // Allow retryMakesafePoolLoad to re-run the fetch
+      data._makesafePoolLoaded = false;
+      renderMyJobs(data);
     });
   }
+
+  function retryMakesafePoolLoad() {
+    if (!_lastJobData) return;
+    _lastJobData._makesafePoolLoaded = false;
+    _lastJobData._makesafePoolError = false;
+    _lastJobData._makesafePoolErrorMsg = '';
+    delete _lastJobData._makesafePoolIncomplete;
+    delete _lastJobData.makesafePool;
+    loadMakesafePoolJobs(_lastJobData);
+  }
+  window.retryMakesafePoolLoad = retryMakesafePoolLoad;
 
 
   function requestGlobalJobSearch(q) {
@@ -4742,6 +4918,11 @@
       _globalJobSearch.loading = false;
       _globalJobSearch.loaded = false;
       _globalJobSearch.results = [];
+      _globalJobSearch.total = 0;
+      _globalJobSearch.totalKnown = false;
+      _globalJobSearch.truncated = false;
+      _globalJobSearch.error = false;
+      _globalJobSearch.errorMsg = '';
       return;
     }
     if (_globalJobSearch.q === q && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
@@ -4749,6 +4930,11 @@
     _globalJobSearch.loading = true;
     _globalJobSearch.loaded = false;
     _globalJobSearch.results = [];
+    _globalJobSearch.total = 0;
+    _globalJobSearch.totalKnown = false;
+    _globalJobSearch.truncated = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
     var token = ++_globalJobSearch.token;
     _globalJobSearch.timer = setTimeout(function() {
       api('search_all_jobs', { q: q }).then(function(res) {
@@ -4758,9 +4944,23 @@
           if (!job || !job.id) return;
           results.push(job);
         });
+        // No silent cap: show every job the signed-in role may see (incl. cancelled/archived).
+        // Only claim completeness when the API actually reports a total; otherwise the row
+        // count alone cannot distinguish a full result set from a server-side truncation.
+        var apiTotal = (res && typeof res.total === 'number') ? res.total
+          : (res && typeof res.count === 'number') ? res.count
+          : null;
         _globalJobSearch.loading = false;
         _globalJobSearch.loaded = true;
-        _globalJobSearch.results = results.slice(0, 25);
+        _globalJobSearch.results = results;
+        // Compare the API total against the rows it actually returned, not the
+        // client-filtered list — otherwise rows dropped locally read as server truncation.
+        var returned = (res.jobs || []).length;
+        _globalJobSearch.totalKnown = apiTotal !== null;
+        _globalJobSearch.truncated = apiTotal !== null && apiTotal > returned;
+        _globalJobSearch.total = apiTotal !== null ? Math.max(apiTotal, returned) : results.length;
+        _globalJobSearch.error = false;
+        _globalJobSearch.errorMsg = '';
         if (_lastJobData) renderMyJobs(_lastJobData);
       }).catch(function(err) {
         if (token !== _globalJobSearch.token) return;
@@ -4768,10 +4968,28 @@
         _globalJobSearch.loading = false;
         _globalJobSearch.loaded = true;
         _globalJobSearch.results = [];
+        _globalJobSearch.total = 0;
+        _globalJobSearch.totalKnown = false;
+        _globalJobSearch.truncated = false;
+        _globalJobSearch.error = true;
+        _globalJobSearch.errorMsg = loadFailureHint();
         if (_lastJobData) renderMyJobs(_lastJobData);
       });
     }, 300);
   }
+
+  function retryGlobalJobSearch() {
+    var q = _globalJobSearch.q;
+    if (!q || q.length < 2) return;
+    _globalJobSearch.q = '';
+    _globalJobSearch.loading = false;
+    _globalJobSearch.loaded = false;
+    _globalJobSearch.error = false;
+    _globalJobSearch.errorMsg = '';
+    requestGlobalJobSearch(q);
+    if (_lastJobData) renderMyJobs(_lastJobData);
+  }
+  window.retryGlobalJobSearch = retryGlobalJobSearch;
 
   function findAssignmentForGlobalJob(data, jobId) {
     if (!data || !jobId) return null;
@@ -4844,10 +5062,35 @@
       h += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
       return h;
     }
-    var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
-    if (!results.length) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">No jobs match this All-tab search.</div>';
+    if (_globalJobSearch.q === query && _globalJobSearch.error) {
+      h += loadFailureCard(
+        'Could not search the job database',
+        'This is not “no matches” — the search failed. Check your connection and retry.',
+        _globalJobSearch.errorMsg,
+        'retryGlobalJobSearch');
       return h;
+    }
+    var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
+    var shown = results.length;
+    var total = (_globalJobSearch.q === query ? _globalJobSearch.total : shown) || shown;
+    var totalKnown = _globalJobSearch.q === query && !!_globalJobSearch.totalKnown;
+    var truncated = _globalJobSearch.q === query && !!_globalJobSearch.truncated;
+    // Always state the count — never silent truncation.
+    if (shown === 0) {
+      var emptyCopy = truncated
+        ? 'Showing 0 of ' + total + ' matches — none could be displayed.'
+        : totalKnown
+          ? '0 matches. No jobs match this All-tab search.'
+          : 'No jobs match this All-tab search.';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">' + emptyCopy + '</div>';
+      return h;
+    }
+    if (!totalKnown) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' match' + (shown === 1 ? '' : 'es') + '</div>';
+    } else if (!truncated) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' match' + (shown === 1 ? '' : 'es') + ' — showing all ' + shown + '</div>';
+    } else {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">Showing ' + shown + ' of ' + total + ' matches</div>';
     }
     results.forEach(function(job, idx) {
       cacheTradeJob(job, findAssignmentForGlobalJob(data, job.id));
@@ -4987,6 +5230,31 @@
     var hasAny = false;
     sections.forEach(function(sec) {
       var items = sec.key === 'today' ? todayJobs : (data[sec.key] || []);
+      // Pool load failure: show a visible failed state (empty and broken must never look alike).
+      var poolState = sec.key !== 'makesafePool' ? ''
+        : data._makesafePoolLoading ? 'loading'
+        : data._makesafePoolError ? 'error'
+        : (items.length === 0 && data._makesafePoolIncomplete) ? 'incomplete'
+        : '';
+      if (poolState) {
+        if (query) return;
+        if (_jobFilter === 'assigned') return;
+        if (_jobFilter === 'thisWeek') return;
+        hasAny = true;
+        html += '<div class="section-label">Open MakeSafe Jobs</div>';
+        if (poolState === 'loading') {
+          html += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
+        } else if (poolState === 'error') {
+          html += loadFailureCard(
+            'Could not load open MakeSafe jobs',
+            'This is not “no work available” — the pool failed to load. Check your connection and retry.',
+            data._makesafePoolErrorMsg,
+            'retryMakesafePoolLoad');
+        } else {
+          html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">No open MakeSafe jobs in the rows we could read, but the job database returned more than one request can hold — this is not a confirmed empty pool. Check with ops.</div>';
+        }
+        return;
+      }
       if (items.length === 0) return;
       // Apply filter: if filter is 'today' only show today section, 'thisWeek' only today+thisWeek.
       // Exception: on the Today view we still surface the crew's own allocated make-safes
@@ -5042,6 +5310,9 @@
       html += '<div class="section-label">' + sectionLabel + '</div>';
       if (sec.key === 'makesafePool') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Open MakeSafe pool. Tap a card to open the report when ops has released/left it open.</div>';
+        if (data._makesafePoolIncomplete) {
+          html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin:-4px 0 10px;line-height:1.4">This pool may be incomplete — the job database returned more rows than could be read in one request. Check with ops before treating it as the full list.</div>';
+        }
       }
       if (sec.key === 'recent') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Past-dated jobs still waiting on your report. They stay here until the report is submitted.</div>';
@@ -12245,10 +12516,10 @@
   })();
   // </calendar-renderers>
 
-  // ── DOM wiring for the new calendar (U2/U3). Uses CalRender (pure) + the U1
-  //    adapter fetch. Additive: the old calendar functions stay defined and the
-  //    old #viewSchedule .container is hidden (not removed); U4 adds the hatch. ──
-  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, classic: false, dirty: false, loadedAt: 0 };
+  // ── DOM wiring for the .ncal calendar (U2/U3). Uses CalRender (pure) + the U1
+  //    adapter fetch. Classic-calendar hatch removed 2026-07-20: .ncal is the
+  //    only calendar; any session parked on classic is migrated here on entry. ──
+  var NC = { calView: 'cal', scale: 'day', axis: 'crew', type: 'all', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, dirty: false, loadedAt: 0 };
   // U-T3 freshness: dirty = a Board write happened, refetch on next entry;
   // loadedAt = when the model was last fetched (drives the TTL + "Updated" stamp).
   var NC_TTL_MS = 90000;
@@ -12259,7 +12530,7 @@
     // date + month MUST be included: every CalRender view reads st.date (day/week/agenda/run,
     // 21 sites) and month views read st.month. Omitting them makes parse(undefined) -> Invalid Date
     // -> "NaN undefined" period label + "UNDEFINED NAN" columns across the whole grid. Default to
-    // today/this-month so a direct ncPaint (e.g. via ncShowNew before renderNewCalendar's default) is safe.
+    // today/this-month so a direct ncPaint (e.g. before renderNewCalendar's default) is safe.
     var d = NC.date || awstDateStr();
     var mo = NC.month || (d.slice(0, 8) + '01');
     return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, date: d, month: mo, me: NC.me, boardAllowed: ncBoardAllowed(), lens: ncBoardAllowed() ? 'manager' : 'installer' };
@@ -12270,26 +12541,6 @@
   }
   function ncInRange(d) { return NC.fetchFrom && NC.fetchTo && d >= NC.fetchFrom && d <= NC.fetchTo; }
 
-  // U4 · Classic-calendar hatch reveal/return. The old cluster is never removed;
-  // this un-hides it and boots it via the untouched showScheduleSubTab('calendar').
-  function ncOldContainer() { var s = document.getElementById('viewSchedule'); return s ? s.querySelector(':scope > .container') : null; }
-  function ncShowClassic() {
-    NC.classic = true;
-    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'none';
-    var oc = ncOldContainer(); if (oc) oc.style.display = '';
-    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'flex';
-    ncCloseSheet();
-    if (typeof showScheduleSubTab === 'function') showScheduleSubTab('calendar'); // boots loadTeamCalendar + old sub-tabs
-  }
-  function ncShowNew() {
-    NC.classic = false;
-    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
-    var bar = document.getElementById('ncClassicBar'); if (bar) bar.style.display = 'none';
-    var root = document.getElementById('ncalRoot'); if (root) root.style.display = 'flex';
-    if (NC.model) ncPaint(); else renderNewCalendar();
-  }
-  window.ncShowNew = ncShowNew;
-
   async function renderNewCalendar() {
     var root = document.getElementById('ncalRoot');
     if (!root) return;
@@ -12297,13 +12548,11 @@
     if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
     if (!ncBoardAllowed()) NC.scope = 'mine';
     ncWireOnce();
-    // If the user parked in the Classic calendar this session, keep them there.
-    // Boot default is still the NEW system (NC.classic starts false on load).
-    if (NC.classic) { ncShowClassic(); return; }
-    // Show the new system; hide the old container + classic bar (kept in DOM).
-    root.style.display = 'flex';
-    var oc = ncOldContainer(); if (oc) oc.style.display = 'none';
-    var cbar = document.getElementById('ncClassicBar'); if (cbar) cbar.style.display = 'none';
+    // .ncal is the only calendar. The Availability panel owns the Schedule surface
+    // while it is open, so a late-settling repaint must not un-hide the calendar
+    // underneath it.
+    var availPanel = document.getElementById('scheduleAvailPanel');
+    if (!availPanel || availPanel.style.display === 'none') root.style.display = 'flex';
 
     var host = document.getElementById('ncCalhost');
     // U-T3 freshness: refetch when the model is missing, an out-of-window date is
@@ -12511,10 +12760,7 @@
       return '<div class="sh-kick">Filter the calendar</div>'
         + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
         + '<div class="fgroup"><div class="sh-lab">Trade</div><div class="fchips">' + chips + '</div></div>'
-        + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>'
-        + '<div class="fgroup"><div class="sh-lab">Other</div>'
-        + '<button class="nc-classic-row" data-classic="1"><span>Classic calendar</span><span class="uarrow">&rsaquo;</span></button>'
-        + '<div class="nc-classic-note">The old Calendar, Team and Availability views, exactly as before.</div></div>';
+        + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>';
     }
     body.innerHTML = content();
     body.onclick = function (e) {
@@ -12522,8 +12768,6 @@
       if (c) { NC.type = c.getAttribute('data-ftype'); body.innerHTML = content(); ncPaint(); return; }
       var sc = e.target.closest('[data-fscope]');
       if (sc) { NC.scope = sc.getAttribute('data-fscope'); body.innerHTML = content(); ncPaint(); return; }
-      var cl = e.target.closest('[data-classic]');
-      if (cl) { ncShowClassic(); }
     };
     document.getElementById('ncSheetFoot').innerHTML = '<button class="btn ghost" id="ncResetBtn">Reset</button><button class="btn dark" id="ncDoneBtn">Done</button>';
     document.getElementById('ncResetBtn').addEventListener('click', function () { NC.type = 'all'; NC.scope = ncBoardAllowed() ? 'everyone' : 'mine'; body.innerHTML = content(); ncPaint(); });
@@ -12555,8 +12799,28 @@
       var dd = e.target.closest('[data-date]'); if (dd) { NC.date = dd.getAttribute('data-date'); NC.scale = 'day'; NC.calView = 'cal'; ncRepaintForDate(); }
     });
     document.getElementById('ncScrim').addEventListener('click', ncCloseSheet);
+    var _ab = document.getElementById('ncAvailBtn');
+    if (_ab) _ab.addEventListener('click', function () { showAvailabilityPanel(true); });
   }
   window.renderNewCalendar = renderNewCalendar;
+
+  // Availability lives beside .ncal, not inside it: the two swap places within the
+  // Schedule view so .ncal stays the only calendar.
+  window.showAvailabilityPanel = function (show) {
+    var root = document.getElementById('ncalRoot');
+    var panel = document.getElementById('scheduleAvailPanel');
+    if (!panel) return;
+    if (show) {
+      if (root) root.style.display = 'none';
+      panel.style.display = '';
+      var view = document.getElementById('scheduleAvailView');
+      if (view) view.style.display = '';
+      renderScheduleView();
+    } else {
+      panel.style.display = 'none';
+      renderNewCalendar();
+    }
+  };
 
   async function loadTeamCalendar() {
     if (!_calWeekStart) _calWeekStart = getMonday(new Date());
@@ -21258,6 +21522,7 @@
     });
 
     cloud.on('auth:logout', function() {
+      resetJobListSession();
       _user = null;
       _currentJobId = null;
       _currentJob = null;

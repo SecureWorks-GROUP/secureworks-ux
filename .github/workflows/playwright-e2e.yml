@@ -1,0 +1,69 @@
+name: Trade App E2E
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trade-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    name: Trade board flows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: true
+      E2E_TRADE_INSTALLER_EMAIL: ${{ secrets.E2E_TRADE_INSTALLER_EMAIL }}
+      E2E_TRADE_INSTALLER_PASSWORD: ${{ secrets.E2E_TRADE_INSTALLER_PASSWORD }}
+      E2E_TRADE_ALLOCATOR_EMAIL: ${{ secrets.E2E_TRADE_ALLOCATOR_EMAIL }}
+      E2E_TRADE_ALLOCATOR_PASSWORD: ${{ secrets.E2E_TRADE_ALLOCATOR_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium and system dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Report optional live-auth setup
+        if: env.E2E_TRADE_INSTALLER_EMAIL == '' || env.E2E_TRADE_ALLOCATOR_EMAIL == ''
+        run: echo '::warning::Dedicated Supabase E2E secrets are not configured. Mocked board coverage will run; optional live-auth checks will be loudly skipped.'
+
+      - name: Run Playwright suite
+        timeout-minutes: 5
+        run: npm run test:e2e
+
+      - name: Upload failure traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-e2e-failure-${{ github.run_attempt }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

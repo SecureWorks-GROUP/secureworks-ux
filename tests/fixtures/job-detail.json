@@ -1,0 +1,30 @@
+{
+  "job": {
+    "id": "e2e-job-1",
+    "job_number": "E2E-JOB-001",
+    "type": "patio",
+    "status": "scheduled",
+    "client_name": "Fixture Homeowner",
+    "client_phone": "0400333444",
+    "client_email": "fixture@example.test",
+    "site_address": "30 Fixture Road",
+    "site_suburb": "Joondalup",
+    "scope_summary": "Install fixture patio",
+    "scope_json": {},
+    "ghl_contact_id": null
+  },
+  "crew": [
+    {
+      "id": "e2e-assignment-1",
+      "user_id": "e2e-installer",
+      "name": "E2E Installer",
+      "status": "scheduled",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "08:30"
+    }
+  ],
+  "purchaseOrders": [],
+  "documents": [],
+  "media": [],
+  "notes": []
+}

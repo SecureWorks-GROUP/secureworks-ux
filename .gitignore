@@ -14,6 +14,9 @@ drafts/
 
 # Local browser/test audit output
 .gstack/
+node_modules/
+playwright-report/
+test-results/
 
 # Supabase CLI local temp files
 supabase/.temp/

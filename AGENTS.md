@@ -27,6 +27,10 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 > **Note:** This repo does not yet use Husky. The trunk guard is installed as a `.git/hooks/pre-commit` (per-clone, not tracked by git). Adopting Husky would make this hook portable across clones — tracked as a recommended follow-up.
 
+## Testing
+
+Trade App changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

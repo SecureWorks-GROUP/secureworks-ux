@@ -5856,18 +5856,34 @@
 
   // Canonical make-safe feed lookup. Embedded rows support pure/test callers;
   // the cached makesafe-board.v1 projection covers My Jobs, detail and hero.
+  var _makesafeV5RowIndex = null, _makesafeV5RowIndexSrc = null;
   function getMakesafeFeedRow(job) {
     job = job || {};
     var embedded = job._makesafeFeedRow || job._feedRow || job.feedRow || null;
     if (embedded) return embedded;
     if (!_makesafeV5Feed || !MakesafeTradeV5) return null;
-    var rows;
-    try { rows = MakesafeTradeV5.rows(_makesafeV5Feed); } catch (e) { return null; }
-    var id = String(job.id || job.job_id || job.jobId || '');
-    var number = String(job.job_number || '');
-    for (var i = 0; i < rows.length; i++) {
-      if ((id && String(rows[i].id) === id) || (number && String(rows[i].job_number || '') === number)) return rows[i];
+    if (_makesafeV5RowIndexSrc !== _makesafeV5Feed) {
+      var byId = {}, byNumber = {};
+      try {
+        MakesafeTradeV5.COLUMNS.forEach(function (c) {
+          var col = (_makesafeV5Feed.columns || {})[c] || [];
+          for (var i = 0; i < col.length; i++) {
+            var r = col[i];
+            if (!r) continue;
+            var rid = String(r.id == null ? '' : r.id);
+            if (rid && byId[rid] === undefined) byId[rid] = r;
+            var rnum = String(r.job_number || '');
+            if (rnum && byNumber[rnum] === undefined) byNumber[rnum] = r;
+          }
+        });
+      } catch (e) { return null; }
+      _makesafeV5RowIndex = { byId: byId, byNumber: byNumber };
+      _makesafeV5RowIndexSrc = _makesafeV5Feed;
     }
+    var id = String(job.id || job.job_id || job.jobId || '');
+    if (id && _makesafeV5RowIndex.byId[id] !== undefined) return _makesafeV5RowIndex.byId[id];
+    var number = String(job.job_number || '');
+    if (number && _makesafeV5RowIndex.byNumber[number] !== undefined) return _makesafeV5RowIndex.byNumber[number];
     return null;
   }
 

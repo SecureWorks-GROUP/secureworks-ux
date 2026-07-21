@@ -59,8 +59,11 @@ assert(html.includes('data-filter="today"') && html.includes('filter-chip active
 assert(html.includes('renderTradeCardCompactSummary'), 'job cards use the compact field-card summary')
 assert(!html.includes('renderTradeCardFacts(job, a, type)'), 'job cards do not render the old database fact grid')
 assert(!html.includes('Builder #') && !html.includes('External #'), 'standard cards do not expose empty builder/external database labels')
-assert(html.includes('run-list-controls'), 'route order controls render on Today cards')
-assert(html.includes("_jobFilter === 'today' && sec.key === 'today' && runListId"), 'route order controls are gated to the Today tab only')
+// Runsheet retired per captain ruling ("it loses its value"): Today is simply
+// the day's cards in time order — no reorder controls, no run-numbering badges.
+// getTodayRunListState still supplies the natural/persisted order (covered above).
+assert(!/html\s*\+=\s*renderRunListControls\(/.test(html), 'runsheet reorder controls no longer render on any card')
+assert(!html.includes('<span class="run-list-order-badge">'), 'run-numbering badges are removed from Today cards')
 assert(!html.includes('Open report</button>'), 'visible Open report button is removed from job cards')
 assert(html.includes('openJobReport'), 'MakeSafe card tap still opens the report path')
 assert(!/maps\.googleapis\.com|google\.maps\.DirectionsService|DirectionsRenderer/.test(html), 'MVP avoids Google Maps route optimization APIs')

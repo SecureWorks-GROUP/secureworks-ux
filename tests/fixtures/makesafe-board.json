@@ -1,0 +1,75 @@
+{
+  "contract_version": "makesafe-board.v1",
+  "projection": "trade",
+  "generated_at": "{{NOW}}",
+  "columns": {
+    "New": [
+      {
+        "contract_version": "makesafe-board.v1",
+        "id": "e2e-makesafe-new",
+        "job_number": "E2E-MS-001",
+        "type": "makesafe",
+        "makesafe_type": "Storm damage roof report",
+        "column": "New",
+        "canonical_stage": "new",
+        "job_state": "scheduled",
+        "substatus": "waiting_on_allocation",
+        "builder": { "name": "Fixture Builders", "external_ref": "FIX-1001" },
+        "contact": {
+          "client_name": "Test Client",
+          "phone": "0400111222",
+          "address": "10 Fixture Street, Perth WA 6000",
+          "actions": {
+            "call": { "available": true, "href": "tel:0400111222", "unavailable_reason": null },
+            "navigate": { "available": true, "href": "https://www.google.com/maps/search/?api=1&query=10%20Fixture%20Street", "unavailable_reason": null },
+            "text": { "available": true, "href": "sms:0400111222", "unavailable_reason": null }
+          }
+        },
+        "assignments": [],
+        "report": { "state": "not_started", "submitted_at": null, "photo_count": 0 },
+        "pack": { "state": "not_started" },
+        "notes": [{ "id": "note-1", "text": "Fixture access confirmed", "author": "Ops Fixture", "created_at": "{{NOW}}" }],
+        "lineage": { "builder_work_order_number": "WO-E2E-001", "builder_po_number": "PO-E2E-001", "siblings": [] },
+        "age": { "age_hours": 2, "age_days": 0 },
+        "blockers": { "real": [], "stale_artifacts": [] }
+      }
+    ],
+    "Allocated": [
+      {
+        "contract_version": "makesafe-board.v1",
+        "id": "e2e-makesafe-allocated",
+        "job_number": "E2E-MS-002",
+        "type": "makesafe",
+        "makesafe_type": "Temporary roof repair",
+        "column": "Allocated",
+        "canonical_stage": "allocated",
+        "job_state": "scheduled",
+        "substatus": "allocated",
+        "builder": { "name": "Fixture Builders", "external_ref": "FIX-1002" },
+        "contact": {
+          "client_name": "Allocated Client",
+          "phone": "0400222333",
+          "address": "20 Fixture Avenue, Fremantle WA 6160",
+          "actions": {
+            "call": { "available": true, "href": "tel:0400222333", "unavailable_reason": null },
+            "navigate": { "available": true, "href": "https://www.google.com/maps/search/?api=1&query=20%20Fixture%20Avenue", "unavailable_reason": null },
+            "text": { "available": true, "href": "sms:0400222333", "unavailable_reason": null }
+          }
+        },
+        "assignments": [{ "assignment_id": "e2e-ms-assignment", "user_id": "e2e-installer", "name": "E2E Installer", "status": "scheduled", "scheduled_date": "{{TODAY}}", "start_time": "09:00" }],
+        "report": { "state": "waiting_on_trade_report", "submitted_at": null, "photo_count": 0 },
+        "pack": { "state": "not_started" },
+        "notes": [],
+        "lineage": { "builder_work_order_number": "WO-E2E-002", "builder_po_number": "PO-E2E-002", "siblings": [] },
+        "age": { "age_hours": 24, "age_days": 1 },
+        "blockers": { "real": [], "stale_artifacts": [] }
+      }
+    ],
+    "Complete": [],
+    "Archive": []
+  },
+  "rows": [],
+  "permissions": { "visibility": "all_makesafes", "sees_all_makesafes": true, "can_allocate": true },
+  "unmapped_stage_job_ids": [],
+  "parity": { "ok": true, "contract_version": "makesafe-board.v1" }
+}

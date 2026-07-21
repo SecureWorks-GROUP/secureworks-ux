@@ -1,1 +1,10 @@
-{}
+{
+  "scripts": {
+    "serve:e2e": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

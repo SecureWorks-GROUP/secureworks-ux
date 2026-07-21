@@ -97,6 +97,12 @@ The make-safe experience is driven by a single canonical read model — the `mak
   - **transient** (network/5xx) — "Could not load the …" with a **Retry** button (`_loadBoard(true)` for the board, `renderNewCalendar()` for the calendar); the message runs through `friendlyError()`.
   - All three are kept separate from a genuine empty board.
 
+### Builder & type (feed truth)
+- The make-safe board feed is the single source of truth for the builder name and make-safe type on **every** surface. Board cards, My Jobs cards, the job detail builder panel, the report work-order panel, and the job hero all resolve them through `getTradeMakesafeBuilderName(job)` / `getTradeMakesafeTypeLabel(job)`, which look up the job's `makesafe-board.v1` row (`getMakesafeFeedRow` matches by job id, then job number) and return `row.builder.name` / `row.makesafe_type`.
+- The old client-side derivation (`requesting_company_name`, company name/slug, notes/scope regex) survives only as the `getLegacyTradeMakesafe*` fallbacks, used **only** when the job has no feed row. While a feed fetch is still in flight (`_makesafeV5FeedPromise` is set) the client shows a generic `MakeSafe` type and an empty builder rather than guessing.
+- The site occupant/homeowner (`job.client_name`) is never rendered as the builder on any surface — every `requesting_company … || job.client_name` fallback chain was removed.
+- My Jobs (`renderMyJobs`) and the direct MakeSafe report path prime the feed (`fetchMakesafeV5Feed(false)`) alongside their own data, then re-render so cards swap from the legacy fallback to feed facts without changing markup.
+
 ### Calendar
 - Reads only the make-safe feed (`caFetchCalendarModel` no longer calls the legacy `api('calendar')` feed).
 - Crew-axis and job-axis modes, each at Day / Week / Month scale, plus a run sheet. Job-based **Today** is the boot default (`NC = { calView: 'cal', scale: 'day', axis: 'jobs', ... }`).
@@ -115,6 +121,7 @@ The make-safe experience is driven by a single canonical read model — the `mak
 ### Tests
 - `scripts/test-makesafe-trade-v5.js` exercises the feed contract, column ordering, contact-action rendering across every surface, calendar modes, permission gating, and the duplicate/parity/broken-action failure gates. It runs in PR CI (`.github/workflows/pr-check.yml`).
 - It also runs a mocked auth-regression suite (against the extracted `// <trade-api-helper>` block) asserting that a feed **403**, a repeated **401**, and a transient failure never invoke `_forceLogout()`/`handleSessionExpiry()`, that a 403 does not refresh a valid JWT, that a 401 refreshes exactly once, and that `failureHTML` renders the matching access/auth/transient states.
+- `scripts/test-trade-makesafe-feed-truth.js` proves builder/type feed truth: against audited sample jobs (SWMS-26888, SWMS-26953, SWMS-26919) it asserts the feed row wins over conflicting legacy fields, the homeowner can never become the builder, an existing feed row with no builder/type does not fall back to legacy or regex, the legacy derivation still applies for jobs absent from the feed, no derivation runs while the feed is in flight, and every surface (My Jobs, hero, detail, report work order, board card) consumes the feed. It also runs in PR CI.
 
 ## ops-api Trade Endpoints (JWT auth required)
 | Action | Method | Purpose |

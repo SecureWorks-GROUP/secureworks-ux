@@ -17,14 +17,14 @@ test.describe('Trade App make-safe board', () => {
       'Complete',
       'Archive'
     ]);
-    await expect(page.locator('#boardContent .tjb-card')).toHaveCount(2);
-    const newCard = page.locator('#boardContent .tjb-card').filter({ hasText: 'E2E-MS-001' });
+    await expect(page.locator('#boardContent .jc')).toHaveCount(2);
+    const newCard = page.locator('#boardContent .jc').filter({ hasText: 'E2E-MS-001' });
     await expect(newCard).toBeVisible();
     await expect(newCard).toContainText('Nobody allocated');
   });
 
   test('opens a make-safe job detail from its board card', async ({ appPage: page }) => {
-    await page.locator('#boardContent .tjb-card').filter({ hasText: 'E2E-MS-001' }).click();
+    await page.locator('#boardContent .jc').filter({ hasText: 'E2E-MS-001' }).click();
 
     await expect(page.locator('#msv5DetailOverlay')).toHaveClass(/active/);
     await expect(page.locator('#msv5DetailContent')).toContainText('E2E-MS-001');
@@ -33,7 +33,7 @@ test.describe('Trade App make-safe board', () => {
   });
 
   test('opens the allocation sheet for an allocator role without writing', async ({ appPage: page }) => {
-    const card = page.locator('#boardContent .tjb-card').filter({ hasText: 'E2E-MS-001' });
+    const card = page.locator('#boardContent .jc').filter({ hasText: 'E2E-MS-001' });
     await card.getByRole('button', { name: 'Allocate' }).click();
 
     await expect(page.locator('#allocOverlay')).toHaveClass(/active/);

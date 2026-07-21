@@ -2955,6 +2955,136 @@
     .tjb-age{font-family:var(--sw-mono);font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--tj-orange-deep,#C2410C);background:#FFF1E7;border-radius:6px;padding:2px 6px;flex:0 0 auto}
     .tjb-adr{font-size:12.5px;color:var(--sw-text-sec);margin:3px 0 4px;line-height:1.35;white-space:normal}
     .tjb-desc{font-size:12px;color:var(--sw-text-sec);margin:1px 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* ═══════════════════════════════════════════════════════════════════
+       UNIFIED JOB CARD (.jc-) — one docket grammar for every job type.
+       Approved design: trade-app-card-design-fable-v1 + captain amendment
+       (2026-07-21): the primary/Allocate action follows the job-type accent,
+       never bright orange. Replaces the legacy make-safe run card and the v5
+       card bodies with one grammar.
+       ═══════════════════════════════════════════════════════════════════ */
+    :root{
+      /* type accents — one recipe (solid .56 / ink .46 / tint .96), five hues */
+      --jt-ms:#AE4E2C; --jt-ms-ink:#94401F; --jt-ms-tint:#FAEFEA;
+      --jt-fc:#44708F; --jt-fc-ink:#385C77; --jt-fc-tint:#EDF3F7;
+      --jt-pt:#2E7D5B; --jt-pt-ink:#256A4C; --jt-pt-tint:#EAF4EF;
+      --jt-dk:#8F6A2A; --jt-dk-ink:#77571E; --jt-dk-tint:#F7F2E7;
+      --jt-rn:#83588B; --jt-rn-ink:#6C4674; --jt-rn-tint:#F5EFF6;
+      --jt-nt:#5C7683; --jt-nt-ink:#4C6A7C; --jt-nt-tint:#EEF1F3;
+      /* status chips — the only four status words a trade sees (+ live On site) */
+      --jst-new-bg:#FDEDE6; --jst-new-ink:#C7431B;
+      --jst-alloc-bg:#EDF3F7; --jst-alloc-ink:#385C77;
+      --jst-done-bg:#E8F4EC; --jst-done-ink:#1E7A43;
+      --jst-arch-bg:#EEF1F3; --jst-arch-ink:#6B7A83;
+    }
+    .jc{position:relative;display:block;width:100%;text-align:left;background:var(--sw-card);border:1px solid var(--sw-border);border-left:3px solid var(--jc-a,#98A6AD);border-radius:14px;padding:15px 16px 13px;box-shadow:var(--sw-shadow);font-family:var(--sw-font);cursor:pointer}
+    .jc + .jc{margin-top:10px}
+    .jc:active{background:#FBFCFC}
+    .jc.ms{--jc-a:var(--jt-ms);--jc-ink:var(--jt-ms-ink);--jc-tint:var(--jt-ms-tint)}
+    .jc.fc{--jc-a:var(--jt-fc);--jc-ink:var(--jt-fc-ink);--jc-tint:var(--jt-fc-tint)}
+    .jc.pt{--jc-a:var(--jt-pt);--jc-ink:var(--jt-pt-ink);--jc-tint:var(--jt-pt-tint)}
+    .jc.dk{--jc-a:var(--jt-dk);--jc-ink:var(--jt-dk-ink);--jc-tint:var(--jt-dk-tint)}
+    .jc.rn{--jc-a:var(--jt-rn);--jc-ink:var(--jt-rn-ink);--jc-tint:var(--jt-rn-tint)}
+    .jc.nt{--jc-a:var(--jt-nt);--jc-ink:var(--jt-nt-ink);--jc-tint:var(--jt-nt-tint)}
+    .jc-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-bottom:10px;min-width:0}
+    .jc-stamp{flex:0 0 auto;font:600 10px var(--sw-mono);letter-spacing:.09em;text-transform:uppercase;color:#fff;background:var(--jc-a,#98A6AD);border-radius:5px;padding:3.5px 8px}
+    .jc-age{font:600 10.5px var(--sw-mono);letter-spacing:.03em;color:var(--sw-ink-3)}
+    .jc-age.hot{color:var(--sw-orange-deep)}
+    .jc-status{margin-left:auto;flex:0 0 auto;font:600 10.5px var(--sw-mono);letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:4px 10px}
+    .jc-status.new{background:var(--jst-new-bg);color:var(--jst-new-ink)}
+    .jc-status.alloc{background:var(--jst-alloc-bg);color:var(--jst-alloc-ink)}
+    .jc-status.done{background:var(--jst-done-bg);color:var(--jst-done-ink)}
+    .jc-status.arch{background:var(--jst-arch-bg);color:var(--jst-arch-ink)}
+    .jc-status.live{background:var(--sw-orange);color:#fff}
+    .jc-status.live .pulse{display:inline-block;width:6px;height:6px;border-radius:50%;background:#fff;margin-right:5px;vertical-align:1px;animation:jcpulse 1.6s ease-in-out infinite}
+    @keyframes jcpulse{0%,100%{opacity:1}50%{opacity:.35}}
+    @media (prefers-reduced-motion: reduce){.jc-status.live .pulse{animation:none}}
+    .jc-place{font-size:21px;font-weight:750;letter-spacing:-.015em;line-height:1.1;color:var(--sw-dark)}
+    .jc-addr{font-size:13px;color:var(--sw-mid);margin-top:3px}
+    .jc-refs{font:500 12px var(--sw-mono);color:var(--sw-ink-3);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .jc-refs .ours{color:var(--sw-mid);font-weight:600}
+    .jc-refs .sep{opacity:.45;margin:0 6px}
+    .jc-parties{display:grid;grid-template-columns:64px 1fr;row-gap:5px;margin-top:11px;align-items:baseline}
+    .jc-parties .k{font:600 10px var(--sw-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--sw-ink-3)}
+    .jc-parties .v{font-size:14px;font-weight:650;color:var(--sw-text);min-width:0;overflow-wrap:anywhere}
+    .jc-parties .v.weak{font-weight:500}
+    .jc-miss{font:500 12px var(--sw-mono);color:var(--sw-ink-3)}
+    .jc-rail{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--sw-border);font-size:13px;min-width:0}
+    .jc-rail .when{min-width:0;font:600 12.5px var(--sw-mono);color:var(--sw-dark)}
+    .jc-rail .when .t-miss{color:var(--sw-ink-3);font-weight:500}
+    .jc-rail .crew{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--sw-dark)}
+    .jc-rail .crew svg{width:13px;height:13px;opacity:.55}
+    .jc-rail .crew.none{font:500 12px var(--sw-mono);color:var(--sw-ink-3);font-weight:500}
+    .jc-rail .when .jc-wx{margin-left:8px;font:600 11px var(--sw-mono);color:var(--sw-orange);font-weight:600}
+    .jc-rail .when .jc-wx:empty{display:none}
+    .jc-note{margin-top:11px;padding:9px 12px;background:#F7F9FA;border-left:2px solid var(--sw-line-2);border-radius:0 8px 8px 0;font-size:12.5px;line-height:1.45;color:var(--sw-text)}
+    .jc-note b{display:block;font:600 10px var(--sw-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--sw-ink-3);margin-bottom:3px}
+    .jc-report{margin-top:11px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--jst-done-ink);font-weight:600}
+    .jc-report svg{width:15px;height:15px;flex:0 0 auto}
+    .jc-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+    .jc-actions .act{flex:1;min-width:88px;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border:0;border-radius:10px;background:#EDF1F3;color:var(--sw-dark);font:700 12.5px var(--sw-font);cursor:pointer;text-decoration:none;padding:0 10px}
+    .jc-actions .act:active{filter:brightness(.96)}
+    /* Captain amendment: the Allocate / primary action follows the job-type accent */
+    .jc-actions .act.primary{background:var(--jc-a,#98A6AD);color:#fff}
+    .jc-actions .act svg{width:14px;height:14px}
+
+    /* Search identity rows (.jcsr) — one line per result, type edge + chip */
+    .jcsr{display:flex;align-items:center;gap:10px;background:var(--sw-card);border:1px solid var(--sw-border);border-left:3px solid var(--jc-a,#98A6AD);border-radius:12px;padding:11px 12px;margin-bottom:7px;min-width:0;width:100%;text-align:left;cursor:pointer;font-family:var(--sw-font)}
+    .jcsr.ms{--jc-a:var(--jt-ms)} .jcsr.fc{--jc-a:var(--jt-fc)} .jcsr.pt{--jc-a:var(--jt-pt)} .jcsr.dk{--jc-a:var(--jt-dk)} .jcsr.rn{--jc-a:var(--jt-rn)} .jcsr.nt{--jc-a:var(--jt-nt)}
+    .jcsr .inf{flex:1;min-width:0}
+    .jcsr .s{font-size:14.5px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .jcsr .m{font:500 11px var(--sw-mono);color:var(--sw-ink-3);margin-top:2px;min-width:0;overflow-wrap:anywhere}
+    .jcsr .jc-status{flex:0 0 auto;margin-left:0}
+
+    /* Quick-look sheet (.ql-) — the shared detail entry for every card */
+    .ql{font-family:var(--sw-font)}
+    .ql.ms{--jc-a:var(--jt-ms)} .ql.fc{--jc-a:var(--jt-fc)} .ql.pt{--jc-a:var(--jt-pt)} .ql.dk{--jc-a:var(--jt-dk)} .ql.rn{--jc-a:var(--jt-rn)} .ql.nt{--jc-a:var(--jt-nt)}
+    .ql-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
+    .ql-head .ql-id{flex:1;min-width:0}
+    .ql-head .row1{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;min-width:0}
+    .ql-head h3{font-size:20px;font-weight:750;letter-spacing:-.015em;color:var(--sw-dark);margin-top:6px}
+    .ql-head .meta{font:500 11px var(--sw-mono);color:var(--sw-ink-3);margin-top:2px;overflow-wrap:anywhere}
+    .ql-close{flex:0 0 auto;width:44px;height:44px;border:1px solid var(--sw-border);border-radius:10px;background:var(--sw-card);font-size:20px;color:var(--sw-mid);cursor:pointer}
+    .ql-sec{margin-top:10px;padding:13px 14px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:14px}
+    .ql-sec h4{font:600 10px var(--sw-mono);letter-spacing:.11em;text-transform:uppercase;color:var(--sw-ink-3);margin-bottom:9px}
+    .ql-row{display:flex;gap:10px;padding:4.5px 0;font-size:13.5px;line-height:1.4}
+    .ql-row .k{flex:0 0 86px;font:600 10px var(--sw-mono);letter-spacing:.07em;text-transform:uppercase;color:var(--sw-ink-3);padding-top:2px}
+    .ql-row .v{flex:1;min-width:0;font-weight:650;color:var(--sw-dark);overflow-wrap:anywhere}
+    .ql-contact{display:flex;gap:8px;margin-top:10px}
+    .ql-contact a,.ql-contact span{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:11px;background:var(--sw-card);border:1px solid var(--sw-line-2);color:var(--sw-dark);font:700 13px var(--sw-font);text-decoration:none;cursor:pointer}
+    .ql-contact span[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+    .ql-contact a svg{width:15px;height:15px;opacity:.7}
+    .ql-steps{margin-top:2px;position:relative}
+    .ql-steps:before{content:"";position:absolute;left:7.5px;top:14px;bottom:22px;width:1.5px;background:var(--sw-line-2)}
+    .ql-step{display:flex;gap:12px;position:relative;padding:5px 0 5px 2px}
+    .ql-step .dot{flex:0 0 auto;width:12px;height:12px;border-radius:50%;margin-top:4px;background:var(--sw-dark);position:relative;z-index:1}
+    .ql-step.todo .dot{background:var(--sw-card);border:2px solid var(--sw-line-2)}
+    .ql-step .s-body{flex:1;min-width:0}
+    .ql-step .s-k{font:600 10px var(--sw-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--sw-ink-3)}
+    .ql-step .s-v{font-size:13.5px;font-weight:650;color:var(--sw-dark);margin-top:1px;overflow-wrap:anywhere}
+    .ql-step.todo .s-v{font:500 12px var(--sw-mono);color:var(--sw-ink-3)}
+    .ql-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+    .ql-actions button{flex:1;min-width:90px;min-height:46px;border:0;border-radius:11px;background:#E7ECEF;color:var(--sw-dark);font:700 13px var(--sw-font);cursor:pointer}
+    .ql-actions button.primary{background:var(--jc-a,#98A6AD);color:#fff}
+    .ql-openfull{display:block;text-align:center;margin-top:12px;padding:6px 0 4px;font:600 12.5px var(--sw-font);color:var(--sw-mid);text-decoration:none;background:none;border:0;width:100%;cursor:pointer}
+    .ql-openfull span{border-bottom:1.5px solid var(--sw-line-2);padding-bottom:2px}
+
+    /* Detail header (.dh-) — the full job view identity band */
+    .dh{background:var(--sw-dark);color:#F5F7F8;padding:16px 16px 15px;border-radius:14px;border-bottom:3px solid var(--jc-a,#98A6AD)}
+    .dh.ms{--jc-a:var(--jt-ms)} .dh.fc{--jc-a:var(--jt-fc)} .dh.pt{--jc-a:var(--jt-pt)} .dh.dk{--jc-a:var(--jt-dk)} .dh.rn{--jc-a:var(--jt-rn)} .dh.nt{--jc-a:var(--jt-nt)}
+    .dh-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 9px;min-width:0}
+    .dh .jc-stamp{background:var(--jc-a)}
+    .dh-num{font:600 12px var(--sw-mono);letter-spacing:.04em;color:#9DB2BD}
+    .dh-place{font-size:23px;font-weight:750;letter-spacing:-.015em;margin-top:9px;color:#fff}
+    .dh-addr{font-size:13px;color:#B7C4CB;margin-top:3px}
+    .dh-parties{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:10px;font-size:13px}
+    .dh-parties .k{font:600 9.5px var(--sw-mono);letter-spacing:.08em;text-transform:uppercase;color:#8FA4AF;margin-right:6px}
+    .dh-parties b{color:#fff;font-weight:650}
+    .dh-parties .jc-miss{color:#9DB2BD}
+
+    /* Allocation roster — multi-select (captain: multiple people per job) */
+    .alloc-crew.sel{border-color:var(--jt-ms);background:var(--jt-ms-tint)}
+    .alloc-crew .tick{float:right;color:var(--jt-ms-ink);font-weight:800;font-family:var(--sw-mono)}
   </style>
 </head>
 <body>
@@ -4798,14 +4928,10 @@
   };
 
   // Shared run-list controls: up/down arrows + manual "type the order" box.
+  // Runsheet reorder controls retired (captain ruling: the runsheet "loses its
+  // value"). Kept as an inert no-op so any stale caller renders nothing.
   function renderRunListControls(runListId, idx, total, todayComplete) {
-    var h = '<div class="run-list-controls">';
-    h += '<button class="run-list-btn" onclick="event.stopPropagation();moveTodayRunListJob(\'' + esc(runListId) + '\', \'up\')"' + (idx === 0 ? ' disabled' : '') + '>↑</button>';
-    h += '<button class="run-list-btn" onclick="event.stopPropagation();moveTodayRunListJob(\'' + esc(runListId) + '\', \'down\')"' + (idx === total - 1 ? ' disabled' : '') + '>↓</button>';
-    h += '<span class="run-list-order-entry">Order <input type="number" min="1" class="run-list-order-input" value="' + (idx + 1) + '" onclick="event.stopPropagation()" onchange="setTodayRunListPosition(\'' + esc(runListId) + '\', this.value)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}"></span>';
-    if (todayComplete) h += '<span class="run-list-complete-pill">Done for today</span>';
-    h += '</div>';
-    return h;
+    return '';
   }
 
   window.__SW_TRADE_TODAY_RUN_LIST_TESTS = {
@@ -5087,29 +5213,26 @@
     var attrs = clickable
       ? ' onclick="' + openAction + '" style="cursor:pointer"'
       : ' style="cursor:default"';
-    var note = '';
-    if (isOpenMakesafe && !assignment) note = 'Open MakeSafe · tap to view/report';
-    else if (assignment) note = 'Allocated to you · tap to open';
-    else if (isMakesafe) note = 'MakeSafe job · tap to view (read-only)';
-    else note = statusLabel === 'Completed' ? 'Historical completed job' : 'Search result only · not allocated to you';
+    // One vocabulary: map the search hit to the four user-facing statuses.
+    var scls;
+    if (assignment) scls = UnifiedJobCard.statusFromAssignment(assignment.status);
+    else if (isOpenMakesafe) scls = 'new';
+    else {
+      var raw = String(job.status || '').toLowerCase();
+      if (job.completed_at || ['complete', 'completed', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1) scls = 'done';
+      else if (['cancelled', 'canceled', 'lost', 'void', 'voided', 'archived', 'deleted', 'duplicate', 'duplicated'].indexOf(raw) !== -1) scls = 'arch';
+      else scls = 'alloc';
+    }
+    var chip = UnifiedJobCard.STATUS[scls] || UnifiedJobCard.STATUS.alloc;
+    var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    var typeLabel = TYPE_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    var place = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim() || 'Suburb TBC';
+    var client = String(job.client_name || '').trim();
+    var metaBits = [job.job_number, client, typeLabel].filter(Boolean).join(' · ');
 
-    var h = '<div class="job-card" data-type="' + esc(type) + '"' + attrs + '>';
-    h += '  <div class="job-card-top">';
-    h += '    <div>';
-    h += '      <div class="job-card-client">' + esc(getTradeCardTitle(job, type)) + '</div>';
-    h += '      <div class="job-card-address">' + esc(getTradeCardLine(job, type));
-    if (job.job_number) h += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.job_number) + '</span>';
-    if (job.external_ref) h += ' <span style="color:var(--sw-mid);font-size:12px">' + esc(job.external_ref) + '</span>';
-    h += '</div>';
-    h += '    </div>';
-    h += '    <span class="job-card-badge badge-' + esc(type) + '">' + esc(type) + '</span>';
-    h += '  </div>';
-    h += '  <div class="job-card-meta">';
-    h += '    <span class="status-pill status-' + esc(statusClass) + '">' + esc(statusLabel) + '</span>';
-    if (job.completed_at) h += '<span>Completed ' + esc(formatDate(job.completed_at)) + '</span>';
-    else if (job.created_at) h += '<span>Created ' + esc(formatDate(job.created_at)) + '</span>';
-    h += '<span>' + esc(note) + '</span>';
-    h += '  </div>';
+    var h = '<div class="jcsr ' + esc(UnifiedJobCard.typeCls(type)) + '"' + attrs + '>';
+    h += '<div class="inf"><div class="s">' + esc(place) + '</div><div class="m">' + esc(metaBits) + '</div></div>';
+    h += '<span class="jc-status ' + chip.cls + '">' + esc(chip.label) + '</span>';
     h += '</div>';
     return h;
   }
@@ -5185,6 +5308,27 @@
     }
     // today/thisWeek are handled by section filtering in render
     return true;
+  }
+
+  // My Jobs installer action row (Call / Text / Notes / Navigate), styled as
+  // the unified card's quiet .jc-actions — orange stays reserved for allocate.
+  function _myJobActionsHTML(job, a, type) {
+    var cardPhone = getTradeCardPhone(job);
+    var CALL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
+    var TEXT = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
+    var NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    var NAV = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>';
+    var h = '<div class="jc-actions">';
+    if (cardPhone) {
+      h += '<a class="act" href="tel:' + esc(cardPhone) + '" onclick="event.stopPropagation()">' + CALL + 'Call</a>';
+      if (type === 'makesafe') h += '<a class="act" href="sms:' + esc(cardPhone) + '" onclick="event.stopPropagation()">' + TEXT + 'Text</a>';
+      else h += '<button type="button" class="act" onclick="event.stopPropagation();openJobToTab(\'' + esc(job.id) + '\', \'' + esc(a.id) + '\', \'comms\')">' + TEXT + 'Text</button>';
+    }
+    h += '<button type="button" class="act" onclick="event.stopPropagation();openJobNotes(\'' + esc(job.id) + '\', decodeURIComponent(\'' + encodeURIComponent(getTradeCardTitle(job, type)) + '\'))">' + NOTE + 'Notes</button>';
+    if (job.site_address || job.site_suburb) {
+      h += '<a class="act" href="' + getMapsUrl(job.site_address, job.site_suburb) + '" target="_blank" onclick="event.stopPropagation()">' + NAV + 'Navigate</a>';
+    }
+    return h + '</div>';
   }
 
   function renderMyJobs(data) {
@@ -5269,18 +5413,14 @@
           cacheTradeJob(job, a);
           var type = getTradeJobType(job, a);
           var openAction = type === 'makesafe' ? 'openJobReport' : 'openJob';
-          // History card re-dressed to the M2 grammar (DA-M3-2) for consistency.
-          var _histCard = TradeJobCard.buildModel(job, a, {
-            type: type,
-            typeLabel: type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : null,
-            builderName: type === 'makesafe' ? getTradeMakesafeBuilderName(job) : null,
-            dateLabel: formatDate(a.scheduled_date),
-            desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
-            crew: getTradeAssignmentCrewLabel(a)
+          // History card renders through the one unified docket grammar
+          // (UnifiedJobCard derives make-safe builder/type feed-first internally).
+          var _histModel = UnifiedJobCard.fromJobAssignment(job, a, type, {
+            desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
           });
-          html += '<div class="job-card tjcard" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + a.id + '\')">';
-          html += TradeJobCard.cardBodyHTML(_histCard);
-          html += '</div>';
+          html += UnifiedJobCard.wrap(_histModel, {
+            onclick: openAction + '(\'' + job.id + '\', \'' + a.id + '\')'
+          });
         });
       } else {
         html += '<div style="text-align:center;padding:32px;color:var(--sw-text-sec);font-size:14px;">No past jobs found</div>';
@@ -5379,24 +5519,17 @@
       if (sec.key === 'recent') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Past-dated jobs still waiting on your report. They stay here until the report is submitted.</div>';
       }
-      if (_jobFilter === 'today' && sec.key === 'today') {
-        html += '<div class="run-list-note">Execution order is saved on this device for you/crew/today. Use the compact ↑/↓ buttons to resequence the run; Call, Text, Note, Navigate and card tap stay on each job.</div>';
-      } else if (sec.key === 'today') {
-        html += '<div class="run-list-note">Today jobs shown here for database checking only. Route ordering controls live on the Today tab.</div>';
-      }
-      filtered.forEach(function(a, idx) {
+      // Runsheet removed (captain ruling): Today is simply the day's cards in
+      // time order — no run numbering, no reorder controls, no run-list note.
+      filtered.forEach(function(a) {
         var job = a.jobs || {};
         var statusClass = 'status-' + (a.status || 'scheduled');
         var todayComplete = sec.key === 'today' && isReportSubmittedForTradeCard(job, a);
-        var todayClass = sec.key === 'today' ? ' today-card' + (todayComplete ? ' run-list-complete' : '') : '';
-        var runListId = getTodayRunListId(a);
 
-        // Internal / job-less entry
+        // Internal / job-less entry (kept minimal; not a job card)
         if (!job.id) {
-          html += '<div class="job-card' + todayClass + '" data-type="internal" style="border-left-color:var(--sw-text-sec)">';
-          html += '  <div class="job-card-top">';
-          if (sec.key === 'today') html += '    <span class="run-list-order-badge">' + (idx + 1) + '</span>';
-          html += '    <div>';
+          html += '<div class="job-card" data-type="internal" style="border-left-color:var(--sw-text-sec)">';
+          html += '  <div class="job-card-top"><div>';
           html += '      <div class="job-card-client">' + esc(a.label || 'Internal Event') + '</div>';
           html += '      <div class="job-card-address" style="color:var(--sw-text-sec);font-style:italic">Internal · No job</div>';
           html += '    </div>';
@@ -5407,9 +5540,6 @@
           if (a.start_time) html += '<span style="font-weight:600">' + a.start_time.slice(0, 5) + '</span>';
           html += '    <span class="status-pill ' + statusClass + '">' + (a.status || 'scheduled').replace(/_/g, ' ') + '</span>';
           html += '  </div>';
-          if (_jobFilter === 'today' && sec.key === 'today' && runListId) {
-            html += renderRunListControls(runListId, idx, filtered.length, false);
-          }
           html += '</div>';
           return;
         }
@@ -5418,80 +5548,19 @@
         var type = getTradeJobType(job, a);
         var openAction = type === 'makesafe' ? 'openJobReport' : 'openJob';
         var assignmentArg = a._makesafePool ? '' : (a.id || '');
-        // MakeSafe jobs get their own dispatch-style card. Standard jobs
-        // (patio/fencing/decking/reno) fall through to the unchanged path below.
-        if (type === 'makesafe') {
-          html += renderMakesafeRunCard(job, a, idx, filtered, sec, todayComplete, runListId);
-          return;
-        }
-        // M3 U1 (DA-M3-2): card internals re-dressed to the M2 card grammar via
-        // TradeJobCard. Injected impure values keep app UX (relative date via
-        // formatDate, scope summary, the app crew label incl. admin _allCrew join).
-        // The job-card shell, onclick, run-list badge, PO badges + action row are
-        // preserved (carry-forward ledger). Weather span (data-weather-date) is
-        // emitted inside the card body.
-        var _tjCard = TradeJobCard.buildModel(job, a, {
-          type: type,
-          typeLabel: type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : null,
-          builderName: type === 'makesafe' ? getTradeMakesafeBuilderName(job) : null,
-          dateLabel: formatDate(a.scheduled_date),
-          desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
-          crew: getTradeAssignmentCrewLabel(a)
+        // Every job type — make-safe and standard — renders through the one
+        // unified docket card. po_count is 0 on all live jobs (audit) so the
+        // delivery / materials badges are dropped as dead UI. Make-safe
+        // builder/type are derived feed-first inside UnifiedJobCard (PR #208).
+        var _model = UnifiedJobCard.fromJobAssignment(job, a, type, {
+          desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
         });
-        html += '<div class="job-card tjcard' + todayClass + '" data-type="' + type + '" onclick="' + openAction + '(\'' + job.id + '\', \'' + assignmentArg + '\')">';
-        if (sec.key === 'today') html += '<span class="run-list-order-badge">' + (idx + 1) + '</span>';
-        html += TradeJobCard.cardBodyHTML(_tjCard);
-        // Pickup vs Delivery badge + Materials status (preserved)
-        var poInfo = job.po_info;
-        if (poInfo) {
-          if (poInfo.delivery_method === 'pickup') {
-            html += '<div class="badge-delivery pickup" style="margin-top:8px">&#128230; PICKUP — ' + esc(poInfo.pickup_location || 'TBC') + '</div>';
-          } else {
-            html += '<div class="badge-delivery delivery" style="margin-top:8px">&#128666; DELIVERY' + (poInfo.delivery_date ? ' — ' + formatDate(poInfo.delivery_date) : '') + '</div>';
-          }
-          if (poInfo.materials_confirmed) {
-            html += ' <span class="badge-materials confirmed">&#9989; Materials confirmed</span>';
-          } else {
-            html += ' <span class="badge-materials pending">&#9888; Materials not confirmed</span>';
-          }
-        }
-        if (todayComplete) html += '<div style="margin-top:8px"><span class="run-list-complete-pill">Report submitted</span></div>';
-        // Financial display removed — customer quote/sell price not shown to installers
-        // Quick action buttons (Call, Text, Navigate)
-        html += '  <div style="display:flex;gap:6px;margin-top:8px">';
-        var cardPhone = getTradeCardPhone(job);
-        if (cardPhone) {
-          html += '    <a href="tel:' + esc(cardPhone) + '" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-green);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-          html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
-          html += '      Call</a>';
-        }
-        if (cardPhone) {
-          if (type === 'makesafe') {
-              html += '    <a href="sms:' + esc(cardPhone) + '" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-blue);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-              html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
-              html += '      Text</a>';
-          } else {
-            html += '    <button onclick="event.stopPropagation();openJobToTab(\'' + esc(job.id) + '\', \'' + esc(a.id) + '\', \'comms\')" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-blue);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
-            html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
-            html += '      Text</button>';
-          }
-        }
-        // Title goes through encodeURIComponent so an apostrophe (O'Connor, client names)
-        // cannot break the inline onclick JS string and silently kill the click.
-        html += '    <button onclick="event.stopPropagation();openJobNotes(\'' + esc(job.id) + '\', decodeURIComponent(\'' + encodeURIComponent(getTradeCardTitle(job, type)) + '\'))" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-card);color:var(--sw-mid);border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">';
-        html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-        html += '      Notes</button>';
-        if (job.site_address || job.site_suburb) {
-          var navUrl = getMapsUrl(job.site_address, job.site_suburb);
-          html += '    <a href="' + navUrl + '" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-mid);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-          html += '      <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>';
-          html += '      Navigate</a>';
-        }
-        html += '  </div>';
-        if (_jobFilter === 'today' && sec.key === 'today' && runListId) {
-          html += renderRunListControls(runListId, idx, filtered.length, todayComplete);
-        }
-        html += '</div>';
+        if (todayComplete) _model.report = 'Report submitted';
+        html += UnifiedJobCard.wrap(_model, {
+          onclick: openAction + '(\'' + job.id + '\', \'' + assignmentArg + '\')',
+          showWeather: true,
+          actionsHTML: _myJobActionsHTML(job, a, type)
+        });
       });
     });
 
@@ -5814,6 +5883,246 @@
   })();
   // </trade-jobcard>
 
+  // ══════════════════════════════════════════════════════════════════════
+  // UNIFIED JOB CARD (.jc-) — the single docket grammar every job renders
+  // through: make-safe board rows, My Jobs (make-safe + standard), history,
+  // quick-look and detail all normalise to one model, one renderer, one voice.
+  // Approved design trade-app-card-design-fable-v1 + captain amendment.
+  // Presentational only — reads the same fields the existing helpers read; it
+  // does not re-derive builder/type (that lives in the feed-truth branch).
+  // ══════════════════════════════════════════════════════════════════════
+  // <unified-jobcard>
+  var UnifiedJobCard = (function () {
+    'use strict';
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function fmtDay(iso) {
+      var m = String(iso == null ? '' : iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return '';
+      var d = new Date(+m[1], +m[2] - 1, +m[3]);
+      if (isNaN(d.getTime())) return '';
+      return WD[d.getDay()] + ' ' + d.getDate() + ' ' + MO[d.getMonth()];
+    }
+    function fmtTime(t) {
+      var m = String(t == null ? '' : t).trim().match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return '';
+      var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+      if (isNaN(h) || isNaN(mm)) return '';
+      var disp = h % 12; if (disp === 0) disp = 12;
+      return disp + ':' + (mm < 10 ? '0' : '') + mm + (h < 12 ? 'am' : 'pm');
+    }
+    // job type -> accent class. Standard types map to their hue; anything else
+    // is neutral (keeps its name via the caller's stampLabel).
+    function typeCls(type) {
+      var k = String(type == null ? '' : type).toLowerCase().trim();
+      if (k === 'makesafe' || k === 'make_safe' || k === 'make-safe') return 'ms';
+      if (k === 'fencing') return 'fc';
+      if (k === 'patio') return 'pt';
+      if (k === 'decking' || k === 'deck') return 'dk';
+      if (k === 'reno' || k === 'renovation' || k === 'renovations') return 'rn';
+      return 'nt';
+    }
+    // The four user-facing statuses (+ live On site). One vocabulary everywhere.
+    var STATUS = {
+      new: { cls: 'new', label: 'New' }, alloc: { cls: 'alloc', label: 'Allocated' },
+      live: { cls: 'live', label: 'On site' }, done: { cls: 'done', label: 'Complete' },
+      arch: { cls: 'arch', label: 'Archive' }
+    };
+    function statusFromColumn(column) {
+      var k = String(column || '').toLowerCase();
+      if (k === 'new') return 'new';
+      if (k === 'allocated') return 'alloc';
+      if (k === 'complete' || k === 'completed' || k === 'done') return 'done';
+      return 'arch'; // Archive / Cancelled — terminal
+    }
+    function statusFromAssignment(rawStatus, isPool) {
+      if (isPool) return 'new';
+      var k = String(rawStatus == null ? '' : rawStatus).toLowerCase().trim();
+      if (k === 'available' || k === 'open' || k === 'unassigned') return 'new';
+      if (k === 'in_progress') return 'live';
+      if (k === 'complete' || k === 'completed' || k === 'submitted' || k === 'verified' || k === 'disputed') return 'done';
+      if (k === 'cancelled' || k === 'canceled' || k === 'archived') return 'arch';
+      return 'alloc'; // scheduled / confirmed / draft
+    }
+
+    // Pure renderer: model -> the card body (head through report). The caller
+    // wraps it in <article class="jc TYPE"> ... </article> and appends actions.
+    function cardBodyHTML(model, opts) {
+      var m = model || {}; opts = opts || {};
+      var showStatus = opts.showStatus !== false;
+      var h = '<div class="jc-head"><span class="jc-stamp">' + esc(m.stampLabel || 'Job') + '</span>';
+      if (m.age) h += '<span class="jc-age' + (m.ageHot ? ' hot' : '') + '">' + esc(m.age) + '</span>';
+      if (showStatus && m.statusCls) {
+        var live = m.statusCls === 'live';
+        h += '<span class="jc-status ' + m.statusCls + '">' + (live ? '<span class="pulse"></span>' : '') + esc(m.statusLabel || '') + '</span>';
+      }
+      h += '</div>';
+      h += '<div class="jc-place">' + esc(m.place || 'Suburb TBC') + '</div>';
+      if (m.addr) h += '<div class="jc-addr">' + esc(m.addr) + '</div>';
+      var refs = (m.refs || []).filter(function (r) { return r && r.text; });
+      if (refs.length) {
+        h += '<div class="jc-refs">' + refs.map(function (r, i) {
+          return (i ? '<span class="sep">&middot;</span>' : '') + (r.ours ? '<span class="ours">' + esc(r.text) + '</span>' : esc(r.text));
+        }).join('') + '</div>';
+      }
+      var parties = (m.parties || []).filter(Boolean);
+      if (parties.length) {
+        h += '<div class="jc-parties">';
+        parties.forEach(function (p) {
+          h += '<span class="k">' + esc(p.k) + '</span><span class="v' + (p.weak ? ' weak' : '') + '">'
+            + (p.miss ? '<span class="jc-miss">' + esc(p.v) + '</span>' : esc(p.v)) + '</span>';
+        });
+        h += '</div>';
+      }
+      if (m.note) h += '<div class="jc-note"><b>' + esc(m.note.author || 'Note') + (m.note.date ? ' &middot; ' + esc(m.note.date) : '') + '</b>' + esc(m.note.text || '') + '</div>';
+      if (m.report) h += '<div class="jc-report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>' + esc(m.report) + '</div>';
+      // Run rail — when + who. Skipped only when both are empty (e.g. pool with nothing).
+      var hasWhen = m.whenLabel || m.whenMiss || m.timeLabel || m.timeMiss;
+      var hasCrew = m.crew || m.crewNone;
+      if (hasWhen || hasCrew) {
+        h += '<div class="jc-rail"><span class="when">';
+        if (m.whenLabel) {
+          h += esc(m.whenLabel);
+          if (m.timeLabel) h += ' &middot; ' + esc(m.timeLabel);
+          else if (m.timeMiss) h += ' &middot; <span class="t-miss">no time set</span>';
+        } else {
+          h += '<span class="t-miss">' + esc(m.whenMiss || 'Not booked yet') + '</span>';
+        }
+        if (opts.showWeather && m.weatherDate) h += '<span class="jc-wx" data-weather-date="' + esc(m.weatherDate) + '"></span>';
+        h += '</span>';
+        if (m.crew) h += '<span class="crew"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg>' + esc(m.crew) + (m.crewExtra ? ' <span style="opacity:.7">' + esc(m.crewExtra) + '</span>' : '') + '</span>';
+        else if (m.crewNone) h += '<span class="crew none">' + esc(m.crewNone) + '</span>';
+        h += '</div>';
+      }
+      return h;
+    }
+
+    // Wrap the body in the full card element with its onclick + optional actions.
+    function wrap(model, opts) {
+      opts = opts || {};
+      var cls = (model && model.typeCls) || 'nt';
+      var tag = opts.tag || 'div';
+      var attrs = 'class="jc ' + cls + (opts.extraCls ? ' ' + opts.extraCls : '') + '"';
+      if (opts.onclick) attrs += ' onclick="' + opts.onclick + '"';
+      if (opts.dataSearch != null) attrs += ' data-search="' + esc(opts.dataSearch) + '"';
+      if (opts.dataAttrs) attrs += ' ' + opts.dataAttrs;
+      if (tag === 'button') attrs += ' type="button"';
+      return '<' + tag + ' ' + attrs + '>' + cardBodyHTML(model, opts) + (opts.actionsHTML || '') + '</' + tag + '>';
+    }
+
+    // ── Normaliser A: make-safe board feed row (makesafe-board.v1) ──
+    function ageFromRow(row) {
+      var age = (row || {}).age || {};
+      if (age.age_hours == null) return { text: '', hot: false };
+      var hrs = Number(age.age_hours);
+      var text = hrs < 24 ? (Math.max(0, Math.floor(hrs)) + 'h')
+        : (Math.max(0, Math.floor(age.age_days != null ? age.age_days : hrs / 24)) + 'd');
+      return { text: text, hot: hrs >= 24 };
+    }
+    function fromFeedRow(row, opts) {
+      opts = opts || {};
+      var V = MakesafeTradeV5, a = V.primaryAssignment(row), note = V.latestNote(row);
+      var age = ageFromRow(row);
+      var sub = V.suburb(row); if (/^SUBURB TBC$/i.test(sub)) sub = 'Suburb TBC';
+      var addr = V.fullAddress(row);
+      var l = row.lineage || {}, refs = [];
+      if (row.job_number) refs.push({ text: row.job_number, ours: true });
+      if ((row.builder || {}).external_ref) refs.push({ text: (row.builder || {}).external_ref });
+      if (l.builder_work_order_number) refs.push({ text: l.builder_work_order_number });
+      if (l.builder_po_number) refs.push({ text: l.builder_po_number });
+      var builder = (row.builder || {}).name, client = ((row.contact || {}).client_name || '').trim();
+      var crewNames = (row.assignments || []).map(function (x) { return String((x && (x.name || x.crew_name)) || '').trim(); }).filter(Boolean);
+      crewNames = crewNames.filter(function (n, i) { return crewNames.indexOf(n) === i; });
+      var st = STATUS[statusFromColumn(row.column)];
+      var report = null;
+      if (row.report && row.report.submitted_at) report = 'Report submitted ' + fmtDay(String(row.report.submitted_at).slice(0, 10)) + (row.report.photo_count ? ' · ' + Number(row.report.photo_count) + ' photos' : '');
+      return {
+        typeCls: 'ms', stampLabel: row.makesafe_type || 'Make safe',
+        age: opts.showAge === false ? '' : age.text, ageHot: age.hot,
+        statusCls: st.cls, statusLabel: st.label,
+        place: sub, addr: addr,
+        refs: refs,
+        parties: [
+          { k: 'Builder', v: builder || 'Not on file', miss: !builder },
+          { k: 'Client', v: client || 'Not on the work order', miss: !client }
+        ],
+        whenLabel: a && a.scheduled_date ? fmtDay(a.scheduled_date) : '',
+        whenMiss: 'Not booked yet',
+        timeLabel: a && a.start_time ? fmtTime(a.start_time) : '',
+        timeMiss: !!(a && a.scheduled_date && !a.start_time),
+        weatherDate: (a && a.scheduled_date) || '',
+        crew: crewNames.length ? crewNames[0] : '',
+        crewExtra: crewNames.length > 1 ? '+' + (crewNames.length - 1) : '',
+        crewNone: crewNames.length ? '' : 'Nobody allocated',
+        note: note ? { author: note.author || 'Trade', date: fmtDay(String(note.created_at || '').slice(0, 10)), text: note.text || '' } : null,
+        report: report
+      };
+    }
+
+    // ── Normaliser B: My Jobs / history / search (job + assignment) ──
+    var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    function fromJobAssignment(job, a, type, opts) {
+      job = job || {}; a = a || {}; opts = opts || {};
+      var cls = typeCls(type);
+      var isMs = cls === 'ms';
+      var isPool = !!a._makesafePool || String(a.status || '').toLowerCase() === 'available';
+      var stamp = isMs ? (typeof getTradeMakesafeTypeLabel === 'function' ? getTradeMakesafeTypeLabel(job) : 'Make safe')
+        : (STD_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); }));
+      var st = STATUS[statusFromAssignment(a.status, isPool)];
+      var sub = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim() || 'Suburb TBC';
+      var addr = (typeof dedupeAddress === 'function') ? dedupeAddress(job.site_address, job.site_suburb) : (job.site_address || '');
+      var refs = [];
+      if (job.job_number) refs.push({ text: job.job_number, ours: true });
+      if (isMs) {
+        var md = job.makesafe_details || job.metadata || {};
+        var xref = md.external_ref || job.external_ref || job.claim_number;
+        if (xref) refs.push({ text: String(xref) });
+      }
+      var parties;
+      if (isMs) {
+        // Feed-first make-safe builder (PR #208): reads the makesafe-board.v1
+        // row's builder.name, never the site occupant; legacy chain is fallback.
+        var builder = (typeof getTradeMakesafeBuilderName === 'function')
+          ? getTradeMakesafeBuilderName(job)
+          : ((typeof TradeJobCard !== 'undefined' && TradeJobCard.builderName) ? TradeJobCard.builderName(job) : '');
+        var client = String(job.client_name || '').trim();
+        parties = [
+          { k: 'Builder', v: builder || 'Not on file', miss: !builder },
+          { k: 'Client', v: client || 'Not on the work order', miss: !client }
+        ];
+      } else {
+        var cli = String(job.client_name || '').trim();
+        var scope = String(opts.desc || (typeof buildScopeSummary === 'function' ? buildScopeSummary(job.scope_json, type) : '') || '').trim();
+        if (scope && scope.toLowerCase() === String(stamp).toLowerCase()) scope = '';
+        parties = [{ k: 'Client', v: cli || 'Not on file', miss: !cli }];
+        if (scope) parties.push({ k: 'Scope', v: scope, weak: true });
+      }
+      var crew = isPool ? '' : (typeof getTradeAssignmentCrewLabel === 'function' ? getTradeAssignmentCrewLabel(a) : (a.crew_name || ''));
+      return {
+        typeCls: cls, stampLabel: stamp,
+        age: '', ageHot: false,
+        statusCls: st.cls, statusLabel: st.label,
+        place: sub, addr: addr, refs: refs, parties: parties,
+        whenLabel: a.scheduled_date ? fmtDay(a.scheduled_date) : '',
+        whenMiss: 'Not booked yet',
+        timeLabel: a.start_time ? fmtTime(a.start_time) : '',
+        timeMiss: !!(a.scheduled_date && !a.start_time),
+        weatherDate: a.scheduled_date || '',
+        crew: crew,
+        crewNone: isPool ? 'All make-safe trades' : (crew ? '' : 'Nobody allocated'),
+        note: null, report: null
+      };
+    }
+
+    return {
+      esc: esc, fmtDay: fmtDay, fmtTime: fmtTime, typeCls: typeCls, STATUS: STATUS,
+      statusFromColumn: statusFromColumn, statusFromAssignment: statusFromAssignment,
+      cardBodyHTML: cardBodyHTML, wrap: wrap, fromFeedRow: fromFeedRow, fromJobAssignment: fromJobAssignment
+    };
+  })();
+  // </unified-jobcard>
+
   function isTradeMakesafeJob(job, assignment) {
     if (!job && !assignment) return false;
     job = job || {};
@@ -6043,69 +6352,12 @@
     return map[sub] || null;
   }
 
-  // Full make-safe route card: red banner (builder + suburb + state), job type
-  // headline, then homeowner / refs / address / AI work-order summary / meta.
-  function renderMakesafeRunCard(job, a, idx, filtered, sec, todayComplete, runListId) {
-    var md = job.makesafe_details || job.metadata || {};
-    var todayClass = sec.key === 'today' ? ' today-card' + (todayComplete ? ' run-list-complete' : '') : '';
-    var assignmentArg = a._makesafePool ? '' : (a.id || '');
-    var builder = getMakesafeBuilderCode(job);
-    var suburb = String(job.site_suburb || '').toUpperCase();
-    var sub = getMakesafeSubstatusPill(job);
-    var typeLabel = getTradeMakesafeTypeLabel(job);
-    var homeowner = job.client_name || '';
-    var theirRef = firstTradeCardValue([md.external_ref, job.external_ref, job.claim_number]);
-    var ourNo = job.job_number || '';
-    var address = job.site_address || '';
-    var summary = firstTradeCardValue([md.wo_summary, job.wo_summary, md.work_order_summary]);
-    var crew = getTradeAssignmentCrewLabel(a);
-    var cardPhone = getTradeCardPhone(job);
-
-    var h = '<div class="job-card ms-card' + todayClass + '" data-type="makesafe" onclick="openJobReport(\'' + job.id + '\', \'' + assignmentArg + '\')">';
-    // Banner: builder + SUBURB + lifecycle state
-    h += '<div class="ms-banner">';
-    if (builder) h += '<span class="ms-co">' + esc(builder) + '</span><span class="ms-vr"></span>';
-    h += '<span class="ms-suburb">' + esc(suburb || 'SITE TBC') + '</span>';
-    if (sub) h += '<span class="ms-state ' + sub.cls + '"><span class="ms-dot"></span>' + esc(sub.label) + '</span>';
-    h += '</div>';
-    // Headline: job type + Make Safe badge
-    h += '<div class="ms-headrow"><div class="ms-head-l">';
-    if (sec.key === 'today') h += '<span class="run-list-order-badge">' + (idx + 1) + '</span>';
-    h += '<span class="ms-type">' + esc(typeLabel) + '</span></div>';
-    h += '<span class="job-card-badge badge-makesafe">Make Safe</span></div>';
-    if (crew) h += '<div class="ms-crew">&#128119; ' + esc(crew) + '</div>';
-    h += '<div class="ms-divider"></div>';
-    if (homeowner) h += '<div class="ms-home">' + esc(homeowner) + '</div>';
-    if (theirRef || ourNo) {
-      h += '<div class="ms-refs">';
-      if (theirRef) h += '<span class="ms-chip ms-chip-theirs">' + esc(theirRef) + '</span>';
-      if (ourNo) h += '<span class="ms-chip ms-chip-ours">' + esc(ourNo) + '</span>';
-      h += '</div>';
-    }
-    if (address) h += '<div class="ms-addr"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>' + esc(address) + '</div>';
-    if (summary) h += '<div class="ms-wonote"><span class="ms-wo-body"><span class="ms-ai">AI</span>' + esc(summary) + '</span></div>';
-    // Meta: scheduled time + day, weather (async)
-    var timeLabel = a.start_time ? a.start_time.slice(0, 5) : 'No time set';
-    h += '<div class="ms-meta"><span class="ms-when">' + esc(timeLabel) + ' <span class="ms-day">&middot; ' + esc(formatDate(a.scheduled_date)) + '</span></span>';
-    h += '<span class="ms-wx" data-weather-date="' + (a.scheduled_date || '') + '"></span></div>';
-    // Actions
-    h += '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">';
-    if (cardPhone) {
-      h += '<a href="tel:' + esc(cardPhone) + '" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-green);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-      h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>Call</a>';
-      h += '<a href="sms:' + esc(cardPhone) + '" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-blue);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-      h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>Text</a>';
-    }
-    if (job.site_address || job.site_suburb) {
-      var navUrl = getMapsUrl(job.site_address, job.site_suburb);
-      h += '<a href="' + navUrl + '" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;justify-content:center;gap:4px;height:40px;padding:0 12px;background:var(--sw-mid);color:#fff;border-radius:8px;text-decoration:none;font-size:12px;font-weight:700">';
-      h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>Navigate</a>';
-    }
-    h += '</div>';
-    if (_jobFilter === 'today' && sec.key === 'today' && runListId) h += renderRunListControls(runListId, idx, filtered.length, todayComplete);
-    h += '</div>';
-    return h;
-  }
+  // Legacy red-banner make-safe run card and the runsheet reorder controls were
+  // retired here (captain ruling): My Jobs make-safes now render through the one
+  // unified docket card (UnifiedJobCard.fromJobAssignment), same as every other
+  // job type. getMakesafeSubstatusPill / getMakesafeBuilderCode are no longer
+  // read by any card — the ops substatus vocabulary a trade never needed is gone.
+  // (Make-safe builder/type still resolve feed-first via PR #208's helpers.)
 
   // Open a job and auto-switch to a specific tab (e.g. 'comms') after it loads
   window.openJobToTab = function(jobId, assignmentId, tabName) {
@@ -6383,80 +6635,76 @@
   function renderHeroCard(data, phase) {
     var job = data.job;
     var type = getTradeJobType(job);
-    var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
+    var cls = UnifiedJobCard.typeCls(type);
+    var isMs = type === 'makesafe';
     var config = (job.scope_json && (job.scope_json.config || job.scope_json)) || {};
-    var pos = data.purchaseOrders || [];
     var matStatus = deriveMaterialsState(data);
     var myAssignment = getMyAssignment(data);
     var schedDate = myAssignment ? myAssignment.scheduled_date : null;
     var dayInfo = getJobDayInfo(data);
+    var compact = (phase === 'travelling' || phase === 'on_site');
 
-    var h = '<div class="job-hero" style="--job-color:' + color + '">';
-
-    // Badge + job number
-    h += '<div>';
-    h += '<span class="job-hero-badge">' + esc(type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : type) + '</span>';
-    if (job.job_number) h += '<span class="job-hero-number">' + esc(job.job_number) + '</span>';
-    if (phase === 'complete') h += '<span style="background:#27AE60;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;margin-left:6px">COMPLETED</span>';
-    if (phase === 'shift_done') h += '<span style="background:var(--sw-orange);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;margin-left:6px">SHIFT DONE</span>';
-    h += '</div>';
-
-    // Client name
-    h += '<div class="job-hero-client">' + esc(job.client_name || 'Unknown') + '</div>';
-
-    // Address (deduplicated)
+    // Identity band (.dh) — real type stamp (feed-first for make-safe), place
+    // first, correct parties, one status chip. No raw lowercase enum, no occupant.
+    var stamp = isMs ? getTradeMakesafeTypeLabel(job) : getTradeStandardTypeLabel(job, type);
+    var chipCls, chipLabel;
+    if (phase === 'complete' || phase === 'shift_done') { chipCls = 'done'; chipLabel = 'Complete'; }
+    else if (phase === 'on_site' || phase === 'travelling') { chipCls = 'live'; chipLabel = 'On site'; }
+    else { chipCls = 'alloc'; chipLabel = 'Allocated'; }
     var addr = dedupeAddress(job.site_address, job.site_suburb);
-    h += '<div class="job-hero-address">' + esc(addr) + '</div>';
+    var place = String(job.site_suburb || '').trim() || String(addr || '').split(',')[0].trim() || 'Suburb TBC';
 
-    // Compact mode for travelling/on_site — skip scope summary and meta row
-    if (phase === 'travelling' || phase === 'on_site') {
-      h += '</div>';
-      return h;
-    }
-
-    // Make-safe: show requesting company instead of scope
-    if (type === 'makesafe') {
-      var heroBuilder = getTradeMakesafeBuilderName(job);
-      if (heroBuilder) {
-        var heroRef = (job.makesafe_details && job.makesafe_details.external_ref) ? job.makesafe_details.external_ref : ((job.metadata && job.metadata.external_ref) || null);
-        h += '<div class="job-hero-scope" style="color:var(--sw-red);">' + esc(heroBuilder) + (heroRef ? ' - Ref: ' + esc(heroRef) : '') + '</div>';
-      }
-      if (job.notes) {
-        h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;white-space:pre-wrap;">' + esc(job.notes.substring(0, 150)) + '</div>';
-      }
-      h += '</div>';
-      return h;
-    }
-
-    // Scope summary — humanised
+    // Scope summary (standard jobs) — humanised.
     var scopeParts = [];
-    if (type === 'fencing') {
-      if (config.totalLength || config.length) scopeParts.push((config.totalLength || config.length) + 'm');
-      if (config.material) scopeParts.push(humanise('material', config.material));
-      if (config.height) scopeParts.push(config.height + 'mm');
-      if (config.colour || config.color) scopeParts.push(config.colour || config.color);
-      var gates = config.gates || config.gateCount || 0;
-      if (typeof gates === 'object' && Array.isArray(gates)) gates = gates.length;
-      if (gates > 0) scopeParts.push(gates + ' gate' + (gates > 1 ? 's' : ''));
+    if (!isMs) {
+      if (type === 'fencing') {
+        if (config.totalLength || config.length) scopeParts.push((config.totalLength || config.length) + 'm');
+        if (config.material) scopeParts.push(humanise('material', config.material));
+        if (config.height) scopeParts.push(config.height + 'mm');
+        if (config.colour || config.color) scopeParts.push(config.colour || config.color);
+        var gates = config.gates || config.gateCount || 0;
+        if (typeof gates === 'object' && Array.isArray(gates)) gates = gates.length;
+        if (gates > 0) scopeParts.push(gates + ' gate' + (gates > 1 ? 's' : ''));
+      } else {
+        if (config.length && config.projection) scopeParts.push(config.length + 'm × ' + config.projection + 'm');
+        if (config.roofStyle) scopeParts.push(humanise('roofStyle', config.roofStyle));
+        if (config.roofing) scopeParts.push(humanise('roofing', config.roofing));
+        if (config.connection) scopeParts.push(humanise('connection', config.connection));
+        if (config.posts) scopeParts.push(config.posts + ' post' + (config.posts > 1 ? 's' : ''));
+      }
+    }
+
+    var h = '<div class="dh ' + cls + '">';
+    h += '<div class="dh-top"><span class="jc-stamp">' + esc(stamp) + '</span>';
+    if (job.job_number) h += '<span class="dh-num">' + esc(job.job_number) + '</span>';
+    h += '<span class="jc-status ' + chipCls + '" style="margin-left:auto">' + (chipCls === 'live' ? '<span class="pulse"></span>' : '') + esc(chipLabel) + '</span></div>';
+    h += '<div class="dh-place">' + esc(place) + '</div>';
+    h += '<div class="dh-addr">' + esc(addr) + '</div>';
+    h += '<div class="dh-parties">';
+    if (isMs) {
+      var builder = getTradeMakesafeBuilderName(job); // feed-first (PR #208), never the occupant
+      var client = String(job.client_name || '').trim();
+      h += '<span><span class="k">Builder</span>' + (builder ? '<b>' + esc(builder) + '</b>' : '<span class="jc-miss">Not on file</span>') + '</span>';
+      h += '<span><span class="k">Client</span>' + (client ? '<b>' + esc(client) + '</b>' : '<span class="jc-miss">Not on the work order</span>') + '</span>';
     } else {
-      if (config.length && config.projection) scopeParts.push(config.length + 'm × ' + config.projection + 'm');
-      if (config.roofStyle) scopeParts.push(humanise('roofStyle', config.roofStyle));
-      if (config.roofing) scopeParts.push(humanise('roofing', config.roofing));
-      if (config.connection) scopeParts.push(humanise('connection', config.connection));
-      if (config.posts) scopeParts.push(config.posts + ' post' + (config.posts > 1 ? 's' : ''));
+      var cli = String(job.client_name || '').trim();
+      h += '<span><span class="k">Client</span>' + (cli ? '<b>' + esc(cli) + '</b>' : '<span class="jc-miss">Not on file</span>') + '</span>';
+      if (scopeParts.length) h += '<span><span class="k">Scope</span><b style="font-weight:500">' + esc(scopeParts.join(' · ')) + '</b></span>';
     }
-    if (scopeParts.length > 0) {
-      h += '<div class="job-hero-scope">' + esc(scopeParts.join(' · ')) + '</div>';
+    h += '</div></div>';
+
+    // Make-safe work-order note (kept), light strip below the band.
+    if (isMs && !compact && job.notes) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;white-space:pre-wrap;line-height:1.45">' + esc(job.notes.substring(0, 150)) + '</div>';
     }
-
-    // Meta row: materials + date + day info
-    h += '<div class="job-hero-meta">';
-    h += '<span>' + matStatus.icon + ' ' + esc(matStatus.text) + '</span>';
-    if (schedDate) h += '<span>📅 ' + formatDate(schedDate) + '</span>';
-    if (dayInfo) h += '<span>' + esc(dayInfo) + '</span>';
-    h += '</div>';
-
-    h += '</div>';
+    // Meta strip: materials + date + day info (standard, non-compact).
+    if (!isMs && !compact) {
+      h += '<div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12.5px;color:var(--sw-text-sec)">';
+      h += '<span>' + matStatus.icon + ' ' + esc(matStatus.text) + '</span>';
+      if (schedDate) h += '<span>📅 ' + formatDate(schedDate) + '</span>';
+      if (dayInfo) h += '<span>' + esc(dayInfo) + '</span>';
+      h += '</div>';
+    }
     return h;
   }
 
@@ -12459,7 +12707,7 @@
       };
     }
     return { VERSION: VERSION, COLUMNS: COLUMNS, validate: validate, validateContact: validateContact, rows: rows, board: board,
-      fullAddress: fullAddress, suburb: suburb, crewLabel: crewLabel, primaryAssignment: primaryAssignment, contactActionsHTML: contactActionsHTML,
+      fullAddress: fullAddress, suburb: suburb, crewLabel: crewLabel, primaryAssignment: primaryAssignment, latestNote: latestNote, contactActionsHTML: contactActionsHTML,
       portalHTML: portalHTML, cardBodyHTML: cardBodyHTML, calendarBlocks: calendarBlocks, legacyAllocateModel: legacyAllocateModel,
       failureState: failureState, failureHTML: failureHTML, esc: esc };
   })();
@@ -12476,11 +12724,30 @@
   }
   function invalidateMakesafeV5Feed() { _makesafeV5Feed = null; _makesafeV5FeedAt = 0; }
 
-  function _msv5Fact(value, missing) {
-    return value != null && String(value).trim() ? esc(String(value)) : '<span class="missing">' + esc(missing) + '</span>';
+  // Quick-look (.ql) row / step / contact builders — one quiet missing voice.
+  function _qlRow(k, value, missing) {
+    var has = value != null && String(value).trim();
+    return '<div class="ql-row"><span class="k">' + esc(k) + '</span><span class="v">' + (has ? esc(String(value)) : '<span class="jc-miss">' + esc(missing) + '</span>') + '</span></div>';
   }
-  function _msv5DetailRow(key, value, missing) {
-    return '<div class="msv5-detail-row"><span class="k">' + esc(key) + '</span><span class="v">' + _msv5Fact(value, missing) + '</span></div>';
+  function _qlStepRaw(todo, k, vHtml) {
+    return '<div class="ql-step' + (todo ? ' todo' : '') + '"><span class="dot"></span><div class="s-body"><span class="s-k">' + esc(k) + '</span><div class="s-v">' + vHtml + '</div></div></div>';
+  }
+  function _qlContactHrefOk(key, href) {
+    var v = String(href || '');
+    if (key === 'call') return /^tel:\+?\d+$/i.test(v);
+    if (key === 'text') return /^sms:\+?\d+$/i.test(v);
+    return /^https:\/\//i.test(v);
+  }
+  function _qlContact(row) {
+    var actions = ((row.contact || {}).actions) || {};
+    var defs = [['call', 'Call'], ['text', 'Text'], ['navigate', 'Navigate']];
+    var out = '<div class="ql-contact">';
+    defs.forEach(function (d) {
+      var act = actions[d[0]] || {};
+      if (act.available === true && act.href && _qlContactHrefOk(d[0], act.href)) out += '<a href="' + esc(act.href) + '"' + (d[0] === 'navigate' ? ' target="_blank" rel="noopener"' : '') + ' onclick="event.stopPropagation()">' + d[1] + '</a>';
+      else out += '<span aria-disabled="true">' + d[1] + '</span>';
+    });
+    return out + '</div>';
   }
   function closeMakesafeV5Detail() {
     var overlay = document.getElementById('msv5DetailOverlay'); if (overlay) overlay.classList.remove('active');
@@ -12490,39 +12757,56 @@
     fetchMakesafeV5Feed(false).then(function (payload) {
       var row = MakesafeTradeV5.rows(payload).filter(function (r) { return String(r.id) === String(jobId); })[0];
       if (!row) throw new Error('Job is no longer visible in the make-safe feed');
-      var mount = document.getElementById('msv5DetailContent'), assignments = row.assignments || [], report = row.report || {}, lineage = row.lineage || {};
-      var html = '<div class="msv5-detail-head"><div><h3>' + esc(MakesafeTradeV5.suburb(row)) + '</h3><div class="alloc-head ameta">' + esc(row.job_number || 'MAKE-SAFE') + ' &middot; ' + esc(row.column) + '</div></div><button class="msv5-detail-close" onclick="closeMakesafeV5Detail()" aria-label="Close">&times;</button></div>';
-      html += '<div class="tjb-card ms" style="cursor:default" onclick="event.stopPropagation()">' + MakesafeTradeV5.cardBodyHTML(row)
-        + MakesafeTradeV5.contactActionsHTML(row, 'job-detail') + MakesafeTradeV5.portalHTML(row, 'job-detail') + '</div>';
-      html += '<section class="msv5-detail-sec"><h4>The job</h4>'
-        + _msv5DetailRow('Client', (row.contact || {}).client_name, 'NOT ON THE WORK ORDER')
-        + _msv5DetailRow('Phone', (row.contact || {}).phone, 'NO CLIENT PHONE ON FILE')
-        + _msv5DetailRow('Type', row.makesafe_type, 'MAKE-SAFE')
-        + _msv5DetailRow('Builder', (row.builder || {}).name, 'NOT ON FILE')
-        + _msv5DetailRow('Claim ref', (row.builder || {}).external_ref || lineage.builder_claim_ref, 'NOT ON FILE')
-        + _msv5DetailRow('Work order', lineage.builder_work_order_number, 'NOT ON FILE')
-        + _msv5DetailRow('PO', lineage.builder_po_number, 'NOT ON FILE') + '</section>';
-      html += '<section class="msv5-detail-sec"><h4>Where it is up to</h4>';
-      if (assignments.length) {
-        assignments.forEach(function (a) {
-          html += _msv5DetailRow('Allocated', a.name || a.crew_name, 'NOBODY ALLOCATED')
-            + _msv5DetailRow('Booked', a.scheduled_date ? (a.scheduled_date + (a.start_time ? ' · ' + String(a.start_time).slice(0, 5) : ' · NO TIME SET')) : null, 'NO DAY OR TIME SET')
-            + _msv5DetailRow('Attended', a.arrived_at || a.started_at, 'NOT YET')
-            + _msv5DetailRow('Completed', a.completed_at, 'NOT YET');
-        });
-      } else html += _msv5DetailRow('Allocated', null, 'NOBODY ALLOCATED');
-      html += _msv5DetailRow('Report', report.submitted_at, 'NOT SUBMITTED')
-        + _msv5DetailRow('Photos', report.submitted_at ? Number(report.photo_count || 0) + ' completion photos' : null, 'NOT SUBMITTED')
-        + _msv5DetailRow('Related', (lineage.siblings || []).map(function (s) { return s.job_number || s.job_id; }).join(', '), 'NO OTHER JOBS ON THIS CLAIM') + '</section>';
-      html += '<section class="msv5-detail-sec"><h4>Notes</h4>';
+      var mount = document.getElementById('msv5DetailContent');
+      var V = MakesafeTradeV5, U = UnifiedJobCard;
+      var a = V.primaryAssignment(row), report = row.report || {}, contact = row.contact || {};
+      var m = U.fromFeedRow(row, { showAge: false });
+      var refsLine = (m.refs || []).map(function (r) { return r.text; }).join(' · ');
+      var canAllocate = (payload.permissions || {}).can_allocate === true && (row.column === 'New' || row.column === 'Allocated');
+
+      var html = '<div class="ql ms">';
+      // Header: stamp + status + suburb + refs, once. The card is not repeated below.
+      html += '<div class="ql-head"><div class="ql-id"><div class="row1"><span class="jc-stamp">' + esc(m.stampLabel) + '</span>'
+        + '<span class="jc-status ' + m.statusCls + '">' + (m.statusCls === 'live' ? '<span class="pulse"></span>' : '') + esc(m.statusLabel) + '</span></div>'
+        + '<h3>' + esc(m.place) + '</h3><div class="meta">' + esc(refsLine || (row.job_number || 'Make-safe')) + '</div></div>'
+        + '<button class="ql-close" onclick="closeMakesafeV5Detail()" aria-label="Close">&times;</button></div>';
+      // Facts + contact
+      html += '<div class="ql-sec">'
+        + _qlRow('Address', V.fullAddress(row), 'Address TBC')
+        + _qlRow('Builder', (row.builder || {}).name, 'Not on file')
+        + _qlRow('Client', contact.client_name, 'Not on the work order')
+        + _qlRow('Phone', contact.phone, 'No phone on file')
+        + _qlContact(row) + '</div>';
+      // Where it's up to — the board's own words, never a second vocabulary.
+      html += '<div class="ql-sec"><h4>Where it\'s up to</h4><div class="ql-steps">';
+      var cameIn = (row.age && row.age.created_at) ? U.fmtDay(String(row.age.created_at).slice(0, 10)) : '';
+      html += _qlStepRaw(false, 'New', esc(cameIn ? 'Came in ' + cameIn : 'In the make-safe queue'));
+      var allocDone = !!(a && (a.name || a.crew_name));
+      var allocV;
+      if (allocDone) {
+        allocV = esc(m.crew || a.name || a.crew_name);
+        if (a.scheduled_date) allocV += ' &middot; ' + esc(U.fmtDay(a.scheduled_date)) + (a.start_time ? ' &middot; ' + esc(U.fmtTime(a.start_time)) : ' &middot; <span class="jc-miss">no time set</span>');
+      } else allocV = '<span class="jc-miss">Nobody allocated</span>';
+      html += _qlStepRaw(!allocDone, 'Allocated', allocV);
+      var compDone = row.column === 'Complete' || row.column === 'Archive' || !!report.submitted_at;
+      var compV = report.submitted_at
+        ? ('Report submitted ' + esc(U.fmtDay(String(report.submitted_at).slice(0, 10))) + (report.photo_count ? ' &middot; ' + Number(report.photo_count) + ' photos' : ''))
+        : '<span class="jc-miss">Report not submitted</span>';
+      html += _qlStepRaw(!compDone, 'Complete', compV);
+      html += '</div></div>';
+      // Notes
+      html += '<div class="ql-sec"><h4>Notes</h4>';
       if ((row.notes || []).length) {
-        (row.notes || []).forEach(function (note) { html += '<div class="tjb-latest-note"><b>' + esc(note.author || 'Trade') + (note.created_at ? ' · ' + esc(String(note.created_at).slice(0, 16).replace('T', ' ')) : '') + '</b>' + esc(note.text || '') + '</div>'; });
-      } else html += '<div class="missing">NO NOTES YET</div>';
-      html += '</section><div class="tjb-card-actions">'
-        + '<button class="tjb-card-action" onclick="closeMakesafeV5Detail();openJobNotes(\'' + esc(row.id) + '\',\'' + esc(row.job_number || 'Make-safe') + '\')">Add note</button>'
-        + '<button class="tjb-card-action" onclick="closeMakesafeV5Detail();openJobReport(\'' + esc(row.id) + '\',\'\')">Write report</button>'
-        + ((payload.permissions || {}).can_allocate === true && (row.column === 'New' || row.column === 'Allocated') ? '<button class="tjb-card-action primary" onclick="closeMakesafeV5Detail();openMakesafeAllocateByJobId(\'' + esc(row.id) + '\')">Allocate / time</button>' : '')
+        (row.notes || []).forEach(function (note) { html += '<div class="jc-note" style="margin:0 0 8px"><b>' + esc(note.author || 'Trade') + (note.created_at ? ' &middot; ' + esc(U.fmtDay(String(note.created_at).slice(0, 10))) : '') + '</b>' + esc(note.text || '') + '</div>'; });
+      } else html += '<div class="jc-miss">No notes yet</div>';
+      html += '</div>';
+      // Actions — Allocate follows the job-type accent (primary in a .ql ms).
+      html += '<div class="ql-actions"><button onclick="closeMakesafeV5Detail();openJobNotes(\'' + esc(row.id) + '\',\'' + esc(row.job_number || 'Make-safe') + '\')">Add note</button>'
+        + '<button onclick="closeMakesafeV5Detail();openJobReport(\'' + esc(row.id) + '\',\'\')">Write report</button>'
+        + (canAllocate ? '<button class="primary" onclick="closeMakesafeV5Detail();openMakesafeAllocateByJobId(\'' + esc(row.id) + '\')">Allocate / time</button>' : '')
         + '</div>';
+      html += '<button class="ql-openfull" onclick="closeMakesafeV5Detail();openJobReport(\'' + esc(row.id) + '\',\'\')"><span>Open full job</span></button>';
+      html += '</div>';
       mount.innerHTML = html;
       document.getElementById('msv5DetailOverlay').classList.add('active');
     }).catch(function (err) { toast('Could not open job: ' + friendlyError(err), true); });
@@ -17269,18 +17553,24 @@
 
   function _boardCardHTML(model, cardId) {
     var row = model._feedRow || {}, contact = row.contact || {};
-    var searchStr = esc([row.job_number, row.makesafe_type, (row.builder || {}).name, (row.builder || {}).external_ref,
+    var searchStr = [row.job_number, row.makesafe_type, (row.builder || {}).name, (row.builder || {}).external_ref,
       contact.client_name, contact.phone, contact.address, (row.lineage || {}).builder_po_number]
-      .filter(Boolean).join(' ').toLowerCase());
+      .filter(Boolean).join(' ').toLowerCase();
     var canAllocate = _boardAllowed() && (row.column === 'New' || row.column === 'Allocated');
-    var html = '<article class="tjb-card ms" data-search="' + searchStr + '" data-board-column="' + esc(row.column) + '" role="button" tabindex="0" onclick="openMakesafeV5Detail(\'' + esc(row.id) + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openMakesafeV5Detail(\'' + esc(row.id) + '\')}">';
-    html += MakesafeTradeV5.cardBodyHTML(row);
-    html += MakesafeTradeV5.contactActionsHTML(row, 'board-card') + MakesafeTradeV5.portalHTML(row, 'board-card');
-    html += '<div class="tjb-card-actions">';
-    if (canAllocate) html += '<button class="tjb-card-action primary" onclick="event.stopPropagation();openAllocateSheet(\'' + esc(cardId) + '\')">Allocate</button>';
-    html += '<button class="tjb-card-action" onclick="event.stopPropagation();openJobNotes(\'' + esc(row.id) + '\',\'' + esc(row.job_number || 'Make-safe') + '\')">Add note</button>';
-    html += '</div></article>';
-    return html;
+    // Inside a column the card drops its status chip — the column IS the status.
+    var m = UnifiedJobCard.fromFeedRow(row, { showAge: true });
+    var actions = '<div class="jc-actions">';
+    if (canAllocate) actions += '<button type="button" class="act primary" onclick="event.stopPropagation();openAllocateSheet(\'' + esc(cardId) + '\')">Allocate / time</button>';
+    actions += '<button type="button" class="act" onclick="event.stopPropagation();openJobNotes(\'' + esc(row.id) + '\',\'' + esc(row.job_number || 'Make-safe') + '\')">Add note</button>';
+    actions += '</div>';
+    return UnifiedJobCard.wrap(m, {
+      tag: 'article',
+      onclick: 'openMakesafeV5Detail(\'' + esc(row.id) + '\')',
+      dataSearch: searchStr,
+      dataAttrs: 'data-board-column="' + esc(row.column) + '" role="button" tabindex="0" onkeydown="if(event.key===&quot;Enter&quot;||event.key===&quot; &quot;){event.preventDefault();openMakesafeV5Detail(\'' + esc(row.id) + '\')}"',
+      showStatus: false,
+      actionsHTML: actions
+    });
   }
 
   function _renderBoard() {
@@ -17382,7 +17672,7 @@
     var input = document.getElementById('boardSearchInput');
     var q = input ? String(input.value || '').toLowerCase().trim() : '';
     _boardSearchQuery = q;
-    var cards = document.querySelectorAll('#boardContent .tjb-card'), shown = 0;
+    var cards = document.querySelectorAll('#boardContent .jc'), shown = 0;
     for (var i = 0; i < cards.length; i++) {
       var hay = cards[i].getAttribute('data-search') || '';
       var visible = !q || hay.indexOf(q) !== -1;
@@ -17718,7 +18008,9 @@
     // approved trade projection and never expose allocation.
     if (!_boardAllowed() || (feedRow.column !== 'New' && feedRow.column !== 'Allocated')) return;
     var ctx = AllocateCore.buildContext(model, null, { now: new Date() });
-    _allocSel = { model: model, cardId: cardId, ctx: ctx, userId: null, crew: null };
+    // Multi-select allocation (captain requirement): userIds/crews carry the full
+    // selection; userId/crew mirror the first pick for the single-write fast path.
+    _allocSel = { model: model, cardId: cardId, ctx: ctx, userId: null, crew: null, userIds: [], crews: [] };
     _allocGuard = { busy: false };
     _allocEditGuard = { busy: false };
 
@@ -17749,13 +18041,15 @@
     } else {
       var curId = row.user_id || (row.user && row.user.id) || null;
       var defaultCrew = roster.filter(function (u) { return _user && String(u.id) === String(_user.id); })[0] || roster[0];
-      _allocSel.userId = defaultCrew.id; _allocSel.crew = defaultCrew;
-      mount.innerHTML = roster.map(function (u) {
+      _allocSel.userId = String(defaultCrew.id); _allocSel.crew = defaultCrew;
+      _allocSel.userIds = [String(defaultCrew.id)]; _allocSel.crews = [defaultCrew];
+      mount.innerHTML = '<div class="alloc-label" style="margin-bottom:8px">Crew · tap to select one or more</div>' + roster.map(function (u) {
         var isCur = reassign && curId && String(u.id) === String(curId);
         var isDefault = String(u.id) === String(defaultCrew.id);
-        return '<button class="alloc-crew' + (isCur ? ' cur' : '') + (isDefault ? ' sel' : '') + '" onclick="selectAllocCrew(this,\'' + esc(u.id) + '\')">' +
+        return '<button type="button" class="alloc-crew' + (isCur ? ' cur' : '') + (isDefault ? ' sel' : '') + '" onclick="selectAllocCrew(this,\'' + esc(u.id) + '\')">' +
           esc(u.name) + ((_user && String(u.id) === String(_user.id)) ? ' · me' : (isCur ? ' (current)' : '')) +
-          '<span class="role">' + esc(String(u.role || '').replace(/_/g, ' ')) + '</span></button>';
+          '<span class="role">' + esc(String(u.role || '').replace(/_/g, ' ')) + '</span>' +
+          (isDefault ? '<span class="tick">&#10003;</span>' : '') + '</button>';
       }).join('');
     }
     // M3b U3 (D5): schedule pickers. NEW allocation -> date (M3 default) +
@@ -17801,33 +18095,54 @@
 
   // The confirm line always shows the EFFECTIVE date/time the write will carry
   // (sentinel withSchedule — honest even after the manager edits the pickers).
+  // Multi-select: names join, and the button counts the picks.
   function _allocUpdateConfirmLine() {
-    if (!_allocSel || !_allocSel.userId) return;
-    var model = _allocSel.model, ctx = _allocSel.ctx;
-    var name = _allocSel.crew ? (_allocSel.crew.name || 'crew') : 'crew';
-    var what = model.ref || model.sub || 'job';
+    if (!_allocSel) return;
+    var sel = _allocSel, model = sel.model, ctx = sel.ctx;
+    var names = (sel.crews || []).map(function (c) { return c && (c.name || 'crew'); });
     var lineEl = document.getElementById('allocConfirmLine');
+    var btn = document.getElementById('allocConfirmBtn');
+    if (!names.length) {
+      if (lineEl) lineEl.textContent = 'Select at least one crew member';
+      if (btn) { btn.disabled = true; btn.textContent = 'Allocate'; }
+      return;
+    }
+    var who = names.length <= 2 ? names.join(' & ') : (names.slice(0, 2).join(', ') + ' +' + (names.length - 2));
+    var what = model.ref || model.sub || 'job';
     if (ctx.mode === 'reassign') {
-      lineEl.textContent = 'Reassign ' + what + ' to ' + name;
+      lineEl.textContent = (names.length > 1 ? 'Assign ' : 'Reassign ') + what + ' to ' + who;
     } else {
       var eff = AllocateCore.withSchedule(ctx, _readAllocSchedule());
-      var line = 'Assign ' + what + ' to ' + name + ' · ' + AllocateCore.fmtDate(eff.scheduledDate);
+      var line = 'Assign ' + what + ' to ' + who + ' · ' + AllocateCore.fmtDate(eff.scheduledDate);
       if (eff.startTime) line += ' · ' + (AllocateCore.fmtClock(eff.startTime) || eff.startTime);
       lineEl.textContent = line;
     }
-    document.getElementById('allocConfirmBtn').disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = names.length > 1 ? ('Allocate ' + names.length) : 'Allocate'; }
   }
   window.allocScheduleChanged = function () { _allocUpdateConfirmLine(); };
 
+  // Toggle a crew member in/out of the selection (captain: multiple people per job).
   window.selectAllocCrew = function (btn, userId) {
     if (!_allocSel || !_boardCache) return;
+    var uid = String(userId);
+    _allocSel.userIds = _allocSel.userIds || [];
+    var at = _allocSel.userIds.indexOf(uid);
+    if (at >= 0) {
+      _allocSel.userIds.splice(at, 1);
+      btn.classList.remove('sel');
+      var t = btn.querySelector('.tick'); if (t) t.parentNode.removeChild(t);
+    } else {
+      _allocSel.userIds.push(uid);
+      btn.classList.add('sel');
+      if (!btn.querySelector('.tick')) { var s = document.createElement('span'); s.className = 'tick'; s.innerHTML = '&#10003;'; btn.appendChild(s); }
+    }
     var roster = _boardCache.roster || [];
-    var crew = null;
-    for (var i = 0; i < roster.length; i++) { if (String(roster[i].id) === String(userId)) { crew = roster[i]; break; } }
-    _allocSel.userId = userId; _allocSel.crew = crew;
-    var opts = document.querySelectorAll('#allocRoster .alloc-crew');
-    for (var j = 0; j < opts.length; j++) opts[j].classList.remove('sel');
-    btn.classList.add('sel');
+    _allocSel.crews = _allocSel.userIds.map(function (id) {
+      for (var i = 0; i < roster.length; i++) { if (String(roster[i].id) === String(id)) return roster[i]; }
+      return null;
+    }).filter(Boolean);
+    _allocSel.userId = _allocSel.userIds[0] || null;
+    _allocSel.crew = _allocSel.crews[0] || null;
     _allocUpdateConfirmLine();
   };
 
@@ -17867,12 +18182,38 @@
     if (p) p.catch(function () {});
   };
 
-  window.confirmAllocate = function () {
-    if (!_allocSel || !_allocSel.userId || !_boardCache) return;
+  // Build the list of allocate_job payloads for the current selection. Every
+  // payload is one of the two EXISTING supported allocate_job shapes:
+  //   create   { jobId, userId, scheduledDate, startTime?, endTime? }
+  //   reassign { assignmentId, userId }
+  // Multiple people on one job = several create writes against the same jobId.
+  function _buildAllocOps(sel, sched) {
+    var ops = [], ctx = sel.ctx, users = sel.userIds || [];
+    var jobId = (sel.model._boardJob && sel.model._boardJob.id)
+      || ((sel.model._boardRow && sel.model._boardRow.jobs) || {}).id || null;
+    if (ctx.mode === 'create') {
+      users.forEach(function (uid) {
+        ops.push(AllocateCore.buildPayload(AllocateCore.withSchedule(AllocateCore.withUser(ctx, uid), sched)));
+      });
+    } else {
+      // Assigned job: first pick reassigns the existing assignment (silent path);
+      // each additional pick creates a new assignment on the same job.
+      var baseDate = AllocateCore.normDate(sched.date) || String((sel.model._boardRow || {}).scheduled_date || '').slice(0, 10) || AllocateCore.awstToday();
+      var st = AllocateCore.normTime(sched.start), en = AllocateCore.normTime(sched.end);
+      users.forEach(function (uid, i) {
+        if (i === 0) { ops.push(AllocateCore.buildPayload(AllocateCore.withUser(ctx, uid))); return; }
+        var c = { mode: 'create', jobId: jobId, userId: uid, scheduledDate: baseDate };
+        if (st) c.startTime = st;
+        if (en) c.endTime = en;
+        ops.push(AllocateCore.buildPayload(c));
+      });
+    }
+    return ops;
+  }
+
+  // Proven single-write path: optimistic apply + rollback + double-fire guard.
+  function _confirmAllocateSingle() {
     var sel = _allocSel, board = _boardCache.board;
-    // Rebind inside the sentinel: withUser (same silent-reassign discipline)
-    // + withSchedule (the pickers' date/times — create mode only; the picked
-    // date/time is exactly what the confirm line showed).
     var ctx = AllocateCore.withSchedule(AllocateCore.withUser(sel.ctx, sel.userId), _readAllocSchedule());
     var btn = document.getElementById('allocConfirmBtn');
     var p = AllocateCore.run(ctx, {
@@ -17894,9 +18235,47 @@
         toast('Could not allocate: ' + friendlyError(err), true);
       }
     });
-    // run() rethrows after onError (pure API) — onError already surfaced it, so
-    // swallow here to avoid an unhandled rejection. null = double-tap no-op.
+    // run() rethrows after onError — swallow to avoid an unhandled rejection.
     if (p) p.catch(function () {});
+  }
+
+  window.confirmAllocate = function () {
+    if (!_allocSel || !_boardCache) return;
+    var sel = _allocSel, users = sel.userIds || [];
+    if (!users.length) return;
+    // One person → the proven optimistic single-write path (no regression).
+    if (users.length === 1) { sel.userId = users[0]; sel.crew = sel.crews[0]; return _confirmAllocateSingle(); }
+    // Multiple people → fire one supported allocate_job per pick, sequentially.
+    if (_allocGuard && _allocGuard.busy) return;
+    if (_allocGuard) _allocGuard.busy = true;
+    var ops = _buildAllocOps(sel, _readAllocSchedule());
+    var isCreateMode = sel.ctx && sel.ctx.mode === 'create';
+    var btn = document.getElementById('allocConfirmBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Assigning ' + ops.length + '...'; }
+    var i = 0, done = 0, failed = 0, createResultApplied = false;
+    function step() {
+      if (i >= ops.length) {
+        if (_allocGuard) _allocGuard.busy = false;
+        closeAllocateSheet();
+        toast(failed ? ('Assigned ' + done + ' of ' + ops.length + ' — ' + failed + ' failed') : ('Allocated ' + done + ' crew'), !!failed);
+        _refreshBoardSilent();
+        NC.dirty = true;
+        if (_currentView === 'schedule') renderNewCalendar();
+        return;
+      }
+      var idx = i, payload = ops[i++];
+      api('allocate_job', null, payload).then(function (res) {
+        if (AllocateCore.isSuccess(res)) {
+          done++;
+          if (isCreateMode && !createResultApplied) {
+            createResultApplied = true;
+            AllocateCore.applyCreateResult(sel.model, res, (sel.userIds || [])[idx]);
+          }
+        } else failed++;
+        step();
+      }).catch(function () { failed++; step(); });
+    }
+    step();
   };
 
   // Silent board refresh (server truth) after a write — no spinner swap; keeps the

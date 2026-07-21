@@ -31,6 +31,26 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 Trade App changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
 
+## Trade App job cards (`trade.html`)
+
+All job types (make-safe, fencing, patio, decking, reno) render through ONE card
+grammar: the `UnifiedJobCard` module (search `// <unified-jobcard>`) → `.jc-*`
+CSS. `.ql-*` is the shared quick-look sheet, `.dh-*` the full-view detail header.
+`.jc.<type>` sets `--jc-a` (job-type accent from the `--jt-*` tokens); the
+primary/Allocate action uses `var(--jc-a)`, never brand orange (captain ruling).
+The four user-facing statuses are the ONLY vocabulary: New / Allocated / Complete
+/ Archive (+ live "On site"). The legacy `.ms-*` run card, `.tjc-*` card bodies,
+and the runsheet reorder controls are retired — do not revive them. The calendar
+keeps its own `.ncal`/`.sh-*` timeline grammar (shares the type accents).
+
+Gotchas:
+- `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global. To
+  QA internal renderers, serve over http (the browser extension blocks `file://`)
+  and eval the sentinel-delimited modules in a harness.
+- Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.
+  a class name like `.tjc-*/.tjb-`). It closes the comment early and SILENTLY
+  drops the next CSS rule — this once shipped every job-type accent as grey.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

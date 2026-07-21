@@ -3834,7 +3834,23 @@
     });
   }
 
-  function api(action, params, postBody) {
+  // <trade-api-helper>
+  function _apiError(status, message) {
+    var err = new Error(message || (status === 403 ? 'Trade access is not available for this account' : 'Request failed'));
+    err.status = status;
+    err.code = status === 403 ? 'access_denied' : (status === 401 ? 'auth_expired' : 'request_failed');
+    return err;
+  }
+
+  function _readApiError(r, fallback) {
+    return r.json().catch(function() { return {}; }).then(function(body) {
+      throw _apiError(r.status, body.error || body.message || fallback || r.statusText);
+    });
+  }
+
+  function api(action, params, postBody, options) {
+    options = options || {};
+    var preserveSession = options.preserveSessionOnAuthFailure === true;
     return getAuthToken().then(function(token) {
       var url = _opsApiBase + '?action=' + action;
       if (params) {
@@ -3859,38 +3875,48 @@
 
       return fetch(url, opts).then(function(r) {
         clearTimeout(timeoutId);
-        // Detect expired session — retry once with refreshed token before kicking out
-        if (r.status === 401 || r.status === 403) {
-          return r.json().catch(function() { return {}; }).then(function(e) {
-            var msg = e.error || '';
-            // If this is the first 401, try refreshing the token and retrying
-            if (!opts._retried && cloud && cloud.supabase) {
+
+        // 403 is authorisation, not authentication. Refreshing the same valid JWT
+        // cannot grant a role, and signing out here creates a logout loop.
+        if (r.status === 403) return _readApiError(r, 'Trade access is not available for this account');
+
+        // A 401 may be an expired JWT. Refresh once. Read-only feed callers opt
+        // into preserving the signed-in session so the surface can prompt for an
+        // explicit re-login instead of logging the user out automatically.
+        if (r.status === 401) {
+          return r.json().catch(function() { return {}; }).then(function() {
+            if (cloud && cloud.supabase) {
               console.log('[trade] 401 received, refreshing token and retrying...');
               return cloud.supabase.auth.refreshSession().then(function(ref) {
                 var newToken = ref.data?.session?.access_token;
-                if (!newToken) { _forceLogout(); throw new Error('Session expired — please log in again'); }
-                _cachedAccessToken = newToken; // Update cache with fresh token
-                // Retry with fresh token
+                if (!newToken) {
+                  if (!preserveSession) _forceLogout();
+                  throw _apiError(401, 'Session expired. Please sign in again.');
+                }
+                _cachedAccessToken = newToken;
                 var retryHeaders = Object.assign({}, headers, { 'Authorization': 'Bearer ' + newToken });
                 var retryOpts = { headers: retryHeaders, signal: opts.signal };
                 if (postBody) { retryOpts.method = 'POST'; retryOpts.body = JSON.stringify(postBody); }
-                retryOpts._retried = true;
                 return fetch(url, retryOpts).then(function(r2) {
-                  if (r2.status === 401 || r2.status === 403) { _forceLogout(); throw new Error('Session expired — please log in again'); }
-                  if (!r2.ok) return r2.json().catch(function() { throw new Error(r2.statusText); }).then(function(e2) { throw new Error(e2.error || r2.statusText); });
+                  if (r2.status === 403) return _readApiError(r2, 'Trade access is not available for this account');
+                  if (r2.status === 401) {
+                    if (!preserveSession) _forceLogout();
+                    return _readApiError(r2, 'Session expired. Please sign in again.');
+                  }
+                  if (!r2.ok) return _readApiError(r2, r2.statusText || 'Request failed');
                   return r2.json();
                 });
-              }).catch(function(refreshErr) {
+              }, function(refreshErr) {
                 console.error('[trade] Token refresh failed:', refreshErr);
-                handleSessionExpiry();
-                throw new Error('Session expired — please log in again');
+                if (!preserveSession) handleSessionExpiry();
+                throw _apiError(401, 'Session expired. Please sign in again.');
               });
             }
-            handleSessionExpiry();
-            throw new Error(msg || 'Session expired — please log in again');
+            if (!preserveSession) handleSessionExpiry();
+            throw _apiError(401, 'Session expired. Please sign in again.');
           });
         }
-        if (!r.ok) return r.json().catch(function() { throw new Error(r.statusText || 'Request failed'); }).then(function(e) { throw new Error(e.error || r.statusText); });
+        if (!r.ok) return _readApiError(r, r.statusText || 'Request failed');
         return r.json();
       }).catch(function(err) {
         clearTimeout(timeoutId);
@@ -3898,6 +3924,7 @@
       });
     });
   }
+  // </trade-api-helper>
 
   // ══════════════════════════════════════════════════
   // OFFLINE ACTION QUEUE
@@ -12163,6 +12190,38 @@
       if (key === 'text') return /^sms:\+?\d+$/i.test(v);
       return /^https:\/\//i.test(v);
     }
+    function failureState(err, surface) {
+      var status = Number(err && err.status), code = String((err && err.code) || '');
+      var label = surface === 'calendar' ? 'calendar' : 'make-safe board';
+      if (status === 403 || code === 'access_denied') {
+        return {
+          kind: 'access', title: 'No trade access for this account',
+          detail: 'This signed-in account is not authorised for the ' + label + '. Ask Ops to check your Trade access.',
+          action: 'relogin', actionLabel: 'Sign in with another account'
+        };
+      }
+      if (status === 401 || code === 'auth_expired') {
+        return {
+          kind: 'auth', title: 'Please sign in again',
+          detail: 'Your session could not be refreshed. Your work is still here. Sign in again when you are ready.',
+          action: 'relogin', actionLabel: 'Sign in again'
+        };
+      }
+      return {
+        kind: 'transient', title: 'Could not load the ' + label,
+        detail: (err && err.message) ? String(err.message) : 'Check your connection and try again.',
+        action: 'retry', actionLabel: 'Retry'
+      };
+    }
+    function failureHTML(err, surface, retryCall, wrapperClass) {
+      var state = failureState(err, surface);
+      var action = state.action === 'relogin'
+        ? 'doLogout()'
+        : String(retryCall || (surface === 'calendar' ? 'renderNewCalendar()' : '_loadBoard(true)'));
+      return '<div class="' + esc(wrapperClass || 'empty-state') + '" data-feed-failure="' + esc(state.kind) + '"><b>' + esc(state.title) + '</b>'
+        + '<div style="margin-top:6px">' + esc(state.detail) + '</div>'
+        + '<button class="btn ghost" style="margin-top:12px" onclick="' + esc(action) + '">' + esc(state.actionLabel) + '</button></div>';
+    }
     function validateContact(row) {
       ['call', 'navigate', 'text'].forEach(function (key) {
         var a = action(row, key);
@@ -12312,7 +12371,8 @@
     }
     return { VERSION: VERSION, COLUMNS: COLUMNS, validate: validate, validateContact: validateContact, rows: rows, board: board,
       fullAddress: fullAddress, suburb: suburb, crewLabel: crewLabel, primaryAssignment: primaryAssignment, contactActionsHTML: contactActionsHTML,
-      portalHTML: portalHTML, cardBodyHTML: cardBodyHTML, calendarBlocks: calendarBlocks, legacyAllocateModel: legacyAllocateModel, esc: esc };
+      portalHTML: portalHTML, cardBodyHTML: cardBodyHTML, calendarBlocks: calendarBlocks, legacyAllocateModel: legacyAllocateModel,
+      failureState: failureState, failureHTML: failureHTML, esc: esc };
   })();
   // </makesafe-trade-v5>
 
@@ -12320,7 +12380,7 @@
   function fetchMakesafeV5Feed(force) {
     if (!force && _makesafeV5Feed && Date.now() - _makesafeV5FeedAt < 90000) return Promise.resolve(_makesafeV5Feed);
     if (!force && _makesafeV5FeedPromise) return _makesafeV5FeedPromise;
-    _makesafeV5FeedPromise = api('makesafe_board', { projection: 'trade' }).then(function (payload) {
+    _makesafeV5FeedPromise = api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true }).then(function (payload) {
       _makesafeV5Feed = MakesafeTradeV5.validate(payload); _makesafeV5FeedAt = Date.now(); _makesafeV5FeedPromise = null; return _makesafeV5Feed;
     }).catch(function (err) { _makesafeV5FeedPromise = null; throw err; });
     return _makesafeV5FeedPromise;
@@ -12828,7 +12888,7 @@
         NC.loadedAt = Date.now(); NC.dirty = false; // model is now fresh
       } catch (e) {
         NC.loading = false;
-        if (host) host.innerHTML = '<div class="emptyview"><b>Could not load the calendar</b>' + esc(e && e.message ? e.message : e) + '<br><button class="btn ghost" style="margin-top:12px" onclick="renderNewCalendar()">Retry</button></div>';
+        if (host) host.innerHTML = MakesafeTradeV5.failureHTML(e, 'calendar', 'renderNewCalendar()', 'emptyview');
         return;
       }
       NC.loading = false;
@@ -17112,8 +17172,7 @@
       _renderBoard();
     }).catch(function (err) {
       if (!container) return;
-      container.innerHTML = '<div class="empty-state"><p>Could not load the make-safe board</p><div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(friendlyError(err)) + '</div>' +
-        '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="_loadBoard(true)">Retry</button></div>';
+      container.innerHTML = MakesafeTradeV5.failureHTML(err, 'board', '_loadBoard(true)', 'empty-state');
     });
   }
 

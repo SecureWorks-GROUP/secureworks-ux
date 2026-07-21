@@ -12732,13 +12732,19 @@
   function _qlStepRaw(todo, k, vHtml) {
     return '<div class="ql-step' + (todo ? ' todo' : '') + '"><span class="dot"></span><div class="s-body"><span class="s-k">' + esc(k) + '</span><div class="s-v">' + vHtml + '</div></div></div>';
   }
+  function _qlContactHrefOk(key, href) {
+    var v = String(href || '');
+    if (key === 'call') return /^tel:\+?\d+$/i.test(v);
+    if (key === 'text') return /^sms:\+?\d+$/i.test(v);
+    return /^https:\/\//i.test(v);
+  }
   function _qlContact(row) {
     var actions = ((row.contact || {}).actions) || {};
     var defs = [['call', 'Call'], ['text', 'Text'], ['navigate', 'Navigate']];
     var out = '<div class="ql-contact">';
     defs.forEach(function (d) {
       var act = actions[d[0]] || {};
-      if (act.available === true && act.href) out += '<a href="' + esc(act.href) + '"' + (d[0] === 'navigate' ? ' target="_blank" rel="noopener"' : '') + ' onclick="event.stopPropagation()">' + d[1] + '</a>';
+      if (act.available === true && act.href && _qlContactHrefOk(d[0], act.href)) out += '<a href="' + esc(act.href) + '"' + (d[0] === 'navigate' ? ' target="_blank" rel="noopener"' : '') + ' onclick="event.stopPropagation()">' + d[1] + '</a>';
       else out += '<span aria-disabled="true">' + d[1] + '</span>';
     });
     return out + '</div>';

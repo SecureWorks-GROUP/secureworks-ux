@@ -3634,6 +3634,7 @@
   // ══════════════════════════════════════════════════
   // ERROR MESSAGES — friendly for trades
   // ══════════════════════════════════════════════════
+  // <friendly-error>
   var ERROR_MAP = {
     'Login required': 'You need to log in first',
     'Session expired': 'Your session expired — please log in again',
@@ -3652,6 +3653,7 @@
     }
     return msg;
   }
+  // </friendly-error>
 
   // ══════════════════════════════════════════════════
   // OFFLINE DRAFTS — localStorage persistence
@@ -12209,7 +12211,7 @@
       }
       return {
         kind: 'transient', title: 'Could not load the ' + label,
-        detail: (err && err.message) ? String(err.message) : 'Check your connection and try again.',
+        detail: err ? String(friendlyError(err)) : 'Check your connection and try again.',
         action: 'retry', actionLabel: 'Retry'
       };
     }

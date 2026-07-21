@@ -14,6 +14,7 @@ function block(open, close) {
 const context = { console };
 vm.createContext(context);
 vm.runInContext([
+  block('// <friendly-error>', '// </friendly-error>'),
   block('// <calendar-adapter-core>', '// </calendar-adapter-core>'),
   block('// <makesafe-trade-v5>', '// </makesafe-trade-v5>'),
   block('// <calendar-renderers>', '// </calendar-renderers>')
@@ -101,6 +102,11 @@ async function testFeedFailureStates() {
   const retryHTML = V5.failureHTML(transient.error, 'calendar', 'renderNewCalendar()', 'emptyview');
   assert(retryHTML.includes('data-feed-failure="transient"'));
   assert(retryHTML.includes('>Retry<'), 'transient calendar failure keeps the retry pattern');
+
+  const droppedSignal = V5.failureHTML(new Error('Failed to fetch'), 'calendar', 'renderNewCalendar()', 'emptyview');
+  assert(droppedSignal.includes('data-feed-failure="transient"'));
+  assert(droppedSignal.includes('No internet connection'), 'transient failures map raw network errors through friendlyError');
+  assert(!droppedSignal.includes('Failed to fetch'), 'transient failures never surface the raw fetch error string');
 }
 
 const actions = {

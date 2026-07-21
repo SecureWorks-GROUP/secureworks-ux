@@ -19,8 +19,9 @@ Covered Trade App flows:
 3. An authenticated allocator sees the four make-safe columns and fixture jobs.
 4. A make-safe card opens its detail sheet.
 5. The allocator can open the allocation sheet. The test does not confirm it.
-6. An authenticated installer sees My Jobs and can open a standard job detail.
-7. Optional dedicated accounts prove that the real Supabase password login still works.
+6. The allocation sheet's primary Allocate button follows the job-type accent, not brand orange (captain ruling).
+7. An authenticated installer sees My Jobs and can open a standard job detail.
+8. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

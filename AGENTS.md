@@ -38,6 +38,10 @@ grammar: the `UnifiedJobCard` module (search `// <unified-jobcard>`) → `.jc-*`
 CSS. `.ql-*` is the shared quick-look sheet, `.dh-*` the full-view detail header.
 `.jc.<type>` sets `--jc-a` (job-type accent from the `--jt-*` tokens); the
 primary/Allocate action uses `var(--jc-a)`, never brand orange (captain ruling).
+The allocate sheet (`#allocSheet`) is a DETACHED overlay — it can't inherit a
+card's `--jc-a`, so `openAllocateSheet` stamps the job-type class onto it and
+`.alloc-sheet.<type>` sets the var; keep that stamping or the Allocate button
+silently falls back to orange.
 The four user-facing statuses are the ONLY vocabulary: New / Allocated / Complete
 / Archive (+ live "On site"). The legacy `.ms-*` run card, `.tjc-*` card bodies,
 and the runsheet reorder controls are retired — do not revive them. The calendar

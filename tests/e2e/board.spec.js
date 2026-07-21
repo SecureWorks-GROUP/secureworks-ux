@@ -41,4 +41,21 @@ test.describe('Trade App make-safe board', () => {
     await expect(page.locator('#allocRoster .alloc-crew')).toHaveCount(2);
     await expect(page.locator('#allocConfirmBtn')).toBeEnabled();
   });
+
+  // Captain ruling (2026-07-21): the primary Allocate action follows the job-type
+  // accent, never bright orange (#F15A29 / rgb(241,90,41)). The sheet is a detached
+  // overlay, so openAllocateSheet must stamp the job type onto #allocSheet for the
+  // accent to resolve — this guards that plumbing against a silent regression.
+  test('allocation sheet Allocate button uses the job-type accent, not bright orange', async ({ appPage: page }) => {
+    await page.locator('#boardContent .jc').filter({ hasText: 'E2E-MS-001' })
+      .getByRole('button', { name: 'Allocate' }).click();
+    await expect(page.locator('#allocOverlay')).toHaveClass(/active/);
+
+    // The sheet carries the make-safe type class so --jc-a resolves on the button.
+    await expect(page.locator('#allocSheet')).toHaveClass(/\bms\b/);
+    const bg = await page.locator('#allocConfirmBtn')
+      .evaluate((b) => getComputedStyle(b).backgroundColor);
+    expect(bg).not.toBe('rgb(241, 90, 41)');   // not the brand bright orange
+    expect(bg).toBe('rgb(174, 78, 44)');        // make-safe accent (--jt-ms #AE4E2C)
+  });
 });

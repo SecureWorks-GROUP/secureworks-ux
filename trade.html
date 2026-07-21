@@ -2933,7 +2933,18 @@
     .alloc-actions{display:flex;gap:10px}
     .alloc-actions button{flex:1;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--sw-font)}
     .alloc-cancel{background:var(--sw-light);color:var(--sw-text)}
-    .alloc-ok{background:var(--sw-orange);color:#fff}
+    /* Captain ruling (2026-07-21): the primary Allocate action follows the
+       job-type accent, never bright orange. The sheet is a detached overlay so
+       it never inherits a card's --jc-a; openAllocateSheet stamps the job type
+       onto #allocSheet (below) so the accent resolves here. sw-orange stays only
+       as the fallback if the type class is somehow absent. */
+    .alloc-sheet.ms{--jc-a:var(--jt-ms)}
+    .alloc-sheet.fc{--jc-a:var(--jt-fc)}
+    .alloc-sheet.pt{--jc-a:var(--jt-pt)}
+    .alloc-sheet.dk{--jc-a:var(--jt-dk)}
+    .alloc-sheet.rn{--jc-a:var(--jt-rn)}
+    .alloc-sheet.nt{--jc-a:var(--jt-nt)}
+    .alloc-ok{background:var(--jc-a,var(--sw-orange));color:#fff}
     .alloc-ok:disabled{opacity:.45}
     .msv5-detail-sheet{max-height:92vh}
     .msv5-detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
@@ -3460,7 +3471,7 @@
 
 <!-- M3 U3 — Allocation sheet (manager Board: tap a job -> pick crew -> confirm -> allocate_job) -->
 <div class="alloc-overlay" id="allocOverlay" onclick="if(event.target===this)closeAllocateSheet()">
-  <div class="alloc-sheet">
+  <div class="alloc-sheet" id="allocSheet">
     <div class="alloc-head" id="allocHead"></div>
     <div class="alloc-label">Assign to crew</div>
     <div id="allocRoster"></div>
@@ -18021,6 +18032,11 @@
     var curCrew = model.crew || '';
     var openAction = (model.type === 'makesafe') ? 'openMakesafeV5Detail' : 'openJob';
     var openArg = row._makesafePool ? '' : (row.id || '');
+    // Stamp the job type onto the sheet so the primary Allocate action resolves
+    // its --jc-a accent (captain ruling: never bright orange). The detached
+    // overlay can't inherit a card's accent, so it is set explicitly here.
+    var allocSheetEl = document.getElementById('allocSheet');
+    if (allocSheetEl) allocSheetEl.className = 'alloc-sheet ' + (model.typeCls || UnifiedJobCard.typeCls(model.type) || 'nt');
     document.getElementById('allocHead').innerHTML =
       '<div class="at">' + esc(model.sub || 'Site TBC') + '</div>' +
       '<div class="as">' + esc(model.typeLabel || 'Job') + (ref ? ' &middot; ' + esc(ref) : '') + '</div>' +

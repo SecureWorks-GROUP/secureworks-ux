@@ -4401,6 +4401,16 @@
     if (!_user || _sessionExpired) return;
     var container = document.getElementById('myJobsList');
 
+    // Prime the canonical make-safe projection alongside My Jobs. Once it lands,
+    // re-render any list already on screen so builder/type switch from the explicit
+    // legacy fallback to server-owned feed facts without changing card markup.
+    fetchMakesafeV5Feed(false).then(function() {
+      if (_lastJobData && _currentView === 'myJobs') renderMyJobs(_lastJobData);
+    }).catch(function(err) {
+      console.warn('[trade] make-safe feed unavailable; using legacy builder/type fallback:', err);
+      if (_lastJobData && _currentView === 'myJobs') renderMyJobs(_lastJobData);
+    });
+
     // Cache-first: show cached jobs immediately, then refresh in background
     var cached = loadJobListCache();
     if (cached) {
@@ -5262,6 +5272,8 @@
           // History card re-dressed to the M2 grammar (DA-M3-2) for consistency.
           var _histCard = TradeJobCard.buildModel(job, a, {
             type: type,
+            typeLabel: type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : null,
+            builderName: type === 'makesafe' ? getTradeMakesafeBuilderName(job) : null,
             dateLabel: formatDate(a.scheduled_date),
             desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
             crew: getTradeAssignmentCrewLabel(a)
@@ -5420,6 +5432,8 @@
         // emitted inside the card body.
         var _tjCard = TradeJobCard.buildModel(job, a, {
           type: type,
+          typeLabel: type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : null,
+          builderName: type === 'makesafe' ? getTradeMakesafeBuilderName(job) : null,
           dateLabel: formatDate(a.scheduled_date),
           desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
           crew: getTradeAssignmentCrewLabel(a)
@@ -5734,10 +5748,11 @@
       var rawType = (opts.type != null && opts.type !== '') ? opts.type : job.type;
       var mapped = mapType(rawType);
       var tm = typeMeta(mapped, rawType);
+      if (mapped === 'makesafe' && opts.typeLabel != null) tm = { cls: tm.cls, label: String(opts.typeLabel || 'MakeSafe') };
       var st = statusOf(a.status);
       var isMs = mapped === 'makesafe';
       var party = isMs
-        ? { k: 'Builder', v: builderName(job) || NO_PARTY }
+        ? { k: 'Builder', v: ((opts.builderName != null ? String(opts.builderName) : builderName(job)).trim()) || NO_PARTY }
         : { k: 'Client', v: (String(job.client_name || '').trim()) || NO_PARTY };
       var sub = String(job.site_suburb || '').trim()
         || (String(job.site_address || '').trim().split(',')[0])
@@ -5839,7 +5854,43 @@
     return null;
   }
 
-  function getTradeMakesafeTypeLabel(job) {
+  // Canonical make-safe feed lookup. Embedded rows support pure/test callers;
+  // the cached makesafe-board.v1 projection covers My Jobs, detail and hero.
+  function getMakesafeFeedRow(job) {
+    job = job || {};
+    var embedded = job._makesafeFeedRow || job._feedRow || job.feedRow || null;
+    if (embedded) return embedded;
+    if (!_makesafeV5Feed || !MakesafeTradeV5) return null;
+    var rows;
+    try { rows = MakesafeTradeV5.rows(_makesafeV5Feed); } catch (e) { return null; }
+    var id = String(job.id || job.job_id || job.jobId || '');
+    var number = String(job.job_number || '');
+    for (var i = 0; i < rows.length; i++) {
+      if ((id && String(rows[i].id) === id) || (number && String(rows[i].job_number || '') === number)) return rows[i];
+    }
+    return null;
+  }
+
+  // Explicit legacy fallback. It is used only when this job has no visible
+  // makesafe-board.v1 row, and never treats the site occupant as the builder.
+  function getLegacyTradeMakesafeBuilderName(job) {
+    job = job || {};
+    var md = job.makesafe_details || job.metadata || {};
+    var company = md.makesafe_companies || md.requesting_company || {};
+    var directBuilder = typeof job.builder === 'string' ? job.builder : ((job.builder || {}).name || '');
+    return String(md.requesting_company_name || company.name || directBuilder || '').trim();
+  }
+
+  function getTradeMakesafeBuilderName(job) {
+    var row = getMakesafeFeedRow(job);
+    if (row) return String(((row.builder || {}).name) || '').trim();
+    // Do not guess while a feed request could still supply the row.
+    if (typeof _makesafeV5FeedPromise !== 'undefined' && _makesafeV5FeedPromise) return '';
+    return getLegacyTradeMakesafeBuilderName(job);
+  }
+
+  // The regex cascade is deliberately isolated as the no-feed fallback.
+  function getLegacyTradeMakesafeTypeLabel(job) {
     job = job || {};
     var detail = job.makesafe_details || {};
     var md = job.metadata || {};
@@ -5859,6 +5910,14 @@
     if (/\b(roof\s+(report|assessment\s*report|inspection\s*report)|report\s+.*\broof\b|prime\s+roof\s+report|single\s+storey\s+roof\s+report|two\s+storey\s+roof\s+report|cause\s+of\s+damage\/point\s+of\s+water\s+entry)\b/.test(lower)) return 'Roof Report';
     if (/\b(assessment\s*(report)?|assess\s+and\s+quote|inspect\s+and\s+(provide\s+)?quote|inspection\s+and\s+assessment|contractor\s+(inspection|assessment)|quote\s*(request|link|report)?|quotation|scope\s+of\s+works?)\b/.test(lower)) return 'Assessment / Quote Report';
     return 'MakeSafe';
+  }
+
+  function getTradeMakesafeTypeLabel(job) {
+    var row = getMakesafeFeedRow(job);
+    if (row) return String(row.makesafe_type || '').trim() || 'MakeSafe';
+    // A generic label is safer than regex guessing while feed truth is in flight.
+    if (typeof _makesafeV5FeedPromise !== 'undefined' && _makesafeV5FeedPromise) return 'MakeSafe';
+    return getLegacyTradeMakesafeTypeLabel(job);
   }
 
   function getTradeStandardTypeLabel(job, type) {
@@ -5937,11 +5996,14 @@
   // ── MakeSafe route card helpers ──
   // Short builder code for the banner (AJS, KBA, MLB...). Prefers a real short
   // company name, falls back to initials, then the slug.
-  function getMakesafeBuilderCode(md) {
-    md = md || {};
+  function getMakesafeBuilderCode(job) {
+    job = job || {};
+    var row = getMakesafeFeedRow(job);
+    var md = job.makesafe_details || job.metadata || {};
     var company = md.makesafe_companies || {};
-    var name = String(md.requesting_company_name || company.name || '').trim();
-    var slug = String(md.requesting_company_slug || company.slug || '').trim();
+    var name = getTradeMakesafeBuilderName(job);
+    // A slug is also legacy derivation, so it is allowed only when there is no feed row.
+    var slug = row ? '' : String(md.requesting_company_slug || company.slug || '').trim();
     if (name) {
       var toks = name.split(/\s+/).filter(Boolean);
       if (toks[0] && toks[0].length <= 4) return toks[0].toUpperCase();
@@ -5971,7 +6033,7 @@
     var md = job.makesafe_details || job.metadata || {};
     var todayClass = sec.key === 'today' ? ' today-card' + (todayComplete ? ' run-list-complete' : '') : '';
     var assignmentArg = a._makesafePool ? '' : (a.id || '');
-    var builder = getMakesafeBuilderCode(md);
+    var builder = getMakesafeBuilderCode(job);
     var suburb = String(job.site_suburb || '').toUpperCase();
     var sub = getMakesafeSubstatusPill(job);
     var typeLabel = getTradeMakesafeTypeLabel(job);
@@ -6317,7 +6379,7 @@
 
     // Badge + job number
     h += '<div>';
-    h += '<span class="job-hero-badge">' + esc(type) + '</span>';
+    h += '<span class="job-hero-badge">' + esc(type === 'makesafe' ? getTradeMakesafeTypeLabel(job) : type) + '</span>';
     if (job.job_number) h += '<span class="job-hero-number">' + esc(job.job_number) + '</span>';
     if (phase === 'complete') h += '<span style="background:#27AE60;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;margin-left:6px">COMPLETED</span>';
     if (phase === 'shift_done') h += '<span style="background:var(--sw-orange);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;margin-left:6px">SHIFT DONE</span>';
@@ -6338,9 +6400,10 @@
 
     // Make-safe: show requesting company instead of scope
     if (type === 'makesafe') {
-      if (job.metadata && job.metadata.requesting_company) {
-        var heroRef = (job.makesafe_details && job.makesafe_details.external_ref) ? job.makesafe_details.external_ref : (job.metadata.external_ref || null);
-        h += '<div class="job-hero-scope" style="color:var(--sw-red);">' + esc(job.metadata.requesting_company.name) + (heroRef ? ' - Ref: ' + esc(heroRef) : '') + '</div>';
+      var heroBuilder = getTradeMakesafeBuilderName(job);
+      if (heroBuilder) {
+        var heroRef = (job.makesafe_details && job.makesafe_details.external_ref) ? job.makesafe_details.external_ref : ((job.metadata && job.metadata.external_ref) || null);
+        h += '<div class="job-hero-scope" style="color:var(--sw-red);">' + esc(heroBuilder) + (heroRef ? ' - Ref: ' + esc(heroRef) : '') + '</div>';
       }
       if (job.notes) {
         h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;white-space:pre-wrap;">' + esc(job.notes.substring(0, 150)) + '</div>';
@@ -7848,13 +7911,13 @@
     var job = data.job || {};
     var ms = data.makesafe_details || job.makesafe_details || job.metadata || {};
     if (getTradeJobType(job) !== 'makesafe') return '';
-    var msCompany = ms.makesafe_companies || ms.requesting_company || null;
-    var companyName = ms.requesting_company_name || (msCompany && msCompany.name) || (ms.requesting_company && ms.requesting_company.name) || job.client_name || '';
+    var makesafeJob = Object.assign({}, job, { makesafe_details: ms });
+    var companyName = getTradeMakesafeBuilderName(makesafeJob);
     var email = firstMakesafeEmail(ms, job);
     var source = ms.source_email || {};
     var emailText = getMakesafeBuilderEmailText(ms);
     var receivedAt = getMakesafeSourceReceivedAt(ms, job);
-    var familyLabel = getTradeMakesafeTypeLabel(Object.assign({}, job, { makesafe_details: ms }));
+    var familyLabel = getTradeMakesafeTypeLabel(makesafeJob);
     var emailLabel = source.from_email ? 'Original email' : 'Builder email';
     var links = mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, source.links, source.source_email_links, source.portal_links, ms.portal_links);
     var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
@@ -10446,8 +10509,9 @@
     }
     var addr = [job.site_address, job.site_suburb].filter(Boolean).join(', ');
     if (addr) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Site:</strong> ' + esc(addr) + '</div>';
-    var company = ms.requesting_company_name || (ms.requesting_company && ms.requesting_company.name) || (ms.makesafe_companies && ms.makesafe_companies.name) || job.client_name || '';
-    var familyLabel = getTradeMakesafeTypeLabel(Object.assign({}, job, { makesafe_details: ms }));
+    var makesafeJob = Object.assign({}, job, { makesafe_details: ms });
+    var company = getTradeMakesafeBuilderName(makesafeJob);
+    var familyLabel = getTradeMakesafeTypeLabel(makesafeJob);
     var receivedAt = getMakesafeSourceReceivedAt(ms, job);
     if (familyLabel) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>Family:</strong> ' + esc(familyLabel) + '</div>';
     if (company) h += '<div style="font-size:13px;color:var(--sw-text);margin-bottom:6px"><strong>From:</strong> ' + esc(company) + '</div>';
@@ -10688,7 +10752,14 @@
     var container = document.getElementById('reportContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading MakeSafe report...</div>';
 
-    api('trade_job_detail', { jobId: jobId }).then(function(data) {
+    Promise.all([
+      api('trade_job_detail', { jobId: jobId }),
+      fetchMakesafeV5Feed(false).catch(function(err) {
+        console.warn('[trade] make-safe feed unavailable in report; using legacy builder/type fallback:', err);
+        return null;
+      })
+    ]).then(function(results) {
+      var data = results[0];
       if (!data.job) data.job = data;
       // Backend returns MakeSafe overlay details at top level. Copy enough of
       // that signal onto the job before type detection so SWMS/detail-backed

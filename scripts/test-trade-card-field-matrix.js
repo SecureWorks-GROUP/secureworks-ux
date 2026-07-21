@@ -37,6 +37,6 @@ const todayIdx = html.indexOf('data-filter="today"')
 const allIdx = html.indexOf('data-filter="all"')
 assert(todayIdx !== -1 && allIdx !== -1 && todayIdx < allIdx, 'Today tab remains first/default before All')
 assert(html.includes("var _jobFilter = 'today'"), 'Jobs view still defaults to Today')
-assert(html.includes("_jobFilter === 'today' && sec.key === 'today' && runListId"), 'run-list controls remain gated to Today only')
+assert(!/html\s*\+=\s*renderRunListControls\(/.test(html), 'runsheet reorder controls are retired (captain ruling); Today is time-ordered cards only')
 
 console.log('PASS trade card field matrix regression checks')

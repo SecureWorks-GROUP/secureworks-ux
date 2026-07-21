@@ -91,12 +91,15 @@ assert.strictEqual(context.getTradeMakesafeTypeLabel(noFeed), 'MakeSafe', 'type 
 context._makesafeV5FeedPromise = null;
 
 const surfaces = {
-  myJobs: extractFunction('renderMakesafeRunCard'),
+  // The legacy renderMakesafeRunCard was retired; every job type (make-safe
+  // included) now renders through the one unified docket card. Its normaliser
+  // UnifiedJobCard.fromJobAssignment is the surface that must stay feed-first.
+  myJobs: extractFunction('fromJobAssignment'),
   hero: extractFunction('renderHeroCard'),
   detailPanel: extractFunction('renderMakesafeBuilderPanel'),
   reportWorkOrder: extractFunction('renderMakesafeWorkOrderInline')
 };
-assert(surfaces.myJobs.includes('getMakesafeBuilderCode(job)') && surfaces.myJobs.includes('getTradeMakesafeTypeLabel(job)'), 'My Jobs card resolves feed builder and type');
+assert(surfaces.myJobs.includes('getTradeMakesafeBuilderName(job)') && surfaces.myJobs.includes('getTradeMakesafeTypeLabel(job)'), 'unified My Jobs card resolves feed builder and type');
 assert(surfaces.hero.includes('getTradeMakesafeBuilderName(job)') && surfaces.hero.includes('getTradeMakesafeTypeLabel(job)'), 'hero resolves feed builder and type');
 assert(surfaces.detailPanel.includes('getTradeMakesafeBuilderName(') && surfaces.detailPanel.includes('getTradeMakesafeTypeLabel('), 'detail panel resolves feed builder and type');
 assert(surfaces.reportWorkOrder.includes('getTradeMakesafeBuilderName(') && surfaces.reportWorkOrder.includes('getTradeMakesafeTypeLabel('), 'report work order resolves feed builder and type');

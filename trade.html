@@ -12707,7 +12707,7 @@
       };
     }
     return { VERSION: VERSION, COLUMNS: COLUMNS, validate: validate, validateContact: validateContact, rows: rows, board: board,
-      fullAddress: fullAddress, suburb: suburb, crewLabel: crewLabel, primaryAssignment: primaryAssignment, contactActionsHTML: contactActionsHTML,
+      fullAddress: fullAddress, suburb: suburb, crewLabel: crewLabel, primaryAssignment: primaryAssignment, latestNote: latestNote, contactActionsHTML: contactActionsHTML,
       portalHTML: portalHTML, cardBodyHTML: cardBodyHTML, calendarBlocks: calendarBlocks, legacyAllocateModel: legacyAllocateModel,
       failureState: failureState, failureHTML: failureHTML, esc: esc };
   })();
@@ -18243,9 +18243,10 @@
     if (_allocGuard && _allocGuard.busy) return;
     if (_allocGuard) _allocGuard.busy = true;
     var ops = _buildAllocOps(sel, _readAllocSchedule());
+    var isCreateMode = sel.ctx && sel.ctx.mode === 'create';
     var btn = document.getElementById('allocConfirmBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Assigning ' + ops.length + '...'; }
-    var i = 0, done = 0, failed = 0;
+    var i = 0, done = 0, failed = 0, createResultApplied = false;
     function step() {
       if (i >= ops.length) {
         if (_allocGuard) _allocGuard.busy = false;
@@ -18256,9 +18257,15 @@
         if (_currentView === 'schedule') renderNewCalendar();
         return;
       }
-      var payload = ops[i++];
+      var idx = i, payload = ops[i++];
       api('allocate_job', null, payload).then(function (res) {
-        if (AllocateCore.isSuccess(res)) done++; else failed++;
+        if (AllocateCore.isSuccess(res)) {
+          done++;
+          if (isCreateMode && !createResultApplied) {
+            createResultApplied = true;
+            AllocateCore.applyCreateResult(sel.model, res, (sel.userIds || [])[idx]);
+          }
+        } else failed++;
         step();
       }).catch(function () { failed++; step(); });
     }

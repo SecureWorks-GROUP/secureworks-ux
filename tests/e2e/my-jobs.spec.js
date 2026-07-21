@@ -9,7 +9,7 @@ test('My Jobs renders an installer assignment and opens its job detail', async (
 
   await expect(page.locator('#viewMyJobs')).toHaveClass(/active/);
   await expect(page.locator('#myJobsList')).toContainText('Today Route (1)');
-  const jobCard = page.locator('#myJobsList .job-card').filter({ hasText: 'E2E-JOB-001' });
+  const jobCard = page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' });
   await expect(jobCard).toContainText('Fixture Homeowner');
   await expect(page.locator('#navBoard')).toBeVisible();
 

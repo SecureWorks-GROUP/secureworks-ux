@@ -78,17 +78,24 @@
 ### Auth & Security
 - JWT auth on all trade endpoints (via `authTrade` in ops-api)
 - `assertAssigned` check — trades can only access jobs they're assigned to
-- Session expiry detection (401/403 → auto sign-out + redirect to login)
+- Auth-failure handling distinguishes authorisation from authentication and never logs a signed-in user out on a feed failure:
+  - **403** is a role rejection, not an expired session — the same valid JWT is never refreshed and the user is never signed out; the surface shows an in-page "no trade access" state.
+  - **401** may be an expired JWT — refreshed once. Read-only feed callers pass `{ preserveSessionOnAuthFailure: true }` to `api()` so a failed refresh prompts explicit re-login in place instead of auto sign-out. Write/action callers that omit the flag still fall back to `handleSessionExpiry()` / `_forceLogout()`.
+  - `api()` throws typed errors carrying `status` and a `code` of `access_denied` (403) / `auth_expired` (401) / `request_failed` so surfaces can render the right state.
 - Prices stripped from PO line items (trades see items + quantities, not costs)
 
 ## Make-Safe Board (Trade v5)
-The make-safe experience is driven by a single canonical read model — the `makesafe_board` feed fetched with `api('makesafe_board', { projection: 'trade' })`, contract `makesafe-board.v1`. The `MakesafeTradeV5` module in `trade.html` (delimited by the `// <makesafe-trade-v5>` markers) validates and renders it. All view state is server-owned; the client never derives columns, visibility, or action rights from assignment status or from role/name logic.
+The make-safe experience is driven by a single canonical read model — the `makesafe_board` feed fetched with `api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true })`, contract `makesafe-board.v1`. The `preserveSessionOnAuthFailure` flag keeps a signed-in user in place when the feed rejects: a 403 (no trade role) or an unrefreshable 401 renders an in-page state instead of logging the user out. The `MakesafeTradeV5` module in `trade.html` (delimited by the `// <makesafe-trade-v5>` markers) validates and renders it. All view state is server-owned; the client never derives columns, visibility, or action rights from assignment status or from role/name logic.
 
 ### Board
 - Exactly four columns from the feed: **New**, **Allocated**, **Complete**, **Archive** (no client-side column override; the old assignment-derived `MS_COLUMN_OVERRIDE` / `COLUMNS_MAKESAFE` paths are retired). The server-supplied `column` wins even if an assignment reads `complete`.
 - Cards show make-safe type, suburb, full address, builder/client, refs, primary assignment date/time, crew (or "Nobody allocated"), and latest note. No pricing or other trades' invoice data is ever rendered on Trade v5 surfaces.
 - `validate()` is a hard gate: it rejects a feed whose `contract_version`/`projection` don't match, whose `parity.ok` is not `true`, whose columns don't match the four, that contains a duplicate card id or a column mismatch, or that carries a broken/unstated contact action.
-- Load failure is a distinct, retryable state ("Could not load the make-safe board" + Retry), kept separate from a genuine empty board.
+- Load failure is rendered by the shared `MakesafeTradeV5.failureHTML(err, surface, retryCall, wrapperClass)` state renderer (also used by the calendar), which maps the feed error to one of three states, each tagged `data-feed-failure`:
+  - **access** (403) — "No trade access for this account" with a "Sign in with another account" button (calls `doLogout()`); no Retry, since retrying a role rejection is pointless.
+  - **auth** (unrefreshable 401) — "Please sign in again" with a re-login button; the user's in-progress work is preserved.
+  - **transient** (network/5xx) — "Could not load the …" with a **Retry** button (`_loadBoard(true)` for the board, `renderNewCalendar()` for the calendar); the message runs through `friendlyError()`.
+  - All three are kept separate from a genuine empty board.
 
 ### Calendar
 - Reads only the make-safe feed (`caFetchCalendarModel` no longer calls the legacy `api('calendar')` feed).
@@ -107,6 +114,7 @@ The make-safe experience is driven by a single canonical read model — the `mak
 
 ### Tests
 - `scripts/test-makesafe-trade-v5.js` exercises the feed contract, column ordering, contact-action rendering across every surface, calendar modes, permission gating, and the duplicate/parity/broken-action failure gates. It runs in PR CI (`.github/workflows/pr-check.yml`).
+- It also runs a mocked auth-regression suite (against the extracted `// <trade-api-helper>` block) asserting that a feed **403**, a repeated **401**, and a transient failure never invoke `_forceLogout()`/`handleSessionExpiry()`, that a 403 does not refresh a valid JWT, that a 401 refreshes exactly once, and that `failureHTML` renders the matching access/auth/transient states.
 
 ## ops-api Trade Endpoints (JWT auth required)
 | Action | Method | Purpose |

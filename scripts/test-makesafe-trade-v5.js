@@ -14,12 +14,100 @@ function block(open, close) {
 const context = { console };
 vm.createContext(context);
 vm.runInContext([
+  block('// <friendly-error>', '// </friendly-error>'),
   block('// <calendar-adapter-core>', '// </calendar-adapter-core>'),
   block('// <makesafe-trade-v5>', '// </makesafe-trade-v5>'),
   block('// <calendar-renderers>', '// </calendar-renderers>')
 ].join('\n'), context);
 const V5 = context.MakesafeTradeV5;
 const CR = context.CalRender;
+
+function mockResponse(status, body) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    statusText: status === 403 ? 'Forbidden' : (status === 401 ? 'Unauthorized' : 'Service Unavailable'),
+    json: () => Promise.resolve(body || {})
+  };
+}
+
+async function mockedFeedFailure(statuses) {
+  let refreshes = 0, logouts = 0, expiryHandlers = 0;
+  const requests = [];
+  const responses = statuses.map(status => mockResponse(status, {
+    error: status === 403 ? 'trade projection requires an authenticated trade session' :
+      (status === 401 ? 'Invalid JWT' : 'Temporary upstream failure')
+  }));
+  const apiContext = {
+    console,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    _opsApiBase: 'https://example.supabase.co/functions/v1/ops-api',
+    _swApiKey: 'test-api-key',
+    _cachedAccessToken: 'signed-in-jwt',
+    getAuthToken: () => Promise.resolve('signed-in-jwt'),
+    fetch: (url, opts) => {
+      requests.push({ url, opts });
+      const response = responses.shift();
+      assert(response, 'unexpected extra feed request');
+      return Promise.resolve(response);
+    },
+    cloud: { supabase: { auth: { refreshSession: () => {
+      refreshes++;
+      return Promise.resolve({ data: { session: { access_token: 'refreshed-jwt' } } });
+    } } } },
+    _forceLogout: () => { logouts++; },
+    handleSessionExpiry: () => { expiryHandlers++; }
+  };
+  vm.createContext(apiContext);
+  vm.runInContext(block('// <trade-api-helper>', '// </trade-api-helper>'), apiContext);
+  let error = null;
+  try {
+    await apiContext.api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true });
+  } catch (err) {
+    error = err;
+  }
+  assert(error, 'mocked failed feed must reject');
+  return { error, refreshes, logouts, expiryHandlers, requests };
+}
+
+async function testFeedFailureStates() {
+  const forbidden = await mockedFeedFailure([403]);
+  assert.strictEqual(forbidden.error.status, 403);
+  assert.strictEqual(forbidden.error.code, 'access_denied');
+  assert.strictEqual(forbidden.refreshes, 0, '403 role rejection must not refresh a valid JWT');
+  assert.strictEqual(forbidden.logouts, 0, '403 feed rejection must never log the user out');
+  assert.strictEqual(forbidden.expiryHandlers, 0, '403 feed rejection must not enter session-expiry handling');
+  assert.strictEqual(forbidden.requests[0].opts.headers.Authorization, 'Bearer signed-in-jwt');
+  const accessHTML = V5.failureHTML(forbidden.error, 'calendar', 'renderNewCalendar()', 'emptyview');
+  const boardAccessHTML = V5.failureHTML(forbidden.error, 'board', '_loadBoard(true)', 'empty-state');
+  for (const rendered of [accessHTML, boardAccessHTML]) {
+    assert(rendered.includes('data-feed-failure="access"'));
+    assert(rendered.includes('No trade access for this account'));
+    assert(rendered.includes('Sign in with another account'));
+    assert(!rendered.includes('>Retry<'), 'role rejection is not masked as a transient retry state');
+  }
+
+  const expired = await mockedFeedFailure([401, 401]);
+  assert.strictEqual(expired.refreshes, 1, '401 feed failure refreshes exactly once');
+  assert.strictEqual(expired.logouts, 0, 'failed feed refresh must not log the user out');
+  assert.strictEqual(expired.error.code, 'auth_expired');
+  const authHTML = V5.failureHTML(expired.error, 'calendar', 'renderNewCalendar()', 'emptyview');
+  assert(authHTML.includes('data-feed-failure="auth"'));
+  assert(authHTML.includes('Please sign in again'));
+
+  const transient = await mockedFeedFailure([503]);
+  assert.strictEqual(transient.logouts, 0, 'transient feed failure must not log the user out');
+  const retryHTML = V5.failureHTML(transient.error, 'calendar', 'renderNewCalendar()', 'emptyview');
+  assert(retryHTML.includes('data-feed-failure="transient"'));
+  assert(retryHTML.includes('>Retry<'), 'transient calendar failure keeps the retry pattern');
+
+  const droppedSignal = V5.failureHTML(new Error('Failed to fetch'), 'calendar', 'renderNewCalendar()', 'emptyview');
+  assert(droppedSignal.includes('data-feed-failure="transient"'));
+  assert(droppedSignal.includes('No internet connection'), 'transient failures map raw network errors through friendlyError');
+  assert(!droppedSignal.includes('Failed to fetch'), 'transient failures never surface the raw fetch error string');
+}
 
 const actions = {
   call: { available: true, href: 'tel:0400111222', unavailable_reason: null },
@@ -111,13 +199,18 @@ const card = V5.cardBodyHTML(allocated);
 assert(!/999|pricing|invoice/i.test(card), 'trade v5 card never renders pricing or invoices');
 assert(V5.portalHTML(allocated, 'board-card').includes('https://roof.example/report/allocated'), 'roof portal renders when the feed exposes it');
 
-assert(/api\('makesafe_board', \{ projection: 'trade' \}\)/.test(html), 'canonical trade projection is fetched');
+assert(/api\('makesafe_board', \{ projection: 'trade' \}, null, \{ preserveSessionOnAuthFailure: true \}\)/.test(html), 'canonical trade projection preserves the signed-in session on auth failure');
 assert(!/MS_COLUMN_OVERRIDE|COLUMNS_MAKESAFE/.test(html), 'assignment-derived make-safe columns are retired');
 assert(/NC = \{ calView: 'cal', scale: 'day', axis: 'jobs'/.test(html), 'job-based Today is the calendar default');
 assert(/function ncBoardAllowed\(\) \{ return !!\(NC\.model && NC\.model\.permissions/.test(html), 'calendar action rights come from feed permissions');
 assert(/_boardCache\.permissions && _boardCache\.permissions\.can_allocate/.test(html), 'board action rights come from feed permissions');
 assert(/_boardBtn\.style\.display = ''/.test(html), 'server-filtered board is visible to ordinary allocated-only trades');
-assert(/Could not load the make-safe board[\s\S]*Retry/.test(html), 'board failure is distinct and retryable');
+assert(/MakesafeTradeV5\.failureHTML\(err, 'board', '_loadBoard\(true\)'/.test(html), 'board failures use the shared access/auth/retry state renderer');
 const fetchBody = html.slice(html.indexOf('async function caFetchCalendarModel'), html.indexOf('// ══════════════════════════════════════════════════════════════════════\n  // M2 U2'));
 assert(!/api\('calendar'/.test(fetchBody), 'make-safe calendar no longer reads the legacy calendar feed');
-console.log('make-safe trade v5 tests passed');
+testFeedFailureStates().then(() => {
+  console.log('make-safe trade v5 tests passed');
+}).catch(err => {
+  console.error(err);
+  process.exitCode = 1;
+});

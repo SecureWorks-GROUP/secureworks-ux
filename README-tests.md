@@ -28,7 +28,7 @@ The default PR gate runs the shipped `trade.html`, `shared/cloud.js`, auth handl
 
 This is preferable for the standing PR gate because it is deterministic, works on fork PRs, needs no production credential, and guarantees no production writes. Fixture data also gives every PR the exact roles and job states required to exercise allocation and installer views.
 
-`tests/helpers/feed-stub.js` rejects any unapproved non-GET `ops-api` request and the shared Playwright fixture fails the test if one was attempted. Mutation-path tests must add a stubbed response explicitly and must never use the live-auth tests.
+`tests/helpers/feed-stub.js` rejects any unapproved non-GET `ops-api` request and the shared Playwright fixture fails the test if one was attempted. A catch-all guard (`installExternalRequestGuard`) sits underneath every other route: same-origin app assets fall through, and any request to an origin without an explicit stub is recorded and aborted, so the test also fails if the app reaches an unstubbed external endpoint (Google Places, storage uploads, and the like). Write-safety is enforced, not incidental. Mutation-path tests must add a stubbed response explicitly and must never use the live-auth tests.
 
 The optional live-auth checks provide the smaller integration proof that dedicated credentials can authenticate against Supabase project `kevgrhcjxspbxgovpmfl`. They do not click any mutation control. If secrets are absent, Playwright reports two explicit `LIVE AUTH SKIPPED` annotations while all mocked coverage remains green.
 

@@ -1,8 +1,9 @@
 const { test: base, expect } = require('@playwright/test');
 const { installSupabaseAuthStub } = require('../helpers/auth');
-const { installFeedStubs, loadJsonFixture } = require('../helpers/feed-stub');
+const { installFeedStubs, installExternalRequestGuard, loadJsonFixture } = require('../helpers/feed-stub');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
+const APP_ORIGIN = new URL(process.env.E2E_BASE_URL || 'http://127.0.0.1:4173').origin;
 
 const PERSONAS = {
   allocator: {
@@ -40,6 +41,8 @@ const test = base.extend({
   appPage: async ({ page, persona, feedScenario }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
+
+    const guard = await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
 
     await installSupabaseAuthStub(page, {
       users: Object.fromEntries(Object.values(PERSONAS).map((entry) => [entry.email, entry])),
@@ -89,6 +92,7 @@ const test = base.extend({
     await page.goto('/trade.html');
     await use(page);
     expect(feed.unexpectedWrites, 'stubbed E2E flows must never attempt an ops-api write').toEqual([]);
+    expect(guard.blockedRequests, 'stubbed E2E flows must never reach an unstubbed external endpoint').toEqual([]);
   }
 });
 

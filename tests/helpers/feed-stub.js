@@ -78,4 +78,32 @@ async function installFeedStubs(page, {
   return { unexpectedWrites };
 }
 
-module.exports = { installFeedStubs, loadJsonFixture, perthDate };
+/**
+ * Catch-all safety net. Registered before every other route so it resolves last.
+ * Same-origin app assets (served by the local static server or an approved
+ * E2E_BASE_URL deployment) fall through to their handlers; any other outbound
+ * request is recorded and aborted so a mocked run can never reach a real
+ * production or third-party endpoint that lacks an explicit stub.
+ */
+async function installExternalRequestGuard(page, { allowedOrigins = [] } = {}) {
+  const allowed = new Set(allowedOrigins);
+  const blockedRequests = [];
+
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    let origin = null;
+    try { origin = new URL(request.url()).origin; } catch { origin = null; }
+
+    if (origin && allowed.has(origin)) {
+      await route.fallback();
+      return;
+    }
+
+    blockedRequests.push(`${request.method()} ${request.url()}`);
+    await route.abort();
+  });
+
+  return { blockedRequests };
+}
+
+module.exports = { installFeedStubs, installExternalRequestGuard, loadJsonFixture, perthDate };

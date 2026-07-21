@@ -15,7 +15,7 @@ jobs:
   playwright:
     name: Trade board flows
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       CI: true
       E2E_TRADE_INSTALLER_EMAIL: ${{ secrets.E2E_TRADE_INSTALLER_EMAIL }}
@@ -54,6 +54,7 @@ jobs:
         run: echo '::warning::Dedicated Supabase E2E secrets are not configured. Mocked board coverage will run; optional live-auth checks will be loudly skipped.'
 
       - name: Run Playwright suite
+        timeout-minutes: 5
         run: npm run test:e2e
 
       - name: Upload failure traces and screenshots

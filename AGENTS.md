@@ -47,6 +47,27 @@ The four user-facing statuses are the ONLY vocabulary: New / Allocated / Complet
 and the runsheet reorder controls are retired — do not revive them. The calendar
 keeps its own `.ncal`/`.sh-*` timeline grammar (shares the type accents).
 
+## Make-safe visibility & the manager view (`trade.html`)
+
+Make-safe visibility is 100% SERVER-DRIVEN by the `makesafe_board` feed
+(`makesafe-board.v1`, edge function — not in this repo). The client applies NO
+allocation-based hiding: `MakesafeTradeV5.board()` just renders whatever columns
+the server sends, and the Board (`_renderBoard`, search `Make-safe Board v5`) shows
+every card in every column. A MANAGER seeing all cards (allocated or not) is the
+feed returning `permissions.sees_all_makesafes:true` / `can_allocate:true` for that
+user; a non-manager gets `allocated_only` + `can_allocate:false` and a view-only
+board (no `button.act.primary` Allocate action). Allocation ≠ visibility: an
+assignment means "this person is doing the job", never "may see it". So if a real
+manager (e.g. Hugo) can't see everything, the fix is his server role / the feed's
+permission logic — NOT trade.html. The calendar's Mine/Everyone `scope` is a
+PRESENTATION lens only (`ncSeesAll()` → default `everyone` + unassigned rows for
+managers); it filters rows the server already chose to send. Regression guards:
+`tests/e2e/manager-visibility.spec.js` (manager sees unallocated+allocated) and
+`installer-board-readonly.spec.js` (non-manager view-only). NB: board cards are
+`role="button"` and their accessible names contain "Allocated"/"Nobody allocated",
+so a `getByRole('button',{name:'Allocate'})` count matches cards too — target the
+`button.act.primary` class for the real Allocate action.
+
 Gotchas:
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global. To
   QA internal renderers, serve over http (the browser extension blocks `file://`)

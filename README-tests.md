@@ -21,7 +21,9 @@ Covered Trade App flows:
 5. The allocator can open the allocation sheet. The test does not confirm it.
 6. The allocation sheet's primary Allocate button follows the job-type accent, not brand orange (captain ruling).
 7. An authenticated installer sees My Jobs and can open a standard job detail.
-8. Optional dedicated accounts prove that the real Supabase password login still works.
+8. A make-safe manager's board is board-wide: they see every card, unallocated AND allocated (captain ruling 2026-07-22), and can allocate. Captures 1440px/390px board screenshots to `test-results/manager-view/`.
+9. A non-manager's make-safe board is view-only: no Allocate action (`can_allocate:false`).
+10. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

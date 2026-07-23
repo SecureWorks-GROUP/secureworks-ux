@@ -8398,7 +8398,33 @@ async function resizeAssignment(assignmentId, edge, targetDate) {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
   }
+  // Warn if the dropped edge lands on an unavailable/leave day — a resize
+  // never changes crew, so the event's own crew keys the availability lookup.
+  var crew = 'Unassigned';
+  if (ev.user_id) {
+    var match = _crewList.find(function(u) { return u.id === ev.user_id; });
+    crew = match ? match.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
+  } else {
+    crew = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
+  }
+  var avail = _calAvailability[crew + '_' + targetDate];
+  if (avail && (avail.status === 'unavailable' || avail.status === 'leave')) {
+    showConfirmModal(
+      'Crew Unavailable',
+      escapeHtml(crew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(targetDate) + '. Schedule anyway?',
+      'Schedule Anyway',
+      function() { doResizeAssignment(ev, edge, targetDate); }
+    );
+    return;
+  }
+  doResizeAssignment(ev, edge, targetDate);
+}
+
+async function doResizeAssignment(ev, edge, targetDate) {
   var payload = CalOpsCore.buildResizePayload(ev, edge, targetDate);
+  // A clamped or no-change edge drop leaves the span as-is — skip the write.
+  if (payload.scheduled_date === ev.scheduled_date &&
+      payload.scheduled_end === (ev.scheduled_end || ev.scheduled_date)) return;
   try {
     await opsPost('update_assignment', payload);
     showToast('Duration updated', 'success');
@@ -8509,15 +8535,15 @@ async function submitScheduleFromModal(jobId) {
 
   try {
     await opsPost('create_assignment', {
-      job_id: jobId,
-      user_id: crewUserId,
-      crew_name: crew,
-      scheduled_date: date,
-      scheduled_end: endStr,
-      duration_days: dur,
+      jobId: jobId,
+      userId: crewUserId,
+      crewName: crew,
+      scheduledDate: date,
+      scheduledEnd: endStr,
+      durationDays: dur,
       role: 'lead_installer',
-      assignment_type: 'install',
-      confirmation_status: 'tentative', // G3: calendar planning entry stays silent
+      assignmentType: 'install',
+      confirmationStatus: 'tentative', // G3: calendar planning entry stays silent
     });
     closeScheduleModal();
     showToast('Assignment created (tentative)', 'success');

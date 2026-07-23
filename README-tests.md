@@ -1,6 +1,6 @@
 # Playwright E2E template
 
-This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's highest-value read-only flows in Chromium.
+This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's highest-value read-only flows in Chromium, plus a pure-node unit spec for the Ops Dash calendar date math.
 
 ## What runs
 
@@ -24,6 +24,10 @@ Covered Trade App flows:
 8. A make-safe manager's board is board-wide: they see every card, unallocated AND allocated (captain ruling 2026-07-22), and can allocate. Captures 1440px/390px board screenshots to `test-results/manager-view/`.
 9. A non-manager's make-safe board is view-only: no Allocate action (`can_allocate:false`).
 10. Optional dedicated accounts prove that the real Supabase password login still works.
+
+Ops Dash coverage in the same suite:
+
+- `tests/e2e/cal-workdays.spec.js` — CP1 calendar working-day (weekend-skip) span math. Pure node: no browser, page, or server fixtures. It reads `ops.html`, extracts the code between the `// <calendar-ops-core>` sentinels, and evaluates it, so assertions run against the real shipped `CalOpsCore` functions (`layWorkingDays`, `paintedSpanDates`, `buildMovePayloadV2`, `buildResizePayload`) and cannot drift. It lives in `tests/e2e/` because that is the Playwright `testDir` and it must run in the PR gate.
 
 ## Why the main suite uses stubs
 

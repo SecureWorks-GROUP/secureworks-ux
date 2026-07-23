@@ -7136,7 +7136,9 @@ var CalOpsCore = (function () {
     var span = mode === '2w' ? 13 : 6;
     return { from: focusStr, to: addDaysStr(focusStr, span) };
   }
-  // U-O1: what a drag writes. Same installer + new date => a SILENT
+  // U-O1: what a drag writes when dragv2 is OFF (the default) — kept
+  // byte-identical while the flag exists; buildMovePayloadV2 below is the
+  // flagged CP1 path. Same installer + new date => a SILENT
   // update_assignment carrying the span shifted by the same delta as the start.
   // A DIFFERENT installer => a reassignment routed through the createAssignment
   // allocation path (delete old + create new, NO tentative) so the new installer

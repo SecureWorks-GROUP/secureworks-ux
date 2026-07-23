@@ -21,6 +21,12 @@ Supabase Edge Functions have compute limits. Heavy operations (backfills, bulk X
 ### Supabase CLI path
 `/Users/marninstobbe/.local/bin/supabase` — NOT available via `npx` or global PATH.
 
+### ops.html `// <calendar-ops-core>` sentinels are load-bearing
+`tests/e2e/cal-workdays.spec.js` reads `ops.html`, extracts everything between `// <calendar-ops-core>` and `// </calendar-ops-core>`, and evaluates it to test the REAL shipped date math. Renaming, moving, or splitting those sentinel comments (or adding code inside the block that can't run outside the page) breaks the PR gate.
+
+### Calendar dragv2 flag-off path must stay byte-identical
+The CP1 drag behaviour in ops.html is gated by `?dragv2=1` / `localStorage.sw_cal_dragv2='1'` (default OFF). V1 `buildMovePayload` is deliberately kept alongside `buildMovePayloadV2` — don't "clean it up" while the flag exists, or flag-off drags change behaviour.
+
 ### Duplicate const declarations
 Same `const` variable name in the same function scope causes Deno BOOT_ERROR. The function won't even start — no useful error message.
 
@@ -73,6 +79,9 @@ If both instances deploy at the same time, the last deploy wins. Coordinate depl
 
 ### cloud.js onAuthStateChange only handles SIGNED_IN
 The handler at cloud.js line 201 only catches `event === 'SIGNED_IN'`. Supabase v2 fires `INITIAL_SESSION` for existing sessions on page load. This means: if a user is logged in from CEO/Ops dashboard and opens trade.html, their existing session might not trigger the login flow. They may need to re-authenticate. Fix: handle `INITIAL_SESSION` in cloud.js (affects all dashboards).
+
+### Assignments with user_id NULL are invisible in the Trade App
+`my_jobs` filters by `.eq('user_id', …)`, so an assignment created with only a free-typed `crew_name` (user_id NULL) never appears on any installer's phone. The ops.html Schedule modal now forces picking a real crew member (sends `userId`), and the backend rejects name-only installs — don't reintroduce a free-text crew field.
 
 ### job_assignments.role constraint
 Valid values: `lead_installer`, `helper`, `estimator`. Using `lead` or `installer` will fail with a constraint violation. Check migration 001 line 166.

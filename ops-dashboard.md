@@ -25,9 +25,22 @@
 - Make-safe job detail keeps one job card while listing each attendance-cycle trade report separately. Opening a visit report shows only photos bound to that report's `attendance_cycle_id`; unbound media is not guessed onto a multi-visit report.
 - Calendar Schedule view clamps an inverted assignment span (`scheduled_end` before `scheduled_date`) to a single day at its start, so a bad row never paints its bar over a lane-mate; long bar labels ellipsize inside their own bar (guarded by `tests/e2e/ops-schedule-lane-overlap.spec.js`).
 
+## Calendar drag-to-reschedule (CP1, flag `dragv2`)
+Feature flag: `?dragv2=1` or `localStorage.sw_cal_dragv2 = '1'` — DEFAULT OFF; off = the pre-CP1 calendar-delta drag, byte-identical. When ON:
+- **Move**: drag the card body; the drop day becomes the new START and the job's length is preserved in WORKING days laid forward skipping weekends (Fri 2-day job dropped on Wed = Wed–Thu).
+- **Resize**: drag either edge handle onto a day; the other edge holds, span never inverts. Same weekend-skip counting (Fri job pulled one day longer = Fri + Mon).
+- **Weekends are opt-in**: interior Sat/Sun are breaks — a weekend-crossing bar paints Mon–Fri, breaks, resumes Monday as ONE logical job. A weekend day counts only when deliberately chosen as an endpoint (drop or edge-drag onto Sat/Sun).
+- **Reschedule SMS prompt**: after a drop or start-changing resize, a confirm asks "Do you want to send [client] a reschedule update?" — Yes calls `send_client_update` with trigger `install_rescheduled`. Nothing sends without that explicit Yes; an end-day extension never prompts.
+- **Duration source**: the rendered `scheduled_date..scheduled_end` span wins when `scheduled_end` exists (legacy rows carry an unused `duration_days` default of 1 — a drag must never collapse a visible multi-day bar); `duration_days` is used only when there is no span. Every dragv2 write carries all three fields so `duration_days` becomes real from first use.
+- **Unflagged real-crew fix**: the sidebar-drag Schedule modal now requires picking a real crew member from the user list (`create_assignment` with camelCase keys + `userId`). Free-typed names created `user_id NULL` rows the Trade App's my-jobs filter can never show; the backend rejects name-only installs.
+- Crew-change drags keep the G2 allocation semantics (delete + `create_assignment` with NO confirmationStatus, so the new installer gets the allocation SMS) — only the span/duration math changed.
+- Pure date math lives in the `// <calendar-ops-core>` block; guarded by `tests/e2e/cal-workdays.spec.js` (extracts and evaluates the shipped code).
+
 ## ops-api Actions
 See edge-functions.md for full list. Key ones:
-- `schedule`, `update_assignment`, `delete_assignment` — calendar CRUD
+- `schedule`, `update_assignment`, `delete_assignment` — calendar CRUD (dragv2 updates carry `scheduled_date` + `scheduled_end` + `duration_days`)
+- `create_assignment` — camelCase payload from the Schedule modal (`jobId`, `userId`, `crewName`, `scheduledDate`, `scheduledEnd`, `durationDays`, …); `userId` required for installs
+- `send_client_update` — client comms; calendar reschedule uses trigger `install_rescheduled` (explicit-confirm only; server dedups per job + new date)
 - `create_po`, `update_po`, `push_po_to_xero` — purchase orders
 - `create_wo`, `update_wo` — work orders
 - `job_detail` — full job data with assignments, POs, WOs, scope, invoices

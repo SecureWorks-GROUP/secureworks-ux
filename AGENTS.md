@@ -29,7 +29,25 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 ## Testing
 
-Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
+Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. The suite also carries `tests/e2e/cal-workdays.spec.js` — a pure-node spec that extracts the code between `// <calendar-ops-core>` and `// </calendar-ops-core>` in `ops.html` and asserts against the REAL shipped functions, so renaming or moving those sentinels breaks CI. See `README-tests.md` for the covered flows and the copyable-template details.
+
+## Ops Dash calendar drag (`ops.html`)
+
+CP1 drag-to-reschedule is behind a feature flag: `?dragv2=1` or
+`localStorage.sw_cal_dragv2='1'` (DEFAULT OFF, same pattern as `sw_cap1b_enabled`).
+Flag off must stay byte-identical to the old behaviour — that is why V1
+`buildMovePayload` (calendar-delta shift) lives alongside `buildMovePayloadV2`
+(drop day = new START, duration preserved in WORKING days, weekend-skip); do not
+"clean up" the V1 path while the flag exists. Weekends are opt-in: interior
+Sat/Sun are breaks, a weekend counts only as a deliberately chosen endpoint.
+Duration precedence: the rendered `scheduled_date..scheduled_end` span wins over
+`duration_days` (legacy rows all carry the unused default 1 — a drag must never
+collapse a visible multi-day bar). The reschedule SMS (`send_client_update`,
+trigger `install_rescheduled`) fires ONLY from an explicit Yes in the confirm
+modal, and only when the START day changed. The Schedule modal's real-crew
+requirement is deliberately UNFLAGGED: `create_assignment` takes camelCase keys
+and a required `userId` — name-only rows are invisible to the Trade App's
+my-jobs filter and the backend rejects them.
 
 ## Ops make-safe board (`ops.html`)
 

@@ -1,6 +1,6 @@
 # Playwright E2E template
 
-This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium.
+This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium, plus a pure-node unit spec for the Ops Dash calendar date math.
 
 ## What runs
 
@@ -35,6 +35,10 @@ Covered flows (Trade App and Ops Dash):
 20. Optional dedicated accounts prove that the real Supabase password login still works.
 21. The trade portal-report confirmation is hidden only by current-cycle `portal_verified_at` or a screenshot-backed sealed capture for the current attendance cycle. Bare substatus, `report_received_at`, and the legacy event-only `report_on_portal` flag cannot hide it; aged share links keep the enabled confirmation control and explain the builder-resend path. This exact sentinel-delimited production module is covered by `scripts/test-trade-portal-confirmation.js` and runs before Playwright through `npm run test:e2e`.
 22. Branding images, CDN objects and SES open/click trackers stored as `kind: builder_portal` are never offered as portal links on either dashboard — not in the Ops Builder links panel, not on the board card link row, and not as the trade "Open builder report portal" CTA — while a genuine share URL is kept even when its token has expired. `scripts/test-f5-portal-link-hygiene.js` extracts the shipped filter from `ops.html` and `trade.html` and runs before Playwright through `npm run test:e2e`.
+
+Ops Dash coverage in the same suite:
+
+- `tests/e2e/cal-workdays.spec.js` — CP1 calendar working-day (weekend-skip) span math. Pure node: no browser, page, or server fixtures. It reads `ops.html`, extracts the code between the `// <calendar-ops-core>` sentinels, and evaluates it, so assertions run against the real shipped `CalOpsCore` functions (`layWorkingDays`, `paintedSpanDates`, `buildMovePayloadV2`, `buildResizePayload`) and cannot drift. It lives in `tests/e2e/` because that is the Playwright `testDir` and it must run in the PR gate.
 
 ## Why the main suite uses stubs
 

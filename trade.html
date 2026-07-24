@@ -4245,9 +4245,11 @@
       if (idx >= files.length) return Promise.resolve(results);
       var file = files[idx];
       idx++;
-      if (onProgress) onProgress(idx, files.length);
       return uploadOnePhoto(file, jobId, phase, '').then(function(res) {
         results.push(res);
+        // Progress means the upload is registered in job_media, not merely started.
+        // The report UI uses this callback to show its green persisted-photo tick.
+        if (onProgress) onProgress(idx, files.length);
         return next();
       });
     }
@@ -9305,6 +9307,22 @@
     });
   };
 
+  function updateMsrPhotoCount(total) {
+    total = Math.max(0, Number(total) || 0);
+    window._msrPhotoCounts = window._msrPhotoCounts || {};
+    window._msrPhotoCounts.total = total;
+    var countEl = document.getElementById('msrPhotoCount');
+    if (countEl) countEl.textContent = String(total);
+    var gateCountEl = document.getElementById('msrPhotoGateCount');
+    if (gateCountEl) gateCountEl.textContent = String(total);
+    var gateEl = document.getElementById('msrPhotoGate');
+    if (gateEl) {
+      var photoOk = total >= 5;
+      gateEl.style.background = photoOk ? '#E8F8EF' : '#FEF3C7';
+      gateEl.style.color = photoOk ? '#155724' : '#92400E';
+    }
+  }
+
   // Make-safe report photo upload handler — uploads immediately but doesn't reload the page
   window.handleMsrPhotoUpload = function(input, phase) {
     var files = Array.from(input.files || []);
@@ -9370,8 +9388,10 @@
       if (progress) progress.style.display = 'none';
       if (progressFill) progressFill.style.width = '0%';
       toast(files.length + ' photo(s) uploaded');
-      window._msrPhotoCounts = window._msrPhotoCounts || { total: 0 };
-      window._msrPhotoCounts.total = (window._msrPhotoCounts.total || 0) + files.length;
+      // uploadPhotosSequential resolves only after confirm_upload has registered
+      // each photo in job_media, which is the backend final-report gate's source.
+      var persistedTotal = ((window._msrPhotoCounts && window._msrPhotoCounts.total) || 0) + results.length;
+      updateMsrPhotoCount(persistedTotal);
       input.value = '';
       // Ensure all show as done
       imgEls.forEach(function(el) {
@@ -10036,21 +10056,23 @@
     // ── Photo Upload Section (single control, internally categorised) ──
     h += msrKick('Photos');
     var allMedia = data.media || [];
-    var jobPhotos = allMedia.filter(function(m) { return !m.type || m.type === 'photo'; });
+    // Match the backend gate exactly: it counts persisted job_media rows whose
+    // type is photo for this job. Untyped media must not create a false pass.
+    var jobPhotos = allMedia.filter(function(m) { return m.type === 'photo'; });
     window._msrPhotoCounts = { total: jobPhotos.length };
 
     h += '<div style="margin-bottom:14px;border:1px solid var(--sw-border);border-radius:10px;padding:12px;">';
     h += '<div style="font-size:13px;font-weight:800;margin-bottom:4px;">MakeSafe photos *</div>';
     h += '<div style="font-size:12px;color:var(--sw-text-sec);line-height:1.4;margin-bottom:10px;">Upload at least <strong>5 photos</strong> before submitting the report.</div>';
-    h += '<div style="font-size:11px;color:var(--sw-text);margin-bottom:10px;"><strong>Photos (' + jobPhotos.length + ')</strong>' + renderPhotoThumbs(jobPhotos, 'msrPhotoGrid') + '</div>';
+    h += '<div style="font-size:11px;color:var(--sw-text);margin-bottom:10px;"><strong>Photos (<span id="msrPhotoCount">' + jobPhotos.length + '</span>)</strong>' + renderPhotoThumbs(jobPhotos, 'msrPhotoGrid') + '</div>';
     h += '<div class="upload-area" onclick="document.getElementById(\'msrPhotoInput\').click()" style="padding:16px;border:2px dashed var(--sw-border);border-radius:8px;text-align:center;cursor:pointer;"><svg width="24" height="24" viewBox="0 0 24 24" fill="var(--sw-mid)" style="margin-bottom:4px;"><path d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg><p style="font-size:12px;color:var(--sw-text-sec);margin:0;">Select one or more photos</p></div>';
     h += '<input type="file" id="msrPhotoInput" accept="image/*" multiple style="display:none" onchange="handleMsrPhotoUpload(this, \'completion\')">';
     h += '<div class="upload-progress" id="msrUnifiedProgress" style="display:none"><span id="msrUnifiedProgressText">Uploading...</span><div class="upload-progress-bar"><div class="upload-progress-fill" id="msrUnifiedProgressFill"></div></div></div>';
     h += '</div>';
 
     var photoOk = jobPhotos.length >= 5;
-    h += '<div style="background:' + (photoOk ? '#E8F8EF' : '#FEF3C7') + ';border-radius:8px;padding:10px;margin-bottom:16px;font-size:12px;color:' + (photoOk ? '#155724' : '#92400E') + ';">';
-    h += '<strong>Photo gate:</strong> ' + jobPhotos.length + '/5 photos uploaded.';
+    h += '<div id="msrPhotoGate" style="background:' + (photoOk ? '#E8F8EF' : '#FEF3C7') + ';border-radius:8px;padding:10px;margin-bottom:16px;font-size:12px;color:' + (photoOk ? '#155724' : '#92400E') + ';">';
+    h += '<strong>Photo gate:</strong> <span id="msrPhotoGateCount">' + jobPhotos.length + '</span>/5 photos uploaded.';
     h += '</div>';
 
     h += '<button onclick="submitMakesafeReport()" style="width:100%;background:var(--sw-orange);color:#fff;border:none;padding:14px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer;min-height:50px;">Submit MakeSafe report</button>';
@@ -10106,6 +10128,7 @@
     var extraNotes = ((document.getElementById('msrExtraNotes') || {}).value || '').trim();
     var payload = {
       job_id: _currentJobId,
+      userId: _user ? _user.id : null,
       arrival_time: arrivalDate + ' ' + arrivalTime,
       damage_description: 'Make-safe type: ' + displayJobType + '\nDamage: ' + damageDesc.value.trim(),
       job_type: jobType,

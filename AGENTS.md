@@ -42,9 +42,12 @@ The allocate sheet (`#allocSheet`) is a DETACHED overlay — it can't inherit a
 card's `--jc-a`, so `openAllocateSheet` stamps the job-type class onto it and
 `.alloc-sheet.<type>` sets the var; keep that stamping or the Allocate button
 silently falls back to orange.
-On every make-safe surface the four user-facing statuses are the ONLY vocabulary:
-New / Allocated / Complete / Archive (+ live "On site"). The fencing board vertical
-carries its own column labels (`trade-app.md`); it must not rename make-safe's.
+Two status vocabularies exist, scoped by vertical — they are never merged. On
+every make-safe surface the four user-facing statuses are the ONLY vocabulary:
+New / Allocated / Complete / Archive (+ live "On site"). The separate fencing
+field-work Board vertical has its own six column words: Ready / Scheduled / On
+site / Done / Attention / Cancelled (`FencingBoardCore`, detail in
+`trade-app.md`). Neither set may be renamed onto the other's surfaces.
 The legacy `.ms-*` run card, `.tjc-*` card bodies, and the runsheet reorder
 controls are retired — do not revive them. The calendar keeps its own
 `.ncal`/`.sh-*` timeline grammar (shares the type accents).

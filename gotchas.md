@@ -88,7 +88,7 @@ The `uploadPhoto` endpoint (base64 dataUrl) exists but the frontend uses the 3-s
 The `confirm_upload` step accepts `po_id` and `phase: 'receipt'` for receipt photos.
 
 ### Service worker cache must be bumped on every trade.html change
-`sw-trade.js` has `CACHE_NAME = 'sw-trade-v3'`. If you change trade.html, bump this version or users on mobile will see stale cached version until the SW updates in background.
+`sw-trade.js` holds the live cache version in `CACHE_NAME` (read it there, never from a doc copy). If you change trade.html, bump that version or users on mobile will see stale cached version until the SW updates in background.
 
 ## PATTERNS TO FOLLOW
 

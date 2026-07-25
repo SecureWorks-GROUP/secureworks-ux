@@ -83,8 +83,9 @@ queueing it. Surface-level detail lives in `trade-app.md`.
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`
-(managed fencing lead across Board / My Jobs / Calendar, other-crew read-only, no
-writes). NB: board cards are `role="button"` and their accessible names contain
+(managed fencing lead across Board weeks / My Jobs / Calendar, other-crew
+read-only, one explicitly stubbed `allocate_job` write and no unapproved write).
+NB: board cards are `role="button"` and their accessible names contain
 "Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
 matches cards too — target the `button.act.primary` class for the real Allocate
 action.

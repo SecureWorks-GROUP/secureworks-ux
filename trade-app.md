@@ -2,7 +2,7 @@
 
 ## Status: BUILT & DEPLOYED (3 March 2026)
 **File**: `dashboard/trade.html` (~3,250 LOC)
-**Service Worker**: `dashboard/sw-trade.js` (cache v3)
+**Service Worker**: `dashboard/sw-trade.js` (live cache version is its `CACHE_NAME`; bump rule in `gotchas.md`)
 **Manifest**: `dashboard/manifest.json` (PWA installable)
 **User**: Field installers (Henry, Isaac, etc.)
 **Auth**: Supabase magic link via cloud.js
@@ -110,7 +110,7 @@ The make-safe experience is driven by a single canonical read model — the `mak
 ### Coordinated backend dependencies
 - **Board completeness:** the UX intentionally sends only the published authenticated `my_jobs?mode=all` request. The current backend manager branch applies a 30-day `scheduled_date` floor, which also excludes null-dated assignments before the open-pool merge. The backend contract must return Henry's complete same-tenant managed-fencing history and future (including the existing open-pool rows), or publish an authorized range request. This UX does not invent `from`/`to` parameters and cannot recover rows the server omits.
 - **Calendar deployment:** the UX already sends the recorded JWT `trade_calendar` / `trade-calendar.v1` request and keeps `unknown action` visible. The coordinated backend action must merge and deploy before Calendar can load; there is no office/static-key fallback.
-- **Work-order deductions:** an empty per-metre week now exposes the existing authenticated `my_work_orders` flow and never renders an unattributed zero-value Submit action. The current server response is own-assigned/capped and `submit_work_order_invoice` calculates from work-order scope only. Manager-authorized fencing work-order search plus server-allowlisted negative trade charges, net/GST/rounding fields, audit and submission validation require a published backend contract before the UX can display or submit them. No client-side money schema or deduction arithmetic is inferred here.
+- **Work-order deductions:** an empty per-metre week now exposes the existing authenticated `my_work_orders` flow and never renders an unattributed zero-value Submit action. The current server response is own-assigned/capped and `submit_work_order_invoice` calculates from work-order scope only; the hub's search box (`filterWorkOrders`) is a client-side filter over the orders that authenticated read already returned, never a server query. Manager-authorized fencing work-order search plus server-allowlisted negative trade charges, net/GST/rounding fields, audit and submission validation require a published backend contract before the UX can display or submit them. No client-side money schema or deduction arithmetic is inferred here.
 - **`my_work_orders` tenant/vertical fields:** authorization for `invoiceWorkOrder` is the authenticated `my_work_orders` response itself — every surface that can reach `submit_work_order_invoice` (the Work Order hub and the job-detail Cost Breakdown) registers the order it renders from its own read, so a hub visit is never a precondition for the ordinary job-detail invoice. On top of that server truth the client narrows only on fields the server actually supplies: `org_id` (tenant, `workOrderTenantOk` — untagged passes, tagged must match the viewer, and a viewer with no `org_id` fails closed on admin/managed-vertical surfaces while ordinary own-only responses still render) and a canonical vertical (`workOrderVertical` reads `job_type`, else `vertical`, else nested `jobs.type` — and nothing else; a bare `type` on a work-order row is a document/work-order kind in this codebase, never a job vertical, so it is deliberately not in the chain). Both are **optional today**: an order with no canonical vertical is kept rather than dropped, so a response without `job_type` degrades to the existing server-authorized own-only list instead of an empty hub, while managed cross-job access stays fail-closed through the tenant guard and the server's own scoping. For the managed-fencing hub to be authoritative rather than best-effort, the backend must return an explicit per-row `org_id` and one of those canonical vertical fields, or expose tenant/vertical-scoped `my_work_orders` parameters.
 
 ### Builder & type (feed truth)
@@ -193,7 +193,6 @@ These can be deleted after testing.
 - No offline job cache (only notes and drafts cache offline, job list requires network)
 - EzyBills integration researched but deferred — simple in-app receipt capture built instead. EzyBills (AU$25/mo) has REST API for OCR + Xero PO matching if needed later
 - `site_address` and `site_suburb` are NULL on most jobs (GHL sync doesn't pull address). Navigate buttons and suburb labels will be empty until address data is backfilled
-- Service worker cache is at v3 — bump on every trade.html change
 
 ## Business Process: PO → Receipt Flow
 The user (Marnin) wants this enforced: **no approved PO = no purchase allowed**.

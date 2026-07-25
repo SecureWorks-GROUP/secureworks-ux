@@ -2886,8 +2886,16 @@
     .tjb-verts::-webkit-scrollbar{display:none}
     .tjb-vert{flex:0 0 auto;font-family:var(--sw-mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:7px 13px;border-radius:999px;border:1.4px solid var(--sw-border);background:var(--sw-card);color:var(--sw-mid);cursor:pointer}
     .tjb-vert.sel{background:var(--sw-dark);border-color:var(--sw-dark);color:#fff}
+    .tjb-week{margin:2px 0 12px;padding:12px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:12px}
+    .tjb-week-label{font:600 13px var(--sw-mono);letter-spacing:.02em;color:var(--sw-dark);text-align:center;margin-bottom:9px}
+    .tjb-week-actions{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+    .tjb-week-btn{min-height:42px;padding:0 12px;border:1px solid var(--sw-border);border-radius:9px;background:var(--sw-light);color:var(--sw-dark);font:700 12px var(--sw-font);cursor:pointer}
+    .tjb-week-btn.icon{min-width:44px;padding:0;font-size:18px}
+    .tjb-week-btn.sel,.tjb-week-btn[aria-pressed="true"]{background:var(--sw-dark);border-color:var(--sw-dark);color:#fff}
     .tjb-strip{display:flex;gap:5px;padding:0 0 12px;flex:0 0 auto}
-    .tjb-stripcell{flex:1;min-width:0;border-radius:10px;padding:8px 2px 7px;text-align:center;background:var(--sw-card);border:1px solid var(--sw-border)}
+    .tjb-stripcell{flex:1;min-width:0;border-radius:10px;padding:8px 2px 7px;text-align:center;background:var(--sw-card);border:1px solid var(--sw-border);font-family:inherit}
+    button.tjb-stripcell{cursor:pointer}
+    .tjb-stripcell[aria-current="true"]{border-color:var(--sw-dark);box-shadow:inset 0 0 0 1px var(--sw-dark)}
     .tjb-stripcell .n{display:block;font-family:var(--sw-mono);font-size:18px;font-weight:600;line-height:1;color:var(--sw-dark)}
     .tjb-stripcell .l{display:block;font-family:var(--sw-mono);font-size:9px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--sw-text-sec);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .tjb-stripcell.hot .n{color:var(--tj-orange-deep)}
@@ -2911,6 +2919,16 @@
     .tjb-note{font-size:12px;color:var(--sw-text-sec);margin:-2px 0 10px}
     .tjb-warn{font-size:12px;color:#B45309;background:#FEF3C7;border-radius:8px;padding:8px 10px;margin:6px 0}
     .tjb-manageronly{text-align:center;padding:40px 20px;color:var(--sw-text-sec);font-size:14px}
+    @media (max-width:700px){
+      .tjb-week{padding:10px}
+      .tjb-week-actions{display:grid;grid-template-columns:44px minmax(68px,1fr) minmax(92px,1.25fr) 44px;gap:6px}
+      .tjb-week-btn{padding:0 7px}
+      .tjb-wrap.fencing .tjb-strip{overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;padding-bottom:10px}
+      .tjb-wrap.fencing .tjb-strip::-webkit-scrollbar,.tjb-wrap.fencing .tjb-pager::-webkit-scrollbar{display:none}
+      .tjb-wrap.fencing .tjb-stripcell{flex:0 0 74px;scroll-snap-align:start}
+      .tjb-wrap.fencing .tjb-pager{display:flex;gap:12px;overflow-x:auto;overflow-y:visible;scroll-snap-type:x mandatory;scroll-padding-inline:0;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
+      .tjb-wrap.fencing .tjb-col{flex:0 0 100%;width:100%;margin-bottom:0;scroll-snap-align:start;scroll-snap-stop:always}
+    }
     /* M3 U3 — allocation sheet: tap a board card -> pick crew -> confirm -> allocate_job */
     .alloc-overlay{position:fixed;inset:0;z-index:560;background:rgba(0,0,0,0.5);display:none;align-items:flex-end;justify-content:center}
     .alloc-overlay.active{display:flex}
@@ -3547,6 +3565,7 @@
   var _reportMode = null;       // null = generic service report, 'makesafe' = MakeSafe report template
   var _tradeJobCacheById = {};  // card/detail cache for MakeSafe fallback rendering
   var _invoiceBuilderOpen = false; // true when invoice builder is active
+  var _authorizedWorkOrderIds = {}; // work orders this session's authenticated my_work_orders reads returned for this viewer
   var _opsApiBase = '';
   var _cachedMyJobs = [];    // flat array of all assignments for Camera/Schedule views
   var _isAdmin = false;       // dispatcher role: admin or ops_manager
@@ -4834,6 +4853,7 @@
     _globalJobSearch.errorMsg = '';
     _cachedMyJobs = [];
     _tradeJobCacheById = {};
+    _authorizedWorkOrderIds = {};
     _myJobsRequestToken++;
     resetCalendarSession();
     resetBoardSession();
@@ -9094,7 +9114,7 @@
       api('my_work_orders').then(function(res) {
         var el = document.getElementById('woJobCostBreakdown');
         if (!el) return;
-        var orders = res.work_orders || [];
+        var orders = (res.work_orders || []).filter(workOrderTenantOk);
         var match = null;
         for (var i = 0; i < orders.length; i++) {
           if (orders[i].id === wo.id || orders[i].job_id === job.id) { match = orders[i]; break; }
@@ -9128,6 +9148,7 @@
         } else if (viewOnly) {
           ch += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">View only -- another crew is allocated</div>';
         } else if (match.can_invoice) {
+          authorizeWorkOrders([match]);
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
         } else {
           ch += '<div style="font-size:12px;color:#92400e;margin-top:10px">Not ready -- job not complete</div>';
@@ -15221,6 +15242,8 @@
     // Group assignments by job and calculate metres from scope_json
     if (!data.assignments || data.assignments.length === 0) {
       html += '<div class="hours-no-data">No completed jobs this week</div>';
+      html += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text-sec);text-align:center;margin:-6px 0 12px">Choose an authorised fencing work order to start an invoice.</div>';
+      html += '<button class="btn btn-secondary" style="width:100%;font-size:13px" onclick="openWorkOrderHub()">&#128203; Choose a Work Order</button>';
       container.innerHTML = html;
       return;
     }
@@ -17883,6 +17906,12 @@
       if (jobType) return jobType === 'fencing';
       return norm(row.assignment_type) === 'fencing_open';
     }
+    function isSameOrg(row, orgId) {
+      row = row || {};
+      var rowOrg = row.org_id || (row.jobs || {}).org_id;
+      if (!rowOrg) return true;
+      return !!orgId && String(rowOrg) === String(orgId);
+    }
     function terminalColumn(row) {
       var status = norm(((row || {}).jobs || {}).status);
       if (JOB_DEAD[status]) return 'cancelled';
@@ -17904,13 +17933,13 @@
     }
     function priority(row) { return PRIORITY[norm((row || {}).status)] || 0; }
 
-    function buildBoard(data, makeCard) {
+    function buildBoard(data, makeCard, orgId) {
       data = data || {};
       makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row }; };
       var assigned = [], pool = [];
       ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'].forEach(function (bucket) {
         (data[bucket] || []).forEach(function (row) {
-          if (!isFencingRow(row)) return;
+          if (!isFencingRow(row) || !isSameOrg(row, orgId)) return;
           if (isPoolRow(row)) pool.push(row);
           else assigned.push(row);
         });
@@ -17962,11 +17991,62 @@
       };
     }
 
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function dateParts(iso) {
+      var match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return null;
+      var value = new Date(Date.UTC(+match[1], +match[2] - 1, +match[3]));
+      return isNaN(value.getTime()) ? null : value;
+    }
+    function isoDate(value) { return value.toISOString().slice(0, 10); }
+    function addDays(iso, amount) {
+      var value = dateParts(iso);
+      if (!value) return '';
+      value.setUTCDate(value.getUTCDate() + Number(amount || 0));
+      return isoDate(value);
+    }
+    function weekStart(iso) {
+      var value = dateParts(iso);
+      if (!value) return '';
+      var day = value.getUTCDay();
+      value.setUTCDate(value.getUTCDate() - (day === 0 ? 6 : day - 1));
+      return isoDate(value);
+    }
+    function weekLabel(start) {
+      var from = dateParts(start), to = dateParts(addDays(start, 6));
+      if (!from || !to) return '';
+      var fromYear = from.getUTCFullYear(), toYear = to.getUTCFullYear();
+      var left = 'Mon ' + from.getUTCDate() + ' ' + MONTHS[from.getUTCMonth()];
+      if (fromYear !== toYear) left += ' ' + fromYear;
+      return left + ' \u2013 Sun ' + to.getUTCDate() + ' ' + MONTHS[to.getUTCMonth()] + ' ' + toYear;
+    }
+    function forSelection(vertical, start, unscheduled) {
+      var end = addDays(start, 6);
+      var columns = (vertical.columns || []).map(function (column) {
+        var cards = (column.cards || []).filter(function (card) {
+          var row = card._boardRow || {};
+          var scheduled = String(row.scheduled_date || '').slice(0, 10);
+          if (unscheduled) return !scheduled;
+          return !!scheduled && scheduled >= start && scheduled <= end;
+        });
+        return { key: column.key, label: column.label, hot: column.hot, cards: cards };
+      });
+      var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
+      return {
+        vertical: vertical.vertical,
+        label: vertical.label,
+        columns: columns,
+        total: total,
+        unmappedCount: vertical.unmappedCount || 0
+      };
+    }
+
     return {
       COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
-      isPoolRow: isPoolRow, isFencingRow: isFencingRow,
+      isPoolRow: isPoolRow, isFencingRow: isFencingRow, isSameOrg: isSameOrg,
       terminalColumn: terminalColumn, columnOf: columnOf,
-      canAllocate: canAllocate, buildBoard: buildBoard
+      canAllocate: canAllocate, buildBoard: buildBoard,
+      addDays: addDays, weekStart: weekStart, weekLabel: weekLabel, forSelection: forSelection
     };
   })();
   // </fencing-board-core>
@@ -17978,7 +18058,9 @@
   var _boardCardById = {};  // cardId -> { model, vertical }; rebuilt each _renderBoard (the tap-target registry)
   var _boardCardSeq = 0;
   var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
-  var _boardCancelledVisible = false; // M-F W2-D — Cancelled column collapsed by default
+  var _fencingBoardWeekStart = null; // Perth Monday; null until first fencing render
+  var _fencingBoardUnscheduled = false;
+  var _boardStatusKey = null;
   var _fieldBoardCacheByKey = {};
   var _fieldBoardTtlMs = 90000;   // same freshness window as the make-safe v5 feed
   // M-F W2-C — reopen a cancelled make-safe from the trade board. Same gate as
@@ -17997,7 +18079,6 @@
       toast('Could not reopen: ' + friendlyError(err), true);
     });
   };
-  window.toggleBoardCancelled = function () { _boardCancelledVisible = !_boardCancelledVisible; _renderBoard(); };
   var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
   var _allocGuard = null;   // per-open double-fire guard { busy }
   var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
@@ -18007,6 +18088,9 @@
     _boardVert = null;
     _boardCardById = {};
     _fieldBoardCacheByKey = {};
+    _fencingBoardWeekStart = null;
+    _fencingBoardUnscheduled = false;
+    _boardStatusKey = null;
     invalidateMakesafeV5Feed();
   }
 
@@ -18077,7 +18161,7 @@
     var cached = _fieldBoardCacheByKey[key];
     if (!force && cached && Date.now() - cached.at < _fieldBoardTtlMs) return Promise.resolve(cached.board);
     return api('my_jobs', { mode: 'all' }).then(function (data) {
-      var board = FencingBoardCore.buildBoard(data, _fencingBoardCardModel);
+      var board = FencingBoardCore.buildBoard(data, _fencingBoardCardModel, (_user || {}).org_id);
       _fieldBoardCacheByKey[key] = { board: board, at: Date.now() };
       return board;
     });
@@ -18109,6 +18193,93 @@
   }
 
   window.setBoardVertical = function (v) { _boardVert = v; _renderBoard(); };
+
+  function _currentFencingWeek() {
+    return FencingBoardCore.weekStart(awstDateStr());
+  }
+
+  function _ensureFencingWeek() {
+    if (!_fencingBoardWeekStart) _fencingBoardWeekStart = _currentFencingWeek();
+    return _fencingBoardWeekStart;
+  }
+
+  window.shiftFencingBoardWeek = function (amount) {
+    var base = _fencingBoardUnscheduled ? _currentFencingWeek() : _ensureFencingWeek();
+    _fencingBoardWeekStart = FencingBoardCore.addDays(base, Number(amount || 0) * 7);
+    _fencingBoardUnscheduled = false;
+    _renderBoard();
+  };
+
+  window.showCurrentFencingBoardWeek = function () {
+    _fencingBoardWeekStart = _currentFencingWeek();
+    _fencingBoardUnscheduled = false;
+    _renderBoard();
+  };
+
+  window.showUnscheduledFencingBoard = function () {
+    _ensureFencingWeek();
+    _fencingBoardUnscheduled = true;
+    _boardStatusKey = 'needs';
+    _renderBoard();
+  };
+
+  function _selectFencingBoardWeek(date, statusKey) {
+    var start = FencingBoardCore.weekStart(String(date || '').slice(0, 10));
+    if (!start) return;
+    _fencingBoardWeekStart = start;
+    _fencingBoardUnscheduled = false;
+    if (statusKey) _boardStatusKey = statusKey;
+  }
+
+  function _setBoardStatusAffordance(key) {
+    _boardStatusKey = key || _boardStatusKey;
+    var buttons = document.querySelectorAll('#boardContent [data-board-status-target]');
+    for (var i = 0; i < buttons.length; i++) {
+      var current = buttons[i].getAttribute('data-board-status-target') === _boardStatusKey;
+      buttons[i].setAttribute('aria-current', current ? 'true' : 'false');
+    }
+  }
+
+  window.goBoardStatus = function (key) {
+    var pager = document.querySelector('#boardContent .tjb-wrap.fencing .tjb-pager');
+    var column = document.getElementById('board-col-' + key);
+    if (!pager || !column) return;
+    _setBoardStatusAffordance(key);
+    if (window.matchMedia && window.matchMedia('(max-width:700px)').matches) {
+      pager.scrollTo({ left: column.offsetLeft - pager.offsetLeft, behavior: 'smooth' });
+    } else {
+      column.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    var button = document.querySelector('#boardContent [data-board-status-target="' + key + '"]');
+    if (button) button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  };
+
+  function _wireBoardPager() {
+    var pager = document.querySelector('#boardContent .tjb-wrap.fencing .tjb-pager');
+    if (!pager) return;
+    var columns = Array.prototype.slice.call(pager.querySelectorAll('.tjb-col'));
+    if (!columns.length) return;
+    var valid = columns.some(function (column) { return column.getAttribute('data-board-column-key') === _boardStatusKey; });
+    if (!valid) _boardStatusKey = columns[0].getAttribute('data-board-column-key');
+    _setBoardStatusAffordance(_boardStatusKey);
+    if (!(window.matchMedia && window.matchMedia('(max-width:700px)').matches)) return;
+    var selected = document.getElementById('board-col-' + _boardStatusKey);
+    if (selected) pager.scrollLeft = selected.offsetLeft - pager.offsetLeft;
+    var ticking = false;
+    pager.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () {
+        ticking = false;
+        var nearest = columns[0], distance = Infinity;
+        columns.forEach(function (column) {
+          var delta = Math.abs((column.offsetLeft - pager.offsetLeft) - pager.scrollLeft);
+          if (delta < distance) { nearest = column; distance = delta; }
+        });
+        _setBoardStatusAffordance(nearest.getAttribute('data-board-column-key'));
+      });
+    }, { passive: true });
+  }
 
   function _boardCardHTML(model, cardId, vertical) {
     if (vertical === 'fencing') {
@@ -18163,8 +18334,26 @@
     var active = null;
     for (var i = 0; i < board.verticals.length; i++) { if (board.verticals[i].vertical === _boardVert) { active = board.verticals[i]; break; } }
     if (!active) active = board.verticals[0];
+    var isFencing = active.vertical === 'fencing';
+    if (isFencing) {
+      active = FencingBoardCore.forSelection(active, _ensureFencingWeek(), _fencingBoardUnscheduled);
+    }
 
-    var html = '<div class="tjb-wrap">';
+    var html = '<div class="tjb-wrap' + (isFencing ? ' fencing' : '') + '">';
+    if (isFencing) {
+      var currentWeek = _currentFencingWeek();
+      html += '<div class="tjb-week" id="fenceWeekNav" aria-label="Fencing Board week">';
+      html += '<div class="tjb-week-label" id="fenceWeekLabel">' +
+        (_fencingBoardUnscheduled ? 'Unscheduled fencing work' : FencingBoardCore.weekLabel(_ensureFencingWeek())) + '</div>';
+      html += '<div class="tjb-week-actions">';
+      html += '<button type="button" class="tjb-week-btn icon" onclick="shiftFencingBoardWeek(-1)" aria-label="Previous week">&#8592;</button>';
+      html += '<button type="button" class="tjb-week-btn' + (!_fencingBoardUnscheduled && _ensureFencingWeek() === currentWeek ? ' sel' : '') +
+        '" onclick="showCurrentFencingBoardWeek()" aria-pressed="' + (!_fencingBoardUnscheduled && _ensureFencingWeek() === currentWeek ? 'true' : 'false') + '">This week</button>';
+      html += '<button type="button" class="tjb-week-btn' + (_fencingBoardUnscheduled ? ' sel' : '') +
+        '" onclick="showUnscheduledFencingBoard()" aria-pressed="' + (_fencingBoardUnscheduled ? 'true' : 'false') + '">Unscheduled</button>';
+      html += '<button type="button" class="tjb-week-btn icon" onclick="shiftFencingBoardWeek(1)" aria-label="Next week">&#8594;</button>';
+      html += '</div></div>';
+    }
     // Unmapped-status guard (STOP surfaced, never a silent wrong column). The
     // count is per-vertical and counted in JOBS — each vertical reports its own.
     var unmappedJobs = active.unmappedCount || 0;
@@ -18182,8 +18371,9 @@
     if (board.verticals.length > 1) {
       html += '<div class="tjb-verts">';
       board.verticals.forEach(function (v) {
+        var visibleCount = v.vertical === active.vertical ? active.total : v.total;
         html += '<button class="tjb-vert' + (v.vertical === active.vertical ? ' sel' : '') + '" onclick="setBoardVertical(\'' + esc(v.vertical) + '\')">' +
-          esc(v.label) + ' <span style="opacity:.7">' + v.total + '</span></button>';
+          esc(v.label) + ' <span style="opacity:.7">' + visibleCount + '</span></button>';
       });
       html += '</div>';
     }
@@ -18193,31 +18383,27 @@
     if (crewNames.length) {
       html += '<div class="tjb-note">Crew (' + crewNames.length + ') · ' + esc(crewNames.slice(0, 6).join(', ')) + (crewNames.length > 6 ? ' +' + (crewNames.length - 6) : '') + '</div>';
     }
-    // M-F W2-D — collapse the terminal Cancelled column behind a toggle so the
-    // active view reads through to Done/Completed; managers open it on demand.
-    // Trade has no Archive column, so Cancelled is the only "dead" column to
-    // collapse here (Done stays visible — it is trade's Completed column).
-    var _cancelledCol = null;
-    active.columns.forEach(function (c) { if (c.key === 'cancelled') _cancelledCol = c; });
-    var _cancelledCount = _cancelledCol ? _cancelledCol.cards.length : 0;
-    function _showCol(c) { return !(c.key === 'cancelled' && !_boardCancelledVisible); }
-    if (_cancelledCol) {
-      html += '<div style="display:flex;justify-content:flex-end;margin:0 0 8px;">' +
-        '<button onclick="toggleBoardCancelled()" style="background:' + (_boardCancelledVisible ? 'var(--sw-mid)' : 'var(--sw-light)') + ';color:' + (_boardCancelledVisible ? '#fff' : 'var(--sw-text)') + ';border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;padding:7px 12px;cursor:pointer;font-family:var(--sw-font);">' +
-        (_boardCancelledVisible ? 'Hide cancelled' : 'Show cancelled') + (_cancelledCount ? ' (' + _cancelledCount + ')' : '') + '</button></div>';
-    }
-    // status strip for the active vertical
+    // status strip for the active vertical. Only the fencing Board turns the
+    // strip into column navigation for its horizontal pager; every other
+    // vertical keeps the plain stacked counters.
     html += '<div class="tjb-strip">';
     active.columns.forEach(function (c) {
-      if (!_showCol(c)) return;
-      html += '<div class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') + '"><span class="n">' + c.cards.length + '</span><span class="l">' + esc(c.label) + '</span></div>';
+      var counts = '<span class="n">' + c.cards.length + '</span><span class="l">' + esc(c.label) + '</span>';
+      if (!isFencing) {
+        html += '<div class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') + '">' + counts + '</div>';
+        return;
+      }
+      html += '<button type="button" class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') +
+        '" data-board-status-target="' + esc(c.key) + '" onclick="goBoardStatus(\'' + esc(c.key) + '\')" aria-controls="board-col-' + esc(c.key) +
+        '" aria-current="' + (_boardStatusKey === c.key ? 'true' : 'false') + '">' + counts + '</button>';
     });
     html += '</div>';
     // pager of columns
     html += '<div class="tjb-pager">';
     active.columns.forEach(function (c) {
-      if (!_showCol(c)) return;
-      html += '<div class="tjb-col"><div class="tjb-colhead' + (c.hot ? ' hot' : '') + '"><b>' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
+      html += '<section class="tjb-col" id="board-col-' + esc(c.key) + '" data-board-column-key="' + esc(c.key) +
+        '" aria-labelledby="board-col-label-' + esc(c.key) + '"><div class="tjb-colhead' + (c.hot ? ' hot' : '') +
+        '"><b id="board-col-label-' + esc(c.key) + '">' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
       html += '<div class="tjb-colcards">';
       if (c.cards.length) {
         c.cards.forEach(function (m) {
@@ -18228,12 +18414,13 @@
       } else {
         html += '<div class="tjb-empty">No ' + esc(active.label.toLowerCase()) + ' jobs in ' + esc(c.label) + '.</div>';
       }
-      html += '</div></div>';
+      html += '</div></section>';
     });
     html += '</div>';
     html += '<div class="tjb-note" style="text-align:center;margin-top:6px">' + (_activeBoardCanAllocate() ? 'Allocate and set arrival time from any live card.' : 'View only. Visibility and actions are set by the server.') + '</div>';
     html += '</div>';
     container.innerHTML = html;
+    if (isFencing) _wireBoardPager();
     if (weatherData) renderWeatherBadges();
     // M3d — a background reload rebuilds innerHTML; re-apply any active filter
     // so the input value + visible-card set survive the re-render (no focus
@@ -18758,6 +18945,9 @@
       onSuccess: function () {
         closeAllocateSheet();
         toast('Schedule updated');
+        if (sel.model && sel.model.type === 'fencing' && payload.scheduled_date) {
+          _selectFencingBoardWeek(payload.scheduled_date, FencingBoardCore.columnOf(sel.model._boardRow || {}) || 'scheduled');
+        }
         _refreshBoardSilent();
         NC.dirty = true; // U-T3: a Board schedule edit changes the calendar — refetch on next entry
         if (_currentView === 'schedule') renderNewCalendar();
@@ -18815,6 +19005,9 @@
       onSuccess: function (res) {
         closeAllocateSheet();
         toast(res && res.deduped ? 'Already assigned' : (ctx.mode === 'reassign' ? 'Crew reassigned' : 'Job allocated'));
+        if (sel.model && sel.model.type === 'fencing' && ctx.mode === 'create') {
+          _selectFencingBoardWeek(ctx.scheduledDate, 'scheduled');
+        }
         _refreshBoardSilent();
         NC.dirty = true; // U-T3: a Board allocation changes the calendar — refetch on next entry
         if (_currentView === 'schedule') renderNewCalendar();
@@ -18848,6 +19041,9 @@
         if (_allocGuard) _allocGuard.busy = false;
         closeAllocateSheet();
         toast(failed ? ('Assigned ' + done + ' of ' + ops.length + ' — ' + failed + ' failed') : ('Allocated ' + done + ' crew'), !!failed);
+        if (sel.model && sel.model.type === 'fencing' && isCreateMode && done > 0 && ops[0]) {
+          _selectFencingBoardWeek(ops[0].scheduledDate, 'scheduled');
+        }
         _refreshBoardSilent();
         NC.dirty = true;
         if (_currentView === 'schedule') renderNewCalendar();
@@ -19015,12 +19211,63 @@
   // WORK ORDERS — sub-view in Financial Hub
   // ══════════════════════════════════════════════════
 
+  // <trade-workorder-auth>
+  // Tenant guard shared by every my_work_orders consumer. An order the server
+  // did not tag stays usable (own-only responses carry no tenant column); a
+  // tagged order must match the viewer, and a viewer whose profile carries no
+  // org_id fails closed on every widened (admin / managed-vertical) surface.
+  function workOrderTenantOk(order) {
+    var orderOrg = String((order || {}).org_id || '');
+    if (!orderOrg) return true;
+    var viewerOrg = String((_user || {}).org_id || '');
+    if (viewerOrg) return orderOrg === viewerOrg;
+    return !canUseEveryoneLens();
+  }
+
+  // Canonical vertical for a work order when the backend supplies one. An
+  // order with no vertical is never dropped — the narrowing is a lens over
+  // what the server already authorised, not the authorisation itself.
+  function workOrderVertical(order) {
+    order = order || {};
+    var raw = order.job_type || order.vertical || (order.jobs || {}).type;
+    return String(raw || '').toLowerCase().trim();
+  }
+
+  // The Work Order hub lens: same tenant, and for a managed-vertical lead the
+  // verticals he manages whenever the server says which vertical an order is.
+  function workOrdersForViewer(orders) {
+    var managed = managedTradeVerticals(_user);
+    return (orders || []).filter(function (order) {
+      if (!order || !workOrderTenantOk(order)) return false;
+      if (!managed.length) return true;
+      var vertical = workOrderVertical(order);
+      return !vertical || managed.indexOf(vertical) !== -1;
+    });
+  }
+
+  // Every entry point that can reach submit_work_order_invoice registers the
+  // order it renders from its own authenticated my_work_orders response, so a
+  // write is always backed by a server-scoped read in this session. The hub is
+  // never a precondition for the job-detail Cost Breakdown invoice.
+  function authorizeWorkOrders(orders) {
+    var allowed = (orders || []).filter(function (order) { return order && workOrderTenantOk(order); });
+    allowed.forEach(function (order) {
+      if (order.id) _authorizedWorkOrderIds[String(order.id)] = true;
+    });
+    return allowed;
+  }
+
+  function isAuthorizedWorkOrder(workOrderId) {
+    return _authorizedWorkOrderIds[String(workOrderId || '')] === true;
+  }
+  // </trade-workorder-auth>
+
   window.openWorkOrderHub = function() {
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading work orders...</div>';
 
     api('my_work_orders').then(function(res) {
-      renderWorkOrderHub(res.work_orders || []);
+      renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
     }).catch(function(err) {
       container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
     });
@@ -19041,10 +19288,16 @@
       return;
     }
 
+    html += '<input id="workOrderSearch" type="search" autocomplete="off" placeholder="Search authorised work orders" oninput="filterWorkOrders()" ' +
+      'style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:11px 13px;font-size:14px;font-family:inherit;color:var(--sw-text);background:var(--sw-card);border:1px solid var(--sw-border);border-radius:10px;outline:none">';
+    html += '<div id="workOrderSearchCount" class="tjb-note">' + orders.length + ' work order' + (orders.length === 1 ? '' : 's') + '</div>';
+
     orders.forEach(function(wo) {
       var statusLabel = (wo.status || 'unknown').replace(/_/g, ' ');
+      var workOrderSearch = [wo.wo_number, wo.job_number, wo.client_name, wo.site_address]
+        .filter(Boolean).join(' ').toLowerCase();
 
-      html += '<div style="padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow);margin-bottom:10px">';
+      html += '<div data-work-order-card data-search="' + esc(workOrderSearch) + '" style="padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow);margin-bottom:10px">';
 
       // Header: WO number + status
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
@@ -19089,7 +19342,25 @@
     container.innerHTML = html;
   }
 
+  window.filterWorkOrders = function () {
+    var input = document.getElementById('workOrderSearch');
+    var query = String((input && input.value) || '').toLowerCase().trim();
+    var cards = document.querySelectorAll('[data-work-order-card]');
+    var shown = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var visible = !query || String(cards[i].getAttribute('data-search') || '').indexOf(query) !== -1;
+      cards[i].style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    }
+    var count = document.getElementById('workOrderSearchCount');
+    if (count) count.textContent = query ? (shown + ' matching work order' + (shown === 1 ? '' : 's')) : (cards.length + ' work order' + (cards.length === 1 ? '' : 's'));
+  };
+
   window.invoiceWorkOrder = function(workOrderId) {
+    if (!isAuthorizedWorkOrder(workOrderId)) {
+      toast('This work order is not available to invoice', true);
+      return;
+    }
     showConfirm('Submit Invoice', 'Submit invoice for this work order? It will be created as a DRAFT in Xero.', 'Submit').then(function(ok) {
       if (!ok) return;
 

@@ -43,9 +43,181 @@
       }
     }
   ],
-  "thisWeek": [],
-  "upcoming": [],
-  "recent": [],
+  "thisWeek": [
+    {
+      "id": "fence-assignment-onsite",
+      "user_id": "e2e-henry",
+      "status": "in_progress",
+      "scheduled_date": "{{CURRENT_TUESDAY}}",
+      "start_time": "08:00",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-onsite",
+        "job_number": "FENCE-ONSITE-004",
+        "type": "fencing",
+        "status": "in_progress",
+        "client_name": "On Site Client",
+        "site_address": "44 Plinth Way",
+        "site_suburb": "Osborne Park",
+        "scope_summary": "Continue rear fence installation",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "fence-assignment-done",
+      "user_id": "e2e-alyx",
+      "status": "complete",
+      "scheduled_date": "{{CURRENT_WEDNESDAY}}",
+      "start_time": "07:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-done",
+        "job_number": "FENCE-DONE-005",
+        "type": "fencing",
+        "status": "complete",
+        "client_name": "Done Client",
+        "site_address": "55 Gate Road",
+        "site_suburb": "Dianella",
+        "scope_summary": "Completed boundary fence",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "fence-assignment-attention",
+      "user_id": "e2e-henry",
+      "status": "disputed",
+      "scheduled_date": "{{CURRENT_THURSDAY}}",
+      "start_time": "10:00",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-attention",
+        "job_number": "FENCE-ATTN-006",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Attention Client",
+        "site_address": "66 Return Street",
+        "site_suburb": "Morley",
+        "scope_summary": "Resolve access issue",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "fence-assignment-cancelled",
+      "user_id": "e2e-alyx",
+      "status": "cancelled",
+      "scheduled_date": "{{CURRENT_THURSDAY}}",
+      "start_time": "11:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-cancelled",
+        "job_number": "FENCE-CANCEL-007",
+        "type": "fencing",
+        "status": "cancelled",
+        "client_name": "Cancelled Client",
+        "site_address": "77 Removed Road",
+        "site_suburb": "Innaloo",
+        "scope_summary": "Cancelled fencing work",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "other-tenant-fence-assignment",
+      "org_id": "00000000-0000-0000-0000-000000000999",
+      "user_id": "outside-user",
+      "status": "scheduled",
+      "scheduled_date": "{{CURRENT_TUESDAY}}",
+      "crew_name": "Outside Crew",
+      "jobs": {
+        "id": "other-tenant-fence-job",
+        "org_id": "00000000-0000-0000-0000-000000000999",
+        "job_number": "OTHER-TENANT-FENCE",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Outside Tenant",
+        "site_address": "999 Elsewhere Street",
+        "site_suburb": "Perth",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "patio-assignment",
+      "user_id": "e2e-henry",
+      "status": "scheduled",
+      "scheduled_date": "{{CURRENT_WEDNESDAY}}",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "patio-job",
+        "job_number": "PATIO-NOT-AUTHORISED",
+        "type": "patio",
+        "status": "scheduled",
+        "client_name": "Patio Client",
+        "site_address": "88 Patio Parade",
+        "site_suburb": "Stirling",
+        "scope_json": {}
+      }
+    }
+  ],
+  "upcoming": [
+    {
+      "id": "fence-assignment-future",
+      "user_id": "e2e-alyx",
+      "status": "scheduled",
+      "scheduled_date": "{{FUTURE_MONDAY}}",
+      "start_time": "08:30",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-future",
+        "job_number": "FENCE-FUTURE-008",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Future Client",
+        "site_address": "88 Horizon Road",
+        "site_suburb": "Ellenbrook",
+        "scope_summary": "Future fencing installation",
+        "scope_json": {}
+      }
+    }
+  ],
+  "recent": [
+    {
+      "id": "fence-assignment-previous",
+      "user_id": "e2e-henry",
+      "status": "complete",
+      "scheduled_date": "{{PREVIOUS_MONDAY}}",
+      "start_time": "07:30",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-previous",
+        "job_number": "FENCE-PREVIOUS-009",
+        "type": "fencing",
+        "status": "complete",
+        "client_name": "Previous Week Client",
+        "site_address": "99 Prior Place",
+        "site_suburb": "Scarborough",
+        "scope_summary": "Previous week fencing",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "fence-assignment-historical",
+      "user_id": "e2e-alyx",
+      "status": "complete",
+      "scheduled_date": "{{HISTORICAL_MONDAY}}",
+      "start_time": "07:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-historical",
+        "job_number": "FENCE-HISTORICAL-010",
+        "type": "fencing",
+        "status": "complete",
+        "client_name": "Historical Client",
+        "site_address": "10 Archive Avenue",
+        "site_suburb": "Midland",
+        "scope_summary": "Historical fencing work",
+        "scope_json": {}
+      }
+    }
+  ],
   "makesafePool": [
     {
       "id": "fence-open-pool",

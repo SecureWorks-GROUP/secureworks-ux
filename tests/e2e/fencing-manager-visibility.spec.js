@@ -18,6 +18,26 @@ function boardWeekLabel(start) {
   return `Mon ${from.getUTCDate()} ${months[from.getUTCMonth()]}${leftYear} – Sun ${end.getUTCDate()} ${months[end.getUTCMonth()]} ${end.getUTCFullYear()}`;
 }
 
+function boardPagerRestState(page, key) {
+  return page.locator('#boardContent .tjb-wrap.fencing .tjb-pager').evaluate((pager, columnKey) => {
+    const column = pager.querySelector('[data-board-column-key="' + columnKey + '"]');
+    if (!column) return null;
+    const target = column.offsetLeft - pager.offsetLeft;
+    return { target, drift: Math.round(Math.abs(pager.scrollLeft - target)) };
+  }, key);
+}
+
+// Tapping a status starts a smooth scroll. A touch swipe cancels an in-flight
+// programmatic scroll on some platforms and rides along with it on others, so
+// swiping before the pager comes to rest makes the snap target undecidable.
+// Wait for the tapped column to be settled under the pager first.
+async function settleBoardPagerOn(page, key) {
+  await expect
+    .poll(async () => (await boardPagerRestState(page, key))?.drift ?? null)
+    .toBeLessThanOrEqual(2);
+  expect((await boardPagerRestState(page, key)).target).toBeGreaterThan(0);
+}
+
 async function swipeBoardLeft(page) {
   const pager = page.locator('#boardContent .tjb-pager');
   const box = await pager.boundingBox();
@@ -295,7 +315,7 @@ for (const width of [390, 360]) {
 
       await page.getByRole('button', { name: /Scheduled/ }).click();
       await expect(page.locator('[data-board-status-target="scheduled"]')).toHaveAttribute('aria-current', 'true');
-      await expect.poll(() => page.locator('.tjb-pager').evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      await settleBoardPagerOn(page, 'scheduled');
       await swipeBoardLeft(page);
       await expect(page.locator('[data-board-status-target="onsite"]')).toHaveAttribute('aria-current', 'true');
       await expect(page.locator('#fenceWeekLabel')).toHaveText(expectedWeek);

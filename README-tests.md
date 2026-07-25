@@ -23,7 +23,8 @@ Covered Trade App flows:
 7. An authenticated installer sees My Jobs and can open a standard job detail.
 8. A make-safe manager's board is board-wide: they see every card, unallocated AND allocated (captain ruling 2026-07-22), and can allocate. Captures 1440px/390px board screenshots to `test-results/manager-view/`.
 9. A non-manager's make-safe board is view-only: no Allocate action (`can_allocate:false`).
-10. Optional dedicated accounts prove that the real Supabase password login still works.
+10. A make-safe final report gates on persisted `job_media` photos: only confirmed `type: photo` uploads count, the visible photo count refreshes as uploads confirm without discarding the in-progress form, and a submitted report is attributed to the signed-in trade (`userId`).
+11. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

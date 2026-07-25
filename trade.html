@@ -13066,7 +13066,7 @@
 
   // Calendar source router. Make-safe remains on its canonical projection;
   // fencing crosses only the strict trade-calendar.v1 adapter above.
-  async function caFetchCalendarModel(fromStr, toStr) {
+  async function caFetchCalendarModel(fromStr, toStr, force) {
     if (NC.type !== 'makesafe') {
       return TradeCalendarSource.load({
         from: fromStr,
@@ -13074,7 +13074,7 @@
         vertical: NC.type,
         lens: NC.scope,
         cacheKey: tradeSurfaceCacheKey('calendar', NC.type, NC.scope)
-      }, false);
+      }, !!force);
     }
     var payload = await fetchMakesafeV5Feed(false);
     var blocks = MakesafeTradeV5.calendarBlocks(payload).filter(function (b) {
@@ -13519,7 +13519,7 @@
       var requestToken = ++NC.requestToken;
       NC.loading = true;
       try {
-        var data = await caFetchCalendarModel(from, to);
+        var data = await caFetchCalendarModel(from, to, stale);
         if (requestToken !== NC.requestToken || desiredModelKey !== tradeSurfaceCacheKey('calendar', NC.type, NC.scope)) return;
         var jobBlocks = (data.blocks || []).filter(function (b) { return b._jobId; }); // org/meeting rows (no job_id) stay in the classic calendar
         if (NC.type !== 'makesafe' && data.mode) NC.scope = data.mode === 'all' ? 'everyone' : 'mine';
@@ -17863,19 +17863,21 @@
       });
       var byColumn = {};
       columns.forEach(function (column) { byColumn[column.key] = column; });
-      var unmapped = {};
+      var unmapped = {}, unmappedCount = 0;
       assignedRows.concat(poolRows).forEach(function (row) {
         var column = columnOf(row);
         if (!column) {
           unmapped[norm(row.status) || 'blank'] = true;
+          unmappedCount++;
           column = 'attention';
         }
         byColumn[column].cards.push(makeCard(row.jobs || {}, row));
       });
       var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
       return {
-        verticals: [{ vertical: 'fencing', label: 'Fencing', columns: columns, total: total }],
+        verticals: [{ vertical: 'fencing', label: 'Fencing', columns: columns, total: total, unmappedCount: unmappedCount }],
         unmappedStatuses: Object.keys(unmapped),
+        unmappedCount: unmappedCount,
         assignedCount: assignedRows.length,
         poolCount: poolRows.length,
         poolMergedIntoAssigned: poolMergedIntoAssigned
@@ -17900,6 +17902,7 @@
   var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
   var _boardCancelledVisible = false; // M-F W2-D — Cancelled column collapsed by default
   var _fieldBoardCacheByKey = {};
+  var _fieldBoardTtlMs = 90000;   // same freshness window as the make-safe v5 feed
   // M-F W2-C — reopen a cancelled make-safe from the trade board. Same gate as
   // cancel/re-attend; passes the backend's required default reason (the user is
   // not asked for one). On success the board reloads and the card lands in New.
@@ -17963,9 +17966,10 @@
         })
       };
     });
-    var active = { vertical: 'makesafe', label: 'Make-safe', columns: columns, total: projected.rows.length };
+    var unmappedJobIds = projected.unmapped_stage_job_ids || [];
+    var active = { vertical: 'makesafe', label: 'Make-safe', columns: columns, total: projected.rows.length, unmappedCount: unmappedJobIds.length };
     return {
-      board: { verticals: [active], unmappedStatuses: projected.unmapped_stage_job_ids || [] },
+      board: { verticals: [active], unmappedStatuses: unmappedJobIds },
       roster: roster, permissions: projected.permissions || {}, generated_at: projected.generated_at,
       modelByJobId: modelByJobId, feed: payload
     };
@@ -17992,10 +17996,11 @@
   function _loadFencingBoard(force) {
     if (!managesTradeVertical('fencing')) return Promise.resolve(null);
     var key = tradeSurfaceCacheKey('board', 'fencing', 'everyone');
-    if (!force && _fieldBoardCacheByKey[key]) return Promise.resolve(_fieldBoardCacheByKey[key]);
+    var cached = _fieldBoardCacheByKey[key];
+    if (!force && cached && Date.now() - cached.at < _fieldBoardTtlMs) return Promise.resolve(cached.board);
     return api('my_jobs', { mode: 'all' }).then(function (data) {
       var board = FencingBoardCore.buildBoard(data, _fencingBoardCardModel);
-      _fieldBoardCacheByKey[key] = board;
+      _fieldBoardCacheByKey[key] = { board: board, at: Date.now() };
       return board;
     });
   }
@@ -18012,7 +18017,6 @@
       _boardCache = _buildMakesafeV5BoardCache(res[0], roster);
       if (res[2] && res[2].verticals && res[2].verticals.length) {
         _boardCache.board.verticals = res[2].verticals.concat(_boardCache.board.verticals);
-        _boardCache.board.unmappedStatuses = (_boardCache.board.unmappedStatuses || []).concat(res[2].unmappedStatuses || []);
       }
       var preferred = managesTradeVertical('fencing') ? 'fencing' : 'makesafe';
       if (!_boardVert || !_boardCache.board.verticals.some(function (vertical) { return vertical.vertical === _boardVert; })) {
@@ -18083,9 +18087,11 @@
     if (!active) active = board.verticals[0];
 
     var html = '<div class="tjb-wrap">';
-    // Unmapped-status guard (STOP surfaced, never a silent wrong column)
-    if (board.unmappedStatuses.length) {
-      html += '<div class="tjb-warn">The feed surfaced ' + board.unmappedStatuses.length + ' job(s) with an unknown canonical stage. They remain visible for review.</div>';
+    // Unmapped-status guard (STOP surfaced, never a silent wrong column). The
+    // count is per-vertical and counted in JOBS — each vertical reports its own.
+    var unmappedJobs = active.unmappedCount || 0;
+    if (unmappedJobs) {
+      html += '<div class="tjb-warn">The feed surfaced ' + unmappedJobs + ' job(s) with an unknown canonical stage. They remain visible for review.</div>';
     }
     // M3d — client-side search over the board cards (name / suburb / ref).
     html += '<input id="boardSearchInput" type="search" oninput="filterBoard()" autocomplete="off" ' +
@@ -18788,6 +18794,8 @@
   // optimistic view if the refresh itself fails.
   function _refreshBoardSilent() {
     invalidateMakesafeV5Feed();
+    _fieldBoardCacheByKey = {};
+    if (typeof TradeCalendarSource !== 'undefined' && TradeCalendarSource) TradeCalendarSource.clear();
     _loadBoard(true, { silent: true });
   }
 

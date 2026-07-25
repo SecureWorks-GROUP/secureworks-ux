@@ -80,6 +80,10 @@ const unknownStatus = {
   id: 'assignment-future', status: 'future_backend_status',
   jobs: { ...fencingJob, id: 'fence-3', job_number: 'FENCE-3' }
 };
+const unknownStatusTwin = {
+  id: 'assignment-future-2', status: 'future_backend_status',
+  jobs: { ...fencingJob, id: 'fence-4', job_number: 'FENCE-4' }
+};
 const board = fencing.buildBoard({
   today: [assigned, mixed, mislabeledPool, unknownStatus],
   thisWeek: [],
@@ -95,8 +99,20 @@ assert.strictEqual(cards.some((card) => card.job.type !== 'fencing'), false, 'ot
 assert.strictEqual(board.verticals[0].columns.find((column) => column.key === 'attention').cards[0].job.id, 'fence-3',
   'unknown server statuses stay visible in Attention');
 assert.deepStrictEqual(Array.from(board.unmappedStatuses), ['future_backend_status']);
+assert.strictEqual(board.unmappedCount, 1, 'the unmapped guard counts jobs, not status tokens');
+assert.strictEqual(board.verticals[0].unmappedCount, 1, 'the fencing vertical carries its own unmapped job count');
 assert.strictEqual(fencing.columnOf(assigned), 'scheduled');
 assert.strictEqual(fencing.columnOf(genuinePool), 'needs');
+
+// Two jobs sharing ONE unknown status must report as 2 jobs, not 1 status token.
+const sharedUnknown = fencing.buildBoard({
+  today: [unknownStatus, unknownStatusTwin], thisWeek: [], upcoming: [], recent: [], makesafePool: []
+}, (job, row) => ({ job, row }));
+assert.deepStrictEqual(Array.from(sharedUnknown.unmappedStatuses), ['future_backend_status']);
+assert.strictEqual(sharedUnknown.unmappedCount, 2, 'jobs sharing one unknown status still count as 2 jobs');
+assert.strictEqual(sharedUnknown.verticals[0].unmappedCount, 2);
+assert(/var unmappedJobs = active\.unmappedCount \|\| 0;/.test(html),
+  'the board banner reads the ACTIVE vertical unmapped count, never a cross-vertical merge');
 
 const payload = {
   schema: 'trade-calendar.v1',
@@ -152,4 +168,34 @@ assert(/crewNone: isPool \? \(isMs \? 'All make-safe trades' : 'Nobody allocated
 assert(/_lastJobDataKey === activeCacheKey/.test(html),
   'a late projection refresh cannot repaint a broader My Jobs lens');
 
-console.log('fencing manager visibility tests passed');
+// Freshness: the calendar's staleness decision must reach the transport cache,
+// and a Board write must drop both field caches.
+assert(/caFetchCalendarModel\(from, to, stale\)/.test(html),
+  'the calendar threads its staleness decision into the source load');
+assert(/\}, !!force\);/.test(html), 'the fencing calendar source honours a forced reload');
+assert(/Date\.now\(\) - cached\.at < _fieldBoardTtlMs/.test(html),
+  'the fencing board cache expires on a TTL instead of freezing for the session');
+assert(/_refreshBoardSilent\(\) \{[\s\S]*?_fieldBoardCacheByKey = \{\};[\s\S]*?TradeCalendarSource\.clear\(\);/.test(html),
+  'a Board write clears the fencing board and calendar caches');
+
+(async function freshness() {
+  const cacheRequest = { from: '2026-07-20', to: '2026-08-10', vertical: 'fencing', lens: 'everyone', cacheKey: allKey };
+  let loads = 0;
+  calendar.register(() => { loads++; return adapted; });
+
+  await calendar.load(cacheRequest, false);
+  await calendar.load(cacheRequest, false);
+  assert.strictEqual(loads, 1, 'an unforced load reuses the cached window');
+
+  await calendar.load(cacheRequest, true);
+  assert.strictEqual(loads, 2, 'a stale load refetches instead of serving the session cache');
+
+  await calendar.load({ ...cacheRequest, cacheKey: mineKey, lens: 'mine' }, false);
+  assert.strictEqual(loads, 3, 'a lens switch never reuses the other lens cache entry');
+
+  calendar.clear();
+  await calendar.load(cacheRequest, false);
+  assert.strictEqual(loads, 4, 'clearing the source drops every cached window');
+
+  console.log('fencing manager visibility tests passed');
+})().catch((err) => { console.error(err); process.exitCode = 1; });

@@ -9,10 +9,33 @@ function perthDate() {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+function addIsoDays(iso, amount) {
+  const [year, month, day] = iso.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+}
+
+function perthWeekMonday() {
+  const today = perthDate();
+  const [year, month, day] = today.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  const weekDay = value.getUTCDay();
+  return addIsoDays(today, -(weekDay === 0 ? 6 : weekDay - 1));
+}
+
 function loadJsonFixture(fileName, replacements = {}) {
   const fixturePath = path.resolve(__dirname, '..', 'fixtures', fileName);
+  const monday = perthWeekMonday();
   const values = {
     TODAY: perthDate(),
+    CURRENT_MONDAY: monday,
+    CURRENT_TUESDAY: addIsoDays(monday, 1),
+    CURRENT_WEDNESDAY: addIsoDays(monday, 2),
+    CURRENT_THURSDAY: addIsoDays(monday, 3),
+    PREVIOUS_MONDAY: addIsoDays(monday, -7),
+    HISTORICAL_MONDAY: addIsoDays(monday, -84),
+    FUTURE_MONDAY: addIsoDays(monday, 182),
     NOW: new Date().toISOString(),
     ...replacements
   };
@@ -46,7 +69,8 @@ async function installFeedStubs(page, {
       method: request.method(),
       action,
       url: request.url(),
-      authorization: request.headers().authorization || ''
+      authorization: request.headers().authorization || '',
+      body: isWrite ? request.postDataJSON() : null
     });
 
     if (isWrite && !allowed.has(action)) {
@@ -113,4 +137,4 @@ async function installExternalRequestGuard(page, { allowedOrigins = [] } = {}) {
   return { blockedRequests };
 }
 
-module.exports = { installFeedStubs, installExternalRequestGuard, loadJsonFixture, perthDate };
+module.exports = { installFeedStubs, installExternalRequestGuard, loadJsonFixture, perthDate, perthWeekMonday, addIsoDays };

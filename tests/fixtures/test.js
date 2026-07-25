@@ -1,6 +1,12 @@
 const { test: base, expect } = require('@playwright/test');
 const { installSupabaseAuthStub } = require('../helpers/auth');
-const { installFeedStubs, installExternalRequestGuard, loadJsonFixture } = require('../helpers/feed-stub');
+const {
+  installFeedStubs,
+  installExternalRequestGuard,
+  loadJsonFixture,
+  perthWeekMonday,
+  addIsoDays
+} = require('../helpers/feed-stub');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const APP_ORIGIN = new URL(process.env.E2E_BASE_URL || 'http://127.0.0.1:4173').origin;
@@ -78,11 +84,55 @@ const test = base.extend({
     const makesafeResponse = feedScenario === 'access-denied'
       ? { status: 403, body: { error: 'Trade access is not available for this account' } }
       : board;
-    const fencingAll = loadJsonFixture('fencing-manager-jobs.json');
+    let fencingAll = loadJsonFixture('fencing-manager-jobs.json');
     const fencingMine = loadJsonFixture('fencing-manager-mine.json');
     const fencingCalendar = loadJsonFixture('trade-calendar-fencing.json');
-    const fencingRows = ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool']
+    const fencingRows = () => ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool']
       .flatMap((bucket) => fencingAll[bucket] || []);
+    const weekStart = perthWeekMonday();
+    const workOrders = [
+      {
+        id: 'wo-fence-authorised',
+        wo_number: 'WO-FENCE-001',
+        job_id: 'fence-job-henry',
+        job_number: 'FENCE-HENRY-001',
+        client_name: 'Henry Client',
+        job_type: 'fencing',
+        status: 'complete',
+        site_address: '11 Boundary Road',
+        scope_items: [{ description: 'Install fencing', quantity: 10, rate: 10, total: 100 }],
+        subtotal: 100,
+        gst: 10,
+        total: 110,
+        already_invoiced: false,
+        can_invoice: true
+      },
+      {
+        id: 'wo-patio-not-managed',
+        wo_number: 'WO-PATIO-002',
+        job_number: 'PATIO-NOT-AUTHORISED',
+        client_name: 'Patio Client',
+        job_type: 'patio',
+        status: 'complete',
+        subtotal: 200,
+        gst: 20,
+        total: 220,
+        can_invoice: true
+      },
+      {
+        id: 'wo-other-tenant',
+        org_id: '00000000-0000-0000-0000-000000000999',
+        wo_number: 'WO-OTHER-TENANT',
+        job_number: 'OTHER-TENANT-FENCE',
+        client_name: 'Outside Tenant',
+        job_type: 'fencing',
+        status: 'complete',
+        subtotal: 300,
+        gst: 30,
+        total: 330,
+        can_invoice: true
+      }
+    ];
     const feed = await installFeedStubs(page, {
       endpoint: `${SUPABASE_ORIGIN}/functions/v1/ops-api`,
       requestLog: feedRequests,
@@ -114,23 +164,29 @@ const test = base.extend({
           if (persona !== 'fencing_manager') {
             return { status: 403, body: { error: 'Trade calendar fixture is fencing-manager only' } };
           }
+          if (feedScenario === 'calendar-unknown-action') {
+            return { status: 404, body: { error: 'unknown action' } };
+          }
           const mode = url.searchParams.get('mode') === 'mine' ? 'mine' : 'all';
+          const from = url.searchParams.get('from') || '0000-01-01';
+          const to = url.searchParams.get('to') || '9999-12-31';
           return {
             ...fencingCalendar,
             mode,
-            events: mode === 'mine'
-              ? fencingCalendar.events.filter((event) => event.user_id === PERSONAS.fencing_manager.profile.id)
-              : fencingCalendar.events
+            events: fencingCalendar.events.filter((event) => {
+              const overlaps = event.scheduled_date <= to && (event.scheduled_end || event.scheduled_date) >= from;
+              return overlaps && (mode !== 'mine' || event.user_id === PERSONAS.fencing_manager.profile.id);
+            })
           };
         },
         trade_job_detail: ({ url }) => {
           if (persona !== 'fencing_manager') return loadJsonFixture('job-detail.json');
           const jobId = url.searchParams.get('jobId');
-          const assignment = fencingRows.find((row) => row.jobs && row.jobs.id === jobId);
+          const assignment = fencingRows().find((row) => row.jobs && row.jobs.id === jobId);
           if (!assignment) return { status: 404, body: { error: 'Unknown fencing fixture job' } };
           return {
             job: assignment.jobs,
-            crew: fencingRows
+            crew: fencingRows()
               .filter((row) => row.jobs && row.jobs.id === jobId && row.id)
               .map((row) => ({
                 id: row.id,
@@ -146,8 +202,42 @@ const test = base.extend({
             notes: []
           };
         },
-        crew_charges_on_my_jobs: { charges: [] }
-      }
+        crew_charges_on_my_jobs: { charges: [] },
+        my_hours: {
+          week_start: weekStart,
+          week_ending: addIsoDays(weekStart, 6),
+          assignments: [],
+          total_hours: 0,
+          already_submitted: false
+        },
+        my_trade_invoices: { invoices: [] },
+        my_work_orders: {
+          work_orders: persona === 'fencing_manager' ? workOrders : []
+        },
+        allocate_job: async ({ request }) => {
+          if (feedScenario !== 'fencing-allocation' || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Allocation fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const open = (fencingAll.makesafePool || []).find((row) => row.jobs && row.jobs.id === body.jobId);
+          if (!open) return { ok: true, mode: 'idempotent', deduped: true };
+          const assignment = {
+            ...open,
+            id: 'fence-assignment-new',
+            user_id: body.userId,
+            status: 'scheduled',
+            assignment_type: 'install',
+            scheduled_date: body.scheduledDate,
+            start_time: body.startTime || null,
+            end_time: body.endTime || null,
+            crew_name: body.userId === PERSONAS.fencing_manager.profile.id ? PERSONAS.fencing_manager.profile.name : 'Alyx Crew'
+          };
+          fencingAll.makesafePool = (fencingAll.makesafePool || []).filter((row) => !row.jobs || row.jobs.id !== body.jobId);
+          fencingAll.upcoming = (fencingAll.upcoming || []).concat([assignment]);
+          return { ok: true, mode: 'create', assignment };
+        }
+      },
+      allowedWriteActions: feedScenario === 'fencing-allocation' ? ['allocate_job'] : []
     });
 
     await page.route('https://cdnjs.cloudflare.com/**', (route) => route.fulfill({

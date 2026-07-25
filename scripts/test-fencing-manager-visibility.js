@@ -76,6 +76,10 @@ const mislabeledPool = {
   id: 'patio-open', status: 'available', assignment_type: 'fencing_open',
   jobs: { id: 'patio-open-job', job_number: 'PATIO-OPEN', type: 'patio', status: 'new' }
 };
+const otherTenant = {
+  id: 'outside-assignment', org_id: 'org-2', status: 'scheduled', scheduled_date: '2026-07-25',
+  jobs: { ...fencingJob, id: 'outside-job', job_number: 'OUTSIDE-1', org_id: 'org-2' }
+};
 const unknownStatus = {
   id: 'assignment-future', status: 'future_backend_status',
   jobs: { ...fencingJob, id: 'fence-3', job_number: 'FENCE-3' }
@@ -85,17 +89,18 @@ const unknownStatusTwin = {
   jobs: { ...fencingJob, id: 'fence-4', job_number: 'FENCE-4' }
 };
 const board = fencing.buildBoard({
-  today: [assigned, mixed, mislabeledPool, unknownStatus],
+  today: [assigned, mixed, mislabeledPool, unknownStatus, otherTenant],
   thisWeek: [],
   upcoming: [],
   recent: [],
   makesafePool: [stalePool, genuinePool, duplicatePool]
-}, (job, row) => ({ job, row }));
+}, (job, row) => ({ job, row, _boardRow: row }), 'org-1');
 const cards = board.verticals[0].columns.flatMap((column) => column.cards);
 assert.strictEqual(cards.length, 3, 'board keeps assigned, genuinely open, and review-required fencing');
 assert.strictEqual(cards.filter((card) => card.job.id === 'fence-1').length, 1, 'old assigned work cannot reappear as available');
 assert.strictEqual(cards.filter((card) => card.job.id === 'fence-2').length, 1, 'duplicate open rows cannot duplicate a fencing card');
 assert.strictEqual(cards.some((card) => card.job.type !== 'fencing'), false, 'other verticals never enter the fencing board');
+assert.strictEqual(cards.some((card) => card.job.id === 'outside-job'), false, 'a row carrying another tenant id never enters the fencing board');
 assert.strictEqual(board.verticals[0].columns.find((column) => column.key === 'attention').cards[0].job.id, 'fence-3',
   'unknown server statuses stay visible in Attention');
 assert.deepStrictEqual(Array.from(board.unmappedStatuses), ['future_backend_status']);
@@ -103,11 +108,17 @@ assert.strictEqual(board.unmappedCount, 1, 'the unmapped guard counts jobs, not 
 assert.strictEqual(board.verticals[0].unmappedCount, 1, 'the fencing vertical carries its own unmapped job count');
 assert.strictEqual(fencing.columnOf(assigned), 'scheduled');
 assert.strictEqual(fencing.columnOf(genuinePool), 'needs');
+assert.strictEqual(fencing.weekStart('2026-07-25'), '2026-07-20', 'week planning uses Monday in date-only space');
+assert.strictEqual(fencing.weekLabel('2026-07-20'), 'Mon 20 Jul – Sun 26 Jul 2026');
+assert.strictEqual(fencing.forSelection(board.verticals[0], '2026-07-20', false).total, 1,
+  'a selected week includes only canonically dated work in that Monday-Sunday range');
+assert.strictEqual(fencing.forSelection(board.verticals[0], '2026-07-20', true).total, 1,
+  'Unscheduled deliberately retains the one genuinely open Ready job');
 
 // Two jobs sharing ONE unknown status must report as 2 jobs, not 1 status token.
 const sharedUnknown = fencing.buildBoard({
   today: [unknownStatus, unknownStatusTwin], thisWeek: [], upcoming: [], recent: [], makesafePool: []
-}, (job, row) => ({ job, row }));
+}, (job, row) => ({ job, row, _boardRow: row }));
 assert.deepStrictEqual(Array.from(sharedUnknown.unmappedStatuses), ['future_backend_status']);
 assert.strictEqual(sharedUnknown.unmappedCount, 2, 'jobs sharing one unknown status still count as 2 jobs');
 assert.strictEqual(sharedUnknown.verticals[0].unmappedCount, 2);

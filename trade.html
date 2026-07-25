@@ -3164,11 +3164,11 @@
   </div>
   <div class="container">
     <div class="job-search-bar" id="jobSearchBar" style="display:none">
-      <!-- Admin toggle: All Jobs / My Jobs -->
+      <!-- Manager lens: Everyone / Mine -->
       <div id="adminJobToggle" style="display:none;margin-bottom:10px">
         <div style="display:flex;background:var(--sw-light);border-radius:8px;padding:2px;gap:2px">
-          <button id="adminToggleAll" onclick="setAdminView(true)" style="flex:1;padding:7px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--sw-mid);transition:all 0.2s">All Jobs</button>
-          <button id="adminToggleMine" onclick="setAdminView(false)" style="flex:1;padding:7px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-dark);color:#fff;transition:all 0.2s">My Assignments</button>
+          <button id="adminToggleAll" onclick="setAdminView(true)" style="flex:1;padding:7px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--sw-mid);transition:all 0.2s">Everyone</button>
+          <button id="adminToggleMine" onclick="setAdminView(false)" style="flex:1;padding:7px 12px;border:none;border-radius:6px;font-family:var(--sw-font);font-size:13px;font-weight:600;cursor:pointer;background:var(--sw-dark);color:#fff;transition:all 0.2s">Mine</button>
         </div>
       </div>
       <input type="text" id="jobSearchInput" placeholder="Search assigned jobs — switch to All to search every job, including old/completed..." oninput="filterMyJobs()">
@@ -3549,8 +3549,52 @@
   var _invoiceBuilderOpen = false; // true when invoice builder is active
   var _opsApiBase = '';
   var _cachedMyJobs = [];    // flat array of all assignments for Camera/Schedule views
-  var _isAdmin = false;       // set true when user role === 'admin'
-  var _adminViewAll = false;  // admin toggle: true = all jobs, false = my assignments only
+  var _isAdmin = false;       // dispatcher role: admin or ops_manager
+  var _adminViewAll = false;  // manager lens: true = everyone, false = mine
+  var _myJobsRequestToken = 0;
+
+  // <trade-visibility-core>
+  function managedTradeVerticals(user) {
+    var raw = user && Array.isArray(user.managed_verticals) ? user.managed_verticals : [];
+    var seen = {}, out = [];
+    raw.forEach(function (value) {
+      var key = String(value || '').toLowerCase().trim();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      out.push(key);
+    });
+    return out.sort();
+  }
+
+  function managesTradeVertical(vertical) {
+    return managedTradeVerticals(_user).indexOf(String(vertical || '').toLowerCase()) !== -1;
+  }
+
+  function canUseEveryoneLens() {
+    return !!(_isAdmin || managedTradeVerticals(_user).length);
+  }
+
+  function primaryManagedTradeVertical() {
+    var verticals = managedTradeVerticals(_user);
+    return verticals.indexOf('fencing') !== -1 ? 'fencing' : (verticals[0] || '');
+  }
+
+  function activeMyJobsLens() {
+    return canUseEveryoneLens() && _adminViewAll ? 'everyone' : 'mine';
+  }
+
+  // Per-viewer caches must also include the authorization lens and vertical.
+  // A shared device can then switch Mine/Everyone without painting a payload
+  // cached for a broader identity context.
+  function tradeSurfaceCacheKey(surface, vertical, lens, user) {
+    user = user || _user || {};
+    var uid = String(user.id || user.email || '');
+    if (!uid) return '';
+    var v = String(vertical || 'own').toLowerCase();
+    var l = String(lens || 'mine').toLowerCase();
+    return String(surface || 'trade') + ':' + encodeURIComponent(uid) + ':' + encodeURIComponent(v) + ':' + encodeURIComponent(l);
+  }
+  // </trade-visibility-core>
 
   // ── M-F Cancel a make-safe (W1-D / W2-C) ──────────────────────────────────
   // Fixed reason set shared by the trade cancel form + the cancelled-card labels.
@@ -4312,7 +4356,11 @@
     // ops manager, default straight into the all-jobs (dispatcher) view so every
     // scheduled job and every pipeline make-safe lands on their board automatically.
     _isAdmin = (_user.role === 'admin' || _user.role === 'ops_manager');
-    _adminViewAll = (_user.role === 'ops_manager'); // ops manager defaults to All Jobs; admins opt in
+    // Ops managers and managed-vertical leads open on Everyone; global admins
+    // retain the existing opt-in behavior. The backend still owns the returned
+    // tenant/vertical set for mode=all.
+    _adminViewAll = (_user.role === 'ops_manager' || managedTradeVerticals(_user).length > 0);
+    applyTradeVisibilityDefaults();
     document.getElementById('headerUser').textContent = _user.name || _user.email;
     document.getElementById('bottomNav').style.display = 'flex';
     document.getElementById('viewLogin').classList.remove('active');
@@ -4522,21 +4570,29 @@
   // MY JOBS
   // ══════════════════════════════════════════════════
 
-  // Admin view toggle
-  window.setAdminView = function(showAll) {
-    _adminViewAll = showAll;
-    // Update toggle button styles
+  // Manager visibility lens (dispatcher or managed-vertical lead).
+  function syncManagerJobToggle() {
     var btnAll = document.getElementById('adminToggleAll');
     var btnMine = document.getElementById('adminToggleMine');
-    if (btnAll && btnMine) {
-      if (showAll) {
-        btnAll.style.background = 'var(--sw-dark)'; btnAll.style.color = '#fff';
-        btnMine.style.background = 'transparent'; btnMine.style.color = 'var(--sw-mid)';
-      } else {
-        btnMine.style.background = 'var(--sw-dark)'; btnMine.style.color = '#fff';
-        btnAll.style.background = 'transparent'; btnAll.style.color = 'var(--sw-mid)';
-      }
+    if (!btnAll || !btnMine) return;
+    if (_adminViewAll) {
+      btnAll.style.background = 'var(--sw-dark)'; btnAll.style.color = '#fff';
+      btnMine.style.background = 'transparent'; btnMine.style.color = 'var(--sw-mid)';
+    } else {
+      btnMine.style.background = 'var(--sw-dark)'; btnMine.style.color = '#fff';
+      btnAll.style.background = 'transparent'; btnAll.style.color = 'var(--sw-mid)';
     }
+  }
+
+  window.setAdminView = function(showAll) {
+    if (!canUseEveryoneLens()) return;
+    _adminViewAll = showAll;
+    // Never retain the broader in-memory model while changing authorization
+    // lenses. A lens-specific cache may replace it synchronously below.
+    _lastJobData = null;
+    _lastJobDataKey = null;
+    _cachedMyJobs = [];
+    syncManagerJobToggle();
     loadMyJobs();
   };
 
@@ -4547,11 +4603,12 @@
     // Prime the canonical make-safe projection alongside My Jobs. Once it lands,
     // re-render any list already on screen so builder/type switch from the explicit
     // legacy fallback to server-owned feed facts without changing card markup.
+    var activeCacheKey = jobListCacheKey();
     fetchMakesafeV5Feed(false).then(function() {
-      if (_lastJobData && _currentView === 'myJobs') renderMyJobs(_lastJobData);
+      if (_lastJobData && _lastJobDataKey === activeCacheKey && activeCacheKey === jobListCacheKey() && _currentView === 'myJobs') renderMyJobs(_lastJobData);
     }).catch(function(err) {
       console.warn('[trade] make-safe feed unavailable; using legacy builder/type fallback:', err);
-      if (_lastJobData && _currentView === 'myJobs') renderMyJobs(_lastJobData);
+      if (_lastJobData && _lastJobDataKey === activeCacheKey && activeCacheKey === jobListCacheKey() && _currentView === 'myJobs') renderMyJobs(_lastJobData);
     });
 
     // Cache-first: show cached jobs immediately, then refresh in background
@@ -4565,9 +4622,10 @@
         '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div>';
     }
 
-    // Show admin toggle if admin
+    // Dispatchers and managed-vertical leads may explicitly switch Everyone/Mine.
     var adminToggle = document.getElementById('adminJobToggle');
-    if (adminToggle) adminToggle.style.display = _isAdmin ? 'block' : 'none';
+    if (adminToggle) adminToggle.style.display = canUseEveryoneLens() ? 'block' : 'none';
+    syncManagerJobToggle();
 
     // Slow connection hint after 8 seconds (only shown when no cache)
     var slowTimer = setTimeout(function() {
@@ -4577,20 +4635,23 @@
       }
     }, 8000);
 
-    // Pass mode param for admin users
+    // mode=all is an authorization request, not a client-side widening. The
+    // backend limits managed leads to their tenant-scoped managed verticals.
     var params = {};
-    if (_isAdmin) params.mode = _adminViewAll ? 'all' : 'mine';
+    if (canUseEveryoneLens()) params.mode = _adminViewAll ? 'all' : 'mine';
+    var requestToken = ++_myJobsRequestToken;
+    var requestCacheKey = jobListCacheKey();
 
     // Always fetch fresh data — if cache was shown, this is a background refresh
     api('my_jobs', params).then(function(data) {
       clearTimeout(slowTimer);
+      if (requestToken !== _myJobsRequestToken || requestCacheKey !== jobListCacheKey()) return;
       renderMyJobs(data);
       // Open MakeSafe pool is dispatcher-only (backend supplies makesafePool for
       // admin/ops_manager). Client fallback runs when that array is absent so a
       // partial payload still surfaces work; failure must render visibly.
       // Regular trades stay allocation-based — they never call this.
-      var mv = _user && _user.managed_verticals;
-      if (_isAdmin || (Array.isArray(mv) && mv.length > 0)) {
+      if (_isAdmin) {
         loadMakesafePoolJobs(data);
       }
       // Check for active server-side clock (survives app reinstall / device switch)
@@ -4662,6 +4723,7 @@
   // ── Job Search & Filter State ──
   var _jobFilter = 'today';
   var _lastJobData = null;
+  var _lastJobDataKey = null;
   var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, truncated: false, error: false, errorMsg: '', timer: null, token: 0 };
 
   // The pool itself travels with its "may be incomplete" verdict; caching the rows without
@@ -4696,27 +4758,34 @@
     return out;
   }
 
-  // Cached job lists carry per-viewer data (allocations, and for dispatchers the open
-  // MakeSafe pool). Key the cache to the signed-in user so a shared device never shows
-  // one user's jobs to the next.
-  function jobListCacheKey() {
+  // Cached job lists carry per-viewer authorization data. Key by user + managed
+  // vertical set + Mine/Everyone lens so a shared device or lens switch cannot
+  // briefly paint a broader payload.
+  function jobListCacheOwnerPrefix() {
     var uid = (_user && (_user.id || _user.email)) || '';
-    return uid ? 'sw_jobs_cache_' + uid : '';
+    return uid ? 'sw_jobs_cache_' + encodeURIComponent(uid) + '_' : '';
+  }
+
+  function jobListCacheKey() {
+    var owner = jobListCacheOwnerPrefix();
+    if (!owner) return '';
+    var vertical = managedTradeVerticals(_user).join('+') || (_isAdmin ? 'all' : 'own');
+    return owner + encodeURIComponent(vertical) + '_' + activeMyJobsLens();
   }
 
   var JOB_LIST_CACHE_PREFIX = 'sw_jobs_cache_';
 
-  // Only the signed-in user's cache may live on disk. Every other entry (a previous
-  // installer on a shared device, plus the legacy unscoped key) is job data we must
-  // not retain and storage we would otherwise leak until quota kills caching entirely.
+  // Only the signed-in user's cache family may live on disk. Mine and Everyone
+  // entries for that viewer may coexist; every previous viewer is pruned.
   var _prunedForKey = null;
   function pruneJobListCaches(keepKey) {
-    if (_prunedForKey === keepKey) return; // once per signed-in user, not once per render
-    _prunedForKey = keepKey;
+    var owner = jobListCacheOwnerPrefix();
+    if (_prunedForKey === owner) return; // once per signed-in user, not once per lens
+    _prunedForKey = owner;
     try {
       localStorage.removeItem('sw_jobs_cache'); // legacy unscoped cache
       Object.keys(localStorage).forEach(function(k) {
-        if (k.indexOf(JOB_LIST_CACHE_PREFIX) !== 0 || k === keepKey) return;
+        if (k.indexOf(JOB_LIST_CACHE_PREFIX) !== 0 || (owner && k.indexOf(owner) === 0)) return;
         localStorage.removeItem(k);
       });
     } catch(e) {}
@@ -4725,11 +4794,13 @@
   // Sign-out must not leave the outgoing user's job list on a shared device. Call while
   // _user is still set — the key is derived from it.
   function clearJobListCache() {
-    var key = jobListCacheKey();
+    var owner = jobListCacheOwnerPrefix();
     _prunedForKey = null;
     try {
       localStorage.removeItem('sw_jobs_cache');
-      if (key) localStorage.removeItem(key);
+      Object.keys(localStorage).forEach(function(k) {
+        if (owner && k.indexOf(owner) === 0) localStorage.removeItem(k);
+      });
     } catch(e) {}
   }
 
@@ -4740,6 +4811,7 @@
   function resetJobListSession() {
     clearJobListCache();
     _lastJobData = null;
+    _lastJobDataKey = null;
     if (_globalJobSearch.timer) clearTimeout(_globalJobSearch.timer);
     _globalJobSearch.timer = null;
     _globalJobSearch.token++;
@@ -4754,7 +4826,9 @@
     _globalJobSearch.errorMsg = '';
     _cachedMyJobs = [];
     _tradeJobCacheById = {};
+    _myJobsRequestToken++;
     resetCalendarSession();
+    resetBoardSession();
   }
 
   // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
@@ -4763,6 +4837,7 @@
   // filtered by user A's id until a refetch lands, and forever if it fails.
   function resetCalendarSession() {
     if (typeof NC === 'undefined' || !NC) return;
+    if (typeof TradeCalendarSource !== 'undefined' && TradeCalendarSource) TradeCalendarSource.clear();
     NC.me = { id: null, name: null };
     NC.model = null;
     NC.loadedAt = 0;
@@ -4773,8 +4848,20 @@
     NC.scope = 'everyone';
     NC.dirty = false;
     NC.loading = false;
+    NC.modelKey = null;
+    NC.requestToken = (NC.requestToken || 0) + 1;
     var host = document.getElementById('ncCalhost');
     if (host) host.innerHTML = '';
+  }
+
+  function applyTradeVisibilityDefaults() {
+    if (typeof NC === 'undefined' || !NC) return;
+    var vertical = primaryManagedTradeVertical();
+    NC.type = vertical === 'fencing' ? 'fencing' : 'makesafe';
+    NC.scope = canUseEveryoneLens() ? 'everyone' : 'mine';
+    NC.model = null;
+    NC.modelKey = null;
+    NC.requestToken = (NC.requestToken || 0) + 1;
   }
 
   function saveJobListCache(data) {
@@ -5346,6 +5433,7 @@
 
   function renderMyJobs(data) {
     _lastJobData = data;
+    _lastJobDataKey = jobListCacheKey();
     saveJobListCache(data);
     var container = document.getElementById('myJobsList');
     var html = '';
@@ -5400,10 +5488,12 @@
     // On non-All tabs, also surface global results when the query looks like a builder/job ref.
     if (_needsGlobalSearch) html += renderGlobalJobSearchResults(data, query);
 
+    var managedPrimary = primaryManagedTradeVertical();
+    var readyPoolLabel = managedPrimary === 'fencing' ? 'Fencing Ready for Crew' : 'Open MakeSafe Jobs';
     var sections = [
       { key: 'today', label: 'Today' },
       { key: 'recent', label: 'Needs Report' },
-      { key: 'makesafePool', label: 'Open MakeSafe Jobs' },
+      { key: 'makesafePool', label: readyPoolLabel },
       { key: 'thisWeek', label: 'This Week' },
       { key: 'upcoming', label: 'Upcoming' },
     ];
@@ -5456,7 +5546,7 @@
         if (_jobFilter === 'assigned') return;
         if (_jobFilter === 'thisWeek') return;
         hasAny = true;
-        html += '<div class="section-label">Open MakeSafe Jobs</div>';
+        html += '<div class="section-label">' + esc(readyPoolLabel) + '</div>';
         if (poolState === 'loading') {
           html += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
         } else if (poolState === 'error') {
@@ -6123,7 +6213,7 @@
         timeMiss: !!(a.scheduled_date && !a.start_time),
         weatherDate: a.scheduled_date || '',
         crew: crew,
-        crewNone: isPool ? 'All make-safe trades' : (crew ? '' : 'Nobody allocated'),
+        crewNone: isPool ? (isMs ? 'All make-safe trades' : 'Nobody allocated') : (crew ? '' : 'Nobody allocated'),
         note: null, report: null
       };
     }
@@ -11852,7 +11942,7 @@
     // Tapping Activity before My Jobs API returns means _cachedMyJobs is empty.
     if (!_lastJobData && _user) {
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading activity...</div>';
-      api('my_jobs', _isAdmin ? { mode: _adminViewAll ? 'all' : 'mine' } : {}).then(function(data) {
+      api('my_jobs', canUseEveryoneLens() ? { mode: _adminViewAll ? 'all' : 'mine' } : {}).then(function(data) {
         renderMyJobs(data);
         renderActivityView();
       }).catch(function(err) {
@@ -12758,6 +12848,134 @@
   }
   function invalidateMakesafeV5Feed() { _makesafeV5Feed = null; _makesafeV5FeedAt = 0; }
 
+  // Field-calendar boundary. The transport below consumes only the published
+  // trade-calendar.v1 contract, then hands the existing calendar renderer its
+  // normalized model. JWT authentication remains centralized in api().
+  // <trade-calendar-source>
+  var TradeCalendarSource = (function () {
+    'use strict';
+    var loader = null, cache = {};
+
+    function pendingError() {
+      var err = new Error('The secured fencing calendar source is not connected yet');
+      err.code = 'calendar_contract_pending';
+      return err;
+    }
+    function requestKey(request) {
+      return [
+        request.cacheKey || '',
+        request.from || '',
+        request.to || ''
+      ].join('|');
+    }
+    function validateModel(model, request) {
+      if (!model || typeof model !== 'object' || !Array.isArray(model.blocks)) {
+        throw new Error('Field calendar adapter must return a normalized model with blocks[]');
+      }
+      var vertical = String(request.vertical || '').toLowerCase();
+      model.blocks.forEach(function (block) {
+        if (!block || typeof block !== 'object') throw new Error('Field calendar block is invalid');
+        if (String(block.type || '').toLowerCase() !== vertical) {
+          throw new Error('Field calendar adapter returned a row outside the requested vertical');
+        }
+      });
+      return {
+        blocks: model.blocks.slice(),
+        people: Array.isArray(model.people) ? model.people.slice() : CalAdapterCore.buildPeople([], model.blocks),
+        availability: Array.isArray(model.availability) ? model.availability.slice() : [],
+        roster: Array.isArray(model.roster) ? model.roster.slice() : [],
+        unmappedStatuses: Array.isArray(model.unmappedStatuses) ? model.unmappedStatuses.slice() : [],
+        inputCount: model.inputCount == null ? model.blocks.length : model.inputCount,
+        outputCount: model.outputCount == null ? model.blocks.length : model.outputCount,
+        permissions: model.permissions || {},
+        mode: model.mode === 'all' ? 'all' : 'mine',
+        truncated: model.truncated === true,
+        generated_at: model.generated_at || null,
+        feedRows: [],
+        unscheduledRows: Array.isArray(model.unscheduledRows) ? model.unscheduledRows.slice() : []
+      };
+    }
+    function register(nextLoader) {
+      if (typeof nextLoader !== 'function') throw new Error('Trade calendar source must be a function');
+      loader = nextLoader;
+      cache = {};
+    }
+    function clear() { cache = {}; }
+    function load(request, force) {
+      if (!loader) return Promise.reject(pendingError());
+      var key = requestKey(request);
+      if (!force && cache[key]) return Promise.resolve(cache[key]);
+      return Promise.resolve(loader({
+        from: request.from,
+        to: request.to,
+        vertical: request.vertical,
+        lens: request.lens
+      })).then(function (model) {
+        var validated = validateModel(model, request);
+        cache[key] = validated;
+        return validated;
+      });
+    }
+    function adaptV1(payload, request) {
+      payload = payload || {};
+      request = request || {};
+      if (payload.schema !== 'trade-calendar.v1') throw new Error('Unsupported trade calendar schema');
+      if (payload.mode !== 'mine' && payload.mode !== 'all') throw new Error('Trade calendar returned an invalid effective mode');
+      if (String(request.vertical || '').toLowerCase() !== 'fencing' || payload.type !== 'fencing') {
+        throw new Error('Trade calendar returned a vertical outside the fencing request');
+      }
+      if (!Array.isArray(payload.events)) throw new Error('Trade calendar response is missing events[]');
+      if (typeof payload.truncated !== 'boolean') throw new Error('Trade calendar response is missing truncated');
+      payload.events.forEach(function (event) {
+        if (!event || String(event.job_type || '').toLowerCase() !== 'fencing') {
+          throw new Error('Trade calendar returned an event outside fencing');
+        }
+      });
+      var adapted = CalAdapterCore.adaptEvents(payload.events);
+      return {
+        blocks: adapted.blocks,
+        people: CalAdapterCore.buildPeople([], adapted.blocks),
+        availability: [],
+        roster: [],
+        unmappedStatuses: adapted.unmappedStatuses,
+        inputCount: adapted.inputCount,
+        outputCount: adapted.outputCount,
+        permissions: { sees_all: payload.mode === 'all' },
+        mode: payload.mode,
+        truncated: payload.truncated,
+        generated_at: null,
+        unscheduledRows: []
+      };
+    }
+    return {
+      register: register, clear: clear, load: load,
+      validateModel: validateModel, requestKey: requestKey, adaptV1: adaptV1
+    };
+  })();
+  TradeCalendarSource.register(function (request) {
+    if (String(request.vertical || '').toLowerCase() !== 'fencing') {
+      return Promise.reject(new Error('Only the published fencing calendar contract is available'));
+    }
+    var params = {
+      from: request.from,
+      to: request.to,
+      mode: request.lens === 'everyone' ? 'all' : 'mine',
+      type: 'fencing'
+    };
+    return api('trade_calendar', params, null, { preserveSessionOnAuthFailure: true }).then(function (payload) {
+      return TradeCalendarSource.adaptV1(payload, request);
+    });
+  });
+  window.registerTradeCalendarSource = function (loader) {
+    TradeCalendarSource.register(loader);
+    if (typeof NC !== 'undefined' && NC) {
+      NC.model = null;
+      NC.modelKey = null;
+      NC.loadedAt = 0;
+    }
+  };
+  // </trade-calendar-source>
+
   // Quick-look (.ql) row / step / contact builders — one quiet missing voice.
   function _qlRow(k, value, missing) {
     var has = value != null && String(value).trim();
@@ -12846,10 +13064,18 @@
     }).catch(function (err) { toast('Could not open job: ' + friendlyError(err), true); });
   };
 
-  // Network adapter: every make-safe calendar fact comes from the canonical
-  // trade projection. Assignment facts are used only for dates/crew/times,
-  // never for board placement or visibility.
+  // Calendar source router. Make-safe remains on its canonical projection;
+  // fencing crosses only the strict trade-calendar.v1 adapter above.
   async function caFetchCalendarModel(fromStr, toStr) {
+    if (NC.type !== 'makesafe') {
+      return TradeCalendarSource.load({
+        from: fromStr,
+        to: toStr,
+        vertical: NC.type,
+        lens: NC.scope,
+        cacheKey: tradeSurfaceCacheKey('calendar', NC.type, NC.scope)
+      }, false);
+    }
     var payload = await fetchMakesafeV5Feed(false);
     var blocks = MakesafeTradeV5.calendarBlocks(payload).filter(function (b) {
       return b.date >= fromStr && b.date <= toStr;
@@ -13237,13 +13463,16 @@
   // ── DOM wiring for the .ncal calendar (U2/U3). Uses CalRender (pure) + the U1
   //    adapter fetch. Classic-calendar hatch removed 2026-07-20: .ncal is the
   //    only calendar; any session parked on classic is migrated here on entry. ──
-  var NC = { calView: 'cal', scale: 'day', axis: 'jobs', type: 'makesafe', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, dirty: false, loadedAt: 0 };
+  var NC = { calView: 'cal', scale: 'day', axis: 'jobs', type: 'makesafe', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, modelKey: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, dirty: false, loadedAt: 0, requestToken: 0 };
   // U-T3 freshness: dirty = a Board write happened, refetch on next entry;
   // loadedAt = when the model was last fetched (drives the TTL + "Updated" stamp).
   var NC_TTL_MS = 90000;
 
   function ncBoardAllowed() { return !!(NC.model && NC.model.permissions && NC.model.permissions.can_allocate === true); }
-  function ncSeesAll() { return !!(NC.model && NC.model.permissions && NC.model.permissions.sees_all_makesafes === true); }
+  function ncSeesAll() {
+    return !!(NC.model && NC.model.permissions &&
+      (NC.model.permissions.sees_all === true || NC.model.permissions.sees_all_makesafes === true));
+  }
   function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
   function ncState() {
     // date + month MUST be included: every CalRender view reads st.date (day/week/agenda/run,
@@ -13265,8 +13494,8 @@
     if (!root) return;
     if (!NC.date) { NC.date = awstDateStr(); NC.month = NC.date.slice(0, 8) + '01'; }
     if (!NC.me.id) NC.me = { id: (_user && _user.id) || null, name: (_user && _user.name) || null };
-    // Visibility is already filtered by makesafe-board.v1. Scope is only a
-    // presentation lens over rows the server chose to send.
+    // The active server feed owns visibility: makesafe-board.v1 for Make-safe,
+    // and trade-calendar.v1 with an authorized mine/all mode for fencing.
     ncWireOnce();
     // .ncal is the only calendar. The Availability panel owns the Schedule surface
     // while it is open, so a late-settling repaint must not un-hide the calendar
@@ -13281,24 +13510,34 @@
     // predicate is the pure CalAdapterCore.shouldRefetch (smoke-tested).
     var ageMs = NC.loadedAt ? (Date.now() - NC.loadedAt) : null;
     var stale = CalAdapterCore.shouldRefetch({ hasModel: !!NC.model, dirty: NC.dirty, ageMs: ageMs, ttlMs: NC_TTL_MS });
-    if (stale || !ncInRange(NC.date) || !ncInRange(NC.month)) {
+    var desiredModelKey = tradeSurfaceCacheKey('calendar', NC.type, NC.scope);
+    if (stale || NC.modelKey !== desiredModelKey || !ncInRange(NC.date) || !ncInRange(NC.month)) {
       if (host && !NC.model) host.innerHTML = '<div class="emptyview"><b>Loading calendar…</b></div>';
       var anchor = NC.scale === 'month' ? NC.month : NC.date;
       var from = CalRender.addDays(CalRender.mondayOf(anchor), -7);
       var to = CalRender.addDays(from, 55);
+      var requestToken = ++NC.requestToken;
       NC.loading = true;
       try {
         var data = await caFetchCalendarModel(from, to);
+        if (requestToken !== NC.requestToken || desiredModelKey !== tradeSurfaceCacheKey('calendar', NC.type, NC.scope)) return;
         var jobBlocks = (data.blocks || []).filter(function (b) { return b._jobId; }); // org/meeting rows (no job_id) stay in the classic calendar
-        NC.model = { blocks: jobBlocks, people: data.people || [], today: awstDateStr(), now: ncNowDecimal(), _unmapped: data.unmappedStatuses || [], permissions: data.permissions || {}, feedRows: data.feedRows || [], unscheduledRows: data.unscheduledRows || [], generated_at: data.generated_at || null };
+        if (NC.type !== 'makesafe' && data.mode) NC.scope = data.mode === 'all' ? 'everyone' : 'mine';
+        NC.model = { blocks: jobBlocks, people: data.people || [], today: awstDateStr(), now: ncNowDecimal(), _unmapped: data.unmappedStatuses || [], permissions: data.permissions || {}, feedRows: data.feedRows || [], unscheduledRows: data.unscheduledRows || [], generated_at: data.generated_at || null, truncated: data.truncated === true };
+        NC.modelKey = tradeSurfaceCacheKey('calendar', NC.type, NC.scope);
         NC.fetchFrom = from; NC.fetchTo = to;
         NC.loadedAt = Date.now(); NC.dirty = false; // model is now fresh
       } catch (e) {
+        if (requestToken !== NC.requestToken) return;
         NC.loading = false;
-        if (host) host.innerHTML = MakesafeTradeV5.failureHTML(e, 'calendar', 'renderNewCalendar()', 'emptyview');
+        if (host) {
+          host.innerHTML = e && e.code === 'calendar_contract_pending'
+            ? '<div class="emptyview" data-calendar-state="contract-pending"><b>Fencing calendar connection pending</b>The secured calendar feed is not connected in this UX build yet.</div>'
+            : MakesafeTradeV5.failureHTML(e, 'calendar', 'renderNewCalendar()', 'emptyview');
+        }
         return;
       }
-      NC.loading = false;
+      if (requestToken === NC.requestToken) NC.loading = false;
     }
     ncPaint();
   }
@@ -13307,7 +13546,11 @@
     var M = NC.model; if (!M) return;
     var st = ncState();
     var host = document.getElementById('ncCalhost');
-    if (host) host.innerHTML = CalRender.render(M, st);
+    if (host) {
+      host.innerHTML = (M.truncated
+        ? '<div class="tjb-warn">This calendar reached the server limit. Narrow the date range before treating it as complete.</div>'
+        : '') + CalRender.render(M, st);
+    }
     ncSyncSeg('ncViewseg', 'data-cv', NC.calView);
     ncSyncSeg('ncScaleseg', 'data-sc', NC.scale);
     ncSyncSeg('ncAxisseg', 'data-ax', NC.axis);
@@ -13374,10 +13617,14 @@
     // U-T4: "Edit schedule" appears only for blocks carrying a REAL assignment id
     // (synthesized-id blocks can't be written back). It reuses the M3b silent
     // update_assignment write path (no crew key, ever).
-    var allocateBtn = (j.job_id && ncBoardAllowed()) ? '<button class="btn primary" onclick="ncCloseSheet();openMakesafeAllocateByJobId(\'' + esc(j.job_id) + '\')">Allocate / set time</button>' : '';
+    var isMakesafe = j.type === 'makesafe';
+    var allocateBtn = (isMakesafe && j.job_id && ncBoardAllowed()) ? '<button class="btn primary" onclick="ncCloseSheet();openMakesafeAllocateByJobId(\'' + esc(j.job_id) + '\')">Allocate / set time</button>' : '';
     if (j.job_id) {
+      var openJobAction = isMakesafe
+        ? 'openMakesafeV5Detail(\'' + esc(j.job_id) + '\')'
+        : 'openJob(\'' + esc(j.job_id) + '\',\'' + esc(j._assignmentId || '') + '\')';
       foot.innerHTML = '<button class="btn ghost" onclick="ncCloseSheet()">Close</button>'
-        + '<button class="btn dark" onclick="ncCloseSheet();openMakesafeV5Detail(\'' + esc(j.job_id) + '\')">Open job</button>'
+        + '<button class="btn dark" onclick="ncCloseSheet();' + openJobAction + '">Open job</button>'
         + allocateBtn;
     } else {
       foot.innerHTML = '<button class="btn dark" onclick="ncCloseSheet()">Close</button>';
@@ -13489,12 +13736,21 @@
 
   function ncOpenFilterSheet() {
     var body = document.getElementById('ncSheetBody');
+    function reloadForFilter() {
+      NC.model = null;
+      NC.modelKey = null;
+      NC.loadedAt = 0;
+      NC.dirty = false;
+      renderNewCalendar();
+    }
     function content() {
       var trades = [['makesafe', 'Make-safe', 'ms dot-ms']];
+      if (managesTradeVertical('fencing')) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
       var scope = '<div class="seg lite" style="max-width:240px">'
         + '<button class="segbtn' + (NC.scope === 'mine' ? ' on' : '') + '" data-fscope="mine">Mine</button>'
-        + '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">Everyone</button></div>';
+        + (canUseEveryoneLens() ? '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">Everyone</button>' : '')
+        + '</div>';
       return '<div class="sh-kick">Filter the calendar</div>'
         + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
         + '<div class="fgroup"><div class="sh-lab">Trade</div><div class="fchips">' + chips + '</div></div>'
@@ -13503,12 +13759,29 @@
     body.innerHTML = content();
     body.onclick = function (e) {
       var c = e.target.closest('[data-ftype]');
-      if (c) { NC.type = c.getAttribute('data-ftype'); body.innerHTML = content(); ncPaint(); return; }
+      if (c) {
+        var nextType = c.getAttribute('data-ftype');
+        if (nextType !== NC.type) { NC.type = nextType; reloadForFilter(); }
+        body.innerHTML = content();
+        return;
+      }
       var sc = e.target.closest('[data-fscope]');
-      if (sc) { NC.scope = sc.getAttribute('data-fscope'); body.innerHTML = content(); ncPaint(); return; }
+      if (sc) {
+        var nextScope = sc.getAttribute('data-fscope');
+        if (nextScope === 'everyone' && !canUseEveryoneLens()) return;
+        if (nextScope !== NC.scope) { NC.scope = nextScope; reloadForFilter(); }
+        body.innerHTML = content();
+        return;
+      }
     };
     document.getElementById('ncSheetFoot').innerHTML = '<button class="btn ghost" id="ncResetBtn">Reset</button><button class="btn dark" id="ncDoneBtn">Done</button>';
-    document.getElementById('ncResetBtn').addEventListener('click', function () { NC.type = 'makesafe'; NC.scope = 'everyone'; body.innerHTML = content(); ncPaint(); });
+    document.getElementById('ncResetBtn').addEventListener('click', function () {
+      var defaultVertical = primaryManagedTradeVertical();
+      NC.type = defaultVertical === 'fencing' ? 'fencing' : 'makesafe';
+      NC.scope = canUseEveryoneLens() ? 'everyone' : 'mine';
+      body.innerHTML = content();
+      reloadForFilter();
+    });
     document.getElementById('ncDoneBtn').addEventListener('click', ncCloseSheet);
     ncOpenSheet();
   }
@@ -13522,7 +13795,12 @@
     document.getElementById('ncFbtn').addEventListener('click', ncOpenFilterSheet);
     // U-T3 · manual refresh: force a full refetch of the calendar model.
     var _rb = document.getElementById('ncRefreshBtn');
-    if (_rb) _rb.addEventListener('click', function () { invalidateMakesafeV5Feed(); NC.model = null; NC.loadedAt = 0; NC.dirty = false; renderNewCalendar(); });
+    if (_rb) _rb.addEventListener('click', function () {
+      if (NC.type === 'makesafe') invalidateMakesafeV5Feed();
+      else TradeCalendarSource.clear();
+      NC.model = null; NC.modelKey = null; NC.loadedAt = 0; NC.dirty = false;
+      renderNewCalendar();
+    });
     document.getElementById('ncPPrev').addEventListener('click', function () { ncCycle(-1); });
     document.getElementById('ncPNext').addEventListener('click', function () { ncCycle(1); });
     document.getElementById('ncDayrail').addEventListener('click', function (e) {
@@ -17492,14 +17770,126 @@
   // PROFILE VIEW — User info + sign out + rate + invoices
   // ══════════════════════════════════════════════════
 
-  // Legacy sentinel retained so older smoke extractors fail closed. The active
-  // board core is MakesafeTradeV5 above and consumes makesafe-board.v1 only.
-  // <trade-board>
-  // Compatibility name retained for older allocation helpers. Board placement is
-  // owned exclusively by MakesafeTradeV5.board(makesafe-board.v1); no assignment
-  // status-to-column map exists in the active client.
-  var BoardCore = { canAllocate: function () { return false; } };
-  // </trade-board>
+  // Field-board core. Make-safe placement remains exclusively owned by
+  // MakesafeTradeV5.board(makesafe-board.v1); this module accepts only fencing
+  // rows returned by the server-authorized my_jobs?mode=all path.
+  // <fencing-board-core>
+  var FencingBoardCore = (function () {
+    'use strict';
+    var COLUMNS = [
+      { key: 'needs', label: 'Ready', hot: true },
+      { key: 'scheduled', label: 'Scheduled', hot: false },
+      { key: 'onsite', label: 'On site', hot: false },
+      { key: 'done', label: 'Done', hot: false },
+      { key: 'attention', label: 'Attention', hot: false },
+      { key: 'cancelled', label: 'Cancelled', hot: false }
+    ];
+    var COLUMN_MAP = {
+      scheduled: 'scheduled', confirmed: 'scheduled', draft: 'scheduled',
+      in_progress: 'onsite',
+      complete: 'done', submitted: 'done', verified: 'done',
+      disputed: 'attention', cancelled: 'cancelled'
+    };
+    var JOB_DEAD = { cancelled: 1, lost: 1, deleted: 1, duplicate: 1, duplicated: 1, void: 1, voided: 1 };
+    var JOB_FINISHED = { complete: 1, completed: 1, invoiced: 1, paid: 1, closed: 1, archived: 1 };
+    var PRIORITY = { in_progress: 6, disputed: 5, submitted: 4, verified: 4, confirmed: 3, scheduled: 3, draft: 2, complete: 2, cancelled: 0, available: 0 };
+
+    function norm(value) { return String(value == null ? '' : value).toLowerCase().trim(); }
+    function isPoolRow(row) {
+      row = row || {};
+      return norm(row.status) === 'available' || norm(row.assignment_type) === 'fencing_open';
+    }
+    function isFencingRow(row) {
+      row = row || {};
+      var jobType = norm((row.jobs || {}).type);
+      if (jobType) return jobType === 'fencing';
+      return norm(row.assignment_type) === 'fencing_open';
+    }
+    function terminalColumn(row) {
+      var status = norm(((row || {}).jobs || {}).status);
+      if (JOB_DEAD[status]) return 'cancelled';
+      if (JOB_FINISHED[status]) return 'done';
+      return null;
+    }
+    function columnOf(row) {
+      var terminal = terminalColumn(row);
+      if (terminal) return terminal;
+      if (isPoolRow(row)) return 'needs';
+      var status = norm((row || {}).status);
+      return Object.prototype.hasOwnProperty.call(COLUMN_MAP, status) ? COLUMN_MAP[status] : null;
+    }
+    function canAllocate(row) {
+      if (!row || terminalColumn(row)) return false;
+      if (isPoolRow(row)) return true;
+      var column = columnOf(row);
+      return column === 'scheduled' || column === 'onsite';
+    }
+    function priority(row) { return PRIORITY[norm((row || {}).status)] || 0; }
+
+    function buildBoard(data, makeCard) {
+      data = data || {};
+      makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row }; };
+      var assigned = [], pool = [];
+      ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'].forEach(function (bucket) {
+        (data[bucket] || []).forEach(function (row) {
+          if (!isFencingRow(row)) return;
+          if (isPoolRow(row)) pool.push(row);
+          else assigned.push(row);
+        });
+      });
+
+      var byJob = {};
+      assigned.forEach(function (row) {
+        var jobId = ((row || {}).jobs || {}).id;
+        if (!jobId) return;
+        if (!byJob[jobId] || priority(row) > priority(byJob[jobId])) byJob[jobId] = row;
+      });
+      var assignedRows = Object.keys(byJob).map(function (jobId) { return byJob[jobId]; });
+      var poolByJob = {};
+      var poolMergedIntoAssigned = 0;
+      pool.forEach(function (row) {
+        var jobId = ((row || {}).jobs || {}).id;
+        if (!jobId) return;
+        if (byJob[jobId]) {
+          poolMergedIntoAssigned++;
+          return;
+        }
+        if (!poolByJob[jobId]) poolByJob[jobId] = row;
+      });
+      var poolRows = Object.keys(poolByJob).map(function (jobId) { return poolByJob[jobId]; });
+
+      var columns = COLUMNS.map(function (column) {
+        return { key: column.key, label: column.label, hot: column.hot, cards: [] };
+      });
+      var byColumn = {};
+      columns.forEach(function (column) { byColumn[column.key] = column; });
+      var unmapped = {};
+      assignedRows.concat(poolRows).forEach(function (row) {
+        var column = columnOf(row);
+        if (!column) {
+          unmapped[norm(row.status) || 'blank'] = true;
+          column = 'attention';
+        }
+        byColumn[column].cards.push(makeCard(row.jobs || {}, row));
+      });
+      var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
+      return {
+        verticals: [{ vertical: 'fencing', label: 'Fencing', columns: columns, total: total }],
+        unmappedStatuses: Object.keys(unmapped),
+        assignedCount: assignedRows.length,
+        poolCount: poolRows.length,
+        poolMergedIntoAssigned: poolMergedIntoAssigned
+      };
+    }
+
+    return {
+      COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
+      isPoolRow: isPoolRow, isFencingRow: isFencingRow,
+      terminalColumn: terminalColumn, columnOf: columnOf,
+      canAllocate: canAllocate, buildBoard: buildBoard
+    };
+  })();
+  // </fencing-board-core>
 
   // Make-safe Board v5. Card truth, visibility and permissions come from the
   // canonical trade projection; list_users supplies only the Allocate roster.
@@ -17509,6 +17899,7 @@
   var _boardCardSeq = 0;
   var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
   var _boardCancelledVisible = false; // M-F W2-D — Cancelled column collapsed by default
+  var _fieldBoardCacheByKey = {};
   // M-F W2-C — reopen a cancelled make-safe from the trade board. Same gate as
   // cancel/re-attend; passes the backend's required default reason (the user is
   // not asked for one). On success the board reloads and the card lands in New.
@@ -17530,14 +17921,27 @@
   var _allocGuard = null;   // per-open double-fire guard { busy }
   var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
 
+  function resetBoardSession() {
+    _boardCache = null;
+    _boardVert = null;
+    _boardCardById = {};
+    _fieldBoardCacheByKey = {};
+    invalidateMakesafeV5Feed();
+  }
+
   function _boardAllowed() {
     return !!(_boardCache && _boardCache.permissions && _boardCache.permissions.can_allocate === true);
+  }
+
+  function _activeBoardCanAllocate() {
+    if (_boardVert === 'makesafe') return _boardAllowed();
+    return _boardVert === 'fencing' && managesTradeVertical('fencing');
   }
 
   function renderBoardView() {
     var container = document.getElementById('boardContent');
     if (!container) return;
-    container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading the make-safe board...</div>';
+    container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading the board...</div>';
     _loadBoard();
   }
 
@@ -17567,17 +17971,56 @@
     };
   }
 
-  function _loadBoard(force) {
+  function _fencingBoardCardModel(job, row) {
+    var model = UnifiedJobCard.fromJobAssignment(job, row, 'fencing', {
+      desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing')
+    });
+    // AllocationCore predates UnifiedJobCard and reads these aliases. Keep the
+    // one visual grammar while supplying its existing write-model seam.
+    model.type = 'fencing';
+    model.typeLabel = 'Fencing';
+    model.sub = model.place;
+    model.ref = String(job.job_number || '');
+    model.desc = String(job.scope_summary || buildScopeSummary(job.scope_json, 'fencing') || '');
+    model.dateLabel = model.whenLabel || '';
+    model.timeText = model.timeLabel || '';
+    model._boardRow = row;
+    model._boardJob = job;
+    return model;
+  }
+
+  function _loadFencingBoard(force) {
+    if (!managesTradeVertical('fencing')) return Promise.resolve(null);
+    var key = tradeSurfaceCacheKey('board', 'fencing', 'everyone');
+    if (!force && _fieldBoardCacheByKey[key]) return Promise.resolve(_fieldBoardCacheByKey[key]);
+    return api('my_jobs', { mode: 'all' }).then(function (data) {
+      var board = FencingBoardCore.buildBoard(data, _fencingBoardCardModel);
+      _fieldBoardCacheByKey[key] = board;
+      return board;
+    });
+  }
+
+  function _loadBoard(force, options) {
+    options = options || {};
     var container = document.getElementById('boardContent');
-    Promise.all([
+    return Promise.all([
       fetchMakesafeV5Feed(!!force),
-      api('list_users', {}).catch(function () { return null; })
+      api('list_users', {}).catch(function () { return null; }),
+      _loadFencingBoard(!!force)
     ]).then(function (res) {
       var roster = ((res[1] && (res[1].users || res[1])) || []);
       _boardCache = _buildMakesafeV5BoardCache(res[0], roster);
-      _boardVert = 'makesafe';
+      if (res[2] && res[2].verticals && res[2].verticals.length) {
+        _boardCache.board.verticals = res[2].verticals.concat(_boardCache.board.verticals);
+        _boardCache.board.unmappedStatuses = (_boardCache.board.unmappedStatuses || []).concat(res[2].unmappedStatuses || []);
+      }
+      var preferred = managesTradeVertical('fencing') ? 'fencing' : 'makesafe';
+      if (!_boardVert || !_boardCache.board.verticals.some(function (vertical) { return vertical.vertical === _boardVert; })) {
+        _boardVert = preferred;
+      }
       _renderBoard();
     }).catch(function (err) {
+      if (options.silent) return;
       if (!container) return;
       container.innerHTML = MakesafeTradeV5.failureHTML(err, 'board', '_loadBoard(true)', 'empty-state');
     });
@@ -17585,7 +18028,25 @@
 
   window.setBoardVertical = function (v) { _boardVert = v; _renderBoard(); };
 
-  function _boardCardHTML(model, cardId) {
+  function _boardCardHTML(model, cardId, vertical) {
+    if (vertical === 'fencing') {
+      var fieldRow = model._boardRow || {}, fieldJob = model._boardJob || fieldRow.jobs || {};
+      var fieldSearch = [fieldJob.job_number, fieldJob.client_name, fieldJob.site_address, fieldJob.site_suburb, model.desc, model.crew]
+        .filter(Boolean).join(' ').toLowerCase();
+      var fieldActions = '<div class="jc-actions">';
+      if (_activeBoardCanAllocate() && FencingBoardCore.canAllocate(fieldRow)) {
+        fieldActions += '<button type="button" class="act primary" onclick="event.stopPropagation();openAllocateSheet(\'' + esc(cardId) + '\')">Allocate / time</button>';
+      }
+      fieldActions += '<button type="button" class="act" onclick="event.stopPropagation();openJobNotes(\'' + esc(fieldJob.id || '') + '\',\'' + esc(fieldJob.job_number || 'Fencing job') + '\')">Add note</button></div>';
+      return UnifiedJobCard.wrap(model, {
+        tag: 'article',
+        onclick: 'openJob(\'' + esc(fieldJob.id || '') + '\',\'' + esc(fieldRow.id || '') + '\')',
+        dataSearch: fieldSearch,
+        dataAttrs: 'data-board-column="' + esc(FencingBoardCore.columnOf(fieldRow) || '') + '" role="button" tabindex="0" onkeydown="if(event.key===&quot;Enter&quot;||event.key===&quot; &quot;){event.preventDefault();openJob(\'' + esc(fieldJob.id || '') + '\',\'' + esc(fieldRow.id || '') + '\')}"',
+        showStatus: false,
+        actionsHTML: fieldActions
+      });
+    }
     var row = model._feedRow || {}, contact = row.contact || {};
     var searchStr = [row.job_number, row.makesafe_type, (row.builder || {}).name, (row.builder || {}).external_ref,
       contact.client_name, contact.phone, contact.address, (row.lineage || {}).builder_po_number]
@@ -17624,11 +18085,11 @@
     var html = '<div class="tjb-wrap">';
     // Unmapped-status guard (STOP surfaced, never a silent wrong column)
     if (board.unmappedStatuses.length) {
-      html += '<div class="tjb-warn">The feed retained ' + board.unmappedStatuses.length + ' job(s) with an unknown canonical stage in New. Ops has been alerted; no card was hidden.</div>';
+      html += '<div class="tjb-warn">The feed surfaced ' + board.unmappedStatuses.length + ' job(s) with an unknown canonical stage. They remain visible for review.</div>';
     }
     // M3d — client-side search over the board cards (name / suburb / ref).
     html += '<input id="boardSearchInput" type="search" oninput="filterBoard()" autocomplete="off" ' +
-      'placeholder="Search make-safes by name, suburb or ref" ' +
+      'placeholder="Search ' + esc(active.label.toLowerCase()) + ' by name, suburb or ref" ' +
       'style="width:100%;box-sizing:border-box;margin:2px 0 10px;padding:11px 13px;font-size:14px;' +
       'font-family:inherit;color:var(--sw-text);background:var(--sw-card);' +
       'border:1px solid var(--sw-border);border-radius:10px;outline:none">' +
@@ -17678,15 +18139,15 @@
         c.cards.forEach(function (m) {
           var cid = 'bc' + (_boardCardSeq++);
           _boardCardById[cid] = { model: m, vertical: active.vertical };
-          html += _boardCardHTML(m, cid);
+          html += _boardCardHTML(m, cid, active.vertical);
         });
       } else {
-        html += '<div class="tjb-empty">No make-safes in ' + esc(c.label) + '.</div>';
+        html += '<div class="tjb-empty">No ' + esc(active.label.toLowerCase()) + ' jobs in ' + esc(c.label) + '.</div>';
       }
       html += '</div></div>';
     });
     html += '</div>';
-    html += '<div class="tjb-note" style="text-align:center;margin-top:6px">' + (_boardAllowed() ? 'Allocate and set arrival time from any live card.' : 'View only. Visibility and actions are set by the server.') + '</div>';
+    html += '<div class="tjb-note" style="text-align:center;margin-top:6px">' + (_activeBoardCanAllocate() ? 'Allocate and set arrival time from any live card.' : 'View only. Visibility and actions are set by the server.') + '</div>';
     html += '</div>';
     container.innerHTML = html;
     if (weatherData) renderWeatherBadges();
@@ -18038,9 +18499,15 @@
     var entry = _boardCardById[cardId];
     if (!entry || !_boardCache) return;
     var model = entry.model, feedRow = model._feedRow || {};
-    // Server permission is authoritative. Complete/Archive are terminal in the
-    // approved trade projection and never expose allocation.
-    if (!_boardAllowed() || (feedRow.column !== 'New' && feedRow.column !== 'Allocated')) return;
+    // Make-safe actions remain feed-permission driven. Field actions are
+    // available only on the viewer's managed fencing vertical and live rows.
+    if (entry.vertical === 'makesafe') {
+      if (!_boardAllowed() || (feedRow.column !== 'New' && feedRow.column !== 'Allocated')) return;
+    } else if (entry.vertical === 'fencing') {
+      if (!managesTradeVertical('fencing') || !FencingBoardCore.canAllocate(model._boardRow)) return;
+    } else {
+      return;
+    }
     var ctx = AllocateCore.buildContext(model, null, { now: new Date() });
     // Multi-select allocation (captain requirement): userIds/crews carry the full
     // selection; userId/crew mirror the first pick for the single-write fast path.
@@ -18321,15 +18788,7 @@
   // optimistic view if the refresh itself fails.
   function _refreshBoardSilent() {
     invalidateMakesafeV5Feed();
-    Promise.all([
-      fetchMakesafeV5Feed(true),
-      api('list_users', {}).catch(function () { return null; })
-    ]).then(function (res) {
-      var roster = ((res[1] && (res[1].users || res[1])) || (_boardCache && _boardCache.roster) || []);
-      _boardCache = _buildMakesafeV5BoardCache(res[0], roster);
-      _boardVert = 'makesafe';
-      _renderBoard();
-    }).catch(function () { /* keep the optimistic view on refresh failure */ });
+    _loadBoard(true, { silent: true });
   }
 
   function renderProfileView() {

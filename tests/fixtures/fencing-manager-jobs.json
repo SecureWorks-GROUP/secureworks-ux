@@ -1,0 +1,96 @@
+{
+  "today": [
+    {
+      "id": "fence-assignment-henry",
+      "user_id": "e2e-henry",
+      "status": "scheduled",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "07:30",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-henry",
+        "job_number": "FENCE-HENRY-001",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Henry Client",
+        "client_phone": "0400111001",
+        "site_address": "11 Boundary Road",
+        "site_suburb": "Balcatta",
+        "scope_summary": "Install 18 m Colorbond fence",
+        "scope_json": {},
+        "po_info": null
+      }
+    },
+    {
+      "id": "fence-assignment-alyx",
+      "user_id": "e2e-alyx",
+      "status": "confirmed",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "09:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-alyx",
+        "job_number": "FENCE-ALYX-002",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Other Crew Client",
+        "client_phone": "0400111002",
+        "site_address": "22 Rail Street",
+        "site_suburb": "Joondalup",
+        "scope_summary": "Replace side boundary fence",
+        "scope_json": {},
+        "po_info": null
+      }
+    }
+  ],
+  "thisWeek": [],
+  "upcoming": [],
+  "recent": [],
+  "makesafePool": [
+    {
+      "id": "fence-open-pool",
+      "user_id": null,
+      "status": "available",
+      "scheduled_date": null,
+      "start_time": null,
+      "crew_name": null,
+      "assignment_type": "fencing_open",
+      "jobs": {
+        "id": "fence-job-open",
+        "job_number": "FENCE-OPEN-003",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Open Fence Client",
+        "client_phone": "0400111003",
+        "site_address": "33 Post Avenue",
+        "site_suburb": "Wanneroo",
+        "scope_summary": "New front fence",
+        "scope_json": {},
+        "po_info": null
+      }
+    },
+    {
+      "id": "stale-open-copy",
+      "user_id": null,
+      "status": "available",
+      "scheduled_date": null,
+      "start_time": null,
+      "crew_name": null,
+      "assignment_type": "fencing_open",
+      "jobs": {
+        "id": "fence-job-alyx",
+        "job_number": "FENCE-ALYX-002",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Other Crew Client",
+        "client_phone": "0400111002",
+        "site_address": "22 Rail Street",
+        "site_suburb": "Joondalup",
+        "scope_summary": "Replace side boundary fence",
+        "scope_json": {},
+        "po_info": null
+      }
+    }
+  ],
+  "_adminView": true
+}

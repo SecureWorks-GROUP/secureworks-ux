@@ -1,0 +1,30 @@
+{
+  "today": [
+    {
+      "id": "fence-assignment-henry",
+      "user_id": "e2e-henry",
+      "status": "scheduled",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "07:30",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-henry",
+        "job_number": "FENCE-HENRY-001",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Henry Client",
+        "client_phone": "0400111001",
+        "site_address": "11 Boundary Road",
+        "site_suburb": "Balcatta",
+        "scope_summary": "Install 18 m Colorbond fence",
+        "scope_json": {},
+        "po_info": null
+      }
+    }
+  ],
+  "thisWeek": [],
+  "upcoming": [],
+  "recent": [],
+  "makesafePool": [],
+  "_adminView": false
+}

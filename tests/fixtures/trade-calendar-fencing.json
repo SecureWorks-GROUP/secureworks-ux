@@ -1,0 +1,48 @@
+{
+  "schema": "trade-calendar.v1",
+  "mode": "all",
+  "type": "fencing",
+  "events": [
+    {
+      "assignment_id": "fence-assignment-henry",
+      "job_id": "fence-job-henry",
+      "user_id": "e2e-henry",
+      "job_number": "FENCE-HENRY-001",
+      "client_name": "Henry Client",
+      "site_address": "11 Boundary Road",
+      "site_suburb": "Balcatta",
+      "scheduled_date": "{{TODAY}}",
+      "scheduled_end": "{{TODAY}}",
+      "start_time": "07:30",
+      "end_time": "15:30",
+      "crew_name": "Henry Fence",
+      "assigned_to": "Henry Fence",
+      "assignment_type": "install",
+      "assignment_status": "scheduled",
+      "confirmation_status": "confirmed",
+      "job_type": "fencing",
+      "job_status": "scheduled"
+    },
+    {
+      "assignment_id": "fence-assignment-alyx",
+      "job_id": "fence-job-alyx",
+      "user_id": "e2e-alyx",
+      "job_number": "FENCE-ALYX-002",
+      "client_name": "Other Crew Client",
+      "site_address": "22 Rail Street",
+      "site_suburb": "Joondalup",
+      "scheduled_date": "{{TODAY}}",
+      "scheduled_end": "{{TODAY}}",
+      "start_time": "09:00",
+      "end_time": "16:00",
+      "crew_name": "Alyx Crew",
+      "assigned_to": "Alyx Crew",
+      "assignment_type": "install",
+      "assignment_status": "confirmed",
+      "confirmation_status": "confirmed",
+      "job_type": "fencing",
+      "job_status": "scheduled"
+    }
+  ],
+  "truncated": false
+}

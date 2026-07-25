@@ -42,12 +42,17 @@ The allocate sheet (`#allocSheet`) is a DETACHED overlay — it can't inherit a
 card's `--jc-a`, so `openAllocateSheet` stamps the job-type class onto it and
 `.alloc-sheet.<type>` sets the var; keep that stamping or the Allocate button
 silently falls back to orange.
-The four user-facing statuses are the ONLY vocabulary: New / Allocated / Complete
-/ Archive (+ live "On site"). The legacy `.ms-*` run card, `.tjc-*` card bodies,
-and the runsheet reorder controls are retired — do not revive them. The calendar
-keeps its own `.ncal`/`.sh-*` timeline grammar (shares the type accents).
+Two status vocabularies exist, scoped by vertical — they are never merged. On
+every make-safe surface the four user-facing statuses are the ONLY vocabulary:
+New / Allocated / Complete / Archive (+ live "On site"). The separate fencing
+field-work Board vertical has its own six column words: Ready / Scheduled / On
+site / Done / Attention / Cancelled (`FencingBoardCore`, detail in
+`trade-app.md`). Neither set may be renamed onto the other's surfaces.
+The legacy `.ms-*` run card, `.tjc-*` card bodies, and the runsheet reorder
+controls are retired — do not revive them. The calendar keeps its own
+`.ncal`/`.sh-*` timeline grammar (shares the type accents).
 
-## Make-safe visibility & the manager view (`trade.html`)
+## Trade visibility & the manager view (`trade.html`)
 
 Make-safe visibility is 100% SERVER-DRIVEN by the `makesafe_board` feed
 (`makesafe-board.v1`, edge function — not in this repo). The client applies NO
@@ -59,14 +64,30 @@ user; a non-manager gets `allocated_only` + `can_allocate:false` and a view-only
 board (no `button.act.primary` Allocate action). Allocation ≠ visibility: an
 assignment means "this person is doing the job", never "may see it". So if a real
 manager (e.g. Hugo) can't see everything, the fix is his server role / the feed's
-permission logic — NOT trade.html. The calendar's Mine/Everyone `scope` is a
-PRESENTATION lens only (`ncSeesAll()` → default `everyone` + unassigned rows for
-managers); it filters rows the server already chose to send. Regression guards:
-`tests/e2e/manager-visibility.spec.js` (manager sees unallocated+allocated) and
-`installer-board-readonly.spec.js` (non-manager view-only). NB: board cards are
-`role="button"` and their accessible names contain "Allocated"/"Nobody allocated",
-so a `getByRole('button',{name:'Allocate'})` count matches cards too — target the
-`button.act.primary` class for the real Allocate action.
+permission logic — NOT trade.html.
+
+A managed-vertical lead (`users.managed_verticals`, e.g. Henry with `['fencing']`)
+is NOT an ops manager — he keeps `role = lead_installer` and gains only his own
+vertical. Widening stays server-side: the client asks through the authorized
+`my_jobs?mode=all` (fencing Board vertical + My Jobs) and
+`trade_calendar?type=fencing&mode=all` (`trade-calendar.v1`) paths and renders what
+comes back. So for fencing the Everyone/Mine lens is an AUTHORIZATION request, not
+a client filter; for make-safe the calendar `scope` stays a presentation lens over
+rows the feed already chose to send (`ncSeesAll()` accepts `permissions.sees_all`
+or `sees_all_makesafes`). Every per-viewer cache (job list, board, calendar) is
+keyed by user + vertical + lens — keep those keys or a lens switch repaints the
+broader payload. Visibility still is not authority: another crew's job detail is
+VIEW-ONLY (`// <foreign-job-readonly>`) and `api()` refuses the write rather than
+queueing it. Surface-level detail lives in `trade-app.md`.
+
+Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
+unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
+`fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`
+(managed fencing lead across Board / My Jobs / Calendar, other-crew read-only, no
+writes). NB: board cards are `role="button"` and their accessible names contain
+"Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
+matches cards too — target the `button.act.primary` class for the real Allocate
+action.
 
 Gotchas:
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global. To

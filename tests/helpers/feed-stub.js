@@ -31,7 +31,8 @@ function loadJsonFixture(fileName, replacements = {}) {
 async function installFeedStubs(page, {
   endpoint,
   actions,
-  allowedWriteActions = []
+  allowedWriteActions = [],
+  requestLog = []
 }) {
   const unexpectedWrites = [];
   const allowed = new Set(allowedWriteActions);
@@ -41,6 +42,12 @@ async function installFeedStubs(page, {
     const url = new URL(request.url());
     const action = url.searchParams.get('action') || '';
     const isWrite = request.method() !== 'GET';
+    requestLog.push({
+      method: request.method(),
+      action,
+      url: request.url(),
+      authorization: request.headers().authorization || ''
+    });
 
     if (isWrite && !allowed.has(action)) {
       unexpectedWrites.push(`${request.method()} ${action || url.pathname}`);
@@ -75,7 +82,7 @@ async function installFeedStubs(page, {
     });
   });
 
-  return { unexpectedWrites };
+  return { unexpectedWrites, requestLog };
 }
 
 /**

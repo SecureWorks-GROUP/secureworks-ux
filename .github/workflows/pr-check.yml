@@ -63,3 +63,6 @@ jobs:
 
       - name: Test make-safe builder/type feed truth
         run: node scripts/test-trade-makesafe-feed-truth.js
+
+      - name: Test fencing manager visibility contract
+        run: node scripts/test-fencing-manager-visibility.js

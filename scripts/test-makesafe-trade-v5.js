@@ -58,10 +58,19 @@ async function mockedFeedFailure(statuses) {
       return Promise.resolve({ data: { session: { access_token: 'refreshed-jwt' } } });
     } } } },
     _forceLogout: () => { logouts++; },
-    handleSessionExpiry: () => { expiryHandlers++; }
+    handleSessionExpiry: () => { expiryHandlers++; },
+    // api() runs the view-only guard before every request, so the sandbox needs
+    // the real guard plus its scope: no job open, nothing to block.
+    _user: null,
+    _currentJob: null,
+    getTradeJobType: () => 'makesafe',
+    toast: () => {}
   };
   vm.createContext(apiContext);
-  vm.runInContext(block('// <trade-api-helper>', '// </trade-api-helper>'), apiContext);
+  vm.runInContext([
+    block('// <foreign-job-readonly>', '// </foreign-job-readonly>'),
+    block('// <trade-api-helper>', '// </trade-api-helper>')
+  ].join('\n'), apiContext);
   let error = null;
   try {
     await apiContext.api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true });

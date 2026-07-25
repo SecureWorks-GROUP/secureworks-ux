@@ -36,6 +36,45 @@ test.describe('Fencing manager visibility', () => {
     await expect(page.locator('#viewJob')).toHaveClass(/active/);
     await expect(page.locator('#jobDetailContent')).toContainText('FENCE-ALYX-002');
     await expect(page.locator('#jobDetailContent')).toContainText('Other Crew Client');
+
+    // Visibility is not authority: another crew's job is view-only.
+    const detail = page.locator('#jobDetailContent');
+    await expect(page.locator('#jobViewOnlyBanner')).toContainText('View only');
+    await expect(detail).not.toContainText('Clock On');
+    await expect(detail).not.toContainText('Start Travel');
+    await expect(detail).not.toContainText("I've Read & Understood");
+    await expect(detail.locator('.sf-action-btn')).toHaveCount(0);
+    await expect(page.locator('#bottomNoteInput')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="photos"]').click();
+    await expect(page.locator('#jdTab_photos')).toBeVisible();
+    await expect(page.locator('#tabPhotoInput')).toHaveCount(0);
+    await expect(page.locator('#jdTab_photos .upload-area')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="log"]').click();
+    await expect(page.locator('#jdTab_log')).toBeVisible();
+    await expect(page.locator('#tabNoteInput')).toHaveCount(0);
+    await expect(page.locator('.jd-tab[data-tab="comms"]')).toHaveCount(0);
+
+    // Even a forced write against the other crew's assignment must not leave the client,
+    // and must not be parked in the offline retry queue.
+    await page.evaluate(() => window.timerAction('clock_on', 'fence-assignment-alyx'));
+    await expect(page.locator('#toast')).toContainText('View only');
+    expect(await page.evaluate(() => localStorage.getItem('sw_action_queue') || '[]')).toBe('[]');
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('sw_pending_clock_')))).toEqual([]);
+    expect(feedRequests.filter((entry) => entry.method !== 'GET')).toEqual([]);
+  });
+
+  test('own fencing job keeps its crew actions', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('#navBoard').click();
+    await page.locator('#boardContent .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
+
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('#jobDetailContent')).toContainText('FENCE-HENRY-001');
+    await expect(page.locator('#jobViewOnlyBanner')).toHaveCount(0);
+    await expect(page.locator('#jobDetailContent .sf-action-btn').filter({ hasText: 'Accept' })).toBeVisible();
+    await expect(page.locator('#bottomNoteInput')).toBeVisible();
   });
 
   test('My Jobs defaults to Everyone and Mine removes other-crew and open fencing only', async ({ appPage: page, feedRequests }) => {

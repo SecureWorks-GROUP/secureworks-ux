@@ -4038,6 +4038,12 @@
   function api(action, params, postBody, options) {
     options = options || {};
     var preserveSession = options.preserveSessionOnAuthFailure === true;
+    if (blockedForeignJobWrite(params, postBody)) {
+      var blocked = _apiError(403, 'View only — this job belongs to another crew');
+      blocked.code = 'view_only';
+      toast('View only — this job belongs to another crew', true);
+      return Promise.reject(blocked);
+    }
     return getAuthToken().then(function(token) {
       var url = _opsApiBase + '?action=' + action;
       if (params) {
@@ -4118,6 +4124,8 @@
   // ══════════════════════════════════════════════════
 
   function queueOfflineAction(action, postBody) {
+    // A blocked view-only write must not be parked for later retry either.
+    if (blockedForeignJobWrite(null, postBody)) return;
     var queue = [];
     try { queue = JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch(e) {}
     queue.push({ action: action, body: postBody, ts: new Date().toISOString() });
@@ -6619,16 +6627,62 @@
     }
     if (mine.length === 1) return mine[0];
 
-    // Fallback: match by assignment ID passed from job card tap
+    // Fallback: match by assignment ID passed from job card tap.
+    // Never adopt a row the feed says belongs to someone else — a managed-vertical
+    // viewer opens other crews' cards, and inheriting their assignment would hand
+    // them that crew's clock/accept actions.
     if (_currentAssignment) {
       for (var i = 0; i < crew.length; i++) {
-        if (crew[i].id === _currentAssignment) return crew[i];
+        if (crew[i].id === _currentAssignment && !isOtherCrewAssignment(crew[i])) return crew[i];
       }
     }
     // Last resort: if only one crew member, assume it's them
-    if (crew.length === 1) return crew[0];
+    if (crew.length === 1 && !isOtherCrewAssignment(crew[0])) return crew[0];
     return null;
   }
+
+  // <foreign-job-readonly>
+  // Visibility is not authority. A managed-vertical viewer (Henry sees every
+  // fencing job) can open work allocated to another crew; that detail is
+  // VIEW-ONLY. The server is the real gate — this stops the client offering, or
+  // firing, a write it has no standing to make. Rows with no user_id (open pool,
+  // or a feed that omits it) are not another crew's, so legacy behaviour stands.
+  function isOtherCrewAssignment(assignment) {
+    return !!(assignment && assignment.user_id && _user && assignment.user_id !== _user.id);
+  }
+
+  function isForeignCrewJob(data) {
+    var crew = (data && data.crew) || [];
+    if (!_user || !crew.length) return false;
+    var ownsOne = crew.some(function(a) { return a.user_id && a.user_id === _user.id; });
+    if (ownsOne) return false;
+    return crew.some(isOtherCrewAssignment);
+  }
+
+  function foreignCrewNames(data) {
+    var names = [];
+    ((data && data.crew) || []).forEach(function(a) {
+      var name = a && (a.name || a.crew_name);
+      if (name && names.indexOf(name) === -1) names.push(name);
+    });
+    return names.join(', ');
+  }
+
+  // Blocks a write aimed at the job currently open in view-only mode, before it
+  // reaches the network or the offline retry queue.
+  function blockedForeignJobWrite(params, postBody) {
+    if (!postBody || !_currentJob || !isForeignCrewJob(_currentJob)) return false;
+    // Make-safe keeps its own server-driven authority model (makesafe_board
+    // permissions + report submission); it never renders this detail surface.
+    if (_currentJob.job && getTradeJobType(_currentJob.job) === 'makesafe') return false;
+    var ids = [];
+    if (_currentJob.job && _currentJob.job.id) ids.push(_currentJob.job.id);
+    (_currentJob.crew || []).forEach(function(a) { if (a && a.id) ids.push(a.id); });
+    if (!ids.length) return false;
+    var payload = JSON.stringify([params || {}, postBody]);
+    return ids.some(function(id) { return payload.indexOf(id) !== -1; });
+  }
+  // </foreign-job-readonly>
 
   function getMaterialsStatus(pos) {
     if (!pos || pos.length === 0) return { icon: '🔴', text: 'No materials ordered' };
@@ -8324,6 +8378,7 @@
     var phase = deriveJobPhase(data);
     var type = getTradeJobType(job);
     var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
+    var viewOnly = isForeignCrewJob(data);
 
     // Store for tab lazy-loading
     _currentJob = data;
@@ -8332,6 +8387,14 @@
 
     // ── Back button ──
     html += '<button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button>';
+
+    // ── View-only notice (another crew's job) ──
+    if (viewOnly) {
+      var allocatedTo = foreignCrewNames(data);
+      html += '<div id="jobViewOnlyBanner" style="padding:12px 14px;background:var(--sw-light);border:1px solid var(--sw-border);border-radius:10px;margin-bottom:12px;font-size:13px;color:var(--sw-text-sec)">';
+      html += '&#128065; <strong style="color:var(--sw-dark)">View only</strong> — ' + (allocatedTo ? esc(allocatedTo) + ' is' : 'another crew is') + ' allocated to this job.';
+      html += '</div>';
+    }
 
     // ── Section 1: Job Hero Card ──
     html += renderHeroCard(data, phase);
@@ -8423,7 +8486,7 @@
     html += 'Photos';
     if (mediaCount > 0) html += '<span class="tab-badge">' + mediaCount + '</span>';
     html += '</button>';
-    if (canMessage()) {
+    if (canMessage() && !viewOnly) {
       html += '<button class="jd-tab" data-tab="comms" onclick="switchJobTab(\'comms\')">Comms</button>';
     }
     html += '<button class="jd-tab" data-tab="log" onclick="switchJobTab(\'log\')">';
@@ -8461,7 +8524,7 @@
         if (n.detail_json && n.detail_json.from_ops) html += '<span style="font-size:10px;background:var(--sw-blue);color:#fff;padding:1px 5px;border-radius:4px">Office</span>';
         html += '<span style="flex:1"></span>';
         html += '<span style="font-size:11px;color:var(--sw-text-sec)">' + timeAgo(n.created_at) + '</span>';
-        html += '<button onclick="deleteNote(\'' + n.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
+        if (!viewOnly) html += '<button onclick="deleteNote(\'' + n.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
         html += '</div>';
         html += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + esc((n.detail_json && n.detail_json.text) || '') + '</div>';
         html += '</div>';
@@ -8470,10 +8533,12 @@
     } else {
       html += '<div id="bottomNotesList" style="padding:12px;text-align:center;color:var(--sw-text-sec);font-size:13px">No notes yet</div>';
     }
-    html += '<div style="display:flex;gap:8px;margin-top:10px;">';
-    html += '<input type="text" id="bottomNoteInput" placeholder="Add a note..." style="flex:1;padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);" onkeydown="if(event.key===\'Enter\')submitBottomNote()">';
-    html += '<button onclick="submitBottomNote()" style="background:var(--sw-orange);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px;">Send</button>';
-    html += '</div>';
+    if (!viewOnly) {
+      html += '<div style="display:flex;gap:8px;margin-top:10px;">';
+      html += '<input type="text" id="bottomNoteInput" placeholder="Add a note..." style="flex:1;padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);" onkeydown="if(event.key===\'Enter\')submitBottomNote()">';
+      html += '<button onclick="submitBottomNote()" style="background:var(--sw-orange);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px;">Send</button>';
+      html += '</div>';
+    }
     html += '</div>';
 
     container.innerHTML = html;
@@ -8506,6 +8571,8 @@
     } catch(e) {}
     // If saved tab is workorder/comms but user is Tier 1, fall back to scope
     if ((lastTab === 'workorder' || lastTab === 'comms') && !canMessage()) lastTab = 'scope';
+    // Comms is suppressed on another crew's job — never restore into a missing tab
+    if (lastTab === 'comms' && viewOnly) lastTab = 'scope';
     switchJobTab(lastTab);
 
     // ── Timer system (unchanged) ──
@@ -8552,8 +8619,8 @@
       buttons += ' Call</a>';
     }
 
-    // Text button — switches to Comms tab (Tier 2+ only)
-    if (canMessage()) {
+    // Text button — switches to Comms tab (Tier 2+ only, never on another crew's job)
+    if (canMessage() && !isForeignCrewJob(data)) {
       buttons += '<button class="jd-action-btn act-text" onclick="switchJobTab(\'comms\')">';
       buttons += '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
       buttons += ' Text</button>';
@@ -8639,6 +8706,7 @@
     var config = scope.config || scope || {};
     var wo = data.workOrder;
     var type = (job.type || 'patio').toLowerCase();
+    var viewOnly = isForeignCrewJob(data);
     var h = '';
 
     // ── 1. HEADER — job type badge + address ──
@@ -9057,6 +9125,8 @@
 
         if (match.already_invoiced) {
           ch += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);padding:10px;font-size:13px;font-weight:600;margin-top:12px">&#10003; Invoiced</div>';
+        } else if (viewOnly) {
+          ch += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">View only -- another crew is allocated</div>';
         } else if (match.can_invoice) {
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
         } else {
@@ -9097,7 +9167,7 @@
           ch += '  </div>';
           ch += '  <div class="crew-charge-amount">$' + Number(c.line_total_ex || 0).toFixed(2) + '</div>';
 
-          if (status === 'pending' || status === 'submitted') {
+          if ((status === 'pending' || status === 'submitted') && !viewOnly) {
             ch += '  <div class="crew-actions">';
             ch += '    <button class="crew-btn-approve" onclick="reviewCrewCharge(\'' + c.line_id + '\', \'approve\')" title="Approve">&#10003;</button>';
             ch += '    <button class="crew-btn-reject" onclick="reviewCrewCharge(\'' + c.line_id + '\', \'reject\')" title="Query">&#9888;</button>';
@@ -9275,6 +9345,7 @@
 
   function renderJobTab_photos(data, phase, container) {
     var media = data.media || [];
+    var viewOnly = isForeignCrewJob(data);
     var byPhase = { scope: [], in_progress: [], completion: [], issue: [] };
     media.forEach(function(m) {
       var p = m.phase || 'scope';
@@ -9302,15 +9373,17 @@
     h += '</div>';
 
     // Take Photo button — opens existing camera view with this job pre-selected
-    h += '<button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="';
-    h += '_cameraJobId=\'' + esc(data.job.id) + '\';';
-    // Auto-detect phase from clock state
-    h += 'if(_clockState===\'on\' && _arrivedAt){_cameraPhase=\'in_progress\';}';
-    h += 'else if(phase===\'complete\'){_cameraPhase=\'completion\';}';
-    h += 'else{_cameraPhase=\'scope\';}';
-    h += 'showView(\'camera\');';
-    h += '">';
-    h += '&#128247; Take Photo</button>';
+    if (!viewOnly) {
+      h += '<button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="';
+      h += '_cameraJobId=\'' + esc(data.job.id) + '\';';
+      // Auto-detect phase from clock state
+      h += 'if(_clockState===\'on\' && _arrivedAt){_cameraPhase=\'in_progress\';}';
+      h += 'else if(phase===\'complete\'){_cameraPhase=\'completion\';}';
+      h += 'else{_cameraPhase=\'scope\';}';
+      h += 'showView(\'camera\');';
+      h += '">';
+      h += '&#128247; Take Photo</button>';
+    }
 
     // Before/After comparison (if both exist)
     var scopePhotos = byPhase.scope;
@@ -9352,17 +9425,19 @@
     });
 
     // Upload area (for adding more photos in-context)
-    h += '<div class="detail-section">';
-    h += '  <div class="upload-area" onclick="document.getElementById(\'tabPhotoInput\').click()">';
-    h += '    <svg viewBox="0 0 24 24"><path d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg>';
-    h += '    <p>Tap to add photos</p>';
-    h += '  </div>';
-    h += '  <input type="file" id="tabPhotoInput" accept="image/*" capture="environment" multiple style="display:none" onchange="handleTabPhotoUpload(this)">';
-    h += '  <div class="upload-progress" id="tabUploadProgress" style="display:none">';
-    h += '    <span id="tabUploadProgressText">Uploading...</span>';
-    h += '    <div class="upload-progress-bar"><div class="upload-progress-fill" id="tabUploadProgressFill"></div></div>';
-    h += '  </div>';
-    h += '</div>';
+    if (!viewOnly) {
+      h += '<div class="detail-section">';
+      h += '  <div class="upload-area" onclick="document.getElementById(\'tabPhotoInput\').click()">';
+      h += '    <svg viewBox="0 0 24 24"><path d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg>';
+      h += '    <p>Tap to add photos</p>';
+      h += '  </div>';
+      h += '  <input type="file" id="tabPhotoInput" accept="image/*" capture="environment" multiple style="display:none" onchange="handleTabPhotoUpload(this)">';
+      h += '  <div class="upload-progress" id="tabUploadProgress" style="display:none">';
+      h += '    <span id="tabUploadProgressText">Uploading...</span>';
+      h += '    <div class="upload-progress-bar"><div class="upload-progress-fill" id="tabUploadProgressFill"></div></div>';
+      h += '  </div>';
+      h += '</div>';
+    }
 
     container.innerHTML = h;
   }
@@ -9642,14 +9717,17 @@
     var notes = data.notes || [];
     var media = data.media || [];
     var crew = data.crew || [];
+    var viewOnly = isForeignCrewJob(data);
 
     // Add Note input at top
-    h += '<div style="display:flex;gap:8px;margin-bottom:12px">';
-    h += '  <input type="text" id="tabNoteInput" placeholder="Log a note \u2014 issue, change, observation..." style="flex:1;padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);" onkeydown="if(event.key===\'Enter\')submitTabNote()">';
-    h += '  <button onclick="submitTabNote()" style="background:var(--sw-orange);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px;white-space:nowrap;">Send</button>';
-    h += '</div>';
+    if (!viewOnly) {
+      h += '<div style="display:flex;gap:8px;margin-bottom:12px">';
+      h += '  <input type="text" id="tabNoteInput" placeholder="Log a note \u2014 issue, change, observation..." style="flex:1;padding:10px 12px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);" onkeydown="if(event.key===\'Enter\')submitTabNote()">';
+      h += '  <button onclick="submitTabNote()" style="background:var(--sw-orange);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px;white-space:nowrap;">Send</button>';
+      h += '</div>';
+    }
     // Voice note button
-    if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+    if (!viewOnly && (window.SpeechRecognition || window.webkitSpeechRecognition)) {
       h += '<button class="btn btn-secondary btn-small" id="tabBtnVoice" onclick="toggleVoiceNote()" style="margin-bottom:12px;font-size:12px">';
       h += '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-3px;margin-right:4px"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>';
       h += ' Voice Note</button>';
@@ -9715,7 +9793,7 @@
         if (entry.isAdmin) h += '<span style="font-size:10px;background:var(--sw-blue);color:#fff;padding:1px 5px;border-radius:4px">Office</span>';
         h += '<span style="flex:1"></span>';
         h += '<span style="font-size:11px;color:var(--sw-text-sec)">' + timeAgo(entry.time) + '</span>';
-        if (entry.id && entry.type !== 'photo') h += '<button onclick="deleteNote(\'' + entry.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
+        if (!viewOnly && entry.id && entry.type !== 'photo') h += '<button onclick="deleteNote(\'' + entry.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
         h += '</div>';
         if (entry.text) h += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + esc(entry.text) + '</div>';
         if (entry.thumb) {
@@ -19209,6 +19287,9 @@
       saveTimerState();
       return result;
     }).catch(function(err) {
+      // A view-only block is a refusal, not a lost connection: never stash or
+      // optimistically apply another crew's clock event.
+      if (err && err.code === 'view_only') throw err;
       console.error('[trade] clock_event failed:', event, err);
 
       // Save locally + queue for retry — DON'T clear state

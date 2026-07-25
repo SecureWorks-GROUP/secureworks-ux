@@ -163,14 +163,27 @@ assert(/if \(isFencing\) _wireBoardPager\(\);/.test(html),
 const workOrders = [
   { id: 'wo-fencing', job_type: 'fencing' },
   { id: 'wo-untyped' },
+  { id: 'wo-kind-only', type: 'labour' },
+  { id: 'wo-nested', jobs: { type: 'fencing' } },
+  { id: 'wo-alias', vertical: 'Fencing' },
   { id: 'wo-patio', job_type: 'patio' },
   { id: 'wo-foreign', job_type: 'fencing', org_id: 'org-2' }
 ];
 context._user = { id: 'henry', role: 'lead_installer', managed_verticals: ['fencing'], org_id: 'org-1' };
 assert.deepStrictEqual(
   Array.from(context.workOrdersForViewer(workOrders).map((order) => order.id)),
-  ['wo-fencing', 'wo-untyped'],
+  ['wo-fencing', 'wo-untyped', 'wo-kind-only', 'wo-nested', 'wo-alias'],
   'the managed hub drops another vertical and another tenant but never an untyped order');
+assert.strictEqual(context.workOrderVertical({ type: 'labour' }), '',
+  'a bare type is a work-order kind, never a job vertical');
+assert.strictEqual(context.workOrderVertical({ job_type: 'labour', type: 'fencing' }), 'labour',
+  'only the canonical vertical fields decide the vertical');
+assert.deepStrictEqual(
+  Array.from(['job_type', 'vertical', 'jobs'].map((field) => context.workOrderVertical(
+    field === 'jobs' ? { jobs: { type: 'Fencing' } } : { [field]: 'Fencing' }
+  ))),
+  ['fencing', 'fencing', 'fencing'],
+  'job_type, vertical and nested jobs.type are the accepted canonical vertical fields');
 context._authorizedWorkOrderIds = {};
 context.authorizeWorkOrders(context.workOrdersForViewer(workOrders));
 assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), true,
@@ -181,7 +194,7 @@ assert.strictEqual(context.isAuthorizedWorkOrder('wo-foreign'), false,
 // Job detail reaches invoiceWorkOrder from its own read, with no hub visit.
 context._authorizedWorkOrderIds = {};
 assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), false);
-context.authorizeWorkOrders([workOrders[2]]);
+context.authorizeWorkOrders([workOrders.find((order) => order.id === 'wo-patio')]);
 assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), true,
   'the job-detail entry point authorises the order it renders, hub or no hub');
 assert(/authorizeWorkOrders\(\[match\]\);/.test(html),

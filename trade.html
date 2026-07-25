@@ -19229,7 +19229,7 @@
   // what the server already authorised, not the authorisation itself.
   function workOrderVertical(order) {
     order = order || {};
-    var raw = order.job_type || order.vertical || order.type || (order.jobs || {}).type;
+    var raw = order.job_type || order.vertical || (order.jobs || {}).type;
     return String(raw || '').toLowerCase().trim();
   }
 

@@ -19,6 +19,7 @@ const context = {
   console,
   window: {},
   _isAdmin: false,
+  _authorizedWorkOrderIds: {},
   _user: {
     id: 'henry',
     email: 'henry@example.test',
@@ -31,7 +32,8 @@ vm.runInContext([
   block('// <trade-visibility-core>', '// </trade-visibility-core>'),
   block('// <calendar-adapter-core>', '// </calendar-adapter-core>'),
   block('// <trade-calendar-source>', '// </trade-calendar-source>'),
-  block('// <fencing-board-core>', '// </fencing-board-core>')
+  block('// <fencing-board-core>', '// </fencing-board-core>'),
+  block('// <trade-workorder-auth>', '// </trade-workorder-auth>')
 ].join('\n'), context);
 
 const visibility = {
@@ -110,10 +112,25 @@ assert.strictEqual(fencing.columnOf(assigned), 'scheduled');
 assert.strictEqual(fencing.columnOf(genuinePool), 'needs');
 assert.strictEqual(fencing.weekStart('2026-07-25'), '2026-07-20', 'week planning uses Monday in date-only space');
 assert.strictEqual(fencing.weekLabel('2026-07-20'), 'Mon 20 Jul – Sun 26 Jul 2026');
-assert.strictEqual(fencing.forSelection(board.verticals[0], '2026-07-20', false).total, 1,
+const scheduledWeek = fencing.forSelection(board.verticals[0], '2026-07-20', false);
+assert.strictEqual(scheduledWeek.total, 1,
   'a selected week includes only canonically dated work in that Monday-Sunday range');
-assert.strictEqual(fencing.forSelection(board.verticals[0], '2026-07-20', true).total, 1,
-  'Unscheduled deliberately retains the one genuinely open Ready job');
+assert.strictEqual(scheduledWeek.unmappedCount, 1,
+  'the unmapped-status guard stays board-wide, never recounted from the filtered week');
+const unscheduled = fencing.forSelection(board.verticals[0], '2026-07-20', true);
+assert.strictEqual(unscheduled.total, 2,
+  'Unscheduled reaches every undated card, not only the open Ready ones');
+assert.deepStrictEqual(
+  Array.from(unscheduled.columns.filter((column) => column.cards.length).map((column) => column.key)),
+  ['needs', 'attention'],
+  'an undated card stays in its own status column under Unscheduled');
+assert.strictEqual(unscheduled.unmappedCount, 1,
+  'an undated unknown status is still counted in the board-wide unmapped guard');
+const reachable = new Set(
+  scheduledWeek.columns.concat(unscheduled.columns).flatMap((column) => column.cards)
+);
+assert.strictEqual(cards.filter((card) => !reachable.has(card)).length, 0,
+  'no authorised card is unreachable from its own week plus Unscheduled');
 
 // Two jobs sharing ONE unknown status must report as 2 jobs, not 1 status token.
 const sharedUnknown = fencing.buildBoard({
@@ -124,6 +141,69 @@ assert.strictEqual(sharedUnknown.unmappedCount, 2, 'jobs sharing one unknown sta
 assert.strictEqual(sharedUnknown.verticals[0].unmappedCount, 2);
 assert(/var unmappedJobs = active\.unmappedCount \|\| 0;/.test(html),
   'the board banner reads the ACTIVE vertical unmapped count, never a cross-vertical merge');
+
+// The mobile column pager is a fencing-Board affordance only — the make-safe
+// board keeps its stacked columns and plain counters at every width.
+const mobileBlock = html.match(/@media \(max-width:700px\)\{([\s\S]*?)\n {4}\}/);
+assert(mobileBlock, 'the board mobile media query still exists');
+const sharedBoardClasses = ['tjb-pager', 'tjb-col', 'tjb-strip', 'tjb-stripcell'];
+Array.from(mobileBlock[1].matchAll(/([^{}]+)\{[^{}]*\}/g)).forEach((rule) => {
+  rule[1].split(',').forEach((selector) => {
+    const text = selector.trim();
+    if (!sharedBoardClasses.some((name) => new RegExp(`\\.${name}(?![\\w-])`).test(text))) return;
+    assert(text.startsWith('.tjb-wrap.fencing '),
+      `"${text}" restyles a shared board class on phones — scope it to .tjb-wrap.fencing so make-safe is unchanged`);
+  });
+});
+assert(/if \(isFencing\) _wireBoardPager\(\);/.test(html),
+  'only the fencing board wires the horizontal pager');
+
+// Work-order authorization. The registry is the authenticated my_work_orders
+// response itself, so the job-detail Cost Breakdown never depends on a hub visit.
+const workOrders = [
+  { id: 'wo-fencing', job_type: 'fencing' },
+  { id: 'wo-untyped' },
+  { id: 'wo-patio', job_type: 'patio' },
+  { id: 'wo-foreign', job_type: 'fencing', org_id: 'org-2' }
+];
+context._user = { id: 'henry', role: 'lead_installer', managed_verticals: ['fencing'], org_id: 'org-1' };
+assert.deepStrictEqual(
+  Array.from(context.workOrdersForViewer(workOrders).map((order) => order.id)),
+  ['wo-fencing', 'wo-untyped'],
+  'the managed hub drops another vertical and another tenant but never an untyped order');
+context._authorizedWorkOrderIds = {};
+context.authorizeWorkOrders(context.workOrdersForViewer(workOrders));
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), true,
+  'an order the server returned without a vertical stays invoiceable');
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-foreign'), false,
+  'another tenant order is never invoiceable');
+
+// Job detail reaches invoiceWorkOrder from its own read, with no hub visit.
+context._authorizedWorkOrderIds = {};
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), false);
+context.authorizeWorkOrders([workOrders[2]]);
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), true,
+  'the job-detail entry point authorises the order it renders, hub or no hub');
+assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
+  'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
+assert(/var orders = \(res\.work_orders \|\| \[\]\)\.filter\(workOrderTenantOk\);/.test(html),
+  'the job-detail read applies the same tenant guard as the hub');
+
+// Tenant guard: fail closed for a widened viewer with no org_id, keep the
+// ordinary server-scoped own-only response usable.
+context._user = { id: 'henry', role: 'lead_installer', managed_verticals: ['fencing'] };
+assert.strictEqual(context.workOrderTenantOk({ id: 'wo-foreign', org_id: 'org-2' }), false,
+  'a managed lead with no org_id fails closed on a tenant-tagged order');
+assert.strictEqual(context.workOrderTenantOk({ id: 'wo-untagged' }), true,
+  'an untagged order stays usable — own-only responses carry no tenant column');
+context._user = { id: 'installer', role: 'crew', managed_verticals: [] };
+assert.strictEqual(context.workOrderTenantOk({ id: 'wo-own', org_id: 'org-2' }), true,
+  'an ordinary installer keeps the server-authorized own-only response');
+assert.strictEqual(fencing.isSameOrg({ org_id: 'org-2' }, ''), false,
+  'the board tenant guard agrees: a tagged row needs a known viewer org');
+assert.strictEqual(fencing.isSameOrg({ id: 'untagged' }, ''), true,
+  'the board tenant guard keeps rows the server did not tag');
+context._user = { id: 'henry', role: 'lead_installer', managed_verticals: ['fencing'] };
 
 const payload = {
   schema: 'trade-calendar.v1',

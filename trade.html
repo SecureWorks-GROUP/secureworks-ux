@@ -2893,7 +2893,8 @@
     .tjb-week-btn.icon{min-width:44px;padding:0;font-size:18px}
     .tjb-week-btn.sel,.tjb-week-btn[aria-pressed="true"]{background:var(--sw-dark);border-color:var(--sw-dark);color:#fff}
     .tjb-strip{display:flex;gap:5px;padding:0 0 12px;flex:0 0 auto}
-    .tjb-stripcell{flex:1;min-width:0;border-radius:10px;padding:8px 2px 7px;text-align:center;background:var(--sw-card);border:1px solid var(--sw-border);font-family:inherit;cursor:pointer}
+    .tjb-stripcell{flex:1;min-width:0;border-radius:10px;padding:8px 2px 7px;text-align:center;background:var(--sw-card);border:1px solid var(--sw-border);font-family:inherit}
+    button.tjb-stripcell{cursor:pointer}
     .tjb-stripcell[aria-current="true"]{border-color:var(--sw-dark);box-shadow:inset 0 0 0 1px var(--sw-dark)}
     .tjb-stripcell .n{display:block;font-family:var(--sw-mono);font-size:18px;font-weight:600;line-height:1;color:var(--sw-dark)}
     .tjb-stripcell .l{display:block;font-family:var(--sw-mono);font-size:9px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:var(--sw-text-sec);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2922,11 +2923,11 @@
       .tjb-week{padding:10px}
       .tjb-week-actions{display:grid;grid-template-columns:44px minmax(68px,1fr) minmax(92px,1.25fr) 44px;gap:6px}
       .tjb-week-btn{padding:0 7px}
-      .tjb-strip{overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;padding-bottom:10px}
-      .tjb-strip::-webkit-scrollbar,.tjb-pager::-webkit-scrollbar{display:none}
-      .tjb-stripcell{flex:0 0 74px;scroll-snap-align:start}
-      .tjb-pager{display:flex;gap:12px;overflow-x:auto;overflow-y:visible;scroll-snap-type:x mandatory;scroll-padding-inline:0;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
-      .tjb-col{flex:0 0 100%;width:100%;margin-bottom:0;scroll-snap-align:start;scroll-snap-stop:always}
+      .tjb-wrap.fencing .tjb-strip{overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;padding-bottom:10px}
+      .tjb-wrap.fencing .tjb-strip::-webkit-scrollbar,.tjb-wrap.fencing .tjb-pager::-webkit-scrollbar{display:none}
+      .tjb-wrap.fencing .tjb-stripcell{flex:0 0 74px;scroll-snap-align:start}
+      .tjb-wrap.fencing .tjb-pager{display:flex;gap:12px;overflow-x:auto;overflow-y:visible;scroll-snap-type:x mandatory;scroll-padding-inline:0;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
+      .tjb-wrap.fencing .tjb-col{flex:0 0 100%;width:100%;margin-bottom:0;scroll-snap-align:start;scroll-snap-stop:always}
     }
     /* M3 U3 — allocation sheet: tap a board card -> pick crew -> confirm -> allocate_job */
     .alloc-overlay{position:fixed;inset:0;z-index:560;background:rgba(0,0,0,0.5);display:none;align-items:flex-end;justify-content:center}
@@ -3564,7 +3565,7 @@
   var _reportMode = null;       // null = generic service report, 'makesafe' = MakeSafe report template
   var _tradeJobCacheById = {};  // card/detail cache for MakeSafe fallback rendering
   var _invoiceBuilderOpen = false; // true when invoice builder is active
-  var _authorizedWorkOrderIds = {}; // last authenticated my_work_orders response after local vertical/tenant narrowing
+  var _authorizedWorkOrderIds = {}; // work orders this session's authenticated my_work_orders reads returned for this viewer
   var _opsApiBase = '';
   var _cachedMyJobs = [];    // flat array of all assignments for Camera/Schedule views
   var _isAdmin = false;       // dispatcher role: admin or ops_manager
@@ -9113,7 +9114,7 @@
       api('my_work_orders').then(function(res) {
         var el = document.getElementById('woJobCostBreakdown');
         if (!el) return;
-        var orders = res.work_orders || [];
+        var orders = (res.work_orders || []).filter(workOrderTenantOk);
         var match = null;
         for (var i = 0; i < orders.length; i++) {
           if (orders[i].id === wo.id || orders[i].job_id === job.id) { match = orders[i]; break; }
@@ -9147,6 +9148,7 @@
         } else if (viewOnly) {
           ch += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">View only -- another crew is allocated</div>';
         } else if (match.can_invoice) {
+          authorizeWorkOrders([match]);
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
         } else {
           ch += '<div style="font-size:12px;color:#92400e;margin-top:10px">Not ready -- job not complete</div>';
@@ -17905,10 +17907,10 @@
       return norm(row.assignment_type) === 'fencing_open';
     }
     function isSameOrg(row, orgId) {
-      if (!orgId) return true;
       row = row || {};
       var rowOrg = row.org_id || (row.jobs || {}).org_id;
-      return !rowOrg || String(rowOrg) === String(orgId);
+      if (!rowOrg) return true;
+      return !!orgId && String(rowOrg) === String(orgId);
     }
     function terminalColumn(row) {
       var status = norm(((row || {}).jobs || {}).status);
@@ -18024,24 +18026,18 @@
         var cards = (column.cards || []).filter(function (card) {
           var row = card._boardRow || {};
           var scheduled = String(row.scheduled_date || '').slice(0, 10);
-          if (unscheduled) return !scheduled && column.key === 'needs';
+          if (unscheduled) return !scheduled;
           return !!scheduled && scheduled >= start && scheduled <= end;
         });
         return { key: column.key, label: column.label, hot: column.hot, cards: cards };
       });
       var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
-      var unmappedCount = 0;
-      columns.forEach(function (column) {
-        column.cards.forEach(function (card) {
-          if (!columnOf(card._boardRow || {})) unmappedCount++;
-        });
-      });
       return {
         vertical: vertical.vertical,
         label: vertical.label,
         columns: columns,
         total: total,
-        unmappedCount: unmappedCount
+        unmappedCount: vertical.unmappedCount || 0
       };
     }
 
@@ -18062,7 +18058,6 @@
   var _boardCardById = {};  // cardId -> { model, vertical }; rebuilt each _renderBoard (the tap-target registry)
   var _boardCardSeq = 0;
   var _boardSearchQuery = ''; // M3d — active Board search text; survives re-renders
-  var _boardCancelledVisible = false; // M-F W2-D — Cancelled column collapsed by default
   var _fencingBoardWeekStart = null; // Perth Monday; null until first fencing render
   var _fencingBoardUnscheduled = false;
   var _boardStatusKey = null;
@@ -18084,7 +18079,6 @@
       toast('Could not reopen: ' + friendlyError(err), true);
     });
   };
-  window.toggleBoardCancelled = function () { _boardCancelledVisible = !_boardCancelledVisible; _renderBoard(); };
   var _allocSel = null;     // active allocation-sheet selection { model, cardId, userId, crew }
   var _allocGuard = null;   // per-open double-fire guard { busy }
   var _allocEditGuard = null; // M3b U3: schedule-edit double-fire guard { busy }
@@ -18247,7 +18241,7 @@
   }
 
   window.goBoardStatus = function (key) {
-    var pager = document.querySelector('#boardContent .tjb-pager');
+    var pager = document.querySelector('#boardContent .tjb-wrap.fencing .tjb-pager');
     var column = document.getElementById('board-col-' + key);
     if (!pager || !column) return;
     _setBoardStatusAffordance(key);
@@ -18261,7 +18255,7 @@
   };
 
   function _wireBoardPager() {
-    var pager = document.querySelector('#boardContent .tjb-pager');
+    var pager = document.querySelector('#boardContent .tjb-wrap.fencing .tjb-pager');
     if (!pager) return;
     var columns = Array.prototype.slice.call(pager.querySelectorAll('.tjb-col'));
     if (!columns.length) return;
@@ -18340,12 +18334,13 @@
     var active = null;
     for (var i = 0; i < board.verticals.length; i++) { if (board.verticals[i].vertical === _boardVert) { active = board.verticals[i]; break; } }
     if (!active) active = board.verticals[0];
-    if (active.vertical === 'fencing') {
+    var isFencing = active.vertical === 'fencing';
+    if (isFencing) {
       active = FencingBoardCore.forSelection(active, _ensureFencingWeek(), _fencingBoardUnscheduled);
     }
 
-    var html = '<div class="tjb-wrap">';
-    if (active.vertical === 'fencing') {
+    var html = '<div class="tjb-wrap' + (isFencing ? ' fencing' : '') + '">';
+    if (isFencing) {
       var currentWeek = _currentFencingWeek();
       html += '<div class="tjb-week" id="fenceWeekNav" aria-label="Fencing Board week">';
       html += '<div class="tjb-week-label" id="fenceWeekLabel">' +
@@ -18388,33 +18383,24 @@
     if (crewNames.length) {
       html += '<div class="tjb-note">Crew (' + crewNames.length + ') · ' + esc(crewNames.slice(0, 6).join(', ')) + (crewNames.length > 6 ? ' +' + (crewNames.length - 6) : '') + '</div>';
     }
-    // M-F W2-D — collapse the terminal Cancelled column behind a toggle so the
-    // active view reads through to Done/Completed; managers open it on demand.
-    // Trade has no Archive column, so Cancelled is the only "dead" column to
-    // collapse here (Done stays visible — it is trade's Completed column).
-    var _cancelledCol = null;
-    active.columns.forEach(function (c) { if (c.key === 'cancelled') _cancelledCol = c; });
-    var _cancelledCount = _cancelledCol ? _cancelledCol.cards.length : 0;
-    function _showCol(c) { return active.vertical === 'fencing' || !(c.key === 'cancelled' && !_boardCancelledVisible); }
-    if (_cancelledCol && active.vertical !== 'fencing') {
-      html += '<div style="display:flex;justify-content:flex-end;margin:0 0 8px;">' +
-        '<button onclick="toggleBoardCancelled()" style="background:' + (_boardCancelledVisible ? 'var(--sw-mid)' : 'var(--sw-light)') + ';color:' + (_boardCancelledVisible ? '#fff' : 'var(--sw-text)') + ';border:1px solid var(--sw-border);border-radius:8px;font-size:12px;font-weight:700;padding:7px 12px;cursor:pointer;font-family:var(--sw-font);">' +
-        (_boardCancelledVisible ? 'Hide cancelled' : 'Show cancelled') + (_cancelledCount ? ' (' + _cancelledCount + ')' : '') + '</button></div>';
-    }
-    // status strip for the active vertical
+    // status strip for the active vertical. Only the fencing Board turns the
+    // strip into column navigation for its horizontal pager; every other
+    // vertical keeps the plain stacked counters.
     html += '<div class="tjb-strip">';
     active.columns.forEach(function (c) {
-      if (!_showCol(c)) return;
+      var counts = '<span class="n">' + c.cards.length + '</span><span class="l">' + esc(c.label) + '</span>';
+      if (!isFencing) {
+        html += '<div class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') + '">' + counts + '</div>';
+        return;
+      }
       html += '<button type="button" class="tjb-stripcell' + (c.hot && c.cards.length ? ' hot' : '') +
         '" data-board-status-target="' + esc(c.key) + '" onclick="goBoardStatus(\'' + esc(c.key) + '\')" aria-controls="board-col-' + esc(c.key) +
-        '" aria-current="' + (_boardStatusKey === c.key ? 'true' : 'false') + '"><span class="n">' + c.cards.length +
-        '</span><span class="l">' + esc(c.label) + '</span></button>';
+        '" aria-current="' + (_boardStatusKey === c.key ? 'true' : 'false') + '">' + counts + '</button>';
     });
     html += '</div>';
     // pager of columns
     html += '<div class="tjb-pager">';
     active.columns.forEach(function (c) {
-      if (!_showCol(c)) return;
       html += '<section class="tjb-col" id="board-col-' + esc(c.key) + '" data-board-column-key="' + esc(c.key) +
         '" aria-labelledby="board-col-label-' + esc(c.key) + '"><div class="tjb-colhead' + (c.hot ? ' hot' : '') +
         '"><b id="board-col-label-' + esc(c.key) + '">' + esc(c.label) + '</b><span class="cc">' + c.cards.length + '</span></div>';
@@ -18434,7 +18420,7 @@
     html += '<div class="tjb-note" style="text-align:center;margin-top:6px">' + (_activeBoardCanAllocate() ? 'Allocate and set arrival time from any live card.' : 'View only. Visibility and actions are set by the server.') + '</div>';
     html += '</div>';
     container.innerHTML = html;
-    _wireBoardPager();
+    if (isFencing) _wireBoardPager();
     if (weatherData) renderWeatherBadges();
     // M3d — a background reload rebuilds innerHTML; re-apply any active filter
     // so the input value + visible-card set survive the re-render (no focus
@@ -19055,7 +19041,7 @@
         if (_allocGuard) _allocGuard.busy = false;
         closeAllocateSheet();
         toast(failed ? ('Assigned ' + done + ' of ' + ops.length + ' — ' + failed + ' failed') : ('Allocated ' + done + ' crew'), !!failed);
-        if (sel.model && sel.model.type === 'fencing' && isCreateMode && ops[0]) {
+        if (sel.model && sel.model.type === 'fencing' && isCreateMode && done > 0 && ops[0]) {
           _selectFencingBoardWeek(ops[0].scheduledDate, 'scheduled');
         }
         _refreshBoardSilent();
@@ -19225,26 +19211,63 @@
   // WORK ORDERS — sub-view in Financial Hub
   // ══════════════════════════════════════════════════
 
+  // <trade-workorder-auth>
+  // Tenant guard shared by every my_work_orders consumer. An order the server
+  // did not tag stays usable (own-only responses carry no tenant column); a
+  // tagged order must match the viewer, and a viewer whose profile carries no
+  // org_id fails closed on every widened (admin / managed-vertical) surface.
+  function workOrderTenantOk(order) {
+    var orderOrg = String((order || {}).org_id || '');
+    if (!orderOrg) return true;
+    var viewerOrg = String((_user || {}).org_id || '');
+    if (viewerOrg) return orderOrg === viewerOrg;
+    return !canUseEveryoneLens();
+  }
+
+  // Canonical vertical for a work order when the backend supplies one. An
+  // order with no vertical is never dropped — the narrowing is a lens over
+  // what the server already authorised, not the authorisation itself.
+  function workOrderVertical(order) {
+    order = order || {};
+    var raw = order.job_type || order.vertical || order.type || (order.jobs || {}).type;
+    return String(raw || '').toLowerCase().trim();
+  }
+
+  // The Work Order hub lens: same tenant, and for a managed-vertical lead the
+  // verticals he manages whenever the server says which vertical an order is.
+  function workOrdersForViewer(orders) {
+    var managed = managedTradeVerticals(_user);
+    return (orders || []).filter(function (order) {
+      if (!order || !workOrderTenantOk(order)) return false;
+      if (!managed.length) return true;
+      var vertical = workOrderVertical(order);
+      return !vertical || managed.indexOf(vertical) !== -1;
+    });
+  }
+
+  // Every entry point that can reach submit_work_order_invoice registers the
+  // order it renders from its own authenticated my_work_orders response, so a
+  // write is always backed by a server-scoped read in this session. The hub is
+  // never a precondition for the job-detail Cost Breakdown invoice.
+  function authorizeWorkOrders(orders) {
+    var allowed = (orders || []).filter(function (order) { return order && workOrderTenantOk(order); });
+    allowed.forEach(function (order) {
+      if (order.id) _authorizedWorkOrderIds[String(order.id)] = true;
+    });
+    return allowed;
+  }
+
+  function isAuthorizedWorkOrder(workOrderId) {
+    return _authorizedWorkOrderIds[String(workOrderId || '')] === true;
+  }
+  // </trade-workorder-auth>
+
   window.openWorkOrderHub = function() {
     var container = document.getElementById('hoursContent');
-    _authorizedWorkOrderIds = {};
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading work orders...</div>';
 
     api('my_work_orders').then(function(res) {
-      var orders = res.work_orders || [];
-      var managed = managedTradeVerticals(_user);
-      orders = orders.filter(function (order) {
-        return !order.org_id || String(order.org_id) === String((_user || {}).org_id || '');
-      });
-      if (managed.length) {
-        orders = orders.filter(function (order) {
-          return managed.indexOf(String(order.job_type || '').toLowerCase()) !== -1;
-        });
-      }
-      orders.forEach(function (order) {
-        if (order && order.id) _authorizedWorkOrderIds[String(order.id)] = true;
-      });
-      renderWorkOrderHub(orders);
+      renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
     }).catch(function(err) {
       container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
     });
@@ -19334,7 +19357,7 @@
   };
 
   window.invoiceWorkOrder = function(workOrderId) {
-    if (!_authorizedWorkOrderIds[String(workOrderId || '')]) {
+    if (!isAuthorizedWorkOrder(workOrderId)) {
       toast('This work order is not available to invoice', true);
       return;
     }

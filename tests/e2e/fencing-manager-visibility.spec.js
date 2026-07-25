@@ -38,20 +38,44 @@ async function settleBoardPagerOn(page, key) {
   expect((await boardPagerRestState(page, key)).target).toBeGreaterThan(0);
 }
 
+// One deliberate finger drag across the pager. Input.synthesizeScrollGesture is
+// deliberately NOT used: it injects through the platform gesture target, which
+// differs per OS (Aura on the Linux runner, a direct dispatch on macOS), so the
+// same call flings a different distance on each and the snap target stops being
+// decidable. Dispatching the touch stream ourselves is the platform-independent
+// path, and it lets the drag pin down its own physics: travel just under one
+// column step, then creep and hold before lifting so the release velocity is
+// below the fling threshold. Distance alone then decides the snap, and the
+// column's scroll-snap-stop:always still caps the move at one status.
 async function swipeBoardLeft(page) {
   const pager = page.locator('#boardContent .tjb-pager');
   const box = await pager.boundingBox();
   if (!box) throw new Error('Board pager is not visible');
+  const step = await pager.evaluate((element) => {
+    const columns = element.querySelectorAll('.tjb-col');
+    return columns.length > 1 ? columns[1].offsetLeft - columns[0].offsetLeft : element.clientWidth;
+  });
+  // Every touch point stays inside the pager: a drag that runs off the viewport
+  // edge gets truncated, and a short drag would snap back to the same column.
+  const travel = Math.min(step, box.width - 8);
   const cdp = await page.context().newCDPSession(page);
   const y = box.y + Math.min(120, box.height / 2);
-  await cdp.send('Input.synthesizeScrollGesture', {
-    x: box.x + box.width / 2,
-    y,
-    xDistance: -Math.round(box.width * 0.9),
-    yDistance: 0,
-    speed: 600,
-    gestureSourceType: 'touch'
+  const startX = box.x + box.width - 4;
+  const touch = (type, offset) => cdp.send('Input.dispatchTouchEvent', {
+    type,
+    touchPoints: type === 'touchEnd' ? [] : [{ x: startX - offset, y }]
   });
+
+  await touch('touchStart', 0);
+  for (let stepIndex = 1; stepIndex <= 12; stepIndex++) {
+    await touch('touchMove', (travel * stepIndex) / 12);
+  }
+  for (const settleOffset of [travel + 2, travel + 3]) {
+    await page.waitForTimeout(60);
+    await touch('touchMove', settleOffset);
+  }
+  await page.waitForTimeout(60);
+  await touch('touchEnd', travel + 3);
 }
 
 test.describe('Fencing manager visibility', () => {
@@ -317,6 +341,8 @@ for (const width of [390, 360]) {
       await expect(page.locator('[data-board-status-target="scheduled"]')).toHaveAttribute('aria-current', 'true');
       await settleBoardPagerOn(page, 'scheduled');
       await swipeBoardLeft(page);
+      // The swipe must land the pager on the next status, not drift or fly past it.
+      await settleBoardPagerOn(page, 'onsite');
       await expect(page.locator('[data-board-status-target="onsite"]')).toHaveAttribute('aria-current', 'true');
       await expect(page.locator('#fenceWeekLabel')).toHaveText(expectedWeek);
 

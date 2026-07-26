@@ -22,6 +22,25 @@
       }
     },
     {
+      "id": "fence-assignment-multi-26004-current",
+      "user_id": "e2e-henry",
+      "status": "scheduled",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "10:30",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-multi-26004",
+        "job_number": "FENCE-MULTI-26004",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Multi Week Current Client",
+        "site_address": "14 Repeat Road",
+        "site_suburb": "Balcatta",
+        "scope_summary": "Return visit in the current week",
+        "scope_json": {}
+      }
+    },
+    {
       "id": "fence-assignment-alyx",
       "user_id": "e2e-alyx",
       "status": "confirmed",
@@ -176,9 +195,66 @@
         "scope_summary": "Future fencing installation",
         "scope_json": {}
       }
+    },
+    {
+      "id": "fence-assignment-multi-26033-future",
+      "user_id": "e2e-alyx",
+      "status": "scheduled",
+      "scheduled_date": "{{FUTURE_MONDAY}}",
+      "start_time": "11:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-multi-26033",
+        "job_number": "FENCE-MULTI-26033",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Multi Week Future Client",
+        "site_address": "33 Repeat Road",
+        "site_suburb": "Wanneroo",
+        "scope_summary": "Previous and future visits on one job",
+        "scope_json": {}
+      }
     }
   ],
   "recent": [
+    {
+      "id": "fence-assignment-multi-26004-historical",
+      "user_id": "e2e-henry",
+      "status": "scheduled",
+      "scheduled_date": "{{HISTORICAL_MONDAY}}",
+      "start_time": "07:30",
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-multi-26004",
+        "job_number": "FENCE-MULTI-26004",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Multi Week Current Client",
+        "site_address": "14 Repeat Road",
+        "site_suburb": "Balcatta",
+        "scope_summary": "Historical visit on the same job",
+        "scope_json": {}
+      }
+    },
+    {
+      "id": "fence-assignment-multi-26033-previous",
+      "user_id": "e2e-alyx",
+      "status": "scheduled",
+      "scheduled_date": "{{PREVIOUS_MONDAY}}",
+      "start_time": "08:00",
+      "crew_name": "Alyx Crew",
+      "jobs": {
+        "id": "fence-job-multi-26033",
+        "job_number": "FENCE-MULTI-26033",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Multi Week Future Client",
+        "site_address": "33 Repeat Road",
+        "site_suburb": "Wanneroo",
+        "scope_summary": "Previous and future visits on one job",
+        "scope_json": {}
+      }
+    },
     {
       "id": "fence-assignment-previous",
       "user_id": "e2e-henry",
@@ -218,12 +294,33 @@
       }
     }
   ],
+  "unscheduled": [
+    {
+      "id": "fence-assignment-unscheduled",
+      "user_id": "e2e-henry",
+      "status": "confirmed",
+      "scheduled_date": null,
+      "start_time": null,
+      "crew_name": "Henry Fence",
+      "jobs": {
+        "id": "fence-job-unscheduled",
+        "job_number": "FENCE-UNSCHEDULED-011",
+        "type": "fencing",
+        "status": "scheduled",
+        "client_name": "Unscheduled Assigned Client",
+        "site_address": "11 Holding Street",
+        "site_suburb": "Wangara",
+        "scope_summary": "Assigned fencing work awaiting a date",
+        "scope_json": {}
+      }
+    }
+  ],
   "makesafePool": [
     {
       "id": "fence-open-pool",
       "user_id": null,
       "status": "available",
-      "scheduled_date": null,
+      "scheduled_date": "{{TODAY}}",
       "start_time": null,
       "crew_name": null,
       "assignment_type": "fencing_open",
@@ -245,7 +342,7 @@
       "id": "stale-open-copy",
       "user_id": null,
       "status": "available",
-      "scheduled_date": null,
+      "scheduled_date": "{{TODAY}}",
       "start_time": null,
       "crew_name": null,
       "assignment_type": "fencing_open",

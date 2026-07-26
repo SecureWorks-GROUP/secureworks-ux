@@ -67,6 +67,9 @@ const stalePool = {
 };
 const genuinePool = {
   id: 'open-2', status: 'available', assignment_type: 'fencing_open',
+  // Production currently transports open pool rows with a synthetic today date.
+  // Board semantics must still keep the row under Unscheduled Ready.
+  scheduled_date: '2026-07-25',
   jobs: { ...fencingJob, id: 'fence-2', job_number: 'FENCE-2' }
 };
 const duplicatePool = { ...genuinePool, id: 'open-2-duplicate' };
@@ -90,15 +93,20 @@ const unknownStatusTwin = {
   id: 'assignment-future-2', status: 'future_backend_status',
   jobs: { ...fencingJob, id: 'fence-4', job_number: 'FENCE-4' }
 };
+const backendUnscheduled = {
+  id: 'assignment-unscheduled', user_id: 'henry', status: 'confirmed', scheduled_date: null,
+  jobs: { ...fencingJob, id: 'fence-5', job_number: 'FENCE-5' }
+};
 const board = fencing.buildBoard({
   today: [assigned, mixed, mislabeledPool, unknownStatus, otherTenant],
   thisWeek: [],
   upcoming: [],
   recent: [],
+  unscheduled: [backendUnscheduled],
   makesafePool: [stalePool, genuinePool, duplicatePool]
 }, (job, row) => ({ job, row, _boardRow: row }), 'org-1');
 const cards = board.verticals[0].columns.flatMap((column) => column.cards);
-assert.strictEqual(cards.length, 3, 'board keeps assigned, genuinely open, and review-required fencing');
+assert.strictEqual(cards.length, 4, 'board keeps assigned, backend-unscheduled, genuinely open, and review-required fencing');
 assert.strictEqual(cards.filter((card) => card.job.id === 'fence-1').length, 1, 'old assigned work cannot reappear as available');
 assert.strictEqual(cards.filter((card) => card.job.id === 'fence-2').length, 1, 'duplicate open rows cannot duplicate a fencing card');
 assert.strictEqual(cards.some((card) => card.job.type !== 'fencing'), false, 'other verticals never enter the fencing board');
@@ -118,19 +126,50 @@ assert.strictEqual(scheduledWeek.total, 1,
 assert.strictEqual(scheduledWeek.unmappedCount, 1,
   'the unmapped-status guard stays board-wide, never recounted from the filtered week');
 const unscheduled = fencing.forSelection(board.verticals[0], '2026-07-20', true);
-assert.strictEqual(unscheduled.total, 2,
-  'Unscheduled reaches every undated card, not only the open Ready ones');
+assert.strictEqual(unscheduled.total, 3,
+  'Unscheduled reaches backend null-date assignments and synthetic-date open Ready work');
 assert.deepStrictEqual(
   Array.from(unscheduled.columns.filter((column) => column.cards.length).map((column) => column.key)),
-  ['needs', 'attention'],
-  'an undated card stays in its own status column under Unscheduled');
+  ['needs', 'scheduled', 'attention'],
+  'each unscheduled card stays in its own status column');
 assert.strictEqual(unscheduled.unmappedCount, 1,
   'an undated unknown status is still counted in the board-wide unmapped guard');
-const reachable = new Set(
-  scheduledWeek.columns.concat(unscheduled.columns).flatMap((column) => column.cards)
+const reachableJobIds = new Set(
+  scheduledWeek.columns.concat(unscheduled.columns)
+    .flatMap((column) => column.cards)
+    .map((card) => card.job.id)
 );
-assert.strictEqual(cards.filter((card) => !reachable.has(card)).length, 0,
+assert.strictEqual(cards.filter((card) => !reachableJobIds.has(card.job.id)).length, 0,
   'no authorised card is unreachable from its own week plus Unscheduled');
+
+// Production-shaped multi-week jobs must be filtered to the selected week
+// before the one-card-per-job dedupe. The same job appears once in every week
+// where it has a visit, never only in whichever response bucket won globally.
+const multiCurrentJob = { ...fencingJob, id: 'fence-26004', job_number: 'SWF-26004' };
+const multiFutureJob = { ...fencingJob, id: 'fence-26033', job_number: 'SWF-26033' };
+const multiWeekBoard = fencing.buildBoard({
+  today: [{ id: '26004-current', status: 'scheduled', scheduled_date: '2026-07-25', jobs: multiCurrentJob }],
+  thisWeek: [{ id: '26004-current-second', status: 'scheduled', scheduled_date: '2026-07-23', jobs: multiCurrentJob }],
+  upcoming: [{ id: '26033-future', status: 'scheduled', scheduled_date: '2026-08-03', jobs: multiFutureJob }],
+  recent: [
+    { id: '26004-history', status: 'scheduled', scheduled_date: '2026-05-04', jobs: multiCurrentJob },
+    { id: '26033-previous', status: 'scheduled', scheduled_date: '2026-07-13', jobs: multiFutureJob }
+  ],
+  unscheduled: [], makesafePool: []
+}, (job, row) => ({ job, row, _boardRow: row }));
+function selectedJobCount(boardModel, week, jobId) {
+  return fencing.forSelection(boardModel.verticals[0], week, false).columns
+    .flatMap((column) => column.cards)
+    .filter((card) => card.job.id === jobId).length;
+}
+assert.strictEqual(selectedJobCount(multiWeekBoard, '2026-07-20', 'fence-26004'), 1,
+  'SWF-26004 class appears once in its current visit week');
+assert.strictEqual(selectedJobCount(multiWeekBoard, '2026-05-04', 'fence-26004'), 1,
+  'SWF-26004 class also appears once in its historical visit week');
+assert.strictEqual(selectedJobCount(multiWeekBoard, '2026-07-13', 'fence-26033'), 1,
+  'SWF-26033 class appears once in its previous visit week');
+assert.strictEqual(selectedJobCount(multiWeekBoard, '2026-08-03', 'fence-26033'), 1,
+  'SWF-26033 class also appears once in its future visit week');
 
 // Two jobs sharing ONE unknown status must report as 2 jobs, not 1 status token.
 const sharedUnknown = fencing.buildBoard({
@@ -157,6 +196,16 @@ Array.from(mobileBlock[1].matchAll(/([^{}]+)\{[^{}]*\}/g)).forEach((rule) => {
 });
 assert(/if \(isFencing\) _wireBoardPager\(\);/.test(html),
   'only the fencing board wires the horizontal pager');
+assert(/\['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool'\]/.test(html),
+  'the Board ingests the backend unscheduled bucket');
+assert(/if \(unscheduled\) return pool \|\| !scheduled;/.test(html),
+  'open pool rows stay under Unscheduled even when production supplies a synthetic date');
+assert(/function _invalidateAssignmentLifecycleCaches\(\)/.test(html),
+  'assignment lifecycle writes own a shared Board and Calendar invalidation seam');
+assert((html.match(/_invalidateAssignmentLifecycleCaches\(\);/g) || []).length >= 10,
+  'successful assignment, phase, clock, verification, completion, and sync paths invalidate planning caches');
+assert(/function _refreshBoardSilent\(\) \{[\s\S]*?_invalidateAssignmentLifecycleCaches\(\);[\s\S]*?_loadBoard\(true/.test(html),
+  'allocation refresh reuses the same cache invalidation seam');
 
 // Work-order authorization. The registry is the authenticated my_work_orders
 // response itself, so the job-detail Cost Breakdown never depends on a hub visit.
@@ -279,8 +328,10 @@ assert(/caFetchCalendarModel\(from, to, stale\)/.test(html),
 assert(/\}, !!force\);/.test(html), 'the fencing calendar source honours a forced reload');
 assert(/Date\.now\(\) - cached\.at < _fieldBoardTtlMs/.test(html),
   'the fencing board cache expires on a TTL instead of freezing for the session');
-assert(/_refreshBoardSilent\(\) \{[\s\S]*?_fieldBoardCacheByKey = \{\};[\s\S]*?TradeCalendarSource\.clear\(\);/.test(html),
-  'a Board write clears the fencing board and calendar caches');
+assert(/function _invalidateAssignmentLifecycleCaches\(\) \{[\s\S]*?_fieldBoardCacheByKey = \{\};[\s\S]*?TradeCalendarSource\.clear\(\);/.test(html),
+  'the lifecycle invalidation seam clears the fencing board and calendar caches');
+assert(/function _refreshBoardSilent\(\) \{[\s\S]*?_invalidateAssignmentLifecycleCaches\(\);/.test(html),
+  'a Board write uses the shared lifecycle cache invalidation seam');
 
 (async function freshness() {
   const cacheRequest = { from: '2026-07-20', to: '2026-08-10', vertical: 'fencing', lens: 'everyone', cacheKey: allKey };

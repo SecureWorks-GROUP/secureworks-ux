@@ -4169,7 +4169,12 @@
     queue.forEach(function(item) {
       chain = chain.then(function() {
         return api(item.action, null, item.body).then(function() {
-          // Success — don't add to remaining
+          // A queued lifecycle write has now become server truth. Drop the same
+          // planning caches as an online write before the next Board entry.
+          if (['update_job_phase', 'update_my_assignment', 'clock_event', 'complete_job'].indexOf(item.action) !== -1) {
+            _invalidateAssignmentLifecycleCaches();
+          }
+          // Success: don't add to remaining.
         }).catch(function() {
           // Still failing — keep in queue
           remaining.push(item);
@@ -4208,7 +4213,9 @@
         body.accuracy = pos.coords.accuracy;
       }, function() {}, { timeout: 3000, maximumAge: 60000 });
     }
-    api('update_job_phase', null, body).catch(function(err) {
+    api('update_job_phase', null, body).then(function() {
+      _invalidateAssignmentLifecycleCaches();
+    }).catch(function(err) {
       // Network failure — queue for retry
       if (err.name === 'AbortError' || err.message === 'Failed to fetch' || !navigator.onLine) {
         queueOfflineAction('update_job_phase', body);
@@ -10622,6 +10629,7 @@
         payload.accuracy = Math.round(loc.coords.accuracy);
       }
       api('update_my_assignment', null, payload).then(function(data) {
+        _invalidateAssignmentLifecycleCaches();
         var statusMsg = 'Status updated';
         if (loc) statusMsg += ' (location recorded)';
         toast(statusMsg);
@@ -17845,6 +17853,7 @@
       promises.push(api('set_trade_rate', null, { hourly_rate: editedRate }));
 
       Promise.all(promises).then(function() {
+        _invalidateAssignmentLifecycleCaches();
         toast('Hours submitted for verification');
         loadHoursView();
       }).catch(function(err) {
@@ -17917,6 +17926,7 @@
 
   window.verifyHours = function(assignmentId, approved) {
     api('verify_hours', null, { assignment_ids: [assignmentId], approved: true }).then(function() {
+      _invalidateAssignmentLifecycleCaches();
       toast('Hours approved');
       openVerificationInbox(); // reload
     }).catch(function(err) {
@@ -17928,6 +17938,7 @@
     showTextPrompt('Dispute Hours', 'What\'s wrong with these hours?', 'Submit Dispute').then(function(reason) {
       if (!reason) return;
       api('dispute_hours', null, { assignment_id: assignmentId, reason: reason }).then(function() {
+        _invalidateAssignmentLifecycleCaches();
         toast('Hours disputed — labourer notified');
         openVerificationInbox();
       }).catch(function(err) {
@@ -17944,6 +17955,7 @@
         var ids = (data.verifications || []).map(function(v) { return v.id; });
         return api('verify_hours', null, { assignment_ids: ids, approved: true });
       }).then(function() {
+        _invalidateAssignmentLifecycleCaches();
         toast('All hours approved');
         openVerificationInbox();
       }).catch(function(err) {
@@ -18017,12 +18029,22 @@
       return column === 'scheduled' || column === 'onsite';
     }
     function priority(row) { return PRIORITY[norm((row || {}).status)] || 0; }
+    function rowJobId(row) { return String((((row || {}).jobs || {}).id) || ''); }
+    function preferredRows(rows) {
+      var byJob = {};
+      (rows || []).forEach(function (row) {
+        var jobId = rowJobId(row);
+        if (!jobId) return;
+        if (!byJob[jobId] || priority(row) > priority(byJob[jobId])) byJob[jobId] = row;
+      });
+      return Object.keys(byJob).map(function (jobId) { return byJob[jobId]; });
+    }
 
     function buildBoard(data, makeCard, orgId) {
       data = data || {};
-      makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row }; };
+      makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row, _boardRow: row }; };
       var assigned = [], pool = [];
-      ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'].forEach(function (bucket) {
+      ['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool'].forEach(function (bucket) {
         (data[bucket] || []).forEach(function (row) {
           if (!isFencingRow(row) || !isSameOrg(row, orgId)) return;
           if (isPoolRow(row)) pool.push(row);
@@ -18030,25 +18052,35 @@
         });
       });
 
-      var byJob = {};
-      assigned.forEach(function (row) {
-        var jobId = ((row || {}).jobs || {}).id;
-        if (!jobId) return;
-        if (!byJob[jobId] || priority(row) > priority(byJob[jobId])) byJob[jobId] = row;
-      });
-      var assignedRows = Object.keys(byJob).map(function (jobId) { return byJob[jobId]; });
+      // Keep every assignment row for week selection. A job can have legitimate
+      // visits in several weeks; collapsing it here made only one of those weeks
+      // reachable. The representative rows below remain useful for the unfiltered
+      // vertical summary, but forSelection filters first and dedupes second.
+      var assignedRows = preferredRows(assigned);
+      var assignedJobIds = {};
+      assigned.forEach(function (row) { var id = rowJobId(row); if (id) assignedJobIds[id] = true; });
       var poolByJob = {};
       var poolMergedIntoAssigned = 0;
       pool.forEach(function (row) {
-        var jobId = ((row || {}).jobs || {}).id;
+        var jobId = rowJobId(row);
         if (!jobId) return;
-        if (byJob[jobId]) {
+        if (assignedJobIds[jobId]) {
           poolMergedIntoAssigned++;
           return;
         }
         if (!poolByJob[jobId]) poolByJob[jobId] = row;
       });
       var poolRows = Object.keys(poolByJob).map(function (jobId) { return poolByJob[jobId]; });
+      var selectionCards = assigned.filter(function (row) { return !!rowJobId(row); }).concat(poolRows).map(function (row) {
+        return makeCard(row.jobs || {}, row);
+      });
+      function cardForRow(row) {
+        for (var i = 0; i < selectionCards.length; i++) {
+          var cardRow = selectionCards[i]._boardRow || selectionCards[i].row;
+          if (cardRow === row) return selectionCards[i];
+        }
+        return makeCard(row.jobs || {}, row);
+      }
 
       var columns = COLUMNS.map(function (column) {
         return { key: column.key, label: column.label, hot: column.hot, cards: [] };
@@ -18063,11 +18095,14 @@
           unmappedCount++;
           column = 'attention';
         }
-        byColumn[column].cards.push(makeCard(row.jobs || {}, row));
+        byColumn[column].cards.push(cardForRow(row));
       });
       var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
       return {
-        verticals: [{ vertical: 'fencing', label: 'Fencing', columns: columns, total: total, unmappedCount: unmappedCount }],
+        verticals: [{
+          vertical: 'fencing', label: 'Fencing', columns: columns, total: total,
+          unmappedCount: unmappedCount, selectionCards: selectionCards
+        }],
         unmappedStatuses: Object.keys(unmapped),
         unmappedCount: unmappedCount,
         assignedCount: assignedRows.length,
@@ -18107,14 +18142,39 @@
     }
     function forSelection(vertical, start, unscheduled) {
       var end = addDays(start, 6);
-      var columns = (vertical.columns || []).map(function (column) {
-        var cards = (column.cards || []).filter(function (card) {
-          var row = card._boardRow || {};
-          var scheduled = String(row.scheduled_date || '').slice(0, 10);
-          if (unscheduled) return !scheduled;
-          return !!scheduled && scheduled >= start && scheduled <= end;
-        });
-        return { key: column.key, label: column.label, hot: column.hot, cards: cards };
+      var sourceCards = vertical.selectionCards || (vertical.columns || []).reduce(function (cards, column) {
+        return cards.concat(column.cards || []);
+      }, []);
+      var selected = sourceCards.filter(function (card) {
+        var row = card._boardRow || card.row || {};
+        var scheduled = String(row.scheduled_date || '').slice(0, 10);
+        var pool = isPoolRow(row);
+        // Pool work has no real assignment date. Production currently transports
+        // synthetic pool rows with today's date, so classify by row authority
+        // rather than that placeholder and keep Ready work under Unscheduled.
+        if (unscheduled) return pool || !scheduled;
+        if (pool) return false;
+        return !!scheduled && scheduled >= start && scheduled <= end;
+      });
+      var selectedByJob = {};
+      selected.forEach(function (card) {
+        var row = card._boardRow || card.row || {};
+        var jobId = rowJobId(row);
+        if (!jobId) return;
+        var current = selectedByJob[jobId];
+        var currentRow = current && (current._boardRow || current.row || {});
+        if (!current || priority(row) > priority(currentRow)) selectedByJob[jobId] = card;
+      });
+      var columns = COLUMNS.map(function (column) {
+        return { key: column.key, label: column.label, hot: column.hot, cards: [] };
+      });
+      var byColumn = {};
+      columns.forEach(function (column) { byColumn[column.key] = column; });
+      Object.keys(selectedByJob).forEach(function (jobId) {
+        var card = selectedByJob[jobId];
+        var row = card._boardRow || card.row || {};
+        var column = columnOf(row) || 'attention';
+        byColumn[column].cards.push(card);
       });
       var total = columns.reduce(function (count, column) { return count + column.cards.length; }, 0);
       return {
@@ -18655,23 +18715,48 @@
     // + crew label. reassign: crew label change in place.
     function applyOptimistic(board, model, crew, ctx) {
       var loc = _locate(board, model);
-      if (!loc) return { undo: function () {} };
       var name = crewName(crew);
+      // A selected week can use a non-representative visit from selectionCards.
+      // Reassignment only changes its crew label, so it remains safely
+      // optimistic even when that visit is not in the unfiltered summary columns.
+      if (!loc && (!ctx || ctx.mode !== 'create')) {
+        var previousCrew = model.crew;
+        model.crew = name;
+        return { undo: function () { model.crew = previousCrew; } };
+      }
+      if (!loc) return { undo: function () {} };
+      var boardRow = model._boardRow || null;
       var prev = {
         crew: model.crew, crewEmptyLabel: model.crewEmptyLabel,
         statusToken: model.statusToken, statusLabel: model.statusLabel,
-        fromCol: loc.col, fromIdx: loc.cardIdx
+        fromCol: loc.col, fromIdx: loc.cardIdx,
+        rowStatus: boardRow && boardRow.status,
+        rowType: boardRow && boardRow.assignment_type,
+        rowDate: boardRow && boardRow.scheduled_date,
+        rowUser: boardRow && boardRow.user_id
       };
       if (ctx && ctx.mode === 'create') {
         var target = _colByKey(loc.vert, 'allocated') || _colByKey(loc.vert, 'scheduled') || loc.col;
         loc.col.cards.splice(loc.cardIdx, 1);
         model.crew = name; model.crewEmptyLabel = '';
         model.statusToken = 'booked'; model.statusLabel = 'Scheduled';
+        if (boardRow) {
+          boardRow.status = 'scheduled';
+          boardRow.assignment_type = 'install';
+          boardRow.scheduled_date = ctx.scheduledDate || boardRow.scheduled_date;
+          boardRow.user_id = ctx.userId || boardRow.user_id;
+        }
         target.cards.push(model);
         return { undo: function () {
           var i = target.cards.indexOf(model); if (i >= 0) target.cards.splice(i, 1);
           model.crew = prev.crew; model.crewEmptyLabel = prev.crewEmptyLabel;
           model.statusToken = prev.statusToken; model.statusLabel = prev.statusLabel;
+          if (boardRow) {
+            boardRow.status = prev.rowStatus;
+            boardRow.assignment_type = prev.rowType;
+            boardRow.scheduled_date = prev.rowDate;
+            boardRow.user_id = prev.rowUser;
+          }
           prev.fromCol.cards.splice(Math.min(prev.fromIdx, prev.fromCol.cards.length), 0, model);
         } };
       }
@@ -19149,12 +19234,20 @@
     step();
   };
 
-  // Silent board refresh (server truth) after a write — no spinner swap; keeps the
-  // optimistic view if the refresh itself fails.
-  function _refreshBoardSilent() {
-    invalidateMakesafeV5Feed();
+  // Assignment lifecycle writes happen in job detail, outside the Board. Clear
+  // both planning caches on success so the next Board or Calendar entry reads
+  // server truth instead of repainting a pre-write 90-second snapshot.
+  function _invalidateAssignmentLifecycleCaches() {
     _fieldBoardCacheByKey = {};
     if (typeof TradeCalendarSource !== 'undefined' && TradeCalendarSource) TradeCalendarSource.clear();
+    NC.dirty = true;
+  }
+
+  // Silent board refresh (server truth) after a write. Keep the optimistic view
+  // if the refresh itself fails.
+  function _refreshBoardSilent() {
+    invalidateMakesafeV5Feed();
+    _invalidateAssignmentLifecycleCaches();
     _loadBoard(true, { silent: true });
   }
 
@@ -19641,6 +19734,7 @@
       }
 
       saveTimerState();
+      _invalidateAssignmentLifecycleCaches();
       return result;
     }).catch(function(err) {
       // A view-only block is a refusal, not a lost connection: never stash or
@@ -19838,6 +19932,7 @@
 
   window.acceptAssignment = function(assignmentId) {
     api('update_my_assignment', null, { assignmentId: assignmentId, status: 'confirmed' }).then(function() {
+      _invalidateAssignmentLifecycleCaches();
       toast('Job accepted');
       if (_currentJob) {
         var myA = getMyAssignment(_currentJob);
@@ -19851,6 +19946,7 @@
     showConfirm('Decline this job?', 'Are you sure you want to decline? The office will be notified.', 'Yes, Decline').then(function(ok) {
       if (!ok) return;
       api('update_my_assignment', null, { assignmentId: assignmentId, status: 'declined' }).then(function() {
+        _invalidateAssignmentLifecycleCaches();
         toast('Job declined — office notified');
         showTab('jobs');
       }).catch(function() { toast('Failed to decline — try again', 'error'); });
@@ -20390,6 +20486,7 @@
     if (!newUserId) { toast('Select a crew member', true); return; }
     // TODO: ops-api?action=reassign_crew
     api('reassign_crew', null, { assignmentId: _reassignAssignmentId, newUserId: newUserId }).then(function() {
+      _invalidateAssignmentLifecycleCaches();
       toast('Crew reassigned');
       closeReassignModal();
       if (_currentJobId) window.loadJobDetail(_currentJobId);
@@ -21139,7 +21236,10 @@
       tick('Updating job status...');
       var completePayload = { jobId: jobId, signatureName: _wizSigName };
       if (_wizSatisfaction > 0) completePayload.satisfaction_rating = _wizSatisfaction;
-      return api('complete_job', null, completePayload);
+      return api('complete_job', null, completePayload).then(function(result) {
+        _invalidateAssignmentLifecycleCaches();
+        return result;
+      });
     });
 
     // 6. Send client comms trigger (fire and forget) — skip if already SMS'd absent client
@@ -23024,6 +23124,7 @@
         var payload = JSON.parse(localStorage.getItem(key));
         if (payload) {
           api('clock_event', {}, payload).then(function() {
+            _invalidateAssignmentLifecycleCaches();
             localStorage.removeItem(key);
             console.log('[trade] Synced pending clock event:', payload.event);
           }).catch(function() {

@@ -75,16 +75,23 @@ comes back. So for fencing the Everyone/Mine lens is an AUTHORIZATION request, n
 a client filter; for make-safe the calendar `scope` stays a presentation lens over
 rows the feed already chose to send (`ncSeesAll()` accepts `permissions.sees_all`
 or `sees_all_makesafes`). Every per-viewer cache (job list, board, calendar) is
-keyed by user + vertical + lens — keep those keys or a lens switch repaints the
-broader payload. Visibility still is not authority: another crew's job detail is
-VIEW-ONLY (`// <foreign-job-readonly>`) and `api()` refuses the write rather than
-queueing it. Surface-level detail lives in `trade-app.md`.
+keyed by user + vertical + lens; keep those keys or a lens switch repaints the
+broader payload. Fencing week selection must filter the complete assignment rows
+before one-card-per-job dedupe, because one job may have valid visits in several
+weeks. The Board ingests the backend `unscheduled` bucket and treats open-pool
+rows as Unscheduled even when their transport date is synthetic. Successful
+assignment lifecycle writes clear Board and Calendar planning caches through
+`_invalidateAssignmentLifecycleCaches()`. Visibility still is not authority:
+another crew's job detail is VIEW-ONLY (`// <foreign-job-readonly>`) and `api()`
+refuses the write rather than queueing it. Surface-level detail lives in
+`trade-app.md`.
 
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`
-(managed fencing lead across Board weeks / My Jobs / Calendar, other-crew
-read-only, one explicitly stubbed `allocate_job` write and no unapproved write).
+(managed fencing lead across multi-week/Unscheduled Board rows, My Jobs and
+Calendar, other-crew read-only, one explicitly stubbed `allocate_job` write, and
+own-assignment lifecycle refresh writes with no unapproved write).
 NB: board cards are `role="button"` and their accessible names contain
 "Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
 matches cards too — target the `button.act.primary` class for the real Allocate

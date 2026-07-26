@@ -87,8 +87,9 @@ const test = base.extend({
     let fencingAll = loadJsonFixture('fencing-manager-jobs.json');
     const fencingMine = loadJsonFixture('fencing-manager-mine.json');
     const fencingCalendar = loadJsonFixture('trade-calendar-fencing.json');
-    const fencingRows = () => ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool']
+    const fencingRows = () => ['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool']
       .flatMap((bucket) => fencingAll[bucket] || []);
+    const fencingAssignment = (assignmentId) => fencingRows().find((row) => row.id === assignmentId);
     const weekStart = perthWeekMonday();
     const workOrders = [
       {
@@ -235,9 +236,45 @@ const test = base.extend({
           fencingAll.makesafePool = (fencingAll.makesafePool || []).filter((row) => !row.jobs || row.jobs.id !== body.jobId);
           fencingAll.upcoming = (fencingAll.upcoming || []).concat([assignment]);
           return { ok: true, mode: 'create', assignment };
+        },
+        update_my_assignment: async ({ request }) => {
+          if (feedScenario !== 'fencing-stage-lifecycle' || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Assignment lifecycle fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const assignment = fencingAssignment(body.assignmentId);
+          if (!assignment || assignment.user_id !== PERSONAS.fencing_manager.profile.id) {
+            return { status: 403, body: { error: 'Not your assignment' } };
+          }
+          if (body.status) assignment.status = body.status;
+          return { assignment: { ...assignment } };
+        },
+        clock_event: async ({ request }) => {
+          if (feedScenario !== 'fencing-stage-lifecycle' || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Clock lifecycle fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const assignment = fencingAssignment(body.assignment_id);
+          if (!assignment || assignment.user_id !== PERSONAS.fencing_manager.profile.id) {
+            return { status: 403, body: { error: 'Not your assignment' } };
+          }
+          if (body.event === 'clock_on' || body.event === 'start_travel') assignment.status = 'in_progress';
+          if (body.event === 'clock_off') assignment.status = 'complete';
+          return {
+            success: true,
+            assignment: {
+              ...assignment,
+              clocked_on_at: body.event === 'clock_off' ? null : new Date().toISOString(),
+              arrived_at: body.event === 'clock_on' ? new Date().toISOString() : null,
+              clocked_off_at: body.event === 'clock_off' ? new Date().toISOString() : null
+            },
+            net_hours: body.event === 'clock_off' ? 1 : null
+          };
         }
       },
-      allowedWriteActions: feedScenario === 'fencing-allocation' ? ['allocate_job'] : []
+      allowedWriteActions: feedScenario === 'fencing-allocation'
+        ? ['allocate_job']
+        : (feedScenario === 'fencing-stage-lifecycle' ? ['update_my_assignment', 'clock_event'] : [])
     });
 
     await page.route('https://cdnjs.cloudflare.com/**', (route) => route.fulfill({

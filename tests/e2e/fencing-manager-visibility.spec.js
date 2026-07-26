@@ -152,31 +152,37 @@ test.describe('Fencing manager visibility', () => {
     await signIn(page, PERSONAS.fencing_manager);
     await page.locator('#navBoard').click();
     await expect(page.locator('#fenceWeekLabel')).toHaveText(boardWeekLabel(perthWeekMonday()));
-    await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('2');
+    await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('3');
+    await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-MULTI-26004' })).toHaveCount(1);
     let navigations = 0;
     page.on('framenavigated', () => { navigations += 1; });
 
     await page.getByRole('button', { name: 'Previous week' }).click();
     await expect(page.locator('#fenceWeekLabel')).toHaveText(boardWeekLabel(addIsoDays(perthWeekMonday(), -7)));
     await expect(page.locator('#boardContent')).toContainText('FENCE-PREVIOUS-009');
+    await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-MULTI-26033' })).toHaveCount(1);
     await expect(page.locator('#boardContent')).not.toContainText('FENCE-HENRY-001');
     await expect(page.locator('[data-board-status-target="done"] .n')).toHaveText('1');
 
     await page.evaluate(() => window.shiftFencingBoardWeek(-11));
     await expect(page.locator('#fenceWeekLabel')).toHaveText(boardWeekLabel(addIsoDays(perthWeekMonday(), -84)));
     await expect(page.locator('#boardContent')).toContainText('FENCE-HISTORICAL-010');
+    await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-MULTI-26004' })).toHaveCount(1);
     await expect(page.locator('[data-board-status-target="done"] .n')).toHaveText('1');
 
     await page.getByRole('button', { name: 'This week' }).click();
     await page.evaluate(() => window.shiftFencingBoardWeek(26));
     await expect(page.locator('#fenceWeekLabel')).toHaveText(boardWeekLabel(addIsoDays(perthWeekMonday(), 182)));
     await expect(page.locator('#boardContent')).toContainText('FENCE-FUTURE-008');
-    await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('1');
+    await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-MULTI-26033' })).toHaveCount(1);
+    await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('2');
 
     await page.getByRole('button', { name: 'Unscheduled' }).click();
     await expect(page.locator('#boardContent')).toContainText('FENCE-OPEN-003');
     await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-OPEN-003' })).toHaveCount(1);
+    await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-UNSCHEDULED-011' })).toHaveCount(1);
     await expect(page.locator('[data-board-status-target="needs"] .n')).toHaveText('1');
+    await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('1');
     expect(navigations).toBe(0);
   });
 
@@ -285,7 +291,7 @@ test.describe('Fencing manager visibility', () => {
       await expect(scheduled).toHaveCount(1);
       await expect(scheduled).toContainText('Henry Fence');
       await expect(page.locator('#boardContent .jc').filter({ hasText: 'FENCE-OPEN-003' })).toHaveCount(1);
-      await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('2');
+      await expect(page.locator('[data-board-status-target="scheduled"] .n')).toHaveText('3');
 
       const writes = feedRequests.filter((entry) => entry.action === 'allocate_job');
       expect(writes).toHaveLength(1);
@@ -298,6 +304,57 @@ test.describe('Fencing manager visibility', () => {
         startTime: '08:15'
       });
       expect(requestsFor(feedRequests, 'my_jobs').filter((entry) => entry.parsed.searchParams.get('mode') === 'all').length).toBeGreaterThan(1);
+    });
+  });
+
+  test.describe('fencing assignment lifecycle refresh', () => {
+    test.use({ feedScenario: 'fencing-stage-lifecycle' });
+
+    test('refetches Board and Calendar after Accept, Clock On, and Clock Off', async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.fencing_manager);
+      await page.locator('#navBoard').click();
+      const allJobReads = () => requestsFor(feedRequests, 'my_jobs')
+        .filter((entry) => entry.parsed.searchParams.get('mode') === 'all');
+      let readsBefore = allJobReads().length;
+
+      await page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
+      await page.getByRole('button', { name: /Accept/ }).click();
+      await expect(page.locator('#toast')).toContainText('Job accepted');
+      await page.locator('#navBoard').click();
+      await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
+      await expect(page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
+
+      readsBefore = allJobReads().length;
+      await page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
+      await page.getByRole('button', { name: /Clock On \(on site\)/ }).click();
+      await page.getByRole('button', { name: 'Yes, Clock On' }).click();
+      await expect(page.locator('#toast')).toContainText('Clocked On');
+      const calendarReadsBefore = requestsFor(feedRequests, 'trade_calendar').length;
+
+      await page.locator('#navBoard').click();
+      await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
+      await expect(page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
+      await expect(page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(0);
+
+      await page.locator('[data-view="schedule"]').click();
+      await expect.poll(() => requestsFor(feedRequests, 'trade_calendar').length).toBeGreaterThan(calendarReadsBefore);
+      await page.locator('#navBoard').click();
+      readsBefore = allJobReads().length;
+      await page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
+      await page.evaluate(() => window.timerAction('clock_off', 'fence-assignment-henry'));
+      await expect(page.locator('#toast')).toContainText('Clocked off');
+
+      await page.locator('#navBoard').click();
+      await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
+      await expect(page.locator('#board-col-done .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
+      await expect(page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(0);
+
+      const stageWrites = feedRequests.filter((entry) => entry.method === 'POST');
+      expect(stageWrites.map((entry) => [entry.action, entry.body.status || entry.body.event])).toEqual([
+        ['update_my_assignment', 'confirmed'],
+        ['clock_event', 'clock_on'],
+        ['clock_event', 'clock_off']
+      ]);
     });
   });
 

@@ -4107,9 +4107,16 @@
                 }
                 _cachedAccessToken = newToken;
                 var retryHeaders = Object.assign({}, headers, { 'Authorization': 'Bearer ' + newToken });
-                var retryOpts = { headers: retryHeaders, signal: opts.signal };
+                // The first attempt's timeout has already been cleared, so the
+                // retry needs its own. Without one a refreshed request could
+                // hang forever on weak signal instead of reporting a timeout.
+                var retryController = new AbortController();
+                var retryTimeoutId = setTimeout(function() { retryController.abort(); }, 20000);
+                var retryOpts = { headers: retryHeaders, signal: retryController.signal };
                 if (postBody) { retryOpts.method = 'POST'; retryOpts.body = JSON.stringify(postBody); }
-                return fetch(url, retryOpts).then(function(r2) {
+                return fetch(url, retryOpts).finally(function() {
+                  clearTimeout(retryTimeoutId);
+                }).then(function(r2) {
                   if (r2.status === 403) return _readApiError(r2, 'Trade access is not available for this account');
                   if (r2.status === 401) {
                     if (!preserveSession) _forceLogout();
@@ -4308,23 +4315,67 @@
     });
   }
 
-  // Sequential upload — one at a time for weak signal
+  function _isAuthError(err) {
+    return Boolean(err) && (err.status === 401 || err.code === 'auth_expired');
+  }
+
+  // Sequential upload — one at a time for weak signal.
+  //
+  // Always resolves with { uploaded, failed } describing what actually reached
+  // job_media. A file that fails mid-batch never discards the photos the server
+  // already confirmed: on site with patchy signal that locked a crew out of
+  // submitting their own report, because the gate counts confirmed photos and
+  // a rejected batch credited none of them (Hugo, 2026-07-26).
+  //
+  // The run stops early only once the session itself is gone, since every
+  // remaining file would fail the same way.
   function uploadPhotosSequential(files, jobId, phase, onProgress) {
-    var results = [];
+    var uploaded = [];
+    var failed = [];
     var idx = 0;
+    function report(index, ok, err) {
+      // Progress means the upload is registered in job_media, not merely started.
+      // The report UI uses this callback to show its per-photo tick or cross.
+      if (onProgress) onProgress(index, files.length, { index: index, ok: ok, error: err || null });
+    }
+    function done() {
+      return Promise.resolve({ uploaded: uploaded, failed: failed });
+    }
     function next() {
-      if (idx >= files.length) return Promise.resolve(results);
+      if (idx >= files.length) return done();
       var file = files[idx];
       idx++;
+      var fileIndex = idx;
       return uploadOnePhoto(file, jobId, phase, '').then(function(res) {
-        results.push(res);
-        // Progress means the upload is registered in job_media, not merely started.
-        // The report UI uses this callback to show its green persisted-photo tick.
-        if (onProgress) onProgress(idx, files.length);
+        uploaded.push(res);
+        report(fileIndex, true, null);
+        return next();
+      }, function(err) {
+        failed.push({ index: fileIndex, error: err });
+        report(fileIndex, false, err);
+        if (_sessionExpired || _isAuthError(err)) return done();
         return next();
       });
     }
     return next();
+  }
+
+  // Plain-English outcome for a finished batch, so the crew is told exactly
+  // what landed instead of a bare "upload failed" that hides the successes.
+  function reportUploadOutcome(result, noun) {
+    noun = noun || 'photo';
+    var landed = result.uploaded.length;
+    var lost = result.failed.length;
+    if (!lost) {
+      toast(landed + ' ' + noun + '(s) uploaded');
+      return;
+    }
+    var reason = friendlyError(result.failed[0].error);
+    if (!landed) {
+      toast('Upload failed — ' + reason, true);
+      return;
+    }
+    toast(landed + ' ' + noun + '(s) uploaded, ' + lost + ' failed — ' + reason, true);
   }
 
   // ══════════════════════════════════════════════════
@@ -9477,12 +9528,13 @@
     uploadPhotosSequential(files, _currentJobId, selectedPhase, function(done, total) {
       if (progressText) progressText.textContent = 'Uploading ' + done + '/' + total + '...';
       if (progressFill) progressFill.style.width = Math.round((done / total) * 100) + '%';
-    }).then(function() {
+    }).then(function(result) {
       _uploading = false;
       if (progress) progress.style.display = 'none';
-      toast(files.length + ' photo(s) uploaded');
+      reportUploadOutcome(result);
       input.value = '';
-      // Reload job detail to refresh photo data, then re-render photos tab
+      // Reload job detail to refresh photo data, then re-render photos tab.
+      // Photos that landed are shown even when the rest of the batch failed.
       loadJobDetail(_currentJobId);
     }).catch(function(err) {
       _uploading = false;
@@ -9560,31 +9612,34 @@
       imgEls.push({ img: img, badge: badge });
     });
 
-    uploadPhotosSequential(files, _currentJobId, phase, function(done, total) {
+    uploadPhotosSequential(files, _currentJobId, phase, function(done, total, outcome) {
       if (progressText) progressText.textContent = 'Uploading ' + phaseLabel + ' photo ' + done + ' of ' + total + '...';
       if (progressFill) progressFill.style.width = Math.round((done / total) * 100) + '%';
-      // Mark completed photo with green tick
-      if (done > 0 && imgEls[done - 1]) {
-        imgEls[done - 1].img.style.opacity = '1';
-        imgEls[done - 1].badge.style.background = '#4CAF50';
-        imgEls[done - 1].badge.innerHTML = '&#10003;';
+      // Tick each photo the moment the server confirms it, cross the ones that
+      // did not make it, so the crew can see exactly which photo to retry.
+      var el = outcome && imgEls[outcome.index - 1];
+      if (el) {
+        if (outcome.ok) {
+          el.img.style.opacity = '1';
+          el.badge.style.background = '#4CAF50';
+          el.badge.innerHTML = '&#10003;';
+        } else {
+          el.badge.style.background = '#F44336';
+          el.badge.innerHTML = '&#10007;';
+        }
       }
-    }).then(function(results) {
+    }).then(function(result) {
       _uploading = false;
       if (progress) progress.style.display = 'none';
       if (progressFill) progressFill.style.width = '0%';
-      toast(files.length + ' photo(s) uploaded');
-      // uploadPhotosSequential resolves only after confirm_upload has registered
-      // each photo in job_media, which is the backend final-report gate's source.
-      var persistedTotal = ((window._msrPhotoCounts && window._msrPhotoCounts.total) || 0) + results.length;
+      reportUploadOutcome(result);
+      // Every entry in result.uploaded is registered in job_media, which is the
+      // final-report gate's source of truth. Credit them whether or not the rest
+      // of the batch made it — otherwise a single failed photo hides work the
+      // job already holds and blocks the report.
+      var persistedTotal = ((window._msrPhotoCounts && window._msrPhotoCounts.total) || 0) + result.uploaded.length;
       updateMsrPhotoCount(persistedTotal);
       input.value = '';
-      // Ensure all show as done
-      imgEls.forEach(function(el) {
-        el.img.style.opacity = '1';
-        el.badge.style.background = '#4CAF50';
-        el.badge.innerHTML = '&#10003;';
-      });
     }).catch(function(err) {
       _uploading = false;
       if (progress) progress.style.display = 'none';
@@ -10308,12 +10363,6 @@
     });
     if (!materials.length) { toast('Please enter materials/equipment used, or write None'); return; }
 
-    var photoCounts = window._msrPhotoCounts || { total: 0 };
-    if ((photoCounts.total || 0) < 5) {
-      toast('Please add at least 5 photos');
-      return;
-    }
-
     var extraNotes = ((document.getElementById('msrExtraNotes') || {}).value || '').trim();
     var payload = {
       job_id: _currentJobId,
@@ -10334,14 +10383,50 @@
       status: 'submitted',
     };
 
-    api('submit_makesafe_report', null, payload).then(function() {
-      toast('Report submitted');
-      if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(_currentJobId);
-      else refreshJobTab('ms_report');
-    }).catch(function(err) {
-      toast('Failed: ' + (err.message || err));
+    function sendMakesafeReport() {
+      api('submit_makesafe_report', null, payload).then(function() {
+        toast('Report submitted');
+        if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(_currentJobId);
+        else refreshJobTab('ms_report');
+      }).catch(function(err) {
+        toast('Failed: ' + (err.message || err));
+      });
+    }
+
+    // The report needs five photos on the job. The local tally can sit behind
+    // what the job actually holds — a batch that fails part-way leaves confirmed
+    // photos on the server this counter never saw — so ask the server before
+    // refusing. The gate still holds: it is the server's count that decides,
+    // and a job genuinely short of photos is still turned away.
+    if (((window._msrPhotoCounts || {}).total || 0) >= 5) {
+      sendMakesafeReport();
+      return;
+    }
+    toast('Checking photos already on this job...');
+    countConfirmedJobPhotos(_currentJobId).then(function(serverTotal) {
+      if (serverTotal === null) {
+        toast('Could not check photos — check your signal and try again', true);
+        return;
+      }
+      updateMsrPhotoCount(serverTotal);
+      if (serverTotal < 5) {
+        toast('Please add at least 5 photos');
+        return;
+      }
+      sendMakesafeReport();
     });
   };
+
+  // How many photos the server actually holds for this job. Resolves null when
+  // the job could not be read, so a lost connection is never mistaken for
+  // "no photos" and used to refuse a report.
+  function countConfirmedJobPhotos(jobId) {
+    if (!jobId) return Promise.resolve(null);
+    return api('trade_job_detail', { jobId: jobId }).then(function(data) {
+      var media = (data && data.media) || [];
+      return media.filter(function(m) { return !m.type || m.type === 'photo'; }).length;
+    }).catch(function() { return null; });
+  }
 
   // Note submission from bottom notes section
   window.submitBottomNote = function() {
@@ -10735,9 +10820,9 @@
     uploadPhotosSequential(files, _currentJobId, phase, function(current, total) {
       if (progressText) progressText.textContent = 'Uploading ' + current + ' of ' + total + '...';
       if (progressFill) progressFill.style.width = Math.round(current / total * 100) + '%';
-    }).then(function(results) {
-      // Add uploaded photos to grid
-      results.forEach(function(res) {
+    }).then(function(result) {
+      // Show every photo that reached the server, even on a partial batch
+      result.uploaded.forEach(function(res) {
         var grid = document.getElementById('completionGrid');
         if (!grid) {
           // Create grid if it doesn't exist
@@ -10763,7 +10848,7 @@
         }
       });
 
-      toast(results.length + ' photo(s) uploaded');
+      reportUploadOutcome(result);
     }).catch(function(err) {
       toast('Upload error: ' + friendlyError(err), true);
     }).finally(function() {
@@ -11442,9 +11527,9 @@
 
     toast('Uploading ' + files.length + ' photo(s)...');
 
-    uploadPhotosSequential(files, _currentJobId, 'completion', null).then(function(results) {
+    uploadPhotosSequential(files, _currentJobId, 'completion', null).then(function(result) {
       var grid = document.getElementById('reportPhotoGrid');
-      results.forEach(function(res) {
+      result.uploaded.forEach(function(res) {
         if (grid && res.url) {
           var img = document.createElement('img');
           img.src = res.url;
@@ -11454,7 +11539,7 @@
           grid.appendChild(img);
         }
       });
-      toast(results.length + ' photo(s) uploaded');
+      reportUploadOutcome(result);
     }).catch(function(err) {
       toast('Upload error: ' + friendlyError(err), true);
     }).finally(function() {
@@ -22162,10 +22247,17 @@
     if (statusEl) statusEl.textContent = 'Uploading ' + files.length + ' photo(s)...';
     uploadPhotosSequential(files, _currentJobId, 'in_progress', function(current, total) {
       if (statusEl) statusEl.textContent = 'Uploading ' + current + ' of ' + total + '...';
-    }).then(function(results) {
-      _eodPhotoCount += results.length;
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--sw-green)">&#10003; ' + results.length + ' photo(s) uploaded</span>';
-      toast(results.length + ' photo(s) uploaded');
+    }).then(function(result) {
+      // Same rule as the make-safe gate: photos the server confirmed always
+      // count, so a partial batch never locks the crew out of the day's submit.
+      var landed = result.uploaded.length;
+      _eodPhotoCount += landed;
+      if (statusEl) {
+        statusEl.innerHTML = result.failed.length
+          ? '<span style="color:var(--sw-red)">&#10003; ' + landed + ' uploaded, ' + result.failed.length + ' failed — try those again</span>'
+          : '<span style="color:var(--sw-green)">&#10003; ' + landed + ' photo(s) uploaded</span>';
+      }
+      reportUploadOutcome(result);
       // Re-render to update submit button state
       renderEodStep();
     }).catch(function(err) {

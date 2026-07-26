@@ -13874,7 +13874,7 @@
       onSuccess: function () {
         ncCloseSheet();
         ncToast('Schedule updated');
-        NC.dirty = true;      // U-T3: pull server truth…
+        _invalidateAssignmentLifecycleCaches(); // U-T3: pull server truth on both planning surfaces…
         renderNewCalendar();  // …now (dirty ⇒ shouldRefetch true; model stays up so no blank)
       },
       onError: function () {
@@ -18071,15 +18071,15 @@
         if (!poolByJob[jobId]) poolByJob[jobId] = row;
       });
       var poolRows = Object.keys(poolByJob).map(function (jobId) { return poolByJob[jobId]; });
-      var selectionCards = assigned.filter(function (row) { return !!rowJobId(row); }).concat(poolRows).map(function (row) {
-        return makeCard(row.jobs || {}, row);
+      var selectionRows = assigned.filter(function (row) { return !!rowJobId(row); }).concat(poolRows);
+      var selectionCards = selectionRows.map(function (row) { return makeCard(row.jobs || {}, row); });
+      // Row identity -> its already-built card, so column assembly stays linear.
+      var cardByRow = new Map();
+      selectionRows.forEach(function (row, index) {
+        if (!cardByRow.has(row)) cardByRow.set(row, selectionCards[index]);
       });
       function cardForRow(row) {
-        for (var i = 0; i < selectionCards.length; i++) {
-          var cardRow = selectionCards[i]._boardRow || selectionCards[i].row;
-          if (cardRow === row) return selectionCards[i];
-        }
-        return makeCard(row.jobs || {}, row);
+        return cardByRow.get(row) || makeCard(row.jobs || {}, row);
       }
 
       var columns = COLUMNS.map(function (column) {

@@ -206,6 +206,12 @@ assert((html.match(/_invalidateAssignmentLifecycleCaches\(\);/g) || []).length >
   'successful assignment, phase, clock, verification, completion, and sync paths invalidate planning caches');
 assert(/function _refreshBoardSilent\(\) \{[\s\S]*?_invalidateAssignmentLifecycleCaches\(\);[\s\S]*?_loadBoard\(true/.test(html),
   'allocation refresh reuses the same cache invalidation seam');
+const ncSaveScheduleEdit = html.match(/function ncSaveScheduleEdit\(j\) \{[\s\S]*?\n {2}\}\n/);
+assert(ncSaveScheduleEdit, 'the calendar schedule-edit write still exists');
+assert(/_invalidateAssignmentLifecycleCaches\(\);[\s\S]*?renderNewCalendar\(\);/.test(ncSaveScheduleEdit[0]),
+  'a calendar schedule edit clears the Board cache too, not just the calendar model');
+assert(!/NC\.dirty = true;/.test(ncSaveScheduleEdit[0]),
+  'the calendar schedule edit must not hand-roll a calendar-only invalidation');
 
 // Work-order authorization. The registry is the authenticated my_work_orders
 // response itself, so the job-detail Cost Breakdown never depends on a hub visit.

@@ -10710,13 +10710,11 @@ function renderMakesafeCard(j, status) {
     + escapeHtml(String(ageTxt)) + '</span>';
   html += '</div>';
 
-  // U2 board truth: unresolved status evidence is never hidden behind a badge
-  // or tooltip. The backend supplies one reviewed, plain-English Captain action;
-  // absent/cleared marks render nothing.
-  if (j.captain_action && j.captain_action.message) {
-    html += '<div class="ms-captain-action"><b>Waiting on Captain</b>'
-      + escapeHtml(String(j.captain_action.message)) + '</div>';
-  }
+  var captainAction = j.captain_action && j.captain_action.message
+    ? String(j.captain_action.message)
+    : 'Action unavailable — needs attention — ' + String(j.job_number || j.external_ref || j.id || 'this make-safe card');
+  html += '<div class="ms-captain-action"><b>Waiting on Captain</b>'
+    + escapeHtml(captainAction) + '</div>';
 
   // identity
   html += '<div class="ms-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';

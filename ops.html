@@ -1528,6 +1528,26 @@
       width: 11px; height: 11px; border-radius: 3px; background: var(--sw-red); color: #fff;
       display: flex; align-items: center; justify-content: center; font-size: 7px; font-weight: 900; flex-shrink: 0;
     }
+    .ms-card-v2 .ms-captain-action {
+      margin-top: 6px;
+      padding: 7px 8px;
+      border: 1px solid #F5C889;
+      border-left: 3px solid #B45309;
+      border-radius: 6px;
+      background: #FEF3E7;
+      color: #7A4A12;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .ms-card-v2 .ms-captain-action b {
+      display: block;
+      margin-bottom: 2px;
+      color: #8A3F08;
+      font-size: 9px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
 
     /* ── 2A crew chip (avatar initials + name + assign date) ── */
     .ms-card-v2 .ms-block { margin-top: 5px; border-top: 1px solid var(--sw-light); padding-top: 5px; }
@@ -10689,6 +10709,17 @@ function renderMakesafeCard(j, status) {
     + (sla.breached ? '<span class="ms-warn-ic">&#9888;</span>' : '')
     + escapeHtml(String(ageTxt)) + '</span>';
   html += '</div>';
+
+  var captainActionEnvelope = j.captain_action && typeof j.captain_action === 'object';
+  var captainAction = captainActionEnvelope && typeof j.captain_action.message === 'string'
+    ? j.captain_action.message.trim()
+    : '';
+  var serverStage = String(j.board_stage || j.makesafe_stage || '').trim();
+  if (captainAction || captainActionEnvelope || !serverStage) {
+    var captainText = captainAction || 'Action unavailable — needs attention — ' + String(j.job_number || j.external_ref || j.id || 'this make-safe card');
+    html += '<div class="ms-captain-action"><b>Waiting on Captain</b>'
+      + escapeHtml(captainText) + '</div>';
+  }
 
   // identity
   html += '<div class="ms-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';

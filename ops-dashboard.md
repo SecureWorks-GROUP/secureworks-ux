@@ -21,6 +21,7 @@
 - Scope-to-PO material extraction (auto-populates PO from scope_json)
 - Assignment completion cascade (complete buttons, prompt when all done)
 - Crew utilisation (bar chart, colour-coded green/amber/red)
+- Make-safe cards render the server-supplied stage; cards without a trustworthy stage show an escaped **Waiting on Captain** action message instead of a browser-inferred status.
 
 ## ops-api Actions
 See edge-functions.md for full list. Key ones:

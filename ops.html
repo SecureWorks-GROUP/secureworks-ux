@@ -10710,11 +10710,16 @@ function renderMakesafeCard(j, status) {
     + escapeHtml(String(ageTxt)) + '</span>';
   html += '</div>';
 
-  var captainAction = j.captain_action && j.captain_action.message
-    ? String(j.captain_action.message)
-    : 'Action unavailable — needs attention — ' + String(j.job_number || j.external_ref || j.id || 'this make-safe card');
-  html += '<div class="ms-captain-action"><b>Waiting on Captain</b>'
-    + escapeHtml(captainAction) + '</div>';
+  var captainActionEnvelope = j.captain_action && typeof j.captain_action === 'object';
+  var captainAction = captainActionEnvelope && typeof j.captain_action.message === 'string'
+    ? j.captain_action.message.trim()
+    : '';
+  var serverStage = String(j.board_stage || j.makesafe_stage || '').trim();
+  if (captainAction || captainActionEnvelope || !serverStage) {
+    var captainText = captainAction || 'Action unavailable — needs attention — ' + String(j.job_number || j.external_ref || j.id || 'this make-safe card');
+    html += '<div class="ms-captain-action"><b>Waiting on Captain</b>'
+      + escapeHtml(captainText) + '</div>';
+  }
 
   // identity
   html += '<div class="ms-suburb">' + escapeHtml(String(suburb || 'Suburb TBC')) + '</div>';

@@ -27,7 +27,21 @@ test('make-safe card shows the actionable Captain sentence inline', async ({ pag
   expect(rendered).not.toContain('<script>bad()</script>');
 });
 
-test('make-safe card shows an identified gap when Captain action is absent', async ({ page }) => {
+test('make-safe card does not warn when server stage is valid and action is absent', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => renderMakesafeCard({
+    id: 'job-captain-stage',
+    job_number: 'SWMS-STAGE',
+    board_stage: 'allocated',
+    makesafe_job_family_label: 'Make Safe',
+    site_suburb: 'Perth',
+    created_at: new Date().toISOString(),
+  }, 'allocated'));
+
+  expect(rendered).not.toContain('ms-captain-action');
+});
+
+test('make-safe card shows an identified gap for an incomplete Captain action envelope', async ({ page }) => {
   await page.goto('/ops.html');
   const rendered = await page.evaluate(() => renderMakesafeCard({
     id: 'job-captain-gap',
@@ -36,6 +50,7 @@ test('make-safe card shows an identified gap when Captain action is absent', asy
     makesafe_job_family_label: 'Make Safe',
     site_suburb: 'Perth',
     created_at: new Date().toISOString(),
+    captain_action: { code: 'attendance_cycle_ruling' },
   }, 'allocated'));
 
   expect(rendered).toContain('Waiting on Captain');

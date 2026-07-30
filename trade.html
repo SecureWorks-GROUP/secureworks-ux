@@ -4287,7 +4287,7 @@
   // 3. confirm_upload → register media record
   // ══════════════════════════════════════════════════
 
-  function uploadOnePhoto(file, jobId, phase, label) {
+  function uploadOnePhoto(file, jobId, phase, label, attendanceCycleId) {
     var compressed;
     return compressImage(file).then(function(f) {
       compressed = f;
@@ -4312,13 +4312,18 @@
       });
     }).then(function(urlData) {
       // Step 3: confirm upload and register media
-      return api('confirm_upload', null, {
+      var payload = {
         jobId: jobId,
         publicUrl: urlData.publicUrl,
         path: urlData.path,
         label: label || '',
         phase: phase || 'completion'
-      });
+      };
+      if (attendanceCycleId) {
+        payload.attendance_cycle_id = attendanceCycleId;
+        payload.cycle_attribution = 'bound';
+      }
+      return api('confirm_upload', null, payload);
     });
   }
 
@@ -4336,7 +4341,7 @@
   //
   // The run stops early only once the session itself is gone, since every
   // remaining file would fail the same way.
-  function uploadPhotosSequential(files, jobId, phase, onProgress) {
+  function uploadPhotosSequential(files, jobId, phase, onProgress, attendanceCycleId) {
     var uploaded = [];
     var failed = [];
     var idx = 0;
@@ -4353,7 +4358,7 @@
       var file = files[idx];
       idx++;
       var fileIndex = idx;
-      return uploadOnePhoto(file, jobId, phase, '').then(function(res) {
+      return uploadOnePhoto(file, jobId, phase, '', attendanceCycleId).then(function(res) {
         uploaded.push(res);
         report(fileIndex, true, null);
         return next();
@@ -9568,6 +9573,17 @@
     }
   }
 
+  function getActiveMakesafeAttendanceCycleId(data) {
+    var details = data && data.makesafe_details;
+    return details && details.attendance_cycle_id ? String(details.attendance_cycle_id) : '';
+  }
+
+  function isMakesafeReportPhoto(media, attendanceCycleId) {
+    if (!media || (media.type && media.type !== 'photo')) return false;
+    if (!attendanceCycleId) return true;
+    return String(media.attendance_cycle_id || '') === attendanceCycleId && String(media.cycle_attribution || '') === 'bound';
+  }
+
   // Make-safe report photo upload handler — uploads immediately but doesn't reload the page
   window.handleMsrPhotoUpload = function(input, phase) {
     var files = Array.from(input.files || []);
@@ -9635,7 +9651,7 @@
           el.badge.innerHTML = '&#10007;';
         }
       }
-    }).then(function(result) {
+    }, (window._msrPhotoCounts || {}).attendanceCycleId).then(function(result) {
       _uploading = false;
       if (progress) progress.style.display = 'none';
       if (progressFill) progressFill.style.width = '0%';
@@ -10307,10 +10323,11 @@
     // ── Photo Upload Section (single control, internally categorised) ──
     h += msrKick('Photos');
     var allMedia = data.media || [];
+    var attendanceCycleId = getActiveMakesafeAttendanceCycleId(data);
     // Match the backend gate exactly: it counts persisted job_media rows whose
     // type is photo for this job. Untyped media must not create a false pass.
-    var jobPhotos = allMedia.filter(function(m) { return m.type === 'photo'; });
-    window._msrPhotoCounts = { total: jobPhotos.length };
+    var jobPhotos = allMedia.filter(function(m) { return isMakesafeReportPhoto(m, attendanceCycleId); });
+    window._msrPhotoCounts = { total: jobPhotos.length, attendanceCycleId: attendanceCycleId };
 
     h += '<div style="margin-bottom:14px;border:1px solid var(--sw-border);border-radius:10px;padding:12px;">';
     h += '<div style="font-size:13px;font-weight:800;margin-bottom:4px;">MakeSafe photos *</div>';
@@ -10389,6 +10406,9 @@
       invoice_notes: extraNotes,
       status: 'submitted',
     };
+    if ((window._msrPhotoCounts || {}).attendanceCycleId) {
+      payload.attendance_cycle_id = window._msrPhotoCounts.attendanceCycleId;
+    }
 
     function sendMakesafeReport() {
       api('submit_makesafe_report', null, payload).then(function() {
@@ -10410,7 +10430,7 @@
       return;
     }
     toast('Checking photos already on this job...');
-    countConfirmedJobPhotos(_currentJobId).then(function(serverTotal) {
+    countConfirmedJobPhotos(_currentJobId, (window._msrPhotoCounts || {}).attendanceCycleId).then(function(serverTotal) {
       if (serverTotal === null) {
         toast('Could not check photos — check your signal and try again', true);
         return;
@@ -10427,11 +10447,11 @@
   // How many photos the server actually holds for this job. Resolves null when
   // the job could not be read, so a lost connection is never mistaken for
   // "no photos" and used to refuse a report.
-  function countConfirmedJobPhotos(jobId) {
+  function countConfirmedJobPhotos(jobId, attendanceCycleId) {
     if (!jobId) return Promise.resolve(null);
     return api('trade_job_detail', { jobId: jobId }).then(function(data) {
       var media = (data && data.media) || [];
-      return media.filter(function(m) { return !m.type || m.type === 'photo'; }).length;
+      return media.filter(function(m) { return isMakesafeReportPhoto(m, attendanceCycleId); }).length;
     }).catch(function() { return null; });
   }
 

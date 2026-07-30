@@ -16611,7 +16611,7 @@ function renderOverviewView(data) {
   if (j.type === 'makesafe') {
     var msDetails = data.makesafe_details || {};
     var msSub = msDetails.substatus || 'pending_allocation';
-    var msReport = (data.service_reports || [])[0] || null;
+    var msReport = getMakesafeRawReport(data);
     var msChecklist = msReport && msReport.checklist_json ? msReport.checklist_json : null;
 
     html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';

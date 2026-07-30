@@ -800,6 +800,11 @@
     .cal-schedule-bar.readiness-at_risk { box-shadow: inset 3px 0 0 0 #F59E0B; }
     .cal-schedule-bar.readiness-blocked { box-shadow: inset 3px 0 0 0 #EF4444; }
     .cal-schedule-bar:hover { filter: brightness(0.95); }
+    /* The bar is a flex container, so the label is a flex item and its default
+       min-width:auto stops it shrinking — text-overflow never fires and a long
+       client name is hard-clipped mid-glyph at the bar edge. min-width:0 lets it
+       shrink and ellipsize inside its own bar. */
+    .cal-schedule-bar .bar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .cal-schedule-bar .bar-crew { display: inline-flex; gap: 1px; margin-left: auto; flex-shrink: 0; }
     .cal-schedule-bar .bar-crew .crew-initial {
       width: 18px; height: 18px; border-radius: 50%; color: #fff;
@@ -7739,6 +7744,22 @@ function renderScheduleView(container, range) {
   var DAYS_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   var holidayMap = _calEventFilters.holidays ? getHolidayMap() : {};
 
+  // Bad-data guard. An assignment whose scheduled_end lands BEFORE its
+  // scheduled_date gives an inverted span, and the two halves of this renderer
+  // read that differently: the lane packer's "job.end < other.start ||
+  // job.start > other.end" test declares no overlap, so the bar shares a lane
+  // with one it visually sits on, and the geometry below computes a negative
+  // widthPct — invalid CSS, so the declaration is dropped and the absolutely
+  // positioned bar falls back to width:auto and paints its whole label over its
+  // lane-mate. Clamping to a single-day span at the start date keeps both halves
+  // honest. (Well-formed spans reach `jobs` via the activeDates → contiguous
+  // segments path below, which already guarantees start <= end.)
+  function spanEnd(ev) {
+    var s = ev.scheduled_date;
+    var e = ev.scheduled_end || s;
+    return (s && e < s) ? s : e;
+  }
+
   // Pad to full weeks (Mon-Sun)
   var firstDate = new Date(dates[0] + 'T00:00:00');
   var lastDate = new Date(dates[dates.length - 1] + 'T00:00:00');
@@ -7787,7 +7808,7 @@ function renderScheduleView(container, range) {
           label: ev.label || 'Internal',
           job_type: ev.job_type || null,
           start: ev.scheduled_date,
-          end: ev.scheduled_end || ev.scheduled_date,
+          end: spanEnd(ev),
           crew: crew,
           isLabel: true,
           recurrence_group_id: ev.recurrence_group_id || null
@@ -7795,7 +7816,7 @@ function renderScheduleView(container, range) {
       } else {
         // expand span + add crew
         if (ev.scheduled_date < labelMap[aid].start) labelMap[aid].start = ev.scheduled_date;
-        var evEnd2 = ev.scheduled_end || ev.scheduled_date;
+        var evEnd2 = spanEnd(ev);
         if (evEnd2 > labelMap[aid].end) labelMap[aid].end = evEnd2;
         var crewName2 = 'Unassigned';
         if (ev.user_id) {
@@ -7832,7 +7853,7 @@ function renderScheduleView(container, range) {
         start_time: ev.start_time || null,
         end_time: ev.end_time || null,
         start: ev.scheduled_date,
-        end: ev.scheduled_end || ev.scheduled_date,
+        end: spanEnd(ev),
         crew: {},
         assignmentId: ev.assignment_id || '',
         activeDates: {},
@@ -7841,7 +7862,7 @@ function renderScheduleView(container, range) {
     }
     // Track actual assignment dates (each date the crew is on site)
     var evStart = ev.scheduled_date;
-    var evEndDate = ev.scheduled_end || ev.scheduled_date;
+    var evEndDate = spanEnd(ev);
     var d = new Date(evStart + 'T00:00:00');
     var dEnd = new Date(evEndDate + 'T00:00:00');
     while (d <= dEnd) { jobMap[jid].activeDates[localDateStr(d)] = true; d.setDate(d.getDate() + 1); }
@@ -8011,6 +8032,12 @@ function renderScheduleView(container, range) {
 
       var startIdx = weekDates.indexOf(barStart);
       var endIdx = weekDates.indexOf(barEnd);
+      // Belt and braces on top of spanEnd(): widthPct must stay positive. A
+      // negative or zero width is invalid CSS, gets dropped, and leaves the bar
+      // at width:auto — i.e. shrink-wrapped around its own label and painted
+      // over whatever else shares its lane.
+      if (startIdx < 0) startIdx = 0;
+      if (endIdx < startIdx) endIdx = startIdx;
       var leftPct = (startIdx / 7 * 100).toFixed(2);
       var widthPct = ((endIdx - startIdx + 1) / 7 * 100).toFixed(2);
 
@@ -8028,7 +8055,7 @@ function renderScheduleView(container, range) {
         html += '>';
         html += '<span class="bar-dot" style="background:' + (job.job_type ? '' : '#9CA3AF') + ';"></span>';
         if (job.start_time) html += '<span style="font-weight:700;font-size:8px;margin-right:2px;">' + job.start_time.slice(0,5) + '</span>';
-        html += '<em style="overflow:hidden;text-overflow:ellipsis;font-style:italic;">' + escapeHtml(job.label) + '</em>';
+        html += '<em class="bar-label" style="font-style:italic;">' + escapeHtml(job.label) + '</em>';
         if (job.recurrence_group_id) html += '<svg class="cal-recurrence-icon" viewBox="0 0 16 16"><path d="M2 8a6 6 0 0110.5-4M14 8a6 6 0 01-10.5 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.5 1v3h-3M3.5 15v-3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         if (job.crewNames.length > 0) {
           html += '<span class="bar-crew">';
@@ -8063,7 +8090,7 @@ function renderScheduleView(container, range) {
         // Time + Job number + client
         if (job.start_time) html += '<span style="font-weight:700;font-size:8px;margin-right:2px;">' + job.start_time.slice(0,5) + '</span>';
         if (job.job_number) html += '<strong style="font-size:9px;">' + job.job_number + '</strong> ';
-        html += '<span style="overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(job.client_name) + '</span>';
+        html += '<span class="bar-label">' + escapeHtml(job.client_name) + '</span>';
 
         // Lock icon
         if (confClass === 'confirmed') html += '<span class="bar-lock">&#128274;</span>';

@@ -106,6 +106,12 @@ Gotchas:
 - Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.
   a class name like `.tjc-*/.tjb-`). It closes the comment early and SILENTLY
   drops the next CSS rule — this once shipped every job-type accent as grey.
+- `ops.html`'s calendar Schedule view (`renderScheduleView`) packs bars into
+  absolute lanes and sizes them with a percentage width, so both halves assume
+  `start <= end`. An inverted span breaks both at once — see the `spanEnd()`
+  comment there, and `tests/e2e/ops-schedule-lane-overlap.spec.js` for the guard.
+  The Crew view (`renderSwimlaneView`) stacks per-day cells in normal flow
+  instead, so the same bad row goes silently MISSING there rather than garbled.
 
 ## Maintaining this file
 

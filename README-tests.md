@@ -1,6 +1,6 @@
 # Playwright E2E template
 
-This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium, plus a pure-node unit spec for the Ops Dash calendar date math.
+This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium, plus Ops Dash calendar coverage: a pure-node unit spec for the working-day date math and a real-pointer drag regression spec.
 
 ## What runs
 
@@ -39,6 +39,7 @@ Covered flows (Trade App and Ops Dash):
 Ops Dash coverage in the same suite:
 
 - `tests/e2e/cal-workdays.spec.js` — CP1 calendar working-day (weekend-skip) span math. Pure node: no browser, page, or server fixtures. It reads `ops.html`, extracts the code between the `// <calendar-ops-core>` sentinels, and evaluates it, so assertions run against the real shipped `CalOpsCore` functions (`layWorkingDays`, `paintedSpanDates`, `buildMovePayloadV2`, `buildResizePayload`) and cannot drift. It lives in `tests/e2e/` because that is the Playwright `testDir` and it must run in the PR gate.
+- `tests/e2e/cal-drag-real-input.spec.js` — CP1 drag-to-reschedule with REAL pointer input only (Playwright `page.mouse` press-move-release through the trusted CDP input pipeline, never `element.dispatchEvent` — synthetic events pass even when a real user cannot drag, which is exactly how the Schedule-view gap shipped). Boots the real repo `ops.html` over `file://` with `?dragv2=1` and the Jarvis bar visible, stubbing `ops-api` at the network layer via `page.route` and recording every write. Covers BOTH calendar views: Crew-view block move and edge resize, Schedule-view bar move and edge resize (entered by a real click on the view toggle), and a confirmed bar staying locked with no write.
 
 ## Why the main suite uses stubs
 

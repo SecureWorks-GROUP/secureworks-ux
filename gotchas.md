@@ -27,6 +27,9 @@ Supabase Edge Functions have compute limits. Heavy operations (backfills, bulk X
 ### Calendar dragv2 flag-off path must stay byte-identical
 The CP1 drag behaviour in ops.html is gated by `?dragv2=1` / `localStorage.sw_cal_dragv2='1'` (default OFF). V1 `buildMovePayload` is deliberately kept alongside `buildMovePayloadV2` — don't "clean it up" while the flag exists, or flag-off drags change behaviour.
 
+### Calendar dragstart must seed dataTransfer for Firefox
+Every calendar `dragstart` handler in ops.html calls `event.dataTransfer.setData('text/plain', …)` — Firefox refuses to start an HTML5 drag when dataTransfer is empty (Chrome doesn't care; the real payload travels via `_calDragData`). This is deliberately unflagged since it changes no Chrome behaviour. Don't omit it when adding a new draggable element.
+
 ### Duplicate const declarations
 Same `const` variable name in the same function scope causes Deno BOOT_ERROR. The function won't even start — no useful error message.
 

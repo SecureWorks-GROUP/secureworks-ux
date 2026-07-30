@@ -51,9 +51,10 @@ function fixtureEvents() {
 }
 
 // Boots ops.html on the stubbed network. Returns { writes } — every mutating
-// ops-api call the page makes, in order.
-async function bootCalendar(page) {
-  const state = { events: fixtureEvents() };
+// ops-api call the page makes, in order. Pass { events } to boot with a
+// modified fixture (e.g. a confirmed assignment).
+async function bootCalendar(page, opts = {}) {
+  const state = { events: opts.events || fixtureEvents() };
   const writes = [];
   await page.route('**/*', async (route) => {
     const url = route.request().url();
@@ -199,31 +200,9 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
   });
 
   test('confirmed bars stay locked: drag produces no write', async ({ page }) => {
-    const state = { events: fixtureEvents() };
-    state.events[0].confirmation_status = 'confirmed';
-    const writes = [];
-    await page.route('**/*', async (route) => {
-      const url = route.request().url();
-      if (url.startsWith('file://')) return route.continue();
-      const m = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
-      if (!m) return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
-      const json = (obj) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(obj) });
-      if (m[1] === 'calendar') return json({ events: state.events });
-      if (m[1] === 'pipeline') return json({ columns: { accepted: [] } });
-      if (m[1] === 'get_crew_availability') return json([]);
-      if (m[1] === 'list_users') return json({ users: USERS });
-      writes.push({ action: m[1], body: route.request().postDataJSON() });
-      return json({ ok: true });
-    });
-    await page.addInitScript(() => {
-      try {
-        localStorage.setItem('sw_ops_tab', 'calendar');
-        localStorage.setItem('sw_cal_range', '2w');
-        localStorage.setItem('sw_cal_view_mode', 'crew');
-      } catch (e) {}
-    });
-    await page.goto(OPS_URL);
-    await expect(page.locator('.cal-job-block').first()).toBeVisible();
+    const events = fixtureEvents();
+    events[0].confirmation_status = 'confirmed';
+    const { writes } = await bootCalendar(page, { events });
     await toSchedule(page);
     const bar = page.locator('.cal-schedule-bar[data-job-id="j-1"]').first();
     const dst = page.locator('.cal-schedule-cell[data-date="' + D.THU + '"]');

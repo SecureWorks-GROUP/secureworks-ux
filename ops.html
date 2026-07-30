@@ -8613,12 +8613,13 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
       var offset = CalOpsCore.workingSpanDays(oldStart, ev.scheduled_date);
       var evStart = CalOpsCore.layWorkingDays(newDate, offset);
       var plan = CalOpsCore.buildMovePayloadV2(ev, crewNameOf(ev), ev.user_id || null, evStart);
+      if (plan.mode !== 'move') throw new Error('Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign');
       await opsPost('update_assignment', plan.update);
     }
     showToast('Rescheduled', 'success');
     maybeOfferRescheduleSms(evs[0], newDate);
     loadCalendar();
-  } catch (e) { showToast('Error: ' + e.message, 'warning'); }
+  } catch (e) { showToast('Error: ' + e.message, 'warning'); loadCalendar(); }
 }
 
 function handleCalDrop(event, cell) {

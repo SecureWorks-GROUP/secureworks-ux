@@ -583,13 +583,9 @@ from All and Board while Today remains assignment-scoped).
 NB: board cards are `role="button"` and their accessible names contain
 "Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
 matches cards too — target the `button.act.primary` class for the real Allocate
-action. Reattendance is different from allocation: any trade who opens their
-already-reported assigned MakeSafe sees **Create reattendance report**, while the
-server enforces assigned-trade/dispatcher/vertical-manager relationship authority.
-Keep cancellation manager-only. Ops job detail lists every cycle report separately
-and filters report photos by `attendance_cycle_id`. Reattendance behavior is
-documented in `trade-app.md`, and Ops report cycles in `ops-dashboard.md`; keep
-those documents authoritative.
+action. Reattendance behavior is documented in `trade-app.md`, and Ops report
+cycles in `ops-dashboard.md`; keep those documents authoritative rather than
+duplicating the contracts here.
 
 Gotchas:
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global. To

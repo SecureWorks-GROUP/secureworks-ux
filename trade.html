@@ -16859,7 +16859,8 @@
       var warn = document.querySelector('[data-cardnetwarn="' + idx + '"]');
       if (warn) warn.style.display = net < 0 ? 'block' : 'none';
       var brk = document.querySelector('[data-cardwobreak="' + idx + '"]');
-      if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.';
+      if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.'
+        + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '');
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
       if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');

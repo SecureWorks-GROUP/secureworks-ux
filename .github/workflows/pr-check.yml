@@ -66,3 +66,6 @@ jobs:
 
       - name: Test fencing manager visibility contract
         run: node scripts/test-fencing-manager-visibility.js
+
+      - name: Test WO labour-line payload contract
+        run: node scripts/test-trade-wo-labour-lines.js

@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+// Regression: WO-mode labour lines must reach the named labourer's pay.
+//
+// The reported production bug (2026-07-30): Alyx worked out SWF-26767 as
+// WO $559.50 with labour line "Tendo" 11.5h × $25 = $287.50, net $272. The
+// $287.50 came off Alyx's net but no pay record was ever created for Tendo —
+// the office hand-keyed it from the prose description (mis-keyed in
+// production). The backend now fans each named labour line out into that crew
+// member's payout invoice, which makes the CLIENT payload the contract: this
+// harness extracts the [JC-PAYLOAD-BUILD-START..END] block verbatim from
+// trade.html, executes it, and pins the structured lines the backend pays
+// from — cleaned names, real hours×rate, no unnamed money.
+const fs = require('fs')
+const assert = require('assert')
+const vm = require('vm')
+
+const html = fs.readFileSync('trade.html', 'utf8')
+
+const startMark = '// [JC-PAYLOAD-BUILD-START]'
+const endMark = '// [JC-PAYLOAD-BUILD-END]'
+const start = html.indexOf(startMark)
+const end = html.indexOf(endMark)
+assert(start !== -1 && end !== -1 && end > start, 'JC-PAYLOAD block markers exist')
+const block = html.slice(start, end)
+
+const context = {
+  // The block references _isMakesafeCard (defined outside it in trade.html);
+  // none of these cards are make-safe, so a false stub is faithful.
+  _isMakesafeCard: function() { return false },
+  console,
+}
+vm.createContext(context)
+vm.runInContext(block, context)
+
+function woCard(overrides) {
+  return Object.assign({
+    _idx: 0,
+    included: true,
+    wo_mode: true,
+    job_id: 'j-26767',
+    job_number: 'SWF-26767',
+    job_type: 'fencing',
+    client_name: 'Kelvin Gillies',
+    scheduled_date: '2026-07-14',
+    wo_allocated: 559.5,
+    wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+    description: '',
+    manually_added: false,
+  }, overrides || {})
+}
+
+// ── The captain's screenshot, end to end ─────────────────────────────────
+{
+  const built = context._buildJobCentricPayload([woCard()])
+  assert(!built.error, 'captain case builds without error: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.row_type, 'work_order')
+  assert.strictEqual(row.rate, 272, 'WO holder net is 559.5 − 287.5 = 272')
+  assert.strictEqual(row.wo_allocated, 559.5)
+  assert.strictEqual(row.wo_labour_deduction, 287.5)
+  // JSON round-trip: vm-context objects carry a foreign Object.prototype.
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
+    { trade_name: 'Tendo', hours: 11.5, rate: 25, amount: 287.5 },
+  ], 'structured labour line rides the payload — this is what pays Tendo')
+  assert(row.description.indexOf('Tendo 11.5h×$25=$287.5') !== -1, 'prose audit trail kept')
+  assert.strictEqual(built.subtotal, 272)
+}
+
+// ── Name hygiene: "Tendo  " (production data) is the same person ─────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_labour_lines: [{ trade_name: '  Tendo  ', hours: 11.5, rate: 25 }],
+  })])
+  assert(!built.error, 'padded name builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems[0].wo_labour_lines[0].trade_name, 'Tendo')
+  assert(built.cardExtraItems[0].description.indexOf('Tendo 11.5h') !== -1, 'breakdown text uses the cleaned name')
+}
+
+// ── Multiple labourers on one WO ─────────────────────────────────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 2000,
+    wo_labour_lines: [
+      { trade_name: 'Henry', hours: 4, rate: 50 },
+      { trade_name: 'Jose', hours: 6, rate: 45 },
+    ],
+  })])
+  assert(!built.error, 'multi-line builds: ' + built.error)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.wo_labour_deduction, 470)
+  assert.strictEqual(row.rate, 1530)
+  assert.strictEqual(row.wo_labour_lines.length, 2)
+}
+
+// ── Empty template rows are dropped, not sent ────────────────────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_labour_lines: [
+      { trade_name: 'Tendo', hours: 11.5, rate: 25 },
+      { trade_name: '', hours: null, rate: null }, // untouched "+ Add labour line"
+    ],
+  })])
+  assert(!built.error, 'template row builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems[0].wo_labour_lines.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].rate, 272)
+}
+
+// ── Money with no person blocks (was silently unpayable) ─────────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_labour_lines: [{ trade_name: '', hours: 2, rate: 30 }],
+  })])
+  assert(built.error, 'unnamed money must block')
+  assert(built.error.indexOf('name the crew member') !== -1, 'error says why: ' + built.error)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(built.missingIndices)), [0])
+}
+
+// ── A person with no money blocks (half-filled line) ─────────────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_labour_lines: [{ trade_name: 'Kim', hours: 0, rate: 25 }],
+  })])
+  assert(built.error, 'named line without hours must block')
+  assert(built.error.indexOf('Kim') !== -1, 'error names the person: ' + built.error)
+}
+
+// ── Existing WO guards unchanged ─────────────────────────────────────────
+{
+  const neg = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [{ trade_name: 'Tendo', hours: 10, rate: 25 }],
+  })])
+  assert(neg.error && neg.error.indexOf('negative') !== -1, 'negative net still blocks')
+
+  const zero = context._buildJobCentricPayload([woCard({
+    wo_allocated: 287.5,
+    wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+  })])
+  assert(zero.error && zero.error.indexOf('$0.00') !== -1, 'zero net still blocks')
+
+  const noAlloc = context._buildJobCentricPayload([woCard({ wo_allocated: null })])
+  assert(noAlloc.error && noAlloc.error.indexOf('WO allocated') !== -1, 'missing WO amount still blocks')
+}
+
+// ── Hourly cards untouched by the labour-line validation ─────────────────
+{
+  const built = context._buildJobCentricPayload([{
+    _idx: 0, included: true, assignment_id: 'a1', hours: 8, rate: 40,
+    job_number: 'SWF-1', description: '', manually_added: false,
+  }])
+  assert(!built.error, 'plain hourly card builds: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 1)
+}
+
+console.log('OK — WO labour-line payload contract holds (8 scenarios)')

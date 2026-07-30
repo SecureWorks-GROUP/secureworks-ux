@@ -50,7 +50,7 @@ function detail() {
     purchaseOrders: [],
     documents: [],
     notes: [],
-    media: visitTwoStarted ? [] : Array.from({ length: 5 }, (_, index) => ({
+    media: Array.from({ length: 5 }, (_, index) => ({
       id: `visit-1-photo-${index + 1}`,
       job_id: 'e2e-makesafe-reattend',
       type: 'photo',

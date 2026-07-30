@@ -49,6 +49,19 @@ requirement is deliberately UNFLAGGED: `create_assignment` takes camelCase keys
 and a required `userId` — name-only rows are invisible to the Trade App's
 my-jobs filter and the backend rejects them.
 
+The calendar has TWO views and BOTH must stay draggable: Crew (swimlane,
+per-assignment blocks) and Schedule (`renderScheduleView`, job-grouped bars;
+the active view persists in `localStorage.sw_cal_view_mode`, so one click on
+the toggle silently sticks forever — this is how "drag is broken" shipped once
+already: only Crew view had drag wiring). Schedule-view drops carry only a DAY
+(no crew rows — a drop there never reassigns); bars float on a
+`pointer-events:none` overlay above the day cells, so bars themselves must
+accept `dragover`/`drop` and fall through to the cell under the pointer.
+Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
+ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
+synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
+is exactly the masking that hid the Schedule-view gap. Keep it that way.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

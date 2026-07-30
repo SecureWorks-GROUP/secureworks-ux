@@ -42,10 +42,10 @@ function makesafeReportDetail(media = []) {
   };
 }
 
-async function openReport(page) {
-  await signIn(page, PERSONAS.allocator);
+async function openReport(page, persona = PERSONAS.allocator, expectedText = 'Make-Safe Report') {
+  await signIn(page, persona);
   await page.evaluate(() => window.openJobReport('e2e-makesafe-allocated', 'e2e-ms-assignment'));
-  await expect(page.locator('#makesafeReportDirectContent')).toContainText('Make-Safe Report');
+  await expect(page.locator('#makesafeReportDirectContent')).toContainText(expectedText);
 }
 
 test.describe('Trade App MakeSafe final report', () => {
@@ -410,5 +410,195 @@ test.describe('Trade App MakeSafe final report', () => {
     await expect(page.locator('#toast')).toContainText('at least 5 photos');
     await page.waitForTimeout(1500);
     expect(submittedPayload).toBeNull();
+  });
+});
+
+test.describe('Trade App self-started MakeSafe reattendance', () => {
+  test.use({ persona: 'installer' });
+
+  test('an assigned trade starts visit two with a reason and lands in its separate report', async ({ appPage: page }) => {
+    const firstReport = {
+      id: 'report-visit-1',
+      job_id: 'e2e-makesafe-allocated',
+      status: 'submitted',
+      cycle_number: 1,
+      attendance_cycle_id: 'cycle-visit-1',
+      cycle_attribution: 'bound',
+      submitted_at: '2026-07-27T01:00:00Z',
+      checklist_json: {
+        damage_description: 'Fence was unsafe.',
+        work_done: 'Secured the fence on visit one.',
+        materials_used: ['star pickets'],
+        labour_hours: 2,
+        trade_count: 1
+      }
+    };
+    let reattendancePayload = null;
+    let visitTwoStarted = false;
+
+    await page.route(`${OPS_API}**`, async (route) => {
+      const request = route.request();
+      const action = new URL(request.url()).searchParams.get('action');
+      if (action === 'trade_job_detail') {
+        const detail = makesafeReportDetail(Array.from({ length: 5 }, (_, index) => ({
+          id: `visit-1-photo-${index + 1}`,
+          job_id: 'e2e-makesafe-allocated',
+          type: 'photo',
+          phase: 'completion',
+          attendance_cycle_id: 'cycle-visit-1',
+          cycle_attribution: 'bound',
+          storage_url: PHOTO_DATA_URL
+        })));
+        detail.serviceReport = visitTwoStarted ? null : firstReport;
+        detail.serviceReports = [firstReport];
+        detail.makesafe_details = {
+          substatus: visitTwoStarted ? 'waiting_on_trade_report' : 'admin_to_send_report',
+          report_received_at: visitTwoStarted ? null : firstReport.submitted_at,
+          cycle_number: visitTwoStarted ? 2 : 1,
+          reattend_count: visitTwoStarted ? 1 : 0,
+          attendance_cycle_id: visitTwoStarted ? 'cycle-visit-2' : 'cycle-visit-1',
+          cycle_attribution: 'bound',
+          last_reattend_reason: visitTwoStarted ? 'storm loosened the temporary fence' : null
+        };
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) });
+        return;
+      }
+      if (action === 'reattend_makesafe') {
+        reattendancePayload = request.postDataJSON();
+        visitTwoStarted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ok: true,
+            reattended: true,
+            cycle_number: 2,
+            reattend_count: 1,
+            attendance_cycle_id: 'cycle-visit-2',
+            authorization_relationship: 'assigned_trade'
+          })
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openReport(page, PERSONAS.installer, 'Report Submitted');
+    await expect(page.getByRole('button', { name: 'Create reattendance report' })).toBeVisible();
+    await page.getByRole('button', { name: 'Create reattendance report' }).click();
+    await page.locator('#reattendReason').fill('storm loosened the temporary fence');
+    await page.getByRole('button', { name: 'Start reattendance' }).click();
+
+    await expect.poll(() => reattendancePayload).not.toBeNull();
+    expect(reattendancePayload).toEqual({
+      job_id: 'e2e-makesafe-allocated',
+      reason: 'storm loosened the temporary fence'
+    });
+    await expect(page.locator('#makesafeReattendBar')).toContainText('Re-attend · visit 2');
+    await expect(page.locator('#makesafeReportDirectContent')).toContainText('Photo gate: 0/5 photos uploaded.');
+    await expect(page.locator('#makesafeReportDirectContent')).not.toContainText('Secured the fence on visit one.');
+  });
+
+  test('surfaces a server-side relationship authorization rejection', async ({ appPage: page }) => {
+    let rejectedPayload = null;
+
+    await page.route(`${OPS_API}**`, async (route) => {
+      const request = route.request();
+      const action = new URL(request.url()).searchParams.get('action');
+      if (action === 'trade_job_detail') {
+        const detail = makesafeReportDetail(Array.from({ length: 5 }, (_, index) => ({
+          id: `visit-1-photo-${index + 1}`,
+          job_id: 'e2e-makesafe-allocated',
+          type: 'photo',
+          phase: 'completion',
+          attendance_cycle_id: 'cycle-visit-1',
+          cycle_attribution: 'bound',
+          storage_url: PHOTO_DATA_URL
+        })));
+        detail.serviceReport = {
+          id: 'report-visit-1',
+          job_id: 'e2e-makesafe-allocated',
+          status: 'submitted',
+          checklist_json: { damage_description: 'Fence was unsafe.' }
+        };
+        detail.makesafe_details = { substatus: 'admin_to_send_report', report_received_at: '2026-07-27T01:00:00Z' };
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) });
+        return;
+      }
+      if (action === 'reattend_makesafe') {
+        rejectedPayload = request.postDataJSON();
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Not authorized: unrelated user cannot re-attend this job' })
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openReport(page, PERSONAS.installer, 'Report Submitted');
+    await page.getByRole('button', { name: 'Create reattendance report' }).click();
+    await page.locator('#reattendReason').fill('unrelated-user authorization check');
+    await page.getByRole('button', { name: 'Start reattendance' }).click();
+
+    await expect.poll(() => rejectedPayload).not.toBeNull();
+    expect(rejectedPayload).toEqual({
+      job_id: 'e2e-makesafe-allocated',
+      reason: 'unrelated-user authorization check'
+    });
+    await expect(page.locator('#toast')).toContainText('Could not start reattendance');
+    await expect(page.locator('#toast')).toContainText('unrelated user');
+  });
+});
+
+test.describe('Trade App MakeSafe cancellation authority', () => {
+  test('a make-safe manager can cancel with a reason and note', async ({ appPage: page }) => {
+    let cancelPayload = null;
+    await page.route(`${OPS_API}**`, async (route) => {
+      const request = route.request();
+      const action = new URL(request.url()).searchParams.get('action');
+      if (action === 'trade_job_detail') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makesafeReportDetail()) });
+        return;
+      }
+      if (action === 'cancel_makesafe') {
+        cancelPayload = request.postDataJSON();
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openReport(page, PERSONAS.allocator);
+    await page.getByRole('button', { name: 'Cancel job' }).click();
+    await page.locator('#cancelNote').fill('Builder recalled the job');
+    await page.getByRole('button', { name: 'Cancel this job' }).click();
+    await expect(page.locator('#cancelConfirmMsg')).toContainText('E2E Allocator');
+    await page.getByRole('button', { name: 'Yes, cancel this job' }).click();
+
+    await expect.poll(() => cancelPayload).not.toBeNull();
+    expect(cancelPayload).toEqual({
+      job_id: 'e2e-makesafe-allocated',
+      reason_code: 'builder_recalled',
+      note: 'Builder recalled the job'
+    });
+  });
+
+  test.use({ persona: 'installer' });
+
+  test('a non-manager has no cancellation control', async ({ appPage: page }) => {
+    await page.route(`${OPS_API}**`, async (route) => {
+      const action = new URL(route.request().url()).searchParams.get('action');
+      if (action === 'trade_job_detail') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(makesafeReportDetail()) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await openReport(page, PERSONAS.installer);
+    await expect(page.locator('#makesafeCancelBar')).toBeEmpty();
+    await expect(page.getByRole('button', { name: 'Cancel job' })).toHaveCount(0);
   });
 });

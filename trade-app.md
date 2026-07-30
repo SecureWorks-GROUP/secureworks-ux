@@ -119,6 +119,10 @@ The make-safe experience is driven by a single canonical read model — the `mak
 - The site occupant/homeowner (`job.client_name`) is never rendered as the builder on any surface — every `requesting_company … || job.client_name` fallback chain was removed.
 - My Jobs (`renderMyJobs`) and the direct MakeSafe report path prime the feed (`fetchMakesafeV5Feed(false)`) alongside their own data, then re-render so cards swap from the legacy fallback to feed facts without changing markup.
 
+### Reattendance and report cycles
+- After an assigned trade has submitted a MakeSafe report, that trade can choose **Create reattendance report**, enter the required reason, and start the next attendance cycle. The server re-checks the caller's assigned-trade, dispatcher, or managed-vertical relationship; the client does not widen authority. The action opens a separate blank report for the new visit with its own attendance-cycle photo gate (five confirmed photos required).
+- Reattendance keeps the existing job card and prior report intact. Cancellation remains manager-only, and this flow does not create or calculate a charge.
+
 ### Calendar
 - `caFetchCalendarModel` routes on `NC.type`: make-safe reads only the `makesafe_board` feed (the legacy `api('calendar')` feed is gone), and fencing crosses the strict `TradeCalendarSource` adapter (`// <trade-calendar-source>`). There is no third transport.
 - The fencing transport consumes exactly one published contract: `GET ops-api?action=trade_calendar` with `from`, `to`, `mode` (`mine` | `all`) and `type=fencing`, JWT-authenticated through `api()` with `{ preserveSessionOnAuthFailure: true }`. `adaptV1` hard-rejects a payload whose `schema` is not `trade-calendar.v1`, whose effective `mode` is neither `mine` nor `all`, whose `type` or any event `job_type` falls outside the requested fencing vertical, or which omits `events[]` / `truncated`. `truncated: true` paints an explicit "reached the server limit" warning above the calendar. With no source registered the host renders a `data-calendar-state="contract-pending"` state rather than guessing rows.

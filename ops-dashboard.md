@@ -22,6 +22,7 @@
 - Assignment completion cascade (complete buttons, prompt when all done)
 - Crew utilisation (bar chart, colour-coded green/amber/red)
 - Make-safe cards render the server-supplied stage; cards without a trustworthy stage show an escaped **Waiting on Captain** action message instead of a browser-inferred status.
+- Make-safe job detail keeps one job card while listing each attendance-cycle trade report separately. Opening a visit report shows only photos bound to that report's `attendance_cycle_id`; unbound media is not guessed onto a multi-visit report.
 
 ## ops-api Actions
 See edge-functions.md for full list. Key ones:

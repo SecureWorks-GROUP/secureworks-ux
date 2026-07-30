@@ -4287,7 +4287,7 @@
   // 3. confirm_upload → register media record
   // ══════════════════════════════════════════════════
 
-  function uploadOnePhoto(file, jobId, phase, label) {
+  function uploadOnePhoto(file, jobId, phase, label, attendanceCycleId) {
     var compressed;
     return compressImage(file).then(function(f) {
       compressed = f;
@@ -4312,13 +4312,18 @@
       });
     }).then(function(urlData) {
       // Step 3: confirm upload and register media
-      return api('confirm_upload', null, {
+      var payload = {
         jobId: jobId,
         publicUrl: urlData.publicUrl,
         path: urlData.path,
         label: label || '',
         phase: phase || 'completion'
-      });
+      };
+      if (attendanceCycleId) {
+        payload.attendance_cycle_id = attendanceCycleId;
+        payload.cycle_attribution = 'bound';
+      }
+      return api('confirm_upload', null, payload);
     });
   }
 
@@ -4336,7 +4341,7 @@
   //
   // The run stops early only once the session itself is gone, since every
   // remaining file would fail the same way.
-  function uploadPhotosSequential(files, jobId, phase, onProgress) {
+  function uploadPhotosSequential(files, jobId, phase, onProgress, attendanceCycleId) {
     var uploaded = [];
     var failed = [];
     var idx = 0;
@@ -4353,7 +4358,7 @@
       var file = files[idx];
       idx++;
       var fileIndex = idx;
-      return uploadOnePhoto(file, jobId, phase, '').then(function(res) {
+      return uploadOnePhoto(file, jobId, phase, '', attendanceCycleId).then(function(res) {
         uploaded.push(res);
         report(fileIndex, true, null);
         return next();
@@ -9568,6 +9573,17 @@
     }
   }
 
+  function getActiveMakesafeAttendanceCycleId(data) {
+    var details = data && data.makesafe_details;
+    return details && details.attendance_cycle_id ? String(details.attendance_cycle_id) : '';
+  }
+
+  function isMakesafeReportPhoto(media, attendanceCycleId) {
+    if (!media || (media.type && media.type !== 'photo')) return false;
+    if (!attendanceCycleId) return true;
+    return String(media.attendance_cycle_id || '') === attendanceCycleId && String(media.cycle_attribution || '') === 'bound';
+  }
+
   // Make-safe report photo upload handler — uploads immediately but doesn't reload the page
   window.handleMsrPhotoUpload = function(input, phase) {
     var files = Array.from(input.files || []);
@@ -9635,7 +9651,7 @@
           el.badge.innerHTML = '&#10007;';
         }
       }
-    }).then(function(result) {
+    }, (window._msrPhotoCounts || {}).attendanceCycleId).then(function(result) {
       _uploading = false;
       if (progress) progress.style.display = 'none';
       if (progressFill) progressFill.style.width = '0%';
@@ -10307,10 +10323,11 @@
     // ── Photo Upload Section (single control, internally categorised) ──
     h += msrKick('Photos');
     var allMedia = data.media || [];
+    var attendanceCycleId = getActiveMakesafeAttendanceCycleId(data);
     // Match the backend gate exactly: it counts persisted job_media rows whose
     // type is photo for this job. Untyped media must not create a false pass.
-    var jobPhotos = allMedia.filter(function(m) { return m.type === 'photo'; });
-    window._msrPhotoCounts = { total: jobPhotos.length };
+    var jobPhotos = allMedia.filter(function(m) { return isMakesafeReportPhoto(m, attendanceCycleId); });
+    window._msrPhotoCounts = { total: jobPhotos.length, attendanceCycleId: attendanceCycleId };
 
     h += '<div style="margin-bottom:14px;border:1px solid var(--sw-border);border-radius:10px;padding:12px;">';
     h += '<div style="font-size:13px;font-weight:800;margin-bottom:4px;">MakeSafe photos *</div>';
@@ -10389,6 +10406,9 @@
       invoice_notes: extraNotes,
       status: 'submitted',
     };
+    if ((window._msrPhotoCounts || {}).attendanceCycleId) {
+      payload.attendance_cycle_id = window._msrPhotoCounts.attendanceCycleId;
+    }
 
     function sendMakesafeReport() {
       api('submit_makesafe_report', null, payload).then(function() {
@@ -10410,7 +10430,7 @@
       return;
     }
     toast('Checking photos already on this job...');
-    countConfirmedJobPhotos(_currentJobId).then(function(serverTotal) {
+    countConfirmedJobPhotos(_currentJobId, (window._msrPhotoCounts || {}).attendanceCycleId).then(function(serverTotal) {
       if (serverTotal === null) {
         toast('Could not check photos — check your signal and try again', true);
         return;
@@ -10427,11 +10447,11 @@
   // How many photos the server actually holds for this job. Resolves null when
   // the job could not be read, so a lost connection is never mistaken for
   // "no photos" and used to refuse a report.
-  function countConfirmedJobPhotos(jobId) {
+  function countConfirmedJobPhotos(jobId, attendanceCycleId) {
     if (!jobId) return Promise.resolve(null);
     return api('trade_job_detail', { jobId: jobId }).then(function(data) {
       var media = (data && data.media) || [];
-      return media.filter(function(m) { return !m.type || m.type === 'photo'; }).length;
+      return media.filter(function(m) { return isMakesafeReportPhoto(m, attendanceCycleId); }).length;
     }).catch(function() { return null; });
   }
 
@@ -11143,11 +11163,11 @@
   }
 
   // ── Re-attendance (M-C) ──────────────────────────────────────────────────────
-  // Managers only: send an already-reported make-safe back to the trade for a
-  // second visit on the SAME work order (no new WO). Mirrors the tap-to-allocate
-  // posture — a display-only gate here; the server (reattend_makesafe) re-checks
-  // that the caller is a dispatcher or a manager of the job's vertical.
-  function _canManageMakesafeReattend() {
+  // Any trade who can open their assigned, already-reported MakeSafe may start
+  // the next attendance report. The server re-checks the exact job relationship
+  // and still refuses an unrelated user. Manager authority remains separate for
+  // cancellation and allocation actions.
+  function _canManageMakesafeAdminActions() {
     var mv = _user && _user.managed_verticals;
     return !!(_isAdmin || (Array.isArray(mv) && mv.indexOf('makesafe') !== -1));
   }
@@ -11175,17 +11195,18 @@
         (ms.last_reattend_reason ? '<span style="font-weight:400;color:#4338CA;">— ' + esc(ms.last_reattend_reason) + '</span>' : '') +
         '</div>';
     }
-    // Manager action: send it back for another visit (only on a reported card).
-    if (_canManageMakesafeReattend() && _makesafeIsReported(data)) {
+    // Relationship-gated server action, shown on every reported job detail the
+    // signed-in trade is allowed to open.
+    if (_makesafeIsReported(data)) {
       h += '<div id="reattendPanel" style="background:#fff;border:1px solid var(--sw-border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">' +
-        '<div style="font-size:13px;font-weight:600;color:var(--sw-text);margin-bottom:6px;">Builder asked for a re-attend?</div>' +
-        '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">Send this job back to the trade for another visit on the same work order. The current report is kept.</div>' +
-        '<button id="reattendAskBtn" onclick="reattendAsk()" style="width:100%;background:var(--sw-mid);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;min-height:46px;font-family:var(--sw-font);">Send back for re-attend</button>' +
+        '<div style="font-size:13px;font-weight:600;color:var(--sw-text);margin-bottom:6px;">Need another attendance?</div>' +
+        '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">Start a separate report for the next visit on this work order. The first report and its photos stay on the job.</div>' +
+        '<button id="reattendAskBtn" onclick="reattendAsk()" style="width:100%;background:var(--sw-mid);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;min-height:46px;font-family:var(--sw-font);">Create reattendance report</button>' +
         '<div id="reattendConfirmRow" style="display:none;margin-top:10px;">' +
         '<input id="reattendReason" type="text" placeholder="Reason (e.g. temp fence blew down again)" style="width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;box-sizing:border-box;font-family:var(--sw-font);margin-bottom:8px;">' +
         '<div style="display:flex;gap:8px;">' +
         '<button onclick="reattendCancel()" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-light);color:var(--sw-text);font-family:var(--sw-font);">Cancel</button>' +
-        '<button id="reattendYesBtn" onclick="reattendConfirm(\'' + esc(jobId) + '\')" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-orange);color:#fff;font-family:var(--sw-font);">Confirm re-attend</button>' +
+        '<button id="reattendYesBtn" onclick="reattendConfirm(\'' + esc(jobId) + '\')" style="flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;background:var(--sw-orange);color:#fff;font-family:var(--sw-font);">Start reattendance</button>' +
         '</div></div></div>';
     }
     return h;
@@ -11210,13 +11231,14 @@
     var reason = input ? String(input.value || '').trim() : '';
     if (!reason) { toast('Add a short reason first', true); if (input) input.focus(); return; }
     var yes = document.getElementById('reattendYesBtn');
-    if (yes) { yes.disabled = true; yes.textContent = 'Sending back...'; }
+    if (yes) { yes.disabled = true; yes.textContent = 'Starting...'; }
     api('reattend_makesafe', null, { job_id: jobId, reason: reason }).then(function (res) {
-      toast('Sent back for re-attend — now allocated (visit ' + ((res && res.reattend_count ? res.reattend_count : 1) + 1) + ')');
-      showView('board');
+      var visit = Number(res && res.cycle_number) || ((Number(res && res.reattend_count) || 1) + 1);
+      toast('Reattendance visit ' + visit + ' started. Complete its separate report now.');
+      window.openJobReport(jobId, '');
     }).catch(function (err) {
-      if (yes) { yes.disabled = false; yes.textContent = 'Confirm re-attend'; }
-      toast('Could not re-attend: ' + friendlyError(err), true);
+      if (yes) { yes.disabled = false; yes.textContent = 'Start reattendance'; }
+      toast('Could not start reattendance: ' + friendlyError(err), true);
     });
   };
 
@@ -11227,7 +11249,7 @@
   // confirm before the write. The server (cancel_makesafe) re-checks authz and
   // blocks the cancel if a live invoice exists.
   function makesafeCancelBarHTML(data) {
-    if (!_canManageMakesafeReattend()) return '';
+    if (!_canManageMakesafeAdminActions()) return '';
     var jobId = (data && data.job && data.job.id) || _currentJobId || '';
     var opts = MS_CANCEL_REASONS.map(function (r) {
       return '<option value="' + esc(r.code) + '">' + esc(r.label) + '</option>';

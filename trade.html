@@ -16335,14 +16335,14 @@
             var ll = labourLines[li];
             var llAmt = Math.round((Number(ll.hours || 0) * Number(ll.rate || 0)) * 100) / 100;
             html += '<div data-woll="' + c._idx + '_' + li + '" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;background:rgba(0,0,0,0.02);border-radius:8px;padding:6px 8px">';
-            html += '<input type="text" value="' + esc(ll.trade_name || '') + '" placeholder="Name" '
+            html += '<input type="text" data-cardwollname="' + c._idx + '_' + li + '" value="' + esc(ll.trade_name || '') + '" placeholder="Name" '
               + 'onchange="setWoLabourLineName(' + c._idx + ',' + li + ',this.value)" '
               + 'style="flex:1;min-width:80px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-family:var(--sw-font)">';
-            html += '<input type="number" min="0" step="0.25" inputmode="decimal" value="' + (ll.hours != null ? ll.hours : '') + '" placeholder="hrs" '
+            html += '<input type="number" data-cardwollhours="' + c._idx + '_' + li + '" min="0" step="0.25" inputmode="decimal" value="' + (ll.hours != null ? ll.hours : '') + '" placeholder="hrs" '
               + 'onchange="setWoLabourLineHours(' + c._idx + ',' + li + ',this.value)" '
               + 'style="width:60px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px">';
             html += '<span style="font-size:11px;color:var(--sw-text-sec)">x</span>';
-            html += '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (ll.rate != null ? ll.rate : '') + '" placeholder="$/hr" '
+            html += '<input type="number" data-cardwollrate="' + c._idx + '_' + li + '" min="0" step="0.01" inputmode="decimal" value="' + (ll.rate != null ? ll.rate : '') + '" placeholder="$/hr" '
               + 'onchange="setWoLabourLineRate(' + c._idx + ',' + li + ',this.value)" '
               + 'style="width:70px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px">';
             html += '<span style="font-size:13px;font-weight:700;color:var(--sw-dark);min-width:60px;text-align:right">= $' + llAmt.toFixed(2) + '</span>';
@@ -16552,8 +16552,23 @@
           var n = parseFloat(allocEl.value);
           c.wo_allocated = (isNaN(n) || n < 0) ? null : n;
         }
-        // Labour line inputs are synced inline via setWoLabourLine* handlers;
-        // no additional sync needed here.
+        var labourLines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
+        for (var li = 0; li < labourLines.length; li++) {
+          var line = labourLines[li];
+          var key = idx + '_' + li;
+          var nameEl = document.querySelector('[data-cardwollname="' + key + '"]');
+          if (nameEl) line.trade_name = nameEl.value || '';
+          var hoursEl = document.querySelector('[data-cardwollhours="' + key + '"]');
+          if (hoursEl) {
+            var hours = parseFloat(hoursEl.value);
+            line.hours = (isNaN(hours) || hours < 0) ? null : hours;
+          }
+          var rateEl = document.querySelector('[data-cardwollrate="' + key + '"]');
+          if (rateEl) {
+            var rate = parseFloat(rateEl.value);
+            line.rate = (isNaN(rate) || rate < 0) ? null : rate;
+          }
+        }
       } else {
         var hrsEl = document.querySelector('[data-cardhours="' + idx + '"]');
         if (hrsEl) {

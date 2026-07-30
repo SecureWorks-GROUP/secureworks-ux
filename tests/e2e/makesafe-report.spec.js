@@ -440,7 +440,7 @@ test.describe('Trade App self-started MakeSafe reattendance', () => {
       const request = route.request();
       const action = new URL(request.url()).searchParams.get('action');
       if (action === 'trade_job_detail') {
-        const detail = makesafeReportDetail(Array.from({ length: 5 }, (_, index) => ({
+        const detail = makesafeReportDetail(visitTwoStarted ? [] : Array.from({ length: 5 }, (_, index) => ({
           id: `visit-1-photo-${index + 1}`,
           job_id: 'e2e-makesafe-allocated',
           type: 'photo',

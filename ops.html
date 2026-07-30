@@ -15916,9 +15916,35 @@ function parseMakesafeSendLog(events) {
   });
   return result;
 }
-function getMakesafeRawReport(data) {
+function getMakesafeReports(data) {
   var reports = (data && (data.service_reports || (data.serviceReport ? [data.serviceReport] : []))) || [];
-  return reports[0] || null;
+  return reports.slice().sort(function(a, b) {
+    var byCycle = Number(a.cycle_number || 1) - Number(b.cycle_number || 1);
+    if (byCycle) return byCycle;
+    return String(a.submitted_at || a.created_at || '').localeCompare(String(b.submitted_at || b.created_at || ''));
+  });
+}
+function getMakesafeRawReport(data, reportId) {
+  var reports = getMakesafeReports(data);
+  if (reportId) {
+    for (var i = 0; i < reports.length; i++) {
+      if (String(reports[i].id || '') === String(reportId)) return reports[i];
+    }
+  }
+  return reports.length ? reports[reports.length - 1] : null;
+}
+function getMakesafeReportMedia(data, report) {
+  var media = (data && data.media) || [];
+  if (!report) return [];
+  if (report.attendance_cycle_id) {
+    return media.filter(function(item) {
+      return String(item.attendance_cycle_id || '') === String(report.attendance_cycle_id) &&
+        String(item.cycle_attribution || '') === 'bound';
+    });
+  }
+  // A single legacy report predates attendance ids, so preserve its old all-media
+  // view. On a multi-visit job, never guess that unbound photos belong to a visit.
+  return getMakesafeReports(data).length === 1 ? media : [];
 }
 function makesafeRawReportValue(value) {
   if (Array.isArray(value)) return value.filter(Boolean).join(', ');
@@ -15935,9 +15961,9 @@ function renderMakesafeRawReportField(label, value, multiline) {
     + '<div style="font-size:13px;color:' + color + ';' + (multiline ? 'white-space:pre-wrap;line-height:1.45;' : '') + '">' + escapeHtml(text) + '</div>'
     + '</div>';
 }
-function openMakesafeRawTradeReport() {
+function openMakesafeRawTradeReport(reportId) {
   var data = _currentJobData || {};
-  var report = getMakesafeRawReport(data);
+  var report = getMakesafeRawReport(data, reportId);
   if (!report) {
     showToast('No trade-app report submitted yet', 'warning');
     return;
@@ -15945,7 +15971,7 @@ function openMakesafeRawTradeReport() {
   var checklist = report.checklist_json || {};
   var md = data.makesafe_details || {};
   var j = data.job || {};
-  var media = data.media || [];
+  var media = getMakesafeReportMedia(data, report);
   var submittedType = checklist.job_type === 'Other'
     ? (checklist.job_type_detail || checklist.makesafe_type_detail || 'Other')
     : checklist.job_type;
@@ -15957,13 +15983,15 @@ function openMakesafeRawTradeReport() {
     modal.setAttribute('onclick', "if(event.target===this)closeModal('makesafeRawReportModal')");
     document.body.appendChild(modal);
   }
+  var cycleNumber = Number(report.cycle_number || 1);
   var html = '<div class="modal" style="max-width:760px;max-height:90vh;overflow-y:auto;">';
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">';
-  html += '<div><div class="modal-title" style="margin-bottom:3px;">Raw trade-app report</div>';
+  html += '<div><div class="modal-title" style="margin-bottom:3px;">Trade report · Visit ' + cycleNumber + '</div>';
   html += '<div style="font-size:12px;color:var(--sw-text-sec);">' + escapeHtml(j.job_number || md.external_ref || 'MakeSafe job') + (j.site_suburb ? ' · ' + escapeHtml(j.site_suburb) : '') + '</div></div>';
   html += '<button class="btn btn-secondary btn-sm" onclick="closeModal(\'makesafeRawReportModal\')">Close</button>';
   html += '</div>';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px;">';
+  html += renderMakesafeRawReportField('Attendance cycle', 'Visit ' + cycleNumber, false);
   html += renderMakesafeRawReportField('Submitted at', report.submitted_at ? fmtMakesafeSendDate(report.submitted_at) : report.created_at, false);
   html += renderMakesafeRawReportField('Submitted by', report.submitted_by || report.submitted_by_name || 'trade app', false);
   html += renderMakesafeRawReportField('Report status', report.status || 'submitted', false);
@@ -15978,7 +16006,7 @@ function openMakesafeRawTradeReport() {
   html += renderMakesafeRawReportField('Materials / equipment', checklist.materials_used, true);
   html += renderMakesafeRawReportField('Access issues', checklist.access_issues, true);
   html += renderMakesafeRawReportField('Invoice / admin notes', checklist.invoice_notes, true);
-  html += '<div style="font-size:10px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.35px;margin:14px 0 6px;">Photos (' + media.length + ')</div>';
+  html += '<div style="font-size:10px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.35px;margin:14px 0 6px;">Visit ' + cycleNumber + ' photos (' + media.length + ')</div>';
   if (media.length) {
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;">';
     media.slice(0, 30).forEach(function(m) {
@@ -16301,8 +16329,8 @@ function renderMakesafeOpsDetail(data) {
   var docs = data.documents || [];
   var workOrders = data.work_orders || [];
   var workOrderDocs = docs.filter(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; });
-  var reports = data.service_reports || (data.serviceReport ? [data.serviceReport] : []);
-  var report = reports[0] || null;
+  var reports = getMakesafeReports(data);
+  var report = reports.length ? reports[reports.length - 1] : null;
   var checklist = report && report.checklist_json ? report.checklist_json : null;
   var reportDocs = docs.filter(isMakesafeReportDoc);
   var invoices = (data.invoices || []).filter(function(inv) { return inv.invoice_type === 'ACCREC' && ['VOIDED','DELETED'].indexOf(inv.status) < 0; });
@@ -16388,10 +16416,24 @@ function renderMakesafeOpsDetail(data) {
   html += '</div>';
 
   html += '<div style="background:var(--sw-card);padding:14px;box-shadow:var(--sw-shadow);min-height:128px;">';
-  html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Trade report</div>';
-  if (checklist || reportDocs.length) {
-    html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">Report attached</div>';
-    if (report && report.submitted_at) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:6px;">Submitted ' + fmtDate(String(report.submitted_at).slice(0, 10)) + '</div>';
+  html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Trade reports</div>';
+  if (checklist || reportDocs.length || reports.length) {
+    html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">' + (reports.length ? reports.length + ' visit report' + (reports.length === 1 ? '' : 's') : 'Report document attached') + '</div>';
+    if (reports.length) {
+      html += '<div data-testid="makesafe-visit-reports" style="display:grid;gap:6px;margin:8px 0 10px;">';
+      reports.forEach(function(visitReport) {
+        var visit = Number(visitReport.cycle_number || 1);
+        var submitted = visitReport.submitted_at || visitReport.created_at || null;
+        var reportId = String(visitReport.id || '').replace(/'/g, "\\'");
+        html += '<div data-report-cycle="' + visit + '" style="display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--sw-border);border-radius:7px;padding:8px 9px;">';
+        html += '<div><div style="font-size:12px;font-weight:850;color:var(--sw-dark);">Visit ' + visit + '</div>';
+        html += '<div style="font-size:11px;color:var(--sw-text-sec);">' + escapeHtml(submitted ? fmtMakesafeSendDate(submitted) : 'Submitted time unavailable') + ' · ' + escapeHtml(visitReport.status || 'submitted') + '</div></div>';
+        html += '<button class="btn btn-secondary btn-sm" data-open-report-cycle="' + visit + '" onclick="openMakesafeRawTradeReport(\'' + reportId + '\')">Open report</button>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    if (report && report.submitted_at) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:6px;">Latest submitted ' + fmtDate(String(report.submitted_at).slice(0, 10)) + '</div>';
     var submittedType = checklist && (checklist.job_type === 'Other' ? (checklist.job_type_detail || checklist.makesafe_type_detail || 'Other') : checklist.job_type);
     if (submittedType) html += '<div style="font-size:12px;color:var(--sw-text);margin-bottom:6px;"><strong>Type:</strong> ' + escapeHtml(submittedType) + '</div>';
     if (checklist && checklist.work_done) html += '<div style="font-size:12px;color:var(--sw-text);white-space:pre-wrap;max-height:86px;overflow:auto;">' + escapeHtml(String(checklist.work_done).slice(0, 360)) + '</div>';

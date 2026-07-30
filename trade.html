@@ -16359,7 +16359,8 @@
           html += '<span data-cardamt="' + c._idx + '" style="font-size:20px;font-weight:800;color:' + ((c.included && net < 0) ? 'var(--sw-red)' : 'var(--sw-dark)') + '">$' + (c.included ? net : 0).toFixed(2) + '</span>';
           html += '</div>';
           html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
-          html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.</div>';
+          html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
+            + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '') + '</div>';
         } else {
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
           html += '<label style="font-size:12px;color:var(--sw-text-sec)">Hours</label>';
@@ -16909,14 +16910,35 @@
   // Routing: assigned hourly cards → manual_assignments (assignment_id-keyed,
   // ops-api requires it); searched-in (manually_added) and WO-mode cards →
   // extra_items (client-priced lane → pending_ops_review). WO-mode rows carry
-  // the full breakdown in the description — ops-api persists description, not
-  // the structured wo_* fields, so the description is the audit trail.
+  // the breakdown in the description AND the structured wo_* fields — ops-api
+  // persists both and fans each named labour line out into that crew member's
+  // own payout invoice (pending office review), so the labour deducted from
+  // this trade's net actually reaches the people who worked the site.
+  // _woCleanLabourLines: canonical view of a card's labour lines. Names are
+  // trimmed + inner whitespace collapsed (production had "Tendo  " ≠ "Tendo"),
+  // amounts recomputed from hours×rate, and untouched "+ Add labour line"
+  // template rows (no name, no money) dropped. Everything downstream — sum,
+  // breakdown text, payload — reads THIS, because the backend pays the named
+  // crew member from each line and free-text noise breaks that match.
+  function _woCleanLabourLines(c) {
+    var lines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var name = String(lines[i].trade_name || '').replace(/\s+/g, ' ').trim();
+      var hours = Number(lines[i].hours || 0);
+      var rate = Number(lines[i].rate || 0);
+      var amount = Math.round(hours * rate * 100) / 100;
+      if (!name && amount <= 0) continue;
+      out.push({ trade_name: name, hours: hours, rate: rate, amount: amount });
+    }
+    return out;
+  }
   // _woLabourSum: sum all labour lines from the array (Q17).
   function _woLabourSum(c) {
-    var lines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
+    var lines = _woCleanLabourLines(c);
     var sum = 0;
     for (var i = 0; i < lines.length; i++) {
-      sum += Math.round((Number(lines[i].hours || 0) * Number(lines[i].rate || 0)) * 100) / 100;
+      sum += lines[i].amount;
     }
     return Math.round(sum * 100) / 100;
   }
@@ -16929,16 +16951,13 @@
   // Build audit-trail description string: "WO $2000 − labour [Henry 4h×$50=$200; Jose 6h×$45=$270]=net $1530"
   function _woBreakdownText(c) {
     var a = Number(c.wo_allocated) || 0;
-    var lines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
+    var lines = _woCleanLabourLines(c);
     var net = _woNet(c);
     if (lines.length === 0) {
       return 'WO $' + a + ' = net $' + net;
     }
     var parts = lines.map(function(ll) {
-      var h = Number(ll.hours || 0);
-      var r = Number(ll.rate || 0);
-      var amt = Math.round(h * r * 100) / 100;
-      return (ll.trade_name || 'Trade') + ' ' + h + 'h×$' + r + '=$' + amt;
+      return (ll.trade_name || 'Trade') + ' ' + ll.hours + 'h×$' + ll.rate + '=$' + ll.amount;
     });
     return 'WO $' + a + ' − labour [' + parts.join('; ') + ']=net $' + net;
   }
@@ -16953,6 +16972,28 @@
     if (woNeg.length > 0) return { error: 'Net payable cannot be negative on ' + (woNeg[0].job_number || 'a job') + ' — the labour deduction is more than the WO allocation. Fix the amounts before submitting.', missingIndices: woNeg.map(function(c){return c._idx;}) };
     var woZero = included.filter(function(c) { return c.wo_mode && _woNet(c) === 0; });
     if (woZero.length > 0) return { error: 'Net payable is $0.00 on ' + (woZero[0].job_number || 'a job') + ' — untick the job or fix the amounts', missingIndices: woZero.map(function(c){return c._idx;}) };
+    // Every labour line is paid to the NAMED crew member by the office, so a
+    // line that carries money must name a person and a named line must carry
+    // real hours × rate — otherwise the deduction comes off this trade's net
+    // but nobody can be paid it (the original missing-labourer-pay bug).
+    var woBadLine = [];
+    included.forEach(function(c) {
+      if (!c.wo_mode) return;
+      var lines = _woCleanLabourLines(c);
+      for (var i = 0; i < lines.length; i++) {
+        var jobLbl = c.job_number || c.site_suburb || 'a job';
+        if (!lines[i].trade_name) {
+          woBadLine.push({ idx: c._idx, msg: jobLbl + ': name the crew member on every labour line — the office pays them that amount.' });
+        } else if (!(lines[i].hours > 0) || !(lines[i].rate > 0)) {
+          woBadLine.push({ idx: c._idx, msg: jobLbl + ': enter hours and rate for ' + lines[i].trade_name + '’s labour line.' });
+        }
+      }
+    });
+    if (woBadLine.length > 0) {
+      var _woShown = woBadLine.slice(0, 3).map(function(b) { return b.msg; });
+      if (woBadLine.length > 3) _woShown.push('...and ' + (woBadLine.length - 3) + ' more');
+      return { error: _woShown.join(' · '), missingIndices: woBadLine.map(function(b){ return b.idx; }) };
+    }
     // Description is required for manually-added (searched) hourly rows so ops know
     // what was done, but optional for auto-assigned cards (job/client already identifies
     // the work). Hours and rate are required for all hourly cards.
@@ -17005,15 +17046,10 @@
       } else if (c.wo_mode) {
         var net = _woNet(c);
         subtotal += net;
-        // Build structured labour lines with computed amounts [Q17]
-        var labourLinesOut = (Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : []).map(function(ll) {
-          return {
-            trade_name: ll.trade_name || '',
-            hours: Number(ll.hours || 0),
-            rate: Number(ll.rate || 0),
-            amount: Math.round((Number(ll.hours || 0) * Number(ll.rate || 0)) * 100) / 100
-          };
-        });
+        // Build structured labour lines with computed amounts [Q17]. Cleaned
+        // (trimmed names, recomputed amounts, empty rows dropped) — the backend
+        // creates each named crew member's payout invoice from these.
+        var labourLinesOut = _woCleanLabourLines(c);
         var labourDeduction = _woLabourSum(c);
         cardExtraItems.push({
           type: 'Work Order',
@@ -17162,6 +17198,14 @@
           successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:8px">Sent to the office for verification. You will be paid once approved.</div>';
         } else if (result.xero_bill_number || result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to the bookkeepers</div>';
+        }
+        // WO labour fan-out: tell the trade who the office pays from their
+        // labour lines so nobody double-pays crew in cash.
+        (result.wo_labour_payouts || []).forEach(function(p) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:4px">' + esc(p.name) + ' will be paid $' + Number(p.total_ex || 0).toFixed(2) + ' by the office (verified first) — don\'t pay them yourself.</div>';
+        });
+        if ((result.wo_labour_unresolved || []).length > 0) {
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; The office will sort pay for: ' + esc(result.wo_labour_unresolved.join(', ')) + ' (couldn\'t match to a crew member automatically).</div>';
         }
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';

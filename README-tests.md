@@ -28,7 +28,8 @@ Covered Trade App flows:
 12. A make-safe card renders a server-provided Captain action message inline with HTML escaped, and shows a visible `Waiting on Captain` state when the server stage is unavailable; a valid server stage without an action does not show the warning.
 13. An assigned trade can start a MakeSafe reattendance with a required reason, land in a blank visit-two report with a fresh five-photo gate, and remain subject to server-side relationship authorization; the same spec proves cancellation remains manager-only.
 14. Ops keeps one MakeSafe job card while listing and opening each attendance-cycle report, and the isolated browser fixture proves each report shows only its bound photos.
-15. Optional dedicated accounts prove that the real Supabase password login still works.
+15. The Ops Dash calendar Schedule view never superimposes two job bars: an inverted-span assignment (`scheduled_end` before `scheduled_date`) still renders with a valid width, clamped to a single day at its start, while a tidy week keeps non-overlapping bars sharing one lane, crew badges attached to their own bar, and long client names ellipsized inside their bars.
+16. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

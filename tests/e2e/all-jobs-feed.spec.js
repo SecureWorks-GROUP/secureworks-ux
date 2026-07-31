@@ -1,3 +1,4 @@
+const path = require('node:path');
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 
@@ -16,6 +17,8 @@ const searchAllJobsRequests = (feedRequests) => feedRequests
   .filter((entry) => entry.action === 'search_all_jobs')
   .map((entry) => new URL(entry.url).searchParams);
 
+const SHOT_DIR = path.resolve(__dirname, '..', '..', 'test-results', 'all-jobs-feed');
+
 async function openAllTab(page) {
   await page.locator('[data-view="myJobs"]').click();
   await expect(page.locator('#jobSearchBar')).toBeVisible();
@@ -29,7 +32,7 @@ async function scrollToBottom(page) {
 test.describe('All tab — whole-company feed (company viewer/manager)', () => {
   test.use({ persona: 'allocator', feedScenario: 'all-jobs-feed' });
 
-  test('empty-query All pages the complete feed in on scroll and stops at the end', async ({ appPage: page, feedRequests }) => {
+  test('empty-query All pages the complete feed in on scroll and stops at the end', async ({ appPage: page, feedRequests }, testInfo) => {
     await signIn(page, PERSONAS.allocator);
     await openAllTab(page);
 
@@ -38,6 +41,10 @@ test.describe('All tab — whole-company feed (company viewer/manager)', () => {
     await expect(page.locator('#myJobsList')).toContainText('Showing 30 of 90 jobs');
     await expect(page.locator('#myJobsList .jcsr')).toHaveCount(30);
     await expect(page.locator('#globalJobPager')).toContainText('Keep scrolling to load more jobs');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const firstPage = await page.screenshot({ path: path.join(SHOT_DIR, 'all-jobs-first-page-390.png') });
+    await testInfo.attach('all-jobs-first-page-390', { body: firstPage, contentType: 'image/png' });
 
     // Page 2 + 3 arrive by scrolling, not by a button press.
     await scrollToBottom(page);
@@ -50,6 +57,10 @@ test.describe('All tab — whole-company feed (company viewer/manager)', () => {
     await expect(page.locator('#myJobsList')).toContainText('90 jobs — showing all 90');
     await expect(page.locator('#myJobsList .jcsr').filter({ hasText: 'SWALL-1000' })).toHaveCount(1);
     await expect(page.locator('#myJobsList .jcsr').filter({ hasText: 'SWALL-1089' })).toHaveCount(1);
+
+    await page.locator('#globalJobPager').scrollIntoViewIfNeeded();
+    const endOfList = await page.screenshot({ path: path.join(SHOT_DIR, 'all-jobs-end-of-list-390.png') });
+    await testInfo.attach('all-jobs-end-of-list-390', { body: endOfList, contentType: 'image/png' });
 
     await scrollToBottom(page);
     const requests = searchAllJobsRequests(feedRequests);

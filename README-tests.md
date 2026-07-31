@@ -1,6 +1,6 @@
 # Playwright E2E template
 
-This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's highest-value read-only flows in Chromium.
+This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium.
 
 ## What runs
 
@@ -12,7 +12,7 @@ npm run test:e2e
 
 `playwright.config.js` starts a local static server automatically. Set `E2E_BASE_URL` to test an already-served deployment instead.
 
-Covered Trade App flows:
+Covered flows (Trade App and Ops Dash):
 
 1. Login UI renders and bad credentials produce a stable inline rejection.
 2. A signed-in user stays signed in when the read-only calendar feed returns 403, guarding the PR 207 logout-loop regression.

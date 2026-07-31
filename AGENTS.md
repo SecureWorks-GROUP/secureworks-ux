@@ -29,7 +29,7 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 ## Testing
 
-Trade App changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
+Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
 
 ## Trade App job cards (`trade.html`)
 

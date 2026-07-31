@@ -20266,7 +20266,7 @@ function syncAssignEndDate() {
   if (startDate) {
     var end = new Date(startDate + 'T00:00:00');
     end.setDate(end.getDate() + dur - 1);
-    document.getElementById('assignEndDate').value = end.toISOString().slice(0, 10);
+    document.getElementById('assignEndDate').value = localDateStr(end);
   }
 }
 

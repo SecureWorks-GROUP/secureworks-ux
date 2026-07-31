@@ -23,6 +23,35 @@
 - Pull-to-refresh with 2-second throttle
 - Empty state with icon
 
+### All tab — the whole-company job feed
+Captain ruling 2026-07-31, server contract in secureworks-backend
+`docs/trade-all-means-all-v1.md`: on the All tab "all" means all. Both All-tab
+reads go through `search_all_jobs` and share one state object plus one renderer
+in `trade.html` (search `// <all-tab-full-feed>`):
+
+- **Empty query** = the company feed. `allJobsFeedActive()` only asks for it when
+  the viewer already holds the Everyone lens (`canUseEveryoneLens()`), so an
+  installer's All tab is unchanged and still query-driven. Visibility is not the
+  client's to widen: the response must come back with `lens: 'company'` or the
+  block says the list is unavailable for this account rather than passing an
+  assignment-scoped answer off as every job.
+- **Paging** follows the server's `next_offset` — never a client-invented
+  `page_size`. `syncGlobalJobFeedPaging()` runs on window scroll and after every
+  My Jobs repaint (a first page shorter than the viewport would otherwise wait
+  for a scroll that never comes). Rows are deduped by `jobs.id` across pages, so
+  one job is one card. The footer (`#globalJobPager`) is always in one of three
+  honest states: loading, retryable page failure ("this is not the end of the
+  list"), or the end-of-list marker.
+- The feed block renders **after** the viewer's own sections — it is endless, so
+  their Today/Needs Report work stays above it — while a typed search keeps
+  rendering above them as it always did.
+- `requestGlobalJobSearch()` returns before touching its debounce timer when the
+  same request is already scheduled. Every caller re-renders straight after
+  asking and the render asks again; clearing first cancelled the fetch the first
+  call had just scheduled, which is why typed All-tab search never left the app.
+- Guarded by `tests/e2e/all-jobs-feed.spec.js` (feed paging, server-lens
+  authority, installer unchanged, search unchanged).
+
 ### Job Detail View
 - **Client card**: name, phone (tap-to-call), address + Navigate button (Google Maps directions URL: `www.google.com/maps/dir/?api=1&destination=`)
 - **Assignment status buttons**: Confirm → On Site → Complete (with GPS check-in + haptic feedback)

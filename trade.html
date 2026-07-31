@@ -4814,7 +4814,11 @@
   var _jobFilter = 'today';
   var _lastJobData = null;
   var _lastJobDataKey = null;
-  var _globalJobSearch = { q: '', loading: false, loaded: false, results: [], total: 0, totalKnown: false, truncated: false, error: false, errorMsg: '', timer: null, token: 0 };
+  // One state object serves both All-tab reads: a typed search and the empty-query
+  // company feed (mode 'search' | 'feed'). `seen` keeps one card per job across
+  // pages, `received` counts raw API rows so a locally deduped row never reads as
+  // server truncation, and `nextOffset` is the server's own "there is more" verdict.
+  var _globalJobSearch = { q: '', mode: 'search', loading: false, loaded: false, results: [], seen: {}, received: 0, total: 0, totalKnown: false, truncated: false, nextOffset: null, paging: false, pageError: false, pageErrorMsg: '', denied: false, error: false, errorMsg: '', timer: null, token: 0 };
 
   // The pool itself travels with its "may be incomplete" verdict; caching the rows without
   // that caveat would replay a known-truncated pool as a definitive list on the next launch.
@@ -5287,82 +5291,206 @@
   window.retryMakesafePoolLoad = retryMakesafePoolLoad;
 
 
-  function requestGlobalJobSearch(q) {
-    q = String(q || '').toLowerCase().trim();
-    clearTimeout(_globalJobSearch.timer);
-    if (q.length < 2) {
-      _globalJobSearch.q = q;
-      _globalJobSearch.loading = false;
-      _globalJobSearch.loaded = false;
-      _globalJobSearch.results = [];
-      _globalJobSearch.total = 0;
-      _globalJobSearch.totalKnown = false;
-      _globalJobSearch.truncated = false;
-      _globalJobSearch.error = false;
-      _globalJobSearch.errorMsg = '';
-      return;
-    }
-    if (_globalJobSearch.q === q && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
-    _globalJobSearch.q = q;
-    _globalJobSearch.loading = true;
+  // <all-tab-full-feed>
+  // Captain ruling 2026-07-31 (secureworks-backend docs/trade-all-means-all-v1.md):
+  // on the All tab "all" means every company job — full history, every vertical,
+  // one card per job — not the newest slice. search_all_jobs returns that whole
+  // feed for an EMPTY query and pages it with next_offset. Only the roles that
+  // already hold the Everyone lens browse it; an installer's All tab stays the
+  // query-driven search it has always been. The server remains the authority: a
+  // response whose lens is not 'company' is never painted as the company feed.
+  function canBrowseCompanyJobFeed() {
+    return canUseEveryoneLens();
+  }
+
+  function allJobsFeedActive(query) {
+    return _jobFilter === 'all' && !query && canBrowseCompanyJobFeed();
+  }
+
+  // The rendered block and the loaded state must describe the same request, or a
+  // stale search would paint itself as the feed (and the reverse).
+  function globalJobStateMatches(query, isFeed) {
+    return _globalJobSearch.q === query && (_globalJobSearch.mode === 'feed') === !!isFeed;
+  }
+
+  function resetGlobalJobSearchState() {
+    _globalJobSearch.q = '';
+    _globalJobSearch.mode = 'search';
+    _globalJobSearch.loading = false;
     _globalJobSearch.loaded = false;
     _globalJobSearch.results = [];
+    _globalJobSearch.seen = {};
+    _globalJobSearch.received = 0;
     _globalJobSearch.total = 0;
     _globalJobSearch.totalKnown = false;
     _globalJobSearch.truncated = false;
+    _globalJobSearch.nextOffset = null;
+    _globalJobSearch.paging = false;
+    _globalJobSearch.pageError = false;
+    _globalJobSearch.pageErrorMsg = '';
+    _globalJobSearch.denied = false;
     _globalJobSearch.error = false;
     _globalJobSearch.errorMsg = '';
+  }
+
+  // One request path for both All-tab reads. offset > 0 asks for the next page;
+  // page_size stays the server's call so the client never invents a cap.
+  function fetchGlobalJobPage(q, offset) {
+    var params = {};
+    if (q) params.q = q;
+    if (offset > 0) params.offset = offset;
+    return api('search_all_jobs', params);
+  }
+
+  // One job = one card, across pages too. Server pages do not overlap, but a
+  // repeated row must never render as a second card (the captain's condition).
+  function absorbGlobalJobPage(res, offset) {
+    var rows = (res && res.jobs) || [];
+    rows.forEach(function(job) {
+      if (!job || !job.id || _globalJobSearch.seen[job.id]) return;
+      _globalJobSearch.seen[job.id] = true;
+      _globalJobSearch.results.push(job);
+    });
+    _globalJobSearch.received += rows.length;
+    // No silent cap: show every job the signed-in role may see (incl. cancelled/archived).
+    // Only claim completeness when the API actually reports a total; otherwise the row
+    // count alone cannot distinguish a full result set from a server-side truncation.
+    var apiTotal = (res && typeof res.total === 'number') ? res.total
+      : (res && typeof res.count === 'number') ? res.count
+      : null;
+    // next_offset is the server's own "there is more" verdict. An ops-api that
+    // does not send it simply never pages — it never pages in circles.
+    var next = (res && typeof res.next_offset === 'number' && res.next_offset > offset) ? res.next_offset : null;
+    _globalJobSearch.nextOffset = next;
+    _globalJobSearch.totalKnown = apiTotal !== null;
+    // Compare the API total against the rows it actually returned, not the
+    // deduped list — otherwise rows dropped locally read as server truncation.
+    _globalJobSearch.truncated = next !== null || (apiTotal !== null && apiTotal > _globalJobSearch.received);
+    _globalJobSearch.total = apiTotal !== null
+      ? Math.max(apiTotal, _globalJobSearch.results.length)
+      : _globalJobSearch.results.length;
+  }
+
+  function requestGlobalJobSearch(q) {
+    q = String(q || '').toLowerCase().trim();
+    var isFeed = !q && allJobsFeedActive('');
+    if (q.length < 2 && !isFeed) {
+      clearTimeout(_globalJobSearch.timer);
+      resetGlobalJobSearchState();
+      _globalJobSearch.q = q;
+      return;
+    }
+    // Return BEFORE touching the timer when this request is already scheduled or
+    // in flight. Every caller re-renders straight after asking, and the render
+    // asks again — clearing the timer first cancelled the debounced fetch that
+    // the first call had just scheduled, so a typed search never left the app.
+    if (globalJobStateMatches(q, isFeed) && (_globalJobSearch.loading || _globalJobSearch.loaded)) return;
+    clearTimeout(_globalJobSearch.timer);
+    resetGlobalJobSearchState();
+    _globalJobSearch.q = q;
+    _globalJobSearch.mode = isFeed ? 'feed' : 'search';
+    _globalJobSearch.loading = true;
     var token = ++_globalJobSearch.token;
+    // The feed is a tab press, not a keystroke — only typed search is debounced.
     _globalJobSearch.timer = setTimeout(function() {
-      api('search_all_jobs', { q: q }).then(function(res) {
-        if (token !== _globalJobSearch.token || _globalJobSearch.q !== q) return;
-        var results = [];
-        (res.jobs || []).forEach(function(job) {
-          if (!job || !job.id) return;
-          results.push(job);
-        });
-        // No silent cap: show every job the signed-in role may see (incl. cancelled/archived).
-        // Only claim completeness when the API actually reports a total; otherwise the row
-        // count alone cannot distinguish a full result set from a server-side truncation.
-        var apiTotal = (res && typeof res.total === 'number') ? res.total
-          : (res && typeof res.count === 'number') ? res.count
-          : null;
+      fetchGlobalJobPage(q, 0).then(function(res) {
+        if (token !== _globalJobSearch.token || !globalJobStateMatches(q, isFeed)) return;
         _globalJobSearch.loading = false;
         _globalJobSearch.loaded = true;
-        _globalJobSearch.results = results;
-        // Compare the API total against the rows it actually returned, not the
-        // client-filtered list — otherwise rows dropped locally read as server truncation.
-        var returned = (res.jobs || []).length;
-        _globalJobSearch.totalKnown = apiTotal !== null;
-        _globalJobSearch.truncated = apiTotal !== null && apiTotal > returned;
-        _globalJobSearch.total = apiTotal !== null ? Math.max(apiTotal, returned) : results.length;
+        // The company feed is the server's grant, not the client's claim. If
+        // ops-api answered with anything but the company lens, say so instead of
+        // passing an assignment-scoped list off as every job in the company.
+        if (isFeed && (!res || res.lens !== 'company')) {
+          _globalJobSearch.denied = true;
+          if (_lastJobData) renderMyJobs(_lastJobData);
+          return;
+        }
+        absorbGlobalJobPage(res, 0);
         _globalJobSearch.error = false;
         _globalJobSearch.errorMsg = '';
         if (_lastJobData) renderMyJobs(_lastJobData);
+        syncGlobalJobFeedPaging();
       }).catch(function(err) {
         if (token !== _globalJobSearch.token) return;
         console.warn('[trade] Global job search failed:', err && (err.message || err));
         _globalJobSearch.loading = false;
         _globalJobSearch.loaded = true;
         _globalJobSearch.results = [];
+        _globalJobSearch.seen = {};
+        _globalJobSearch.received = 0;
         _globalJobSearch.total = 0;
         _globalJobSearch.totalKnown = false;
         _globalJobSearch.truncated = false;
+        _globalJobSearch.nextOffset = null;
         _globalJobSearch.error = true;
         _globalJobSearch.errorMsg = loadFailureHint();
         if (_lastJobData) renderMyJobs(_lastJobData);
       });
-    }, 300);
+    }, isFeed ? 0 : 300);
+  }
+
+  // Next page of whichever All-tab read is on screen. A page failure keeps
+  // nextOffset so the retry resumes exactly where it stopped — a failed page
+  // must never look like the end of the list.
+  function loadMoreGlobalJobs() {
+    if (_globalJobSearch.loading || _globalJobSearch.paging) return;
+    var next = _globalJobSearch.nextOffset;
+    if (typeof next !== 'number') return;
+    var q = _globalJobSearch.q;
+    var isFeed = _globalJobSearch.mode === 'feed';
+    var token = _globalJobSearch.token;
+    _globalJobSearch.paging = true;
+    _globalJobSearch.pageError = false;
+    _globalJobSearch.pageErrorMsg = '';
+    if (_lastJobData) renderMyJobs(_lastJobData);
+    fetchGlobalJobPage(q, next).then(function(res) {
+      if (token !== _globalJobSearch.token) return;
+      _globalJobSearch.paging = false;
+      if (isFeed && (!res || res.lens !== 'company')) {
+        // Lens changed under us — stop paging rather than mix scopes in one list.
+        _globalJobSearch.nextOffset = null;
+      } else {
+        absorbGlobalJobPage(res, next);
+      }
+      if (_lastJobData) renderMyJobs(_lastJobData);
+      syncGlobalJobFeedPaging();
+    }).catch(function(err) {
+      if (token !== _globalJobSearch.token) return;
+      console.warn('[trade] All-tab next page failed:', err && (err.message || err));
+      _globalJobSearch.paging = false;
+      _globalJobSearch.pageError = true;
+      _globalJobSearch.pageErrorMsg = loadFailureHint();
+      if (_lastJobData) renderMyJobs(_lastJobData);
+    });
+  }
+  window.loadMoreGlobalJobs = loadMoreGlobalJobs;
+
+  // px from the bottom of the page at which the next page starts loading.
+  var GLOBAL_JOB_PAGE_TRIGGER_PX = 600;
+
+  function globalJobBlockOnScreen() {
+    if (_currentView !== 'myJobs') return false;
+    var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
+    if (_globalJobSearch.mode === 'feed') return allJobsFeedActive(query) && globalJobStateMatches('', true);
+    return query.length >= 2 && globalJobStateMatches(query, false);
+  }
+
+  // Scroll paging: called after every My Jobs repaint and on scroll. A page that
+  // failed waits for the explicit retry rather than re-firing on every scroll tick.
+  function syncGlobalJobFeedPaging() {
+    if (typeof _globalJobSearch.nextOffset !== 'number') return;
+    if (_globalJobSearch.loading || _globalJobSearch.paging || _globalJobSearch.pageError) return;
+    if (!globalJobBlockOnScreen()) return;
+    var doc = document.documentElement || document.body;
+    var bottomGap = doc.scrollHeight - (window.scrollY + window.innerHeight);
+    if (bottomGap <= GLOBAL_JOB_PAGE_TRIGGER_PX) loadMoreGlobalJobs();
   }
 
   function retryGlobalJobSearch() {
     var q = _globalJobSearch.q;
-    if (!q || q.length < 2) return;
-    _globalJobSearch.q = '';
-    _globalJobSearch.loading = false;
-    _globalJobSearch.loaded = false;
-    _globalJobSearch.error = false;
-    _globalJobSearch.errorMsg = '';
+    var isFeed = _globalJobSearch.mode === 'feed';
+    if (!isFeed && (!q || q.length < 2)) return;
+    resetGlobalJobSearchState();
     requestGlobalJobSearch(q);
     if (_lastJobData) renderMyJobs(_lastJobData);
   }
@@ -5428,49 +5556,88 @@
     return h;
   }
 
+  // Renders both All-tab reads through one grammar: a typed search (query given)
+  // and the empty-query company feed (query ''). The feed adds the scroll pager
+  // footer; the search block keeps the copy it always had.
   function renderGlobalJobSearchResults(data, query) {
-    if (!query || query.length < 2) return '';
-    var h = '<div class="section-label">All database · all jobs</div>';
-    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px;line-height:1.4">All tab search includes old, completed and archived jobs across the board, including jobs allocated to other trades. Today and allocated views still show only your live assigned jobs.</div>';
-    if (_globalJobSearch.loading && _globalJobSearch.q === query) {
+    query = String(query || '');
+    var isFeed = !query;
+    if (!isFeed && query.length < 2) return '';
+    var matched = globalJobStateMatches(query, isFeed);
+    var noun = isFeed ? 'job' : 'match';
+    var nouns = isFeed ? 'jobs' : 'matches';
+    var h = '<div class="section-label">' + (isFeed ? 'All jobs · whole company' : 'All database · all jobs') + '</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px;line-height:1.4">' + (isFeed
+      ? 'Every job in the database, newest first, across every vertical and crew — including cancelled, completed and archived work. Today and allocated views still show only your live assigned jobs.'
+      : 'All tab search includes old, completed and archived jobs across the board, including jobs allocated to other trades. Today and allocated views still show only your live assigned jobs.') + '</div>';
+    if (matched && _globalJobSearch.denied) {
+      // Not an empty list and not a failure: this account was not granted the
+      // company lens, so say which browse it does have.
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px;line-height:1.4">The whole-company job list is not available for this account. Search by client, suburb or job number to reach any job.</div>';
+      return h;
+    }
+    if (matched && _globalJobSearch.loading) {
       h += '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>';
       return h;
     }
-    if (_globalJobSearch.q === query && _globalJobSearch.error) {
+    if (matched && _globalJobSearch.error) {
       h += loadFailureCard(
-        'Could not search the job database',
-        'This is not “no matches” — the search failed. Check your connection and retry.',
+        isFeed ? 'Could not load the job database' : 'Could not search the job database',
+        isFeed
+          ? 'This is not “no jobs” — the list failed to load. Check your connection and retry.'
+          : 'This is not “no matches” — the search failed. Check your connection and retry.',
         _globalJobSearch.errorMsg,
         'retryGlobalJobSearch');
       return h;
     }
-    var results = (_globalJobSearch.q === query ? _globalJobSearch.results : []) || [];
+    var results = (matched ? _globalJobSearch.results : []) || [];
     var shown = results.length;
-    var total = (_globalJobSearch.q === query ? _globalJobSearch.total : shown) || shown;
-    var totalKnown = _globalJobSearch.q === query && !!_globalJobSearch.totalKnown;
-    var truncated = _globalJobSearch.q === query && !!_globalJobSearch.truncated;
+    var total = (matched ? _globalJobSearch.total : shown) || shown;
+    var totalKnown = matched && !!_globalJobSearch.totalKnown;
+    var truncated = matched && !!_globalJobSearch.truncated;
+    var emptyReason = isFeed ? 'No jobs in the company job list.' : 'No jobs match this All-tab search.';
     // Always state the count — never silent truncation.
     if (shown === 0) {
       var emptyCopy = truncated
-        ? 'Showing 0 of ' + total + ' matches — none could be displayed.'
+        ? 'Showing 0 of ' + total + ' ' + nouns + ' — none could be displayed.'
         : totalKnown
-          ? '0 matches. No jobs match this All-tab search.'
-          : 'No jobs match this All-tab search.';
+          ? '0 ' + nouns + '. ' + emptyReason
+          : emptyReason;
       h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:10px 2px">' + emptyCopy + '</div>';
       return h;
     }
     if (!totalKnown) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' match' + (shown === 1 ? '' : 'es') + '</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' ' + (shown === 1 ? noun : nouns) + '</div>';
     } else if (!truncated) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' match' + (shown === 1 ? '' : 'es') + ' — showing all ' + shown + '</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + shown + ' ' + (shown === 1 ? noun : nouns) + ' — showing all ' + shown + '</div>';
     } else {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">Showing ' + shown + ' of ' + total + ' matches</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">Showing ' + shown + ' of ' + total + ' ' + nouns + '</div>';
     }
     results.forEach(function(job, idx) {
       cacheTradeJob(job, findAssignmentForGlobalJob(data, job.id));
       h += renderGlobalJobSearchCard(job, data, idx);
     });
+    h += renderGlobalJobPagerFooter(matched, shown, nouns);
     return h;
+  }
+
+  // Scroll-pager footer: loading, a failed page (retryable, never mistaken for
+  // the end) or a clean end-of-list marker.
+  function renderGlobalJobPagerFooter(matched, shown, nouns) {
+    if (!matched || !shown) return '';
+    var base = 'font-size:12px;color:var(--sw-text-sec);padding:14px 2px;text-align:center;line-height:1.4';
+    if (_globalJobSearch.paging) {
+      return '<div id="globalJobPager" style="' + base + '"><span class="spinner"></span> Loading more ' + nouns + '...</div>';
+    }
+    if (_globalJobSearch.pageError) {
+      return '<div id="globalJobPager" style="' + base + ';color:#B35309">Could not load the next page — this is not the end of the list.' +
+        (_globalJobSearch.pageErrorMsg ? ' ' + esc(_globalJobSearch.pageErrorMsg) : '') +
+        ' <button type="button" onclick="loadMoreGlobalJobs()" style="margin-left:6px;padding:6px 12px;border:1px solid var(--sw-border);border-radius:8px;background:#fff;font-family:var(--sw-font);font-size:12px;font-weight:600;cursor:pointer">Retry</button></div>';
+    }
+    if (typeof _globalJobSearch.nextOffset === 'number') {
+      return '<div id="globalJobPager" style="' + base + '">Keep scrolling to load more ' + nouns + '</div>';
+    }
+    return '<div id="globalJobPager" style="' + base + '">End of the list — all ' + shown + ' ' + nouns + ' loaded.</div>';
   }
 
   function submitTradeAdminNote(jobId) {
@@ -5535,7 +5702,10 @@
 
     var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
     var _needsGlobalSearch = query.length >= 2;
-    if (_needsGlobalSearch) requestGlobalJobSearch(query);
+    // All tab with an empty query: the whole company job feed, for the roles that
+    // already hold the Everyone lens. Installer-scoped tabs are untouched.
+    var _needsAllJobsFeed = allJobsFeedActive(query);
+    if (_needsGlobalSearch || _needsAllJobsFeed) requestGlobalJobSearch(query);
 
     var todayRunListState = getTodayRunListState(data.today || []);
     var todayJobs = todayRunListState.items;
@@ -5758,12 +5928,20 @@
       });
     });
 
-    if (!hasAny) {
+    // This empty state REPLACES the whole list, so it may only run when nothing
+    // else is on screen. "No jobs assigned to you" is not the answer the All tab
+    // owes a query or a company viewer — the global block is, and it states its
+    // own count (it previously discarded a rendered search result set).
+    if (!hasAny && !_needsGlobalSearch && !_needsAllJobsFeed) {
       html = '<div class="empty-state">';
       html += '  <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
       html += '  <p>No jobs assigned to you yet</p>';
       html += '</div>';
     }
+
+    // The company feed is appended last: it is an endless list, so the viewer's
+    // own sections stay above it and the scroll trigger is the end of the page.
+    if (_needsAllJobsFeed) html += renderGlobalJobSearchResults(data, '');
 
     container.innerHTML = html;
 
@@ -5775,6 +5953,10 @@
     // Check for schedule notifications + update nav badge
     checkScheduleNotifications();
     updateScheduleBadge();
+
+    // A first page shorter than the viewport would otherwise wait for a scroll
+    // that never comes — ask again now that the list has real height.
+    syncGlobalJobFeedPaging();
   }
 
   // ══════════════════════════════════════════════════
@@ -22770,6 +22952,24 @@
     if (e.key === 'ArrowLeft') lightboxNav(-1);
     if (e.key === 'ArrowRight') lightboxNav(1);
   });
+
+  // ══════════════════════════════════════════════════
+  // ALL-TAB SCROLL PAGING (My Jobs)
+  // ══════════════════════════════════════════════════
+  // The page itself scrolls (same assumption as pull-to-refresh below), and every
+  // repaint replaces #myJobsList wholesale — so this watches the window rather
+  // than observing a sentinel node each repaint would destroy.
+  (function initGlobalJobScrollPaging() {
+    var queued = false;
+    window.addEventListener('scroll', function() {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function() {
+        queued = false;
+        syncGlobalJobFeedPaging();
+      });
+    }, { passive: true });
+  })();
 
   // ══════════════════════════════════════════════════
   // PULL-TO-REFRESH (My Jobs)

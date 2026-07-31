@@ -157,11 +157,60 @@ const test = base.extend({
         can_invoice: true
       }
     ];
+    // All-tab company feed (secureworks-backend docs/trade-all-means-all-v1.md).
+    // Paged deliberately small so the scroll pager has to run more than once, and
+    // only served under the all-jobs-feed scenarios — every other scenario keeps
+    // the unregistered-action 404 the suite already relied on.
+    const ALL_FEED_PAGE_SIZE = 30;
+    const allFeedJobs = Array.from({ length: 90 }, (_, index) => ({
+      id: `e2e-all-job-${String(index + 1).padStart(3, '0')}`,
+      job_number: `SWALL-${1000 + index}`,
+      client_name: `All Feed Client ${index + 1}`,
+      site_suburb: `Feedville ${index + 1}`,
+      site_address: `${index + 1} Ledger Road, Feedville`,
+      type: index % 2 === 0 ? 'fencing' : 'patio',
+      status: index % 3 === 0 ? 'complete' : 'scheduled'
+    }));
     const feed = await installFeedStubs(page, {
       endpoint: `${SUPABASE_ORIGIN}/functions/v1/ops-api`,
       requestLog: feedRequests,
       actions: {
         makesafe_board: makesafeResponse,
+        search_all_jobs: ({ url }) => {
+          if (feedScenario !== 'all-jobs-feed' && feedScenario !== 'all-jobs-feed-denied') {
+            return { status: 404, body: { error: 'No E2E fixture registered for search_all_jobs' } };
+          }
+          const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+          const offset = Number(url.searchParams.get('offset') || 0);
+          if (!q && feedScenario === 'all-jobs-feed-denied') {
+            // Server declined the company lens: the client must not paint this
+            // assignment-scoped answer as "every job in the company".
+            return {
+              jobs: [],
+              lens: 'assigned',
+              total: 0,
+              page_size: ALL_FEED_PAGE_SIZE,
+              offset,
+              truncated: false,
+              next_offset: null
+            };
+          }
+          const pool = q
+            ? allFeedJobs.filter((job) =>
+              job.job_number.toLowerCase().includes(q) || job.client_name.toLowerCase().includes(q))
+            : allFeedJobs;
+          const page = pool.slice(offset, offset + ALL_FEED_PAGE_SIZE);
+          const hasMore = offset + page.length < pool.length;
+          return {
+            jobs: page,
+            lens: q ? 'search' : 'company',
+            total: pool.length,
+            page_size: ALL_FEED_PAGE_SIZE,
+            offset,
+            truncated: hasMore,
+            next_offset: hasMore ? offset + ALL_FEED_PAGE_SIZE : null
+          };
+        },
         list_users: persona === 'fencing_manager'
           ? {
               users: [

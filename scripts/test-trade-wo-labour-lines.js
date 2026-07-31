@@ -1,15 +1,14 @@
 #!/usr/bin/env node
-// Regression: WO-mode labour lines must reach the named labourer's pay.
+// Regression: WO-mode labour deductions must identify the named crew member.
 //
 // The reported production bug (2026-07-30): Alyx worked out SWF-26767 as
 // WO $559.50 with labour line "Tendo" 11.5h × $25 = $287.50, net $272. The
-// $287.50 came off Alyx's net but no pay record was ever created for Tendo —
-// the office hand-keyed it from the prose description (mis-keyed in
-// production). The backend now fans each named labour line out into that crew
-// member's payout invoice, which makes the CLIENT payload the contract: this
+// $287.50 came off Alyx's net but the office could not reconcile it to Tendo
+// from the prose description and mis-keyed it in production. The structured
+// labour lines make the CLIENT payload the reconciliation contract: this
 // harness extracts the [JC-PAYLOAD-BUILD-START..END] block verbatim from
-// trade.html, executes it, and pins the structured lines the backend pays
-// from — cleaned names, real hours×rate, no unnamed money.
+// trade.html, executes it, and pins the deduction details shown to the office
+// while named crew bill SecureWorks Group directly.
 const fs = require('fs')
 const assert = require('assert')
 const vm = require('vm')
@@ -62,7 +61,7 @@ function woCard(overrides) {
   // JSON round-trip: vm-context objects carry a foreign Object.prototype.
   assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
     { trade_name: 'Tendo', hours: 11.5, rate: 25, amount: 287.5 },
-  ], 'structured labour line rides the payload — this is what pays Tendo')
+  ], 'structured labour line rides the payload for office reconciliation')
   assert(row.description.indexOf('Tendo 11.5h×$25=$287.5') !== -1, 'prose audit trail kept')
   assert.strictEqual(built.subtotal, 272)
 }
@@ -106,7 +105,7 @@ function woCard(overrides) {
   assert.strictEqual(built.cardExtraItems[0].rate, 272)
 }
 
-// ── Money with no person blocks (was silently unpayable) ─────────────────
+// ── Money with no person blocks (deduction must be attributable) ─────────
 {
   const built = context._buildJobCentricPayload([woCard({
     wo_labour_lines: [{ trade_name: '', hours: 2, rate: 30 }],

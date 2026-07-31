@@ -29,7 +29,7 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 ## Testing
 
-Trade App changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
+Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
 
 ## Trade App job cards (`trade.html`)
 
@@ -106,6 +106,12 @@ Gotchas:
 - Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.
   a class name like `.tjc-*/.tjb-`). It closes the comment early and SILENTLY
   drops the next CSS rule — this once shipped every job-type accent as grey.
+- `ops.html`'s calendar Schedule view (`renderScheduleView`) packs bars into
+  absolute lanes and sizes them with a percentage width, so both halves assume
+  `start <= end`. An inverted span breaks both at once — see the `spanEnd()`
+  comment there, and `tests/e2e/ops-schedule-lane-overlap.spec.js` for the guard.
+  The Crew view (`renderSwimlaneView`) stacks per-day cells in normal flow
+  instead, so the same bad row goes silently MISSING there rather than garbled.
 
 ## Maintaining this file
 

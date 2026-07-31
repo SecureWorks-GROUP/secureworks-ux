@@ -1,6 +1,6 @@
 # Playwright E2E template
 
-This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's highest-value read-only flows in Chromium.
+This suite is the SecureWorks Group copyable pattern for static HTML tools. It runs on every pull request and covers the Trade App's and Ops Dash's highest-value read-only flows in Chromium.
 
 ## What runs
 
@@ -12,7 +12,7 @@ npm run test:e2e
 
 `playwright.config.js` starts a local static server automatically. Set `E2E_BASE_URL` to test an already-served deployment instead.
 
-Covered Trade App flows:
+Covered flows (Trade App and Ops Dash):
 
 1. Login UI renders and bad credentials produce a stable inline rejection.
 2. A signed-in user stays signed in when the read-only calendar feed returns 403, guarding the PR 207 logout-loop regression.
@@ -28,7 +28,8 @@ Covered Trade App flows:
 12. A make-safe card renders a server-provided Captain action message inline with HTML escaped, and shows a visible `Waiting on Captain` state when the server stage is unavailable; a valid server stage without an action does not show the warning.
 13. An assigned trade can start a MakeSafe reattendance with a required reason, land in a blank visit-two report with a fresh five-photo gate, and remain subject to server-side relationship authorization; the same spec proves cancellation remains manager-only.
 14. Ops keeps one MakeSafe job card while listing and opening each attendance-cycle report, and the isolated browser fixture proves each report shows only its bound photos.
-15. Optional dedicated accounts prove that the real Supabase password login still works.
+15. The Ops Dash calendar Schedule view never superimposes two job bars: an inverted-span assignment (`scheduled_end` before `scheduled_date`) still renders with a valid width, clamped to a single day at its start, while a tidy week keeps non-overlapping bars sharing one lane, crew badges attached to their own bar, and long client names ellipsized inside their bars.
+16. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

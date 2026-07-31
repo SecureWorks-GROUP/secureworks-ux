@@ -29,13 +29,15 @@ const today = new Date(); today.setHours(0, 0, 0, 0);
 const monA = plusDays(today, (8 - today.getDay()) % 7);
 const D = {
   MON: isoStr(monA), TUE: isoStr(plusDays(monA, 1)), WED: isoStr(plusDays(monA, 2)),
-  THU: isoStr(plusDays(monA, 3)), FRI: isoStr(plusDays(monA, 4)),
-  MON2: isoStr(plusDays(monA, 7)),
+  THU: isoStr(plusDays(monA, 3)), FRI: isoStr(plusDays(monA, 4)), SAT: isoStr(plusDays(monA, 5)),
+  SUN: isoStr(plusDays(monA, 6)), MON2: isoStr(plusDays(monA, 7)),
+  WED2: isoStr(plusDays(monA, 9)), THU2: isoStr(plusDays(monA, 10)),
 };
 
 const USERS = [
   { id: 'u-hugo', name: 'Hugo', email: 'hugo@secureworkswa.com.au', role: 'lead_installer' },
   { id: 'u-liam', name: 'Liam', email: 'liam@secureworkswa.com.au', role: 'installer' },
+  { id: 'u-priya', name: 'Priya', email: 'priya@secureworkswa.com.au', role: 'installer' },
 ];
 
 function fixtureEvents() {
@@ -47,6 +49,8 @@ function fixtureEvents() {
   return [
     { ...base, assignment_id: 'a-jane', job_id: 'j-1', user_id: 'u-hugo', crew_name: 'Hugo', assigned_to: 'Hugo', job_number: 'SWF-101', client_name: 'Jane Citizen', site_address: '12 Example St, Padbury WA 6025', site_suburb: 'Padbury', scheduled_date: D.MON, scheduled_end: D.WED, duration_days: 3 },
     { ...base, assignment_id: 'a-bob', job_id: 'j-2', user_id: 'u-liam', crew_name: 'Liam', assigned_to: 'Liam', job_number: 'SWF-102', client_name: 'Bob Mason', site_address: '8 Harbour Rd, Hillarys WA 6025', site_suburb: 'Hillarys', scheduled_date: D.FRI, scheduled_end: D.FRI, duration_days: 1 },
+    // Weekend-crossing span: Fri + Mon (2 working days), interior Sat/Sun are breaks.
+    { ...base, assignment_id: 'a-will', job_id: 'j-3', user_id: 'u-priya', crew_name: 'Priya', assigned_to: 'Priya', job_number: 'SWF-103', client_name: 'Will Parker', site_address: '19 Seaview Tce, Trigg WA 6029', site_suburb: 'Trigg', scheduled_date: D.FRI, scheduled_end: D.MON2, duration_days: 2 },
   ];
 }
 
@@ -197,6 +201,51 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     expect(resize.body.scheduled_date).toBe(D.FRI);
     expect(resize.body.scheduled_end).toBe(D.MON2);
     expect(resize.body.duration_days).toBe(2);
+  });
+
+  test('weekend-crossing job renders as broken segments in BOTH views', async ({ page }) => {
+    await bootCalendar(page);
+    // Crew view: Fri and Mon paint, interior Sat/Sun do NOT.
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.FRI + '"][data-crew="Priya"] .cal-job-block')).toHaveCount(1);
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.MON2 + '"][data-crew="Priya"] .cal-job-block')).toHaveCount(1);
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.SAT + '"][data-crew="Priya"] .cal-job-block')).toHaveCount(0);
+    await expect(page.locator('.cal-swim-cell[data-date="' + D.SUN + '"][data-crew="Priya"] .cal-job-block')).toHaveCount(0);
+    // Schedule view: the same job is TWO bar segments (Fri | Mon), one logical job.
+    await toSchedule(page);
+    await expect(page.locator('.cal-schedule-bar[data-job-id="j-3"]')).toHaveCount(2);
+  });
+
+  test('weekend-crossing job: dragging the FIRST segment reschedules the whole job', async ({ page }) => {
+    const { writes } = await bootCalendar(page);
+    await toSchedule(page);
+    // Segments render in date order: first() = the Friday segment.
+    const friSeg = page.locator('.cal-schedule-bar[data-job-id="j-3"]').first();
+    const dst = page.locator('.cal-schedule-cell[data-date="' + D.WED + '"]');
+    await realDrag(page, friSeg, dst);
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move, 'dragging a weekend-crossing segment must produce an update_assignment write').toBeTruthy();
+    expect(move.body.assignmentId).toBe('a-will');
+    // Drop day = new START; 2 working days from Wednesday = Wed + Thu.
+    expect(move.body.scheduled_date).toBe(D.WED);
+    expect(move.body.scheduled_end).toBe(D.THU);
+    expect(move.body.duration_days).toBe(2);
+    expect(move.body.crew_name).toBe('Priya');
+  });
+
+  test('weekend-crossing job: dragging the RESUME segment reschedules the whole job', async ({ page }) => {
+    const { writes } = await bootCalendar(page);
+    await toSchedule(page);
+    const monSeg = page.locator('.cal-schedule-bar[data-job-id="j-3"]').last();
+    const dst = page.locator('.cal-schedule-cell[data-date="' + D.WED2 + '"]');
+    await realDrag(page, monSeg, dst);
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move, 'dragging the resume segment must produce an update_assignment write').toBeTruthy();
+    expect(move.body.assignmentId).toBe('a-will');
+    expect(move.body.scheduled_date).toBe(D.WED2);
+    expect(move.body.scheduled_end).toBe(D.THU2);
+    expect(move.body.duration_days).toBe(2);
   });
 
   test('confirmed bars stay locked: drag produces no write', async ({ page }) => {

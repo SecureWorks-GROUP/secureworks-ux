@@ -16360,7 +16360,7 @@
           html += '</div>';
           html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
           html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
-            + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '') + '</div>';
+            + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
           html += '<label style="font-size:12px;color:var(--sw-text-sec)">Hours</label>';
@@ -16860,7 +16860,7 @@
       if (warn) warn.style.display = net < 0 ? 'block' : 'none';
       var brk = document.querySelector('[data-cardwobreak="' + idx + '"]');
       if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.'
-        + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '');
+        + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '');
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
       if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');
@@ -16927,15 +16927,15 @@
   // ops-api requires it); searched-in (manually_added) and WO-mode cards →
   // extra_items (client-priced lane → pending_ops_review). WO-mode rows carry
   // the breakdown in the description AND the structured wo_* fields — ops-api
-  // persists both and fans each named labour line out into that crew member's
-  // own payout invoice (pending office review), so the labour deducted from
-  // this trade's net actually reaches the people who worked the site.
+  // persists both on the holder invoice for office reconciliation. Labour is
+  // deducted from this trade's net; each named crew member bills SecureWorks
+  // Group directly.
   // _woCleanLabourLines: canonical view of a card's labour lines. Names are
   // trimmed + inner whitespace collapsed (production had "Tendo  " ≠ "Tendo"),
   // amounts recomputed from hours×rate, and untouched "+ Add labour line"
   // template rows (no name, no money) dropped. Everything downstream — sum,
-  // breakdown text, payload — reads THIS, because the backend pays the named
-  // crew member from each line and free-text noise breaks that match.
+  // breakdown text, payload — reads THIS, so every deduction is attributed to
+  // the named crew member for office reconciliation.
   function _woCleanLabourLines(c) {
     var lines = Array.isArray(c.wo_labour_lines) ? c.wo_labour_lines : [];
     var out = [];
@@ -16988,10 +16988,9 @@
     if (woNeg.length > 0) return { error: 'Net payable cannot be negative on ' + (woNeg[0].job_number || 'a job') + ' — the labour deduction is more than the WO allocation. Fix the amounts before submitting.', missingIndices: woNeg.map(function(c){return c._idx;}) };
     var woZero = included.filter(function(c) { return c.wo_mode && _woNet(c) === 0; });
     if (woZero.length > 0) return { error: 'Net payable is $0.00 on ' + (woZero[0].job_number || 'a job') + ' — untick the job or fix the amounts', missingIndices: woZero.map(function(c){return c._idx;}) };
-    // Every labour line is paid to the NAMED crew member by the office, so a
-    // line that carries money must name a person and a named line must carry
-    // real hours × rate — otherwise the deduction comes off this trade's net
-    // but nobody can be paid it (the original missing-labourer-pay bug).
+    // Every labour deduction must identify the crew member who bills
+    // SecureWorks Group directly, so a line that carries money must name a
+    // person and a named line must carry real hours × rate.
     var woBadLine = [];
     included.forEach(function(c) {
       if (!c.wo_mode) return;
@@ -16999,7 +16998,7 @@
       for (var i = 0; i < lines.length; i++) {
         var jobLbl = c.job_number || c.site_suburb || 'a job';
         if (!lines[i].trade_name) {
-          woBadLine.push({ idx: c._idx, msg: jobLbl + ': name the crew member on every labour line — the office pays them that amount.' });
+          woBadLine.push({ idx: c._idx, msg: jobLbl + ': name the crew member on every labour line so the deduction is shown to the office; they bill SecureWorks Group directly.' });
         } else if (!(lines[i].hours > 0) || !(lines[i].rate > 0)) {
           woBadLine.push({ idx: c._idx, msg: jobLbl + ': enter hours and rate for ' + lines[i].trade_name + '’s labour line.' });
         }
@@ -17064,7 +17063,7 @@
         subtotal += net;
         // Build structured labour lines with computed amounts [Q17]. Cleaned
         // (trimmed names, recomputed amounts, empty rows dropped) — the backend
-        // creates each named crew member's payout invoice from these.
+        // stores these on the holder invoice for office reconciliation.
         var labourLinesOut = _woCleanLabourLines(c);
         var labourDeduction = _woLabourSum(c);
         cardExtraItems.push({
@@ -17215,13 +17214,13 @@
         } else if (result.xero_bill_number || result.xero_bill_id) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to the bookkeepers</div>';
         }
-        // WO labour fan-out: tell the trade who the office pays from their
-        // labour lines so nobody double-pays crew in cash.
+        // Legacy response fields still carry reconciliation detail. Present
+        // them as direct-billing guidance, never as an office payout promise.
         (result.wo_labour_payouts || []).forEach(function(p) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:4px">' + esc(p.name) + ' will be paid $' + Number(p.total_ex || 0).toFixed(2) + ' by the office (verified first) — don\'t pay them yourself.</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:4px">$' + Number(p.total_ex || 0).toFixed(2) + ' for ' + esc(p.name) + ' was deducted from your invoice and shown to the office. They must bill SecureWorks Group directly.</div>';
         });
         if ((result.wo_labour_unresolved || []).length > 0) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; The office will sort pay for: ' + esc(result.wo_labour_unresolved.join(', ')) + ' (couldn\'t match to a crew member automatically).</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Labour for ' + esc(result.wo_labour_unresolved.join(', ')) + ' was deducted from your invoice and shown to the office. Those crew must bill SecureWorks Group directly.</div>';
         }
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';

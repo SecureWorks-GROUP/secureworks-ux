@@ -91,6 +91,29 @@ const test = base.extend({
       .flatMap((bucket) => fencingAll[bucket] || []);
     const fencingAssignment = (assignmentId) => fencingRows().find((row) => row.id === assignmentId);
     const weekStart = perthWeekMonday();
+    const labourExplainerHours = {
+      week_start: weekStart,
+      week_ending: addIsoDays(weekStart, 6),
+      assignments: [
+        {
+          id: 'e2e-wo-holder-assignment',
+          job_id: 'e2e-wo-holder-job',
+          scheduled_date: addIsoDays(weekStart, 1),
+          hours_worked: 8,
+          jobs: {
+            id: 'e2e-wo-holder-job',
+            job_number: 'SWF-26767',
+            client_name: 'Kelvin Gillies',
+            site_suburb: 'Joondalup',
+            type: 'fencing'
+          }
+        }
+      ],
+      rate: 50,
+      rate_resolved: true,
+      total_hours: 8,
+      already_submitted: false
+    };
     const workOrders = [
       {
         id: 'wo-fence-authorised',
@@ -204,13 +227,15 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: {
-          week_start: weekStart,
-          week_ending: addIsoDays(weekStart, 6),
-          assignments: [],
-          total_hours: 0,
-          already_submitted: false
-        },
+        my_hours: feedScenario === 'wo-labour-explainer'
+          ? labourExplainerHours
+          : {
+              week_start: weekStart,
+              week_ending: addIsoDays(weekStart, 6),
+              assignments: [],
+              total_hours: 0,
+              already_submitted: false
+            },
         my_trade_invoices: { invoices: [] },
         my_work_orders: {
           work_orders: persona === 'fencing_manager' ? workOrders : []
@@ -270,11 +295,30 @@ const test = base.extend({
             },
             net_hours: body.event === 'clock_off' ? 1 : null
           };
+        },
+        generate_trade_invoice: ({ request }) => {
+          if (feedScenario !== 'wo-labour-explainer' || persona !== 'installer') {
+            return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const line = body.extra_items && body.extra_items[0];
+          if (!line || line.job_number !== 'SWF-26767') {
+            return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
+          }
+          return {
+            ok: true,
+            invoice_number: 'SW-INV-E2E-26767',
+            total_inc: 272,
+            pending_ops_review: true,
+            wo_labour_payouts: [{ name: 'Tendo', total_ex: 287.5 }]
+          };
         }
       },
       allowedWriteActions: feedScenario === 'fencing-allocation'
         ? ['allocate_job']
-        : (feedScenario === 'fencing-stage-lifecycle' ? ['update_my_assignment', 'clock_event'] : [])
+        : (feedScenario === 'fencing-stage-lifecycle'
+            ? ['update_my_assignment', 'clock_event']
+            : (feedScenario === 'wo-labour-explainer' ? ['generate_trade_invoice'] : []))
     });
 
     await page.route('https://cdnjs.cloudflare.com/**', (route) => route.fulfill({

@@ -83,15 +83,21 @@ rows as Unscheduled even when their transport date is synthetic. Successful
 assignment lifecycle writes clear Board and Calendar planning caches through
 `_invalidateAssignmentLifecycleCaches()`. Visibility still is not authority:
 another crew's job detail is VIEW-ONLY (`// <foreign-job-readonly>`) and `api()`
-refuses the write rather than queueing it. Surface-level detail lives in
-`trade-app.md`.
+refuses the write rather than queueing it. The My Jobs All tab is the same story
+on the job table instead of the assignment table: an empty query asks
+`search_all_jobs` for the whole company feed only when the viewer already holds
+the Everyone lens, and it is painted only when the server answers
+`lens: 'company'` — scroll paging then follows the server's `next_offset`
+(`// <all-tab-full-feed>`). Surface-level detail lives in `trade-app.md`.
 
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`
 (managed fencing lead across multi-week/Unscheduled Board rows, My Jobs and
 Calendar, other-crew read-only, one explicitly stubbed `allocate_job` write, and
-own-assignment lifecycle refresh writes with no unapproved write).
+own-assignment lifecycle refresh writes with no unapproved write), and
+`all-jobs-feed.spec.js` (All-tab company feed paging, server-lens authority,
+installer All tab unchanged).
 NB: board cards are `role="button"` and their accessible names contain
 "Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
 matches cards too — target the `button.act.primary` class for the real Allocate

@@ -29,7 +29,8 @@ Covered flows (Trade App and Ops Dash):
 13. An assigned trade can start a MakeSafe reattendance with a required reason, land in a blank visit-two report with a fresh five-photo gate, and remain subject to server-side relationship authorization; the same spec proves cancellation remains manager-only.
 14. Ops keeps one MakeSafe job card while listing and opening each attendance-cycle report, and the isolated browser fixture proves each report shows only its bound photos.
 15. The Ops Dash calendar Schedule view never superimposes two job bars: an inverted-span assignment (`scheduled_end` before `scheduled_date`) still renders with a valid width, clamped to a single day at its start, while a tidy week keeps non-overlapping bars sharing one lane, crew badges attached to their own bar, and long client names ellipsized inside their bars.
-16. Optional dedicated accounts prove that the real Supabase password login still works.
+16. The All tab means all: a company viewer/manager with an empty query gets the whole-company feed, paged in on scroll through `next_offset` (three fixture pages, 90 jobs, one card per job) and stopping at an explicit end-of-list marker. The server stays the authority — a response whose `lens` is not `company` is never painted as the feed — an installer never requests it, and typed All-tab search keeps its own copy and results.
+17. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

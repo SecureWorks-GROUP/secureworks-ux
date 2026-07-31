@@ -269,7 +269,7 @@ test('CalOpsCore.spanEnd is a no-op for every well-formed span', async ({ page }
 // so in Perth (UTC+8) a 1-day assignment wrote scheduled_end one day BEFORE
 // scheduled_date — creating exactly the inverted spans the surfaces above have
 // to clamp — and every N-day span landed one day short. The end date must be
-// formatted in LOCAL time (localDateStr). These tests pin the browser context
+// formatted in LOCAL time (localDateStr). This test pins the browser context
 // to Australia/Perth so a UTC-serialising regression fails even on UTC CI.
 test.describe('assignment end-date writes from a UTC+8 browser', () => {
   test.use({ timezoneId: 'Australia/Perth' });
@@ -281,41 +281,12 @@ test.describe('assignment end-date writes from a UTC+8 browser', () => {
     expect(offset, 'browser context must run at UTC+8').toBe(-480);
   });
 
-  // Drives the real schedule modal end-to-end: open it for a fake unscheduled
-  // job, set the duration, submit, and capture what create_assignment would
-  // have sent to the server.
-  async function captureScheduleWrite(page, start, dur) {
-    return page.evaluate(async (args) => {
-      window._unschedJobs = [{ id: 'job-tz', client_name: 'Tess Zone', site_suburb: 'Perth',
-        job_number: 'SWM-27100', type: 'makesafe' }];
-      const posts = [];
-      window.opsPost = (action, body) => { posts.push({ action, body }); return Promise.resolve({ ok: true }); };
-      window.loadCalendar = () => {};
-      window.openScheduleModal('job-tz', 'Hugo', args.start);
-      document.getElementById('schedDuration').value = String(args.dur);
-      await window.submitScheduleFromModal('job-tz');
-      return posts;
-    }, { start, dur });
-  }
-
-  test('a 1-day assignment writes scheduled_end equal to scheduled_date', async ({ page }) => {
-    const posts = await captureScheduleWrite(page, MON, 1);
-
-    expect(posts).toHaveLength(1);
-    expect(posts[0].action).toBe('create_assignment');
-    expect(posts[0].body.scheduled_date).toBe(MON);
-    // toISOString() wrote 2026-08-02 here: an inverted span, born at write time.
-    expect(posts[0].body.scheduled_end).toBe(MON);
-  });
-
-  test('an N-day assignment writes a full-length span, not one day short', async ({ page }) => {
-    const posts = await captureScheduleWrite(page, MON, 3);
-
-    expect(posts).toHaveLength(1);
-    // start + dur - 1; toISOString() wrote 2026-08-04.
-    expect(posts[0].body.scheduled_date).toBe(MON);
-    expect(posts[0].body.scheduled_end).toBe('2026-08-05');
-  });
+  // The Schedule-modal create path is NOT retested here. PR 234 put it behind
+  // __SW_CAL_DRAGV2_ENABLED (default ON = working-day spans via layWorkingDays;
+  // the flag-off branch keeps calendar-day spans and already uses localDateStr),
+  // and cal-drag-real-input.spec.js owns that surface with its own Perth-pinned
+  // flag-off 1-day/3-day create assertions. Duplicating it here would only
+  // re-test the drag lane's code through a second, weaker harness.
 
   test('assignment modal end-date sync computes the end in local time', async ({ page }) => {
     const ends = await page.evaluate((start) => {

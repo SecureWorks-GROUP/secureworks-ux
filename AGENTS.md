@@ -280,7 +280,10 @@ Gotchas:
   matches zero days and drops the job silently, while Schedule view's lane packer
   and percentage widths garble it instead. Read every span through
   `CalOpsCore.spanEnd(ev)`, which clamps a backwards range to a single day at its
-  start. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
+  start. The write side has the mirror rule: serialise a computed end Date with
+  `localDateStr`, never `toISOString().slice(0, 10)` — Perth is UTC+8, so UTC
+  serialisation lands the previous day, which is what minted these inverted spans
+  in the first place. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
   `tests/e2e/ops-schedule-lane-overlap.spec.js`.
 
 ## Maintaining this file

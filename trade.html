@@ -16360,7 +16360,7 @@
           html += '</div>';
           html += '<div data-cardnetwarn="' + c._idx + '" style="display:' + (net < 0 ? 'block' : 'none') + ';font-size:11px;color:var(--sw-red);font-weight:600;margin-top:2px">Labour deduction is more than the WO allocation — net cannot be negative.</div>';
           html += '<div data-cardwobreak="' + c._idx + '" style="font-size:10px;color:var(--sw-text-sec);margin-top:4px">' + esc(_woBreakdownText(c)) + ' — written on the invoice line.'
-            + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '') + '</div>';
+            + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '') + '</div>';
         } else {
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
           html += '<label style="font-size:12px;color:var(--sw-text-sec)">Hours</label>';
@@ -16860,7 +16860,7 @@
       if (warn) warn.style.display = net < 0 ? 'block' : 'none';
       var brk = document.querySelector('[data-cardwobreak="' + idx + '"]');
       if (brk) brk.textContent = _woBreakdownText(c) + ' — written on the invoice line.'
-        + (_woCleanLabourLines(c).length > 0 ? ' Each named crew member is paid their labour line by the office — don\'t pay them yourself.' : '');
+        + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '');
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
       if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');
@@ -17064,7 +17064,7 @@
         subtotal += net;
         // Build structured labour lines with computed amounts [Q17]. Cleaned
         // (trimmed names, recomputed amounts, empty rows dropped) — the backend
-        // creates each named crew member's payout invoice from these.
+        // stores these on the holder invoice for office reconciliation.
         var labourLinesOut = _woCleanLabourLines(c);
         var labourDeduction = _woLabourSum(c);
         cardExtraItems.push({

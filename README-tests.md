@@ -30,7 +30,8 @@ Covered flows (Trade App and Ops Dash):
 14. Ops keeps one MakeSafe job card while listing and opening each attendance-cycle report, and the isolated browser fixture proves each report shows only its bound photos.
 15. The Ops Dash calendar Schedule view never superimposes two job bars: an inverted-span assignment (`scheduled_end` before `scheduled_date`) still renders with a valid width, clamped to a single day at its start, while a tidy week keeps non-overlapping bars sharing one lane, crew badges attached to their own bar, and long client names ellipsized inside their bars.
 16. The All tab means all: a company viewer/manager with an empty query gets the whole-company feed, paged in on scroll through `next_offset` (three fixture pages, 90 jobs, one card per job) and stopping at an explicit end-of-list marker. The server stays the authority — a response whose `lens` is not `company` is never painted as the feed — an installer never requests it, and typed All-tab search keeps its own copy and results.
-17. Optional dedicated accounts prove that the real Supabase password login still works.
+18. The Ops Dash make-safe board places every card by the canonical feed's `canonical_stage`: a captain display-ledger archive of a Docs Ready job lands under Archive, and the close-out enrichment join — which still carries the overlay-blind declared stage — can neither pull it back nor contribute any stage key. A canonical stage this board does not render keeps its card visible and flagged instead of dropping it, an unsupported `contract_version` fails loudly, a degraded `intake_exceptions` marker or a missing enrichment join raises a non-blocking banner, `getMakesafeBuilder` no longer strands a card on "Builder TBC" when the company object has no usable name, and the card key legend opens by default with the report tile spelled out.
+19. Optional dedicated accounts prove that the real Supabase password login still works.
 
 ## Why the main suite uses stubs
 

@@ -10535,7 +10535,7 @@ function buildMakesafeBoardColumns(payload, enrichById) {
 // whether the close-out enrichment join was available on the last load. Both feed
 // renderMakesafeFeedNotices.
 var _makesafeBoardPayload = null;
-var _makesafeBoardEnrichAvailable = true;
+var _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
 
 async function fetchMakesafeBoardData() {
   var results = await Promise.all([
@@ -10555,7 +10555,14 @@ async function fetchMakesafeBoardData() {
   Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
     (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
   });
-  _makesafeBoardEnrichAvailable = !!enrich;
+  var canonicalRows = [];
+  Object.keys(payload.columns || {}).forEach(function(stage) {
+    (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
+  });
+  var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
+  _makesafeBoardEnrichState = !enrich
+    ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
+    : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
   _makesafeBoardPayload = payload;
   return { columns: buildMakesafeBoardColumns(payload, enrichById), _canonical: payload };
 }
@@ -10574,8 +10581,11 @@ function renderMakesafeFeedNotices() {
       + (when ? ', ' + escapeHtml(when) : '') + '.'
       + (degraded.error ? '<span style="display:block;opacity:.8;margin-top:2px;word-break:break-word;">' + escapeHtml(String(degraded.error).slice(0, 240)) + '</span>' : ''));
   }
-  if (!_makesafeBoardEnrichAvailable) {
+  if (_makesafeBoardEnrichState.status === 'failed') {
     notices.push('<b>Close-out detail unavailable</b> &mdash; cards are showing canonical stages only; work-order and invoice chips may read as pending.');
+  }
+  if (_makesafeBoardEnrichState.status === 'partial') {
+    notices.push('<b>Close-out detail partially unavailable</b> &mdash; ' + _makesafeBoardEnrichState.missing + ' of ' + _makesafeBoardEnrichState.total + ' cards are missing work-order, invoice or SWMS-slug detail; columns and placement remain complete from the canonical feed.');
   }
   if (!notices.length) return '';
   return '<div class="ms-feed-notice" role="status" style="display:flex;flex-direction:column;gap:4px;'

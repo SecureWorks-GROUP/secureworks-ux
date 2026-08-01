@@ -134,7 +134,7 @@ test('a degraded intake-exception panel shows a non-blocking board banner', asyn
   await page.goto('/ops.html');
   const html = await page.evaluate((payload) => {
     _makesafeBoardPayload = payload;
-    _makesafeBoardEnrichAvailable = true;
+    _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
     return renderMakesafeFeedNotices();
   }, boardPayload([], {
     intake_exceptions: {
@@ -152,22 +152,49 @@ test('a clean intake-exception panel shows no banner', async ({ page }) => {
   await page.goto('/ops.html');
   const html = await page.evaluate((payload) => {
     _makesafeBoardPayload = payload;
-    _makesafeBoardEnrichAvailable = true;
+    _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
     return renderMakesafeFeedNotices();
   }, boardPayload([], { intake_exceptions: { cards: [], degraded: null } }));
 
   expect(html).toBe('');
 });
 
-test('a missing close-out enrichment join is announced rather than silent', async ({ page }) => {
+test('a failed close-out enrichment join is announced rather than silent', async ({ page }) => {
   await page.goto('/ops.html');
   const html = await page.evaluate((payload) => {
     _makesafeBoardPayload = payload;
-    _makesafeBoardEnrichAvailable = false;
+    _makesafeBoardEnrichState = { status: 'failed', missing: 0, total: 0 };
     return renderMakesafeFeedNotices();
   }, boardPayload([], { intake_exceptions: { cards: [], degraded: null } }));
 
   expect(html).toContain('Close-out detail unavailable');
+});
+
+test('a partial close-out enrichment join names missing detail without changing placement', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await page.evaluate(async (payload) => {
+    const realFetch = window.opsFetch;
+    const covered = payload.rows[1];
+    window.opsFetch = (action) => Promise.resolve(action === 'makesafe_board'
+      ? payload
+      : { columns: { archive: [covered] } });
+    try {
+      const board = await fetchMakesafeBoardData();
+      return {
+        html: renderMakesafeFeedNotices(),
+        archive: board.columns.archive.map((card) => card.job_number),
+        state: _makesafeBoardEnrichState,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+    }
+  }, boardPayload([ledgerArchivedRow(), Object.assign({}, ledgerArchivedRow(), { id: 'job-ledger-covered', job_number: 'SWMS-COVERED' })]));
+
+  expect(result.html).toContain('Close-out detail partially unavailable');
+  expect(result.html).toContain('1 of 2 cards');
+  expect(result.html).toContain('columns and placement remain complete');
+  expect(result.state).toEqual({ status: 'partial', missing: 1, total: 2 });
+  expect(result.archive).toEqual(['SWMS-LEDGER', 'SWMS-COVERED']);
 });
 
 test('an unsupported board contract fails loudly instead of rendering a partial board', async ({ page }) => {

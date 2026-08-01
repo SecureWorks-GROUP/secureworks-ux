@@ -15678,6 +15678,8 @@ async function refreshJobDetail(canonicalReadSucceeded) {
   if (_currentJobId) {
     try {
       var data = await opsFetch('job_detail', { jobId: _currentJobId });
+      if (canonicalReadSucceeded === false) data._makesafeStageReadFailed = true;
+      else if (canonicalReadSucceeded === true) delete data._makesafeStageReadFailed;
       _currentJobData = data;
       renderHealthBar(data);
       renderActionDrawer(data);
@@ -15691,6 +15693,7 @@ async function refreshJobDetail(canonicalReadSucceeded) {
     } catch(e) {
       console.error('refreshJobDetail error:', e);
       if (_currentJobData && _currentJobData.job && _currentJobData.job.type === 'makesafe') {
+        _currentJobData._makesafeStageReadFailed = true;
         renderOverviewView(Object.assign({}, _currentJobData, { _makesafeStageReadFailed: true }));
       }
       return false;

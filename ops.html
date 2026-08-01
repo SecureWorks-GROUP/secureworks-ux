@@ -10836,6 +10836,7 @@ async function fetchMakesafeBoardData() {
   // with it so opening a card straight off a fresh board does not re-GET the same
   // feed. A transition still clears this (refreshMakesafeCanonicalStages).
   var columns = buildMakesafeBoardColumns(payload, enrichById);
+  clearMakesafeStageReadFailures();
   _makesafeCanonicalStageFetch = Promise.resolve();
   return { columns: columns, _canonical: payload };
 }

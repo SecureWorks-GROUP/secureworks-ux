@@ -10485,6 +10485,7 @@ function rememberMakesafeCanonicalStage(row) {
 
 // The stage a make-safe job detail may display, plus where it came from.
 function resolveMakesafeDetailStage(data) {
+  if (data && data._makesafeStageReadFailed) return { stage: '', source: 'unknown' };
   var j = (data && data.job) || {};
   var fromDetail = makesafeCanonicalStageOf(data) || makesafeCanonicalStageOf(j)
     || makesafeCanonicalStageOf(data && data.makesafe_details);
@@ -10503,13 +10504,15 @@ function ensureMakesafeCanonicalStages() {
   if (!_makesafeCanonicalStageFetch) {
     _makesafeCanonicalStageFetch = opsFetch('makesafe_board', { projection: 'ops' })
       .then(function(payload) {
-        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return;
+        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return false;
         Object.keys(payload.columns || {}).forEach(function(stage) {
           (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
         });
+        return true;
       })
       .catch(function(e) {
         console.warn('Make-safe detail: canonical stage lookup unavailable:', e && e.message);
+        return false;
       });
   }
   return _makesafeCanonicalStageFetch;
@@ -10528,8 +10531,8 @@ function refreshMakesafeCanonicalStages() {
 // every make-safe transition this page performs: without it the detail keeps the
 // stage it was painted with and can offer a move the new stage forbids.
 async function afterMakesafeStageTransition() {
-  await refreshMakesafeCanonicalStages();
-  if (_currentJobId) await refreshJobDetail();
+  var canonicalReadSucceeded = await refreshMakesafeCanonicalStages();
+  if (_currentJobId) await refreshJobDetail(canonicalReadSucceeded);
 }
 // </makesafe-detail-canonical-stage>
 // ════════════════════════════════════════════════════════════
@@ -15671,7 +15674,7 @@ function closeJobDetail(skipHistory) {
 }
 
 // Refresh current job detail (after an action)
-async function refreshJobDetail() {
+async function refreshJobDetail(canonicalReadSucceeded) {
   if (_currentJobId) {
     try {
       var data = await opsFetch('job_detail', { jobId: _currentJobId });
@@ -15681,8 +15684,19 @@ async function refreshJobDetail() {
       var activeTab = document.querySelector('.jd-tab.active');
       var tab = activeTab ? activeTab.getAttribute('data-jd-tab') : 'timeline';
       showJobSubView(tab);
-    } catch(e) { console.error('refreshJobDetail error:', e); }
+      if (canonicalReadSucceeded === false && data.job && data.job.type === 'makesafe') {
+        renderOverviewView(Object.assign({}, data, { _makesafeStageReadFailed: true }));
+      }
+      return true;
+    } catch(e) {
+      console.error('refreshJobDetail error:', e);
+      if (_currentJobData && _currentJobData.job && _currentJobData.job.type === 'makesafe') {
+        renderOverviewView(Object.assign({}, _currentJobData, { _makesafeStageReadFailed: true }));
+      }
+      return false;
+    }
   }
+  return true;
 }
 
 function showJobSubView(tab) {

@@ -213,6 +213,12 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     // Schedule view: the same job is TWO bar segments (Fri | Mon), one logical job.
     await toSchedule(page);
     await expect(page.locator('.cal-schedule-bar[data-job-id="j-3"]')).toHaveCount(2);
+    // Two bars alone can't prove the weekend break — the old renderer also
+    // splits at the week-row boundary (Fri–Sun | Mon). The Fri segment must
+    // span ONE day column, never stretch across the Sat/Sun cells.
+    const cell = await page.locator('.cal-schedule-cell[data-date="' + D.FRI + '"]').boundingBox();
+    const friSeg = await page.locator('.cal-schedule-bar[data-job-id="j-3"]').first().boundingBox();
+    expect(friSeg.width, 'the Fri segment must not paint across Sat/Sun').toBeLessThan(cell.width * 1.5);
   });
 
   test('weekend-crossing job: dragging the FIRST segment reschedules the whole job', async ({ page }) => {

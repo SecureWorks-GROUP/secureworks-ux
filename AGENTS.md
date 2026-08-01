@@ -31,6 +31,28 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. See `README-tests.md` for the covered flows and the copyable-template details.
 
+## Ops make-safe board (`ops.html`)
+
+The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1`,
+projection `ops`) — the same canonical feed the Trade board uses, and the only one
+carrying `canonical_stage` (declared `board_stage` + the captain display ledger).
+Column placement comes from `canonical_stage` and nothing else; the client
+re-derives no stage. Search `// <makesafe-board-canonical>` in `ops.html`.
+This is the board's primary feed; it did not previously have a
+`makesafe_board` fallback. Do not describe the migration as fallback logic.
+`makesafe_pipeline?history=all` is still fetched alongside, but only as a
+presentation join over the identical job set (`MAKESAFE_ENRICH_FIELDS`) for the
+close-out fields the canonical projection drops — has_wo, invoice_status,
+requesting_company_slug, intake date, suburb, family label. Never put a stage,
+status or column key in that whitelist, and never let it decide which cards exist:
+that is exactly the overlay-blindness this migration removed. When either the
+feed's `intake_exceptions.degraded` marker or the enrichment join is missing, the
+board says so in a banner (`renderMakesafeFeedNotices`) rather than losing data
+silently. Guard: `tests/e2e/ops-makesafe-canonical-board.spec.js`; verification
+evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
+The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
+directly and remain overlay-blind — migrating them is follow-up work.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

@@ -8996,18 +8996,20 @@ async function autoApproveCleanMakesafeIntakeDraftsIfNeeded() {
 async function loadJobs() {
   updateJobsDate();
   try {
-    var params = {};
-    if (_jobFilter) params.type = _jobFilter;
-    // makesafe_pipeline does not support a search param; board search is client-side
-    if (_jobSearch && _pipelineTab !== 'makesafes') params.search = _jobSearch;
-
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
-      await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
+    var data;
+    if (_pipelineTab === 'makesafes') {
+      // Make-safe board: canonical feed only. See <makesafe-board-canonical>.
+      // Board search stays client-side (the feed takes no search param).
+      if (_jobView === 'kanban') {
+        await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
+      }
+      data = await fetchMakesafeBoardData();
+    } else {
+      var params = {};
+      if (_jobFilter) params.type = _jobFilter;
+      if (_jobSearch) params.search = _jobSearch;
+      data = await opsFetch('pipeline', params);
     }
-
-    // Make-safe tab uses dedicated enriched pipeline endpoint
-    var endpoint = (_pipelineTab === 'makesafes') ? 'makesafe_pipeline' : 'pipeline';
-    var data = await opsFetch(endpoint, params);
     _pipelineData = data;
     renderJobs(data);
     // Unified kanban: load the INTAKE column's drafts (separate endpoint) and
@@ -9213,6 +9215,10 @@ function renderJobs(data) {
     } else if (_pipelineTab === 'patio' || _pipelineTab === 'decking') {
       renderPatioKanban(container, data.columns);
     } else if (_pipelineTab === 'makesafes') {
+      // Only a canonical makesafe_board payload can place make-safe cards. A
+      // stale non-make-safe payload (mid tab-switch, before loadJobs resolves)
+      // holds the previous paint rather than repainting an empty board.
+      if (!data || !data._canonical) return;
       renderMakesafeKanban(container, data.columns);
     } else {
       renderKanban(container, data.columns);
@@ -9558,7 +9564,10 @@ function renderMakesafeKanban(container, columns) {
     archive: '#64748B',
     cancelled: '#B91C1C',
   };
-  var uiColumns = buildMakesafeColumns(columns);
+  // Canonical columns, straight from the feed. The client re-derives NOTHING:
+  // a display-ledger archive leaves the live columns because the server said so.
+  // See <makesafe-board-canonical>.
+  var uiColumns = columns || {};
 
   // Sync the Archive button's active appearance on every render
   var archBtn = document.getElementById('btnMakesafeArchive');
@@ -9575,6 +9584,7 @@ function renderMakesafeKanban(container, columns) {
 
   var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
   html += renderMakesafeLegend();
+  html += renderMakesafeFeedNotices();
   html += renderMakesafeTruthStrip();
 
   // Archive search bar — only shown when archive is visible
@@ -10071,14 +10081,15 @@ function openMakesafeReviewOverlay(overlayId, panelId, title) {
 }
 
 // One board-level legend explaining the 5 chip glyphs + the 4 states. Collapsible
-// so it doesn't permanently eat board height once the ops team knows the key.
+// so it doesn't permanently eat board height once the ops team knows the key —
+// but OPEN by default (captain review 2026-08-01): collapsed-by-default meant a
+// first-time operator saw five unlabelled glyphs with no way to know there was a
+// key at all. Once anyone hides it the choice sticks in localStorage.
 var _makesafeLegendCollapsed = (function() {
   try {
-    var stored = localStorage.getItem('sw_makesafe_legend_collapsed');
-    if (stored === 'false') return false;
-    if (stored === 'true') return true;
+    return localStorage.getItem('sw_makesafe_legend_collapsed') === 'true';
   } catch (_) {}
-  return true;
+  return false;
 })();
 var _makesafeArchiveVisible = false;   // archive column hidden by default
 var _makesafeArchiveSearch = '';       // live filter applied when archive is open
@@ -10177,7 +10188,7 @@ function renderMakesafeLegend() {
   // The 5 doc icons
   html += '<div class="ms-legend-col"><h4>The 5 doc icons (left &rarr; right)</h4><div class="ms-legend-row">';
   html += '<div class="ms-legend-item">' + glyphChip('done', 'wo') + '<span><b>WO</b> &mdash; work order attached</span></div>';
-  html += '<div class="ms-legend-item">' + glyphChip('pending', 'report') + '<span><b>Rep</b> &mdash; make-safe report from trade</span></div>';
+  html += '<div class="ms-legend-item">' + glyphChip('pending', 'report') + '<span><b>Report</b> &mdash; make-safe report from trade</span></div>';
   html += '<div class="ms-legend-item">' + glyphChip('na', 'swms') + '<span><b>SWMS</b> &mdash; MLB only (N/A elsewhere)</span></div>';
   html += '<div class="ms-legend-item">' + glyphChip('pending', 'invoice') + '<span><b>Inv</b> &mdash; invoice raised / sent</span></div>';
   html += '<div class="ms-legend-item">' + glyphChip('pending', 'sent') + '<span><b>Sent</b> &mdash; pack emailed to builder</span></div>';
@@ -10203,11 +10214,32 @@ function renderMakesafeLegend() {
 function getMakesafeSubstatus(j) {
   return j.substatus || (j.makesafe_details && j.makesafe_details.substatus) || '';
 }
+// Builder display name, across every make-safe payload shape (board card, map
+// pin, crew planner pill, job detail, canonical feed row).
+// A company OBJECT without a usable name used to RETURN EARLY with '', so those
+// cards read "Builder TBC" even when requesting_company_name was populated right
+// beside it. Every source is now tried in order and the first real name wins.
 function getMakesafeBuilder(j) {
+  j = j || {};
   var md = j.makesafe_details || j.metadata || {};
-  var company = md.makesafe_companies || md.requesting_company || j.makesafe_companies;
-  if (company && typeof company === 'object') return company.name || company.company_name || '';
-  return j.requesting_company || j.requesting_company_name || company || '';
+  function nameOf(v) {
+    if (!v) return '';
+    if (typeof v === 'string') return v.trim();
+    if (typeof v === 'object') return String(v.name || v.company_name || '').trim();
+    return '';
+  }
+  var candidates = [
+    md.makesafe_companies, j.makesafe_companies,
+    md.requesting_company_name, j.requesting_company_name,
+    md.requesting_company, j.requesting_company,
+    j.builder,            // canonical makesafe-board.v1 row
+    j.builder_company
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    var name = nameOf(candidates[i]);
+    if (name) return name;
+  }
+  return '';
 }
 function _makesafeTextFromValue(value) {
   if (!value) return '';
@@ -10293,43 +10325,276 @@ function getMakesafeStage(j, rawStatus) {
   if (sub === 'waiting_on_trade_report' || rawStatus === 'scheduled' || rawStatus === 'in_progress') return 'allocated';
   return 'new';
 }
-// Best-available completion timestamp for a make-safe, for the "Completed This
-// Week" window. Mirrors the backend makesafeCompletedAt precedence (invoice date,
-// then invoice_ready, then job.completed_at, then updated_at) using the fields the
-// board list payload actually carries.
-function getMakesafeCompletedAt(j) {
-  var md = j.makesafe_details || {};
-  return j.invoice_date || j.invoice_created_at || md.invoice_ready_at
-    || j.completed_at || j.updated_at || null;
+// ════════════════════════════════════════════════════════════
+// <makesafe-board-canonical>
+// The ops make-safe board's data source is `ops-api?action=makesafe_board`
+// (contract `makesafe-board.v1`, projection `ops`) — the same canonical feed the
+// Trade board consumes. It is the ONLY feed carrying `canonical_stage`: the raw
+// declared `board_stage` with the captain display ledger (`status_application`)
+// already applied.
+//
+// It used to render `ops-api?action=makesafe_pipeline` directly. That feed is
+// keyed on the raw board_stage and is therefore overlay-blind BY CONSTRUCTION, so
+// no display-ledger transition (ruled archives, duplicate-survivor archives) had
+// ever been visible on the ops UI — silently, while the board looked healthy.
+// Column placement now comes from `canonical_stage` and nothing else.
+//
+// CLOSE-OUT ENRICHMENT SIDE-CHANNEL. The canonical projection deliberately drops
+// the per-card close-out presentation fields this board renders (has_wo,
+// invoice_status, requesting_company_slug, intake date, suburb, family label), so
+// they are joined in BY JOB ID from `makesafe_pipeline?history=all` through the
+// explicit MAKESAFE_ENRICH_FIELDS whitelist. It is decoration ONLY:
+//   - it can never add, remove or move a card — the canonical columns own that;
+//   - no stage-bearing key is ever copied from it (see the whitelist); and
+//   - if it fails, every card still renders from the canonical row alone and the
+//     board says so (renderMakesafeFeedNotices).
+// Never widen that whitelist with a stage/status key — that is precisely the
+// overlay-blindness this migration removed.
+// ════════════════════════════════════════════════════════════
+var MAKESAFE_BOARD_CONTRACT = 'makesafe-board.v1';
+
+// Presentation-only keys copied verbatim off the enriched pipeline row. Every
+// one of these is dropped by the canonical projection and read by the existing
+// card renderer. NO stage, status, substatus or column key belongs here.
+var MAKESAFE_ENRICH_FIELDS = [
+  // close-out doc booleans (canonical carries report/invoice/swms but not the WO)
+  'has_wo', 'docs_missing', 'docs_warning',
+  // invoice + send truth for the Inv / Sent chips
+  'invoice_status', 'invoice_raw_status', 'invoice_date', 'invoice_created_at',
+  // identity + grouping the canonical projection does not carry
+  'requesting_company_slug', 'requesting_company_name', 'requesting_company',
+  'builder_company', 'site_suburb', 'site_address', 'client_email',
+  // the makesafe_details / metadata blobs the type-label + cancel readers use
+  'makesafe_details', 'metadata', 'notes',
+  'cancel_reason', 'cancel_note', 'cancelled_by', 'cancelled_at',
+  // timestamps the age / SLA / intake-label helpers read
+  'intake_at', 'created_at', 'updated_at', 'completed_at',
+  // reattendance detail + the report-ready resume chip
+  'reattend_count', 'is_reattend', 'last_reattend_at',
+  'resume_action', 'pack_status', 'needs_money_review'
+];
+
+// Suburb fallback for the degraded path (no enriched row). The canonical feed
+// folds the suburb into `contact.address`, so take the tail segment and strip a
+// trailing state/postcode. A single-segment address yields nothing rather than
+// echoing the street line back as a suburb.
+function makesafeSuburbFromAddress(address) {
+  var parts = String(address || '').trim().split(',');
+  if (parts.length < 2) return '';
+  return String(parts[parts.length - 1]).trim()
+    .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i, '')
+    .replace(/\s+\d{4}$/, '').trim();
 }
-// True when a completed make-safe falls inside the rolling current-week window
-// (< 7 days since completion). Unknown/unparseable dates stay in "completed" (same
-// fail-open as the backend) so a card is never silently lost to a missing date.
-function isMakesafeCompletedThisWeek(j) {
-  var raw = getMakesafeCompletedAt(j);
-  if (!raw) return true;
-  var t = new Date(raw).getTime();
-  if (isNaN(t)) return true;
-  return (Date.now() - t) < 7 * 86400000;
+
+// Company slug fallback for the degraded path. Only the MLB spelling matters —
+// it is the one slug the SWMS chip branches on (SWMS is MLB-only).
+function makesafeCompanySlugFallback(name) {
+  var t = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return (t === 'mlbuilders') ? 'mlb' : t;
 }
-function buildMakesafeColumns(columns) {
-  var out = { new: [], allocated: [], trade_report_in: [], report_ready: [], completed: [], archive: [], cancelled: [] };
-  Object.keys(columns || {}).forEach(function(rawStatus) {
-    (columns[rawStatus] || []).forEach(function(j) {
-      var stage = getMakesafeStage(j, rawStatus);
-      // "Completed This Week" must window to a rolling current week. The backend
-      // board_stage already does a 7-day split, but the board defends against an
-      // un-windowed payload (e.g. an older deployed edge fn): anything routed to
-      // `completed` whose completion date is 7+ days old rolls to `archive`, so
-      // the column only ever shows this week's closes.
-      if (stage === 'completed' && !isMakesafeCompletedThisWeek(j)) stage = 'archive';
-      if (!out[stage]) out[stage] = [];
-      j._makesafe_raw_status = rawStatus;
-      out[stage].push(j);
+
+// Project one canonical `makesafe-board.v1` row onto the field shape the existing
+// make-safe card renderer reads. Enrichment is written FIRST so every canonical
+// assignment below overwrites it — the canonical row always wins.
+function mapCanonicalMakesafeRow(row, enrich) {
+  row = row || {};
+  var contact = row.contact || {};
+  var builder = row.builder || {};
+  var pack = row.pack || {};
+  var report = row.report || {};
+  var age = row.age || {};
+  var lineage = row.lineage || {};
+  var docs = pack.closeout_documents || {};
+
+  // `enriched` gates the degraded-path guesses below. When the close-out join is
+  // present its values are authoritative for those fields and are never
+  // second-guessed, so an enriched card renders exactly as it did before.
+  var enriched = !!enrich;
+  var j = {};
+  if (enriched) {
+    MAKESAFE_ENRICH_FIELDS.forEach(function(k) {
+      if (enrich[k] !== undefined) j[k] = enrich[k];
+    });
+  }
+
+  // ── canonical spine ──
+  j.id = row.id;
+  j.job_number = row.job_number || null;
+  j.type = row.type || 'makesafe';
+  j.status = row.job_state || null;
+  j.substatus = row.substatus || null;
+  // THE reason this migration exists: the card's server-stage verdict is the
+  // CANONICAL stage (declared + display ledger), never the raw declared one.
+  j.board_stage = row.canonical_stage || null;
+  j.board_label = row.canonical_stage_label || null;
+  j.canonical_stage = row.canonical_stage || null;
+  j.declared_stage = row.declared_stage || null;
+  j.status_application = row.status_application || null;
+  j.duplicate_of_job_id = row.duplicate_of_job_id || null;
+  j.duplicate_of_job_number = row.duplicate_of_job_number || null;
+  j.captain_action = row.captain_action || null;
+  if (row.projection_warning) j.projection_warning = row.projection_warning;
+
+  j.client_name = contact.client_name || null;
+  j.client_phone = contact.phone || null;
+  j.contact = contact;
+  if (!j.site_address) j.site_address = contact.address || null;
+  if (!enriched) j.site_suburb = makesafeSuburbFromAddress(contact.address);
+
+  j.builder = builder;
+  j.external_ref = builder.external_ref || lineage.builder_claim_ref || null;
+  if (!j.requesting_company_name) j.requesting_company_name = builder.name || null;
+  // The canonical feed carries no company slug and the SWMS chip branches on it,
+  // so guess from the builder name — but only when there is no enriched row to
+  // ask. A present-but-null enriched slug is an answer, not a gap.
+  if (!enriched) j.requesting_company_slug = makesafeCompanySlugFallback(builder.name);
+  j.lineage = lineage;
+
+  // Crew is canonical: the feed's assignment rows are the only crew source, so a
+  // stale enriched crew_label can never re-appear on a card.
+  j.assignments = Array.isArray(row.assignments) ? row.assignments : [];
+
+  j.report_status = report.state || null;
+  j.report = report;
+  j.report_pack = pack;
+  j.pack_sent = pack.sent === true;
+  j.sent_to_builder = pack.sent === true;
+  j.has_report_doc = docs.report === true;
+  j.has_invoice_doc = docs.invoice === true;
+  j.has_swms_doc = docs.swms === true;
+  if (typeof j.has_wo !== 'boolean') j.has_wo = false;
+
+  // The canonical feed states missing close-out docs as a blocker, which is the
+  // list the doc chips' "missing (expected)" state wants.
+  j.blockers = row.blockers || null;
+  var missing = [];
+  ((row.blockers || {}).real || []).forEach(function(b) {
+    if (b && b.code === 'closeout_documents_missing' && Array.isArray(b.documents)) {
+      missing = missing.concat(b.documents);
+    }
+  });
+  j.missing_docs = missing;
+
+  // No canonical carrier for invoice_status. On the degraded path say only what
+  // the close-out doc evidence supports; the chip then reads "not ready yet"
+  // rather than inventing a paid/invoiced state.
+  if (!j.invoice_status) j.invoice_status = docs.invoice === true ? 'invoiced' : '';
+
+  j.age_hours = (age.age_hours != null) ? age.age_hours : null;
+  j.age_days = (age.age_days != null) ? age.age_days : null;
+  j.age = age;
+
+  var cancelled = row.cancelled || null;
+  if (cancelled) {
+    if (cancelled.reason) j.cancel_reason = cancelled.reason;
+    if (cancelled.note) j.cancel_note = cancelled.note;
+    if (cancelled.by) j.cancelled_by = cancelled.by;
+    if (cancelled.at) j.cancelled_at = cancelled.at;
+  }
+
+  j.cycle_number = row.cycle_number != null ? row.cycle_number : null;
+  j.attendance_cycle_id = row.attendance_cycle_id || null;
+  j.cycle_attribution_flags = Array.isArray(row.cycle_attribution_flags) ? row.cycle_attribution_flags : [];
+  j.readiness_revision = row.readiness_revision || null;
+  j.commercial_warning = row.commercial_warning || null;
+  j.computed_status = row.computed_status || null;
+  j.ses_family = row.ses_family || null;
+
+  // Type label. An enriched card keeps the exact inputs getMakesafeTypeLabel had
+  // before (makesafe_details / metadata / notes), so its label is unchanged —
+  // including the scope-text inference that beats a generic intake family label.
+  // Only the degraded path leans on the canonical `makesafe_type`, which holds
+  // either a resolved label or a raw family key; getMakesafeTypeLabel reads both.
+  if (!enriched) j.makesafe_job_family = row.makesafe_type || null;
+  return j;
+}
+
+// Canonical columns -> the board's per-stage card map. The server owns placement:
+// this only maps each row and keeps the seven rendered stage keys present.
+function buildMakesafeBoardColumns(payload, enrichById) {
+  enrichById = enrichById || {};
+  var out = {};
+  MAKESAFES_STAGES.forEach(function(stage) { out[stage] = []; });
+  var columns = (payload && payload.columns) || {};
+  Object.keys(columns).forEach(function(stage) {
+    var known = Object.prototype.hasOwnProperty.call(out, stage);
+    (columns[stage] || []).forEach(function(row) {
+      var card = mapCanonicalMakesafeRow(row, enrichById[row && row.id]);
+      if (known) { out[stage].push(card); return; }
+      // A stage this board does not render would otherwise vanish. Keep the card
+      // visible in New and say why, rather than lose it silently.
+      console.warn('Make-safe board: unrendered canonical stage "' + stage + '" on ' + (card.job_number || card.id));
+      if (!card.projection_warning) card.projection_warning = 'Unrendered canonical stage: ' + stage;
+      out.new.push(card);
     });
   });
   return out;
 }
+
+// Last canonical envelope (contract version, parity, intake_exceptions) and
+// whether the close-out enrichment join was available on the last load. Both feed
+// renderMakesafeFeedNotices.
+var _makesafeBoardPayload = null;
+var _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
+
+async function fetchMakesafeBoardData() {
+  var results = await Promise.all([
+    opsFetch('makesafe_board', { projection: 'ops' }),
+    // Decoration only — never blocks the board. See <makesafe-board-canonical>.
+    opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
+      console.warn('Make-safe board: close-out enrichment unavailable:', e && e.message);
+      return null;
+    })
+  ]);
+  var payload = results[0] || {};
+  if (payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
+    throw new Error('Unsupported make-safe board contract: ' + (payload.contract_version || 'none'));
+  }
+  var enrich = results[1];
+  var enrichById = {};
+  Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
+    (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
+  });
+  var canonicalRows = [];
+  Object.keys(payload.columns || {}).forEach(function(stage) {
+    (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
+  });
+  var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
+  _makesafeBoardEnrichState = !enrich
+    ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
+    : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
+  _makesafeBoardPayload = payload;
+  return { columns: buildMakesafeBoardColumns(payload, enrichById), _canonical: payload };
+}
+
+// Small, non-blocking notices above the board for the two ways this feed can
+// silently lose data: the backend's degraded intake-exception panel (the board is
+// still served, the exception cards are not — ops-api v949 marks it instead of
+// answering 500), and a missing close-out enrichment join.
+function renderMakesafeFeedNotices() {
+  var notices = [];
+  var degraded = ((_makesafeBoardPayload || {}).intake_exceptions || {}).degraded;
+  if (degraded) {
+    var when = degraded.failed_at ? _makesafeTruthAgo(degraded.failed_at) : '';
+    notices.push('<b>Intake exception panel degraded</b> &mdash; the board is complete, but intake exception cards could not be read'
+      + (degraded.reason ? ' (' + escapeHtml(String(degraded.reason)) + ')' : '')
+      + (when ? ', ' + escapeHtml(when) : '') + '.'
+      + (degraded.error ? '<span style="display:block;opacity:.8;margin-top:2px;word-break:break-word;">' + escapeHtml(String(degraded.error).slice(0, 240)) + '</span>' : ''));
+  }
+  if (_makesafeBoardEnrichState.status === 'failed') {
+    notices.push('<b>Close-out detail unavailable</b> &mdash; cards are showing canonical stages only; work-order and invoice chips may read as pending.');
+  }
+  if (_makesafeBoardEnrichState.status === 'partial') {
+    notices.push('<b>Close-out detail partially unavailable</b> &mdash; ' + _makesafeBoardEnrichState.missing + ' of ' + _makesafeBoardEnrichState.total + ' cards are missing work-order, invoice or SWMS-slug detail; columns and placement remain complete from the canonical feed.');
+  }
+  if (!notices.length) return '';
+  return '<div class="ms-feed-notice" role="status" style="display:flex;flex-direction:column;gap:4px;'
+    + 'padding:7px 12px;margin:0 0 8px;border-radius:8px;font-size:11px;'
+    + 'background:#FEF3E7;border:1px solid #F5C889;color:#7A4A12;">'
+    + notices.map(function(n) { return '<span>&#9888; ' + n + '</span>'; }).join('')
+    + '</div>';
+}
+// </makesafe-board-canonical>
 function getMakesafeAssignmentRows(j) {
   var rows = [];
   if (Array.isArray(j.assignments)) rows = rows.concat(j.assignments);
@@ -10443,9 +10708,10 @@ function renderMakesafeTinyBadge(label, color) {
 // Compact, scannable per-card status: one small tile each for Work Order (W),
 // Report (R), SWMS (S), Invoice ($), and "emailed to builder" / sent (➤).
 // Replaces the verbose pill stack so a whole column reads at a glance. Drives off
-// the makesafe_pipeline list payload fields (has_wo / has_report_doc /
-// has_swms_doc / has_invoice_doc / missing_docs / invoice_status / report_status /
-// requesting_company_slug) — see data notes inline below.
+// the mapped card fields (has_wo / has_report_doc / has_swms_doc / has_invoice_doc
+// / missing_docs / invoice_status / report_status / requesting_company_slug), which
+// mapCanonicalMakesafeRow fills from the canonical row plus the close-out
+// enrichment join — see <makesafe-board-canonical> and the data notes below.
 //
 // Why letter/symbol tiles, not emoji icons: emoji glyphs (clipboard/page/shield/
 // envelope) render in fixed full colour on most platforms and ignore CSS `color`,
@@ -10550,10 +10816,10 @@ function renderMakesafeStatusIcons(j, status) {
 
   // 2) Make-safe report
   var reportStatus = String(j.report_status || '').toLowerCase();
-  if (j.has_report_doc) add('report', 'done', 'Rep', 'Report: attached');
-  else if (missing.report) add('report', 'missing', 'Rep', 'Report: missing (expected)');
-  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') add('report', 'missing', 'Rep', 'Report submitted: PDF missing');
-  else add('report', 'pending', 'Rep', 'Report: awaiting trade report');
+  if (j.has_report_doc) add('report', 'done', 'Report', 'Report: attached');
+  else if (missing.report) add('report', 'missing', 'Report', 'Report: missing (expected)');
+  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') add('report', 'missing', 'Report', 'Report submitted: PDF missing');
+  else add('report', 'pending', 'Report', 'Report: awaiting trade report');
 
   // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
   if (slug !== 'mlb') add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
@@ -12499,7 +12765,7 @@ function renderJobList(container, columns) {
     html += '<tr onclick="openJobDetail(\'' + j.id + '\')" onmouseenter="hoverJobCard(event,\'' + j.id + '\')" onmouseleave="hideJobHover()" style="cursor:pointer;">';
     html += '<td><strong>' + (j.client_name || 'Unknown') + '</strong></td>';
     html += '<td>' + (j.site_suburb || '') + '</td>';
-    // List view: make-safe jobs carry makesafe_job_family_label directly from makesafe_pipeline.
+    // List view: make-safe cards carry their family label through mapCanonicalMakesafeRow.
     html += '<td><span class="type-badge ' + j.type + '">' + (j.type === 'makesafe' ? escapeHtml(getMakesafeTypeLabel(j)) : typeBadgeLabel(j.type)) + '</span></td>';
     html += '<td><span class="status-badge ' + j.status + '">' + STATUS_LABELS[j.status] + '</span></td>';
     html += '<td style="font-family:var(--sw-font-num);">' + (j.value ? fmt$(j.value) : '-') + '</td>';

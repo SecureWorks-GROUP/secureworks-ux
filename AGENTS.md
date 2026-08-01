@@ -38,11 +38,8 @@ projection `ops`) — the same canonical feed the Trade board uses, and the only
 carrying `canonical_stage` (declared `board_stage` + the captain display ledger).
 Column placement comes from `canonical_stage` and nothing else; the client
 re-derives no stage. Search `// <makesafe-board-canonical>` in `ops.html`.
-Correcting the record: secureworks-backend PR 468's evidence doc and AGENTS.md
-entry say `ops.html` *falls back* from `makesafe_board` to `makesafe_pipeline` —
-false. Until this change it only ever called `makesafe_pipeline`, so no
-display-ledger transition had EVER been visible on the ops UI. There was no
-fallback because there was no primary.
+This is the board's primary feed; it did not previously have a
+`makesafe_board` fallback. Do not describe the migration as fallback logic.
 `makesafe_pipeline?history=all` is still fetched alongside, but only as a
 presentation join over the identical job set (`MAKESAFE_ENRICH_FIELDS`) for the
 close-out fields the canonical projection drops — has_wo, invoice_status,

@@ -5865,6 +5865,15 @@ function cleanCrewName(name) {
   return CREW_NAME_MAP[key] || name;
 }
 
+// Match by user_id first (reliable), fallback to name matching
+function crewDisplayName(ev) {
+  if (ev.user_id) {
+    var m = _crewList.find(function(u) { return u.id === ev.user_id; });
+    if (m) return m.name;
+  }
+  return cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
+}
+
 async function loadCrewList() {
   if (_crewList.length > 0) return;
   try {
@@ -7491,14 +7500,7 @@ function renderSwimlaneView(container, range) {
     if (aType === 'reminder' && !_calEventFilters.reminders) return;
     if (ev.job_id && !_calEventFilters.jobs) return;
     if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !_calEventFilters.jobs) return;
-    // Match by user_id first (reliable), fallback to name matching
-    var crew = 'Unassigned';
-    if (ev.user_id) {
-      var _match = _crewList.find(function(u) { return u.id === ev.user_id; });
-      crew = _match ? _match.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      crew = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var crew = crewDisplayName(ev);
     if (!crewMap[crew]) crewMap[crew] = { division: guessDivision(ev), events: {} };
     var startDate = ev.scheduled_date;
     var endDate = ev.scheduled_end || ev.scheduled_date;
@@ -7990,13 +7992,7 @@ function renderScheduleView(container, range) {
       // Group job-less entries by label+date so multiple crew appear on one bar
       var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date;
       if (!labelMap[aid]) {
-        var crewName = 'Unassigned';
-        if (ev.user_id) {
-          var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-          crewName = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-        } else {
-          crewName = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-        }
+        var crewName = crewDisplayName(ev);
         var crew = {};
         if (crewName !== 'Unassigned') crew[crewName] = true;
         labelMap[aid] = {
@@ -8015,13 +8011,7 @@ function renderScheduleView(container, range) {
         if (ev.scheduled_date < labelMap[aid].start) labelMap[aid].start = ev.scheduled_date;
         var evEnd2 = spanEnd(ev);
         if (evEnd2 > labelMap[aid].end) labelMap[aid].end = evEnd2;
-        var crewName2 = 'Unassigned';
-        if (ev.user_id) {
-          var m2 = _crewList.find(function(u) { return u.id === ev.user_id; });
-          crewName2 = m2 ? m2.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-        } else {
-          crewName2 = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-        }
+        var crewName2 = crewDisplayName(ev);
         if (crewName2 !== 'Unassigned') labelMap[aid].crew[crewName2] = true;
       }
       return;
@@ -8078,13 +8068,7 @@ function renderScheduleView(container, range) {
     if (evEndDate > jobMap[jid].end) jobMap[jid].end = evEndDate;
     if (!jobMap[jid].assignmentId && ev.assignment_id) jobMap[jid].assignmentId = ev.assignment_id;
     // Collect crew
-    var crewName = 'Unassigned';
-    if (ev.user_id) {
-      var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-      crewName = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      crewName = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var crewName = crewDisplayName(ev);
     if (crewName !== 'Unassigned') jobMap[jid].crew[crewName] = true;
   });
 
@@ -8390,13 +8374,7 @@ function showScheduleTooltip(event, jobId) {
   var crewSet = {};
   _calEvents.forEach(function(ev) {
     if (ev.job_id !== jobId) return;
-    var cn = 'Unassigned';
-    if (ev.user_id) {
-      var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-      cn = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      cn = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var cn = crewDisplayName(ev);
     if (cn !== 'Unassigned') crewSet[cn] = true;
   });
   var crewNames = Object.keys(crewSet);
@@ -8582,6 +8560,23 @@ function handleSchedDrop(event) {
   }
 }
 
+function crewDayClash(crew, dateStr) {
+  var avail = _calAvailability[crew + '_' + dateStr];
+  return (avail && (avail.status === 'unavailable' || avail.status === 'leave')) ? avail : null;
+}
+
+// Warn if the target day is unavailable/leave for the crew; otherwise proceed.
+function confirmIfCrewUnavailable(crew, dateStr, proceed) {
+  var avail = crewDayClash(crew, dateStr);
+  if (!avail) { proceed(); return; }
+  showConfirmModal(
+    'Crew Unavailable',
+    escapeHtml(crew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(dateStr) + '. Schedule anyway?',
+    'Schedule Anyway',
+    proceed
+  );
+}
+
 // CP1 (dragv2): Schedule-view bar move. The drop day is the segment's new
 // START. A single-assignment segment routes through moveAssignment with its
 // OWN crew — identical guards to the Crew view (confirmed lock, availability
@@ -8602,17 +8597,10 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
     showToast('Confirmed — use Reschedule in the job popup', 'warning');
     return;
   }
-  function crewNameOf(ev) {
-    if (ev.user_id) {
-      var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-      if (m) return m.name;
-    }
-    return cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-  }
   if (evs.length === 1) {
     // Pin the event's own user_id so this path can NEVER resolve a different
     // person by display name and turn the move into a reassign.
-    moveAssignment(evs[0].assignment_id, crewNameOf(evs[0]), newDate, { pinnedUserId: evs[0].user_id || null });
+    moveAssignment(evs[0].assignment_id, crewDisplayName(evs[0]), newDate, { pinnedUserId: evs[0].user_id || null });
     return;
   }
   evs.sort(function(a, b) { return a.scheduled_date.localeCompare(b.scheduled_date); });
@@ -8626,9 +8614,9 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
     // Keep each assignment's working-day offset within the dragged bar.
     var offset = CalOpsCore.workingSpanDays(oldStart, ev.scheduled_date);
     var evStart = CalOpsCore.layWorkingDays(newDate, offset);
-    var plan = CalOpsCore.buildMovePayloadV2(ev, crewNameOf(ev), ev.user_id || null, evStart);
+    var plan = CalOpsCore.buildMovePayloadV2(ev, crewDisplayName(ev), ev.user_id || null, evStart);
     if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
-    plans.push({ ev: ev, crew: crewNameOf(ev), plan: plan });
+    plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
   }
   async function applyMoves() {
     try {
@@ -8646,8 +8634,8 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
   plans.forEach(function(p) {
     var span = CalOpsCore.paintedSpanDates(p.plan.update.scheduled_date, p.plan.update.scheduled_end);
     span.forEach(function(ds) {
-      var avail = _calAvailability[p.crew + '_' + ds];
-      if (avail && (avail.status === 'unavailable' || avail.status === 'leave')) {
+      var avail = crewDayClash(p.crew, ds);
+      if (avail) {
         clashes.push(escapeHtml(p.crew) + ' — ' + fmtDate(ds) + ' (<strong>' + avail.status + '</strong>)');
       }
     });
@@ -8697,24 +8685,7 @@ async function resizeAssignment(assignmentId, edge, targetDate) {
   }
   // Warn if the dropped edge lands on an unavailable/leave day — a resize
   // never changes crew, so the event's own crew keys the availability lookup.
-  var crew = 'Unassigned';
-  if (ev.user_id) {
-    var match = _crewList.find(function(u) { return u.id === ev.user_id; });
-    crew = match ? match.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-  } else {
-    crew = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-  }
-  var avail = _calAvailability[crew + '_' + targetDate];
-  if (avail && (avail.status === 'unavailable' || avail.status === 'leave')) {
-    showConfirmModal(
-      'Crew Unavailable',
-      escapeHtml(crew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(targetDate) + '. Schedule anyway?',
-      'Schedule Anyway',
-      function() { doResizeAssignment(ev, edge, targetDate); }
-    );
-    return;
-  }
-  doResizeAssignment(ev, edge, targetDate);
+  confirmIfCrewUnavailable(crewDisplayName(ev), targetDate, function() { doResizeAssignment(ev, edge, targetDate); });
 }
 
 async function doResizeAssignment(ev, edge, targetDate) {
@@ -8867,19 +8838,7 @@ async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   }
 
   // Warn if target cell is unavailable/leave
-  var availKey = newCrew + '_' + newDate;
-  var avail = _calAvailability[availKey];
-  if (avail && (avail.status === 'unavailable' || avail.status === 'leave')) {
-    showConfirmModal(
-      'Crew Unavailable',
-      escapeHtml(newCrew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(newDate) + '. Schedule anyway?',
-      'Schedule Anyway',
-      function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); }
-    );
-    return;
-  }
-
-  doMoveAssignment(assignmentId, newCrew, newDate, opts);
+  confirmIfCrewUnavailable(newCrew, newDate, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
 }
 
 async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {

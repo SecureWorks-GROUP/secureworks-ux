@@ -10348,6 +10348,22 @@ function getSesFamilyLabel(j) {
   if (SES_FAMILY_LABELS[fam]) return SES_FAMILY_LABELS[fam];
   return fam.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 }
+// THE BOARD CARD'S FAMILY TAG — canonical row or nothing.
+// A card is built from a `makesafe-board.v1` row, and that row always carries the
+// family verdict, so the card has no business guessing one. This helper is
+// deliberately a dead end: canonical family, else "Family not determined". It can
+// never reach the metadata/text/regex chain in getMakesafeTypeLabel below, so a
+// degraded or partial feed fails to "unknown" instead of resuming the guessing
+// that mislabelled 74 of 407 cards (ses-ui-ground-truth-v1 §2.6).
+// The other make-safe surfaces (job detail, calendar popup, job lists) are fed by
+// `job_detail` / `list_jobs`, which carry no `ses_family` at all — they keep the
+// legacy chain below, because for them the alternative is no label whatsoever.
+function getMakesafeCardFamilyLabel(j) {
+  return getSesFamilyLabel(j) || SES_FAMILY_UNKNOWN_LABEL;
+}
+function isMakesafeCardFamilyUndetermined(j) {
+  return getMakesafeCardFamilyLabel(j) === SES_FAMILY_UNKNOWN_LABEL;
+}
 function getMakesafeTypeLabel(j, mdOverride) {
   // The canonical family beats every local lookup below, including the override.
   var sesLabel = getSesFamilyLabel(j);
@@ -10422,19 +10438,35 @@ function getMakesafeStage(j, rawStatus) {
 // contradicted their own column; ses-ui-ground-truth-v1 §3.3).
 //
 // Authority order for the detail, and there is no fourth option:
-//   1. `canonical_stage` on the job_detail payload — the durable server answer.
-//      Only that key is trusted: a bare `board_stage` is the DECLARED stage and
-//      is overlay-blind by construction, so it is never read here.
-//   2. the canonical stage the `makesafe-board.v1` feed already published for
-//      this job id (remembered per card at map time, refreshed on every load).
+//   1. `canonical_stage` on the job_detail payload — the durable server answer if
+//      and when the `job_detail` producer carries one. Only that key is trusted:
+//      a bare `board_stage` is the DECLARED stage and is overlay-blind by
+//      construction, so it is never read here. The deployed `job_detail` does NOT
+//      supply it today, so in practice authority (2) answers.
+//   2. the canonical stage `makesafe-board.v1` published for this job id.
 //   3. unknown. The badge says so and every forward-move action is withheld.
 //      A stage is never guessed from substatus again.
+//
+// FRESHNESS IS PART OF THE CONTRACT. (2) is a read of a feed, and a read goes
+// stale the moment anything transitions the job — so it is invalidated and re-read
+// rather than remembered indefinitely:
+//   - opening a make-safe detail reads the canonical feed and REPAINTS the detail
+//     if the answer differs from what was painted (`openJobDetail`);
+//   - every make-safe transition this page performs calls
+//     `refreshMakesafeCanonicalStages()`, which DROPS the whole map and re-reads
+//     the feed, then repaints the open detail from that response
+//     (`afterMakesafeStageTransition`).
+// Dropping the map (rather than patching one entry) is deliberate: one transition
+// can move sibling cards through the display ledger too, and a failed re-read must
+// fail closed to "Stage not confirmed" instead of showing a pre-write stage.
 // ════════════════════════════════════════════════════════════
 var MAKESAFE_CANONICAL_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive', 'cancelled'];
 var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready'];
 
-// job id -> canonical stage, straight off the canonical feed's rows.
+// job id -> canonical stage / canonical pack existence, straight off the
+// canonical feed's rows. Both are dropped together on every transition.
 var _makesafeCanonicalStageById = {};
+var _makesafeCanonicalPackById = {};
 var _makesafeCanonicalStageFetch = null;
 
 function makesafeCanonicalStageOf(source) {
@@ -10443,8 +10475,12 @@ function makesafeCanonicalStageOf(source) {
 }
 
 function rememberMakesafeCanonicalStage(row) {
+  if (!row || !row.id) return;
   var stage = makesafeCanonicalStageOf(row);
-  if (row && row.id && stage) _makesafeCanonicalStageById[row.id] = stage;
+  if (stage) _makesafeCanonicalStageById[row.id] = stage;
+  if (row.pack && typeof row.pack === 'object') {
+    _makesafeCanonicalPackById[row.id] = makesafeHasDraftedPack({ report_pack: row.pack });
+  }
 }
 
 // The stage a make-safe job detail may display, plus where it came from.
@@ -10458,10 +10494,11 @@ function resolveMakesafeDetailStage(data) {
   return { stage: '', source: 'unknown' };
 }
 
-// Read the canonical board feed once per session so a job opened without the
-// board (deep link, search result) still gets a canonical stage instead of a
-// guess. Read-only GET of the same feed the board renders; never a write, and a
-// failure just leaves the stage unknown.
+// Read the canonical board feed so a job opened without the board (deep link,
+// search result) still gets a canonical stage instead of a guess. Read-only GET of
+// the same feed the board renders; never a write, and a failure leaves the stage
+// unknown. Memoised per read so one detail paint issues one request; call
+// refreshMakesafeCanonicalStages() to force a current answer.
 function ensureMakesafeCanonicalStages() {
   if (!_makesafeCanonicalStageFetch) {
     _makesafeCanonicalStageFetch = opsFetch('makesafe_board', { projection: 'ops' })
@@ -10476,6 +10513,23 @@ function ensureMakesafeCanonicalStages() {
       });
   }
   return _makesafeCanonicalStageFetch;
+}
+
+// Forget every remembered canonical answer and read the feed again. Anything a
+// transition may have moved is therefore re-read, not recalled.
+function refreshMakesafeCanonicalStages() {
+  _makesafeCanonicalStageById = {};
+  _makesafeCanonicalPackById = {};
+  _makesafeCanonicalStageFetch = null;
+  return ensureMakesafeCanonicalStages();
+}
+
+// Repaint the open job detail from a CURRENT canonical response. Called after
+// every make-safe transition this page performs: without it the detail keeps the
+// stage it was painted with and can offer a move the new stage forbids.
+async function afterMakesafeStageTransition() {
+  await refreshMakesafeCanonicalStages();
+  if (_currentJobId) await refreshJobDetail();
 }
 // </makesafe-detail-canonical-stage>
 // ════════════════════════════════════════════════════════════
@@ -10726,7 +10780,13 @@ async function fetchMakesafeBoardData() {
     ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
     : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
   _makesafeBoardPayload = payload;
-  return { columns: buildMakesafeBoardColumns(payload, enrichById), _canonical: payload };
+  // This load IS a current canonical read, and buildMakesafeBoardColumns has just
+  // remembered every row's stage and pack from it. Satisfy the detail's lookup
+  // with it so opening a card straight off a fresh board does not re-GET the same
+  // feed. A transition still clears this (refreshMakesafeCanonicalStages).
+  var columns = buildMakesafeBoardColumns(payload, enrichById);
+  _makesafeCanonicalStageFetch = Promise.resolve();
+  return { columns: columns, _canonical: payload };
 }
 
 // Small, non-blocking notices above the board for the two ways this feed can
@@ -11028,22 +11088,43 @@ function makesafeUiStageLabel(stage) {
 }
 
 // ── "Docs Ready" honesty ─────────────────────────────────────────────────
-// The Docs Ready column holds cards; the report-drafts feed that backs the
-// review-and-send pack holds none, so the column asserts a document pack that
-// does not exist (24 cards, 0 packs — ses-ui-ground-truth-v1 §0). This does NOT
-// redefine what Docs Ready means (captain decision C.4, still open); it only
-// answers "is there a drafted pack for THIS card" so the card and the column can
-// stop implying one. A pack is drafted only when the backend says so: an
-// explicit resume_action / pack_status from the report-drafts feed, or the
-// canonical report_ready verdict together with the drafted-not-sent substatus.
-var MAKESAFE_DRAFTED_PACK_STATES = ['drafted', 'draft', 'authorised', 'authorized', 'sent', 'closed'];
+// The Docs Ready column holds cards; no document pack has ever been drafted for
+// them (24 cards, 0 packs — ses-ui-ground-truth-v1 §0), so the column asserts a
+// pack that does not exist. This does NOT redefine what Docs Ready means (captain
+// decision C.4, still open); it only answers "is there a drafted pack for THIS
+// card" so the card and the column can stop implying one.
+//
+// CANONICAL ROW OR NOTHING. The answer comes from the `makesafe-board.v1` row's
+// own pack block (`row.pack` -> `j.report_pack`), which states pack existence
+// directly: `drafted`, `state` (not_started / drafted / sending / sent / failed),
+// `sent`, `sent_at`. Two things are deliberately NOT consulted:
+//   - `resume_action` / `pack_status`, which come from the overlay-blind
+//     `makesafe_pipeline` enrichment join — the forbidden side-channel; and
+//   - `board_stage` + substatus, which are a column and a workflow flag, not a
+//     pack. Inferring a pack from `report_ready + admin_to_send_report` invents a
+//     document that does not exist, which is the exact lie being removed here.
+// No pack facts on the row => no pack drafted. Never a guess in the other
+// direction.
+var MAKESAFE_DRAFTED_PACK_STATES = ['drafted', 'draft', 'authorised', 'authorized', 'sending', 'sent', 'failed', 'closed'];
 function makesafeHasDraftedPack(j) {
-  if (!j) return false;
-  if (j.resume_action) return true;
-  var ps = j.pack_status && (j.pack_status.status || j.pack_status.state);
-  if (ps && MAKESAFE_DRAFTED_PACK_STATES.indexOf(String(ps).toLowerCase()) >= 0) return true;
-  var stage = String(j.board_stage || j.makesafe_stage || '').toLowerCase();
-  return stage === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report';
+  var pack = j && j.report_pack;
+  if (!pack || typeof pack !== 'object') return false;
+  if (pack.drafted === true) return true;
+  if (pack.sent === true || pack.sent_at) return true;
+  var state = String(pack.state || '').trim().toLowerCase();
+  return MAKESAFE_DRAFTED_PACK_STATES.indexOf(state) >= 0;
+}
+// The same pack truth for a job the detail is showing. `job_detail` carries no
+// canonical pack block, so the answer is whatever the canonical feed published
+// for this job id — or "not confirmed", which is stated rather than guessed.
+function resolveMakesafeDetailPack(data) {
+  var j = (data && data.job) || {};
+  if (j.report_pack && typeof j.report_pack === 'object') {
+    return { known: true, drafted: makesafeHasDraftedPack(j) };
+  }
+  var remembered = j.id ? _makesafeCanonicalPackById[j.id] : undefined;
+  if (remembered === undefined) return { known: false, drafted: false };
+  return { known: true, drafted: remembered };
 }
 async function moveMakesafeUiStage(jobId, stage) {
   // MONEY-SAFETY: a drag into the two report columns must move the SUBSTATUS only,
@@ -11166,7 +11247,8 @@ function renderMakesafeCard(j, status) {
   var intake = getMakesafeIntakeDate(j);
   var intakeLabel = intake ? fmtDate(String(intake).slice(0, 10)) : 'n/a';
   var crew = getMakesafeCrewLabel(j);
-  var typeLabel = getMakesafeTypeLabel(j);
+  // Canonical family only on a board card — see getMakesafeCardFamilyLabel.
+  var typeLabel = getMakesafeCardFamilyLabel(j);
   var assignDate = getMakesafeAssignmentDateDMY(j);
   var tintCls = makesafeTypeTintClass(typeLabel);
 
@@ -11187,9 +11269,13 @@ function renderMakesafeCard(j, status) {
   // is board_stage === 'report_ready'; a report-in-but-undrafted job is 'trade_report_in'.
   // Fallback: if a pre-#193 payload carries no board_stage, keep the old substatus-only
   // behaviour so nothing regresses.
+  // ...and, since #227, on the canonical row actually carrying a pack: the chip
+  // reads "Report pack drafted", so stage + substatus alone must not be allowed to
+  // assert one (see makesafeHasDraftedPack).
   var backendStage = j.board_stage || j.makesafe_stage || '';
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
-    && (backendStage ? backendStage === 'report_ready' : true);
+    && (backendStage ? backendStage === 'report_ready' : true)
+    && makesafeHasDraftedPack(j);
   // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
   // drafts feed supplies (mirrored onto the board payload by the backend). Drives the
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
@@ -11199,9 +11285,9 @@ function renderMakesafeCard(j, status) {
 
   // top line: type tag + ready-to-send chip + age/KPI pill
   html += '<div class="ms-top">';
-  var familyUndetermined = isSesFamilyUndetermined(j);
+  var familyUndetermined = isMakesafeCardFamilyUndetermined(j);
   html += '<span class="ms-ttag' + (familyUndetermined ? ' unknown' : '') + '"'
-    + (familyUndetermined ? ' title="The canonical feed could not determine this job family (ses_family: unknown). No family is guessed from the job text."' : '')
+    + (familyUndetermined ? ' title="The canonical feed did not determine this job family. No family is guessed from the job text."' : '')
     + '>' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
@@ -11333,7 +11419,11 @@ async function advanceMakesafeSubstatus(jobId, newSubstatus) {
   try {
     await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: newSubstatus });
     showToast('Substatus updated', 'success');
-    refreshJobDetail();
+    // The transition may have moved this job's canonical column. Re-read the
+    // canonical feed and repaint the detail from THAT answer before anything
+    // else, so the badge and the Next step block can never show the pre-write
+    // stage. See <makesafe-detail-canonical-stage>.
+    await afterMakesafeStageTransition();
     loadJobs();
   } catch (e) {
     showToast('Failed: ' + e.message, 'warning');
@@ -12966,6 +13056,9 @@ async function kanbanDrop(e) {
     if (_pipelineTab === 'makesafes') {
       await moveMakesafeUiStage(jobId, toStatus);
       showToast('Make-safe moved to ' + makesafeUiStageLabel(toStatus), 'success');
+      // A drag is a stage transition too — re-read the canonical feed and repaint
+      // any open detail rather than leave it on the pre-drag stage.
+      await afterMakesafeStageTransition();
     } else {
       await opsPost('update_job_status', { jobId: jobId, status: toStatus });
       showToast('Job moved to ' + (STATUS_LABELS[toStatus] || toStatus), 'success');
@@ -15511,13 +15604,19 @@ async function openJobDetail(jobId) {
     showJobSubView('overview');
 
     // A make-safe detail shows the CANONICAL board stage and gates its actions on
-    // it. When the board feed has not been read this session (deep link straight
-    // into a job), read it once — read-only — and repaint, rather than leave the
-    // stage unconfirmed. See <makesafe-detail-canonical-stage>.
-    if (String((data.job || {}).type) === 'makesafe' && resolveMakesafeDetailStage(data).source === 'unknown') {
+    // it, so it always reads the canonical feed (read-only) and repaints when that
+    // answer differs from the one it just painted — whether the first paint had no
+    // stage at all (deep link straight into a job) or a remembered one that a
+    // transition has since moved. See <makesafe-detail-canonical-stage>.
+    if (String((data.job || {}).type) === 'makesafe') {
+      var paintedStage = resolveMakesafeDetailStage(data);
+      var paintedPack = resolveMakesafeDetailPack(data);
       ensureMakesafeCanonicalStages().then(function() {
         if (_currentJobId !== jobId || _currentJobData !== data) return;
-        if (resolveMakesafeDetailStage(data).source === 'unknown') return;
+        var currentStage = resolveMakesafeDetailStage(data);
+        var currentPack = resolveMakesafeDetailPack(data);
+        if (currentStage.stage === paintedStage.stage && currentStage.source === paintedStage.source
+          && currentPack.known === paintedPack.known && currentPack.drafted === paintedPack.drafted) return;
         renderOverviewView(data);
       });
     }
@@ -17043,12 +17142,16 @@ function renderMakesafeOpsDetail(data) {
     invoiceDocs.slice(0, 3).forEach(function(doc) { html += renderMakesafeDocPreview(doc); });
   } else {
     // Docs Ready with no drafted pack must not read as "docs ready" — say which.
-    var packDrafted = makesafeHasDraftedPack(Object.assign({}, j, { board_stage: stage, substatus: sub }));
+    // The verdict is canonical pack truth or an explicit "not confirmed"; it is
+    // never inferred from this column plus a substatus.
+    var packInfo = resolveMakesafeDetailPack(data);
     var invHeadline = (stage !== 'report_ready')
       ? { text: 'No invoice yet', color: '#8FA4B2' }
-      : (packDrafted
-        ? { text: 'Docs ready for admin/reporting skill', color: '#9B59B6' }
-        : { text: 'Docs Ready column &mdash; no pack drafted yet', color: '#B45309' });
+      : (!packInfo.known
+        ? { text: 'Docs Ready column &mdash; pack state not confirmed', color: '#8FA4B2' }
+        : (packInfo.drafted
+          ? { text: 'Docs ready for admin/reporting skill', color: '#9B59B6' }
+          : { text: 'Docs Ready column &mdash; no pack drafted yet', color: '#B45309' }));
     html += '<div style="font-size:14px;font-weight:850;color:' + invHeadline.color + ';margin-bottom:6px;">' + invHeadline.text + '</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">The reporting skill/admin process should produce the final report and invoice, then mark this completed.</div>';
   }
@@ -20380,6 +20483,7 @@ async function _doMakesafeCancel(jobId, reasonCode, note) {
   try {
     await opsPost('cancel_makesafe', { job_id: jobId, reason_code: reasonCode, note: note });
     showToast('Make-safe cancelled', 'info');
+    await afterMakesafeStageTransition();
     loadJobs();
   } catch (e) {
     if (/live[_ ]?invoice/i.test(String((e && e.message) || ''))) {
@@ -20394,6 +20498,7 @@ async function reopenMakesafeJob(jobId) {
   try {
     await opsPost('reopen_makesafe', { job_id: jobId, reason: 'reopen after cancel' });
     showToast('Make-safe reopened — back in New', 'info');
+    await afterMakesafeStageTransition();
     loadJobs();
   } catch (e) {
     showToast('Could not reopen: ' + (e && e.message ? e.message : 'unknown error'), 'error');

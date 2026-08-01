@@ -1,0 +1,92 @@
+{
+  "generated_by": "scripts/makesafe-ui-truth-census.js",
+  "board": "ops.html?noAutoIntake=1#jobs → Make-Safes",
+  "feed": "ops-api?action=makesafe_board&projection=ops (makesafe-board.v1) + makesafe_pipeline?history=all (presentation join)",
+  "population": {
+    "canonical_rows_rendered": 440,
+    "cards_per_rendered_column": {
+      "intake": 10,
+      "new": 36,
+      "allocated": 30,
+      "trade_report_in": 12,
+      "report_ready": 24,
+      "completed": 2,
+      "archive": 303,
+      "cancelled": 33
+    },
+    "note": "The `intake` column holds intake DRAFTS, which are not `makesafe-board.v1` rows and are not part of this population."
+  },
+  "family_tags": {
+    "cards_with_a_tag": 440,
+    "agree_with_canonical_ses_family": 440,
+    "disagree": 0,
+    "undetermined_rendered_as_not_determined": 22,
+    "label_vocabulary": {
+      "MakeSafe": 176,
+      "Temporary Fence MakeSafe": 126,
+      "Roof Report": 61,
+      "Restoration": 1,
+      "Assessment / Quote Report": 54,
+      "Family not determined": 22
+    }
+  },
+  "detail_vs_column": {
+    "contradictions_now": 0,
+    "contradictions_with_the_pre_change_derivation": 325,
+    "pre_change_contradictions_offering_a_move_on_a_terminal_card": 59,
+    "detail_stage_sources": {
+      "board_feed": 440
+    }
+  },
+  "docs_ready_pack_truth": {
+    "cards": 24,
+    "canonical_pack_drafted": 1,
+    "no_pack_chip_rendered": 23
+  },
+  "card_face_links": {
+    "builder_link_anchors": 269,
+    "cards_with_at_least_one_builder_link": 122,
+    "anchors_total_including_other_card_links": 269
+  },
+  "privacy_scan_of_the_rendered_dom": {
+    "emails": 0,
+    "phones": 0,
+    "street_lines": 0
+  },
+  "privacy_scan_after_capture": {
+    "emails": 0,
+    "phones": 0
+  },
+  "screenshots": [
+    "00-board-docs-ready-honesty.png",
+    "01-family-assessment-quote.png",
+    "02-family-ordinary-roof-portal.png",
+    "03-family-physical-makesafe.png",
+    "04-family-restoration.png",
+    "05-family-temporary-fencing.png",
+    "06-family-unknown.png",
+    "10-detail-archived-SWMS-261099-header.png",
+    "11-detail-archived-SWMS-261099-next-step.png"
+  ],
+  "requests": {
+    "total": 10,
+    "by_method": {
+      "GET": 10
+    },
+    "non_get": 0,
+    "actions": {
+      "list_users": 1,
+      "pipeline": 1,
+      "list_intake_drafts": 2,
+      "makesafe_audit": 2,
+      "makesafe_pipeline": 1,
+      "makesafe_board": 1,
+      "job_detail": 1,
+      "annotations": 1
+    }
+  },
+  "console": {
+    "total": 4,
+    "errors": 0
+  }
+}

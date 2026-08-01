@@ -55,20 +55,39 @@ directly and remain overlay-blind — migrating them is follow-up work.
 
 The JOB DETAIL obeys the same rule: it never derives a make-safe's stage from
 substatus. `resolveMakesafeDetailStage` takes `canonical_stage` off the
-`job_detail` payload, else the stage the canonical feed already published for
-that job id, else says "Stage not confirmed" — and the Next step forward-move
-buttons are gated on that stage, so a terminal (archive/cancelled/completed) or
-unconfirmed card offers no move. A bare `board_stage` is the DECLARED stage and
-is deliberately not trusted here. Search `// <makesafe-detail-canonical-stage>`.
-The card's family tag is the canonical row's `ses_family` / `ses_family_label`
-(`getSesFamilyLabel`), never the `inferMakesafeFamilyFromText` regex, and
-`ses_family: 'unknown'` renders as "Family not determined". Docs Ready keeps its
-name and meaning (captain decision C.4 is still open) but a card with no drafted
-pack says "No pack drafted" and the column states how many packs exist —
-`makesafeHasDraftedPack`. Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`;
-live verification evidence in `docs/evidence/ses-b2-ui-truth-2026-08-02/`.
-Read-only sessions against the live board must use `ops.html?noAutoIntake=1`:
-loading the board otherwise POSTs `auto_approve_clean_intake_drafts`.
+`job_detail` payload if that producer ever carries one (it does not today), else
+the stage the canonical feed published for that job id, else says "Stage not
+confirmed" — and the Next step forward-move buttons are gated on that stage, so a
+terminal (archive/cancelled/completed) or unconfirmed card offers no move. A bare
+`board_stage` is the DECLARED stage and is deliberately not trusted here.
+FRESHNESS IS PART OF THAT CONTRACT: the remembered stage is a read, so every
+make-safe transition this page performs (`advanceMakesafeSubstatus`, board drag,
+cancel, reopen) calls `afterMakesafeStageTransition()`, which DROPS the whole map,
+re-reads the canonical feed and repaints the open detail from that response; a
+failed re-read falls back to "Stage not confirmed", never to the pre-write stage.
+Search `// <makesafe-detail-canonical-stage>`.
+
+Two claims on a make-safe surface are canonical-row-or-nothing. The BOARD CARD's
+family tag comes from `getMakesafeCardFamilyLabel` — canonical `ses_family` /
+`ses_family_label` or "Family not determined", with no path to the
+`inferMakesafeFamilyFromText` regex. (`getMakesafeTypeLabel` keeps that legacy
+chain for the detail / calendar / list surfaces, whose feeds carry no
+`ses_family` at all.) PACK EXISTENCE comes from `makesafeHasDraftedPack`, which
+reads only the canonical row's `pack` block (`drafted`, `state`, `sent`,
+`sent_at`) — never the `resume_action` / `pack_status` enrichment fields, and
+never `stage + substatus`, which describe a column and a workflow flag rather
+than a document. Docs Ready keeps its name and meaning (captain decision C.4 is
+still open) but a card the canonical row cannot prove has a pack says "No pack
+drafted", and the column states how many packs exist.
+
+Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live verification evidence in
+`docs/evidence/ses-b2-ui-truth-2026-08-02/`, regenerated end to end by
+`scripts/makesafe-ui-truth-census.js` — that script is also the pattern for any
+read-only live-board measurement here: it routes every request, aborts non-GETs,
+and redacts client data out of every response body before it can reach the DOM or
+a screenshot. Read-only sessions against the live board must use
+`ops.html?noAutoIntake=1`: loading the board otherwise POSTs
+`auto_approve_clean_intake_drafts`.
 
 ## Trade App job cards (`trade.html`)
 

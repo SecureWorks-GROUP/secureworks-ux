@@ -9,40 +9,71 @@ const { test, expect } = require('@playwright/test');
 //   4. the builder links the row already carries render on the card face.
 // Ground truth for every number quoted here: data/ses-ui-ground-truth-v1.
 
+// A `makesafe-board.v1` row in the shape the LIVE feed actually sends. Every
+// block here exists on every live row (verified against the production feed by
+// scripts/makesafe-ui-truth-census.js) — in particular `pack`, which is the only
+// admissible evidence that a document pack exists.
+function canonicalRow(over) {
+  return Object.assign({
+    contract_version: 'makesafe-board.v1',
+    id: 'job-row',
+    job_number: 'SWMS-ROW',
+    type: 'makesafe',
+    ses_family: 'physical_makesafe',
+    ses_family_label: 'MakeSafe',
+    ses_recipe_state: null,
+    job_state: 'accepted',
+    substatus: 'company_contact_required',
+    declared_stage: 'new',
+    canonical_stage: 'new',
+    canonical_stage_label: 'New',
+    status_application: null,
+    makesafe_type: 'MakeSafe',
+    builder: { name: 'ML Builders', external_ref: 'MLB-27227PO-56922' },
+    contact: { client_name: 'Test Client', phone: null, address: '2 Test Street, Balga' },
+    assignments: [],
+    report: { state: 'not_started', submitted_at: null, photo_count: 0, cycle_number: 1 },
+    pack: {
+      state: 'not_started', sent: false, sent_at: null, drafted: false,
+      docket_revision_id: null, pre_xero_docs_ready: false,
+      closeout_documents: { report: false, invoice: false, swms: false },
+    },
+    notes: null,
+    lineage: {},
+    age: { age_days: 4, age_hours: 96 },
+    blockers: {},
+    cancelled: null,
+  }, over || {});
+}
+
 // The card the captain's display ledger archived (SWMS-261099 in the report):
 // declared report_ready, canonically archived, substatus still pre-allocation.
 function ledgerArchivedRow() {
-  return {
+  return canonicalRow({
     id: 'job-archived',
     job_number: 'SWMS-ARCHIVED',
-    type: 'makesafe',
-    job_state: 'accepted',
-    substatus: 'company_contact_required',
     declared_stage: 'new',
     canonical_stage: 'archive',
     canonical_stage_label: 'Archive',
     ses_family: 'temporary_fencing',
     ses_family_label: 'Temporary Fencing',
-    makesafe_type: 'MakeSafe',
-    builder: { name: 'ML Builders', external_ref: 'MLB-27227PO-56922' },
-    contact: { client_name: 'Test Client', phone: null, address: '2 Test Street, Balga' },
-    assignments: [], report: {}, pack: {}, lineage: {}, age: { age_days: 4, age_hours: 96 },
-    blockers: {}, cancelled: null,
-  };
+  });
 }
 
 function boardPayload(rows) {
   const columns = { new: [], allocated: [], trade_report_in: [], report_ready: [], completed: [], archive: [], cancelled: [] };
   rows.forEach((r) => { (columns[r.canonical_stage] || columns.new).push(r); });
-  return { contract_version: 'makesafe-board.v1', projection: 'ops', columns, rows };
+  return { contract_version: 'makesafe-board.v1', projection: 'ops', columns };
 }
 
-// Minimal job_detail payload — the shape renderMakesafeOpsDetail is handed.
+// A `job_detail` payload in the shape the LIVE endpoint sends: it carries NO
+// canonical_stage and NO canonical pack block, which is exactly why the detail
+// has to read the canonical board feed for both.
 function detailPayload(job) {
   return {
     job: Object.assign({ type: 'makesafe' }, job),
     documents: [], work_orders: [], invoices: [], events: [], media: [],
-    assignments: [], service_reports: [],
+    assignments: [], service_reports: [], job_assignments: [],
   };
 }
 
@@ -66,21 +97,86 @@ test('an archived card opens as Archive and offers no forward move', async ({ pa
   expect(result.html).toContain('No forward move is offered here');
 });
 
-test('job_detail canonical_stage outranks the remembered board stage', async ({ page }) => {
+test('a transition repaints the open detail from a CURRENT canonical response', async ({ page }) => {
+  // The whole point of the durable-stage contract: the detail must never keep
+  // showing the stage it was painted with. `job_detail` carries no canonical
+  // stage, so after a write the page re-reads the canonical feed and repaints
+  // from that response. Both feeds here are stubbed with their REAL shapes.
   await page.goto('/ops.html');
-  const result = await page.evaluate((payload) => {
-    buildMakesafeBoardColumns(payload, {});
-    const data = {
-      job: { id: 'job-archived', type: 'makesafe', canonical_stage: 'allocated', status: 'accepted', substatus: 'company_contact_required' },
-      documents: [], work_orders: [], invoices: [], events: [], media: [], assignments: [],
+  const result = await page.evaluate(async (payloads) => {
+    const requests = [];
+    const detail = {
+      job: { id: 'job-move', type: 'makesafe', job_number: 'SWMS-MOVE', status: 'accepted', substatus: 'waiting_on_trade_report' },
+      documents: [], work_orders: [], invoices: [], events: [], media: [], assignments: [], job_assignments: [],
     };
-    return { resolved: resolveMakesafeDetailStage(data), html: renderMakesafeOpsDetail(data) };
-  }, boardPayload([ledgerArchivedRow()]));
+    let boardCall = 0;
+    window.opsFetch = function (action) {
+      requests.push({ method: 'GET', action });
+      if (action === 'makesafe_board') return Promise.resolve(payloads[Math.min(boardCall++, 1)]);
+      if (action === 'job_detail') return Promise.resolve(detail);
+      return Promise.resolve({});
+    };
+    window.opsPost = function (action) { requests.push({ method: 'POST', action }); return Promise.resolve({ ok: true }); };
+    window.loadJobs = function () {};
 
-  expect(result.resolved).toEqual({ stage: 'allocated', source: 'job_detail' });
-  expect(result.html).toContain('>Allocated<');
-  // A live stage keeps its legitimate next step.
-  expect(result.html).toContain("advanceMakesafeSubstatus('job-archived','waiting_on_trade_report')");
+    // 1. the board loads: the job is canonically Allocated, and the detail paints it.
+    await ensureMakesafeCanonicalStages();
+    const before = resolveMakesafeDetailStage(detail);
+    _currentJobId = 'job-move';
+    _currentJobData = detail;
+    showJobSubView('overview');
+    const beforeHtml = document.getElementById('jdOverview').innerHTML;
+
+    // 2. an operator advances it. The second canonical read answers Docs Ready.
+    await advanceMakesafeSubstatus('job-move', 'admin_to_send_report');
+
+    return {
+      requests,
+      before,
+      after: resolveMakesafeDetailStage(detail),
+      beforeHtml,
+      afterHtml: document.getElementById('jdOverview').innerHTML,
+    };
+  }, [
+    boardPayload([canonicalRow({ id: 'job-move', job_number: 'SWMS-MOVE', canonical_stage: 'allocated', canonical_stage_label: 'Allocated', substatus: 'waiting_on_trade_report' })]),
+    boardPayload([canonicalRow({ id: 'job-move', job_number: 'SWMS-MOVE', canonical_stage: 'report_ready', canonical_stage_label: 'Docs Ready', substatus: 'admin_to_send_report' })]),
+  ]);
+
+  expect(result.before).toEqual({ stage: 'allocated', source: 'board_feed' });
+  expect(result.beforeHtml).toContain('>Allocated<');
+  // The write is followed by a fresh canonical GET, then the detail refresh.
+  expect(result.requests).toEqual([
+    { method: 'GET', action: 'makesafe_board' },
+    { method: 'POST', action: 'update_makesafe_substatus' },
+    { method: 'GET', action: 'makesafe_board' },
+    { method: 'GET', action: 'job_detail' },
+  ]);
+  expect(result.after).toEqual({ stage: 'report_ready', source: 'board_feed' });
+  // ...and the ALREADY-RENDERED detail now shows the new stage, not the old one.
+  expect(result.afterHtml).toContain('>Docs Ready<');
+  expect(result.afterHtml).not.toContain('>Allocated<');
+});
+
+test('a stale canonical answer is dropped rather than shown after a transition', async ({ page }) => {
+  // If the post-transition canonical read fails, the detail must fall back to
+  // "Stage not confirmed" — never to the stage it held before the write.
+  await page.goto('/ops.html');
+  const result = await page.evaluate(async (payload) => {
+    window.opsFetch = function (action) {
+      if (action === 'makesafe_board') {
+        return window.__boardFails ? Promise.reject(new Error('feed down')) : Promise.resolve(payload);
+      }
+      return Promise.resolve({});
+    };
+    await ensureMakesafeCanonicalStages();
+    const before = resolveMakesafeDetailStage({ job: { id: 'job-move' } });
+    window.__boardFails = true;
+    await refreshMakesafeCanonicalStages();
+    return { before, after: resolveMakesafeDetailStage({ job: { id: 'job-move' } }) };
+  }, boardPayload([canonicalRow({ id: 'job-move', canonical_stage: 'allocated' })]));
+
+  expect(result.before).toEqual({ stage: 'allocated', source: 'board_feed' });
+  expect(result.after).toEqual({ stage: '', source: 'unknown' });
 });
 
 test('a declared board_stage is never accepted as the detail stage', async ({ page }) => {
@@ -117,14 +213,37 @@ test('the card family tag comes from the canonical feed, not the job text', asyn
     // The feed's own wording wins when it sends one.
     feedLabel: getMakesafeTypeLabel({ ses_family: 'ordinary_roof_portal', ses_family_label: 'Roof Report (Prime portal)' }),
     fencing: getMakesafeTypeLabel({ ses_family: 'temporary_fencing', notes: 'board up window and make safe' }),
-    // No canonical family: the pre-existing metadata/regex chain still applies.
-    legacy: getMakesafeTypeLabel({ metadata: { makesafe_job_family: 'roof_report' } }),
   }));
 
   expect(labels.assessment).toBe('Assessment Report & Quote');
   expect(labels.feedLabel).toBe('Roof Report (Prime portal)');
   expect(labels.fencing).toBe('Temporary Fence MakeSafe');
-  expect(labels.legacy).toBe('Roof Report');
+});
+
+test('a board card with no canonical family refuses to guess one', async ({ page }) => {
+  // A degraded feed must not be able to resume the text/regex guessing that
+  // mislabelled 74 of 407 cards. There is no path from a board card to it.
+  await page.goto('/ops.html');
+  const result = await page.evaluate(() => {
+    // Everything the old fallback chain used to read, and nothing canonical.
+    const degraded = {
+      id: 'job-no-family', job_number: 'SWMS-NOFAMILY', canonical_stage: 'new', board_stage: 'new',
+      site_suburb: 'Perth',
+      makesafe_job_family: 'roof_report',
+      metadata: { makesafe_job_family: 'roof_report', makesafe_job_family_label: 'Roof Report' },
+      makesafe_details: { scope: 'Roof report required for storm damage' },
+      notes: 'roof report for storm damage',
+    };
+    return {
+      label: getMakesafeCardFamilyLabel(degraded),
+      card: renderMakesafeCard(degraded, 'new'),
+    };
+  });
+
+  expect(result.label).toBe('Family not determined');
+  expect(result.card).toContain('Family not determined');
+  expect(result.card).toContain('class="ms-ttag unknown"');
+  expect(result.card).not.toContain('Roof Report');
 });
 
 test('a refused family renders as an unresolved state, never a guess', async ({ page }) => {
@@ -139,40 +258,90 @@ test('a refused family renders as an unresolved state, never a guess', async ({ 
   expect(card).not.toContain('>ROOF REPORT<');
 });
 
-test('a Docs Ready card with no drafted pack says so', async ({ page }) => {
+test('pack existence is canonical-row truth, never stage plus substatus', async ({ page }) => {
   await page.goto('/ops.html');
-  const result = await page.evaluate(() => {
-    const base = { id: 'a', job_number: 'SWMS-NOPACK', canonical_stage: 'report_ready', board_stage: 'report_ready', site_suburb: 'Perth', ses_family: 'assessment_quote' };
-    const drafted = Object.assign({}, base, { id: 'b', job_number: 'SWMS-PACK', substatus: 'admin_to_send_report' });
+  const result = await page.evaluate((payload) => {
+    const cols = buildMakesafeBoardColumns(payload, {
+      // The enrichment join offers its own pack opinion. It is a side-channel and
+      // must not be consulted: the canonical row for this job says not_started.
+      'job-inferred': { resume_action: 'send', pack_status: { status: 'drafted' } },
+    });
+    const byId = {};
+    Object.keys(cols).forEach((s) => cols[s].forEach((c) => { byId[c.id] = c; }));
     return {
-      noPack: renderMakesafeCard(base, 'report_ready'),
-      drafted: renderMakesafeCard(drafted, 'report_ready'),
-      hasPack: [makesafeHasDraftedPack(base), makesafeHasDraftedPack(drafted)],
+      hasPack: {
+        none: makesafeHasDraftedPack(byId['job-nopack']),
+        inferred: makesafeHasDraftedPack(byId['job-inferred']),
+        drafted: makesafeHasDraftedPack(byId['job-drafted']),
+        sent: makesafeHasDraftedPack(byId['job-sent']),
+      },
+      cards: {
+        none: renderMakesafeCard(byId['job-nopack'], 'report_ready'),
+        inferred: renderMakesafeCard(byId['job-inferred'], 'report_ready'),
+        drafted: renderMakesafeCard(byId['job-drafted'], 'report_ready'),
+      },
     };
-  });
+  }, boardPayload([
+    canonicalRow({ id: 'job-nopack', job_number: 'SWMS-NOPACK', canonical_stage: 'report_ready', substatus: 'ready_to_invoice' }),
+    // report_ready + admin_to_send_report, the old inference — and no pack record.
+    canonicalRow({ id: 'job-inferred', job_number: 'SWMS-INFER', canonical_stage: 'report_ready', substatus: 'admin_to_send_report' }),
+    canonicalRow({
+      id: 'job-drafted', job_number: 'SWMS-PACK', canonical_stage: 'report_ready', substatus: 'admin_to_send_report',
+      pack: { state: 'drafted', sent: false, sent_at: null, drafted: true, docket_revision_id: null, pre_xero_docs_ready: false, closeout_documents: {} },
+    }),
+    canonicalRow({
+      id: 'job-sent', job_number: 'SWMS-SENT', canonical_stage: 'report_ready', substatus: 'complete',
+      pack: { state: 'sent', sent: true, sent_at: '2026-07-30T02:00:00Z', drafted: false, docket_revision_id: null, pre_xero_docs_ready: false, closeout_documents: {} },
+    }),
+  ]));
 
-  expect(result.hasPack).toEqual([false, true]);
-  expect(result.noPack).toContain('No pack drafted');
-  expect(result.drafted).not.toContain('No pack drafted');
-  expect(result.drafted).toContain('Review job pack');
+  // A pack the canonical row cannot prove does not exist — whatever the column,
+  // the substatus, or the enrichment join say.
+  expect(result.hasPack).toEqual({ none: false, inferred: false, drafted: true, sent: true });
+  expect(result.cards.none).toContain('No pack drafted');
+  expect(result.cards.inferred).toContain('No pack drafted');
+  expect(result.cards.inferred).not.toContain('Review job pack');
+  expect(result.cards.drafted).not.toContain('No pack drafted');
+  expect(result.cards.drafted).toContain('Review job pack');
 });
 
 test('the Docs Ready column states how many cards actually have a pack', async ({ page }) => {
   await page.goto('/ops.html');
-  const header = await page.evaluate(() => {
-    const rows = [0, 1, 2].map((i) => ({
-      id: 'p' + i, job_number: 'SWMS-P' + i, canonical_stage: 'report_ready', type: 'makesafe',
-      builder: {}, contact: {}, assignments: [], report: {}, pack: {}, lineage: {}, age: {}, blockers: {},
-    }));
-    const cols = buildMakesafeBoardColumns({ contract_version: 'makesafe-board.v1', columns: { report_ready: rows } }, {});
+  const header = await page.evaluate((payload) => {
+    const cols = buildMakesafeBoardColumns(payload, {});
     const host = document.createElement('div');
     renderMakesafeKanban(host, cols);
     const el = host.querySelector('.kanban-col[data-status="report_ready"] .kanban-col-header');
     return el ? el.textContent : '';
-  });
+  }, boardPayload([0, 1, 2].map((i) => canonicalRow({ id: 'p' + i, job_number: 'SWMS-P' + i, canonical_stage: 'report_ready' }))));
 
   expect(header).toContain('Docs Ready');
   expect(header).toContain('0 of 3 with a drafted pack');
+});
+
+test('the detail states an unconfirmed pack rather than claiming one', async ({ page }) => {
+  // job_detail carries no canonical pack block. Without a canonical answer for
+  // this job the detail says so; with one it repeats it.
+  await page.goto('/ops.html');
+  const result = await page.evaluate((payload) => {
+    const unknown = resolveMakesafeDetailPack(detailFor('job-unseen'));
+    buildMakesafeBoardColumns(payload, {});
+    return {
+      unknown,
+      known: resolveMakesafeDetailPack(detailFor('job-nopack')),
+      html: renderMakesafeOpsDetail(detailFor('job-unseen')),
+    };
+    function detailFor(id) {
+      return {
+        job: { id: id, type: 'makesafe', status: 'accepted', substatus: 'ready_to_invoice' },
+        documents: [], work_orders: [], invoices: [], events: [], media: [], assignments: [],
+      };
+    }
+  }, boardPayload([canonicalRow({ id: 'job-nopack', canonical_stage: 'report_ready', substatus: 'ready_to_invoice' })]));
+
+  expect(result.unknown).toEqual({ known: false, drafted: false });
+  expect(result.known).toEqual({ known: true, drafted: false });
+  expect(result.html).not.toContain('Docs ready for admin/reporting skill');
 });
 
 test('builder links the row already carries render on the card face', async ({ page }) => {

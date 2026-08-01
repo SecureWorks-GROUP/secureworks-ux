@@ -1,0 +1,441 @@
+job_number,canonical_stage,declared_stage,rendered_column,ses_family,expected_family_label,rendered_family_tag,family_agrees,detail_stage,detail_stage_source,detail_contradicts_column,legacy_detail_stage,legacy_contradicts_column,canonical_pack_drafted,no_pack_chip,card_builder_links,card_anchors,trade_chip
+SWMS-261121,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261120,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261119,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261115,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261110,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261103,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,3,3,New
+SWMS-261102,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261101,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261100,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261096,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261085,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261083,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261082,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261058,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261057,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,1,1,New
+SWMS-261056,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261033,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261032,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261031,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261030,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261023,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-261016,new,new,new,ordinary_roof_portal,Roof Report,Roof Report,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26936,new,new,new,restoration,Restoration,Restoration,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26935,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26932,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26931,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26843,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26833,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26827,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26823,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26821,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26816,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26807,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26804,new,new,new,physical_makesafe,MakeSafe,MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26778,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26776,new,new,new,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,new,board_feed,false,new,false,false,false,0,0,New
+SWMS-26934,allocated,new,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,new,true,false,false,1,1,Allocated
+SWMS-26810,allocated,new,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,new,true,false,false,1,1,Allocated
+SWMS-261050,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,new,true,false,false,0,0,Allocated
+SWMS-261049,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-261026,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,new,true,false,false,0,0,Allocated
+SWMS-261022,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,new,true,false,false,0,0,Allocated
+SWMS-261019,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,new,true,false,false,1,1,Allocated
+SWMS-261018,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,new,true,false,false,0,0,Allocated
+SWMS-261014,allocated,allocated,allocated,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,allocated,board_feed,false,new,true,false,false,0,0,Allocated
+SWMS-26981,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26978,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26965,allocated,allocated,allocated,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26953,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,true,false,1,1,Allocated
+SWMS-26930,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26926,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26910,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26902,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,true,false,1,1,Allocated
+SWMS-26883,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26849,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26790,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26729,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,2,2,Allocated
+SWMS-26719,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26715,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26707,allocated,allocated,allocated,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26658,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26632,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26619,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26618,allocated,allocated,allocated,ordinary_roof_portal,Roof Report,Roof Report,true,allocated,board_feed,false,allocated,false,false,false,1,1,Allocated
+SWMS-26583,allocated,allocated,allocated,physical_makesafe,MakeSafe,MakeSafe,true,allocated,board_feed,false,allocated,false,false,false,0,0,Allocated
+SWMS-26633,allocated,report_ready,allocated,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,allocated,board_feed,false,report_ready,true,false,false,0,0,Allocated
+SWMS-261109,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,false,false,0,0,Trade Report In
+SWMS-261080,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,false,false,3,3,Trade Report In
+SWMS-261065,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,false,false,3,3,Trade Report In
+SWMS-261029,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,false,false,0,0,Trade Report In
+SWMS-261025,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,0,0,Trade Report In
+SWMS-261024,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,1,1,Trade Report In
+SWMS-261021,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,0,0,Trade Report In
+SWMS-261020,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,0,0,Trade Report In
+SWMS-261017,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,0,0,Trade Report In
+SWMS-261015,trade_report_in,trade_report_in,trade_report_in,physical_makesafe,MakeSafe,MakeSafe,true,trade_report_in,board_feed,false,report_ready,true,true,false,0,0,Trade Report In
+SWMS-26980,trade_report_in,trade_report_in,trade_report_in,ordinary_roof_portal,Roof Report,Roof Report,true,trade_report_in,board_feed,false,report_ready,true,false,false,1,1,Trade Report In
+SWMS-26957,trade_report_in,trade_report_in,trade_report_in,ordinary_roof_portal,Roof Report,Roof Report,true,trade_report_in,board_feed,false,report_ready,true,false,false,1,1,Trade Report In
+SWMS-261123,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261116,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261114,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261113,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261081,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261079,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-261059,report_ready,report_ready,report_ready,physical_makesafe,MakeSafe,MakeSafe,true,report_ready,board_feed,false,report_ready,false,false,true,0,0,Docs Ready
+SWMS-26857,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,1,1,Docs Ready
+SWMS-26853,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26852,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26851,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26848,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,1,1,Docs Ready
+SWMS-26832,report_ready,report_ready,report_ready,physical_makesafe,MakeSafe,MakeSafe,true,report_ready,board_feed,false,completed,true,true,false,0,0,Docs Ready
+SWMS-26803,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,1,1,Docs Ready
+SWMS-26759,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26754,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,1,1,Docs Ready
+SWMS-26748,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26740,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26736,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26735,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26732,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26728,report_ready,report_ready,report_ready,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,report_ready,board_feed,false,report_ready,false,false,true,3,3,Docs Ready
+SWMS-26709,report_ready,report_ready,report_ready,ordinary_roof_portal,Roof Report,Roof Report,true,report_ready,board_feed,false,report_ready,false,false,true,1,1,Docs Ready
+SWMS-26585,report_ready,report_ready,report_ready,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,report_ready,board_feed,false,report_ready,false,false,true,0,0,Docs Ready
+SWMS-261055,completed,completed,completed,physical_makesafe,MakeSafe,MakeSafe,true,completed,board_feed,false,completed,false,true,false,0,0,
+SWMS-261028,completed,completed,completed,physical_makesafe,MakeSafe,MakeSafe,true,completed,board_feed,false,completed,false,true,false,0,0,
+SWMS-261118,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261099,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261097,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261095,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261094,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261093,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261092,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261091,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261089,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261088,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261087,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261086,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261084,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261078,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,3,3,
+SWMS-261077,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261076,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261075,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261074,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261068,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261067,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261064,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-261051,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,2,2,
+SWMS-26925,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26918,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26822,archive,new,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26820,archive,new,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26998,archive,allocated,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,new,true,false,false,3,3,
+SWMS-26952,archive,allocated,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26928,archive,allocated,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,allocated,true,false,false,1,1,
+SWMS-26920,archive,allocated,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,allocated,true,false,false,0,0,
+SWMS-26784,archive,allocated,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,allocated,true,false,false,0,0,
+SWMS-26713,archive,allocated,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,allocated,true,false,false,2,2,
+SWMS-26660,archive,allocated,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,allocated,true,false,false,1,1,
+SWMS-26651,archive,allocated,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,allocated,true,true,false,0,0,
+SWMS-261124,archive,report_ready,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,false,false,0,0,
+SWMS-26855,archive,report_ready,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,report_ready,true,false,false,1,1,
+SWMS-26845,archive,report_ready,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26791,archive,report_ready,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,false,false,3,3,
+SWMS-26782,archive,report_ready,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,false,false,0,0,
+SWMS-261039,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-261038,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-261037,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-261036,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-261035,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-261034,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26964,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26956,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26955,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26949,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26948,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26946,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26944,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26940,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26939,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26938,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26937,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26933,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,2,2,
+SWMS-26929,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26927,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26919,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26917,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26903,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26901,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26900,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26898,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26896,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26894,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26893,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26891,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26888,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26887,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26885,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26884,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26882,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26878,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26875,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26871,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26867,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26866,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26865,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26864,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26863,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,report_ready,true,true,false,1,1,
+SWMS-26862,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26861,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26858,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26847,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26846,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26844,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26841,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26840,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26837,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26836,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26835,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26829,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26825,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26819,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26815,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26814,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26812,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26806,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26805,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26800,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26795,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26794,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26793,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26792,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26789,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26788,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26787,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26786,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26785,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26783,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26781,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26780,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26779,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26777,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26775,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26774,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26773,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26772,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26770,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26769,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26766,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26763,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26762,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26757,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26756,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,new,true,false,false,3,3,
+SWMS-26755,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,new,true,false,false,3,3,
+SWMS-26753,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26752,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26751,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26750,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26749,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26747,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26744,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26742,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26741,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26739,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26738,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26737,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26734,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,2,2,
+SWMS-26733,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26731,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,report_ready,true,false,false,3,3,
+SWMS-26730,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26727,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26726,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26725,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26724,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26723,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26722,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26721,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26720,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26718,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26717,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26712,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26711,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26710,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26708,archive,archive,archive,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,archive,board_feed,false,completed,true,true,false,3,3,
+SWMS-26706,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,completed,true,true,false,1,1,
+SWMS-26693,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26692,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26691,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26690,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26689,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26688,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26687,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26686,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26684,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26683,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26682,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26681,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26680,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26679,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26678,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26674,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26673,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26672,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26671,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26668,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26663,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26659,archive,archive,archive,ordinary_roof_portal,Roof Report,Roof Report,true,archive,board_feed,false,allocated,true,true,false,0,0,
+SWMS-26657,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26655,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26654,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26653,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26652,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26644,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26642,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26630,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26629,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26628,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26606,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26604,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26603,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26598,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26597,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26596,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-TEST-0611,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,allocated,true,false,false,0,0,
+SWMS-26587,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26584,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26582,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26581,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26580,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26579,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26563,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26562,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26560,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26559,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26547,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26546,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26540,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26534,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26533,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26530,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26529,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26528,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26527,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26526,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26525,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26524,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26523,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26522,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26521,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26520,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26517,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26515,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26514,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26513,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26512,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26511,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26510,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26509,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26507,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26506,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26503,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26496,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26491,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26490,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26487,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26483,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26482,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26481,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26480,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26479,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26478,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26477,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26465,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26464,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26463,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26462,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26459,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26458,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26457,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26456,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26455,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26450,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,new,true,false,false,0,0,
+SWMS-26449,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26448,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26447,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26446,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26445,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26444,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26443,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26442,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26441,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26440,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26438,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67178,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67005,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+MS191469,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,completed,true,true,false,0,0,
+BWCWA6781,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+WB68792,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67170,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+BWCWA6773,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 66933,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67260,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26433,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26432,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26431,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26430,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26429,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26428,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26427,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26426,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26425,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26424,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26422,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26421,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26420,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26419,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26418,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26417,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26416,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,completed,true,false,false,0,0,
+SWMS-26415,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26414,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26413,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26412,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67172,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26410,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26409,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+AJBR 67205,archive,archive,archive,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,archive,board_feed,false,completed,true,true,false,0,0,
+SWMS-26393,archive,archive,archive,physical_makesafe,MakeSafe,MakeSafe,true,archive,board_feed,false,report_ready,true,true,false,0,0,
+SWMS-26001,archive,archive,archive,unknown,Family not determined,Family not determined,true,archive,board_feed,false,report_ready,true,false,false,0,0,
+SWMS-26895,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26880,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26868,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-TEST-001,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26645,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26641,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26631,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26599,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26519,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26518,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26516,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26508,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26497,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26437,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26423,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26505,cancelled,cancelled,cancelled,unknown,Family not determined,Family not determined,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26716,cancelled,cancelled,cancelled,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,cancelled,board_feed,false,cancelled,false,false,false,3,3,
+SWMS-26959,cancelled,cancelled,cancelled,ordinary_roof_portal,Roof Report,Roof Report,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26947,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26504,cancelled,cancelled,cancelled,unknown,Family not determined,Family not determined,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26802,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26960,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26916,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26879,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26394,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26643,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26961,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-261054,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26945,cancelled,cancelled,cancelled,temporary_fencing,Temporary Fence MakeSafe,Temporary Fence MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26714,cancelled,cancelled,cancelled,unknown,Family not determined,Family not determined,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-261027,cancelled,cancelled,cancelled,physical_makesafe,MakeSafe,MakeSafe,true,cancelled,board_feed,false,cancelled,false,false,false,0,0,
+SWMS-26856,cancelled,cancelled,cancelled,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,cancelled,board_feed,false,cancelled,false,false,false,1,1,
+SWMS-26859,cancelled,cancelled,cancelled,assessment_quote,Assessment / Quote Report,Assessment / Quote Report,true,cancelled,board_feed,false,cancelled,false,false,false,1,1,

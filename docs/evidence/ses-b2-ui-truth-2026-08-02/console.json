@@ -1,0 +1,18 @@
+[
+  {
+    "type": "log",
+    "text": "[SecureWorks Cloud] URL: found"
+  },
+  {
+    "type": "log",
+    "text": "[SecureWorks Cloud] Key: found"
+  },
+  {
+    "type": "log",
+    "text": "[SecureWorks Cloud] supabase global: object"
+  },
+  {
+    "type": "log",
+    "text": "[SecureWorks Cloud] Initialising..."
+  }
+]

@@ -53,6 +53,52 @@ evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
 The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
 directly and remain overlay-blind — migrating them is follow-up work.
 
+The JOB DETAIL obeys the same rule: it never derives a make-safe's stage from
+substatus. `resolveMakesafeDetailStage` takes `canonical_stage` off the
+`job_detail` payload if that producer ever carries one (it does not today), else
+the stage the canonical feed published for that job id, else says "Stage not
+confirmed" — and the Next step forward-move buttons are gated on that stage, so a
+terminal (archive/cancelled/completed) or unconfirmed card offers no move. A bare
+`board_stage` is the DECLARED stage and is deliberately not trusted here.
+FRESHNESS IS PART OF THAT CONTRACT: the remembered stage is a read, so every
+make-safe transition this page performs (`advanceMakesafeSubstatus`, board drag,
+cancel, reopen) calls `afterMakesafeStageTransition()`, which DROPS the whole map,
+re-reads the canonical feed and repaints the open detail from that response.
+If EITHER the canonical read or the `job_detail` read fails, that job id is marked
+in `_makesafeStageReadFailedIds` and `resolveMakesafeDetailStage` refuses to name
+a stage for it — so the badge reads "Stage not confirmed" and no forward move is
+offered, never the pre-write stage. That mark lives in the RESOLVER, not on the
+payload and not with the callers: `refreshJobDetail()` is called from ~10 places
+that know nothing about make-safe stages, and each replaces `_currentJobData`, so
+a payload-borne flag is silently dropped by the next ordinary refresh. Only a
+canonical read that actually SUCCEEDED clears it (`clearMakesafeStageReadFailures`
+inside `ensureMakesafeCanonicalStages`); a successful `job_detail` is not evidence
+about the board's stage. Do not add a stage argument to `refreshJobDetail` — the
+point is that no caller can forget one. Search
+`// <makesafe-detail-canonical-stage>`.
+
+Two claims on a make-safe surface are canonical-row-or-nothing. The BOARD CARD's
+family tag comes from `getMakesafeCardFamilyLabel` — canonical `ses_family` /
+`ses_family_label` or "Family not determined", with no path to the
+`inferMakesafeFamilyFromText` regex. (`getMakesafeTypeLabel` keeps that legacy
+chain for the detail / calendar / list surfaces, whose feeds carry no
+`ses_family` at all.) PACK EXISTENCE comes from `makesafeHasDraftedPack`, which
+reads only the canonical row's `pack` block (`drafted`, `state`, `sent`,
+`sent_at`) — never the `resume_action` / `pack_status` enrichment fields, and
+never `stage + substatus`, which describe a column and a workflow flag rather
+than a document. Docs Ready keeps its name and meaning (captain decision C.4 is
+still open) but a card the canonical row cannot prove has a pack says "No pack
+drafted", and the column states how many packs exist.
+
+Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live verification evidence in
+`docs/evidence/ses-b2-ui-truth-2026-08-02/`, regenerated end to end by
+`scripts/makesafe-ui-truth-census.js` — that script is also the pattern for any
+read-only live-board measurement here: it routes every request, aborts non-GETs,
+and redacts client data out of every response body before it can reach the DOM or
+a screenshot. Read-only sessions against the live board must use
+`ops.html?noAutoIntake=1`: loading the board otherwise POSTs
+`auto_approve_clean_intake_drafts`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

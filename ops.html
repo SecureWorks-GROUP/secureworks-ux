@@ -1471,12 +1471,21 @@
     .ms-card-v2.t-default { --ms-type: var(--sw-mid); }
 
     /* ── Top line: type tag + age pill ── */
-    .ms-card-v2 .ms-top { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+    /* wraps so a second chip (e.g. "No pack drafted") never overflows the card */
+    .ms-card-v2 .ms-top { display: flex; align-items: center; justify-content: space-between; gap: 5px; flex-wrap: wrap; row-gap: 3px; }
     .ms-card-v2 .ms-ttag {
       font-size: 8px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
       color: var(--ms-type, var(--sw-mid));
       background: color-mix(in srgb, var(--ms-type, var(--sw-mid)) 12%, #fff);
       padding: 1px 6px; border-radius: 100px; white-space: nowrap;
+    }
+    /* Family refused by the canonical feed (ses_family unknown). Deliberately
+       reads as an unresolved state, not as a job type. */
+    .ms-card-v2 .ms-ttag.unknown {
+      color: var(--sw-mid-light);
+      background: transparent;
+      box-shadow: inset 0 0 0 1px #D8E1E6;
+      font-style: italic;
     }
     /* age / KPI pill — muted age inside the KPI, escalating with health */
     .ms-card-v2 .ms-age-pill {
@@ -1622,6 +1631,33 @@
     .ms-doc.done .ms-doc-name    { color: var(--sw-sage-deep); }
     .ms-doc.missing .ms-doc-name { color: var(--sw-red); }
     .ms-doc.na .ms-doc-name      { color: #C3CED5; }
+
+    /* ── Builder / family links on the card face ──
+       The same external links the job detail already renders, brought onto the
+       card so the evidence is one click away instead of two. Real anchors, so
+       they must not bubble into the card's open-detail click. */
+    .ms-card-v2 .ms-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+    .ms-card-v2 .ms-link {
+      display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+      font-size: 8.5px; font-weight: 800; letter-spacing: 0.2px;
+      padding: 2px 6px; border-radius: 100px; text-decoration: none;
+      color: #0E7C7B; background: color-mix(in srgb, #0E7C7B 9%, #fff);
+      border: 1px solid color-mix(in srgb, #0E7C7B 22%, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ms-card-v2 .ms-link:hover { background: color-mix(in srgb, #0E7C7B 18%, #fff); }
+    .ms-card-v2 .ms-link-more { font-size: 8.5px; font-weight: 800; color: var(--sw-mid-light); padding: 2px 2px; }
+
+    /* Docs Ready honesty marker: the column holds the card, no pack was drafted. */
+    .ms-card-v2 .ms-nopack {
+      font-size: 9px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+      color: #7A4A12; background: #FEF3E7; border: 1px solid #F5C889;
+    }
+    .kanban-col-header .ms-col-note {
+      display: block; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
+      text-transform: none; color: #7A4A12; margin-top: 2px;
+    }
 
     /* ── Action buttons ── */
     .ms-card-v2 .ms-btn-alloc {
@@ -9634,8 +9670,20 @@ function renderMakesafeKanban(container, columns) {
       ? (jobs.length + '/' + allJobs.length)
       : jobs.length;
 
+    // Docs Ready holds cards whose document pack has never been drafted. State
+    // the pack count under the header so the column stops implying one. This
+    // does not rename or redefine the column (captain decision C.4).
+    var colNote = '';
+    if (status === 'report_ready' && allJobs.length) {
+      var drafted = allJobs.filter(makesafeHasDraftedPack).length;
+      if (drafted < allJobs.length) {
+        colNote = '<span class="ms-col-note" title="Docs Ready is a column, not a promise that a document pack exists. Cards with no drafted pack are marked on the card.">'
+          + drafted + ' of ' + allJobs.length + ' with a drafted pack</span>';
+      }
+    }
+
     html += '<div class="kanban-col" data-status="' + status + '" ondragover="kanbanDragOver(event)" ondragleave="kanbanDragLeave(event)" ondrop="kanbanDrop(event)">';
-    html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">' + colHeader + '<span class="count">' + countBadge + '</span></div>';
+    html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">' + colHeader + '<span class="count">' + countBadge + '</span>' + colNote + '</div>';
     html += '<div class="kanban-body">';
 
     if (jobs.length === 0) {
@@ -10266,7 +10314,44 @@ function inferMakesafeFamilyFromText(text) {
   if (/\b(assessment\s*(report)?|assess\s+and\s+quote|inspect\s+and\s+(provide\s+)?quote|inspection\s+and\s+assessment|contractor\s+(inspection|assessment)|quote\s*(request|link|report)?|quotation|scope\s+of\s+works?)\b/.test(lower)) return 'assessment_report_quote';
   return 'general_makesafe';
 }
+// ── SES job family: the canonical row's answer, not a text guess ──────────
+// `makesafe-board.v1` carries `ses_family` (+ `ses_family_label`) on EVERY row.
+// The card used to ignore both and fall through to inferMakesafeFamilyFromText,
+// a regex over scope/description/notes, which mislabelled 74 of 407 cards
+// (ses-ui-ground-truth-v1 §2.6) — an enriched card's `makesafe_details` shadows
+// `j.metadata`, so every intake-family lookup missed. The feed's answer wins now.
+// `ses_family_label` is the stable vocabulary (the metadata blob carries two
+// spellings for the same family); the map below only names a family whose label
+// the feed did not send. A REFUSED family (`unknown`) is stated as unresolved —
+// it is never guessed back into one of the real families.
+var SES_FAMILY_UNKNOWN_LABEL = 'Family not determined';
+var SES_FAMILY_LABELS = {
+  physical_makesafe:    'MakeSafe',
+  temporary_fencing:    'Temporary Fence MakeSafe',
+  ordinary_roof_portal: 'Roof Report',
+  own_template_roof:    'Roof Report',
+  assessment_quote:     'Assessment Report & Quote',
+  restoration:          'Restoration',
+  repair:               'Repair',
+  unknown:              SES_FAMILY_UNKNOWN_LABEL
+};
+function isSesFamilyUndetermined(j) {
+  var fam = String((j && j.ses_family) || '').trim().toLowerCase();
+  return fam === 'unknown' || fam === 'refused' || fam === 'undetermined';
+}
+function getSesFamilyLabel(j) {
+  var fam = String((j && j.ses_family) || '').trim().toLowerCase();
+  if (!fam) return '';
+  if (isSesFamilyUndetermined(j)) return SES_FAMILY_UNKNOWN_LABEL;
+  var feedLabel = String((j && j.ses_family_label) || '').trim();
+  if (feedLabel) return feedLabel;
+  if (SES_FAMILY_LABELS[fam]) return SES_FAMILY_LABELS[fam];
+  return fam.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
 function getMakesafeTypeLabel(j, mdOverride) {
+  // The canonical family beats every local lookup below, including the override.
+  var sesLabel = getSesFamilyLabel(j);
+  if (sesLabel) return sesLabel;
   var md = mdOverride || j.makesafe_details || j.metadata || {};
   // Prefer the canonical intake family saved by the backend. If it is missing,
   // infer only one of the four agreed families. Descriptive issues such as board
@@ -10325,6 +10410,74 @@ function getMakesafeStage(j, rawStatus) {
   if (sub === 'waiting_on_trade_report' || rawStatus === 'scheduled' || rawStatus === 'in_progress') return 'allocated';
   return 'new';
 }
+
+// ════════════════════════════════════════════════════════════
+// <makesafe-detail-canonical-stage>
+// The job detail must NEVER re-derive a make-safe's board stage. It used to call
+// getMakesafeStage on the job_detail payload, which carries no canonical stage,
+// so the derivation fell through to substatus — the same overlay-blind client
+// guess PR #226 removed from the board one level up. Result: an archived card
+// opened as "New", four days old, and the Next step block offered a forward-move
+// button that would undo the captain's display-ledger archive (80 cards
+// contradicted their own column; ses-ui-ground-truth-v1 §3.3).
+//
+// Authority order for the detail, and there is no fourth option:
+//   1. `canonical_stage` on the job_detail payload — the durable server answer.
+//      Only that key is trusted: a bare `board_stage` is the DECLARED stage and
+//      is overlay-blind by construction, so it is never read here.
+//   2. the canonical stage the `makesafe-board.v1` feed already published for
+//      this job id (remembered per card at map time, refreshed on every load).
+//   3. unknown. The badge says so and every forward-move action is withheld.
+//      A stage is never guessed from substatus again.
+// ════════════════════════════════════════════════════════════
+var MAKESAFE_CANONICAL_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive', 'cancelled'];
+var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready'];
+
+// job id -> canonical stage, straight off the canonical feed's rows.
+var _makesafeCanonicalStageById = {};
+var _makesafeCanonicalStageFetch = null;
+
+function makesafeCanonicalStageOf(source) {
+  var stage = String((source && source.canonical_stage) || '').trim().toLowerCase();
+  return MAKESAFE_CANONICAL_STAGES.indexOf(stage) >= 0 ? stage : '';
+}
+
+function rememberMakesafeCanonicalStage(row) {
+  var stage = makesafeCanonicalStageOf(row);
+  if (row && row.id && stage) _makesafeCanonicalStageById[row.id] = stage;
+}
+
+// The stage a make-safe job detail may display, plus where it came from.
+function resolveMakesafeDetailStage(data) {
+  var j = (data && data.job) || {};
+  var fromDetail = makesafeCanonicalStageOf(data) || makesafeCanonicalStageOf(j)
+    || makesafeCanonicalStageOf(data && data.makesafe_details);
+  if (fromDetail) return { stage: fromDetail, source: 'job_detail' };
+  var cached = j.id ? _makesafeCanonicalStageById[j.id] : '';
+  if (cached) return { stage: cached, source: 'board_feed' };
+  return { stage: '', source: 'unknown' };
+}
+
+// Read the canonical board feed once per session so a job opened without the
+// board (deep link, search result) still gets a canonical stage instead of a
+// guess. Read-only GET of the same feed the board renders; never a write, and a
+// failure just leaves the stage unknown.
+function ensureMakesafeCanonicalStages() {
+  if (!_makesafeCanonicalStageFetch) {
+    _makesafeCanonicalStageFetch = opsFetch('makesafe_board', { projection: 'ops' })
+      .then(function(payload) {
+        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return;
+        Object.keys(payload.columns || {}).forEach(function(stage) {
+          (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
+        });
+      })
+      .catch(function(e) {
+        console.warn('Make-safe detail: canonical stage lookup unavailable:', e && e.message);
+      });
+  }
+  return _makesafeCanonicalStageFetch;
+}
+// </makesafe-detail-canonical-stage>
 // ════════════════════════════════════════════════════════════
 // <makesafe-board-canonical>
 // The ops make-safe board's data source is `ops-api?action=makesafe_board`
@@ -10498,7 +10651,16 @@ function mapCanonicalMakesafeRow(row, enrich) {
   j.readiness_revision = row.readiness_revision || null;
   j.commercial_warning = row.commercial_warning || null;
   j.computed_status = row.computed_status || null;
+  // SES family identity — canonical row only. `ses_family` is the key the family
+  // tag renders from; `ses_family_label` is the feed's stable wording for it.
   j.ses_family = row.ses_family || null;
+  j.ses_family_label = row.ses_family_label || null;
+  j.ses_recipe_state = row.ses_recipe_state || null;
+
+  // The card's canonical stage is also the ONLY stage the job detail may show
+  // for it. Remember it by job id so opening the card cannot re-derive a
+  // different one. See <makesafe-detail-canonical-stage>.
+  rememberMakesafeCanonicalStage(row);
 
   // Type label. An enriched card keeps the exact inputs getMakesafeTypeLabel had
   // before (makesafe_details / metadata / notes), so its label is unchanged —
@@ -10700,8 +10862,9 @@ function getMakesafeInvoiceLabel(j, status) {
   if (j.has_final_invoice || j.invoice_number) return { label: 'Invoice sent', color: '#3498DB' };
   return { label: 'No invoice yet', color: '#8FA4B2' };
 }
-function renderMakesafeTinyBadge(label, color) {
-  return '<span style="font-size:10px;padding:2px 6px;border-radius:10px;background:' + color + '20;color:' + color + ';font-weight:700;white-space:nowrap;">' + escapeHtml(label) + '</span>';
+function renderMakesafeTinyBadge(label, color, title) {
+  return '<span' + (title ? ' title="' + escapeAttr(title) + '"' : '')
+    + ' style="font-size:10px;padding:2px 6px;border-radius:10px;background:' + color + '20;color:' + color + ';font-weight:700;white-space:nowrap;">' + escapeHtml(label) + '</span>';
 }
 
 // ── Make-safe card status icon row ──
@@ -10861,7 +11024,26 @@ function renderMakesafeStatusIcons(j, status) {
   return html;
 }
 function makesafeUiStageLabel(stage) {
-  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, completed: 'Completed This Week', archive: 'Archive' })[stage] || stage;
+  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, completed: 'Completed This Week', archive: 'Archive', cancelled: 'Cancelled' })[stage] || stage;
+}
+
+// ── "Docs Ready" honesty ─────────────────────────────────────────────────
+// The Docs Ready column holds cards; the report-drafts feed that backs the
+// review-and-send pack holds none, so the column asserts a document pack that
+// does not exist (24 cards, 0 packs — ses-ui-ground-truth-v1 §0). This does NOT
+// redefine what Docs Ready means (captain decision C.4, still open); it only
+// answers "is there a drafted pack for THIS card" so the card and the column can
+// stop implying one. A pack is drafted only when the backend says so: an
+// explicit resume_action / pack_status from the report-drafts feed, or the
+// canonical report_ready verdict together with the drafted-not-sent substatus.
+var MAKESAFE_DRAFTED_PACK_STATES = ['drafted', 'draft', 'authorised', 'authorized', 'sent', 'closed'];
+function makesafeHasDraftedPack(j) {
+  if (!j) return false;
+  if (j.resume_action) return true;
+  var ps = j.pack_status && (j.pack_status.status || j.pack_status.state);
+  if (ps && MAKESAFE_DRAFTED_PACK_STATES.indexOf(String(ps).toLowerCase()) >= 0) return true;
+  var stage = String(j.board_stage || j.makesafe_stage || '').toLowerCase();
+  return stage === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report';
 }
 async function moveMakesafeUiStage(jobId, stage) {
   // MONEY-SAFETY: a drag into the two report columns must move the SUBSTATUS only,
@@ -10930,11 +11112,46 @@ function makesafeTradeStageLabel(j, status) {
   j = j || {};
   var stage = String(j.board_stage || j.makesafe_stage || status || '').toLowerCase();
   if (stage === 'completed' || stage === 'archive') return '';
+  // The canonical stage is the Trade board's stage too — both boards read the
+  // same feed — so when the card carries one, say exactly that and stop there.
+  // The substatus/crew chain below is only for a payload without a stage; it can
+  // otherwise print "Docs Ready" on a card sitting in the New column.
+  var canonical = makesafeCanonicalStageOf(j);
+  if (canonical) {
+    if (canonical === 'completed' || canonical === 'archive' || canonical === 'cancelled') return '';
+    return makesafeUiStageLabel(canonical);
+  }
   var sub = getMakesafeSubstatus(j);
   if (stage === 'report_ready' || sub === 'ready_to_invoice') return 'Docs Ready';
   if (stage === 'trade_report_in' || sub === 'admin_to_send_report') return 'Trade Report In';
   if (getMakesafeCrewLabel(j)) return 'Allocated';
   return 'New';
+}
+
+// ── Builder / family links on the card face ──────────────────────────────
+// The card face carried ZERO clickable evidence: 0 anchors on 407 cards, while
+// the assessment triad (report + photos + quote) and the roof report link were
+// sitting on the card object the whole time and rendering only one click deeper
+// (ses-ui-ground-truth-v1 §2.3, §3.2). This renders exactly what the row already
+// carries — no feed change, no widened enrichment whitelist, no per-family
+// required-link recipe (that is captain decision C.4).
+// The anchors sit inside a card whose whole surface opens the job, so every one
+// stops the click from bubbling into openMakesafeJob.
+var MAKESAFE_CARD_LINK_LIMIT = 3;
+function renderMakesafeCardLinks(j) {
+  var links = collectMakesafeExternalLinks(j.makesafe_details || j.metadata || {});
+  if (!links.length) return '';
+  var shown = links.slice(0, MAKESAFE_CARD_LINK_LIMIT);
+  var rest = links.length - shown.length;
+  var html = '<div class="ms-links">';
+  shown.forEach(function(link) {
+    html += '<a class="ms-link" href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener"'
+      + ' title="' + escapeAttr(link.label + ' — ' + link.url) + '"'
+      + ' onclick="event.stopPropagation();">' + escapeHtml(link.label) + ' &#8599;</a>';
+  });
+  if (rest > 0) html += '<span class="ms-link-more" title="Open the card to see every builder link">+' + rest + ' more</span>';
+  html += '</div>';
+  return html;
 }
 
 // OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
@@ -10982,7 +11199,10 @@ function renderMakesafeCard(j, status) {
 
   // top line: type tag + ready-to-send chip + age/KPI pill
   html += '<div class="ms-top">';
-  html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
+  var familyUndetermined = isSesFamilyUndetermined(j);
+  html += '<span class="ms-ttag' + (familyUndetermined ? ' unknown' : '') + '"'
+    + (familyUndetermined ? ' title="The canonical feed could not determine this job family (ses_family: unknown). No family is guessed from the job text."' : '')
+    + '>' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
   } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
@@ -10990,6 +11210,11 @@ function renderMakesafeCard(j, status) {
     // Neutral chip — deliberately NOT teal/"ready" — so the card reads honestly while
     // it sits in Report Ready awaiting the draft. Cosmetic only.
     html += '<span title="Trade report received — pack not yet drafted" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#4C6A7C;color:#fff;text-transform:uppercase;white-space:nowrap;">Report in</span>';
+  } else if (status === 'report_ready' && !makesafeHasDraftedPack(j)) {
+    // Sitting in Docs Ready with no document pack behind it. Say so on the card
+    // rather than let the column imply a pack exists. Does not change what the
+    // column means (captain decision C.4) — only what this card claims.
+    html += '<span class="ms-nopack" title="No document pack has been drafted for this job. The Docs Ready column does not mean a pack exists.">No pack drafted</span>';
   }
   // Money-review cue (Task 4): amber "Check pricing" chip when the backend flags the
   // pack's invoice for a pricing review. Defensive — absent field renders nothing.
@@ -11063,6 +11288,8 @@ function renderMakesafeCard(j, status) {
 
   // doc-icon row (WO / Report / SWMS / Invoice / Sent) + X/5 count
   html += renderMakesafeStatusIcons(j, status);
+  // builder / family links the row already carries — clickable on the face
+  html += renderMakesafeCardLinks(j);
   html += '</div>'; // /block
 
   if (status !== 'cancelled' && (status === 'new' || status === 'allocated' || getMakesafeSubstatus(j) === 'pending_allocation')) {
@@ -15282,6 +15509,18 @@ async function openJobDetail(jobId) {
     renderHealthBar(data);
     // Render the active sub-view (default to overview)
     showJobSubView('overview');
+
+    // A make-safe detail shows the CANONICAL board stage and gates its actions on
+    // it. When the board feed has not been read this session (deep link straight
+    // into a job), read it once — read-only — and repaint, rather than leave the
+    // stage unconfirmed. See <makesafe-detail-canonical-stage>.
+    if (String((data.job || {}).type) === 'makesafe' && resolveMakesafeDetailStage(data).source === 'unknown') {
+      ensureMakesafeCanonicalStages().then(function() {
+        if (_currentJobId !== jobId || _currentJobData !== data) return;
+        if (resolveMakesafeDetailStage(data).source === 'unknown') return;
+        renderOverviewView(data);
+      });
+    }
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     if (requestSeq !== _jobDetailRequestSeq) return;
@@ -16565,15 +16804,22 @@ function renderMakesafeDocViewer(data) {
   return html;
 }
 
-function renderMakesafeOpsExternalLinks(md) {
-  var KIND_LABELS = {
-    roof_report: 'Roof Report',
-    assessment_report: 'Assessment Report',
-    photos: 'Photo Schedule',
-    quote: 'Quote',
-    builder_portal: 'Builder Portal',
-    work_order: 'Work Order'
-  };
+var MAKESAFE_LINK_KIND_LABELS = {
+  roof_report: 'Roof Report',
+  assessment_report: 'Assessment Report',
+  photos: 'Photo Schedule',
+  quote: 'Quote',
+  builder_portal: 'Builder Portal',
+  work_order: 'Work Order'
+};
+// Collect the builder/portal links off a make-safe details blob, deduped by URL
+// and labelled by kind. Shared by the job detail's Builder links panel and the
+// board card's link row, so both surfaces name the same link the same way.
+// Presentation only: it renders the URLs that already ride on the card object
+// and applies NO per-family required-link recipe (captain decision C.4).
+function collectMakesafeExternalLinks(md) {
+  md = md || {};
+  var KIND_LABELS = MAKESAFE_LINK_KIND_LABELS;
   var links = [];
   function add(item, fallbackLabel) {
     if (!item) return;
@@ -16596,6 +16842,11 @@ function renderMakesafeOpsExternalLinks(md) {
     else if (raw && typeof raw === 'object') Object.keys(raw).forEach(function(label) { add(raw[label], label); });
     else if (raw) add(raw, 'Open link');
   });
+  return links;
+}
+
+function renderMakesafeOpsExternalLinks(md) {
+  var links = collectMakesafeExternalLinks(md);
   if (!links.length) return '';
   var html = '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);border-left:4px solid #0E7C7B;">';
   html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Builder links</div>';
@@ -16611,8 +16862,13 @@ function renderMakesafeOpsDetail(data) {
   var j = data.job || {};
   var md = data.makesafe_details || j.makesafe_details || j.metadata || {};
   var sub = md.substatus || getMakesafeSubstatus(j) || 'pending_allocation';
-  var stage = getMakesafeStage(Object.assign({}, j, { substatus: sub }), j.status || '');
-  var age = getMakesafeAgeParts(j, stage);
+  // The board's canonical stage, or an honest "not confirmed". NEVER a
+  // substatus re-derivation — see <makesafe-detail-canonical-stage>.
+  var stageInfo = resolveMakesafeDetailStage(data);
+  var stage = stageInfo.stage;
+  var stageKnown = !!stage;
+  var stageLive = stageKnown && MAKESAFE_LIVE_STAGES.indexOf(stage) >= 0;
+  var age = getMakesafeAgeParts(j, stageKnown ? stage : '');
   var builder = getMakesafeBuilder(Object.assign({}, j, { makesafe_details: md })) || 'Builder TBC';
   var suburb = j.site_suburb || j.suburb || 'Suburb TBC';
   // Call without md override so getMakesafeTypeLabel can fall through to j.metadata,
@@ -16656,7 +16912,16 @@ function renderMakesafeOpsDetail(data) {
   html += '<div style="font-size:14px;color:#D97706;font-weight:850;margin-top:4px;">' + escapeHtml(builder) + '</div>';
   html += '</div>';
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">';
-  html += renderMakesafeTinyBadge(makesafeUiStageLabel(stage), age.color);
+  // Stage badge = the board column, or an explicit "not confirmed". The two can
+  // no longer disagree because they are now the same value.
+  if (stageKnown) {
+    html += renderMakesafeTinyBadge(makesafeUiStageLabel(stage), age.color,
+      'Board column: ' + makesafeUiStageLabel(stage)
+      + (stageInfo.source === 'board_feed' ? ' (canonical make-safe board feed)' : ' (canonical stage from job_detail)'));
+  } else {
+    html += renderMakesafeTinyBadge('Stage not confirmed', '#8FA4B2',
+      'The canonical make-safe board feed has not answered for this job, so its board column is unknown. No stage is derived here.');
+  }
   html += renderMakesafeTinyBadge(age.label, age.color);
   if (j.job_number) html += renderMakesafeTinyBadge(j.job_number, '#8FA4B2');
   if (adminNotes.length) html += renderMakesafeTinyBadge('Admin note ' + adminNotes.length, '#7C3AED');
@@ -16777,7 +17042,14 @@ function renderMakesafeOpsDetail(data) {
     html += '<div style="font-size:14px;font-weight:850;color:var(--sw-green);margin-bottom:6px;">Invoice document attached</div>';
     invoiceDocs.slice(0, 3).forEach(function(doc) { html += renderMakesafeDocPreview(doc); });
   } else {
-    html += '<div style="font-size:14px;font-weight:850;color:' + (stage === 'report_ready' ? '#9B59B6' : '#8FA4B2') + ';margin-bottom:6px;">' + (stage === 'report_ready' ? 'Docs ready for admin/reporting skill' : 'No invoice yet') + '</div>';
+    // Docs Ready with no drafted pack must not read as "docs ready" — say which.
+    var packDrafted = makesafeHasDraftedPack(Object.assign({}, j, { board_stage: stage, substatus: sub }));
+    var invHeadline = (stage !== 'report_ready')
+      ? { text: 'No invoice yet', color: '#8FA4B2' }
+      : (packDrafted
+        ? { text: 'Docs ready for admin/reporting skill', color: '#9B59B6' }
+        : { text: 'Docs Ready column &mdash; no pack drafted yet', color: '#B45309' });
+    html += '<div style="font-size:14px;font-weight:850;color:' + invHeadline.color + ';margin-bottom:6px;">' + invHeadline.text + '</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">The reporting skill/admin process should produce the final report and invoice, then mark this completed.</div>';
   }
   html += '</div>';
@@ -16786,14 +17058,31 @@ function renderMakesafeOpsDetail(data) {
   // Documents + send-log look-back panel for this make-safe job.
   html += renderMakesafeDocsSendLogPanel(data);
 
+  // Forward-move actions are GATED ON THE CANONICAL STAGE, not on substatus.
+  // A card the captain's display ledger archived used to open here offering
+  // "Allocated / waiting report" — one click from silently undoing that ruling.
+  // Terminal and unconfirmed stages now offer no move at all.
   var subActions = [];
-  if (sub === 'pending_allocation' || sub === 'company_contact_required' || sub === 'company_contact_done') subActions.push({ to: 'waiting_on_trade_report', label: 'Allocated / waiting report', color: '#F39C12' });
-  if (sub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Docs ready', color: '#9B59B6' }); // M3b U5 (G2)
-  if (sub === 'admin_to_send_report') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
-  if (sub === 'ready_to_invoice') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
+  if (stageLive) {
+    if (sub === 'pending_allocation' || sub === 'company_contact_required' || sub === 'company_contact_done') subActions.push({ to: 'waiting_on_trade_report', label: 'Allocated / waiting report', color: '#F39C12' });
+    if (sub === 'waiting_on_trade_report') subActions.push({ to: 'admin_to_send_report', label: 'Docs ready', color: '#9B59B6' }); // M3b U5 (G2)
+    if (sub === 'admin_to_send_report') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
+    if (sub === 'ready_to_invoice') subActions.push({ to: 'complete', label: 'Mark completed after reporting/invoice', color: '#7F8C8D' });
+  }
+  var TERMINAL_STAGE_NOTES = {
+    archive: 'This job is in <b>Archive</b> on the make-safe board. No forward move is offered here &mdash; moving it would undo the archive ruling that put it there.',
+    cancelled: 'This job is <b>Cancelled</b> on the make-safe board. No forward move is offered here.',
+    completed: 'This job is in <b>Completed This Week</b> on the make-safe board. The make-safe flow is finished.'
+  };
   html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
   html += '<div style="font-size:11px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;margin-bottom:8px;">Next step</div>';
-  if (subActions.length) {
+  if (!stageKnown) {
+    html += '<div style="font-size:12px;color:#7A4A12;background:#FEF3E7;border:1px solid #F5C889;border-radius:6px;padding:8px 10px;">'
+      + '<b>Board stage not confirmed.</b> The canonical make-safe board feed has not answered for this job, so no stage move is offered here. Open the make-safe board to act on it.</div>';
+  } else if (!stageLive) {
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);background:var(--sw-warm-200);border-radius:6px;padding:8px 10px;">'
+      + (TERMINAL_STAGE_NOTES[stage] || 'No forward move is offered from this board column.') + '</div>';
+  } else if (subActions.length) {
     subActions.forEach(function(sa) { html += '<button onclick="advanceMakesafeSubstatus(\'' + j.id + '\',\'' + sa.to + '\')" class="btn btn-sm" style="background:' + sa.color + ';color:#fff;margin-right:6px;margin-bottom:6px;">' + sa.label + '</button>'; });
   } else {
     html += '<div style="font-size:13px;color:var(--sw-green);font-weight:800;">MakeSafe flow complete.</div>';

@@ -53,6 +53,23 @@ evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
 The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
 directly and remain overlay-blind — migrating them is follow-up work.
 
+The JOB DETAIL obeys the same rule: it never derives a make-safe's stage from
+substatus. `resolveMakesafeDetailStage` takes `canonical_stage` off the
+`job_detail` payload, else the stage the canonical feed already published for
+that job id, else says "Stage not confirmed" — and the Next step forward-move
+buttons are gated on that stage, so a terminal (archive/cancelled/completed) or
+unconfirmed card offers no move. A bare `board_stage` is the DECLARED stage and
+is deliberately not trusted here. Search `// <makesafe-detail-canonical-stage>`.
+The card's family tag is the canonical row's `ses_family` / `ses_family_label`
+(`getSesFamilyLabel`), never the `inferMakesafeFamilyFromText` regex, and
+`ses_family: 'unknown'` renders as "Family not determined". Docs Ready keeps its
+name and meaning (captain decision C.4 is still open) but a card with no drafted
+pack says "No pack drafted" and the column states how many packs exist —
+`makesafeHasDraftedPack`. Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`;
+live verification evidence in `docs/evidence/ses-b2-ui-truth-2026-08-02/`.
+Read-only sessions against the live board must use `ops.html?noAutoIntake=1`:
+loading the board otherwise POSTs `auto_approve_clean_intake_drafts`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

@@ -63,9 +63,19 @@ terminal (archive/cancelled/completed) or unconfirmed card offers no move. A bar
 FRESHNESS IS PART OF THAT CONTRACT: the remembered stage is a read, so every
 make-safe transition this page performs (`advanceMakesafeSubstatus`, board drag,
 cancel, reopen) calls `afterMakesafeStageTransition()`, which DROPS the whole map,
-re-reads the canonical feed and repaints the open detail from that response; a
-failed re-read falls back to "Stage not confirmed", never to the pre-write stage.
-Search `// <makesafe-detail-canonical-stage>`.
+re-reads the canonical feed and repaints the open detail from that response.
+If EITHER the canonical read or the `job_detail` read fails, that job id is marked
+in `_makesafeStageReadFailedIds` and `resolveMakesafeDetailStage` refuses to name
+a stage for it — so the badge reads "Stage not confirmed" and no forward move is
+offered, never the pre-write stage. That mark lives in the RESOLVER, not on the
+payload and not with the callers: `refreshJobDetail()` is called from ~10 places
+that know nothing about make-safe stages, and each replaces `_currentJobData`, so
+a payload-borne flag is silently dropped by the next ordinary refresh. Only a
+canonical read that actually SUCCEEDED clears it (`clearMakesafeStageReadFailures`
+inside `ensureMakesafeCanonicalStages`); a successful `job_detail` is not evidence
+about the board's stage. Do not add a stage argument to `refreshJobDetail` — the
+point is that no caller can forget one. Search
+`// <makesafe-detail-canonical-stage>`.
 
 Two claims on a make-safe surface are canonical-row-or-nothing. The BOARD CARD's
 family tag comes from `getMakesafeCardFamilyLabel` — canonical `ses_family` /

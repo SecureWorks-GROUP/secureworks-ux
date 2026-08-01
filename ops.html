@@ -10483,9 +10483,33 @@ function rememberMakesafeCanonicalStage(row) {
   }
 }
 
+// Job ids whose canonical stage could not be re-read after a transition.
+//
+// THE RESOLVER OWNS THIS STATE, not the callers and not the payload. Marking a
+// payload does not work: `refreshJobDetail()` is called from ~10 places that know
+// nothing about make-safe stages, and each one replaces `_currentJobData` with a
+// fresh unmarked payload — silently restoring a stage no canonical read ever
+// confirmed. Keyed by job id here, every repaint path (tab switch, sub-view
+// change, any later render) inherits the not-confirmed state automatically,
+// because they all resolve the stage through this one function.
+//
+// It is cleared ONLY by a canonical read that actually succeeded. A successful
+// `job_detail` refresh is not evidence about the board's stage and must never
+// clear it.
+var _makesafeStageReadFailedIds = {};
+
+function markMakesafeStageReadFailed(jobId) {
+  if (jobId) _makesafeStageReadFailedIds[jobId] = true;
+}
+
+function clearMakesafeStageReadFailures() {
+  _makesafeStageReadFailedIds = {};
+}
+
 // The stage a make-safe job detail may display, plus where it came from.
 function resolveMakesafeDetailStage(data) {
-  if (data && data._makesafeStageReadFailed) return { stage: '', source: 'unknown' };
+  var jid = (data && data.job && data.job.id) || '';
+  if (jid && _makesafeStageReadFailedIds[jid]) return { stage: '', source: 'unknown' };
   var j = (data && data.job) || {};
   var fromDetail = makesafeCanonicalStageOf(data) || makesafeCanonicalStageOf(j)
     || makesafeCanonicalStageOf(data && data.makesafe_details);
@@ -10504,14 +10528,21 @@ function ensureMakesafeCanonicalStages() {
   if (!_makesafeCanonicalStageFetch) {
     _makesafeCanonicalStageFetch = opsFetch('makesafe_board', { projection: 'ops' })
       .then(function(payload) {
-        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return false;
+        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
+          _makesafeCanonicalStageFetch = null; // an unusable answer is not an answer: let the next caller retry
+          return false;
+        }
         Object.keys(payload.columns || {}).forEach(function(stage) {
           (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
         });
+        // THE one event that may clear a not-confirmed stage: a canonical read
+        // that actually succeeded.
+        clearMakesafeStageReadFailures();
         return true;
       })
       .catch(function(e) {
         console.warn('Make-safe detail: canonical stage lookup unavailable:', e && e.message);
+        _makesafeCanonicalStageFetch = null; // do not cache a failure — retry on the next open
         return false;
       });
   }
@@ -10530,9 +10561,26 @@ function refreshMakesafeCanonicalStages() {
 // Repaint the open job detail from a CURRENT canonical response. Called after
 // every make-safe transition this page performs: without it the detail keeps the
 // stage it was painted with and can offer a move the new stage forbids.
+// FAIL CLOSED ON EITHER READ. The canonical read gives the stage; the detail read
+// gives everything painted around it. If either one fails, this job is marked
+// not-confirmed in the resolver, so the repaint below — and every repaint after
+// it — shows "Stage not confirmed" with no forward-move action, instead of the
+// stage the detail was painted with before the write.
 async function afterMakesafeStageTransition() {
+  var jobId = _currentJobId;
   var canonicalReadSucceeded = await refreshMakesafeCanonicalStages();
-  if (_currentJobId) await refreshJobDetail(canonicalReadSucceeded);
+  if (!canonicalReadSucceeded) markMakesafeStageReadFailed(jobId);
+  if (!jobId) return;
+  // refreshJobDetail repaints on success, and the mark above is already in place
+  // by then, so a canonical failure surfaces in that same paint.
+  var detailReadSucceeded = await refreshJobDetail();
+  if (detailReadSucceeded) return;
+  // The detail payload could not be re-read, so nothing repainted it. Mark the
+  // job and repaint what is still on screen as unconfirmed.
+  markMakesafeStageReadFailed(jobId);
+  if (_currentJobData && _currentJobData.job && _currentJobData.job.type === 'makesafe') {
+    renderOverviewView(_currentJobData);
+  }
 }
 // </makesafe-detail-canonical-stage>
 // ════════════════════════════════════════════════════════════
@@ -15673,33 +15721,25 @@ function closeJobDetail(skipHistory) {
   }
 }
 
-// Refresh current job detail (after an action)
-async function refreshJobDetail(canonicalReadSucceeded) {
-  if (_currentJobId) {
-    try {
-      var data = await opsFetch('job_detail', { jobId: _currentJobId });
-      if (canonicalReadSucceeded === false) data._makesafeStageReadFailed = true;
-      else if (canonicalReadSucceeded === true) delete data._makesafeStageReadFailed;
-      _currentJobData = data;
-      renderHealthBar(data);
-      renderActionDrawer(data);
-      var activeTab = document.querySelector('.jd-tab.active');
-      var tab = activeTab ? activeTab.getAttribute('data-jd-tab') : 'timeline';
-      showJobSubView(tab);
-      if (canonicalReadSucceeded === false && data.job && data.job.type === 'makesafe') {
-        renderOverviewView(Object.assign({}, data, { _makesafeStageReadFailed: true }));
-      }
-      return true;
-    } catch(e) {
-      console.error('refreshJobDetail error:', e);
-      if (_currentJobData && _currentJobData.job && _currentJobData.job.type === 'makesafe') {
-        _currentJobData._makesafeStageReadFailed = true;
-        renderOverviewView(Object.assign({}, _currentJobData, { _makesafeStageReadFailed: true }));
-      }
-      return false;
-    }
+// Refresh current job detail (after an action). Deliberately takes NO make-safe
+// stage argument: a caller cannot forget to pass one, because the not-confirmed
+// state lives in the stage resolver rather than on this payload. Returns whether
+// the re-read succeeded so a make-safe transition can fail closed.
+async function refreshJobDetail() {
+  if (!_currentJobId) return true;
+  try {
+    var data = await opsFetch('job_detail', { jobId: _currentJobId });
+    _currentJobData = data;
+    renderHealthBar(data);
+    renderActionDrawer(data);
+    var activeTab = document.querySelector('.jd-tab.active');
+    var tab = activeTab ? activeTab.getAttribute('data-jd-tab') : 'timeline';
+    showJobSubView(tab);
+    return true;
+  } catch(e) {
+    console.error('refreshJobDetail error:', e);
+    return false;
   }
-  return true;
 }
 
 function showJobSubView(tab) {

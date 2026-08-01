@@ -157,6 +157,122 @@ test('a transition repaints the open detail from a CURRENT canonical response', 
   expect(result.afterHtml).not.toContain('>Allocated<');
 });
 
+// Harness for the three fail-closed paths below: paint a make-safe detail whose
+// canonical stage is Allocated, then transition it with the canonical and/or the
+// detail read failing. `fail` picks which read breaks.
+async function paintThenTransition(page, fail) {
+  return page.evaluate(async ({ payload, fail }) => {
+    const detail = {
+      job: { id: 'job-move', type: 'makesafe', job_number: 'SWMS-MOVE', status: 'accepted', substatus: 'waiting_on_trade_report' },
+      documents: [], work_orders: [], invoices: [], events: [], media: [], assignments: [], job_assignments: [],
+    };
+    let transitioned = false;
+    window.opsFetch = function (action) {
+      if (action === 'makesafe_board') {
+        return (transitioned && fail.canonical) ? Promise.reject(new Error('feed down')) : Promise.resolve(payload);
+      }
+      if (action === 'job_detail') {
+        return (transitioned && fail.detail) ? Promise.reject(new Error('detail down')) : Promise.resolve(detail);
+      }
+      return Promise.resolve({});
+    };
+    window.opsPost = function () { return Promise.resolve({ ok: true }); };
+    window.loadJobs = function () {};
+
+    await ensureMakesafeCanonicalStages();
+    _currentJobId = 'job-move';
+    _currentJobData = detail;
+    showJobSubView('overview');
+    const beforeHtml = document.getElementById('jdOverview').innerHTML;
+
+    transitioned = true;
+    await advanceMakesafeSubstatus('job-move', 'admin_to_send_report');
+
+    return { detail, beforeHtml, afterHtml: document.getElementById('jdOverview').innerHTML };
+  }, { payload: boardPayload([canonicalRow({ id: 'job-move', job_number: 'SWMS-MOVE', canonical_stage: 'allocated', substatus: 'waiting_on_trade_report' })]), fail });
+}
+
+test('a failed canonical read after a transition repaints the detail as unconfirmed', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await paintThenTransition(page, { canonical: true, detail: false });
+
+  expect(result.beforeHtml).toContain('>Allocated<');
+  // The pre-transition paint is gone, and no forward move survives it.
+  expect(result.afterHtml).toContain('Stage not confirmed');
+  expect(result.afterHtml).toContain('Board stage not confirmed');
+  expect(result.afterHtml).not.toContain('>Allocated<');
+  expect(result.afterHtml).not.toContain('advanceMakesafeSubstatus');
+});
+
+test('a failed DETAIL read after a transition also fails closed', async ({ page }) => {
+  // The path that slipped: refreshJobDetail() swallowed its error, so nothing
+  // repainted and the pre-transition stage stayed on screen.
+  await page.goto('/ops.html');
+  const result = await paintThenTransition(page, { canonical: false, detail: true });
+
+  expect(result.beforeHtml).toContain('>Allocated<');
+  expect(result.afterHtml).toContain('Stage not confirmed');
+  expect(result.afterHtml).not.toContain('>Allocated<');
+  expect(result.afterHtml).not.toContain('advanceMakesafeSubstatus');
+});
+
+test('the not-confirmed stage survives a tab switch and a plain detail refresh', async ({ page }) => {
+  // The two ways the previous fix leaked: the marker lived on one rendered copy,
+  // so any later repaint — a sub-view switch, or one of the ~10 no-argument
+  // refreshJobDetail() callers — restored a stage no canonical read confirmed.
+  await page.goto('/ops.html');
+  const failed = await paintThenTransition(page, { canonical: true, detail: false });
+  expect(failed.afterHtml).toContain('Stage not confirmed');
+
+  const after = await page.evaluate(async () => {
+    // 1. leave the overview and come back.
+    showJobSubView('history');
+    showJobSubView('overview');
+    const afterTabSwitch = document.getElementById('jdOverview').innerHTML;
+
+    // 2. a plain refresh, exactly as every other caller in the page makes it —
+    //    it succeeds, and a successful job_detail is NOT evidence about the
+    //    board's stage, so it must not clear the not-confirmed state.
+    window.opsFetch = function (action) {
+      if (action === 'job_detail') {
+        return Promise.resolve({
+          job: { id: 'job-move', type: 'makesafe', job_number: 'SWMS-MOVE', status: 'accepted', substatus: 'waiting_on_trade_report', canonical_stage: 'allocated' },
+          documents: [], work_orders: [], invoices: [], events: [], media: [], assignments: [], job_assignments: [],
+        });
+      }
+      return Promise.resolve({});
+    };
+    const refreshed = await refreshJobDetail();
+    return { afterTabSwitch, refreshed, afterPlainRefresh: document.getElementById('jdOverview').innerHTML };
+  });
+
+  expect(after.afterTabSwitch).toContain('Stage not confirmed');
+  expect(after.afterTabSwitch).not.toContain('advanceMakesafeSubstatus');
+  expect(after.refreshed).toBe(true);
+  // Even a payload carrying canonical_stage cannot lift the mark.
+  expect(after.afterPlainRefresh).toContain('Stage not confirmed');
+  expect(after.afterPlainRefresh).not.toContain('>Allocated<');
+  expect(after.afterPlainRefresh).not.toContain('advanceMakesafeSubstatus');
+});
+
+test('only a successful canonical read clears the not-confirmed stage', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await paintThenTransition(page, { canonical: true, detail: false });
+  expect(result.afterHtml).toContain('Stage not confirmed');
+
+  const recovered = await page.evaluate(async (payload) => {
+    window.opsFetch = function (action) {
+      if (action === 'makesafe_board') return Promise.resolve(payload);
+      return Promise.resolve({});
+    };
+    const ok = await refreshMakesafeCanonicalStages();
+    return { ok, stage: resolveMakesafeDetailStage({ job: { id: 'job-move' } }) };
+  }, boardPayload([canonicalRow({ id: 'job-move', canonical_stage: 'report_ready' })]));
+
+  expect(recovered.ok).toBe(true);
+  expect(recovered.stage).toEqual({ stage: 'report_ready', source: 'board_feed' });
+});
+
 test('a stale canonical answer is dropped rather than shown after a transition', async ({ page }) => {
   // If the post-transition canonical read fails, the detail must fall back to
   // "Stage not confirmed" — never to the stage it held before the write.

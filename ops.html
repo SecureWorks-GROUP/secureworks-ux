@@ -17181,27 +17181,65 @@ var MAKESAFE_LINK_KIND_LABELS = {
   builder_portal: 'Builder Portal',
   work_order: 'Work Order'
 };
+// Kinds that CLAIM to be a builder portal. A row of one of these kinds has to
+// prove it with a share/report path before it may be offered as a button.
+var MAKESAFE_PORTAL_LINK_KINDS = {
+  roof_report: 1, assessment_report: 1, photos: 1, quote: 1, builder_portal: 1
+};
+// <makesafe-portal-link-hygiene> F5 — mirror of the ops-api
+// urlIsBuilderPortalLink / urlLooksLikeAssetOrTracking predicate. Structural
+// reject for image/CDN/tracking URLs so historical polluted external_links rows
+// are never offered as portal buttons. Liveness is NOT checked: an expired
+// share is an aged job, not a broken link, and stays visible.
+function urlLooksLikeAssetOrTracking(url) {
+  try {
+    var u = new URL(String(url || '').trim());
+    var host = u.hostname.toLowerCase();
+    if (host === 'awstrack.me' || host.slice(-12) === '.awstrack.me') return true;
+    if (/\.(?:png|jpe?g|gif|webp|svg|ico|bmp)(?:\?|#|$)/i.test(u.pathname)) return true;
+    return false;
+  } catch (e) { return false; }
+}
+function urlIsBuilderPortalLink(url) {
+  try {
+    var u = new URL(String(url || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (urlLooksLikeAssetOrTracking(url)) return false;
+    if (!/\/(share|report|reports|portal|s|r)\//i.test(u.pathname)) return false;
+    return true;
+  } catch (e) { return false; }
+}
 // Collect the builder/portal links off a make-safe details blob, deduped by URL
 // and labelled by kind. Shared by the job detail's Builder links panel and the
-// board card's link row, so both surfaces name the same link the same way.
+// board card's link row, so both surfaces name the same link the same way — and
+// so both get the F5 hygiene filter above from one place.
 // Presentation only: it renders the URLs that already ride on the card object
 // and applies NO per-family required-link recipe (captain decision C.4).
 function collectMakesafeExternalLinks(md) {
   md = md || {};
   var KIND_LABELS = MAKESAFE_LINK_KIND_LABELS;
+  var PORTAL_KINDS = MAKESAFE_PORTAL_LINK_KINDS;
   var links = [];
   function add(item, fallbackLabel) {
     if (!item) return;
     var url = typeof item === 'string' ? item : (item.url || item.href || item.link || '');
     url = String(url || '').trim();
     if (!url || !/^(https?:|mailto:|tel:)/i.test(url)) return;
+    // Never surface branding images, signatures, CDN objects, or SES trackers
+    // as Builder Portal buttons (F5 / ses-links-truth-audit-v1).
+    if (/^https?:/i.test(url) && urlLooksLikeAssetOrTracking(url)) return;
     var label;
+    var kind = '';
     if (typeof item === 'string') {
       label = fallbackLabel;
     } else {
-      var kind = String(item.kind || '').trim().toLowerCase();
+      kind = String(item.kind || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
       label = (kind && KIND_LABELS[kind]) || item.label || item.name || item.title || fallbackLabel || 'Open link';
     }
+    // Portal-kind (or portal-labelled) rows require a genuine share/report path.
+    // An expired share still passes — age is not a hide condition.
+    var looksPortal = PORTAL_KINDS[kind] || /builder\s*portal|portal\s*link|report\s*link/i.test(String(label || ''));
+    if (looksPortal && /^https?:/i.test(url) && !urlIsBuilderPortalLink(url)) return;
     var key = url.toLowerCase();
     if (links.some(function(l) { return l.key === key; })) return;
     links.push({ key: key, label: label, url: url });

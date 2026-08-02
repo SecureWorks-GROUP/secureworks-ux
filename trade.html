@@ -8461,6 +8461,28 @@
     return h;
   }
 
+  // F5 portal-link hygiene — mirror of ops-api urlIsBuilderPortalLink /
+  // urlLooksLikeAssetOrTracking. Hides branding/tracker URLs from the trade
+  // link list and portal picker without stripping stored rows.
+  function urlLooksLikeAssetOrTracking(url) {
+    try {
+      var u = new URL(String(url || '').trim());
+      var host = u.hostname.toLowerCase();
+      if (host === 'awstrack.me' || host.slice(-12) === '.awstrack.me') return true;
+      if (/\.(?:png|jpe?g|gif|webp|svg|ico|bmp)(?:\?|#|$)/i.test(u.pathname)) return true;
+      return false;
+    } catch (e) { return false; }
+  }
+  function urlIsBuilderPortalLink(url) {
+    try {
+      var u = new URL(String(url || '').trim());
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+      if (urlLooksLikeAssetOrTracking(url)) return false;
+      if (!/\/(share|report|reports|portal|s|r)\//i.test(u.pathname)) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+
   function normaliseTradeExternalLinks(raw) {
     var out = [];
     function add(label, url) {
@@ -8468,6 +8490,8 @@
       if (!url) return;
       if (/^www\./i.test(url)) url = 'https://' + url;
       if (!/^(https?:|mailto:|tel:)/i.test(url)) return;
+      // F5: never list branding images / SES trackers as trade links.
+      if (/^https?:/i.test(url) && urlLooksLikeAssetOrTracking(url)) return;
       out.push({ label: String(label || 'Open link').trim() || 'Open link', url: url });
     }
     if (Array.isArray(raw)) {
@@ -10184,30 +10208,65 @@
       var u = String(v == null ? '' : v).trim();
       return /^https?:\/\//i.test(u) ? u : '';
     }
+    // F5 — pure portal hygiene inside the sentinel so CP2 smoke extracts it.
+    // Mirror of ops-api urlIsBuilderPortalLink / urlLooksLikeAssetOrTracking.
+    // Liveness is never checked: an expired share is still a portal URL.
+    function urlLooksLikeAssetOrTracking(url) {
+      try {
+        var u = new URL(String(url || '').trim());
+        var host = u.hostname.toLowerCase();
+        if (host === 'awstrack.me' || host.slice(-12) === '.awstrack.me') return true;
+        if (/\.(?:png|jpe?g|gif|webp|svg|ico|bmp)(?:\?|#|$)/i.test(u.pathname)) return true;
+        return false;
+      } catch (e) { return false; }
+    }
+    function urlIsBuilderPortalLink(url) {
+      try {
+        var u = new URL(String(url || '').trim());
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+        if (urlLooksLikeAssetOrTracking(url)) return false;
+        if (!/\/(share|report|reports|portal|s|r)\//i.test(u.pathname)) return false;
+        return true;
+      } catch (e) { return false; }
+    }
     // Backend shape (ship-review FIX 2): external_links is an ARRAY of
     // {label,url,kind}; the U6 marker appends {label:'Builder Portal', url,
     // kind:'builder_portal'}. Match by kind first, then label — never guess
-    // from an unrelated link. http(s) only.
+    // from an unrelated link. http(s) only. F5: only genuine share/report
+    // paths count — image/CDN/tracking URLs with kind=builder_portal are skipped.
+    var _PORTAL_KINDS = {
+      builder_portal: 1, roof_report: 1, assessment_report: 1, photos: 1, quote: 1
+    };
     function _portalFromArray(arr) {
       if (!Array.isArray(arr)) return '';
-      var i, e, u;
+      var i, e, u, k;
+      // Prefer typed report kinds / builder_portal with a genuine portal URL.
       for (i = 0; i < arr.length; i++) {
         e = arr[i] || {};
-        if (String(e.kind || '').toLowerCase().trim() === 'builder_portal') {
-          u = _httpUrl(e.url); if (u) return u;
+        k = String(e.kind || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+        if (_PORTAL_KINDS[k]) {
+          u = _httpUrl(e.url);
+          if (u && urlIsBuilderPortalLink(u)) return u;
         }
       }
       for (i = 0; i < arr.length; i++) {
         e = arr[i] || {};
         if (/builder\s*portal/i.test(String(e.label || ''))) {
-          u = _httpUrl(e.url); if (u) return u;
+          u = _httpUrl(e.url);
+          if (u && urlIsBuilderPortalLink(u)) return u;
         }
+      }
+      // Fallback: first genuine share URL regardless of kind (covers untyped).
+      for (i = 0; i < arr.length; i++) {
+        e = arr[i] || {};
+        u = _httpUrl(typeof e === 'string' ? e : e.url);
+        if (u && urlIsBuilderPortalLink(u)) return u;
       }
       return '';
     }
     // Builder portal link: the backend ARRAY shape wins; the legacy OBJECT
     // shape (external_links.builder_portal_url) is kept as a fallback.
-    // http(s) only — anything else is dropped, never rendered.
+    // http(s) only — image/tracker/non-share URLs are never returned.
     function portalUrl(detail, md) {
       detail = detail || {}; md = md || {};
       var fromArr = _portalFromArray(detail.external_links) || _portalFromArray(md.external_links);
@@ -10219,7 +10278,7 @@
       ];
       for (var i = 0; i < cands.length; i++) {
         var u = _httpUrl(cands[i]);
-        if (u) return u;
+        if (u && urlIsBuilderPortalLink(u)) return u;
       }
       return '';
     }

@@ -16272,6 +16272,29 @@ function renderMakesafeDocViewer(data) {
   return html;
 }
 
+// F5 portal-link hygiene — mirror of ops-api urlIsBuilderPortalLink /
+// urlLooksLikeAssetOrTracking. Structural reject for image/CDN/tracking URLs
+// so historical polluted external_links rows are never offered as portal
+// buttons. Liveness is NOT checked (expired share still shown).
+function urlLooksLikeAssetOrTracking(url) {
+  try {
+    var u = new URL(String(url || '').trim());
+    var host = u.hostname.toLowerCase();
+    if (host === 'awstrack.me' || host.slice(-12) === '.awstrack.me') return true;
+    if (/\.(?:png|jpe?g|gif|webp|svg|ico|bmp)(?:\?|#|$)/i.test(u.pathname)) return true;
+    return false;
+  } catch (e) { return false; }
+}
+function urlIsBuilderPortalLink(url) {
+  try {
+    var u = new URL(String(url || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (urlLooksLikeAssetOrTracking(url)) return false;
+    if (!/\/(share|report|reports|portal|s|r)\//i.test(u.pathname)) return false;
+    return true;
+  } catch (e) { return false; }
+}
+
 function renderMakesafeOpsExternalLinks(md) {
   var KIND_LABELS = {
     roof_report: 'Roof Report',
@@ -16281,19 +16304,30 @@ function renderMakesafeOpsExternalLinks(md) {
     builder_portal: 'Builder Portal',
     work_order: 'Work Order'
   };
+  var PORTAL_KINDS = {
+    roof_report: 1, assessment_report: 1, photos: 1, quote: 1, builder_portal: 1
+  };
   var links = [];
   function add(item, fallbackLabel) {
     if (!item) return;
     var url = typeof item === 'string' ? item : (item.url || item.href || item.link || '');
     url = String(url || '').trim();
     if (!url || !/^(https?:|mailto:|tel:)/i.test(url)) return;
+    // Never surface branding images, signatures, CDN objects, or SES trackers
+    // as Builder Portal buttons (F5 / ses-links-truth-audit-v1).
+    if (/^https?:/i.test(url) && urlLooksLikeAssetOrTracking(url)) return;
     var label;
+    var kind = '';
     if (typeof item === 'string') {
       label = fallbackLabel;
     } else {
-      var kind = String(item.kind || '').trim().toLowerCase();
+      kind = String(item.kind || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
       label = (kind && KIND_LABELS[kind]) || item.label || item.name || item.title || fallbackLabel || 'Open link';
     }
+    // Portal-kind (or portal-labelled) rows require a genuine share/report path.
+    // An expired share still passes — age is not a hide condition.
+    var looksPortal = PORTAL_KINDS[kind] || /builder\s*portal|portal\s*link|report\s*link/i.test(String(label || ''));
+    if (looksPortal && /^https?:/i.test(url) && !urlIsBuilderPortalLink(url)) return;
     var key = url.toLowerCase();
     if (links.some(function(l) { return l.key === key; })) return;
     links.push({ key: key, label: label, url: url });

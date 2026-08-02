@@ -114,7 +114,7 @@ card link row are filtered from one place; trade applies it in
 LIVENESS IS NEVER CHECKED: an expired share is an AGED JOB, not a broken link
 (captain domain fact — Prime shares expire around 30 days), so it stays visible and
 the trade panel explains the builder-resend path. This is display hygiene only; it
-strips no stored rows, and cleaning up the 59 polluted rows is a separate
+strips no stored rows, and cleaning up the 62 polluted rows is a separate
 captain-gated tranche. Guard: `scripts/test-f5-portal-link-hygiene.js` (runs before
 Playwright via `npm run test:e2e`) plus the card-face case in
 `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live evidence, and the read-only census

@@ -11840,6 +11840,12 @@ function intakeWorkOrderPdfs(d) {
       matchesDraftPo: !!poRef && !!cardPo && poRef === cardPo
     });
   });
+  var namedWorkOrders = items.filter(function(item) {
+    return /works?[\s_-]*order/.test(item.name.toLowerCase());
+  });
+  var identified = namedWorkOrders.length > 0;
+  items = identified ? namedWorkOrders : items;
+  items.forEach(function(item) { item.identifiedWorkOrder = identified; });
   items.sort(function(a, b) {
     if (a.matchesDraftPo !== b.matchesDraftPo) return a.matchesDraftPo ? -1 : 1;
     return a.order - b.order;
@@ -11965,7 +11971,7 @@ async function loadMakesafeIntake() {
 // choice, not a given. Names the POs and states whether the draft's own ref
 // picked the leading one.
 function renderIntakeMultiWorkOrderWarning(pdfs) {
-  if (!pdfs || pdfs.length < 2) return '';
+  if (!pdfs || pdfs.length < 2 || !pdfs[0].identifiedWorkOrder) return '';
   var refs = pdfs.map(function(p) { return p.poRef || 'no PO on file name'; });
   var matched = pdfs.filter(function(p) { return p.matchesDraftPo; });
   var lead = matched.length === 1
@@ -11984,7 +11990,7 @@ function renderIntakeReviewPdfChips(pdfs, activeIdx) {
   pdfs.forEach(function(p, i) {
     html += '<button type="button" class="msi-wo-chip' + (i === activeIdx ? ' active' : '') + '" ' +
       'data-msi-pdf-idx="' + i + '" onclick="msiReviewPdfJump(' + i + ')" title="' + escapeAttr(p.name) + '">' +
-      escapeHtml(p.poRef || ('Work order #' + (i + 1))) + '</button>';
+      escapeHtml(p.identifiedWorkOrder ? (p.poRef || ('Work order #' + (i + 1))) : ('Attachment #' + (i + 1))) + '</button>';
   });
   html += '</div>';
   return html;

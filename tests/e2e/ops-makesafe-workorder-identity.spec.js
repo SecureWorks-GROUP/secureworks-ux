@@ -203,6 +203,39 @@ test('the draft\'s own PO selects which work order is reviewed', async ({ page }
   expect(out.src).toContain('wo-53995.pdf');
 });
 
+test('named work orders exclude unrelated servable attachments from review', async ({ page }) => {
+  const d = draft({ attachments_json: [
+    { file_name: 'quote_MLB-26183.pdf', pdf_url: 'https://example.invalid/quote.pdf' },
+    { file_name: 'work_order_MLB-26183PO-54000.pdf', pdf_url: 'https://example.invalid/wo-54000.pdf' },
+  ] });
+  const out = await page.evaluate((draftRow) => {
+    _makesafeIntakeDraftCache[draftRow.id] = draftRow;
+    renderMakesafeIntakeReview(draftRow.id);
+    return {
+      pdfs: intakeWorkOrderPdfs(draftRow).map((p) => p.name),
+      html: document.getElementById('jobsBody').innerHTML,
+    };
+  }, d);
+  expect(out.pdfs).toEqual(['work_order_MLB-26183PO-54000.pdf']);
+  expect(out.html).not.toContain('quote_MLB-26183.pdf');
+  expect(out.html).not.toContain('work orders');
+});
+
+test('unidentified servable attachments remain available as a review fallback', async ({ page }) => {
+  const d = draft({ attachments_json: [
+    { file_name: 'builder-document.pdf', pdf_url: 'https://example.invalid/builder-document.pdf' },
+    { file_name: 'site-plan.pdf', pdf_url: 'https://example.invalid/site-plan.pdf' },
+  ] });
+  const out = await page.evaluate((draftRow) => ({
+    first: intakeFirstPdfUrl(draftRow),
+    pdfs: intakeWorkOrderPdfs(draftRow).map((p) => p.identifiedWorkOrder),
+    warning: renderIntakeMultiWorkOrderWarning(intakeWorkOrderPdfs(draftRow)),
+  }), d);
+  expect(out.first).toContain('builder-document.pdf');
+  expect(out.pdfs).toEqual([false, false]);
+  expect(out.warning).toBe('');
+});
+
 test('switching the reviewed work order swaps the frame and the full-screen link', async ({ page }) => {
   const out = await page.evaluate((d) => {
     _makesafeIntakeDraftCache[d.id] = d;

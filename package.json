@@ -2,7 +2,8 @@
   "scripts": {
     "serve:e2e": "python3 -m http.server 4173 --bind 127.0.0.1",
     "test:portal-confirmation": "node scripts/test-trade-portal-confirmation.js",
-    "test:e2e": "npm run test:portal-confirmation && playwright test",
+    "test:portal-link-hygiene": "node scripts/test-f5-portal-link-hygiene.js",
+    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {

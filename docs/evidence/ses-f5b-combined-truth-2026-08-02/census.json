@@ -1,0 +1,883 @@
+{
+  "generated_by": "scripts/ses-f5b-combined-truth-census.js",
+  "board": "ops.html?noAutoIntake=1#jobs → Make-Safes",
+  "ui_read_at_commit": "6a3734e",
+  "population": {
+    "cards_on_board": 440,
+    "job_detail_read_per_card": 440,
+    "job_detail_errors": 0
+  },
+  "coexistence": {
+    "cards_with_two_or_more_work_orders": 11,
+    "cards_every_work_order_listed": 11,
+    "cards_with_a_link_row_dropped_as_non_portal": 16,
+    "link_rows_dropped_total": 62,
+    "cards_trade_confirmation_visible": 421,
+    "cards_trade_confirmation_visible_that_legacy_would_have_hidden": 278,
+    "cards_exercising_all_three": 0,
+    "cards_exercising_at_least_two": 27,
+    "trade_cta_ever_a_dropped_asset": 0
+  },
+  "live_card_exercising_links_and_confirmation": {
+    "job_id": "8553f5e9-ba06-41cc-9de2-60ad797484ca",
+    "job_number": "SWMS-261079",
+    "suburb": "Floreat",
+    "builder_ref": "MLB-27148",
+    "ses_family": "ordinary_roof_portal",
+    "canonical_stage": "report_ready",
+    "work_order_count": 1,
+    "work_order_pos": [
+      "PO-57210"
+    ],
+    "all_work_orders_listed": true,
+    "leading_matches_card_po": false,
+    "link_rows_offered": 5,
+    "link_rows_kept": 1,
+    "link_rows_dropped": 4,
+    "dropped_shapes": [
+      "documents.primeeco.tech/<token>/<token>.png",
+      "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+      "documents.primeeco.tech/<token>/<token>.png",
+      "documents.primeeco.tech/<token>/<token>.png"
+    ],
+    "kept_shapes": [
+      "primeeco.tech/share/<token>"
+    ],
+    "trade_confirmation_visible": true,
+    "trade_portal_cta": "genuine share offered",
+    "trade_portal_is_a_dropped_asset": false,
+    "trade_legacy_would_hide": true
+  },
+  "live_card_exercising_multi_work_order": {
+    "job_id": "c109abb6-fc80-4eff-91e5-daf55cc96b15",
+    "job_number": "SWMS-26721",
+    "suburb": "Eaton",
+    "builder_ref": "MLB-25795",
+    "ses_family": "ordinary_roof_portal",
+    "canonical_stage": "archive",
+    "work_order_count": 2,
+    "work_order_pos": [
+      "PO-53893",
+      "PO-53896"
+    ],
+    "all_work_orders_listed": true,
+    "leading_matches_card_po": false,
+    "link_rows_offered": 4,
+    "link_rows_kept": 4,
+    "link_rows_dropped": 0,
+    "dropped_shapes": [],
+    "kept_shapes": [
+      "primeeco.tech/share/<token>",
+      "primeeco.tech/share/<token>",
+      "primeeco.tech/share/<token>",
+      "primeeco.tech/share/<token>"
+    ],
+    "trade_confirmation_visible": true,
+    "trade_portal_cta": "genuine share offered",
+    "trade_portal_is_a_dropped_asset": false,
+    "trade_legacy_would_hide": true
+  },
+  "composed_all_three_card": {
+    "work_orders_on_card": 2,
+    "work_order_slots_rendered": 2,
+    "work_order_pos_rendered": [
+      "PO-53893",
+      "PO-53896"
+    ],
+    "multi_work_order_warning_shown": true,
+    "builder_links_kept": 1,
+    "builder_links_panel_has_asset_or_tracker": false,
+    "builder_links_labels": [
+      "Builder Portal"
+    ],
+    "trade_confirmation_visible": true,
+    "trade_portal_cta": "genuine share offered",
+    "trade_panel": {
+      "done": false,
+      "family_label": "Roof Report",
+      "confirmation_control_present": true,
+      "portal_cta_present": true,
+      "expired_link_guidance_present": true,
+      "portal_cta_is_a_share_url": true,
+      "portal_cta_is_an_asset_or_tracker": false
+    },
+    "composed_from": {
+      "link_rows_and_trade_state": "SWMS-261079",
+      "work_order_documents": "SWMS-26721",
+      "why": "no live card carries both a second builder instruction and a polluted link row"
+    }
+  },
+  "read_only_proof": {
+    "non_get_requests_aborted": 0,
+    "violations": [],
+    "clicks_on_the_live_board": 0
+  },
+  "cards_exercising_all_three": [],
+  "cards_exercising_at_least_two": [
+    {
+      "job_id": "dd4b5a7a-b019-4ae8-ad6b-8a003befafdc",
+      "job_number": "SWMS-26462",
+      "suburb": "AVELEY",
+      "builder_ref": "67380",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "archive",
+      "work_order_count": 2,
+      "work_order_pos": [
+        null,
+        null
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 0,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "c109abb6-fc80-4eff-91e5-daf55cc96b15",
+      "job_number": "SWMS-26721",
+      "suburb": "Eaton",
+      "builder_ref": "MLB-25795",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "archive",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53893",
+        "PO-53896"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 4,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "ddfba6de-9806-4933-847d-d152782b5455",
+      "job_number": "SWMS-26735",
+      "suburb": "Glen Iris",
+      "builder_ref": "MLB-26183",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53995",
+        "PO-54000"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 4,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "a7a573a5-2d6d-4a64-aa71-d21f934eac70",
+      "job_number": "SWMS-26736",
+      "suburb": "Usher",
+      "builder_ref": "MLB-25625",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54006",
+        "PO-54007"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 4,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "66774c3f-6e4d-4ad0-a9c5-5b950993b9c7",
+      "job_number": "SWMS-26759",
+      "suburb": "Myalup, WA 6220",
+      "builder_ref": "MLB-25765",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54176",
+        "PO-54177"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 4,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "0ec5c7d3-bc1a-48ad-9a70-0bc916200ea3",
+      "job_number": "SWMS-26852",
+      "suburb": "Glen Iris, WA 6230",
+      "builder_ref": "MLB-26183",
+      "ses_family": "assessment_quote",
+      "canonical_stage": "report_ready",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54000",
+        "PO-53995"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 3,
+      "link_rows_kept": 3,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "1caa4531-910c-45af-95c5-d5ce3b99d4e9",
+      "job_number": "SWMS-26853",
+      "suburb": "Myalup, WA 6220",
+      "builder_ref": "MLB-25765",
+      "ses_family": "assessment_quote",
+      "canonical_stage": "report_ready",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54177",
+        "PO-54176"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 3,
+      "link_rows_kept": 3,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "39d082b7-2819-4595-bee2-c3e8509dfb0c",
+      "job_number": "SWMS-26855",
+      "suburb": "Eaton, WA 6232",
+      "builder_ref": "MLB-25795",
+      "ses_family": "assessment_quote",
+      "canonical_stage": "archive",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53896",
+        "PO-53893"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 1,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "7aa83351-a1c1-450f-af9d-77e7777da92a",
+      "job_number": "SWMS-26902",
+      "suburb": "Ballajura",
+      "builder_ref": "MLB-26443",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "allocated",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-56252",
+        "PO-55255"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 1,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "ba92e2e9-4af2-40c1-9ad5-57d1bdaa2365",
+      "job_number": "SWMS-26957",
+      "suburb": "Kardinya",
+      "builder_ref": "MLB-26190",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "trade_report_in",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53966",
+        "PO-53964"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 1,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "www.primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "30f96ac3-4d58-430c-bc51-a3ae0a78ef66",
+      "job_number": "SWMS-26998",
+      "suburb": "Usher",
+      "builder_ref": "MLB-25625",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "archive",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54007",
+        "PO-54006"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 4,
+      "link_rows_dropped": 0,
+      "dropped_shapes": [],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>",
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "d41cbb16-6762-468b-bdaa-e1d5d7297937",
+      "job_number": "SWMS-261051",
+      "suburb": "Harrisdale",
+      "builder_ref": "WB69684",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "archive",
+      "work_order_count": 1,
+      "work_order_pos": [
+        null
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 2,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 1,
+      "dropped_shapes": [
+        "s3-ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/522/Picture+1.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "b406ac52-6134-4105-9ab5-78645bd89057",
+      "job_number": "SWMS-261065",
+      "suburb": "Munster",
+      "builder_ref": "MLB-26344",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "trade_report_in",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57087"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "07cd5547-b77e-47d5-a16b-a3464767ce74",
+      "job_number": "SWMS-261078",
+      "suburb": "Victoria Park",
+      "builder_ref": "MLB-24749",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "archive",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-56699"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "8553f5e9-ba06-41cc-9de2-60ad797484ca",
+      "job_number": "SWMS-261079",
+      "suburb": "Floreat",
+      "builder_ref": "MLB-27148",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57210"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "f8c19311-611d-4c8f-87b6-bb2005c47bda",
+      "job_number": "SWMS-261080",
+      "suburb": "Floreat",
+      "builder_ref": "MLB-27148",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "trade_report_in",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57211"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "967cdb6e-e57e-46ea-89d8-14e8afbc2ada",
+      "job_number": "SWMS-261081",
+      "suburb": "Mindarie",
+      "builder_ref": "MLB-27100",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-56960"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "ae2c1cf6-8d5e-4dfb-9a20-ae2c5dc04a10",
+      "job_number": "SWMS-261103",
+      "suburb": "Yokine",
+      "builder_ref": "PO20877",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-20877"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": true,
+      "link_rows_offered": 3,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 2,
+      "dropped_shapes": [
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/2536/BW+Logo.JPG",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "www.primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "4315d6dd-49f7-4f98-bf23-a365590f9b7f",
+      "job_number": "SWMS-261110",
+      "suburb": "Innaloo",
+      "builder_ref": "RR-27221",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57408"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "191cb5a8-7c73-424f-ad80-f4e9793a691a",
+      "job_number": "SWMS-261113",
+      "suburb": "Woodvale",
+      "builder_ref": "MLB-19475",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57512"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "088dee02-91d0-4539-8c9c-6014c9ebf06e",
+      "job_number": "SWMS-261114",
+      "suburb": "White Gum Valley",
+      "builder_ref": "RR-26836",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57514"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "d97067be-62e7-48e2-acff-344bb7473dd5",
+      "job_number": "SWMS-261115",
+      "suburb": "Morley",
+      "builder_ref": "MLB-27387",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57524"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 4,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "b7abfb20-6ab3-41fb-b5af-d65491bca38c",
+      "job_number": "SWMS-261116",
+      "suburb": "Morley",
+      "builder_ref": "MLB-27387",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57525"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    },
+    {
+      "job_id": "d80a2a95-be2b-40e0-9b0f-63c1098b47d5",
+      "job_number": "SWMS-261119",
+      "suburb": "Eaton",
+      "builder_ref": "MLB-26010",
+      "ses_family": "temporary_fencing",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-54250"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 5,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "xw2vdtj6.r.ap-southeast-2.awstrack.me/I0/<token>/<token>=258"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "4404a257-ff02-4a10-bfa5-60fb797f1b7b",
+      "job_number": "SWMS-261120",
+      "suburb": "Glen Iris",
+      "builder_ref": "MLB-26183",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-54281"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 5,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "xw2vdtj6.r.ap-southeast-2.awstrack.me/I0/<token>/<token>=258"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "9f699b7e-bca6-4c0e-b749-5560ca806530",
+      "job_number": "SWMS-261121",
+      "suburb": "Usher",
+      "builder_ref": "MLB-25625",
+      "ses_family": "physical_makesafe",
+      "canonical_stage": "new",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-54309"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 0,
+      "link_rows_dropped": 5,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "xw2vdtj6.r.ap-southeast-2.awstrack.me/I0/<token>/<token>=258"
+      ],
+      "kept_shapes": [],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "no portal link offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": false
+    },
+    {
+      "job_id": "7e266353-b04d-4e0e-8725-dacfaf0387d7",
+      "job_number": "SWMS-261123",
+      "suburb": "Cottesloe",
+      "builder_ref": "MLB-27309",
+      "ses_family": "ordinary_roof_portal",
+      "canonical_stage": "report_ready",
+      "work_order_count": 1,
+      "work_order_pos": [
+        "PO-57445"
+      ],
+      "all_work_orders_listed": true,
+      "leading_matches_card_po": false,
+      "link_rows_offered": 5,
+      "link_rows_kept": 1,
+      "link_rows_dropped": 4,
+      "dropped_shapes": [
+        "documents.primeeco.tech/<token>/<token>.png",
+        "s3.ap-southeast-2.amazonaws.com/cdn.primeeco.tech/company/504/<token>.jpg",
+        "documents.primeeco.tech/<token>/<token>.png",
+        "documents.primeeco.tech/<token>/<token>.png"
+      ],
+      "kept_shapes": [
+        "primeeco.tech/share/<token>"
+      ],
+      "trade_confirmation_visible": true,
+      "trade_portal_cta": "genuine share offered",
+      "trade_portal_is_a_dropped_asset": false,
+      "trade_legacy_would_hide": true
+    }
+  ]
+}

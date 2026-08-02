@@ -470,7 +470,13 @@ test('builder links the row already carries render on the card face', async ({ p
         { kind: 'assessment_report', url: 'https://primeeco.tech/share/report-1' },
         { kind: 'photos', url: 'https://primeeco.tech/share/photos-1' },
         { kind: 'quote', url: 'https://primeeco.tech/share/quote-1' },
+        { kind: 'builder_portal', url: 'https://primeeco.tech/share/portal-1' },
+        // F5: a portal-kind row whose URL is a CDN object with no share path is
+        // not a portal. It is never offered, and never counted in "+N more".
         { kind: 'builder_portal', url: 'https://documents.primeeco.tech/asset-1' },
+        // ...nor is a branding image or an SES open/click tracker.
+        { kind: 'builder_portal', url: 'https://documents.primeeco.tech/x/mlb_new_logo.png' },
+        { kind: 'builder_portal', url: 'https://xw2vdtj6.r.ap-southeast-2.awstrack.me/I0/0108/1/1' },
         // duplicate URL: deduped, never counted twice
         { kind: 'quote', url: 'https://primeeco.tech/share/quote-1' },
       ],
@@ -480,8 +486,13 @@ test('builder links the row already carries render on the card face', async ({ p
   expect(card).toContain('href="https://primeeco.tech/share/report-1"');
   expect(card).toContain('Assessment Report');
   expect(card).toContain('Photo Schedule');
-  // Capped at three, remainder counted honestly (4 unique URLs, 3 shown).
+  // Capped at three, remainder counted honestly (4 genuine URLs, 3 shown).
   expect(card).toContain('+1 more');
+  // The three non-portal rows are gone from the card face entirely — not
+  // rendered, and not inflating the remainder count.
+  expect(card).not.toContain('documents.primeeco.tech/asset-1');
+  expect(card).not.toContain('mlb_new_logo.png');
+  expect(card).not.toContain('awstrack.me');
   // The anchors must never trip the card's open-detail click.
   expect(card).toContain('onclick="event.stopPropagation();"');
 });

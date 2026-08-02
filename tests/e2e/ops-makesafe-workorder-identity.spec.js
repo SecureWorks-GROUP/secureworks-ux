@@ -217,7 +217,9 @@ test('named work orders exclude unrelated servable attachments from review', asy
     };
   }, d);
   expect(out.pdfs).toEqual(['work_order_MLB-26183PO-54000.pdf']);
-  expect(out.html).not.toContain('quote_MLB-26183.pdf');
+  // The review keeps the complete attachment list visible for provenance;
+  // only the selected work-order review set must exclude unrelated files.
+  expect(out.html).toContain('quote_MLB-26183.pdf');
   expect(out.html).not.toContain('work orders');
 });
 

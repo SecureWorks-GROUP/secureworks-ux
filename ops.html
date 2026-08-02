@@ -8632,24 +8632,9 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
   // working-day spans — a single confirm, never one modal per crew member.
   var clashes = [];
   plans.forEach(function(p) {
-    var span = CalOpsCore.paintedSpanDates(p.plan.update.scheduled_date, p.plan.update.scheduled_end);
-    span.forEach(function(ds) {
-      var avail = crewDayClash(p.crew, ds);
-      if (avail) {
-        clashes.push(escapeHtml(p.crew) + ' — ' + fmtDate(ds) + ' (<strong>' + avail.status + '</strong>)');
-      }
-    });
+    clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
   });
-  if (clashes.length) {
-    showConfirmModal(
-      'Crew Unavailable',
-      clashes.join('<br>') + '<br>Schedule anyway?',
-      'Schedule Anyway',
-      applyMoves
-    );
-    return;
-  }
-  applyMoves();
+  confirmClashesOrProceed(clashes, applyMoves);
 }
 
 function handleCalDrop(event, cell) {
@@ -8791,14 +8776,17 @@ async function submitScheduleFromModal(jobId) {
   if (!date) { showToast('Date required', 'warning'); return; }
 
   // CP1 (dragv2): duration laid in WORKING days (weekend-skip). Flag off keeps
-  // the original calendar-day end math.
+  // calendar-day spans, but in LOCAL time (Captain ruling cp1-askuser-2):
+  // toISOString() converted local midnight to UTC, which in Perth (UTC+8)
+  // rolled the end date back one day — a 1-day create wrote scheduled_end the
+  // day BEFORE scheduled_date (the inverted spans the Crew view silently drops).
   var endStr;
   if (window.__SW_CAL_DRAGV2_ENABLED) {
     endStr = CalOpsCore.layWorkingDays(date, dur);
   } else {
     var endDate = new Date(date + 'T00:00:00');
     endDate.setDate(endDate.getDate() + dur - 1);
-    endStr = endDate.toISOString().slice(0, 10);
+    endStr = localDateStr(endDate);
   }
 
   try {
@@ -8837,8 +8825,42 @@ async function moveAssignment(assignmentId, newCrew, newDate, opts) {
     return;
   }
 
-  // Warn if target cell is unavailable/leave
+  // Warn if target cell is unavailable/leave. With dragv2 on, the check runs
+  // at the same depth as multi-crew bar moves (Captain ruling cp1-askuser-2):
+  // EVERY painted day of the moved working-day span, one combined confirm,
+  // identical wording. Flag off keeps the original drop-day-only check.
+  if (window.__SW_CAL_DRAGV2_ENABLED) {
+    var dur = ev.scheduled_end
+      ? CalOpsCore.workingSpanDays(ev.scheduled_date, ev.scheduled_end)
+      : (Number(ev.duration_days) > 0 ? Math.round(Number(ev.duration_days)) : 1);
+    var clashes = collectSpanClashes(newCrew, newDate, CalOpsCore.layWorkingDays(newDate, dur));
+    confirmClashesOrProceed(clashes, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
+    return;
+  }
   confirmIfCrewUnavailable(newCrew, newDate, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
+}
+
+// CP1 (dragv2): every unavailable/leave day for `crew` across the painted
+// working-day span [startStr..endStr], formatted for the combined confirm.
+function collectSpanClashes(crew, startStr, endStr) {
+  var clashes = [];
+  CalOpsCore.paintedSpanDates(startStr, endStr).forEach(function(ds) {
+    var avail = crewDayClash(crew, ds);
+    if (avail) clashes.push(escapeHtml(crew) + ' — ' + fmtDate(ds) + ' (<strong>' + avail.status + '</strong>)');
+  });
+  return clashes;
+}
+
+// One combined "Crew Unavailable" confirm for however many clashes — never a
+// modal per crew/day. No clashes = straight through.
+function confirmClashesOrProceed(clashes, proceed) {
+  if (!clashes.length) { proceed(); return; }
+  showConfirmModal(
+    'Crew Unavailable',
+    clashes.join('<br>') + '<br>Schedule anyway?',
+    'Schedule Anyway',
+    proceed
+  );
 }
 
 async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {

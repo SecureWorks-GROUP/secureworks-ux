@@ -16,7 +16,8 @@
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 
-const OPS_URL = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html') + '?dragv2=1#calendar';
+const OPS_BASE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
+const OPS_URL = OPS_BASE + '?dragv2=1#calendar';
 
 // Fixture dates: first Monday >= today (same scheme as the CP1 walkthrough),
 // so every date sits inside the 2-week today-forward window.
@@ -31,7 +32,7 @@ const D = {
   MON: isoStr(monA), TUE: isoStr(plusDays(monA, 1)), WED: isoStr(plusDays(monA, 2)),
   THU: isoStr(plusDays(monA, 3)), FRI: isoStr(plusDays(monA, 4)), SAT: isoStr(plusDays(monA, 5)),
   SUN: isoStr(plusDays(monA, 6)), MON2: isoStr(plusDays(monA, 7)),
-  WED2: isoStr(plusDays(monA, 9)), THU2: isoStr(plusDays(monA, 10)),
+  TUE2: isoStr(plusDays(monA, 8)), WED2: isoStr(plusDays(monA, 9)), THU2: isoStr(plusDays(monA, 10)),
 };
 
 const USERS = [
@@ -55,8 +56,9 @@ function fixtureEvents() {
 }
 
 // Boots ops.html on the stubbed network. Returns { writes } — every mutating
-// ops-api call the page makes, in order. Pass { events } to boot with a
-// modified fixture (e.g. a confirmed assignment).
+// ops-api call the page makes, in order. Opts: { events } fixture override,
+// { flagOff } to boot WITHOUT dragv2, { unschedJobs } for the pipeline feed,
+// { availability } rows for get_crew_availability.
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents() };
   const writes = [];
@@ -68,8 +70,8 @@ async function bootCalendar(page, opts = {}) {
     const action = m[1];
     const json = (obj) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(obj) });
     if (action === 'calendar') return json({ events: state.events });
-    if (action === 'pipeline') return json({ columns: { accepted: [] } });
-    if (action === 'get_crew_availability') return json([]);
+    if (action === 'pipeline') return json({ columns: { accepted: opts.unschedJobs || [] } });
+    if (action === 'get_crew_availability') return json(opts.availability || []);
     if (action === 'list_users') return json({ users: USERS });
     if (action === 'update_assignment') {
       const body = route.request().postDataJSON();
@@ -96,10 +98,17 @@ async function bootCalendar(page, opts = {}) {
       localStorage.setItem('sw_cal_view_mode', 'crew');
     } catch (e) { /* file:// storage quirks — the URL flag still applies */ }
   });
-  await page.goto(OPS_URL);
+  await page.goto(opts.flagOff ? OPS_BASE + '#calendar' : OPS_URL);
   await expect(page.locator('.cal-job-block').first()).toBeVisible();
   // The real page shape: the Jarvis bar must be present, not hidden.
   await expect(page.locator('#jarvisBar')).toBeVisible();
+  if (opts.availability && opts.availability.length) {
+    // The availability shading is an async enrich — wait for it to land so a
+    // drag can't race ahead of the leave data it is meant to warn about.
+    await expect
+      .poll(() => page.evaluate(() => Object.keys(_calAvailability).length), { message: 'availability enrich never landed' })
+      .toBeGreaterThan(0);
+  }
   return { writes };
 }
 
@@ -264,5 +273,69 @@ test.describe('Schedule view — real-pointer drag (the shipped CP1 gap)', () =>
     await realDrag(page, bar, dst);
     await page.waitForTimeout(300);
     expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
+  });
+});
+
+// Captain ruling [cp1-askuser-2] (2026-08-01): both review findings fixed.
+// These checks pin the browser to Perth time (UTC+8) — the flag-off end-date
+// bug only shows on the UTC+ side of midnight.
+test.describe('Captain ruling cp1-askuser-2 — Perth timezone', () => {
+  test.use({ timezoneId: 'Australia/Perth' });
+
+  test('flag OFF: Schedule-modal create writes the intended local span, never inverted', async ({ page }) => {
+    await bootCalendar(page, {
+      flagOff: true,
+      unschedJobs: [{ id: 'j-new', client_name: 'Pat New', site_suburb: 'Padbury', job_number: 'SWF-200', type: 'fencing', value: 0 }],
+    });
+    const writes = [];
+    page.on('request', (r) => {
+      if (r.url().includes('action=create_assignment')) writes.push(r.postDataJSON());
+    });
+    // Opening the modal is setup, not the behaviour under test — the create
+    // form itself is driven with real input.
+    await page.evaluate((date) => openScheduleModal('j-new', '', date), D.MON);
+    await expect(page.locator('#schedCrew')).toBeVisible();
+    await page.selectOption('#schedCrew', 'u-hugo');
+    // 1-day create: pre-fix, toISOString in Perth wrote scheduled_end the day
+    // BEFORE scheduled_date (an inverted span the Crew view silently drops).
+    await page.locator('#schedDuration').fill('1');
+    await page.getByRole('button', { name: 'Create Planned' }).click();
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
+    expect(writes[0].scheduledDate).toBe(D.MON);
+    expect(writes[0].scheduledEnd).toBe(D.MON);
+    // 3-day create: flag off counts CALENDAR days — Mon..Wed.
+    await page.evaluate((date) => openScheduleModal('j-new', '', date), D.MON);
+    await page.selectOption('#schedCrew', 'u-hugo');
+    await page.locator('#schedDuration').fill('3');
+    await page.getByRole('button', { name: 'Create Planned' }).click();
+    await expect.poll(() => writes.length).toBeGreaterThan(1);
+    expect(writes[1].scheduledDate).toBe(D.MON);
+    expect(writes[1].scheduledEnd).toBe(D.WED);
+  });
+
+  test('single-crew multi-day move onto mid-span leave triggers the combined warning', async ({ page }) => {
+    const { writes } = await bootCalendar(page, {
+      availability: [{ user_id: 'u-priya', date: D.TUE2, status: 'leave', note: 'AL' }],
+    });
+    // Crew view: drag Will Parker (Priya, Fri->Mon, 2 working days) onto MON2.
+    // The moved span is Mon+Tue; Priya is on leave Tue — the drop-day-only
+    // check would stay silent, the span-depth check must warn.
+    const src = page.locator('.cal-swim-cell[data-date="' + D.FRI + '"][data-crew="Priya"] .cal-job-block');
+    const dst = page.locator('.cal-swim-cell[data-date="' + D.MON2 + '"][data-crew="Priya"]');
+    await realDrag(page, src, dst);
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    const modal = page.locator('#calConfirmModal');
+    await expect(modal).toContainText('Crew Unavailable');
+    await expect(modal).toContainText('Priya');
+    await expect(modal).toContainText('leave');
+    // Nothing moves until the explicit confirm.
+    expect(writes.filter((w) => w.action === 'update_assignment')).toHaveLength(0);
+    await page.locator('#confirmModalProceed').click();
+    await expect.poll(() => writes.filter((w) => w.action === 'update_assignment').length).toBeGreaterThan(0);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move.body.assignmentId).toBe('a-will');
+    expect(move.body.scheduled_date).toBe(D.MON2);
+    expect(move.body.scheduled_end).toBe(D.TUE2);
+    expect(move.body.duration_days).toBe(2);
   });
 });

@@ -11,6 +11,16 @@ function extractFunction(name) {
   const start = html.indexOf(marker);
   assert(start >= 0, `${name} exists`);
   const brace = html.indexOf('{', start);
+  // This IIFE returns its public API immediately after the normaliser. The
+  // normaliser's own return object is therefore the last return before that
+  // API boundary; use the boundary to avoid mistaking regex/callback syntax
+  // for the outer function's braces.
+  if (name === 'fromJobAssignment') {
+    const boundary = html.indexOf('\n    return {', start);
+    const close = html.lastIndexOf('}', boundary);
+    assert(boundary > brace && close > brace, `${name} boundary exists`);
+    return html.slice(start, close + 1);
+  }
   let depth = 0;
   let quote = null;
   let escaped = false;
@@ -19,6 +29,31 @@ function extractFunction(name) {
     if (quote) {
       if (escaped) escaped = false;
       else if (ch === '\\') escaped = true;
+      else if (quote === '`' && ch === '$' && html[i + 1] === '{') {
+        // Braces inside a template interpolation belong to the expression,
+        // not to the function body. Skip that expression with the same
+        // quote-aware rules before resuming the template literal.
+        let exprDepth = 1;
+        let exprQuote = null;
+        let exprEscaped = false;
+        i += 2;
+        for (; i < html.length && exprDepth; i++) {
+          const exprCh = html[i];
+          if (exprQuote) {
+            if (exprEscaped) exprEscaped = false;
+            else if (exprCh === '\\') exprEscaped = true;
+            else if (exprCh === exprQuote) exprQuote = null;
+            continue;
+          }
+          if (exprCh === '"' || exprCh === "'" || exprCh === '`') {
+            exprQuote = exprCh;
+            continue;
+          }
+          if (exprCh === '{') exprDepth++;
+          else if (exprCh === '}') exprDepth--;
+        }
+        i--;
+      }
       else if (ch === quote) quote = null;
       continue;
     }

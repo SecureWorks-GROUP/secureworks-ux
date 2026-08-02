@@ -1,0 +1,292 @@
+{
+  "generated_by": "scripts/ses-f2-workorder-identity-census.js",
+  "board": "ops.html?noAutoIntake=1#jobs → Make-Safes",
+  "ui_read_at_commit": "625dbc1",
+  "population": {
+    "cards_on_board": 440,
+    "job_detail_read_per_card": 440,
+    "job_detail_errors": 0,
+    "cards_by_work_order_count": {
+      "none": 19,
+      "single": 410,
+      "multi": 11
+    }
+  },
+  "cards_with_more_than_one_work_order": 11,
+  "of_those": {
+    "old_rule_hid_a_different_purchase_order": 10,
+    "card_declares_a_purchase_order_of_its_own": 0,
+    "now_leading_work_order_matches_the_card_po": 0,
+    "now_every_work_order_listed": 11
+  },
+  "read_only_proof": {
+    "non_get_requests_aborted": 0,
+    "violations": []
+  },
+  "cards": [
+    {
+      "job_number": "SWMS-26462",
+      "suburb": "AVELEY",
+      "builder_ref": "67380",
+      "ses_family": "physical_makesafe",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "",
+        ""
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "Works Order - AJBR 67380.pdf",
+      "old_rule_hid": [
+        "Works Order.pdf"
+      ],
+      "old_rule_hid_a_different_instruction": false,
+      "now_slot_labels": [
+        "Work Order · no PO on file name #1",
+        "Work Order · no PO on file name #2"
+      ],
+      "now_leading_po": "",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26721",
+      "suburb": "Eaton",
+      "builder_ref": "MLB-25795",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53893",
+        "PO-53896"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-53893",
+      "old_rule_hid": [
+        "PO-53896"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-53893",
+        "Work Order · PO-53896"
+      ],
+      "now_leading_po": "PO-53893",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26735",
+      "suburb": "Glen Iris",
+      "builder_ref": "MLB-26183",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53995",
+        "PO-54000"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-53995",
+      "old_rule_hid": [
+        "PO-54000"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-53995",
+        "Work Order · PO-54000"
+      ],
+      "now_leading_po": "PO-53995",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26736",
+      "suburb": "Usher",
+      "builder_ref": "MLB-25625",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54006",
+        "PO-54007"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-54006",
+      "old_rule_hid": [
+        "PO-54007"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-54006",
+        "Work Order · PO-54007"
+      ],
+      "now_leading_po": "PO-54006",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26759",
+      "suburb": "Myalup, WA 6220",
+      "builder_ref": "MLB-25765",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54176",
+        "PO-54177"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-54176",
+      "old_rule_hid": [
+        "PO-54177"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-54176",
+        "Work Order · PO-54177"
+      ],
+      "now_leading_po": "PO-54176",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26852",
+      "suburb": "Glen Iris, WA 6230",
+      "builder_ref": "MLB-26183",
+      "ses_family": "assessment_quote",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54000",
+        "PO-53995"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-54000",
+      "old_rule_hid": [
+        "PO-53995"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-54000",
+        "Work Order · PO-53995"
+      ],
+      "now_leading_po": "PO-54000",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26853",
+      "suburb": "Myalup, WA 6220",
+      "builder_ref": "MLB-25765",
+      "ses_family": "assessment_quote",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54177",
+        "PO-54176"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-54177",
+      "old_rule_hid": [
+        "PO-54176"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-54177",
+        "Work Order · PO-54176"
+      ],
+      "now_leading_po": "PO-54177",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26855",
+      "suburb": "Eaton, WA 6232",
+      "builder_ref": "MLB-25795",
+      "ses_family": "assessment_quote",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53896",
+        "PO-53893"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-53896",
+      "old_rule_hid": [
+        "PO-53893"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-53896",
+        "Work Order · PO-53893"
+      ],
+      "now_leading_po": "PO-53896",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26902",
+      "suburb": "Ballajura",
+      "builder_ref": "MLB-26443",
+      "ses_family": "physical_makesafe",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-56252",
+        "PO-55255"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-56252",
+      "old_rule_hid": [
+        "PO-55255"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-56252",
+        "Work Order · PO-55255"
+      ],
+      "now_leading_po": "PO-56252",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26957",
+      "suburb": "Kardinya",
+      "builder_ref": "MLB-26190",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-53966",
+        "PO-53964"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-53966",
+      "old_rule_hid": [
+        "PO-53964"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-53966",
+        "Work Order · PO-53964"
+      ],
+      "now_leading_po": "PO-53966",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    },
+    {
+      "job_number": "SWMS-26998",
+      "suburb": "Usher",
+      "builder_ref": "MLB-25625",
+      "ses_family": "ordinary_roof_portal",
+      "work_order_count": 2,
+      "work_order_pos": [
+        "PO-54007",
+        "PO-54006"
+      ],
+      "card_po_refs": [],
+      "old_rule_showed": "PO-54007",
+      "old_rule_hid": [
+        "PO-54006"
+      ],
+      "old_rule_hid_a_different_instruction": true,
+      "now_slot_labels": [
+        "Work Order · PO-54007",
+        "Work Order · PO-54006"
+      ],
+      "now_leading_po": "PO-54007",
+      "now_leading_matches_card_po": false,
+      "now_all_listed": true
+    }
+  ]
+}

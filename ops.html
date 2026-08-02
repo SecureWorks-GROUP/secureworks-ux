@@ -7333,21 +7333,26 @@ var CalOpsCore = (function () {
     return out;
   }
   function workingSpanDays(startStr, endStr) { return paintedSpanDates(startStr, endStr).length; }
-  // U-O1 upgraded for CP1 (dragv2): same reassign-vs-move split as
-  // buildMovePayload, but the drop day becomes the new START and the job's
-  // length is preserved in WORKING days (weekend-skip), not calendar days.
-  // Duration source: the RENDERED span when scheduled_end exists (a drag must
-  // preserve what's on screen — every legacy row still carries the unused
-  // duration_days default of 1); duration_days when there is no span to read.
-  // Either way the write carries scheduled_end + duration_days, so from the
-  // first drag onward duration_days is real and round-trips.
-  function buildMovePayloadV2(ev, newCrew, newUserId, newDate) {
-    var oldStart = ev.scheduled_date;
-    var oldEnd = ev.scheduled_end || oldStart;
+  // The span a V2 move lands on: drop day = new START, length preserved in
+  // WORKING days. Duration source: the RENDERED span when scheduled_end exists
+  // (a drag must preserve what's on screen — every legacy row still carries the
+  // unused duration_days default of 1); duration_days when there is no span to
+  // read. The ONLY derivation of a moved span — the availability warning and
+  // the write both go through here so they can never disagree.
+  function movedSpanV2(ev, newDate) {
     var duration = ev.scheduled_end
-      ? workingSpanDays(oldStart, oldEnd)
+      ? workingSpanDays(ev.scheduled_date, ev.scheduled_end)
       : (Number(ev.duration_days) > 0 ? Math.round(Number(ev.duration_days)) : 1);
-    var newEnd = layWorkingDays(newDate, duration);
+    return { start: newDate, end: layWorkingDays(newDate, duration), duration: duration };
+  }
+  // U-O1 upgraded for CP1 (dragv2): same reassign-vs-move split as
+  // buildMovePayload, but the span comes from movedSpanV2 above. Either way the
+  // write carries scheduled_end + duration_days, so from the first drag onward
+  // duration_days is real and round-trips.
+  function buildMovePayloadV2(ev, newCrew, newUserId, newDate) {
+    var span = movedSpanV2(ev, newDate);
+    var duration = span.duration;
+    var newEnd = span.end;
     var oldUserId = ev.user_id || null;
     var crewChanged = !!newUserId && String(newUserId) !== String(oldUserId);
     if (crewChanged) {
@@ -7396,7 +7401,8 @@ var CalOpsCore = (function () {
     truncationNotice: truncationNotice,
     isWeekendStr: isWeekendStr, layWorkingDays: layWorkingDays,
     paintedSpanDates: paintedSpanDates, workingSpanDays: workingSpanDays,
-    buildMovePayloadV2: buildMovePayloadV2, buildResizePayload: buildResizePayload
+    movedSpanV2: movedSpanV2, buildMovePayloadV2: buildMovePayloadV2,
+    buildResizePayload: buildResizePayload
   };
 })();
 // </calendar-ops-core>
@@ -8732,6 +8738,13 @@ function openScheduleModal(jobId, crew, date) {
   if (!job) return;
   var modal = document.getElementById('calSchedModal');
   var backdrop = document.getElementById('calSchedBackdrop');
+  function crewOptions() {
+    var opts = '<option value="">Select crew…</option>';
+    _crewList.forEach(function(u) {
+      opts += '<option value="' + u.id + '"' + (u.name === crew ? ' selected' : '') + '>' + escapeHtml(u.name) + '</option>';
+    });
+    return opts;
+  }
   modal.innerHTML =
     '<div style="font-size:14px;font-weight:700;margin-bottom:12px;">Schedule Job</div>' +
     '<div style="font-size:12px;margin-bottom:6px;"><strong>' + escapeHtml(job.client_name || 'Unknown') + '</strong> — ' + escapeHtml(job.site_suburb || '') + '</div>' +
@@ -8741,13 +8754,7 @@ function openScheduleModal(jobId, crew, date) {
     // crew is now picked from the real user list; the backend rejects
     // name-only installs outright.
     '<div class="form-group"><label class="form-label">Crew</label><select class="form-input" id="schedCrew">' +
-    (function() {
-      var opts = '<option value="">Select crew…</option>';
-      _crewList.forEach(function(u) {
-        opts += '<option value="' + u.id + '"' + (u.name === crew ? ' selected' : '') + '>' + escapeHtml(u.name) + '</option>';
-      });
-      return opts;
-    })() + '</select></div>' +
+    crewOptions() + '</select></div>' +
     '<div class="form-group"><label class="form-label">Start Date</label><input type="date" class="form-input" id="schedDate" value="' + date + '"></div>' +
     '<div class="form-group"><label class="form-label">Duration (days)</label><input type="number" class="form-input" id="schedDuration" value="1" min="1" max="30"></div>' +
     '<div style="display:flex;gap:8px;margin-top:16px;">' +
@@ -8756,6 +8763,16 @@ function openScheduleModal(jobId, crew, date) {
     '</div>';
   modal.classList.add('open');
   backdrop.classList.add('open');
+  // The boot-time crew fetch can fail or still be in flight; without options
+  // this select is a dead end (a real userId is REQUIRED to create).
+  if (!_crewList.length) {
+    var crewSel = document.getElementById('schedCrew');
+    loadCrewList().then(function() {
+      if (document.getElementById('schedCrew') !== crewSel) return;
+      if (_crewList.length) { crewSel.innerHTML = crewOptions(); return; }
+      if (modal.classList.contains('open')) showToast('Crew list unavailable — close and reopen to retry', 'warning');
+    });
+  }
 }
 
 function closeScheduleModal() {
@@ -8830,10 +8847,8 @@ async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // EVERY painted day of the moved working-day span, one combined confirm,
   // identical wording. Flag off keeps the original drop-day-only check.
   if (window.__SW_CAL_DRAGV2_ENABLED) {
-    var dur = ev.scheduled_end
-      ? CalOpsCore.workingSpanDays(ev.scheduled_date, ev.scheduled_end)
-      : (Number(ev.duration_days) > 0 ? Math.round(Number(ev.duration_days)) : 1);
-    var clashes = collectSpanClashes(newCrew, newDate, CalOpsCore.layWorkingDays(newDate, dur));
+    var span = CalOpsCore.movedSpanV2(ev, newDate);
+    var clashes = collectSpanClashes(newCrew, span.start, span.end);
     confirmClashesOrProceed(clashes, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
     return;
   }

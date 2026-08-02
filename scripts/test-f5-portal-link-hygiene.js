@@ -166,6 +166,14 @@ function runTradeChecks(coreApi, exportKeys) {
       ],
     }, {}) === F5_SHARE,
   );
+  check(
+    'trade portalUrl rejects untyped share',
+    portalUrl({
+      external_links: [
+        { label: 'Source email', url: F5_SHARE, kind: 'source_email' },
+      ],
+    }, {}) === '',
+  );
   if (typeof coreApi.urlIsBuilderPortalLink === 'function') {
     check('trade urlIsBuilderPortalLink rejects logo', !coreApi.urlIsBuilderPortalLink(F5_LOGO));
     check('trade urlIsBuilderPortalLink rejects tracker', !coreApi.urlIsBuilderPortalLink(F5_TRACKER));

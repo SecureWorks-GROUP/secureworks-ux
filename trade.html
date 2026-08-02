@@ -10256,12 +10256,6 @@
           if (u && urlIsBuilderPortalLink(u)) return u;
         }
       }
-      // Fallback: first genuine share URL regardless of kind (covers untyped).
-      for (i = 0; i < arr.length; i++) {
-        e = arr[i] || {};
-        u = _httpUrl(typeof e === 'string' ? e : e.url);
-        if (u && urlIsBuilderPortalLink(u)) return u;
-      }
       return '';
     }
     // Builder portal link: the backend ARRAY shape wins; the legacy OBJECT

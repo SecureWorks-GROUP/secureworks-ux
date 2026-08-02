@@ -27,10 +27,14 @@ function extractBetween(src, startMarker, endMarker) {
   return src.slice(start, end);
 }
 
-// ── ops.html: pure helpers + renderMakesafeOpsExternalLinks ──────────────
+// ── ops.html: pure helpers + collector + renderMakesafeOpsExternalLinks ──
+// Start at the kind-label table: since #227 the hygiene predicates live above
+// the SHARED collectMakesafeExternalLinks, which both the job-detail Builder
+// links panel and the board card link row call, so the whole region has to be
+// extracted together for the render checks below to exercise the real path.
 const opsHelpers = extractBetween(
   ops,
-  '// F5 portal-link hygiene — mirror of ops-api urlIsBuilderPortalLink',
+  'var MAKESAFE_LINK_KIND_LABELS = {',
   'function renderMakesafeOpsDetail',
 );
 // Provide a minimal escapeHtml + browser globals so the renderer can run offline.

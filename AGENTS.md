@@ -99,6 +99,26 @@ a screenshot. Read-only sessions against the live board must use
 `ops.html?noAutoIntake=1`: loading the board otherwise POSTs
 `auto_approve_clean_intake_drafts`.
 
+A STORED LINK IS NOT A PORTAL BECAUSE IT SAYS IT IS. 20% of live `external_links`
+rows (59 of 299, all `kind: builder_portal`) are branding images, email signatures
+or SES open/click trackers that Claude extraction lifted out of email HTML
+(`ses-links-truth-audit-v1`). `urlIsBuilderPortalLink` / `urlLooksLikeAssetOrTracking`
+in both `ops.html` and `trade.html` (`// <makesafe-portal-link-hygiene>`) mirror the
+ops-api merge-boundary predicate: a URL is offered as a portal only if it is
+http(s), carries a share/report-style path segment, and is neither an image
+extension nor an `awstrack.me` host. Ops applies it once inside the SHARED
+`collectMakesafeExternalLinks`, so the job-detail Builder links panel and the board
+card link row are filtered from one place; trade applies it in
+`normaliseTradeExternalLinks` and in `ReportDoneCore.portalUrl()`, so a polluted
+`kind=builder_portal` row can never become the "Open builder report portal" CTA.
+LIVENESS IS NEVER CHECKED: an expired share is an AGED JOB, not a broken link
+(captain domain fact — Prime shares expire around 30 days), so it stays visible and
+the trade panel explains the builder-resend path. This is display hygiene only; it
+strips no stored rows, and cleaning up the 59 polluted rows is a separate
+captain-gated tranche. Guard: `scripts/test-f5-portal-link-hygiene.js` (runs before
+Playwright via `npm run test:e2e`) plus the card-face case in
+`tests/e2e/ops-makesafe-ui-truth.spec.js`.
+
 A make-safe card can carry the work orders of TWO DIFFERENT builder instructions —
 11 of 440 live cards do, and on 10 the two carry different POs. So NO make-safe
 surface may pick one work order and hide the rest. `buildMakesafeWorkOrderSlots`

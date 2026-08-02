@@ -1,0 +1,92 @@
+{
+  "SWMS-26852": {
+    "job_number": "SWMS-26852",
+    "suburb": "Glen Iris, WA 6230",
+    "builder_ref": "MLB-26183",
+    "card_po_refs": [],
+    "work_order_docs_on_card": [
+      {
+        "file_name": "work_order_MLB-26183PO-54000_Secureworks_Group_Pty_Ltd.pdf",
+        "created_at": "2026-07-21T11:11:07.028362+00:00"
+      },
+      {
+        "file_name": "work_order_MLB-26183PO-53995_Secureworks_Group_Pty_Ltd.pdf",
+        "created_at": "2026-07-21T11:11:05.961384+00:00"
+      }
+    ],
+    "old_rule_would_show": "work_order_MLB-26183PO-54000_Secureworks_Group_Pty_Ltd.pdf",
+    "old_rule_hid": [
+      "work_order_MLB-26183PO-53995_Secureworks_Group_Pty_Ltd.pdf"
+    ],
+    "now_rendered_chips": [
+      "Work Order \u00b7 PO-54000",
+      "Work Order \u00b7 PO-53995"
+    ],
+    "now_work_order_slots": [
+      {
+        "label": "Work Order \u00b7 PO-54000",
+        "poRef": "PO-54000",
+        "matchesCardPo": false
+      },
+      {
+        "label": "Work Order \u00b7 PO-53995",
+        "poRef": "PO-53995",
+        "matchesCardPo": false
+      }
+    ],
+    "selected_chip": "Work Order \u00b7 PO-54000",
+    "warning_in_viewer": true,
+    "warning_in_full_detail": true,
+    "privacy": {
+      "emails": 0,
+      "phones": 0,
+      "street_lines": 0
+    },
+    "non_get_blocked": []
+  },
+  "SWMS-26759": {
+    "job_number": "SWMS-26759",
+    "suburb": "Myalup, WA 6220",
+    "builder_ref": "MLB-25765",
+    "card_po_refs": [],
+    "work_order_docs_on_card": [
+      {
+        "file_name": "work_order_MLB-25765PO-54176_Secureworks_Group_Pty_Ltd.pdf",
+        "created_at": "2026-06-23T01:45:16.777804+00:00"
+      },
+      {
+        "file_name": "work_order_MLB-25765PO-54177_Secureworks_Group_Pty_Ltd.pdf",
+        "created_at": "2026-06-23T01:45:16.7413+00:00"
+      }
+    ],
+    "old_rule_would_show": "work_order_MLB-25765PO-54176_Secureworks_Group_Pty_Ltd.pdf",
+    "old_rule_hid": [
+      "work_order_MLB-25765PO-54177_Secureworks_Group_Pty_Ltd.pdf"
+    ],
+    "now_rendered_chips": [
+      "Work Order \u00b7 PO-54176",
+      "Work Order \u00b7 PO-54177"
+    ],
+    "now_work_order_slots": [
+      {
+        "label": "Work Order \u00b7 PO-54176",
+        "poRef": "PO-54176",
+        "matchesCardPo": false
+      },
+      {
+        "label": "Work Order \u00b7 PO-54177",
+        "poRef": "PO-54177",
+        "matchesCardPo": false
+      }
+    ],
+    "selected_chip": "Work Order \u00b7 PO-54176",
+    "warning_in_viewer": true,
+    "warning_in_full_detail": true,
+    "privacy": {
+      "emails": 0,
+      "phones": 0,
+      "street_lines": 0
+    },
+    "non_get_blocked": []
+  }
+}

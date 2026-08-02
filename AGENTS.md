@@ -99,6 +99,22 @@ a screenshot. Read-only sessions against the live board must use
 `ops.html?noAutoIntake=1`: loading the board otherwise POSTs
 `auto_approve_clean_intake_drafts`.
 
+A make-safe card can carry the work orders of TWO DIFFERENT builder instructions —
+11 of 440 live cards do, and on 10 the two carry different POs. So NO make-safe
+surface may pick one work order and hide the rest. `buildMakesafeWorkOrderSlots`
+lists every work order on the card, preferring the one whose file name carries the
+card's own PO where it declares one and otherwise ranking none, and the viewer
+warns by count and by PO (`// <makesafe-workorder-identity>`); the intake review
+screen does the same over a draft's attachments (`intakeWorkOrderPdfs`, replacing
+"first attachment wins"). Identity comes from the PO alone: the file name embeds
+the builder CLAIM ref too (`work_order_MLB-26183PO-54000_...`) and both work orders
+of a claim share it, so only `extractPoRef` can discriminate. Supplier
+`purchase_orders` are a different numbering namespace from the builder PO and are
+deliberately not consulted. Guard:
+`tests/e2e/ops-makesafe-workorder-identity.spec.js`; live evidence + the board-wide
+census in `docs/evidence/ses-f2-workorder-viewer-identity-2026-08-02/`
+(`scripts/ses-f2-workorder-identity-census.js`).
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

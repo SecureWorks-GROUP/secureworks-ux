@@ -2999,6 +2999,23 @@
       background: #F3F6F8;
       margin-bottom: 8px;
     }
+    /* <makesafe-workorder-identity> two work orders on one intake draft */
+    .msi-wo-warn {
+      display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px;
+      padding: 9px 11px; border-radius: 8px;
+      border: 1px solid #F5C77E; background: #FFF7EA; color: #7A4B08;
+      font-size: 12px; font-weight: 650; line-height: 1.45;
+    }
+    .msi-wo-warn strong { font-weight: 850; }
+    .msi-wo-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .msi-wo-chip {
+      border: 1px solid #D5E1E8; background: #fff; color: #48697A;
+      font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 999px;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .msi-wo-chip:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
+    .msi-wo-chip.active { background: #1F3A44; color: #fff; border-color: #1F3A44; }
 
     /* MakeSafe job-detail inline document viewer (WO-first carousel) */
     .ms-docviewer-card {
@@ -3011,6 +3028,14 @@
       font-size: 11px; font-weight: 850; color: var(--sw-mid);
       text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;
     }
+    /* <makesafe-workorder-identity> two builder instructions on one card */
+    .ms-docviewer-warn {
+      display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px;
+      padding: 9px 11px; border-radius: 8px;
+      border: 1px solid #F5C77E; background: #FFF7EA; color: #7A4B08;
+      font-size: 12px; font-weight: 650; line-height: 1.45;
+    }
+    .ms-docviewer-warn strong { font-weight: 850; }
     .ms-docviewer-bar {
       display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
     }
@@ -11745,6 +11770,11 @@ async function doCreateMakesafe(payload) {
 
 // ── Make-Safe Intake Review Gate ──
 var _makesafeIntakeDraftCache = {};
+// <makesafe-workorder-identity> the work-order PDFs of the draft on the review
+// screen, and which one the reviewer is currently looking at. Reset on every
+// renderMakesafeIntakeReview so switching drafts never leaks the prior list.
+var _msiReviewPdfs = [];
+var _msiReviewPdfIdx = 0;
 var MAKESAFE_INTAKE_REQUIRED_FIELDS = ['requesting_company', 'external_ref', 'client_name', 'site_address', 'work_order_pdf'];
 
 function safeParseJson(value, fallback) {
@@ -11785,18 +11815,47 @@ function intakeFieldValue(d, field) {
   return '';
 }
 
-function intakeFirstPdfUrl(d) {
-  var atts = intakeAttachments(d);
-  for (var i = 0; i < atts.length; i++) {
+// <makesafe-workorder-identity> Every servable work-order PDF on a draft, ordered
+// for review. A builder email can carry TWO work orders for two different
+// instructions on the same claim — that is how 11 live cards ended up holding
+// two work orders each (see <makesafe-workorder-identity>). Reviewing "the first
+// attachment" therefore approved a draft against whichever PDF happened to come
+// first in the email. Same rule as the board viewer: prefer the one whose file
+// name carries the draft's own PO, otherwise offer all of them and say so.
+function intakeWorkOrderPdfs(d) {
+  var cardPo = extractPoRef(intakeFieldValue(d, 'external_ref'));
+  var items = [];
+  intakeAttachments(d).forEach(function(att, i) {
     // GRACEFUL PDF: skip attachments the backend flagged as unavailable (the
     // re-upload to job-documents failed, so any recorded pdf_url would 404).
     // Returning their URL would render the raw {"statusCode":"404"} JSON in the
     // cockpit iframe. Treat them as "no usable PDF" so the graceful fallback shows.
-    if (atts[i] && atts[i].pdf_unavailable) continue;
-    var url = atts[i].pdf_url || atts[i].public_url || atts[i].url || '';
-    if (url) return url;
-  }
-  return '';
+    if (!att || att.pdf_unavailable) return;
+    var url = att.pdf_url || att.public_url || att.url || '';
+    if (!url) return;
+    var name = String(att.file_name || att.name || '');
+    var poRef = extractPoRef(name);
+    items.push({
+      url: url, name: name || 'work-order.pdf', poRef: poRef, order: i,
+      matchesDraftPo: !!poRef && !!cardPo && poRef === cardPo
+    });
+  });
+  var namedWorkOrders = items.filter(function(item) {
+    return /works?[\s_-]*order/.test(item.name.toLowerCase());
+  });
+  var identified = namedWorkOrders.length > 0;
+  items = identified ? namedWorkOrders : items;
+  items.forEach(function(item) { item.identifiedWorkOrder = identified; });
+  items.sort(function(a, b) {
+    if (a.matchesDraftPo !== b.matchesDraftPo) return a.matchesDraftPo ? -1 : 1;
+    return a.order - b.order;
+  });
+  return items;
+}
+
+function intakeFirstPdfUrl(d) {
+  var pdfs = intakeWorkOrderPdfs(d);
+  return pdfs.length ? pdfs[0].url : '';
 }
 
 function intakeMissingFields(d, reviewedFields) {
@@ -11907,6 +11966,52 @@ async function loadMakesafeIntake() {
   }
 }
 
+// <makesafe-workorder-identity> The review screen's warning: this draft's email
+// carries more than one work order, so approving it against one of them is a
+// choice, not a given. Names the POs and states whether the draft's own ref
+// picked the leading one.
+function renderIntakeMultiWorkOrderWarning(pdfs) {
+  if (!pdfs || pdfs.length < 2 || !pdfs[0].identifiedWorkOrder) return '';
+  var refs = pdfs.map(function(p) { return p.poRef || 'no PO on file name'; });
+  var matched = pdfs.filter(function(p) { return p.matchesDraftPo; });
+  var lead = matched.length === 1
+    ? 'Showing <strong>' + escapeHtml(matched[0].poRef) + '</strong> first — it matches this draft\'s builder ref.'
+    : 'Nothing on this draft says which instruction it is, so none is preferred.';
+  return '<div class="msi-wo-warn" role="status">' +
+    '<span aria-hidden="true">&#9888;</span>' +
+    '<span>This email carries <strong>' + pdfs.length + ' work orders</strong> (' + escapeHtml(refs.join(', ')) + '). ' +
+    lead + ' Switch between them below and approve against the right one.</span>' +
+    '</div>';
+}
+
+function renderIntakeReviewPdfChips(pdfs, activeIdx) {
+  if (!pdfs || pdfs.length < 2) return '';
+  var html = '<div class="msi-wo-chips">';
+  pdfs.forEach(function(p, i) {
+    html += '<button type="button" class="msi-wo-chip' + (i === activeIdx ? ' active' : '') + '" ' +
+      'data-msi-pdf-idx="' + i + '" onclick="msiReviewPdfJump(' + i + ')" title="' + escapeAttr(p.name) + '">' +
+      escapeHtml(p.identifiedWorkOrder ? (p.poRef || ('Work order #' + (i + 1))) : ('Attachment #' + (i + 1))) + '</button>';
+  });
+  html += '</div>';
+  return html;
+}
+
+// Swap the reviewed PDF in place. Presentation only — no field is re-extracted
+// and nothing is written; the reviewer is simply looking at a different document.
+function msiReviewPdfJump(idx) {
+  var pdfs = _msiReviewPdfs || [];
+  if (!pdfs.length) return;
+  _msiReviewPdfIdx = Math.max(0, Math.min(idx, pdfs.length - 1));
+  var entry = pdfs[_msiReviewPdfIdx];
+  var frame = document.getElementById('msiPdfFrame');
+  if (frame) frame.setAttribute('src', entry.url);
+  var open = document.getElementById('msiPdfOpen');
+  if (open) open.setAttribute('href', entry.url);
+  document.querySelectorAll('[data-msi-pdf-idx]').forEach(function(el) {
+    el.classList.toggle('active', Number(el.getAttribute('data-msi-pdf-idx')) === _msiReviewPdfIdx);
+  });
+}
+
 function renderMakesafeIntakeReview(draftId) {
   var d = _makesafeIntakeDraftCache[draftId];
   var container = document.getElementById('jobsBody');
@@ -11915,7 +12020,10 @@ function renderMakesafeIntakeReview(draftId) {
     return;
   }
   var attachments = intakeAttachments(d);
-  var pdfUrl = intakeFirstPdfUrl(d);
+  var reviewPdfs = intakeWorkOrderPdfs(d);
+  _msiReviewPdfs = reviewPdfs;
+  _msiReviewPdfIdx = 0;
+  var pdfUrl = reviewPdfs.length ? reviewPdfs[0].url : '';
   var html = '<div class="msi-review-shell">';
   html += '<div class="msi-review-header">';
   html += '<div><h3 style="margin:0;color:#1F3A44;">Review MakeSafe Intake</h3><div style="font-size:12px;color:#6B7280;">Compare the source work order against SecureSuite fields, then tick or cross.</div></div>';
@@ -11929,10 +12037,12 @@ function renderMakesafeIntakeReview(draftId) {
   html += '<div style="font-size:13px;color:#1F2937;margin-bottom:8px;"><strong>Email:</strong> ' + escapeHtml(d.subject || '(no subject)') + '</div>';
   html += '<div style="font-size:12px;color:#6B7280;margin-bottom:10px;">From: ' + escapeHtml(d.from_name || d.from_email || '') + '</div>';
   if (pdfUrl) {
+    html += renderIntakeMultiWorkOrderWarning(reviewPdfs);
+    html += renderIntakeReviewPdfChips(reviewPdfs, 0);
     html += '<div class="msi-pdf-frame">';
-    html += '<iframe title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;"></iframe>';
+    html += '<iframe id="msiPdfFrame" title="Work order PDF" src="' + escapeAttr(pdfUrl) + '" style="width:100%;height:100%;border:0;"></iframe>';
     html += '</div>';
-    html += '<a href="' + escapeAttr(pdfUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:#4C6A7C;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px;font-weight:700;font-size:12px;">Open PDF full-screen</a>';
+    html += '<a id="msiPdfOpen" href="' + escapeAttr(pdfUrl) + '" target="_blank" rel="noopener" style="display:inline-block;background:#4C6A7C;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px;font-weight:700;font-size:12px;">Open PDF full-screen</a>';
   } else {
     html += '<div style="padding:24px;border:1px dashed #D5E1E8;border-radius:10px;color:#E74C3C;background:#FFF7ED;margin-bottom:10px;">No PDF preview URL found. Cross/hold unless a work order is attached elsewhere.</div>';
   }
@@ -16811,35 +16921,116 @@ function msafeDocKind(url, doc) {
 }
 
 // Build the ordered, de-duped document list for the viewer.
-// Order: Work Order first (Marnin's lead), then Make Safe Report, Invoice, SWMS,
-// then any other attached document with a renderable URL not already listed.
-// Each entry: { label, doc, url, kind }. A null doc => an honest "not attached" slot
-// (only the Work Order slot is shown when missing, so ops notices the gap).
+// ── <makesafe-workorder-identity> ──────────────────────────────────────────
+// A make-safe card can legitimately carry the work orders of TWO DIFFERENT
+// builder instructions on the same claim: 11 of the 440 live cards carry more
+// than one work order and 10 of those two carry DIFFERENT POs (census in
+// docs/evidence/ses-f2-workorder-viewer-identity-2026-08-02; audit
+// ses-family-truth-audit-v1 §1b named nine of them). SWMS-26852 holds PO-53995
+// assessment + PO-54000 roof. The viewer used to fill its single "Work Order" slot with
+// pickLatestMakesafeDoc — NEWEST created_at WINS, no identity check of any kind —
+// and the append pass then hid the loser as if it were a duplicate copy. It is
+// not a copy, it is a different job, so the operator was shown the wrong
+// instruction with no chip, no arrow and no warning. On SWMS-26759 the two rows
+// are 36 ms apart, so the document on screen was decided by a race.
+//
+// The rule now is identity first, and NEVER drop one:
+//   1. prefer the work order whose file name carries the card's OWN purchase
+//      order, where the card declares one;
+//   2. otherwise show ALL of them, each chip labelled with its own PO;
+//   3. renderMakesafeDocViewer warns whenever the count is > 1.
+//
+// The file name embeds the builder CLAIM ref as well as the PO
+// ("work_order_MLB-26183PO-54000_...") and BOTH work orders of a claim carry the
+// SAME claim ref — so the claim ref can never discriminate between them. Only the
+// PO can, which is why extractPoRef reads a PO token and nothing else.
+//
+// `data.purchase_orders` is deliberately NOT consulted: those are our OUTGOING
+// supplier POs, a different numbering namespace from the builder PO printed on a
+// work order, and a coincidental collision would silently re-select the wrong
+// document — the exact failure this change removes.
+function extractPoRef(text) {
+  // No leading \b: the live refs run the claim straight into the PO
+  // ("MLB-27227PO-56922"), where there is no word boundary before the P.
+  // Requiring a non-letter instead still rejects words that merely end in "po".
+  var m = String(text == null ? '' : text).match(/(?:^|[^A-Za-z])PO[\s_-]?0*(\d{3,})/i);
+  return m ? 'PO-' + m[1] : '';
+}
+// The purchase orders the CARD itself claims, from the builder reference the
+// intake recorded. Most cards carry only a claim ref (MLB-26183) and therefore
+// declare no PO at all — in which case rule 1 cannot fire and rule 2 applies.
+function makesafeCardPoRefs(data) {
+  var j = (data && data.job) || {};
+  var md = (data && data.makesafe_details) || j.makesafe_details || j.metadata || {};
+  var builder = (j && j.builder) || {};
+  var refs = {};
+  [j.external_ref, md.external_ref, md.builder_ref, builder.external_ref].forEach(function(v) {
+    var po = extractPoRef(v);
+    if (po) refs[po] = true;
+  });
+  return Object.keys(refs);
+}
+// Every work-order document on the card, as ordered viewer slots. One work order
+// keeps the plain "Work Order" label and the old behaviour exactly; more than one
+// is ordered card-PO match first, then newest first, and each is named by its PO.
+function buildMakesafeWorkOrderSlots(data, documents) {
+  var matches = (documents || []).filter(isMakesafeWorkOrderDoc);
+  if (!matches.length) return [{ label: 'Work Order', doc: null, slot: 'work_order' }];
+  var cardPoRefs = makesafeCardPoRefs(data);
+  var entries = matches.map(function(doc, i) {
+    var poRef = extractPoRef(doc && (doc.file_name || doc.name));
+    return { doc: doc, poRef: poRef, order: i, matchesCardPo: !!poRef && cardPoRefs.indexOf(poRef) >= 0 };
+  });
+  entries.sort(function(a, b) {
+    if (a.matchesCardPo !== b.matchesCardPo) return a.matchesCardPo ? -1 : 1;
+    var cmp = String((b.doc && b.doc.created_at) || '').localeCompare(String((a.doc && a.doc.created_at) || ''));
+    return cmp || (a.order - b.order);
+  });
+  if (entries.length === 1) {
+    return [{ label: 'Work Order', doc: entries[0].doc, slot: 'work_order', poRef: entries[0].poRef, matchesCardPo: entries[0].matchesCardPo }];
+  }
+  return entries.map(function(e, i) {
+    // With no PO on the file name there is nothing truthful to name it by, so it
+    // is numbered rather than given a PO it does not carry.
+    var label = 'Work Order · ' + (e.poRef || ('no PO on file name #' + (i + 1)));
+    return { label: label, doc: e.doc, slot: 'work_order', poRef: e.poRef, matchesCardPo: e.matchesCardPo };
+  });
+}
+
+// Order: Work Order first (Marnin's lead) — every work order on the card, not one
+// of them — then Make Safe Report, Invoice, SWMS, then any other attached document
+// with a renderable URL not already listed.
+// Each entry: { label, doc, url, kind, slot, poRef, matchesCardPo }. A null doc =>
+// an honest "not attached" slot (only the Work Order slot is shown when missing,
+// so ops notices the gap).
 function buildMakesafeDocList(data) {
   var documents = (data && data.documents) || [];
-  var picks = [
-    { label: 'Work Order', doc: pickLatestMakesafeDoc(documents, isMakesafeWorkOrderDoc) },
+  var workOrders = buildMakesafeWorkOrderSlots(data, documents);
+  var picks = workOrders.concat([
     { label: 'Make Safe Report', doc: pickLatestMakesafeDoc(documents, isMakesafeReportDoc) },
     { label: 'Invoice', doc: pickLatestMakesafeDoc(documents, isMakesafeInvoiceDoc) },
     { label: 'SWMS', doc: pickLatestMakesafeDoc(documents, isMakesafeSwmsDoc) }
-  ];
+  ]);
   var seen = {};
   var list = [];
   picks.forEach(function(p) {
     if (p.doc) {
       var url = getDocOpenUrl(p.doc);
       if (p.doc.id) seen[p.doc.id] = true;
-      list.push({ label: p.label, doc: p.doc, url: url, kind: url ? msafeDocKind(url, p.doc) : 'missing' });
-    } else if (p.label === 'Work Order') {
+      list.push({ label: p.label, doc: p.doc, url: url, kind: url ? msafeDocKind(url, p.doc) : 'missing',
+        slot: p.slot || '', poRef: p.poRef || '', matchesCardPo: !!p.matchesCardPo });
+    } else if (p.slot === 'work_order') {
       // Keep the Work Order slot visible even when missing — it must lead, and
       // an absent WO is operationally important to see on click-in.
-      list.push({ label: p.label, doc: null, url: '', kind: 'missing' });
+      list.push({ label: p.label, doc: null, url: '', kind: 'missing', slot: 'work_order', poRef: '', matchesCardPo: false });
     }
   });
   // Append any other attached document with a renderable URL (e.g. extra photos,
-  // supplier quotes) that isn't already one of the four named slots. Docs that
-  // match a named matcher (e.g. a second Work Order copy) are skipped here so the
-  // viewer shows one WO/report/invoice/SWMS, not duplicates.
+  // supplier quotes) that isn't already listed. This filter no longer suppresses
+  // any work order: buildMakesafeWorkOrderSlots has ALREADY listed every one of
+  // them above, so skipping them here is a de-dupe of the list, not a drop
+  // (<makesafe-workorder-identity>). The report / invoice / SWMS slots still show
+  // one copy each, which is the pre-existing behaviour and out of this scope.
   function matchesNamedSlot(d) {
     return isMakesafeWorkOrderDoc(d) || isMakesafeReportDoc(d) || isMakesafeInvoiceDoc(d) || isMakesafeSwmsDoc(d);
   }
@@ -16848,7 +17039,7 @@ function buildMakesafeDocList(data) {
     var url = getDocOpenUrl(d);
     if (!url) return;
     seen[d.id] = true;
-    list.push({ label: String(d.file_name || d.name || d.type || 'Document'), doc: d, url: url, kind: msafeDocKind(url, d) });
+    list.push({ label: String(d.file_name || d.name || d.type || 'Document'), doc: d, url: url, kind: msafeDocKind(url, d), slot: '', poRef: '', matchesCardPo: false });
   });
   return list;
 }
@@ -16941,6 +17132,26 @@ function msafeDocViewerJump(idx) {
   if (el) el.innerHTML = renderMakesafeDocViewerInner();
 }
 
+// <makesafe-workorder-identity> The card-face warning. More than one work order on
+// a card means two builder instructions landed on one card, so the operator must
+// be told rather than shown one of them silently. It names the POs, and says
+// plainly whether the card's own purchase order picked the leading one or whether
+// the card cannot tell — never implying a choice the evidence does not support.
+function renderMakesafeMultiWorkOrderWarning(docs) {
+  var wos = (docs || []).filter(function(d) { return d.slot === 'work_order' && d.doc; });
+  if (wos.length < 2) return '';
+  var refs = wos.map(function(d) { return d.poRef || 'no PO on file name'; });
+  var matched = wos.filter(function(d) { return d.matchesCardPo; });
+  var lead = matched.length === 1
+    ? 'Showing <strong>' + escapeHtml(matched[0].poRef) + '</strong> first — it is the one that matches this card\'s own purchase order.'
+    : 'Nothing on this card says which instruction it is, so none is preferred. Read the PO on each before acting.';
+  return '<div class="ms-docviewer-warn" role="status">' +
+    '<span aria-hidden="true">&#9888;</span>' +
+    '<span>This card carries <strong>' + wos.length + ' work orders</strong> (' + escapeHtml(refs.join(', ')) + '). ' +
+    lead + ' All ' + wos.length + ' are listed below — none is hidden.</span>' +
+    '</div>';
+}
+
 // Build the whole viewer card (called from renderMakesafeOpsDetail). Resets state.
 function renderMakesafeDocViewer(data) {
   var docs = buildMakesafeDocList(data);
@@ -16948,6 +17159,7 @@ function renderMakesafeDocViewer(data) {
   var renderable = docs.filter(function(d) { return d.kind !== 'missing'; });
   var html = '<div class="ms-docviewer-card">';
   html += '<div class="ms-docviewer-head">Documents</div>';
+  html += renderMakesafeMultiWorkOrderWarning(docs);
   if (!docs.length || !renderable.length) {
     html += '<div class="ms-docviewer-stage"><div class="ms-docviewer-empty">' +
       '<div style="font-size:28px;opacity:0.4;">&#128196;</div>' +

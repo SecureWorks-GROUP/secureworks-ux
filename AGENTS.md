@@ -117,7 +117,12 @@ the trade panel explains the builder-resend path. This is display hygiene only; 
 strips no stored rows, and cleaning up the 59 polluted rows is a separate
 captain-gated tranche. Guard: `scripts/test-f5-portal-link-hygiene.js` (runs before
 Playwright via `npm run test:e2e`) plus the card-face case in
-`tests/e2e/ops-makesafe-ui-truth.spec.js`.
+`tests/e2e/ops-makesafe-ui-truth.spec.js`. Live evidence, and the read-only census
+that scores this fix ALONGSIDE the work-order identity and trade-confirmation fixes
+on every card at once, in `docs/evidence/ses-f5b-combined-truth-2026-08-02/`
+(`scripts/ses-f5b-combined-truth-census.js`). Note its finding before assuming a
+single card can demonstrate all three: on today's board the multi-work-order cards
+and the polluted-link cards are DISJOINT sets.
 
 A make-safe card can carry the work orders of TWO DIFFERENT builder instructions —
 11 of 440 live cards do, and on 10 the two carry different POs. So NO make-safe

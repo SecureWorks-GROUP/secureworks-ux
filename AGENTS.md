@@ -38,8 +38,13 @@ CP1 drag-to-reschedule is behind a feature flag: `?dragv2=1` or
 Flag off must stay byte-identical to the old behaviour — that is why V1
 `buildMovePayload` (calendar-delta shift) lives alongside `buildMovePayloadV2`
 (drop day = new START, duration preserved in WORKING days, weekend-skip); do not
-"clean up" the V1 path while the flag exists. Weekends are opt-in: interior
-Sat/Sun are breaks, a weekend counts only as a deliberately chosen endpoint.
+"clean up" the V1 path while the flag exists. One Captain-authorized exception
+(ruling cp1-askuser-2): the flag-off Schedule-modal create computes its end date
+with `localDateStr`, not `toISOString()` — the UTC conversion rolled local
+midnight back a day in Perth (UTC+8) and wrote inverted 1-day spans; same
+intended calendar-day span, now in local time, so do not "restore" byte-identity
+by reverting it. Weekends are opt-in: interior Sat/Sun are breaks, a weekend
+counts only as a deliberately chosen endpoint.
 Duration precedence: the rendered `scheduled_date..scheduled_end` span wins over
 `duration_days` (legacy rows all carry the unused default 1 — a drag must never
 collapse a visible multi-day bar). The reschedule SMS (`send_client_update`,
@@ -60,11 +65,17 @@ display-name lookup that could land on a deactivated or duplicate-named user —
 Crew-view callers deliberately keep name resolution because it powers
 cross-row reassignment; a multi-assignment move builds all plans first, then
 shows ONE combined "Crew Unavailable" confirm across every affected crew
-(Captain ruling — never one modal per crew). With dragv2 ON the Schedule view
-lays active dates via `CalOpsCore.paintedSpanDates`, so weekend-crossing jobs
-render as broken segments like the Crew view and dragging EITHER segment
-reschedules the whole job; flag OFF keeps the every-calendar-day loop
-byte-identical. Bars float on a `pointer-events:none` overlay above the day
+(Captain ruling — never one modal per crew). With dragv2 ON a single-assignment
+move (either view, shared `moveAssignment`) runs the SAME span-depth check —
+every painted day of the moved span (`CalOpsCore.movedSpanV2`, the only
+derivation of a moved span, shared by warning and write) through the shared
+`collectSpanClashes`/`confirmClashesOrProceed` helpers, one combined confirm,
+identical wording (ruling cp1-askuser-2); flag off keeps the drop-day-only
+check. With dragv2 ON the Schedule view lays active dates via
+`CalOpsCore.paintedSpanDates`, so weekend-crossing jobs render as broken
+segments like the Crew view and dragging EITHER segment reschedules the whole
+job; flag OFF keeps the every-calendar-day loop byte-identical. Bars float
+on a `pointer-events:none` overlay above the day
 cells, so bars themselves must accept `dragover`/`drop` and fall through to
 the cell under the pointer.
 Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use

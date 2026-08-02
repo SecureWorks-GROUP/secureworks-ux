@@ -10155,14 +10155,30 @@
       return Object.prototype.hasOwnProperty.call(REPORT_FAMILIES, familyOf(job, detail));
     }
     function familyLabel(job, detail) { return REPORT_FAMILIES[familyOf(job, detail)] || 'Report'; }
-    // The trade's portal step is already marked done (the B4 marker writes
-    // report_on_portal + report_received_at + substatus admin_to_send_report).
+    // Completion is current-cycle evidence, never a lifecycle side effect. The
+    // B4 marker writes portal_verified_*; a future detail payload may also carry
+    // the sealed screenshot-backed capture rows for the active attendance cycle.
+    function hasSealedCaptureThisCycle(detail) {
+      var cycleId = String(detail.attendance_cycle_id || '').trim();
+      if (!cycleId) return false;
+      var captures = detail.portal_captures;
+      if (!Array.isArray(captures)) return false;
+      for (var i = 0; i < captures.length; i++) {
+        var capture = captures[i] || {};
+        if (String(capture.attendance_cycle_id || '').trim() !== cycleId) continue;
+        if (String(capture.capture_result || '').toLowerCase().trim() !== 'done') continue;
+        if (String(capture.status || '').toLowerCase().trim() !== 'verified') continue;
+        if (!String(capture.screenshot_object_key || '').trim()) continue;
+        return true;
+      }
+      return false;
+    }
     function isMarkedDone(detail) {
       detail = detail || {};
-      if (detail.report_on_portal === true) return true;
-      if (String(detail.report_received_at || '').trim()) return true;
-      var sub = String(detail.substatus || '').toLowerCase().trim();
-      return sub === 'admin_to_send_report' || sub === 'ready_to_invoice' || sub === 'complete';
+      var currentCycle = Number(detail.cycle_number == null ? 1 : detail.cycle_number);
+      var verifiedThisCycle = !!String(detail.portal_verified_at || '').trim() &&
+        Number(detail.portal_verified_cycle) === currentCycle;
+      return verifiedThisCycle || hasSealedCaptureThisCycle(detail);
     }
     function _httpUrl(v) {
       var u = String(v == null ? '' : v).trim();
@@ -10246,6 +10262,7 @@
       h += '<button onclick="submitTradeAdminNote(\'' + esc(m.jobId) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:16px;">&#128221; Note for admin</button>';
       if (m.portalUrl) {
         h += '<a href="' + esc(m.portalUrl) + '" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;background:var(--sw-dark);color:#fff;border-radius:8px;padding:13px;margin-bottom:10px;text-decoration:none;font-size:14px;font-weight:800;min-height:48px;">Open builder report portal &#8599;</a>';
+        h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">If the link has expired, this is an aged job rather than an app error. Use <strong>Note for admin</strong> to request a fresh builder link, and mark done only after the report is completed.</div>';
       } else {
         h += '<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:8px 10px;margin-bottom:10px;">No portal link is attached to this job &mdash; use the link in the builder\'s work order or email above.</div>';
       }

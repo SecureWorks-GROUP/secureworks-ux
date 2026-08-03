@@ -214,6 +214,36 @@ The legacy `.ms-*` run card, `.tjc-*` card bodies, and the runsheet reorder
 controls are retired — do not revive them. The calendar keeps its own
 `.ncal`/`.sh-*` timeline grammar (shares the type accents).
 
+## Crew roster & lead installer (`trade.html`)
+
+Who is on a job, and who leads it, is server truth only — `TradeCrewCore`
+(search `// <trade-crew-roster-core>`) and its renderer
+(`// <trade-crew-roster-view>`, `.crw-*` CSS) derive nothing the
+`trade_job_detail` payload (secureworks-backend PR #513) didn't say. `crew[]`
+carries one row per crew member per DAY; the core collapses that to one row per
+PERSON before rendering, or a multi-day job doubles as duplicate crew. `role`
+is never read as the lead signal — it defaults to `'lead_installer'` on every
+insert, so almost every production row already claims it. `is_lead` /
+`leadInstaller` are the only source of truth, and the migration deliberately
+shipped with no backfill, so "no lead set" is the honest state of every
+pre-existing job.
+Two absences are never collapsed into one: `leadInstaller: null` means the
+server says nobody leads this job (shown as "No lead installer set");
+the key being ABSENT means this ops-api deployment predates PR #513 and has
+no opinion (crew still renders, no lead claim, no set-lead control offered —
+`leadSupported: false`, `data-lead-supported="0"` on `#crewRosterPanel`).
+`setJobLeadInstaller` calls `set_job_lead`; `canSetLead` mirrors the server's
+`assertAssignmentMutationAuthz` gate (dispatcher, or a manager of that job's
+vertical) purely so the control isn't offered where the server would refuse
+it — the server remains the real authority. This is the one write the
+`<foreign-job-readonly>` guard deliberately exempts
+(`FOREIGN_JOB_WRITE_EXEMPT_ACTIONS`): a manager sets the lead ON another
+crew's job precisely when viewing it read-only. There is one crew renderer in
+this app (`renderCrewRosterPanel`) shared by the standard job detail and the
+make-safe report surface — do not grow a second crew list. Pure-core coverage:
+`scripts/test-trade-crew-lead-core.js`; rendered coverage:
+`tests/e2e/trade-crew-lead.spec.js`.
+
 ## Trade visibility & the manager view (`trade.html`)
 
 Make-safe visibility is 100% SERVER-DRIVEN by the `makesafe_board` feed

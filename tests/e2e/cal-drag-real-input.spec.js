@@ -18,6 +18,8 @@ const { test, expect } = require('@playwright/test');
 
 const OPS_BASE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 const OPS_URL = OPS_BASE + '?dragv2=1#calendar';
+// dragv2 is ON by default now, so the flag-off boot must opt OUT explicitly.
+const OPS_URL_FLAG_OFF = OPS_BASE + '?dragv2=0#calendar';
 
 // Fixture dates: first Monday >= today (same scheme as the CP1 walkthrough),
 // so every date sits inside the 2-week today-forward window.
@@ -58,7 +60,9 @@ function fixtureEvents() {
 // Boots ops.html on the stubbed network. Returns { writes } — every mutating
 // ops-api call the page makes, in order. Opts: { events } fixture override,
 // { flagOff } to boot WITHOUT dragv2, { unschedJobs } for the pipeline feed,
-// { availability } rows for get_crew_availability.
+// { availability } rows for get_crew_availability, { url } to override the
+// boot URL entirely (the gating tests boot with NO dragv2 param to prove the
+// default), { dragLs } to seed localStorage.sw_cal_dragv2 before load.
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents() };
   const writes = [];
@@ -91,14 +95,15 @@ async function bootCalendar(page, opts = {}) {
     }
     return json({});
   });
-  await page.addInitScript(() => {
+  await page.addInitScript((dragLs) => {
     try {
       localStorage.setItem('sw_ops_tab', 'calendar');
       localStorage.setItem('sw_cal_range', '2w');
       localStorage.setItem('sw_cal_view_mode', 'crew');
+      if (dragLs != null) localStorage.setItem('sw_cal_dragv2', dragLs);
     } catch (e) { /* file:// storage quirks — the URL flag still applies */ }
-  });
-  await page.goto(opts.flagOff ? OPS_BASE + '#calendar' : OPS_URL);
+  }, opts.dragLs == null ? null : opts.dragLs);
+  await page.goto(opts.url || (opts.flagOff ? OPS_URL_FLAG_OFF : OPS_URL));
   await expect(page.locator('.cal-job-block').first()).toBeVisible();
   // The real page shape: the Jarvis bar must be present, not hidden.
   await expect(page.locator('#jarvisBar')).toBeVisible();
@@ -337,5 +342,64 @@ test.describe('Captain ruling cp1-askuser-2 — Perth timezone', () => {
     expect(move.body.scheduled_date).toBe(D.MON2);
     expect(move.body.scheduled_end).toBe(D.TUE2);
     expect(move.body.duration_days).toBe(2);
+  });
+});
+
+// ── dragv2 default-on gating (team-wide enable) ──
+// The flag flip is the change under test here: a PLAIN boot — no query param,
+// no localStorage key, exactly how the team loads the page — must behave like
+// ?dragv2=1 used to, and both kill switches must still reach the untouched V1
+// path.
+test.describe('dragv2 default-on gating', () => {
+  const PLAIN_URL = OPS_BASE + '#calendar';
+
+  test('plain boot (no param, no localStorage): drag is V2 — working-day span + reschedule prompt', async ({ page }) => {
+    const { writes } = await bootCalendar(page, { url: PLAIN_URL });
+    expect(await page.evaluate(() => window.__SW_CAL_DRAGV2_ENABLED)).toBe(true);
+    const src = page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block');
+    const dst = page.locator('.cal-swim-cell[data-date="' + D.THU + '"][data-crew="Hugo"]');
+    await realDrag(page, src, dst);
+    await expect(page.locator('#calConfirmBackdrop')).toHaveClass(/open/);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    expect(move, 'a plain-boot drag must produce an update_assignment write').toBeTruthy();
+    expect(move.body.scheduled_date).toBe(D.THU);
+    // Weekend-skip end = V2. The V1 calendar shift would have written D.SAT.
+    expect(move.body.scheduled_end).toBe(D.MON2);
+    expect(move.body.duration_days).toBe(3);
+  });
+
+  test('localStorage kill switch "0": drag is the V1 calendar-delta shift, no prompt', async ({ page }) => {
+    const { writes } = await bootCalendar(page, { url: PLAIN_URL, dragLs: '0' });
+    expect(await page.evaluate(() => window.__SW_CAL_DRAGV2_ENABLED)).toBe(false);
+    const src = page.locator('.cal-swim-cell[data-date="' + D.MON + '"][data-crew="Hugo"] .cal-job-block');
+    const dst = page.locator('.cal-swim-cell[data-date="' + D.THU + '"][data-crew="Hugo"]');
+    await realDrag(page, src, dst);
+    await expect
+      .poll(() => writes.filter((w) => w.action === 'update_assignment').length, { message: 'the kill switch must keep the old drag working, not remove drag' })
+      .toBeGreaterThan(0);
+    const move = writes.find((w) => w.action === 'update_assignment');
+    // V1 shifts the whole span by the calendar delta: Mon..Wed +3 = Thu..Sat.
+    expect(move.body.scheduled_date).toBe(D.THU);
+    expect(move.body.scheduled_end).toBe(D.SAT);
+    expect(move.body.duration_days).toBeUndefined();
+    // The reschedule-SMS prompt is V2-only — the V1 move is silent.
+    await page.waitForTimeout(300);
+    await expect(page.locator('#calConfirmBackdrop')).not.toHaveClass(/open/);
+  });
+
+  test('flag precedence: URL beats localStorage in both directions', async ({ page }) => {
+    await bootCalendar(page, { url: PLAIN_URL });
+    const flag = () => page.evaluate(() => window.__SW_CAL_DRAGV2_ENABLED);
+    expect(await flag()).toBe(true); // default ON
+    await page.evaluate(() => localStorage.setItem('sw_cal_dragv2', '1'));
+    await page.goto(PLAIN_URL);
+    expect(await flag()).toBe(true); // legacy '1' opt-in bookmark still works
+    await page.goto(OPS_URL_FLAG_OFF);
+    expect(await flag()).toBe(false); // ?dragv2=0 beats localStorage '1'
+    await page.evaluate(() => localStorage.setItem('sw_cal_dragv2', '0'));
+    await page.goto(PLAIN_URL);
+    expect(await flag()).toBe(false); // persistent kill switch
+    await page.goto(OPS_URL);
+    expect(await flag()).toBe(true); // ?dragv2=1 beats localStorage '0'
   });
 });

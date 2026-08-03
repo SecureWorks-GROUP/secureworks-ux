@@ -4979,21 +4979,27 @@ if (window.__SW_CAP1B_GATE_UX_ENABLED) {
 }
 
 // ── Calendar drag v2 flag (CP1 drag-to-reschedule — ops-dash-calendar-overhaul) ──
-// Enabled when ?dragv2=1 is in the URL OR localStorage.sw_cal_dragv2 === '1'.
+// ON BY DEFAULT (Captain-approved team-wide enable). Kill switch: ?dragv2=0 in
+// the URL for one page load, or localStorage.sw_cal_dragv2 === '0' persistently.
+// ?dragv2=1 / localStorage '1' are still accepted (now redundant) so existing
+// bookmarks keep working.
 // Gates the NEW drag behaviour only: working-day (weekend-skip) duration on
 // drag, weekend-break rendering of multi-day bars, edge-resize handles, and the
-// client reschedule-SMS prompt after a drop. OFF (the default) = the calendar
-// drags exactly as before this slice.
+// client reschedule-SMS prompt after a drop. OFF = the calendar drags exactly
+// as before this slice.
 window.__SW_CAL_DRAGV2_ENABLED = (function () {
   try {
-    var qs = (window.location.search || '').match(/[?&]dragv2=1\b/);
-    if (qs) return true;
+    var search = window.location.search || '';
+    if (search.match(/[?&]dragv2=1\b/)) return true;
+    if (search.match(/[?&]dragv2=0\b/)) return false;
     var ls = window.localStorage && window.localStorage.getItem('sw_cal_dragv2');
-    return ls === '1';
-  } catch (e) { return false; }
+    if (ls === '1') return true;
+    if (ls === '0') return false;
+    return true;
+  } catch (e) { return true; }
 })();
 if (window.__SW_CAL_DRAGV2_ENABLED) {
-  console.info('[CP1] calendar drag v2 enabled — working-day drag/resize + reschedule prompt. Disable by clearing localStorage.sw_cal_dragv2.');
+  console.info('[CP1] calendar drag v2 enabled — working-day drag/resize + reschedule prompt. Disable via ?dragv2=0 or localStorage.sw_cal_dragv2 = "0".');
 }
 
 // Council modal alias — called from quick view

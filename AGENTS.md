@@ -33,8 +33,9 @@ Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs o
 
 ## Ops Dash calendar drag (`ops.html`)
 
-CP1 drag-to-reschedule is behind a feature flag: `?dragv2=1` or
-`localStorage.sw_cal_dragv2='1'` (DEFAULT OFF, same pattern as `sw_cap1b_enabled`).
+CP1 drag-to-reschedule is behind a feature flag that is now DEFAULT ON. Kill
+switch: `?dragv2=0` or `localStorage.sw_cal_dragv2='0'`; `?dragv2=1` / `'1'`
+still force it on.
 Flag off must stay byte-identical to the old behaviour — that is why V1
 `buildMovePayload` (calendar-delta shift) lives alongside `buildMovePayloadV2`
 (drop day = new START, duration preserved in WORKING days, weekend-skip); do not

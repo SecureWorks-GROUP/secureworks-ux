@@ -11732,16 +11732,28 @@ var MAKESAFE_ENRICH_FIELDS = [
 ];
 
 // Suburb fallback for the degraded path (no enriched row). The canonical feed
-// folds the suburb into `contact.address`, so take the tail segment and strip a
-// trailing state/postcode. A single-segment address yields nothing rather than
-// echoing the street line back as a suburb.
+// folds the suburb into `contact.address`. The state/postcode may share the
+// suburb segment (`Bertram WA 6167`) or occupy its own segment (`WA 6060`), so
+// skip a state-only tail before stripping any inline suffix. A single-segment
+// address yields nothing rather than echoing the street line back as a suburb.
+// <makesafe-suburb-from-address>
 function makesafeSuburbFromAddress(address) {
-  var parts = String(address || '').trim().split(',');
+  var parts = String(address || '').trim().split(',').map(function(part) {
+    return String(part || '').trim();
+  }).filter(Boolean);
   if (parts.length < 2) return '';
-  return String(parts[parts.length - 1]).trim()
-    .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i, '')
+
+  var tailIndex = parts.length - 1;
+  var tail = parts[tailIndex];
+  if (/^\d{4}$/.test(tail)) tail = parts[--tailIndex];
+  if (/^(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)$/i.test(tail)) tail = parts[--tailIndex];
+  if (/^(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i.test(tail)) tail = parts[--tailIndex];
+
+  return String(tail).trim()
+    .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)(?:\s+\d{4})?$/i, '')
     .replace(/\s+\d{4}$/, '').trim();
 }
+// </makesafe-suburb-from-address>
 
 // Company slug fallback for the degraded path. Only the MLB spelling matters —
 // it is the one slug the SWMS chip branches on (SWMS is MLB-only).

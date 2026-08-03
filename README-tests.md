@@ -36,6 +36,7 @@ Covered flows (Trade App and Ops Dash):
 20. Optional dedicated accounts prove that the real Supabase password login still works.
 21. The trade portal-report confirmation is hidden only by current-cycle `portal_verified_at` or a screenshot-backed sealed capture for the current attendance cycle. Bare substatus, `report_received_at`, and the legacy event-only `report_on_portal` flag cannot hide it; aged share links keep the enabled confirmation control and explain the builder-resend path. This exact sentinel-delimited production module is covered by `scripts/test-trade-portal-confirmation.js` and runs before Playwright through `npm run test:e2e`.
 22. Branding images, CDN objects and SES open/click trackers stored as `kind: builder_portal` are never offered as portal links on either dashboard — not in the Ops Builder links panel, not on the board card link row, and not as the trade "Open builder report portal" CTA — while a genuine share URL is kept even when its token has expired. `scripts/test-f5-portal-link-hygiene.js` extracts the shipped filter from `ops.html` and `trade.html` and runs before Playwright through `npm run test:e2e`.
+23. The MakeSafe reporting cockpit's degraded canonical-feed identity path derives the real suburb from both `Suburb WA 6060` and `Suburb, WA 6060` address tails, never the state token. `modules/ops-makesafe-reporting-cockpit.smoke.mjs` extracts the shipped parser from `ops.html`, runs it through the live cockpit card renderer with the `MLB-26658PO-56313` failure shape, and runs before Playwright through `npm run test:e2e`.
 
 Ops Dash coverage in the same suite:
 
@@ -90,7 +91,7 @@ Repo-specific feed action names and roles belong in `tests/fixtures/test.js`, no
 ## Copy this pattern to another tool repo
 
 1. Copy `playwright.config.js`, `.github/workflows/playwright-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
-2. Install `@playwright/test` and copy the three npm scripts from this repo's `package.json`.
+2. Install `@playwright/test` and copy the four npm scripts from this repo's `package.json`.
 3. Change the served HTML path in the workflow/config only if the tool is not at the repository root.
 4. Replace the personas in `tests/fixtures/test.js` with that tool's minimum roles.
 5. Record synthetic JSON fixtures for each read endpoint. Remove names, phone numbers, tokens, and live client data.

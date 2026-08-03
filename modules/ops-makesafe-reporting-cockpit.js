@@ -589,6 +589,7 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   var sections = cockpit.sections || {};
   var statusChip = _msSesStatusChip(cockpit.status);
   if (cockpit.status === 'HOLD') {
+    // The review pane uses amber for HOLD; the shared board-card chip remains unchanged.
     statusChip = { label: statusChip.label, bg: '#B45309', fg: '#fff' };
   }
 

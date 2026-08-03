@@ -270,6 +270,10 @@ check(
   makesafeSuburbFromAddress("186 Tyler Street, Tuart Hill, WA 6060") === "Tuart Hill",
 );
 check(
+  "split comma-delimited state/postcode resolves the preceding suburb",
+  makesafeSuburbFromAddress("186 Tyler Street, Tuart Hill, WA, 6060") === "Tuart Hill",
+);
+check(
   "same-segment state/postcode suffix resolves the suburb",
   makesafeSuburbFromAddress("4 Warrior Pass, Bertram WA 6167") === "Bertram",
 );

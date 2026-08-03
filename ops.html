@@ -11743,10 +11743,11 @@ function makesafeSuburbFromAddress(address) {
   }).filter(Boolean);
   if (parts.length < 2) return '';
 
-  var tail = parts[parts.length - 1];
-  if (/^(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)(?:\s+\d{4})?$/i.test(tail) || /^\d{4}$/.test(tail)) {
-    tail = parts[parts.length - 2];
-  }
+  var tailIndex = parts.length - 1;
+  var tail = parts[tailIndex];
+  if (/^\d{4}$/.test(tail)) tail = parts[--tailIndex];
+  if (/^(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)$/i.test(tail)) tail = parts[--tailIndex];
+  if (/^(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i.test(tail)) tail = parts[--tailIndex];
 
   return String(tail).trim()
     .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)(?:\s+\d{4})?$/i, '')

@@ -91,7 +91,7 @@ Repo-specific feed action names and roles belong in `tests/fixtures/test.js`, no
 ## Copy this pattern to another tool repo
 
 1. Copy `playwright.config.js`, `.github/workflows/playwright-e2e.yml`, `tests/helpers/`, and `tests/fixtures/test.js`.
-2. Install `@playwright/test` and copy the three npm scripts from this repo's `package.json`.
+2. Install `@playwright/test` and copy the four npm scripts from this repo's `package.json`.
 3. Change the served HTML path in the workflow/config only if the tool is not at the repository root.
 4. Replace the personas in `tests/fixtures/test.js` with that tool's minimum roles.
 5. Record synthetic JSON fixtures for each read endpoint. Remove names, phone numbers, tokens, and live client data.

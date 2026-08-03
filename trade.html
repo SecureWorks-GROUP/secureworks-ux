@@ -18967,7 +18967,8 @@
 
   function _fencingBoardCardModel(job, row) {
     var model = UnifiedJobCard.fromJobAssignment(job, row, 'fencing', {
-      desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing')
+      desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing'),
+      crewAssignments: row && row.assignments
     });
     // AllocationCore predates UnifiedJobCard and reads these aliases. Keep the
     // one visual grammar while supplying its existing write-model seam.

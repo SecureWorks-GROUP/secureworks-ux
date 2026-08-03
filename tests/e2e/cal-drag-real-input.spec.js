@@ -18,6 +18,8 @@ const { test, expect } = require('@playwright/test');
 
 const OPS_BASE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 const OPS_URL = OPS_BASE + '?dragv2=1#calendar';
+// dragv2 is ON by default now, so the flag-off boot must opt OUT explicitly.
+const OPS_URL_FLAG_OFF = OPS_BASE + '?dragv2=0#calendar';
 
 // Fixture dates: first Monday >= today (same scheme as the CP1 walkthrough),
 // so every date sits inside the 2-week today-forward window.
@@ -98,7 +100,7 @@ async function bootCalendar(page, opts = {}) {
       localStorage.setItem('sw_cal_view_mode', 'crew');
     } catch (e) { /* file:// storage quirks — the URL flag still applies */ }
   });
-  await page.goto(opts.flagOff ? OPS_BASE + '#calendar' : OPS_URL);
+  await page.goto(opts.flagOff ? OPS_URL_FLAG_OFF : OPS_URL);
   await expect(page.locator('.cal-job-block').first()).toBeVisible();
   // The real page shape: the Jarvis bar must be present, not hidden.
   await expect(page.locator('#jarvisBar')).toBeVisible();

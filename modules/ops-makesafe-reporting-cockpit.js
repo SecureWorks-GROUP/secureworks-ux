@@ -588,6 +588,9 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   var cockpit = ctx.cockpit || {};
   var sections = cockpit.sections || {};
   var statusChip = _msSesStatusChip(cockpit.status);
+  if (cockpit.status === 'HOLD') {
+    statusChip = { label: statusChip.label, bg: '#B45309', fg: '#fff' };
+  }
 
   var docTabs = _msReportingDocTabs(row);
   if (typeof _msActiveDocTab[jobId] !== 'number' || _msActiveDocTab[jobId] >= docTabs.length) {
@@ -1036,12 +1039,12 @@ function _msSesArtifactsByHash(ctx) {
 // What each artifact role IS, in the captain's words. Used to explain why an
 // attachment is on a route. A role with no entry gets no invented sentence.
 var _MS_SES_ROLE_REASONS = {
-  supporting_report_pdf: 'the make-safe completion report this pack was assembled to deliver',
-  xero_invoice_pdf: 'the tax invoice for this job',
-  swms_artifact: 'the safe work method statement recorded for this job',
-  source_attachment: "the builder's own instruction, sent back so both sides hold the same document",
-  completion_photo: 'a site photo from the completion report',
-  sibling_photo_evidence: 'site photo evidence held against this job'
+  supporting_report_pdf: 'a make-safe completion report PDF; this is a generic file-type description, not a job-specific reason recorded by the pack',
+  xero_invoice_pdf: 'a tax invoice PDF; this is a generic file-type description, not a job-specific reason recorded by the pack',
+  swms_artifact: 'a safe work method statement; this is a generic file-type description, not a job-specific reason recorded by the pack',
+  source_attachment: "a builder instruction attachment; this is a generic file-type description, not a job-specific reason recorded by the pack",
+  completion_photo: 'a completion-report site photo; this is a generic file-type description, not a job-specific reason recorded by the pack',
+  sibling_photo_evidence: 'site photo evidence; this is a generic file-type description, not a job-specific reason recorded by the pack'
 };
 
 /**

@@ -5300,7 +5300,13 @@ function opsFetch(action, params, options) {
   return fetch(url, fetchOpts).then(function(resp) {
     if (!resp.ok) {
       return resp.json().catch(function() { return {}; }).then(function(err) {
-        throw new Error(err.error || 'API error: ' + resp.status);
+        // SES refusals arrive as { error: fact, refusal: { code, fact } } — keep
+        // the machine-readable refusal + HTTP status on the thrown Error so
+        // callers can branch (e.g. stale_review re-fetch) without parsing text.
+        var e = new Error(err.error || 'API error: ' + resp.status);
+        e.status = resp.status;
+        e.refusal = err.refusal || null;
+        throw e;
       });
     }
     return resp.json();
@@ -5321,7 +5327,48 @@ function opsPost(action, body) {
         // with a 4xx/5xx status) — surface something readable either way.
         var em = err.error;
         if (em && typeof em === 'object') em = em.message || em.code;
-        throw new Error(em || 'API error: ' + resp.status);
+        var e = new Error(em || 'API error: ' + resp.status);
+        e.status = resp.status;
+        e.refusal = err.refusal || null;
+        throw e;
+      });
+    }
+    return resp.json();
+  });
+}
+
+// SES JWT-only actions (sign_off_ses_docket, approve_ses_invoice_revision,
+// approve_ses_release_revision, record_ses_review_feedback) 403 ANY request that
+// carries x-api-key: the ops-api classifies x-api-key-first, and the dashboard's
+// default headers (x-api-key + Bearer ANON) always land as authMode='api_key'.
+// This helper OMITS x-api-key and bears the signed-in operator's own Supabase
+// session access_token (magic-link login), so the request classifies as 'jwt'
+// and the server can attribute the approval to the identified operator.
+async function opsPostJwt(action, body) {
+  var token = null;
+  try {
+    if (cloud && cloud.supabase && cloud.supabase.auth && cloud.supabase.auth.getSession) {
+      var sess = await cloud.supabase.auth.getSession();
+      token = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    }
+  } catch (e) { token = null; }
+  if (!token) {
+    throw new Error('This action needs a signed-in operator session (magic link). Sign in, then retry.');
+  }
+  body = Object.assign({}, body, { operator_email: _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null });
+  return fetch(_opsApiBase + '?action=' + action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify(body),
+  }).then(function(resp) {
+    if (!resp.ok) {
+      return resp.json().catch(function() { return {}; }).then(function(err) {
+        var em = err.error;
+        if (em && typeof em === 'object') em = em.message || em.code;
+        var e = new Error(em || 'API error: ' + resp.status);
+        e.status = resp.status;
+        e.refusal = err.refusal || null;
+        throw e;
       });
     }
     return resp.json();

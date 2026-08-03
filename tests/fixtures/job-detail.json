@@ -18,11 +18,26 @@
       "id": "e2e-assignment-1",
       "user_id": "e2e-installer",
       "name": "E2E Installer",
+      "is_lead": false,
+      "status": "scheduled",
+      "scheduled_date": "{{TODAY}}",
+      "start_time": "08:30"
+    },
+    {
+      "id": "e2e-assignment-2",
+      "user_id": "e2e-allocator",
+      "name": "E2E Allocator",
+      "is_lead": true,
       "status": "scheduled",
       "scheduled_date": "{{TODAY}}",
       "start_time": "08:30"
     }
   ],
+  "leadInstaller": {
+    "assignment_id": "e2e-assignment-2",
+    "user_id": "e2e-allocator",
+    "name": "E2E Allocator"
+  },
   "purchaseOrders": [],
   "documents": [],
   "media": [],

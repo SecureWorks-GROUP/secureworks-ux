@@ -4,6 +4,7 @@ const {
   installFeedStubs,
   installExternalRequestGuard,
   loadJsonFixture,
+  perthDate,
   perthWeekMonday,
   addIsoDays
 } = require('../helpers/feed-stub');
@@ -171,6 +172,62 @@ const test = base.extend({
       type: index % 2 === 0 ? 'fencing' : 'patio',
       status: index % 3 === 0 ? 'complete' : 'scheduled'
     }));
+    // ── Crew roster + lead installer (secureworks-backend PR #513) ──
+    // Its own rows rather than the shared fencing fixture, so spec 11 keeps the
+    // exact assignment set it recorded. Deliberately shaped like production:
+    // Alyx holds TWO rows on the same job (a multi-day allocation, one row per
+    // day) and `role` is 'lead_installer' on every row — the default that made
+    // the backend refuse to read it as the lead signal.
+    const crewLeadRows = [
+      {
+        id: 'fence-assignment-alyx', user_id: 'e2e-alyx', crew_name: 'Alyx Crew',
+        users: { name: 'Alyx Crew' }, role: 'lead_installer', status: 'scheduled',
+        scheduled_date: perthDate(), start_time: '07:30'
+      },
+      {
+        id: 'fence-assignment-alyx-day2', user_id: 'e2e-alyx', crew_name: 'Alyx Crew',
+        users: { name: 'Alyx Crew' }, role: 'lead_installer', status: 'scheduled',
+        scheduled_date: addIsoDays(perthDate(), 1), start_time: '07:30'
+      },
+      {
+        id: 'fence-assignment-sam', user_id: 'e2e-sam', crew_name: 'Sam Offsider',
+        users: { name: 'Sam Offsider' }, role: 'lead_installer', status: 'scheduled',
+        scheduled_date: perthDate(), start_time: '07:30'
+      }
+    ];
+    // Nobody designated: the migration deliberately shipped no backfill.
+    let crewLeadAssignmentId = null;
+    const crewLeadDetail = (jobId) => {
+      const row = fencingRows().find((entry) => entry.jobs && entry.jobs.id === jobId);
+      if (!row) return { status: 404, body: { error: 'Unknown fencing fixture job' } };
+      // 'crew-lead-legacy' models an ops-api deployment that predates PR #513:
+      // no `leadInstaller` key and no `is_lead` on any row.
+      const legacy = feedScenario === 'crew-lead-legacy';
+      const crew = crewLeadRows.map((entry) => (legacy
+        ? { ...entry }
+        : { ...entry, name: entry.users.name, is_lead: entry.id === crewLeadAssignmentId }));
+      const payload = {
+        job: row.jobs, crew, purchaseOrders: [], documents: [], media: [], notes: []
+      };
+      if (!legacy) {
+        const lead = crew.find((entry) => entry.is_lead) || null;
+        payload.leadInstaller = lead
+          ? { assignment_id: lead.id, user_id: lead.user_id, name: lead.name }
+          : null;
+      }
+      return payload;
+    };
+    const CREW_LEAD_SCENARIOS = ['crew-lead', 'crew-lead-legacy', 'crew-lead-refused'];
+    // One place deciding which scenario may write, so adding a scenario cannot
+    // accidentally widen an existing one.
+    const WRITE_SCENARIOS = {
+      'fencing-allocation': ['allocate_job'],
+      'fencing-stage-lifecycle': ['update_my_assignment', 'clock_event'],
+      'wo-labour-explainer': ['generate_trade_invoice'],
+      'crew-lead': ['set_job_lead'],
+      'crew-lead-refused': ['set_job_lead']
+    };
+
     const feed = await installFeedStubs(page, {
       endpoint: `${SUPABASE_ORIGIN}/functions/v1/ops-api`,
       requestLog: feedRequests,
@@ -252,9 +309,33 @@ const test = base.extend({
             })
           };
         },
+        set_job_lead: ({ request }) => {
+          if (feedScenario === 'crew-lead-refused') {
+            return { status: 409, body: { error: 'That person is not an active crew member on this job' } };
+          }
+          if (feedScenario !== 'crew-lead') {
+            return { status: 409, body: { error: 'Lead installer fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          if (body.clear === true) {
+            crewLeadAssignmentId = null;
+            return { success: true, job_id: body.jobId, lead: null };
+          }
+          const row = crewLeadRows.find((entry) => entry.id === body.assignmentId);
+          if (!row) {
+            return { status: 409, body: { error: 'That person is not an active crew member on this job' } };
+          }
+          crewLeadAssignmentId = row.id;
+          return {
+            success: true,
+            job_id: body.jobId,
+            lead: { assignment_id: row.id, user_id: row.user_id, name: row.users.name }
+          };
+        },
         trade_job_detail: ({ url }) => {
-          if (persona !== 'fencing_manager') return loadJsonFixture('job-detail.json');
           const jobId = url.searchParams.get('jobId');
+          if (CREW_LEAD_SCENARIOS.includes(feedScenario)) return crewLeadDetail(jobId);
+          if (persona !== 'fencing_manager') return loadJsonFixture('job-detail.json');
           const assignment = fencingRows().find((row) => row.jobs && row.jobs.id === jobId);
           if (!assignment) return { status: 404, body: { error: 'Unknown fencing fixture job' } };
           return {
@@ -363,11 +444,7 @@ const test = base.extend({
           };
         }
       },
-      allowedWriteActions: feedScenario === 'fencing-allocation'
-        ? ['allocate_job']
-        : (feedScenario === 'fencing-stage-lifecycle'
-            ? ['update_my_assignment', 'clock_event']
-            : (feedScenario === 'wo-labour-explainer' ? ['generate_trade_invoice'] : []))
+      allowedWriteActions: WRITE_SCENARIOS[feedScenario] || []
     });
 
     await page.route('https://cdnjs.cloudflare.com/**', (route) => route.fulfill({

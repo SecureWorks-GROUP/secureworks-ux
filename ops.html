@@ -4899,6 +4899,9 @@ var _unschedJobs = []; // Unscheduled jobs for crew sidebar
 var _calDate = new Date(); // current focus date for calendar
 var _jobView = 'kanban'; // 'kanban' or 'list'
 var _pipelineTab = 'fencing'; // 'fencing', 'patio', 'decking', 'misc'
+// Job type each pipeline tab already implies — used to suppress the redundant
+// type badge on kanban cards. 'misc' is deliberately absent: that board mixes types.
+var KANBAN_TAB_IMPLIED_TYPE = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe' };
 var _jobFilter = 'fencing'; // API type filter — set by setPipelineTab()
 var _jobSearch = '';
 var _invFilter = 'ACCREC';
@@ -12222,8 +12225,11 @@ function renderKanbanCard(j, status) {
   if (status === 'rectification') {
     html += '<span class="rect-badge">RECT</span>';
   }
-  // Type badge — hide in fencing pipeline (redundant)
-  if (_pipelineTab !== 'fencing') {
+  // Type badge — redundant when the pipeline tab already implies the type, so it is
+  // only drawn when the job's type does not match the board it is sitting on (that
+  // mismatch is worth seeing).
+  var tabImpliedType = KANBAN_TAB_IMPLIED_TYPE[_pipelineTab];
+  if (j.type !== tabImpliedType) {
     html += '<span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
   }
   if (j.first_scheduled_date && (status === 'scheduled' || status === 'in_progress')) {

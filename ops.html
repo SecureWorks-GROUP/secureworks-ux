@@ -7277,6 +7277,25 @@ var CalOpsCore = (function () {
     var a = new Date(fromStr + 'T00:00:00'), b = new Date(toStr + 'T00:00:00');
     return Math.round((b - a) / 86400000);
   }
+  // Bad-data guard, shared by every surface that turns an assignment into a date
+  // span. An assignment whose scheduled_end lands BEFORE its scheduled_date is
+  // inverted, and the naive `end = scheduled_end || scheduled_date` makes each
+  // reader misbehave in its own way:
+  //   - a `day >= start && day <= end` sweep matches ZERO days, so the row is
+  //     silently dropped — it vanishes from the Crew view and the make-safe
+  //     planner, and is left out of conflict counting, and the job then reads as
+  //     unscheduled when it actually has an assignment;
+  //   - Schedule view's lane packer reads "job.end < other.start" as no overlap
+  //     and computes a negative widthPct, so the bar falls back to width:auto and
+  //     paints its label over its lane-mate.
+  // Clamping a backwards range to a single-day span at its start date keeps every
+  // reader honest and agreeing with the others. Well-formed spans are returned
+  // untouched, so this is a no-op for every sane row.
+  function spanEnd(ev) {
+    var s = ev && ev.scheduled_date;
+    var e = (ev && ev.scheduled_end) || s;
+    return (s && e < s) ? s : e;
+  }
   // U-O3(b): 1w/2w windows are anchored today-FORWARD (focus date = column 1),
   // not snapped back to Monday. Month stays the calendar month.
   function calWindowRange(focusStr, mode) {
@@ -7339,7 +7358,7 @@ var CalOpsCore = (function () {
   function calCountLabel(events, mode, todayStr) {
     var total = (events || []).length;
     var upcoming = (events || []).filter(function (e) {
-      var end = (e && (e.scheduled_end || e.scheduled_date)) || '';
+      var end = spanEnd(e) || '';
       return end >= todayStr;
     }).length;
     var scope = mode === 'month' ? 'this month' : mode === '2w' ? 'in this fortnight' : 'this week';
@@ -7451,7 +7470,7 @@ var CalOpsCore = (function () {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
     partitionCellEntries: partitionCellEntries, calCountLabel: calCountLabel,
-    truncationNotice: truncationNotice,
+    truncationNotice: truncationNotice, spanEnd: spanEnd,
     isWeekendStr: isWeekendStr, layWorkingDays: layWorkingDays,
     paintedSpanDates: paintedSpanDates, workingSpanDays: workingSpanDays,
     movedSpanV2: movedSpanV2, buildMovePayloadV2: buildMovePayloadV2,
@@ -7562,10 +7581,11 @@ function renderSwimlaneView(container, range) {
     var crew = crewDisplayName(ev);
     if (!crewMap[crew]) crewMap[crew] = { division: guessDivision(ev), events: {} };
     var startDate = ev.scheduled_date;
-    var endDate = ev.scheduled_end || ev.scheduled_date;
+    var endDate = CalOpsCore.spanEnd(ev); // inverted spans would match zero days and drop the job off this view
     // CP1 (dragv2): interior Sat/Sun are weekend BREAKS — a weekend-crossing
     // bar paints Mon–Fri, skips the weekend, resumes Monday as one logical
     // job. Weekend days still paint when deliberately chosen as an endpoint.
+    // Fed the NORMALISED end so a backwards span cannot paint an empty set.
     var painted = window.__SW_CAL_DRAGV2_ENABLED ? CalOpsCore.paintedSpanDates(startDate, endDate) : null;
     dates.forEach(function(dateStr) {
       if (dateStr >= startDate && dateStr <= endDate) {
@@ -7915,7 +7935,7 @@ function renderCalSummary(range) {
   _calEvents.forEach(function(ev) {
     var crew = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
     var start = ev.scheduled_date;
-    var end = ev.scheduled_end || start;
+    var end = CalOpsCore.spanEnd(ev); // inverted spans would match zero days and go uncounted
     dates.forEach(function(ds) {
       if (ds >= start && ds <= end) {
         var key = crew + '_' + ds;
@@ -8002,21 +8022,15 @@ function renderScheduleView(container, range) {
   var DAYS_SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   var holidayMap = _calEventFilters.holidays ? getHolidayMap() : {};
 
-  // Bad-data guard. An assignment whose scheduled_end lands BEFORE its
-  // scheduled_date gives an inverted span, and the two halves of this renderer
-  // read that differently: the lane packer's "job.end < other.start ||
-  // job.start > other.end" test declares no overlap, so the bar shares a lane
-  // with one it visually sits on, and the geometry below computes a negative
-  // widthPct — invalid CSS, so the declaration is dropped and the absolutely
-  // positioned bar falls back to width:auto and paints its whole label over its
-  // lane-mate. Clamping to a single-day span at the start date keeps both halves
-  // honest. (Well-formed spans reach `jobs` via the activeDates → contiguous
-  // segments path below, which already guarantees start <= end.)
-  function spanEnd(ev) {
-    var s = ev.scheduled_date;
-    var e = ev.scheduled_end || s;
-    return (s && e < s) ? s : e;
-  }
+  // Bad-data guard for inverted spans (scheduled_end before scheduled_date) —
+  // see CalOpsCore.spanEnd for what goes wrong and why clamping is the answer.
+  // Here it keeps the two halves of this renderer agreeing: the lane packer's
+  // "job.end < other.start || job.start > other.end" test would declare no
+  // overlap, and the geometry below would compute a negative widthPct. Every
+  // calendar surface reads spans through this one helper so they cannot drift.
+  // (Well-formed spans reach `jobs` via the activeDates → contiguous segments
+  // path below, which already guarantees start <= end.)
+  var spanEnd = CalOpsCore.spanEnd;
 
   // Pad to full weeks (Mon-Sun)
   var firstDate = new Date(dates[0] + 'T00:00:00');
@@ -13139,7 +13153,7 @@ function makesafePlannerEventIsMakesafe(ev) {
 }
 function makesafePlannerEventDates(ev, weekDays) {
   var start = ev.scheduled_date;
-  var end = ev.scheduled_end || ev.scheduled_date;
+  var end = CalOpsCore.spanEnd(ev); // inverted spans would match zero days and vanish from the planner
   if (!start) return [];
   return weekDays.filter(function(day) { return day >= start && day <= end; });
 }
@@ -20252,7 +20266,7 @@ function syncAssignEndDate() {
   if (startDate) {
     var end = new Date(startDate + 'T00:00:00');
     end.setDate(end.getDate() + dur - 1);
-    document.getElementById('assignEndDate').value = end.toISOString().slice(0, 10);
+    document.getElementById('assignEndDate').value = localDateStr(end);
   }
 }
 

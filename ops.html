@@ -4895,8 +4895,7 @@
     <div class="form-group">
       <label class="form-label">Approval Type</label>
       <select class="form-input" id="councilType" onchange="updateCouncilDefaultSteps()">
-        <option value="full_building_permit">Full Building Permit</option>
-        <option value="full_building_permit_da">Full Building Permit + DA</option>
+        <option value="standard_council">Standard Council (Patio/Fencing)</option>
         <option value="engineering_only">Engineering Only</option>
         <option value="cdc_only">CDC Only</option>
         <option value="custom">Custom</option>
@@ -5019,6 +5018,9 @@ var _unschedJobs = []; // Unscheduled jobs for crew sidebar
 var _calDate = new Date(); // current focus date for calendar
 var _jobView = 'kanban'; // 'kanban' or 'list'
 var _pipelineTab = 'fencing'; // 'fencing', 'patio', 'decking', 'misc'
+// Job type each pipeline tab already implies — used to suppress the redundant
+// type badge on kanban cards. 'misc' is deliberately absent: that board mixes types.
+var KANBAN_TAB_IMPLIED_TYPE = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe' };
 var _jobFilter = 'fencing'; // API type filter — set by setPipelineTab()
 var _jobSearch = '';
 var _invFilter = 'ACCREC';
@@ -13554,8 +13556,11 @@ function renderKanbanCard(j, status) {
   if (status === 'rectification') {
     html += '<span class="rect-badge">RECT</span>';
   }
-  // Type badge — hide in fencing pipeline (redundant)
-  if (_pipelineTab !== 'fencing') {
+  // Type badge — redundant when the pipeline tab already implies the type, so it is
+  // only drawn when the job's type does not match the board it is sitting on (that
+  // mismatch is worth seeing).
+  var tabImpliedType = KANBAN_TAB_IMPLIED_TYPE[_pipelineTab];
+  if (j.type !== tabImpliedType) {
     html += '<span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
   }
   if (j.first_scheduled_date && (status === 'scheduled' || status === 'in_progress')) {
@@ -13572,8 +13577,18 @@ function renderKanbanCard(j, status) {
   }
   if (j.council_count > 0 || (j.type === 'patio' && j.council_required === true)) {
     html += '<span class="kanban-meta-badge" style="background:rgba(52,152,219,0.1);color:var(--sw-blue,#3498DB);">Council</span>';
-    if (status === 'approvals' && j.council_step) {
-      html += '<span class="kanban-meta-badge council-step-badge" style="background:rgba(52,152,219,0.15);color:var(--sw-blue,#3498DB);font-weight:600;cursor:pointer;" onclick="event.stopPropagation();showCouncilSteps(this,\'' + j.id + '\')">Step ' + j.council_step + '</span>';
+    if (status === 'approvals') {
+      // The step chip doubles as the picker, so it is drawn for every approvals job
+      // even when no council submission exists yet — otherwise a job that nobody
+      // started the process on has no way to be set to the step it is actually up to.
+      // Picking a step on an unstarted job seeds the submission (see startCouncilAtStep).
+      var stepStarted = !!j.council_step;
+      var stepLabel = stepStarted ? j.council_step : '-/' + COUNCIL_STANDARD_STEP_NAMES.length;
+      var stepStyle = stepStarted
+        ? 'background:rgba(52,152,219,0.15);color:var(--sw-blue,#3498DB);'
+        : 'background:rgba(143,164,178,0.18);color:var(--sw-text-sec,#8FA4B2);';
+      var stepTitle = stepStarted ? 'Council step - click to change' : 'Council process not started - click to set the step';
+      html += '<span class="kanban-meta-badge council-step-badge" style="' + stepStyle + 'font-weight:600;cursor:pointer;" title="' + stepTitle + '" onclick="event.stopPropagation();showCouncilSteps(this,\'' + j.id + '\')">Step ' + stepLabel + '</span>';
     }
   }
   if (j.ghl_opportunity_id) html += '<a class="kanban-ghl-link" href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" onclick="event.stopPropagation()" title="View in GHL">&#8599;</a>';
@@ -21081,6 +21096,47 @@ async function setCouncilRequired(jobId, value) {
 }
 
 var _councilStepPopup = null;
+
+// Mirrors the `standard_council` row in council_step_templates. Only used to draw the
+// picker for a job with no submission yet — the submission itself is always seeded from
+// the DB template, and the popup re-renders off the server response straight after, so
+// this list is a label preview and never the source of truth for step data.
+//
+// Do not reword 'Development Approval'. jumpCouncilStep in ops-api matches that name
+// exactly to mark DA 'skipped' rather than 'complete' when a jump passes over it
+// untouched. Engineering comes before Development Approval; do not swap them.
+var COUNCIL_STANDARD_STEP_NAMES = [
+  'Get House Plans',
+  'Drafting',
+  'Engineering',
+  'Development Approval',
+  'CDC',
+  'Submit to Council + BA1',
+  'Complete',
+];
+
+// Shared markup for the step popup. `onclickFor(i)` supplies the per-row handler so the
+// same rows can either jump an existing submission or start a new one.
+function councilStepPopupHtml(steps, currentIdx, onclickFor, note) {
+  var html = '<div style="padding:10px 14px 6px;font-weight:600;font-size:12px;color:var(--sw-dark);border-bottom:1px solid var(--sw-border,#e5e7eb);">Council Steps</div>';
+  if (note) {
+    html += '<div style="padding:8px 14px 0;font-size:11px;color:var(--sw-text-sec);line-height:1.4;">' + note + '</div>';
+  }
+  html += '<div style="padding:8px 14px 10px;">';
+  steps.forEach(function(s, i) {
+    var isCurrent = i === currentIdx && s.status !== 'complete' && s.status !== 'skipped';
+    var isComplete = s.status === 'complete';
+    var isSkipped = s.status === 'skipped';
+    var icon = isComplete ? '<span style="color:#27AE60;">&#10003;</span>' : isSkipped ? '<span style="color:var(--sw-text-sec);">&#8212;</span>' : isCurrent ? '<span style="color:var(--sw-blue,#3498DB);">&#9658;</span>' : '<span style="color:var(--sw-border,#ccc);">&#9675;</span>';
+    var weight = isCurrent ? 'font-weight:600;color:var(--sw-blue,#3498DB);' : isComplete ? 'color:#27AE60;' : isSkipped ? 'color:var(--sw-text-sec);text-decoration:line-through;' : 'color:var(--sw-text-sec);';
+    html += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;border-radius:4px;padding:5px 4px;' + weight + '" onmouseenter="this.style.background=\'rgba(52,152,219,0.08)\'" onmouseleave="this.style.background=\'transparent\'" onclick="' + onclickFor(i) + '">';
+    html += icon + ' ' + (i + 1) + '. ' + escapeHtml(s.name || 'Untitled Step');
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 async function showCouncilSteps(anchor, jobId) {
   // Close existing
   if (_councilStepPopup) { _councilStepPopup.remove(); _councilStepPopup = null; }
@@ -21108,26 +21164,20 @@ async function showCouncilSteps(anchor, jobId) {
   try {
     var data = await opsFetch('list_council_submissions', { job_id: jobId });
     var subs = data.submissions || data || [];
-    if (!subs.length) { pop.innerHTML = '<div style="padding:12px;font-size:12px;">No council submission found</div>'; return; }
-    var sub = subs[0];
-    var steps = sub.steps || [];
-    var currentIdx = sub.current_step_index || 0;
-
-    var html = '<div style="padding:10px 14px 6px;font-weight:600;font-size:12px;color:var(--sw-dark);border-bottom:1px solid var(--sw-border,#e5e7eb);">Council Steps</div>';
-    html += '<div style="padding:8px 14px 10px;">';
-    var subId = sub.id;
-    steps.forEach(function(s, i) {
-      var isCurrent = i === currentIdx && s.status !== 'complete' && s.status !== 'skipped';
-      var isComplete = s.status === 'complete';
-      var isSkipped = s.status === 'skipped';
-      var icon = isComplete ? '<span style="color:#27AE60;">&#10003;</span>' : isSkipped ? '<span style="color:var(--sw-text-sec);">&#8212;</span>' : isCurrent ? '<span style="color:var(--sw-blue,#3498DB);">&#9658;</span>' : '<span style="color:var(--sw-border,#ccc);">&#9675;</span>';
-      var weight = isCurrent ? 'font-weight:600;color:var(--sw-blue,#3498DB);' : isComplete ? 'color:#27AE60;' : isSkipped ? 'color:var(--sw-text-sec);text-decoration:line-through;' : 'color:var(--sw-text-sec);';
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;cursor:pointer;border-radius:4px;padding:5px 4px;' + weight + '" onmouseenter="this.style.background=\'rgba(52,152,219,0.08)\'" onmouseleave="this.style.background=\'transparent\'" onclick="setCouncilStep(\'' + subId + '\',' + i + ',\'' + jobId + '\')">';
-      html += icon + ' ' + (i + 1) + '. ' + s.name;
-      html += '</div>';
-    });
-    html += '</div>';
-    pop.innerHTML = html;
+    if (!subs.length) {
+      // No submission yet. Offer the standard template as a picker rather than a dead
+      // end — choosing a step starts the process at that step in one action.
+      var previewSteps = COUNCIL_STANDARD_STEP_NAMES.map(function(n) { return { name: n, status: 'pending' }; });
+      pop.innerHTML = councilStepPopupHtml(previewSteps, -1, function(i) {
+        return 'startCouncilAtStep(\'' + jobId + '\',' + i + ')';
+      }, 'Not started. Pick the step this job is up to.');
+    } else {
+      var sub = subs[0];
+      var subId = sub.id;
+      pop.innerHTML = councilStepPopupHtml(sub.steps || [], sub.current_step_index || 0, function(i) {
+        return 'setCouncilStep(\'' + subId + '\',' + i + ',\'' + jobId + '\')';
+      });
+    }
 
     // Reposition if near edge
     var popRect = pop.getBoundingClientRect();
@@ -21138,48 +21188,59 @@ async function showCouncilSteps(anchor, jobId) {
   }
 }
 
+// Start the council process for a job that has none, landing directly on the step the
+// operator says it is up to. Steps are seeded from the standard_council DB template;
+// setCouncilStep then marks everything before the chosen step complete.
+async function startCouncilAtStep(jobId, stepIndex) {
+  try {
+    var created = await opsPost('create_council_submission', { job_id: jobId, template_type: 'standard_council' });
+    var subId = created && created.submission_id;
+    if (!subId) throw new Error('no submission_id returned');
+    if (_pipelineData && _pipelineData.columns) {
+      Object.values(_pipelineData.columns).forEach(function(arr) {
+        arr.forEach(function(j) { if (j.id === jobId) j.council_count = (j.council_count || 0) + 1; });
+      });
+    }
+    await setCouncilStep(subId, stepIndex, jobId);
+    if (typeof loadApprovals === 'function') loadApprovals();
+  } catch (e) {
+    showToast('Failed to start council process: ' + e.message, 'error');
+  }
+}
+
 async function setCouncilStep(submissionId, stepIndex, jobId) {
   try {
     var result = await opsPost('jump_council_step', { submission_id: submissionId, target_step_index: stepIndex });
+    var steps = result.steps || [];
+    var stepLabel = 'Step ' + (stepIndex + 1) + '/' + (steps.length || 7);
     // Update badge on kanban card
     if (_pipelineData && _pipelineData.columns) {
       Object.values(_pipelineData.columns).forEach(function(arr) {
         arr.forEach(function(j) {
           if (j.id === jobId) {
-            j.council_step = (stepIndex + 1) + '/' + (result.steps ? result.steps.length : 7);
+            j.council_step = (stepIndex + 1) + '/' + (steps.length || 7);
           }
         });
       });
     }
     // Re-render the popup in place
     if (_councilStepPopup) {
-      var anchor = _councilStepPopup;
-      var pop = _councilStepPopup;
-      var steps = result.steps || [];
-      var currentIdx = result.current_step_index;
-      var html = '<div style="padding:10px 14px 6px;font-weight:600;font-size:12px;color:var(--sw-dark);border-bottom:1px solid var(--sw-border,#e5e7eb);">Council Steps</div>';
-      html += '<div style="padding:8px 14px 10px;">';
-      steps.forEach(function(s, i) {
-        var isCurrent = i === currentIdx && s.status !== 'complete' && s.status !== 'skipped';
-        var isComplete = s.status === 'complete';
-        var isSkipped = s.status === 'skipped';
-        var icon = isComplete ? '<span style="color:#27AE60;">&#10003;</span>' : isSkipped ? '<span style="color:var(--sw-text-sec);">&#8212;</span>' : isCurrent ? '<span style="color:var(--sw-blue,#3498DB);">&#9658;</span>' : '<span style="color:var(--sw-border,#ccc);">&#9675;</span>';
-        var weight = isCurrent ? 'font-weight:600;color:var(--sw-blue,#3498DB);' : isComplete ? 'color:#27AE60;' : isSkipped ? 'color:var(--sw-text-sec);text-decoration:line-through;' : 'color:var(--sw-text-sec);';
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;cursor:pointer;border-radius:4px;padding:5px 4px;' + weight + '" onmouseenter="this.style.background=\'rgba(52,152,219,0.08)\'" onmouseleave="this.style.background=\'transparent\'" onclick="setCouncilStep(\'' + submissionId + '\',' + i + ',\'' + jobId + '\')">';
-        html += icon + ' ' + (i + 1) + '. ' + s.name;
-        html += '</div>';
+      _councilStepPopup.innerHTML = councilStepPopupHtml(steps, result.current_step_index, function(i) {
+        return 'setCouncilStep(\'' + submissionId + '\',' + i + ',\'' + jobId + '\')';
       });
-      html += '</div>';
-      pop.innerHTML = html;
     }
-    // Update the badge text on the kanban card
+    // Update the badge text on the kanban card. A badge for a job whose process has just
+    // been started is still styled as unstarted, so recolour it to the active blue.
     var badges = document.querySelectorAll('.council-step-badge');
     badges.forEach(function(b) {
       if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf(jobId) !== -1) {
-        b.textContent = 'Step ' + (stepIndex + 1) + '/' + (result.steps ? result.steps.length : 7);
+        b.textContent = stepLabel;
+        b.style.background = 'rgba(52,152,219,0.15)';
+        b.style.color = 'var(--sw-blue,#3498DB)';
+        b.title = 'Council step - click to change';
       }
     });
-    showToast('Council step updated to: ' + (result.steps ? result.steps[stepIndex].name : 'Step ' + (stepIndex + 1)), 'success');
+    showToast('Council step updated to: ' + (steps[stepIndex] ? steps[stepIndex].name : 'Step ' + (stepIndex + 1)), 'success');
   } catch (e) {
     showToast('Failed to update council step: ' + e.message, 'error');
   }

@@ -1795,22 +1795,25 @@ async function confirmAcceptance() {
 var _councilSteps = [];
 
 var COUNCIL_DEFAULT_STEPS = {
-  full_building_permit: [
-    { name: 'Get Client House Plans' },
-    { name: 'Drafting (Patio Plans)' },
-    { name: 'Engineering Certification' },
-    { name: 'CDC (Private Building Surveyor)' },
-    { name: 'Submit to Council for Building Permit' },
-    { name: 'Building Permit Received' },
-  ],
-  full_building_permit_da: [
-    { name: 'Get Client House Plans' },
-    { name: 'Drafting (Patio Plans)' },
-    { name: 'Development Approval (DA)' },
-    { name: 'Engineering Certification' },
-    { name: 'CDC (Private Building Surveyor)' },
-    { name: 'Submit to Council for Building Permit' },
-    { name: 'Building Permit Received' },
+  // Mirrors the `standard_council` council_step_templates row — the step list every
+  // real submission actually uses. Replaced a 6-step 'full_building_permit' default
+  // and a 7-step 'full_building_permit_da' variant, neither of which any submission
+  // had ever been created from. Kept in sync with COUNCIL_STANDARD_STEP_NAMES in
+  // ops.html, which drives the kanban step picker.
+  //
+  // Do not reword 'Development Approval'. jumpCouncilStep in ops-api matches that
+  // name exactly to mark DA 'skipped' rather than 'complete' when a jump passes over
+  // it untouched (the usual case: straight to CDC). The removed '+ DA' variant called
+  // it 'Development Approval (DA)', which missed that rule and wrongly completed it.
+  // Order matters too: Engineering comes before Development Approval.
+  standard_council: [
+    { name: 'Get House Plans' },
+    { name: 'Drafting' },
+    { name: 'Engineering' },
+    { name: 'Development Approval' },
+    { name: 'CDC' },
+    { name: 'Submit to Council + BA1' },
+    { name: 'Complete' },
   ],
   engineering_only: [
     { name: 'Get Client House Plans' },
@@ -1841,7 +1844,7 @@ function openCouncilStartModal(jobId) {
   } else {
     infoEl.textContent = jobId;
   }
-  document.getElementById('councilType').value = 'full_building_permit';
+  document.getElementById('councilType').value = 'standard_council';
   updateCouncilDefaultSteps();
   document.getElementById('councilStartModal').classList.add('active');
 }

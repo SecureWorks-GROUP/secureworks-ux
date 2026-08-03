@@ -31,7 +31,26 @@ import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = join(__dirname, "ops-makesafe-reporting-cockpit.js");
+const OPS_HTML = join(__dirname, "..", "ops.html");
 const code = readFileSync(SRC, "utf8");
+const opsHtml = readFileSync(OPS_HTML, "utf8");
+
+function extractOpsBlock(open, close) {
+  const start = opsHtml.indexOf(open);
+  const end = opsHtml.indexOf(close);
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error(`Missing ${open} block in ${OPS_HTML}`);
+  }
+  return opsHtml.slice(start + open.length, end);
+}
+
+const suburbParserSource = extractOpsBlock(
+  "// <makesafe-suburb-from-address>",
+  "// </makesafe-suburb-from-address>",
+);
+const makesafeSuburbFromAddress = new Function(
+  suburbParserSource + "\nreturn makesafeSuburbFromAddress;",
+)();
 
 let failures = 0;
 function check(name, cond) {
@@ -124,14 +143,9 @@ const sandbox = {
   _pipelineTab: "makesafes",
   _pipelineData: { columns: {} },
   _makesafeBoardPayload: { columns: null },
-  // The board's own degraded-path suburb rule (mirrors ops.html).
-  makesafeSuburbFromAddress: (address) => {
-    const parts = String(address || "").trim().split(",");
-    if (parts.length < 2) return "";
-    return parts[parts.length - 1].trim()
-      .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i, "")
-      .replace(/\s+\d{4}$/, "").trim();
-  },
+  // The actual board degraded-path parser extracted from ops.html. The module
+  // consumes this global in production, so the smoke must not carry a mirror.
+  makesafeSuburbFromAddress,
   module: undefined,
   console,
 };
@@ -248,6 +262,24 @@ check(
   "prepare_ses_release_revision is wired single-job only",
   /prepare_ses_release_revision['"]\s*,\s*prepBody/.test(code) &&
     /prepBody\s*=\s*\{\s*job_ids:\s*\[jobId\]\s*\}/.test(code),
+);
+
+// The shipped degraded-path parser must handle both canonical address shapes.
+check(
+  "separate state/postcode segment resolves the preceding suburb",
+  makesafeSuburbFromAddress("186 Tyler Street, Tuart Hill, WA 6060") === "Tuart Hill",
+);
+check(
+  "same-segment state/postcode suffix resolves the suburb",
+  makesafeSuburbFromAddress("4 Warrior Pass, Bertram WA 6167") === "Bertram",
+);
+check(
+  "suburb-only tail remains the suburb",
+  makesafeSuburbFromAddress("28 Peninsula Road, Maylands") === "Maylands",
+);
+check(
+  "single-segment address does not invent a suburb",
+  makesafeSuburbFromAddress("Single street only") === "",
 );
 
 // ── 4. Fixtures ──────────────────────────────────────────────────────────────
@@ -528,6 +560,29 @@ check(
 check(
   "the cached-payload path does NOT re-read the board feed",
   !calls.opsFetch.some((c) => c.action === "makesafe_board"),
+);
+// Regression for the production failure shape: the canonical address ends in
+// its own `WA 6060` segment, so the cockpit card must render the segment before
+// it instead of publishing the state token as the suburb.
+const separateStateTailRow = {
+  ...boardRawRow,
+  contact: {
+    ...boardRawRow.contact,
+    address: "186 Tyler Street, Tuart Hill, WA 6060",
+  },
+  builder: {
+    ...boardRawRow.builder,
+    external_ref: "MLB-26658PO-56313",
+  },
+};
+sandbox._makesafeBoardPayload.columns = { report_ready: [separateStateTailRow] };
+calls.opsFetch.length = 0;
+await mod.loadMakesafeReportingCockpit();
+const separateStateTailHtml = elements["msReportingListBody"]._html || "";
+check(
+  "cached canonical MLB-26658PO-56313 card renders Tuart Hill, never Suburb: WA",
+  separateStateTailHtml.includes("<strong>Suburb:</strong> Tuart Hill") &&
+    !separateStateTailHtml.includes("<strong>Suburb:</strong> WA"),
 );
 // Neither cache in memory (Approvals tab opened first): one read-only GET of
 // the same canonical feed.

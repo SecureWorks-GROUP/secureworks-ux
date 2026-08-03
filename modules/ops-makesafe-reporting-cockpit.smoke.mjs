@@ -1,10 +1,21 @@
-// Standalone smoke test for the MakeSafe Reporting cockpit module.
+// Standalone smoke test for the MakeSafe Reporting cockpit module (SES wiring).
 //
-// The ops dashboard has no JS test runner; the intake cockpit ships a manual
-// console-smoke comment only. This is a stricter, automated smoke for the
-// MONEY/COMMS-critical reporting cockpit: it evals the module in a stubbed
-// browser-ish global scope and asserts the gate-critical wiring WITHOUT a real
-// browser, real DOM, or real network.
+// The ops dashboard has no JS test runner; this is a stricter, automated smoke
+// for the MONEY/COMMS-critical reporting cockpit: it evals the module in a
+// stubbed browser-ish global scope and asserts the SES gate-critical wiring
+// WITHOUT a real browser, real DOM, or real network:
+//   - the list feed stays on makesafe_report_drafts and enriches each card's
+//     chip from query_ses_review_cockpit;
+//   - the detail panel reads query_ses_review_cockpit + get_ses_reviewable_pack
+//     (resolved via list_ses_docs_ready_reviews) and renders the byte-exact
+//     docs, the three exact routes, and the fixed photo set;
+//   - APPROVE INVOICE runs approve_ses_invoice_revision (JWT) ->
+//     execute_ses_invoice_revision; SEND IT runs sign_off_ses_docket (JWT,
+//     hash-bound) -> prepare_ses_release_revision -> approve_ses_release_revision
+//     (JWT) -> execute_ses_release_revision;
+//   - the retired legacy actions (makesafe_send_pack, makesafe_resume_close,
+//     makesafe_reset_failed_pack, makesafe_send_photo_followup) are never
+//     called — at runtime or in source.
 //
 // Run:  node modules/ops-makesafe-reporting-cockpit.smoke.mjs
 // Exit code 0 == pass, 1 == fail.
@@ -26,12 +37,14 @@ function check(name, cond) {
     failures++;
   }
 }
+// Drain pending microtasks (the module's async loaders chain promise ticks).
+function flush() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
-// ── 1. Capture the recorded opsPost call + toasts via a stubbed global scope ──
-const calls = { opsPost: [], opsFetch: [], toasts: [], confirms: [] };
+// ── 1. Stubbed global scope ──────────────────────────────────────────────────
+const calls = { opsPost: [], opsPostJwt: [], opsFetch: [], toasts: [], confirms: [] };
 
-// A minimal DOM stub: getElementById returns a recording element; the approve
-// button element lets us drive the disabled/textContent path.
 function makeEl() {
   return {
     _html: "",
@@ -54,42 +67,32 @@ const documentStub = {
   querySelector: () => null,
 };
 
-// Mutable behaviour holders so the test can swap what opsFetch returns AFTER
-// the module has closed over the stub (the module captures these wrappers by
-// reference; the wrappers delegate to the holder, which the test can repoint).
+// Per-action behaviour maps; an Error value rejects.
 const behaviour = {
-  fetchResult: { drafts: [] },
-  postResult: {
-    success: true,
-    sent: true,
-    closed: true,
-    invoice_number: "INV-1234",
-    photo_followup: { sent: true, photo_count: 1 },
-  },
+  fetch: {},
+  post: {},
+  postJwt: {},
   confirmReturns: true,
 };
-// The carousel renderer + global state live in ops.html. The module reuses them
-// at runtime; here we provide a faithful-enough stub so showMsReportingDetail
-// exercises its real carousel-feed path. The stub mirrors the entry shape
-// ({label,url,kind}) and emits the urls into the panel so the doc assertions hold.
-const _msafeDocViewer = { docs: [], idx: 0 };
-function renderMakesafeDocViewerInner() {
-  return _msafeDocViewer.docs.map((d) => {
-    if (d.kind === "pdf") {
-      return '<iframe src="' + d.url + '" title="' + d.label + '"></iframe>';
-    }
-    return '<img src="' + d.url + '" alt="' + d.label + '">';
-  }).join("");
+function dispatch(map, action) {
+  const r = map[action];
+  if (r instanceof Error) return Promise.reject(r);
+  return Promise.resolve(r === undefined ? {} : r);
 }
+
 const sandbox = {
   document: documentStub,
   opsFetch: (action, params) => {
     calls.opsFetch.push({ action, params });
-    return Promise.resolve(behaviour.fetchResult);
+    return dispatch(behaviour.fetch, action);
   },
   opsPost: (action, body) => {
     calls.opsPost.push({ action, body });
-    return Promise.resolve(behaviour.postResult);
+    return dispatch(behaviour.post, action);
+  },
+  opsPostJwt: (action, body) => {
+    calls.opsPostJwt.push({ action, body });
+    return dispatch(behaviour.postJwt, action);
   },
   showToast: (msg, kind) => {
     calls.toasts.push({ msg, kind });
@@ -103,50 +106,58 @@ const sandbox = {
       .replace(/>/g, "&gt;"),
   escapeAttr: (s) =>
     String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/&/g, "&amp;"),
-  _msafeDocViewer,
-  renderMakesafeDocViewerInner,
+  _opsUserEmail: "marnin@secureworkswa.com.au",
   module: undefined,
   console,
 };
 
-// Eval the module body inside the sandbox, exposing its top-level functions by
-// returning them. We append a return-map so the IIFE hands them back.
 const exposed = [
   "loadMakesafeReportingCockpit",
   "renderMsReportingCard",
   "showMsReportingDetail",
   "showMsReportingDetailEmpty",
+  "approveSesInvoice",
+  "sendSesRelease",
+  "refreshMsReportingBadge",
+  "_msSesStatusChip",
+  "_msSesActionBlock",
+  "_msSesDocsFromArtifacts",
+  "_msSesMapInvoice",
+  "_msSesRenderRoutes",
+  "_msSesRenderPhotos",
+  "_msSesIsStale",
+  "_msSwitchDocTab",
+  "_msReportingHideJobFromActiveList",
+  "_msGetAllPhotos",
+  "_msIsPortalBuilder",
+  // Legacy symbols that MUST be gone:
   "approveMakesafeReportPack",
   "finishMakesafeCloseOut",
   "resolveMakesafeSendState",
   "resetMakesafeFailedPack",
-  "refreshMsReportingBadge",
-  "_msReportingHideJobFromActiveList",
-  "_msSwitchDocTab",
-  "_msReportingSubjectHasReviewMarker",
-  "_msGetReportPhotos",
-  "_msGetPhotoApprovalState",
   "_msTogglePhotoApproval",
+  "_msGetPhotoApprovalState",
+  "_msGetReportPhotos",
+  "_msReportingSubjectHasReviewMarker",
 ];
 const wrapped = '"use strict";\n' + code + "\nreturn { " +
   exposed.map((n) => `${n}: typeof ${n} !== 'undefined' ? ${n} : undefined`)
     .join(", ") +
-  ', _msReportingCache: typeof _msReportingCache !== "undefined" ? _msReportingCache : undefined, _msPhotoApprovalState: typeof _msPhotoApprovalState !== "undefined" ? _msPhotoApprovalState : undefined };';
+  ', _msSesPackCache: typeof _msSesPackCache !== "undefined" ? _msSesPackCache : undefined' +
+  ', _msActiveDocTab: typeof _msActiveDocTab !== "undefined" ? _msActiveDocTab : undefined };';
 
-const argNames = Object.keys(sandbox);
-const argVals = argNames.map((k) => sandbox[k]);
 let mod;
 try {
   // eslint-disable-next-line no-new-func
-  mod = new Function(...argNames, wrapped)(...argVals);
+  mod = new Function(...Object.keys(sandbox), wrapped)(...Object.values(sandbox));
 } catch (e) {
   console.log("  FAIL - module evaluates without throwing: " + e.message);
   process.exit(1);
 }
 
-console.log("MakeSafe Reporting cockpit smoke test");
+console.log("MakeSafe Reporting cockpit smoke test (SES wiring)");
 
-// ── 2. Key functions exist ──
+// ── 2. Key functions exist; the legacy surface is gone ──────────────────────
 check(
   "defines loadMakesafeReportingCockpit",
   typeof mod.loadMakesafeReportingCockpit === "function",
@@ -160,604 +171,675 @@ check(
   typeof mod.showMsReportingDetail === "function",
 );
 check(
-  "defines approveMakesafeReportPack",
-  typeof mod.approveMakesafeReportPack === "function",
+  "defines approveSesInvoice",
+  typeof mod.approveSesInvoice === "function",
 );
+check("defines sendSesRelease", typeof mod.sendSesRelease === "function");
 check(
   "defines refreshMsReportingBadge",
   typeof mod.refreshMsReportingBadge === "function",
 );
+for (const gone of [
+  "approveMakesafeReportPack",
+  "finishMakesafeCloseOut",
+  "resolveMakesafeSendState",
+  "resetMakesafeFailedPack",
+  "_msTogglePhotoApproval",
+  "_msGetPhotoApprovalState",
+  "_msGetReportPhotos",
+  "_msReportingSubjectHasReviewMarker",
+]) {
+  check("legacy symbol retired: " + gone, mod[gone] === undefined);
+}
 
-// ── 4. The detail renderer references photos + line items + BOTH pdf urls ──
-const fixture = {
-  job_id: "job-1",
+// ── 3. The module source never calls the retired 410 actions ────────────────
+for (const retired of [
+  "makesafe_send_pack",
+  "makesafe_send_photo_followup",
+  "makesafe_resume_close",
+  "makesafe_reset_failed_pack",
+]) {
+  const callSite = new RegExp(
+    "ops(?:Post|Fetch|PostJwt)\\(\\s*['\"]" + retired + "['\"]",
+  );
+  check("source never calls retired action " + retired, !callSite.test(code));
+}
+// No multi-job release can be built from this surface: the only prepare call
+// must bind exactly one job.
+check(
+  "prepare_ses_release_revision is wired single-job only",
+  /prepare_ses_release_revision['"]\s*,\s*prepBody/.test(code) &&
+    /prepBody\s*=\s*\{\s*job_ids:\s*\[jobId\]\s*\}/.test(code),
+);
+
+// ── 4. Fixtures ──────────────────────────────────────────────────────────────
+const JOB = "job-1";
+const DOCKET_REV = "11111111-1111-1111-1111-111111111111";
+const HASH = "sha256:" + "a".repeat(64);
+const PHOTO_HASH_1 = "sha256:" + "b".repeat(64);
+const PHOTO_HASH_2 = "sha256:" + "c".repeat(64);
+const REPORT_HASH = "sha256:" + "d".repeat(64);
+const XERO_PDF_HASH = "sha256:" + "e".repeat(64);
+
+const feedDraft = {
+  job_id: JOB,
   job_number: "MS-100",
   builder: "MLB Constructions",
   external_ref: "MLB-25248",
   client_name: "Jane Homeowner",
   site_address: "12 Smith Street, Joondalup",
   site_suburb: "Joondalup",
-  recipient_email: "accounts@mlb.com.au",
-  invoice: {
-    invoice_number: "INV-1234",
-    status: "DRAFT",
-    total_ex_gst: 100,
-    total_inc_gst: 110,
-    lines: [{
-      description: "Temp fence hire",
-      quantity: 2,
-      unit_price: 50,
-      line_total: 100,
-    }],
-    lines_unavailable: false,
-  },
-  report_pdf_url: "https://example.com/report.pdf",
-  invoice_pdf_url: "https://example.com/invoice.pdf",
-  cc: ["ses@secureworkswa.com.au"],
-  resume_action: "send",
-  draft_docs: [
-    {
-      label: "Make safe report",
-      url: "https://example.com/report.pdf",
-      kind: "pdf",
-      created_at: "2026-06-20T01:00:00.000Z",
-    },
-    {
-      label: "Draft invoice",
-      url: "https://example.com/invoice.pdf",
-      kind: "pdf",
-      created_at: "2026-06-20T01:05:00.000Z",
-    },
-  ],
-  source_docs: [
-    {
-      label: "Raw Trade Report",
-      url: "",
-      kind: "html",
-      received_at: "2026-06-20T02:00:00.000Z",
-      created_at: "2026-06-20T01:50:00.000Z",
-      raw_report: {
-        status: "submitted",
-        checklist_json: {
-          labour_hours: 3,
-          trade_count: 1,
-          work_done: "Made safe and propped wall.",
-        },
-        notes: "Raw note from trade",
-        submitted_at: "2026-06-20T02:00:00.000Z",
-      },
-    },
-    {
-      label: "Trade Report PDF",
-      url: "https://example.com/trade-report.pdf",
-      kind: "pdf",
-      received_at: "2026-06-20T02:00:00.000Z",
-      created_at: "2026-06-20T01:50:00.000Z",
-    },
-    {
-      label: "Work order",
-      url: "https://example.com/wo.pdf",
-      kind: "pdf",
-      received_at: "2026-06-19T08:30:00.000Z",
-      created_at: "2026-06-19T08:30:00.000Z",
-    },
-    { label: "front", url: "https://example.com/p1.jpg", kind: "image", received_at: "2026-06-20T02:10:00.000Z" },
-    { label: "hallway", url: "https://example.com/p2.jpg", kind: "image", received_at: "2026-06-20T02:11:00.000Z" },
-  ],
-  photos: [
-    {
-      url: "https://example.com/p1.jpg",
-      thumbnail_url: "https://example.com/p1t.jpg",
-      label: "front",
-    },
-    {
-      url: "https://example.com/p2.jpg",
-      thumbnail_url: "https://example.com/p2t.jpg",
-      label: "hallway",
-    },
-  ],
-  report_photos: [
-    {
-      url: "https://example.com/p1.jpg",
-      thumbnail_url: "https://example.com/p1t.jpg",
-      label: "front",
-    },
-  ],
-  report_photo_urls: ["https://example.com/p1.jpg"],
-  report_photo_limit: 8,
-  default_subject:
-    "Make Safe Completion - MLB-25248 - 12 Smith Street, Joondalup",
-  default_html_body: "<p>hello builder</p>",
+  trade_notes: "Raw trade notes here",
+  invoice: { total_inc_gst: 110 },
 };
-// ── 3. loadMakesafeReportingCockpit calls the read endpoint AND populates the
-//    module's internal cache (load reassigns the cache var, so we seed THROUGH
-//    load by stubbing opsFetch to return our fixture, then render from cache). ──
-behaviour.fetchResult = { drafts: [fixture] };
+
+const proposal = {
+  line_items: [{
+    description: "Temp fence hire",
+    quantity: 2,
+    unit_price_ex_gst: 50,
+    amount_ex_gst: 100,
+  }],
+  subtotal_ex_gst: 100,
+  total_inc_gst: 110,
+};
+
+function cockpitSendReady() {
+  return {
+    schema: "secureworks.makesafe.ses-review-cockpit/v1",
+    status: "SEND_READY",
+    stale: false,
+    sections: {
+      status: { status: "SEND_READY", stale: false, reasons: [] },
+      money: {
+        local_invoice_proposal: proposal,
+        xero: { invoice_number: "INV-1234", status: "AUTHORISED" },
+      },
+      email_drafts: [
+        {
+          route_kind: "report",
+          recipients: ["accounts@mlb.com.au"],
+          cc: ["ses@secureworkswa.com.au"],
+          subject: "Make Safe Completion - MLB-25248",
+          body: "Report body text",
+          attachment_hashes: [REPORT_HASH],
+          ready: true,
+        },
+        {
+          route_kind: "photo",
+          recipients: ["accounts@mlb.com.au"],
+          cc: [],
+          subject: "Photos - MLB-25248",
+          body: "Photo body",
+          attachment_hashes: [PHOTO_HASH_1],
+          ready: true,
+        },
+        {
+          route_kind: "invoice",
+          recipients: ["accounts@mlb.com.au"],
+          cc: [],
+          subject: "MLB-25248 - Xero invoice INV-1234",
+          body: "Invoice body",
+          attachment_hashes: [XERO_PDF_HASH],
+          ready: true,
+        },
+      ],
+    },
+    controls: {
+      approve_invoice: {
+        enabled: false,
+        label: "APPROVE INVOICE",
+        plan: "Create one Xero DRAFT for this exact obligation revision.",
+      },
+      send_it: {
+        enabled: true,
+        label: "SEND IT",
+        plan: "Send the approved report, photo, and invoice routes for this exact release revision.",
+      },
+      captain_only: false,
+    },
+  };
+}
+
+const queueRow = {
+  job_id: JOB,
+  docket_revision_id: DOCKET_REV,
+  docket_output_content_hash: HASH,
+  review_state: "needs_review",
+};
+
+function reviewablePack() {
+  return {
+    review: {
+      docket_revision_id: DOCKET_REV,
+      review_state: "needs_review",
+      docket_output_content_hash: HASH,
+    },
+    docket: {
+      id: DOCKET_REV,
+      output_content_hash: HASH,
+      local_invoice_proposal: proposal,
+      xero_binding: { invoice_number: "INV-1234", status: "AUTHORISED" },
+    },
+    artifacts: [
+      {
+        role: "supporting_report_pdf",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/Make Safe Report - MLB-25248.pdf",
+        media_type: "application/pdf",
+        content_hash: REPORT_HASH,
+        signed_url: "https://example.com/report.pdf",
+      },
+      {
+        role: "xero_invoice_pdf",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/Xero Invoice - INV-1234.pdf",
+        media_type: "application/pdf",
+        content_hash: XERO_PDF_HASH,
+        signed_url: "https://example.com/xero-invoice.pdf",
+      },
+      {
+        role: "swms_artifact",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/SWMS.pdf",
+        media_type: "application/pdf",
+        content_hash: "sha256:" + "f".repeat(64),
+        signed_url: "https://example.com/swms.pdf",
+      },
+      {
+        role: "source_attachment",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/work_order_MLB-25248.pdf",
+        media_type: "application/pdf",
+        content_hash: "sha256:" + "0".repeat(64),
+        signed_url: "https://example.com/wo.pdf",
+      },
+      {
+        role: "completion_photo",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/front.jpg",
+        media_type: "image/jpeg",
+        content_hash: PHOTO_HASH_1,
+        metadata: { order: 0 },
+        signed_url: "https://example.com/p1.jpg",
+      },
+      {
+        role: "completion_photo",
+        object_key: "b/" + JOB + "/" + DOCKET_REV + "/hallway.jpg",
+        media_type: "image/jpeg",
+        content_hash: PHOTO_HASH_2,
+        metadata: { order: 1 },
+        signed_url: "https://example.com/p2.jpg",
+      },
+    ],
+    audit_trail: [],
+  };
+}
+
+function seedSendReady() {
+  behaviour.fetch = {
+    makesafe_report_drafts: { drafts: [feedDraft] },
+    list_ses_docs_ready_reviews: { dockets: [queueRow] },
+    query_ses_review_cockpit: cockpitSendReady(),
+    get_ses_reviewable_pack: reviewablePack(),
+  };
+  behaviour.post = {};
+  behaviour.postJwt = {};
+}
+
+// ── 5. List load: legacy feed + SES queue refresh + badge enrichment ─────────
+seedSendReady();
 await mod.loadMakesafeReportingCockpit();
 check(
-  "loadMakesafeReportingCockpit calls opsFetch(makesafe_report_drafts)",
+  "load keeps the list feed on makesafe_report_drafts",
   calls.opsFetch.some((c) => c.action === "makesafe_report_drafts"),
+);
+check(
+  "load refreshes the SES Docs Ready queue",
+  calls.opsFetch.some((c) => c.action === "list_ses_docs_ready_reviews"),
 );
 check(
   "a card is rendered into the list body for the loaded pack",
   (elements["msReportingListBody"]._html || "").includes("Major Loss Builders"),
 );
+check(
+  "the card chip starts neutral and carries the enrichment hook id",
+  (elements["msReportingListBody"]._html || "").includes("msCardBadge_job_1"),
+);
+await flush();
+check(
+  "each card is enriched from query_ses_review_cockpit",
+  calls.opsFetch.some((c) =>
+    c.action === "query_ses_review_cockpit" && c.params.job_id === JOB
+  ),
+);
+check(
+  "the card chip lands on the SES cockpit status",
+  elements["msCardBadge_job_1"].textContent === "SEND READY",
+);
 
-mod.showMsReportingDetail("job-1");
+// ── 6. Detail: byte-exact pack, routes, fixed photos, invoice, controls ─────
+calls.opsFetch.length = 0;
+await mod.showMsReportingDetail(JOB);
 const detailHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "detail carousel renders the source photo url",
-  detailHtml.includes("https://example.com/p1"),
+  "detail reads the cockpit view for the job",
+  calls.opsFetch.some((c) =>
+    c.action === "query_ses_review_cockpit" && c.params.job_id === JOB
+  ),
 );
 check(
-  "detail renders only report photos selected by default",
-  detailHtml.includes("1 of 1 report photos approved") &&
-    detailHtml.includes("1 extra source photo kept as evidence only") &&
-    mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"] &&
-    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p2.jpg"],
+  "detail fetches the byte-exact pack by docket_revision_id",
+  calls.opsFetch.some((c) =>
+    c.action === "get_ses_reviewable_pack" &&
+    c.params.docket_revision_id === DOCKET_REV
+  ),
 );
 check(
-  "photo approval copy explains the report PDF eight-photo cap",
-  detailHtml.includes("approve send photos (report PDF capped at 8)") &&
-    detailHtml.includes("Report PDF includes up to 8 photos"),
-);
-mod._msTogglePhotoApproval("job-1", "https://example.com/p1.jpg");
-check(
-  "clicking a photo excludes it from the selected set",
-  !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"],
-);
-mod._msGetPhotoApprovalState("job-1", [
-  { url: "https://example.com/p1.jpg?v=fresh" },
-]);
-check(
-  "photo approval state reconciles refreshed urls without re-approving excluded photos",
-  Object.keys(mod._msPhotoApprovalState["job-1"].approved).length === 0 &&
-    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg?v=fresh"] &&
-    !mod._msPhotoApprovalState["job-1"].approved["https://example.com/p1.jpg"],
-);
-
-mod._msTogglePhotoApproval("job-1", "https://example.com/p1.jpg?v=fresh");
-check(
-  "detail carousel renders the work-order url",
-  detailHtml.includes("https://example.com/wo.pdf"),
+  "detail renders the three exact routes SEND IT releases",
+  detailHtml.includes("the exact emails SEND IT releases") &&
+    detailHtml.includes("Report email") &&
+    detailHtml.includes("Photo email") &&
+    detailHtml.includes("Invoice email"),
 );
 check(
-  "detail click-through tabs include the raw trade report",
-  detailHtml.includes("Raw Trade Report"),
-);
-mod._msSwitchDocTab("job-1", 2, "msReportingDetailPanel");
-check(
-  "raw trade report tab renders the trade-submitted source body",
-  (elements["msDocStage_job_1"]._html || "").includes("Made safe and propped wall"),
+  "detail states SEND IT sends all three routes at once",
+  /all three routes at once/i.test(detailHtml),
 );
 check(
-  "detail click-through tabs include the trade report PDF",
-  detailHtml.includes("Trade Report PDF") &&
-    detailHtml.includes("https://example.com/trade-report.pdf#view=Fit"),
+  "detail shows the route recipient, cc and subject",
+  detailHtml.includes("accounts@mlb.com.au") &&
+    detailHtml.includes("ses@secureworkswa.com.au") &&
+    detailHtml.includes("Make Safe Completion - MLB-25248"),
 );
 check(
-  "detail click-through tabs include the insurer/builder work order",
-  detailHtml.includes("Work Order") &&
-    detailHtml.includes("https://example.com/wo.pdf#view=Fit"),
+  "detail renders the fixed photo set (1 in the email, 1 evidence-only)",
+  detailHtml.includes("fixed in the release revision") &&
+    /1 photo in the photo email/.test(detailHtml) &&
+    /1 kept as evidence only/.test(detailHtml),
 );
 check(
-  "detail renders received timestamp metadata for source documents",
-  detailHtml.includes("Received") && detailHtml.includes("20 June 2026"),
+  "detail has NO include/exclude photo toggles (fixed set)",
+  !detailHtml.includes("_msTogglePhotoApproval"),
 );
 check(
-  "detail renders the invoice line item description",
-  detailHtml.includes("Temp fence hire"),
+  "detail renders the invoice proposal lines + totals + Xero binding",
+  detailHtml.includes("Temp fence hire") &&
+    detailHtml.includes("$110.00") &&
+    detailHtml.includes("INV-1234"),
 );
 check(
-  "detail carousel renders the report PDF url in an iframe",
-  detailHtml.includes("https://example.com/report.pdf") &&
-    detailHtml.includes("<iframe"),
+  "detail renders doc tabs from the pack artifacts",
+  detailHtml.includes("Make Safe Report") &&
+    detailHtml.includes("Xero Invoice") &&
+    detailHtml.includes("SWMS") &&
+    detailHtml.includes("Work Order"),
 );
 check(
-  "PDF viewer opens in whole-page mode, not fit-width mode",
+  "detail opens the report PDF whole-page in the stage",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
-    detailHtml.includes("whole page") &&
-    !detailHtml.includes("#view=FitH"),
+    detailHtml.includes("<iframe") &&
+    detailHtml.includes("whole page"),
 );
 check(
-  "PDF viewer stage is capped for large monitors",
-  detailHtml.includes("max-width:980px"),
+  "detail shows the raw trade notes from the live feed",
+  detailHtml.includes("Raw trade notes here"),
 );
 check(
-  "detail carousel renders the invoice PDF url",
-  detailHtml.includes("https://example.com/invoice.pdf#view=Fit"),
+  "detail renders the per-job SEND IT button (never a send-all)",
+  detailHtml.includes('id="msSesSendItBtn"') &&
+    detailHtml.includes("sendSesRelease(&#x27;" + JOB) ||
+    detailHtml.includes("sendSesRelease('" + JOB),
 );
 check(
-  "detail shows the recipient email",
-  detailHtml.includes("accounts@mlb.com.au"),
+  "detail does NOT render APPROVE INVOICE when the control is disabled",
+  !detailHtml.includes('id="msSesApproveInvoiceBtn"'),
 );
 check(
-  "detail shows the CC recipient",
-  detailHtml.includes("ses@secureworkswa.com.au"),
-);
-check("detail shows the inc-GST total", detailHtml.includes("$110.00"));
-check(
-  "detail has an Approve & send pack button (live send mode)",
-  detailHtml.includes("Approve &amp; send pack") ||
-    detailHtml.includes("Approve & send pack"),
+  "detail shows the Docs Ready tick as not yet recorded, bound to the pack hash",
+  /not yet recorded/.test(detailHtml) && detailHtml.includes("sha256:aaa"),
 );
 check(
-  "detail explains the live authorise/send + JPEG photo follow-up",
-  /Authorises the invoice in Xero/i.test(detailHtml) &&
-    /approved photos as a JPEG follow-up/i.test(detailHtml),
+  "detail never revives the legacy recipient/send copy",
+  !detailHtml.includes("Pack will be emailed to") &&
+    !detailHtml.includes("Approve &amp; send pack") &&
+    !detailHtml.includes("Approve & send pack"),
+);
+check(
+  "the pack context is cached with the exact hash + review state",
+  mod._msSesPackCache[JOB] &&
+    mod._msSesPackCache[JOB].outputHash === HASH &&
+    mod._msSesPackCache[JOB].reviewState === "needs_review" &&
+    mod._msSesPackCache[JOB].docketRevisionId === DOCKET_REV,
 );
 
-// ── 5. Approve fires makesafe_send_pack in live mode with selected photos ──
-await mod.approveMakesafeReportPack("job-1");
-const sendCall = calls.opsPost.find((c) => c.action === "makesafe_send_pack");
-check("approve calls opsPost(makesafe_send_pack)", !!sendCall);
-check("approve confirms before sending", calls.confirms.length > 0);
-if (sendCall) {
-  check(
-    "send body carries the recipient_email",
-    sendCall.body.recipient_email === "accounts@mlb.com.au",
-  );
-  check("send body carries pack_kind=main", sendCall.body.pack_kind === "main");
-  check(
-    "send body carries a subject + html_body",
-    !!sendCall.body.subject && !!sendCall.body.html_body,
-  );
-  check(
-    "send body does not carry canary_mode",
-    Object.prototype.hasOwnProperty.call(sendCall.body, "canary_mode") === false,
-  );
-  check(
-    "send body carries approved_photos only for selected photos",
-    Array.isArray(sendCall.body.approved_photos) &&
-      sendCall.body.approved_photos.length === 1 &&
-      sendCall.body.approved_photos[0].url === "https://example.com/p1.jpg",
-  );
-}
-check(
-  "success toast says photo follow-up was sent",
-  calls.toasts.some((t) => /Photo follow-up sent/i.test(t.msg || "")),
-);
-
-// ── 6. GATE ANTIDOTE - the composer refuses a review-marker subject ──
-const REVIEW_MARKERS = [
-  "TEST",
-  "ROUND",
-  "DRAFT",
-  "REVIEW",
-  "INTERNAL",
-  "PREVIEW",
-];
-let markerCaught = true;
-for (const marker of REVIEW_MARKERS) {
-  if (
-    !mod._msReportingSubjectHasReviewMarker(
-      "Make Safe " + marker + " Completion",
-    )
-  ) markerCaught = false;
-}
-check("subject marker guard catches every review marker token", markerCaught);
-// A clean subject is allowed; a substring (PROTESTING) is not a whole token.
-check(
-  "subject marker guard allows a clean subject",
-  !mod._msReportingSubjectHasReviewMarker("Make Safe Completion - MLB-25248"),
-);
-check(
-  "subject marker guard ignores substrings (PROTESTING != TEST)",
-  !mod._msReportingSubjectHasReviewMarker("PROTESTING site works"),
-);
-
-// A marker-laden subject must NOT reach opsPost. Seed job-2 THROUGH load (the
-// cache var is reassigned by load, so a direct cache poke would miss it).
+// ── 7. SEND IT: the full per-job release chain, hash-bound sign-off first ───
 calls.opsPost.length = 0;
-calls.toasts.length = 0;
-const job2 = Object.assign({}, fixture, {
-  job_id: "job-2",
-  default_subject: "Make Safe DRAFT Completion",
-});
-behaviour.fetchResult = { drafts: [job2] };
-await mod.loadMakesafeReportingCockpit();
-await mod.approveMakesafeReportPack("job-2");
-check(
-  "approve REFUSES to send a review-marker subject (no opsPost)",
-  !calls.opsPost.some((c) => c.action === "makesafe_send_pack"),
-);
-check(
-  "approve surfaces an error toast on the refusal",
-  calls.toasts.some((t) => t.kind === "error"),
-);
-
-// ── 7. The module source never hard-codes a review-marker filename/subject ──
-// (defence: nothing in the composer emits a literal marker into a name/subject)
-const offending = [
-  '"TEST',
-  'TEST"',
-  '"DRAFT',
-  '"REVIEW',
-  '"PREVIEW',
-  '"INTERNAL',
-  '"ROUND',
-];
-check(
-  "module source does not hardcode a review-marker literal in copy",
-  !offending.some((s) => code.includes(s)),
-);
-
-// ── 8. STATE-AWARE RESUME ACTIONS (Phase 1b) ──────────────────────────────
-// 8a. finish_send keeps the UNCHANGED makesafe_send_pack call (re-emails once).
-calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
 calls.confirms.length = 0;
-const jobFinishSend = Object.assign({}, fixture, {
-  job_id: "job-fs",
-  resume_action: "finish_send",
-});
-behaviour.fetchResult = { drafts: [jobFinishSend] };
-await mod.loadMakesafeReportingCockpit();
-const fsHtml = (() => {
-  mod.showMsReportingDetail("job-fs");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
+calls.toasts.length = 0;
+behaviour.post["prepare_ses_release_revision"] = {
+  release: { id: "rel-1", content_hash: "sha256:" + "1".repeat(64) },
+};
+behaviour.postJwt["approve_ses_release_revision"] = { approval: { id: "ap-1" } };
+behaviour.postJwt["sign_off_ses_docket"] = { review: { review_state: "signed_off" } };
+behaviour.post["execute_ses_release_revision"] = {
+  state: "released",
+  route_proofs: [{ route_kind: "report" }, { route_kind: "photo" }, { route_kind: "invoice" }],
+};
+await mod.sendSesRelease(JOB);
+check("SEND IT confirms before acting", calls.confirms.length > 0);
 check(
-  "finish_send renders the live finish-send button",
-  fsHtml.includes("Finish send"),
-);
-await mod.approveMakesafeReportPack("job-fs");
-check(
-  "finish_send still calls makesafe_send_pack",
-  calls.opsPost.some((c) => c.action === "makesafe_send_pack"),
-);
-check(
-  "finish_send confirm mentions JPEG follow-up and no re-authorise",
+  "SEND IT confirm copy says all three routes + irreversible",
   calls.confirms.some((m) =>
-    /already authorised/i.test(m) && /JPEG follow-up/i.test(m)
+    /ALL THREE routes/i.test(m) && /irreversible/i.test(m)
+  ),
+);
+const signoffCall = calls.opsPostJwt.find((c) => c.action === "sign_off_ses_docket");
+check(
+  "SEND IT records the Docs Ready tick via JWT, bound to the displayed hash",
+  !!signoffCall &&
+    signoffCall.body.docket_revision_id === DOCKET_REV &&
+    signoffCall.body.expected_output_content_hash === HASH,
+);
+const prepCall = calls.opsPost.find((c) => c.action === "prepare_ses_release_revision");
+check(
+  "SEND IT prepares the release for THIS job only",
+  !!prepCall && Array.isArray(prepCall.body.job_ids) &&
+    prepCall.body.job_ids.length === 1 && prepCall.body.job_ids[0] === JOB,
+);
+const approveRelCall = calls.opsPostJwt.find((c) =>
+  c.action === "approve_ses_release_revision"
+);
+check(
+  "SEND IT approves the release revision via JWT",
+  !!approveRelCall && approveRelCall.body.release_revision_id === "rel-1",
+);
+const execRelCall = calls.opsPost.find((c) => c.action === "execute_ses_release_revision");
+check(
+  "SEND IT executes the exact release revision",
+  !!execRelCall && execRelCall.body.release_revision_id === "rel-1",
+);
+check(
+  "SEND IT chain order: sign_off -> prepare -> approve -> execute",
+  signoffCall && prepCall && approveRelCall && execRelCall &&
+    calls.opsPostJwt.indexOf(signoffCall) === 0 &&
+    calls.opsPost[0] === prepCall &&
+    calls.opsPostJwt[1] === approveRelCall &&
+    calls.opsPost[1] === execRelCall,
+);
+check(
+  "SEND IT never touches the retired combined send",
+  !calls.opsPost.some((c) => c.action === "makesafe_send_pack") &&
+    !calls.opsPostJwt.some((c) => c.action === "makesafe_send_pack"),
+);
+check(
+  "SEND IT success toast reports the three routes",
+  calls.toasts.some((t) =>
+    t.kind === "success" && /3 routes sent/i.test(t.msg || "")
   ),
 );
 
-// 8b. finish_close_out -> makesafe_resume_close (NO send_pack).
+// ── 8. SEND IT skips sign-off when the tick is already recorded ─────────────
+// A signed-off docket has dropped out of the needs_review queue: no pack fetch,
+// tick copy flips, and the chain starts at prepare.
+behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [] };
 calls.opsPost.length = 0;
-calls.confirms.length = 0;
-const jobClose = Object.assign({}, fixture, {
-  job_id: "job-cl",
-  resume_action: "finish_close_out",
-});
-behaviour.fetchResult = { drafts: [jobClose] };
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
 await mod.loadMakesafeReportingCockpit();
-const clHtml = (() => {
-  mod.showMsReportingDetail("job-cl");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
+await mod.showMsReportingDetail(JOB);
+const signedOffHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  'finish_close_out renders a "Finish close-out" button',
-  clHtml.includes("Finish close-out"),
-);
-await mod.finishMakesafeCloseOut("job-cl");
-check(
-  "finish_close_out calls opsPost(makesafe_resume_close)",
-  calls.opsPost.some((c) => c.action === "makesafe_resume_close"),
+  "signed-off docket is NOT re-fetched as a reviewable pack",
+  !calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
 );
 check(
-  "finish_close_out NEVER calls makesafe_send_pack",
-  !calls.opsPost.some((c) => c.action === "makesafe_send_pack"),
+  "signed-off detail says the Docs Ready tick is already recorded",
+  /already recorded/.test(signedOffHtml),
+);
+check(
+  "signed-off detail explains the byte-exact pack view has passed",
+  signedOffHtml.includes("already passed Docs Ready review"),
+);
+check(
+  "signed-off detail still renders routes + money from the cockpit",
+  signedOffHtml.includes("Report email") && signedOffHtml.includes("Temp fence hire"),
+);
+await mod.sendSesRelease(JOB);
+check(
+  "SEND IT on an already-ticked pack skips sign_off_ses_docket",
+  !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
+    calls.opsPost.some((c) => c.action === "prepare_ses_release_revision"),
 );
 
-// 8c. resolve_send_state -> two explicit choices; both go via makesafe_send_pack
-//     WITH sending_resolution, never auto-picked.
+// ── 9. A 409 stale_review anywhere aborts the chain and reloads ─────────────
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
 calls.opsPost.length = 0;
-calls.confirms.length = 0;
-const jobResolve = Object.assign({}, fixture, {
-  job_id: "job-rs",
-  resume_action: "resolve_send_state",
-  pack_status: {
-    status: "authorised_not_sent",
-    send_started_at: new Date(Date.now() - 600000).toISOString(),
-    in_flight_stale: true,
-  },
-});
-behaviour.fetchResult = { drafts: [jobResolve] };
-await mod.loadMakesafeReportingCockpit();
-const rsHtml = (() => {
-  mod.showMsReportingDetail("job-rs");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
+calls.opsPostJwt.length = 0;
+calls.toasts.length = 0;
+calls.opsFetch.length = 0;
+const staleErr = new Error("Reload the current review pack and tick its exact displayed hash.");
+staleErr.status = 409;
+staleErr.refusal = { code: "stale_review", fact: "stale" };
+behaviour.postJwt["sign_off_ses_docket"] = { review: { review_state: "signed_off" } };
+behaviour.post["prepare_ses_release_revision"] = { release: { id: "rel-2" } };
+behaviour.postJwt["approve_ses_release_revision"] = staleErr;
+await mod.sendSesRelease(JOB);
 check(
-  "resolve_send_state shows the Sent-Items-first verify prompt",
-  /Sent Items/i.test(rsHtml),
+  "a stale_review aborts BEFORE execute_ses_release_revision",
+  !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
 );
 check(
-  "resolve_send_state offers BOTH explicit choices",
-  /WAS sent/i.test(rsHtml) && /was NOT sent/i.test(rsHtml),
+  "a stale_review surfaces an info toast (nothing was sent)",
+  calls.toasts.some((t) => t.kind === "info" && /nothing was sent/i.test(t.msg || "")),
 );
-await mod.resolveMakesafeSendState("job-rs", "confirmed_sent");
-const resolveCall = calls.opsPost.find((c) =>
-  c.action === "makesafe_send_pack"
-);
+await flush();
 check(
-  "resolve(confirmed_sent) calls makesafe_send_pack with sending_resolution",
-  !!resolveCall && resolveCall.body.sending_resolution === "confirmed_sent",
+  "a stale_review reloads the fresh pack",
+  calls.opsFetch.some((c) => c.action === "makesafe_report_drafts"),
 );
 
-// The re-send branch is a real send, so it must preserve the photo approval gate.
+// ── 10. APPROVE INVOICE: JWT approval -> Xero execute ────────────────────────
+function cockpitInvoiceReady() {
+  const c = cockpitSendReady();
+  c.status = "INVOICE_CREATE_READY";
+  c.sections.status.status = "INVOICE_CREATE_READY";
+  c.sections.money.xero = null;
+  c.controls.approve_invoice.enabled = true;
+  c.controls.send_it.enabled = false;
+  return c;
+}
+behaviour.fetch["query_ses_review_cockpit"] = cockpitInvoiceReady();
+behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [queueRow] };
+// Pre-Xero: the pack carries the proposal but no xero_binding yet.
+const preXeroPack = reviewablePack();
+preXeroPack.docket.xero_binding = null;
+preXeroPack.artifacts = preXeroPack.artifacts.filter((a) =>
+  a.role !== "xero_invoice_pdf"
+);
+behaviour.fetch["get_ses_reviewable_pack"] = preXeroPack;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const invoiceHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "INVOICE_CREATE_READY renders the APPROVE INVOICE button",
+  invoiceHtml.includes('id="msSesApproveInvoiceBtn"'),
+);
+check(
+  "INVOICE_CREATE_READY does NOT render SEND IT",
+  !invoiceHtml.includes('id="msSesSendItBtn"'),
+);
+check(
+  "invoice review marks the proposal as not yet in Xero",
+  invoiceHtml.includes("SES proposal (not yet in Xero)"),
+);
 calls.opsPost.length = 0;
-calls.confirms.length = 0;
-mod._msTogglePhotoApproval("job-rs", "https://example.com/p2.jpg");
-await mod.resolveMakesafeSendState("job-rs", "confirmed_not_sent");
-const resendResolveCall = calls.opsPost.find((c) =>
-  c.action === "makesafe_send_pack"
+calls.opsPostJwt.length = 0;
+calls.toasts.length = 0;
+behaviour.postJwt["approve_ses_invoice_revision"] = {
+  approval: { invoice_obligation_revision_id: "obr-1" },
+};
+behaviour.post["execute_ses_invoice_revision"] = {
+  state: "authorised_invoice_bound",
+  invoice: { invoice_number: "INV-1234", status: "AUTHORISED" },
+};
+await mod.approveSesInvoice(JOB);
+const invApproveCall = calls.opsPostJwt.find((c) =>
+  c.action === "approve_ses_invoice_revision"
 );
 check(
-  "resolve(confirmed_not_sent) carries approved_photos only for selected photos",
-  !!resendResolveCall &&
-    resendResolveCall.body.sending_resolution === "confirmed_not_sent" &&
-    Array.isArray(resendResolveCall.body.approved_photos) &&
-    resendResolveCall.body.approved_photos.length === 1 &&
-    resendResolveCall.body.approved_photos[0].url === "https://example.com/p1.jpg",
+  "APPROVE INVOICE records the JWT approval with includes_authorise",
+  !!invApproveCall &&
+    invApproveCall.body.job_id === JOB &&
+    invApproveCall.body.includes_authorise === true,
+);
+const invExecCall = calls.opsPost.find((c) =>
+  c.action === "execute_ses_invoice_revision"
+);
+check(
+  "APPROVE INVOICE executes the approved obligation revision",
+  !!invExecCall &&
+    invExecCall.body.job_id === JOB &&
+    invExecCall.body.invoice_obligation_revision_id === "obr-1",
+);
+check(
+  "APPROVE INVOICE success toast names the invoice + the fresh tick requirement",
+  calls.toasts.some((t) =>
+    t.kind === "success" && /INV-1234/.test(t.msg || "") &&
+    /fresh Docs Ready tick/i.test(t.msg || "")
+  ),
 );
 
-// 8d. failed pack -> blocked state, NO send button, optional reset action.
+// 10b. The obligation revision falls back to query_ses_invoice_obligation when
+// the approval response does not carry it.
 calls.opsPost.length = 0;
-calls.confirms.length = 0;
-const jobFailed = Object.assign({}, fixture, {
-  job_id: "job-fail",
-  resume_action: undefined,
-  pack_status: {
-    status: "failed",
-    failed_step: "authorise_invoice",
-    error_detail: "Xero 400",
-  },
-});
-behaviour.fetchResult = { drafts: [jobFailed] };
-await mod.loadMakesafeReportingCockpit();
-const failHtml = (() => {
-  mod.showMsReportingDetail("job-fail");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
+behaviour.postJwt["approve_ses_invoice_revision"] = { approval: {} };
+behaviour.fetch["query_ses_invoice_obligation"] = { revisions: [{ id: "obr-9" }] };
+await mod.approveSesInvoice(JOB);
 check(
-  "failed pack shows a blocked/needs-ops state",
-  /Blocked/i.test(failHtml) && /needs ops/i.test(failHtml),
-);
-check(
-  "failed pack has NO send/approve primary button",
-  !/Approve (&amp;|&) send pack/.test(failHtml) &&
-    !/Finish send/.test(failHtml),
-);
-await mod.resetMakesafeFailedPack("job-fail");
-check(
-  "reset calls opsPost(makesafe_reset_failed_pack)",
-  calls.opsPost.some((c) => c.action === "makesafe_reset_failed_pack"),
+  "APPROVE INVOICE resolves the obligation revision via query_ses_invoice_obligation fallback",
+  calls.opsFetch.some((c) => c.action === "query_ses_invoice_obligation") &&
+    calls.opsPost.some((c) =>
+      c.action === "execute_ses_invoice_revision" &&
+      c.body.invoice_obligation_revision_id === "obr-9"
+    ),
 );
 
-const jobFailedPortal = Object.assign({}, fixture, {
-  job_id: "job-fail-portal",
-  builder: "Western Building",
-  requesting_company_name: "Western Building",
-  requesting_company_slug: "western-building",
-  external_ref: "WB-26080",
-  recipient_email: null,
-  resume_action: undefined,
-  pack_status: {
-    status: "failed",
-    failed_step: "portal_prepare",
-    error_detail: "portal prep failed",
-  },
-});
-const failedPortalCard = mod.renderMsReportingCard(jobFailedPortal);
-behaviour.fetchResult = { drafts: [jobFailedPortal] };
+// ── 11. HOLD: blocker facts verbatim, no money/send action ──────────────────
+const holdCockpit = cockpitSendReady();
+holdCockpit.status = "HOLD";
+holdCockpit.sections.status = {
+  status: "HOLD",
+  stale: false,
+  reasons: ["The insurance work order is missing from this docket."],
+};
+holdCockpit.controls.approve_invoice.enabled = false;
+holdCockpit.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = holdCockpit;
 await mod.loadMakesafeReportingCockpit();
-const failedPortalHtml = (() => {
-  mod.showMsReportingDetail("job-fail-portal");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
+await mod.showMsReportingDetail(JOB);
+const holdHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "failed portal-builder card shows BLOCKED before portal-ready state",
-  failedPortalCard.includes("BLOCKED") && !failedPortalCard.includes("READY TO SUBMIT"),
+  "HOLD renders the backend blocker facts verbatim",
+  holdHtml.includes("The insurance work order is missing from this docket."),
 );
 check(
-  "failed portal-builder panel blocks portal submit action",
-    /Blocked/i.test(failedPortalHtml) &&
-    /needs ops/i.test(failedPortalHtml) &&
-    !/Ready to submit on portal/i.test(failedPortalHtml) &&
-    !/Mark as portal submitted/i.test(failedPortalHtml) &&
-    !/Submit the pack manually/i.test(failedPortalHtml) &&
-    /Portal pack blocked/i.test(failedPortalHtml),
+  "HOLD renders NO approve/send action",
+  !holdHtml.includes('id="msSesSendItBtn"') &&
+    !holdHtml.includes('id="msSesApproveInvoiceBtn"') &&
+    /no approve\/send action is available/i.test(holdHtml),
 );
 
-// ── 9. needs_money_review HOOK — DEFENSIVE ────────────────────────────────
-// 9a. Flagged: amber card chip + highlighted invoice line.
-const jobMoney = Object.assign({}, fixture, {
+// ── 12. No SES docket: the honest retired-path state ─────────────────────────
+const noDocketJob = Object.assign({}, feedDraft, { job_id: "job-no-docket" });
+behaviour.fetch["makesafe_report_drafts"] = { drafts: [noDocketJob] };
+behaviour.fetch["query_ses_review_cockpit"] = new Error(
+  "No current SES docket revision exists for this job.",
+);
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+await mod.loadMakesafeReportingCockpit();
+await flush();
+check(
+  "a job with no SES docket gets the honest NO SES PACK chip",
+  elements["msCardBadge_job_no_docket"].textContent === "NO SES PACK",
+);
+await mod.showMsReportingDetail("job-no-docket");
+const noDocketHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "a job with no SES docket renders the honest no-pack state",
+  noDocketHtml.includes("No reviewable SES pack persisted yet") &&
+    noDocketHtml.includes("410"),
+);
+check(
+  "the no-pack state offers NO action buttons at all",
+  !noDocketHtml.includes("msSesSendItBtn") &&
+    !noDocketHtml.includes("msSesApproveInvoiceBtn") &&
+    !noDocketHtml.includes("approveMakesafeReportPack"),
+);
+
+// ── 13. Signed URLs expire in 300s: a late tab switch re-fetches the pack ────
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+calls.opsFetch.length = 0;
+mod._msSesPackCache[JOB].fetchedAt = Date.now() - 300000; // 5 min old
+mod._msSwitchDocTab(JOB, 1, "msReportingDetailPanel");
+await flush();
+await flush();
+check(
+  "a tab switch past the signed-URL lifetime re-fetches the pack",
+  calls.opsFetch.some((c) => c.action === "query_ses_review_cockpit") &&
+    calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
+);
+check(
+  "the re-fetch preserves the clicked tab",
+  mod._msActiveDocTab[JOB] === 1,
+);
+// A fresh pack switches locally without a network round-trip.
+calls.opsFetch.length = 0;
+mod._msSesPackCache[JOB].fetchedAt = Date.now();
+mod._msSwitchDocTab(JOB, 2, "msReportingDetailPanel");
+check(
+  "a tab switch within the signed-URL lifetime stays local",
+  !calls.opsFetch.some((c) => c.action === "query_ses_review_cockpit") &&
+    mod._msActiveDocTab[JOB] === 2,
+);
+
+// ── 14. Status chip vocabulary + stale error classification ──────────────────
+check(
+  "the status chip maps the four SES cockpit statuses",
+  mod._msSesStatusChip("SEND_READY").label === "SEND READY" &&
+    mod._msSesStatusChip("INVOICE_CREATE_READY").label === "APPROVE INVOICE" &&
+    mod._msSesStatusChip("PRE_XERO_DOCS_READY").label === "DOCS READY" &&
+    mod._msSesStatusChip("HOLD").label === "ON HOLD",
+);
+check(
+  "unknown / no-docket statuses get honest fallback chips",
+  mod._msSesStatusChip("NO_DOCKET").label === "NO SES PACK" &&
+    mod._msSesStatusChip("whatever").label === "SES UNKNOWN",
+);
+check(
+  "_msSesIsStale classifies 409s and stale_review refusals",
+  mod._msSesIsStale({ status: 409 }) &&
+    mod._msSesIsStale({ refusal: { code: "stale_review" } }) &&
+    !mod._msSesIsStale({ status: 500 }) &&
+    !mod._msSesIsStale(null),
+);
+
+// ── 15. Card money-review chip still comes from the live feed ────────────────
+const moneyDraft = Object.assign({}, feedDraft, {
   job_id: "job-mr",
   needs_money_review: true,
-  money_review: {
-    needs_money_review: true,
-    reason: "Unit price above rate card",
-    flagged_lines: [{
-      line_index: 0,
-      description: "Temp fence hire",
-      confidence: 0.82,
-      note: "check rate",
-    }],
-  },
-});
-const moneyCardHtml = mod.renderMsReportingCard(jobMoney);
-check(
-  "money-review card renders the CHECK PRICING chip",
-  moneyCardHtml.includes("CHECK PRICING"),
-);
-behaviour.fetchResult = { drafts: [jobMoney] };
-await mod.loadMakesafeReportingCockpit();
-const moneyDetail = (() => {
-  mod.showMsReportingDetail("job-mr");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
-check(
-  "money-review panel shows the pricing-flagged banner",
-  /Pricing flagged/i.test(moneyDetail),
-);
-check(
-  "money-review panel shows the flagged line note",
-  moneyDetail.includes("check rate"),
-);
-
-const nestedOnlyMoney = Object.assign({}, fixture, {
-  job_id: "job-mr-nested",
-  needs_money_review: false,
-  money_review: {
-    needs_money_review: true,
-    reason: "one or more invoice lines have $0 pricing",
-    flagged_lines: [{ line_index: 0, description: "Labour", flag: "zero_unit_price" }],
-  },
+  money_review: { needs_money_review: true, reason: "Unit price above rate card" },
 });
 check(
-  "nested money_review.needs_money_review renders CHECK PRICING chip",
-  mod.renderMsReportingCard(nestedOnlyMoney).includes("CHECK PRICING"),
-);
-behaviour.fetchResult = { drafts: [nestedOnlyMoney] };
-await mod.loadMakesafeReportingCockpit();
-const nestedMoneyDetail = (() => {
-  mod.showMsReportingDetail("job-mr-nested");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
-check(
-  "nested money_review.needs_money_review renders pricing banner",
-  /Pricing flagged/i.test(nestedMoneyDetail),
+  "the card still renders CHECK PRICING from the live feed",
+  mod.renderMsReportingCard(moneyDraft).includes("CHECK PRICING"),
 );
 check(
-  "nested money_review.needs_money_review blocks approve/send action",
-  /Fix pricing before send/i.test(nestedMoneyDetail),
-);
-
-// 9b. Defensive: absent needs_money_review -> NO chip, no banner.
-const cleanCard = mod.renderMsReportingCard(fixture);
-check(
-  "absent needs_money_review -> NO card chip",
-  !cleanCard.includes("CHECK PRICING"),
-);
-behaviour.fetchResult = { drafts: [fixture] };
-await mod.loadMakesafeReportingCockpit();
-const cleanDetail = (() => {
-  mod.showMsReportingDetail("job-1");
-  return elements["msReportingDetailPanel"]._html || "";
-})();
-check(
-  "absent needs_money_review -> NO panel pricing banner",
-  !/Pricing flagged/i.test(cleanDetail),
-);
-
-const mlbCard = mod.renderMsReportingCard({
-  ...fixture,
-  job_id: "job-mlb",
-  builder: "ML Builders",
-  requesting_company_name: "ML Builders",
-  external_ref: "MLB-26003",
-});
-check(
-  "ML Builders legacy label renders as Major Loss Builders for MLB refs",
-  mlbCard.includes("Major Loss Builders") && !mlbCard.includes(">ML Builders<"),
-);
-
-mod._msReportingHideJobFromActiveList("job-1", "Revision requested");
-check(
-  "revision-in-flight hides the job from the active reporting list",
-  (elements["msReportingListBody"]._html || "").includes("No report drafts waiting for your tick") &&
-    (elements["msReportingDetailPanel"]._html || "").includes("Revision handed back"),
+  "a clean feed row renders no CHECK PRICING chip",
+  !mod.renderMsReportingCard(feedDraft).includes("CHECK PRICING"),
 );
 
 console.log("");

@@ -1,23 +1,43 @@
 // ════════════════════════════════════════════════════════════
 // MAKESAFE REPORTING COCKPIT - APPROVALS VIEW (right column)
-// The INFORMED-APPROVE CONTENT GATE for make-safe report packs. Sibling to the
-// intake cockpit (ops-makesafe-intake-cockpit.js): same approvals split-pane,
-// its own tab. Renders into #msReportingListBody (left column) and
-// #msReportingDetailPanel (right detail).
+// The INFORMED-APPROVE CONTENT GATE for make-safe report packs, rewired onto the
+// SES docket actions. The legacy combined approve/send path is RETIRED
+// server-side (makesafe_send_pack / makesafe_send_photo_followup return 410
+// legacy_combined_release_retired) and this module NEVER calls it, nor the
+// legacy resume actions (makesafe_resume_close / makesafe_reset_failed_pack).
 //
-// MONEY/COMMS critical. The approve button triggers a LIVE Xero authorise +
-// builder send. The backend then immediately sends the approved site photos as a
-// JPEG-only follow-up email. The detail panel MUST show enough for an informed
-// human decision BEFORE the click:
-// the report photos, the invoice line items + totals, BOTH PDFs inline (report +
-// draft invoice), and the exact builder recipient the pack will go to.
+// LIST: still the live makesafe_report_drafts feed (identity facts + invoice
+// glance), with each card's status chip enriched from query_ses_review_cockpit.
+// DETAIL: query_ses_review_cockpit (status / controls / routes / money) plus
+// get_ses_reviewable_pack (byte-exact docs + photos + the hash the Docs Ready
+// tick binds to), discovered via list_ses_docs_ready_reviews
+// (job_id -> docket_revision_id; needs_review dockets only — a signed-off
+// docket has already passed that queue, so the exact-pack view is offered only
+// while the pack is in the queue).
+// ACTIONS (per-job only — never a multi-job release):
+//   APPROVE INVOICE: approve_ses_invoice_revision (JWT, includes_authorise)
+//     -> execute_ses_invoice_revision (creates + AUTHORISES the real Xero
+//     invoice and binds the Xero PDF into a fresh docket that needs a new tick).
+//   SEND IT: sign_off_ses_docket (JWT, hash-bound to the displayed pack) ->
+//     prepare_ses_release_revision { job_ids: [job] } ->
+//     approve_ses_release_revision (JWT) -> execute_ses_release_revision.
+//     SEND IT releases ALL THREE routes (report + photo + invoice emails) at
+//     once; the UI copy says so.
 //
 // Globals consumed (all defined in ops.html):
-//   opsFetch, opsPost, showToast, escapeHtml, escapeAttr
+//   opsFetch, opsPost, opsPostJwt, showToast, escapeHtml, escapeAttr
 // ════════════════════════════════════════════════════════════
 
 var _msReportingCache = {};
-var _msPhotoApprovalState = {};
+// SES state, keyed by job_id:
+//   _msSesReviewQueue  — job_id -> Docs Ready queue row (needs_review dockets).
+//   _msSesCockpitCache — job_id -> cockpit view (card badge enrichment).
+//   _msSesPackCache    — job_id -> the open detail context
+//                        { jobId, panelId, cockpit, queueEntry, pack,
+//                          docketRevisionId, outputHash, reviewState, fetchedAt }.
+var _msSesReviewQueue = {};
+var _msSesCockpitCache = {};
+var _msSesPackCache = {};
 
 // JS-STRING escape for values interpolated INSIDE a single-quoted JS string in an
 // inline onclick handler. escapeAttr/escapeHtml are HTML-context escapes (entities
@@ -34,10 +54,6 @@ function _msJsAttr(s) {
   // Safe for: onclick="fn('<HERE>')" — JS-escape first, then HTML-attr-escape so the
   // double-quoted attribute and the single-quoted JS string are both intact.
   return escapeAttr(_msJsStr(s));
-}
-
-function _msPhotoApprovalKey(url) {
-  return String(url == null ? '' : url).split('?')[0].split('#')[0].trim();
 }
 
 function _msReportingCanonicalBuilderName(d) {
@@ -62,7 +78,12 @@ function _msReportingCanonicalBuilderName(d) {
 // ────────────────────────────────────────────────────────────
 
 /**
- * Load report-draft-ready packs and render the cockpit column.
+ * Load report-draft-ready packs and render the cockpit column. The list feed is
+ * the still-live legacy makesafe_report_drafts read (identity + invoice glance);
+// every actionable fact on the DETAIL panel comes from the SES actions. Also
+ * refreshes the SES Docs Ready queue (job_id -> current needs_review docket) so
+ * the detail open can resolve the exact docket revision, and enriches each
+ * card's status chip from query_ses_review_cockpit.
  * Returns the count of drafts (resolves to 0 on error).
  */
 async function loadMakesafeReportingCockpit() {
@@ -71,7 +92,9 @@ async function loadMakesafeReportingCockpit() {
     body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading report drafts...</div>';
   }
   try {
+    var queuePromise = _msSesRefreshReviewQueue();
     var data = await opsFetch('makesafe_report_drafts', {});
+    await queuePromise;
     var drafts = (data && data.drafts) || [];
     _msReportingCache = {};
     drafts.forEach(function(d) { _msReportingCache[d.job_id] = d; });
@@ -87,6 +110,9 @@ async function loadMakesafeReportingCockpit() {
         var html = '';
         drafts.forEach(function(d) { html += renderMsReportingCard(d); });
         body.innerHTML = html;
+        // Enrich each card's status chip with the SES cockpit status (async;
+        // failures land on an honest fallback chip, never a legacy action).
+        _msSesEnrichCardBadges(drafts);
       }
     }
 
@@ -102,6 +128,66 @@ async function loadMakesafeReportingCockpit() {
 }
 
 /**
+ * Refresh the SES Docs Ready review queue (needs_review dockets). This is the
+ * ONLY dispatched read that maps job_id -> exact current docket_revision_id;
+ * a signed-off docket has legitimately dropped out of it. Failures keep the
+ * previous map (the detail open re-tries on a miss).
+ */
+async function _msSesRefreshReviewQueue() {
+  try {
+    var data = await opsFetch('list_ses_docs_ready_reviews', { limit: 100 });
+    var map = {};
+    ((data && data.dockets) || []).forEach(function(r) {
+      if (r && r.job_id) map[r.job_id] = r;
+    });
+    _msSesReviewQueue = map;
+  } catch (_e) {
+    // Degrade honestly: without the queue the detail renders from the cockpit
+    // view alone (no byte-exact pack, no hash-bound tick).
+  }
+}
+
+/**
+ * Enrich the rendered list cards with the SES cockpit status chip. One bounded
+ * read per card (the review queue is small); a job with no SES docket gets an
+ * honest NO SES PACK chip, a read failure gets SES UNKNOWN.
+ */
+function _msSesEnrichCardBadges(drafts) {
+  drafts.forEach(function(d) {
+    var jobId = d && d.job_id;
+    if (!jobId) return;
+    opsFetch('query_ses_review_cockpit', { job_id: jobId }).then(function(cockpit) {
+      _msSesCockpitCache[jobId] = cockpit;
+      _msSesUpdateCardBadge(jobId, cockpit && cockpit.status);
+    }).catch(function(e) {
+      var msg = String((e && e.message) || e || '');
+      _msSesUpdateCardBadge(jobId, /No current SES docket revision/i.test(msg) ? 'NO_DOCKET' : 'UNKNOWN');
+    });
+  });
+}
+
+function _msSesUpdateCardBadge(jobId, status) {
+  var el = document.getElementById('msCardBadge_' + _msDocTabKey(jobId));
+  if (!el) return;
+  var chip = _msSesStatusChip(status);
+  el.textContent = chip.label;
+  el.style.background = chip.bg;
+  el.style.color = chip.fg;
+}
+
+// The single status vocabulary for this surface: the SES cockpit status.
+function _msSesStatusChip(status) {
+  switch (status) {
+    case 'SEND_READY': return { label: 'SEND READY', bg: '#27AE60', fg: '#fff' };
+    case 'INVOICE_CREATE_READY': return { label: 'APPROVE INVOICE', bg: '#B45309', fg: '#fff' };
+    case 'PRE_XERO_DOCS_READY': return { label: 'DOCS READY', bg: '#0E7C7B', fg: '#fff' };
+    case 'HOLD': return { label: 'ON HOLD', bg: '#991B1B', fg: '#fff' };
+    case 'NO_DOCKET': return { label: 'NO SES PACK', bg: '#6B7280', fg: '#fff' };
+    default: return { label: 'SES UNKNOWN', bg: '#6B7280', fg: '#fff' };
+  }
+}
+
+/**
  * Format a number as AUD currency for display.
  */
 function _msFmtAud(n) {
@@ -111,7 +197,9 @@ function _msFmtAud(n) {
 }
 
 /**
- * Render a single report-draft card for the cockpit column.
+ * Render a single report-draft card for the cockpit column. Identity + invoice
+ * glance come from the live feed; the status chip starts neutral and is
+ * enriched to the SES cockpit status by _msSesEnrichCardBadges.
  */
 function renderMsReportingCard(d) {
   var builder = _msReportingCanonicalBuilderName(d);
@@ -119,28 +207,16 @@ function renderMsReportingCard(d) {
   var suburb = d.site_suburb;
   var incGst = d.invoice ? d.invoice.total_inc_gst : null;
 
-  // The pack status badge: keyed off resume_action (drives the button + chip).
-  // Fallback to the legacy pack_status whitelist when resume_action is absent.
-  var packStatus = d.pack_status ? (d.pack_status.status || '') : '';
-  var badge = _msReportingCardBadge(d.resume_action, packStatus);
-  var statusBg = badge.bg;
-  var statusLabel = badge.label;
-
-  var safeId = escapeAttr(d.job_id);
+  var safeId = _msJsAttr(d.job_id);
   var cardKey = _msDocTabKey(d.job_id);
-  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '" onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + statusBg + ';">';
+  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '" onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid #94A3B8;">';
 
-  // Top row: status badge (+ amber money-review chip when flagged + first-draft chip)
-  var action = d.resume_action || '';
+  // Top row: the SES status chip (enriched async) + amber money-review chip
+  // when the still-live feed flags pricing.
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
-  html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:#fff;">' + statusLabel + '</span>';
+  html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#6B7280;color:#fff;">CHECKING SES&#8230;</span>';
   if (_msNeedsMoneyReview(d)) {
     html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;">CHECK PRICING</span>';
-  }
-  var isFirstDraft = d.first_draft_ready === true ||
-    (action === 'send' && (!packStatus || packStatus === 'drafted' || packStatus === 'admin_to_send_report'));
-  if (isFirstDraft) {
-    html += '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#0E7C7B;color:#fff;opacity:0.75;">FIRST DRAFT</span>';
   }
   html += '</div>';
 
@@ -154,12 +230,7 @@ function renderMsReportingCard(d) {
   // Invoice amount (inc GST) - prominent
   html += '<div style="margin-top:8px;font-size:18px;font-weight:800;color:var(--sw-dark);">' + (incGst != null ? _msFmtAud(incGst) : 'No invoice') + '<span style="font-size:10px;font-weight:600;color:var(--sw-text-sec);margin-left:4px;">inc GST</span></div>';
 
-  // No-recipient warning at a glance
-  if (!d.recipient_email) {
-    html += '<div style="font-size:11px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:5px 8px;margin-top:8px;">No builder email on file. Cannot send.</div>';
-  }
-
-  // Review button. Same approval mechanism as the board "Review job pack" action.
+  // Review button. Same review mechanism as the board "Review job pack" action.
   html += '<div style="margin-top:10px;">';
   html += '<button onclick="event.stopPropagation();showMsReportingDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review job pack</button>';
   html += '</div>';
@@ -168,98 +239,186 @@ function renderMsReportingCard(d) {
   return html;
 }
 
-// Map resume_action (with a legacy pack_status fallback) to the list-card badge.
-function _msReportingCardBadge(resumeAction, packStatus) {
-  var map = {
-    send:               { label: 'NEEDS YOUR TICK',    bg: '#0E7C7B' },
-    finish_send:        { label: 'FINISH SEND',        bg: '#B45309' },
-    finish_close_out:   { label: 'FINISH CLOSE-OUT',   bg: '#6D28D9' },
-    resolve_send_state: { label: 'RESOLVE SEND STATE', bg: '#B91C1C' }
-  };
-  if (resumeAction && map[resumeAction]) return map[resumeAction];
-  if (packStatus === 'failed') return { label: 'BLOCKED', bg: '#991B1B' };
-  var legacyResume = ['authorised_not_sent', 'sent_marker_failed', 'sent_not_closed', 'close_failed'].indexOf(packStatus) >= 0;
-  return legacyResume ? { label: 'NEEDS RESUME', bg: '#B45309' } : { label: 'NEEDS YOUR TICK', bg: '#0E7C7B' };
-}
-
 // ────────────────────────────────────────────────────────────
-// 2. DETAIL PANEL - the informed-approve content gate
+// 2. DETAIL PANEL - the SES-informed approve gate
 // ────────────────────────────────────────────────────────────
 
 /**
- * Render the integrated review-and-send pack (design ref state A) into the target
- * panel. Top-to-bottom: job header (type chip + status chip), doc tabs (Report /
- * Invoice / SWMS) with a fit-to-page PDF stage, trade notes, recipient + per-builder
- * note, photos-at-bottom with the mandatory approval gate, then the per-builder
- * send/submit action block.
+ * Render the SES review pack into the target panel. Async: loads the cockpit
+ * view (status / controls / routes / money) and — while the docket is still in
+ * the Docs Ready queue — the byte-exact reviewable pack (docs, photos, the hash
+ * the sign-off binds to). A job with no current SES docket renders an honest
+ * "no reviewable pack persisted yet" state and NEVER touches the retired 410
+ * actions.
  *
- * Works in BOTH hosts: the board overlay (targetPanelId = ...Board) and the inline
- * Approvals-tab panel (targetPanelId = 'msReportingDetailPanel' / undefined).
- *
- * All money-safety behaviour is preserved: the photo-approval gate, the send-disabled
- * states, the resume_action branches (finish_send / finish_close_out /
- * resolve_send_state), and the money-review banner all flow through the reused
- * _msReportingActionBlock + _msRenderPhotoApproval helpers.
+ * Works in BOTH hosts: the board overlay (targetPanelId = ...Board) and the
+ * inline Approvals-tab panel (targetPanelId = 'msReportingDetailPanel' /
+ * undefined).
  */
-function showMsReportingDetail(jobId, targetPanelId) {
-  var d = _msReportingCache[jobId];
+async function showMsReportingDetail(jobId, targetPanelId) {
   var panel = document.getElementById(targetPanelId || 'msReportingDetailPanel');
   if (!panel) return;
-  if (!d) {
+  var base = _msReportingCache[jobId];
+  if (!base) {
     panel.innerHTML = '<div style="padding:20px;color:#E74C3C;font-size:13px;">Pack not loaded. <button onclick="loadMakesafeReportingCockpit()" style="margin-left:8px;">Reload</button></div>';
     return;
   }
+  panel.innerHTML = '<div style="padding:32px 20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading the SES review pack&#8230;</div>';
+  var ctx;
+  try {
+    ctx = await _msSesLoadPackContext(jobId);
+  } catch (e) {
+    panel.innerHTML = _msSesRenderUnavailable(jobId, base, e, targetPanelId);
+    return;
+  }
+  ctx.panelId = targetPanelId || 'msReportingDetailPanel';
+  _msSesPackCache[jobId] = ctx;
+  panel.innerHTML = _msSesRenderDetail(jobId, ctx, targetPanelId);
+  // Populate the feedback thread after the container exists. Guarded so the
+  // review panel still works if the feedback module is absent/still loading.
+  if (typeof loadMsNotes === 'function') {
+    loadMsNotes(jobId, 'msNotesPanel-' + jobId);
+  }
+}
 
-  var safeId = escapeAttr(d.job_id);
-  var safeJobKey = _msDocTabKey(d.job_id);
-  var builder = _msReportingCanonicalBuilderName(d);
-  var inv = d.invoice || null;
-  // When hosted in the board overlay, Back/Hold should close the overlay rather
-  // than empty the (off-screen) inline approvals panel.
+/**
+ * Load the full SES context for a job: the cockpit view first (the authority
+ * for status + controls + routes), then the byte-exact reviewable pack when the
+ * docket is still in the Docs Ready queue. One stale_review retry: the queue
+ * row can lag a fresh docket revision, so on a 409 we refresh the queue and
+ * retry once before surfacing the refusal.
+ */
+async function _msSesLoadPackContext(jobId, retried) {
+  var cockpit = await opsFetch('query_ses_review_cockpit', { job_id: jobId });
+  var entry = _msSesReviewQueue[jobId] || null;
+  if (!entry && !retried) {
+    await _msSesRefreshReviewQueue();
+    entry = _msSesReviewQueue[jobId] || null;
+  }
+  var ctx = {
+    jobId: jobId,
+    cockpit: cockpit,
+    queueEntry: entry,
+    pack: null,
+    docketRevisionId: entry ? entry.docket_revision_id : null,
+    outputHash: entry ? (entry.docket_output_content_hash || null) : null,
+    // No queue entry + a loading cockpit means the current docket has already
+    // passed the needs_review queue, i.e. its Docs Ready tick is recorded.
+    reviewState: entry ? (entry.review_state || 'needs_review') : 'signed_off',
+    fetchedAt: 0
+  };
+  if (entry) {
+    try {
+      ctx.pack = await opsFetch('get_ses_reviewable_pack', { docket_revision_id: entry.docket_revision_id });
+      ctx.fetchedAt = Date.now();
+      if (ctx.pack && ctx.pack.docket && ctx.pack.docket.output_content_hash) {
+        ctx.outputHash = ctx.pack.docket.output_content_hash;
+      }
+      if (ctx.pack && ctx.pack.review && ctx.pack.review.review_state) {
+        ctx.reviewState = ctx.pack.review.review_state;
+      }
+    } catch (e) {
+      if (_msSesIsStale(e) && !retried) {
+        await _msSesRefreshReviewQueue();
+        return _msSesLoadPackContext(jobId, true);
+      }
+      throw e;
+    }
+  }
+  return ctx;
+}
+
+// A 409 from the SES reads/actions means the displayed pack or tick no longer
+// matches the current docket bytes (stale_review and friends) — re-fetch and
+// re-render rather than acting on stale bytes.
+function _msSesIsStale(e) {
+  return !!(e && (e.status === 409 || (e.refusal && e.refusal.code === 'stale_review')));
+}
+
+// The operator label recorded on api_key-allowed SES writes (prepare/execute).
+// JWT actions take their identity from the verified session server-side.
+function _msSesActor() {
+  return (typeof _opsUserEmail !== 'undefined' && _opsUserEmail) || null;
+}
+
+/**
+ * The honest non-SES state: either the job has no current SES docket (the
+ * legacy path is retired; nothing here can send) or the cockpit read failed
+ * (retry offered). Never calls a legacy action.
+ */
+function _msSesRenderUnavailable(jobId, base, err, targetPanelId) {
   var isOverlay = !!(targetPanelId && targetPanelId !== 'msReportingDetailPanel');
   var dismissAction = isOverlay ? 'closeMakesafeReportingOverlay()' : 'showMsReportingDetailEmpty()';
-  var isPortal = _msIsPortalBuilder(d);
+  var builder = _msReportingCanonicalBuilderName(base || {});
+  var msg = String((err && err.message) || err || '');
+  var noDocket = /No current SES docket revision/i.test(msg);
+  var html = '';
+  html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:16px 20px;background:#fff;border-bottom:1px solid var(--sw-border);">';
+  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:700;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
+  html += '<div style="flex:1;min-width:0;font-size:15px;font-weight:700;color:var(--sw-dark);">' + escapeHtml(builder) + (base && base.external_ref ? ' &middot; ' + escapeHtml(base.external_ref) : '') + '</div>';
+  html += '</div>';
+  html += '<div style="margin:24px 20px;padding:16px;border-radius:8px;border:1px solid ' + (noDocket ? 'var(--sw-border)' : '#FECACA') + ';background:' + (noDocket ? '#fff' : '#FEF2F2') + ';">';
+  if (noDocket) {
+    html += '<div style="font-size:14px;font-weight:800;color:var(--sw-dark);">No reviewable SES pack persisted yet</div>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;line-height:1.55;">The legacy approve/send path is retired server-side (it answers 410). This panel reviews SES docket packs only: a pack appears here once the SES reporting routine assembles a docket for this job. Nothing on this screen can send, authorise, or charge.</div>';
+  } else {
+    html += '<div style="font-size:14px;font-weight:800;color:#991B1B;">The SES review cockpit could not be loaded</div>';
+    html += '<div style="font-size:12px;color:#7F1D1D;margin-top:8px;line-height:1.55;">' + escapeHtml(msg || 'Unknown error') + '</div>';
+    html += '<button onclick="showMsReportingDetail(\'' + _msJsAttr(jobId) + '\'' + (targetPanelId ? ',\'' + _msJsAttr(targetPanelId) + '\'' : '') + ')" style="margin-top:10px;background:#1F3A44;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Retry</button>';
+  }
+  html += '</div>';
+  return html;
+}
 
-  // ── DOC TABS SOURCE ───────────────────────────────────────────────────────
-  // Only the drafted outputs (report / invoice / SWMS) become tabs; source docs
-  // (work order, photos) are not tabbed (photos render in the approval grid below).
-  // _msReportingDocTabs filters _msReportingBuildCarouselDocs(d) to report/invoice/
-  // SWMS PDFs. The SWMS tab appears only when a SWMS doc exists.
-  var docTabs = _msReportingDocTabs(d);
-  // Reset the active tab to the first doc on each fresh open of this job.
-  _msActiveDocTab[d.job_id] = 0;
+/**
+ * Render the SES review pack. Top-to-bottom: job header (type chip + SES status
+ * chip), HOLD/stale banners, doc tabs + PDF stage (byte-exact pack artifacts),
+ * invoice review (SES proposal / Xero binding), source evidence, trade notes,
+ * the three exact email routes, the fixed photo set (display-only), feedback,
+ * then the cockpit-controls action block.
+ */
+function _msSesRenderDetail(jobId, ctx, targetPanelId) {
+  var base = _msReportingCache[jobId] || { job_id: jobId };
+  var row = _msSesSynthRow(jobId, ctx);
+  // The doc-tab switcher + evidence renderers read the synthesized row from the
+  // shared cache; the list re-seeds the cache on every load.
+  _msReportingCache[jobId] = row;
+  var safeId = _msJsAttr(jobId);
+  var safeJobKey = _msDocTabKey(jobId);
+  var builder = _msReportingCanonicalBuilderName(base);
+  var isOverlay = !!(targetPanelId && targetPanelId !== 'msReportingDetailPanel');
+  var dismissAction = isOverlay ? 'closeMakesafeReportingOverlay()' : 'showMsReportingDetailEmpty()';
+  var cockpit = ctx.cockpit || {};
+  var sections = cockpit.sections || {};
+  var statusChip = _msSesStatusChip(cockpit.status);
 
-  // Initialize photo approval state for this job. Default approval is limited
-  // to the report-photo set, not every raw/source photo, so the follow-up email
-  // aligns with the report PDF.
-  var reportPhotosForInit = _msGetReportPhotos(d);
-  _msGetPhotoApprovalState(d.job_id, reportPhotosForInit);
-
-  // Status chip on the right: send-ready vs resume vs portal.
-  var statusChip = _msReportingStatusChip(d);
+  var docTabs = _msReportingDocTabs(row);
+  if (typeof _msActiveDocTab[jobId] !== 'number' || _msActiveDocTab[jobId] >= docTabs.length) {
+    _msActiveDocTab[jobId] = 0;
+  }
+  var activeTab = _msActiveDocTab[jobId];
 
   var html = '';
 
   // ── JOB HEADER ─────────────────────────────────────────────────────────────
-  // Prefer the stored family (consistent with getMakesafeTypeLabel in ops.html).
-  var _rawFamily = d.makesafe_job_family;
-  var _familyLabel = d.makesafe_job_family_label ||
+  var _rawFamily = base.makesafe_job_family;
+  var _familyLabel = base.makesafe_job_family_label ||
     (typeof getMakesafeFamilyLabel === 'function' ? getMakesafeFamilyLabel(_rawFamily) : '') ||
     (_rawFamily ? String(_rawFamily).replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : '');
-  var typeLabel = _familyLabel || d.makesafe_type || d.makesafe_type_detail || d.job_type || 'Make safe';
+  var typeLabel = _familyLabel || base.makesafe_type || base.makesafe_type_detail || base.job_type || 'Make safe';
   typeLabel = String(typeLabel).toUpperCase();
   html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:16px 20px;background:#fff;border-bottom:1px solid var(--sw-border);">';
   html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:700;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
   html += '<div style="flex:1;min-width:0;">';
   html += '<div style="font-size:17px;font-weight:700;color:var(--sw-dark);display:flex;align-items:center;flex-wrap:wrap;gap:8px;">';
-  html += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">' + escapeHtml(builder) + (d.external_ref ? ' &middot; ' + escapeHtml(d.external_ref) : '') + '</span>';
+  html += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">' + escapeHtml(builder) + (base.external_ref ? ' &middot; ' + escapeHtml(base.external_ref) : '') + '</span>';
   html += '<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:#FDEBE4;color:var(--sw-orange);">' + escapeHtml(typeLabel) + '</span>';
   html += '</div>';
   var headerBits = [];
-  if (d.job_number) headerBits.push('Job ' + d.job_number);
-  if (d.client_name) headerBits.push(d.client_name);
-  if (d.site_address) headerBits.push(d.site_address);
-  else if (d.site_suburb) headerBits.push(d.site_suburb);
+  if (base.job_number) headerBits.push('Job ' + base.job_number);
+  if (base.client_name) headerBits.push(base.client_name);
+  if (base.site_address) headerBits.push(base.site_address);
+  else if (base.site_suburb) headerBits.push(base.site_suburb);
   html += '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:3px;">' + escapeHtml(headerBits.join('  ·  ')) + '</div>';
   html += '</div>';
   html += '<div style="flex-shrink:0;"><span style="display:inline-block;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:' + statusChip.bg + ';color:' + statusChip.fg + ';white-space:nowrap;">' + escapeHtml(statusChip.label) + '</span></div>';
@@ -268,132 +427,290 @@ function showMsReportingDetail(jobId, targetPanelId) {
   // Scrollable body (single scroll column - everything visible without leaving the panel)
   html += '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 0 16px;background:#F7FAFB;">';
 
-  // Pack-status / resume banner (only when there is something to flag)
-  if (d.pack_status && d.pack_status.status && d.pack_status.status !== 'drafted' && d.pack_status.status !== 'admin_to_send_report') {
-    var ps = d.pack_status;
-    var isFailed = ps.status === 'failed';
-    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid ' + (isFailed ? '#FECACA' : '#FDE68A') + ';background:' + (isFailed ? '#FEF2F2' : '#FFFBEB') + ';font-size:12px;color:' + (isFailed ? '#991B1B' : '#92400E') + ';">';
-    html += '<strong>Pack state:</strong> ' + escapeHtml(ps.status);
-    if (ps.failed_step) html += ' (last step: ' + escapeHtml(ps.failed_step) + ')';
-    if (ps.error_detail) html += '<div style="margin-top:4px;">' + escapeHtml(ps.error_detail) + '</div>';
-    if (ps.send_started_at) {
-      html += '<div style="margin-top:4px;">Send started ' + escapeHtml(_msReportingAgeText(ps.send_started_at)) + (ps.in_flight_stale ? ' - flagged STALE.' : '.') + '</div>';
+  // ── HOLD banner: the backend's blocker facts, verbatim ────────────────────
+  if (cockpit.status === 'HOLD') {
+    var reasons = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
+    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FECACA;background:#FEF2F2;font-size:12px;color:#991B1B;">';
+    html += '<strong>On hold.</strong> The backend has not cleared this pack for invoice or release:';
+    if (reasons.length) {
+      html += '<ul style="margin:6px 0 0;padding-left:18px;">';
+      reasons.forEach(function(r) { html += '<li style="margin-top:3px;">' + escapeHtml(r) + '</li>'; });
+      html += '</ul>';
     }
-    if (!isFailed) {
-      html += '<div style="margin-top:4px;">Resuming is safe: an authorised invoice is not re-authorised, a sent pack is not re-sent.</div>';
+    if (_msIsPortalBuilder(base)) {
+      html += '<div style="margin-top:6px;">This builder uses a secure portal. Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).</div>';
     }
+    html += '</div>';
+  } else if (_msIsPortalBuilder(base)) {
+    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #BBE0DF;background:#EAF4F4;font-size:12px;color:#0E5F5E;">';
+    html += '<strong>Portal builder.</strong> Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).';
     html += '</div>';
   }
 
-  // Money-review banner (Task 4) — only when the backend flags pricing. Defensive:
-  // absent needs_money_review renders nothing. Supports both the legacy top-level
-  // flag and the current nested money_review.needs_money_review feed shape.
-  if (_msNeedsMoneyReview(d)) {
-    var mr = d.money_review || {};
-    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;font-size:12px;color:#92400E;">';
-    html += '<strong>&#9888; Pricing flagged for review.</strong>';
-    if (mr.reason) html += ' ' + escapeHtml(mr.reason);
-    if (mr.flagged_lines && mr.flagged_lines.length) {
-      html += '<div style="margin-top:4px;">' + mr.flagged_lines.length + ' invoice line' + (mr.flagged_lines.length === 1 ? '' : 's') + ' flagged. Open the Draft Invoice tab and confirm pricing before you send.</div>';
-    }
+  // ── Stale banner (defensive: we never pass a displayed binding) ───────────
+  if (cockpit.stale) {
+    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FDE68A;background:#FFFBEB;font-size:12px;color:#92400E;">';
+    html += '<strong>This view is stale.</strong> The underlying readiness rows moved after this cockpit was read &mdash; close and reopen the pack before acting.';
     html += '</div>';
   }
 
   // ── DOCUMENTS — CLICK THROUGH (doc tabs + fit-to-page PDF stage) ───────────
   html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Documents &mdash; click through</div>';
   if (docTabs.length) {
-    // Tab buttons.
     html += '<div id="msDocTabs_' + safeJobKey + '" style="display:flex;gap:8px;padding:0 20px 10px;flex-wrap:wrap;">';
     docTabs.forEach(function(t, i) {
-      var active = (i === 0);
+      var active = (i === activeTab);
       var bg = active ? 'var(--sw-orange)' : '#fff';
       var fg = active ? '#fff' : 'var(--sw-dark)';
       var bd = active ? 'var(--sw-orange)' : 'var(--sw-border)';
       html += '<button type="button" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')" style="border:1px solid ' + bd + ';background:' + bg + ';color:' + fg + ';padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">' + escapeHtml(t.tabLabel) + '</button>';
     });
     html += '</div>';
-    // PDF stage (whole-page). Stable id so _msSwitchDocTab can re-render just this.
-    // Width is capped so a large monitor does not stretch the dark viewer gutters
-    // across the whole approval panel; narrow screens still use the available width.
-    html += '<div id="msDocStage_' + safeJobKey + '" style="margin:0 auto;width:calc(100% - 40px);max-width:980px;">' + _msRenderDocStage(docTabs, 0) + '</div>';
+    // PDF stage (whole-page). Signed URLs live 300s; tab switches past that age
+    // re-fetch the pack first (see _msSwitchDocTab).
+    html += '<div id="msDocStage_' + safeJobKey + '" style="margin:0 auto;width:calc(100% - 40px);max-width:980px;">' + _msRenderDocStage(docTabs, activeTab) + '</div>';
   } else {
-    html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">No drafted documents attached to this pack yet.</div>';
+    html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">'
+      + (ctx.pack
+        ? 'No drafted documents attached to this pack yet.'
+        : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The routes and money facts below are the current cockpit truth.')
+      + '</div>';
   }
 
-  // ── INVOICE REVIEW (line items + totals + pricing flags) ───────────────────
-  html += _msRenderInvoiceReview(d);
+  // ── INVOICE REVIEW (SES proposal lines + totals / Xero binding) ────────────
+  html += _msRenderInvoiceReview(row);
 
-  // ── SOURCE EVIDENCE (work order / trade docs; photos are approved below) ───
-  html += _msRenderSourceEvidence(d);
+  // ── SOURCE EVIDENCE (work order / trade docs; photos are shown below) ─────
+  html += _msRenderSourceEvidence(row);
 
-  // ── TRADE NOTES (raw from submission) ──────────────────────────────────────
-  if (d.trade_notes && d.trade_notes.trim()) {
+  // ── TRADE NOTES (raw from submission, carried by the live feed) ───────────
+  if (base.trade_notes && String(base.trade_notes).trim()) {
     html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Trade notes (raw from submission)</div>';
-    html += '<div style="margin:0 20px 4px;background:#F7FAFC;border:1px solid var(--sw-border);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(d.trade_notes) + '</div>';
+    html += '<div style="margin:0 20px 4px;background:#F7FAFC;border:1px solid var(--sw-border);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(base.trade_notes) + '</div>';
   }
 
-  // ── RECIPIENT + PER-BUILDER NOTE ───────────────────────────────────────────
-  var builderNote = _msReportingBuilderNote(d);
-  if (isPortal) {
-    var portalPackFailed = d.pack_status && d.pack_status.status === 'failed';
-    // Portal builders (Western / Builderwest): no recipient email. If the pack is
-    // failed, do NOT tell ops to submit manually; the failed state must win until
-    // reset/retried.
-    html += '<div style="margin:14px 20px 4px;background:' + (portalPackFailed ? '#FEF2F2' : '#EAF4F4') + ';border:1px solid ' + (portalPackFailed ? '#FECACA' : '#BBE0DF') + ';border-radius:8px;padding:12px 14px;font-size:13px;">';
-    if (portalPackFailed) {
-      html += '<b style="display:block;font-size:11px;color:#991B1B;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Portal pack blocked</b>';
-      html += 'Do not submit this Western/Builderwest pack manually until the failed pack is reset or retried.';
-    } else {
-      html += '<b style="display:block;font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Submit on portal</b>';
-      html += 'Western Building / Builderwest use their Prime-system portal. Submit the pack manually.';
-    }
-    html += '</div>';
-  } else {
-    html += '<div style="margin:14px 20px 4px;background:#F1F8F3;border:1px solid #CFE6D6;border-radius:8px;padding:12px 14px;font-size:13px;' + (d.recipient_email ? '' : 'border-color:#FECACA;background:#FEF2F2;') + '">';
-    html += '<b style="display:block;font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;margin-bottom:3px;">Pack will be emailed to</b>';
-    if (d.recipient_email) {
-      html += '<span style="font-weight:700;color:var(--sw-dark);">' + escapeHtml(d.recipient_email) + '</span>';
-      var ccList = Array.isArray(d.cc) ? d.cc.filter(Boolean) : [];
-      if (ccList.length) {
-        html += ' &nbsp; <span style="color:var(--sw-text-sec);">CC ' + escapeHtml(ccList.join(', ')) + '</span>';
-      }
-    } else {
-      html += '<span style="font-weight:700;color:#B91C1C;">No builder email on file. The send cannot proceed until a recipient is set.</span>';
-    }
-    if (builderNote) {
-      html += '<br/><span style="color:var(--sw-text-sec);font-size:12px;">' + escapeHtml(builderNote) + '</span>';
-    }
-    html += '</div>';
-  }
+  // ── ROUTES — the exact emails SEND IT releases ─────────────────────────────
+  html += _msSesRenderRoutes(ctx);
 
-  // ── PHOTOS AT THE BOTTOM (mandatory approval gate) ─────────────────────────
-  // Reuses _msRenderPhotoApproval (grid + approve/exclude + count + send gate).
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; approve send photos (report PDF capped at 8)</div>';
-  html += '<div style="padding:0 20px;">' + _msRenderPhotoApprovalBody(d, d.job_id) + '</div>';
+  // ── PHOTOS — the fixed photo-route set (display-only) ──────────────────────
+  html += _msSesRenderPhotos(ctx);
 
-  // ── DRAFT FEEDBACK / REVISE PACK ─────────────────────────────────────────
-  // Natural-language feedback surface: Marnin can ask for report, invoice,
-  // photo or rules changes. The Revise Pack action is draft-only and never sends.
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Feedback &mdash; Revise Pack</div>';
+  // ── REVIEW FEEDBACK ────────────────────────────────────────────────────────
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Feedback</div>';
   html += '<div id="msNotesPanel-' + safeId + '" style="padding:0 20px;"></div>';
 
-  // ── ACTION BLOCK (per-builder send / submit) ──────────────────────────────
-  // Reuses _msReportingActionBlock — keeps all resume_action + portal + failed
-  // branches and the money-safety send gate intact.
+  // ── ACTION BLOCK (cockpit controls) ────────────────────────────────────────
   html += '<div style="margin-top:16px;padding:16px 20px;border-top:1px solid var(--sw-border);background:#fff;display:flex;flex-direction:column;gap:8px;">';
-  html += _msReportingActionBlock(d, safeId, inv, dismissAction);
+  html += _msSesActionBlock(jobId, ctx, dismissAction);
   html += '</div>';
 
   html += '</div>'; // end scroll body
 
-  panel.innerHTML = html;
+  return html;
+}
 
-  // Populate the draft-feedback thread after the container exists. Guarded so
-  // the review panel still works if the feedback module is absent/still loading.
-  if (typeof loadMsNotes === 'function') {
-    loadMsNotes(d.job_id, 'msNotesPanel-' + d.job_id);
+/**
+ * Merge the live feed row (identity facts) with the SES-derived review content
+ * into the row shape the shared renderers (doc tabs, invoice review, source
+ * evidence) consume. Legacy send fields are stripped so no legacy gate can
+ * pick them up.
+ */
+function _msSesSynthRow(jobId, ctx) {
+  var base = _msReportingCache[jobId] || { job_id: jobId };
+  var row = {};
+  Object.keys(base).forEach(function(k) { row[k] = base[k]; });
+  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts);
+  row.draft_docs = docs.draft;
+  row.source_docs = docs.source;
+  row.photos = docs.photos;
+  row.invoice = _msSesMapInvoice(ctx);
+  row.recipient_email = null;
+  row.cc = null;
+  row.default_subject = null;
+  row.default_html_body = null;
+  row.resume_action = null;
+  row.pack_status = null;
+  row.needs_money_review = false;
+  row.money_review = null;
+  return row;
+}
+
+/**
+ * Map the reviewable pack's artifacts to viewer docs. Only real document bytes
+ * become tabs/evidence: the rendered report PDF, the bound Xero invoice PDF,
+ * the SWMS, source attachments (work order), and the photo set. JSON/text plan
+ * artifacts (invoice_proposal, photo_selection, *_email_draft, review_spec,
+ * envelope, ...) are not viewer docs — the routes + invoice sections render
+ * their content.
+ */
+function _msSesDocsFromArtifacts(artifacts) {
+  var draft = [];
+  var source = [];
+  var photos = [];
+  (artifacts || []).forEach(function(a) {
+    if (!a || !a.signed_url) return;
+    var fileName = String(a.object_key || '').split('/').pop() || 'Document';
+    var label = fileName.replace(/\.[a-z0-9]+$/i, '');
+    var meta = a.metadata || {};
+    if (a.role === 'supporting_report_pdf') {
+      draft.push({ label: 'Make safe report', url: a.signed_url, kind: 'pdf' });
+    } else if (a.role === 'xero_invoice_pdf') {
+      draft.push({ label: 'Xero invoice', url: a.signed_url, kind: 'pdf' });
+    } else if (a.role === 'swms_artifact') {
+      draft.push({ label: 'SWMS', url: a.signed_url, kind: 'pdf' });
+    } else if (a.role === 'source_attachment') {
+      source.push({ label: label, url: a.signed_url, kind: _msSesMediaKind(a.media_type, a.object_key) });
+    } else if (a.role === 'completion_photo' || a.role === 'sibling_photo_evidence') {
+      var p = {
+        label: label,
+        url: a.signed_url,
+        kind: 'image',
+        content_hash: a.content_hash || null,
+        role: a.role,
+        order: (meta.order != null ? meta.order : null)
+      };
+      // Images in source_docs never become tabs or evidence links (the shared
+      // renderers filter them); they feed _msGetAllPhotos for the feedback module.
+      source.push(p);
+      photos.push(p);
+    }
+  });
+  photos.sort(function(x, y) {
+    return (x.order == null ? 9999 : x.order) - (y.order == null ? 9999 : y.order);
+  });
+  return { draft: draft, source: source, photos: photos };
+}
+
+function _msSesMediaKind(mediaType, objectKey) {
+  var mt = String(mediaType || '').toLowerCase();
+  if (mt === 'application/pdf') return 'pdf';
+  if (mt.indexOf('image/') === 0) return 'image';
+  if (mt === 'text/html') return 'html';
+  return _msReportingDocKind(objectKey || '');
+}
+
+/**
+ * Map the SES money facts to the shared invoice-review shape. The proposal is
+ * the docket's local_invoice_proposal (ses-local-invoice-proposal/v1:
+ * line_items[{description, quantity, unit_price_ex_gst, amount_ex_gst}],
+ * subtotal_ex_gst, total_inc_gst); once bound, the Xero status/number come from
+ * xero_binding. Falls back to the cockpit money section when the byte-exact
+ * pack is not in view (signed-off docket).
+ */
+function _msSesMapInvoice(ctx) {
+  var sections = (ctx.cockpit && ctx.cockpit.sections) || {};
+  var money = sections.money || {};
+  var proposal = (ctx.pack && ctx.pack.docket && ctx.pack.docket.local_invoice_proposal) ||
+    money.local_invoice_proposal || null;
+  var xero = (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || money.xero || null;
+  if (!proposal && !xero) return null;
+  var lines = [];
+  if (proposal && Array.isArray(proposal.line_items)) {
+    lines = proposal.line_items.map(function(li) {
+      li = li || {};
+      return {
+        description: li.description,
+        quantity: li.quantity,
+        unit_price: (li.unit_price_ex_gst != null ? li.unit_price_ex_gst : li.unit_price),
+        line_total: (li.amount_ex_gst != null ? li.amount_ex_gst : li.line_total)
+      };
+    });
   }
-  _msUpdateSendButtonPhotoGate(d.job_id);
+  return {
+    invoice_number: (xero && xero.invoice_number) || null,
+    status: xero ? (xero.status || 'BOUND') : 'SES proposal (not yet in Xero)',
+    lines: lines,
+    total_ex_gst: proposal ? proposal.subtotal_ex_gst : null,
+    total_inc_gst: proposal ? proposal.total_inc_gst : null,
+    lines_unavailable: !lines.length
+  };
+}
+
+// ── ROUTES + PHOTOS (the exact release content) ─────────────────────────────
+
+var _MS_SES_ROUTE_ORDER = { report: 0, photo: 1, invoice: 2 };
+var _MS_SES_ROUTE_LABELS = { report: 'Report email', photo: 'Photo email', invoice: 'Invoice email' };
+
+/**
+ * Render the three exact email routes the release carries (report + photo +
+ * invoice), straight from the cockpit's resolved routes: recipients, cc,
+ * subject, body excerpt, attachment count, and the backend's ready flag.
+ */
+function _msSesRenderRoutes(ctx) {
+  var sections = (ctx.cockpit && ctx.cockpit.sections) || {};
+  var routes = Array.isArray(sections.email_drafts) ? sections.email_drafts.slice() : [];
+  if (!routes.length) return '';
+  routes.sort(function(a, b) {
+    var oa = (a && _MS_SES_ROUTE_ORDER[a.route_kind] != null) ? _MS_SES_ROUTE_ORDER[a.route_kind] : 9;
+    var ob = (b && _MS_SES_ROUTE_ORDER[b.route_kind] != null) ? _MS_SES_ROUTE_ORDER[b.route_kind] : 9;
+    return oa - ob;
+  });
+  var html = '';
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Routes &mdash; the exact emails SEND IT releases</div>';
+  html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);">SEND IT sends <strong>all three routes at once</strong> (report + photos + invoice) to the exact recipients below.</div>';
+  routes.forEach(function(r) {
+    r = r || {};
+    var label = _MS_SES_ROUTE_LABELS[r.route_kind] || String(r.route_kind || 'Route');
+    var ready = r.ready === true;
+    var recipients = Array.isArray(r.recipients) ? r.recipients.filter(Boolean) : [];
+    var cc = Array.isArray(r.cc) ? r.cc.filter(Boolean) : [];
+    var attachments = Array.isArray(r.attachment_hashes) ? r.attachment_hashes.length : 0;
+    var bodyExcerpt = String(r.body || '').replace(/\s+/g, ' ').trim();
+    if (bodyExcerpt.length > 280) bodyExcerpt = bodyExcerpt.slice(0, 280) + '&#8230;';
+    html += '<div style="margin:8px 20px 4px;background:#fff;border:1px solid ' + (ready ? '#CFE6D6' : '#FECACA') + ';border-radius:8px;padding:12px 14px;font-size:13px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<b style="font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;">' + escapeHtml(label) + '</b>';
+    html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + (ready ? '#27AE60' : '#B91C1C') + ';color:#fff;">' + (ready ? 'READY' : 'NOT READY') + '</span>';
+    html += '</div>';
+    html += '<div style="margin-top:6px;"><strong>To:</strong> ' + (recipients.length ? escapeHtml(recipients.join(', ')) : '<span style="color:#B91C1C;font-weight:700;">no recipient</span>') + '</div>';
+    if (cc.length) html += '<div style="margin-top:2px;"><strong>Cc:</strong> ' + escapeHtml(cc.join(', ')) + '</div>';
+    html += '<div style="margin-top:2px;"><strong>Subject:</strong> ' + escapeHtml(r.subject || '') + '</div>';
+    if (bodyExcerpt) {
+      html += '<div style="margin-top:4px;color:var(--sw-text-sec);font-size:12px;line-height:1.45;">' + escapeHtml(bodyExcerpt) + '</div>';
+    }
+    html += '<div style="margin-top:4px;color:var(--sw-text-sec);font-size:11px;">' + attachments + ' attachment' + (attachments === 1 ? '' : 's') + ' fixed in the release revision</div>';
+    html += '</div>';
+  });
+  return html;
+}
+
+/**
+ * The photo set is FIXED by the SES release revision (the photo route's
+ * attachment hashes), so this section is a display-only affirmation: the photos
+ * in the photo email (green) plus any other docket photos kept as evidence
+ * (grey). No include/exclude toggles — changes go through feedback + a revised
+ * pack, never through a send-time payload.
+ */
+function _msSesRenderPhotos(ctx) {
+  if (!ctx.pack) return '';
+  var sections = (ctx.cockpit && ctx.cockpit.sections) || {};
+  var routes = Array.isArray(sections.email_drafts) ? sections.email_drafts : [];
+  var photoRoute = null;
+  routes.forEach(function(r) { if (r && r.route_kind === 'photo') photoRoute = r; });
+  var routeHashes = {};
+  ((photoRoute && photoRoute.attachment_hashes) || []).forEach(function(h) { routeHashes[h] = true; });
+  var docs = _msSesDocsFromArtifacts(ctx.pack.artifacts);
+  var photos = docs.photos;
+  if (!photos.length) return '';
+  var inRoute = photos.filter(function(p) { return p.content_hash && routeHashes[p.content_hash]; });
+  var evidence = photos.filter(function(p) { return !(p.content_hash && routeHashes[p.content_hash]); });
+  var html = '';
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; fixed in the release revision</div>';
+  html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);">';
+  html += inRoute.length + ' photo' + (inRoute.length === 1 ? '' : 's') + ' in the photo email';
+  if (evidence.length) html += ' &middot; ' + evidence.length + ' kept as evidence only (not sent)';
+  html += '. The photo set is fixed by the SES release revision and cannot be changed from this screen &mdash; record feedback to request a revised pack.';
+  html += '</div>';
+  html += '<div style="padding:0 20px;display:flex;flex-wrap:wrap;gap:10px;">';
+  inRoute.concat(evidence).forEach(function(p) {
+    var sent = !!(p.content_hash && routeHashes[p.content_hash]);
+    html += '<div style="position:relative;width:120px;height:88px;border-radius:8px;overflow:hidden;outline:3px solid ' + (sent ? '#5E8B6E' : '#9CA3AF') + ';opacity:' + (sent ? '1' : '0.55') + ';flex-shrink:0;background:#5b6b73;" title="' + escapeAttr(sent ? 'In the photo email' : 'Evidence only — not sent') + '">';
+    html += '<img src="' + escapeAttr(p.url) + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
+    html += '<div style="position:absolute;top:5px;right:5px;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;background:' + (sent ? '#5E8B6E' : '#6B7280') + ';padding:0 4px;">' + (sent ? '&#10003;' : 'evidence') + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
 }
 
 // ── DOC TABS (report / invoice / SWMS) ───────────────────────────────────────
@@ -407,13 +724,10 @@ function _msDocTabKey(jobId) {
 
 /**
  * Build the doc-tab list for a pack: drafted outputs first (Make Safe Report /
- * Draft Invoice / SWMS), then source inputs (Trade Report / Work Order).
- * Photos remain in the approval grid because they have a separate include/exclude
- * gate; source PDFs are first-class click-throughs so the operator can compare
- * the generated pack against the raw trade report + insurer/builder work order.
- * The SWMS tab appears only when a SWMS doc exists in the feed.
- * Each entry: { tabLabel, url, kind } where url already carries #view=Fit for PDFs
- * (via _msReportingBuildCarouselDocs) and keeps the versioned ?v= query intact.
+ * Xero Invoice / Draft Invoice / SWMS), then source inputs (Trade Report /
+ * Work Order). Photos remain in the photo section (fixed set, display-only).
+ * Each entry: { tabLabel, url, kind } where url already carries #view=Fit for
+ * PDFs (via _msReportingBuildCarouselDocs).
  */
 function _msReportingDocTabs(d) {
   var docs = _msReportingBuildCarouselDocs(d);
@@ -421,11 +735,12 @@ function _msReportingDocTabs(d) {
   docs.forEach(function(doc) {
     var label = String(doc.label || '').toLowerCase();
     var tabLabel = null;
-    if (doc.kind === 'image') return; // photos stay in the approval grid
-    if (/raw/.test(label) && /trade|service|report/.test(label)) tabLabel = 'Raw Trade Report';
+    if (doc.kind === 'image') return; // photos stay in the photo section
+    if (/xero/.test(label) && /invoice/.test(label)) tabLabel = 'Xero Invoice';
+    else if (/raw/.test(label) && /trade|service|report/.test(label)) tabLabel = 'Raw Trade Report';
     else if (/trade|service/.test(label) && /pdf/.test(label)) tabLabel = 'Trade Report PDF';
     else if (/trade|service|raw/.test(label)) tabLabel = 'Trade Report';
-    else if (/work\s*order|^wo$/.test(label)) tabLabel = 'Work Order';
+    else if (/work\S*\s*order|^wo$/.test(label)) tabLabel = 'Work Order';
     else if (/make\s*safe|completion/.test(label) && /report/.test(label)) tabLabel = 'Make Safe Report';
     else if (/invoice/.test(label)) tabLabel = 'Draft Invoice';
     else if (/swms/.test(label)) tabLabel = 'SWMS';
@@ -445,7 +760,7 @@ function _msReportingDocTabs(d) {
   });
   // Order: generated pack first, source evidence after it.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
-  var order = { 'Make Safe Report': 0, 'Draft Invoice': 1, 'SWMS': 2, 'Raw Trade Report': 3, 'Trade Report': 4, 'Trade Report PDF': 5, 'Work Order': 6 };
+  var order = { 'Make Safe Report': 0, 'Xero Invoice': 1, 'Draft Invoice': 1, 'SWMS': 2, 'Raw Trade Report': 3, 'Trade Report': 4, 'Trade Report PDF': 5, 'Work Order': 6 };
   out.sort(function(a, b) {
     var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : 9;
     var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : 9;
@@ -537,10 +852,19 @@ function _msRenderRawTradeReportDoc(t) {
 }
 
 /**
- * Switch the active doc tab: update tab button styling + re-render just the PDF stage.
- * Re-resolves the buttons + stage from the live panel so it works in BOTH hosts.
+ * Switch the active doc tab: update tab button styling + re-render just the PDF
+ * stage. Signed pack URLs live 300s — a tab switch past that age re-fetches the
+ * pack (full detail reload, preserving the clicked tab) instead of rendering a
+ * dead iframe. Re-resolves the buttons + stage from the live panel so it works
+ * in BOTH hosts.
  */
 function _msSwitchDocTab(jobId, idx, panelId) {
+  var ctx = _msSesPackCache[jobId];
+  if (ctx && ctx.pack && ctx.fetchedAt && (Date.now() - ctx.fetchedAt) > 240000) {
+    _msActiveDocTab[jobId] = idx;
+    showMsReportingDetail(jobId, panelId);
+    return;
+  }
   var d = _msReportingCache[jobId];
   if (!d) return;
   var docTabs = _msReportingDocTabs(d);
@@ -569,46 +893,12 @@ function _msSwitchDocTab(jobId, idx, panelId) {
   if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx);
 }
 
-/**
- * The right-hand status chip for the header: maps resume_action / pack state /
- * portal builder to a {label, bg, fg}. Teal "first draft ready" for the send case.
- */
-function _msReportingStatusChip(d) {
-  var action = d.resume_action || '';
-  var packStatus = d.pack_status ? (d.pack_status.status || '') : '';
-  // Failed state wins over builder type. A failed Western/Builderwest portal pack
-  // must look blocked, never ready/submittable.
-  if (packStatus === 'failed') return { label: 'BLOCKED', bg: '#991B1B', fg: '#fff' };
-  if (_msIsPortalBuilder(d)) return { label: 'READY TO SUBMIT', bg: '#0E7C7B', fg: '#fff' };
-  if (action === 'resolve_send_state') return { label: 'SEND STATE UNCLEAR', bg: '#B91C1C', fg: '#fff' };
-  if (action === 'finish_close_out') return { label: 'FINISH CLOSE-OUT', bg: '#6D28D9', fg: '#fff' };
-  if (action === 'finish_send') return { label: 'FINISH SEND', bg: '#B45309', fg: '#fff' };
-  return { label: 'FIRST DRAFT READY', bg: '#0E7C7B', fg: '#fff' };
-}
-
-/**
- * The per-builder note shown under the recipient line. AJS and MLB send two emails
- * (email 1 = the pack, email 2 = the approved photos individually); MLB's pack also
- * includes the SWMS. Returns '' when there is no specific note (no em dashes).
- */
-function _msReportingBuilderNote(d) {
-  var name = String((d.builder || d.requesting_company_name || '')).toLowerCase();
-  var slug = String(d.requesting_company_slug || '').toLowerCase();
-  var ref = String(d.external_ref || '').toUpperCase();
-  var isMlb = slug.indexOf('mlb') >= 0 || name.indexOf('mlb') >= 0 || ref.indexOf('MLB') === 0;
-  var isAjs = slug.indexOf('ajs') >= 0 || name.indexOf('ajs') >= 0 || ref.indexOf('AJS') === 0 || ref.indexOf('AJBR') === 0;
-  if (isMlb) return 'MLB: email 1 = report + invoice + SWMS, email 2 = the approved photos individually.';
-  if (isAjs) return 'AJS: email 1 = report + invoice, email 2 = the approved photos individually.';
-  return '';
-}
-
 // ── CAROUSEL + MONEY-REVIEW HELPERS ─────────────────────────────────────────
 
 /**
- * Map the feed's draft_docs[] + source_docs[] into the shared doc-viewer entry
- * shape ({label, url, kind, doc}). draft outputs lead (report/invoice/SWMS), then
- * source docs (work order, photos). Falls back to the legacy report_pdf_url /
- * invoice_pdf_url + photos[] fields if the new arrays are absent (pre-#193 feed).
+ * Map the row's draft_docs[] + source_docs[] into the shared doc-viewer entry
+ * shape ({label, url, kind, doc}). Draft outputs lead (report/invoice/SWMS),
+ * then source docs (work order, photos).
  */
 function _msReportingBuildCarouselDocs(d) {
   var out = [];
@@ -639,20 +929,10 @@ function _msReportingBuildCarouselDocs(d) {
   // Drafted outputs first.
   if (Array.isArray(d.draft_docs)) {
     d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd); });
-  } else {
-    add('Make safe report', d.report_pdf_url, 'pdf');
-    add('Draft invoice', d.invoice_pdf_url, 'pdf');
   }
   // Source docs next (work order, photos, etc.).
   if (Array.isArray(d.source_docs)) {
     d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd); });
-  }
-  // Legacy photos[] fallback if no source_docs supplied them.
-  if (!Array.isArray(d.source_docs) && Array.isArray(d.photos)) {
-    d.photos.forEach(function(p, i) {
-      if (!p) return;
-      add(p.label || ('Photo ' + (i + 1)), p.url || p.thumbnail_url, 'image');
-    });
   }
   return out;
 }
@@ -690,16 +970,16 @@ function _msReportingFormatTimestamp(iso) {
   });
 }
 
-// Render the draft invoice facts inside the review panel so Marnin can check the
-// money before the send click. This is deliberately read-only: editing/pricing
-// changes still go through the Draft Pack / Revise Pack loop, not the send button.
+// Render the invoice facts inside the review panel so the operator can check
+// the money before any approve click. Deliberately read-only: pricing changes
+// go through feedback + a revised pack, never through a send-time edit.
 function _msRenderInvoiceReview(d) {
   var inv = d && d.invoice;
   if (!inv) return '';
   var lines = Array.isArray(inv.lines) ? inv.lines : [];
   var flags = _msReportingFlaggedLineMap(d);
   var html = '';
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Draft invoice review</div>';
+  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Invoice review</div>';
   html += '<div style="margin:0 20px 4px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;font-size:12px;color:var(--sw-dark);">';
   if (inv.invoice_number || inv.status) {
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--sw-border);background:#F7FAFB;color:var(--sw-text-sec);">';
@@ -743,9 +1023,9 @@ function _msRenderInvoiceReview(d) {
   return html;
 }
 
-// Render non-photo source evidence links in the review panel. The photo evidence
-// is still shown in the mandatory approval section below, but work orders and
-// trade/source PDFs must stay visible for draft-vs-source checking.
+// Render non-photo source evidence links in the review panel. The photo set is
+// shown in its own fixed-set section; work orders and trade/source PDFs stay
+// visible for draft-vs-source checking.
 function _msRenderSourceEvidence(d) {
   if (!d || !Array.isArray(d.source_docs)) return '';
   var docs = d.source_docs.filter(function(sd) {
@@ -775,7 +1055,7 @@ function _msRenderSourceEvidence(d) {
   return html;
 }
 
-// Build a lookup of flagged invoice lines keyed by line_index (Task 4). Defensive:
+// Build a lookup of flagged invoice lines keyed by line_index. Defensive:
 // absent money_review / flagged_lines returns an empty map (no highlights).
 function _msReportingFlaggedLineMap(d) {
   var map = {};
@@ -802,114 +1082,58 @@ function _msReportingLineFlag(map, idx, li) {
   return null;
 }
 
-// Human-readable age of an ISO timestamp ("12 minutes ago", "2 hours ago").
-function _msReportingAgeText(iso) {
-  var t = new Date(iso).getTime();
-  if (isNaN(t)) return String(iso);
-  var secs = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (secs < 60) return secs + ' second' + (secs === 1 ? '' : 's') + ' ago';
-  var mins = Math.floor(secs / 60);
-  if (mins < 60) return mins + ' minute' + (mins === 1 ? '' : 's') + ' ago';
-  var hrs = Math.floor(mins / 60);
-  if (hrs < 24) return hrs + ' hour' + (hrs === 1 ? '' : 's') + ' ago';
-  var days = Math.floor(hrs / 24);
-  return days + ' day' + (days === 1 ? '' : 's') + ' ago';
-}
-
-// ── STATE-AWARE ACTION BLOCK (Task 2) ───────────────────────────────────────
+// ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 
 /**
- * Build the primary-action block for the panel, keyed off d.resume_action:
- *   'send' / absent+drafted -> "Approve & send pack"  -> approveMakesafeReportPack
- *   'finish_send'           -> "Finish send"           -> approveMakesafeReportPack
- *   'finish_close_out'      -> "Finish close-out"      -> finishMakesafeCloseOut
- *   'resolve_send_state'    -> "Resolve send state"    -> resolveMakesafeSendState
- *   failed (no resume_action + pack_status.status==='failed') -> blocked, no send btn
+ * Build the primary-action block for the panel, keyed off the SES cockpit
+ * status + controls:
+ *   HOLD                          -> blocker facts, no money/send action
+ *   controls.approve_invoice.on   -> "APPROVE INVOICE" -> approveSesInvoice
+ *   controls.send_it.enabled      -> "SEND IT"         -> sendSesRelease
+ *   neither                       -> honest waiting note (never a legacy action)
  */
-function _msReportingActionBlock(d, safeId, inv, dismissAction) {
+function _msSesActionBlock(jobId, ctx, dismissAction) {
+  var base = _msReportingCache[jobId] || {};
+  var cockpit = ctx.cockpit || {};
+  var sections = cockpit.sections || {};
+  var controls = cockpit.controls || {};
+  var approveInvoice = controls.approve_invoice || {};
+  var sendIt = controls.send_it || {};
+  var safeId = _msJsAttr(jobId);
   var html = '';
-  var action = d.resume_action || '';
-  var packStatus = d.pack_status ? (d.pack_status.status || '') : '';
 
-  // Blocked / failed: no send/portal action — needs ops. This must come BEFORE
-  // portal-builder handling so a failed Western/Builderwest pack cannot be shown as
-  // ready/submittable.
-  if (packStatus === 'failed') {
-    var ps = d.pack_status || {};
+  // HOLD: the backend's blocker facts win — no approve/send action exists.
+  if (cockpit.status === 'HOLD') {
     html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #FECACA;background:#FEF2F2;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#991B1B;">Blocked &mdash; needs ops</div>';
-    html += '<div style="font-size:12px;color:#991B1B;margin-top:4px;">This pack failed' + (ps.failed_step ? ' at step <strong>' + escapeHtml(ps.failed_step) + '</strong>' : '') + '. It cannot be sent from here until it is reset.</div>';
+    html += '<div style="font-size:13px;font-weight:800;color:#991B1B;">On hold &mdash; no approve/send action is available</div>';
+    html += '<div style="font-size:12px;color:#991B1B;margin-top:4px;">Resolve the blocker facts listed above; the controls appear here when the backend clears the pack.</div>';
     html += '</div>';
-    html += '<button onclick="resetMakesafeFailedPack(\'' + safeId + '\')" style="background:#fff;color:#991B1B;border:1px solid #FECACA;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Reset &amp; retry (ops)</button>';
     html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
     return html;
   }
 
-  // Money-review blocks any approve/send/portal-submit action. The operator should
-  // revise the draft first so Xero and the report pack are corrected before approval.
-  if (_msNeedsMoneyReview(d)) {
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#92400E;">Check pricing before approval</div>';
-    html += '<div style="font-size:12px;color:#92400E;margin-top:4px;">This pack has invoice lines flagged by the backend. Revise/fix the draft invoice before sending or portal submission.</div>';
-    html += '</div>';
-    html += '<button id="msReportingApproveBtn" disabled style="width:100%;background:#B45309;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:not-allowed;opacity:.45;">Fix pricing before send</button>';
-    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
-    return html;
-  }
-
-  // Portal builders (Western Building / Builderwest): manual portal submission, no email button.
-  if (_msIsPortalBuilder(d)) {
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #BBE0DF;background:#EAF4F4;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#0E5F5E;">Ready to submit on portal</div>';
-    html += '<div style="font-size:12px;color:#0E5F5E;margin-top:4px;">This builder uses a secure portal (Prime system) for report submission. The pack (report + invoice + SWMS) has been prepared. Submit manually on their portal link.</div>';
-    html += '</div>';
-    html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')" style="width:100%;background:#0E7C7B;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">Mark as portal submitted</button>';
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">This marks the pack as portal-ready and records your approval. No email is sent.</div>';
-    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
-    return html;
-  }
-
-  // resolve_send_state: ambiguous in-flight — Sent-Items-first, two explicit choices.
-  if (action === 'resolve_send_state') {
-    var rs = d.pack_status || {};
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #FCA5A5;background:#FEF2F2;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#991B1B;">Send state unclear &mdash; verify the Sent Items folder first</div>';
-    html += '<div style="font-size:12px;color:#7F1D1D;margin-top:4px;">A send was started'
-      + (rs.send_started_at ? ' ' + escapeHtml(_msReportingAgeText(rs.send_started_at)) : '')
-      + (rs.in_flight_stale ? ' and is now flagged <strong>stale</strong>' : '')
-      + ', but we cannot confirm whether the builder email actually went out. <strong>Open the orders@ Sent Items and check before choosing.</strong></div>';
-    html += '</div>';
-    // Primary (safe) choice: it WAS sent → just reconciles, no re-email.
-    html += '<button onclick="resolveMakesafeSendState(\'' + safeId + '\',\'confirmed_sent\')" style="background:#27AE60;color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;">It WAS sent &mdash; mark confirmed (no re-email)</button>';
-    // Secondary, deliberate choice: it was NOT sent → triggers a real re-send.
-    html += '<button onclick="resolveMakesafeSendState(\'' + safeId + '\',\'confirmed_not_sent\')" style="background:#fff;color:#B91C1C;border:1px solid #FCA5A5;padding:9px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">It was NOT sent &mdash; re-send the pack now</button>';
-    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
-    return html;
-  }
-
-  // finish_close_out: already emailed — only finishes the close-out. Never sends.
-  if (action === 'finish_close_out') {
-    html += '<button id="msReportingApproveBtn" onclick="finishMakesafeCloseOut(\'' + safeId + '\')" style="background:#6D28D9;color:#fff;border:none;padding:12px 16px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;">Finish close-out</button>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">This pack was already emailed. This only finishes the close-out (marks the job complete). It will NOT re-send or re-charge.</div>';
-    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
-    return html;
-  }
-
-  // send / finish_send / (absent + drafted): both go through approveMakesafeReportPack.
-  // The backend authorises the invoice, sends the formal pack, then immediately
-  // sends the approved photos as a JPEG-only follow-up email.
-  var canSend = !!d.recipient_email && !!inv;
-  var isFinishSend = action === 'finish_send';
-  var label = isFinishSend ? 'Finish send' : 'Approve & send pack';
-  html += '<button id="msReportingApproveBtn" onclick="approveMakesafeReportPack(\'' + safeId + '\')"'
-    + (canSend ? '' : ' disabled')
-    + ' style="width:100%;background:' + (isFinishSend ? '#B45309' : '#27AE60') + ';color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:' + (canSend ? 'pointer' : 'not-allowed') + ';opacity:' + (canSend ? '1' : '.45') + ';">' + label + '</button>';
-  if (!canSend) {
-    html += '<div style="font-size:12px;color:#B91C1C;text-align:center;">' + (!d.recipient_email ? 'A builder recipient email is required. ' : '') + (!inv ? 'A linked invoice is required.' : '') + '</div>';
-  } else if (isFinishSend) {
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">The invoice is already authorised. This finishes the send by re-emailing the pack once to ' + escapeHtml(d.recipient_email) + ' (no re-authorise), then sends approved photos as a JPEG follow-up.</div>';
+  // The Docs Ready tick state, bound to the exact displayed pack hash.
+  if (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash) {
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Docs Ready tick: <strong>not yet recorded</strong>. SEND IT first records your tick bound to the exact displayed pack hash <code style="font-size:10px;">' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code></div>';
   } else {
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">Authorises the invoice in Xero, emails the pack to ' + escapeHtml(d.recipient_email) + ', then sends approved photos as a JPEG follow-up. Your click, every time.</div>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Docs Ready tick: <strong>already recorded</strong> for the exact current pack.</div>';
+  }
+
+  if (approveInvoice.enabled) {
+    html += '<button id="msSesApproveInvoiceBtn" onclick="approveSesInvoice(\'' + safeId + '\')" style="width:100%;background:#B45309;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">APPROVE INVOICE</button>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">' + escapeHtml(approveInvoice.plan || 'Creates and authorises the real Xero invoice for this exact invoice revision.') + '</div>';
+  }
+  if (sendIt.enabled) {
+    html += '<button id="msSesSendItBtn" onclick="sendSesRelease(\'' + safeId + '\')" style="width:100%;background:#27AE60;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">SEND IT</button>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">' + escapeHtml(sendIt.plan || 'Sends the approved routes for this exact release revision.') + ' Sends <strong>all three routes at once</strong> (report + photos + invoice). This is irreversible.</div>';
+  }
+  if (!approveInvoice.enabled && !sendIt.enabled) {
+    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid var(--sw-border);background:#F7FAFB;">';
+    html += '<div style="font-size:13px;font-weight:800;color:var(--sw-dark);">No action enabled yet</div>';
+    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;">The backend has not enabled APPROVE INVOICE or SEND IT for this pack'
+      + (controls.captain_only ? ' (Captain authority is required for this pack)' : '')
+      + '. Review the documents and routes, record any feedback, and check back when the reporting routine advances the pack.</div>';
+    html += '</div>';
   }
   html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
   return html;
@@ -928,234 +1152,139 @@ function showMsReportingDetailEmpty() {
 }
 
 // ────────────────────────────────────────────────────────────
-// 3. ACTION - approve + send (LIVE authorise + email)
+// 3. ACTIONS - APPROVE INVOICE + SEND IT (SES chains)
 // ────────────────────────────────────────────────────────────
 
+/**
+ * APPROVE INVOICE: record the identified operator's approval of the exact
+ * current invoice revision (JWT; includes authorise), then execute it — the
+ * backend creates + AUTHORISES the real Xero invoice and binds the Xero PDF
+ * into a fresh docket revision, which re-enters the Docs Ready queue for a new
+ * tick before SEND IT.
+ */
+async function approveSesInvoice(jobId) {
+  var ctx = _msSesPackCache[jobId];
+  if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  if (!confirm('This records your SES approval and creates + AUTHORISES the real Xero invoice for this exact invoice revision, then binds the Xero PDF into a fresh pack for final review. Continue?')) return;
 
-function _msApprovedPhotosOrBlock(jobId, d) {
-  var reportPhotos = _msGetReportPhotos(d);
-  var state = _msGetPhotoApprovalState(jobId, reportPhotos);
-  var approvedPhotos = reportPhotos.filter(function(p) {
-    return p && p.url && !!state.approved[p.url];
+  var btn = document.getElementById('msSesApproveInvoiceBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Recording approval...'; }
+
+  try {
+    var approval = await opsPostJwt('approve_ses_invoice_revision', {
+      job_id: jobId,
+      includes_authorise: true
+    });
+    var obligationRevisionId = approval && approval.approval && approval.approval.invoice_obligation_revision_id;
+    if (!obligationRevisionId) {
+      var ob = await opsFetch('query_ses_invoice_obligation', { job_id: jobId });
+      var revisions = (ob && ob.revisions) || [];
+      obligationRevisionId = revisions.length ? revisions[0].id : null;
+    }
+    if (!obligationRevisionId) {
+      throw new Error('The approved invoice obligation revision could not be resolved.');
+    }
+    if (btn) btn.textContent = 'Authorising in Xero...';
+    var execBody = { job_id: jobId, invoice_obligation_revision_id: obligationRevisionId };
+    var actor = _msSesActor();
+    if (actor) execBody.actor = actor;
+    var executed = await opsPost('execute_ses_invoice_revision', execBody);
+    var invoiceNumber = executed && executed.invoice && executed.invoice.invoice_number;
+    showToast('Invoice authorised in Xero' + (invoiceNumber ? ' (' + invoiceNumber + ')' : '') + '. The invoice-bound pack needs a fresh Docs Ready tick before SEND IT.', 'success');
+    _msSesReloadDetail(jobId);
+  } catch (e) {
+    if (_msSesIsStale(e)) {
+      showToast('The pack changed while you reviewed it. Reloading the fresh pack.', 'info');
+      _msSesReloadDetail(jobId);
+      return;
+    }
+    showToast('Approve invoice failed: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'APPROVE INVOICE'; }
+  }
+}
+
+/**
+ * SEND IT: the full release chain for THIS job only (never a multi-job
+ * release):
+ *   1. sign_off_ses_docket (JWT, hash-bound to the exact displayed pack) —
+ *      skipped only when the tick is already recorded for the current bytes;
+ *   2. prepare_ses_release_revision { job_ids: [jobId] };
+ *   3. approve_ses_release_revision (JWT);
+ *   4. execute_ses_release_revision — sends ALL THREE routes (report + photo +
+ *      invoice emails), writes route proofs, and verifies the closeout.
+ * A 409 stale_review anywhere aborts the chain and reloads the fresh pack.
+ */
+async function sendSesRelease(jobId) {
+  var ctx = _msSesPackCache[jobId];
+  if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  var needsSignoff = ctx.reviewState === 'needs_review' && !!ctx.docketRevisionId && !!ctx.outputHash;
+  var confirmMsg = 'SEND IT releases ALL THREE routes at once (report + photos + invoice emails) to the exact recipients shown'
+    + (needsSignoff
+      ? ', after recording your Docs Ready tick bound to the exact displayed pack hash'
+      : ' (the Docs Ready tick is already recorded for the current pack)')
+    + '. This is irreversible. Send now?';
+  if (!confirm(confirmMsg)) return;
+
+  var btn = document.getElementById('msSesSendItBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+
+  try {
+    if (needsSignoff) {
+      if (btn) btn.textContent = 'Recording Docs Ready tick...';
+      await opsPostJwt('sign_off_ses_docket', {
+        docket_revision_id: ctx.docketRevisionId,
+        expected_output_content_hash: ctx.outputHash
+      });
+    }
+    if (btn) btn.textContent = 'Preparing release...';
+    var prepBody = { job_ids: [jobId] };
+    var actor = _msSesActor();
+    if (actor) prepBody.created_by = actor;
+    var prepared = await opsPost('prepare_ses_release_revision', prepBody);
+    var releaseRevisionId = prepared && prepared.release && prepared.release.id;
+    if (!releaseRevisionId) {
+      throw new Error('The release revision id was not returned by prepare_ses_release_revision.');
+    }
+    if (btn) btn.textContent = 'Approving release...';
+    await opsPostJwt('approve_ses_release_revision', { release_revision_id: releaseRevisionId });
+    if (btn) btn.textContent = 'Sending all three routes...';
+    var execBody = { release_revision_id: releaseRevisionId };
+    if (actor) execBody.actor = actor;
+    var executed = await opsPost('execute_ses_release_revision', execBody);
+    var proofCount = executed && Array.isArray(executed.route_proofs) ? executed.route_proofs.length : 3;
+    showToast('Pack released — ' + proofCount + ' routes sent (report, photos, invoice) and the closeout is verified.', 'success');
+    _msReportingAfterSend();
+  } catch (e) {
+    if (_msSesIsStale(e)) {
+      showToast('The pack changed while you reviewed it. Reloading the fresh pack — nothing was sent.', 'info');
+      _msSesReloadDetail(jobId);
+      return;
+    }
+    showToast('SEND IT failed: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'SEND IT'; }
+  }
+}
+
+/**
+ * Reload the list and reopen this job's detail against the fresh SES state
+ * (used after a successful APPROVE INVOICE and after any stale_review).
+ */
+function _msSesReloadDetail(jobId) {
+  var panelId = (_msSesPackCache[jobId] && _msSesPackCache[jobId].panelId) || 'msReportingDetailPanel';
+  loadMakesafeReportingCockpit().then(function() {
+    if (_msReportingCache[jobId]) {
+      showMsReportingDetail(jobId, panelId);
+    } else if (panelId === 'msReportingDetailPanel') {
+      showMsReportingDetailEmpty();
+    }
   });
-  if (reportPhotos.length > 0 && approvedPhotos.length === 0) {
-    showToast('Approve at least one report photo before sending (only approved report photos go in the follow-up).', 'error');
-    return null;
-  }
-  return approvedPhotos;
-}
-
-/**
- * Approve the pack: confirm, then call makesafe_send_pack with the recipient +
- * the gate-passing default subject/body the read endpoint supplied. Surfaces the
- * backend's fail-closed errors verbatim; treats {already_sent:true} as info.
- */
-async function approveMakesafeReportPack(jobId) {
-  var d = _msReportingCache[jobId];
-  if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
-  var isPortal = (typeof _msIsPortalBuilder === 'function') && _msIsPortalBuilder(d);
-  if (_msNeedsMoneyReview(d)) {
-    showToast('Pricing is flagged for review. Revise/fix the draft invoice before approving.', 'error');
-    return;
-  }
-
-  // Email builders (AJS / MLB) MUST have a recipient. Portal builders (Western /
-  // Builderwest) intentionally have NONE — they prep the pack for manual portal
-  // submission, so the recipient/subject/body checks are skipped for them.
-  if (!isPortal && !d.recipient_email) { showToast('No builder recipient email on file; cannot send.', 'error'); return; }
-
-  // FAIL-CLOSED PHOTO GATE (defence in depth — not just the disabled button). The
-  // mandatory rule: ONLY approved photos go out, and at least one must be approved
-  // when photos were submitted. Refuse the call if photos exist but none approved,
-  // so a stale handler / direct invocation can never send a photo-less pack or
-  // (for the follow-up) an empty photo set. Applies to BOTH email + portal.
-  var approvedPhotos = _msApprovedPhotosOrBlock(jobId, d);
-  if (approvedPhotos === null) return;
-
-  var subject = d.default_subject || '';
-  var htmlBody = d.default_html_body || '';
-  if (!isPortal) {
-    // Defence in depth: never send a subject carrying a review/test marker. The
-    // backend gate also enforces this, but we refuse to even attempt the call.
-    if (_msReportingSubjectHasReviewMarker(subject)) {
-      showToast('Refusing to send: the subject contains a review/test marker.', 'error');
-      return;
-    }
-    if (!subject || !htmlBody) {
-      showToast('Missing subject or body for this pack; reload the list.', 'error');
-      return;
-    }
-  }
-
-  // State-aware confirm. Portal = prep-for-portal (no email). finish_send resumes
-  // an already-authorised invoice; normal send authorises + emails the builder.
-  var confirmMsg;
-  if (isPortal) {
-    confirmMsg = 'This prepares the pack (report + invoice + SWMS) for manual submission on the builder portal and records your approval. NO email is sent. Continue?';
-  } else if (d.resume_action === 'finish_send') {
-    confirmMsg = 'This finishes sending the pack to ' + d.recipient_email + ' (the invoice is already authorised; it will not be re-authorised), then immediately sends approved photos as a JPEG follow-up. Send now?';
-  } else {
-    confirmMsg = 'This authorises the invoice, emails the builder, and immediately sends approved photos as a JPEG follow-up. Send now?';
-  }
-  if (!confirm(confirmMsg)) return;
-
-  var btn = document.getElementById('msReportingApproveBtn');
-  var origLabel = btn ? btn.textContent : (isPortal ? 'Mark as portal submitted' : 'Approve & send pack');
-  if (btn) { btn.disabled = true; btn.textContent = isPortal ? 'Preparing...' : 'Sending...'; }
-
-  try {
-    // Portal builders send NO recipient/subject/body — the backend detects the
-    // portal builder, prepares the pack and returns { portal_ready: true } (no email).
-    var payload = {
-      job_id: jobId,
-      pack_kind: 'main',
-      approved_photos: approvedPhotos
-    };
-    if (!isPortal) {
-      payload.recipient_email = d.recipient_email;
-      payload.subject = subject;
-      payload.html_body = htmlBody;
-    }
-    var result = await opsPost('makesafe_send_pack', payload);
-    if (result && result.portal_ready) {
-      showToast('Pack marked as ready for portal submission.', 'success');
-    } else if (result && result.already_sent) {
-      showToast('Pack was already sent for this job (marker present); nothing re-sent.', 'info');
-    } else if (result && result.status === 'sent_not_closed') {
-      showToast('Pack sent. Note: the make-safe close did not apply; resume to reconcile.', 'info');
-    } else {
-      var photo = result && result.photo_followup;
-      var photoText = photo && photo.sent ? ' Photo follow-up sent (' + (photo.photo_count || approvedPhotos.length) + ' JPEGs).' : (photo && photo.error ? ' Photo follow-up needs review.' : '');
-      showToast('Pack sent to ' + d.recipient_email + (result && result.invoice_number ? ' (invoice ' + result.invoice_number + ')' : '') + '.' + photoText, photo && photo.error ? 'info' : 'success');
-    }
-    _msReportingAfterSend();
-  } catch (e) {
-    // Backend returns clear fail-closed errors (client send gate failed,
-    // conflict: pack already sending, preflight failed). Surface verbatim.
-    showToast('Send failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
-  }
-}
-
-// ────────────────────────────────────────────────────────────
-// 3b. RESUME ACTIONS (state machine: close-out, resolve-send-state, reset)
-// ────────────────────────────────────────────────────────────
-
-/**
- * finish_close_out: the pack was already emailed; this ONLY finishes the close-out
- * (marks the job complete). It does NOT re-send or re-charge. Calls the new
- * makesafe_resume_close action (close-only). On success: toast + refresh.
- */
-async function finishMakesafeCloseOut(jobId) {
-  var d = _msReportingCache[jobId];
-  if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
-  if (!confirm('This pack was already emailed; this only finishes the close-out (marks the job complete). It will NOT re-send or re-charge. Continue?')) return;
-
-  var btn = document.getElementById('msReportingApproveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Finishing close-out...'; }
-
-  try {
-    var result = await opsPost('makesafe_resume_close', { job_id: jobId, pack_kind: 'main' });
-    showToast('Close-out finished' + (result && result.job_number ? ' for job ' + result.job_number : '') + '.', 'success');
-    _msReportingAfterSend();
-  } catch (e) {
-    showToast('Close-out failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Finish close-out'; }
-  }
-}
-
-/**
- * resolve_send_state: an in-flight send whose outcome is unknown. The operator must
- * verify the Sent Items folder first, then pick one of two EXPLICIT choices (never a
- * default): 'confirmed_sent' (reconcile only, no re-email) or 'confirmed_not_sent'
- * (triggers a real re-send). Both go through the UNCHANGED makesafe_send_pack with an
- * added sending_resolution field. choice is passed in from the two buttons.
- */
-async function resolveMakesafeSendState(jobId, choice) {
-  var d = _msReportingCache[jobId];
-  if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
-  if (choice !== 'confirmed_sent' && choice !== 'confirmed_not_sent') {
-    showToast('Pick whether the pack was sent or not.', 'error');
-    return;
-  }
-  if (choice === 'confirmed_not_sent' && !d.recipient_email) {
-    showToast('No builder recipient email on file; cannot re-send.', 'error');
-    return;
-  }
-
-  var subject = d.default_subject || '';
-  var htmlBody = d.default_html_body || '';
-  // Defence in depth, mirroring the normal send: never carry a review/test marker.
-  if (_msReportingSubjectHasReviewMarker(subject)) {
-    showToast('Refusing to send: the subject contains a review/test marker.', 'error');
-    return;
-  }
-  if (choice === 'confirmed_not_sent' && (!subject || !htmlBody)) {
-    showToast('Missing subject or body for this pack; reload the list.', 'error');
-    return;
-  }
-  var approvedPhotos = [];
-  if (choice === 'confirmed_not_sent') {
-    approvedPhotos = _msApprovedPhotosOrBlock(jobId, d);
-    if (approvedPhotos === null) return;
-  }
-
-  var confirmMsg = (choice === 'confirmed_sent')
-    ? 'You confirmed (from the Sent Items folder) that the pack WAS already sent. This will reconcile the send state without emailing again. Continue?'
-    : 'You confirmed (from the Sent Items folder) that the pack was NOT sent. This will RE-SEND the pack to ' + d.recipient_email + ' now. Continue?';
-  if (!confirm(confirmMsg)) return;
-
-  // Disable both choice buttons during the call (they share no single id).
-  var actionWrap = document.getElementById('msReportingApproveBtn');
-  if (actionWrap) actionWrap.disabled = true;
-
-  try {
-    var payload = {
-      job_id: jobId,
-      pack_kind: 'main',
-      recipient_email: d.recipient_email,
-      subject: subject,
-      html_body: htmlBody,
-      sending_resolution: choice
-    };
-    if (choice === 'confirmed_not_sent') payload.approved_photos = approvedPhotos;
-    var result = await opsPost('makesafe_send_pack', payload);
-    if (choice === 'confirmed_sent') {
-      showToast('Send state reconciled (marked already-sent); nothing re-emailed.', 'success');
-    } else if (result && result.already_sent) {
-      showToast('Pack was already sent for this job (marker present); nothing re-sent.', 'info');
-    } else {
-      showToast('Pack re-sent to ' + d.recipient_email + (result && result.invoice_number ? ' (invoice ' + result.invoice_number + ')' : ''), 'success');
-    }
-    _msReportingAfterSend();
-  } catch (e) {
-    showToast('Resolve failed: ' + (e.message || e), 'error');
-    if (actionWrap) actionWrap.disabled = false;
-  }
-}
-
-/**
- * Privileged reset for a failed pack: clears the failed pack state so it can be
- * re-attempted. No send/charge — just unblocks. Reloads the surface on success.
- */
-async function resetMakesafeFailedPack(jobId) {
-  var d = _msReportingCache[jobId];
-  if (!d) { showToast('Pack not loaded; reload the list.', 'error'); return; }
-  if (!confirm('Reset this failed pack so it can be retried? This does not send or charge anything — it only clears the failed state.')) return;
-  try {
-    await opsPost('makesafe_reset_failed_pack', { job_id: jobId, pack_kind: 'main' });
-    showToast('Failed pack reset; reloading.', 'success');
-    _msReportingAfterSend();
-  } catch (e) {
-    showToast('Reset failed: ' + (e.message || e), 'error');
-  }
 }
 
 /**
  * Refresh whichever surface hosts the reporting review after a successful send.
  * Board overlay: close it and reload the unified kanban (the card moves out of
  * Report Ready). Inline approvals tab: reload the cockpit list + reset the detail
- * panel (legacy fallback behaviour, unchanged).
+ * panel.
  */
 function _msReportingAfterSend() {
   if (typeof closeMakesafeReportingOverlay === 'function' && document.getElementById('makesafeReportingOverlay')) {
@@ -1206,19 +1335,6 @@ function _msReportingHideJobFromActiveList(jobId, reason) {
   }
 }
 
-// Whole-token review-marker check mirroring the backend gate. Used for the
-// approve-time defence-in-depth refusal.
-var _MS_REPORTING_REVIEW_MARKERS = ['TE'+'ST', 'RO'+'UND', 'DR'+'AFT', 'RE'+'VIEW', 'IN'+'TERNAL', 'PRE'+'VIEW'];
-function _msReportingSubjectHasReviewMarker(subject) {
-  var upper = String(subject || '').toUpperCase();
-  for (var i = 0; i < _MS_REPORTING_REVIEW_MARKERS.length; i++) {
-    var m = _MS_REPORTING_REVIEW_MARKERS[i];
-    var re = new RegExp('(^|[^A-Z0-9])' + m + '([^A-Z0-9]|$)');
-    if (re.test(upper)) return true;
-  }
-  return false;
-}
-
 // ────────────────────────────────────────────────────────────
 // 4. BADGE
 // ────────────────────────────────────────────────────────────
@@ -1238,11 +1354,11 @@ function refreshMsReportingBadge(count) {
   }
 }
 
-// ── PHOTO APPROVAL HELPERS ───────────────────────────────────────────────────
+// ── PHOTO COLLECTION (shared with the feedback module) ──────────────────────
 
 /**
  * Collect all photos from d.source_docs (kind=image) or d.photos[] as a fallback.
- * Returns [{url, label}] — used by the photo approval section and the send gate.
+ * Returns [{url, label}] — used by the feedback module's photo reference list.
  */
 function _msGetAllPhotos(d) {
   var photos = [];
@@ -1263,250 +1379,14 @@ function _msGetAllPhotos(d) {
   return photos;
 }
 
-/**
- * Return the report-photo set used by the approval/send flow. Prefer the
- * backend's report_photos/report_photo_urls (the same capped set as the report
- * PDF). For older feed payloads, mirror the report renderer fallback by taking
- * the first capped source photos instead of all raw photos.
- */
-function _msGetReportPhotos(d) {
-  var photos = [];
-  if (Array.isArray(d && d.report_photos)) {
-    d.report_photos.forEach(function(p, i) {
-      if (p && (p.url || p.thumbnail_url)) {
-        photos.push({ url: p.url || p.thumbnail_url, label: p.label || ('Report photo ' + (i + 1)) });
-      }
-    });
-  }
-  if (!photos.length && Array.isArray(d && d.report_photo_urls)) {
-    d.report_photo_urls.forEach(function(url, i) {
-      if (url) photos.push({ url: url, label: 'Report photo ' + (i + 1) });
-    });
-  }
-  if (!photos.length) {
-    photos = _msGetAllPhotos(d).slice(0, _msReportPhotoLimit(d));
-  }
-  return _msDedupePhotosByUrl(photos);
-}
-
-function _msDedupePhotosByUrl(photos) {
-  var seen = {};
-  var out = [];
-  (photos || []).forEach(function(p) {
-    if (!p || !p.url || seen[p.url]) return;
-    seen[p.url] = true;
-    out.push(p);
-  });
-  return out;
-}
-
-/**
- * Get (or initialize) photo approval state for a job. On first access, all photos
- * start as approved (opt-out model per the contract).
- */
-function _msGetPhotoApprovalState(jobId, allPhotos) {
-  allPhotos = allPhotos || [];
-  var existing = _msPhotoApprovalState[jobId] || null;
-  var previousApproved = (existing && existing.approved) || {};
-  var previousKnown = (existing && existing.known) || {};
-  var previousKnownKeys = (existing && existing.knownKeys) || {};
-  var previousApprovedKeys = {};
-  Object.keys(previousApproved).forEach(function(url) {
-    var key = _msPhotoApprovalKey(url);
-    if (key) previousApprovedKeys[key] = previousApproved[url] === true;
-  });
-
-  var approvedSet = {};
-  var knownSet = {};
-  var knownKeys = {};
-  allPhotos.forEach(function(p) {
-    if (!p || !p.url) return;
-    var url = p.url;
-    var key = _msPhotoApprovalKey(url);
-    knownSet[url] = true;
-    if (key) knownKeys[key] = true;
-
-    if (Object.prototype.hasOwnProperty.call(previousApproved, url)) {
-      if (previousApproved[url]) approvedSet[url] = true;
-      return;
-    }
-    if (Object.prototype.hasOwnProperty.call(previousKnown, url)) {
-      // Seen before and absent from approved => operator excluded it.
-      return;
-    }
-    if (key && Object.prototype.hasOwnProperty.call(previousKnownKeys, key)) {
-      // Same underlying photo with a fresh signed/cache-busted URL. Carry the
-      // previous decision across without keeping stale URL keys in the count.
-      if (previousApprovedKeys[key]) approvedSet[url] = true;
-      return;
-    }
-    approvedSet[url] = true;
-  });
-
-  if (!existing || existing.approved !== approvedSet) {
-    _msPhotoApprovalState[jobId] = { approved: approvedSet, known: knownSet, knownKeys: knownKeys };
-  }
-  return _msPhotoApprovalState[jobId];
-}
-
-/**
- * Toggle a single photo's approval state, then re-render the approval section
- * and update the send button gate.
- */
-function _msTogglePhotoApproval(jobId, photoUrl) {
-  if (!_msPhotoApprovalState[jobId]) return;
-  var state = _msPhotoApprovalState[jobId];
-  state.known = state.known || {};
-  state.knownKeys = state.knownKeys || {};
-  state.known[photoUrl] = true;
-  var key = _msPhotoApprovalKey(photoUrl);
-  if (key) state.knownKeys[key] = true;
-  if (state.approved[photoUrl]) {
-    delete state.approved[photoUrl];
-  } else {
-    state.approved[photoUrl] = true;
-  }
-  // Re-render just the photo approval section
-  var safeJobIdAttr = jobId.replace(/-/g, '_');
-  var section = document.getElementById('msPhotoApprovalSection_' + safeJobIdAttr);
-  if (section) {
-    var d = _msReportingCache[jobId];
-    if (d) section.innerHTML = _msRenderPhotoApprovalInner(d, jobId);
-  }
-  // Also update the send button state
-  _msUpdateSendButtonPhotoGate(jobId);
-}
-
-/**
- * Render the inner content of the photo-approval section (photo grid + count summary).
- * Called on first render and on each toggle.
- */
-function _msRenderPhotoApprovalInner(d, jobId) {
-  var allPhotos = _msGetAllPhotos(d);
-  var reportPhotos = _msGetReportPhotos(d);
-  if (!reportPhotos.length) {
-    return '<div style="font-size:12px;color:var(--sw-text-sec);">No photos submitted with this report.</div>';
-  }
-  var state = _msGetPhotoApprovalState(jobId, reportPhotos);
-  var approvedCount = Object.keys(state.approved).length;
-  var excludedCount = reportPhotos.length - approvedCount;
-  var sourceExtraCount = Math.max(0, allPhotos.length - reportPhotos.length);
-  var reportLimit = _msReportPhotoLimit(d);
-  var reportIncludedCount = Math.min(approvedCount, reportLimit);
-  var html = '';
-  // Count line (matches the ref .photocount).
-  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px;">';
-  html += approvedCount + ' of ' + reportPhotos.length + ' report photos approved for send/review';
-  if (excludedCount > 0) html += ' &middot; ' + excludedCount + ' excluded';
-  html += '. Report PDF includes up to ' + reportLimit + ' photos';
-  if (sourceExtraCount > 0) {
-    html += ' &middot; ' + sourceExtraCount + ' extra source photo' + (sourceExtraCount === 1 ? '' : 's') + ' kept as evidence only (not in follow-up). ';
-  } else if (approvedCount > reportLimit) {
-    html += ' (' + reportIncludedCount + ' in the report PDF; extras remain photo evidence/follow-up). ';
-  } else {
-    html += '. ';
-  }
-  if (approvedCount === 0) {
-    html += '<strong style="color:#B91C1C;">At least one photo must be approved to send.</strong>';
-  }
-  html += '</div>';
-  // Wider tiles (120x88) with green outline (approved) / red outline + dimmed
-  // (excluded) and a corner marker — matches the ref .ph / .ph.ok / .ph.no.
-  html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
-  reportPhotos.forEach(function(p) {
-    var isApproved = !!state.approved[p.url];
-    var safeUrl = escapeAttr(p.url);          // for src="..." (HTML attribute context)
-    var jsUrl = _msJsAttr(p.url);             // for onclick fn('...') (JS-string-in-attr)
-    var jsJobId = _msJsAttr(jobId);           // UUID, but escaped fail-closed
-    var outline = isApproved ? '3px solid #5E8B6E' : '3px solid #E74C3C';
-    var opacity = isApproved ? '1' : '0.5';
-    html += '<div style="position:relative;width:120px;height:88px;border-radius:8px;overflow:hidden;outline:' + outline + ';opacity:' + opacity + ';cursor:pointer;flex-shrink:0;background:#5b6b73;"'
-      + ' onclick="_msTogglePhotoApproval(\'' + jsJobId + '\',\'' + jsUrl + '\')"'
-      + ' title="' + (isApproved ? 'Click to exclude' : 'Click to include') + '">';
-    html += '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
-    html += '<div style="position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;background:' + (isApproved ? '#5E8B6E' : '#E74C3C') + ';">'
-      + (isApproved ? '&#10003;' : '&times;') + '</div>';
-    html += '</div>';
-  });
-  html += '</div>';
-  return html;
-}
-
-function _msReportPhotoLimit(d) {
-  var raw = d && (d.report_photo_limit || d.photo_limit ||
-    (d.report && d.report.photo_limit) ||
-    (d.draft_pack && d.draft_pack.report && d.draft_pack.report.photo_limit));
-  var n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) n = 8;
-  return Math.max(1, Math.min(8, Math.round(n)));
-}
-
-/**
- * Build the outer photo-approval container (heading + section div with id for re-render).
- * Kept for any caller that wants the labelled card; the integrated review screen uses
- * _msRenderPhotoApprovalBody instead (it supplies its own section label).
- */
-function _msRenderPhotoApproval(d, jobId) {
-  var allPhotos = _msGetReportPhotos(d);
-  var html = '';
-  html += '<div style="margin-bottom:8px;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">Photo approval';
-  if (allPhotos.length > 0) {
-    html += ' <span style="font-size:10px;font-weight:600;color:#B91C1C;">(mandatory)</span>';
-  }
-  html += '</div>';
-  html += _msRenderPhotoApprovalBody(d, jobId);
-  return html;
-}
-
-/**
- * The photo-approval section body only (no heading) — the re-renderable container
- * with the stable section id. Used by the integrated review screen which supplies its
- * own "Photos — approve send photos (report PDF capped at 8)" section label.
- */
-function _msRenderPhotoApprovalBody(d, jobId) {
-  var safeJobIdAttr = escapeAttr(jobId).replace(/-/g, '_');
-  return '<div id="msPhotoApprovalSection_' + safeJobIdAttr + '">' + _msRenderPhotoApprovalInner(d, jobId) + '</div>';
-}
-
-/**
- * Update the send button's disabled state based on photo approval gate.
- * If photos exist but none are approved, the send button is disabled.
- */
-function _msUpdateSendButtonPhotoGate(jobId) {
-  var d = _msReportingCache[jobId];
-  if (!d) return;
-  var allPhotos = _msGetReportPhotos(d);
-  var state = _msGetPhotoApprovalState(jobId, allPhotos);
-  var approvedCount = Object.keys(state.approved).length;
-  var hasPhotos = allPhotos.length > 0;
-  var hasApproved = approvedCount > 0;
-  var btn = document.getElementById('msReportingApproveBtn');
-  if (!btn) return;
-  // Portal builders submit manually (no email) — the portal button is never gated on
-  // recipient/invoice, only on the photo gate (the photos still go in the pack).
-  var isPortal = _msIsPortalBuilder(d);
-  // If photos exist but none approved, disable send
-  if (hasPhotos && !hasApproved) {
-    btn.disabled = true;
-    btn.style.opacity = '0.45';
-    btn.style.cursor = 'not-allowed';
-    btn.title = 'Approve at least one photo to send';
-  } else {
-    var canSend = !_msNeedsMoneyReview(d) && (isPortal ? true : (!!d.recipient_email && !!d.invoice));
-    btn.disabled = !canSend;
-    btn.style.opacity = canSend ? '1' : '0.45';
-    btn.style.cursor = canSend ? 'pointer' : 'not-allowed';
-    btn.title = _msNeedsMoneyReview(d) ? 'Fix pricing before approving' : '';
-  }
-}
-
 // ── PORTAL BUILDER DETECTION ─────────────────────────────────────────────────
 
 /**
  * Returns true if this job belongs to a portal-submission builder
  * (Western Building or Builderwest). These builders use a secure portal
- * (e.g. Prime) rather than email, so we show "Ready to submit on portal"
- * instead of the normal email button.
+ * (e.g. Prime) rather than email. In the SES flow the portal capture evidence
+ * is recorded by the capture tooling; this screen only NOTES the portal branch
+ * (it cannot submit to the portal).
  */
 function _msIsPortalBuilder(d) {
   // MUST mirror the backend _isMakesafeWesternCompany (ops-api index.ts) exactly so
@@ -1526,13 +1406,18 @@ function _msIsPortalBuilder(d) {
 // SMOKE TEST (manual, run in browser console):
 // 1. showView('approvals') -- approvals view loads
 // 2. Click "MakeSafe Reporting" tab -- reporting cockpit renders, loading state
-// 3. loadMakesafeReportingCockpit() returns a count (0 or N)
-// 4. If packs exist: clicking a card renders detail with photos, invoice line
-//    items + totals, BOTH PDFs inline, the recipient email, an approve button
-// 5. approve button disabled when no recipient_email or no invoice
-// 6. approveMakesafeReportPack confirms, then opsPost('makesafe_send_pack', ...)
-//    with recipient_email + the gate-passing default subject/body
-// 7. {already_sent:true} -> info toast; backend errors -> error toast (not swallowed)
+// 3. loadMakesafeReportingCockpit() returns a count (0 or N); card chips enrich
+//    to the SES cockpit status (DOCS READY / APPROVE INVOICE / SEND READY /
+//    ON HOLD / NO SES PACK)
+// 4. Clicking a card loads query_ses_review_cockpit + get_ses_reviewable_pack
+//    and renders the doc tabs, invoice lines, the three exact routes, and the
+//    fixed photo set
+// 5. APPROVE INVOICE (when enabled) runs approve_ses_invoice_revision (JWT) ->
+//    execute_ses_invoice_revision; SEND IT (when enabled) runs
+//    sign_off_ses_docket (JWT, hash-bound) -> prepare_ses_release_revision ->
+//    approve_ses_release_revision (JWT) -> execute_ses_release_revision
+// 6. A job with no SES docket shows the honest "no reviewable pack" state and
+//    never calls the retired 410 actions
 //
 // Automated smoke: modules/ops-makesafe-reporting-cockpit.smoke.mjs
 

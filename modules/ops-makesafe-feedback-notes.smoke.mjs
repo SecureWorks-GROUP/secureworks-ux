@@ -18,7 +18,7 @@ function check(name, cond) {
   }
 }
 
-const calls = { opsPost: [], opsFetch: [], toasts: [], hidden: [], reloads: [], detail: [] };
+const calls = { opsPost: [], opsPostJwt: [], opsFetch: [], toasts: [], hidden: [], reloads: [], detail: [], sesReloads: [] };
 function makeEl() {
   return {
     _html: "",
@@ -66,6 +66,12 @@ const sandbox = {
     }
     return Promise.resolve(behaviour.postResult);
   },
+  opsPostJwt: (action, body) => {
+    calls.opsPostJwt.push({ action, body });
+    return Promise.resolve(behaviour.postJwtResult || { feedback: { id: 1 } });
+  },
+  _msSesPackCache: {},
+  _msSesReloadDetail: (jobId) => calls.sesReloads.push(jobId),
   showToast: (msg, kind) => calls.toasts.push({ msg, kind }),
   _msReportingHideJobFromActiveList: (jobId, reason) => {
     calls.hidden.push({ jobId, reason });
@@ -290,6 +296,154 @@ await mod.triggerMsRerun("job-9");
 check(
   "skipped Revise Pack response does not hide the active review card",
   calls.hidden.length === 0,
+);
+
+// ── SES MODE — feedback records on the exact docket revision ────────────────
+// A job whose detail rendered from the SES cockpit has a _msSesPackCache entry.
+const SES_JOB = "job-ses";
+const SES_REV = "11111111-1111-1111-1111-111111111111";
+sandbox._msSesPackCache[SES_JOB] = {
+  jobId: SES_JOB,
+  docketRevisionId: SES_REV,
+  reviewState: "needs_review",
+};
+
+// Panel rendering in SES mode: no Revise Pack controls, a Record feedback
+// composer, and SES guidance copy.
+const sesPanel = mod.renderMsNotesPanel(SES_JOB, [], {
+  showRerunButton: false,
+  sesMode: true,
+});
+check(
+  "SES panel uses Review feedback naming",
+  sesPanel.includes("Review feedback") &&
+    !sesPanel.includes("Revise Pack feedback"),
+);
+check(
+  "SES panel hides BOTH Revise Pack buttons",
+  !sesPanel.includes("Revise Pack now") &&
+    !sesPanel.includes("Save feedback + Revise Pack") &&
+    !sesPanel.includes("triggerMsRerun"),
+);
+check(
+  "SES panel offers the Record feedback composer",
+  sesPanel.includes("Record feedback") && sesPanel.includes("<textarea"),
+);
+check(
+  "SES panel explains the readiness invalidation",
+  /invalidates the pack/i.test(sesPanel) && /revised pack/i.test(sesPanel),
+);
+
+// loadMsNotes in SES mode still reads the legacy thread but hides the rerun
+// button, and merges this session's docket-recorded echoes.
+behaviour.fetchResult = { notes: [humanNote] };
+await mod.loadMsNotes(SES_JOB, "msNotesPanel-" + SES_JOB);
+const sesLoadHtml = elements["msNotesPanel-" + SES_JOB]._html || "";
+check(
+  "SES loadMsNotes renders the legacy thread without the rerun button",
+  sesLoadHtml.includes("fix the invoice costing") &&
+    !sesLoadHtml.includes("Revise Pack now"),
+);
+
+// Saving in SES mode posts record_ses_review_feedback via opsPostJwt (never
+// add_draft_note), bound to the exact docket revision.
+calls.opsPost = [];
+calls.opsPostJwt = [];
+calls.sesReloads = [];
+elements["msNoteInput-" + SES_JOB] = makeEl();
+elements["msNoteInput-" + SES_JOB].value =
+  "costing is off — add 1 extra labour hour";
+await mod.addMsNote(SES_JOB);
+const sesFeedbackCall = calls.opsPostJwt.find((c) =>
+  c.action === "record_ses_review_feedback"
+);
+check(
+  "SES save calls opsPostJwt(record_ses_review_feedback)",
+  !!sesFeedbackCall,
+);
+check(
+  "SES save NEVER calls add_draft_note",
+  !calls.opsPost.some((c) => c.action === "add_draft_note"),
+);
+check(
+  "SES feedback body binds the exact docket revision + job",
+  !!sesFeedbackCall &&
+    sesFeedbackCall.body.docket_revision_id === SES_REV &&
+    sesFeedbackCall.body.job_id === SES_JOB,
+);
+check(
+  "SES feedback body carries a change_type and the note in after",
+  !!sesFeedbackCall &&
+    typeof sesFeedbackCall.body.change_type === "string" &&
+    sesFeedbackCall.body.change_type.trim().length > 0 &&
+    !!sesFeedbackCall.body.after &&
+    /labour hour/.test(sesFeedbackCall.body.after.note || ""),
+);
+check(
+  "SES save echoes the recorded note into the rendered thread",
+  (elements["msNotesPanel-" + SES_JOB]._html || "").includes(
+    "costing is off",
+  ) &&
+    (elements["msNotesPanel-" + SES_JOB]._html || "").includes(
+      "recorded on the SES docket",
+    ),
+);
+check(
+  "SES save reloads the cockpit detail (readiness was invalidated)",
+  calls.sesReloads.includes(SES_JOB),
+);
+check(
+  "SES save toast names the readiness invalidation",
+  calls.toasts.some((t) =>
+    t.kind === "success" && /readiness/i.test(t.msg || "")
+  ),
+);
+
+// The echo survives a thread reload (SES feedback has no read-back action).
+await mod.loadMsNotes(SES_JOB, "msNotesPanel-" + SES_JOB);
+check(
+  "SES echo persists across thread reloads",
+  (elements["msNotesPanel-" + SES_JOB]._html || "").includes("costing is off"),
+);
+
+// A signed-off pack (no docket revision in the queue) cannot take feedback:
+// the composer is replaced by an honest note and the save refuses.
+const SIGNED_JOB = "job-signed";
+sandbox._msSesPackCache[SIGNED_JOB] = {
+  jobId: SIGNED_JOB,
+  docketRevisionId: null,
+  reviewState: "signed_off",
+};
+const signedPanel = mod.renderMsNotesPanel(SIGNED_JOB, [], {
+  showRerunButton: false,
+  sesMode: true,
+});
+check(
+  "signed-off SES pack replaces the composer with an honest note",
+  signedPanel.includes("already passed Docs Ready review") &&
+    !signedPanel.includes("<textarea"),
+);
+calls.opsPostJwt = [];
+calls.toasts = [];
+await mod.addMsNote(SIGNED_JOB, "too late");
+check(
+  "SES save on a signed-off pack refuses without calling the backend",
+  calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) =>
+      t.kind === "error" && /already passed Docs Ready review/i.test(t.msg || "")
+    ),
+);
+
+// addMsNoteAndRerun in SES mode degrades to the record-only save.
+calls.opsPostJwt = [];
+calls.opsPost = [];
+elements["msNoteInput-" + SES_JOB] = makeEl();
+elements["msNoteInput-" + SES_JOB].value = "second SES note";
+await mod.addMsNoteAndRerun(SES_JOB);
+check(
+  "addMsNoteAndRerun in SES mode records feedback and NEVER reruns",
+  calls.opsPostJwt.some((c) => c.action === "record_ses_review_feedback") &&
+    !calls.opsPost.some((c) => c.action === "rerun_draft_report"),
 );
 
 console.log("");

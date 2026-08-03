@@ -604,34 +604,47 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     (_rawFamily ? String(_rawFamily).replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : '');
   var typeLabel = _familyLabel || base.makesafe_type || base.makesafe_type_detail || base.job_type || 'Make safe';
   typeLabel = String(typeLabel).toUpperCase();
-  html += '<div style="flex-shrink:0;display:flex;align-items:flex-start;gap:12px;padding:16px 20px;background:#fff;border-bottom:1px solid var(--sw-border);">';
-  html += '<button onclick="' + dismissAction + '" style="background:none;border:none;color:var(--sw-orange);font-size:13px;font-weight:700;cursor:pointer;padding:4px 0;white-space:nowrap;">&#8592; Back</button>';
-  html += '<div style="flex:1;min-width:0;">';
-  html += '<div style="font-size:17px;font-weight:700;color:var(--sw-dark);display:flex;align-items:center;flex-wrap:wrap;gap:8px;">';
-  html += '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">' + escapeHtml(builder) + (base.external_ref ? ' &middot; ' + escapeHtml(base.external_ref) : '') + '</span>';
-  html += '<span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:#FDEBE4;color:var(--sw-orange);">' + escapeHtml(typeLabel) + '</span>';
-  html += '</div>';
+  html += '<div class="msr-head">';
+  html += '<button type="button" class="msr-back" onclick="' + dismissAction + '">&#8592; Back</button>';
+  html += '<div class="msr-head-main">';
+  html += '<h2 class="msr-title">';
+  html += '<span class="msr-title-name">' + escapeHtml(builder) + '</span>';
+  if (base.external_ref) html += '<span class="msr-ref">&middot; ' + escapeHtml(base.external_ref) + '</span>';
+  html += '<span class="msr-chip family">' + escapeHtml(typeLabel) + '</span>';
+  html += '</h2>';
+  // Identity facts as labelled pairs rather than one dot-joined run, so the job
+  // number reads as a job number and not as part of the address.
   var headerBits = [];
-  if (base.job_number) headerBits.push('Job ' + base.job_number);
-  if (base.client_name) headerBits.push(base.client_name);
-  if (base.site_address) headerBits.push(base.site_address);
-  else if (base.site_suburb) headerBits.push(base.site_suburb);
-  html += '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:3px;">' + escapeHtml(headerBits.join('  ·  ')) + '</div>';
+  if (base.job_number) headerBits.push(['Job', base.job_number]);
+  if (base.client_name) headerBits.push(['Client', base.client_name]);
+  if (base.site_address) headerBits.push(['Site', base.site_address]);
+  else if (base.site_suburb) headerBits.push(['Site', base.site_suburb]);
+  if (headerBits.length) {
+    html += '<div class="msr-submeta">';
+    headerBits.forEach(function(pair) {
+      html += '<span><b>' + escapeHtml(pair[0]) + '</b> ' + escapeHtml(String(pair[1])) + '</span>';
+    });
+    html += '</div>';
+  }
   html += '</div>';
-  html += '<div style="flex-shrink:0;"><span style="display:inline-block;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.3px;background:' + statusChip.bg + ';color:' + statusChip.fg + ';white-space:nowrap;">' + escapeHtml(statusChip.label) + '</span></div>';
+  html += '<div class="msr-state"><span class="msr-chip" style="background:' + statusChip.bg + ';color:' + statusChip.fg + ';">' + escapeHtml(statusChip.label) + '</span></div>';
   html += '</div>';
 
   // Scrollable body (single scroll column - everything visible without leaving the panel)
-  html += '<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 0 16px;background:#F7FAFB;">';
+  html += '<div class="msr-body">';
 
   // ── HOLD banner: the backend's blocker facts, verbatim ────────────────────
+  // Amber, not red: per the blueprint a hold is the machine stopping and asking
+  // for a person, which is exactly what amber means on this surface. Red is
+  // reserved for a read that actually failed.
   if (cockpit.status === 'HOLD') {
     var reasons = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
-    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FECACA;background:#FEF2F2;font-size:12px;color:#991B1B;">';
-    html += '<strong>On hold.</strong> The backend has not cleared this pack for invoice or release:';
+    html += '<div class="msr-banner stop">';
+    html += '<div class="msr-banner-title">&#9888; On hold &mdash; this pack cannot be invoiced or released</div>';
+    html += 'The backend named these blockers. There is no override on this screen: clear them through feedback and a revised pack.';
     if (reasons.length) {
-      html += '<ul style="margin:6px 0 0;padding-left:18px;">';
-      reasons.forEach(function(r) { html += '<li style="margin-top:3px;">' + escapeHtml(r) + '</li>'; });
+      html += '<ul>';
+      reasons.forEach(function(r) { html += '<li>' + escapeHtml(r) + '</li>'; });
       html += '</ul>';
     }
     if (_msIsPortalBuilder(base)) {
@@ -639,42 +652,45 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     }
     html += '</div>';
   } else if (_msIsPortalBuilder(base)) {
-    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #BBE0DF;background:#EAF4F4;font-size:12px;color:#0E5F5E;">';
-    html += '<strong>Portal builder.</strong> Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).';
+    html += '<div class="msr-banner info">';
+    html += '<div class="msr-banner-title">Portal builder</div>';
+    html += 'Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).';
     html += '</div>';
   }
 
   // ── Stale banner (defensive: we never pass a displayed binding) ───────────
   if (cockpit.stale) {
-    html += '<div style="margin:16px 20px 0;padding:10px 14px;border-radius:8px;border:1px solid #FDE68A;background:#FFFBEB;font-size:12px;color:#92400E;">';
-    html += '<strong>This view is stale.</strong> The underlying readiness rows moved after this cockpit was read &mdash; close and reopen the pack before acting.';
+    html += '<div class="msr-banner stop">';
+    html += '<div class="msr-banner-title">&#9888; This view is stale</div>';
+    html += 'The underlying readiness rows moved after this cockpit was read &mdash; close and reopen the pack before acting.';
     html += '</div>';
   }
 
+  // ── PACK COMPLETENESS (blueprint RV-1: name what is missing, do not just
+  //    show an empty frame) ───────────────────────────────────────────────────
+  html += _msSesRenderCompleteness(row, ctx);
+
   // ── DOCUMENTS — CLICK THROUGH (doc tabs + fit-to-page PDF stage) ───────────
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Documents &mdash; click through</div>';
+  html += '<div class="msr-sec"><h3>Documents</h3><span class="msr-sec-note">every document in the pack, readable here</span></div>';
   if (docTabs.length) {
-    html += '<div id="msDocTabs_' + safeJobKey + '" style="display:flex;gap:8px;padding:0 20px 10px;flex-wrap:wrap;">';
+    html += '<div id="msDocTabs_' + safeJobKey + '" class="msr-tabs" role="tablist" aria-label="Pack documents">';
     docTabs.forEach(function(t, i) {
       var active = (i === activeTab);
-      var bg = active ? 'var(--sw-orange)' : '#fff';
-      var fg = active ? '#fff' : 'var(--sw-dark)';
-      var bd = active ? 'var(--sw-orange)' : 'var(--sw-border)';
-      html += '<button type="button" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')" style="border:1px solid ' + bd + ';background:' + bg + ';color:' + fg + ';padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">' + escapeHtml(t.tabLabel) + '</button>';
+      html += '<button type="button" role="tab" class="msr-tab" aria-selected="' + (active ? 'true' : 'false') + '" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')">' + escapeHtml(t.tabLabel) + '</button>';
     });
     html += '</div>';
     // PDF stage (whole-page). Signed URLs live 300s; tab switches past that age
     // re-fetch the pack first (see _msSwitchDocTab).
-    html += '<div id="msDocStage_' + safeJobKey + '" style="margin:0 auto;width:calc(100% - 40px);max-width:980px;">' + _msRenderDocStage(docTabs, activeTab) + '</div>';
+    html += '<div id="msDocStage_' + safeJobKey + '" class="msr-stage-wrap">' + _msRenderDocStage(docTabs, activeTab) + '</div>';
   } else {
-    html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);background:#fff;border:1px dashed var(--sw-border);border-radius:8px;padding:12px;">'
+    html += '<div class="msr-panel"><div class="msr-empty-note">'
       + (ctx.pack
-        ? 'No drafted documents attached to this pack yet.'
+        ? 'No drafted documents are attached to this pack yet. The completeness list above names what the pack is missing.'
         : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The routes and money facts below are the current cockpit truth.')
-      + '</div>';
+      + '</div></div>';
   }
 
-  // ── INVOICE REVIEW (SES proposal lines + totals / Xero binding) ────────────
+  // ── DRAFT INVOICE REVIEW (SES proposal lines + totals / Xero binding) ──────
   html += _msRenderInvoiceReview(row);
 
   // ── SOURCE EVIDENCE (work order / trade docs; photos are shown below) ─────
@@ -682,27 +698,117 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 
   // ── TRADE NOTES (raw from submission, carried by the live feed) ───────────
   if (base.trade_notes && String(base.trade_notes).trim()) {
-    html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Trade notes (raw from submission)</div>';
-    html += '<div style="margin:0 20px 4px;background:#F7FAFC;border:1px solid var(--sw-border);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(base.trade_notes) + '</div>';
+    html += '<div class="msr-sec"><h3>Trade notes</h3><span class="msr-sec-note">raw from the submission</span></div>';
+    html += '<div class="msr-panel"><div class="msr-notes">' + escapeHtml(base.trade_notes) + '</div></div>';
   }
 
-  // ── ROUTES — the exact emails SEND IT releases ─────────────────────────────
+  // ── THE OUTGOING EMAIL, BEFORE APPROVAL ───────────────────────────────────
   html += _msSesRenderRoutes(ctx);
 
   // ── PHOTOS — the fixed photo-route set (display-only) ──────────────────────
   html += _msSesRenderPhotos(ctx);
 
   // ── REVIEW FEEDBACK ────────────────────────────────────────────────────────
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Feedback</div>';
+  html += '<div class="msr-sec"><h3>Feedback</h3><span class="msr-sec-note">the next run reads what you write here</span></div>';
   html += '<div id="msNotesPanel-' + safeId + '" style="padding:0 20px;"></div>';
 
   // ── ACTION BLOCK (cockpit controls) ────────────────────────────────────────
-  html += '<div style="margin-top:16px;padding:16px 20px;border-top:1px solid var(--sw-border);background:#fff;display:flex;flex-direction:column;gap:8px;">';
+  html += '<div class="msr-act">';
   html += _msSesActionBlock(jobId, ctx, dismissAction);
   html += '</div>';
 
   html += '</div>'; // end scroll body
 
+  return html;
+}
+
+/**
+ * <makesafe-docs-ready-review> PACK COMPLETENESS.
+ *
+ * Blueprint RV-1: "the surface says which document is missing rather than
+ * showing an empty frame". Every claim here comes from the reviewable pack's
+ * own artifacts (via the synthesized row) plus the cockpit's invoice mapping —
+ * never from a stage, substatus, or column name, which describe where a card
+ * sits rather than which documents exist.
+ *
+ * SWMS is the one deliberately soft line: no feed on this surface states
+ * whether a job OWES a SWMS, so an absent SWMS is reported as "not in this
+ * pack" and never as "not required". Claiming a safety document is not owed is
+ * not a claim this screen has the evidence to make.
+ */
+function _msSesRenderCompleteness(row, ctx) {
+  if (!ctx || !ctx.pack) return '';
+  var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
+  var source = Array.isArray(row.source_docs) ? row.source_docs : [];
+  var photos = Array.isArray(row.photos) ? row.photos : [];
+  var inv = row.invoice;
+
+  function hasDraft(re) {
+    return draft.some(function(d) { return d && re.test(String(d.label || '')); });
+  }
+  var hasWorkOrder = source.some(function(s) {
+    return s && s.kind !== 'image' && /work\s*order|works\s*order|^wo\b/i.test(String(s.label || ''));
+  });
+  var hasReport = hasDraft(/make\s*safe|completion|report/i);
+  var hasSwms = hasDraft(/swms/i);
+  var hasInvoicePdf = hasDraft(/invoice/i);
+
+  var items = [
+    {
+      name: 'Work order',
+      state: hasWorkOrder ? 'present' : 'missing',
+      present: 'The builder instruction is attached to this pack.',
+      missing: 'No work order is attached to this pack.'
+    },
+    {
+      name: 'Completion report',
+      state: hasReport ? 'present' : 'missing',
+      present: 'The drafted make-safe report is in the pack.',
+      missing: 'No drafted completion report is in the pack.'
+    },
+    {
+      name: 'SWMS',
+      state: hasSwms ? 'present' : 'na',
+      present: 'A SWMS is in the pack.',
+      na: 'Not in this pack. This screen cannot tell you whether one is owed.'
+    },
+    {
+      name: 'Invoice',
+      state: inv ? (hasInvoicePdf ? 'present' : 'missing') : 'missing',
+      present: 'Invoice figures and the invoice PDF are both in the pack.',
+      missing: inv
+        ? 'Figures are drafted below, but no invoice PDF is in the pack yet.'
+        : 'No draft invoice on this pack. Nothing here can be approved without one.'
+    },
+    {
+      name: 'Photos',
+      state: photos.length ? 'present' : 'missing',
+      present: photos.length + ' photo' + (photos.length === 1 ? '' : 's') + ' captured on the docket.',
+      missing: 'No photos are attached to this pack.'
+    }
+  ];
+
+  var missingNames = items.filter(function(i) { return i.state === 'missing'; })
+    .map(function(i) { return i.name; });
+
+  var html = '';
+  html += '<div class="msr-sec"><h3>Pack completeness</h3><span class="msr-sec-note">what this pack actually carries</span></div>';
+  html += '<div class="msr-panel"><div class="msr-comp">';
+  items.forEach(function(i) {
+    var mark = i.state === 'present' ? '&#10003;' : (i.state === 'missing' ? '!' : '&ndash;');
+    html += '<div class="msr-comp-item ' + i.state + '">';
+    html += '<span class="msr-comp-mark" aria-hidden="true">' + mark + '</span>';
+    html += '<span><span class="msr-comp-name">' + escapeHtml(i.name) + '</span>';
+    html += '<span class="msr-comp-note">' + escapeHtml(i[i.state]) + '</span></span>';
+    html += '</div>';
+  });
+  html += '</div>';
+  if (missingNames.length) {
+    html += '<div class="msr-comp-foot short">Missing from this pack: <strong>' + escapeHtml(missingNames.join(', ')) + '</strong>. Read the rest of the pack before you decide whether that blocks the send.</div>';
+  } else {
+    html += '<div class="msr-comp-foot">Every document this screen can check for is in the pack.</div>';
+  }
+  html += '</div>';
   return html;
 }
 
@@ -827,6 +933,10 @@ function _msSesMapInvoice(ctx) {
 
 var _MS_SES_ROUTE_ORDER = { report: 0, photo: 1, invoice: 2 };
 var _MS_SES_ROUTE_LABELS = { report: 'Report email', photo: 'Photo email', invoice: 'Invoice email' };
+var _MS_SMALL_NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six'];
+function _msSmallNumberWord(n) {
+  return (_MS_SMALL_NUMBER_WORDS[n] != null) ? _MS_SMALL_NUMBER_WORDS[n] : String(n);
+}
 
 /**
  * Render the three exact email routes the release carries (report + photo +
@@ -842,32 +952,146 @@ function _msSesRenderRoutes(ctx) {
     var ob = (b && _MS_SES_ROUTE_ORDER[b.route_kind] != null) ? _MS_SES_ROUTE_ORDER[b.route_kind] : 9;
     return oa - ob;
   });
+  var byHash = _msSesArtifactsByHash(ctx);
   var html = '';
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Routes &mdash; the exact emails SEND IT releases</div>';
-  html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);">SEND IT sends <strong>all three routes at once</strong> (report + photos + invoice) to the exact recipients below.</div>';
+  html += '<div class="msr-sec"><h3>The outgoing email</h3><span class="msr-sec-note">the exact emails SEND IT releases</span></div>';
+  html += '<div class="msr-lede">SEND IT sends <strong>all ' + _msSmallNumberWord(routes.length) + ' routes at once</strong> (report + photos + invoice) to the exact recipients below, exactly as shown &mdash; nothing here is a summary.</div>';
   routes.forEach(function(r) {
     r = r || {};
     var label = _MS_SES_ROUTE_LABELS[r.route_kind] || String(r.route_kind || 'Route');
     var ready = r.ready === true;
     var recipients = Array.isArray(r.recipients) ? r.recipients.filter(Boolean) : [];
     var cc = Array.isArray(r.cc) ? r.cc.filter(Boolean) : [];
-    var attachments = Array.isArray(r.attachment_hashes) ? r.attachment_hashes.length : 0;
-    var bodyExcerpt = String(r.body || '').replace(/\s+/g, ' ').trim();
-    if (bodyExcerpt.length > 280) bodyExcerpt = bodyExcerpt.slice(0, 280) + '&#8230;';
-    html += '<div style="margin:8px 20px 4px;background:#fff;border:1px solid ' + (ready ? '#CFE6D6' : '#FECACA') + ';border-radius:8px;padding:12px 14px;font-size:13px;">';
-    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
-    html += '<b style="font-size:11px;color:var(--sw-mid);letter-spacing:0.4px;text-transform:uppercase;">' + escapeHtml(label) + '</b>';
-    html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + (ready ? '#27AE60' : '#B91C1C') + ';color:#fff;">' + (ready ? 'READY' : 'NOT READY') + '</span>';
+    var hashes = Array.isArray(r.attachment_hashes) ? r.attachment_hashes : [];
+
+    html += '<div class="msr-mail">';
+    html += '<div class="msr-mail-top">';
+    html += '<span class="msr-mail-name">' + escapeHtml(label) + '</span>';
+    html += '<span class="msr-chip" style="background:' + (ready ? 'var(--sw-sage)' : '#C9821B') + ';color:#fff;">' + (ready ? 'Ready' : 'Not ready') + '</span>';
     html += '</div>';
-    html += '<div style="margin-top:6px;"><strong>To:</strong> ' + (recipients.length ? escapeHtml(recipients.join(', ')) : '<span style="color:#B91C1C;font-weight:700;">no recipient</span>') + '</div>';
-    if (cc.length) html += '<div style="margin-top:2px;"><strong>Cc:</strong> ' + escapeHtml(cc.join(', ')) + '</div>';
-    html += '<div style="margin-top:2px;"><strong>Subject:</strong> ' + escapeHtml(r.subject || '') + '</div>';
-    if (bodyExcerpt) {
-      html += '<div style="margin-top:4px;color:var(--sw-text-sec);font-size:12px;line-height:1.45;">' + escapeHtml(bodyExcerpt) + '</div>';
+
+    html += '<div class="msr-mail-fields">';
+    html += '<div class="msr-mail-row"><span class="mk">To</span><span class="mv' + (recipients.length ? '' : ' bad') + '">'
+      + (recipients.length ? escapeHtml(recipients.join(', ')) : 'No recipient on this route')
+      + '</span></div>';
+    html += '<div class="msr-mail-row"><span class="mk">Cc</span><span class="mv' + (cc.length ? '' : ' none') + '">'
+      + (cc.length ? escapeHtml(cc.join(', ')) : 'Nobody')
+      + '</span></div>';
+    html += '<div class="msr-mail-row"><span class="mk">Subject</span><span class="mv' + (r.subject ? '' : ' none') + '">'
+      + (r.subject ? escapeHtml(r.subject) : 'No subject on this route')
+      + '</span></div>';
+    html += '</div>';
+
+    // RV-4: the body in full. An excerpt is not "the email exactly as it will
+    // send", and the old 280-char cut appended a pre-escaped ellipsis entity
+    // that then got escaped again and shipped as literal "&#8230;".
+    if (String(r.body || '').trim()) {
+      html += '<div class="msr-mail-body">' + escapeHtml(String(r.body)) + '</div>';
+    } else {
+      html += '<div class="msr-mail-body" style="color:var(--sw-mid);font-style:italic;">This route carries no body text.</div>';
     }
-    html += '<div style="margin-top:4px;color:var(--sw-text-sec);font-size:11px;">' + attachments + ' attachment' + (attachments === 1 ? '' : 's') + ' fixed in the release revision</div>';
+
+    // RV-4: attachments BY NAME. The route carries content hashes; the pack
+    // carries the artifacts. A hash with no artifact in the pack is named as
+    // unresolved rather than silently dropped from the count.
+    html += '<div class="msr-att">';
+    if (!hashes.length) {
+      html += '<span class="msr-att-item">No attachments on this route</span>';
+    } else {
+      hashes.forEach(function(h) {
+        var a = byHash[h];
+        if (a) {
+          html += '<span class="msr-att-item">&#128206; ' + escapeHtml(a.fileName) + '</span>';
+        } else {
+          html += '<span class="msr-att-item unresolved">&#9888; Attachment not in this pack (' + escapeHtml(String(h).slice(0, 18)) + '&#8230;)</span>';
+        }
+      });
+    }
+    html += '</div>';
+
+    html += _msSesRouteWhy(r, byHash);
     html += '</div>';
   });
+  return html;
+}
+
+/**
+ * Index the reviewable pack's artifacts by content hash, with the file name and
+ * role each one carries. This is the only join between a route's
+ * attachment_hashes and a human-readable attachment name.
+ */
+function _msSesArtifactsByHash(ctx) {
+  var byHash = {};
+  var artifacts = (ctx && ctx.pack && ctx.pack.artifacts) || [];
+  artifacts.forEach(function(a) {
+    if (!a || !a.content_hash) return;
+    byHash[a.content_hash] = {
+      fileName: String(a.object_key || '').split('/').pop() || 'Document',
+      role: a.role || null
+    };
+  });
+  return byHash;
+}
+
+// What each artifact role IS, in the captain's words. Used to explain why an
+// attachment is on a route. A role with no entry gets no invented sentence.
+var _MS_SES_ROLE_REASONS = {
+  supporting_report_pdf: 'the make-safe completion report this pack was assembled to deliver',
+  xero_invoice_pdf: 'the tax invoice for this job',
+  swms_artifact: 'the safe work method statement recorded for this job',
+  source_attachment: "the builder's own instruction, sent back so both sides hold the same document",
+  completion_photo: 'a site photo from the completion report',
+  sibling_photo_evidence: 'site photo evidence held against this job'
+};
+
+/**
+ * Blueprint RV-5: beside the email, why each recipient is on it and why each
+ * attachment is there, "derived from this job's own facts and never from a
+ * fixed template".
+ *
+ * So this renders ONLY what the pack records. A recipient reason is printed
+ * when the route carries one (recipient_reasons[].reason); otherwise the line
+ * says the pack records no reason for that address. An attachment reason comes
+ * from the resolved artifact's own role. Nothing here is inferred from the
+ * builder name, the suburb, or the route kind: a plausible sentence about who
+ * gets a client's paperwork is exactly the wrong thing to guess.
+ */
+function _msSesRouteWhy(r, byHash) {
+  var reasons = {};
+  (Array.isArray(r.recipient_reasons) ? r.recipient_reasons : []).forEach(function(rr) {
+    if (rr && rr.address) reasons[String(rr.address).toLowerCase()] = rr.reason || null;
+  });
+  var addresses = []
+    .concat(Array.isArray(r.recipients) ? r.recipients : [])
+    .concat(Array.isArray(r.cc) ? r.cc : [])
+    .filter(Boolean);
+
+  var lines = [];
+  addresses.forEach(function(addr) {
+    var why = reasons[String(addr).toLowerCase()];
+    if (why) {
+      lines.push('<li><strong>' + escapeHtml(addr) + '</strong> &mdash; ' + escapeHtml(why) + '</li>');
+    } else {
+      lines.push('<li><strong>' + escapeHtml(addr) + '</strong> &mdash; <span class="unrecorded">the pack records no reason for this address.</span></li>');
+    }
+  });
+  (Array.isArray(r.attachment_hashes) ? r.attachment_hashes : []).forEach(function(h) {
+    var a = byHash[h];
+    if (!a) return;
+    var why = a.role ? _MS_SES_ROLE_REASONS[a.role] : null;
+    if (why) {
+      lines.push('<li><strong>' + escapeHtml(a.fileName) + '</strong> &mdash; ' + escapeHtml(why) + '.</li>');
+    } else {
+      lines.push('<li><strong>' + escapeHtml(a.fileName) + '</strong> &mdash; <span class="unrecorded">the pack does not say why this file is on the route.</span></li>');
+    }
+  });
+  if (!lines.length) return '';
+
+  var html = '';
+  html += '<div class="msr-why">';
+  html += '<div class="msr-why-h">Why this, for this job</div>';
+  html += '<ul>' + lines.join('') + '</ul>';
+  html += '</div>';
   return html;
 }
 
@@ -892,19 +1116,19 @@ function _msSesRenderPhotos(ctx) {
   var inRoute = photos.filter(function(p) { return p.content_hash && routeHashes[p.content_hash]; });
   var evidence = photos.filter(function(p) { return !(p.content_hash && routeHashes[p.content_hash]); });
   var html = '';
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Photos &mdash; fixed in the release revision</div>';
-  html += '<div style="margin:0 20px 4px;font-size:12px;color:var(--sw-text-sec);">';
+  html += '<div class="msr-sec"><h3>Photos</h3><span class="msr-sec-note">fixed in the release revision</span></div>';
+  html += '<div class="msr-lede">';
   html += inRoute.length + ' photo' + (inRoute.length === 1 ? '' : 's') + ' in the photo email';
   if (evidence.length) html += ' &middot; ' + evidence.length + ' kept as evidence only (not sent)';
   html += '. The photo set is fixed by the SES release revision and cannot be changed from this screen &mdash; record feedback to request a revised pack.';
   html += '</div>';
-  html += '<div style="padding:0 20px;display:flex;flex-wrap:wrap;gap:10px;">';
+  html += '<div class="msr-photos">';
   inRoute.concat(evidence).forEach(function(p) {
     var sent = !!(p.content_hash && routeHashes[p.content_hash]);
-    html += '<div style="position:relative;width:120px;height:88px;border-radius:8px;overflow:hidden;outline:3px solid ' + (sent ? '#5E8B6E' : '#9CA3AF') + ';opacity:' + (sent ? '1' : '0.55') + ';flex-shrink:0;background:#5b6b73;" title="' + escapeAttr(sent ? 'In the photo email' : 'Evidence only — not sent') + '">';
-    html += '<img src="' + escapeAttr(p.url) + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
-    html += '<div style="position:absolute;top:5px;right:5px;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;background:' + (sent ? '#5E8B6E' : '#6B7280') + ';padding:0 4px;">' + (sent ? '&#10003;' : 'evidence') + '</div>';
-    html += '</div>';
+    html += '<figure class="msr-photo' + (sent ? '' : ' evidence') + '" title="' + escapeAttr(sent ? 'In the photo email' : 'Evidence only — not sent') + '">';
+    html += '<img src="' + escapeAttr(p.url) + '" alt="' + escapeAttr(p.label || 'Site photo') + '" loading="lazy">';
+    html += '<figcaption class="msr-photo-tag">' + (sent ? '&#10003;' : 'evidence') + '</figcaption>';
+    html += '</figure>';
   });
   html += '</div>';
   return html;
@@ -978,9 +1202,8 @@ function _msRenderDocStage(docTabs, idx) {
   if (t && t.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(t.received_at));
   if (t && t.created_at && t.created_at !== t.received_at) metaBits.push('Created ' + _msReportingFormatTimestamp(t.created_at));
   var metaHtml = metaBits.length
-    ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 8px;color:var(--sw-text-sec);font-size:11px;">'
-      + '<span style="font-weight:800;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.4px;">' + escapeHtml(t.tabLabel || 'Document') + '</span>'
-      + metaBits.map(function(m) { return '<span style="background:#fff;border:1px solid var(--sw-border);border-radius:999px;padding:3px 8px;">' + escapeHtml(m) + '</span>'; }).join('')
+    ? '<div class="msr-stage-meta"><span class="k">' + escapeHtml(t.tabLabel || 'Document') + '</span>'
+      + metaBits.map(function(m) { return '<span class="t">' + escapeHtml(m) + '</span>'; }).join('')
       + '</div>'
     : '';
   var inner;
@@ -988,19 +1211,16 @@ function _msRenderDocStage(docTabs, idx) {
     if (t && (t.kind === 'html' || t.raw_report)) {
       inner = _msRenderRawTradeReportDoc(t);
     } else {
-      inner = '<div style="color:#cdd8df;font-size:13px;">Document not available.</div>';
+      inner = '<div class="msr-stage-empty">Document not available.</div>';
     }
   } else if (t.kind === 'image') {
-    inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);">';
+    inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;">';
   } else if (t.kind === 'pdf') {
-    inner = '<iframe title="' + escapeAttr(t.tabLabel) + '" src="' + escapeAttr(t.url) + '" style="width:min(92%,720px);height:96%;border:none;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);background:#fff;"></iframe>';
+    inner = '<iframe title="' + escapeAttr(t.tabLabel) + '" src="' + escapeAttr(t.url) + '" style="width:min(92%,720px);height:96%;background:#fff;"></iframe>';
   } else {
-    inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
+    inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
-  return metaHtml + '<div style="background:#3a464d;border-radius:8px;height:clamp(680px,78vh,900px);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">'
-    + '<div style="position:absolute;top:8px;right:14px;font-size:11px;color:#cdd8df;background:rgba(0,0,0,.3);padding:2px 8px;border-radius:5px;">whole page</div>'
-    + inner
-    + '</div>';
+  return metaHtml + '<div class="msr-stage"><span class="msr-stage-tag">whole page</span>' + inner + '</div>';
 }
 
 function _msRenderRawTradeReportDoc(t) {
@@ -1176,45 +1396,41 @@ function _msRenderInvoiceReview(d) {
   var lines = Array.isArray(inv.lines) ? inv.lines : [];
   var flags = _msReportingFlaggedLineMap(d);
   var html = '';
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Invoice review</div>';
-  html += '<div style="margin:0 20px 4px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;font-size:12px;color:var(--sw-dark);">';
+  html += '<div class="msr-sec"><h3>Draft invoice</h3><span class="msr-sec-note">the real ledger draft, read-only here</span></div>';
+  html += '<div class="msr-panel">';
   if (inv.invoice_number || inv.status) {
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--sw-border);background:#F7FAFB;color:var(--sw-text-sec);">';
-    if (inv.invoice_number) html += '<span><strong>Invoice:</strong> ' + escapeHtml(inv.invoice_number) + '</span>';
-    if (inv.status) html += '<span><strong>Status:</strong> ' + escapeHtml(inv.status) + '</span>';
+    html += '<div class="msr-inv-head">';
+    if (inv.invoice_number) html += '<span><b>Invoice</b> <span class="msr-num">' + escapeHtml(inv.invoice_number) + '</span></span>';
+    if (inv.status) html += '<span><b>Status</b> ' + escapeHtml(inv.status) + '</span>';
     html += '</div>';
   }
   if (lines.length) {
-    html += '<div style="display:flex;flex-direction:column;">';
     lines.forEach(function(li, idx) {
       li = li || {};
       var flag = _msReportingLineFlag(flags, idx, li);
-      var bg = flag ? '#FFFBEB' : '#fff';
-      var bd = flag ? '#FCD34D' : 'var(--sw-border)';
       var desc = li.description || li.name || ('Line ' + (idx + 1));
       var qty = li.quantity != null ? Number(li.quantity) : null;
       var unit = li.unit_price != null ? Number(li.unit_price) : (li.unit_amount != null ? Number(li.unit_amount) : null);
       var total = li.line_total != null ? Number(li.line_total) : (li.amount != null ? Number(li.amount) : null);
-      html += '<div style="padding:10px 12px;border-bottom:1px solid ' + bd + ';background:' + bg + ';">';
-      html += '<div style="font-weight:700;">' + escapeHtml(desc) + '</div>';
+      html += '<div class="msr-inv-line' + (flag ? ' flagged' : '') + '">';
+      html += '<div class="msr-inv-desc">' + escapeHtml(desc) + '</div>';
       var bits = [];
       if (qty != null && isFinite(qty)) bits.push('Qty ' + qty);
       if (unit != null && isFinite(unit)) bits.push('Unit ' + _msFmtAud(unit));
       if (total != null && isFinite(total)) bits.push('Line ' + _msFmtAud(total));
-      if (bits.length) html += '<div style="margin-top:3px;color:var(--sw-text-sec);">' + escapeHtml(bits.join(' · ')) + '</div>';
+      if (bits.length) html += '<div class="msr-inv-figs msr-num">' + escapeHtml(bits.join(' · ')) + '</div>';
       if (flag) {
         var note = flag.note || flag.reason || flag.description || 'Check this line before sending.';
-        html += '<div style="margin-top:5px;color:#92400E;font-weight:700;">Pricing note: ' + escapeHtml(note) + '</div>';
+        html += '<div class="msr-inv-flag">&#9888; ' + escapeHtml(note) + '</div>';
       }
       html += '</div>';
     });
-    html += '</div>';
   } else if (inv.lines_unavailable) {
-    html += '<div style="padding:10px 12px;color:var(--sw-text-sec);">Invoice line detail is unavailable for this draft.</div>';
+    html += '<div class="msr-empty-note">Invoice line detail is unavailable for this draft.</div>';
   }
-  html += '<div style="display:flex;justify-content:flex-end;gap:18px;padding:10px 12px;background:#F7FAFB;font-weight:800;">';
-  if (inv.total_ex_gst != null) html += '<span>ex GST ' + escapeHtml(_msFmtAud(inv.total_ex_gst)) + '</span>';
-  if (inv.total_inc_gst != null) html += '<span>inc GST ' + escapeHtml(_msFmtAud(inv.total_inc_gst)) + '</span>';
+  html += '<div class="msr-inv-tot msr-num">';
+  if (inv.total_ex_gst != null) html += '<span><span class="lbl">ex GST</span>' + escapeHtml(_msFmtAud(inv.total_ex_gst)) + '</span>';
+  if (inv.total_inc_gst != null) html += '<span><span class="lbl">inc GST</span>' + escapeHtml(_msFmtAud(inv.total_inc_gst)) + '</span>';
   html += '</div>';
   html += '</div>';
   return html;
@@ -1232,23 +1448,23 @@ function _msRenderSourceEvidence(d) {
   });
   if (!docs.length) return '';
   var html = '';
-  html += '<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:var(--sw-mid);text-transform:uppercase;padding:16px 20px 6px;">Source evidence</div>';
-  html += '<div style="margin:0 20px 4px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;font-size:12px;">';
+  html += '<div class="msr-sec"><h3>Source evidence</h3><span class="msr-sec-note">what the pack was drafted from</span></div>';
+  html += '<div class="msr-panel"><div class="msr-ev">';
   docs.forEach(function(sd) {
     var label = sd.label || 'Source document';
     var metaBits = [];
     if (sd.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(sd.received_at));
     if (sd.created_at && sd.created_at !== sd.received_at) metaBits.push('Created ' + _msReportingFormatTimestamp(sd.created_at));
-    html += '<div style="display:flex;flex-direction:column;gap:2px;">';
+    html += '<div class="msr-ev-row">';
     if (sd.url) {
-      html += '<a href="' + escapeAttr(sd.url) + '" target="_blank" rel="noopener" data-source-url="' + escapeAttr(sd.url) + '" style="color:var(--sw-orange);font-weight:700;text-decoration:none;word-break:break-all;">' + escapeHtml(label) + ' ↗</a>';
+      html += '<a href="' + escapeAttr(sd.url) + '" target="_blank" rel="noopener" data-source-url="' + escapeAttr(sd.url) + '" class="msr-ev-link">' + escapeHtml(label) + ' ↗</a>';
     } else {
-      html += '<div style="color:var(--sw-dark);font-weight:800;">' + escapeHtml(label) + '</div>';
+      html += '<div class="msr-ev-name">' + escapeHtml(label) + '</div>';
     }
-    if (metaBits.length) html += '<div style="color:var(--sw-text-sec);font-size:11px;">' + escapeHtml(metaBits.join(' · ')) + '</div>';
+    if (metaBits.length) html += '<div class="msr-ev-meta">' + escapeHtml(metaBits.join(' · ')) + '</div>';
     html += '</div>';
   });
-  html += '</div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -1301,38 +1517,44 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
 
   // HOLD: the backend's blocker facts win — no approve/send action exists.
   if (cockpit.status === 'HOLD') {
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid #FECACA;background:#FEF2F2;">';
-    html += '<div style="font-size:13px;font-weight:800;color:#991B1B;">On hold &mdash; no approve/send action is available</div>';
-    html += '<div style="font-size:12px;color:#991B1B;margin-top:4px;">Resolve the blocker facts listed above; the controls appear here when the backend clears the pack.</div>';
+    html += '<div class="msr-banner stop" style="margin:0;">';
+    html += '<div class="msr-banner-title">On hold &mdash; no approve/send action is available</div>';
+    html += 'Resolve the blocker facts named above; the controls appear here when the backend clears the pack.';
     html += '</div>';
-    html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+    html += '<button type="button" class="msr-btn ghost" onclick="' + dismissAction + '">Hold for later</button>';
     return html;
   }
 
-  // The Docs Ready tick state, bound to the exact displayed pack hash.
-  if (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash) {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Docs Ready tick: <strong>not yet recorded</strong>. SEND IT first records your tick bound to the exact displayed pack hash <code style="font-size:10px;">' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code></div>';
+  // The Docs Ready tick state, bound to the exact displayed pack hash. This is
+  // the captain's per-job approval record (blueprint: "the approve control is
+  // your decision" / RV-10): a tick that dies the moment the pack's bytes
+  // change, never a running approve-all.
+  var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
+  html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
+  if (tickPending) {
+    html += '<span>&#9679;</span><span>Docs Ready tick: <b>not yet recorded</b>. SEND IT records your tick bound to the exact displayed pack hash <code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code> — any later change to this pack voids it.</span>';
   } else {
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);">Docs Ready tick: <strong>already recorded</strong> for the exact current pack.</div>';
+    html += '<span>&#10003;</span><span>Docs Ready tick: <b>already recorded</b> for the exact current pack.</span>';
   }
+  html += '</div>';
 
   if (approveInvoice.enabled) {
-    html += '<button id="msSesApproveInvoiceBtn" onclick="approveSesInvoice(\'' + safeId + '\')" style="width:100%;background:#B45309;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">APPROVE INVOICE</button>';
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">' + escapeHtml(approveInvoice.plan || 'Creates and authorises the real Xero invoice for this exact invoice revision.') + '</div>';
+    html += '<button type="button" id="msSesApproveInvoiceBtn" class="msr-btn primary" onclick="approveSesInvoice(\'' + safeId + '\')">APPROVE INVOICE</button>';
+    html += '<div class="msr-btn-note">' + escapeHtml(approveInvoice.plan || 'Creates and authorises the real Xero invoice for this exact invoice revision.') + '</div>';
   }
   if (sendIt.enabled) {
-    html += '<button id="msSesSendItBtn" onclick="sendSesRelease(\'' + safeId + '\')" style="width:100%;background:#27AE60;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">SEND IT</button>';
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">' + escapeHtml(sendIt.plan || 'Sends the approved routes for this exact release revision.') + ' Sends <strong>all three routes at once</strong> (report + photos + invoice). This is irreversible.</div>';
+    html += '<button type="button" id="msSesSendItBtn" class="msr-btn go" onclick="sendSesRelease(\'' + safeId + '\')">SEND IT</button>';
+    html += '<div class="msr-btn-note">' + escapeHtml(sendIt.plan || 'Sends the approved routes for this exact release revision.') + ' Sends <strong>all routes at once</strong>. This is irreversible.</div>';
   }
   if (!approveInvoice.enabled && !sendIt.enabled) {
-    html += '<div style="padding:12px 14px;border-radius:8px;border:1px solid var(--sw-border);background:#F7FAFB;">';
-    html += '<div style="font-size:13px;font-weight:800;color:var(--sw-dark);">No action enabled yet</div>';
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px;">The backend has not enabled APPROVE INVOICE or SEND IT for this pack'
+    html += '<div class="msr-banner" style="margin:0;">';
+    html += '<div class="msr-banner-title">No action enabled yet</div>';
+    html += 'The backend has not enabled APPROVE INVOICE or SEND IT for this pack'
       + (controls.captain_only ? ' (Captain authority is required for this pack)' : '')
-      + '. Review the documents and routes, record any feedback, and check back when the reporting routine advances the pack.</div>';
+      + '. Review the documents and routes, record any feedback, and check back when the reporting routine advances the pack.';
     html += '</div>';
   }
-  html += '<button onclick="' + dismissAction + '" style="background:#E5EEF3;color:#1F3A44;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
+  html += '<button type="button" class="msr-btn ghost" onclick="' + dismissAction + '">Hold for later</button>';
   return html;
 }
 

@@ -193,6 +193,29 @@ deliberately not consulted. Guard:
 census in `docs/evidence/ses-f2-workorder-viewer-identity-2026-08-02/`
 (`scripts/ses-f2-workorder-identity-census.js`).
 
+The Docs Ready "review & send" pane (`showMsReportingDetail` /
+`_msSesRenderDetail` in `modules/ops-makesafe-reporting-cockpit.js`, feedback
+composer in `modules/ops-makesafe-feedback-notes.js`) is built to the captain's
+blueprint at secureworks-wiki
+`coding/work/campaigns/makesafe-system/MAKESAFE-SYSTEM-BLUEPRINT.html`
+(acceptance criteria RV-1..RV-11). Its own design system lives in `ops.html`
+under `/* MAKE-SAFE DOCS READY REVIEW PANE */` (class prefix `.msr-`): pack
+completeness names missing documents by name rather than showing an empty
+frame (RV-1), the outgoing-email section renders the full body verbatim plus a
+per-recipient/per-attachment "why this, for this job" block sourced only from
+data the pack actually carries — never an invented template sentence (RV-4/5).
+A HOLD is rendered amber (a machine stop wanting a person), never red (reserved
+for an actually-failed read). Guard: the module's own
+`ops-makesafe-reporting-cockpit.smoke.mjs` (run with
+`node --experimental-vm-modules modules/ops-makesafe-reporting-cockpit.smoke.mjs`)
+encodes literal UI copy as behavioral contracts — expect to update its string
+assertions deliberately when this pane's wording changes, not to route around
+them. `scripts/ses-docs-ready-review-shot.js` + `tests/e2e/fixtures/ses-docs-ready-bertram.js`
+capture this pane offline (no network) from a fixture built off the live
+Bertram AJBR-70271 job (job identity/builder-routing facts only; no client
+name/phone/street) — the reusable pattern for any future before/after
+screenshot pair of a make-safe surface.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

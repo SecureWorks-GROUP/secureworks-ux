@@ -4800,7 +4800,6 @@
       <label class="form-label">Approval Type</label>
       <select class="form-input" id="councilType" onchange="updateCouncilDefaultSteps()">
         <option value="standard_council">Standard Council (Patio/Fencing)</option>
-        <option value="full_building_permit_da">Full Building Permit + DA</option>
         <option value="engineering_only">Engineering Only</option>
         <option value="cdc_only">CDC Only</option>
         <option value="custom">Custom</option>
@@ -19507,6 +19506,10 @@ var _councilStepPopup = null;
 // picker for a job with no submission yet — the submission itself is always seeded from
 // the DB template, and the popup re-renders off the server response straight after, so
 // this list is a label preview and never the source of truth for step data.
+//
+// Do not reword 'Development Approval'. jumpCouncilStep in ops-api matches that name
+// exactly to mark DA 'skipped' rather than 'complete' when a jump passes over it
+// untouched. Engineering comes before Development Approval; do not swap them.
 var COUNCIL_STANDARD_STEP_NAMES = [
   'Get House Plans',
   'Drafting',

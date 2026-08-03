@@ -56,7 +56,18 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 - **Client card**: name, phone (tap-to-call), address + Navigate button (Google Maps directions URL: `www.google.com/maps/dir/?api=1&destination=`)
 - **Assignment status buttons**: Confirm → On Site → Complete (with GPS check-in + haptic feedback)
 - **Live timer**: ticks every 30s when status is in_progress
-- **Crew section**: who else is assigned today
+- **Crew roster**: every allocated person is listed once (the detail feed may
+  repeat a person once per day); the designated lead carries a **LEAD
+  INSTALLER** badge and other people remain plain crew members. An explicit
+  `leadInstaller: null` is shown as "No lead installer set". If the detail
+  payload predates the lead contract, the crew still renders but makes no lead
+  claim and offers no lead control.
+- **Lead installer**: a dispatcher or manager of the job's vertical may set,
+  change, or clear the lead through `set_job_lead`; the server remains the
+  authority. This narrow action is also allowed while viewing another crew's
+  job read-only. Failed writes leave the roster truthful rather than applying
+  an optimistic badge. The shared roster renderer is used by standard detail
+  and the make-safe report surface.
 - **Work order**: structured scope items + special instructions + PDF link
 - **Materials / Purchase Orders**: PO cards with status badges, line items, delivery dates
   - Draft POs show lock icon: "PO not yet approved — do not purchase"
@@ -178,6 +189,13 @@ The make-safe experience is driven by a single canonical read model — the `mak
 - Visibility is not authority: when the crew on a job is somebody else, the detail view renders view-only (`// <foreign-job-readonly>` → `#jobViewOnlyBanner`) with no clock/accept actions and no note, photo, comms, crew-charge or work-order invoice controls, and `blockedForeignJobWrite` rejects such a write inside `api()` before it reaches the network or the offline retry queue. Make-safe detail keeps its own server-driven authority model and is untouched by this gate.
 
 ### Tests
+- `scripts/test-trade-crew-lead-core.js` locks the roster contract against the
+  shipped `trade.html`: day-row collapsing, explicit `is_lead` truth, the
+  distinct no-lead versus legacy-payload states, and the server-authority
+  mirror for the lead control. `tests/e2e/trade-crew-lead.spec.js` covers the
+  installer and managed-manager detail flows, refused writes, legacy payloads,
+  and full crew names on make-safe cards. The core check runs as part of
+  `npm run test:e2e`.
 - `scripts/test-makesafe-trade-v5.js` exercises the feed contract, column ordering, contact-action rendering across every surface, calendar modes, permission gating, and the duplicate/parity/broken-action failure gates. It runs in PR CI (`.github/workflows/pr-check.yml`).
 - It also runs a mocked auth-regression suite (against the extracted `// <trade-api-helper>` block) asserting that a feed **403**, a repeated **401**, and a transient failure never invoke `_forceLogout()`/`handleSessionExpiry()`, that a 403 does not refresh a valid JWT, that a 401 refreshes exactly once, and that `failureHTML` renders the matching access/auth/transient states.
 - `scripts/test-fencing-manager-visibility.js` guards the managed-vertical lead contract against the extracted `// <trade-visibility-core>`, `// <trade-calendar-source>` and `// <fencing-board-core>` blocks: the Everyone lens is granted by `managed_verticals` (not by role) and denied to an ordinary installer, caches split by identity / vertical / lens, the fencing board dedupes stale and duplicate open rows, excludes an explicitly foreign tenant row, filters before per-week dedupe for multi-week jobs, ingests backend-unscheduled rows, classifies synthetic-date pool rows as Unscheduled, and keeps unknown statuses visible in Attention with a board-wide job count. It also guards lifecycle cache invalidation, `// <trade-workorder-auth>` tenant/vertical rules, the fencing-only phone pager, and strict `trade-calendar.v1` validation. It runs in PR CI. The end-to-end counterpart is `tests/e2e/fencing-manager-visibility.spec.js` (see `README-tests.md`), including production-shaped multi-week, Unscheduled, and Accept/Clock On/Clock Off refresh coverage.
@@ -188,7 +206,8 @@ The make-safe experience is driven by a single canonical read model — the `mak
 |--------|--------|---------|
 | `my_jobs` | GET | Jobs assigned to authenticated user, grouped by date; `mode=all` returns the server-authorized set for a dispatcher or managed-vertical lead |
 | `trade_calendar` | GET | Field calendar rows for one vertical, contract `trade-calendar.v1`; params `from`, `to`, `mode=mine\|all`, `type=fencing` |
-| `trade_job_detail` | GET | Full job view: client, docs, media, notes, POs, crew, work order, report |
+| `trade_job_detail` | GET | Full job view: client, docs, media, notes, POs, crew, lead installer projection, work order, report |
+| `set_job_lead` | POST | Set, change, or clear the designated lead installer for a job (server-authorized dispatcher or job-vertical manager) |
 | `add_note` | POST | Add note to job timeline (via job_events) |
 | `upload_photo` | POST | Upload photo (base64 dataUrl) — supports po_id for receipts |
 | `get_upload_url` | POST | Get signed upload URL for direct storage upload |

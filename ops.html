@@ -729,6 +729,16 @@
     /* Dragging state */
     .cal-job-block.dragging { opacity: 0.5; transform: rotate(2deg); }
 
+    /* CP1 (dragv2): edge-resize handles — visible on hover, endpoints only */
+    .cal-resize-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; opacity: 0; }
+    .cal-resize-handle.left { left: 0; border-left: 2px solid var(--sw-orange); }
+    .cal-resize-handle.right { right: 0; border-right: 2px solid var(--sw-orange); }
+    .cal-job-block:hover .cal-resize-handle { opacity: 0.9; }
+    /* CP1 (dragv2): Schedule-view drag — same affordances as the Crew view */
+    .cal-schedule-bar:hover .cal-resize-handle { opacity: 0.9; }
+    .cal-schedule-bar.dragging { opacity: 0.5; }
+    .cal-schedule-cell.drag-over { outline: 2px solid var(--sw-orange); outline-offset: -2px; background: rgba(241,90,41,0.08); }
+
     /* Conflict / warning icons in cell */
     .cal-cell-warning {
       position: absolute; top: 1px; right: 1px; font-size: 11px; cursor: pointer;
@@ -4968,6 +4978,24 @@ if (window.__SW_CAP1B_GATE_UX_ENABLED) {
   console.info('[Cap 1B] gate UX enabled — display-only, read-only. Disable via ?cap1b=0 or clearing localStorage.sw_cap1b_enabled.');
 }
 
+// ── Calendar drag v2 flag (CP1 drag-to-reschedule — ops-dash-calendar-overhaul) ──
+// Enabled when ?dragv2=1 is in the URL OR localStorage.sw_cal_dragv2 === '1'.
+// Gates the NEW drag behaviour only: working-day (weekend-skip) duration on
+// drag, weekend-break rendering of multi-day bars, edge-resize handles, and the
+// client reschedule-SMS prompt after a drop. OFF (the default) = the calendar
+// drags exactly as before this slice.
+window.__SW_CAL_DRAGV2_ENABLED = (function () {
+  try {
+    var qs = (window.location.search || '').match(/[?&]dragv2=1\b/);
+    if (qs) return true;
+    var ls = window.localStorage && window.localStorage.getItem('sw_cal_dragv2');
+    return ls === '1';
+  } catch (e) { return false; }
+})();
+if (window.__SW_CAL_DRAGV2_ENABLED) {
+  console.info('[CP1] calendar drag v2 enabled — working-day drag/resize + reschedule prompt. Disable by clearing localStorage.sw_cal_dragv2.');
+}
+
 // Council modal alias — called from quick view
 function openCouncilModal(jobId) {
   if (typeof openCouncilStartModal === 'function') openCouncilStartModal(jobId);
@@ -5835,6 +5863,15 @@ function cleanCrewName(name) {
   if (!name) return name;
   var key = name.toLowerCase().replace(/\s/g, '');
   return CREW_NAME_MAP[key] || name;
+}
+
+// Match by user_id first (reliable), fallback to name matching
+function crewDisplayName(ev) {
+  if (ev.user_id) {
+    var m = _crewList.find(function(u) { return u.id === ev.user_id; });
+    if (m) return m.name;
+  }
+  return cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
 }
 
 async function loadCrewList() {
@@ -7198,7 +7235,9 @@ var CalOpsCore = (function () {
     var span = mode === '2w' ? 13 : 6;
     return { from: focusStr, to: addDaysStr(focusStr, span) };
   }
-  // U-O1: what a drag writes. Same installer + new date => a SILENT
+  // U-O1: what a drag writes when dragv2 is OFF (the default) — kept
+  // byte-identical while the flag exists; buildMovePayloadV2 below is the
+  // flagged CP1 path. Same installer + new date => a SILENT
   // update_assignment carrying the span shifted by the same delta as the start.
   // A DIFFERENT installer => a reassignment routed through the createAssignment
   // allocation path (delete old + create new, NO tentative) so the new installer
@@ -7261,11 +7300,109 @@ var CalOpsCore = (function () {
     if (!truncated) return '';
     return '<span class="cal-trunc-warn" title="The calendar feed is capped at 500 events; some are not shown. Switch to a shorter range to see everything.">⚠ View truncated at 500 events — narrow the window</span>';
   }
+  // ── CP1 working-day span math (weekend-skip; pure) ──
+  // Weekends are BREAKS by default: interior Sat/Sun in a span are never worked
+  // days. A weekend day counts only when deliberately chosen as an ENDPOINT —
+  // a drop onto Sat/Sun, or an edge dragged onto Sat/Sun.
+  function isWeekendStr(dateStr) {
+    var dow = new Date(dateStr + 'T00:00:00').getDay();
+    return dow === 0 || dow === 6;
+  }
+  // Lay `durationDays` worked days forward from startStr. Day 1 is startStr
+  // itself (a deliberate weekend drop counts); later days skip Sat/Sun.
+  // (Mon,5)->Fri · (Mon,6)->next Mon · (Fri,2)->Mon · (Sat,2)->Mon.
+  function layWorkingDays(startStr, durationDays) {
+    var n = Math.max(1, Math.round(Number(durationDays) || 1));
+    var cur = startStr;
+    for (var i = 1; i < n; i++) {
+      cur = addDaysStr(cur, 1);
+      while (isWeekendStr(cur)) cur = addDaysStr(cur, 1);
+    }
+    return cur;
+  }
+  // The dates in [startStr,endStr] that are actually worked/painted: weekdays
+  // always, Sat/Sun only as an explicit endpoint. A weekend-crossing job paints
+  // Mon–Fri, breaks Sat/Sun, resumes Monday — ONE logical job.
+  function paintedSpanDates(startStr, endStr) {
+    var out = [], d = startStr;
+    if (!endStr || endStr < startStr) endStr = startStr;
+    while (d <= endStr) {
+      if (!isWeekendStr(d) || d === startStr || d === endStr) out.push(d);
+      d = addDaysStr(d, 1);
+    }
+    return out;
+  }
+  function workingSpanDays(startStr, endStr) { return paintedSpanDates(startStr, endStr).length; }
+  // The span a V2 move lands on: drop day = new START, length preserved in
+  // WORKING days. Duration source: the RENDERED span when scheduled_end exists
+  // (a drag must preserve what's on screen — every legacy row still carries the
+  // unused duration_days default of 1); duration_days when there is no span to
+  // read. The ONLY derivation of a moved span — the availability warning and
+  // the write both go through here so they can never disagree.
+  function movedSpanV2(ev, newDate) {
+    var duration = ev.scheduled_end
+      ? workingSpanDays(ev.scheduled_date, ev.scheduled_end)
+      : (Number(ev.duration_days) > 0 ? Math.round(Number(ev.duration_days)) : 1);
+    return { start: newDate, end: layWorkingDays(newDate, duration), duration: duration };
+  }
+  // U-O1 upgraded for CP1 (dragv2): same reassign-vs-move split as
+  // buildMovePayload, but the span comes from movedSpanV2 above. Either way the
+  // write carries scheduled_end + duration_days, so from the first drag onward
+  // duration_days is real and round-trips.
+  function buildMovePayloadV2(ev, newCrew, newUserId, newDate) {
+    var span = movedSpanV2(ev, newDate);
+    var duration = span.duration;
+    var newEnd = span.end;
+    var oldUserId = ev.user_id || null;
+    var crewChanged = !!newUserId && String(newUserId) !== String(oldUserId);
+    if (crewChanged) {
+      var create = {
+        jobId: ev.job_id || null,
+        scheduledDate: newDate,
+        scheduledEnd: newEnd,
+        durationDays: duration,
+        startTime: ev.start_time || null,
+        endTime: ev.end_time || null,
+        assignmentType: ev.assignment_type || 'install',
+        crewName: newCrew,
+        userId: newUserId,
+        role: ev.role || 'lead_installer',
+        label: ev.label || null,
+        jobType: ev.job_type || null
+        // NO confirmationStatus: crew change stays an allocation act (G2).
+      };
+      return { mode: 'reassign', deleteId: ev.assignment_id, create: create };
+    }
+    return { mode: 'move', update: {
+      assignmentId: ev.assignment_id, crew_name: newCrew,
+      scheduled_date: newDate, scheduled_end: newEnd, duration_days: duration
+    } };
+  }
+  // CP1 resize: drag either edge onto a day; the other edge holds. The target
+  // is clamped so the span never inverts. duration_days is recomputed from the
+  // painted span, so endpoint weekends count (a Friday job pulled one day
+  // longer onto Monday = Fri + Mon = 2; pulled onto Saturday = Fri + Sat = 2).
+  function buildResizePayload(ev, edge, targetDate) {
+    var start = ev.scheduled_date;
+    var end = ev.scheduled_end || start;
+    var newStart = start, newEnd = end;
+    if (edge === 'start') newStart = targetDate > end ? end : targetDate;
+    else newEnd = targetDate < start ? start : targetDate;
+    return {
+      assignmentId: ev.assignment_id,
+      scheduled_date: newStart, scheduled_end: newEnd,
+      duration_days: workingSpanDays(newStart, newEnd)
+    };
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
     partitionCellEntries: partitionCellEntries, calCountLabel: calCountLabel,
-    truncationNotice: truncationNotice
+    truncationNotice: truncationNotice,
+    isWeekendStr: isWeekendStr, layWorkingDays: layWorkingDays,
+    paintedSpanDates: paintedSpanDates, workingSpanDays: workingSpanDays,
+    movedSpanV2: movedSpanV2, buildMovePayloadV2: buildMovePayloadV2,
+    buildResizePayload: buildResizePayload
   };
 })();
 // </calendar-ops-core>
@@ -7369,19 +7506,17 @@ function renderSwimlaneView(container, range) {
     if (aType === 'reminder' && !_calEventFilters.reminders) return;
     if (ev.job_id && !_calEventFilters.jobs) return;
     if (!ev.job_id && aType !== 'meeting' && aType !== 'reminder' && !_calEventFilters.jobs) return;
-    // Match by user_id first (reliable), fallback to name matching
-    var crew = 'Unassigned';
-    if (ev.user_id) {
-      var _match = _crewList.find(function(u) { return u.id === ev.user_id; });
-      crew = _match ? _match.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      crew = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var crew = crewDisplayName(ev);
     if (!crewMap[crew]) crewMap[crew] = { division: guessDivision(ev), events: {} };
     var startDate = ev.scheduled_date;
     var endDate = ev.scheduled_end || ev.scheduled_date;
+    // CP1 (dragv2): interior Sat/Sun are weekend BREAKS — a weekend-crossing
+    // bar paints Mon–Fri, skips the weekend, resumes Monday as one logical
+    // job. Weekend days still paint when deliberately chosen as an endpoint.
+    var painted = window.__SW_CAL_DRAGV2_ENABLED ? CalOpsCore.paintedSpanDates(startDate, endDate) : null;
     dates.forEach(function(dateStr) {
       if (dateStr >= startDate && dateStr <= endDate) {
+        if (painted && painted.indexOf(dateStr) === -1) return; // weekend break day
         if (!crewMap[crew].events[dateStr]) crewMap[crew].events[dateStr] = [];
         var pos = 'multi-single';
         if (startDate !== endDate) {
@@ -7636,6 +7771,15 @@ function renderSwimlaneView(container, range) {
         html += ' title="' + cardTitle + '"';
         html += '>';
 
+        // CP1 (dragv2): edge-resize handles on the span's endpoint segments —
+        // drag a handle onto a day cell to extend/shorten (weekend-skip math
+        // in CalOpsCore.buildResizePayload).
+        if (window.__SW_CAL_DRAGV2_ENABLED && isDraggable) {
+          var rsStart = ev.scheduled_date, rsEnd = ev.scheduled_end || ev.scheduled_date;
+          if (dateStr === rsStart) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleResizeDragStart(event,\'' + ev.assignment_id + '\',\'start\')"></span>';
+          if (dateStr === rsEnd) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleResizeDragStart(event,\'' + ev.assignment_id + '\',\'end\')"></span>';
+        }
+
         if (aType === 'meeting') {
           if (ev.start_time) html += '<span style="font-weight:700;font-size:9px;font-family:var(--sw-font-num);margin-right:3px;">' + ev.start_time.slice(0,5) + '</span>';
           html += escapeHtml(ev.label || ev.client_name || 'Meeting');
@@ -7854,13 +7998,7 @@ function renderScheduleView(container, range) {
       // Group job-less entries by label+date so multiple crew appear on one bar
       var aid = 'lbl_' + (ev.label || 'internal') + '_' + ev.scheduled_date;
       if (!labelMap[aid]) {
-        var crewName = 'Unassigned';
-        if (ev.user_id) {
-          var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-          crewName = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-        } else {
-          crewName = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-        }
+        var crewName = crewDisplayName(ev);
         var crew = {};
         if (crewName !== 'Unassigned') crew[crewName] = true;
         labelMap[aid] = {
@@ -7879,13 +8017,7 @@ function renderScheduleView(container, range) {
         if (ev.scheduled_date < labelMap[aid].start) labelMap[aid].start = ev.scheduled_date;
         var evEnd2 = spanEnd(ev);
         if (evEnd2 > labelMap[aid].end) labelMap[aid].end = evEnd2;
-        var crewName2 = 'Unassigned';
-        if (ev.user_id) {
-          var m2 = _crewList.find(function(u) { return u.id === ev.user_id; });
-          crewName2 = m2 ? m2.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-        } else {
-          crewName2 = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-        }
+        var crewName2 = crewDisplayName(ev);
         if (crewName2 !== 'Unassigned') labelMap[aid].crew[crewName2] = true;
       }
       return;
@@ -7924,21 +8056,25 @@ function renderScheduleView(container, range) {
     // Track actual assignment dates (each date the crew is on site)
     var evStart = ev.scheduled_date;
     var evEndDate = spanEnd(ev);
-    var d = new Date(evStart + 'T00:00:00');
-    var dEnd = new Date(evEndDate + 'T00:00:00');
-    while (d <= dEnd) { jobMap[jid].activeDates[localDateStr(d)] = true; d.setDate(d.getDate() + 1); }
+    if (window.__SW_CAL_DRAGV2_ENABLED) {
+      // CP1 (dragv2): interior Sat/Sun are weekend BREAKS, same as the Crew
+      // view — the existing contiguous-run splitter below then renders a
+      // weekend-crossing job as broken segments (Fri | Mon) of ONE logical
+      // job. Weekend days still count as deliberately chosen endpoints.
+      CalOpsCore.paintedSpanDates(evStart, evEndDate).forEach(function(pds) {
+        jobMap[jid].activeDates[pds] = true;
+      });
+    } else {
+      var d = new Date(evStart + 'T00:00:00');
+      var dEnd = new Date(evEndDate + 'T00:00:00');
+      while (d <= dEnd) { jobMap[jid].activeDates[localDateStr(d)] = true; d.setDate(d.getDate() + 1); }
+    }
     // Expand overall span
     if (ev.scheduled_date < jobMap[jid].start) jobMap[jid].start = ev.scheduled_date;
     if (evEndDate > jobMap[jid].end) jobMap[jid].end = evEndDate;
     if (!jobMap[jid].assignmentId && ev.assignment_id) jobMap[jid].assignmentId = ev.assignment_id;
     // Collect crew
-    var crewName = 'Unassigned';
-    if (ev.user_id) {
-      var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-      crewName = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      crewName = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var crewName = crewDisplayName(ev);
     if (crewName !== 'Unassigned') jobMap[jid].crew[crewName] = true;
   });
 
@@ -8073,6 +8209,15 @@ function renderScheduleView(container, range) {
       if (isHoliday) cellClass += ' holiday-col';
 
       html += '<div class="' + cellClass + '" style="min-height:' + cellMinHeight + 'px;"';
+      // CP1 (dragv2): Schedule-view day cells are drop targets — bar moves,
+      // edge resizes and unscheduled-sidebar drops all land on a DAY here
+      // (this view has no crew rows; a drop never reassigns).
+      if (window.__SW_CAL_DRAGV2_ENABLED) {
+        html += ' data-date="' + ds + '"';
+        html += ' ondragover="event.preventDefault();this.classList.add(\'drag-over\')"';
+        html += ' ondragleave="this.classList.remove(\'drag-over\')"';
+        html += ' ondrop="handleSchedDrop(event)"';
+      }
       html += ' onclick="openAssignmentModal(null,\'' + ds + '\')">';
       html += '<span class="cal-schedule-day-num">' + dd.getDate() + '</span>';
       if (isHoliday) html += '<span class="cal-schedule-holiday-badge">' + escapeHtml(holidayMap[ds]) + '</span>';
@@ -8113,6 +8258,12 @@ function renderScheduleView(container, range) {
         html += ' style="position:absolute;top:' + topPx + 'px;left:' + leftPct + '%;width:' + widthPct + '%;height:' + barHeight + 'px;' + lblStyle + '"';
         html += ' data-assignment-id="' + job.assignmentId + '"';
         html += ' onclick="event.stopPropagation();openCalJobPopup(event,\'' + job.assignmentId + '\')"';
+        // CP1 (dragv2): bars float above the day cells (separate overlay layer),
+        // so a drop over a bar must fall through to the day beneath it.
+        if (window.__SW_CAL_DRAGV2_ENABLED) {
+          html += ' ondragover="event.preventDefault()"';
+          html += ' ondrop="handleSchedDrop(event)"';
+        }
         html += '>';
         html += '<span class="bar-dot" style="background:' + (job.job_type ? '' : '#9CA3AF') + ';"></span>';
         if (job.start_time) html += '<span style="font-weight:700;font-size:8px;margin-right:2px;">' + job.start_time.slice(0,5) + '</span>';
@@ -8140,7 +8291,39 @@ function renderScheduleView(container, range) {
         html += ' onclick="event.stopPropagation();openCalJobPopup(event,\'' + (job.assignmentId || '') + '\')"';
         html += ' onmouseenter="showScheduleTooltip(event,\'' + realJobId + '\')"';
         html += ' onmouseleave="hideScheduleTooltip()"';
+        // CP1 (dragv2): Schedule-view drag-to-reschedule — the bar drags as one
+        // job segment; the drop day becomes its new START (crew never changes
+        // from this view). Confirmed bars are locked, same as the Crew view.
+        if (window.__SW_CAL_DRAGV2_ENABLED) {
+          if (confClass !== 'confirmed') {
+            html += ' draggable="true"';
+            html += ' ondragstart="handleSchedBarDragStart(event,\'' + realJobId + '\',\'' + job.start + '\',\'' + job.end + '\')"';
+          } else {
+            html += ' draggable="true"';
+            html += ' ondragstart="event.preventDefault();showToast(\'Confirmed — use Reschedule in popup\',\'warning\');return false;"';
+          }
+          html += ' ondragover="event.preventDefault()"';
+          html += ' ondrop="handleSchedDrop(event)"';
+        }
         html += '>';
+
+        // CP1 (dragv2): edge-resize handles — only when the bar maps to exactly
+        // ONE assignment (a multi-crew bar has no single edge to resize) and
+        // only on TRUE endpoints (not week-clipped continuations).
+        if (window.__SW_CAL_DRAGV2_ENABLED && confClass !== 'confirmed') {
+          var barEvs = _calEvents.filter(function(e) {
+            if (e.job_id !== realJobId) return false;
+            var t = e.assignment_type || 'install';
+            if (t === 'meeting' || t === 'reminder') return false;
+            var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
+            return !(en < job.start || s > job.end);
+          });
+          if (barEvs.length === 1) {
+            var rsEv = barEvs[0];
+            if (barStart === rsEv.scheduled_date) html += '<span class="cal-resize-handle left" draggable="true" title="Drag to change the start day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'start\')"></span>';
+            if (barEnd === (rsEv.scheduled_end || rsEv.scheduled_date)) html += '<span class="cal-resize-handle right" draggable="true" title="Drag to change the end day" ondragstart="handleResizeDragStart(event,\'' + rsEv.assignment_id + '\',\'end\')"></span>';
+          }
+        }
 
         // Readiness dot
         if (readiness) {
@@ -8197,13 +8380,7 @@ function showScheduleTooltip(event, jobId) {
   var crewSet = {};
   _calEvents.forEach(function(ev) {
     if (ev.job_id !== jobId) return;
-    var cn = 'Unassigned';
-    if (ev.user_id) {
-      var m = _crewList.find(function(u) { return u.id === ev.user_id; });
-      cn = m ? m.name : (cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned');
-    } else {
-      cn = cleanCrewName(ev.crew_name || ev.assigned_to) || 'Unassigned';
-    }
+    var cn = crewDisplayName(ev);
     if (cn !== 'Unassigned') crewSet[cn] = true;
   });
   var crewNames = Object.keys(crewSet);
@@ -8327,6 +8504,9 @@ var _calDragData = null;
 function handleBlockDragStart(event, assignmentId) {
   _calDragData = { type: 'assignment', assignmentId: assignmentId };
   event.dataTransfer.effectAllowed = 'move';
+  // Firefox refuses to start a drag with an empty dataTransfer; Chrome doesn't
+  // care. The payload itself still travels via _calDragData.
+  try { event.dataTransfer.setData('text/plain', assignmentId); } catch (e) {}
   event.target.classList.add('dragging');
   setTimeout(function() { event.target.classList.remove('dragging'); }, 0);
 }
@@ -8334,8 +8514,133 @@ function handleBlockDragStart(event, assignmentId) {
 function handleUnschedDragStart(event, jobId) {
   _calDragData = { type: 'unsched', jobId: jobId };
   event.dataTransfer.effectAllowed = 'copy';
+  try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
   event.target.classList.add('dragging');
   setTimeout(function() { event.target.classList.remove('dragging'); }, 0);
+}
+
+// CP1 (dragv2): an edge-handle drag must not start the block's own move-drag.
+function handleResizeDragStart(event, assignmentId, edge) {
+  event.stopPropagation();
+  _calDragData = { type: 'resize', assignmentId: assignmentId, edge: edge };
+  event.dataTransfer.effectAllowed = 'move';
+  try { event.dataTransfer.setData('text/plain', assignmentId); } catch (e) {}
+}
+
+// CP1 (dragv2): Schedule view — the whole bar (one contiguous job segment)
+// drags as a unit. Crew is never changed from this view.
+function handleSchedBarDragStart(event, jobId, segStart, segEnd) {
+  event.stopPropagation();
+  _calDragData = { type: 'sched-job', jobId: jobId, segStart: segStart, segEnd: segEnd };
+  event.dataTransfer.effectAllowed = 'move';
+  try { event.dataTransfer.setData('text/plain', jobId); } catch (e) {}
+  event.target.classList.add('dragging');
+  setTimeout(function() { event.target.classList.remove('dragging'); }, 0);
+}
+
+// CP1 (dragv2): Schedule-view drop resolver. Bars float on an overlay above
+// the day cells, so the drop target may be a bar, a resize handle, or the cell
+// itself — resolve to the day cell under the pointer either way.
+function handleSchedDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  var cell = event.target.closest ? event.target.closest('.cal-schedule-cell') : null;
+  if (!cell && document.elementsFromPoint) {
+    var stack = document.elementsFromPoint(event.clientX, event.clientY);
+    for (var i = 0; i < stack.length; i++) {
+      if (stack[i].classList && stack[i].classList.contains('cal-schedule-cell')) { cell = stack[i]; break; }
+    }
+  }
+  document.querySelectorAll('.cal-schedule-cell.drag-over').forEach(function(c) { c.classList.remove('drag-over'); });
+  var date = cell ? cell.getAttribute('data-date') : null;
+  var dd = _calDragData;
+  _calDragData = null;
+  if (!dd || !date) return;
+  if (dd.type === 'unsched') {
+    openScheduleModal(dd.jobId, '', date);
+  } else if (dd.type === 'resize') {
+    // Same rule as the Crew view: only the DAY matters, a resize never reassigns.
+    resizeAssignment(dd.assignmentId, dd.edge, date);
+  } else if (dd.type === 'sched-job') {
+    moveSchedSegment(dd.jobId, dd.segStart, dd.segEnd, date);
+  }
+}
+
+function crewDayClash(crew, dateStr) {
+  var avail = _calAvailability[crew + '_' + dateStr];
+  return (avail && (avail.status === 'unavailable' || avail.status === 'leave')) ? avail : null;
+}
+
+// Warn if the target day is unavailable/leave for the crew; otherwise proceed.
+function confirmIfCrewUnavailable(crew, dateStr, proceed) {
+  var avail = crewDayClash(crew, dateStr);
+  if (!avail) { proceed(); return; }
+  showConfirmModal(
+    'Crew Unavailable',
+    escapeHtml(crew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(dateStr) + '. Schedule anyway?',
+    'Schedule Anyway',
+    proceed
+  );
+}
+
+// CP1 (dragv2): Schedule-view bar move. The drop day is the segment's new
+// START. A single-assignment segment routes through moveAssignment with its
+// OWN crew — identical guards to the Crew view (confirmed lock, availability
+// warning, reschedule-SMS offer). A multi-crew segment moves every assignment
+// under the bar, each keeping its working-day offset and duration, with one
+// SMS offer for the job.
+async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  var evs = _calEvents.filter(function(e) {
+    if (e.job_id !== jobId) return false;
+    var t = e.assignment_type || 'install';
+    if (t === 'meeting' || t === 'reminder') return false;
+    var s = e.scheduled_date, en = e.scheduled_end || e.scheduled_date;
+    return !(en < segStart || s > segEnd);
+  });
+  if (!evs.length) return;
+  if (evs.some(function(e) { return e.confirmation_status === 'confirmed'; })) {
+    showToast('Confirmed — use Reschedule in the job popup', 'warning');
+    return;
+  }
+  if (evs.length === 1) {
+    // Pin the event's own user_id so this path can NEVER resolve a different
+    // person by display name and turn the move into a reassign.
+    moveAssignment(evs[0].assignment_id, crewDisplayName(evs[0]), newDate, { pinnedUserId: evs[0].user_id || null });
+    return;
+  }
+  evs.sort(function(a, b) { return a.scheduled_date.localeCompare(b.scheduled_date); });
+  var oldStart = evs[0].scheduled_date;
+  if (newDate === oldStart) return;
+  // Build every per-assignment plan up front so the availability check and the
+  // writes see the same spans.
+  var plans = [];
+  for (var i = 0; i < evs.length; i++) {
+    var ev = evs[i];
+    // Keep each assignment's working-day offset within the dragged bar.
+    var offset = CalOpsCore.workingSpanDays(oldStart, ev.scheduled_date);
+    var evStart = CalOpsCore.layWorkingDays(newDate, offset);
+    var plan = CalOpsCore.buildMovePayloadV2(ev, crewDisplayName(ev), ev.user_id || null, evStart);
+    if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
+    plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
+  }
+  async function applyMoves() {
+    try {
+      for (var pi = 0; pi < plans.length; pi++) {
+        await opsPost('update_assignment', plans[pi].plan.update);
+      }
+      showToast('Rescheduled', 'success');
+      maybeOfferRescheduleSms(evs[0], newDate);
+      loadCalendar();
+    } catch (e) { showToast('Error: ' + e.message, 'warning'); loadCalendar(); }
+  }
+  // ONE combined availability check across all affected crew over their moved
+  // working-day spans — a single confirm, never one modal per crew member.
+  var clashes = [];
+  plans.forEach(function(p) {
+    clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
+  });
+  confirmClashesOrProceed(clashes, applyMoves);
 }
 
 function handleCalDrop(event, cell) {
@@ -8351,8 +8656,70 @@ function handleCalDrop(event, cell) {
   } else if (_calDragData.type === 'assignment') {
     // Move existing assignment
     moveAssignment(_calDragData.assignmentId, crew, date);
+  } else if (_calDragData.type === 'resize') {
+    // CP1 (dragv2): edge resize — only the DAY of the drop cell matters; the
+    // row (crew) is ignored, a resize never reassigns.
+    resizeAssignment(_calDragData.assignmentId, _calDragData.edge, date);
   }
   _calDragData = null;
+}
+
+// CP1 (dragv2): drag an edge onto a day — the other edge holds. Weekends count
+// only when they are the chosen endpoint (deliberate). Round-trips through
+// update_assignment carrying scheduled_date / scheduled_end / duration_days.
+async function resizeAssignment(assignmentId, edge, targetDate) {
+  var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
+  if (!ev) return;
+  if (ev.confirmation_status === 'confirmed') {
+    showToast('Confirmed — use Reschedule in the job popup', 'warning');
+    return;
+  }
+  // Warn if the dropped edge lands on an unavailable/leave day — a resize
+  // never changes crew, so the event's own crew keys the availability lookup.
+  confirmIfCrewUnavailable(crewDisplayName(ev), targetDate, function() { doResizeAssignment(ev, edge, targetDate); });
+}
+
+async function doResizeAssignment(ev, edge, targetDate) {
+  var payload = CalOpsCore.buildResizePayload(ev, edge, targetDate);
+  // A clamped or no-change edge drop leaves the span as-is — skip the write.
+  if (payload.scheduled_date === ev.scheduled_date &&
+      payload.scheduled_end === (ev.scheduled_end || ev.scheduled_date)) return;
+  try {
+    await opsPost('update_assignment', payload);
+    showToast('Duration updated', 'success');
+    // Only a changed START day is a reschedule the client would care about —
+    // an end-day extension doesn't move their arrival date.
+    if (payload.scheduled_date !== ev.scheduled_date) {
+      maybeOfferRescheduleSms(ev, payload.scheduled_date);
+    }
+    loadCalendar();
+  } catch (e) { showToast('Error: ' + e.message, 'warning'); }
+}
+
+// CP1 (dragv2): after a drag/resize that changed the job's start day, ask
+// before texting the client. The install_rescheduled SMS fires ONLY from an
+// explicit Yes here — never automatically. Dedup server-side is per (job, new
+// date), so a double-tap is swallowed but a later re-reschedule still sends.
+function maybeOfferRescheduleSms(ev, newDate) {
+  if (!window.__SW_CAL_DRAGV2_ENABLED) return;
+  if (!ev || !ev.job_id) return; // internal events have no client
+  var clientName = (ev.client_name || '').trim() || 'the client';
+  showConfirmModal(
+    'Send reschedule update?',
+    'Do you want to send <strong>' + escapeHtml(clientName) + '</strong> a reschedule update?' +
+      '<br><span style="font-size:11px;color:var(--sw-text-sec);">SMS: install rescheduled to ' + fmtDate(newDate) + '</span>',
+    'Send SMS',
+    function() {
+      opsPost('send_client_update', {
+        job_id: ev.job_id,
+        comms_trigger: 'install_rescheduled',
+        template_vars: { new_date: newDate }
+      }).then(function(r) {
+        if (r && r.sent) showToast('Reschedule SMS sent', 'success');
+        else showToast('SMS not sent' + (r && r.reason ? ': ' + r.reason : ''), 'warning');
+      }).catch(function(e) { showToast('SMS failed: ' + e.message, 'warning'); });
+    }
+  );
 }
 
 function handleCellClick(date, crew, userId) {
@@ -8371,11 +8738,23 @@ function openScheduleModal(jobId, crew, date) {
   if (!job) return;
   var modal = document.getElementById('calSchedModal');
   var backdrop = document.getElementById('calSchedBackdrop');
+  function crewOptions() {
+    var opts = '<option value="">Select crew…</option>';
+    _crewList.forEach(function(u) {
+      opts += '<option value="' + u.id + '"' + (u.name === crew ? ' selected' : '') + '>' + escapeHtml(u.name) + '</option>';
+    });
+    return opts;
+  }
   modal.innerHTML =
     '<div style="font-size:14px;font-weight:700;margin-bottom:12px;">Schedule Job</div>' +
     '<div style="font-size:12px;margin-bottom:6px;"><strong>' + escapeHtml(job.client_name || 'Unknown') + '</strong> — ' + escapeHtml(job.site_suburb || '') + '</div>' +
     '<div style="font-size:12px;margin-bottom:12px;color:var(--sw-text-sec);">' + (job.job_number || '') + ' · ' + typeBadgeLabel(job.type) + '</div>' +
-    '<div class="form-group"><label class="form-label">Crew</label><input type="text" class="form-input" id="schedCrew" value="' + escapeHtml(crew || '') + '"></div>' +
+    // CP1 fold-forward (real-crew fix): a free-typed crew name creates a row
+    // with user_id NULL — invisible to every installer in the Trade App. The
+    // crew is now picked from the real user list; the backend rejects
+    // name-only installs outright.
+    '<div class="form-group"><label class="form-label">Crew</label><select class="form-input" id="schedCrew">' +
+    crewOptions() + '</select></div>' +
     '<div class="form-group"><label class="form-label">Start Date</label><input type="date" class="form-input" id="schedDate" value="' + date + '"></div>' +
     '<div class="form-group"><label class="form-label">Duration (days)</label><input type="number" class="form-input" id="schedDuration" value="1" min="1" max="30"></div>' +
     '<div style="display:flex;gap:8px;margin-top:16px;">' +
@@ -8384,6 +8763,16 @@ function openScheduleModal(jobId, crew, date) {
     '</div>';
   modal.classList.add('open');
   backdrop.classList.add('open');
+  // The boot-time crew fetch can fail or still be in flight; without options
+  // this select is a dead end (a real userId is REQUIRED to create).
+  if (!_crewList.length) {
+    var crewSel = document.getElementById('schedCrew');
+    loadCrewList().then(function() {
+      if (document.getElementById('schedCrew') !== crewSel) return;
+      if (_crewList.length) { crewSel.innerHTML = crewOptions(); return; }
+      if (modal.classList.contains('open')) showToast('Crew list unavailable — close and reopen to retry', 'warning');
+    });
+  }
 }
 
 function closeScheduleModal() {
@@ -8392,25 +8781,42 @@ function closeScheduleModal() {
 }
 
 async function submitScheduleFromModal(jobId) {
-  var crew = document.getElementById('schedCrew').value;
+  var crewSel = document.getElementById('schedCrew');
+  var crewUserId = crewSel.value || null;
+  var crew = crewUserId ? crewSel.options[crewSel.selectedIndex].text : '';
   var date = document.getElementById('schedDate').value;
   var dur = parseInt(document.getElementById('schedDuration').value) || 1;
 
-  if (!crew || !date) { showToast('Crew and date required', 'warning'); return; }
+  // CP1 fold-forward (real-crew fix): user_id is required so the assignment is
+  // actually visible in the Trade App's my-jobs filter.
+  if (!crewUserId) { showToast('Pick a real crew member — name-only assignments never reach the Trade App', 'warning'); return; }
+  if (!date) { showToast('Date required', 'warning'); return; }
 
-  var endDate = new Date(date + 'T00:00:00');
-  endDate.setDate(endDate.getDate() + dur - 1);
-  var endStr = endDate.toISOString().slice(0, 10);
+  // CP1 (dragv2): duration laid in WORKING days (weekend-skip). Flag off keeps
+  // calendar-day spans, but in LOCAL time (Captain ruling cp1-askuser-2):
+  // toISOString() converted local midnight to UTC, which in Perth (UTC+8)
+  // rolled the end date back one day — a 1-day create wrote scheduled_end the
+  // day BEFORE scheduled_date (the inverted spans the Crew view silently drops).
+  var endStr;
+  if (window.__SW_CAL_DRAGV2_ENABLED) {
+    endStr = CalOpsCore.layWorkingDays(date, dur);
+  } else {
+    var endDate = new Date(date + 'T00:00:00');
+    endDate.setDate(endDate.getDate() + dur - 1);
+    endStr = localDateStr(endDate);
+  }
 
   try {
     await opsPost('create_assignment', {
-      job_id: jobId,
-      crew_name: crew,
-      scheduled_date: date,
-      scheduled_end: endStr,
+      jobId: jobId,
+      userId: crewUserId,
+      crewName: crew,
+      scheduledDate: date,
+      scheduledEnd: endStr,
+      durationDays: dur,
       role: 'lead_installer',
-      assignment_type: 'install',
-      confirmation_status: 'tentative', // G3: calendar planning entry stays silent
+      assignmentType: 'install',
+      confirmationStatus: 'tentative', // G3: calendar planning entry stays silent
     });
     closeScheduleModal();
     showToast('Assignment created (tentative)', 'success');
@@ -8420,7 +8826,12 @@ async function submitScheduleFromModal(jobId) {
   }
 }
 
-async function moveAssignment(assignmentId, newCrew, newDate) {
+// CP1 (dragv2): `opts.pinnedUserId` pins the move to a known user_id so the
+// Schedule view can never re-resolve crew by display NAME — a name lookup can
+// land on a different person (deactivated user, duplicate display names) and
+// silently turn a move into a reassign. Crew-view callers omit opts and keep
+// the name-resolution that powers cross-row reassignment.
+async function moveAssignment(assignmentId, newCrew, newDate, opts) {
   // Find the assignment in events
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) return;
@@ -8431,23 +8842,43 @@ async function moveAssignment(assignmentId, newCrew, newDate) {
     return;
   }
 
-  // Warn if target cell is unavailable/leave
-  var availKey = newCrew + '_' + newDate;
-  var avail = _calAvailability[availKey];
-  if (avail && (avail.status === 'unavailable' || avail.status === 'leave')) {
-    showConfirmModal(
-      'Crew Unavailable',
-      escapeHtml(newCrew) + ' is marked <strong>' + avail.status + '</strong> on ' + fmtDate(newDate) + '. Schedule anyway?',
-      'Schedule Anyway',
-      function() { doMoveAssignment(assignmentId, newCrew, newDate); }
-    );
+  // Warn if target cell is unavailable/leave. With dragv2 on, the check runs
+  // at the same depth as multi-crew bar moves (Captain ruling cp1-askuser-2):
+  // EVERY painted day of the moved working-day span, one combined confirm,
+  // identical wording. Flag off keeps the original drop-day-only check.
+  if (window.__SW_CAL_DRAGV2_ENABLED) {
+    var span = CalOpsCore.movedSpanV2(ev, newDate);
+    var clashes = collectSpanClashes(newCrew, span.start, span.end);
+    confirmClashesOrProceed(clashes, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
     return;
   }
-
-  doMoveAssignment(assignmentId, newCrew, newDate);
+  confirmIfCrewUnavailable(newCrew, newDate, function() { doMoveAssignment(assignmentId, newCrew, newDate, opts); });
 }
 
-async function doMoveAssignment(assignmentId, newCrew, newDate) {
+// CP1 (dragv2): every unavailable/leave day for `crew` across the painted
+// working-day span [startStr..endStr], formatted for the combined confirm.
+function collectSpanClashes(crew, startStr, endStr) {
+  var clashes = [];
+  CalOpsCore.paintedSpanDates(startStr, endStr).forEach(function(ds) {
+    var avail = crewDayClash(crew, ds);
+    if (avail) clashes.push(escapeHtml(crew) + ' — ' + fmtDate(ds) + ' (<strong>' + avail.status + '</strong>)');
+  });
+  return clashes;
+}
+
+// One combined "Crew Unavailable" confirm for however many clashes — never a
+// modal per crew/day. No clashes = straight through.
+function confirmClashesOrProceed(clashes, proceed) {
+  if (!clashes.length) { proceed(); return; }
+  showConfirmModal(
+    'Crew Unavailable',
+    clashes.join('<br>') + '<br>Schedule anyway?',
+    'Schedule Anyway',
+    proceed
+  );
+}
+
+async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) {
     // No cached event — fall back to the minimal silent date move.
@@ -8458,13 +8889,25 @@ async function doMoveAssignment(assignmentId, newCrew, newDate) {
     } catch (e) { showToast('Error: ' + e.message, 'warning'); }
     return;
   }
-  // Resolve the target swimlane row to a real installer (the grid groups by
-  // user_id first, so a crew change MUST carry the new user_id or the block
-  // snaps back to the original person).
-  var target = _crewList.find(function(u) { return u.name === newCrew; })
-            || _crewList.find(function(u) { return u.name && u.name.toLowerCase() === String(newCrew || '').toLowerCase(); });
-  var newUserId = target ? target.id : null;
-  var plan = CalOpsCore.buildMovePayload(ev, newCrew, newUserId, newDate);
+  var newUserId;
+  if (opts && 'pinnedUserId' in opts) {
+    // CP1 (dragv2): Schedule-view moves pin the event's own user_id — never a
+    // name lookup, so this path can never produce a reassign plan.
+    newUserId = opts.pinnedUserId;
+  } else {
+    // Resolve the target swimlane row to a real installer (the grid groups by
+    // user_id first, so a crew change MUST carry the new user_id or the block
+    // snaps back to the original person).
+    var target = _crewList.find(function(u) { return u.name === newCrew; })
+              || _crewList.find(function(u) { return u.name && u.name.toLowerCase() === String(newCrew || '').toLowerCase(); });
+    newUserId = target ? target.id : null;
+  }
+  // CP1 (dragv2): the drop day becomes the new START and the job's length is
+  // preserved in WORKING days (weekend-skip). Flag off = the original
+  // calendar-delta span shift, untouched.
+  var plan = window.__SW_CAL_DRAGV2_ENABLED
+    ? CalOpsCore.buildMovePayloadV2(ev, newCrew, newUserId, newDate)
+    : CalOpsCore.buildMovePayload(ev, newCrew, newUserId, newDate);
   try {
     if (plan.mode === 'reassign') {
       // Crew change = an allocation act (G2): delete the old row and create the
@@ -8477,6 +8920,9 @@ async function doMoveAssignment(assignmentId, newCrew, newDate) {
       await opsPost('update_assignment', plan.update);
       showToast('Assignment moved', 'success');
     }
+    // CP1 (dragv2): the drop moved the start day — offer the client
+    // reschedule SMS (explicit Yes only; no-ops when the flag is off).
+    if (newDate !== ev.scheduled_date) maybeOfferRescheduleSms(ev, newDate);
     loadCalendar();
   } catch (e) {
     showToast('Error: ' + e.message, 'warning');

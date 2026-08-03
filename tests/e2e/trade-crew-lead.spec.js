@@ -77,11 +77,19 @@ test.describe('Naming the lead installer', () => {
     await expect(panel(page)).toContainText('No lead installer set');
     await expect(panel(page).locator('.crw-badge')).toHaveCount(0);
     await expect(panel(page).locator('.crw-act')).toHaveCount(2);
+    await page.screenshot({
+      path: 'test-results/evidence/trade-crew-lead/no-lead-with-actions.png',
+      animations: 'disabled',
+    });
 
     await row(page, 'Sam Offsider').getByRole('button', { name: 'Make lead' }).click();
     await expect(row(page, 'Sam Offsider')).toContainText('Lead installer');
     await expect(panel(page).locator('.crw-badge')).toHaveCount(1);
     await expect(panel(page)).not.toContainText('No lead installer set');
+    await page.screenshot({
+      path: 'test-results/evidence/trade-crew-lead/sam-as-lead.png',
+      animations: 'disabled',
+    });
     // The lead reads first.
     await expect(panel(page).locator('.crw-row').first()).toContainText('Sam Offsider');
 

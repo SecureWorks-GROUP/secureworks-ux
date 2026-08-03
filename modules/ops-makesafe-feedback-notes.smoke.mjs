@@ -157,13 +157,11 @@ const agentNote = {
 };
 const humanHtml = mod.renderMsNote(humanNote);
 const agentHtml = mod.renderMsNote(agentNote);
-function bgOf(html) {
-  const m = html.match(/background:(#[0-9A-Fa-f]{3,6})/);
-  return m ? m[1].toLowerCase() : null;
-}
 check(
-  "renderMsNote produces different backgrounds for human vs agent",
-  bgOf(humanHtml) !== bgOf(agentHtml),
+  "renderMsNote marks agent notes with the agent class",
+  humanHtml.includes('class="msr-fb-note"') &&
+    agentHtml.includes('class="msr-fb-note agent"') &&
+    !humanHtml.includes('class="msr-fb-note agent"'),
 );
 check(
   "agent reply prefix renders inline",

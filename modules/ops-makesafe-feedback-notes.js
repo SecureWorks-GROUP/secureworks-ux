@@ -351,26 +351,23 @@ function renderMsNotesPanel(jobId, notes, opts) {
   var sesCtx = sesMode ? _msSesFeedbackContext(jobId) : null;
   var sesCanRecord = sesMode && sesCtx && !!sesCtx.docket_revision_id;
 
-  var html =
-    '<div style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;overflow:hidden;">';
+  var html = '<div class="msr-fb">';
 
-  html +=
-    '<div style="padding:9px 12px;border-bottom:1px solid var(--sw-border);font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#48697A;">' +
+  html += '<div class="msr-fb-head">' +
     (sesMode ? "Review feedback" : "Revise Pack feedback") + "</div>";
 
   if (sesMode) {
     html +=
-      '<div style="padding:10px 12px 0;font-size:12px;color:var(--sw-text-sec);line-height:1.45;">Write it like chat: costing off, add/remove invoice line, take wording out of the report, a photo that should not go out, or a proposed rule update. Recorded feedback is appended to the exact docket revision and invalidates the pack&#8217;s readiness &mdash; the reporting routine assembles a revised pack from it.</div>';
+      '<div class="msr-fb-lede">Write it like chat: costing off, add/remove invoice line, take wording out of the report, a photo that should not go out, or a proposed rule update. Recorded feedback is appended to the exact docket revision and invalidates the pack&#8217;s readiness &mdash; the reporting routine assembles a revised pack from it.</div>';
   } else {
     html +=
-      '<div style="padding:10px 12px 0;font-size:12px;color:var(--sw-text-sec);line-height:1.45;">Write it like chat: costing off, add/remove invoice line, take wording out of the report, hide a photo, or propose a rule update. Rule updates become audited suggestions, not silent permanent changes.</div>';
+      '<div class="msr-fb-lede">Write it like chat: costing off, add/remove invoice line, take wording out of the report, hide a photo, or propose a rule update. Rule updates become audited suggestions, not silent permanent changes.</div>';
   }
 
-  html +=
-    '<div style="padding:12px;display:flex;flex-direction:column;gap:8px;">';
+  html += '<div class="msr-fb-list">';
   if (notes.length === 0) {
     html +=
-      '<div style="font-size:12px;color:var(--sw-text-sec);">No feedback yet. If the pack checks out, ignore this section and use ' +
+      '<div class="msr-fb-empty">No feedback yet. If the pack checks out, ignore this section and use ' +
       (sesMode ? "the cockpit controls below." : "Approve &amp; send below.") +
       "</div>";
   } else {
@@ -381,41 +378,38 @@ function renderMsNotesPanel(jobId, notes, opts) {
   html += "</div>";
 
   if (opts.showRerunButton) {
-    html += '<div style="padding:0 12px 12px;">';
-    html += '<button id="msRerunBtn-' + safeId +
+    html += '<div style="padding:0 13px 13px;">';
+    html += '<button type="button" id="msRerunBtn-' + safeId +
       '" onclick="triggerMsRerun(\'' + safeId + "')\" " +
-      'style="width:100%;background:#F15A29;color:#fff;border:none;padding:9px 14px;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;">Revise Pack now</button>';
+      'class="msr-fb-btn brand" style="width:100%;">Revise Pack now</button>';
     html +=
-      '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:5px;">Draft-only: refreshes the review pack from saved feedback and the current selected photos. Does not send, authorise, charge, or close.</div>';
+      '<div class="msr-fb-hint" style="margin-top:5px;">Draft-only: refreshes the review pack from saved feedback and the current selected photos. Does not send, authorise, charge, or close.</div>';
     html += "</div>";
   }
 
-  html +=
-    '<div style="padding:12px;border-top:1px solid #EEF2F5;background:#F7FAFB;">';
+  html += '<div class="msr-fb-foot">';
   if (sesMode && !sesCanRecord) {
     html +=
-      '<div style="font-size:12px;color:var(--sw-text-sec);line-height:1.45;">This pack has already passed Docs Ready review, so feedback can no longer be recorded on it. The cockpit controls below are the current truth.</div>';
+      '<div class="msr-fb-lede" style="padding:0;">This pack has already passed Docs Ready review, so feedback can no longer be recorded on it. The cockpit controls below are the current truth.</div>';
   } else {
     html += '<textarea id="msNoteInput-' + safeId +
-      '" placeholder="Example: costing is slightly off — add 1 extra labour hour to the invoice, remove the risky wording from the MakeSafe report, and hide the blurry hallway photo." ' +
-      'style="width:100%;box-sizing:border-box;min-height:76px;resize:vertical;border:1px solid var(--sw-border);border-radius:6px;padding:8px;font-size:13px;font-family:inherit;color:var(--sw-dark);"></textarea>';
-    html +=
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center;">';
+      '" class="msr-fb-textarea" placeholder="Example: costing is slightly off — add 1 extra labour hour to the invoice, remove the risky wording from the MakeSafe report, and hide the blurry hallway photo."></textarea>';
+    html += '<div class="msr-fb-row">';
     if (sesMode) {
-      html += '<button id="msAddNoteBtn-' + safeId +
+      html += '<button type="button" id="msAddNoteBtn-' + safeId +
         '" onclick="addMsNote(\'' + safeId + "')\" " +
-        'style="background:#1F3A44;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Record feedback</button>';
+        'class="msr-fb-btn dark">Record feedback</button>';
       html +=
-        '<span style="font-size:11px;color:var(--sw-text-sec);">Or leave blank and use the cockpit controls if all boxes check out.</span>';
+        '<span class="msr-fb-hint">Or leave blank and use the cockpit controls if all boxes check out.</span>';
     } else {
-      html += '<button id="msReviseBtn-' + safeId +
+      html += '<button type="button" id="msReviseBtn-' + safeId +
         '" onclick="addMsNoteAndRerun(\'' + safeId + "')\" " +
-        'style="background:#F15A29;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;">Save feedback + Revise Pack</button>';
-      html += '<button id="msAddNoteBtn-' + safeId +
+        'class="msr-fb-btn brand">Save feedback + Revise Pack</button>';
+      html += '<button type="button" id="msAddNoteBtn-' + safeId +
         '" onclick="addMsNote(\'' + safeId + "')\" " +
-        'style="background:#1F3A44;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Add note only</button>';
+        'class="msr-fb-btn dark">Add note only</button>';
       html +=
-        '<span style="font-size:11px;color:var(--sw-text-sec);">Or leave blank and approve/send if all boxes check out.</span>';
+        '<span class="msr-fb-hint">Or leave blank and approve/send if all boxes check out.</span>';
     }
     html += "</div>";
   }
@@ -428,36 +422,25 @@ function renderMsNotesPanel(jobId, notes, opts) {
 function renderMsNote(note) {
   note = note || {};
   var isAgent = note.role === "agent";
-  var bg = isAgent ? "#E6F4F4" : "#F1F3F5";
-  var border = isAgent ? "#0E7C7B" : "#CBD5DD";
   var author = note.author || (isAgent ? "MakeSafe agent" : "Unknown");
   var when = _msFmtNoteTime(note.created_at);
   var body = note.body == null ? "" : String(note.body);
 
-  var html = '<div style="border:1px solid ' + border +
-    ";border-left:3px solid " + border + ";background:" + bg +
-    ';border-radius:6px;padding:8px 10px;">';
+  var html = '<div class="msr-fb-note' + (isAgent ? " agent" : "") + '">';
+  html += '<div class="msr-fb-note-top">';
   html +=
-    '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:3px;">';
-  html +=
-    '<span style="font-size:11px;font-weight:800;color:var(--sw-dark);">' +
+    '<span class="msr-fb-author">' +
     escapeHtml(author) +
-    (isAgent
-      ? ' <span style="font-weight:700;color:#0E7C7B;">(agent)</span>'
-      : "") +
+    (isAgent ? ' <span class="tag">(agent)</span>' : "") +
     (note.ses_recorded
-      ? ' <span style="font-weight:700;color:#48697A;">(recorded on the SES docket)</span>'
+      ? ' <span class="rec">(recorded on the SES docket)</span>'
       : "") +
     "</span>";
   if (when) {
-    html +=
-      '<span style="font-size:10px;color:var(--sw-text-sec);white-space:nowrap;">' +
-      escapeHtml(when) + "</span>";
+    html += '<span class="msr-fb-time">' + escapeHtml(when) + "</span>";
   }
   html += "</div>";
-  html +=
-    '<div style="font-size:13px;color:var(--sw-dark);white-space:pre-wrap;word-break:break-word;">' +
-    escapeHtml(body) + "</div>";
+  html += '<div class="msr-fb-body">' + escapeHtml(body) + "</div>";
   html += "</div>";
   return html;
 }

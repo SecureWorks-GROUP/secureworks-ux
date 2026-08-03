@@ -214,6 +214,14 @@ The legacy `.ms-*` run card, `.tjc-*` card bodies, and the runsheet reorder
 controls are retired — do not revive them. The calendar keeps its own
 `.ncal`/`.sh-*` timeline grammar (shares the type accents).
 
+## Crew roster & lead installer (`trade.html`)
+
+The authoritative crew and lead-installer contract, including absence semantics,
+authority boundaries, shared-renderer ownership, and regression coverage, lives
+in [`trade-app.md`](trade-app.md#job-detail-view). Keep this file focused on
+cross-session invariants; update the owner document when the product contract
+changes.
+
 ## Trade visibility & the manager view (`trade.html`)
 
 Make-safe visibility is 100% SERVER-DRIVEN by the `makesafe_board` feed

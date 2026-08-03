@@ -3041,8 +3041,9 @@
     .jc-rail{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-top:12px;padding-top:11px;border-top:1px solid var(--sw-border);font-size:13px;min-width:0}
     .jc-rail .when{min-width:0;font:600 12.5px var(--sw-mono);color:var(--sw-dark)}
     .jc-rail .when .t-miss{color:var(--sw-ink-3);font-weight:500}
-    .jc-rail .crew{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--sw-dark)}
-    .jc-rail .crew svg{width:13px;height:13px;opacity:.55}
+    .jc-rail .crew{margin-left:auto;display:inline-flex;align-items:flex-start;gap:6px;font-size:13px;font-weight:700;color:var(--sw-dark);min-width:0;text-align:right}
+    .jc-rail .crew svg{width:13px;height:13px;opacity:.55;flex:0 0 auto;margin-top:2px}
+    .jc-rail .crew .nm{min-width:0;overflow-wrap:anywhere}
     .jc-rail .crew.none{font:500 12px var(--sw-mono);color:var(--sw-ink-3);font-weight:500}
     .jc-rail .when .jc-wx{margin-left:8px;font:600 11px var(--sw-mono);color:var(--sw-orange);font-weight:600}
     .jc-rail .when .jc-wx:empty{display:none}
@@ -3110,6 +3111,33 @@
     .dh-parties .k{font:600 9.5px var(--sw-mono);letter-spacing:.08em;text-transform:uppercase;color:#8FA4AF;margin-right:6px}
     .dh-parties b{color:#fff;font-weight:650}
     .dh-parties .jc-miss{color:#9DB2BD}
+
+    /* Crew roster (.crw-) — who is on this job, and who leads it.
+       The LEAD badge is an identity marker, not an action, so it carries brand
+       orange; the job-type accent stays reserved for the primary/Allocate
+       action per the captain ruling on .jc-actions .act.primary. */
+    .crw{background:var(--sw-card);border-radius:var(--sw-radius);box-shadow:var(--sw-shadow);padding:14px 16px;margin-bottom:12px}
+    .crw-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+    .crw-h h3{font:500 11px var(--sw-mono);text-transform:uppercase;letter-spacing:.16em;color:var(--sw-mid);margin:0}
+    .crw-h .crw-count{margin-left:auto;font:600 11px var(--sw-mono);color:var(--sw-ink-3)}
+    .crw-lead-line{font-size:12.5px;color:var(--sw-text-sec);margin-bottom:8px}
+    .crw-lead-line b{color:var(--sw-dark);font-weight:700}
+    .crw-lead-line .crw-unset{font:500 12px var(--sw-mono);color:var(--sw-ink-3)}
+    .crw-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--sw-border)}
+    .crw-row:last-child{border-bottom:none}
+    .crw-av{flex:0 0 auto;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--sw-light);color:var(--sw-mid);font:700 12px var(--sw-font)}
+    .crw-row.lead .crw-av{background:var(--sw-orange);color:#fff}
+    .crw-id{flex:1;min-width:0}
+    .crw-name{font-size:14px;font-weight:650;color:var(--sw-dark);overflow-wrap:anywhere}
+    .crw-name .crw-you{font:600 10px var(--sw-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--sw-mid);margin-left:6px}
+    .crw-sub{font:500 11.5px var(--sw-mono);color:var(--sw-ink-3);margin-top:2px;overflow-wrap:anywhere}
+    .crw-badge{flex:0 0 auto;background:var(--sw-orange);color:#fff;font:700 9.5px var(--sw-mono);letter-spacing:.09em;text-transform:uppercase;padding:4px 7px;border-radius:5px;white-space:nowrap}
+    .crw-act{flex:0 0 auto;min-height:44px;padding:0 12px;border:1px solid var(--sw-border);border-radius:9px;background:var(--sw-card);color:var(--sw-mid);font:700 11.5px var(--sw-font);cursor:pointer;white-space:nowrap}
+    .crw-act:active{background:var(--sw-light)}
+    .crw-act[disabled]{opacity:.55;cursor:default}
+    .crw-empty{font:500 12.5px var(--sw-mono);color:var(--sw-ink-3);padding:4px 0 2px}
+    .crw-note{margin-top:10px;font-size:11.5px;line-height:1.45;color:var(--sw-text-sec)}
+    .crw-err{margin-top:10px;font-size:12px;color:var(--sw-red);font-weight:600}
 
     /* Allocation roster — multi-select (captain: multiple people per job) */
     .alloc-crew.sel{border-color:var(--jt-ms);background:var(--jt-ms-tint)}
@@ -4057,7 +4085,7 @@
   function api(action, params, postBody, options) {
     options = options || {};
     var preserveSession = options.preserveSessionOnAuthFailure === true;
-    if (blockedForeignJobWrite(params, postBody)) {
+    if (blockedForeignJobWrite(action, params, postBody)) {
       var blocked = _apiError(403, 'View only — this job belongs to another crew');
       blocked.code = 'view_only';
       toast('View only — this job belongs to another crew', true);
@@ -4151,7 +4179,7 @@
 
   function queueOfflineAction(action, postBody) {
     // A blocked view-only write must not be parked for later retry either.
-    if (blockedForeignJobWrite(null, postBody)) return;
+    if (blockedForeignJobWrite(action, null, postBody)) return;
     var queue = [];
     try { queue = JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch(e) {}
     queue.push({ action: action, body: postBody, ts: new Date().toISOString() });
@@ -5689,6 +5717,12 @@
     return h + '</div>';
   }
 
+  function getTradeLiveCrewAssignments(jobId) {
+    return (_cachedMyJobs || []).filter(function(a) {
+      return a && a.jobs && a.jobs.id === jobId;
+    });
+  }
+
   function renderMyJobs(data) {
     _lastJobData = data;
     _lastJobDataKey = jobListCacheKey();
@@ -5780,7 +5814,8 @@
           // History card renders through the one unified docket grammar
           // (UnifiedJobCard derives make-safe builder/type feed-first internally).
           var _histModel = UnifiedJobCard.fromJobAssignment(job, a, type, {
-            desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
+            desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+            crewAssignments: getTradeLiveCrewAssignments(job.id)
           });
           html += UnifiedJobCard.wrap(_histModel, {
             onclick: openAction + '(\'' + job.id + '\', \'' + a.id + '\')'
@@ -5917,7 +5952,8 @@
         // delivery / materials badges are dropped as dead UI. Make-safe
         // builder/type are derived feed-first inside UnifiedJobCard (PR #208).
         var _model = UnifiedJobCard.fromJobAssignment(job, a, type, {
-          desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
+          desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+          crewAssignments: getTradeLiveCrewAssignments(job.id)
         });
         if (todayComplete) _model.report = 'Report submitted';
         html += UnifiedJobCard.wrap(_model, {
@@ -6367,7 +6403,7 @@
         }
         if (opts.showWeather && m.weatherDate) h += '<span class="jc-wx" data-weather-date="' + esc(m.weatherDate) + '"></span>';
         h += '</span>';
-        if (m.crew) h += '<span class="crew"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg>' + esc(m.crew) + (m.crewExtra ? ' <span style="opacity:.7">' + esc(m.crewExtra) + '</span>' : '') + '</span>';
+        if (m.crew) h += '<span class="crew"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg><span class="nm">' + esc(m.crew) + (m.crewExtra ? ' <span style="opacity:.7">' + esc(m.crewExtra) + '</span>' : '') + '</span></span>';
         else if (m.crewNone) h += '<span class="crew none">' + esc(m.crewNone) + '</span>';
         h += '</div>';
       }
@@ -6428,8 +6464,13 @@
         timeLabel: a && a.start_time ? fmtTime(a.start_time) : '',
         timeMiss: !!(a && a.scheduled_date && !a.start_time),
         weatherDate: (a && a.scheduled_date) || '',
-        crew: crewNames.length ? crewNames[0] : '',
-        crewExtra: crewNames.length > 1 ? '+' + (crewNames.length - 1) : '',
+        // Captain 2026-08-03: everyone allocated is NAMED on the card, not
+        // collapsed to "first + 2" — the point is seeing who you are on the job
+        // with. No lead marker here: makesafe-board.v1 carries no is_lead, and
+        // this card must not guess one. The detail surface (trade_job_detail,
+        // PR 513) is the only feed that can prove a lead.
+        crew: crewNames.join(', '),
+        crewExtra: '',
         crewNone: crewNames.length ? '' : 'Nobody allocated',
         note: note ? { author: note.author || 'Trade', date: fmtDay(String(note.created_at || '').slice(0, 10)), text: note.text || '' } : null,
         report: report
@@ -6438,6 +6479,21 @@
 
     // ── Normaliser B: My Jobs / history / search (job + assignment) ──
     var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    function liveCrewNames(assignments) {
+      var seen = {};
+      return (assignments || []).filter(function (x) {
+        var status = String((x || {}).status || '').toLowerCase();
+        return status !== 'cancelled' && status !== 'canceled';
+      }).map(function (x) {
+        x = x || {};
+        var name = String(x.crew_name || (x.user && x.user.name) || x.assigned_to || x.trade_name || '').trim();
+        if (!name) return null;
+        var key = String(x.user_id || (x.user && x.user.id) || name).toLowerCase();
+        if (seen[key]) return null;
+        seen[key] = true;
+        return name;
+      }).filter(Boolean);
+    }
     function fromJobAssignment(job, a, type, opts) {
       job = job || {}; a = a || {}; opts = opts || {};
       var cls = typeCls(type);
@@ -6474,7 +6530,8 @@
         parties = [{ k: 'Client', v: cli || 'Not on file', miss: !cli }];
         if (scope) parties.push({ k: 'Scope', v: scope, weak: true });
       }
-      var crew = isPool ? '' : (typeof getTradeAssignmentCrewLabel === 'function' ? getTradeAssignmentCrewLabel(a) : (a.crew_name || ''));
+      var allCrewNames = !isMs && !isPool ? liveCrewNames(opts.crewAssignments) : [];
+      var crew = isPool ? '' : (allCrewNames.length > 1 ? allCrewNames.join(', ') : (typeof getTradeAssignmentCrewLabel === 'function' ? getTradeAssignmentCrewLabel(a) : (a.crew_name || '')));
       return {
         typeCls: cls, stampLabel: stamp,
         age: '', ageHot: false,
@@ -6498,6 +6555,151 @@
     };
   })();
   // </unified-jobcard>
+
+  // <trade-crew-roster-core>
+  // Who is on this job, and who leads it.
+  //
+  // The only feed that can answer either question is trade_job_detail
+  // (secureworks-backend PR #513). `crew[]` carries one row per crew member per
+  // DAY, each with `is_lead`; `leadInstaller` is the server's own projection of
+  // that flag ({assignment_id, user_id, name}) or null when nobody has been
+  // designated. The migration deliberately did NOT backfill a lead, so "no lead
+  // set" is the honest state of every job that predates the feature.
+  //
+  // TWO ABSENCES ARE DIFFERENT AND ARE NEVER COLLAPSED:
+  //   leadInstaller === null  — the feed says nobody leads this job. Say so.
+  //   the key is absent       — this ops-api deployment predates PR #513 and has
+  //                             NO opinion. Render the crew, claim nothing about
+  //                             a lead, and offer no set-lead control (the
+  //                             server action does not exist there either).
+  //
+  // `role` is deliberately never read as the lead signal. It defaults to
+  // 'lead_installer' on every insert, so in production almost every crew member
+  // already claims it (measured 2026-08-03: 112 of 133 non-cancelled rows).
+  // `is_lead` is the explicit designation and is unique per job in the database.
+  var TradeCrewCore = (function () {
+    'use strict';
+    function has(obj, key) { return !!obj && Object.prototype.hasOwnProperty.call(obj, key); }
+
+    function crewName(row) {
+      if (!row) return '';
+      return String(row.name || (row.users && row.users.name) || row.crew_name || '').trim();
+    }
+
+    // True when this payload is capable of expressing a lead at all.
+    function leadSupported(data) {
+      if (!data) return false;
+      if (has(data, 'leadInstaller')) return true;
+      return ((data && data.crew) || []).some(function (row) { return has(row, 'is_lead'); });
+    }
+
+    // One entry per PERSON, not per assignment row: a multi-day job carries a
+    // row per crew member per day, and listing the same name four times is not
+    // a crew list. Rows arrive already filtered to non-cancelled by the server.
+    function roster(data) {
+      var rows = (data && data.crew) || [];
+      var byKey = {}, out = [];
+      rows.forEach(function (row, index) {
+        if (!row) return;
+        var name = crewName(row);
+        var key = row.user_id ? 'u:' + row.user_id
+          : (name ? 'n:' + name.toLowerCase() : 'a:' + (row.id || index));
+        var entry = byKey[key];
+        if (!entry) {
+          entry = {
+            key: key,
+            userId: row.user_id || null,
+            assignmentId: row.id || null,
+            name: name,
+            isLead: false,
+            days: []
+          };
+          byKey[key] = entry;
+          out.push(entry);
+        }
+        if (!entry.name && name) entry.name = name;
+        if (row.is_lead === true) {
+          entry.isLead = true;
+          // Point a later set/clear at the row the database actually flagged.
+          if (row.id) entry.assignmentId = row.id;
+        }
+        if (row.scheduled_date && entry.days.indexOf(row.scheduled_date) === -1) {
+          entry.days.push(row.scheduled_date);
+        }
+      });
+      out.forEach(function (entry) { entry.days.sort(); });
+      // The lead reads first — that ordering IS half of the distinction.
+      out.sort(function (a, b) { return (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0); });
+      return out;
+    }
+
+    // The server's `leadInstaller` wins; the `is_lead` rows it was projected
+    // from are the fallback, so a payload carrying the rows but not the
+    // projection still names a lead instead of silently reporting none.
+    function resolveLead(data, members) {
+      var declared = data && data.leadInstaller;
+      var match = null;
+      if (declared && (declared.user_id || declared.assignment_id)) {
+        members.forEach(function (m) {
+          if (match) return;
+          if (declared.user_id && m.userId && String(m.userId) === String(declared.user_id)) match = m;
+        });
+        members.forEach(function (m) {
+          if (match) return;
+          if (declared.assignment_id && m.assignmentId && String(m.assignmentId) === String(declared.assignment_id)) match = m;
+        });
+        if (match) { match.isLead = true; return match; }
+        // Named a lead this roster cannot place. Report the name the server
+        // gave rather than dropping the designation on the floor.
+        return {
+          key: 'declared', userId: declared.user_id || null,
+          assignmentId: declared.assignment_id || null,
+          name: String(declared.name || '').trim(), isLead: true, days: [], offRoster: true
+        };
+      }
+      members.forEach(function (m) { if (!match && m.isLead) match = m; });
+      return match;
+    }
+
+    function build(data) {
+      var members = roster(data);
+      var supported = leadSupported(data);
+      var lead = supported ? resolveLead(data, members) : null;
+      if (lead) {
+        // resolveLead may have promoted a member; re-sort so the lead leads.
+        members.sort(function (a, b) { return (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0); });
+      } else {
+        members.forEach(function (m) { m.isLead = false; });
+      }
+      return {
+        members: members,
+        lead: lead,
+        leadSupported: supported,
+        hasCrew: members.length > 0
+      };
+    }
+
+    // Mirrors the SERVER gate on set_job_lead (assertAssignmentMutationAuthz —
+    // the same authority as creating the assignment): the dashboard/service
+    // key, a dispatcher, or a manager of THAT job's vertical. An ordinary
+    // assigned installer is refused, including on their own row. The server is
+    // still the real gate; this only decides whether to offer the control.
+    function canSetLead(ctx) {
+      ctx = ctx || {};
+      if (!ctx.leadSupported) return false;
+      if (ctx.isDispatcher === true) return true;
+      var vertical = String(ctx.jobType || '').toLowerCase().trim();
+      if (!vertical) return false;
+      var managed = ctx.managedVerticals || [];
+      for (var i = 0; i < managed.length; i++) {
+        if (String(managed[i] || '').toLowerCase().trim() === vertical) return true;
+      }
+      return false;
+    }
+
+    return { crewName: crewName, leadSupported: leadSupported, roster: roster, build: build, canSetLead: canSetLead };
+  })();
+  // </trade-crew-roster-core>
 
   function isTradeMakesafeJob(job, assignment) {
     if (!job && !assignment) return false;
@@ -6935,7 +7137,16 @@
 
   // Blocks a write aimed at the job currently open in view-only mode, before it
   // reaches the network or the offline retry queue.
-  function blockedForeignJobWrite(params, postBody) {
+  // Manager actions this guard must NOT intercept. The guard exists to stop a
+  // viewer firing another crew's OWN-ASSIGNMENT writes (clock, accept, report)
+  // from a job they merely have visibility on. Designating the lead installer
+  // is the opposite kind of write: it is a manager acting ON that crew, gated
+  // server-side by the same authority as allocating the job, and a manager is
+  // in view-only mode on precisely the jobs where they need it.
+  var FOREIGN_JOB_WRITE_EXEMPT_ACTIONS = { set_job_lead: true };
+
+  function blockedForeignJobWrite(action, params, postBody) {
+    if (FOREIGN_JOB_WRITE_EXEMPT_ACTIONS[String(action || '')]) return false;
     if (!postBody || !_currentJob || !isForeignCrewJob(_currentJob)) return false;
     // Make-safe keeps its own server-driven authority model (makesafe_board
     // permissions + report submission); it never renders this detail surface.
@@ -7049,6 +7260,155 @@
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     return parts[0].substring(0, 2).toUpperCase();
   }
+
+  // <trade-crew-roster-view>
+  // Renders TradeCrewCore's model. Every claim on this panel comes from the
+  // trade_job_detail payload; nothing here derives a lead, and nothing here
+  // renders `role` (see the core module for why that field is not the signal).
+  function tradeCrewRosterAuthority(data) {
+    var model = TradeCrewCore.build(data);
+    return {
+      model: model,
+      canSetLead: TradeCrewCore.canSetLead({
+        leadSupported: model.leadSupported,
+        isDispatcher: _isAdmin,
+        managedVerticals: managedTradeVerticals(_user),
+        jobType: getTradeJobType((data && data.job) || {})
+      })
+    };
+  }
+
+  function crewMemberDaysLabel(member) {
+    var days = (member && member.days) || [];
+    if (!days.length) return '';
+    var label = UnifiedJobCard.fmtDay(days[0]) || '';
+    if (!label) return '';
+    if (days.length > 1) label += ' + ' + (days.length - 1) + ' more day' + (days.length > 2 ? 's' : '');
+    return label;
+  }
+
+  function renderCrewRosterPanel(data) {
+    var view = tradeCrewRosterAuthority(data);
+    var m = view.model;
+    var h = '<div class="crw" id="crewRosterPanel" data-lead-supported="' + (m.leadSupported ? '1' : '0') + '">';
+    h += '<div class="crw-h"><h3>On this job</h3>';
+    if (m.hasCrew) {
+      h += '<span class="crw-count">' + m.members.length + (m.members.length === 1 ? ' person' : ' people') + '</span>';
+    }
+    h += '</div>';
+
+    if (!m.hasCrew) {
+      h += '<div class="crw-empty">Nobody allocated to this job yet.</div></div>';
+      return h;
+    }
+
+    // No-lead state. The server not having a lead is a fact worth stating —
+    // silence would read as "someone leads and we did not say who".
+    if (m.leadSupported && !m.lead) {
+      h += '<div class="crw-lead-line"><span class="crw-unset">No lead installer set</span>'
+        + (view.canSetLead ? ' &middot; pick who is leading below' : '') + '</div>';
+    }
+    if (m.lead && m.lead.offRoster) {
+      h += '<div class="crw-lead-line">Lead installer <b>' + esc(m.lead.name || 'Name not on file') + '</b></div>';
+    }
+
+    m.members.forEach(function (member) {
+      var name = member.name || 'Name not on file';
+      var isMe = !!(_user && member.userId && String(member.userId) === String(_user.id));
+      var days = crewMemberDaysLabel(member);
+      h += '<div class="crw-row' + (member.isLead ? ' lead' : '') + '"'
+        + ' data-crew-user="' + esc(member.userId || '') + '"'
+        + ' data-crew-assignment="' + esc(member.assignmentId || '') + '">';
+      h += '<span class="crw-av">' + esc(getCrewInitials(member.name)) + '</span>';
+      h += '<div class="crw-id"><div class="crw-name">' + esc(name)
+        + (isMe ? '<span class="crw-you">You</span>' : '') + '</div>';
+      if (days) h += '<div class="crw-sub">' + esc(days) + '</div>';
+      h += '</div>';
+      if (member.isLead) h += '<span class="crw-badge">Lead installer</span>';
+      if (view.canSetLead) {
+        if (member.isLead) {
+          h += '<button type="button" class="crw-act" onclick="setJobLeadInstaller(\'\', 1)">Clear</button>';
+        } else if (member.assignmentId) {
+          h += '<button type="button" class="crw-act" onclick="setJobLeadInstaller(\'' + esc(member.assignmentId) + '\', 0)">Make lead</button>';
+        }
+      }
+      h += '</div>';
+    });
+
+    if (!m.leadSupported) {
+      h += '<div class="crw-note">Lead installer is not available from this server yet.</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // Repaint just this panel. A full job refetch would rebuild the detail and
+  // drop the open tab, and the set_job_lead response is already the server's
+  // authoritative answer for the only thing that changed.
+  function repaintCrewRosterPanel() {
+    var panel = document.getElementById('crewRosterPanel');
+    if (!panel || !panel.parentNode) return;
+    var holder = document.createElement('div');
+    holder.innerHTML = renderCrewRosterPanel(_currentJob);
+    var next = holder.firstElementChild;
+    if (next) panel.parentNode.replaceChild(next, panel);
+  }
+
+  function showCrewRosterError(msg) {
+    var panel = document.getElementById('crewRosterPanel');
+    if (!panel) return;
+    var el = panel.querySelector('.crw-err');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'crw-err';
+      panel.appendChild(el);
+    }
+    el.textContent = msg;
+  }
+
+  // Apply the server's answer, not an optimistic guess: set_job_lead returns
+  // {lead: {assignment_id, user_id, name} | null} and that response is the only
+  // thing allowed to change what this panel claims.
+  function applyJobLeadResult(data, res) {
+    if (!data) return;
+    var lead = (res && res.lead) || null;
+    data.leadInstaller = lead
+      ? { assignment_id: lead.assignment_id || null, user_id: lead.user_id || null, name: lead.name || null }
+      : null;
+    (data.crew || []).forEach(function (row) {
+      if (!row) return;
+      if (!lead) { row.is_lead = false; return; }
+      row.is_lead = lead.assignment_id
+        ? String(row.id) === String(lead.assignment_id)
+        : !!(lead.user_id && row.user_id && String(row.user_id) === String(lead.user_id));
+    });
+  }
+
+  // Manager action: name (or clear) the lead installer on this job.
+  window.setJobLeadInstaller = function setJobLeadInstaller(assignmentId, clear) {
+    var data = _currentJob;
+    var jobId = (data && data.job && data.job.id) || _currentJobId;
+    if (!jobId) return;
+    var doClear = !!clear;
+    if (!doClear && !assignmentId) return;
+    var panel = document.getElementById('crewRosterPanel');
+    var buttons = panel ? panel.querySelectorAll('.crw-act') : [];
+    var i;
+    for (i = 0; i < buttons.length; i++) buttons[i].disabled = true;
+    var err = panel && panel.querySelector('.crw-err');
+    if (err) err.textContent = '';
+
+    var body = doClear ? { jobId: jobId, clear: true } : { jobId: jobId, assignmentId: assignmentId };
+    api('set_job_lead', null, body).then(function (res) {
+      applyJobLeadResult(data, res);
+      repaintCrewRosterPanel();
+      toast(doClear ? 'Lead installer cleared' : 'Lead installer updated');
+    }).catch(function (e) {
+      for (var j = 0; j < buttons.length; j++) buttons[j].disabled = false;
+      showCrewRosterError(friendlyError(e));
+    });
+  };
+  // </trade-crew-roster-view>
 
   // ══════════════════════════════════════════════════
   // JOB DETAIL REDESIGN — Section Renderers
@@ -8208,31 +8568,12 @@
     var pos = data.purchaseOrders || [];
     var h = '';
 
-    // ── Crew List (pre_confirm, confirmed only) ──
-    if (crew.length > 0 && (phase === 'pre_confirm' || phase === 'confirmed')) {
-      var type = (job.type || 'patio').toLowerCase();
-      var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
-      h += '<div class="detail-section">';
-      h += '  <h3>Crew</h3>';
-      crew.forEach(function(c) {
-        var userName = (c.users && c.users.name) || 'TBA';
-        var role = c.crew_name || c.role || '';
-        h += '<div class="crew-item">';
-        h += '  <div style="display:flex;align-items:center;gap:8px">';
-        h += '    <span class="crew-avatar" style="background:' + color + '">' + getCrewInitials(userName) + '</span>';
-        h += '    <div>';
-        h += '      <div class="crew-item-name">' + esc(userName) + '</div>';
-        if (role) h += '<div class="crew-item-role">' + esc(role) + '</div>';
-        h += '    </div>';
-        h += '  </div>';
-        h += '  <span class="status-pill status-' + (c.status || 'scheduled') + '">' + (c.status || 'scheduled').replace(/_/g, ' ') + '</span>';
-        if (canReassignCrew()) {
-          h += '  <button onclick="event.stopPropagation();openReassignModal(\'' + c.id + '\', \'' + esc(userName) + '\')" style="background:none;border:1px solid var(--sw-border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--sw-mid);cursor:pointer;margin-left:6px">Reassign</button>';
-        }
-        h += '</div>';
-      });
-      h += '</div>';
-    }
+    // ── Crew List ──
+    // There is ONE crew renderer in this app. This section used to build its
+    // own list (and printed `role`, which is 'lead_installer' on nearly every
+    // production row and therefore meaningless); it now defers to the shared
+    // lead-aware panel so a second, lead-blind crew list cannot come back.
+    if (crew.length > 0) h += renderCrewRosterPanel(data);
 
     // ── Labour Budget Card (complete only) ──
     if (isJobDone(phase)) (function loadLabourBudget() {
@@ -8761,6 +9102,9 @@
 
     // ── Make-Safe Info Panel (for makesafe jobs) ──
     html += renderMakesafeBuilderPanel(data);
+
+    // ── Crew roster + lead installer ──
+    html += renderCrewRosterPanel(data);
 
     // ── Tab Bar ──
     var mediaCount = (data.media || []).length;
@@ -11407,10 +11751,16 @@
       '<div id="makesafeReattendBar">' + makesafeReattendBarHTML(data) + '</div>' +
       '<div id="makesafeCancelBar">' + makesafeCancelBarHTML(data) + '</div>' +
       '<div id="makesafeWorkOrderDirect"></div>' +
+      '<div id="makesafeCrewRoster"></div>' +
       (limited ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#92400E;">Limited details loaded. You can still open the MakeSafe report; refresh if photos or saved report data are missing.</div>' : '') +
       '<div id="makesafeReportDirectContent"></div></div>';
     var woContainer = document.getElementById('makesafeWorkOrderDirect');
     if (woContainer) woContainer.innerHTML = renderMakesafeWorkOrderInline(data);
+    // The make-safe surface never reaches renderJobDetail, so it mounts the
+    // same crew roster itself. The cached-fallback payload (limited) carries
+    // crew: [] and no leadInstaller — it claims nothing, which is correct.
+    var crewContainer = document.getElementById('makesafeCrewRoster');
+    if (crewContainer) crewContainer.innerHTML = renderCrewRosterPanel(data);
     renderJobTab_makesafeReport(data, deriveJobPhase(data), document.getElementById('makesafeReportDirectContent'));
   }
 
@@ -18390,6 +18740,13 @@
       // reachable. The representative rows below remain useful for the unfiltered
       // vertical summary, but forSelection filters first and dedupes second.
       var assignedRows = preferredRows(assigned);
+      var crewByJob = {};
+      assigned.forEach(function (row) {
+        var jobId = rowJobId(row);
+        if (!jobId) return;
+        if (!crewByJob[jobId]) crewByJob[jobId] = [];
+        crewByJob[jobId].push(row);
+      });
       var assignedJobIds = {};
       assigned.forEach(function (row) { var id = rowJobId(row); if (id) assignedJobIds[id] = true; });
       var poolByJob = {};
@@ -18405,14 +18762,14 @@
       });
       var poolRows = Object.keys(poolByJob).map(function (jobId) { return poolByJob[jobId]; });
       var selectionRows = assigned.filter(function (row) { return !!rowJobId(row); }).concat(poolRows);
-      var selectionCards = selectionRows.map(function (row) { return makeCard(row.jobs || {}, row); });
+      var selectionCards = selectionRows.map(function (row) { return makeCard(row.jobs || {}, row, crewByJob[rowJobId(row)] || []); });
       // Row identity -> its already-built card, so column assembly stays linear.
       var cardByRow = new Map();
       selectionRows.forEach(function (row, index) {
         if (!cardByRow.has(row)) cardByRow.set(row, selectionCards[index]);
       });
       function cardForRow(row) {
-        return cardByRow.get(row) || makeCard(row.jobs || {}, row);
+        return cardByRow.get(row) || makeCard(row.jobs || {}, row, crewByJob[rowJobId(row)] || []);
       }
 
       var columns = COLUMNS.map(function (column) {
@@ -18615,9 +18972,10 @@
     };
   }
 
-  function _fencingBoardCardModel(job, row) {
+  function _fencingBoardCardModel(job, row, crewAssignments) {
     var model = UnifiedJobCard.fromJobAssignment(job, row, 'fencing', {
-      desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing')
+      desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing'),
+      crewAssignments: crewAssignments
     });
     // AllocationCore predates UnifiedJobCard and reads these aliases. Keep the
     // one visual grammar while supplying its existing write-model seam.

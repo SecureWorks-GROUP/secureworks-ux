@@ -5717,6 +5717,12 @@
     return h + '</div>';
   }
 
+  function getTradeLiveCrewAssignments(jobId) {
+    return (_cachedMyJobs || []).filter(function(a) {
+      return a && a.jobs && a.jobs.id === jobId;
+    });
+  }
+
   function renderMyJobs(data) {
     _lastJobData = data;
     _lastJobDataKey = jobListCacheKey();
@@ -5808,7 +5814,8 @@
           // History card renders through the one unified docket grammar
           // (UnifiedJobCard derives make-safe builder/type feed-first internally).
           var _histModel = UnifiedJobCard.fromJobAssignment(job, a, type, {
-            desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
+            desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+            crewAssignments: getTradeLiveCrewAssignments(job.id)
           });
           html += UnifiedJobCard.wrap(_histModel, {
             onclick: openAction + '(\'' + job.id + '\', \'' + a.id + '\')'
@@ -5945,7 +5952,8 @@
         // delivery / materials badges are dropped as dead UI. Make-safe
         // builder/type are derived feed-first inside UnifiedJobCard (PR #208).
         var _model = UnifiedJobCard.fromJobAssignment(job, a, type, {
-          desc: job.scope_summary || buildScopeSummary(job.scope_json, type)
+          desc: job.scope_summary || buildScopeSummary(job.scope_json, type),
+          crewAssignments: getTradeLiveCrewAssignments(job.id)
         });
         if (todayComplete) _model.report = 'Report submitted';
         html += UnifiedJobCard.wrap(_model, {
@@ -6471,6 +6479,21 @@
 
     // ── Normaliser B: My Jobs / history / search (job + assignment) ──
     var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    function liveCrewNames(assignments) {
+      var seen = {};
+      return (assignments || []).filter(function (x) {
+        var status = String((x || {}).status || '').toLowerCase();
+        return status !== 'cancelled' && status !== 'canceled';
+      }).map(function (x) {
+        x = x || {};
+        var name = String(x.crew_name || (x.user && x.user.name) || x.assigned_to || x.trade_name || '').trim();
+        if (!name) return null;
+        var key = String(x.user_id || (x.user && x.user.id) || name).toLowerCase();
+        if (seen[key]) return null;
+        seen[key] = true;
+        return name;
+      }).filter(Boolean);
+    }
     function fromJobAssignment(job, a, type, opts) {
       job = job || {}; a = a || {}; opts = opts || {};
       var cls = typeCls(type);
@@ -6507,7 +6530,8 @@
         parties = [{ k: 'Client', v: cli || 'Not on file', miss: !cli }];
         if (scope) parties.push({ k: 'Scope', v: scope, weak: true });
       }
-      var crew = isPool ? '' : (typeof getTradeAssignmentCrewLabel === 'function' ? getTradeAssignmentCrewLabel(a) : (a.crew_name || ''));
+      var allCrewNames = !isMs && !isPool ? liveCrewNames(opts.crewAssignments) : [];
+      var crew = isPool ? '' : (allCrewNames.length > 1 ? allCrewNames.join(', ') : (typeof getTradeAssignmentCrewLabel === 'function' ? getTradeAssignmentCrewLabel(a) : (a.crew_name || '')));
       return {
         typeCls: cls, stampLabel: stamp,
         age: '', ageHot: false,

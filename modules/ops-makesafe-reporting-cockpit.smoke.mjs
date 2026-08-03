@@ -4,8 +4,13 @@
 // for the MONEY/COMMS-critical reporting cockpit: it evals the module in a
 // stubbed browser-ish global scope and asserts the SES gate-critical wiring
 // WITHOUT a real browser, real DOM, or real network:
-//   - the list feed stays on makesafe_report_drafts and enriches each card's
-//     chip from query_ses_review_cockpit;
+//   - the list renders from the SES Docs Ready queue (list_ses_docs_ready_reviews)
+//     and NEVER reads the retired legacy makesafe_report_drafts feed; card
+//     identity is joined from the canonical makesafe_board feed and each card's
+//     chip + invoice glance are enriched from query_ses_review_cockpit;
+//   - the board door (openMakesafeJob, extracted from ops.html) opens the SES
+//     review overlay for a queued job and falls back to the canonical job
+//     detail only when no SES docket AND no legacy pack exist;
 //   - the detail panel reads query_ses_review_cockpit + get_ses_reviewable_pack
 //     (resolved via list_ses_docs_ready_reviews) and renders the byte-exact
 //     docs, the three exact routes, and the fixed photo set;
@@ -44,6 +49,9 @@ function flush() {
 
 // ── 1. Stubbed global scope ──────────────────────────────────────────────────
 const calls = { opsPost: [], opsPostJwt: [], opsFetch: [], toasts: [], confirms: [] };
+// Every action ever dispatched (never reset) so the retired-action sweep covers
+// the whole run, not just the last section.
+const actionLog = [];
 
 function makeEl() {
   return {
@@ -84,14 +92,17 @@ const sandbox = {
   document: documentStub,
   opsFetch: (action, params) => {
     calls.opsFetch.push({ action, params });
+    actionLog.push(action);
     return dispatch(behaviour.fetch, action);
   },
   opsPost: (action, body) => {
     calls.opsPost.push({ action, body });
+    actionLog.push(action);
     return dispatch(behaviour.post, action);
   },
   opsPostJwt: (action, body) => {
     calls.opsPostJwt.push({ action, body });
+    actionLog.push(action);
     return dispatch(behaviour.postJwt, action);
   },
   showToast: (msg, kind) => {
@@ -107,6 +118,20 @@ const sandbox = {
   escapeAttr: (s) =>
     String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/&/g, "&amp;"),
   _opsUserEmail: "marnin@secureworkswa.com.au",
+  // Board-feed state the identity join reads (ops.html globals). Object holders
+  // so scenarios can mutate .columns; the module's typeof guards must also
+  // tolerate their absence.
+  _pipelineTab: "makesafes",
+  _pipelineData: { columns: {} },
+  _makesafeBoardPayload: { columns: null },
+  // The board's own degraded-path suburb rule (mirrors ops.html).
+  makesafeSuburbFromAddress: (address) => {
+    const parts = String(address || "").trim().split(",");
+    if (parts.length < 2) return "";
+    return parts[parts.length - 1].trim()
+      .replace(/\s+(WA|NSW|VIC|QLD|SA|TAS|NT|ACT)\s+\d{4}$/i, "")
+      .replace(/\s+\d{4}$/, "").trim();
+  },
   module: undefined,
   console,
 };
@@ -126,6 +151,8 @@ const exposed = [
   "_msSesRenderRoutes",
   "_msSesRenderPhotos",
   "_msSesIsStale",
+  "_msSesQueueCardRow",
+  "_msSesReviewQueueStale",
   "_msSwitchDocTab",
   "_msReportingHideJobFromActiveList",
   "_msGetAllPhotos",
@@ -179,6 +206,11 @@ check(
   "defines refreshMsReportingBadge",
   typeof mod.refreshMsReportingBadge === "function",
 );
+check(
+  "defines the queue card-row builder + queue staleness gate",
+  typeof mod._msSesQueueCardRow === "function" &&
+    typeof mod._msSesReviewQueueStale === "function",
+);
 for (const gone of [
   "approveMakesafeReportPack",
   "finishMakesafeCloseOut",
@@ -204,6 +236,12 @@ for (const retired of [
   );
   check("source never calls retired action " + retired, !callSite.test(code));
 }
+// The list must never read the retired legacy drafts feed again (it is empty in
+// production and its approve path answers 410).
+check(
+  "source never reads the retired legacy drafts feed",
+  !/ops(?:Post|Fetch|PostJwt)\(\s*['"]makesafe_report_drafts['"]/.test(code),
+);
 // No multi-job release can be built from this surface: the only prepare call
 // must bind exactly one job.
 check(
@@ -221,16 +259,50 @@ const PHOTO_HASH_2 = "sha256:" + "c".repeat(64);
 const REPORT_HASH = "sha256:" + "d".repeat(64);
 const XERO_PDF_HASH = "sha256:" + "e".repeat(64);
 
-const feedDraft = {
+// The legacy drafts feed row. Still stubbed so the smoke proves the module
+// chooses NOT to read it — a card can only ever come from the SES queue.
+const legacyFeedDraft = {
   job_id: JOB,
   job_number: "MS-100",
-  builder: "MLB Constructions",
+  builder: "Ghost Builder (legacy feed)",
+  external_ref: "GHOST-1",
+  site_suburb: "Ghostville",
+  invoice: { total_inc_gst: 999 },
+};
+
+// The canonical makesafe_board row the identity join projects (raw feed shape).
+const boardRawRow = {
+  id: JOB,
+  job_number: "261065",
+  contact: {
+    client_name: "Jane Homeowner",
+    address: "12 Smith Street, Joondalup WA 6027",
+  },
+  builder: { name: "MLB Constructions", external_ref: "MLB-25248" },
+  ses_family: "physical_makesafe",
+  ses_family_label: "Physical make safe",
+  pack: { drafted: true, state: "drafted" },
+};
+const boardPayloadStub = {
+  contract_version: "makesafe-board.v1",
+  columns: { report_ready: [boardRawRow] },
+};
+
+// The mapped board card (canonical row + close-out enrichment already joined by
+// fetchMakesafeBoardData) — carries the true enriched site_suburb and wins over
+// the raw projection.
+const mappedCard = {
+  id: JOB,
+  job_number: "261065",
+  requesting_company_name: "MLB Constructions",
+  builder: { name: "MLB Constructions" },
   external_ref: "MLB-25248",
-  client_name: "Jane Homeowner",
-  site_address: "12 Smith Street, Joondalup",
   site_suburb: "Joondalup",
-  trade_notes: "Raw trade notes here",
-  invoice: { total_inc_gst: 110 },
+  site_address: "12 Smith Street, Joondalup WA 6027",
+  client_name: "Jane Homeowner",
+  requesting_company_slug: "mlb",
+  ses_family: "physical_makesafe",
+  ses_family_label: "Physical make safe",
 };
 
 const proposal = {
@@ -250,6 +322,7 @@ function cockpitSendReady() {
     status: "SEND_READY",
     stale: false,
     sections: {
+      job_story: { job_id: JOB, job_number: "261065", attendance_cycle_ids: [] },
       status: { status: "SEND_READY", stale: false, reasons: [] },
       money: {
         local_invoice_proposal: proposal,
@@ -305,7 +378,9 @@ const queueRow = {
   job_id: JOB,
   docket_revision_id: DOCKET_REV,
   docket_output_content_hash: HASH,
+  docket_stage: "pre_xero",
   review_state: "needs_review",
+  review_state_changed_at: "2026-08-03T01:00:00Z",
 };
 
 function reviewablePack() {
@@ -371,35 +446,55 @@ function reviewablePack() {
   };
 }
 
+// Main scenario: the queue holds JOB, the mapped board card is loaded (the
+// captain came from the board), the raw canonical payload is not cached.
 function seedSendReady() {
   behaviour.fetch = {
-    makesafe_report_drafts: { drafts: [feedDraft] },
+    makesafe_report_drafts: { drafts: [legacyFeedDraft] },
     list_ses_docs_ready_reviews: { dockets: [queueRow] },
     query_ses_review_cockpit: cockpitSendReady(),
     get_ses_reviewable_pack: reviewablePack(),
+    makesafe_board: boardPayloadStub,
   };
   behaviour.post = {};
   behaviour.postJwt = {};
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+  sandbox._makesafeBoardPayload.columns = null;
 }
 
-// ── 5. List load: legacy feed + SES queue refresh + badge enrichment ─────────
+// ── 5. List load: the SES queue owns the cards; identity joins from the board ─
 seedSendReady();
 await mod.loadMakesafeReportingCockpit();
-check(
-  "load keeps the list feed on makesafe_report_drafts",
-  calls.opsFetch.some((c) => c.action === "makesafe_report_drafts"),
-);
 check(
   "load refreshes the SES Docs Ready queue",
   calls.opsFetch.some((c) => c.action === "list_ses_docs_ready_reviews"),
 );
 check(
-  "a card is rendered into the list body for the loaded pack",
-  (elements["msReportingListBody"]._html || "").includes("Major Loss Builders"),
+  "load NEVER reads the retired legacy drafts feed",
+  !calls.opsFetch.some((c) => c.action === "makesafe_report_drafts"),
+);
+const listHtml = elements["msReportingListBody"]._html || "";
+check(
+  "a card is rendered into the list body for the queued pack",
+  listHtml.includes("Major Loss Builders"),
+);
+check(
+  "the card identity is joined from the board feed (ref / job number / suburb)",
+  listHtml.includes("MLB-25248") && listHtml.includes("261065") &&
+    listHtml.includes("Joondalup"),
+);
+check(
+  "no identity fact comes from the legacy feed ghost",
+  !listHtml.includes("Ghost Builder") && !listHtml.includes("GHOST-1") &&
+    !listHtml.includes("Ghostville") && !listHtml.includes("MS-100"),
 );
 check(
   "the card chip starts neutral and carries the enrichment hook id",
-  (elements["msReportingListBody"]._html || "").includes("msCardBadge_job_1"),
+  listHtml.includes("msCardBadge_job_1"),
+);
+check(
+  "the card carries the money + job-number enrichment hooks",
+  listHtml.includes("msCardMoney_job_1") && listHtml.includes("msCardJob_job_1"),
 );
 await flush();
 check(
@@ -412,8 +507,60 @@ check(
   "the card chip lands on the SES cockpit status",
   elements["msCardBadge_job_1"].textContent === "SEND READY",
 );
+check(
+  "the invoice glance fills from the SES money section (local_invoice_proposal.total_inc_gst)",
+  (elements["msCardMoney_job_1"]._html || "").includes("$110.00"),
+);
+
+// ── 5b. Card identity sources: mapped cards / cached payload / one read ──────
+// Cached raw canonical payload (no mapped cards loaded): the suburb comes off
+// the contact.address tail via the board's own degraded-path helper.
+sandbox._pipelineData.columns = null;
+sandbox._makesafeBoardPayload.columns = { report_ready: [boardRawRow] };
+calls.opsFetch.length = 0;
+await mod.loadMakesafeReportingCockpit();
+const rawJoinHtml = elements["msReportingListBody"]._html || "";
+check(
+  "identity projects from the cached canonical payload when no mapped cards are loaded",
+  rawJoinHtml.includes("261065") && rawJoinHtml.includes("Joondalup") &&
+    rawJoinHtml.includes("MLB-25248"),
+);
+check(
+  "the cached-payload path does NOT re-read the board feed",
+  !calls.opsFetch.some((c) => c.action === "makesafe_board"),
+);
+// Neither cache in memory (Approvals tab opened first): one read-only GET of
+// the same canonical feed.
+sandbox._makesafeBoardPayload.columns = null;
+calls.opsFetch.length = 0;
+await mod.loadMakesafeReportingCockpit();
+check(
+  "with no board state in memory the canonical feed is read once for identity",
+  calls.opsFetch.filter((c) => c.action === "makesafe_board").length === 1,
+);
+check(
+  "the fetched-feed path still renders the joined identity",
+  (elements["msReportingListBody"]._html || "").includes("Joondalup"),
+);
+
+// ── 5c. Empty queue: the honest empty state, badge cleared ──────────────────
+sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [] };
+await mod.loadMakesafeReportingCockpit();
+check(
+  "an empty SES queue renders the honest empty state",
+  (elements["msReportingListBody"]._html || "").includes(
+    "No packs awaiting review",
+  ),
+);
+check(
+  "an empty SES queue clears the badge",
+  elements["msReportingBadge"].style.display === "none",
+);
 
 // ── 6. Detail: byte-exact pack, routes, fixed photos, invoice, controls ─────
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
 calls.opsFetch.length = 0;
 await mod.showMsReportingDetail(JOB);
 const detailHtml = elements["msReportingDetailPanel"]._html || "";
@@ -429,6 +576,11 @@ check(
     c.action === "get_ses_reviewable_pack" &&
     c.params.docket_revision_id === DOCKET_REV
   ),
+);
+check(
+  "detail header renders the board-joined identity (builder / ref / job number)",
+  detailHtml.includes("Major Loss Builders") && detailHtml.includes("MLB-25248") &&
+    detailHtml.includes("261065"),
 );
 check(
   "detail renders the three exact routes SEND IT releases",
@@ -477,8 +629,8 @@ check(
     detailHtml.includes("whole page"),
 );
 check(
-  "detail shows the raw trade notes from the live feed",
-  detailHtml.includes("Raw trade notes here"),
+  "the trade-notes section renders only when a feed carries raw trade notes",
+  !detailHtml.includes("Trade notes (raw from submission)"),
 );
 check(
   "detail renders the per-job SEND IT button (never a send-all)",
@@ -576,13 +728,21 @@ check(
 );
 
 // ── 8. SEND IT skips sign-off when the tick is already recorded ─────────────
-// A signed-off docket has dropped out of the needs_review queue: no pack fetch,
-// tick copy flips, and the chain starts at prepare.
+// A signed-off docket has dropped out of the needs_review queue: the list shows
+// the honest empty state, the detail self-seeds its identity from the board
+// join, no pack fetch happens, the tick copy flips, and the chain starts at
+// prepare.
 behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [] };
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.opsFetch.length = 0;
 await mod.loadMakesafeReportingCockpit();
+check(
+  "the list empties when the queue empties (no legacy ghosts)",
+  (elements["msReportingListBody"]._html || "").includes(
+    "No packs awaiting review",
+  ),
+);
 await mod.showMsReportingDetail(JOB);
 const signedOffHtml = elements["msReportingDetailPanel"]._html || "";
 check(
@@ -633,8 +793,8 @@ check(
 );
 await flush();
 check(
-  "a stale_review reloads the fresh pack",
-  calls.opsFetch.some((c) => c.action === "makesafe_report_drafts"),
+  "a stale_review reloads the fresh pack from the SES queue",
+  calls.opsFetch.some((c) => c.action === "list_ses_docs_ready_reviews"),
 );
 
 // ── 10. APPROVE INVOICE: JWT approval -> Xero execute ────────────────────────
@@ -750,9 +910,13 @@ check(
     /no approve\/send action is available/i.test(holdHtml),
 );
 
-// ── 12. No SES docket: the honest retired-path state ─────────────────────────
-const noDocketJob = Object.assign({}, feedDraft, { job_id: "job-no-docket" });
-behaviour.fetch["makesafe_report_drafts"] = { drafts: [noDocketJob] };
+// ── 12. Queue/cockpit disagreement + no SES docket: honest states ───────────
+// A queued job whose docket dropped out between the queue read and the cockpit
+// read gets the honest NO SES PACK chip — never an invented state — and the
+// detail renders the no-pack state with no actions.
+behaviour.fetch["list_ses_docs_ready_reviews"] = {
+  dockets: [Object.assign({}, queueRow, { job_id: "job-no-docket" })],
+};
 behaviour.fetch["query_ses_review_cockpit"] = new Error(
   "No current SES docket revision exists for this job.",
 );
@@ -761,7 +925,7 @@ calls.opsPostJwt.length = 0;
 await mod.loadMakesafeReportingCockpit();
 await flush();
 check(
-  "a job with no SES docket gets the honest NO SES PACK chip",
+  "a queued job whose docket vanished gets the honest NO SES PACK chip",
   elements["msCardBadge_job_no_docket"].textContent === "NO SES PACK",
 );
 await mod.showMsReportingDetail("job-no-docket");
@@ -827,19 +991,213 @@ check(
     !mod._msSesIsStale(null),
 );
 
-// ── 15. Card money-review chip still comes from the live feed ────────────────
-const moneyDraft = Object.assign({}, feedDraft, {
-  job_id: "job-mr",
-  needs_money_review: true,
-  money_review: { needs_money_review: true, reason: "Unit price above rate card" },
+// ── 15. Cards render queue + joined identity facts only ─────────────────────
+const bareCardHtml = mod.renderMsReportingCard({
+  job_id: "job-bare",
+  ses_docket_revision_id: DOCKET_REV,
 });
 check(
-  "the card still renders CHECK PRICING from the live feed",
-  mod.renderMsReportingCard(moneyDraft).includes("CHECK PRICING"),
+  "a card with no joined identity invents no facts (no suburb / ref / pricing chip)",
+  !bareCardHtml.includes("Suburb") && !bareCardHtml.includes("Ref:") &&
+    !bareCardHtml.includes("CHECK PRICING") &&
+    bareCardHtml.includes("(no builder)"),
 );
 check(
-  "a clean feed row renders no CHECK PRICING chip",
-  !mod.renderMsReportingCard(feedDraft).includes("CHECK PRICING"),
+  "a bare card still carries the enrichment hooks + review action",
+  bareCardHtml.includes("msCardBadge_job_bare") &&
+    bareCardHtml.includes("msCardMoney_job_bare") &&
+    bareCardHtml.includes("Review job pack"),
+);
+const joinedCardHtml = mod.renderMsReportingCard(
+  mod._msSesQueueCardRow(JOB, queueRow, {
+    job_number: "261065",
+    builder: "MLB Constructions",
+    external_ref: "MLB-25248",
+    site_suburb: "Joondalup",
+  }),
+);
+check(
+  "a joined card renders the queue + identity facts",
+  joinedCardHtml.includes("MLB-25248") && joinedCardHtml.includes("261065") &&
+    joinedCardHtml.includes("Joondalup"),
+);
+check(
+  "the queue card row carries NO legacy send fields (resume_action / pack_status)",
+  !("resume_action" in mod._msSesQueueCardRow(JOB, queueRow, null)) &&
+    !("pack_status" in mod._msSesQueueCardRow(JOB, queueRow, null)),
+);
+
+// ── 16. The board door (openMakesafeJob, extracted from ops.html) ───────────
+const OPS_SRC = join(__dirname, "..", "ops.html");
+const opsCode = readFileSync(OPS_SRC, "utf8");
+const doorStart = opsCode.indexOf("async function openMakesafeJob(jobId) {");
+const doorEnd = opsCode.indexOf("/**\n * Mount a board overlay", doorStart);
+check(
+  "ops.html door source located for extraction",
+  doorStart > 0 && doorEnd > doorStart,
+);
+const doorSrc = opsCode.slice(doorStart, doorEnd);
+check(
+  "the door no longer primes the legacy drafts feed",
+  !/loadMakesafeReportingCockpit/.test(doorSrc),
+);
+check(
+  "the door source never calls a retired action",
+  !/makesafe_send_pack|makesafe_send_photo_followup|makesafe_resume_close|makesafe_reset_failed_pack/
+    .test(doorSrc),
+);
+
+function makeDoor(env) {
+  const names = Object.keys(env);
+  // eslint-disable-next-line no-new-func
+  return new Function(
+    ...names,
+    '"use strict";\n' + doorSrc + "\nreturn openMakesafeJob;",
+  )(...names.map((n) => env[n]));
+}
+function doorEnv(over) {
+  const doorCalls = {
+    overlay: [],
+    detail: [],
+    jobDetail: [],
+    queueRefresh: 0,
+  };
+  const env = {
+    _msSesReviewQueue: {},
+    _msReportingCache: {},
+    _msSesReviewQueueStale: () => false,
+    _msSesRefreshReviewQueue: async () => {
+      doorCalls.queueRefresh++;
+    },
+    _msIsPortalBuilder: () => false,
+    showMsReportingDetail: (jobId, panelId) => {
+      doorCalls.detail.push({ jobId, panelId });
+    },
+    openMakesafeReviewOverlay: (overlayId, panelId) => {
+      doorCalls.overlay.push({ overlayId, panelId });
+    },
+    openJobDetail: (jobId) => {
+      doorCalls.jobDetail.push(jobId);
+    },
+  };
+  Object.assign(env, over || {});
+  return { env, calls: doorCalls };
+}
+
+// (a) A queued job opens the SES review overlay in the board host.
+const doorA = doorEnv({
+  _msSesReviewQueue: {
+    "job-1": { job_id: "job-1", docket_revision_id: DOCKET_REV },
+  },
+});
+await makeDoor(doorA.env)("job-1");
+check(
+  "door opens the SES review overlay for a queued job",
+  doorA.calls.overlay.length === 1 &&
+    doorA.calls.overlay[0].overlayId === "makesafeReportingOverlay" &&
+    doorA.calls.detail.length === 1 &&
+    doorA.calls.detail[0].jobId === "job-1" &&
+    doorA.calls.detail[0].panelId === "msReportingDetailPanelBoard" &&
+    doorA.calls.jobDetail.length === 0,
+);
+check(
+  "door does not re-read the queue on a hit",
+  doorA.calls.queueRefresh === 0,
+);
+
+// (b) No docket + a fresh queue + no legacy pack -> the canonical job detail,
+// with no queue re-read.
+const doorB = doorEnv();
+await makeDoor(doorB.env)("job-2");
+check(
+  "door falls back to the job detail when no docket and no legacy pack exist",
+  doorB.calls.jobDetail.length === 1 && doorB.calls.jobDetail[0] === "job-2" &&
+    doorB.calls.overlay.length === 0 && doorB.calls.detail.length === 0,
+);
+check(
+  "door does not re-read a fresh queue on a miss",
+  doorB.calls.queueRefresh === 0,
+);
+
+// (c1) A stale queue is re-read on a miss; a docket that just entered review
+// opens the SES overlay.
+const doorC1 = doorEnv({ _msSesReviewQueueStale: () => true });
+doorC1.env._msSesRefreshReviewQueue = async () => {
+  doorC1.calls.queueRefresh++;
+  // Mutate the SAME object the door holds (the real refresh reassigns the
+  // page-global map; the extracted function sees this one's properties).
+  doorC1.env._msSesReviewQueue["job-3"] = {
+    job_id: "job-3",
+    docket_revision_id: DOCKET_REV,
+  };
+};
+await makeDoor(doorC1.env)("job-3");
+check(
+  "door re-reads a stale queue on a miss and opens the SES overlay when the docket appears",
+  doorC1.calls.queueRefresh === 1 && doorC1.calls.overlay.length === 1 &&
+    doorC1.calls.jobDetail.length === 0,
+);
+
+// (c2) A stale re-read that finds no docket falls back to the job detail.
+const doorC2 = doorEnv({ _msSesReviewQueueStale: () => true });
+await makeDoor(doorC2.env)("job-4");
+check(
+  "door falls back to the job detail after a stale re-read finds no docket",
+  doorC2.calls.queueRefresh === 1 && doorC2.calls.jobDetail.length === 1 &&
+    doorC2.calls.overlay.length === 0,
+);
+
+// (d) Legacy safety net: no SES entry, but a genuinely actionable legacy pack
+// is cached -> the review overlay still opens (it can never shadow an SES card:
+// the SES gate ran first).
+const doorD = doorEnv({
+  _msReportingCache: { "job-5": { job_id: "job-5", resume_action: "send" } },
+});
+await makeDoor(doorD.env)("job-5");
+check(
+  "door keeps the legacy actionable-pack safety net below the SES gate",
+  doorD.calls.overlay.length === 1 && doorD.calls.jobDetail.length === 0,
+);
+
+// (e) The SES gate wins over a failed legacy cache row (which the legacy branch
+// would reject): a queued job still opens the review overlay.
+const doorE = doorEnv({
+  _msSesReviewQueue: {
+    "job-6": { job_id: "job-6", docket_revision_id: DOCKET_REV },
+  },
+  _msReportingCache: {
+    "job-6": { job_id: "job-6", pack_status: { status: "failed" } },
+  },
+});
+await makeDoor(doorE.env)("job-6");
+check(
+  "the SES gate opens even over a failed legacy cache row",
+  doorE.calls.overlay.length === 1 && doorE.calls.jobDetail.length === 0,
+);
+
+// (f) The SES module absent entirely (typeof guards) -> the canonical job
+// detail, no throw.
+const doorF = doorEnv();
+delete doorF.env._msSesReviewQueue;
+delete doorF.env._msSesRefreshReviewQueue;
+delete doorF.env._msSesReviewQueueStale;
+await makeDoor(doorF.env)("job-7");
+check(
+  "door degrades to the job detail when the SES module is absent",
+  doorF.calls.jobDetail.length === 1 && doorF.calls.overlay.length === 0,
+);
+
+// ── 17. No retired action was ever dispatched at runtime ────────────────────
+check(
+  "no retired action was ever called at runtime",
+  !actionLog.some((a) =>
+    [
+      "makesafe_send_pack",
+      "makesafe_send_photo_followup",
+      "makesafe_resume_close",
+      "makesafe_reset_failed_pack",
+    ].includes(a)
+  ),
 );
 
 console.log("");

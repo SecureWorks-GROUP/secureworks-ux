@@ -10581,27 +10581,42 @@ function closeMakesafeReportingOverlay() {
 /**
  * ONE adaptive entry for a make-safe board card. A single click opens ONE screen
  * that ADAPTS to the pack state:
- *   - if a draft pack is READY/resumable (it appears in the report-drafts feed) ->
- *     the integrated review-and-send pack (showMsReportingDetail in a board overlay),
+ *   - if the job has a CURRENT SES Docs Ready docket (it sits in the
+ *     list_ses_docs_ready_reviews queue) -> the SES review pack
+ *     (showMsReportingDetail in a board overlay),
+ *   - else if a legacy drafted pack is cached and genuinely actionable -> the
+ *     same overlay (safety only: the legacy feed is empty in production and its
+ *     combined send is retired server-side, and the SES gate runs first, so
+ *     this branch can never shadow an SES card),
  *   - else -> the canonical full job view (openJobDetail), which already shows
  *     status / crew / work order (design ref state B).
  * Same door, the screen adapts. Used by the make-safe card click + the explicit
  * "Review job pack" button so there is a single code path.
  */
 async function openMakesafeJob(jobId) {
-  // Refresh the report-drafts feed if this job isn't already cached. The feed
-  // carries the recipient, invoice lines, PDFs and gate-passing subject/body the
-  // review screen needs, none of which are on the board payload.
-  if (typeof loadMakesafeReportingCockpit === 'function'
-      && (typeof _msReportingCache === 'undefined' || !_msReportingCache[jobId])) {
-    try { await loadMakesafeReportingCockpit(); } catch (e) { /* fall through to canonical */ }
+  // The SES Docs Ready queue (job_id -> current needs_review docket) is the
+  // door's source of truth for a reviewable pack. When this job is not in the
+  // map and the map has never been read or has gone stale, re-read it before
+  // the gate — a docket that entered review since the last read must not send
+  // the captain to the wrong screen. A queue HIT needs no re-read: a docket
+  // that dropped out since is caught by the detail's own stale-review retry.
+  if (typeof _msSesReviewQueue !== 'undefined' && typeof _msSesRefreshReviewQueue === 'function'
+      && !_msSesReviewQueue[jobId]
+      && (typeof _msSesReviewQueueStale !== 'function' || _msSesReviewQueueStale())) {
+    try { await _msSesRefreshReviewQueue(); } catch (e) { /* fall through to the gates */ }
   }
-  // Open the integrated review screen ONLY when the cached pack is genuinely
-  // actionable: it must carry a resume_action (the feed sets one of send /
-  // finish_send / finish_close_out / resolve_send_state for every sendable or
-  // resumable pack) OR be a portal builder (Western/Builderwest prep, which is
-  // review-and-submit). A bare/stale/failed cache entry with no resume_action falls
-  // through to the canonical job view instead of opening an empty review screen.
+  var sesEntry = (typeof _msSesReviewQueue !== 'undefined') ? _msSesReviewQueue[jobId] : null;
+  if (sesEntry && typeof showMsReportingDetail === 'function') {
+    openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
+    showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
+    return;
+  }
+  // Legacy safety net (see the header comment): a cached pack counts ONLY when
+  // it is genuinely actionable — it must carry a resume_action (the feed sets
+  // one of send / finish_send / finish_close_out / resolve_send_state for every
+  // sendable or resumable pack) OR be a portal builder (Western/Builderwest
+  // prep, which is review-and-submit) — and not a failed pack. Queue-seeded SES
+  // rows never carry resume_action, so an SES card can never take this branch.
   var pack = (typeof _msReportingCache !== 'undefined') ? _msReportingCache[jobId] : null;
   var isFailedPack = !!(pack && pack.pack_status && pack.pack_status.status === 'failed');
   var isPortalPack = pack && !isFailedPack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
@@ -10611,7 +10626,8 @@ async function openMakesafeJob(jobId) {
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
   }
-  // No pack ready -> the canonical job view (status / crew / work order).
+  // No SES docket and no actionable legacy pack -> the canonical job view
+  // (status / crew / work order).
   openJobDetail(jobId);
 }
 

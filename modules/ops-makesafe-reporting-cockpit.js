@@ -6,8 +6,16 @@
 // legacy_combined_release_retired) and this module NEVER calls it, nor the
 // legacy resume actions (makesafe_resume_close / makesafe_reset_failed_pack).
 //
-// LIST: still the live makesafe_report_drafts feed (identity facts + invoice
-// glance), with each card's status chip enriched from query_ses_review_cockpit.
+// LIST: the SES Docs Ready queue itself (list_ses_docs_ready_reviews — every
+// job with a current needs_review docket). The queue row carries only
+// job_id / docket_revision_id / stage / hashes / timestamps, so each card's
+// identity (job number / builder / suburb / ref / family) is joined from the
+// canonical makesafe_board feed already cached by the board load, and the
+// status chip + invoice glance are enriched per card from
+// query_ses_review_cockpit. The legacy makesafe_report_drafts read is DROPPED
+// from this surface: it returns zero drafts in production and its combined
+// approve/send path is retired server-side (410), so a card rendered from it
+// could only ever be a ghost.
 // DETAIL: query_ses_review_cockpit (status / controls / routes / money) plus
 // get_ses_reviewable_pack (byte-exact docs + photos + the hash the Docs Ready
 // tick binds to), discovered via list_ses_docs_ready_reviews
@@ -38,6 +46,9 @@ var _msReportingCache = {};
 var _msSesReviewQueue = {};
 var _msSesCockpitCache = {};
 var _msSesPackCache = {};
+// When _msSesReviewQueue was last successfully read (0 = never). The board door
+// uses it to re-read a stale queue before deciding a job has no reviewable pack.
+var _msSesReviewQueueFetchedAt = 0;
 
 // JS-STRING escape for values interpolated INSIDE a single-quoted JS string in an
 // inline onclick handler. escapeAttr/escapeHtml are HTML-context escapes (entities
@@ -78,49 +89,58 @@ function _msReportingCanonicalBuilderName(d) {
 // ────────────────────────────────────────────────────────────
 
 /**
- * Load report-draft-ready packs and render the cockpit column. The list feed is
- * the still-live legacy makesafe_report_drafts read (identity + invoice glance);
-// every actionable fact on the DETAIL panel comes from the SES actions. Also
- * refreshes the SES Docs Ready queue (job_id -> current needs_review docket) so
- * the detail open can resolve the exact docket revision, and enriches each
- * card's status chip from query_ses_review_cockpit.
- * Returns the count of drafts (resolves to 0 on error).
+ * Load the SES Docs Ready review queue and render the cockpit column from it.
+ * The queue (list_ses_docs_ready_reviews) is the ONLY read that maps
+ * job_id -> current needs_review docket, so it owns which cards exist; the
+ * retired legacy drafts feed is never read here. Identity facts the queue does
+ * not carry (job number / builder / suburb / ref / family) are joined from the
+ * canonical makesafe_board feed (see _msSesBoardIdentity), and each card's
+ * status chip + invoice glance are enriched from query_ses_review_cockpit.
+ * Returns the count of queued packs (resolves to 0 on error).
  */
 async function loadMakesafeReportingCockpit() {
   var body = document.getElementById('msReportingListBody');
   if (body) {
-    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading report drafts...</div>';
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading the SES review queue&#8230;</div>';
   }
   try {
-    var queuePromise = _msSesRefreshReviewQueue();
-    var data = await opsFetch('makesafe_report_drafts', {});
-    await queuePromise;
-    var drafts = (data && data.drafts) || [];
+    var identityPromise = _msSesBoardIdentity();
+    await _msSesRefreshReviewQueue();
+    var identityById = await identityPromise;
     _msReportingCache = {};
-    drafts.forEach(function(d) { _msReportingCache[d.job_id] = d; });
+    // Queue order is the server's review_state_changed_at ascending — the pack
+    // waiting longest sits on top. Object.keys preserves the insertion order
+    // _msSesRefreshReviewQueue built the map in (job ids are UUIDs).
+    var rows = [];
+    Object.keys(_msSesReviewQueue).forEach(function(jobId) {
+      var row = _msSesQueueCardRow(jobId, _msSesReviewQueue[jobId], identityById[jobId]);
+      _msReportingCache[jobId] = row;
+      rows.push(row);
+    });
 
     if (body) {
-      if (drafts.length === 0) {
+      if (rows.length === 0) {
         body.innerHTML = '<div style="padding:40px 20px;text-align:center;">'
           + '<div style="font-size:36px;opacity:0.3;margin-bottom:12px;">&#128203;</div>'
-          + '<div style="font-size:14px;font-weight:600;color:var(--sw-dark);">No report drafts to send</div>'
-          + '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px;">Packs appear here once the reporting routine has drafted the invoice and rendered the report.</div>'
+          + '<div style="font-size:14px;font-weight:600;color:var(--sw-dark);">No packs awaiting review</div>'
+          + '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px;">Packs appear here when the SES reporting routine assembles a docket and it enters Docs Ready review.</div>'
           + '</div>';
       } else {
         var html = '';
-        drafts.forEach(function(d) { html += renderMsReportingCard(d); });
+        rows.forEach(function(d) { html += renderMsReportingCard(d); });
         body.innerHTML = html;
-        // Enrich each card's status chip with the SES cockpit status (async;
-        // failures land on an honest fallback chip, never a legacy action).
-        _msSesEnrichCardBadges(drafts);
+        // Enrich each card's status chip + invoice glance with the SES cockpit
+        // view (async; failures land on an honest fallback chip, never a
+        // legacy action).
+        _msSesEnrichCards(rows);
       }
     }
 
-    refreshMsReportingBadge(drafts.length);
-    return drafts.length;
+    refreshMsReportingBadge(rows.length);
+    return rows.length;
   } catch (e) {
     if (body) {
-      body.innerHTML = '<div style="padding:20px;text-align:center;color:#E74C3C;font-size:13px;">Failed to load report drafts: ' + escapeHtml(e.message || String(e)) + '</div>';
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:#E74C3C;font-size:13px;">Failed to load the SES review queue: ' + escapeHtml(e.message || String(e)) + '</div>';
     }
     refreshMsReportingBadge(0);
     return 0;
@@ -141,24 +161,168 @@ async function _msSesRefreshReviewQueue() {
       if (r && r.job_id) map[r.job_id] = r;
     });
     _msSesReviewQueue = map;
+    _msSesReviewQueueFetchedAt = Date.now();
   } catch (_e) {
     // Degrade honestly: without the queue the detail renders from the cockpit
     // view alone (no byte-exact pack, no hash-bound tick).
   }
 }
 
+// The queue read goes stale quickly (a persist run can add a docket at any
+// time), so the board door re-reads it before concluding a job has no pack.
+function _msSesReviewQueueStale(ms) {
+  return !_msSesReviewQueueFetchedAt || (Date.now() - _msSesReviewQueueFetchedAt) > (ms || 30000);
+}
+
+// ── CARD IDENTITY (joined, never invented) ──────────────────────────────────
+// The SES queue row carries no identity facts. Every identity field on a card
+// comes from the canonical makesafe_board feed — the same rows the board
+// renders — preferring the enrichment-joined mapped cards when the make-safe
+// board is the loaded tab (they carry the true site_suburb), else the raw
+// canonical rows (suburb from the contact.address tail, the board's own
+// degraded-path rule). When neither is in memory (Approvals tab opened before
+// the board) the same canonical feed is read once — a read-only GET, the same
+// one ensureMakesafeCanonicalStages uses for deep links.
+
+// Project one raw canonical `makesafe-board.v1` row onto the identity shape the
+// card + detail header read. Mirrors the board's own mapCanonicalMakesafeRow
+// fallbacks; a fact the feed does not carry stays null and renders as a gap.
+function _msSesIdentityFromCanonicalRow(row) {
+  var contact = (row && row.contact) || {};
+  var builder = (row && row.builder) || {};
+  var lineage = (row && row.lineage) || {};
+  var builderName = builder.name || null;
+  return {
+    job_id: row.id,
+    job_number: row.job_number || null,
+    builder: builderName,
+    external_ref: builder.external_ref || lineage.builder_claim_ref || null,
+    site_address: contact.address || null,
+    site_suburb: (typeof makesafeSuburbFromAddress === 'function' ? makesafeSuburbFromAddress(contact.address) : '') || null,
+    client_name: contact.client_name || null,
+    requesting_company_name: builderName,
+    requesting_company_slug: (typeof makesafeCompanySlugFallback === 'function' ? makesafeCompanySlugFallback(builderName) : null),
+    makesafe_job_family: row.ses_family || row.makesafe_type || null,
+    makesafe_job_family_label: row.ses_family_label || null
+  };
+}
+
+// The same projection off a mapped board card (canonical row + close-out
+// enrichment already joined by fetchMakesafeBoardData). These cards carry the
+// true enriched site_suburb, so they win where they exist.
+function _msSesIdentityFromBoardCard(card) {
+  var builderName = card.requesting_company_name || (card.builder && card.builder.name) || null;
+  return {
+    job_id: card.id,
+    job_number: card.job_number || null,
+    builder: builderName,
+    external_ref: card.external_ref || null,
+    site_address: card.site_address || null,
+    site_suburb: card.site_suburb || null,
+    client_name: card.client_name || null,
+    requesting_company_name: builderName,
+    requesting_company_slug: card.requesting_company_slug || null,
+    makesafe_job_family: card.ses_family || card.makesafe_job_family || null,
+    makesafe_job_family_label: card.ses_family_label || null
+  };
+}
+
 /**
- * Enrich the rendered list cards with the SES cockpit status chip. One bounded
- * read per card (the review queue is small); a job with no SES docket gets an
- * honest NO SES PACK chip, a read failure gets SES UNKNOWN.
+ * Build the job_id -> identity map from the board feed. Reads the page's
+ * already-loaded canonical payload (_makesafeBoardPayload) and the mapped board
+ * cards (_pipelineData when the make-safe board is the loaded tab); reads the
+ * canonical feed once when neither is available. Never invents a field.
  */
-function _msSesEnrichCardBadges(drafts) {
-  drafts.forEach(function(d) {
+async function _msSesBoardIdentity() {
+  var byId = {};
+  var payload = (typeof _makesafeBoardPayload !== 'undefined' && _makesafeBoardPayload && _makesafeBoardPayload.columns)
+    ? _makesafeBoardPayload : null;
+  var hasMappedCards = !!(typeof _pipelineTab !== 'undefined' && _pipelineTab === 'makesafes'
+    && typeof _pipelineData !== 'undefined' && _pipelineData && _pipelineData.columns);
+  if (!payload && !hasMappedCards) {
+    // Approvals tab opened before the board: read the same canonical feed once.
+    try {
+      payload = await opsFetch('makesafe_board', { projection: 'ops' });
+    } catch (e) {
+      console.warn('MakeSafe reporting: board identity feed unavailable:', e && e.message);
+      payload = null;
+    }
+  }
+  if (payload && payload.columns) {
+    Object.keys(payload.columns).forEach(function(stage) {
+      (payload.columns[stage] || []).forEach(function(row) {
+        if (row && row.id) byId[row.id] = _msSesIdentityFromCanonicalRow(row);
+      });
+    });
+  }
+  // The mapped, enrichment-joined cards win where they exist (true site_suburb).
+  if (hasMappedCards) {
+    Object.keys(_pipelineData.columns).forEach(function(stage) {
+      (_pipelineData.columns[stage] || []).forEach(function(card) {
+        if (card && card.id) byId[card.id] = _msSesIdentityFromBoardCard(card);
+      });
+    });
+  }
+  return byId;
+}
+
+/**
+ * Build the list/cache row for one queued job: the SES queue facts plus the
+ * joined board identity. This is the row renderMsReportingCard renders and the
+ * detail header reads — it deliberately carries NO legacy send fields
+ * (resume_action / pack_status / recipient / subject), so no legacy gate can
+ * ever pick a queue card up.
+ */
+function _msSesQueueCardRow(jobId, entry, identity) {
+  entry = entry || {};
+  var row = {
+    job_id: jobId,
+    ses_docket_revision_id: entry.docket_revision_id || null,
+    ses_docket_stage: entry.docket_stage || null,
+    ses_queued_at: entry.review_state_changed_at || entry.docket_committed_at || null
+  };
+  if (identity) {
+    ['job_number', 'builder', 'external_ref', 'site_suburb', 'site_address',
+      'client_name', 'requesting_company_name', 'requesting_company_slug',
+      'makesafe_job_family', 'makesafe_job_family_label'].forEach(function(k) {
+      if (identity[k] != null) row[k] = identity[k];
+    });
+  }
+  return row;
+}
+
+/**
+ * Seed _msReportingCache[jobId] from the board identity join when the list has
+ * not run yet (board-first entry through the door). Always seeds at least a
+ * bare job_id row so the detail can open; the SES reads carry the review
+ * content either way.
+ */
+async function _msSesSeedIdentityRow(jobId) {
+  if (_msReportingCache[jobId]) return _msReportingCache[jobId];
+  var identityById = {};
+  try { identityById = await _msSesBoardIdentity(); } catch (_e) { /* bare row */ }
+  var row = _msSesQueueCardRow(jobId, _msSesReviewQueue[jobId], identityById[jobId]);
+  _msReportingCache[jobId] = row;
+  return row;
+}
+
+/**
+ * Enrich the rendered list cards from the SES cockpit view: the status chip,
+ * the invoice glance (sections.money), and the job-number line when the board
+ * join missed it (sections.job_story.job_number is the same fact). One bounded
+ * read per card (the review queue is small); a job whose docket vanished
+ * between the queue read and this read gets an honest NO SES PACK chip, a read
+ * failure gets SES UNKNOWN.
+ */
+function _msSesEnrichCards(rows) {
+  rows.forEach(function(d) {
     var jobId = d && d.job_id;
     if (!jobId) return;
     opsFetch('query_ses_review_cockpit', { job_id: jobId }).then(function(cockpit) {
       _msSesCockpitCache[jobId] = cockpit;
       _msSesUpdateCardBadge(jobId, cockpit && cockpit.status);
+      _msSesUpdateCardMoney(jobId, cockpit);
+      _msSesUpdateCardJobNumber(jobId, cockpit);
     }).catch(function(e) {
       var msg = String((e && e.message) || e || '');
       _msSesUpdateCardBadge(jobId, /No current SES docket revision/i.test(msg) ? 'NO_DOCKET' : 'UNKNOWN');
@@ -173,6 +337,30 @@ function _msSesUpdateCardBadge(jobId, status) {
   el.textContent = chip.label;
   el.style.background = chip.bg;
   el.style.color = chip.fg;
+}
+
+// The card's invoice glance is the SES money truth: the docket's
+// local_invoice_proposal total (inc GST), or an honest "no proposal" note.
+function _msSesUpdateCardMoney(jobId, cockpit) {
+  var el = document.getElementById('msCardMoney_' + _msDocTabKey(jobId));
+  if (!el) return;
+  var money = (cockpit && cockpit.sections && cockpit.sections.money) || {};
+  var proposal = money.local_invoice_proposal || null;
+  var total = (proposal && proposal.total_inc_gst != null) ? Number(proposal.total_inc_gst) : null;
+  if (total != null && isFinite(total)) {
+    el.innerHTML = escapeHtml(_msFmtAud(total)) + '<span style="font-size:10px;font-weight:600;color:var(--sw-text-sec);margin-left:4px;">inc GST</span>';
+  } else {
+    el.innerHTML = '<span style="font-size:11px;font-weight:600;color:var(--sw-text-sec);">No invoice proposal on this pack</span>';
+  }
+}
+
+// Fill the job-number line only when the board join left it empty — the
+// cockpit's job_story.job_number is the same fact from the docket side.
+function _msSesUpdateCardJobNumber(jobId, cockpit) {
+  var el = document.getElementById('msCardJob_' + _msDocTabKey(jobId));
+  if (!el || el.textContent.trim()) return;
+  var n = cockpit && cockpit.sections && cockpit.sections.job_story && cockpit.sections.job_story.job_number;
+  if (n) el.innerHTML = '<strong>Job:</strong> ' + escapeHtml(n);
 }
 
 // The single status vocabulary for this surface: the SES cockpit status.
@@ -197,38 +385,39 @@ function _msFmtAud(n) {
 }
 
 /**
- * Render a single report-draft card for the cockpit column. Identity + invoice
- * glance come from the live feed; the status chip starts neutral and is
- * enriched to the SES cockpit status by _msSesEnrichCardBadges.
+ * Render a single queued-pack card for the cockpit column. Identity facts come
+ * from the canonical board feed join (a missing fact renders as a gap, never a
+ * guess); the status chip, the invoice glance and a missing job number are
+ * enriched from the SES cockpit view by _msSesEnrichCards.
  */
 function renderMsReportingCard(d) {
   var builder = _msReportingCanonicalBuilderName(d);
   var ref = d.external_ref;
   var suburb = d.site_suburb;
-  var incGst = d.invoice ? d.invoice.total_inc_gst : null;
+  var jobNumber = d.job_number;
 
   var safeId = _msJsAttr(d.job_id);
   var cardKey = _msDocTabKey(d.job_id);
   var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '" onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid #94A3B8;">';
 
-  // Top row: the SES status chip (enriched async) + amber money-review chip
-  // when the still-live feed flags pricing.
+  // Top row: the SES status chip (enriched async from query_ses_review_cockpit).
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
   html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#6B7280;color:#fff;">CHECKING SES&#8230;</span>';
-  if (_msNeedsMoneyReview(d)) {
-    html += '<span style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#B45309;color:#fff;">CHECK PRICING</span>';
-  }
   html += '</div>';
 
   // Builder name
   html += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(builder) + '</div>';
 
-  // Detail lines
+  // Detail lines — only real facts render.
   if (ref) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:3px;"><strong>Ref:</strong> ' + escapeHtml(ref) + '</div>';
+  // The job-number line always carries its hook id: when the board join missed
+  // the job, the cockpit enrichment fills it from job_story.job_number.
+  html += '<div id="msCardJob_' + escapeAttr(cardKey) + '" style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;">' + (jobNumber ? '<strong>Job:</strong> ' + escapeHtml(jobNumber) : '') + '</div>';
   if (suburb) html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;"><strong>Suburb:</strong> ' + escapeHtml(suburb) + '</div>';
 
-  // Invoice amount (inc GST) - prominent
-  html += '<div style="margin-top:8px;font-size:18px;font-weight:800;color:var(--sw-dark);">' + (incGst != null ? _msFmtAud(incGst) : 'No invoice') + '<span style="font-size:10px;font-weight:600;color:var(--sw-text-sec);margin-left:4px;">inc GST</span></div>';
+  // Invoice glance (inc GST) - prominent; filled by the SES cockpit enrichment
+  // from sections.money.local_invoice_proposal.
+  html += '<div id="msCardMoney_' + escapeAttr(cardKey) + '" style="margin-top:8px;font-size:18px;font-weight:800;color:var(--sw-dark);"></div>';
 
   // Review button. Same review mechanism as the board "Review job pack" action.
   html += '<div style="margin-top:10px;">';
@@ -258,12 +447,20 @@ function renderMsReportingCard(d) {
 async function showMsReportingDetail(jobId, targetPanelId) {
   var panel = document.getElementById(targetPanelId || 'msReportingDetailPanel');
   if (!panel) return;
+  panel.innerHTML = '<div style="padding:32px 20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading the SES review pack&#8230;</div>';
+  // Board-first entry (the list has not run): seed the identity row the header
+  // reads from the canonical board feed rather than refusing to open. The SES
+  // reads below carry the review content either way, and a job with no current
+  // docket lands on the honest no-pack state.
   var base = _msReportingCache[jobId];
   if (!base) {
-    panel.innerHTML = '<div style="padding:20px;color:#E74C3C;font-size:13px;">Pack not loaded. <button onclick="loadMakesafeReportingCockpit()" style="margin-left:8px;">Reload</button></div>';
-    return;
+    try {
+      base = await _msSesSeedIdentityRow(jobId);
+    } catch (_e) {
+      base = { job_id: jobId };
+      _msReportingCache[jobId] = base;
+    }
   }
-  panel.innerHTML = '<div style="padding:32px 20px;text-align:center;color:var(--sw-text-sec);font-size:13px;">Loading the SES review pack&#8230;</div>';
   var ctx;
   try {
     ctx = await _msSesLoadPackContext(jobId);
@@ -1406,9 +1603,10 @@ function _msIsPortalBuilder(d) {
 // SMOKE TEST (manual, run in browser console):
 // 1. showView('approvals') -- approvals view loads
 // 2. Click "MakeSafe Reporting" tab -- reporting cockpit renders, loading state
-// 3. loadMakesafeReportingCockpit() returns a count (0 or N); card chips enrich
-//    to the SES cockpit status (DOCS READY / APPROVE INVOICE / SEND READY /
-//    ON HOLD / NO SES PACK)
+// 3. loadMakesafeReportingCockpit() returns the SES queue count (0 or N); cards
+//    render from the Docs Ready queue with board-joined identity, and chips
+//    enrich to the SES cockpit status (DOCS READY / APPROVE INVOICE /
+//    SEND READY / ON HOLD / NO SES PACK)
 // 4. Clicking a card loads query_ses_review_cockpit + get_ses_reviewable_pack
 //    and renders the doc tabs, invoice lines, the three exact routes, and the
 //    fixed photo set
@@ -1424,6 +1622,9 @@ function _msIsPortalBuilder(d) {
 // Export for the node smoke test (no-op in the browser).
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    loadMakesafeReportingCockpit: typeof loadMakesafeReportingCockpit !== 'undefined' ? loadMakesafeReportingCockpit : undefined
+    loadMakesafeReportingCockpit: typeof loadMakesafeReportingCockpit !== 'undefined' ? loadMakesafeReportingCockpit : undefined,
+    renderMsReportingCard: typeof renderMsReportingCard !== 'undefined' ? renderMsReportingCard : undefined,
+    _msSesQueueCardRow: typeof _msSesQueueCardRow !== 'undefined' ? _msSesQueueCardRow : undefined,
+    _msSesReviewQueueStale: typeof _msSesReviewQueueStale !== 'undefined' ? _msSesReviewQueueStale : undefined
   };
 }

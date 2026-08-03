@@ -18740,6 +18740,13 @@
       // reachable. The representative rows below remain useful for the unfiltered
       // vertical summary, but forSelection filters first and dedupes second.
       var assignedRows = preferredRows(assigned);
+      var crewByJob = {};
+      assigned.forEach(function (row) {
+        var jobId = rowJobId(row);
+        if (!jobId) return;
+        if (!crewByJob[jobId]) crewByJob[jobId] = [];
+        crewByJob[jobId].push(row);
+      });
       var assignedJobIds = {};
       assigned.forEach(function (row) { var id = rowJobId(row); if (id) assignedJobIds[id] = true; });
       var poolByJob = {};
@@ -18755,14 +18762,14 @@
       });
       var poolRows = Object.keys(poolByJob).map(function (jobId) { return poolByJob[jobId]; });
       var selectionRows = assigned.filter(function (row) { return !!rowJobId(row); }).concat(poolRows);
-      var selectionCards = selectionRows.map(function (row) { return makeCard(row.jobs || {}, row); });
+      var selectionCards = selectionRows.map(function (row) { return makeCard(row.jobs || {}, row, crewByJob[rowJobId(row)] || []); });
       // Row identity -> its already-built card, so column assembly stays linear.
       var cardByRow = new Map();
       selectionRows.forEach(function (row, index) {
         if (!cardByRow.has(row)) cardByRow.set(row, selectionCards[index]);
       });
       function cardForRow(row) {
-        return cardByRow.get(row) || makeCard(row.jobs || {}, row);
+        return cardByRow.get(row) || makeCard(row.jobs || {}, row, crewByJob[rowJobId(row)] || []);
       }
 
       var columns = COLUMNS.map(function (column) {
@@ -18965,10 +18972,10 @@
     };
   }
 
-  function _fencingBoardCardModel(job, row) {
+  function _fencingBoardCardModel(job, row, crewAssignments) {
     var model = UnifiedJobCard.fromJobAssignment(job, row, 'fencing', {
       desc: job.scope_summary || buildScopeSummary(job.scope_json, 'fencing'),
-      crewAssignments: row && row.assignments
+      crewAssignments: crewAssignments
     });
     // AllocationCore predates UnifiedJobCard and reads these aliases. Keep the
     // one visual grammar while supplying its existing write-model seam.

@@ -1748,6 +1748,10 @@
       cursor: pointer;
     }
     .ms-archive-load-btn:hover { background: #475569; }
+    .ms-archive-unload-btn {
+      background: #fff; color: #475569; border: 1px solid #94A3B8;
+    }
+    .ms-archive-unload-btn:hover { background: #E2E8F0; color: #334155; }
     .ms-archive-load-btn:disabled {
       opacity: 0.65; cursor: wait;
     }
@@ -11584,7 +11588,9 @@ function syncMakesafeArchiveButton() {
 }
 
 // One sentence naming the archive's honest state, shared by every surface that
-// has to explain why history is not on screen.
+// has to explain where history is. EVERY loadState gets its own branch: a shared
+// explanation helper that falls through to "not loaded" would hand its next
+// caller a flatly false sentence about a loaded archive.
 function makesafeArchiveStateSummary() {
   var st = _makesafeArchiveState || {};
   var total = String(makesafeArchiveDisplayCount());
@@ -11593,6 +11599,8 @@ function makesafeArchiveStateSummary() {
   if (st.loadState === 'partial') {
     return 'Archive — showing ' + makesafeArchiveLoadedCount() + ' of ' + total + ' records';
   }
+  if (st.loadState === 'loaded') return 'Archive (' + total + ') — loaded';
+  if (st.loadState === 'unknown') return 'Archive — not read yet';
   if (total === '?') return 'Archive — not loaded (count unknown)';
   return 'Archive (' + total + ') — not loaded';
 }
@@ -11652,35 +11660,45 @@ function renderMakesafeArchiveColumnBody(allJobs, jobs) {
 
 // LIST view carries the same contract as the Archive column: the table simply
 // drops archived rows under column_scope=active, so it has to say so and offer
-// the same load control. Returns '' for any tab / state where nothing is hidden.
+// the same load control. It also owns the OFF switch, because it owns an ON
+// switch: the kanban toggle is not reachable from here, so without this the
+// Captain could turn the ~301-card fetch on for the session and never off again.
+// Returns '' for any tab / state where nothing is hidden and nothing is pinned.
 function renderMakesafeArchiveListNotice() {
   if (_pipelineTab !== 'makesafes') return '';
   var st = _makesafeArchiveState || {};
   var state = st.loadState;
-  if (state === 'loaded' || state === 'unknown') return '';
+  var wanted = !!_makesafeArchiveWanted;
+  if (!wanted && (state === 'loaded' || state === 'unknown')) return '';
 
   var summary = makesafeArchiveStateSummary();
   var hint = '';
-  var control = '';
+  var controls = '';
   if (state === 'loading') {
     hint = 'Fetching archived jobs. The rows below are the active board only.';
-    control = '<button type="button" class="ms-archive-load-btn" disabled>Loading…</button>';
+    controls = '<button type="button" class="ms-archive-load-btn" disabled>Loading…</button>';
   } else if (state === 'error') {
     hint = 'Those jobs still exist — this table is missing them, not showing that they are gone.'
       + (st.error ? ' (' + String(st.error) + ')' : '');
-    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Retry load archive</button>';
+    controls = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Retry load archive</button>';
   } else if (state === 'partial') {
     hint = 'The server returned a partial page, so some archived jobs are missing from this table.';
-    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Reload archive</button>';
+    controls = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Reload archive</button>';
+  } else if (state === 'loaded') {
+    hint = 'Archived jobs are in this table, and every board refresh keeps fetching them until you stop.';
   } else {
     hint = 'Archived jobs are excluded from the default board for speed, so they are missing from this table.';
-    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Load archive</button>';
+    controls = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Load archive</button>';
+  }
+  if (wanted && state !== 'loading') {
+    controls += '<button type="button" class="ms-archive-load-btn ms-archive-unload-btn"'
+      + ' onclick="unloadMakesafeArchive()">Stop loading archive</button>';
   }
 
   return '<div class="ms-archive-list-notice" data-archive-list-state="' + escapeHtml(state) + '" role="status">'
     + '<span class="ms-archive-list-title">' + escapeHtml(summary) + '</span>'
     + '<span class="ms-archive-list-hint">' + escapeHtml(hint) + '</span>'
-    + control
+    + controls
     + '</div>';
 }
 
@@ -11724,15 +11742,35 @@ async function loadMakesafeArchive() {
     var board = await fetchMakesafeBoardData({ includeArchive: true });
     // A newer board read superseded this one; it owns the paint and the state.
     if (!board) return;
-    // If the server still reports not included (unexpected with include_archive=1),
-    // treat successful card presence as loaded so we do not loop the empty shell.
     var archiveCards = (board.columns || {}).archive || [];
-    if (_makesafeArchiveState.loadState === 'not_loaded' && archiveCards.length) {
-      _makesafeArchiveState.loadState = 'loaded';
-      _makesafeArchiveState.included = true;
-      _makesafeArchiveState.loaded = archiveCards.length;
-      if (_makesafeArchiveState.count == null) {
-        _makesafeArchiveState.count = archiveCards.length;
+    if (_makesafeArchiveState.loadState === 'not_loaded') {
+      if (archiveCards.length) {
+        // The server did not declare the archive included but sent it anyway.
+        // Cards in hand are cards in hand.
+        _makesafeArchiveState.loadState = 'loaded';
+        _makesafeArchiveState.included = true;
+        _makesafeArchiveState.loaded = archiveCards.length;
+        if (_makesafeArchiveState.count == null) {
+          _makesafeArchiveState.count = archiveCards.length;
+        }
+      } else {
+        // include_archive=1 came back with no history at all. Repainting the
+        // untouched "Load archive" shell would read as a click that did nothing,
+        // so name what happened and keep the census + a retry.
+        var scopeSaid = _makesafeArchiveState.scope ? String(_makesafeArchiveState.scope) : 'active';
+        _makesafeArchiveState = Object.assign({}, _makesafeArchiveState, {
+          loadState: 'error',
+          error: 'Archive was requested but the board came back without it (server reported column_scope=' + scopeSaid + ').',
+          count: keptCount != null ? keptCount : _makesafeArchiveState.count,
+          loaded: 0,
+        });
+        _pipelineData = board;
+        renderJobs(_pipelineData);
+        syncMakesafeArchiveButton();
+        showToast('Archive not returned by the board', 'warning', [
+          { label: 'Retry', primary: true, onclick: 'loadMakesafeArchive()' }
+        ]);
+        return;
       }
     }
     _pipelineData = board;
@@ -11752,6 +11790,32 @@ async function loadMakesafeArchive() {
     if (_pipelineData) renderJobs(_pipelineData);
     showToast('Failed to load archive', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadMakesafeArchive()' }
+    ]);
+  }
+}
+
+// The off switch for the sticky archive request, reachable from any surface that
+// offers the on switch. Clears the flag FIRST so a read that starts meanwhile
+// already asks for the active scope, then re-reads through the one board path so
+// the rows actually leave the table rather than lingering until some later
+// refresh drops them without explanation.
+async function unloadMakesafeArchive() {
+  _makesafeArchiveWanted = false;
+  _makesafeArchiveSearch = '';
+  _makesafeArchiveVisible = false;
+  syncMakesafeArchiveButton();
+  try {
+    var board = await fetchMakesafeBoardData({ includeArchive: false });
+    if (!board) return;
+    _pipelineData = board;
+    renderJobs(_pipelineData);
+    syncMakesafeArchiveButton();
+  } catch (e) {
+    console.warn('Make-safe board: reload without archive failed:', e && e.message);
+    // The flag is already off, so the next read is active-scope either way.
+    if (_pipelineData) renderJobs(_pipelineData);
+    showToast('Could not refresh the board without the archive', 'warning', [
+      { label: 'Retry', primary: true, onclick: 'unloadMakesafeArchive()' }
     ]);
   }
 }
@@ -15002,6 +15066,10 @@ function renderJobList(container, columns) {
   // Archive-on-demand honesty: rows the feed did not send are announced above the
   // table, with the same load control the kanban column carries. Empty for every
   // other tab and whenever nothing is missing. See <makesafe-archive-on-demand>.
+  // The toolbar census belongs to whichever make-safe surface is painting, not to
+  // the kanban renderer alone — in list view that button is the only place the
+  // count shows while the column is closed.
+  if (_pipelineTab === 'makesafes') syncMakesafeArchiveButton();
   var html = renderMakesafeArchiveListNotice();
 
   html += '<div class="data-table-wrap"><table class="data-table"><thead><tr>' +

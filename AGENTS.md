@@ -124,7 +124,14 @@ ARCHIVE: when `archive.returned`/the delivered cards fall short of the census th
 state is `partial`, and the badge reads `loaded/total` with the shortfall named —
 the mirror of the forbidden fake zero. THE LIST VIEW OWES THE SAME HONESTY:
 `renderJobList` opens with `renderMakesafeArchiveListNotice()` (census, reason,
-same load control) rather than quietly dropping ~301 rows out of the table.
+same load control) rather than quietly dropping ~301 rows out of the table, and
+it syncs the toolbar census itself rather than inheriting the kanban renderer's
+call. Because that notice is an ON switch it also carries the OFF switch
+(`unloadMakesafeArchive`, which clears the flag then re-reads active scope) — the
+kanban toggle is unreachable from the table, so without it the session-long
+~301-card fetch could be started and never stopped. A board that answers
+`include_archive=1` with no history at all lands in the error state naming what
+came back, never a repainted "Load archive" shell that reads as a dead click.
 The JOB DETAIL's stage lookup is scope-aware for the same reason: a job the
 default read did not name is re-read with `include_archive=1`
 (`ensureMakesafeCanonicalStageForJob`, tracked by

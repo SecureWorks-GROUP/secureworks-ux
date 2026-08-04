@@ -575,10 +575,14 @@ test('LIST view says the archived rows are missing and offers the same load cont
       await loadMakesafeArchive();
       const after = document.createElement('div');
       renderJobList(after, _pipelineData.columns);
+      const afterNotice = after.querySelector('.ms-archive-list-notice');
       return {
         before,
-        afterHasNotice: !!after.querySelector('.ms-archive-list-notice'),
+        afterState: afterNotice && afterNotice.getAttribute('data-archive-list-state'),
+        afterText: afterNotice ? afterNotice.textContent : '',
+        afterHasUnload: !!(afterNotice && afterNotice.querySelector('.ms-archive-unload-btn')),
         afterRows: after.querySelectorAll('tbody tr').length,
+        buttonLabel: (document.getElementById('btnMakesafeArchive') || {}).textContent,
       };
     } finally {
       window.opsFetch = realFetch;
@@ -593,11 +597,169 @@ test('LIST view says the archived rows are missing and offers the same load cont
   expect(result.before.text).toMatch(/not loaded/i);
   expect(result.before.text).toMatch(/missing from this table/i);
   expect(result.before.hasLoadBtn).toBe(true);
-  // Active rows only until the archive is loaded, then the rows appear and the
-  // notice goes away because nothing is hidden any more.
+  // Active rows only until the archive is loaded, then the rows appear.
   expect(result.before.rows).toBe(4);
-  expect(result.afterHasNotice).toBe(false);
   expect(result.afterRows).toBe(305);
+  // Loaded is stated honestly — never "not loaded" — and the surface that turned
+  // the sticky fetch on can turn it off again.
+  expect(result.afterState).toBe('loaded');
+  expect(result.afterText).toMatch(/Archive \(301\) — loaded/);
+  expect(result.afterText).not.toMatch(/not loaded/i);
+  expect(result.afterHasUnload).toBe(true);
+  // The toolbar census is refreshed by the list render, not only by the kanban one.
+  expect(result.buttonLabel).toBe('Archive (301)');
+});
+
+test('LIST view can stop the sticky archive fetch it started', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, fullPayload }) => {
+    const realFetch = window.opsFetch;
+    const realToast = window.showToast;
+    window.showToast = function () {};
+    const calls = [];
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        const withArchive = !!(params && String(params.include_archive) === '1');
+        calls.push(withArchive ? 'with_archive' : 'active_only');
+        return Promise.resolve(withArchive ? fullPayload : activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      _pipelineTab = 'makesafes';
+      _jobView = 'list';
+      _pipelineData = await fetchMakesafeBoardData();
+      await loadMakesafeArchive();
+      const wantedBefore = _makesafeArchiveWanted;
+
+      await unloadMakesafeArchive();
+      const afterUnload = {
+        wanted: _makesafeArchiveWanted,
+        state: _makesafeArchiveState.loadState,
+        count: _makesafeArchiveState.count,
+        archiveRows: (_pipelineData.columns.archive || []).length,
+      };
+
+      // What the 5-minute auto-refresh does next: back to the active scope.
+      const refreshed = await fetchMakesafeBoardData();
+      const container = document.createElement('div');
+      renderJobList(container, refreshed.columns);
+      const notice = container.querySelector('.ms-archive-list-notice');
+      return {
+        calls,
+        wantedBefore,
+        afterUnload,
+        noticeState: notice && notice.getAttribute('data-archive-list-state'),
+        noticeHasLoad: !!(notice && notice.querySelector('.ms-archive-load-btn')),
+        noticeHasUnload: !!(notice && notice.querySelector('.ms-archive-unload-btn')),
+        rows: container.querySelectorAll('tbody tr').length,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+      window.showToast = realToast;
+      _pipelineTab = 'fencing';
+      _jobView = 'kanban';
+    }
+  }, { activePayload: activeScopePayload(), fullPayload: fullScopePayload() });
+
+  expect(result.wantedBefore).toBe(true);
+  expect(result.calls).toEqual(['active_only', 'with_archive', 'active_only', 'active_only']);
+  expect(result.afterUnload.wanted).toBe(false);
+  expect(result.afterUnload.state).toBe('not_loaded');
+  // Census survives the unload — the cards are gone from the table, not from history.
+  expect(result.afterUnload.count).toBe(301);
+  expect(result.afterUnload.archiveRows).toBe(0);
+  expect(result.rows).toBe(4);
+  // Back to the on-demand shell: load control returns, off switch retires.
+  expect(result.noticeState).toBe('not_loaded');
+  expect(result.noticeHasLoad).toBe(true);
+  expect(result.noticeHasUnload).toBe(false);
+});
+
+test('a board that ignores include_archive=1 fails loudly, never as a no-op click', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async (activePayload) => {
+    const realFetch = window.opsFetch;
+    const realToast = window.showToast;
+    const toasts = [];
+    window.showToast = function (msg) { toasts.push(msg); };
+    // The server answers include_archive=1 with the active scope anyway.
+    window.opsFetch = (action) => Promise.resolve(action === 'makesafe_board' ? activePayload : { columns: {} });
+    try {
+      _pipelineTab = 'makesafes';
+      _pipelineData = await fetchMakesafeBoardData();
+      _makesafeArchiveVisible = true;
+      await loadMakesafeArchive();
+
+      const container = document.createElement('div');
+      renderMakesafeKanban(container, _pipelineData.columns);
+      const body = container.querySelector('.kanban-col[data-status="archive"] .kanban-body');
+      return {
+        state: JSON.parse(JSON.stringify(_makesafeArchiveState)),
+        toasts,
+        headerCount: container.querySelector('.kanban-col[data-status="archive"] .count').textContent,
+        bodyText: body.textContent,
+        hasErrorShell: !!body.querySelector('[data-archive-state="error"]'),
+        hasNotLoadedShell: !!body.querySelector('[data-archive-state="not_loaded"]'),
+        hasRetry: !!body.querySelector('.ms-archive-load-btn'),
+      };
+    } finally {
+      window.opsFetch = realFetch;
+      window.showToast = realToast;
+      _pipelineTab = 'fencing';
+    }
+  }, activeScopePayload());
+
+  expect(result.state.loadState).toBe('error');
+  expect(result.state.error).toMatch(/came back without it/i);
+  expect(result.state.error).toMatch(/column_scope=active/);
+  // Census kept, retry offered, and no pristine "click me again" shell.
+  expect(result.state.count).toBe(301);
+  expect(result.headerCount).toBe('301');
+  expect(result.headerCount).not.toBe('0');
+  expect(result.hasErrorShell).toBe(true);
+  expect(result.hasNotLoadedShell).toBe(false);
+  expect(result.hasRetry).toBe(true);
+  expect(result.bodyText).toMatch(/failed to load/i);
+  expect(result.toasts.length).toBe(1);
+});
+
+test('the shared state summary never calls a loaded archive "not loaded"', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(({ activePayload, fullPayload, partialPayload }) => {
+    const summaries = {};
+    _makesafeArchiveState = {
+      loadState: 'unknown', count: null, loaded: 0, error: null, included: null, scope: null,
+    };
+    summaries.unknown = makesafeArchiveStateSummary();
+    applyMakesafeArchiveStateFromPayload(activePayload);
+    summaries.not_loaded = makesafeArchiveStateSummary();
+    applyMakesafeArchiveStateFromPayload(fullPayload);
+    summaries.loaded = makesafeArchiveStateSummary();
+    applyMakesafeArchiveStateFromPayload(partialPayload);
+    summaries.partial = makesafeArchiveStateSummary();
+    _makesafeArchiveState = Object.assign({}, _makesafeArchiveState, { loadState: 'loading' });
+    summaries.loading = makesafeArchiveStateSummary();
+    _makesafeArchiveState = Object.assign({}, _makesafeArchiveState, { loadState: 'error' });
+    summaries.error = makesafeArchiveStateSummary();
+    return summaries;
+  }, {
+    activePayload: activeScopePayload(),
+    fullPayload: fullScopePayload(),
+    partialPayload: partialScopePayload(),
+  });
+
+  expect(result.unknown).toBe('Archive — not read yet');
+  expect(result.not_loaded).toBe('Archive (301) — not loaded');
+  expect(result.loaded).toBe('Archive (301) — loaded');
+  expect(result.partial).toBe('Archive — showing 2 of 301 records');
+  expect(result.loading).toBe('Archive (301) — loading…');
+  expect(result.error).toBe('Archive (301) — failed to load');
+  // The falsehood this helper used to hand its callers.
+  expect(result.loaded).not.toMatch(/not loaded/i);
 });
 
 test('an archived job detail resolves its stage, not "Stage not confirmed"', async ({ page }) => {

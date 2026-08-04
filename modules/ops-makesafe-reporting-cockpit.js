@@ -645,7 +645,8 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   html += '<div class="msr-state"><span class="msr-chip" style="background:' + statusChip.bg + ';color:' + statusChip.fg + ';">' + escapeHtml(statusChip.label) + '</span></div>';
   html += '</div>';
 
-  // Scrollable body — proof only. Stamps live in the sticky foot below.
+  // Scrollable body — proof only. Stamps live in the pinned foot below
+  // (.msr-actions-foot, a flex sibling of this body, NOT position:sticky).
   html += '<div class="msr-body">';
 
   // ── ONE clear next action ─────────────────────────────────────────────────
@@ -1843,7 +1844,9 @@ function _msReportingFormatTimestamp(iso) {
 // ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 
 /**
- * The two-step stamp rail, rendered at the BOTTOM of the pane (sticky foot).
+ * The two-step stamp rail, rendered at the BOTTOM of the pane in the pinned
+ * .msr-actions-foot — a flex sibling outside the scroll body, deliberately
+ * NOT position:sticky (sticky overlays content on a full-page shot).
  * BOTH primary actions are always VISIBLE; only the backend control flags
  * decide which is pressable:
  *   controls.approve_invoice.enabled -> APPROVE INVOICE live -> approveSesInvoice

@@ -682,13 +682,15 @@ check(
   detailHtml.includes(">Invoice</button>") &&
     detailHtml.includes("INV-1234"),
 );
-// The drafted proposal renders as an invoice PAGE on the stage when no
-// invoice PDF is bound (lines + totals from the row's own figures).
+// Pre-Xero only: the drafted proposal renders as a clearly labelled proposal
+// PAGE (never as INV-n / Tax Invoice). Bound Xero identities take the real PDF
+// path (or honest unavailable) instead.
 {
   const proposalRow = {
     invoice: {
       invoice_number: null,
       status: "SES proposal (not yet in Xero)",
+      bound_xero: false,
       lines: [{ description: "Temp fence hire", quantity: 2, unit_price: 50, line_total: 100 }],
       total_ex_gst: 100,
       total_inc_gst: 110,
@@ -698,12 +700,90 @@ check(
   const proposalTabs = mod._msReportingDocTabs(proposalRow);
   const invStage = mod._msRenderDocStage(proposalTabs, 0, proposalRow);
   check(
-    "the proposal invoice document carries the lines, totals and DRAFT status",
+    "the unbound proposal invoice page carries lines, totals and proposal labels",
     proposalTabs.length === 1 && proposalTabs[0].tabLabel === "Invoice" &&
-      invStage.includes("Tax Invoice") &&
+      proposalTabs[0].kind === "invdoc" &&
+      invStage.includes("Proposed invoice") &&
       invStage.includes("Temp fence hire") &&
       invStage.includes("$110.00") &&
-      invStage.includes("SES proposal, not yet in Xero"),
+      invStage.includes("not yet a Xero invoice") &&
+      !invStage.includes("Tax Invoice"),
+  );
+}
+// Bound Xero DRAFT with a real PDF artifact: Invoice tab is the PDF iframe,
+// never the proposal HTML invention.
+{
+  const draftPdfRow = {
+    invoice: {
+      invoice_number: "INV-1102",
+      xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+      status: "DRAFT",
+      bound_xero: true,
+      lines: [{ description: "should not appear as fake tax invoice", quantity: 1 }],
+      total_ex_gst: 100,
+      total_inc_gst: 110,
+    },
+    draft_docs: [
+      {
+        label: "Xero invoice",
+        url: "https://example.com/xero-draft-inv-1102.pdf",
+        kind: "pdf",
+        isDraft: true,
+        xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+        invoice_number: "INV-1102",
+      },
+    ],
+    source_docs: [],
+    photos: [],
+  };
+  const draftTabs = mod._msReportingDocTabs(draftPdfRow);
+  const invTab = draftTabs.find((t) => t.tabLabel === "Invoice");
+  const draftStage = mod._msRenderDocStage(
+    draftTabs,
+    draftTabs.indexOf(invTab),
+    draftPdfRow,
+  );
+  check(
+    "a bound Xero DRAFT with PDF shows the real PDF, not the proposal HTML",
+    !!invTab && invTab.kind === "pdf" &&
+      /xero-draft-inv-1102\.pdf/.test(invTab.url || "") &&
+      draftStage.includes("<iframe") &&
+      draftStage.includes("xero-draft-inv-1102.pdf") &&
+      !draftStage.includes("Proposed invoice") &&
+      !draftStage.includes("Tax Invoice") &&
+      !draftStage.includes("should not appear as fake tax invoice"),
+  );
+}
+// Bound Xero DRAFT without a fetchable PDF: honest unavailable, never invent.
+{
+  const draftMissingRow = {
+    invoice: {
+      invoice_number: "INV-1102",
+      xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+      status: "DRAFT",
+      bound_xero: true,
+      lines: [{ description: "Temp fence hire", quantity: 2, unit_price: 50, line_total: 100 }],
+      total_ex_gst: 100,
+      total_inc_gst: 110,
+    },
+    draft_docs: [],
+    source_docs: [],
+    photos: [],
+  };
+  const missTabs = mod._msReportingDocTabs(draftMissingRow);
+  const missInv = missTabs.find((t) => t.tabLabel === "Invoice");
+  const missStage = mod._msRenderDocStage(
+    missTabs,
+    missTabs.indexOf(missInv),
+    draftMissingRow,
+  );
+  check(
+    "a bound Xero DRAFT without PDF says unavailable, never invents a tax invoice",
+    !!missInv && missInv.kind === "invoice_unavailable" &&
+      missStage.includes("Invoice document not available") &&
+      !missStage.includes("Proposed invoice") &&
+      !missStage.includes("Tax Invoice") &&
+      !missStage.includes("Temp fence hire"),
   );
 }
 // A builder SOURCE attachment whose file name says "invoice" must NOT claim the
@@ -890,11 +970,18 @@ check(
   "signed-off detail says the Docs Ready tick is already recorded",
   /already recorded/.test(signedOffHtml),
 );
+// Signed-off: no pack re-fetch, so no xero_invoice_pdf signed URL. Cockpit
+// money still names the AUTHORISED Xero identity — that is a bound invoice.
+// The Invoice tab must NOT invent a Tax Invoice HTML page from proposal lines;
+// it shows the honest unavailable state (or a real PDF if one is present).
 check(
-  "signed-off detail renders the invoice document from the cockpit money facts",
+  "signed-off detail keeps an Invoice tab for the bound Xero identity without inventing a tax-invoice HTML page",
   signedOffHtml.includes(">Invoice</button>") &&
-    signedOffHtml.includes("Tax Invoice") &&
-    signedOffHtml.includes("Temp fence hire"),
+    (signedOffHtml.includes("Invoice document not available") ||
+      signedOffHtml.includes("xero-invoice.pdf") ||
+      signedOffHtml.includes("<iframe")) &&
+    !signedOffHtml.includes("Tax Invoice") &&
+    !signedOffHtml.includes("Proposed invoice"),
 );
 check(
   "signed-off detail still renders the routes from the cockpit",
@@ -970,11 +1057,15 @@ check(
   "APPROVE INVOICE's note renders the backend's own plan text verbatim",
   invoiceHtml.includes("Create one Xero DRAFT for this exact obligation revision."),
 );
-// Switching to the Invoice tab renders the proposal as an invoice document,
-// honestly marked not-yet-in-Xero.
+// Pre-Xero (no xero_binding on the pack): Invoice tab is the proposal page,
+// labelled as a proposal — not a Xero INV. Bound DRAFT is covered above.
 {
+  const mapped = mod._msSesMapInvoice({
+    cockpit: cockpitInvoiceReady(),
+    pack: preXeroPack,
+  });
   const preXeroTabs = mod._msReportingDocTabs({
-    invoice: mod._msSesMapInvoice({ cockpit: cockpitInvoiceReady(), pack: preXeroPack }),
+    invoice: mapped,
     draft_docs: [], source_docs: [], photos: [],
   });
   const invIdx = preXeroTabs.findIndex((t) => t.kind === "invdoc");
@@ -987,11 +1078,87 @@ check(
   mod._msSwitchDocTab(JOB, renderedInvIdx, "msReportingDetailPanel");
   const stageHtml = elements["msDocStage_job_1"] ? (elements["msDocStage_job_1"]._html || "") : "";
   check(
-    "the pre-Xero Invoice tab shows the proposal document, marked not yet in Xero",
+    "the pre-Xero Invoice tab shows the proposal document, marked not yet a Xero invoice",
     invIdx >= 0 &&
       renderedInvIdx >= 0 &&
-      stageHtml.includes("SES proposal, not yet in Xero") &&
-      stageHtml.includes("Temp fence hire"),
+      !mapped.bound_xero &&
+      stageHtml.includes("Proposed invoice") &&
+      stageHtml.includes("not yet a Xero invoice") &&
+      stageHtml.includes("Temp fence hire") &&
+      !stageHtml.includes("Tax Invoice"),
+  );
+}
+// Bound DRAFT on the pack: Invoice tab must resolve the real Xero PDF artifact
+// (or honest unavailable), never the proposal HTML — even while APPROVE is the
+// primary control.
+{
+  const draftReadyCockpit = cockpitInvoiceReady();
+  draftReadyCockpit.sections.money.xero = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+    total: 825,
+  };
+  draftReadyCockpit.sections.money.bound_invoice = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+    total: 825,
+    pdf_available: true,
+  };
+  const draftPack = reviewablePack();
+  draftPack.docket.xero_binding = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+  };
+  draftPack.artifacts = draftPack.artifacts.map((a) => {
+    if (a.role !== "xero_invoice_pdf") return a;
+    return {
+      ...a,
+      object_key: "b/" + JOB + "/" + DOCKET_REV + "/Xero Invoice - INV-1102.pdf",
+      signed_url: "https://example.com/xero-draft-inv-1102.pdf",
+      metadata: {
+        xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+        invoice_number: "INV-1102",
+        status: "DRAFT",
+      },
+    };
+  });
+  draftPack.invoice_pdf = {
+    source: "live_fetch",
+    pdf_unavailable: false,
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+  };
+  behaviour.fetch["query_ses_review_cockpit"] = draftReadyCockpit;
+  behaviour.fetch["get_ses_reviewable_pack"] = draftPack;
+  await mod.showMsReportingDetail(JOB);
+  const draftHtml = elements["msReportingDetailPanel"]._html || "";
+  const draftInvIdx = (() => {
+    const m = /data-tabidx="(\d+)"[^>]*>Invoice<\/button>/.exec(draftHtml);
+    return m ? Number(m[1]) : -1;
+  })();
+  if (draftInvIdx >= 0) mod._msSwitchDocTab(JOB, draftInvIdx, "msReportingDetailPanel");
+  const draftStageHtml = elements["msDocStage_job_1"]
+    ? (elements["msDocStage_job_1"]._html || "")
+    : "";
+  const mappedDraft = mod._msSesMapInvoice({
+    cockpit: draftReadyCockpit,
+    pack: draftPack,
+  });
+  check(
+    "bound Xero DRAFT Invoice tab shows the real PDF and Xero draft identity",
+    mappedDraft.bound_xero === true &&
+      mappedDraft.invoice_number === "INV-1102" &&
+      draftHtml.includes(">Invoice</button>") &&
+      draftHtml.includes("INV-1102") &&
+      (draftHtml.includes("xero-draft-inv-1102.pdf") ||
+        draftStageHtml.includes("xero-draft-inv-1102.pdf")) &&
+      (draftHtml.includes("<iframe") || draftStageHtml.includes("<iframe")) &&
+      !draftStageHtml.includes("Proposed invoice") &&
+      !draftStageHtml.includes("Tax Invoice") &&
+      !draftHtml.includes("Tax Invoice"),
   );
 }
 calls.opsPost.length = 0;

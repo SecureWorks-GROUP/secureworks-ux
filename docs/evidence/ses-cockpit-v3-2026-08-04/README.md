@@ -1,5 +1,8 @@
 # MakeSafe review & send cockpit — v3 (2026-08-04)
 
+> Superseded by `docs/evidence/ses-cockpit-v4-2026-08-04/`. This is the record
+> of the v3 pass only; the shipped pane's contract lives in `AGENTS.md`.
+
 The third-pass redesign: calm hierarchy in the captain's decision order —
 identity, one next action, primary stamps at the top, document tabs (the
 invoice is a document, a tab like the report) over one fit-to-page stage,

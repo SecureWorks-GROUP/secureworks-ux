@@ -237,7 +237,9 @@ as `<makesafe-workorder-identity>`. Its merged Cc is filtered against the
 merged To so no address is printed on both, while a Cc-only address survives.
 When the backend has landed two routes, the truth IS the headline and there is
 no preview framing and no fold. Photos, trade notes and feedback are collapsed
-by default — but the Feedback fold is not allowed to hide anything: the
+by default; the photo set stays READ-ONLY inside its fold (the release revision
+fixes it, and a toggle that cannot change anything is a fake control — settled
+Captain ruling) — but the Feedback fold is not allowed to hide anything: the
 feedback module calls `_msSesOnFeedbackThreadRendered` on every thread render,
 which opens the fold and badges its summary when the thread is non-empty or
 `list_draft_notes` failed. THIS PANE RENDERS INTO TWO HOSTS (inline Approvals
@@ -246,8 +248,10 @@ per-job element lookup goes through `_msSesScopedEl`, which resolves inside
 `ctx.panelId` — the panel that owns the open detail — before falling back to
 document scope; the feedback module routes its thread host and composer through
 it too (`_msNotesEl`). A bare `getElementById` here writes to whichever copy is
-first in the DOM, which is the hidden one. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
-APPROVE INVOICE then SEND IT — always visible; armed ONLY by
+first in the DOM, which is the hidden one. PRIMARY ACTIONS sit in a pinned
+panel foot at the BOTTOM — a flex sibling OUTSIDE the scroll body, deliberately
+not `position:sticky` (sticky overlays content on a full-page shot and fights
+the flex column) — APPROVE INVOICE then SEND IT, always visible; armed ONLY by
 `controls.approve_invoice.enabled` / `controls.send_it.enabled`; a disabled
 stamp has no id and no onclick, both action functions re-check the flag, and
 an enabled stamp's note renders the backend's own `plan` text verbatim. The

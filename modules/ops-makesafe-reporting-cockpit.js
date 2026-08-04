@@ -728,7 +728,8 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 
   html += '</div>'; // end scroll body
 
-  // ── PRIMARY ACTIONS AT THE BOTTOM — sticky foot; flags arm the stamps ─────
+  // ── PRIMARY ACTIONS AT THE BOTTOM — pinned foot outside the scroll body
+  //    (a flex sibling, not position:sticky); flags arm the stamps ───────────
   html += '<div class="msr-actions msr-actions-foot">';
   html += _msSesActionBlock(jobId, ctx, dismissAction);
   html += '</div>';

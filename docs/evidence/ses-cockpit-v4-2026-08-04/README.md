@@ -24,7 +24,7 @@ Offline capture from the shipped renderer via
 (`tests/e2e/fixtures/ses-docs-ready-bertram.js`) — no network, no client
 personal data (suburb + job/builder refs and builder routing addresses only).
 
-- `before-*.png` — the pane at the v3-merged tip (`ddcb115` / PR 239 base)
+- `before-*.png` — the pane as v3 shipped (`ddcb115`, the PR 239 merge)
 - `after-*.png` — v4 on `fm/cockpit-bertram-approve-ui-v1`
 - Reference design targets (read-only): `docs/evidence/cockpit-blueprint-targets/`
 - Regenerate: `node scripts/ses-docs-ready-review-shot.js docs/evidence/ses-cockpit-v4-2026-08-04 after`
@@ -32,5 +32,5 @@ personal data (suburb + job/builder refs and builder routing addresses only).
 ## Guards
 
 - Behavioural contracts: `modules/ops-makesafe-reporting-cockpit.smoke.mjs`
-- Design contract: `Agents.md` (Docs Ready review pane paragraph)
+- Design contract: `AGENTS.md` (Docs Ready review pane paragraph)
 - CSS: `ops.html` `/* MAKE-SAFE DOCS READY REVIEW PANE */` (class prefix `.msr-`)

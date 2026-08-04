@@ -3303,7 +3303,8 @@
        identity, ONE next action, hold story, document tabs over a short stage
        (invoice is a DOCUMENT tab), condensed email previews, then photos /
        trade notes / feedback collapsed by default. PRIMARY ACTIONS sit in a
-       sticky foot at the BOTTOM (APPROVE INVOICE then SEND IT), armed only by
+       pinned foot at the BOTTOM (APPROVE INVOICE then SEND IT) - a flex
+       sibling outside the scroll body, not position:sticky - armed only by
        backend control flags. Rendered by
        modules/ops-makesafe-reporting-cockpit.js; search
        <makesafe-docs-ready-review> there. Class prefix: .msr-
@@ -3460,7 +3461,7 @@
     .msr-banner.info { border-color: #C8DFDE; background: #F1F8F7; color: #0E5F5E; }
     .msr-banner.bad { border-color: #E8B4AE; background: #FDF1EF; color: #8C2F21; }
 
-    /* The stamp rail, sticky at the BOTTOM. Lavish rubber-stamp object
+    /* The stamp rail, pinned at the BOTTOM. Lavish rubber-stamp object
        (captain-pinned via skill-sample): heavy border + inset double rule,
        letterspaced caps. Disabled = grey, unpressable, reason underneath. */
     .msr-actions {

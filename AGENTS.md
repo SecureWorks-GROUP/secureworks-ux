@@ -203,37 +203,42 @@ from the approved references in `docs/evidence/cockpit-blueprint-targets/`
 (the job-view mockup's State A/B honesty pair + the lavish review sample).
 Its design system lives in `ops.html` under
 `/* MAKE-SAFE DOCS READY REVIEW PANE */` (class prefix `.msr-`); CALM IS THE
-INSTRUCTION — one type family, tight scale, one accent at a time. The reading
-order is the captain's decision order and is a design contract: identity, ONE
+INSTRUCTION — one type family, tight scale, one accent at a time. Compact is
+the product goal: the captain should scan the whole pack in a couple of
+seconds without endless scrolling. The reading order is a design contract:
+identity (job number + suburb — no client name/street on this surface), ONE
 next action (derived from the backend control flags alone), the single amber
 hold block when held (blockers numbered, deduped case-insensitively — the
 backend can emit one blocker per route — each with the verbatim fact plus a
-plain-English "what clears it" line), the two stamps AT THE TOP (always
-visible; armed ONLY by `controls.approve_invoice.enabled` /
-`controls.send_it.enabled`; a disabled stamp has no id and no onclick, both
-action functions re-check the flag, and an enabled stamp's note renders the
-backend's own `plan` text verbatim), then document tabs over ONE fit-to-page
+plain-English "what clears it" line), then document tabs over ONE compact
 stage — THE INVOICE IS A DOCUMENT here (the bound Xero PDF, else the proposal
 rendered as an invoice page; never a separate section) and MULTIPLE WORK
 ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
 one and hide the rest; discriminated by `extractPoRef` when possible) — then
 missing documents named in one line (RV-1; SWMS stays "not in this pack",
-never "not required"), the outgoing emails as full-width readable cards with
-the body verbatim at reading size plus the recorded "why this, for this job"
-facts (RV-4/5), the read-only photo state (the set is fixed by the release
-revision; a toggle that cannot change anything is a fake control — Captain
-ruling), trade notes, feedback LAST. The mockup's single combined "Approve &
-send pack" button is the RETIRED 410 path and is deliberately not ported
-(settled Captain ruling). Guard: the module's own
-`ops-makesafe-reporting-cockpit.smoke.mjs` (run with
-`node --experimental-vm-modules modules/ops-makesafe-reporting-cockpit.smoke.mjs`)
-encodes literal UI copy as behavioral contracts — expect to update its string
-assertions deliberately when this pane's wording changes, not to route around
-them. `scripts/ses-docs-ready-review-shot.js` + `tests/e2e/fixtures/ses-docs-ready-bertram.js`
-capture this pane offline (no network) from a fixture built off the live
-Bertram AJBR-70271 job (job identity/builder-routing facts only; no client
-name/phone/street) — the reusable pattern for any future before/after
-screenshot pair of a make-safe surface.
+never "not required"), condensed email previews (one-line To/Cc/Subject +
+short body excerpt + attachment chips only — no "why this" essays). For AJS
+builders, when the backend still builds three routes, the pane shows the
+intended two-email shape (report+invoice, then photos) labelled plainly as a
+preview and never as what SEND IT will send today; when the backend has
+landed two routes, show the truth. Photos, trade notes and feedback are
+collapsed by default. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
+APPROVE INVOICE then SEND IT — always visible; armed ONLY by
+`controls.approve_invoice.enabled` / `controls.send_it.enabled`; a disabled
+stamp has no id and no onclick, both action functions re-check the flag, and
+an enabled stamp's note renders the backend's own `plan` text verbatim. The
+mockup's single combined "Approve & send pack" button is the RETIRED 410 path
+and is deliberately not ported (settled Captain ruling). Guard: the module's
+own `ops-makesafe-reporting-cockpit.smoke.mjs` (run with
+`node modules/ops-makesafe-reporting-cockpit.smoke.mjs`) encodes literal UI
+copy as behavioral contracts — expect to update its string assertions
+deliberately when this pane's wording changes, not to route around them.
+`scripts/ses-docs-ready-review-shot.js` +
+`tests/e2e/fixtures/ses-docs-ready-bertram.js` capture this pane offline (no
+network) from a fixture built off the live Bertram AJBR-70271 job (job
+identity/builder-routing facts only; no client name/phone/street) — the
+reusable pattern for any future before/after screenshot pair of a make-safe
+surface.
 
 ## Trade App job cards (`trade.html`)
 

@@ -106,6 +106,38 @@ evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
 The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
 directly and remain overlay-blind — migrating them is follow-up work.
 
+Archive is on demand (backend `column_scope=active` default): the default feed
+omits Archive cards but publishes `column_counts.archive` + `archive` meta. The
+column badge must use that census, never `cards.length` while not loaded — a
+fake zero looks like data loss. Load control: `include_archive=1` via
+`loadMakesafeArchive()`. Search `// <makesafe-archive-on-demand>`; guard
+`tests/e2e/ops-makesafe-archive-on-demand.spec.js`.
+Three things follow from that and are part of the contract, not polish.
+ARCHIVE IS STICKY: `_makesafeArchiveWanted` is set when the Captain loads history
+and cleared only by closing the column, and `fetchMakesafeBoardData()` — the ONE
+board read on this page, used by the default load, the 5-minute auto-refresh, the
+post-transition reload and the archive load alike (`opts.includeArchive` is their
+only difference) — re-requests `include_archive=1` while it is set, so a refresh
+can never take history back mid-review. That function returns `null` when a newer
+board read superseded it; the loser commits nothing. A CAPPED PAGE IS NOT THE
+ARCHIVE: when `archive.returned`/the delivered cards fall short of the census the
+state is `partial`, and the badge reads `loaded/total` with the shortfall named —
+the mirror of the forbidden fake zero. THE LIST VIEW OWES THE SAME HONESTY:
+`renderJobList` opens with `renderMakesafeArchiveListNotice()` (census, reason,
+same load control) rather than quietly dropping ~301 rows out of the table, and
+it syncs the toolbar census itself rather than inheriting the kanban renderer's
+call. Because that notice is an ON switch it also carries the OFF switch
+(`unloadMakesafeArchive`, which clears the flag then re-reads active scope) — the
+kanban toggle is unreachable from the table, so without it the session-long
+~301-card fetch could be started and never stopped. A board that answers
+`include_archive=1` with no history at all lands in the error state naming what
+came back, never a repainted "Load archive" shell that reads as a dead click.
+The JOB DETAIL's stage lookup is scope-aware for the same reason: a job the
+default read did not name is re-read with `include_archive=1`
+(`ensureMakesafeCanonicalStageForJob`, tracked by
+`_makesafeCanonicalStagesCoverArchive`) BEFORE anyone concludes its stage is
+unknown — otherwise every archived make-safe opens as "Stage not confirmed".
+
 The JOB DETAIL obeys the same rule: it never derives a make-safe's stage from
 substatus. `resolveMakesafeDetailStage` takes `canonical_stage` off the
 `job_detail` payload if that producer ever carries one (it does not today), else

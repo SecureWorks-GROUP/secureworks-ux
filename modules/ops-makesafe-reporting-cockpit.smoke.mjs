@@ -1410,6 +1410,150 @@ check(
     calls.confirms.length === 0,
 );
 
+// ── 11b. PR 563 cockpit honesty — read recovery_action, route evidence,
+//        and control.disabled_reason (Bertram live shape, PII-free). ─────────
+// Live SWMS-261109: HOLD on photo route (0 attachments), invoice AUTHORISED
+// INV-1102 so APPROVE is correctly dead with disabled_reason, SEND still off.
+const bertramHonestyCockpit = cockpitSendReady();
+bertramHonestyCockpit.status = "HOLD";
+bertramHonestyCockpit.verdict = {
+  clean: false,
+  blockers: [
+    {
+      state: "refused",
+      code: "route_draft_missing",
+      fact: "A required builder email draft is missing from the current docket revision.",
+      recovery_action:
+        "The photo email is drafted but has no attachments bound to this docket revision, so there is nothing to send on it. Prepare a new docket revision so the current attendance cycle's files are attached; if the pack was already invoice_bound, re-run the AUTHORISED invoice PDF bind afterwards so the new revision keeps the invoice.",
+      evidence: {
+        route_kind: "photo",
+        route_present: true,
+        route_ready: false,
+        attachment_count: 0,
+      },
+    },
+  ],
+  approval_band: "captain_only",
+};
+// Legacy reasons stay generic — the structured verdict must win so the
+// recovery_action is not dropped for a string-only path.
+bertramHonestyCockpit.sections.status = {
+  status: "HOLD",
+  stale: false,
+  reasons: [
+    "A required builder email draft is missing from the current docket revision.",
+  ],
+};
+bertramHonestyCockpit.sections.money = {
+  bound_invoice: {
+    invoice_number: "INV-1102",
+    status: "AUTHORISED",
+    total: 825,
+    pdf_available: true,
+  },
+  xero: {
+    invoice_number: "INV-1102",
+    status: "AUTHORISED",
+    total: 825,
+  },
+};
+bertramHonestyCockpit.controls.approve_invoice = {
+  enabled: false,
+  label: "APPROVE INVOICE",
+  plan: "Approve the existing Xero DRAFT for this exact obligation revision.",
+  disabled_reason:
+    "Invoice already authorised (INV-1102). The money is committed, so there is nothing left to approve — the next step is SEND IT when you say so.",
+};
+bertramHonestyCockpit.controls.send_it = {
+  enabled: false,
+  label: "SEND IT",
+  plan: "Send the approved report, photo and invoice routes (3) for this exact release revision.",
+  route_kinds: ["report", "photo", "invoice"],
+  route_count: 3,
+};
+bertramHonestyCockpit.controls.captain_only = true;
+behaviour.fetch["query_ses_review_cockpit"] = bertramHonestyCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const honestyHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "honesty: HOLD fact renders the backend fact verbatim (not paraphrased)",
+  honestyHtml.includes(
+    "A required builder email draft is missing from the current docket revision.",
+  ),
+);
+check(
+  "honesty: What clears it uses recovery_action (photo-specific), not the hardcoded email-draft remedy",
+  honestyHtml.includes(
+    "The photo email is drafted but has no attachments bound to this docket revision",
+  ) &&
+    !honestyHtml.includes("APPROVE INVOICE creates the invoice in Xero") &&
+    !honestyHtml.includes(
+      "The system still has to draft this email. It normally clears on the next run",
+    ),
+);
+// Approve is stamp 1: its note must be disabled_reason, not the hold lock.
+// Send (stamp 2) may still show the hold lock when it has no disabled_reason.
+const approveNoteMatch = honestyHtml.match(
+  /msr-stamp approve" disabled[\s\S]*?class="msr-stamp-note locked">([\s\S]*?)<\/div>/,
+);
+const approveNoteText = approveNoteMatch ? approveNoteMatch[1] : "";
+check(
+  "honesty: APPROVE shows control.disabled_reason (already authorised), not the generic hold lock",
+  /Invoice already authorised \(INV-1102\)/.test(approveNoteText) &&
+    /money is committed/.test(approveNoteText) &&
+    !/Locked by the hold above/.test(approveNoteText),
+);
+check(
+  "honesty: SEND stays disabled — no fake green, no id, no onclick",
+  !honestyHtml.includes('id="msSesSendItBtn"') &&
+    !honestyHtml.includes("sendSesRelease(") &&
+    /msr-stamp send" disabled/.test(honestyHtml) &&
+    !honestyHtml.includes('id="msSesApproveInvoiceBtn"') &&
+    !honestyHtml.includes("approveSesInvoice(") &&
+    /msr-stamp approve" disabled/.test(honestyHtml),
+);
+// recovery_action absent → still falls back to the local pattern table so
+// older cockpits do not lose a clear path.
+const fallbackCockpit = cockpitSendReady();
+fallbackCockpit.status = "HOLD";
+fallbackCockpit.verdict = {
+  clean: false,
+  blockers: [
+    {
+      state: "refused",
+      code: "route_draft_missing",
+      fact: "Builder email draft missing.",
+      // no recovery_action
+      evidence: { route_kind: "report" },
+    },
+  ],
+};
+fallbackCockpit.sections.status = {
+  status: "HOLD",
+  stale: false,
+  reasons: ["Builder email draft missing."],
+};
+fallbackCockpit.controls.approve_invoice.enabled = false;
+fallbackCockpit.controls.send_it.enabled = false;
+delete fallbackCockpit.controls.approve_invoice.disabled_reason;
+delete fallbackCockpit.controls.send_it.disabled_reason;
+behaviour.fetch["query_ses_review_cockpit"] = fallbackCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const fallbackHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "honesty: when recovery_action is absent, the local clear-path fallback still renders",
+  fallbackHtml.includes("Builder email draft missing.") &&
+    fallbackHtml.includes(
+      "The system still has to draft this email. It normally clears on the next run",
+    ),
+);
+check(
+  "honesty: when disabled_reason is absent, the hold-lock fallback still renders",
+  /Locked by the hold above/.test(fallbackHtml),
+);
+
 // ── 12. Queue/cockpit disagreement + no SES docket: honest states ───────────
 // A queued job whose docket dropped out between the queue read and the cockpit
 // read gets the honest NO SES PACK chip — never an invented state — and the

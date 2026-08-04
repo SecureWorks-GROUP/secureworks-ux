@@ -886,35 +886,77 @@ function _msSesNextAction(cockpit) {
   return '<div class="msr-next' + cls + '"><span class="msr-next-k">Next</span><span class="msr-next-v">' + text + '</span></div>';
 }
 
-// ── HOLD STORY (verbatim facts + plain-English clear paths) ─────────────────
+// ── HOLD STORY (verbatim facts + backend recovery_action when supplied) ─────
 
 /**
- * The deduped hold blockers, verbatim from the cockpit's status.reasons.
- * The backend can emit the same blocker once per route (this is how "builder
- * email draft missing" printed twice on the captain's screen), so duplicates
- * are collapsed case-insensitively before anything renders.
+ * Normalise one hold blocker to { fact, recovery_action, evidence }.
+ * Prefer the structured verdict.blockers objects (PR 563 honesty fields);
+ * fall back to sections.status.reasons strings when the structured list is
+ * absent. Facts are never rewritten — only selected and deduped.
+ */
+function _msSesNormaliseBlocker(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    var s = String(raw).trim();
+    return s ? { fact: s, recovery_action: null, evidence: null } : null;
+  }
+  if (typeof raw !== 'object') return null;
+  var fact = String(raw.fact == null ? (raw.reason == null ? '' : raw.reason) : raw.fact).trim();
+  if (!fact) return null;
+  var recovery = raw.recovery_action != null ? String(raw.recovery_action).trim() : '';
+  var evidence = (raw.evidence && typeof raw.evidence === 'object') ? raw.evidence : null;
+  return {
+    fact: fact,
+    recovery_action: recovery || null,
+    evidence: evidence
+  };
+}
+
+/**
+ * Dedupe key: fact text (case-insensitive) plus route_kind when present, so a
+ * photo-route refusal and a report-route refusal with the same generic fact
+ * string stay distinct (PR 563 route-specific holds).
+ */
+function _msSesBlockerDedupeKey(b) {
+  var factKey = String(b.fact || '').toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
+  var route = (b.evidence && b.evidence.route_kind) ? String(b.evidence.route_kind).toLowerCase() : '';
+  return route ? (factKey + '|' + route) : factKey;
+}
+
+/**
+ * The deduped hold blockers. Source of truth is cockpit.verdict.blockers when
+ * the backend sends it (each entry may carry recovery_action + evidence.route_kind);
+ * otherwise sections.status.reasons (legacy string list).
+ * The backend can emit the same blocker once per route, so duplicates are
+ * collapsed case-insensitively (with route_kind as a discriminator).
  */
 function _msSesHoldBlockers(cockpit) {
+  var verdict = (cockpit && cockpit.verdict) || {};
   var sections = (cockpit && cockpit.sections) || {};
-  var raw = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
+  var raw;
+  if (Array.isArray(verdict.blockers) && verdict.blockers.length) {
+    raw = verdict.blockers;
+  } else {
+    raw = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
+  }
   var seen = {};
   var out = [];
   raw.forEach(function(r) {
-    var t = String(r == null ? '' : r).trim();
-    if (!t) return;
-    var key = t.toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
+    var b = _msSesNormaliseBlocker(r);
+    if (!b) return;
+    var key = _msSesBlockerDedupeKey(b);
     if (seen[key]) return;
     seen[key] = true;
-    out.push(t);
+    out.push(b);
   });
   return out;
 }
 
-// Known blocker shapes -> the plain-English path that clears them. These are
-// PROCESS explanations (how this pipeline works), not claims about the job's
-// state — the blocker fact itself always renders verbatim above the clear
-// path. An unrecognised blocker gets the honest generic path. Order matters:
-// more specific patterns sit above the catch-all /report/ one.
+// Fallback only — used when the backend does NOT supply recovery_action.
+// These are PROCESS explanations (how this pipeline works), not claims about
+// the job's state. A supplied recovery_action always wins and is never
+// overwritten. Order matters: more specific patterns sit above the catch-all
+// /report/ one.
 var _MS_SES_BLOCKER_CLEARS = [
   [/work\s*order|builder\s*instruction/i,
     'Get the builder’s work order onto this job — attach it, or ask the builder to resend it. The pack rebuilds and re-checks on its own.'],
@@ -932,7 +974,15 @@ var _MS_SES_BLOCKER_CLEARS = [
     'The system has to draft the completion report from the trade submission. If it keeps failing, say so in Feedback below.']
 ];
 
-function _msSesBlockerClears(reason) {
+/**
+ * The plain-English path that clears a blocker.
+ * Prefer the backend's recovery_action when present; fall back to the local
+ * pattern table only when it is genuinely absent.
+ */
+function _msSesBlockerClears(blocker) {
+  var b = (blocker && typeof blocker === 'object') ? blocker : { fact: String(blocker || ''), recovery_action: null };
+  if (b.recovery_action) return String(b.recovery_action);
+  var reason = String(b.fact || '');
   for (var i = 0; i < _MS_SES_BLOCKER_CLEARS.length; i++) {
     if (_MS_SES_BLOCKER_CLEARS[i][0].test(reason)) return _MS_SES_BLOCKER_CLEARS[i][1];
   }
@@ -941,7 +991,8 @@ function _msSesBlockerClears(reason) {
 
 /**
  * The single amber hold block: numbered blockers, deduped, each stating the
- * backend's fact VERBATIM plus the plain-English path that clears it.
+ * backend's fact VERBATIM plus the recovery path (backend recovery_action
+ * when supplied, else the local fallback table).
  */
 function _msSesRenderHoldBanner(cockpit) {
   var blockers = _msSesHoldBlockers(cockpit);
@@ -953,9 +1004,9 @@ function _msSesRenderHoldBanner(cockpit) {
   html += '<div class="msr-hold-lede">The system stopped this pack because something is missing or looks wrong. There is no override on this screen.</div>';
   if (n) {
     html += '<ol class="msr-blockers">';
-    blockers.forEach(function(r) {
-      html += '<li><div class="msr-blocker-fact">' + escapeHtml(r) + '</div>';
-      html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(r)) + '</div></li>';
+    blockers.forEach(function(b) {
+      html += '<li><div class="msr-blocker-fact">' + escapeHtml(b.fact) + '</div>';
+      html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(b)) + '</div></li>';
     });
     html += '</ol>';
   }
@@ -2045,29 +2096,45 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     + '. There is no override.';
   var captainNote = controls.captain_only ? ' Captain authority is required for this pack.' : '';
 
+  // disabled_reason is the backend's honest closed-door text (PR 563). Prefer
+  // it over local hold/xero guesses whenever the stamp is off. Never invent a
+  // reason when the field is absent — fall through to the existing copy.
+  function controlDisabledNote(ctrl, fallback) {
+    var reason = ctrl && ctrl.disabled_reason != null ? String(ctrl.disabled_reason).trim() : '';
+    return reason ? escapeHtml(reason) : fallback;
+  }
+
   var approveNote;
   if (approveInvoice.enabled) {
     approveNote = escapeHtml(approveInvoice.plan || 'Creates the real Xero invoice for the figures on the Invoice tab.')
       + ' Your click, every time.';
-  } else if (onHold) {
-    approveNote = holdReason;
-  } else if (xero && (xero.invoice_number || xero.status)) {
-    approveNote = 'Already done &mdash; invoice ' + escapeHtml(xero.invoice_number || '')
-      + (xero.status ? ' is ' + escapeHtml(String(xero.status)) : '') + ' in Xero.';
   } else {
-    approveNote = 'The system has not unlocked this step for this pack yet.' + captainNote;
+    var approveFallback;
+    if (onHold) {
+      approveFallback = holdReason;
+    } else if (xero && (xero.invoice_number || xero.status)) {
+      approveFallback = 'Already done &mdash; invoice ' + escapeHtml(xero.invoice_number || '')
+        + (xero.status ? ' is ' + escapeHtml(String(xero.status)) : '') + ' in Xero.';
+    } else {
+      approveFallback = 'The system has not unlocked this step for this pack yet.' + captainNote;
+    }
+    approveNote = controlDisabledNote(approveInvoice, approveFallback);
   }
 
   var sendNote;
   if (sendIt.enabled) {
     sendNote = escapeHtml(sendIt.plan || 'Sends the emails below exactly as shown.')
       + ' Irreversible. Your click, every time.';
-  } else if (onHold) {
-    sendNote = holdReason;
-  } else if (approveInvoice.enabled) {
-    sendNote = 'Unlocks after APPROVE INVOICE &mdash; the invoice email needs the authorised Xero invoice before anything can send.';
   } else {
-    sendNote = 'The system has not unlocked sending for this pack yet.' + captainNote;
+    var sendFallback;
+    if (onHold) {
+      sendFallback = holdReason;
+    } else if (approveInvoice.enabled) {
+      sendFallback = 'Unlocks after APPROVE INVOICE &mdash; the invoice email needs the authorised Xero invoice before anything can send.';
+    } else {
+      sendFallback = 'The system has not unlocked sending for this pack yet.' + captainNote;
+    }
+    sendNote = controlDisabledNote(sendIt, sendFallback);
   }
 
   html += '<div class="msr-steps">';

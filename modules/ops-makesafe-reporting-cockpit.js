@@ -464,6 +464,13 @@ async function showMsReportingDetail(jobId, targetPanelId) {
   var ctx;
   try {
     ctx = await _msSesLoadPackContext(jobId);
+    // When a bound Xero DRAFT/AUTHORISED has no pack PDF yet (backend pack
+    // inject not deployed, or pack fetch failed), recover the real bytes via
+    // get_invoice_pdf. Dashboard opsFetch always sends x-api-key first, so this
+    // is the same API-key path that already returns INV-1102 live — not a
+    // separate JWT path. Never invent HTML when this fails; the tab stays
+    // honest-unavailable.
+    await _msSesHydrateBoundInvoicePdf(ctx);
   } catch (e) {
     panel.innerHTML = _msSesRenderUnavailable(jobId, base, e, targetPanelId);
     return;
@@ -485,6 +492,74 @@ async function showMsReportingDetail(jobId, targetPanelId) {
  * row can lag a fresh docket revision, so on a 409 we refresh the queue and
  * retry once before surfacing the refusal.
  */
+/**
+ * When a bound Xero invoice has no signed PDF in the pack, fetch the real
+ * Xero-rendered bytes through ops-api get_invoice_pdf and attach them as a
+ * synthetic pack artifact so the Invoice tab iframes the bill.
+ *
+ * Auth note (proved live 2026-08-04): the dashboard's opsFetch always
+ * classifies as api_key (x-api-key wins over Bearer ANON). That is the same
+ * caller shape that already returns a valid ~52 KB PDF for Bertram INV-1102.
+ * This is not a JWT-vs-key gap on the client — it is "pack did not supply
+ * the document" recovery using the known-good read path.
+ */
+async function _msSesHydrateBoundInvoicePdf(ctx) {
+  if (!ctx) return;
+  var inv = _msSesMapInvoice(ctx);
+  if (!inv || !inv.bound_xero || !inv.xero_invoice_id) return;
+  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts);
+  var hasPdf = (docs.draft || []).some(function(d) {
+    return d && d.kind === 'pdf' && /invoice/i.test(String(d.label || ''));
+  });
+  if (hasPdf) return;
+  if (typeof opsFetch !== 'function') return;
+  try {
+    var res = await opsFetch('get_invoice_pdf', {
+      xero_invoice_id: inv.xero_invoice_id,
+    });
+    if (!res || !res.success || !res.pdf_base64) return;
+    var binary = atob(res.pdf_base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    var blob = new Blob([bytes], { type: res.content_type || 'application/pdf' });
+    var objectUrl = URL.createObjectURL(blob);
+    if (ctx.invoicePdfObjectUrl) {
+      try { URL.revokeObjectURL(ctx.invoicePdfObjectUrl); } catch (_e) { /* ignore */ }
+    }
+    ctx.invoicePdfObjectUrl = objectUrl;
+    if (!ctx.pack) ctx.pack = { artifacts: [] };
+    if (!Array.isArray(ctx.pack.artifacts)) ctx.pack.artifacts = [];
+    // Drop any unavailable marker so the real PDF owns the Invoice tab.
+    ctx.pack.artifacts = ctx.pack.artifacts.filter(function(a) {
+      return !(a && a.role === 'xero_invoice_pdf' && !a.signed_url);
+    });
+    var fileName = res.filename || ((inv.invoice_number || 'invoice') + '.pdf');
+    ctx.pack.artifacts.push({
+      role: 'xero_invoice_pdf',
+      media_type: 'application/pdf',
+      signed_url: objectUrl,
+      object_key: 'xero-invoice-pdfs/' + fileName,
+      metadata: {
+        xero_invoice_id: inv.xero_invoice_id,
+        invoice_number: inv.invoice_number || null,
+        status: inv.status || null,
+        source: 'get_invoice_pdf_client_fallback',
+      },
+    });
+    if (!ctx.pack.invoice_pdf) {
+      ctx.pack.invoice_pdf = {
+        source: 'get_invoice_pdf_client_fallback',
+        pdf_unavailable: false,
+        xero_invoice_id: inv.xero_invoice_id,
+        invoice_number: inv.invoice_number || null,
+      };
+    }
+  } catch (e) {
+    // Leave the tab on honest unavailable — never invent a tax-invoice HTML page.
+    console.warn('[ses] get_invoice_pdf fallback failed for bound invoice', e);
+  }
+}
+
 async function _msSesLoadPackContext(jobId, retried) {
   var cockpit = await opsFetch('query_ses_review_cockpit', { job_id: jobId });
   var entry = _msSesReviewQueue[jobId] || null;
@@ -852,7 +927,18 @@ function _msSesMissingLine(row, ctx) {
   if (!missing.length && !invoicePdfMissing && !swmsAbsent) return '';
   var bits = [];
   if (missing.length) bits.push('<b>Not in this pack:</b> ' + escapeHtml(missing.join(', ')) + '.');
-  if (invoicePdfMissing) bits.push('The Invoice tab shows the drafted figures &mdash; the Xero PDF is created at APPROVE INVOICE.');
+  if (invoicePdfMissing) {
+    if (row.invoice && row.invoice.bound_xero) {
+      // A Xero DRAFT PDF exists before APPROVE; the tab loads the real document
+      // (pack inject or get_invoice_pdf). Never claim the PDF waits on APPROVE.
+      bits.push('A Xero ' + escapeHtml(String(row.invoice.status || 'DRAFT')) +
+        ' is bound' +
+        (row.invoice.invoice_number ? ' (' + escapeHtml(row.invoice.invoice_number) + ')' : '') +
+        ' &mdash; the Invoice tab loads the real PDF when available, and says so if it cannot.');
+    } else {
+      bits.push('No Xero invoice is bound yet &mdash; the Invoice tab shows the internal proposal until a DRAFT is minted.');
+    }
+  }
   if (swmsAbsent) bits.push('No SWMS in the pack; this screen cannot tell whether one is owed.');
   return '<div class="msr-missing">' + bits.join(' ') + '</div>';
 }

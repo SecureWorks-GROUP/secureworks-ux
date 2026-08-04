@@ -879,7 +879,7 @@ function _msSesNextAction(cockpit) {
   } else if (controls.send_it && controls.send_it.enabled) {
     text = 'Read the pack, then press <strong>SEND IT</strong>. It emails the report, the photos and the invoice exactly as shown below.';
   } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
-    text = 'Check the Invoice tab, then press <strong>APPROVE INVOICE</strong>. That creates the real Xero invoice; the pack comes back here once more before anything sends.';
+    text = 'Check the Invoice tab, then press <strong>APPROVE INVOICE</strong>. That authorises the Xero draft invoice already prepared for this pack; the pack comes back here once more before anything sends.';
   } else {
     text = 'Nothing to press yet &mdash; the system is still preparing this pack. Review it and leave feedback if something looks wrong.';
   }
@@ -913,35 +913,44 @@ function _msSesNormaliseBlocker(raw) {
 }
 
 /**
- * Dedupe key: fact text (case-insensitive) plus route_kind when present, so a
- * photo-route refusal and a report-route refusal with the same generic fact
- * string stay distinct (PR 563 route-specific holds).
+ * The route a blocker belongs to, as a short label for the fact line. The FACT
+ * itself is never rewritten (it renders verbatim) — this is a separate tag, so
+ * a photo-route refusal and a report-route refusal carrying the same generic
+ * fact string read as two distinct holds instead of two identical lines.
  */
-function _msSesBlockerDedupeKey(b) {
-  var factKey = String(b.fact || '').toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
-  var route = (b.evidence && b.evidence.route_kind) ? String(b.evidence.route_kind).toLowerCase() : '';
-  return route ? (factKey + '|' + route) : factKey;
+var _MS_SES_ROUTE_LABELS = {
+  report: 'Report email',
+  photo: 'Photo email',
+  photos: 'Photo email',
+  invoice: 'Invoice email'
+};
+
+function _msSesBlockerRouteLabel(b) {
+  var kind = (b && b.evidence && b.evidence.route_kind != null) ? String(b.evidence.route_kind).trim() : '';
+  if (!kind) return '';
+  var key = kind.toLowerCase();
+  if (_MS_SES_ROUTE_LABELS[key]) return _MS_SES_ROUTE_LABELS[key];
+  return key.charAt(0).toUpperCase() + key.slice(1) + ' route';
 }
 
 /**
- * The deduped hold blockers. Source of truth is cockpit.verdict.blockers when
- * the backend sends it (each entry may carry recovery_action + evidence.route_kind);
- * otherwise sections.status.reasons (legacy string list).
- * The backend can emit the same blocker once per route, so duplicates are
- * collapsed case-insensitively (with route_kind as a discriminator).
+ * Dedupe key = exactly what the list item RENDERS: the fact text
+ * (case-insensitive), the route label, and the resolved clear path. Two
+ * entries collapse only when the captain would see two byte-identical items —
+ * the documented live bug where the backend emits the same blocker once per
+ * route. A genuinely route-specific or differently-remedied hold survives.
  */
-function _msSesHoldBlockers(cockpit) {
-  var verdict = (cockpit && cockpit.verdict) || {};
-  var sections = (cockpit && cockpit.sections) || {};
-  var raw;
-  if (Array.isArray(verdict.blockers) && verdict.blockers.length) {
-    raw = verdict.blockers;
-  } else {
-    raw = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
-  }
+function _msSesBlockerDedupeKey(b) {
+  var factKey = String(b.fact || '').toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
+  var route = _msSesBlockerRouteLabel(b).toLowerCase();
+  var clears = String(_msSesBlockerClears(b) || '').toLowerCase().replace(/\s+/g, ' ');
+  return factKey + '|' + route + '|' + clears;
+}
+
+function _msSesDedupeBlockers(raw) {
   var seen = {};
   var out = [];
-  raw.forEach(function(r) {
+  (Array.isArray(raw) ? raw : []).forEach(function(r) {
     var b = _msSesNormaliseBlocker(r);
     if (!b) return;
     var key = _msSesBlockerDedupeKey(b);
@@ -950,6 +959,22 @@ function _msSesHoldBlockers(cockpit) {
     out.push(b);
   });
   return out;
+}
+
+/**
+ * The deduped hold blockers. Source of truth is cockpit.verdict.blockers when
+ * the backend sends it (each entry may carry recovery_action + evidence.route_kind);
+ * otherwise sections.status.reasons (legacy string list).
+ * The structured list only wins when it actually YIELDS facts: a blockers array
+ * whose entries all normalise away (no fact/reason text) must not silence the
+ * reasons strings, or the hold block says "cannot move" and names nothing.
+ */
+function _msSesHoldBlockers(cockpit) {
+  var verdict = (cockpit && cockpit.verdict) || {};
+  var sections = (cockpit && cockpit.sections) || {};
+  var out = _msSesDedupeBlockers(verdict.blockers);
+  if (out.length) return out;
+  return _msSesDedupeBlockers(sections.status && sections.status.reasons);
 }
 
 // Fallback only — used when the backend does NOT supply recovery_action.
@@ -963,7 +988,7 @@ var _MS_SES_BLOCKER_CLEARS = [
   [/email\s*draft/i,
     'The system still has to draft this email. It normally clears on the next run of the reporting routine; if it stays stuck, say so in Feedback below.'],
   [/xero\s*invoice/i,
-    'This clears from this screen: APPROVE INVOICE creates the invoice in Xero. Clear any other blockers first and the stamp unlocks.'],
+    'This clears from this screen: APPROVE INVOICE authorises the Xero draft invoice already prepared for this pack. Clear any other blockers first and the stamp unlocks.'],
   [/rate|price|pricing|schedule|labour|invoice\s*line/i,
     'Confirm the right figure in Feedback below. The next pack rebuild re-prices the invoice and this check runs again.'],
   [/photo/i,
@@ -1005,7 +1030,10 @@ function _msSesRenderHoldBanner(cockpit) {
   if (n) {
     html += '<ol class="msr-blockers">';
     blockers.forEach(function(b) {
-      html += '<li><div class="msr-blocker-fact">' + escapeHtml(b.fact) + '</div>';
+      var route = _msSesBlockerRouteLabel(b);
+      html += '<li><div class="msr-blocker-fact">'
+        + (route ? '<span class="msr-blocker-route">' + escapeHtml(route) + '</span>' : '')
+        + escapeHtml(b.fact) + '</div>';
       html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(b)) + '</div></li>';
     });
     html += '</ol>';
@@ -2106,7 +2134,7 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
 
   var approveNote;
   if (approveInvoice.enabled) {
-    approveNote = escapeHtml(approveInvoice.plan || 'Creates the real Xero invoice for the figures on the Invoice tab.')
+    approveNote = escapeHtml(approveInvoice.plan || 'Authorises the Xero draft invoice already prepared for the figures on the Invoice tab.')
       + ' Your click, every time.';
   } else {
     var approveFallback;

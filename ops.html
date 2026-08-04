@@ -3299,12 +3299,13 @@
     }
 
     /* ══════════ MAKE-SAFE DOCS READY REVIEW PANE ══════════
-       The "MakeSafe report pack - review and send" surface. Reading order is
-       the captain's decision order: identity, ONE next action, the hold story,
-       the two stamps AT THE TOP, then proof - document tabs over one
-       fit-to-page stage (the invoice is a DOCUMENT, a tab like the report),
-       the outgoing emails as full-width readable cards, the photo grid, trade
-       notes, feedback last. Rendered by
+       Compact "MakeSafe report pack - review and send" surface. Reading order:
+       identity, ONE next action, hold story, document tabs over a short stage
+       (invoice is a DOCUMENT tab), condensed email previews, then photos /
+       trade notes / feedback collapsed by default. PRIMARY ACTIONS sit in a
+       pinned foot at the BOTTOM (APPROVE INVOICE then SEND IT) - a flex
+       sibling outside the scroll body, not position:sticky - armed only by
+       backend control flags. Rendered by
        modules/ops-makesafe-reporting-cockpit.js; search
        <makesafe-docs-ready-review> there. Class prefix: .msr-
        CALM IS THE INSTRUCTION: one type family, a tight scale
@@ -3312,14 +3313,15 @@
        time - orange for the active tab and the SEND IT stamp, teal for
        APPROVE INVOICE, amber only inside the hold block. Amber marks a
        machine stop that wants a person; red stays reserved for a read that
-       actually failed. */
+       actually failed. Compact: the whole job should scan in a couple of
+       seconds without endless scrolling. */
 
     .msr-head {
       flex-shrink: 0;
       display: flex;
       align-items: flex-start;
-      gap: 14px;
-      padding: 16px 24px;
+      gap: 12px;
+      padding: 12px 20px;
       background: #fff;
       border-bottom: 1px solid var(--sw-border);
     }
@@ -3339,7 +3341,7 @@
     .msr-back:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 3px; }
     .msr-head-main { flex: 1; min-width: 0; }
     .msr-title {
-      font-size: 19px;
+      font-size: 17px;
       font-weight: 700;
       line-height: 1.3;
       color: var(--sw-dark);
@@ -3379,8 +3381,9 @@
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      padding: 0 0 28px;
+      padding: 0 0 12px;
       background: var(--sw-bg);
+      min-height: 0;
     }
 
     /* Small drawn marks used across the pane (stroke = currentColor). */
@@ -3389,15 +3392,15 @@
     /* One next action: the sentence the captain arrives for. */
     .msr-next {
       display: flex;
-      gap: 14px;
+      gap: 12px;
       align-items: baseline;
-      margin: 18px 24px 0;
-      padding: 14px 18px;
+      margin: 12px 20px 0;
+      padding: 10px 14px;
       background: #fff;
       border: 1px solid var(--sw-border);
       border-radius: 8px;
-      font-size: 14px;
-      line-height: 1.55;
+      font-size: 13.5px;
+      line-height: 1.5;
       color: var(--sw-dark);
     }
     .msr-next.hold { background: #FFFBEA; border-color: #F0E2A8; color: #7a6a1f; }
@@ -3416,13 +3419,13 @@
 
     /* The hold story: ONE amber block, numbered verbatim blockers. */
     .msr-hold {
-      margin: 12px 24px 0;
-      padding: 16px 18px;
+      margin: 10px 20px 0;
+      padding: 12px 14px;
       background: #FFFBEA;
       border: 1px solid #F0E2A8;
       border-radius: 8px;
-      font-size: 13.5px;
-      line-height: 1.6;
+      font-size: 13px;
+      line-height: 1.55;
       color: #7a6a1f;
     }
     .msr-hold-h { font-size: 14px; font-weight: 700; color: #6B4708; margin-bottom: 4px; }
@@ -3440,32 +3443,49 @@
     .msr-clears b::after { content: ':'; }
     .msr-hold-foot { margin-top: 12px; font-size: 12.5px; }
 
-    /* Banners kept for portal / stale / failed-read states. */
+    /* Banners kept for portal / stale / failed-read / preview-note states. */
     .msr-banner {
-      margin: 12px 24px 0;
-      padding: 12px 16px;
+      margin: 10px 20px 0;
+      padding: 10px 14px;
       border: 1px solid var(--sw-border);
       border-radius: 8px;
       background: #fff;
-      font-size: 13px;
-      line-height: 1.55;
+      font-size: 12.5px;
+      line-height: 1.5;
       color: var(--sw-dark);
     }
+    .msr-preview-note { margin-bottom: 8px; }
     .msr-banner-title { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
     .msr-banner.stop { border-color: #F0E2A8; background: #FFFBEA; color: #7a6a1f; }
     .msr-banner.stop .msr-banner-title { color: #6B4708; }
     .msr-banner.info { border-color: #C8DFDE; background: #F1F8F7; color: #0E5F5E; }
     .msr-banner.bad { border-color: #E8B4AE; background: #FDF1EF; color: #8C2F21; }
 
-    /* The stamp rail, near the top. The stamp object is the lavish rubber
-       stamp (captain-pinned): heavy border + inset double rule, letterspaced
-       caps. Disabled = grey, unpressable, reason underneath. */
+    /* The stamp rail, pinned at the BOTTOM. Lavish rubber-stamp object
+       (captain-pinned via skill-sample): heavy border + inset double rule,
+       letterspaced caps. Disabled = grey, unpressable, reason underneath. */
     .msr-actions {
-      margin: 12px 24px 0;
-      padding: 18px 18px 14px;
+      margin: 12px 20px 0;
+      padding: 14px 16px 12px;
       background: #fff;
       border: 1px solid var(--sw-border);
       border-radius: 8px;
+    }
+    /* Outside the scroll body, as a flex sibling: always pinned to the panel
+       foot without position:sticky (sticky would overlay content on full-page
+       shots and fight the flex column). */
+    .msr-actions-foot {
+      flex-shrink: 0;
+      margin: 0;
+      border-radius: 0;
+      border-left: 0;
+      border-right: 0;
+      border-bottom: 0;
+      border-top: 1px solid var(--sw-border);
+      box-shadow: 0 -6px 18px rgba(41, 60, 70, 0.06);
+      background: #fff;
+      padding: 14px 20px 16px;
+      z-index: 5;
     }
     .msr-steps {
       display: flex;
@@ -3557,8 +3577,33 @@
       display: flex;
       align-items: baseline;
       gap: 10px;
-      padding: 30px 24px 10px;
+      padding: 16px 20px 8px;
     }
+    /* Collapsed-by-default folds (photos / trade notes / feedback). */
+    .msr-fold { margin: 0; border: 0; }
+    .msr-fold > summary.msr-sec {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+    }
+    .msr-fold > summary.msr-sec::-webkit-details-marker { display: none; }
+    .msr-fold > summary.msr-sec::before {
+      content: '';
+      width: 0;
+      height: 0;
+      border-left: 5px solid var(--sw-mid);
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      margin-right: 2px;
+      flex-shrink: 0;
+      transform: translateY(1px);
+      transition: transform 120ms ease;
+    }
+    .msr-fold[open] > summary.msr-sec::before {
+      transform: rotate(90deg) translateX(1px);
+    }
+    .msr-fold > summary.msr-sec:hover h3 { color: var(--sw-dark); }
+    .msr-fb-host { padding: 0 20px 4px; }
     .msr-sec h3 {
       font-size: 11px;
       font-weight: 800;
@@ -3575,31 +3620,31 @@
       background: var(--sw-border);
     }
     .msr-lede {
-      margin: 0 24px 10px;
-      font-size: 13px;
-      line-height: 1.55;
+      margin: 0 20px 8px;
+      font-size: 12.5px;
+      line-height: 1.5;
       color: var(--sw-mid);
       max-width: 72ch;
     }
     .msr-lede strong { color: var(--sw-dark); font-weight: 700; }
 
     .msr-panel {
-      margin: 0 24px;
+      margin: 0 20px;
       background: #fff;
       border: 1px solid var(--sw-border);
       border-radius: 8px;
     }
 
     /* Document tabs feeding one stage (mockup State A). */
-    .msr-tabs { display: flex; gap: 8px; padding: 0 24px 12px; flex-wrap: wrap; }
+    .msr-tabs { display: flex; gap: 6px; padding: 0 20px 8px; flex-wrap: wrap; }
     .msr-tab {
       border: 1px solid var(--sw-border);
       background: #fff;
       color: var(--sw-dark);
-      padding: 8px 15px;
+      padding: 6px 12px;
       border-radius: 8px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 600;
       font-family: inherit;
       transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
@@ -3611,14 +3656,14 @@
       border-color: var(--sw-orange);
       color: #fff;
     }
-    .msr-stage-wrap { margin: 0 24px; }
+    .msr-stage-wrap { margin: 0 20px; }
     .msr-stage-meta {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       align-items: center;
-      margin: 0 0 8px;
-      font-size: 11.5px;
+      margin: 0 0 6px;
+      font-size: 11px;
       color: var(--sw-mid);
     }
     .msr-stage-meta .k {
@@ -3637,7 +3682,7 @@
     .msr-stage {
       background: #3A464D;
       border-radius: 8px;
-      height: clamp(520px, 68vh, 840px);
+      height: clamp(220px, 32vh, 360px);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -3657,6 +3702,24 @@
       border-radius: 5px;
       padding: 3px 9px;
     }
+    /* The stage is short by design; this is the full-size read escape hatch. */
+    .msr-stage-open {
+      position: absolute;
+      top: 10px;
+      left: 14px;
+      z-index: 2;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.42);
+      border-radius: 5px;
+      padding: 3px 9px;
+      text-decoration: none;
+    }
+    .msr-stage-open:hover { background: rgba(0, 0, 0, 0.66); }
+    .msr-stage-open:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 2px; }
     .msr-stage iframe, .msr-stage img, .msr-stage .msr-stage-html { width: 100%; height: 100%; border: 0; }
     .msr-stage img { object-fit: contain; }
     .msr-stage-html { background: #fff; overflow: auto; padding: 18px 20px; color: var(--sw-text); text-align: left; }
@@ -3744,9 +3807,9 @@
 
     /* RV-1: missing documents, named in one quiet line. */
     .msr-missing {
-      margin: 10px 24px 0;
-      font-size: 12.5px;
-      line-height: 1.6;
+      margin: 8px 20px 0;
+      font-size: 12px;
+      line-height: 1.55;
       color: var(--sw-mid);
       max-width: 80ch;
     }
@@ -3764,98 +3827,82 @@
       max-width: 72ch;
     }
 
-    /* Outgoing emails: full-width readable cards (RV-4/5). */
+    /* Outgoing emails: condensed single-line cards (no "why this" essays). */
     .msr-mail {
-      margin: 0 24px 14px;
+      margin: 0 20px 8px;
       background: #fff;
       border: 1px solid var(--sw-border);
       border-radius: 8px;
       overflow: hidden;
     }
+    .msr-mail.condensed .msr-mail-top {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--sw-light);
+    }
     .msr-mail-top {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 13px 20px;
+      padding: 10px 14px;
       border-bottom: 1px solid var(--sw-light);
     }
-    .msr-mail-name { font-size: 14px; font-weight: 700; color: var(--sw-dark); flex: 1; }
-    .msr-mail-meta { padding: 8px 0 4px; }
-    .msr-mail-row {
+    .msr-mail-name { font-size: 13px; font-weight: 700; color: var(--sw-dark); flex: 1; }
+    .msr-mail-line {
       display: flex;
-      gap: 14px;
-      padding: 5px 20px;
-      font-size: 13.5px;
-      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 4px 14px;
+      padding: 8px 14px 4px;
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: var(--sw-dark);
     }
-    .msr-mail-row .mk {
-      flex: 0 0 62px;
-      font-size: 11px;
-      font-weight: 700;
+    .msr-mail-line .ml-bit { min-width: 0; max-width: 100%; }
+    .msr-mail-line .ml-bit.subj { flex: 1 1 220px; }
+    .msr-mail-line b {
+      font-size: 10px;
+      font-weight: 800;
       letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--sw-mid-light);
-      padding-top: 1px;
+      margin-right: 5px;
     }
-    .msr-mail-row .mv { flex: 1; min-width: 0; color: var(--sw-dark); word-break: break-word; }
-    .msr-mail-row .mv.none { color: var(--sw-mid-light); font-style: italic; }
-    .msr-mail-row .mv.bad { color: #8C2F21; font-weight: 700; }
-    .msr-mail-body {
-      margin: 10px 20px 14px;
-      padding: 16px 20px;
+    .msr-mail-line em { font-style: italic; color: var(--sw-mid-light); font-weight: 500; }
+    .msr-mail-line em.bad { color: #8C2F21; font-weight: 700; font-style: normal; }
+    .msr-mail-excerpt {
+      margin: 4px 14px 8px;
+      padding: 8px 12px;
       background: var(--sw-warm-100);
       border-radius: 6px;
-      font-size: 14px;
-      line-height: 1.65;
+      font-size: 12.5px;
+      line-height: 1.5;
       color: var(--sw-dark);
-      white-space: pre-wrap;
       word-break: break-word;
-      max-width: 68ch;
+      max-width: 72ch;
     }
-    .msr-mail-body.empty { color: var(--sw-mid); font-style: italic; }
-    .msr-att { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 14px; }
+    .msr-mail-excerpt.empty { color: var(--sw-mid); font-style: italic; }
+    .msr-att { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
     .msr-att-item {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 5px;
       max-width: 100%;
-      padding: 5px 11px;
+      padding: 3px 9px;
       border: 1px solid var(--sw-border);
-      border-radius: 6px;
+      border-radius: 999px;
       background: #fff;
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--sw-dark);
       word-break: break-all;
     }
     .msr-att-item.unresolved { border-color: #E0A82E; background: #FFFBEA; color: #6B4708; font-weight: 600; }
-    .msr-why {
-      padding: 12px 20px 14px;
-      border-top: 1px solid var(--sw-light);
-      font-size: 12.5px;
-      line-height: 1.6;
-      color: var(--sw-mid);
-      max-width: 80ch;
-    }
-    .msr-why-h {
-      font-size: 10.5px;
-      font-weight: 800;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      color: var(--sw-mid-light);
-      margin-bottom: 6px;
-    }
-    .msr-why ul { margin: 0; padding-left: 18px; }
-    .msr-why li { margin-top: 4px; }
-    .msr-why li strong { color: var(--sw-dark); }
-    .msr-why .unrecorded { font-style: italic; }
 
     /* Photos: a calm grid; drawn badges, read-only state. */
-    .msr-photocount { padding: 0 24px 8px; font-size: 13px; color: var(--sw-mid); }
-    .msr-photos { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 24px 8px; }
-    .msr-photo { position: relative; width: 132px; margin: 0; flex-shrink: 0; }
+    .msr-photocount { padding: 0 20px 6px; font-size: 12.5px; color: var(--sw-mid); }
+    .msr-photos { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 20px 8px; }
+    .msr-photo { position: relative; width: 108px; margin: 0; flex-shrink: 0; }
     .msr-photo img {
-      width: 132px;
-      height: 96px;
+      width: 108px;
+      height: 78px;
       object-fit: cover;
       display: block;
       background: var(--sw-mid);
@@ -3886,7 +3933,7 @@
       word-break: break-word;
     }
 
-    .msr-foot { padding: 26px 24px 0; }
+    .msr-foot { padding: 14px 20px 4px; }
     .msr-btn {
       border: none;
       border-radius: 8px;
@@ -3910,18 +3957,20 @@
     }
 
     @media (max-width: 900px) {
-      .msr-head { flex-wrap: wrap; padding: 14px 18px; }
-      .msr-next, .msr-hold, .msr-banner, .msr-actions { margin-left: 18px; margin-right: 18px; }
-      .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing { padding-left: 18px; padding-right: 18px; }
-      .msr-sec { padding-left: 18px; padding-right: 18px; }
-      .msr-stage-wrap, .msr-panel, .msr-mail { margin-left: 18px; margin-right: 18px; }
-      .msr-foot { padding-left: 18px; padding-right: 18px; }
-      .msr-mail-row { flex-direction: column; gap: 2px; }
-      .msr-mail-row .mk { flex: none; }
-      .msr-stage { height: clamp(420px, 58vh, 680px); }
-      .msr-stamp { padding: 12px 20px; }
-      .msr-stamp .msr-stamp-word { white-space: normal; font-size: 15px; }
-      .msr-invpage-body { padding: 20px 22px; }
+      .msr-head { flex-wrap: wrap; padding: 12px 16px; }
+      .msr-next, .msr-hold, .msr-banner { margin-left: 16px; margin-right: 16px; }
+      .msr-actions:not(.msr-actions-foot) { margin-left: 16px; margin-right: 16px; }
+      .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing { padding-left: 16px; padding-right: 16px; }
+      .msr-sec { padding-left: 16px; padding-right: 16px; }
+      .msr-stage-wrap, .msr-panel, .msr-mail { margin-left: 16px; margin-right: 16px; }
+      .msr-foot { padding-left: 16px; padding-right: 16px; }
+      .msr-fb-host { padding-left: 16px; padding-right: 16px; }
+      .msr-mail-line { flex-direction: column; gap: 2px; }
+      .msr-stage { height: clamp(200px, 36vh, 320px); }
+      .msr-stamp { padding: 11px 18px; }
+      .msr-stamp .msr-stamp-word { white-space: normal; font-size: 14px; letter-spacing: 0.1em; }
+      .msr-invpage-body { padding: 18px 20px; }
+      .msr-actions-foot { padding-left: 16px; padding-right: 16px; }
     }
 
     /* ── Feedback thread (RV-6/7/8), same panel used in msNotesPanel-<id> ── */

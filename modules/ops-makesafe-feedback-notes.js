@@ -58,8 +58,37 @@ function _msSesFeedbackContext(jobId) {
   return { sesMode: false, docket_revision_id: null };
 }
 
+/**
+ * Tell the host surface what this thread render actually contains, so a
+ * collapsed Feedback fold can open itself for a non-empty thread or a failed
+ * read. Optional: the hook only exists on the SES review pane.
+ */
+function _msNotesAnnounceThread(jobId, count, failed) {
+  if (typeof _msSesOnFeedbackThreadRendered !== "function") return;
+  try {
+    _msSesOnFeedbackThreadRendered(jobId, { count: count, failed: !!failed });
+  } catch (_e) {
+    /* a presentation hook must never break the thread render */
+  }
+}
+
+/**
+ * Resolve one of this job's panel elements. The SES review pane can be open in
+ * two hosts at once (inline Approvals panel + board overlay) carrying the same
+ * ids, so it owns the scoping rule: _msSesScopedEl prefers the panel that owns
+ * the open detail. Outside that pane (or before it loads) this is a plain
+ * getElementById.
+ */
+function _msNotesEl(jobId, elementId) {
+  if (typeof _msSesScopedEl === "function") {
+    var scoped = _msSesScopedEl(jobId, elementId);
+    if (scoped) return scoped;
+  }
+  return document.getElementById(elementId);
+}
+
 async function loadMsNotes(jobId, containerElId) {
-  var el = document.getElementById(containerElId);
+  var el = _msNotesEl(jobId, containerElId);
   if (el) {
     el.innerHTML =
       '<div style="padding:10px 0;font-size:12px;color:var(--sw-text-sec);">Loading feedback...</div>';
@@ -80,6 +109,7 @@ async function loadMsNotes(jobId, containerElId) {
         sesMode: ses.sesMode,
       });
     }
+    _msNotesAnnounceThread(jobId, notes.length, false);
     return notes;
   } catch (e) {
     if (el) {
@@ -92,6 +122,7 @@ async function loadMsNotes(jobId, containerElId) {
           sesMode: ses.sesMode,
         });
     }
+    _msNotesAnnounceThread(jobId, 0, true);
     return [];
   }
 }
@@ -102,7 +133,7 @@ async function loadMsNotes(jobId, containerElId) {
 
 async function addMsNote(jobId, noteBody, authorName) {
   if (noteBody == null) {
-    var ta = document.getElementById("msNoteInput-" + jobId);
+    var ta = _msNotesEl(jobId, "msNoteInput-" + jobId);
     noteBody = ta ? ta.value : "";
   }
   noteBody = String(noteBody == null ? "" : noteBody).trim();
@@ -114,7 +145,7 @@ async function addMsNote(jobId, noteBody, authorName) {
     _MS_NOTES_DEFAULT_AUTHOR;
 
   var ses = _msSesFeedbackContext(jobId);
-  var btn = document.getElementById("msAddNoteBtn-" + jobId);
+  var btn = _msNotesEl(jobId, "msAddNoteBtn-" + jobId);
   var btnLabel = ses.sesMode ? "Record feedback" : "Add note only";
   if (btn) {
     btn.disabled = true;
@@ -197,8 +228,8 @@ async function addMsNoteAndRerun(jobId) {
   if (_msSesFeedbackContext(jobId).sesMode) {
     return addMsNote(jobId);
   }
-  var btn = document.getElementById("msReviseBtn-" + jobId);
-  var ta = document.getElementById("msNoteInput-" + jobId);
+  var btn = _msNotesEl(jobId, "msReviseBtn-" + jobId);
+  var ta = _msNotesEl(jobId, "msNoteInput-" + jobId);
   var noteBody = ta ? ta.value : "";
   if (btn) {
     btn.disabled = true;
@@ -282,7 +313,7 @@ async function _msRefreshReportingAfterRevision(jobId) {
 
 async function triggerMsRerun(jobId, opts) {
   opts = opts || {};
-  var btn = document.getElementById("msRerunBtn-" + jobId);
+  var btn = _msNotesEl(jobId, "msRerunBtn-" + jobId);
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Requesting Revise Pack...";

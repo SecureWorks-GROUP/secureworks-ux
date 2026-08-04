@@ -10,8 +10,10 @@
  * Two facts about this job make it the right proof card for the rebuilt review
  * pane: it carries NO SWMS and NO Xero invoice, so the evidence-completeness
  * section has real missing documents to name (blueprint RV-1), and its builder
- * carries a recorded CC rule, so the per-route "why this, for this job" block
- * has a real recorded reason to quote (blueprint RV-5).
+ * carries a recorded CC rule, so the condensed preview has a real Cc line to
+ * print and the AJS merged-Cc/To de-duplication has something to exercise.
+ * (The v3 per-route "why this, for this job" essay it originally fed is gone —
+ * v4 previews are one-line To/Cc/Subject plus a short excerpt.)
  *
  * The invoice figures are a FIXTURE derived from the job's recorded billing
  * rule (hourly_rate 80) and the trade's recorded labour_hours (3). No Xero

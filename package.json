@@ -4,7 +4,7 @@
     "test:portal-confirmation": "node scripts/test-trade-portal-confirmation.js",
     "test:portal-link-hygiene": "node scripts/test-f5-portal-link-hygiene.js",
     "test:crew-lead-core": "node scripts/test-trade-crew-lead-core.js",
-    "test:makesafe-reporting-cockpit": "node --experimental-vm-modules modules/ops-makesafe-reporting-cockpit.smoke.mjs",
+    "test:makesafe-reporting-cockpit": "node modules/ops-makesafe-reporting-cockpit.smoke.mjs",
     "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:crew-lead-core && npm run test:makesafe-reporting-cockpit && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

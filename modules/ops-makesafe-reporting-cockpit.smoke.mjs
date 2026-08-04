@@ -161,6 +161,22 @@ const sandbox = {
   },
   module: undefined,
   console,
+  // Tabs opened by the "Open document" escape hatch, so the stale-signed-URL
+  // path can be asserted without a real browser.
+  window: {
+    opened: [],
+    open(url) {
+      const tab = {
+        url,
+        closed: false,
+        opener: {},
+        location: { replace(next) { tab.url = next; } },
+        close() { tab.closed = true; },
+      };
+      sandbox.window.opened.push(tab);
+      return tab;
+    },
+  },
 };
 
 const exposed = [
@@ -186,6 +202,12 @@ const exposed = [
   "_msReportingHideJobFromActiveList",
   "_msGetAllPhotos",
   "_msIsPortalBuilder",
+  "_msIsAjsBuilder",
+  "_msSesAjsIntendedEmails",
+  "_msSesOnFeedbackThreadRendered",
+  "_msSesScopedEl",
+  "_msOpenDocFullSize",
+  "_msDocTabUrlAt",
   // Legacy symbols that MUST be gone:
   "approveMakesafeReportPack",
   "finishMakesafeCloseOut",
@@ -657,15 +679,36 @@ check(
     detailHtml.includes("261065"),
 );
 check(
-  "detail renders the three exact routes SEND IT releases",
-  detailHtml.includes("the exact emails SEND IT releases") &&
+  "detail renders the three condensed routes SEND IT releases (non-AJS truth)",
+  detailHtml.includes("what SEND IT releases") &&
     detailHtml.includes("Report email") &&
     detailHtml.includes("Photo email") &&
-    detailHtml.includes("Invoice email"),
+    detailHtml.includes("Invoice email") &&
+    /msr-mail condensed/.test(detailHtml),
 );
 check(
   "detail states SEND IT sends all three emails at once",
-  /all three emails at once/i.test(detailHtml),
+  /all three emails? at once/i.test(detailHtml),
+);
+check(
+  "detail uses condensed TO/CC/subject line — no 'why this' essays",
+  detailHtml.includes("msr-mail-line") &&
+    detailHtml.includes("accounts@mlb.com.au") &&
+    !detailHtml.includes("Why this, for this job") &&
+    !detailHtml.includes("msr-why"),
+);
+check(
+  "primary action stamps sit in the bottom action foot (after emails)",
+  /msr-actions msr-actions-foot/.test(detailHtml) &&
+    detailHtml.indexOf("Outgoing emails") < detailHtml.indexOf("msr-actions-foot") &&
+    detailHtml.indexOf("msSesSendItBtn") > detailHtml.indexOf("Outgoing emails"),
+);
+check(
+  "photos / feedback folds collapse by default",
+  /msr-fold/.test(detailHtml) &&
+    detailHtml.includes(">Photos</h3>") &&
+    detailHtml.includes(">Feedback</h3>") &&
+    !/<details class="msr-fold" open/.test(detailHtml),
 );
 check(
   "detail leads with the one next action for the enabled control",
@@ -681,7 +724,7 @@ check(
 );
 check(
   "detail renders the read-only photo state (1 in the email, 1 evidence-only)",
-  detailHtml.includes("fixed in the release revision") &&
+  detailHtml.includes("fixed in the release") &&
     /1 of 2 photos in the photo email/.test(detailHtml) &&
     /1 kept as evidence only/.test(detailHtml) &&
     /msr-photo ok/.test(detailHtml) && /msr-photo ev/.test(detailHtml),
@@ -1645,7 +1688,436 @@ check(
   doorF.calls.jobDetail.length === 1 && doorF.calls.overlay.length === 0,
 );
 
-// ── 17. No retired action was ever dispatched at runtime ────────────────────
+// ── 17. AJS two-email shape: preview when backend still builds 3 routes ─────
+{
+  // Bertram-shaped AJS identity + three backend routes.
+  const ajsId = {
+    job_id: "ajs-job",
+    builder: "AJ Building & Restoration",
+    external_ref: "AJBR-70271",
+    requesting_company_slug: "aj",
+    site_suburb: "Bertram",
+    job_number: "SWMS-261109",
+  };
+  check("_msIsAjsBuilder recognises AJ Building / AJBR", mod._msIsAjsBuilder(ajsId) === true);
+  check("_msIsAjsBuilder rejects MLB", mod._msIsAjsBuilder({ builder: "MLB Constructions", external_ref: "MLB-1", requesting_company_slug: "mlb" }) === false);
+
+  sandbox._msReportingCache = sandbox._msReportingCache || {};
+  // Seed identity the way showMsReportingDetail's list path would.
+  // Direct render via _msSesRenderDetail with a three-route cockpit.
+  const ajsCockpit = cockpitSendReady();
+  ajsCockpit.sections.email_drafts = [
+    {
+      route_kind: "report",
+      recipients: ["workorders@ajs.build"],
+      cc: ["vanessa@ajs.build"],
+      subject: "Make Safe Report - AJBR-70271 - Bertram",
+      body: "Report body for Bertram. Photos follow separately. Invoice follows separately.",
+      attachment_hashes: [REPORT_HASH],
+      ready: true,
+    },
+    {
+      route_kind: "photo",
+      recipients: ["workorders@ajs.build"],
+      cc: ["vanessa@ajs.build"],
+      subject: "Photo Evidence - AJBR-70271 - Bertram",
+      body: "Site photos attached as separate files.",
+      attachment_hashes: [PHOTO_HASH_1],
+      ready: true,
+    },
+    {
+      route_kind: "invoice",
+      recipients: ["vanessa@ajs.build"],
+      cc: [],
+      subject: "Make Safe Invoice - AJBR-70271 - Bertram",
+      body: "Invoice attached for AJBR-70271.",
+      attachment_hashes: [XERO_PDF_HASH],
+      ready: true,
+    },
+  ];
+  // Use the list/detail path: queue one AJS job with board identity.
+  const AJS_JOB = "ajs-bertram-job";
+  behaviour.fetch.list_ses_docs_ready_reviews = {
+    dockets: [{
+      job_id: AJS_JOB,
+      docket_revision_id: DOCKET_REV,
+      docket_output_content_hash: HASH,
+      review_state: "needs_review",
+    }],
+  };
+  behaviour.fetch.makesafe_board = {
+    contract_version: "makesafe-board.v1",
+    columns: {
+      report_ready: [{
+        id: AJS_JOB,
+        job_number: "SWMS-261109",
+        contact: { address: "Bertram WA 6167" },
+        builder: { name: "AJ Building & Restoration", external_ref: "AJBR-70271" },
+        ses_family: "physical_makesafe",
+        ses_family_label: "Make safe",
+        pack: { drafted: true, state: "drafted" },
+      }],
+    },
+  };
+  // Mapped board wins for suburb/slug when present. Mutate the SAME object the
+  // module closed over as a parameter (reassigning sandbox._pipelineData would
+  // not reach the module's binding).
+  sandbox._pipelineTab = "makesafes";
+  sandbox._pipelineData.columns = {
+    report_ready: [{
+      id: AJS_JOB,
+      job_number: "SWMS-261109",
+      requesting_company_name: "AJ Building & Restoration",
+      builder: "AJ Building & Restoration",
+      external_ref: "AJBR-70271",
+      site_suburb: "Bertram",
+      requesting_company_slug: "aj",
+      ses_family: "physical_makesafe",
+      ses_family_label: "Make safe",
+    }],
+  };
+  sandbox._makesafeBoardPayload.columns = null;
+  behaviour.fetch.query_ses_review_cockpit = ajsCockpit;
+  behaviour.fetch.get_ses_reviewable_pack = {
+    review: {
+      docket_revision_id: DOCKET_REV,
+      review_state: "needs_review",
+      docket_output_content_hash: HASH,
+    },
+    docket: { id: DOCKET_REV, output_content_hash: HASH },
+    artifacts: [
+      {
+        role: "supporting_report_pdf",
+        object_key: "Make Safe Report.pdf",
+        media_type: "application/pdf",
+        content_hash: REPORT_HASH,
+        signed_url: "https://example.com/report.pdf",
+      },
+      {
+        role: "xero_invoice_pdf",
+        object_key: "Invoice.pdf",
+        media_type: "application/pdf",
+        content_hash: XERO_PDF_HASH,
+        signed_url: "https://example.com/invoice.pdf",
+      },
+      {
+        role: "completion_photo",
+        object_key: "Photo 01.jpg",
+        media_type: "image/jpeg",
+        content_hash: PHOTO_HASH_1,
+        signed_url: "https://example.com/p1.jpg",
+      },
+    ],
+  };
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(AJS_JOB);
+  const ajsHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "AJS three-route backend headlines the intended 2-email PREVIEW",
+    ajsHtml.includes("AJS send shape (preview)") &&
+      ajsHtml.includes("Preview of the intended AJS shape") &&
+      ajsHtml.includes("not what SEND IT sends today") &&
+      ajsHtml.includes("Report + invoice") &&
+      ajsHtml.includes("Photos (follow-up)"),
+  );
+  check(
+    "AJS preview still discloses that SEND IT releases three routes today",
+    /still builds <strong>three routes<\/strong>/i.test(ajsHtml) ||
+      /still builds three routes/i.test(ajsHtml.replace(/<[^>]+>/g, " ")),
+  );
+  // The synthesized shape must never REPLACE the truth: the real routes SEND IT
+  // releases today stay on this surface, collapsed under the preview.
+  check(
+    "AJS preview keeps the real routes in a collapsed truth fold below it",
+    ajsHtml.includes("What SEND IT actually sends today") &&
+      ajsHtml.includes("Report email") &&
+      ajsHtml.includes("Photo email") &&
+      ajsHtml.includes("Invoice email") &&
+      ajsHtml.includes("Make Safe Invoice - AJBR-70271 - Bertram") &&
+      ajsHtml.indexOf("Preview of the intended AJS shape") <
+        ajsHtml.indexOf("What SEND IT actually sends today") &&
+      !/<details class="msr-fold" open/.test(ajsHtml),
+  );
+  check(
+    "AJS preview is condensed (chips + one-line meta, no why-this essays)",
+    /msr-mail condensed/.test(ajsHtml) &&
+      ajsHtml.includes("workorders@ajs.build") &&
+      !ajsHtml.includes("Why this, for this job") &&
+      !ajsHtml.includes("msr-why"),
+  );
+  // An address that is To on one merged route is never ALSO printed as Cc.
+  {
+    const combinedStart = ajsHtml.indexOf("Report + invoice");
+    const combinedCard = ajsHtml.slice(
+      combinedStart,
+      ajsHtml.indexOf("</section>", combinedStart),
+    );
+    const vanessaTimes = combinedCard.split("vanessa@ajs.build").length - 1;
+    check(
+      "the merged AJS card never lists the same address on both To and Cc",
+      combinedCard.includes("<b>To</b> workorders@ajs.build, vanessa@ajs.build") &&
+        combinedCard.includes("<b>Cc</b> <em>none</em>") &&
+        vanessaTimes === 1,
+    );
+  }
+  // A Cc-only address must survive the To-filter (nothing required is dropped).
+  {
+    const merged = mod._msSesAjsIntendedEmails([
+      { route_kind: "report", recipients: ["a@b.com"], cc: ["ses@secureworkswa.com.au", "a@b.com"] },
+      { route_kind: "invoice", recipients: ["a@b.com"], cc: [] },
+      { route_kind: "photo", recipients: ["a@b.com"], cc: [] },
+    ]);
+    check(
+      "a Cc-only address survives the To-filter on the merged card",
+      merged.emails[0].cc.length === 1 &&
+        merged.emails[0].cc[0] === "ses@secureworkswa.com.au" &&
+        merged.emails[0].recipients.length === 1,
+    );
+  }
+  // A FOURTH route (e.g. a second builder instruction's invoice) is never
+  // silently dropped by the fixed 2-email synthesis.
+  {
+    const extraInvoice = {
+      route_kind: "invoice",
+      recipients: ["accounts@ajs.build"],
+      cc: [],
+      subject: "Make Safe Invoice - AJBR-70271 - second work order",
+      body: "Second instruction invoice.",
+      attachment_hashes: [],
+      ready: true,
+    };
+    const fourRoutes = ajsCockpit.sections.email_drafts.concat([extraInvoice]);
+    const synth = mod._msSesAjsIntendedEmails(fourRoutes);
+    check(
+      "the 2-email synthesis reports the route it did not consume as a leftover",
+      synth.emails.length === 2 && synth.leftovers.length === 1 &&
+        synth.leftovers[0].subject === extraInvoice.subject,
+    );
+    ajsCockpit.sections.email_drafts = fourRoutes;
+    behaviour.fetch.query_ses_review_cockpit = ajsCockpit;
+    await mod.showMsReportingDetail(AJS_JOB);
+    const fourHtml = elements["msReportingDetailPanel"]._html || "";
+    check(
+      "a 4th route renders on the AJS preview surface and in the truth fold",
+      (fourHtml.split("Make Safe Invoice - AJBR-70271 - second work order").length - 1) >= 2 &&
+        /further route/.test(fourHtml) &&
+        /still builds <strong>four routes<\/strong>/i.test(fourHtml),
+    );
+    ajsCockpit.sections.email_drafts = fourRoutes.slice(0, 3);
+    behaviour.fetch.query_ses_review_cockpit = ajsCockpit;
+  }
+
+  // When the backend already has 2 routes, show the truth with no preview banner.
+  ajsCockpit.sections.email_drafts = [
+    {
+      route_kind: "report",
+      recipients: ["workorders@ajs.build"],
+      cc: ["vanessa@ajs.build"],
+      subject: "Make Safe Report & Invoice - AJBR-70271",
+      body: "Report and invoice attached.",
+      attachment_hashes: [REPORT_HASH, XERO_PDF_HASH],
+      ready: true,
+    },
+    {
+      route_kind: "photo",
+      recipients: ["workorders@ajs.build"],
+      cc: [],
+      subject: "Photos - AJBR-70271",
+      body: "Photos follow-up.",
+      attachment_hashes: [PHOTO_HASH_1],
+      ready: true,
+    },
+  ];
+  behaviour.fetch.query_ses_review_cockpit = ajsCockpit;
+  await mod.showMsReportingDetail(AJS_JOB);
+  const ajsTruthHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "AJS two-route backend shows the truth (no preview banner)",
+    !ajsTruthHtml.includes("Preview of the intended AJS shape") &&
+      ajsTruthHtml.includes("what SEND IT releases") &&
+      ajsTruthHtml.includes("Report email") &&
+      ajsTruthHtml.includes("Photo email") &&
+      /all two emails at once/i.test(ajsTruthHtml),
+  );
+}
+
+// ── 18. The Feedback fold cannot hide a thread or a load failure ────────────
+{
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const foldHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "the Feedback fold is addressable and ships collapsed with its resting note",
+    foldHtml.includes('id="msFeedbackFold-' + JOB + '"') &&
+      foldHtml.includes('id="msFeedbackFoldNote-' + JOB + '"') &&
+      foldHtml.includes("the next run reads what you write here") &&
+      !/<details class="msr-fold" open/.test(foldHtml),
+  );
+  const fold = documentStub.getElementById("msFeedbackFold-" + JOB);
+  const note = documentStub.getElementById("msFeedbackFoldNote-" + JOB);
+  fold.open = false;
+  mod._msSesOnFeedbackThreadRendered(JOB, { count: 0, failed: false });
+  check(
+    "an empty, healthy thread leaves the Feedback fold closed",
+    fold.open === false &&
+      note.textContent === "the next run reads what you write here",
+  );
+  mod._msSesOnFeedbackThreadRendered(JOB, { count: 2, failed: false });
+  check(
+    "recorded feedback opens the fold and badges the count",
+    fold.open === true && /2 recorded/.test(note.textContent),
+  );
+  fold.open = false;
+  mod._msSesOnFeedbackThreadRendered(JOB, { count: 0, failed: true });
+  check(
+    "a failed feedback read opens the fold and says so — never an invisible error",
+    fold.open === true && /could not load/.test(note.textContent),
+  );
+  // DUAL HOST: the inline panel and the board overlay can both hold this job's
+  // fold. The hook must write to the panel that OWNS the open detail, never the
+  // hidden copy getElementById happens to reach first.
+  {
+    const overlayFold = { open: false, textContent: "" };
+    const overlayNote = { open: false, textContent: "" };
+    const overlayPanel = documentStub.getElementById("msReportingDetailPanelBoard");
+    overlayPanel.querySelector = (sel) => {
+      if (sel === '[id="msFeedbackFold-' + JOB + '"]') return overlayFold;
+      if (sel === '[id="msFeedbackFoldNote-' + JOB + '"]') return overlayNote;
+      return null;
+    };
+    mod._msSesPackCache[JOB].panelId = "msReportingDetailPanelBoard";
+    fold.open = false;
+    note.textContent = "untouched";
+    mod._msSesOnFeedbackThreadRendered(JOB, { count: 0, failed: true });
+    check(
+      "the fold hook writes to the panel that owns the detail, not the hidden copy",
+      overlayFold.open === true && /could not load/.test(overlayNote.textContent) &&
+        fold.open === false && note.textContent === "untouched",
+    );
+    check(
+      "_msSesScopedEl falls back to document scope when the panel lacks the element",
+      mod._msSesScopedEl(JOB, "msNotesPanel-" + JOB) ===
+        documentStub.getElementById("msNotesPanel-" + JOB),
+    );
+    overlayPanel.querySelector = () => null;
+    mod._msSesPackCache[JOB].panelId = "msReportingDetailPanel";
+  }
+}
+
+// ── 19. The short stage always offers a full-size read ──────────────────────
+{
+  const pdfStage = mod._msRenderDocStage(
+    [{ tabLabel: "Invoice", kind: "pdf", url: "https://example.com/invoice.pdf#view=Fit" }],
+    0,
+    {},
+  );
+  const imgStage = mod._msRenderDocStage(
+    [{ tabLabel: "Photo 01", kind: "image", url: "https://example.com/p1.jpg" }],
+    0,
+    {},
+  );
+  const invDocStage = mod._msRenderDocStage(
+    [{ tabLabel: "Invoice", kind: "invdoc" }],
+    0,
+    { invoice: { total_inc_gst: 110 } },
+  );
+  check(
+    "a PDF or image stage carries the Open document escape hatch",
+    /msr-stage-open/.test(pdfStage) && /Open document/.test(pdfStage) &&
+      pdfStage.includes('href="https://example.com/invoice.pdf#view=Fit"') &&
+      /msr-stage-open/.test(imgStage) &&
+      !/msr-stage-open/.test(invDocStage),
+  );
+  check(
+    "the Open document hatch opens in a new tab safely",
+    /target="_blank"/.test(pdfStage) && /rel="noopener"/.test(pdfStage),
+  );
+  // A signed pack URL lives 300s and this pane never auto-refreshes, so the
+  // hatch runs through the SAME freshness gate as a tab switch.
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const liveStage = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "a rendered hatch carries the freshness gate for its own job and tab",
+    liveStage.includes(
+      'onclick="return _msOpenDocFullSize(\'' + JOB + "'," +
+        mod._msActiveDocTab[JOB] + ')"',
+    ),
+  );
+  sandbox.window.opened.length = 0;
+  calls.opsFetch.length = 0;
+  check(
+    "a fresh pack lets the anchor's own href open natively (no re-read, no popup)",
+    mod._msOpenDocFullSize(JOB, 0) === true &&
+      sandbox.window.opened.length === 0 &&
+      !calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
+  );
+  // Age the cached pack past the signed-URL lifetime: the hatch must refresh
+  // before it hands the new tab a link.
+  mod._msSesPackCache[JOB].fetchedAt = Date.now() - 300000;
+  calls.opsFetch.length = 0;
+  check(
+    "a stale pack is handled by the hatch instead of following the dead href",
+    mod._msOpenDocFullSize(JOB, 0) === false &&
+      sandbox.window.opened.length === 1 &&
+      sandbox.window.opened[0].opener === null,
+  );
+  await flush();
+  await flush();
+  const reopened = sandbox.window.opened[0];
+  check(
+    "the stale hatch re-reads the pack and points the tab at the refreshed URL",
+    calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack") &&
+      reopened.closed === false &&
+      !!reopened.url && reopened.url !== "" &&
+      reopened.url === mod._msDocTabUrlAt(JOB, 0),
+  );
+  // showMsReportingDetail CATCHES its own load failures and returns normally,
+  // leaving the expired cache in place — so resolving is not evidence of a
+  // fresh link. The waiting tab must be closed, never pointed at the dead URL.
+  {
+    const deadUrl = mod._msDocTabUrlAt(JOB, 0);
+    const staleAt = Date.now() - 300000;
+    mod._msSesPackCache[JOB].fetchedAt = staleAt;
+    behaviour.fetch.query_ses_review_cockpit = new Error("network blip");
+    sandbox.window.opened.length = 0;
+    calls.toasts.length = 0;
+    const handled = mod._msOpenDocFullSize(JOB, 0);
+    await flush();
+    await flush();
+    const abandoned = sandbox.window.opened[0];
+    check(
+      "a failed re-read closes the waiting tab instead of opening the expired URL",
+      handled === false && !!abandoned && abandoned.closed === true &&
+        abandoned.url !== deadUrl &&
+        mod._msSesPackCache[JOB].fetchedAt === staleAt &&
+        calls.toasts.some((t) => /expired/i.test(t.msg) && t.kind === "error"),
+    );
+    // A blocked pop-up must say so, not silently do nothing, and must never
+    // retry window.open outside the click gesture.
+    behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+    mod._msSesPackCache[JOB].fetchedAt = Date.now() - 300000;
+    const realOpen = sandbox.window.open;
+    sandbox.window.open = function () { return null; };
+    sandbox.window.opened.length = 0;
+    calls.toasts.length = 0;
+    const blocked = mod._msOpenDocFullSize(JOB, 0);
+    await flush();
+    await flush();
+    check(
+      "a blocked pop-up reports itself and refreshes the link for the next press",
+      blocked === false && sandbox.window.opened.length === 0 &&
+        calls.toasts.some((t) => /blocked/i.test(t.msg)) &&
+        mod._msOpenDocFullSize(JOB, 0) === true,
+    );
+    sandbox.window.open = realOpen;
+    behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+  }
+}
+
+// ── 20. No retired action was ever dispatched at runtime ────────────────────
 check(
   "no retired action was ever called at runtime",
   !actionLog.some((a) =>

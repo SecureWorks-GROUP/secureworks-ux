@@ -12074,6 +12074,26 @@ function buildMakesafeBoardColumns(payload, enrichById) {
 var _makesafeBoardPayload = null;
 var _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
 
+// True when the board payload already carries the close-out presentation the
+// card paints, so the makesafe_pipeline dual-fetch is not load-bearing.
+//
+// ONLY two honest signals:
+//   1. Explicit card contract: shape/fields === 'card' (backend perf v1).
+//   2. Every row stamps `has_wo` as a boolean — the presentation field the
+//      card-shape projector always emits (boardPresentationFields). A pre-perf
+//      full row never carried top-level has_wo; it had pack.closeout_documents
+//      only. Treating pack presence as self-sufficiency was a fake-green: the
+//      dual-fetch would be skipped, partial-join warnings became unreachable,
+//      and incomplete close-out chips went silent.
+function makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows) {
+  if (!payload) return false;
+  if (payload.shape === 'card' || payload.fields === 'card') return true;
+  if (!canonicalRows || !canonicalRows.length) return false;
+  return canonicalRows.every(function(row) {
+    return row && typeof row.has_wo === 'boolean';
+  });
+}
+
 async function fetchMakesafeBoardData() {
   // Card-shaped ops board (default since makesafe-board-perf-v1) stamps the
   // presentation keys the card paints (has_wo, invoice_status, site_suburb, …)
@@ -12081,9 +12101,10 @@ async function fetchMakesafeBoardData() {
   // is no longer required for board paint. That second call was ~2.3 MB and
   // re-ran the same pipeline the board already ran server-side.
   //
-  // Fallback: if the response is still the pre-perf full shape (no shape/card
-  // marker and no presentation keys), re-join the pipeline as before so a
-  // stale edge deploy does not blank the doc chips.
+  // Fallback: if the response is still the pre-perf full shape (no card marker
+  // and no presentation stamps), re-join the pipeline as before so a stale edge
+  // deploy does not blank the doc chips — and so a PARTIAL join still announces
+  // itself rather than silently painting incomplete cards.
   var payload = await opsFetch('makesafe_board', { projection: 'ops' });
   if (payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
     throw new Error('Unsupported make-safe board contract: ' + (payload.contract_version || 'none'));
@@ -12092,11 +12113,7 @@ async function fetchMakesafeBoardData() {
   Object.keys(payload.columns || {}).forEach(function(stage) {
     (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
   });
-  var selfSufficient = payload.shape === 'card' || payload.fields === 'card' ||
-    (canonicalRows.length > 0 && canonicalRows.every(function(row) {
-      return row && (typeof row.has_wo === 'boolean' || row.site_suburb != null ||
-        (row.pack && row.pack.closeout_documents));
-    }));
+  var selfSufficient = makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows);
   var enrichById = {};
   if (!selfSufficient) {
     var enrich = await opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
@@ -12111,7 +12128,14 @@ async function fetchMakesafeBoardData() {
       ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
       : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
   } else {
-    _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: canonicalRows.length, source: 'card_shape' };
+    // No join ran; partial/failed enrichment is structurally unreachable.
+    _makesafeBoardEnrichState = {
+      status: 'covered',
+      missing: 0,
+      total: canonicalRows.length,
+      source: 'card_shape',
+      join: 'skipped',
+    };
   }
   _makesafeBoardPayload = payload;
   // This load IS a current canonical read, and buildMakesafeBoardColumns has just

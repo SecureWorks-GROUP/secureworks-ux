@@ -170,31 +170,114 @@ test('a failed close-out enrichment join is announced rather than silent', async
   expect(html).toContain('Close-out detail unavailable');
 });
 
+// Pre-perf full board rows never stamped top-level has_wo; they only had
+// pack.closeout_documents. The dual-fetch is still load-bearing on that shape,
+// so a partial join must still announce itself (honesty, not a cosmetic banner).
 test('a partial close-out enrichment join names missing detail without changing placement', async ({ page }) => {
   await page.goto('/ops.html');
   const result = await page.evaluate(async (payload) => {
     const realFetch = window.opsFetch;
     const covered = payload.rows[1];
-    window.opsFetch = (action) => Promise.resolve(action === 'makesafe_board'
-      ? payload
-      : { columns: { archive: [covered] } });
+    const actions = [];
+    window.opsFetch = (action) => {
+      actions.push(action);
+      return Promise.resolve(action === 'makesafe_board'
+        ? payload
+        : { columns: { archive: [covered] } });
+    };
     try {
       const board = await fetchMakesafeBoardData();
       return {
         html: renderMakesafeFeedNotices(),
         archive: board.columns.archive.map((card) => card.job_number),
         state: _makesafeBoardEnrichState,
+        actions,
+        // Prove the fixture is NOT self-sufficient: no card marker, no has_wo stamp.
+        selfSufficient: makesafeBoardPayloadIsSelfSufficient(payload, payload.rows),
       };
     } finally {
       window.opsFetch = realFetch;
     }
   }, boardPayload([ledgerArchivedRow(), Object.assign({}, ledgerArchivedRow(), { id: 'job-ledger-covered', job_number: 'SWMS-COVERED' })]));
 
+  expect(result.selfSufficient).toBe(false);
+  expect(result.actions).toEqual(['makesafe_board', 'makesafe_pipeline']);
   expect(result.html).toContain('Close-out detail partially unavailable');
   expect(result.html).toContain('1 of 2 cards');
   expect(result.html).toContain('columns and placement remain complete');
   expect(result.state).toEqual({ status: 'partial', missing: 1, total: 2 });
   expect(result.archive).toEqual(['SWMS-LEDGER', 'SWMS-COVERED']);
+});
+
+// Card shape (backend perf v1) stamps presentation keys on every row, including
+// has_wo as a boolean. The dual-fetch is then not load-bearing: partial-join
+// cannot occur because no join runs. Assert the NEW truth — do not delete the
+// partial-join test above; that path remains for pre-card edges.
+test('a card-shaped board does not dual-fetch and cannot surface partial close-out join warnings', async ({ page }) => {
+  await page.goto('/ops.html');
+  const cardRow = Object.assign({}, ledgerArchivedRow(), {
+    // Explicit presentation stamps the card projector always emits.
+    has_wo: true,
+    site_suburb: 'Cottesloe',
+    invoice_status: 'paid',
+    requesting_company_slug: 'bw',
+  });
+  const covered = Object.assign({}, cardRow, {
+    id: 'job-ledger-covered',
+    job_number: 'SWMS-COVERED',
+  });
+  const payload = Object.assign(
+    boardPayload([cardRow, covered]),
+    { shape: 'card', fields: 'card' },
+  );
+
+  const result = await page.evaluate(async (p) => {
+    const realFetch = window.opsFetch;
+    const actions = [];
+    window.opsFetch = (action) => {
+      actions.push(action);
+      // If the dual-fetch ever runs, return a PARTIAL pipeline so a silent skip
+      // would be distinguishable from an honest skip (partial would warn).
+      if (action === 'makesafe_board') return Promise.resolve(p);
+      return Promise.resolve({ columns: { archive: [p.rows[1]] } });
+    };
+    try {
+      const board = await fetchMakesafeBoardData();
+      return {
+        html: renderMakesafeFeedNotices(),
+        archive: board.columns.archive.map((card) => card.job_number),
+        state: _makesafeBoardEnrichState,
+        actions,
+        selfSufficient: makesafeBoardPayloadIsSelfSufficient(p, p.rows),
+        hasWoTypes: p.rows.map((r) => typeof r.has_wo),
+        cardHasWo: board.columns.archive.map((c) => c.has_wo),
+        cardSuburb: board.columns.archive.map((c) => c.site_suburb),
+        cardInvoice: board.columns.archive.map((c) => c.invoice_status),
+      };
+    } finally {
+      window.opsFetch = realFetch;
+    }
+  }, payload);
+
+  // Evidence the card shape is self-sufficient: boolean has_wo on every row.
+  expect(result.hasWoTypes).toEqual(['boolean', 'boolean']);
+  expect(result.selfSufficient).toBe(true);
+  // Dual-fetch must not run — partial pipeline mock never consulted.
+  expect(result.actions).toEqual(['makesafe_board']);
+  // No honesty banner: there is no join to be partial.
+  expect(result.html).toBe('');
+  expect(result.state).toEqual({
+    status: 'covered',
+    missing: 0,
+    total: 2,
+    source: 'card_shape',
+    join: 'skipped',
+  });
+  // Placement unchanged; presentation painted from the card row itself.
+  expect(result.archive).toEqual(['SWMS-LEDGER', 'SWMS-COVERED']);
+  expect(result.cardHasWo).toEqual([true, true]);
+  expect(result.cardSuburb).toEqual(['Cottesloe', 'Cottesloe']);
+  expect(result.cardInvoice).toEqual(['paid', 'paid']);
 });
 
 test('an unsupported board contract fails loudly instead of rendering a partial board', async ({ page }) => {

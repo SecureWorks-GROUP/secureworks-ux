@@ -846,6 +846,7 @@ function _msSesMissingLine(row, ctx) {
     return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
   })) missing.push('the builder work order');
   if (!(Array.isArray(row.photos) && row.photos.length)) missing.push('site photos');
+  if (!row.invoice) missing.push('a draft invoice');
   var invoicePdfMissing = row.invoice && !hasDraft(/invoice/i);
   var swmsAbsent = !hasDraft(/swms/i);
   if (!missing.length && !invoicePdfMissing && !swmsAbsent) return '';
@@ -1215,17 +1216,23 @@ function _msReportingDocTabs(d) {
     var label = String(doc.label || '').toLowerCase();
     var tabLabel = null;
     var isWorkOrder = false;
+    var isInvoiceDoc = false;
     if (doc.kind === 'image') return; // photos stay in the photo section
-    if (/xero/.test(label) && /invoice/.test(label)) tabLabel = 'Invoice';
+    // Only a DRAFTED artifact (the pack's own xero_invoice_pdf) may claim the
+    // Invoice slot: a builder SOURCE attachment named "invoice_*.pdf" is the
+    // builder's paperwork, and taking the slot would hide the SES proposal page.
+    if (doc.isDraft && /invoice/.test(label)) { tabLabel = 'Invoice'; isInvoiceDoc = true; }
     else if (/raw/.test(label) && /trade|service|report/.test(label)) tabLabel = 'Raw Trade Report';
     else if (/trade|service/.test(label) && /pdf/.test(label)) tabLabel = 'Trade Report PDF';
     else if (/trade|service|raw/.test(label)) tabLabel = 'Trade Report';
     else if (/work\S*\s*order|^wo$/.test(label)) { tabLabel = 'Work Order'; isWorkOrder = true; }
     else if (/make\s*safe|completion/.test(label) && /report/.test(label)) tabLabel = 'Make Safe Report';
-    else if (/invoice/.test(label)) tabLabel = 'Invoice';
     else if (/swms/.test(label)) tabLabel = 'SWMS';
     else if (/report/.test(label)) tabLabel = 'Trade Report';
     else tabLabel = doc.label || 'Document';
+    // 'Invoice' is reserved for the drafted money document; a source file that
+    // happens to be named that is relabelled rather than shown as a twin tab.
+    if (!isInvoiceDoc && tabLabel === 'Invoice') tabLabel = 'Builder invoice';
     // De-dupe by tab label (one report, one invoice, one SWMS) — EXCEPT work
     // orders, where collapsing would hide a second builder instruction.
     if (!isWorkOrder && out.some(function(o) { return o.tabLabel === tabLabel; })) return;
@@ -1234,6 +1241,7 @@ function _msReportingDocTabs(d) {
       url: doc.url,
       kind: doc.kind,
       isWorkOrder: isWorkOrder,
+      isInvoiceDoc: isInvoiceDoc,
       srcLabel: doc.label || '',
       created_at: doc.created_at || null,
       received_at: doc.received_at || null,
@@ -1253,9 +1261,9 @@ function _msReportingDocTabs(d) {
   }
   // The invoice is ALWAYS a document: when no invoice PDF is bound yet, the
   // drafted proposal renders as an invoice page on the stage (kind 'invdoc').
-  var hasInvoiceTab = out.some(function(o) { return o.tabLabel === 'Invoice'; });
+  var hasInvoiceTab = out.some(function(o) { return o.isInvoiceDoc; });
   if (!hasInvoiceTab && d && d.invoice) {
-    out.push({ tabLabel: 'Invoice', url: null, kind: 'invdoc' });
+    out.push({ tabLabel: 'Invoice', url: null, kind: 'invdoc', isInvoiceDoc: true });
   }
   // Order: report first (the main document), money second, then the rest.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
@@ -1308,13 +1316,11 @@ function _msRenderDocStage(docTabs, idx, row) {
  * The drafted invoice AS A DOCUMENT: an invoice page rendered on the stage
  * from the SES proposal figures (or the Xero binding facts when present but
  * the PDF is not in this pack). Read-only presentation of backend numbers —
- * figure changes go through Feedback, never a send-time edit. Flagged lines
- * (money_review) render on the page itself.
+ * figure changes go through Feedback, never a send-time edit.
  */
 function _msSesRenderInvoiceDoc(d) {
   var inv = (d && d.invoice) || {};
   var lines = Array.isArray(inv.lines) ? inv.lines : [];
-  var flags = _msReportingFlaggedLineMap(d || {});
   var statusLine = inv.invoice_number
     ? escapeHtml(inv.invoice_number) + (inv.status ? ' &middot; ' + escapeHtml(inv.status) : '')
     : 'DRAFT &mdash; SES proposal, not yet in Xero';
@@ -1327,21 +1333,16 @@ function _msSesRenderInvoiceDoc(d) {
     html += '<table class="msr-invpage-tbl"><thead><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit ex</th><th class="n">Amount ex</th></tr></thead><tbody>';
     lines.forEach(function(li, idx) {
       li = li || {};
-      var flag = _msReportingLineFlag(flags, idx, li);
       var desc = li.description || li.name || ('Line ' + (idx + 1));
       var qty = li.quantity != null ? Number(li.quantity) : null;
       var unit = li.unit_price != null ? Number(li.unit_price) : (li.unit_amount != null ? Number(li.unit_amount) : null);
       var total = li.line_total != null ? Number(li.line_total) : (li.amount != null ? Number(li.amount) : null);
-      html += '<tr' + (flag ? ' class="flagged"' : '') + '>';
+      html += '<tr>';
       html += '<td>' + escapeHtml(desc) + '</td>';
       html += '<td class="n">' + (qty != null && isFinite(qty) ? escapeHtml(String(qty)) : '') + '</td>';
       html += '<td class="n">' + (unit != null && isFinite(unit) ? escapeHtml(_msFmtAud(unit)) : '') + '</td>';
       html += '<td class="n">' + (total != null && isFinite(total) ? escapeHtml(_msFmtAud(total)) : '') + '</td>';
       html += '</tr>';
-      if (flag) {
-        var note = flag.note || flag.reason || flag.description || 'Check this line before sending.';
-        html += '<tr class="flagnote"><td colspan="4">' + _MS_SES_ICONS.alert + ' ' + escapeHtml(note) + '</td></tr>';
-      }
     });
     html += '</tbody></table>';
   } else if (inv.lines_unavailable) {
@@ -1443,7 +1444,7 @@ function _msSwitchDocTab(jobId, idx, panelId) {
   if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx, d);
 }
 
-// ── CAROUSEL + MONEY-REVIEW HELPERS ─────────────────────────────────────────
+// ── CAROUSEL HELPERS ────────────────────────────────────────────────────────
 
 /**
  * Map the row's draft_docs[] + source_docs[] into the shared doc-viewer entry
@@ -1453,7 +1454,7 @@ function _msSwitchDocTab(jobId, idx, panelId) {
 function _msReportingBuildCarouselDocs(d) {
   var out = [];
   var seen = {};
-  function add(label, url, kind, meta) {
+  function add(label, url, kind, meta, isDraft) {
     meta = meta || {};
     if (!url && !meta.raw_report && kind !== 'html') return;
     var dedupeKey = url || [label || 'Document', meta.source_type || kind || '', meta.received_at || meta.created_at || ''].join('|');
@@ -1470,6 +1471,7 @@ function _msReportingBuildCarouselDocs(d) {
       url: displayUrl,
       kind: k,
       doc: null,
+      isDraft: !!isDraft,
       created_at: meta.created_at || null,
       received_at: meta.received_at || meta.created_at || null,
       source_type: meta.source_type || null,
@@ -1478,18 +1480,13 @@ function _msReportingBuildCarouselDocs(d) {
   }
   // Drafted outputs first.
   if (Array.isArray(d.draft_docs)) {
-    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd); });
+    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd, true); });
   }
   // Source docs next (work order, photos, etc.).
   if (Array.isArray(d.source_docs)) {
-    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd); });
+    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd, false); });
   }
   return out;
-}
-
-function _msNeedsMoneyReview(d) {
-  return !!(d && (d.needs_money_review === true ||
-    (d.money_review && d.money_review.needs_money_review === true)));
 }
 
 // Normalise a feed kind ('pdf'|'image'|'html') to the viewer's kind vocabulary.
@@ -1525,32 +1522,10 @@ function _msReportingFormatTimestamp(iso) {
 // every work order and trade doc is its own tab, so nothing is reachable in
 // fewer places than before.)
 
-// Build a lookup of flagged invoice lines keyed by line_index. Defensive:
-// absent money_review / flagged_lines returns an empty map (no highlights).
-function _msReportingFlaggedLineMap(d) {
-  var map = {};
-  if (!_msNeedsMoneyReview(d) || !d.money_review) return map;
-  var lines = d.money_review.flagged_lines;
-  if (!Array.isArray(lines)) return map;
-  lines.forEach(function(fl) {
-    if (!fl) return;
-    if (fl.line_index != null) map['i:' + fl.line_index] = fl;
-    if (fl.description) map['d:' + String(fl.description).trim().toLowerCase()] = fl;
-  });
-  return map;
-}
-
-// Resolve a flagged line for one invoice row: match by line_index first, then by
-// description (fallback). Returns the flag object or null.
-function _msReportingLineFlag(map, idx, li) {
-  if (!map) return null;
-  if (map['i:' + idx]) return map['i:' + idx];
-  if (li && li.description) {
-    var key = 'd:' + String(li.description).trim().toLowerCase();
-    if (map[key]) return map[key];
-  }
-  return null;
-}
+// (No per-line money-review highlighting here: no feed reaching this pane
+// carries flagged_lines. The board card's amber "Check pricing" chip is driven
+// by the enriched row's needs_money_review and remains the only money-review
+// cue this repo can honestly render.)
 
 // ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 

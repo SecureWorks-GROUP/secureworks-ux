@@ -706,6 +706,31 @@ check(
       invStage.includes("SES proposal, not yet in Xero"),
   );
 }
+// A builder SOURCE attachment whose file name says "invoice" must NOT claim the
+// Invoice tab — the drafted proposal page would become unreachable.
+{
+  const builderInvoiceRow = {
+    invoice: {
+      invoice_number: null,
+      status: "SES proposal (not yet in Xero)",
+      lines: [{ description: "Temp fence hire", quantity: 2, unit_price: 50, line_total: 100 }],
+      total_ex_gst: 100,
+      total_inc_gst: 110,
+    },
+    draft_docs: [],
+    source_docs: [
+      { label: "invoice_MLB-25248", url: "https://example.com/invoice_MLB-25248.pdf", kind: "pdf" },
+    ],
+    photos: [],
+  };
+  const bTabs = mod._msReportingDocTabs(builderInvoiceRow);
+  const invTabs = bTabs.filter((t) => t.tabLabel === "Invoice");
+  check(
+    "a source attachment named invoice_*.pdf does not suppress the drafted invoice document",
+    invTabs.length === 1 && invTabs[0].kind === "invdoc" &&
+      bTabs.some((t) => t.kind === "pdf" && t.tabLabel !== "Invoice"),
+  );
+}
 // A second work order is NEVER collapsed into the first tab
 // (<makesafe-workorder-identity>: no surface may pick one and hide the rest).
 {
@@ -953,11 +978,18 @@ check(
     draft_docs: [], source_docs: [], photos: [],
   });
   const invIdx = preXeroTabs.findIndex((t) => t.kind === "invdoc");
-  mod._msSwitchDocTab(JOB, 1, "msReportingDetailPanel");
+  // Switch to the tab the RENDERED pane actually labelled "Invoice", not a
+  // literal index that silently drifts when tab ordering changes.
+  const renderedInvIdx = (() => {
+    const m = /data-tabidx="(\d+)"[^>]*>Invoice<\/button>/.exec(invoiceHtml);
+    return m ? Number(m[1]) : -1;
+  })();
+  mod._msSwitchDocTab(JOB, renderedInvIdx, "msReportingDetailPanel");
   const stageHtml = elements["msDocStage_job_1"] ? (elements["msDocStage_job_1"]._html || "") : "";
   check(
     "the pre-Xero Invoice tab shows the proposal document, marked not yet in Xero",
     invIdx >= 0 &&
+      renderedInvIdx >= 0 &&
       stageHtml.includes("SES proposal, not yet in Xero") &&
       stageHtml.includes("Temp fence hire"),
   );

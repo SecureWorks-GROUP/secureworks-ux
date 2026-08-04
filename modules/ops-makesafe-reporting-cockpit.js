@@ -740,6 +740,26 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 var _MS_SES_FEEDBACK_FOLD_NOTE = 'the next run reads what you write here';
 
 /**
+ * Resolve a per-job element inside the panel that OWNS the open detail
+ * (`ctx.panelId`, recorded by showMsReportingDetail). This pane renders into
+ * two hosts — the inline Approvals panel and the board overlay — and both can
+ * hold the same job at once, so a bare getElementById returns whichever copy is
+ * first in the DOM and writes land on the hidden one. Same hazard, and the same
+ * defence, as _msSwitchDocTab's scoped stage lookup. Shared with the feedback
+ * module, which resolves its own thread host and composer through it.
+ */
+function _msSesScopedEl(jobId, elementId) {
+  var ctx = _msSesPackCache[jobId];
+  var panelId = (ctx && ctx.panelId) || null;
+  var panel = panelId ? document.getElementById(panelId) : null;
+  if (panel && panel.querySelector) {
+    var scoped = panel.querySelector('[id="' + String(elementId).replace(/["\\]/g, '\\$&') + '"]');
+    if (scoped) return scoped;
+  }
+  return document.getElementById(elementId);
+}
+
+/**
  * Called by the feedback module every time it renders the thread for a job
  * (modules/ops-makesafe-feedback-notes.js: loadMsNotes). The fold stays
  * collapsed only while the thread is empty AND healthy: recorded feedback gets
@@ -748,8 +768,8 @@ var _MS_SES_FEEDBACK_FOLD_NOTE = 'the next run reads what you write here';
  */
 function _msSesOnFeedbackThreadRendered(jobId, state) {
   state = state || {};
-  var fold = document.getElementById('msFeedbackFold-' + jobId);
-  var note = document.getElementById('msFeedbackFoldNote-' + jobId);
+  var fold = _msSesScopedEl(jobId, 'msFeedbackFold-' + jobId);
+  var note = _msSesScopedEl(jobId, 'msFeedbackFoldNote-' + jobId);
   var count = Number(state.count) || 0;
   if (state.failed) {
     if (note) note.textContent = 'could not load — open to read the error';
@@ -1516,8 +1536,12 @@ function _msRenderDocStage(docTabs, idx, row) {
   }
   var openHatch = '';
   if (t && t.url && (t.kind === 'pdf' || t.kind === 'image')) {
-    openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener">'
-      + 'Open document &#8599;</a>';
+    var stageJobId = row && row.job_id;
+    var freshnessGate = stageJobId
+      ? ' onclick="return _msOpenDocFullSize(\'' + _msJsAttr(stageJobId) + '\',' + idx + ')"'
+      : '';
+    openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener"'
+      + freshnessGate + '>Open document &#8599;</a>';
   }
   return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
 }
@@ -1612,6 +1636,69 @@ function _msRenderRawTradeReportDoc(t) {
     + '</div>';
 }
 
+// Signed pack URLs live 300s. Anything that hands one to the browser past this
+// age re-fetches the pack first, so nobody ever follows a dead link.
+var _MS_SES_SIGNED_URL_STALE_MS = 240000;
+
+/** True when this job's cached pack URLs are too old to hand to the browser. */
+function _msSesPackUrlsStale(jobId) {
+  var ctx = _msSesPackCache[jobId];
+  return !!(ctx && ctx.pack && ctx.fetchedAt &&
+    (Date.now() - ctx.fetchedAt) > _MS_SES_SIGNED_URL_STALE_MS);
+}
+
+/** The signed URL currently behind doc tab `idx`, re-derived from the row. */
+function _msDocTabUrlAt(jobId, idx) {
+  var d = _msReportingCache[jobId];
+  if (!d) return '';
+  var docTabs = _msReportingDocTabs(d);
+  var t = (idx >= 0 && idx < docTabs.length) ? docTabs[idx] : null;
+  return (t && t.url) ? t.url : '';
+}
+
+/**
+ * The stage's "Open document" escape hatch, through the SAME freshness gate the
+ * tab switcher uses. The pane has no auto-refresh, so a calm read longer than
+ * the signed-URL lifetime would otherwise hand the new tab an expired link and
+ * show a storage error instead of the invoice.
+ *
+ * Fresh pack: return true and let the anchor's own href open natively — no
+ * popup blocker in play, and ctrl/middle-click still work. Stale pack: open the
+ * blank tab synchronously inside the click gesture, re-read the pack, then
+ * point that tab at the refreshed URL.
+ */
+function _msOpenDocFullSize(jobId, idx) {
+  if (!_msSesPackUrlsStale(jobId)) return true;
+  var ctx = _msSesPackCache[jobId];
+  var panelId = (ctx && ctx.panelId) || 'msReportingDetailPanel';
+  var win = null;
+  if (typeof window !== 'undefined' && window.open) {
+    win = window.open('', '_blank');
+    if (win) {
+      try { win.opener = null; } catch (_e) { /* older browsers */ }
+    }
+  }
+  _msActiveDocTab[jobId] = idx;
+  Promise.resolve(showMsReportingDetail(jobId, panelId)).then(function() {
+    var url = _msDocTabUrlAt(jobId, idx);
+    if (!url) {
+      if (win) win.close();
+      if (typeof showToast === 'function') {
+        showToast('That document is not in the refreshed pack.', 'error');
+      }
+      return;
+    }
+    if (win) win.location.replace(url);
+    else if (typeof window !== 'undefined' && window.open) window.open(url, '_blank', 'noopener');
+  }).catch(function() {
+    if (win) win.close();
+    if (typeof showToast === 'function') {
+      showToast('Could not refresh the pack link. Reopen the review and try again.', 'error');
+    }
+  });
+  return false;
+}
+
 /**
  * Switch the active doc tab: update tab button styling + re-render just the PDF
  * stage. Signed pack URLs live 300s — a tab switch past that age re-fetches the
@@ -1620,8 +1707,7 @@ function _msRenderRawTradeReportDoc(t) {
  * in BOTH hosts.
  */
 function _msSwitchDocTab(jobId, idx, panelId) {
-  var ctx = _msSesPackCache[jobId];
-  if (ctx && ctx.pack && ctx.fetchedAt && (Date.now() - ctx.fetchedAt) > 240000) {
+  if (_msSesPackUrlsStale(jobId)) {
     _msActiveDocTab[jobId] = idx;
     showMsReportingDetail(jobId, panelId);
     return;

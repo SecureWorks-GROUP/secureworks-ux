@@ -148,6 +148,22 @@ const sandbox = {
   makesafeSuburbFromAddress,
   module: undefined,
   console,
+  // Tabs opened by the "Open document" escape hatch, so the stale-signed-URL
+  // path can be asserted without a real browser.
+  window: {
+    opened: [],
+    open(url) {
+      const tab = {
+        url,
+        closed: false,
+        opener: {},
+        location: { replace(next) { tab.url = next; } },
+        close() { tab.closed = true; },
+      };
+      sandbox.window.opened.push(tab);
+      return tab;
+    },
+  },
 };
 
 const exposed = [
@@ -176,6 +192,9 @@ const exposed = [
   "_msIsAjsBuilder",
   "_msSesAjsIntendedEmails",
   "_msSesOnFeedbackThreadRendered",
+  "_msSesScopedEl",
+  "_msOpenDocFullSize",
+  "_msDocTabUrlAt",
   // Legacy symbols that MUST be gone:
   "approveMakesafeReportPack",
   "finishMakesafeCloseOut",
@@ -1700,6 +1719,35 @@ check(
     "a failed feedback read opens the fold and says so — never an invisible error",
     fold.open === true && /could not load/.test(note.textContent),
   );
+  // DUAL HOST: the inline panel and the board overlay can both hold this job's
+  // fold. The hook must write to the panel that OWNS the open detail, never the
+  // hidden copy getElementById happens to reach first.
+  {
+    const overlayFold = { open: false, textContent: "" };
+    const overlayNote = { open: false, textContent: "" };
+    const overlayPanel = documentStub.getElementById("msReportingDetailPanelBoard");
+    overlayPanel.querySelector = (sel) => {
+      if (sel === '[id="msFeedbackFold-' + JOB + '"]') return overlayFold;
+      if (sel === '[id="msFeedbackFoldNote-' + JOB + '"]') return overlayNote;
+      return null;
+    };
+    mod._msSesPackCache[JOB].panelId = "msReportingDetailPanelBoard";
+    fold.open = false;
+    note.textContent = "untouched";
+    mod._msSesOnFeedbackThreadRendered(JOB, { count: 0, failed: true });
+    check(
+      "the fold hook writes to the panel that owns the detail, not the hidden copy",
+      overlayFold.open === true && /could not load/.test(overlayNote.textContent) &&
+        fold.open === false && note.textContent === "untouched",
+    );
+    check(
+      "_msSesScopedEl falls back to document scope when the panel lacks the element",
+      mod._msSesScopedEl(JOB, "msNotesPanel-" + JOB) ===
+        documentStub.getElementById("msNotesPanel-" + JOB),
+    );
+    overlayPanel.querySelector = () => null;
+    mod._msSesPackCache[JOB].panelId = "msReportingDetailPanel";
+  }
 }
 
 // ── 19. The short stage always offers a full-size read ──────────────────────
@@ -1729,6 +1777,47 @@ check(
   check(
     "the Open document hatch opens in a new tab safely",
     /target="_blank"/.test(pdfStage) && /rel="noopener"/.test(pdfStage),
+  );
+  // A signed pack URL lives 300s and this pane never auto-refreshes, so the
+  // hatch runs through the SAME freshness gate as a tab switch.
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const liveStage = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "a rendered hatch carries the freshness gate for its own job and tab",
+    liveStage.includes(
+      'onclick="return _msOpenDocFullSize(\'' + JOB + "'," +
+        mod._msActiveDocTab[JOB] + ')"',
+    ),
+  );
+  sandbox.window.opened.length = 0;
+  calls.opsFetch.length = 0;
+  check(
+    "a fresh pack lets the anchor's own href open natively (no re-read, no popup)",
+    mod._msOpenDocFullSize(JOB, 0) === true &&
+      sandbox.window.opened.length === 0 &&
+      !calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
+  );
+  // Age the cached pack past the signed-URL lifetime: the hatch must refresh
+  // before it hands the new tab a link.
+  mod._msSesPackCache[JOB].fetchedAt = Date.now() - 300000;
+  calls.opsFetch.length = 0;
+  check(
+    "a stale pack is handled by the hatch instead of following the dead href",
+    mod._msOpenDocFullSize(JOB, 0) === false &&
+      sandbox.window.opened.length === 1 &&
+      sandbox.window.opened[0].opener === null,
+  );
+  await flush();
+  await flush();
+  const reopened = sandbox.window.opened[0];
+  check(
+    "the stale hatch re-reads the pack and points the tab at the refreshed URL",
+    calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack") &&
+      reopened.closed === false &&
+      !!reopened.url && reopened.url !== "" &&
+      reopened.url === mod._msDocTabUrlAt(JOB, 0),
   );
 }
 

@@ -220,7 +220,11 @@ never "not required"), condensed email previews (one-line To/Cc/Subject +
 short body excerpt + attachment chips only — no "why this" essays). The stage
 is deliberately short for density, so every pdf/image stage carries an "Open
 document" link to a full-size read in a new tab — keep that escape hatch if
-you touch `_msRenderDocStage`. For AJS builders, when the backend still builds
+you touch `_msRenderDocStage`, and keep it behind `_msOpenDocFullSize`: signed
+pack URLs live 300s, this pane never auto-refreshes, and a calm read easily
+outlasts them, so the hatch shares `_msSesPackUrlsStale` with the tab switcher
+and re-reads the pack before it hands a new tab a link (fresh pack: it returns
+true and the anchor's own href opens natively). For AJS builders, when the backend still builds
 three routes, the pane HEADLINES the intended two-email shape (report+invoice,
 then photos) labelled plainly as a preview and never as what SEND IT will send
 today, AND keeps the real routes on the same surface in a collapsed "What SEND
@@ -236,7 +240,13 @@ no preview framing and no fold. Photos, trade notes and feedback are collapsed
 by default — but the Feedback fold is not allowed to hide anything: the
 feedback module calls `_msSesOnFeedbackThreadRendered` on every thread render,
 which opens the fold and badges its summary when the thread is non-empty or
-`list_draft_notes` failed. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
+`list_draft_notes` failed. THIS PANE RENDERS INTO TWO HOSTS (inline Approvals
+panel + board overlay) that can hold the same job's ids at once, so every
+per-job element lookup goes through `_msSesScopedEl`, which resolves inside
+`ctx.panelId` — the panel that owns the open detail — before falling back to
+document scope; the feedback module routes its thread host and composer through
+it too (`_msNotesEl`). A bare `getElementById` here writes to whichever copy is
+first in the DOM, which is the hidden one. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
 APPROVE INVOICE then SEND IT — always visible; armed ONLY by
 `controls.approve_invoice.enabled` / `controls.send_it.enabled`; a disabled
 stamp has no id and no onclick, both action functions re-check the flag, and

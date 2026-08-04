@@ -1656,6 +1656,14 @@ function _msDocTabUrlAt(jobId, idx) {
   return (t && t.url) ? t.url : '';
 }
 
+/** Give up on a pending full-size read: close the waiting tab, say why. */
+function _msAbandonDocFullSize(win, message) {
+  if (win) {
+    try { win.close(); } catch (_e) { /* already gone */ }
+  }
+  if (typeof showToast === 'function') showToast(message, 'error');
+}
+
 /**
  * The stage's "Open document" escape hatch, through the SAME freshness gate the
  * tab switcher uses. The pane has no auto-refresh, so a calm read longer than
@@ -1663,14 +1671,19 @@ function _msDocTabUrlAt(jobId, idx) {
  * show a storage error instead of the invoice.
  *
  * Fresh pack: return true and let the anchor's own href open natively — no
- * popup blocker in play, and ctrl/middle-click still work. Stale pack: open the
- * blank tab synchronously inside the click gesture, re-read the pack, then
- * point that tab at the refreshed URL.
+ * popup blocker in play, and ctrl/middle-click still work (that native path is
+ * the fresh-pack case only; a stale href is what this gate exists to stop).
+ * Stale pack: open the blank tab synchronously inside the click gesture, re-read
+ * the pack, and navigate ONLY once that re-read is PROVEN to have landed newer
+ * URLs — showMsReportingDetail catches its own load failures and returns
+ * normally, leaving the expired cache in place, so "it resolved" is not evidence
+ * of a fresh link.
  */
 function _msOpenDocFullSize(jobId, idx) {
   if (!_msSesPackUrlsStale(jobId)) return true;
   var ctx = _msSesPackCache[jobId];
   var panelId = (ctx && ctx.panelId) || 'msReportingDetailPanel';
+  var expiredFetchedAt = ctx ? ctx.fetchedAt : 0;
   var win = null;
   if (typeof window !== 'undefined' && window.open) {
     win = window.open('', '_blank');
@@ -1680,21 +1693,24 @@ function _msOpenDocFullSize(jobId, idx) {
   }
   _msActiveDocTab[jobId] = idx;
   Promise.resolve(showMsReportingDetail(jobId, panelId)).then(function() {
+    var refreshed = _msSesPackCache[jobId];
+    var landedFreshUrls = !!(refreshed && refreshed.fetchedAt &&
+      refreshed.fetchedAt !== expiredFetchedAt && !_msSesPackUrlsStale(jobId));
+    if (!landedFreshUrls) {
+      _msAbandonDocFullSize(win, 'That link had expired and the pack could not be re-read. Reopen the review and try again.');
+      return;
+    }
     var url = _msDocTabUrlAt(jobId, idx);
     if (!url) {
-      if (win) win.close();
-      if (typeof showToast === 'function') {
-        showToast('That document is not in the refreshed pack.', 'error');
-      }
+      _msAbandonDocFullSize(win, 'That document is not in the refreshed pack.');
       return;
     }
     if (win) win.location.replace(url);
-    else if (typeof window !== 'undefined' && window.open) window.open(url, '_blank', 'noopener');
-  }).catch(function() {
-    if (win) win.close();
-    if (typeof showToast === 'function') {
-      showToast('Could not refresh the pack link. Reopen the review and try again.', 'error');
+    else if (typeof showToast === 'function') {
+      showToast('Your browser blocked the new tab. The pack link is refreshed now, so press Open document again.', 'error');
     }
+  }).catch(function() {
+    _msAbandonDocFullSize(win, 'Could not refresh the pack link. Reopen the review and try again.');
   });
   return false;
 }

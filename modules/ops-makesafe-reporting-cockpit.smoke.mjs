@@ -1819,6 +1819,47 @@ check(
       !!reopened.url && reopened.url !== "" &&
       reopened.url === mod._msDocTabUrlAt(JOB, 0),
   );
+  // showMsReportingDetail CATCHES its own load failures and returns normally,
+  // leaving the expired cache in place — so resolving is not evidence of a
+  // fresh link. The waiting tab must be closed, never pointed at the dead URL.
+  {
+    const deadUrl = mod._msDocTabUrlAt(JOB, 0);
+    const staleAt = Date.now() - 300000;
+    mod._msSesPackCache[JOB].fetchedAt = staleAt;
+    behaviour.fetch.query_ses_review_cockpit = new Error("network blip");
+    sandbox.window.opened.length = 0;
+    calls.toasts.length = 0;
+    const handled = mod._msOpenDocFullSize(JOB, 0);
+    await flush();
+    await flush();
+    const abandoned = sandbox.window.opened[0];
+    check(
+      "a failed re-read closes the waiting tab instead of opening the expired URL",
+      handled === false && !!abandoned && abandoned.closed === true &&
+        abandoned.url !== deadUrl &&
+        mod._msSesPackCache[JOB].fetchedAt === staleAt &&
+        calls.toasts.some((t) => /expired/i.test(t.msg) && t.kind === "error"),
+    );
+    // A blocked pop-up must say so, not silently do nothing, and must never
+    // retry window.open outside the click gesture.
+    behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+    mod._msSesPackCache[JOB].fetchedAt = Date.now() - 300000;
+    const realOpen = sandbox.window.open;
+    sandbox.window.open = function () { return null; };
+    sandbox.window.opened.length = 0;
+    calls.toasts.length = 0;
+    const blocked = mod._msOpenDocFullSize(JOB, 0);
+    await flush();
+    await flush();
+    check(
+      "a blocked pop-up reports itself and refreshes the link for the next press",
+      blocked === false && sandbox.window.opened.length === 0 &&
+        calls.toasts.some((t) => /blocked/i.test(t.msg)) &&
+        mod._msOpenDocFullSize(JOB, 0) === true,
+    );
+    sandbox.window.open = realOpen;
+    behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+  }
 }
 
 // ── 20. No retired action was ever dispatched at runtime ────────────────────

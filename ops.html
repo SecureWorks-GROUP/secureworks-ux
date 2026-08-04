@@ -1730,6 +1730,30 @@
       text-align: center; padding: 26px 12px; color: var(--sw-text-sec); font-size: 11.5px;
       border: 1px dashed var(--sw-border); border-radius: 10px; margin: 4px;
     }
+    /* Archive on demand: never look like history vanished when cards were not fetched */
+    .ms-board .ms-archive-not-loaded {
+      text-align: center; padding: 18px 12px; color: #475569; font-size: 12px;
+      border: 1px dashed #94A3B8; border-radius: 10px; margin: 4px;
+      background: #F8FAFC;
+    }
+    .ms-board .ms-archive-not-loaded .ms-archive-not-loaded-title {
+      font-weight: 700; color: #334155; margin-bottom: 4px;
+    }
+    .ms-board .ms-archive-not-loaded .ms-archive-not-loaded-hint {
+      font-size: 11px; color: #64748B; margin: 0 0 10px; line-height: 1.35;
+    }
+    .ms-board .ms-archive-load-btn {
+      display: inline-block; padding: 6px 12px; border: none; border-radius: 6px;
+      background: #64748B; color: #fff; font-size: 11px; font-weight: 700;
+      cursor: pointer;
+    }
+    .ms-board .ms-archive-load-btn:hover { background: #475569; }
+    .ms-board .ms-archive-load-btn:disabled {
+      opacity: 0.65; cursor: wait;
+    }
+    .ms-board .ms-archive-load-error {
+      color: #B91C1C; font-size: 11px; margin: 0 0 8px; word-break: break-word;
+    }
 
     .next-step-bar {
       background: var(--sw-warm-100, #F8F6F3);
@@ -10816,12 +10840,9 @@ function renderMakesafeKanban(container, columns) {
   // See <makesafe-board-canonical>.
   var uiColumns = columns || {};
 
-  // Sync the Archive button's active appearance on every render
-  var archBtn = document.getElementById('btnMakesafeArchive');
-  if (archBtn) {
-    archBtn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
-    archBtn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
-  }
+  // Sync Archive toolbar (count + active state). Count comes from column_counts
+  // when cards are not loaded — never from an empty cards array.
+  syncMakesafeArchiveButton();
   // Sync the Cancelled button's active appearance on every render
   var cancBtn = document.getElementById('btnMakesafeCancelled');
   if (cancBtn) {
@@ -10836,13 +10857,25 @@ function renderMakesafeKanban(container, columns) {
 
   // Archive search bar — only shown when archive is visible
   if (_makesafeArchiveVisible) {
-    var archiveTotal = (uiColumns.archive || []).length;
+    // Prefer the server census; cards.length is only trustworthy when loaded.
+    var archiveTotal = makesafeArchiveDisplayCount();
+    var archiveTotalLabel = (archiveTotal === '?')
+      ? 'count unknown'
+      : (archiveTotal + ' total record' + (archiveTotal === 1 ? '' : 's'));
+    if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'not_loaded') {
+      archiveTotalLabel += ' · not loaded';
+    } else if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'error') {
+      archiveTotalLabel += ' · load failed';
+    } else if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') {
+      archiveTotalLabel += ' · loading';
+    }
     html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 4px;">'
       + '<input id="msArchiveSearch" type="text" placeholder="Search archive — client, suburb, builder, ref…"'
       + ' value="' + escapeHtml(_makesafeArchiveSearch) + '"'
       + ' oninput="makesafeArchiveSearchInput(this.value)"'
       + ' style="flex:1;max-width:380px;padding:5px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:12px;color:#293C46;background:#fff;outline:none;" />'
-      + '<span style="font-size:11px;color:#64748B;">' + archiveTotal + ' total record' + (archiveTotal === 1 ? '' : 's') + '</span>'
+      + '<span style="font-size:11px;color:#64748B;" data-archive-total="' + escapeHtml(String(archiveTotal)) + '">'
+      + escapeHtml(archiveTotalLabel) + '</span>'
       + '</div>';
   }
 
@@ -10876,10 +10909,24 @@ function renderMakesafeKanban(container, columns) {
 
     var stageColor = STAGE_COLORS[status] || '#8FA4B2';
     var colHeader = STAGE_LABELS[status] || status;
-    // Show filtered/total count when a filter is active and cards are hidden
-    var countBadge = ((_makesafeBoardSearch || (status === 'archive' && _makesafeArchiveSearch)) && jobs.length !== allJobs.length)
-      ? (jobs.length + '/' + allJobs.length)
-      : jobs.length;
+    // Active columns: badge = cards present (unchanged).
+    // Archive: badge = column_counts census when cards were not fetched — NEVER
+    // cards.length while not_loaded (that paints a fake 0).
+    var countBadge;
+    if (status === 'archive') {
+      var archiveTotalBadge = makesafeArchiveDisplayCount();
+      var filterActive = !!(_makesafeBoardSearch || _makesafeArchiveSearch);
+      var archiveLoaded = _makesafeArchiveState && _makesafeArchiveState.loadState === 'loaded';
+      if (archiveLoaded && filterActive && jobs.length !== allJobs.length) {
+        countBadge = jobs.length + '/' + archiveTotalBadge;
+      } else {
+        countBadge = archiveTotalBadge;
+      }
+    } else {
+      countBadge = ((_makesafeBoardSearch || (status === 'archive' && _makesafeArchiveSearch)) && jobs.length !== allJobs.length)
+        ? (jobs.length + '/' + allJobs.length)
+        : jobs.length;
+    }
 
     // Docs Ready holds cards whose document pack has never been drafted. State
     // the pack count under the header so the column stops implying one. This
@@ -10897,9 +10944,10 @@ function renderMakesafeKanban(container, columns) {
     html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">' + colHeader + '<span class="count">' + countBadge + '</span>' + colNote + '</div>';
     html += '<div class="kanban-body">';
 
-    if (jobs.length === 0) {
-      var emptyMsg = (status === 'archive' && _makesafeArchiveSearch) ? 'No matches' : 'No jobs';
-      html += '<div class="kanban-empty">' + emptyMsg + '</div>';
+    if (status === 'archive') {
+      html += renderMakesafeArchiveColumnBody(allJobs, jobs);
+    } else if (jobs.length === 0) {
+      html += '<div class="kanban-empty">No jobs</div>';
     } else {
       jobs.forEach(function(j) {
         html += renderMakesafeCard(j, status);
@@ -11370,17 +11418,230 @@ var _makesafeArchiveVisible = false;   // archive column hidden by default
 var _makesafeArchiveSearch = '';       // live filter applied when archive is open
 var _makesafeBoardSearch = '';         // instant client-side filter for all active board columns
 var _makesafeCancelledVisible = false; // M-F W1-E(c) — Cancelled column hidden (collapsed) by default
+// <makesafe-archive-on-demand>
+// Backend default (column_scope=active) omits Archive cards but still publishes
+// column_counts.archive + archive meta. The UI must show the real total and a
+// load control — never paint "0" / "No jobs" as if history vanished.
+// loadState: 'unknown' | 'not_loaded' | 'loading' | 'loaded' | 'error'
+var _makesafeArchiveState = {
+  loadState: 'unknown',
+  count: null,       // trustworthy total from column_counts / archive.total; null = unknown
+  error: null,
+  included: null,
+  scope: null,
+};
+
+// Derive archive load state from a makesafe_board envelope. Legacy payloads with
+// no column_scope / archive meta always included history, so treat them as loaded.
+function applyMakesafeArchiveStateFromPayload(payload) {
+  payload = payload || {};
+  var counts = payload.column_counts || {};
+  var meta = payload.archive || null;
+  var scope = payload.column_scope != null ? String(payload.column_scope) : null;
+  var archiveCards = ((payload.columns || {}).archive) || [];
+  var count = null;
+  if (typeof counts.archive === 'number' && isFinite(counts.archive)) {
+    count = counts.archive;
+  } else if (meta && typeof meta.total === 'number' && isFinite(meta.total)) {
+    count = meta.total;
+  }
+
+  var included = null;
+  if (meta && typeof meta.included === 'boolean') {
+    included = meta.included;
+  } else if (scope === 'all' || scope === 'archive') {
+    included = true;
+  } else if (scope === 'active') {
+    included = false;
+  } else {
+    // Pre-on-demand backend: Archive always rode in the same response.
+    included = true;
+    if (count == null) count = archiveCards.length;
+  }
+  if (included && count == null) count = archiveCards.length;
+
+  _makesafeArchiveState = {
+    loadState: included ? 'loaded' : 'not_loaded',
+    count: count,
+    error: null,
+    included: included,
+    scope: scope,
+  };
+  return _makesafeArchiveState;
+}
+
+// Badge / toolbar text for Archive. NEVER returns 0 when cards were simply not
+// fetched — that is the fake-green the captain forbade. Unknown → '?'.
+function makesafeArchiveDisplayCount() {
+  var st = _makesafeArchiveState || {};
+  if (st.count != null && isFinite(st.count)) return st.count;
+  if (st.loadState === 'loaded') {
+    var cards = (_pipelineData && _pipelineData.columns && _pipelineData.columns.archive) || [];
+    return cards.length;
+  }
+  // not_loaded / loading / error / unknown without a census: do not invent zero.
+  return '?';
+}
+
+function syncMakesafeArchiveButton() {
+  var btn = document.getElementById('btnMakesafeArchive');
+  if (!btn) return;
+  var count = makesafeArchiveDisplayCount();
+  var label = 'Archive';
+  if (count !== '?' || (_makesafeArchiveState && _makesafeArchiveState.loadState !== 'unknown')) {
+    label = 'Archive (' + count + ')';
+  }
+  if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') {
+    label = 'Archive…';
+  }
+  btn.textContent = label;
+  btn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
+  btn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
+  btn.title = (_makesafeArchiveState && _makesafeArchiveState.loadState === 'not_loaded')
+    ? 'Archive cards are not loaded yet. Open the column and load them when needed.'
+    : 'Show or hide the Archive column';
+}
+
+// Empty / pending body for the Archive column when cards are not (yet) present.
+function renderMakesafeArchiveColumnBody(allJobs, jobs) {
+  var st = _makesafeArchiveState || {};
+  var countLabel = makesafeArchiveDisplayCount();
+  var countText = String(countLabel);
+
+  if (st.loadState === 'loading') {
+    return '<div class="ms-archive-not-loaded" data-archive-state="loading" role="status">'
+      + '<div class="ms-archive-not-loaded-title">Archive (' + escapeHtml(countText) + ') — loading…</div>'
+      + '<p class="ms-archive-not-loaded-hint">Fetching archived cards. Active columns stay as they are.</p>'
+      + '<button type="button" class="ms-archive-load-btn" disabled>Loading…</button>'
+      + '</div>';
+  }
+
+  if (st.loadState === 'error') {
+    var err = st.error ? String(st.error) : 'Request failed';
+    return '<div class="ms-archive-not-loaded" data-archive-state="error" role="alert">'
+      + '<div class="ms-archive-not-loaded-title">Archive (' + escapeHtml(countText) + ') — failed to load</div>'
+      + '<p class="ms-archive-load-error">' + escapeHtml(err) + '</p>'
+      + '<p class="ms-archive-not-loaded-hint">Those cards still exist. Retry when ready — this is not zero.</p>'
+      + '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Retry load archive</button>'
+      + '</div>';
+  }
+
+  if (st.loadState === 'not_loaded' || st.loadState === 'unknown') {
+    var title = (countLabel === '?' || countLabel === null)
+      ? 'Archive — not loaded (count unknown)'
+      : ('Archive (' + countText + ') — not loaded');
+    return '<div class="ms-archive-not-loaded" data-archive-state="not_loaded" role="status">'
+      + '<div class="ms-archive-not-loaded-title">' + escapeHtml(title) + '</div>'
+      + '<p class="ms-archive-not-loaded-hint">Archived cards are excluded from the default board for speed. They have not disappeared — load them when you need history.</p>'
+      + '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Load archive</button>'
+      + '</div>';
+  }
+
+  // loaded
+  if (!jobs || jobs.length === 0) {
+    var emptyMsg = _makesafeArchiveSearch ? 'No matches' : 'No jobs';
+    return '<div class="kanban-empty">' + emptyMsg + '</div>';
+  }
+  return jobs.map(function(j) { return renderMakesafeCard(j, 'archive'); }).join('');
+}
+
+// On-demand fetch: include_archive=1 returns the full board including Archive.
+// Replaces the board from that envelope so column_scope / census stay honest.
+async function loadMakesafeArchive() {
+  if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') return;
+  // Keep the known census while loading so the badge never flashes 0.
+  var keptCount = (_makesafeArchiveState && _makesafeArchiveState.count != null)
+    ? _makesafeArchiveState.count
+    : null;
+  _makesafeArchiveState = Object.assign({}, _makesafeArchiveState || {}, {
+    loadState: 'loading',
+    error: null,
+    count: keptCount,
+  });
+  _makesafeArchiveVisible = true;
+  syncMakesafeArchiveButton();
+  if (_pipelineData) renderJobs(_pipelineData);
+
+  try {
+    var payload = await opsFetch('makesafe_board', {
+      projection: 'ops',
+      include_archive: '1',
+    });
+    if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
+      throw new Error('Unsupported make-safe board contract: ' +
+        ((payload && payload.contract_version) || 'none'));
+    }
+    // Rebuild the same way as the default board load so card-shape / enrichment
+    // rules stay identical — only the archive column membership changes.
+    var canonicalRows = [];
+    Object.keys(payload.columns || {}).forEach(function(stage) {
+      (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
+    });
+    var selfSufficient = makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows);
+    var enrichById = {};
+    if (!selfSufficient) {
+      var enrich = await opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
+        console.warn('Make-safe board: close-out enrichment unavailable on archive load:', e && e.message);
+        return null;
+      });
+      Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
+        (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
+      });
+      var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
+      _makesafeBoardEnrichState = !enrich
+        ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
+        : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
+    } else {
+      _makesafeBoardEnrichState = {
+        status: 'covered',
+        missing: 0,
+        total: canonicalRows.length,
+        source: 'card_shape',
+        join: 'skipped',
+      };
+    }
+    var columns = buildMakesafeBoardColumns(payload, enrichById);
+    applyMakesafeArchiveStateFromPayload(payload);
+    // If the server still reports not included (unexpected with include_archive=1),
+    // treat successful card presence as loaded so we do not loop the empty shell.
+    if (_makesafeArchiveState.loadState !== 'loaded' && (columns.archive || []).length) {
+      _makesafeArchiveState.loadState = 'loaded';
+      _makesafeArchiveState.included = true;
+      if (_makesafeArchiveState.count == null) {
+        _makesafeArchiveState.count = columns.archive.length;
+      }
+    }
+    // Only commit board state after a successful rebuild.
+    _makesafeBoardPayload = payload;
+    clearMakesafeStageReadFailures();
+    _makesafeCanonicalStageFetch = Promise.resolve();
+    _pipelineData = { columns: columns, _canonical: payload };
+    renderJobs(_pipelineData);
+    syncMakesafeArchiveButton();
+  } catch (e) {
+    console.warn('Make-safe board: archive load failed:', e && e.message);
+    _makesafeArchiveState = Object.assign({}, _makesafeArchiveState || {}, {
+      loadState: 'error',
+      error: (e && e.message) || 'Failed to load archive',
+      included: false,
+      // Preserve census so the badge does not fall to zero on failure.
+      count: keptCount != null ? keptCount : (_makesafeArchiveState && _makesafeArchiveState.count),
+    });
+    syncMakesafeArchiveButton();
+    if (_pipelineData) renderJobs(_pipelineData);
+    showToast('Failed to load archive', 'warning', [
+      { label: 'Retry', primary: true, onclick: 'loadMakesafeArchive()' }
+    ]);
+  }
+}
+// </makesafe-archive-on-demand>
 
 function toggleMakesafeArchive() {
   _makesafeArchiveVisible = !_makesafeArchiveVisible;
   if (!_makesafeArchiveVisible) _makesafeArchiveSearch = '';
-  // Update button appearance to reflect active state
-  var btn = document.getElementById('btnMakesafeArchive');
-  if (btn) {
-    btn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
-    btn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
-  }
-  // Re-render with current data (no new fetch needed)
+  syncMakesafeArchiveButton();
+  // Re-render with current data (no new fetch needed to show the shell).
+  // Cards load only when the Captain clicks Load archive.
   if (_pipelineData) renderJobs(_pipelineData);
 }
 
@@ -12143,6 +12404,9 @@ async function fetchMakesafeBoardData() {
   // with it so opening a card straight off a fresh board does not re-GET the same
   // feed. A transition still clears this (refreshMakesafeCanonicalStages).
   var columns = buildMakesafeBoardColumns(payload, enrichById);
+  // Archive on demand: record census + load state before paint so the Archive
+  // column never shows a fake zero when column_scope=active.
+  applyMakesafeArchiveStateFromPayload(payload);
   clearMakesafeStageReadFailures();
   _makesafeCanonicalStageFetch = Promise.resolve();
   return { columns: columns, _canonical: payload };

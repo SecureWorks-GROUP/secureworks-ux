@@ -106,6 +106,13 @@ evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
 The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
 directly and remain overlay-blind — migrating them is follow-up work.
 
+Archive is on demand (backend `column_scope=active` default): the default feed
+omits Archive cards but publishes `column_counts.archive` + `archive` meta. The
+column badge must use that census, never `cards.length` while not loaded — a
+fake zero looks like data loss. Load control: `include_archive=1` via
+`loadMakesafeArchive()`. Search `// <makesafe-archive-on-demand>`; guard
+`tests/e2e/ops-makesafe-archive-on-demand.spec.js`.
+
 The JOB DETAIL obeys the same rule: it never derives a make-safe's stage from
 substatus. `resolveMakesafeDetailStage` takes `canonical_stage` off the
 `job_detail` payload if that producer ever carries one (it does not today), else

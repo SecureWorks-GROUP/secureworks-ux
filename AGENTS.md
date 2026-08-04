@@ -198,14 +198,33 @@ The Docs Ready "review & send" pane (`showMsReportingDetail` /
 composer in `modules/ops-makesafe-feedback-notes.js`) is built to the captain's
 blueprint at secureworks-wiki
 `coding/work/campaigns/makesafe-system/MAKESAFE-SYSTEM-BLUEPRINT.html`
-(acceptance criteria RV-1..RV-11). Its own design system lives in `ops.html`
-under `/* MAKE-SAFE DOCS READY REVIEW PANE */` (class prefix `.msr-`): pack
-completeness names missing documents by name rather than showing an empty
-frame (RV-1), the outgoing-email section renders the full body verbatim plus a
-per-recipient/per-attachment "why this, for this job" block sourced only from
-data the pack actually carries — never an invented template sentence (RV-4/5).
-A HOLD is rendered amber (a machine stop wanting a person), never red (reserved
-for an actually-failed read). Guard: the module's own
+(acceptance criteria RV-1..RV-11), with its visual/interaction model ported
+from the approved references in `docs/evidence/cockpit-blueprint-targets/`
+(the job-view mockup's State A/B honesty pair + the lavish review sample).
+Its design system lives in `ops.html` under
+`/* MAKE-SAFE DOCS READY REVIEW PANE */` (class prefix `.msr-`); CALM IS THE
+INSTRUCTION — one type family, tight scale, one accent at a time. The reading
+order is the captain's decision order and is a design contract: identity, ONE
+next action (derived from the backend control flags alone), the single amber
+hold block when held (blockers numbered, deduped case-insensitively — the
+backend can emit one blocker per route — each with the verbatim fact plus a
+plain-English "what clears it" line), the two stamps AT THE TOP (always
+visible; armed ONLY by `controls.approve_invoice.enabled` /
+`controls.send_it.enabled`; a disabled stamp has no id and no onclick, both
+action functions re-check the flag, and an enabled stamp's note renders the
+backend's own `plan` text verbatim), then document tabs over ONE fit-to-page
+stage — THE INVOICE IS A DOCUMENT here (the bound Xero PDF, else the proposal
+rendered as an invoice page; never a separate section) and MULTIPLE WORK
+ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
+one and hide the rest; discriminated by `extractPoRef` when possible) — then
+missing documents named in one line (RV-1; SWMS stays "not in this pack",
+never "not required"), the outgoing emails as full-width readable cards with
+the body verbatim at reading size plus the recorded "why this, for this job"
+facts (RV-4/5), the read-only photo state (the set is fixed by the release
+revision; a toggle that cannot change anything is a fake control — Captain
+ruling), trade notes, feedback LAST. The mockup's single combined "Approve &
+send pack" button is the RETIRED 410 path and is deliberately not ported
+(settled Captain ruling). Guard: the module's own
 `ops-makesafe-reporting-cockpit.smoke.mjs` (run with
 `node --experimental-vm-modules modules/ops-makesafe-reporting-cockpit.smoke.mjs`)
 encodes literal UI copy as behavioral contracts — expect to update its string

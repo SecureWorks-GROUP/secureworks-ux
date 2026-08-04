@@ -1,0 +1,55 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MakeSafe cockpit v3 - preview</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,Helvetica,Arial,sans-serif;color:#293C46;background:#EEF1F3;font-size:15px;line-height:1.55}
+.wrap{max-width:1280px;margin:0 auto;padding:26px 22px 70px}
+h1{font-size:22px;border-left:6px solid #F15A29;padding-left:14px}
+.sub{color:#4C6A7C;font-size:13px;margin:6px 0 16px 20px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.controls span{font-size:13px;color:#4C6A7C;margin-right:4px}
+button{border:1px solid #D2DAE0;background:#fff;color:#293C46;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit}
+button.active{background:#293C46;color:#fff;border-color:#293C46}
+.view{display:none}
+.view.show{display:block}
+.single img{width:100%;display:block;background:#fff;border:1px solid #D2DAE0;border-radius:10px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pair figure{margin:0}
+.pair figcaption{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#fff;padding:7px 12px;border-radius:8px 8px 0 0}
+.pair .b figcaption{background:#8C2F21}
+.pair .a figcaption{background:#1F9D55}
+.pair img{width:100%;display:block;background:#fff;border:1px solid #D2DAE0;border-top:none;border-radius:0 0 10px 10px}
+.note{background:#293C46;color:#fff;border-radius:10px;padding:14px 18px;font-size:13.5px;line-height:1.6;margin-bottom:16px}
+.note b{color:#F15A29}
+@media(max-width:900px){.pair{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+<h1>MakeSafe review &amp; send cockpit - v3</h1>
+<p class="sub">Bertram AJBR-70271 proof card &middot; rendered offline by the shipped code &middot; no client personal data (suburb, job ref, builder ref and builder routing addresses only)</p>
+
+<div class="note">
+Reading order is your decision order: <b>identity &rarr; one next action &rarr; the stamps at the top</b> &rarr; document tabs (the <b>invoice is a document</b> now - a tab like Report and Work Order, shown as an invoice page until the Xero PDF exists) over one fit-to-page stage &rarr; <b>full-width readable emails</b> &rarr; calm photo grid &rarr; trade notes &rarr; feedback last. Everything still binds only to the real backend flags: a locked stamp is visible with its reason, holds render verbatim and deduped with what-clears-it lines, and nothing here can send or approve anything the backend has not enabled.
+</div>
+
+<div class="controls">
+  <span>View:</span>
+  <button id="bA" class="active" onclick="show('A')">Ready to act</button>
+  <button id="bB" onclick="show('B')">On hold</button>
+  <button id="bC" onclick="show('C')">Before / after &mdash; ready</button>
+  <button id="bD" onclick="show('D')">Before / after &mdash; hold</button>
+</div>
+
+<div id="A" class="view show single"><img src="after-send-ready.png" alt="v3, ready to act"></div>
+<div id="B" class="view single"><img src="after-hold.png" alt="v3, on hold"></div>
+<div id="C" class="view pair">
+  <figure class="b"><figcaption>Before</figcaption><img src="before-send-ready.png" alt="before, ready"></figure>
+  <figure class="a"><figcaption>After (v3)</figcaption><img src="after-send-ready.png" alt="after, ready"></figure>
+</div>
+<div id="D" class="view pair">
+  <figure class="b"><figcaption>Before</figcaption><img src="before-hold.png" alt="before, hold"></figure>
+  <figure class="a"><figcaption>After (v3)</figcaption><img src="after-hold.png" alt="after, hold"></figure>
+</div>
+
+<script>
+function show(k){['A','B','C','D'].forEach(function(x){document.getElementById(x).classList.toggle('show',x===k);document.getElementById('b'+x).classList.toggle('active',x===k);});}
+</script>
+</div></body></html>

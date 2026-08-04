@@ -1,0 +1,348 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sample make-safe review (two jobs)</title><style>
+:root{
+  --paper:#F7F5F2;--card:#FFFFFF;--ink:#1E2A31;--steel:#4C6A7C;--steel-2:#6E8798;
+  --hair:#D9D3CA;--hair-2:#E7E2DA;
+  --safety:#F15A29;--safety-ink:#B23C15;--blueprint:#0E7490;--hazard:#E0A400;--hazard-ink:#5A4500;--proof:#2F7D4F;
+  --font-display:"Oswald","Archivo Narrow","Avenir Next Condensed",-apple-system,sans-serif;
+  --font-body:-apple-system,BlinkMacSystemFont,"IBM Plex Sans","Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,"IBM Plex Mono","SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.55 var(--font-body);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+h2{margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:focus-visible{outline:2.5px solid var(--blueprint);outline-offset:2px}
+
+.manifest{position:sticky;top:0;z-index:40;background:var(--ink);color:#fff;border-bottom:3px solid var(--safety)}
+.mf-in{max-width:1080px;margin:0 auto;padding:11px 22px;display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap}
+.mf-t{font-family:var(--font-display);font-weight:700;letter-spacing:.06em;font-size:16px;text-transform:uppercase}
+.mf-c{font-size:11.5px;font-weight:700;letter-spacing:.08em;color:#c7d2d9;text-transform:uppercase}
+.mf-c.st-decide{color:var(--hazard)}.mf-c.st-build{color:#7fd0e6}.mf-c.st-ready{color:#ffb086}
+.mf-tot{margin-left:auto;font-size:15px;font-weight:700;color:#fff}
+.mf-x{background:transparent;border:1px solid rgba(255,255,255,.28);color:#e9eef1;padding:4px 11px;border-radius:6px;font-size:11.5px;font-weight:700;letter-spacing:.05em;cursor:pointer;text-transform:uppercase}
+.mf-x:hover{background:rgba(255,255,255,.14)}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 22px 140px}
+section.docket{position:relative;background:var(--card);border:1px solid var(--hair);border-left:6px solid var(--rail);
+border-radius:3px;margin:0 0 20px;box-shadow:0 1px 0 var(--hair-2);scroll-margin-top:var(--hh,46px)}
+.dk-head{position:sticky;top:var(--hh,46px);z-index:20;background:var(--card);border-bottom:1px solid var(--hair);
+display:flex;justify-content:space-between;align-items:flex-start;gap:10px 18px;flex-wrap:wrap;padding:13px 20px}
+.dk-id{flex:1 1 300px;min-width:0}
+.dk-ref{font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--steel);letter-spacing:.04em}
+.dk-addr{font-family:var(--font-display);font-weight:600;font-size:21px;line-height:1.05;text-transform:uppercase;letter-spacing:.01em;color:var(--ink);margin-top:2px}
+.dk-meta{color:var(--steel);font-size:12.5px;line-height:1.45;margin-top:6px;overflow-wrap:anywhere;word-break:break-word}
+.dk-status{text-align:right;flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.dk-state{font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:.09em;text-transform:uppercase;color:var(--rail)}
+.st-decide .dk-state{color:var(--hazard-ink)}
+.dk-money{font-family:var(--font-mono);font-weight:700;font-size:18px;color:var(--ink)}
+.dk-sec{padding:14px 20px 4px}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:2px 0 11px}
+.eb-t{font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--steel)}
+.eb-n{font-family:var(--font-mono);font-size:10.5px;font-weight:700;color:var(--steel-2)}
+.eb-rule{flex:1;height:0;border-top:1px solid var(--hair)}
+.ledger{display:flex;gap:26px;flex-wrap:wrap;padding:12px 20px 6px}
+.led{flex:1 1 280px}
+.led-h{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;line-height:1.45;margin-bottom:7px;color:var(--steel)}
+.led-need .led-h{color:var(--safety-ink)}
+.led ul{margin:0;padding:0;list-style:none}
+.led li{font-size:13px;line-height:1.62;padding:2px 0 2px 18px;position:relative;overflow-wrap:anywhere}
+.led-done li::before{content:"\2713";position:absolute;left:0;color:var(--proof);font-weight:800}
+.led-need li::before{content:"\2192";position:absolute;left:0;color:var(--safety);font-weight:800}
+.led li.none{color:var(--steel-2);font-style:italic}
+.led li.none::before{content:""}
+.live{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-start;font-size:12px;line-height:1.55;color:var(--steel);
+background:#fbfaf8;border:1px solid var(--hair-2);border-radius:3px;padding:6px 10px;margin:0 0 11px}
+.live>span{display:inline-block;position:relative;line-height:1.55;overflow-wrap:anywhere}
+.lv-k{font-size:9.5px;font-weight:800;letter-spacing:.08em;color:var(--steel-2)}
+.lv-v{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);margin-right:6px;overflow-wrap:anywhere;word-break:break-word}
+.lv-asof{margin-left:auto;font-style:italic;color:var(--steel-2)}
+.live.tradeline{background:transparent;border:none;padding:2px 2px 8px;margin:-6px 0 8px}
+.tr-none{font-style:italic;color:var(--steel-2)}
+.integrity{margin:12px 20px 2px;border:1.5px solid var(--hazard);background:#fdf6e3;border-radius:3px;padding:10px 13px}
+.ig-h{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--hazard-ink);margin-bottom:5px}
+.integrity ul{margin:0;padding-left:18px}.integrity li{font-size:13px;color:#5a4500;margin:3px 0}
+.cardtype-hold{margin:12px 20px 2px;border:1.5px solid var(--hazard);background:#fffdf5;border-radius:3px;overflow:hidden}
+.cardtype-hold .hz-top{height:9px;background:repeating-linear-gradient(45deg,var(--hazard) 0 12px,var(--ink) 12px 24px)}
+.cth-h{font-family:var(--font-display);font-weight:700;font-size:13.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--hazard-ink);padding:9px 14px 2px}
+.cth-list{margin:0;padding:2px 14px 12px 14px;list-style:none}
+.cth-list li{margin:8px 0;padding-left:0}
+.cth-line{font-size:13.5px;color:var(--ink)}
+.cth-tag{display:inline-block;font-family:var(--font-mono);font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--ink);background:var(--hazard);border-radius:2px;padding:1px 6px;margin-right:7px;vertical-align:1px}
+.cth-line code{font-family:var(--font-mono);font-size:12px;background:#f3ede0;border:1px solid var(--hair);border-radius:2px;padding:0 4px}
+.cth-detail{font-size:12.5px;color:#5a4500;margin-top:3px}
+.cth-fix{font-size:12.5px;color:var(--ink);margin-top:4px}
+.cth-fix-k{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:10px;color:var(--hazard-ink);margin-right:6px}
+
+.tiles{display:flex;gap:11px;flex-wrap:wrap}
+details.doc{margin:0;flex:0 1 200px;min-width:150px;max-width:100%;border:1px solid var(--hair);border-radius:3px;overflow:hidden;background:#fff;transition:box-shadow .14s,transform .12s}
+details.doc>summary{display:block;list-style:none;cursor:zoom-in}
+details.doc>summary::-webkit-details-marker{display:none}
+details.doc:not([open]):hover{box-shadow:0 4px 14px rgba(30,42,49,.14);transform:translateY(-1px)}
+.doc-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;padding:7px 10px;background:#f6f4f1;border-bottom:1px solid var(--hair)}
+.doc-role{font-size:11.5px;font-weight:800;color:var(--ink);letter-spacing:.02em}
+.doc-tags{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--steel);background:#eceae6;border:1px solid var(--hair);border-radius:2px;padding:1px 6px;white-space:nowrap}
+.doc-x{display:none;background:var(--ink);color:#fff;border:none;padding:7px 13px;border-radius:4px;font-size:12.5px;font-weight:700;cursor:pointer}
+/* RESERVE image space so base64 decode causes ZERO reflow: a fixed 140px collapsed
+   height (non-photo tiles) and an aspect-ratio square (photos) hold their box before AND
+   after decode. Without this the tiles grow 0->140px as ~100 images decode, and the
+   lavish in-iframe audit (2s max-wait, no image-decode await) samples mid-reflow -> the
+   oscillating phantom overlaps. Stable layout = the audit measures the settled board. */
+.doc-pages{position:relative;background:#eceae6;height:140px;overflow:hidden}
+.doc-pages.sq{height:auto;aspect-ratio:1/1;max-height:none}
+.doc-pages img{width:100%;display:block}
+.doc-pages.sq img{height:100%;object-fit:cover}
+.doc-pages::after{content:"";position:absolute;left:0;right:0;bottom:0;height:38px;background:linear-gradient(rgba(236,234,230,0),rgba(236,234,230,.95));pointer-events:none}
+.doc-pages.sq::after{display:none}
+.doc-rest{max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden}
+.doc-rest img{width:100%;max-width:100%;display:block}
+.doc-pg{position:relative}
+details.doc[open] .doc-rest{width:100%;max-width:100%;min-width:0;overflow:hidden}
+details.doc[open] .doc-pg{margin:0 auto 6px;max-width:100%;min-width:0;overflow:hidden}
+details.doc[open] .doc-pg:hover{outline:2px solid var(--steel);outline-offset:-2px}
+/* Everything inside an OPEN viewer must be positioned (non-static): the lavish layout
+   audit excludes modal overlays from its text-overlap hit-test only when the element it
+   hits is itself positioned - a static img/caption inside the fixed overlay makes text
+   BEHIND the modal report as "overlapping" (false positive, demo board 03 Jul). */
+details.doc[open] summary,details.doc[open] .doc-rest,details.doc[open] img,
+details.doc[open] figcaption,details.doc[open] .doc-hd span{position:relative}
+.portal-live{margin-left:auto;margin-right:6px;font:600 10px/1 var(--mono,monospace);letter-spacing:.04em;
+  color:var(--blueprint);text-decoration:none;border:1px solid var(--blueprint);border-radius:3px;
+  padding:3px 7px;white-space:nowrap}
+.portal-live:hover{background:var(--blueprint);color:#fff}
+details.doc.portal .tag{border-radius:3px;font-weight:700}
+details.doc.t-done .tag{background:var(--proof);color:#fff;border-color:var(--proof)}
+details.doc.t-notdone .tag{background:var(--hazard);color:var(--ink);border-color:var(--hazard)}
+details.doc.t-notdone{border-color:var(--hazard)}
+/* UNREADABLE: same fail-closed prominence as MISSING (t-notdone) but a distinct safety-red
+   accent so a corrupt file reads differently from an absent one. */
+details.doc.t-unreadable{border-color:var(--safety)}
+details.doc.t-unreadable .tag{background:var(--safety);color:#fff;border-color:var(--safety)}
+.doc .noimg{padding:40px 10px;text-align:center;color:var(--steel-2);font-size:12px}
+.doc figcaption{display:block;padding:6px 10px;font:10px var(--font-mono);color:var(--steel);border-top:1px solid var(--hair);word-break:break-all;overflow-wrap:anywhere}
+details.doc:not([open]) .doc-rest{display:none!important;width:0!important;max-width:0!important;height:0!important;overflow:hidden!important}
+details.doc[open]{position:relative;flex:1 0 100%;width:100%;max-width:100%;max-height:none;overflow:hidden;z-index:1;border-radius:6px;box-shadow:0 10px 34px rgba(20,30,36,.18)}
+details.doc[open]>summary{cursor:zoom-out}
+details.doc[open] .doc-hd{position:sticky;top:0;z-index:2}
+details.doc[open] .doc-x{display:inline-block}
+details.doc[open] .doc-pages,details.doc[open] .doc-pages.sq{height:auto;max-height:none;overflow:visible;aspect-ratio:auto}
+details.doc[open] .doc-pages img{height:auto}
+details.doc[open] .doc-pages::after{display:none}
+details.doc[open] .doc-pages img{width:auto;max-width:100%;height:auto;object-fit:contain;margin:0 auto}
+details.doc[open]::before{display:none}
+body.doc-open{overflow:auto}
+#docback{position:fixed;inset:0;background:transparent;z-index:999;display:none}
+body.doc-open #docback{display:none}
+#doc-fab{display:none;position:fixed;right:22px;bottom:22px;z-index:1002;align-items:center;gap:8px;background:var(--safety);color:#fff;border:2px solid #fff;padding:12px 20px;border-radius:4px;font-family:var(--font-display);font-weight:700;letter-spacing:.05em;font-size:14px;text-transform:uppercase;cursor:pointer;box-shadow:0 10px 34px rgba(20,30,36,.5)}
+body.doc-open #doc-fab{display:none}
+/* fluid grid: min(132px,100%) so the column floor never exceeds the container just under a
+   breakpoint; figures are flex columns whose children carry min-width:0/max-width:100%, else
+   at fractional column widths the nested photo-doc viewer exceeds the tile by ~3px and trips
+   the overflow:hidden clip (flagged by the lavish layout audit) */
+.ph-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(132px,100%),1fr));gap:11px}
+figure.ph{margin:0;min-width:0;border:1px solid var(--hair);border-radius:3px;overflow:hidden;background:#fff;display:flex;flex-direction:column}
+figure.ph>*{min-width:0;max-width:100%}
+.ph-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 7px;border-bottom:1px solid var(--hair);background:#f6f4f1}
+.ph-name{font:9.5px var(--font-mono);color:var(--steel-2);margin-left:auto;word-break:break-all;overflow-wrap:anywhere}
+.ph-tog{display:inline-flex;cursor:pointer;border:1.5px solid var(--proof);border-radius:3px;overflow:hidden;font-size:9.5px;font-weight:800;letter-spacing:.04em;flex:none}
+.ph-tog input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.ph-in,.ph-out{padding:2px 7px}
+.ph-in{background:var(--proof);color:#fff}.ph-out{color:var(--steel-2)}
+/* sibling combinator (not :has) so every engine hides the inactive label - only ONE shows */
+.ph-tog input:checked ~ .ph-out{display:none}
+.ph-tog input:not(:checked) ~ .ph-in{display:none}
+.photo-doc{flex:none;border:none;border-radius:0;min-width:0}
+details.bench{margin:12px 0 4px;border:1px dashed var(--hair);border-radius:3px;background:#fbfaf8;overflow:hidden}
+details.bench>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+details.bench>summary::-webkit-details-marker{display:none}
+.bench-lbl{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--steel)}
+.bench-hint{font-size:11.5px;color:var(--steel-2)}
+details.bench .ph-strip{padding:2px 12px 12px}
+/* Photo-completeness (Stage D): quiet green confirmation when the docket carries every photo,
+   loud-ish amber note when the spec never recorded the live total. The short case is the
+   loud t-notdone tile above, not a note. */
+.ph-allnote{font-size:11.5px;font-weight:700;color:var(--proof);margin:2px 0 8px;display:flex;align-items:center;gap:6px}
+.ph-allnote::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--proof);flex:none}
+.ph-unverified{font-size:11.5px;font-weight:700;color:var(--hazard-ink);background:#FBF4DD;border:1px solid var(--hazard);border-radius:3px;padding:6px 10px;margin:2px 0 8px}
+
+.env{margin:0 0 10px;width:100%;max-width:100%;min-width:0;overflow:hidden}
+.env-row{display:flex;gap:10px;padding:2px 0;align-items:flex-start;min-width:0}
+.env-row>span{display:block;position:relative;line-height:1.45}
+.env-k{flex:0 0 56px;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--steel)}
+.env-v{flex:1 1 auto;min-width:0;font-family:var(--font-mono);font-size:12.5px;word-break:break-word;overflow-wrap:anywhere}
+.lines-wrap{margin:0 0 12px}
+.lines-lbl{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--blueprint);margin-bottom:6px}
+table.lines{width:100%;border-collapse:collapse;font-size:12.5px;border:1px solid var(--hair)}
+table.lines th{background:#eef4f6;text-align:left;padding:6px 9px;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--steel);border-bottom:1px solid var(--hair)}
+table.lines td{padding:6px 9px;border-bottom:1px solid var(--hair-2);vertical-align:top}
+.ln-d{color:var(--ink)}
+.ln-n{text-align:right;white-space:nowrap;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+tr.ln-sub td{color:var(--steel);border-bottom:none;padding:3px 9px}
+tr.ln-tot td{font-weight:800;border-top:2px solid var(--hair);font-size:13.5px}
+.body-lbl,.att-lbl{font-size:10.5px;font-weight:800;letter-spacing:.08em;line-height:1.45;text-transform:uppercase;color:var(--steel);margin:12px 0 7px;overflow-wrap:anywhere}
+.mailbody{background:#fbfaf8;border:1px solid var(--hair);border-radius:3px;padding:12px 14px;font:13px/1.72 var(--font-mono);white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;color:#31424c;width:100%;max-width:100%;min-width:0;overflow:hidden}
+/* D31: the email pack collapses to a one-line summary; expands to the verbatim pack */
+details.pack{display:block;width:100%;max-width:100%;min-width:0;border:1px solid var(--hair);border-radius:3px;background:#fbfaf8;overflow:hidden}
+details.pack>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:9px 13px;width:100%;max-width:100%;min-width:0;overflow:hidden}
+details.pack>summary::-webkit-details-marker{display:none}
+details.pack>summary:hover{background:#f4f1ec}
+.pk-lbl{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--steel);flex:none}
+.pk-sum{font-size:12.5px;color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.pk-to{font-family:var(--font-mono);font-size:12px}
+.pk-chev{margin-left:auto;flex:none;width:11px;height:11px;position:relative}
+.pk-chev::before{content:"";position:absolute;top:1px;left:2px;width:6px;height:6px;border-right:2px solid var(--steel);border-bottom:2px solid var(--steel);transform:rotate(45deg);transition:transform .15s}
+details.pack[open]>summary .pk-chev::before{transform:rotate(-135deg)}
+.pack-body{display:block;width:100%;padding:2px 13px 12px;border-top:1px solid var(--hair);min-width:0;max-width:100%;overflow:hidden}
+.pack-body *{max-width:100%;min-width:0}
+.att-list{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px 10px;width:100%;max-width:100%;min-width:0;overflow:hidden}
+.att-list li{font-size:12.5px;color:var(--ink);background:#f6f4f1;border:1px solid var(--hair);border-radius:3px;padding:4px 10px;min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+.att-list li.att-miss{color:var(--safety-ink);background:#fdf0ec;border-color:var(--safety);font-weight:700}
+
+.controls{padding:16px 20px 22px}
+.control{margin-top:6px}
+.control.approve{text-align:center}
+.ctl-plan{font-size:12px;color:var(--steel);margin-bottom:12px;text-align:center}
+/* the stamp: an intrinsic-width rubber-stamp object (centered, not a full-bleed banner),
+   heavy 3px border + inset double-rule, letterspaced condensed caps, ink-on-press */
+.stamp{position:relative;display:inline-block;max-width:100%;cursor:pointer;border:3px solid var(--safety);border-radius:5px;
+background:#fff;padding:17px 48px;text-align:center;transition:transform .08s,box-shadow .08s;
+box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 4px rgba(241,90,41,.28),0 4px 0 rgba(178,60,21,.28)}
+.stamp.stamp-build{border-color:var(--blueprint);box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 4px rgba(14,116,144,.28),0 4px 0 rgba(14,116,144,.28)}
+.stamp:hover{box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 4px rgba(241,90,41,.4),0 6px 0 rgba(178,60,21,.34)}
+.stamp.stamp-build:hover{box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 4px rgba(14,116,144,.4),0 6px 0 rgba(14,116,144,.34)}
+.stamp:active{transform:translateY(2px);box-shadow:inset 0 0 0 2px #fff,inset 0 0 0 4px rgba(241,90,41,.28),0 1px 0 rgba(178,60,21,.28)}
+.stamp input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.stamp-word{font-family:var(--font-display);font-weight:700;font-size:22px;letter-spacing:.17em;text-transform:uppercase;color:var(--safety)}
+.stamp-build .stamp-word{color:var(--blueprint)}
+.stamp-inked{display:none;position:absolute;inset:0;align-items:center;justify-content:center;
+font-family:var(--font-display);font-weight:700;font-size:22px;letter-spacing:.22em;text-transform:uppercase;
+color:#fff;background:var(--safety);border-radius:2px}
+.stamp-build .stamp-inked{background:var(--blueprint)}
+.stamp input:checked ~ .stamp-word{visibility:hidden}
+.stamp input:checked ~ .stamp-inked{display:flex}
+.stamp-note{display:block;width:100%;max-width:560px;margin:12px auto 0;text-align:left}
+.stamp-note,.dec-input{border:1px solid var(--hair);border-radius:3px;padding:9px 11px;font:13px var(--font-body);color:var(--ink);background:#fff;resize:vertical}
+.dec-input{width:100%;margin-top:9px}
+.stamp-note::placeholder,.dec-input::placeholder{color:var(--steel-2)}
+.control.decision{border:1px solid var(--hazard);border-radius:4px;overflow:hidden;background:#fffdf5}
+.control.decision .hz-top{height:9px;background:repeating-linear-gradient(45deg,var(--hazard) 0 12px,var(--ink) 12px 24px)}
+.control.decision .ctl-h{font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--hazard-ink);padding:11px 15px 4px}
+.blockers{margin:0 15px 8px;padding-left:18px}
+.blockers li{font-size:13.5px;color:#5a4500;margin:4px 0;font-weight:600}
+.ctl-inlabel{display:block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--steel);margin:0 15px 4px}
+.control.decision .dec-input{width:calc(100% - 30px);margin:0 15px 14px}
+.proof{margin:12px 20px 2px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:12.5px;color:var(--proof);
+border:1px solid #bfe0cb;background:#eef7f0;border-radius:3px;padding:9px 12px}
+.pf-stamp{font-family:var(--font-display);font-weight:700;letter-spacing:.14em;color:#fff;background:var(--proof);border-radius:2px;padding:2px 9px;font-size:12px;transform:rotate(-3deg)}
+.pf-i{font-family:var(--font-mono);font-size:11.5px}
+.pf-when{margin-left:auto;font-style:italic;color:#5a8a70}
+
+details.cleared{margin:26px 0 10px;border:1px solid #bfe0cb;border-radius:4px;overflow:hidden;background:#fff}
+details.cleared>summary{cursor:pointer;list-style:none;padding:12px 20px;background:#eef7f0}
+details.cleared>summary::-webkit-details-marker{display:none}
+.cl-title{font-family:var(--font-display);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--proof);font-size:14px}
+.cl-row{padding:11px 20px;border-bottom:1px solid var(--hair-2);display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center}
+.cl-row:last-child{border-bottom:none}
+.cl-hd{flex:1 1 300px;min-width:0;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.cl-ref{font:11.5px var(--font-mono);color:var(--steel);font-weight:700;white-space:nowrap}
+.cl-hd b{font-family:var(--font-display);font-weight:600;text-transform:uppercase;font-size:14.5px;word-break:break-word}
+.cl-cards{flex:2 1 380px;min-width:0;display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--steel)}
+.cl-row .proof{flex-basis:100%;margin:6px 0 0}
+
+/* Item 1: the job-story header - dated timeline chips + a verdict chip. */
+.story{margin:12px 20px 2px;border:1px solid var(--hair);background:#fbfaf8;border-radius:3px;padding:9px 13px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.story-h{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);flex:none}
+.story-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0;flex:1 1 auto}
+.tl-step{font-size:12px;color:var(--ink);background:#fff;border:1px solid var(--hair);border-radius:10px;padding:2px 9px;white-space:nowrap}
+.tl-arrow{color:var(--steel-2);font-weight:800}
+.tl-none{font-size:12px;font-style:italic;color:var(--steel-2)}
+.verdict-chip{flex:none;margin-left:auto;font-family:var(--font-display);font-weight:700;font-size:11px;letter-spacing:.07em;text-transform:uppercase;border-radius:3px;padding:3px 10px;color:#fff}
+.verdict-chip.vd-ok{background:var(--proof)}
+.verdict-chip.vd-warn{background:var(--safety)}
+.verdict-chip.vd-hazard{background:var(--hazard);color:var(--ink)}
+.verdict-chip.vd-info{background:var(--steel)}
+.verdict-chip.vd-muted{background:var(--steel-2)}
+/* Item 2 / A7: STORY-UNVERIFIED - truth not established (a distinct fail-closed state, not MISSING). */
+.story-unverified{margin:12px 20px 2px;border:1.5px solid var(--hazard);background:#fffdf5;border-radius:3px;overflow:hidden}
+.story-unverified .hz-top{height:9px;background:repeating-linear-gradient(45deg,var(--hazard) 0 12px,var(--ink) 12px 24px)}
+.su-h{font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--hazard-ink);padding:9px 14px 2px}
+.su-detail{font-size:12.5px;color:#5a4500;padding:0 14px 11px}
+/* Item 5: the plain-English HOLD banner, copy matched to the problem class. */
+.hold-banner{margin:12px 20px 2px;border:1.5px solid var(--safety);background:#fdf0ec;border-radius:3px;overflow:hidden;max-width:100%;box-sizing:border-box}
+.hold-banner .hz-top{height:9px;background:repeating-linear-gradient(45deg,var(--safety) 0 12px,var(--ink) 12px 24px)}
+.hb-h{font-family:var(--font-display);font-weight:700;font-size:14.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--safety-ink);padding:9px 14px 2px;overflow-wrap:anywhere;word-break:break-word}
+.hb-lede{font-size:12.5px;color:#7a2f16;padding:0 14px 4px;overflow-wrap:anywhere;word-break:break-word}
+.hb-reason{font-size:12.5px;color:var(--ink);padding:2px 14px 11px;display:flex;flex-wrap:wrap;gap:0 7px;overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.hb-k{font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:10px;color:var(--safety-ink);flex:none;margin-right:0}
+/* Item 3: docket header badges (NOT-REQUIRED SWMS). */
+.dk-badges{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px 0}
+.bdg{font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.04em;border-radius:3px;padding:2px 8px;border:1px solid var(--hair)}
+.bdg.bdg-muted{color:var(--steel-2);background:#f2efe9;border-color:var(--hair)}
+/* Item 4: internal / out-of-scope card context line. */
+.internal-sec{padding-top:12px}
+.internal-line{font-size:12.5px;color:var(--steel);background:#f4f2ee;border:1px dashed var(--hair);border-radius:3px;padding:8px 12px;margin:0 0 8px}
+.il-tag{font-family:var(--font-mono);font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--steel-2);background:#e7e2da;border:1px solid var(--hair);border-radius:2px;padding:1px 6px;margin-right:8px}
+/* Item 7: the invoice defect box under a linted invoice tile. */
+.inv-lint{flex:1 0 100%;border:1.5px solid var(--safety);background:#fdf0ec;border-radius:3px;padding:9px 13px}
+.inv-lint .il-h{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--safety-ink);margin-bottom:5px}
+.inv-lint ul{margin:0;padding-left:18px}
+.inv-lint li{font-size:12.5px;color:#7a2f16;margin:3px 0}
+/* Item 8: the neutral review control on a pack-less docket. */
+.control.review{border:1px solid var(--steel);border-radius:4px;background:#f7f9fa;padding:0 0 12px}
+.control.review .ctl-h{font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--steel);padding:11px 15px 2px}
+.control.review .rv-note{font-size:12.5px;color:var(--steel);padding:0 15px 6px}
+.control.review .dec-input{width:calc(100% - 30px);margin:0 15px}
+</style></head><body><header class="manifest"><div class="mf-in"><span class="mf-t">SAMPLE MAKE-SAFE REVIEW (TWO JOBS)</span><span class="mf-c">2 DOCKETS</span><span class="mf-c st-decide">0 DECISIONS</span><span class="mf-c st-build">0 TO BUILD</span><span class="mf-c st-ready">0 READY</span><button class="mf-x" onclick="document.querySelectorAll('details.bench').forEach(d=>d.open=true)">Bench</button><button class="mf-x" onclick="document.querySelectorAll('details.doc[open]').forEach(d=>d.removeAttribute('open'))">Close docs</button></div></header><main class="wrap"><section class="docket st-review" id="job-SAMPLE-AJS-0001" data-job="SAMPLE-AJS-0001" style="--rail:var(--steel)"><header class="dk-head"><div class="dk-id"><div class="dk-ref">SAMPLE-AJS-0001</div><h2 class="dk-addr">1 Sample Road, Sampleton WA 6000</h2><div class="dk-meta">Sample Client Two &middot; Sample AJS make-safe (no SWMS for this job type)</div></div><div class="dk-status"><span class="dk-state">REVIEW</span></div></header><div class="dk-badges"><span class="bdg bdg-muted">SWMS not required</span></div><div class="ledger"><div class="led led-done"><div class="led-h">Done</div><ul><li>Make-safe report drafted</li><li>Invoice INV-SAMPLE-0001 drafted in Xero</li></ul></div><div class="led led-need"><div class="led-h">Needs you</div><ul><li>Review this job</li></ul></div></div><div class="dk-sec"><div class="eyebrow"><span class="eb-t">Documents</span><span class="eb-n">3</span><span class="eb-rule"></span></div><div class="live tradeline"><span class="tr-none">no raw trade report on file</span></div><div class="tiles"><details class="doc " data-doc="wo-0.0"><summary><div class="doc-hd"><span class="doc-role">Work Order</span><span class="doc-tags"><span class="tag">from builder</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="WORK_ORDER.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,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"></div></div><figcaption>WORK_ORDER.pdf</figcaption></summary><div class="doc-rest"></div></details><details class="doc " data-doc="rep-0.0"><summary><div class="doc-hd"><span class="doc-role">Make Safe Report</span><span class="doc-tags"><span class="tag">1 page</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="Make Safe Report - SAMPLE-AJS-0001 - Sampleton.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCACcAQQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3GiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigArJ1jxDZaTcw2kiXVzeTIXS2tIGlk2DgsQOgyQMnHNa1cfrdrHeeMUGl6xLpeux2AwXhWWK4gLnja2MlWB6EEbvegDodF1iz1q1a4sXciOQxSxyxtG8TjqrKwBBGR+dX683n1iSSx1XTtRjVb/+1Le0e40RhD9ukdVIUuxyh2jax3ZAGAegrMlmv7Kx8VafFPPYrbz6aYYo9Qe5a2MkoD4duQSACV5HPvQB63RXnF1oMP8AbniHTxfaoLS30yK6hi/tCb5Jm80F87sk/uxwTjOeKh0UL4h1u2t9Z1S82P4csrryI7x4Q8h37pPlIORke3Iz0GAD0KTUbaPVINNZm+0zwvMi7eCiFQ3P1dat15PZatqP2ex1KOV7u8t9B1Y20zjc04jmjETn1JCqffPvV7wyt/bax4fmjl2LfxubhptYe6N8vllt6oRhSGwcrgAEj0oA7XXtfs9DFqLuO5le6kMcMVtA0ruwUscKvPQE/hVa08XaVcw37k3VvLYQG4uLe6tnhlWMAncFYAkcHkVl+PEvH1rwoumzQQ3Rv5fLkniMiD/R5M5UMpPGe4qvrOg38Gl+I9b1rUYbu9fRZ7WNbe3MMcUe1mPBZiSTjkmgDWsvG2kXMttHImoWYu2VbeW8sZYY5Wb7oDsu3J7c89ql1DxbY2WqT6aLTU7q5t1RpRZ2MkwQMMrkqDjOD+Vc74pvLOX4YQ6fHPFJfXdnbw2kCOC7zHZs2jrkHB9sZqSC01e58feJf7K1aKx2w2Xmb7MTbzsfGPmGMc/nQB2mm3q6hZR3SQ3EKvnEdzC0UgwSOVbkdPyqzVCZr2z0SVy63d9DbswZY9olkCnHy5OMntmuF0sLZ23g/VrHVLy6v9WmjW7El28i3KvGzSHyydq7CMjaBtxigD0mqmm6jbalHPJaMzLDcSW75XGHRirD8wa85tIZl8O6ZrzahqD6h/biwhmu5NnlNeGIx7M7Su31GffpUtvetokH9uvPJHY2viK/hvlDHZ5UszKGYf7L7DnsCaAPTKKwfBK3b+H4r3UXlNzfu946SMT5QkO5UGegVdox7Gt6gAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACqGraLpetRJFq2n214iHKCeIPtPqM9Pwq/RQBmnQNHOlHSv7Ls/7PPP2UQqI85znbjGc85pkHhrQrc/uNHsY/kWMhbdQCobeARjnDfN9ea1aKAITaWxllmNvCZZkEcrlBudBnCk9wNx49z61z8/gzS7vWp7q/sbK5s2tLe3gtZIARD5Rk6dgMOBgeldNRQBXjsbSN4XjtYEeGMxRMsYBjQ4yq+g+VeBxwPSqmneH9G0u6lutN0uztbiUYeSGFVYjOcZA6Z5xWnRQBFLbW80sMs0EUkkDFondATGxBBKnscEjjsadNFFcQyQzxpLFIpR43UMrKRggg9QRT6KAMzT/AA7oemT+fpujadaTYx5lvapG35gA1ejtreO4luI4IknmCiWVUAaQL93cepxk4z0zUtFABWbZeH9GsL+S/stLs4LuXO+eKFVc568gd+/rWlRQBWGnWIt1thZ24gSTzVi8pdqvu37gMYzu+bPrz1rJ8R+HTq2n/wBl2rWtpYXM/mX6i3y0w3BmCkEAFiDliD19a36KAEAAAAGAOgFLRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAH/2Q=="></div></div><figcaption>Make Safe Report - SAMPLE-AJS-0001 - Sampleton.pdf</figcaption></summary><div class="doc-rest"></div></details><details class="doc " data-inv="INV-SAMPLE-0001"><summary><div class="doc-hd"><span class="doc-role">Invoice INV-SAMPLE-0001</span><span class="doc-tags"><span class="tag">DRAFT</span><span class="tag">$0.00</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="Xero Invoice - INV-SAMPLE-0001 - SAMPLE-AJS-0001.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAC0ASwDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD6RooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKQkKpJIAHJJ7UALRXF/8Lb8Ibw/226+xGTyv7Q+xTfY92cY8/bsxnjOce9doCGAIOQehFABRRRQAUUVQ1rWrHw9o82qanMYLSDbvcIWxuYKOACepFAF+iiigAorj7/4peF9N1e80yae+e5sX8u4EGnXEyxtgHBZEI6EHrVqb4h+GIfCMfiYamJtJkkWFZoYnkYuW2hdgG4NnjBGaAOmorldI+JXhbWtWi0y3v5YL6fPlQXlpNbNLjrt8xVDH2HNLrfxG8O+H9cfSL2a8a+jjWZ47exnn2q2dpJRCBnBoA6misjw94n07xPbTT6d9q2Qvsb7RaS25zjPAkUE/UVr0AFFFUNa1qx8PaPNqmpzGC0g273CFsbmCjgAnqRQBfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKo64to/h/UEv7kWtm1tIs85YKI0Knc2T0wMnNXqiurWC+s5rS6iWa3nRopI2GQ6sMEH2INAHlAg8X+EvAH9lX2k6R4x8K29j5Bezma2uXtQmMlGyrnZ/dYE/XmrOt61Y6g3h+HTfEGs2elXGlpdW+maJavJeSKcBJHcK2yMLxg4y2eTitX/hVjLpp0aPxh4gj0AoYv7P8ANiOI+nlCUp5gTHy43Zxxmr998PoW1m21LRNYv/D80NkmnMtmsTI9uhJRdsiMAVycMOaAOGtPFHiW98A6RGmrXlrfN4pOjtdTxp9o8kSOuJFA2lwMZ4xle9adnomuXXxB1vws3jXXF0y3s4L2Nw8f2lZJC648zZ9wbCduO47Dnf034Yadp1slr/amoz20OrLrMKSujMkwySC5XcysSScnPvXQ2/h+0tvFd74gSSY3d7bRWsiEjywsZcqQMZz85zz6UAeVaTr3ijxPb/DqyPiCeybVrS//ALQuIFQSSiFkAZcggOcHnHG5j1xUPjO61PTPDnjXwnf6pcatb2cNhe2lzc7TMqSXAVo3ZQA2GTIOM4NbOqfDj7N4m8DaVpVzq1tZ6Rb6gyajDtMlvI5iZdzbdnzZcbSMEZFdEvww02bRNYstR1PUdQu9beJ73UJGQTP5bAoqgLtVRjgBe5oA5fXfEGo614917TWvfFNlY6OYre3XQrPzN0jRrIzyttbP3gAvTAz3rufh/qOtap4IsbjxDbS2+qDfHMJYTCz7XZVcofu7lAbHvVbWPAn27XbnV9K1/U9Bu76NYrw2RjK3AUYViHVsOBwGGDit3QtEs/DmhWmk6errbWqbE3sWZuclmJ6kkkk+poA8y8Pal4osvHXjtNB8PWeqwtqql5J9R+zFG8iPjb5bZGMHORVLXfDOoeG/h75mrSWx1DV/FdtqU8drnyoWknjGxScEgBRzjkk16no3huz0PUtYvbaSd5dXuRdTiRgVVgiphcAYGFHXNReLfCtp4x0MaZeXV3aIs8dwk1oyrIjowZSCysOo9KAOc+NaovwxurpABfWtzbS2Lj76zidAu3vnkjjsTWRcyeJo/jr4g/4Ru20q4c6XZ+cNQnkiAG6TG3YjZ79cV0tn8NrKPVrTUNV1zXNfkspBNbR6lcq8UUg6OERFBYdiQcVtW3huztfFt/4iSSc3d9bxW0iMw8sLGWKkDGc/Mc8mgCbQn1p9NB1+GwhvdxytjK8ke3ty6qc/hXFiHV/G/jPxJbr4j1LRbLRJY7O2isCiF5DEsjSSFlO4ZcAL0wPevRa5LV/AQvddu9W0rX9U0G51CNY737EYytwFGFbDo21wOAy4OKAOLsfE3iXxRD4Dtf7YfT5tSk1C21Ge1Rcy/Z8rvQEEAts4OMDccdBVHxVNqFn4S+IXh271W71S20yXT5LaW8IaZVldGZSwA3AEcZ55r0qx8B6Npknh02QngTw8kyWsauCreau1y+Rkk8nII5JqPVvh9pWs/wBv/aLi8T+3/s32ny3UbPIxs2ZU4zjnOfbFAHN69401Dwfq/jO0up3uXFnFqOjRsASTJ+48oeoE2zj0krvdAtLyw8O6fa6jdveXsUCLcTueZJMDc34nNcT4l0E+Lvi94eL6Rdx2nhwyXM99KmyKdiEaKND/AB4cBj2BTHU16NQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB/9k="></div></div><figcaption>Xero Invoice - INV-SAMPLE-0001 - SAMPLE-AJS-0001.pdf</figcaption></summary><div class="doc-rest"></div></details></div></div><div class="dk-sec"><div class="eyebrow"><span class="eb-t">Client email</span><span class="eb-rule"></span></div><div class="tiles"><details class="doc t-notdone" data-doc="email-missing"><summary><div class="doc-hd"><span class="doc-role">Client email draft</span><span class="doc-tags"><span class="tag">MISSING</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="noimg">no page</div></div><figcaption>Not drafted - no To/Cc/Subject or body on file</figcaption></summary><div class="doc-rest"></div></details></div></div><div class="controls"><div class="control review"><div class="ctl-h">REVIEW &mdash; SAMPLE-AJS-0001</div><div class="rv-note">No send pack on this docket. Record the outcome or your decision below &mdash; nothing releases from here.</div><label class="ctl-inlabel" for="dec-SAMPLE-AJS-0001">Your decision or note</label><textarea class="dec-input" id="dec-SAMPLE-AJS-0001" data-decision="SAMPLE-AJS-0001" rows="2" placeholder="type your call - this is not a send control, nothing releases from here"></textarea></div></div></section><section class="docket st-review" id="job-SAMPLE-MLB-0002" data-job="SAMPLE-MLB-0002" style="--rail:var(--steel)"><header class="dk-head"><div class="dk-id"><div class="dk-ref">SAMPLE-MLB-0002</div><h2 class="dk-addr">2 Example Street, Exampleville WA 6000</h2><div class="dk-meta">Sample Client &middot; Sample MLB make-safe (SWMS required)</div></div><div class="dk-status"><span class="dk-state">REVIEW</span></div></header><div class="ledger"><div class="led led-done"><div class="led-h">Done</div><ul><li>Make-safe report drafted</li><li>Invoice INV-SAMPLE-0002 drafted in Xero</li><li>SWMS generated</li></ul></div><div class="led led-need"><div class="led-h">Needs you</div><ul><li>Review this job</li></ul></div></div><div class="dk-sec"><div class="eyebrow"><span class="eb-t">Documents</span><span class="eb-n">4</span><span class="eb-rule"></span></div><div class="live tradeline"><span class="tr-none">no raw trade report on file</span></div><div class="tiles"><details class="doc " data-doc="wo-1.0"><summary><div class="doc-hd"><span class="doc-role">Work Order</span><span class="doc-tags"><span class="tag">from builder</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="WORK_ORDER.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,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"></div></div><figcaption>WORK_ORDER.pdf</figcaption></summary><div class="doc-rest"></div></details><details class="doc " data-doc="rep-1.0"><summary><div class="doc-hd"><span class="doc-role">Make Safe Report</span><span class="doc-tags"><span class="tag">1 page</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="Make Safe Report - SAMPLE-MLB-0002 - Exampleville.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,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"></div></div><figcaption>Make Safe Report - SAMPLE-MLB-0002 - Exampleville.pdf</figcaption></summary><div class="doc-rest"></div></details><details class="doc " data-doc="swms-1.0"><summary><div class="doc-hd"><span class="doc-role">SWMS</span><span class="doc-tags"></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="SWMS - SAMPLE-MLB-0002.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCACcAQQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3GiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigArJ1jxDZaTcw2kiXVzeTIXS2tIGlk2DgsQOgyQMnHNa1cfrdrHeeMUGl6xLpeux2AwXhWWK4gLnja2MlWB6EEbvegDodF1iz1q1a4sXciOQxSxyxtG8TjqrKwBBGR+dX683n1iSSx1XTtRjVb/+1Le0e40RhD9ukdVIUuxyh2jax3ZAGAegrMlmv7Kx8VafFPPYrbz6aYYo9Qe5a2MkoD4duQSACV5HPvQB63RXnF1oMP8AbniHTxfaoLS30yK6hi/tCb5Jm80F87sk/uxwTjOeKh0UL4h1u2t9Z1S82P4csrryI7x4Q8h37pPlIORke3Iz0GAD0KTUbaPVINNZm+0zwvMi7eCiFQ3P1dat15PZatqP2ex1KOV7u8t9B1Y20zjc04jmjETn1JCqffPvV7wyt/bax4fmjl2LfxubhptYe6N8vllt6oRhSGwcrgAEj0oA7XXtfs9DFqLuO5le6kMcMVtA0ruwUscKvPQE/hVa08XaVcw37k3VvLYQG4uLe6tnhlWMAncFYAkcHkVl+PEvH1rwoumzQQ3Rv5fLkniMiD/R5M5UMpPGe4qvrOg38Gl+I9b1rUYbu9fRZ7WNbe3MMcUe1mPBZiSTjkmgDWsvG2kXMttHImoWYu2VbeW8sZYY5Wb7oDsu3J7c89ql1DxbY2WqT6aLTU7q5t1RpRZ2MkwQMMrkqDjOD+Vc74pvLOX4YQ6fHPFJfXdnbw2kCOC7zHZs2jrkHB9sZqSC01e58feJf7K1aKx2w2Xmb7MTbzsfGPmGMc/nQB2mm3q6hZR3SQ3EKvnEdzC0UgwSOVbkdPyqzVCZr2z0SVy63d9DbswZY9olkCnHy5OMntmuF0sLZ23g/VrHVLy6v9WmjW7El28i3KvGzSHyydq7CMjaBtxigD0mqmm6jbalHPJaMzLDcSW75XGHRirD8wa85tIZl8O6ZrzahqD6h/biwhmu5NnlNeGIx7M7Su31GffpUtvetokH9uvPJHY2viK/hvlDHZ5UszKGYf7L7DnsCaAPTKKwfBK3b+H4r3UXlNzfu946SMT5QkO5UGegVdox7Gt6gAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACqGraLpetRJFq2n214iHKCeIPtPqM9Pwq/RQBmnQNHOlHSv7Ls/7PPP2UQqI85znbjGc85pkHhrQrc/uNHsY/kWMhbdQCobeARjnDfN9ea1aKAITaWxllmNvCZZkEcrlBudBnCk9wNx49z61z8/gzS7vWp7q/sbK5s2tLe3gtZIARD5Rk6dgMOBgeldNRQBXjsbSN4XjtYEeGMxRMsYBjQ4yq+g+VeBxwPSqmneH9G0u6lutN0uztbiUYeSGFVYjOcZA6Z5xWnRQBFLbW80sMs0EUkkDFondATGxBBKnscEjjsadNFFcQyQzxpLFIpR43UMrKRggg9QRT6KAMzT/AA7oemT+fpujadaTYx5lvapG35gA1ejtreO4luI4IknmCiWVUAaQL93cepxk4z0zUtFABWbZeH9GsL+S/stLs4LuXO+eKFVc568gd+/rWlRQBWGnWIt1thZ24gSTzVi8pdqvu37gMYzu+bPrz1rJ8R+HTq2n/wBl2rWtpYXM/mX6i3y0w3BmCkEAFiDliD19a36KAEAAAAGAOgFLRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAH/2Q=="></div></div><figcaption>SWMS - SAMPLE-MLB-0002.pdf</figcaption></summary><div class="doc-rest"></div></details><details class="doc " data-inv="INV-SAMPLE-0002"><summary><div class="doc-hd"><span class="doc-role">Invoice INV-SAMPLE-0002</span><span class="doc-tags"><span class="tag">DRAFT</span><span class="tag">$0.00</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="doc-pg" data-doc-page="Xero Invoice - INV-SAMPLE-0002 - SAMPLE-MLB-0002.pdf - page 1"><img loading="lazy" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAC0ASwDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD6RooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKQkKpJIAHJJ7UALRXF/8Lb8Ibw/226+xGTyv7Q+xTfY92cY8/bsxnjOce9doCGAIOQehFABRRRQAUUVQ1rWrHw9o82qanMYLSDbvcIWxuYKOACepFAF+iiigAorj7/4peF9N1e80yae+e5sX8u4EGnXEyxtgHBZEI6EHrVqb4h+GIfCMfiYamJtJkkWFZoYnkYuW2hdgG4NnjBGaAOmorldI+JXhbWtWi0y3v5YL6fPlQXlpNbNLjrt8xVDH2HNLrfxG8O+H9cfSL2a8a+jjWZ47exnn2q2dpJRCBnBoA6misjw94n07xPbTT6d9q2Qvsb7RaS25zjPAkUE/UVr0AFFFUNa1qx8PaPNqmpzGC0g273CFsbmCjgAnqRQBfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKo64to/h/UEv7kWtm1tIs85YKI0Knc2T0wMnNXqiurWC+s5rS6iWa3nRopI2GQ6sMEH2INAHlAg8X+EvAH9lX2k6R4x8K29j5Bezma2uXtQmMlGyrnZ/dYE/XmrOt61Y6g3h+HTfEGs2elXGlpdW+maJavJeSKcBJHcK2yMLxg4y2eTitX/hVjLpp0aPxh4gj0AoYv7P8ANiOI+nlCUp5gTHy43Zxxmr998PoW1m21LRNYv/D80NkmnMtmsTI9uhJRdsiMAVycMOaAOGtPFHiW98A6RGmrXlrfN4pOjtdTxp9o8kSOuJFA2lwMZ4xle9adnomuXXxB1vws3jXXF0y3s4L2Nw8f2lZJC648zZ9wbCduO47Dnf034Yadp1slr/amoz20OrLrMKSujMkwySC5XcysSScnPvXQ2/h+0tvFd74gSSY3d7bRWsiEjywsZcqQMZz85zz6UAeVaTr3ijxPb/DqyPiCeybVrS//ALQuIFQSSiFkAZcggOcHnHG5j1xUPjO61PTPDnjXwnf6pcatb2cNhe2lzc7TMqSXAVo3ZQA2GTIOM4NbOqfDj7N4m8DaVpVzq1tZ6Rb6gyajDtMlvI5iZdzbdnzZcbSMEZFdEvww02bRNYstR1PUdQu9beJ73UJGQTP5bAoqgLtVRjgBe5oA5fXfEGo614917TWvfFNlY6OYre3XQrPzN0jRrIzyttbP3gAvTAz3rufh/qOtap4IsbjxDbS2+qDfHMJYTCz7XZVcofu7lAbHvVbWPAn27XbnV9K1/U9Bu76NYrw2RjK3AUYViHVsOBwGGDit3QtEs/DmhWmk6errbWqbE3sWZuclmJ6kkkk+poA8y8Pal4osvHXjtNB8PWeqwtqql5J9R+zFG8iPjb5bZGMHORVLXfDOoeG/h75mrSWx1DV/FdtqU8drnyoWknjGxScEgBRzjkk16no3huz0PUtYvbaSd5dXuRdTiRgVVgiphcAYGFHXNReLfCtp4x0MaZeXV3aIs8dwk1oyrIjowZSCysOo9KAOc+NaovwxurpABfWtzbS2Lj76zidAu3vnkjjsTWRcyeJo/jr4g/4Ru20q4c6XZ+cNQnkiAG6TG3YjZ79cV0tn8NrKPVrTUNV1zXNfkspBNbR6lcq8UUg6OERFBYdiQcVtW3huztfFt/4iSSc3d9bxW0iMw8sLGWKkDGc/Mc8mgCbQn1p9NB1+GwhvdxytjK8ke3ty6qc/hXFiHV/G/jPxJbr4j1LRbLRJY7O2isCiF5DEsjSSFlO4ZcAL0wPevRa5LV/AQvddu9W0rX9U0G51CNY737EYytwFGFbDo21wOAy4OKAOLsfE3iXxRD4Dtf7YfT5tSk1C21Ge1Rcy/Z8rvQEEAts4OMDccdBVHxVNqFn4S+IXh271W71S20yXT5LaW8IaZVldGZSwA3AEcZ55r0qx8B6Npknh02QngTw8kyWsauCreau1y+Rkk8nII5JqPVvh9pWs/wBv/aLi8T+3/s32ny3UbPIxs2ZU4zjnOfbFAHN69401Dwfq/jO0up3uXFnFqOjRsASTJ+48oeoE2zj0krvdAtLyw8O6fa6jdveXsUCLcTueZJMDc34nNcT4l0E+Lvi94eL6Rdx2nhwyXM99KmyKdiEaKND/AB4cBj2BTHU16NQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB/9k="></div></div><figcaption>Xero Invoice - INV-SAMPLE-0002 - SAMPLE-MLB-0002.pdf</figcaption></summary><div class="doc-rest"></div></details></div></div><div class="dk-sec"><div class="eyebrow"><span class="eb-t">Client email</span><span class="eb-rule"></span></div><div class="tiles"><details class="doc t-notdone" data-doc="email-missing"><summary><div class="doc-hd"><span class="doc-role">Client email draft</span><span class="doc-tags"><span class="tag">MISSING</span></span><button class="doc-x" type="button" onclick="this.closest('details.doc').removeAttribute('open')">Close</button></div><div class="doc-pages"><div class="noimg">no page</div></div><figcaption>Not drafted - no To/Cc/Subject or body on file</figcaption></summary><div class="doc-rest"></div></details></div></div><div class="controls"><div class="control review"><div class="ctl-h">REVIEW &mdash; SAMPLE-MLB-0002</div><div class="rv-note">No send pack on this docket. Record the outcome or your decision below &mdash; nothing releases from here.</div><label class="ctl-inlabel" for="dec-SAMPLE-MLB-0002">Your decision or note</label><textarea class="dec-input" id="dec-SAMPLE-MLB-0002" data-decision="SAMPLE-MLB-0002" rows="2" placeholder="type your call - this is not a send control, nothing releases from here"></textarea></div></div></section></main><div id="docback"></div><button id="doc-fab" type="button">&#10005; Close document</button><script>
+(function(){
+  function setHH(){var h=document.querySelector('header.manifest');if(h)document.documentElement.style.setProperty('--hh',h.offsetHeight+'px');}
+  setHH();addEventListener('resize',setHH);addEventListener('load',setHH);
+  function openDocs(){return document.querySelectorAll('details.doc[open]');}
+  function closeAll(){openDocs().forEach(function(d){d.removeAttribute('open');});document.body.classList.remove('doc-open');}
+  addEventListener('load',closeAll);
+  addEventListener('pageshow',closeAll);
+  setTimeout(closeAll,0);
+  document.addEventListener('toggle',function(e){
+    var d=e.target;
+    if(!(d instanceof Element)||!d.classList||!d.classList.contains('doc'))return;
+    if(d.open){
+      openDocs().forEach(function(o){if(o!==d)o.removeAttribute('open');});
+      document.body.classList.add('doc-open');
+      d.querySelectorAll('img[loading="lazy"]').forEach(function(im){im.loading='eager';});
+    }else if(openDocs().length===0){document.body.classList.remove('doc-open');}
+  },true);
+  document.addEventListener('click',function(e){
+    var t=e.target;
+    if(t&&(t.id==='docback'||t.id==='doc-fab'||(t.closest&&t.closest('#doc-fab'))))closeAll();
+  });
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAll();});
+
+  /* D21/D22 - feedback wiring. Lavish does NOT passively capture DOM state; the artifact
+     must call window.lavish.queuePrompt(text,{tag,element,data}). Each control passes its
+     own `element` so lavish's per-element queueKey dedup replaces (not duplicates) on
+     re-toggle, and everything ships when Marnin presses "Send to Agent" (one batch/board).
+     Outside lavish (plain browser) this is a harmless no-op. */
+  function ql(text,data,element){try{if(window.lavish&&window.lavish.queuePrompt)window.lavish.queuePrompt(text,{tag:data.action,element:element,data:data});}catch(e){}}
+  function stampInfo(cb){var s=cb.closest('.stamp');var build=s&&s.classList.contains('stamp-build');var wrap=cb.closest('.control');var note=wrap?wrap.querySelector('.stamp-note'):null;return {ref:cb.getAttribute('data-approve'),state:build?'ready_to_build':'ready',note:note?note.value:''};}
+  document.addEventListener('change',function(e){
+    var t=e.target;if(!t||t.tagName!=='INPUT')return;
+    if(t.classList.contains('stamp-cb')){
+      var s=stampInfo(t);
+      if(t.checked)ql('APPROVE SEND — '+s.ref,{action:'approve_send',ref:s.ref,state:s.state,note:s.note},t);
+      else ql('Revoke approval — '+s.ref,{action:'revoke',ref:s.ref},t);
+    }else if(t.hasAttribute('data-photo-in')){
+      /* data-photo-in is "<ref>|<resolved path>" - ship the full path so the apply side can
+         verify the file on disk; show only the basename in the prompt text */
+      var raw=t.getAttribute('data-photo-in')||'';var cut=raw.indexOf('|');
+      var pref=cut<0?raw:raw.slice(0,cut);var pfile=cut<0?'':raw.slice(cut+1);
+      var pname=pfile.split('/').pop();var bench=!!t.closest('details.bench');
+      ql((t.checked?'Photo IN — ':'Photo OUT — ')+pname,{action:bench&&t.checked?'photo_add':'photo_toggle',ref:pref,file:pfile,in:t.checked},t);
+    }
+  });
+  /* text controls emit on blur/change; a note re-queues its stamp so the note ships with it */
+  document.addEventListener('change',function(e){
+    var t=e.target;if(!t||t.tagName!=='TEXTAREA')return;
+    if(t.classList.contains('dec-input')&&t.value.trim())ql('Decision — '+t.getAttribute('data-decision'),{action:'decision',ref:t.getAttribute('data-decision'),text:t.value},t);
+    if(t.classList.contains('stamp-note')){var wrap=t.closest('.control');var cb=wrap?wrap.querySelector('input.stamp-cb'):null;if(cb&&cb.checked){var s=stampInfo(cb);ql('APPROVE SEND — '+s.ref,{action:'approve_send',ref:s.ref,state:s.state,note:t.value},cb);}}
+  });
+})();
+</script></body></html>

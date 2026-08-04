@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Make-Safe Job View - integration mockup</title>
+<style>
+  :root{ --orange:#F15A29; --dark:#293C46; --mid:#4C6A7C; --bg:#F4F6F8; --line:#E2E8EE; --green:#5E8B6E; --red:#E74C3C; --muted:#8FA4B2; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--dark)}
+  .topbar{background:var(--dark);color:#fff;padding:10px 18px;display:flex;align-items:center;gap:18px;font-size:14px}
+  .topbar b{font-weight:700}
+  .topbar .tag{margin-left:auto;background:#1c2b33;padding:4px 10px;border-radius:6px;font-size:12px}
+  .toggle{display:flex;gap:8px;padding:12px 18px;background:#fff;border-bottom:1px solid var(--line);align-items:center}
+  .toggle span{font-size:13px;color:var(--mid);margin-right:6px}
+  .toggle button{border:1px solid var(--line);background:#fff;color:var(--dark);padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600}
+  .toggle button.active{background:var(--dark);color:#fff;border-color:var(--dark)}
+  .wrap{max-width:1100px;margin:18px auto;padding:0 18px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:18px}
+  .jobhead{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:14px}
+  .jobhead .back{color:var(--orange);font-weight:700;cursor:pointer;font-size:13px}
+  .jobhead h2{margin:0;font-size:18px}
+  .jobhead .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .chip{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.3px}
+  .chip.ready{background:#0E7C7B;color:#fff}
+  .chip.waiting{background:#EEF2F5;color:var(--mid)}
+  .chip.type{background:#FDEBE4;color:var(--orange);margin-left:8px}
+  .section-label{font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--mid);text-transform:uppercase;padding:16px 20px 6px}
+  .doctabs{display:flex;gap:8px;padding:0 20px 10px;flex-wrap:wrap}
+  .doctabs button{border:1px solid var(--line);background:#fff;padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--dark)}
+  .doctabs button.active{background:var(--orange);color:#fff;border-color:var(--orange)}
+  .pdfstage{margin:0 20px;background:#3a464d;border-radius:8px;height:520px;display:flex;align-items:center;justify-content:center;position:relative}
+  .pdfpage{background:#fff;width:74%;height:94%;border-radius:3px;box-shadow:0 4px 18px rgba(0,0,0,.3);overflow:hidden;display:flex;flex-direction:column}
+  .pdfpage .band{height:8px;background:var(--orange)}
+  .pdfpage .pbody{padding:22px 26px;font-size:12px;color:#33414a;overflow:hidden}
+  .pdfpage h3{margin:4px 0 2px;font-size:17px}
+  .pdfpage .kv{margin-top:14px;border:1px solid #eef2f5}
+  .pdfpage .kv div{display:flex;border-bottom:1px solid #eef2f5}
+  .pdfpage .kv div:last-child{border-bottom:none}
+  .pdfpage .kv b{width:150px;background:#f4f7f9;padding:6px 8px;font-size:11px;color:var(--mid)}
+  .pdfpage .kv span{padding:6px 8px}
+  .pdfpage .sec{margin-top:12px;background:var(--dark);color:#fff;padding:5px 8px;font-size:11px;font-weight:700;border-left:4px solid var(--orange)}
+  .pdffit{position:absolute;top:8px;right:14px;font-size:11px;color:#cdd8df;background:rgba(0,0,0,.3);padding:2px 8px;border-radius:5px}
+  .notes{margin:0 20px 4px;background:#F7FAFC;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.5}
+  .recip{margin:14px 20px 4px;background:#F1F8F3;border:1px solid #cfe6d6;border-radius:8px;padding:12px 14px;font-size:13px}
+  .recip b{display:block;font-size:11px;color:var(--mid);letter-spacing:.4px;text-transform:uppercase;margin-bottom:3px}
+  .photos{display:flex;gap:10px;padding:6px 20px 14px;flex-wrap:wrap}
+  .ph{width:120px;height:88px;border-radius:8px;position:relative;display:flex;align-items:flex-end;padding:6px;color:#fff;font-size:11px;background:#5b6b73}
+  .ph.ok{outline:3px solid var(--green)}
+  .ph.no{outline:3px solid var(--red);opacity:.5}
+  .ph .mk{position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+  .ph.ok .mk{background:var(--green)}
+  .ph.no .mk{background:var(--red)}
+  .photocount{padding:2px 20px 0;font-size:12px;color:var(--mid)}
+  .actions{padding:16px 20px;border-top:1px solid var(--line)}
+  .btn-send{width:100%;background:#27AE60;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+  .btn-portal{width:100%;background:#0E7C7B;color:#fff;border:none;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+  .helper{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+  /* canonical (no pack) state */
+  .crow{display:flex;padding:10px 20px;border-bottom:1px solid var(--line);font-size:13px}
+  .crow b{width:160px;color:var(--mid)}
+  .progress{display:flex;gap:18px;padding:14px 20px;align-items:center}
+  .dot{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+  .dot .c{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;background:#EEF2F5;color:var(--muted)}
+  .dot.done .c{background:var(--green);color:#fff}
+  .dot.miss .c{background:#FDECEA;color:var(--red);border:1px solid var(--red)}
+  .waitbox{margin:14px 20px;background:#FFFBEA;border:1px solid #F0E2A8;border-radius:8px;padding:14px;font-size:13px;color:#7a6a1f}
+  .hide{display:none}
+  .note{max-width:1100px;margin:0 auto 24px;padding:0 18px;font-size:13px;color:var(--mid);line-height:1.6}
+</style>
+</head>
+<body>
+  <div class="topbar"><b>SecureWorks</b> Ops &nbsp;·&nbsp; Jobs &nbsp;·&nbsp; Make Safes <span class="tag">clicked into job SWMS-26628</span></div>
+
+  <div class="toggle">
+    <span>This is the SAME job opened from the SAME place. Toggle the state:</span>
+    <button id="bA" class="active" onclick="show('A')">Review pack READY</button>
+    <button id="bB" onclick="show('B')">No pack yet (canonical view)</button>
+  </div>
+
+  <!-- STATE A: review pack ready -->
+  <div class="wrap" id="A">
+    <div class="panel">
+      <div class="jobhead">
+        <div class="back">&larr; Back</div>
+        <div>
+          <h2>AJ Building &amp; Restoration · AJBR-67713 <span class="chip type">ROOF MAKE SAFE</span></h2>
+          <div class="sub">Job SWMS-26628 · J. Smith · 12 Coastal Rd, Hillarys WA 6025</div>
+        </div>
+        <div style="margin-left:auto"><span class="chip ready">FIRST DRAFT READY</span></div>
+      </div>
+
+      <div class="section-label">Documents &mdash; click through</div>
+      <div class="doctabs">
+        <button class="active" onclick="tab(this,'report')">Make Safe Report</button>
+        <button onclick="tab(this,'invoice')">Draft Invoice</button>
+        <button onclick="tab(this,'swms')">SWMS</button>
+      </div>
+      <div class="pdfstage">
+        <div class="pdffit">fit to page</div>
+        <div class="pdfpage">
+          <div class="band"></div>
+          <div class="pbody">
+            <h3 id="docTitle">Make Safe Completion Report</h3>
+            <div style="color:#8FA4B2;font-size:11px">AJBR 67713 · 12 Coastal Rd, Hillarys WA 6025</div>
+            <div class="kv">
+              <div><b>Job reference</b><span>AJBR 67713</span></div>
+              <div><b>Site contact</b><span>J. Smith</span></div>
+              <div><b>Attendance</b><span>Arrived 08:30 · 2026-06-17</span></div>
+              <div><b>Crew</b><span>Hugo (1 trade)</span></div>
+              <div><b>Billing</b><span>AJ make-safe: labour + travel</span></div>
+            </div>
+            <div class="sec">Work Order Scope</div>
+            <div style="margin-top:6px">Storm make-safe. Front fence panel blown over, sliding door broken. Secure + board up.</div>
+            <div class="sec">Works Completed</div>
+            <div style="margin-top:6px">Secured front fence panel, boarded broken sliding door (1 ply sheet, 2 braces), cleared driveway debris. Site made safe, client signed off.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">Trade notes (raw from submission)</div>
+      <div class="notes">Attended site 0830. Secured front fence panel that had blown over. Boarded up broken sliding door (1 sheet ply, 2 braces). Removed debris from driveway. No further hazards. Client present, signed off.</div>
+
+      <div class="recip"><b>Pack will be emailed to</b>workorders@ajs.build &nbsp; <span style="color:#8FA4B2">CC ses@secureworkswa.com.au</span><br/><span style="color:#8FA4B2;font-size:12px">AJS: email 1 = report + invoice, email 2 = the approved photos individually.</span></div>
+
+      <div class="section-label">Photos &mdash; approve which go in the pack (mandatory)</div>
+      <div class="photocount">2 of 3 photos approved · 1 excluded</div>
+      <div class="photos">
+        <div class="ph ok" style="background:#6b8b9b">Front fence<span class="mk">&#10003;</span></div>
+        <div class="ph ok" style="background:#4a5b63">Boarded door<span class="mk">&#10003;</span></div>
+        <div class="ph no" style="background:#7a3a30">Blurry shot<span class="mk">&times;</span></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-send">Approve &amp; send pack</button>
+        <div class="helper">Authorises the invoice in Xero and emails the pack. Your click, every time.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATE B: no pack yet, canonical job view -->
+  <div class="wrap hide" id="B">
+    <div class="panel">
+      <div class="jobhead">
+        <div class="back">&larr; Back</div>
+        <div>
+          <h2>AJ Building &amp; Restoration · AJBR-67713 <span class="chip type">ROOF MAKE SAFE</span></h2>
+          <div class="sub">Job SWMS-26628 · J. Smith · 12 Coastal Rd, Hillarys WA 6025</div>
+        </div>
+        <div style="margin-left:auto"><span class="chip waiting">TRADE REPORT IN</span></div>
+      </div>
+
+      <div class="section-label">Job</div>
+      <div class="crow"><b>Status</b><span>Allocated · trade on site</span></div>
+      <div class="crow"><b>Crew</b><span>Hugo · assigned 17/06/2026</span></div>
+      <div class="crow"><b>Builder ref / Our #</b><span>AJBR 67713 · SWMS-26628</span></div>
+
+      <div class="section-label">Reporting progress</div>
+      <div class="progress">
+        <div class="dot done"><div class="c">&#10003;</div>WO</div>
+        <div class="dot miss"><div class="c">!</div>Report</div>
+        <div class="dot"><div class="c">&middot;</div>SWMS</div>
+        <div class="dot"><div class="c">&middot;</div>Invoice</div>
+        <div class="dot"><div class="c">&middot;</div>Sent</div>
+      </div>
+
+      <div class="section-label">Documents</div>
+      <div class="doctabs"><button class="active">Work Order</button></div>
+      <div class="pdfstage" style="height:300px"><div class="pdffit">fit to page</div><div class="pdfpage" style="height:90%"><div class="band"></div><div class="pbody"><h3>Work Order</h3><div style="color:#8FA4B2;font-size:11px">AJBR 67713 from workorders@ajs.build</div></div></div></div>
+
+      <div class="waitbox"><b>Draft pack not ready yet.</b> The trade's report is in but the make-safe report + invoice haven't been drafted. Once the draft is built, this same screen turns into the review-and-send pack above. Nothing to send yet.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>The integration:</b> you click a make-safe job once. If a draft pack is ready you land on the <b>review-and-send pack</b> (state A) - docs tabbed at the top (Report / Invoice / SWMS), the PDF fit-to-page, trade notes, recipient, photos to approve at the bottom, one send button. If it's not ready you land on the <b>canonical job view</b> (state B) - status, crew, reporting progress, the work order - with a clear "not ready" note. Same door, the screen adapts. (MLB would add SWMS as a 3rd tab + the 2-email note; Western/Builderwest would show "Submit on portal" instead of send.)
+  </div>
+
+<script>
+  function show(s){document.getElementById('A').classList.toggle('hide',s!=='A');document.getElementById('B').classList.toggle('hide',s!=='B');document.getElementById('bA').classList.toggle('active',s==='A');document.getElementById('bB').classList.toggle('active',s==='B');}
+  function tab(btn,which){document.querySelectorAll('#A .doctabs button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.getElementById('docTitle').textContent = which==='report'?'Make Safe Completion Report':which==='invoice'?'Tax Invoice INV-0707 (DRAFT)':'Safe Work Method Statement';}
+</script>
+</body>
+</html>

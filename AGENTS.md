@@ -217,12 +217,26 @@ ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
 one and hide the rest; discriminated by `extractPoRef` when possible) — then
 missing documents named in one line (RV-1; SWMS stays "not in this pack",
 never "not required"), condensed email previews (one-line To/Cc/Subject +
-short body excerpt + attachment chips only — no "why this" essays). For AJS
-builders, when the backend still builds three routes, the pane shows the
-intended two-email shape (report+invoice, then photos) labelled plainly as a
-preview and never as what SEND IT will send today; when the backend has
-landed two routes, show the truth. Photos, trade notes and feedback are
-collapsed by default. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
+short body excerpt + attachment chips only — no "why this" essays). The stage
+is deliberately short for density, so every pdf/image stage carries an "Open
+document" link to a full-size read in a new tab — keep that escape hatch if
+you touch `_msRenderDocStage`. For AJS builders, when the backend still builds
+three routes, the pane HEADLINES the intended two-email shape (report+invoice,
+then photos) labelled plainly as a preview and never as what SEND IT will send
+today, AND keeps the real routes on the same surface in a collapsed "What SEND
+IT actually sends today" fold — a synthesized shape may never REPLACE the
+truth on a money-and-send screen. `_msSesAjsIntendedEmails` therefore consumes
+at most one report / invoice / photo route and returns everything else as
+`leftovers`, which render as their own cards: a fourth route or a duplicate
+kind (a second builder instruction's invoice) is never dropped, the same rule
+as `<makesafe-workorder-identity>`. Its merged Cc is filtered against the
+merged To so no address is printed on both, while a Cc-only address survives.
+When the backend has landed two routes, the truth IS the headline and there is
+no preview framing and no fold. Photos, trade notes and feedback are collapsed
+by default — but the Feedback fold is not allowed to hide anything: the
+feedback module calls `_msSesOnFeedbackThreadRendered` on every thread render,
+which opens the fold and badges its summary when the thread is non-empty or
+`list_draft_notes` failed. PRIMARY ACTIONS sit in a sticky foot at the BOTTOM —
 APPROVE INVOICE then SEND IT — always visible; armed ONLY by
 `controls.approve_invoice.enabled` / `controls.send_it.enabled`; a disabled
 stamp has no id and no onclick, both action functions re-check the flag, and

@@ -715,9 +715,12 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     html += '</details>';
   }
 
-  // ── FEEDBACK — collapsed by default ───────────────────────────────────────
-  html += '<details class="msr-fold">';
-  html += '<summary class="msr-sec"><h3>Feedback</h3><span class="msr-sec-note">the next run reads what you write here</span></summary>';
+  // ── FEEDBACK — collapsed by default while the thread is empty and healthy.
+  //    _msSesOnFeedbackThreadRendered opens it once the thread loads with
+  //    something in it, or fails to load: a recorded note and a read failure
+  //    must never be invisible inside a closed fold. ───────────────────────────
+  html += '<details class="msr-fold" id="msFeedbackFold-' + safeId + '">';
+  html += '<summary class="msr-sec"><h3>Feedback</h3><span class="msr-sec-note" id="msFeedbackFoldNote-' + safeId + '">' + _MS_SES_FEEDBACK_FOLD_NOTE + '</span></summary>';
   html += '<div id="msNotesPanel-' + safeId + '" class="msr-fb-host"></div>';
   html += '</details>';
 
@@ -731,6 +734,34 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   html += '</div>';
 
   return html;
+}
+
+// The Feedback fold's resting summary note, before the thread has loaded.
+var _MS_SES_FEEDBACK_FOLD_NOTE = 'the next run reads what you write here';
+
+/**
+ * Called by the feedback module every time it renders the thread for a job
+ * (modules/ops-makesafe-feedback-notes.js: loadMsNotes). The fold stays
+ * collapsed only while the thread is empty AND healthy: recorded feedback gets
+ * a count on the summary and opens the fold, and a load failure opens it too,
+ * because an error rendered inside a closed <details> is an invisible error.
+ */
+function _msSesOnFeedbackThreadRendered(jobId, state) {
+  state = state || {};
+  var fold = document.getElementById('msFeedbackFold-' + jobId);
+  var note = document.getElementById('msFeedbackFoldNote-' + jobId);
+  var count = Number(state.count) || 0;
+  if (state.failed) {
+    if (note) note.textContent = 'could not load — open to read the error';
+    if (fold) fold.open = true;
+    return;
+  }
+  if (count > 0) {
+    if (note) note.textContent = count + ' recorded — open to read';
+    if (fold) fold.open = true;
+    return;
+  }
+  if (note) note.textContent = _MS_SES_FEEDBACK_FOLD_NOTE;
 }
 
 /**
@@ -1012,7 +1043,13 @@ function _msIsAjsBuilder(d) {
   return false;
 }
 
-/** True when the cockpit still carries three separate report/photo/invoice routes. */
+/**
+ * True when the cockpit still carries the separate report/photo/invoice routes
+ * the two-email preview is built from. It is a PRESENCE test only: a fourth
+ * route or a duplicate kind still answers true, so the preview path must render
+ * whatever it did not consume rather than assume the payload is exactly three
+ * (see _msSesAjsIntendedEmails().leftovers and the truth fold).
+ */
 function _msSesHasThreeRouteShape(routes) {
   var kinds = {};
   (routes || []).forEach(function(r) {
@@ -1038,6 +1075,21 @@ function _msSesUniqueList(arr) {
 }
 
 /**
+ * Unique list minus every address already carried by `exclude`. Used so a
+ * merged Cc never repeats an address that the merged To already holds; an
+ * address that appears ONLY on Cc is kept.
+ */
+function _msSesUniqueExcluding(arr, exclude) {
+  var blocked = {};
+  (exclude || []).forEach(function(v) {
+    if (v) blocked[String(v).toLowerCase()] = true;
+  });
+  return _msSesUniqueList(arr).filter(function(v) {
+    return !blocked[String(v).toLowerCase()];
+  });
+}
+
+/**
  * Short body preview: first ~2 sentences / ~180 chars, no walls of text.
  */
 function _msSesBodyExcerpt(body, maxLen) {
@@ -1056,19 +1108,34 @@ function _msSesBodyExcerpt(body, maxLen) {
 }
 
 /**
- * Build the intended AJS two-email shape from three backend routes:
+ * Build the intended AJS two-email shape from the backend routes:
  *   1) report + invoice combined
  *   2) photos as a follow-up
- * This is a PREVIEW only when the backend still builds three routes.
+ * This is a PREVIEW only, while the backend still builds three routes.
+ *
+ * The synthesis consumes AT MOST one report, one invoice and one photo route.
+ * Anything it did not consume — a fourth route, a second invoice for a second
+ * builder instruction — comes back as `leftovers` so the caller can show it:
+ * no make-safe surface may reduce N backend items to a fixed two and hide the
+ * rest (<makesafe-workorder-identity> is the same rule on work orders).
+ *
+ * Returns { emails: [combined, photos], leftovers: [...routes] }.
  */
 function _msSesAjsIntendedEmails(routes) {
-  var byKind = {};
-  (routes || []).forEach(function(r) {
-    if (r && r.route_kind) byKind[r.route_kind] = r;
-  });
-  var report = byKind.report || {};
-  var invoice = byKind.invoice || {};
-  var photo = byKind.photo || {};
+  var list = (Array.isArray(routes) ? routes : []).filter(Boolean);
+  var consumed = [];
+  function takeFirst(kind) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].route_kind === kind && consumed.indexOf(list[i]) < 0) {
+        consumed.push(list[i]);
+        return list[i];
+      }
+    }
+    return null;
+  }
+  var report = takeFirst('report') || {};
+  var invoice = takeFirst('invoice') || {};
+  var photo = takeFirst('photo') || {};
   var combinedHashes = _msSesUniqueList(
     [].concat(report.attachment_hashes || [], invoice.attachment_hashes || [])
   );
@@ -1087,28 +1154,38 @@ function _msSesAjsIntendedEmails(routes) {
         ? report.subject.slice(report.subject.indexOf(' - '))
         : '');
   }
-  return [
-    {
-      route_kind: 'report_invoice',
-      label: 'Report + invoice',
-      recipients: _msSesUniqueList([].concat(report.recipients || [], invoice.recipients || [])),
-      cc: _msSesUniqueList([].concat(report.cc || [], invoice.cc || [])),
-      subject: subject,
-      body: combinedBody,
-      attachment_hashes: combinedHashes,
-      ready: report.ready === true && invoice.ready === true
-    },
-    {
-      route_kind: 'photo',
-      label: 'Photos (follow-up)',
-      recipients: Array.isArray(photo.recipients) ? photo.recipients.filter(Boolean) : [],
-      cc: Array.isArray(photo.cc) ? photo.cc.filter(Boolean) : [],
-      subject: photo.subject || '',
-      body: photo.body || '',
-      attachment_hashes: Array.isArray(photo.attachment_hashes) ? photo.attachment_hashes : [],
-      ready: photo.ready === true
-    }
-  ];
+  // One merged To; the merged Cc drops only what To already carries, so a
+  // Cc-only address (e.g. the ses@ copy) survives and nobody is listed twice.
+  var combinedTo = _msSesUniqueList([].concat(report.recipients || [], invoice.recipients || []));
+  var combinedCc = _msSesUniqueExcluding(
+    [].concat(report.cc || [], invoice.cc || []),
+    combinedTo
+  );
+  return {
+    emails: [
+      {
+        route_kind: 'report_invoice',
+        label: 'Report + invoice',
+        recipients: combinedTo,
+        cc: combinedCc,
+        subject: subject,
+        body: combinedBody,
+        attachment_hashes: combinedHashes,
+        ready: report.ready === true && invoice.ready === true
+      },
+      {
+        route_kind: 'photo',
+        label: 'Photos (follow-up)',
+        recipients: Array.isArray(photo.recipients) ? photo.recipients.filter(Boolean) : [],
+        cc: Array.isArray(photo.cc) ? photo.cc.filter(Boolean) : [],
+        subject: photo.subject || '',
+        body: photo.body || '',
+        attachment_hashes: Array.isArray(photo.attachment_hashes) ? photo.attachment_hashes : [],
+        ready: photo.ready === true
+      }
+    ],
+    leftovers: list.filter(function(r) { return consumed.indexOf(r) < 0; })
+  };
 }
 
 /**
@@ -1171,10 +1248,14 @@ function _msSesRenderCondensedMail(r, byHash) {
  * Condensed email previews for the release routes.
  *
  * - Default: one card per backend route (truth), short TO/CC/subject + excerpt.
- * - AJS with the still-live 3-route backend: show the INTENDED 2-email shape
- *   (report+invoice, then photos) labelled plainly as a preview — never as if
- *   SEND IT already sent that shape. When the backend has landed 2 routes,
- *   show that truth with no preview banner.
+ * - AJS with the still-live 3-route backend: the INTENDED 2-email shape
+ *   (report+invoice, then photos) is the HEADLINE, labelled plainly as a
+ *   preview — never as if SEND IT already sent that shape — and the REAL
+ *   routes SEND IT releases today stay one click away in a collapsed truth
+ *   fold. Any route the synthesis did not consume is rendered as its own card
+ *   in the headline too: a route is never dropped from this surface. When the
+ *   backend has landed 2 routes, the truth IS the headline and there is no
+ *   preview framing and no fold.
  * Attachments render as chips only. The "why this" essay block is not shown.
  */
 function _msSesRenderRoutes(ctx, identity) {
@@ -1191,26 +1272,56 @@ function _msSesRenderRoutes(ctx, identity) {
   var threeRoute = _msSesHasThreeRouteShape(routes);
   // Preview the intended AJS shape only while the backend still builds three.
   var useAjsPreview = isAjs && threeRoute;
-  var displayRoutes = useAjsPreview ? _msSesAjsIntendedEmails(routes) : routes;
+  var realCount = routes.length;
+  var realCountWord = _msSmallNumberWord(realCount);
+  var realPlural = (realCount === 1 ? '' : 's');
 
   var html = '';
-  if (useAjsPreview) {
-    html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">AJS intended shape &mdash; preview</span></div>';
-    html += '<div class="msr-banner info msr-preview-note">';
-    html += '<div class="msr-banner-title">Preview of the intended AJS shape &mdash; not what SEND IT sends today</div>';
-    html += 'AJS packs should go as <strong>two emails</strong>: report + invoice together, then photos as a follow-up. ';
-    html += 'The backend still builds <strong>three routes</strong> right now; SEND IT still releases all three. ';
-    html += 'A separate ship will land the two-email shape &mdash; until then this is a layout preview only.';
-    html += '</div>';
-  } else {
+  if (!useAjsPreview) {
     html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">what SEND IT releases</span></div>';
-    html += '<div class="msr-lede">SEND IT sends <strong>all ' + _msSmallNumberWord(routes.length)
-      + ' email' + (routes.length === 1 ? '' : 's') + ' at once</strong> to the people below.</div>';
+    html += '<div class="msr-lede">SEND IT sends <strong>all ' + realCountWord
+      + ' email' + realPlural + ' at once</strong> to the people below.</div>';
+    routes.forEach(function(r) {
+      html += _msSesRenderCondensedMail(r, byHash);
+    });
+    return html;
   }
 
-  displayRoutes.forEach(function(r) {
+  var intended = _msSesAjsIntendedEmails(routes);
+  html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">AJS send shape (preview)</span></div>';
+  html += '<div class="msr-banner info msr-preview-note">';
+  html += '<div class="msr-banner-title">Preview of the intended AJS shape &mdash; not what SEND IT sends today</div>';
+  html += 'AJS packs should go as <strong>two emails</strong>: report + invoice together, then photos as a follow-up. ';
+  html += 'The backend still builds <strong>' + escapeHtml(realCountWord) + ' route' + realPlural
+    + '</strong> right now; SEND IT still releases all ' + escapeHtml(realCountWord) + '. ';
+  html += 'A separate ship will land the two-email shape &mdash; until then this is a layout preview only. ';
+  html += 'Open <strong>What SEND IT actually sends today</strong> below to read the real emails.';
+  html += '</div>';
+  intended.emails.forEach(function(r) {
     html += _msSesRenderCondensedMail(r, byHash);
   });
+  // A route the two-email shape cannot absorb is shown as itself, never dropped.
+  if (intended.leftovers.length) {
+    html += '<div class="msr-lede"><strong>' + _msSmallNumberWord(intended.leftovers.length)
+      + ' further route' + (intended.leftovers.length === 1 ? '' : 's')
+      + '</strong> the two-email shape does not absorb. '
+      + 'SEND IT releases ' + (intended.leftovers.length === 1 ? 'it' : 'them') + ' too, exactly as below.</div>';
+    intended.leftovers.forEach(function(r) {
+      html += _msSesRenderCondensedMail(r, byHash);
+    });
+  }
+  // The truth, one click away: the real routes SEND IT releases today.
+  html += '<details class="msr-fold">';
+  html += '<summary class="msr-sec"><h3>What SEND IT actually sends today</h3>'
+    + '<span class="msr-sec-note">' + escapeHtml(realCountWord) + ' real email' + realPlural
+    + ' &mdash; open to read them</span></summary>';
+  html += '<div class="msr-lede">These are the backend&rsquo;s own routes. SEND IT releases <strong>all '
+    + escapeHtml(realCountWord) + ' email' + realPlural + ' at once</strong>, exactly as below &mdash; '
+    + 'the preview above is the shape a later ship will land, not this send.</div>';
+  routes.forEach(function(r) {
+    html += _msSesRenderCondensedMail(r, byHash);
+  });
+  html += '</details>';
   return html;
 }
 
@@ -1230,68 +1341,6 @@ function _msSesArtifactsByHash(ctx) {
     };
   });
   return byHash;
-}
-
-// What each artifact role IS, in the captain's words. Used to explain why an
-// attachment is on a route. A role with no entry gets no invented sentence.
-var _MS_SES_ROLE_REASONS = {
-  supporting_report_pdf: 'a make-safe completion report PDF; this is a generic file-type description, not a job-specific reason recorded by the pack',
-  xero_invoice_pdf: 'a tax invoice PDF; this is a generic file-type description, not a job-specific reason recorded by the pack',
-  swms_artifact: 'a safe work method statement; this is a generic file-type description, not a job-specific reason recorded by the pack',
-  source_attachment: "a builder instruction attachment; this is a generic file-type description, not a job-specific reason recorded by the pack",
-  completion_photo: 'a completion-report site photo; this is a generic file-type description, not a job-specific reason recorded by the pack',
-  sibling_photo_evidence: 'site photo evidence; this is a generic file-type description, not a job-specific reason recorded by the pack'
-};
-
-/**
- * Blueprint RV-5: beside the email, why each recipient is on it and why each
- * attachment is there, "derived from this job's own facts and never from a
- * fixed template".
- *
- * So this renders ONLY what the pack records. A recipient reason is printed
- * when the route carries one (recipient_reasons[].reason); otherwise the line
- * says the pack records no reason for that address. An attachment reason comes
- * from the resolved artifact's own role. Nothing here is inferred from the
- * builder name, the suburb, or the route kind: a plausible sentence about who
- * gets a client's paperwork is exactly the wrong thing to guess.
- */
-function _msSesRouteWhy(r, byHash) {
-  var reasons = {};
-  (Array.isArray(r.recipient_reasons) ? r.recipient_reasons : []).forEach(function(rr) {
-    if (rr && rr.address) reasons[String(rr.address).toLowerCase()] = rr.reason || null;
-  });
-  var addresses = []
-    .concat(Array.isArray(r.recipients) ? r.recipients : [])
-    .concat(Array.isArray(r.cc) ? r.cc : [])
-    .filter(Boolean);
-
-  var lines = [];
-  addresses.forEach(function(addr) {
-    var why = reasons[String(addr).toLowerCase()];
-    if (why) {
-      lines.push('<li><strong>' + escapeHtml(addr) + '</strong> &mdash; ' + escapeHtml(why) + '</li>');
-    } else {
-      lines.push('<li><strong>' + escapeHtml(addr) + '</strong> &mdash; <span class="unrecorded">the pack records no reason for this address.</span></li>');
-    }
-  });
-  (Array.isArray(r.attachment_hashes) ? r.attachment_hashes : []).forEach(function(h) {
-    var a = byHash[h];
-    if (!a) return;
-    var why = a.role ? _MS_SES_ROLE_REASONS[a.role] : null;
-    if (why) {
-      lines.push('<li><strong>' + escapeHtml(a.fileName) + '</strong> &mdash; ' + escapeHtml(why) + '.</li>');
-    } else {
-      lines.push('<li><strong>' + escapeHtml(a.fileName) + '</strong> &mdash; <span class="unrecorded">the pack does not say why this file is on the route.</span></li>');
-    }
-  });
-  if (!lines.length) return '';
-
-  var html = '';
-  html += '<div class="msr-why">';
-  html += '<div class="msr-why-h">Why this, for this job</div>';
-  html += '<ul>' + lines.join('') + '</ul>';
-  html += '</div>';
-  return html;
 }
 
 /**
@@ -1434,6 +1483,10 @@ function _msReportingDocTabs(d) {
  * an iframe with the Fit-fragment URL; images render contained; the drafted
  * invoice (kind 'invdoc') renders as an invoice page from the row's own
  * figures; anything else gets an open-in-new-tab fallback.
+ *
+ * The stage is deliberately short (density). A PDF or image therefore carries
+ * an "Open document" escape hatch to a full-size read in a new tab, so nothing
+ * on this screen is only readable at stage size.
  */
 function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];
@@ -1461,7 +1514,12 @@ function _msRenderDocStage(docTabs, idx, row) {
   } else {
     inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
-  return metaHtml + '<div class="msr-stage"><span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
+  var openHatch = '';
+  if (t && t.url && (t.kind === 'pdf' || t.kind === 'image')) {
+    openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener">'
+      + 'Open document &#8599;</a>';
+  }
+  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
 }
 
 /**

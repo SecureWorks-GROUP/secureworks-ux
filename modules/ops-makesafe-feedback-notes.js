@@ -58,6 +58,20 @@ function _msSesFeedbackContext(jobId) {
   return { sesMode: false, docket_revision_id: null };
 }
 
+/**
+ * Tell the host surface what this thread render actually contains, so a
+ * collapsed Feedback fold can open itself for a non-empty thread or a failed
+ * read. Optional: the hook only exists on the SES review pane.
+ */
+function _msNotesAnnounceThread(jobId, count, failed) {
+  if (typeof _msSesOnFeedbackThreadRendered !== "function") return;
+  try {
+    _msSesOnFeedbackThreadRendered(jobId, { count: count, failed: !!failed });
+  } catch (_e) {
+    /* a presentation hook must never break the thread render */
+  }
+}
+
 async function loadMsNotes(jobId, containerElId) {
   var el = document.getElementById(containerElId);
   if (el) {
@@ -80,6 +94,7 @@ async function loadMsNotes(jobId, containerElId) {
         sesMode: ses.sesMode,
       });
     }
+    _msNotesAnnounceThread(jobId, notes.length, false);
     return notes;
   } catch (e) {
     if (el) {
@@ -92,6 +107,7 @@ async function loadMsNotes(jobId, containerElId) {
           sesMode: ses.sesMode,
         });
     }
+    _msNotesAnnounceThread(jobId, 0, true);
     return [];
   }
 }

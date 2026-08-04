@@ -3701,6 +3701,24 @@
       border-radius: 5px;
       padding: 3px 9px;
     }
+    /* The stage is short by design; this is the full-size read escape hatch. */
+    .msr-stage-open {
+      position: absolute;
+      top: 10px;
+      left: 14px;
+      z-index: 2;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.42);
+      border-radius: 5px;
+      padding: 3px 9px;
+      text-decoration: none;
+    }
+    .msr-stage-open:hover { background: rgba(0, 0, 0, 0.66); }
+    .msr-stage-open:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 2px; }
     .msr-stage iframe, .msr-stage img, .msr-stage .msr-stage-html { width: 100%; height: 100%; border: 0; }
     .msr-stage img { object-fit: contain; }
     .msr-stage-html { background: #fff; overflow: auto; padding: 18px 20px; color: var(--sw-text); text-align: left; }
@@ -3861,39 +3879,6 @@
       max-width: 72ch;
     }
     .msr-mail-excerpt.empty { color: var(--sw-mid); font-style: italic; }
-    /* Legacy full-body / multi-row selectors kept so older captures don't break. */
-    .msr-mail-meta { padding: 6px 0 2px; }
-    .msr-mail-row {
-      display: flex;
-      gap: 12px;
-      padding: 4px 14px;
-      font-size: 13px;
-      align-items: baseline;
-    }
-    .msr-mail-row .mk {
-      flex: 0 0 56px;
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--sw-mid-light);
-    }
-    .msr-mail-row .mv { flex: 1; min-width: 0; color: var(--sw-dark); word-break: break-word; }
-    .msr-mail-row .mv.none { color: var(--sw-mid-light); font-style: italic; }
-    .msr-mail-row .mv.bad { color: #8C2F21; font-weight: 700; }
-    .msr-mail-body {
-      margin: 8px 14px 10px;
-      padding: 12px 14px;
-      background: var(--sw-warm-100);
-      border-radius: 6px;
-      font-size: 13px;
-      line-height: 1.55;
-      color: var(--sw-dark);
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-width: 68ch;
-    }
-    .msr-mail-body.empty { color: var(--sw-mid); font-style: italic; }
     .msr-att { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
     .msr-att-item {
       display: inline-flex;
@@ -3909,26 +3894,6 @@
       word-break: break-all;
     }
     .msr-att-item.unresolved { border-color: #E0A82E; background: #FFFBEA; color: #6B4708; font-weight: 600; }
-    .msr-why {
-      padding: 10px 14px 12px;
-      border-top: 1px solid var(--sw-light);
-      font-size: 12px;
-      line-height: 1.55;
-      color: var(--sw-mid);
-      max-width: 80ch;
-    }
-    .msr-why-h {
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      color: var(--sw-mid-light);
-      margin-bottom: 4px;
-    }
-    .msr-why ul { margin: 0; padding-left: 18px; }
-    .msr-why li { margin-top: 3px; }
-    .msr-why li strong { color: var(--sw-dark); }
-    .msr-why .unrecorded { font-style: italic; }
 
     /* Photos: a calm grid; drawn badges, read-only state. */
     .msr-photocount { padding: 0 20px 6px; font-size: 12.5px; color: var(--sw-mid); }

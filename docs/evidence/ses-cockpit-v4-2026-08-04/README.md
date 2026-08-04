@@ -9,8 +9,8 @@ captain can approve Bertram without endless scrolling.
 | --- | --- | --- |
 | Primary actions | Stamps near the top | Stamps in a panel foot at the **bottom** (APPROVE INVOICE → SEND IT) |
 | Emails | Full-width cards, full body, "why this" essays | **Condensed**: one-line To/Cc/Subject, short excerpt, attachment **chips** |
-| AJS shape | Always three backend routes | **2-email intended shape** when AJS still has 3 routes, labelled as a **preview** (not what SEND IT sends today). Truth when backend lands 2. |
-| Density | Tall stage, everything open | Compact stage; photos / trade notes / feedback **collapsed by default** |
+| AJS shape | Always three backend routes | **2-email intended shape** when AJS still has 3 routes, labelled as a **preview** (not what SEND IT sends today), with the real routes kept below in a collapsed **"What SEND IT actually sends today"** fold. Truth when backend lands 2. |
+| Density | Tall stage, everything open | Compact stage + an **"Open document"** hatch to a full-size read; photos / trade notes / feedback **collapsed by default** (Feedback auto-opens for a non-empty thread or a failed read) |
 | Identity | Client + street when present | Job number + suburb only on this surface |
 
 Non-negotiables preserved: bind only to `approve_invoice.enabled` /

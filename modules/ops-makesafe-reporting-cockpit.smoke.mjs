@@ -1295,6 +1295,7 @@ check(
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.toasts.length = 0;
+calls.confirms.length = 0;
 behaviour.postJwt["approve_ses_invoice_revision"] = {
   approval: { invoice_obligation_revision_id: "obr-1" },
 };
@@ -1327,6 +1328,17 @@ check(
     t.kind === "success" && /INV-1234/.test(t.msg || "") &&
     /fresh Docs Ready tick/i.test(t.msg || "")
   ),
+);
+// Option B: the LAST text before the live money write must not claim CREATE.
+check(
+  "APPROVE INVOICE confirm says it AUTHORISES the existing draft, never that it creates one",
+  calls.confirms.length > 0 &&
+    calls.confirms.every((m) =>
+      !/creat/i.test(m || "") && !/mint/i.test(m || "")
+    ) &&
+    calls.confirms.some((m) =>
+      /AUTHORISES the Xero draft invoice already prepared/.test(m || "")
+    ),
 );
 
 // 10b. The obligation revision falls back to query_ses_invoice_obligation when
@@ -1495,7 +1507,7 @@ check(
 check(
   "honesty: the photo-route blocker carries its route label beside the verbatim fact",
   honestyHtml.includes(
-    '<span class="msr-blocker-route">Photo email</span>A required builder email draft is missing',
+    '<span class="msr-blocker-route">Photo email</span> A required builder email draft is missing',
   ),
 );
 // Approve is stamp 1: its note must be disabled_reason, not the hold lock.
@@ -1610,6 +1622,35 @@ check(
     routeHtml.includes('<span class="msr-blocker-route">Report email</span>') &&
     routeHtml.includes('<span class="msr-blocker-route">Photo email</span>') &&
     routeHtml.split("Builder email draft missing.").length - 1 === 2,
+);
+
+// The blocker chips resolve through the ONE cockpit route-label table, so the
+// plural alias and an unknown route both come out honest (a second same-named
+// table would silently shadow this and kill the alias).
+const routeAliasCockpit = cockpitSendReady();
+routeAliasCockpit.status = "HOLD";
+routeAliasCockpit.verdict = {
+  clean: false,
+  blockers: [
+    { fact: "Attachments missing.", evidence: { route_kind: "photos" } },
+    { fact: "Attachments missing.", evidence: { route_kind: "remittance" } },
+  ],
+};
+routeAliasCockpit.sections.status = { status: "HOLD", stale: false, reasons: [] };
+routeAliasCockpit.controls.approve_invoice.enabled = false;
+routeAliasCockpit.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = routeAliasCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const routeAliasHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "route labels: the plural photos alias resolves, an unknown route degrades to its own name",
+  routeAliasHtml.includes(
+    '<span class="msr-blocker-route">Photo email</span> Attachments missing.',
+  ) &&
+    routeAliasHtml.includes(
+      '<span class="msr-blocker-route">Remittance route</span> Attachments missing.',
+    ),
 );
 
 // A blockers array the normaliser cannot read must NOT empty the hold block.

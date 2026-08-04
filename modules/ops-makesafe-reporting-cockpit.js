@@ -24,8 +24,9 @@
 // while the pack is in the queue).
 // ACTIONS (per-job only — never a multi-job release):
 //   APPROVE INVOICE: approve_ses_invoice_revision (JWT, includes_authorise)
-//     -> execute_ses_invoice_revision (creates + AUTHORISES the real Xero
-//     invoice and binds the Xero PDF into a fresh docket that needs a new tick).
+//     -> execute_ses_invoice_revision (AUTHORISES the Xero draft invoice the
+//     agents already minted and binds the Xero PDF into a fresh docket that
+//     needs a new tick).
 //   SEND IT: sign_off_ses_docket (JWT, hash-bound to the displayed pack) ->
 //     prepare_ses_release_revision { job_ids: [job] } ->
 //     approve_ses_release_revision (JWT) -> execute_ses_release_revision.
@@ -918,13 +919,6 @@ function _msSesNormaliseBlocker(raw) {
  * a photo-route refusal and a report-route refusal carrying the same generic
  * fact string read as two distinct holds instead of two identical lines.
  */
-var _MS_SES_ROUTE_LABELS = {
-  report: 'Report email',
-  photo: 'Photo email',
-  photos: 'Photo email',
-  invoice: 'Invoice email'
-};
-
 function _msSesBlockerRouteLabel(b) {
   var kind = (b && b.evidence && b.evidence.route_kind != null) ? String(b.evidence.route_kind).trim() : '';
   if (!kind) return '';
@@ -1032,7 +1026,7 @@ function _msSesRenderHoldBanner(cockpit) {
     blockers.forEach(function(b) {
       var route = _msSesBlockerRouteLabel(b);
       html += '<li><div class="msr-blocker-fact">'
-        + (route ? '<span class="msr-blocker-route">' + escapeHtml(route) + '</span>' : '')
+        + (route ? '<span class="msr-blocker-route">' + escapeHtml(route) + '</span> ' : '')
         + escapeHtml(b.fact) + '</div>';
       html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(b)) + '</div></li>';
     });
@@ -1244,7 +1238,7 @@ function _msSesMapInvoice(ctx) {
 // ── ROUTES + PHOTOS (the exact release content) ─────────────────────────────
 
 var _MS_SES_ROUTE_ORDER = { report: 0, photo: 1, invoice: 2 };
-var _MS_SES_ROUTE_LABELS = { report: 'Report email', photo: 'Photo email', invoice: 'Invoice email' };
+var _MS_SES_ROUTE_LABELS = { report: 'Report email', photo: 'Photo email', photos: 'Photo email', invoice: 'Invoice email' };
 var _MS_SMALL_NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six'];
 function _msSmallNumberWord(n) {
   return (_MS_SMALL_NUMBER_WORDS[n] != null) ? _MS_SMALL_NUMBER_WORDS[n] : String(n);
@@ -2235,9 +2229,9 @@ function showMsReportingDetailEmpty() {
 /**
  * APPROVE INVOICE: record the identified operator's approval of the exact
  * current invoice revision (JWT; includes authorise), then execute it — the
- * backend creates + AUTHORISES the real Xero invoice and binds the Xero PDF
- * into a fresh docket revision, which re-enters the Docs Ready queue for a new
- * tick before SEND IT.
+ * backend AUTHORISES the Xero draft invoice the agents already minted and binds
+ * the Xero PDF into a fresh docket revision, which re-enters the Docs Ready
+ * queue for a new tick before SEND IT.
  */
 async function approveSesInvoice(jobId) {
   var ctx = _msSesPackCache[jobId];
@@ -2249,7 +2243,7 @@ async function approveSesInvoice(jobId) {
     showToast('APPROVE INVOICE is not enabled for this pack.', 'error');
     return;
   }
-  if (!confirm('This records your SES approval and creates + AUTHORISES the real Xero invoice for this exact invoice revision, then binds the Xero PDF into a fresh pack for final review. Continue?')) return;
+  if (!confirm('This records your SES approval and AUTHORISES the Xero draft invoice already prepared for this exact invoice revision, then binds the Xero PDF into a fresh pack for final review. Continue?')) return;
 
   var btn = document.getElementById('msSesApproveInvoiceBtn');
   if (btn) { btn.disabled = true; _msSesStampProgress(btn, 'Recording approval...'); }

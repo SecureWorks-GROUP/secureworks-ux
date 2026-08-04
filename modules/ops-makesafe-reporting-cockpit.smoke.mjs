@@ -1295,6 +1295,7 @@ check(
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.toasts.length = 0;
+calls.confirms.length = 0;
 behaviour.postJwt["approve_ses_invoice_revision"] = {
   approval: { invoice_obligation_revision_id: "obr-1" },
 };
@@ -1327,6 +1328,17 @@ check(
     t.kind === "success" && /INV-1234/.test(t.msg || "") &&
     /fresh Docs Ready tick/i.test(t.msg || "")
   ),
+);
+// Option B: the LAST text before the live money write must not claim CREATE.
+check(
+  "APPROVE INVOICE confirm says it AUTHORISES the existing draft, never that it creates one",
+  calls.confirms.length > 0 &&
+    calls.confirms.every((m) =>
+      !/creat/i.test(m || "") && !/mint/i.test(m || "")
+    ) &&
+    calls.confirms.some((m) =>
+      /AUTHORISES the Xero draft invoice already prepared/.test(m || "")
+    ),
 );
 
 // 10b. The obligation revision falls back to query_ses_invoice_obligation when
@@ -1487,10 +1499,16 @@ check(
   honestyHtml.includes(
     "The photo email is drafted but has no attachments bound to this docket revision",
   ) &&
-    !honestyHtml.includes("APPROVE INVOICE creates the invoice in Xero") &&
+    !honestyHtml.includes("APPROVE INVOICE authorises the Xero draft invoice") &&
     !honestyHtml.includes(
       "The system still has to draft this email. It normally clears on the next run",
     ),
+);
+check(
+  "honesty: the photo-route blocker carries its route label beside the verbatim fact",
+  honestyHtml.includes(
+    '<span class="msr-blocker-route">Photo email</span> A required builder email draft is missing',
+  ),
 );
 // Approve is stamp 1: its note must be disabled_reason, not the hold lock.
 // Send (stamp 2) may still show the hold lock when it has no disabled_reason.
@@ -1552,6 +1570,148 @@ check(
 check(
   "honesty: when disabled_reason is absent, the hold-lock fallback still renders",
   /Locked by the hold above/.test(fallbackHtml),
+);
+
+// ── 11c. Route-aware holds must stay DISTINGUISHABLE, structured blockers may
+//         never silence the reasons, and no pane copy claims APPROVE creates
+//         the invoice (Option B: agents mint the draft, the captain authorises).
+// Same fact on two routes: two items, never two byte-identical lines, and the
+// exact duplicate the backend emits per route is still collapsed.
+const routeCockpit = cockpitSendReady();
+routeCockpit.status = "HOLD";
+routeCockpit.verdict = {
+  clean: false,
+  blockers: [
+    {
+      code: "route_draft_missing",
+      fact: "Builder email draft missing.",
+      evidence: { route_kind: "report" },
+    },
+    {
+      code: "route_draft_missing",
+      fact: "Builder email draft missing.",
+      evidence: { route_kind: "photo" },
+    },
+    {
+      code: "route_draft_missing",
+      fact: "Builder email draft missing.",
+      evidence: { route_kind: "photo" },
+    },
+  ],
+};
+routeCockpit.sections.status = { status: "HOLD", stale: false, reasons: [] };
+routeCockpit.controls.approve_invoice.enabled = false;
+routeCockpit.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = routeCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const routeHtml = elements["msReportingDetailPanel"]._html || "";
+const routeItems = routeHtml
+  .split('<ol class="msr-blockers">')[1]
+  .split("</ol>")[0]
+  .split("<li>")
+  .slice(1);
+check(
+  "route holds: one item per route, the per-route duplicate collapsed",
+  routeItems.length === 2 &&
+    /Clear <strong>2 blockers<\/strong> below/.test(routeHtml),
+);
+check(
+  "route holds: the two items are not byte-identical — each names its route",
+  routeItems[0] !== routeItems[1] &&
+    routeHtml.includes('<span class="msr-blocker-route">Report email</span>') &&
+    routeHtml.includes('<span class="msr-blocker-route">Photo email</span>') &&
+    routeHtml.split("Builder email draft missing.").length - 1 === 2,
+);
+
+// The blocker chips resolve through the ONE cockpit route-label table, so the
+// plural alias and an unknown route both come out honest (a second same-named
+// table would silently shadow this and kill the alias).
+const routeAliasCockpit = cockpitSendReady();
+routeAliasCockpit.status = "HOLD";
+routeAliasCockpit.verdict = {
+  clean: false,
+  blockers: [
+    { fact: "Attachments missing.", evidence: { route_kind: "photos" } },
+    { fact: "Attachments missing.", evidence: { route_kind: "remittance" } },
+  ],
+};
+routeAliasCockpit.sections.status = { status: "HOLD", stale: false, reasons: [] };
+routeAliasCockpit.controls.approve_invoice.enabled = false;
+routeAliasCockpit.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = routeAliasCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const routeAliasHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "route labels: the plural photos alias resolves, an unknown route degrades to its own name",
+  routeAliasHtml.includes(
+    '<span class="msr-blocker-route">Photo email</span> Attachments missing.',
+  ) &&
+    routeAliasHtml.includes(
+      '<span class="msr-blocker-route">Remittance route</span> Attachments missing.',
+    ),
+);
+
+// A blockers array the normaliser cannot read must NOT empty the hold block.
+const shapelessCockpit = cockpitSendReady();
+shapelessCockpit.status = "HOLD";
+shapelessCockpit.verdict = {
+  clean: false,
+  blockers: [
+    { code: "route_draft_missing", evidence: { route_kind: "photo" } },
+    { code: "invoice_not_authorised" },
+  ],
+};
+shapelessCockpit.sections.status = {
+  status: "HOLD",
+  stale: false,
+  reasons: ["The insurance work order is missing from this docket."],
+};
+shapelessCockpit.controls.approve_invoice.enabled = false;
+shapelessCockpit.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = shapelessCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const shapelessHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "honesty: blockers with no readable fact fall back to sections.status.reasons, never an empty hold",
+  shapelessHtml.includes(
+    "The insurance work order is missing from this docket.",
+  ) &&
+    shapelessHtml.includes('<ol class="msr-blockers">') &&
+    /Clear <strong>1 blocker<\/strong> below/.test(shapelessHtml) &&
+    !/this pack cannot move yet/.test(shapelessHtml),
+);
+
+// Option B copy: nothing on this pane may say APPROVE creates the invoice.
+const approveReadyCockpit = cockpitSendReady();
+approveReadyCockpit.status = "NEEDS_REVIEW";
+approveReadyCockpit.sections.status = {
+  status: "NEEDS_REVIEW",
+  stale: false,
+  reasons: [],
+};
+approveReadyCockpit.controls.approve_invoice = {
+  enabled: true,
+  label: "APPROVE INVOICE",
+  // no plan -> the hardcoded default note is what the captain reads
+};
+approveReadyCockpit.controls.send_it = { enabled: false, label: "SEND IT" };
+behaviour.fetch["query_ses_review_cockpit"] = approveReadyCockpit;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const approveHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "Option B: neither the next action nor the APPROVE note claims it CREATES the invoice",
+  !/creates the real Xero invoice/i.test(approveHtml) &&
+    !/creates the invoice in Xero/i.test(approveHtml) &&
+    approveHtml.includes(
+      "authorises the Xero draft invoice already prepared for this pack",
+    ) &&
+    approveHtml.includes(
+      "Authorises the Xero draft invoice already prepared for the figures on the Invoice tab.",
+    ),
 );
 
 // ── 12. Queue/cockpit disagreement + no SES docket: honest states ───────────

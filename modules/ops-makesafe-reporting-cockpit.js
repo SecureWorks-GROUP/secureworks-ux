@@ -862,9 +862,9 @@ function _msSesMissingLine(row, ctx) {
 
 /**
  * Merge the live feed row (identity facts) with the SES-derived review content
- * into the row shape the shared renderers (doc tabs, invoice review, source
- * evidence) consume. Legacy send fields are stripped so no legacy gate can
- * pick them up.
+ * into the row shape the shared renderers (the document tabs, the invoice
+ * document on the stage, the missing-documents line) consume. Legacy send
+ * fields are stripped so no legacy gate can pick them up.
  */
 function _msSesSynthRow(jobId, ctx) {
   var base = _msReportingCache[jobId] || { job_id: jobId };

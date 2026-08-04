@@ -11903,14 +11903,21 @@ function mapCanonicalMakesafeRow(row, enrich) {
   var lineage = row.lineage || {};
   var docs = pack.closeout_documents || {};
 
-  // `enriched` gates the degraded-path guesses below. When the close-out join is
-  // present its values are authoritative for those fields and are never
-  // second-guessed, so an enriched card renders exactly as it did before.
+  // `enriched` gates the pipeline dual-fetch join. Card-shaped board rows
+  // (fields=card) stamp the same presentation keys on the canonical row itself,
+  // so a second makesafe_pipeline call is no longer required for board paint.
   var enriched = !!enrich;
   var j = {};
   if (enriched) {
     MAKESAFE_ENRICH_FIELDS.forEach(function(k) {
       if (enrich[k] !== undefined) j[k] = enrich[k];
+    });
+  } else {
+    // Card-shape presentation: copy only the known enrich keys the row already
+    // carries. Never invent values — absent keys stay unset for the fallbacks
+    // below.
+    MAKESAFE_ENRICH_FIELDS.forEach(function(k) {
+      if (row[k] !== undefined) j[k] = row[k];
     });
   }
 
@@ -11932,19 +11939,25 @@ function mapCanonicalMakesafeRow(row, enrich) {
   j.captain_action = row.captain_action || null;
   if (row.projection_warning) j.projection_warning = row.projection_warning;
 
-  j.client_name = contact.client_name || null;
-  j.client_phone = contact.phone || null;
+  j.client_name = j.client_name || contact.client_name || row.client_name || null;
+  j.client_phone = j.client_phone || contact.phone || row.client_phone || null;
   j.contact = contact;
-  if (!j.site_address) j.site_address = contact.address || null;
-  if (!enriched) j.site_suburb = makesafeSuburbFromAddress(contact.address);
+  if (!j.site_address) j.site_address = row.site_address || contact.address || null;
+  if (!j.site_suburb) {
+    j.site_suburb = row.site_suburb || makesafeSuburbFromAddress(contact.address) || null;
+  }
 
   j.builder = builder;
   j.external_ref = builder.external_ref || lineage.builder_claim_ref || null;
-  if (!j.requesting_company_name) j.requesting_company_name = builder.name || null;
-  // The canonical feed carries no company slug and the SWMS chip branches on it,
-  // so guess from the builder name — but only when there is no enriched row to
-  // ask. A present-but-null enriched slug is an answer, not a gap.
-  if (!enriched) j.requesting_company_slug = makesafeCompanySlugFallback(builder.name);
+  if (!j.requesting_company_name) {
+    j.requesting_company_name = row.requesting_company_name || builder.name || null;
+  }
+  // Prefer the board's stamped slug (card shape / enrich). Only guess from the
+  // builder name when neither supplied one — SWMS chip needs mlb specifically.
+  if (j.requesting_company_slug == null || j.requesting_company_slug === '') {
+    j.requesting_company_slug = row.requesting_company_slug ||
+      makesafeCompanySlugFallback(builder.name);
+  }
   j.lineage = lineage;
 
   // Crew is canonical: the feed's assignment rows are the only crew source, so a
@@ -11959,7 +11972,9 @@ function mapCanonicalMakesafeRow(row, enrich) {
   j.has_report_doc = docs.report === true;
   j.has_invoice_doc = docs.invoice === true;
   j.has_swms_doc = docs.swms === true;
-  if (typeof j.has_wo !== 'boolean') j.has_wo = false;
+  if (typeof j.has_wo !== 'boolean') {
+    j.has_wo = row.has_wo === true;
+  }
 
   // The canonical feed states missing close-out docs as a blocker, which is the
   // list the doc chips' "missing (expected)" state wants.
@@ -11970,12 +11985,17 @@ function mapCanonicalMakesafeRow(row, enrich) {
       missing = missing.concat(b.documents);
     }
   });
-  j.missing_docs = missing;
+  if (!j.missing_docs || !j.missing_docs.length) j.missing_docs = missing;
 
-  // No canonical carrier for invoice_status. On the degraded path say only what
-  // the close-out doc evidence supports; the chip then reads "not ready yet"
-  // rather than inventing a paid/invoiced state.
-  if (!j.invoice_status) j.invoice_status = docs.invoice === true ? 'invoiced' : '';
+  // Prefer stamped invoice_status (card shape / enrich). Degraded fallback only
+  // says what the close-out doc evidence supports — never invents paid.
+  if (!j.invoice_status) {
+    j.invoice_status = row.invoice_status ||
+      (docs.invoice === true ? 'invoiced' : '');
+  }
+  if (!j.invoice_raw_status && row.invoice_raw_status) {
+    j.invoice_raw_status = row.invoice_raw_status;
+  }
 
   j.age_hours = (age.age_hours != null) ? age.age_hours : null;
   j.age_days = (age.age_days != null) ? age.age_days : null;
@@ -11987,6 +12007,17 @@ function mapCanonicalMakesafeRow(row, enrich) {
     if (cancelled.note) j.cancel_note = cancelled.note;
     if (cancelled.by) j.cancelled_by = cancelled.by;
     if (cancelled.at) j.cancelled_at = cancelled.at;
+  }
+  if (!j.cancel_reason && row.cancel_reason) j.cancel_reason = row.cancel_reason;
+  if (!j.cancel_note && row.cancel_note) j.cancel_note = row.cancel_note;
+  if (!j.cancelled_by && row.cancelled_by) j.cancelled_by = row.cancelled_by;
+  if (!j.cancelled_at && row.cancelled_at) j.cancelled_at = row.cancelled_at;
+  if (j.intake_at == null && row.intake_at) j.intake_at = row.intake_at;
+  if (j.created_at == null && row.created_at) j.created_at = row.created_at;
+  if (j.resume_action == null && row.resume_action) j.resume_action = row.resume_action;
+  if (j.pack_status == null && row.pack_status) j.pack_status = row.pack_status;
+  if (j.needs_money_review == null && row.needs_money_review === true) {
+    j.needs_money_review = true;
   }
 
   j.cycle_number = row.cycle_number != null ? row.cycle_number : null;
@@ -12043,32 +12074,69 @@ function buildMakesafeBoardColumns(payload, enrichById) {
 var _makesafeBoardPayload = null;
 var _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
 
+// True when the board payload already carries the close-out presentation the
+// card paints, so the makesafe_pipeline dual-fetch is not load-bearing.
+//
+// ONLY two honest signals:
+//   1. Explicit card contract: shape/fields === 'card' (backend perf v1).
+//   2. Every row stamps `has_wo` as a boolean — the presentation field the
+//      card-shape projector always emits (boardPresentationFields). A pre-perf
+//      full row never carried top-level has_wo; it had pack.closeout_documents
+//      only. Treating pack presence as self-sufficiency was a fake-green: the
+//      dual-fetch would be skipped, partial-join warnings became unreachable,
+//      and incomplete close-out chips went silent.
+function makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows) {
+  if (!payload) return false;
+  if (payload.shape === 'card' || payload.fields === 'card') return true;
+  if (!canonicalRows || !canonicalRows.length) return false;
+  return canonicalRows.every(function(row) {
+    return row && typeof row.has_wo === 'boolean';
+  });
+}
+
 async function fetchMakesafeBoardData() {
-  var results = await Promise.all([
-    opsFetch('makesafe_board', { projection: 'ops' }),
-    // Decoration only — never blocks the board. See <makesafe-board-canonical>.
-    opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
-      console.warn('Make-safe board: close-out enrichment unavailable:', e && e.message);
-      return null;
-    })
-  ]);
-  var payload = results[0] || {};
+  // Card-shaped ops board (default since makesafe-board-perf-v1) stamps the
+  // presentation keys the card paints (has_wo, invoice_status, site_suburb, …)
+  // onto each row, so the historical makesafe_pipeline?history=all dual-fetch
+  // is no longer required for board paint. That second call was ~2.3 MB and
+  // re-ran the same pipeline the board already ran server-side.
+  //
+  // Fallback: if the response is still the pre-perf full shape (no card marker
+  // and no presentation stamps), re-join the pipeline as before so a stale edge
+  // deploy does not blank the doc chips — and so a PARTIAL join still announces
+  // itself rather than silently painting incomplete cards.
+  var payload = await opsFetch('makesafe_board', { projection: 'ops' });
   if (payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
     throw new Error('Unsupported make-safe board contract: ' + (payload.contract_version || 'none'));
   }
-  var enrich = results[1];
-  var enrichById = {};
-  Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
-    (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
-  });
   var canonicalRows = [];
   Object.keys(payload.columns || {}).forEach(function(stage) {
     (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
   });
-  var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
-  _makesafeBoardEnrichState = !enrich
-    ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
-    : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
+  var selfSufficient = makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows);
+  var enrichById = {};
+  if (!selfSufficient) {
+    var enrich = await opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
+      console.warn('Make-safe board: close-out enrichment unavailable:', e && e.message);
+      return null;
+    });
+    Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
+      (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
+    });
+    var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
+    _makesafeBoardEnrichState = !enrich
+      ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
+      : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
+  } else {
+    // No join ran; partial/failed enrichment is structurally unreachable.
+    _makesafeBoardEnrichState = {
+      status: 'covered',
+      missing: 0,
+      total: canonicalRows.length,
+      source: 'card_shape',
+      join: 'skipped',
+    };
+  }
   _makesafeBoardPayload = payload;
   // This load IS a current canonical read, and buildMakesafeBoardColumns has just
   // remembered every row's stage and pack from it. Satisfy the detail's lookup

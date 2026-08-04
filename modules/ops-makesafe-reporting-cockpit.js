@@ -899,16 +899,39 @@ function _msSesDocsFromArtifacts(artifacts) {
   var source = [];
   var photos = [];
   (artifacts || []).forEach(function(a) {
-    if (!a || !a.signed_url) return;
+    if (!a) return;
     var fileName = String(a.object_key || '').split('/').pop() || 'Document';
     var label = fileName.replace(/\.[a-z0-9]+$/i, '');
     var meta = a.metadata || {};
+    // Bound Xero invoice: real PDF when signed_url is present; honest
+    // "unavailable" when the pack marks pdf_unavailable. Never invent HTML.
+    if (a.role === 'xero_invoice_pdf') {
+      if (a.signed_url) {
+        draft.push({
+          label: 'Xero invoice',
+          url: a.signed_url,
+          kind: 'pdf',
+          isDraft: true,
+          xero_invoice_id: meta.xero_invoice_id || null,
+          invoice_number: meta.invoice_number || null,
+        });
+      } else if (a.pdf_unavailable === true || meta.unavailable === true || meta.reason === 'xero_draft_pdf_unavailable') {
+        draft.push({
+          label: 'Xero invoice',
+          url: null,
+          kind: 'invoice_unavailable',
+          isDraft: true,
+          xero_invoice_id: meta.xero_invoice_id || null,
+          invoice_number: meta.invoice_number || null,
+        });
+      }
+      return;
+    }
+    if (!a.signed_url) return;
     if (a.role === 'supporting_report_pdf') {
-      draft.push({ label: 'Make safe report', url: a.signed_url, kind: 'pdf' });
-    } else if (a.role === 'xero_invoice_pdf') {
-      draft.push({ label: 'Xero invoice', url: a.signed_url, kind: 'pdf' });
+      draft.push({ label: 'Make safe report', url: a.signed_url, kind: 'pdf', isDraft: true });
     } else if (a.role === 'swms_artifact') {
-      draft.push({ label: 'SWMS', url: a.signed_url, kind: 'pdf' });
+      draft.push({ label: 'SWMS', url: a.signed_url, kind: 'pdf', isDraft: true });
     } else if (a.role === 'source_attachment') {
       source.push({ label: label, url: a.signed_url, kind: _msSesMediaKind(a.media_type, a.object_key) });
     } else if (a.role === 'completion_photo' || a.role === 'sibling_photo_evidence') {
@@ -953,7 +976,9 @@ function _msSesMapInvoice(ctx) {
   var money = sections.money || {};
   var proposal = (ctx.pack && ctx.pack.docket && ctx.pack.docket.local_invoice_proposal) ||
     money.local_invoice_proposal || null;
-  var xero = (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || money.xero || null;
+  var xero = (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) ||
+    money.xero || money.bound_invoice || null;
+  var packInvoicePdf = (ctx.pack && ctx.pack.invoice_pdf) || null;
   if (!proposal && !xero) return null;
   var lines = [];
   if (proposal && Array.isArray(proposal.line_items)) {
@@ -967,9 +992,21 @@ function _msSesMapInvoice(ctx) {
       };
     });
   }
+  var boundXeroId = (xero && (xero.xero_invoice_id || xero.id)) ||
+    (packInvoicePdf && packInvoicePdf.xero_invoice_id) || null;
+  var xeroStatus = xero ? String(xero.status || 'BOUND').toUpperCase() : '';
+  // A live Xero identity means the Invoice tab must show the real PDF (or say
+  // it is unavailable) — never the local proposal table as if it were INV-n.
+  var boundXero = !!(boundXeroId || (xeroStatus && xeroStatus !== 'SES PROPOSAL (NOT YET IN XERO)'));
   return {
-    invoice_number: (xero && xero.invoice_number) || null,
+    invoice_number: (xero && xero.invoice_number) ||
+      (packInvoicePdf && packInvoicePdf.invoice_number) || null,
+    xero_invoice_id: boundXeroId,
     status: xero ? (xero.status || 'BOUND') : 'SES proposal (not yet in Xero)',
+    bound_xero: boundXero,
+    pdf_available: packInvoicePdf
+      ? packInvoicePdf.pdf_unavailable !== true
+      : !!(xero && xero.pdf_content_hash),
     lines: lines,
     total_ex_gst: proposal ? proposal.subtotal_ex_gst : null,
     total_inc_gst: proposal ? proposal.total_inc_gst : null,
@@ -1259,11 +1296,24 @@ function _msReportingDocTabs(d) {
       o.tabLabel = po ? ('Work Order ' + po) : ('Work Order ' + (i + 1));
     });
   }
-  // The invoice is ALWAYS a document: when no invoice PDF is bound yet, the
-  // drafted proposal renders as an invoice page on the stage (kind 'invdoc').
+  // Invoice tab rules (honest document, never a fake green):
+  // - Real Xero PDF artifact → already pushed as Invoice/pdf above.
+  // - Bound Xero DRAFT/AUTHORISED without PDF → "not available" (never invent).
+  // - Pre-Xero proposal only → local invdoc page labelled as a proposal, not INV-n.
   var hasInvoiceTab = out.some(function(o) { return o.isInvoiceDoc; });
   if (!hasInvoiceTab && d && d.invoice) {
-    out.push({ tabLabel: 'Invoice', url: null, kind: 'invdoc', isInvoiceDoc: true });
+    if (d.invoice.bound_xero) {
+      out.push({
+        tabLabel: 'Invoice',
+        url: null,
+        kind: 'invoice_unavailable',
+        isInvoiceDoc: true,
+        invoice_number: d.invoice.invoice_number || null,
+        xero_invoice_id: d.invoice.xero_invoice_id || null,
+      });
+    } else {
+      out.push({ tabLabel: 'Invoice', url: null, kind: 'invdoc', isInvoiceDoc: true });
+    }
   }
   // Order: report first (the main document), money second, then the rest.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
@@ -1294,7 +1344,11 @@ function _msRenderDocStage(docTabs, idx, row) {
       + '</div>'
     : '';
   var inner;
-  if (t && t.kind === 'invdoc') {
+  if (t && t.kind === 'invoice_unavailable') {
+    inner = _msSesRenderInvoiceUnavailable(row || t);
+  } else if (t && t.kind === 'invdoc') {
+    // Pre-Xero proposal page only. Callers must not route a bound Xero DRAFT
+    // here — that path is invoice_unavailable or the real PDF iframe.
     inner = _msSesRenderInvoiceDoc(row);
   } else if (!t || !t.url) {
     if (t && (t.kind === 'html' || t.raw_report)) {
@@ -1313,22 +1367,46 @@ function _msRenderDocStage(docTabs, idx, row) {
 }
 
 /**
- * The drafted invoice AS A DOCUMENT: an invoice page rendered on the stage
- * from the SES proposal figures (or the Xero binding facts when present but
- * the PDF is not in this pack). Read-only presentation of backend numbers —
- * figure changes go through Feedback, never a send-time edit.
+ * Honest empty state when a Xero DRAFT/AUTHORISED is bound but its PDF could
+ * not be recovered. Never invent a tax-invoice HTML table that looks like INV-n.
+ */
+function _msSesRenderInvoiceUnavailable(d) {
+  var inv = (d && d.invoice) || d || {};
+  var number = inv.invoice_number || inv.invoiceNumber || null;
+  var status = inv.status || null;
+  var html = '<div class="msr-invpage" style="display:flex;align-items:center;justify-content:center;">';
+  html += '<div class="msr-invpage-body" style="text-align:center;max-width:28rem;">';
+  html += '<div class="msr-invpage-head" style="justify-content:center;"><h4>Invoice document not available</h4></div>';
+  if (number || status) {
+    html += '<div class="msr-invpage-note" style="margin-top:8px;">';
+    html += escapeHtml([number, status].filter(Boolean).join(' · '));
+    html += ' is bound in Xero, but the real PDF could not be loaded for this view.</div>';
+  } else {
+    html += '<div class="msr-invpage-note" style="margin-top:8px;">The real Xero invoice PDF could not be loaded for this view.</div>';
+  }
+  html += '<div class="msr-invpage-foot" style="margin-top:12px;">This screen will not invent a tax invoice. Retry after the pack reloads, or open the invoice from Xero.</div>';
+  html += '</div></div>';
+  return html;
+}
+
+/**
+ * Pre-Xero proposal only: an invoice-shaped page from SES proposal figures.
+ * Must never run when a live Xero DRAFT/AUTHORISED is bound — that is a
+ * different document (the real PDF) or an honest unavailable state.
  */
 function _msSesRenderInvoiceDoc(d) {
   var inv = (d && d.invoice) || {};
+  // Defence in depth: bound Xero identity never renders the proposal table.
+  if (inv.bound_xero || inv.xero_invoice_id) {
+    return _msSesRenderInvoiceUnavailable(d);
+  }
   var lines = Array.isArray(inv.lines) ? inv.lines : [];
-  var statusLine = inv.invoice_number
-    ? escapeHtml(inv.invoice_number) + (inv.status ? ' &middot; ' + escapeHtml(inv.status) : '')
-    : 'DRAFT &mdash; SES proposal, not yet in Xero';
+  var statusLine = 'SES proposal &mdash; not yet a Xero invoice';
 
   var html = '<div class="msr-invpage">';
   html += '<div class="msr-invpage-band"></div>';
   html += '<div class="msr-invpage-body">';
-  html += '<div class="msr-invpage-head"><h4>Tax Invoice</h4><span class="msr-invpage-status">' + statusLine + '</span></div>';
+  html += '<div class="msr-invpage-head"><h4>Proposed invoice</h4><span class="msr-invpage-status">' + statusLine + '</span></div>';
   if (lines.length) {
     html += '<table class="msr-invpage-tbl"><thead><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit ex</th><th class="n">Amount ex</th></tr></thead><tbody>';
     lines.forEach(function(li, idx) {
@@ -1352,7 +1430,7 @@ function _msSesRenderInvoiceDoc(d) {
   if (inv.total_ex_gst != null) html += '<div class="row"><span>Subtotal ex GST</span><span>' + escapeHtml(_msFmtAud(inv.total_ex_gst)) + '</span></div>';
   if (inv.total_inc_gst != null) html += '<div class="row tot"><span>Total inc GST</span><span>' + escapeHtml(_msFmtAud(inv.total_inc_gst)) + '</span></div>';
   html += '</div>';
-  html += '<div class="msr-invpage-foot">Figures are read-only here. To change pricing, say so in Feedback &mdash; the next pack rebuild re-prices before anything is approved.</div>';
+  html += '<div class="msr-invpage-foot">This is the internal proposal, not a Xero invoice. After mint, the Invoice tab shows the real Xero PDF. To change pricing, say so in Feedback.</div>';
   html += '</div></div>';
   return html;
 }
@@ -1456,15 +1534,16 @@ function _msReportingBuildCarouselDocs(d) {
   var seen = {};
   function add(label, url, kind, meta, isDraft) {
     meta = meta || {};
-    if (!url && !meta.raw_report && kind !== 'html') return;
+    // invoice_unavailable has no URL by design — honest empty state, not a fake.
+    if (!url && !meta.raw_report && kind !== 'html' && kind !== 'invoice_unavailable') return;
     var dedupeKey = url || [label || 'Document', meta.source_type || kind || '', meta.received_at || meta.created_at || ''].join('|');
     if (seen[dedupeKey]) return;
     seen[dedupeKey] = true;
     var k = kind || _msReportingDocKind(url);
     // For PDFs, append #view=Fit so the iframe opens to the whole page, not fit-width.
     var displayUrl = url;
-    if (k === 'pdf' && url.indexOf('#') === -1) {
-      displayUrl = url + '#view=Fit';
+    if (k === 'pdf' && displayUrl && displayUrl.indexOf('#') === -1) {
+      displayUrl = displayUrl + '#view=Fit';
     }
     out.push({
       label: label || 'Document',
@@ -1476,6 +1555,8 @@ function _msReportingBuildCarouselDocs(d) {
       received_at: meta.received_at || meta.created_at || null,
       source_type: meta.source_type || null,
       raw_report: meta.raw_report || null,
+      xero_invoice_id: meta.xero_invoice_id || null,
+      invoice_number: meta.invoice_number || null,
     });
   }
   // Drafted outputs first.
@@ -1489,10 +1570,12 @@ function _msReportingBuildCarouselDocs(d) {
   return out;
 }
 
-// Normalise a feed kind ('pdf'|'image'|'html') to the viewer's kind vocabulary.
-// Unknown kinds get classified by URL.
+// Normalise a feed kind to the viewer's kind vocabulary.
+// Unknown kinds get classified by URL (null → doc-kind from URL).
 function _msReportingNormaliseKind(kind) {
-  if (kind === 'pdf' || kind === 'image' || kind === 'html') return kind;
+  if (kind === 'pdf' || kind === 'image' || kind === 'html' || kind === 'invoice_unavailable') {
+    return kind;
+  }
   return null;
 }
 

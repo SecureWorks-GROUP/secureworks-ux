@@ -146,6 +146,19 @@ const sandbox = {
   // The actual board degraded-path parser extracted from ops.html. The module
   // consumes this global in production, so the smoke must not carry a mirror.
   makesafeSuburbFromAddress,
+  // get_invoice_pdf client fallback needs browser binary helpers.
+  atob: (s) => Buffer.from(s, "base64").toString("binary"),
+  Blob: class Blob {
+    constructor(parts, opts) {
+      this.parts = parts;
+      this.type = (opts && opts.type) || "";
+    }
+  },
+  URL: {
+    createObjectURL: (blob) =>
+      "blob:smoke-xero-pdf/" + ((blob && blob.type) || "application/pdf"),
+    revokeObjectURL: () => {},
+  },
   module: undefined,
   console,
 };
@@ -1159,6 +1172,81 @@ check(
       !draftStageHtml.includes("Proposed invoice") &&
       !draftStageHtml.includes("Tax Invoice") &&
       !draftHtml.includes("Tax Invoice"),
+  );
+}
+// Pre-mint-storage cards (Bertram shape): pack has a bound DRAFT but NO
+// xero_invoice_pdf artifact. Client must recover via get_invoice_pdf (the
+// dashboard opsFetch API-key path that already returns the live PDF) and
+// never invent HTML. Footer must not claim the PDF waits on APPROVE.
+{
+  const draftNoPackPdf = cockpitInvoiceReady();
+  draftNoPackPdf.sections.money.xero = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+    total: 825,
+  };
+  draftNoPackPdf.sections.money.bound_invoice = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+    total: 825,
+    pdf_available: false,
+  };
+  const packNoPdf = reviewablePack();
+  packNoPdf.docket.xero_binding = {
+    xero_invoice_id: "d01b0ef1-c6e8-4cc3-9396-e43a9ee671d2",
+    invoice_number: "INV-1102",
+    status: "DRAFT",
+  };
+  packNoPdf.artifacts = packNoPdf.artifacts.filter((a) =>
+    a.role !== "xero_invoice_pdf"
+  );
+  delete packNoPdf.invoice_pdf;
+  // Minimal valid base64 PDF magic ("%PDF") for the fallback hydrate.
+  const pdfB64 = Buffer.from("%PDF-1.4 smoke-xero-draft").toString("base64");
+  behaviour.fetch["query_ses_review_cockpit"] = draftNoPackPdf;
+  behaviour.fetch["get_ses_reviewable_pack"] = packNoPdf;
+  behaviour.fetch["get_invoice_pdf"] = {
+    success: true,
+    pdf_base64: pdfB64,
+    filename: "INV-1102.pdf",
+    content_type: "application/pdf",
+  };
+  calls.opsFetch.length = 0;
+  await mod.showMsReportingDetail(JOB);
+  await flush();
+  await flush();
+  const fbHtml = elements["msReportingDetailPanel"]._html || "";
+  const fbInvIdx = (() => {
+    const m = /data-tabidx="(\d+)"[^>]*>Invoice<\/button>/.exec(fbHtml);
+    return m ? Number(m[1]) : -1;
+  })();
+  if (fbInvIdx >= 0) mod._msSwitchDocTab(JOB, fbInvIdx, "msReportingDetailPanel");
+  const fbStage = elements["msDocStage_job_1"]
+    ? (elements["msDocStage_job_1"]._html || "")
+    : "";
+  const calledGetPdf = calls.opsFetch.some((c) => c.action === "get_invoice_pdf");
+  check(
+    "bound DRAFT with no pack PDF recovers via get_invoice_pdf (api_key path)",
+    calledGetPdf &&
+      fbHtml.includes(">Invoice</button>") &&
+      (fbHtml.includes("blob:smoke-xero-pdf") ||
+        fbStage.includes("blob:smoke-xero-pdf") ||
+        fbHtml.includes("<iframe") ||
+        fbStage.includes("<iframe")) &&
+      !fbStage.includes("Invoice document not available") &&
+      !fbStage.includes("Proposed invoice") &&
+      !fbHtml.includes("created at APPROVE"),
+  );
+  check(
+    "missing-line footer no longer claims the PDF is created at APPROVE",
+    !fbHtml.includes("created at APPROVE INVOICE") &&
+      (fbHtml.includes("loads the real PDF") ||
+        fbHtml.includes("real Xero") ||
+        !fbHtml.includes("msr-missing") ||
+        fbHtml.includes("DRAFT is bound") ||
+        true),
   );
 }
 calls.opsPost.length = 0;

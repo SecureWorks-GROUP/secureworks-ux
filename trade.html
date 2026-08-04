@@ -18680,6 +18680,18 @@
       row = row || {};
       return norm(row.status) === 'available' || norm(row.assignment_type) === 'fencing_open';
     }
+    // A GHOST/OBSERVER ROW IS A WATCHER, NOT FIELD WORK, AND NEVER SPEAKS FOR THE
+    // SCHEDULE. Ops staff are mirrored onto a job as `role:'observer'` so it shows
+    // in their own list; those rows are NOT moved when the crew's real assignment
+    // is rescheduled, so their date goes stale the moment anyone drags the job on
+    // the Ops Dash calendar. Every other schedule surface already excludes them:
+    // the Ops Dash calendar AND the Trade calendar both read the `calendar_events`
+    // view, which is defined `WHERE is_ghost = false`. The Board is the one
+    // surface reading `my_jobs` (raw `job_assignments`, unfiltered), so it has to
+    // apply the same rule here or a rescheduled job keeps the observer's old date.
+    // Match on `role` because that is what the feed publishes — `is_ghost` is not
+    // in the payload — and the two agree on every live row.
+    function isObserverRow(row) { return norm((row || {}).role) === 'observer'; }
     function isFencingRow(row) {
       row = row || {};
       var jobType = norm((row.jobs || {}).type);
@@ -18726,10 +18738,13 @@
     function buildBoard(data, makeCard, orgId) {
       data = data || {};
       makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row, _boardRow: row }; };
-      var assigned = [], pool = [];
+      var assigned = [], pool = [], observerRowsDropped = 0;
       ['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool'].forEach(function (bucket) {
         (data[bucket] || []).forEach(function (row) {
           if (!isFencingRow(row) || !isSameOrg(row, orgId)) return;
+          // Dropped before the pool/assigned split so an observer row can never
+          // become a card, a crew name, or the row an Allocate write targets.
+          if (isObserverRow(row)) { observerRowsDropped++; return; }
           if (isPoolRow(row)) pool.push(row);
           else assigned.push(row);
         });
@@ -18797,7 +18812,8 @@
         unmappedCount: unmappedCount,
         assignedCount: assignedRows.length,
         poolCount: poolRows.length,
-        poolMergedIntoAssigned: poolMergedIntoAssigned
+        poolMergedIntoAssigned: poolMergedIntoAssigned,
+        observerRowsDropped: observerRowsDropped
       };
     }
 
@@ -18878,7 +18894,7 @@
 
     return {
       COLUMNS: COLUMNS, COLUMN_MAP: COLUMN_MAP,
-      isPoolRow: isPoolRow, isFencingRow: isFencingRow, isSameOrg: isSameOrg,
+      isPoolRow: isPoolRow, isObserverRow: isObserverRow, isFencingRow: isFencingRow, isSameOrg: isSameOrg,
       terminalColumn: terminalColumn, columnOf: columnOf,
       canAllocate: canAllocate, buildBoard: buildBoard,
       addDays: addDays, weekStart: weekStart, weekLabel: weekLabel, forSelection: forSelection

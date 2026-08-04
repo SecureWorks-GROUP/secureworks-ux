@@ -100,14 +100,38 @@ function activeScopePayload() {
   };
 }
 
-/** Full board after include_archive=1. */
+/**
+ * Full board after include_archive=1. The census and the cards must agree — a
+ * response carrying fewer cards than it counts is the PARTIAL case below, not
+ * this one.
+ */
 function fullScopePayload() {
+  const base = activeScopePayload();
+  const arch = [];
+  for (let i = 1; i <= 301; i++) arch.push(archiveRow(`job-arch-${i}`, `SWMS-ARCH-${i}`));
+  base.columns.archive = arch;
+  base.rows = base.rows.concat(arch);
+  base.column_scope = 'all';
+  base.archive = {
+    included: true,
+    scope: 'all',
+    total: 301,
+    returned: arch.length,
+    offset: 0,
+    limit: null,
+    fetch: base.archive.fetch,
+  };
+  base.parity = { ok: true, checked: 305, errors: [] };
+  return base;
+}
+
+/** Server capped the archive page: 2 cards returned against a 301 census. */
+function partialScopePayload() {
   const base = activeScopePayload();
   const arch = [
     archiveRow('job-arch-1', 'SWMS-ARCH-1'),
     archiveRow('job-arch-2', 'SWMS-ARCH-2'),
   ];
-  // Two sample cards represent the 301-total census for the test harness.
   base.columns.archive = arch;
   base.rows = base.rows.concat(arch);
   base.column_scope = 'all';
@@ -117,10 +141,9 @@ function fullScopePayload() {
     total: 301,
     returned: 2,
     offset: 0,
-    limit: null,
+    limit: 2,
     fetch: base.archive.fetch,
   };
-  base.parity = { ok: true, checked: 6, errors: [] };
   return base;
 }
 
@@ -270,7 +293,7 @@ test('Load archive requests include_archive=1 and paints cards without zeroing t
   expect(result.afterLoadState).toBe('loaded');
   expect(result.afterCount).toBe('301');
   expect(result.afterCount).not.toBe('0');
-  expect(result.archiveLen).toBe(2);
+  expect(result.archiveLen).toBe(301);
   expect(result.bodyHasArch1).toBe(true);
   expect(result.bodyHasArch2).toBe(true);
   expect(result.bodyNotLoaded).toBe(false);
@@ -368,6 +391,260 @@ test('legacy full board (no column_scope) still treats archive as loaded', async
   expect(result.displayCount).toBe(1);
   expect(result.hasNotLoaded).toBe(false);
   expect(result.bodyText).toContain('SWMS-LEGACY');
+});
+
+test('a capped archive page is partial, never badged as the whole census', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, partialPayload }) => {
+    const realFetch = window.opsFetch;
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        return Promise.resolve(params && String(params.include_archive) === '1'
+          ? partialPayload : activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      _pipelineTab = 'makesafes';
+      _pipelineData = await fetchMakesafeBoardData();
+      _makesafeArchiveVisible = true;
+      await loadMakesafeArchive();
+      const container = document.createElement('div');
+      renderMakesafeKanban(container, _pipelineData.columns);
+      const col = container.querySelector('.kanban-col[data-status="archive"]');
+      const body = col.querySelector('.kanban-body');
+      return {
+        state: JSON.parse(JSON.stringify(_makesafeArchiveState)),
+        headerCount: col.querySelector('.count').textContent,
+        displayCount: makesafeArchiveDisplayCount(),
+        loadedCount: makesafeArchiveLoadedCount(),
+        bodyText: body.textContent,
+        hasPartialShell: !!body.querySelector('[data-archive-state="partial"]'),
+        hasLoadControl: !!body.querySelector('.ms-archive-load-btn'),
+        showsCards: body.textContent.indexOf('SWMS-ARCH-1') !== -1,
+        toolbarText: (container.querySelector('[data-archive-total]') || {}).textContent || '',
+      };
+    } finally {
+      window.opsFetch = realFetch;
+      _pipelineTab = 'fencing';
+    }
+  }, { activePayload: activeScopePayload(), partialPayload: partialScopePayload() });
+
+  expect(result.state.loadState).toBe('partial');
+  expect(result.state.count).toBe(301);
+  expect(result.loadedCount).toBe(2);
+  // The badge must not claim 301 cards it does not have, nor hide that 301 exist.
+  expect(result.headerCount).toBe('2/301');
+  expect(result.displayCount).toBe(301);
+  expect(result.hasPartialShell).toBe(true);
+  expect(result.hasLoadControl).toBe(true);
+  expect(result.showsCards).toBe(true);
+  expect(result.bodyText).toMatch(/Showing 2 of 301/i);
+  expect(result.toolbarText).toMatch(/only 2 loaded/i);
+});
+
+test('a loaded archive survives the next board refresh (sticky include_archive)', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, fullPayload }) => {
+    const realFetch = window.opsFetch;
+    const calls = [];
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        calls.push(params && String(params.include_archive) === '1' ? 'with_archive' : 'active_only');
+        return Promise.resolve(params && String(params.include_archive) === '1' ? fullPayload : activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      _pipelineTab = 'makesafes';
+      _pipelineData = await fetchMakesafeBoardData();
+      _makesafeArchiveVisible = true;
+      await loadMakesafeArchive();
+      const afterLoad = {
+        state: _makesafeArchiveState.loadState,
+        archiveLen: (_pipelineData.columns.archive || []).length,
+      };
+
+      // What the 5-minute auto-refresh / any post-transition loadJobs does.
+      const refreshed = await fetchMakesafeBoardData();
+      _pipelineData = refreshed;
+      const afterRefresh = {
+        state: _makesafeArchiveState.loadState,
+        archiveLen: (refreshed.columns.archive || []).length,
+      };
+
+      // Closing the column is the one way to stop asking for history.
+      toggleMakesafeArchive();
+      const closed = await fetchMakesafeBoardData();
+      _pipelineData = closed;
+
+      return {
+        calls,
+        afterLoad,
+        afterRefresh,
+        wantedAfterClose: _makesafeArchiveWanted,
+        stateAfterClose: _makesafeArchiveState.loadState,
+        archiveLenAfterClose: (closed.columns.archive || []).length,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+      _pipelineTab = 'fencing';
+    }
+  }, { activePayload: activeScopePayload(), fullPayload: fullScopePayload() });
+
+  expect(result.afterLoad.state).toBe('loaded');
+  expect(result.afterLoad.archiveLen).toBe(301);
+  // The refresh must re-request the archive rather than silently drop it.
+  expect(result.afterRefresh.state).toBe('loaded');
+  expect(result.afterRefresh.archiveLen).toBe(301);
+  expect(result.calls.slice(0, 3)).toEqual(['active_only', 'with_archive', 'with_archive']);
+  // …and only an explicit close goes back to the on-demand shell.
+  expect(result.wantedAfterClose).toBe(false);
+  expect(result.calls[3]).toBe('active_only');
+  expect(result.stateAfterClose).toBe('not_loaded');
+  expect(result.archiveLenAfterClose).toBe(0);
+});
+
+test('a superseded board read does not clobber a newer one', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, fullPayload }) => {
+    const realFetch = window.opsFetch;
+    let releaseSlow;
+    const slow = new Promise((resolve) => { releaseSlow = resolve; });
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        const withArchive = params && String(params.include_archive) === '1';
+        // The active-scope read is the SLOW one, so it would resolve last.
+        return withArchive
+          ? Promise.resolve(fullPayload)
+          : slow.then(() => activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      const stalePromise = fetchMakesafeBoardData({ includeArchive: false });
+      const fresh = await fetchMakesafeBoardData({ includeArchive: true });
+      releaseSlow();
+      const stale = await stalePromise;
+      return {
+        staleIsNull: stale === null,
+        freshArchiveLen: (fresh.columns.archive || []).length,
+        state: _makesafeArchiveState.loadState,
+        count: _makesafeArchiveState.count,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+    }
+  }, { activePayload: activeScopePayload(), fullPayload: fullScopePayload() });
+
+  expect(result.staleIsNull).toBe(true);
+  expect(result.freshArchiveLen).toBe(301);
+  expect(result.state).toBe('loaded');
+  expect(result.count).toBe(301);
+});
+
+test('LIST view says the archived rows are missing and offers the same load control', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, fullPayload }) => {
+    const realFetch = window.opsFetch;
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        return Promise.resolve(params && String(params.include_archive) === '1' ? fullPayload : activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      _pipelineTab = 'makesafes';
+      _jobView = 'list';
+      _pipelineData = await fetchMakesafeBoardData();
+      const container = document.createElement('div');
+      renderJobList(container, _pipelineData.columns);
+      const notice = container.querySelector('.ms-archive-list-notice');
+      const before = {
+        hasNotice: !!notice,
+        state: notice && notice.getAttribute('data-archive-list-state'),
+        text: notice ? notice.textContent : '',
+        hasLoadBtn: !!(notice && notice.querySelector('.ms-archive-load-btn')),
+        rows: container.querySelectorAll('tbody tr').length,
+      };
+
+      await loadMakesafeArchive();
+      const after = document.createElement('div');
+      renderJobList(after, _pipelineData.columns);
+      return {
+        before,
+        afterHasNotice: !!after.querySelector('.ms-archive-list-notice'),
+        afterRows: after.querySelectorAll('tbody tr').length,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+      _pipelineTab = 'fencing';
+      _jobView = 'kanban';
+    }
+  }, { activePayload: activeScopePayload(), fullPayload: fullScopePayload() });
+
+  expect(result.before.hasNotice).toBe(true);
+  expect(result.before.state).toBe('not_loaded');
+  expect(result.before.text).toContain('301');
+  expect(result.before.text).toMatch(/not loaded/i);
+  expect(result.before.text).toMatch(/missing from this table/i);
+  expect(result.before.hasLoadBtn).toBe(true);
+  // Active rows only until the archive is loaded, then the rows appear and the
+  // notice goes away because nothing is hidden any more.
+  expect(result.before.rows).toBe(4);
+  expect(result.afterHasNotice).toBe(false);
+  expect(result.afterRows).toBe(305);
+});
+
+test('an archived job detail resolves its stage, not "Stage not confirmed"', async ({ page }) => {
+  await page.goto('/ops.html');
+
+  const result = await page.evaluate(async ({ activePayload, fullPayload }) => {
+    const realFetch = window.opsFetch;
+    const calls = [];
+    window.opsFetch = (action, params) => {
+      if (action === 'makesafe_board') {
+        const withArchive = !!(params && String(params.include_archive) === '1');
+        calls.push(withArchive ? 'with_archive' : 'active_only');
+        return Promise.resolve(withArchive ? fullPayload : activePayload);
+      }
+      return Promise.resolve({ columns: {} });
+    };
+    try {
+      // Default board load: active scope, so the archived job is not in the map.
+      await fetchMakesafeBoardData();
+      const beforeLookup = resolveMakesafeDetailStage({ job: { id: 'job-arch-1', type: 'makesafe' } });
+
+      await ensureMakesafeCanonicalStageForJob('job-arch-1');
+      const archived = resolveMakesafeDetailStage({ job: { id: 'job-arch-1', type: 'makesafe' } });
+
+      const callsAfterArchived = calls.length;
+      // An ACTIVE job is already covered — no second read for it.
+      await ensureMakesafeCanonicalStageForJob('job-alloc-1');
+      const active = resolveMakesafeDetailStage({ job: { id: 'job-alloc-1', type: 'makesafe' } });
+
+      return {
+        calls,
+        beforeLookup,
+        archived,
+        active,
+        extraCallsForActiveJob: calls.length - callsAfterArchived,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+    }
+  }, { activePayload: activeScopePayload(), fullPayload: fullScopePayload() });
+
+  expect(result.beforeLookup).toEqual({ stage: '', source: 'unknown' });
+  expect(result.archived).toEqual({ stage: 'archive', source: 'board_feed' });
+  expect(result.calls).toContain('with_archive');
+  // Active-column placement semantics untouched: still resolved from the default read.
+  expect(result.active).toEqual({ stage: 'allocated', source: 'board_feed' });
+  expect(result.extraCallsForActiveJob).toBe(0);
 });
 
 test('active column badges still use cards.length (untouched)', async ({ page }) => {

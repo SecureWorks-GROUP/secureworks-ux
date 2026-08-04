@@ -1742,18 +1742,27 @@
     .ms-board .ms-archive-not-loaded .ms-archive-not-loaded-hint {
       font-size: 11px; color: #64748B; margin: 0 0 10px; line-height: 1.35;
     }
-    .ms-board .ms-archive-load-btn {
+    .ms-archive-load-btn {
       display: inline-block; padding: 6px 12px; border: none; border-radius: 6px;
       background: #64748B; color: #fff; font-size: 11px; font-weight: 700;
       cursor: pointer;
     }
-    .ms-board .ms-archive-load-btn:hover { background: #475569; }
-    .ms-board .ms-archive-load-btn:disabled {
+    .ms-archive-load-btn:hover { background: #475569; }
+    .ms-archive-load-btn:disabled {
       opacity: 0.65; cursor: wait;
     }
-    .ms-board .ms-archive-load-error {
+    .ms-archive-load-error {
       color: #B91C1C; font-size: 11px; margin: 0 0 8px; word-break: break-word;
     }
+    /* Same honesty contract on the LIST view: archived rows that were not fetched
+       are announced above the table, never silently absent. */
+    .ms-archive-list-notice {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 12px; margin: 0 0 8px; border: 1px dashed #94A3B8;
+      border-radius: 8px; background: #F8FAFC; color: #475569; font-size: 12px;
+    }
+    .ms-archive-list-notice .ms-archive-list-title { font-weight: 700; color: #334155; }
+    .ms-archive-list-notice .ms-archive-list-hint { color: #64748B; font-size: 11px; }
 
     .next-step-bar {
       background: var(--sw-warm-100, #F8F6F3);
@@ -10274,7 +10283,10 @@ async function loadJobs() {
       if (_jobView === 'kanban') {
         await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
       }
+      // Returns null when a newer board read (e.g. an in-flight archive load)
+      // superseded this one — that read owns the paint, so do not clobber it.
       data = await fetchMakesafeBoardData();
+      if (!data) return;
     } else {
       var params = {};
       if (_jobFilter) params.type = _jobFilter;
@@ -10293,6 +10305,9 @@ async function loadJobs() {
     }
   } catch (e) {
     console.error('loadJobs error:', e);
+    // A board read that owned an in-flight archive load must not leave the
+    // Archive column stuck on "loading" with no way back.
+    if (_pipelineTab === 'makesafes') failMakesafeArchiveLoadIfPending(e);
     showToast('Failed to load jobs', 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadJobs()' }
     ]);
@@ -10859,15 +10874,19 @@ function renderMakesafeKanban(container, columns) {
   if (_makesafeArchiveVisible) {
     // Prefer the server census; cards.length is only trustworthy when loaded.
     var archiveTotal = makesafeArchiveDisplayCount();
+    var archiveLoadState = (_makesafeArchiveState || {}).loadState;
     var archiveTotalLabel = (archiveTotal === '?')
       ? 'count unknown'
       : (archiveTotal + ' total record' + (archiveTotal === 1 ? '' : 's'));
-    if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'not_loaded') {
+    if (archiveLoadState === 'not_loaded') {
       archiveTotalLabel += ' · not loaded';
-    } else if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'error') {
+    } else if (archiveLoadState === 'error') {
       archiveTotalLabel += ' · load failed';
-    } else if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') {
+    } else if (archiveLoadState === 'loading') {
       archiveTotalLabel += ' · loading';
+    } else if (archiveLoadState === 'partial') {
+      // The search box only ever searches what was fetched. Say how much that is.
+      archiveTotalLabel += ' · only ' + makesafeArchiveLoadedCount() + ' loaded (search covers those)';
     }
     html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 4px;">'
       + '<input id="msArchiveSearch" type="text" placeholder="Search archive — client, suburb, builder, ref…"'
@@ -10911,14 +10930,18 @@ function renderMakesafeKanban(container, columns) {
     var colHeader = STAGE_LABELS[status] || status;
     // Active columns: badge = cards present (unchanged).
     // Archive: badge = column_counts census when cards were not fetched — NEVER
-    // cards.length while not_loaded (that paints a fake 0).
+    // cards.length while not_loaded (that paints a fake 0) — and "loaded/total"
+    // whenever only part of the history is in hand.
     var countBadge;
     if (status === 'archive') {
       var archiveTotalBadge = makesafeArchiveDisplayCount();
       var filterActive = !!(_makesafeBoardSearch || _makesafeArchiveSearch);
-      var archiveLoaded = _makesafeArchiveState && _makesafeArchiveState.loadState === 'loaded';
-      if (archiveLoaded && filterActive && jobs.length !== allJobs.length) {
+      var archiveLoadedNow = (_makesafeArchiveState || {}).loadState === 'loaded';
+      if (archiveLoadedNow && filterActive && jobs.length !== allJobs.length) {
         countBadge = jobs.length + '/' + archiveTotalBadge;
+      } else if ((_makesafeArchiveState || {}).loadState === 'partial') {
+        countBadge = (filterActive && jobs.length !== allJobs.length ? jobs.length : makesafeArchiveLoadedCount())
+          + '/' + archiveTotalBadge;
       } else {
         countBadge = archiveTotalBadge;
       }
@@ -11422,18 +11445,31 @@ var _makesafeCancelledVisible = false; // M-F W1-E(c) — Cancelled column hidde
 // Backend default (column_scope=active) omits Archive cards but still publishes
 // column_counts.archive + archive meta. The UI must show the real total and a
 // load control — never paint "0" / "No jobs" as if history vanished.
-// loadState: 'unknown' | 'not_loaded' | 'loading' | 'loaded' | 'error'
+// loadState: 'unknown' | 'not_loaded' | 'loading' | 'loaded' | 'partial' | 'error'
+//
+// THREE HONESTY RULES, one state object, every make-safe job surface:
+//   1. a census the cards cannot back is never presented as cards ('?' beats 0);
+//   2. a page the server truncated (returned < total) is 'partial', so the badge
+//      reads "loaded/total" and never claims the whole archive; and
+//   3. once the Captain has asked for history, EVERY later board read keeps
+//      asking for it (_makesafeArchiveWanted) — the 5-minute auto-refresh and the
+//      post-transition loadJobs must not silently take the archive away again.
 var _makesafeArchiveState = {
   loadState: 'unknown',
   count: null,       // trustworthy total from column_counts / archive.total; null = unknown
+  loaded: 0,         // archive cards this response actually carried
   error: null,
   included: null,
   scope: null,
 };
+// Sticky across board refreshes: set when the Captain loads history, cleared only
+// when the Archive column is deliberately closed.
+var _makesafeArchiveWanted = false;
 
-// Derive archive load state from a makesafe_board envelope. Legacy payloads with
-// no column_scope / archive meta always included history, so treat them as loaded.
-function applyMakesafeArchiveStateFromPayload(payload) {
+// What a makesafe_board envelope says about its archive column. Pure read — it
+// commits nothing, so the canonical stage lookup can ask the same question of a
+// payload that must never touch board state.
+function makesafeArchiveScopeOfPayload(payload) {
   payload = payload || {};
   var counts = payload.column_counts || {};
   var meta = payload.archive || null;
@@ -11460,12 +11496,33 @@ function applyMakesafeArchiveStateFromPayload(payload) {
   }
   if (included && count == null) count = archiveCards.length;
 
-  _makesafeArchiveState = {
-    loadState: included ? 'loaded' : 'not_loaded',
-    count: count,
-    error: null,
+  // The cards in hand are what this UI can render, whatever the meta claims.
+  var loaded = included ? archiveCards.length : 0;
+  // A capped page (archive.returned / limit / offset) is NOT a full archive. Say
+  // so rather than badge the whole census over a truncated set.
+  var partial = !!(included && count != null && loaded < count);
+
+  return {
     included: included,
+    count: count,
+    loaded: loaded,
+    partial: partial,
     scope: scope,
+    complete: included && !partial,
+  };
+}
+
+// Derive archive load state from a makesafe_board envelope. Legacy payloads with
+// no column_scope / archive meta always included history, so treat them as loaded.
+function applyMakesafeArchiveStateFromPayload(payload) {
+  var info = makesafeArchiveScopeOfPayload(payload);
+  _makesafeArchiveState = {
+    loadState: info.included ? (info.partial ? 'partial' : 'loaded') : 'not_loaded',
+    count: info.count,
+    loaded: info.loaded,
+    error: null,
+    included: info.included,
+    scope: info.scope,
   };
   return _makesafeArchiveState;
 }
@@ -11475,7 +11532,7 @@ function applyMakesafeArchiveStateFromPayload(payload) {
 function makesafeArchiveDisplayCount() {
   var st = _makesafeArchiveState || {};
   if (st.count != null && isFinite(st.count)) return st.count;
-  if (st.loadState === 'loaded') {
+  if (st.loadState === 'loaded' || st.loadState === 'partial') {
     var cards = (_pipelineData && _pipelineData.columns && _pipelineData.columns.archive) || [];
     return cards.length;
   }
@@ -11483,23 +11540,61 @@ function makesafeArchiveDisplayCount() {
   return '?';
 }
 
+// How many archive cards are actually in hand right now. Recorded off the payload
+// that produced the state, so it does not depend on _pipelineData being current.
+function makesafeArchiveLoadedCount() {
+  var st = _makesafeArchiveState || {};
+  if (typeof st.loaded === 'number' && isFinite(st.loaded)) return st.loaded;
+  var cards = (_pipelineData && _pipelineData.columns && _pipelineData.columns.archive) || [];
+  return (st.loadState === 'loaded' || st.loadState === 'partial') ? cards.length : 0;
+}
+
+// "301" when the whole archive is accounted for, "2/301" when only part of it is.
+function makesafeArchiveCountBadge() {
+  var total = makesafeArchiveDisplayCount();
+  if ((_makesafeArchiveState || {}).loadState === 'partial') {
+    return makesafeArchiveLoadedCount() + '/' + total;
+  }
+  return total;
+}
+
 function syncMakesafeArchiveButton() {
   var btn = document.getElementById('btnMakesafeArchive');
   if (!btn) return;
+  var st = _makesafeArchiveState || {};
   var count = makesafeArchiveDisplayCount();
   var label = 'Archive';
-  if (count !== '?' || (_makesafeArchiveState && _makesafeArchiveState.loadState !== 'unknown')) {
-    label = 'Archive (' + count + ')';
+  if (count !== '?' || st.loadState !== 'unknown') {
+    label = 'Archive (' + makesafeArchiveCountBadge() + ')';
   }
-  if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') {
+  if (st.loadState === 'loading') {
     label = 'Archive…';
   }
   btn.textContent = label;
   btn.style.background = _makesafeArchiveVisible ? '#293C46' : '#64748B';
   btn.style.fontWeight = _makesafeArchiveVisible ? '700' : '600';
-  btn.title = (_makesafeArchiveState && _makesafeArchiveState.loadState === 'not_loaded')
-    ? 'Archive cards are not loaded yet. Open the column and load them when needed.'
-    : 'Show or hide the Archive column';
+  if (st.loadState === 'not_loaded') {
+    btn.title = 'Archive cards are not loaded yet. Open the column and load them when needed.';
+  } else if (st.loadState === 'partial') {
+    btn.title = 'Only part of the archive came back: ' + makesafeArchiveLoadedCount()
+      + ' of ' + count + ' cards are loaded.';
+  } else {
+    btn.title = 'Show or hide the Archive column';
+  }
+}
+
+// One sentence naming the archive's honest state, shared by every surface that
+// has to explain why history is not on screen.
+function makesafeArchiveStateSummary() {
+  var st = _makesafeArchiveState || {};
+  var total = String(makesafeArchiveDisplayCount());
+  if (st.loadState === 'loading') return 'Archive (' + total + ') — loading…';
+  if (st.loadState === 'error') return 'Archive (' + total + ') — failed to load';
+  if (st.loadState === 'partial') {
+    return 'Archive — showing ' + makesafeArchiveLoadedCount() + ' of ' + total + ' records';
+  }
+  if (total === '?') return 'Archive — not loaded (count unknown)';
+  return 'Archive (' + total + ') — not loaded';
 }
 
 // Empty / pending body for the Archive column when cards are not (yet) present.
@@ -11507,6 +11602,9 @@ function renderMakesafeArchiveColumnBody(allJobs, jobs) {
   var st = _makesafeArchiveState || {};
   var countLabel = makesafeArchiveDisplayCount();
   var countText = String(countLabel);
+  var cardsHtml = (jobs && jobs.length)
+    ? jobs.map(function(j) { return renderMakesafeCard(j, 'archive'); }).join('')
+    : '<div class="kanban-empty">' + (_makesafeArchiveSearch ? 'No matches' : 'No jobs') + '</div>';
 
   if (st.loadState === 'loading') {
     return '<div class="ms-archive-not-loaded" data-archive-state="loading" role="status">'
@@ -11526,6 +11624,18 @@ function renderMakesafeArchiveColumnBody(allJobs, jobs) {
       + '</div>';
   }
 
+  if (st.loadState === 'partial') {
+    // Cards ARE here, just not all of them. Lead with what is missing so the
+    // column is never read as the whole history.
+    return '<div class="ms-archive-not-loaded" data-archive-state="partial" role="status">'
+      + '<div class="ms-archive-not-loaded-title">Showing ' + escapeHtml(String(makesafeArchiveLoadedCount()))
+      + ' of ' + escapeHtml(countText) + ' archived records</div>'
+      + '<p class="ms-archive-not-loaded-hint">The server returned a partial page, so the rest of the history is not on this board. This count is what is loaded, not the whole archive.</p>'
+      + '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Reload archive</button>'
+      + '</div>'
+      + cardsHtml;
+  }
+
   if (st.loadState === 'not_loaded' || st.loadState === 'unknown') {
     var title = (countLabel === '?' || countLabel === null)
       ? 'Archive — not loaded (count unknown)'
@@ -11537,85 +11647,95 @@ function renderMakesafeArchiveColumnBody(allJobs, jobs) {
       + '</div>';
   }
 
-  // loaded
-  if (!jobs || jobs.length === 0) {
-    var emptyMsg = _makesafeArchiveSearch ? 'No matches' : 'No jobs';
-    return '<div class="kanban-empty">' + emptyMsg + '</div>';
+  return cardsHtml;
+}
+
+// LIST view carries the same contract as the Archive column: the table simply
+// drops archived rows under column_scope=active, so it has to say so and offer
+// the same load control. Returns '' for any tab / state where nothing is hidden.
+function renderMakesafeArchiveListNotice() {
+  if (_pipelineTab !== 'makesafes') return '';
+  var st = _makesafeArchiveState || {};
+  var state = st.loadState;
+  if (state === 'loaded' || state === 'unknown') return '';
+
+  var summary = makesafeArchiveStateSummary();
+  var hint = '';
+  var control = '';
+  if (state === 'loading') {
+    hint = 'Fetching archived jobs. The rows below are the active board only.';
+    control = '<button type="button" class="ms-archive-load-btn" disabled>Loading…</button>';
+  } else if (state === 'error') {
+    hint = 'Those jobs still exist — this table is missing them, not showing that they are gone.'
+      + (st.error ? ' (' + String(st.error) + ')' : '');
+    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Retry load archive</button>';
+  } else if (state === 'partial') {
+    hint = 'The server returned a partial page, so some archived jobs are missing from this table.';
+    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Reload archive</button>';
+  } else {
+    hint = 'Archived jobs are excluded from the default board for speed, so they are missing from this table.';
+    control = '<button type="button" class="ms-archive-load-btn" onclick="loadMakesafeArchive()">Load archive</button>';
   }
-  return jobs.map(function(j) { return renderMakesafeCard(j, 'archive'); }).join('');
+
+  return '<div class="ms-archive-list-notice" data-archive-list-state="' + escapeHtml(state) + '" role="status">'
+    + '<span class="ms-archive-list-title">' + escapeHtml(summary) + '</span>'
+    + '<span class="ms-archive-list-hint">' + escapeHtml(hint) + '</span>'
+    + control
+    + '</div>';
+}
+
+// A board read failed while an archive load was riding on it. Land on the honest
+// error state (census kept) instead of an unreachable spinner.
+function failMakesafeArchiveLoadIfPending(err) {
+  if (!_makesafeArchiveState || _makesafeArchiveState.loadState !== 'loading') return;
+  _makesafeArchiveState = Object.assign({}, _makesafeArchiveState, {
+    loadState: 'error',
+    error: (err && err.message) || 'Failed to load archive',
+    included: false,
+  });
+  syncMakesafeArchiveButton();
 }
 
 // On-demand fetch: include_archive=1 returns the full board including Archive.
-// Replaces the board from that envelope so column_scope / census stay honest.
+// Goes through the SAME fetchMakesafeBoardData path as the default board load, so
+// the contract check, self-sufficiency branch, enrichment join and stage
+// bookkeeping can only ever be defined once.
 async function loadMakesafeArchive() {
   if (_makesafeArchiveState && _makesafeArchiveState.loadState === 'loading') return;
   // Keep the known census while loading so the badge never flashes 0.
   var keptCount = (_makesafeArchiveState && _makesafeArchiveState.count != null)
     ? _makesafeArchiveState.count
     : null;
+  var keptLoaded = makesafeArchiveLoadedCount();
+  // Set BEFORE the fetch: any board read that starts while this one is in flight
+  // then asks for the archive too, so it cannot resolve last and take it away.
+  _makesafeArchiveWanted = true;
   _makesafeArchiveState = Object.assign({}, _makesafeArchiveState || {}, {
     loadState: 'loading',
     error: null,
     count: keptCount,
+    loaded: keptLoaded,
   });
   _makesafeArchiveVisible = true;
   syncMakesafeArchiveButton();
   if (_pipelineData) renderJobs(_pipelineData);
 
   try {
-    var payload = await opsFetch('makesafe_board', {
-      projection: 'ops',
-      include_archive: '1',
-    });
-    if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
-      throw new Error('Unsupported make-safe board contract: ' +
-        ((payload && payload.contract_version) || 'none'));
-    }
-    // Rebuild the same way as the default board load so card-shape / enrichment
-    // rules stay identical — only the archive column membership changes.
-    var canonicalRows = [];
-    Object.keys(payload.columns || {}).forEach(function(stage) {
-      (payload.columns[stage] || []).forEach(function(row) { if (row) canonicalRows.push(row); });
-    });
-    var selfSufficient = makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows);
-    var enrichById = {};
-    if (!selfSufficient) {
-      var enrich = await opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
-        console.warn('Make-safe board: close-out enrichment unavailable on archive load:', e && e.message);
-        return null;
-      });
-      Object.keys((enrich && enrich.columns) || {}).forEach(function(stage) {
-        (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
-      });
-      var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
-      _makesafeBoardEnrichState = !enrich
-        ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
-        : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
-    } else {
-      _makesafeBoardEnrichState = {
-        status: 'covered',
-        missing: 0,
-        total: canonicalRows.length,
-        source: 'card_shape',
-        join: 'skipped',
-      };
-    }
-    var columns = buildMakesafeBoardColumns(payload, enrichById);
-    applyMakesafeArchiveStateFromPayload(payload);
+    var board = await fetchMakesafeBoardData({ includeArchive: true });
+    // A newer board read superseded this one; it owns the paint and the state.
+    if (!board) return;
     // If the server still reports not included (unexpected with include_archive=1),
     // treat successful card presence as loaded so we do not loop the empty shell.
-    if (_makesafeArchiveState.loadState !== 'loaded' && (columns.archive || []).length) {
+    var archiveCards = (board.columns || {}).archive || [];
+    if (_makesafeArchiveState.loadState === 'not_loaded' && archiveCards.length) {
       _makesafeArchiveState.loadState = 'loaded';
       _makesafeArchiveState.included = true;
+      _makesafeArchiveState.loaded = archiveCards.length;
       if (_makesafeArchiveState.count == null) {
-        _makesafeArchiveState.count = columns.archive.length;
+        _makesafeArchiveState.count = archiveCards.length;
       }
     }
-    // Only commit board state after a successful rebuild.
-    _makesafeBoardPayload = payload;
-    clearMakesafeStageReadFailures();
-    _makesafeCanonicalStageFetch = Promise.resolve();
-    _pipelineData = { columns: columns, _canonical: payload };
+    _pipelineData = board;
     renderJobs(_pipelineData);
     syncMakesafeArchiveButton();
   } catch (e) {
@@ -11626,6 +11746,7 @@ async function loadMakesafeArchive() {
       included: false,
       // Preserve census so the badge does not fall to zero on failure.
       count: keptCount != null ? keptCount : (_makesafeArchiveState && _makesafeArchiveState.count),
+      loaded: keptLoaded,
     });
     syncMakesafeArchiveButton();
     if (_pipelineData) renderJobs(_pipelineData);
@@ -11638,7 +11759,12 @@ async function loadMakesafeArchive() {
 
 function toggleMakesafeArchive() {
   _makesafeArchiveVisible = !_makesafeArchiveVisible;
-  if (!_makesafeArchiveVisible) _makesafeArchiveSearch = '';
+  if (!_makesafeArchiveVisible) {
+    _makesafeArchiveSearch = '';
+    // Closing the column is the one way to stop asking for history. Until then
+    // every board refresh keeps requesting it (<makesafe-archive-on-demand>).
+    _makesafeArchiveWanted = false;
+  }
   syncMakesafeArchiveButton();
   // Re-render with current data (no new fetch needed to show the shell).
   // Cards load only when the Captain clicks Load archive.
@@ -11956,6 +12082,10 @@ var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready
 var _makesafeCanonicalStageById = {};
 var _makesafeCanonicalPackById = {};
 var _makesafeCanonicalStageFetch = null;
+// The archive-inclusive read of the same feed, and whether the remembered map is
+// known to cover archived rows at all. See <makesafe-archive-on-demand>.
+var _makesafeCanonicalStageArchiveFetch = null;
+var _makesafeCanonicalStagesCoverArchive = false;
 
 function makesafeCanonicalStageOf(source) {
   var stage = String((source && source.canonical_stage) || '').trim().toLowerCase();
@@ -12012,38 +12142,82 @@ function resolveMakesafeDetailStage(data) {
 // the same feed the board renders; never a write, and a failure leaves the stage
 // unknown. Memoised per read so one detail paint issues one request; call
 // refreshMakesafeCanonicalStages() to force a current answer.
-function ensureMakesafeCanonicalStages() {
+//
+// ARCHIVE IS ON DEMAND ON THIS FEED TOO (<makesafe-archive-on-demand>). The
+// default scope omits archived rows, so "the active read did not name this job"
+// is NOT the same as "no canonical stage exists" — answering unknown there would
+// invent a not-confirmed stage for every archived make-safe. Coverage is tracked
+// rather than assumed: only a payload that actually carried the whole archive
+// sets _makesafeCanonicalStagesCoverArchive.
+function readMakesafeCanonicalStagesFromFeed(params) {
+  return opsFetch('makesafe_board', params)
+    .then(function(payload) {
+      if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return false;
+      Object.keys(payload.columns || {}).forEach(function(stage) {
+        (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
+      });
+      if (makesafeArchiveScopeOfPayload(payload).complete) {
+        _makesafeCanonicalStagesCoverArchive = true;
+      }
+      // THE one event that may clear a not-confirmed stage: a canonical read
+      // that actually succeeded.
+      clearMakesafeStageReadFailures();
+      return true;
+    })
+    .catch(function(e) {
+      console.warn('Make-safe detail: canonical stage lookup unavailable:', e && e.message);
+      return false;
+    });
+}
+
+function ensureMakesafeCanonicalStages(opts) {
+  if (opts && opts.includeArchive) {
+    if (_makesafeCanonicalStagesCoverArchive && _makesafeCanonicalStageFetch) {
+      return _makesafeCanonicalStageFetch;
+    }
+    if (!_makesafeCanonicalStageArchiveFetch) {
+      _makesafeCanonicalStageArchiveFetch =
+        readMakesafeCanonicalStagesFromFeed({ projection: 'ops', include_archive: '1' })
+          .then(function(ok) {
+            if (!ok) _makesafeCanonicalStageArchiveFetch = null; // retry on the next open
+            return ok;
+          });
+    }
+    return _makesafeCanonicalStageArchiveFetch;
+  }
   if (!_makesafeCanonicalStageFetch) {
-    _makesafeCanonicalStageFetch = opsFetch('makesafe_board', { projection: 'ops' })
-      .then(function(payload) {
-        if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
-          _makesafeCanonicalStageFetch = null; // an unusable answer is not an answer: let the next caller retry
-          return false;
-        }
-        Object.keys(payload.columns || {}).forEach(function(stage) {
-          (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
-        });
-        // THE one event that may clear a not-confirmed stage: a canonical read
-        // that actually succeeded.
-        clearMakesafeStageReadFailures();
-        return true;
-      })
-      .catch(function(e) {
-        console.warn('Make-safe detail: canonical stage lookup unavailable:', e && e.message);
-        _makesafeCanonicalStageFetch = null; // do not cache a failure — retry on the next open
-        return false;
+    _makesafeCanonicalStageFetch = readMakesafeCanonicalStagesFromFeed({ projection: 'ops' })
+      .then(function(ok) {
+        if (!ok) _makesafeCanonicalStageFetch = null; // do not cache a failure — retry on the next open
+        return ok;
       });
   }
   return _makesafeCanonicalStageFetch;
 }
 
+// The stage lookup a job detail must use. A job the default-scope read does not
+// name is asked for again with the archive included BEFORE anyone concludes its
+// stage is unknown — otherwise every archived make-safe opens as
+// "Stage not confirmed" purely because the board stopped shipping history.
+function ensureMakesafeCanonicalStageForJob(jobId) {
+  return Promise.resolve(ensureMakesafeCanonicalStages()).then(function(ok) {
+    if (!jobId) return ok;
+    if (_makesafeCanonicalStageById[jobId] || _makesafeCanonicalStagesCoverArchive) return ok;
+    return ensureMakesafeCanonicalStages({ includeArchive: true });
+  });
+}
+
 // Forget every remembered canonical answer and read the feed again. Anything a
-// transition may have moved is therefore re-read, not recalled.
-function refreshMakesafeCanonicalStages() {
+// transition may have moved is therefore re-read, not recalled. Pass the job id
+// under inspection so a job that has just moved INTO the archive is still read
+// from a scope that contains it.
+function refreshMakesafeCanonicalStages(jobId) {
   _makesafeCanonicalStageById = {};
   _makesafeCanonicalPackById = {};
   _makesafeCanonicalStageFetch = null;
-  return ensureMakesafeCanonicalStages();
+  _makesafeCanonicalStageArchiveFetch = null;
+  _makesafeCanonicalStagesCoverArchive = false;
+  return jobId ? ensureMakesafeCanonicalStageForJob(jobId) : ensureMakesafeCanonicalStages();
 }
 
 // Repaint the open job detail from a CURRENT canonical response. Called after
@@ -12056,7 +12230,7 @@ function refreshMakesafeCanonicalStages() {
 // stage the detail was painted with before the write.
 async function afterMakesafeStageTransition() {
   var jobId = _currentJobId;
-  var canonicalReadSucceeded = await refreshMakesafeCanonicalStages();
+  var canonicalReadSucceeded = await refreshMakesafeCanonicalStages(jobId);
   if (!canonicalReadSucceeded) markMakesafeStageReadFailed(jobId);
   if (!jobId) return;
   // refreshJobDetail repaints on success, and the mark above is already in place
@@ -12355,7 +12529,25 @@ function makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows) {
   });
 }
 
-async function fetchMakesafeBoardData() {
+// Every make-safe board read on this page — the default load, the auto-refresh,
+// the post-transition reload and the on-demand archive load — goes through here.
+// `opts.includeArchive` is the ONLY difference between them; leaving it undefined
+// honours the sticky _makesafeArchiveWanted choice, so a refresh can never take
+// back the archive the Captain asked for.
+//
+// Returns null when a newer board read started while this one was in flight: the
+// loser must not commit its (older) columns, enrichment state or archive census.
+var _makesafeBoardFetchSeq = 0;
+
+async function fetchMakesafeBoardData(opts) {
+  opts = opts || {};
+  var includeArchive = (opts.includeArchive != null)
+    ? !!opts.includeArchive
+    : !!_makesafeArchiveWanted;
+  var params = { projection: 'ops' };
+  if (includeArchive) params.include_archive = '1';
+  var mySeq = ++_makesafeBoardFetchSeq;
+
   // Card-shaped ops board (default since makesafe-board-perf-v1) stamps the
   // presentation keys the card paints (has_wo, invoice_status, site_suburb, …)
   // onto each row, so the historical makesafe_pipeline?history=all dual-fetch
@@ -12366,9 +12558,9 @@ async function fetchMakesafeBoardData() {
   // and no presentation stamps), re-join the pipeline as before so a stale edge
   // deploy does not blank the doc chips — and so a PARTIAL join still announces
   // itself rather than silently painting incomplete cards.
-  var payload = await opsFetch('makesafe_board', { projection: 'ops' });
-  if (payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
-    throw new Error('Unsupported make-safe board contract: ' + (payload.contract_version || 'none'));
+  var payload = await opsFetch('makesafe_board', params);
+  if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
+    throw new Error('Unsupported make-safe board contract: ' + ((payload && payload.contract_version) || 'none'));
   }
   var canonicalRows = [];
   Object.keys(payload.columns || {}).forEach(function(stage) {
@@ -12376,6 +12568,7 @@ async function fetchMakesafeBoardData() {
   });
   var selfSufficient = makesafeBoardPayloadIsSelfSufficient(payload, canonicalRows);
   var enrichById = {};
+  var enrichState;
   if (!selfSufficient) {
     var enrich = await opsFetch('makesafe_pipeline', { history: 'all' }).catch(function(e) {
       console.warn('Make-safe board: close-out enrichment unavailable:', e && e.message);
@@ -12385,12 +12578,12 @@ async function fetchMakesafeBoardData() {
       (enrich.columns[stage] || []).forEach(function(r) { if (r && r.id) enrichById[r.id] = r; });
     });
     var missing = canonicalRows.filter(function(row) { return !row.id || !enrichById[row.id]; }).length;
-    _makesafeBoardEnrichState = !enrich
+    enrichState = !enrich
       ? { status: 'failed', missing: canonicalRows.length, total: canonicalRows.length }
       : { status: missing ? 'partial' : 'covered', missing: missing, total: canonicalRows.length };
   } else {
     // No join ran; partial/failed enrichment is structurally unreachable.
-    _makesafeBoardEnrichState = {
+    enrichState = {
       status: 'covered',
       missing: 0,
       total: canonicalRows.length,
@@ -12398,6 +12591,10 @@ async function fetchMakesafeBoardData() {
       join: 'skipped',
     };
   }
+  // Nothing above this line mutates page state, so a superseded read can be
+  // dropped whole rather than half-applied.
+  if (mySeq !== _makesafeBoardFetchSeq) return null;
+  _makesafeBoardEnrichState = enrichState;
   _makesafeBoardPayload = payload;
   // This load IS a current canonical read, and buildMakesafeBoardColumns has just
   // remembered every row's stage and pack from it. Satisfy the detail's lookup
@@ -12408,7 +12605,11 @@ async function fetchMakesafeBoardData() {
   // column never shows a fake zero when column_scope=active.
   applyMakesafeArchiveStateFromPayload(payload);
   clearMakesafeStageReadFailures();
-  _makesafeCanonicalStageFetch = Promise.resolve();
+  _makesafeCanonicalStageFetch = Promise.resolve(true);
+  // Only a payload that actually carried the whole archive lets the detail's
+  // stage lookup stop asking for it. See <makesafe-detail-canonical-stage>.
+  _makesafeCanonicalStagesCoverArchive = makesafeArchiveScopeOfPayload(payload).complete;
+  _makesafeCanonicalStageArchiveFetch = _makesafeCanonicalStagesCoverArchive ? Promise.resolve(true) : null;
   return { columns: columns, _canonical: payload };
 }
 
@@ -14798,7 +14999,12 @@ function renderJobList(container, columns) {
     allJobs = allJobs.concat(columns[status]);
   });
 
-  var html = '<div class="data-table-wrap"><table class="data-table"><thead><tr>' +
+  // Archive-on-demand honesty: rows the feed did not send are announced above the
+  // table, with the same load control the kanban column carries. Empty for every
+  // other tab and whenever nothing is missing. See <makesafe-archive-on-demand>.
+  var html = renderMakesafeArchiveListNotice();
+
+  html += '<div class="data-table-wrap"><table class="data-table"><thead><tr>' +
     '<th>Client</th><th>Suburb</th><th>Type</th><th>Status</th><th>Value</th><th>Days</th><th>Sched</th><th>POs</th><th>WOs</th>' +
     '</tr></thead><tbody>';
 
@@ -17332,7 +17538,7 @@ async function openJobDetail(jobId) {
     if (String((data.job || {}).type) === 'makesafe') {
       var paintedStage = resolveMakesafeDetailStage(data);
       var paintedPack = resolveMakesafeDetailPack(data);
-      ensureMakesafeCanonicalStages().then(function() {
+      ensureMakesafeCanonicalStageForJob(jobId).then(function() {
         if (_currentJobId !== jobId || _currentJobData !== data) return;
         var currentStage = resolveMakesafeDetailStage(data);
         var currentPack = resolveMakesafeDetailPack(data);

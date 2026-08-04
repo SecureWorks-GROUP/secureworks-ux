@@ -190,7 +190,13 @@ function cockpitSendReady() {
   };
 }
 
-/** HOLD-shaped cockpit: the blueprint's "machine stopped and wants a person". */
+/**
+ * HOLD-shaped cockpit: the blueprint's "machine stopped and wants a person".
+ * The default reasons mirror the captain's 2026-08 screenshots of the old
+ * pane: a pricing blocker, a missing Xero invoice, and the builder-email
+ * blocker EMITTED TWICE (the backend can repeat a blocker once per route) —
+ * the pane must render it once.
+ */
 function cockpitHold(reasons) {
   const c = cockpitSendReady();
   c.status = 'HOLD';
@@ -200,6 +206,8 @@ function cockpitHold(reasons) {
     reasons: reasons || [
       'Invoice line 1 labour rate is below this builder’s written schedule ($80/hr min 2 hours).',
       'No Xero invoice exists for this docket revision.',
+      'Builder email draft missing.',
+      'Builder email draft missing.',
     ],
   };
   c.controls.approve_invoice.enabled = false;

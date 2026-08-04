@@ -168,6 +168,8 @@ const exposed = [
   "_msSesQueueCardRow",
   "_msSesReviewQueueStale",
   "_msSwitchDocTab",
+  "_msReportingDocTabs",
+  "_msRenderDocStage",
   "_msReportingHideJobFromActiveList",
   "_msGetAllPhotos",
   "_msIsPortalBuilder",
@@ -649,8 +651,14 @@ check(
     detailHtml.includes("Invoice email"),
 );
 check(
-  "detail states SEND IT sends all three routes at once",
-  /all three routes at once/i.test(detailHtml),
+  "detail states SEND IT sends all three emails at once",
+  /all three emails at once/i.test(detailHtml),
+);
+check(
+  "detail leads with the one next action for the enabled control",
+  /Next</.test(detailHtml) &&
+    /press <strong>SEND IT<\/strong>/.test(detailHtml) &&
+    !/press <strong>APPROVE INVOICE<\/strong>/.test(detailHtml),
 );
 check(
   "detail shows the route recipient, cc and subject",
@@ -659,33 +667,100 @@ check(
     detailHtml.includes("Make Safe Completion - MLB-25248"),
 );
 check(
-  "detail renders the fixed photo set (1 in the email, 1 evidence-only)",
+  "detail renders the read-only photo state (1 in the email, 1 evidence-only)",
   detailHtml.includes("fixed in the release revision") &&
-    /1 photo in the photo email/.test(detailHtml) &&
-    /1 kept as evidence only/.test(detailHtml),
+    /1 of 2 photos in the photo email/.test(detailHtml) &&
+    /1 kept as evidence only/.test(detailHtml) &&
+    /msr-photo ok/.test(detailHtml) && /msr-photo ev/.test(detailHtml),
 );
 check(
   "detail has NO include/exclude photo toggles (fixed set)",
   !detailHtml.includes("_msTogglePhotoApproval"),
 );
 check(
-  "detail renders the invoice proposal lines + totals + Xero binding",
-  detailHtml.includes("Temp fence hire") &&
-    detailHtml.includes("$110.00") &&
+  "the invoice is a DOCUMENT: an Invoice tab, and the Xero binding is cited",
+  detailHtml.includes(">Invoice</button>") &&
     detailHtml.includes("INV-1234"),
 );
+// The drafted proposal renders as an invoice PAGE on the stage when no
+// invoice PDF is bound (lines + totals from the row's own figures).
+{
+  const proposalRow = {
+    invoice: {
+      invoice_number: null,
+      status: "SES proposal (not yet in Xero)",
+      lines: [{ description: "Temp fence hire", quantity: 2, unit_price: 50, line_total: 100 }],
+      total_ex_gst: 100,
+      total_inc_gst: 110,
+    },
+    draft_docs: [], source_docs: [], photos: [],
+  };
+  const proposalTabs = mod._msReportingDocTabs(proposalRow);
+  const invStage = mod._msRenderDocStage(proposalTabs, 0, proposalRow);
+  check(
+    "the proposal invoice document carries the lines, totals and DRAFT status",
+    proposalTabs.length === 1 && proposalTabs[0].tabLabel === "Invoice" &&
+      invStage.includes("Tax Invoice") &&
+      invStage.includes("Temp fence hire") &&
+      invStage.includes("$110.00") &&
+      invStage.includes("SES proposal, not yet in Xero"),
+  );
+}
+// A builder SOURCE attachment whose file name says "invoice" must NOT claim the
+// Invoice tab — the drafted proposal page would become unreachable.
+{
+  const builderInvoiceRow = {
+    invoice: {
+      invoice_number: null,
+      status: "SES proposal (not yet in Xero)",
+      lines: [{ description: "Temp fence hire", quantity: 2, unit_price: 50, line_total: 100 }],
+      total_ex_gst: 100,
+      total_inc_gst: 110,
+    },
+    draft_docs: [],
+    source_docs: [
+      { label: "invoice_MLB-25248", url: "https://example.com/invoice_MLB-25248.pdf", kind: "pdf" },
+    ],
+    photos: [],
+  };
+  const bTabs = mod._msReportingDocTabs(builderInvoiceRow);
+  const invTabs = bTabs.filter((t) => t.tabLabel === "Invoice");
+  check(
+    "a source attachment named invoice_*.pdf does not suppress the drafted invoice document",
+    invTabs.length === 1 && invTabs[0].kind === "invdoc" &&
+      bTabs.some((t) => t.kind === "pdf" && t.tabLabel !== "Invoice"),
+  );
+}
+// A second work order is NEVER collapsed into the first tab
+// (<makesafe-workorder-identity>: no surface may pick one and hide the rest).
+{
+  const twoWoRow = {
+    invoice: null,
+    draft_docs: [],
+    source_docs: [
+      { label: "work_order_MLB-26183PO-54000_a", url: "https://example.com/wo1.pdf", kind: "pdf" },
+      { label: "work_order_MLB-26183PO-61000_b", url: "https://example.com/wo2.pdf", kind: "pdf" },
+    ],
+    photos: [],
+  };
+  const woTabs = mod._msReportingDocTabs(twoWoRow).filter((t) => t.isWorkOrder);
+  check(
+    "two work orders get two distinct tabs, never one",
+    woTabs.length === 2 && woTabs[0].tabLabel !== woTabs[1].tabLabel,
+  );
+}
 check(
   "detail renders doc tabs from the pack artifacts",
   detailHtml.includes("Make Safe Report") &&
-    detailHtml.includes("Xero Invoice") &&
+    detailHtml.includes(">Invoice</button>") &&
     detailHtml.includes("SWMS") &&
     detailHtml.includes("Work Order"),
 );
 check(
-  "detail opens the report PDF whole-page in the stage",
+  "detail opens the report PDF fit-to-page in the stage",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
     detailHtml.includes("<iframe") &&
-    detailHtml.includes("whole page"),
+    detailHtml.includes("fit to page"),
 );
 check(
   "the trade-notes section renders only when a feed carries raw trade notes",
@@ -698,8 +773,11 @@ check(
     detailHtml.includes("sendSesRelease('" + JOB),
 );
 check(
-  "detail does NOT render APPROVE INVOICE when the control is disabled",
-  !detailHtml.includes('id="msSesApproveInvoiceBtn"'),
+  "a disabled APPROVE INVOICE renders as a visible stamp with NO id and NO onclick",
+  !detailHtml.includes('id="msSesApproveInvoiceBtn"') &&
+    !detailHtml.includes("approveSesInvoice(") &&
+    /msr-stamp approve" disabled/.test(detailHtml) &&
+    /Already done/.test(detailHtml),
 );
 check(
   "detail shows the Docs Ready tick as not yet recorded, bound to the pack hash",
@@ -813,12 +891,14 @@ check(
   /already recorded/.test(signedOffHtml),
 );
 check(
-  "signed-off detail explains the byte-exact pack view has passed",
-  signedOffHtml.includes("already passed Docs Ready review"),
+  "signed-off detail renders the invoice document from the cockpit money facts",
+  signedOffHtml.includes(">Invoice</button>") &&
+    signedOffHtml.includes("Tax Invoice") &&
+    signedOffHtml.includes("Temp fence hire"),
 );
 check(
-  "signed-off detail still renders routes + money from the cockpit",
-  signedOffHtml.includes("Report email") && signedOffHtml.includes("Temp fence hire"),
+  "signed-off detail still renders the routes from the cockpit",
+  signedOffHtml.includes("Report email"),
 );
 await mod.sendSesRelease(JOB);
 check(
@@ -887,9 +967,33 @@ check(
   !invoiceHtml.includes('id="msSesSendItBtn"'),
 );
 check(
-  "invoice review marks the proposal as not yet in Xero",
-  invoiceHtml.includes("SES proposal (not yet in Xero)"),
+  "APPROVE INVOICE's note renders the backend's own plan text verbatim",
+  invoiceHtml.includes("Create one Xero DRAFT for this exact obligation revision."),
 );
+// Switching to the Invoice tab renders the proposal as an invoice document,
+// honestly marked not-yet-in-Xero.
+{
+  const preXeroTabs = mod._msReportingDocTabs({
+    invoice: mod._msSesMapInvoice({ cockpit: cockpitInvoiceReady(), pack: preXeroPack }),
+    draft_docs: [], source_docs: [], photos: [],
+  });
+  const invIdx = preXeroTabs.findIndex((t) => t.kind === "invdoc");
+  // Switch to the tab the RENDERED pane actually labelled "Invoice", not a
+  // literal index that silently drifts when tab ordering changes.
+  const renderedInvIdx = (() => {
+    const m = /data-tabidx="(\d+)"[^>]*>Invoice<\/button>/.exec(invoiceHtml);
+    return m ? Number(m[1]) : -1;
+  })();
+  mod._msSwitchDocTab(JOB, renderedInvIdx, "msReportingDetailPanel");
+  const stageHtml = elements["msDocStage_job_1"] ? (elements["msDocStage_job_1"]._html || "") : "";
+  check(
+    "the pre-Xero Invoice tab shows the proposal document, marked not yet in Xero",
+    invIdx >= 0 &&
+      renderedInvIdx >= 0 &&
+      stageHtml.includes("SES proposal, not yet in Xero") &&
+      stageHtml.includes("Temp fence hire"),
+  );
+}
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.toasts.length = 0;
@@ -944,13 +1048,21 @@ check(
     ),
 );
 
-// ── 11. HOLD: blocker facts verbatim, no money/send action ──────────────────
+// ── 11. HOLD: one amber block, numbered + deduped verbatim blockers each
+//        with its clear path; both stamps visible but unpressable ────────────
 const holdCockpit = cockpitSendReady();
 holdCockpit.status = "HOLD";
 holdCockpit.sections.status = {
   status: "HOLD",
   stale: false,
-  reasons: ["The insurance work order is missing from this docket."],
+  // The duplicate is deliberate: the backend can emit the same blocker once
+  // per route (this is how "builder email draft missing" printed twice on the
+  // captain's screen). The block must collapse it.
+  reasons: [
+    "The insurance work order is missing from this docket.",
+    "Builder email draft missing.",
+    "Builder email draft missing.",
+  ],
 };
 holdCockpit.controls.approve_invoice.enabled = false;
 holdCockpit.controls.send_it.enabled = false;
@@ -960,13 +1072,44 @@ await mod.showMsReportingDetail(JOB);
 const holdHtml = elements["msReportingDetailPanel"]._html || "";
 check(
   "HOLD renders the backend blocker facts verbatim",
-  holdHtml.includes("The insurance work order is missing from this docket."),
+  holdHtml.includes("The insurance work order is missing from this docket.") &&
+    holdHtml.includes("Builder email draft missing."),
 );
 check(
-  "HOLD renders NO approve/send action",
+  "HOLD deduplicates a blocker the backend emitted twice",
+  holdHtml.split("Builder email draft missing.").length - 1 === 1,
+);
+check(
+  "HOLD renders exactly ONE amber block, numbered, with a clear path per blocker",
+  holdHtml.split('class="msr-hold"').length - 1 === 1 &&
+    holdHtml.includes('<ol class="msr-blockers">') &&
+    holdHtml.split("What clears it").length - 1 === 2 &&
+    /There is no override/.test(holdHtml),
+);
+check(
+  "the HOLD next action counts the deduped blockers",
+  /Clear <strong>2 blockers<\/strong> below/.test(holdHtml),
+);
+check(
+  "HOLD arms NO action: stamps visible but disabled, no ids, no onclick",
   !holdHtml.includes('id="msSesSendItBtn"') &&
     !holdHtml.includes('id="msSesApproveInvoiceBtn"') &&
-    /no approve\/send action is available/i.test(holdHtml),
+    !holdHtml.includes("sendSesRelease(") &&
+    !holdHtml.includes("approveSesInvoice(") &&
+    /msr-stamp approve" disabled/.test(holdHtml) &&
+    /msr-stamp send" disabled/.test(holdHtml) &&
+    /Locked by the hold above/.test(holdHtml),
+);
+// Even a programmatic call cannot act while the backend flags are off.
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+await mod.sendSesRelease(JOB);
+await mod.approveSesInvoice(JOB);
+check(
+  "sendSesRelease / approveSesInvoice refuse to run while the backend flags are off",
+  calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
+    calls.confirms.length === 0,
 );
 
 // ── 12. Queue/cockpit disagreement + no SES docket: honest states ───────────
@@ -990,8 +1133,9 @@ check(
 await mod.showMsReportingDetail("job-no-docket");
 const noDocketHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "a job with no SES docket renders the honest no-pack state",
-  noDocketHtml.includes("No reviewable SES pack persisted yet") &&
+  "a job with no SES docket renders the honest State B not-ready refusal",
+  noDocketHtml.includes("Draft pack not ready yet") &&
+    noDocketHtml.includes("Nothing to send yet") &&
     noDocketHtml.includes("410"),
 );
 check(

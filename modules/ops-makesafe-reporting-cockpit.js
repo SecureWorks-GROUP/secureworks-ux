@@ -556,8 +556,10 @@ function _msSesRenderUnavailable(jobId, base, err, targetPanelId) {
   html += '</div>';
   html += '<div style="margin:24px 20px;padding:16px;border-radius:8px;border:1px solid ' + (noDocket ? 'var(--sw-border)' : '#FECACA') + ';background:' + (noDocket ? '#fff' : '#FEF2F2') + ';">';
   if (noDocket) {
-    html += '<div style="font-size:14px;font-weight:800;color:var(--sw-dark);">No reviewable SES pack persisted yet</div>';
-    html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;line-height:1.55;">The legacy approve/send path is retired server-side (it answers 410). This panel reviews SES docket packs only: a pack appears here once the SES reporting routine assembles a docket for this job. Nothing on this screen can send, authorise, or charge.</div>';
+    // Mockup State B: the honest not-ready refusal, in its words.
+    html += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);">Draft pack not ready yet</div>';
+    html += '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;line-height:1.6;max-width:62ch;">The make-safe report and invoice have not been drafted for this job. Once the reporting routine builds the draft, this same screen turns into the review-and-send pack. Nothing to send yet &mdash; nothing on this screen can send, authorise or charge.</div>';
+    html += '<div style="font-size:11.5px;color:var(--sw-mid);margin-top:10px;line-height:1.5;">Technical note: the legacy combined approve/send path is retired server-side (it answers 410) and this screen never calls it.</div>';
   } else {
     html += '<div style="font-size:14px;font-weight:800;color:#991B1B;">The SES review cockpit could not be loaded</div>';
     html += '<div style="font-size:12px;color:#7F1D1D;margin-top:8px;line-height:1.55;">' + escapeHtml(msg || 'Unknown error') + '</div>';
@@ -567,17 +569,27 @@ function _msSesRenderUnavailable(jobId, base, err, targetPanelId) {
   return html;
 }
 
+// Small drawn marks (stroke inherits currentColor). Real drawn icons, one
+// consistent 2px stroke — never unicode stand-ins.
+var _MS_SES_ICONS = {
+  check: '<svg class="msr-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  cross: '<svg class="msr-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  clip: '<svg class="msr-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M12.2 7.8 8 12a3 3 0 0 1-4.2-4.2L9 2.6a2.1 2.1 0 0 1 3 3L6.9 10.7a1.05 1.05 0 0 1-1.5-1.5l4.2-4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  alert: '<svg class="msr-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 14.6 13H1.4L8 2.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6.4v3.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".9" fill="currentColor"/></svg>'
+};
+
 /**
- * Render the SES review pack. Top-to-bottom: job header (type chip + SES status
- * chip), HOLD/stale banners, doc tabs + PDF stage (byte-exact pack artifacts),
- * invoice review (SES proposal / Xero binding), source evidence, trade notes,
- * the three exact email routes, the fixed photo set (display-only), feedback,
- * then the cockpit-controls action block.
+ * Render the SES review pack. Reading order is the captain's decision order:
+ * identity, ONE next action, the hold story when held, the two stamps AT THE
+ * TOP (armed only by the backend control flags), then the proof — document
+ * tabs over one fit-to-page stage (the invoice is a DOCUMENT here, a tab like
+ * the report), the outgoing emails as full-width readable cards, the photo
+ * grid, trade notes, and feedback last.
  */
 function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   var base = _msReportingCache[jobId] || { job_id: jobId };
   var row = _msSesSynthRow(jobId, ctx);
-  // The doc-tab switcher + evidence renderers read the synthesized row from the
+  // The doc-tab switcher + shared renderers read the synthesized row from the
   // shared cache; the list re-seeds the cache on every load.
   _msReportingCache[jobId] = row;
   var safeId = _msJsAttr(jobId);
@@ -586,7 +598,6 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   var isOverlay = !!(targetPanelId && targetPanelId !== 'msReportingDetailPanel');
   var dismissAction = isOverlay ? 'closeMakesafeReportingOverlay()' : 'showMsReportingDetailEmpty()';
   var cockpit = ctx.cockpit || {};
-  var sections = cockpit.sections || {};
   var statusChip = _msSesStatusChip(cockpit.status);
   if (cockpit.status === 'HOLD') {
     // The review pane uses amber for HOLD; the shared board-card chip remains unchanged.
@@ -637,25 +648,16 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   // Scrollable body (single scroll column - everything visible without leaving the panel)
   html += '<div class="msr-body">';
 
-  // ── HOLD banner: the backend's blocker facts, verbatim ────────────────────
-  // Amber, not red: per the blueprint a hold is the machine stopping and asking
-  // for a person, which is exactly what amber means on this surface. Red is
-  // reserved for a read that actually failed.
+  // ── ONE clear next action ─────────────────────────────────────────────────
+  html += _msSesNextAction(cockpit);
+
+  // ── The hold story: ONE amber block, numbered verbatim blockers, each with
+  //    its plain-English clear path. Amber is a machine stop wanting a person;
+  //    red stays reserved for a read that actually failed. ───────────────────
   if (cockpit.status === 'HOLD') {
-    var reasons = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
-    html += '<div class="msr-banner stop">';
-    html += '<div class="msr-banner-title">&#9888; On hold &mdash; this pack cannot be invoiced or released</div>';
-    html += 'The backend named these blockers. There is no override on this screen: clear them through feedback and a revised pack.';
-    if (reasons.length) {
-      html += '<ul>';
-      reasons.forEach(function(r) { html += '<li>' + escapeHtml(r) + '</li>'; });
-      html += '</ul>';
-    }
-    if (_msIsPortalBuilder(base)) {
-      html += '<div style="margin-top:6px;">This builder uses a secure portal. Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).</div>';
-    }
-    html += '</div>';
-  } else if (_msIsPortalBuilder(base)) {
+    html += _msSesRenderHoldBanner(cockpit);
+  }
+  if (_msIsPortalBuilder(base)) {
     html += '<div class="msr-banner info">';
     html += '<div class="msr-banner-title">Portal builder</div>';
     html += 'Portal capture evidence is recorded by the capture tooling &mdash; this screen cannot submit to the builder portal (portal capture pending backend wiring).';
@@ -665,17 +667,20 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   // ── Stale banner (defensive: we never pass a displayed binding) ───────────
   if (cockpit.stale) {
     html += '<div class="msr-banner stop">';
-    html += '<div class="msr-banner-title">&#9888; This view is stale</div>';
-    html += 'The underlying readiness rows moved after this cockpit was read &mdash; close and reopen the pack before acting.';
+    html += '<div class="msr-banner-title">This view is out of date</div>';
+    html += 'The pack moved on after this screen was loaded &mdash; close and reopen it before acting.';
     html += '</div>';
   }
 
-  // ── PACK COMPLETENESS (blueprint RV-1: name what is missing, do not just
-  //    show an empty frame) ───────────────────────────────────────────────────
-  html += _msSesRenderCompleteness(row, ctx);
+  // ── PRIMARY ACTIONS AT THE TOP — the two stamps, armed only by the backend
+  //    control flags. A disabled stamp stays visible with its reason. ────────
+  html += '<div class="msr-actions">';
+  html += _msSesActionBlock(jobId, ctx, dismissAction);
+  html += '</div>';
 
-  // ── DOCUMENTS — CLICK THROUGH (doc tabs + fit-to-page PDF stage) ───────────
-  html += '<div class="msr-sec"><h3>Documents</h3><span class="msr-sec-note">every document in the pack, readable here</span></div>';
+  // ── DOCUMENTS — tabs over ONE fit-to-page stage. The invoice is a document
+  //    here: a tab like the report, never a separate section. ────────────────
+  html += '<div class="msr-sec"><h3>Documents</h3><span class="msr-sec-note">click a tab &mdash; it opens right here</span></div>';
   if (docTabs.length) {
     html += '<div id="msDocTabs_' + safeJobKey + '" class="msr-tabs" role="tablist" aria-label="Pack documents">';
     docTabs.forEach(function(t, i) {
@@ -683,22 +688,24 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
       html += '<button type="button" role="tab" class="msr-tab" aria-selected="' + (active ? 'true' : 'false') + '" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')">' + escapeHtml(t.tabLabel) + '</button>';
     });
     html += '</div>';
-    // PDF stage (whole-page). Signed URLs live 300s; tab switches past that age
+    // Stage (fit-to-page). Signed URLs live 300s; tab switches past that age
     // re-fetch the pack first (see _msSwitchDocTab).
-    html += '<div id="msDocStage_' + safeJobKey + '" class="msr-stage-wrap">' + _msRenderDocStage(docTabs, activeTab) + '</div>';
+    html += '<div id="msDocStage_' + safeJobKey + '" class="msr-stage-wrap">' + _msRenderDocStage(docTabs, activeTab, row) + '</div>';
   } else {
     html += '<div class="msr-panel"><div class="msr-empty-note">'
       + (ctx.pack
-        ? 'No drafted documents are attached to this pack yet. The completeness list above names what the pack is missing.'
-        : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The routes and money facts below are the current cockpit truth.')
+        ? 'No documents are attached to this pack yet.'
+        : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The emails below are the current truth.')
       + '</div></div>';
   }
+  // RV-1: a missing document is NAMED, never an empty frame.
+  html += _msSesMissingLine(row, ctx);
 
-  // ── DRAFT INVOICE REVIEW (SES proposal lines + totals / Xero binding) ──────
-  html += _msRenderInvoiceReview(row);
+  // ── THE OUTGOING EMAILS — full-width, readable, verbatim (RV-4/5) ─────────
+  html += _msSesRenderRoutes(ctx);
 
-  // ── SOURCE EVIDENCE (work order / trade docs; photos are shown below) ─────
-  html += _msRenderSourceEvidence(row);
+  // ── PHOTOS — calm grid, fixed set (read-only; changes go through Feedback) ─
+  html += _msSesRenderPhotos(ctx);
 
   // ── TRADE NOTES (raw from submission, carried by the live feed) ───────────
   if (base.trade_notes && String(base.trade_notes).trim()) {
@@ -706,20 +713,11 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     html += '<div class="msr-panel"><div class="msr-notes">' + escapeHtml(base.trade_notes) + '</div></div>';
   }
 
-  // ── THE OUTGOING EMAIL, BEFORE APPROVAL ───────────────────────────────────
-  html += _msSesRenderRoutes(ctx);
-
-  // ── PHOTOS — the fixed photo-route set (display-only) ──────────────────────
-  html += _msSesRenderPhotos(ctx);
-
-  // ── REVIEW FEEDBACK ────────────────────────────────────────────────────────
+  // ── FEEDBACK, LAST ─────────────────────────────────────────────────────────
   html += '<div class="msr-sec"><h3>Feedback</h3><span class="msr-sec-note">the next run reads what you write here</span></div>';
   html += '<div id="msNotesPanel-' + safeId + '" style="padding:0 20px;"></div>';
 
-  // ── ACTION BLOCK (cockpit controls) ────────────────────────────────────────
-  html += '<div class="msr-act">';
-  html += _msSesActionBlock(jobId, ctx, dismissAction);
-  html += '</div>';
+  html += '<div class="msr-foot"><button type="button" class="msr-btn ghost" onclick="' + dismissAction + '">Hold for later</button></div>';
 
   html += '</div>'; // end scroll body
 
@@ -727,100 +725,146 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 }
 
 /**
- * <makesafe-docs-ready-review> PACK COMPLETENESS.
- *
- * Blueprint RV-1: "the surface says which document is missing rather than
- * showing an empty frame". Every claim here comes from the reviewable pack's
- * own artifacts (via the synthesized row) plus the cockpit's invoice mapping —
- * never from a stage, substatus, or column name, which describe where a card
- * sits rather than which documents exist.
- *
- * SWMS is the one deliberately soft line: no feed on this surface states
- * whether a job OWES a SWMS, so an absent SWMS is reported as "not in this
- * pack" and never as "not required". Claiming a safety document is not owed is
- * not a claim this screen has the evidence to make.
+ * The one next action, chosen from the backend control flags alone. It never
+ * names an action the backend has not enabled.
  */
-function _msSesRenderCompleteness(row, ctx) {
-  if (!ctx || !ctx.pack) return '';
-  var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
-  var source = Array.isArray(row.source_docs) ? row.source_docs : [];
-  var photos = Array.isArray(row.photos) ? row.photos : [];
-  var inv = row.invoice;
-
-  function hasDraft(re) {
-    return draft.some(function(d) { return d && re.test(String(d.label || '')); });
-  }
-  var hasWorkOrder = source.some(function(s) {
-    return s && s.kind !== 'image' && /work\s*order|works\s*order|^wo\b/i.test(String(s.label || ''));
-  });
-  var hasReport = hasDraft(/make\s*safe|completion|report/i);
-  var hasSwms = hasDraft(/swms/i);
-  var hasInvoicePdf = hasDraft(/invoice/i);
-
-  var items = [
-    {
-      name: 'Work order',
-      state: hasWorkOrder ? 'present' : 'missing',
-      present: 'The builder instruction is attached to this pack.',
-      missing: 'No work order is attached to this pack.'
-    },
-    {
-      name: 'Completion report',
-      state: hasReport ? 'present' : 'missing',
-      present: 'The drafted make-safe report is in the pack.',
-      missing: 'No drafted completion report is in the pack.'
-    },
-    {
-      name: 'SWMS',
-      state: hasSwms ? 'present' : 'na',
-      present: 'A SWMS is in the pack.',
-      na: 'Not in this pack. This screen cannot tell you whether one is owed.'
-    },
-    {
-      name: 'Invoice',
-      state: inv ? (hasInvoicePdf ? 'present' : 'missing') : 'missing',
-      present: 'Invoice figures and the invoice PDF are both in the pack.',
-      missing: inv
-        ? 'Figures are drafted below, but no invoice PDF is in the pack yet.'
-        : 'No draft invoice on this pack. Nothing here can be approved without one.'
-    },
-    {
-      name: 'Photos',
-      state: photos.length ? 'present' : 'missing',
-      present: photos.length + ' photo' + (photos.length === 1 ? '' : 's') + ' captured on the docket.',
-      missing: 'No photos are attached to this pack.'
-    }
-  ];
-
-  var missingNames = items.filter(function(i) { return i.state === 'missing'; })
-    .map(function(i) { return i.name; });
-
-  var html = '';
-  html += '<div class="msr-sec"><h3>Pack completeness</h3><span class="msr-sec-note">what this pack actually carries</span></div>';
-  html += '<div class="msr-panel"><div class="msr-comp">';
-  items.forEach(function(i) {
-    var mark = i.state === 'present' ? '&#10003;' : (i.state === 'missing' ? '!' : '&ndash;');
-    html += '<div class="msr-comp-item ' + i.state + '">';
-    html += '<span class="msr-comp-mark" aria-hidden="true">' + mark + '</span>';
-    html += '<span><span class="msr-comp-name">' + escapeHtml(i.name) + '</span>';
-    html += '<span class="msr-comp-note">' + escapeHtml(i[i.state]) + '</span></span>';
-    html += '</div>';
-  });
-  html += '</div>';
-  if (missingNames.length) {
-    html += '<div class="msr-comp-foot short">Missing from this pack: <strong>' + escapeHtml(missingNames.join(', ')) + '</strong>. Read the rest of the pack before you decide whether that blocks the send.</div>';
+function _msSesNextAction(cockpit) {
+  var controls = (cockpit && cockpit.controls) || {};
+  var onHold = cockpit && cockpit.status === 'HOLD';
+  var cls = '';
+  var text;
+  if (onHold) {
+    cls = ' hold';
+    var n = _msSesHoldBlockers(cockpit).length;
+    text = n
+      ? ('Clear <strong>' + n + ' blocker' + (n === 1 ? '' : 's') + '</strong> below &mdash; nothing can be approved or sent until then.')
+      : 'The system stopped this pack &mdash; nothing can be approved or sent until it clears.';
+  } else if (controls.send_it && controls.send_it.enabled) {
+    text = 'Read the pack, then press <strong>SEND IT</strong>. It emails the report, the photos and the invoice exactly as shown below.';
+  } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
+    text = 'Check the Invoice tab, then press <strong>APPROVE INVOICE</strong>. That creates the real Xero invoice; the pack comes back here once more before anything sends.';
   } else {
-    html += '<div class="msr-comp-foot">Every document this screen can check for is in the pack.</div>';
+    text = 'Nothing to press yet &mdash; the system is still preparing this pack. Review it and leave feedback if something looks wrong.';
   }
+  return '<div class="msr-next' + cls + '"><span class="msr-next-k">Next</span><span class="msr-next-v">' + text + '</span></div>';
+}
+
+// ── HOLD STORY (verbatim facts + plain-English clear paths) ─────────────────
+
+/**
+ * The deduped hold blockers, verbatim from the cockpit's status.reasons.
+ * The backend can emit the same blocker once per route (this is how "builder
+ * email draft missing" printed twice on the captain's screen), so duplicates
+ * are collapsed case-insensitively before anything renders.
+ */
+function _msSesHoldBlockers(cockpit) {
+  var sections = (cockpit && cockpit.sections) || {};
+  var raw = (sections.status && Array.isArray(sections.status.reasons)) ? sections.status.reasons : [];
+  var seen = {};
+  var out = [];
+  raw.forEach(function(r) {
+    var t = String(r == null ? '' : r).trim();
+    if (!t) return;
+    var key = t.toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '');
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(t);
+  });
+  return out;
+}
+
+// Known blocker shapes -> the plain-English path that clears them. These are
+// PROCESS explanations (how this pipeline works), not claims about the job's
+// state — the blocker fact itself always renders verbatim above the clear
+// path. An unrecognised blocker gets the honest generic path. Order matters:
+// more specific patterns sit above the catch-all /report/ one.
+var _MS_SES_BLOCKER_CLEARS = [
+  [/work\s*order|builder\s*instruction/i,
+    'Get the builder’s work order onto this job — attach it, or ask the builder to resend it. The pack rebuilds and re-checks on its own.'],
+  [/email\s*draft/i,
+    'The system still has to draft this email. It normally clears on the next run of the reporting routine; if it stays stuck, say so in Feedback below.'],
+  [/xero\s*invoice/i,
+    'This clears from this screen: APPROVE INVOICE creates the invoice in Xero. Clear any other blockers first and the stamp unlocks.'],
+  [/rate|price|pricing|schedule|labour|invoice\s*line/i,
+    'Confirm the right figure in Feedback below. The next pack rebuild re-prices the invoice and this check runs again.'],
+  [/photo/i,
+    'The photos have to reach this job (trade upload, or attach them from the intake email); the next pack rebuild picks them up.'],
+  [/swms/i,
+    'The SWMS has to be generated or attached before this pack can go.'],
+  [/completion\s*report|report/i,
+    'The system has to draft the completion report from the trade submission. If it keeps failing, say so in Feedback below.']
+];
+
+function _msSesBlockerClears(reason) {
+  for (var i = 0; i < _MS_SES_BLOCKER_CLEARS.length; i++) {
+    if (_MS_SES_BLOCKER_CLEARS[i][0].test(reason)) return _MS_SES_BLOCKER_CLEARS[i][1];
+  }
+  return 'Fix the thing it names, then the pack rebuilds and re-checks itself. If you cannot fix it from here, say so in Feedback below.';
+}
+
+/**
+ * The single amber hold block: numbered blockers, deduped, each stating the
+ * backend's fact VERBATIM plus the plain-English path that clears it.
+ */
+function _msSesRenderHoldBanner(cockpit) {
+  var blockers = _msSesHoldBlockers(cockpit);
+  var n = blockers.length;
+  var html = '<div class="msr-hold">';
+  html += '<div class="msr-hold-h">On hold &mdash; '
+    + (n ? (n + ' thing' + (n === 1 ? '' : 's') + ' must clear before this pack can move') : 'this pack cannot move yet')
+    + '</div>';
+  html += '<div class="msr-hold-lede">The system stopped this pack because something is missing or looks wrong. There is no override on this screen.</div>';
+  if (n) {
+    html += '<ol class="msr-blockers">';
+    blockers.forEach(function(r) {
+      html += '<li><div class="msr-blocker-fact">' + escapeHtml(r) + '</div>';
+      html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(r)) + '</div></li>';
+    });
+    html += '</ol>';
+  }
+  html += '<div class="msr-hold-foot">Blockers clear on their own the next time the pack rebuilds. If one of them is wrong, say so in Feedback at the bottom.</div>';
   html += '</div>';
   return html;
 }
 
 /**
+ * RV-1: a missing document is NAMED in one quiet sentence under the tabs,
+ * never an empty frame. Facts come from the pack's own artifacts; SWMS is the
+ * one deliberately soft clause — no feed on this surface states whether a job
+ * OWES a SWMS, so an absent SWMS is "not in this pack", never "not required".
+ */
+function _msSesMissingLine(row, ctx) {
+  if (!ctx || !ctx.pack) return '';
+  var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
+  var source = Array.isArray(row.source_docs) ? row.source_docs : [];
+  function hasDraft(re) {
+    return draft.some(function(d) { return d && re.test(String(d.label || '')); });
+  }
+  var missing = [];
+  if (!hasDraft(/make\s*safe|completion|report/i)) missing.push('the completion report');
+  if (!source.some(function(s) {
+    return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
+  })) missing.push('the builder work order');
+  if (!(Array.isArray(row.photos) && row.photos.length)) missing.push('site photos');
+  if (!row.invoice) missing.push('a draft invoice');
+  var invoicePdfMissing = row.invoice && !hasDraft(/invoice/i);
+  var swmsAbsent = !hasDraft(/swms/i);
+  if (!missing.length && !invoicePdfMissing && !swmsAbsent) return '';
+  var bits = [];
+  if (missing.length) bits.push('<b>Not in this pack:</b> ' + escapeHtml(missing.join(', ')) + '.');
+  if (invoicePdfMissing) bits.push('The Invoice tab shows the drafted figures &mdash; the Xero PDF is created at APPROVE INVOICE.');
+  if (swmsAbsent) bits.push('No SWMS in the pack; this screen cannot tell whether one is owed.');
+  return '<div class="msr-missing">' + bits.join(' ') + '</div>';
+}
+
+// (Pack completeness now renders as the one-line _msSesMissingLine under the
+// document tabs — the tabs themselves show what exists.)
+
+/**
  * Merge the live feed row (identity facts) with the SES-derived review content
- * into the row shape the shared renderers (doc tabs, invoice review, source
- * evidence) consume. Legacy send fields are stripped so no legacy gate can
- * pick them up.
+ * into the row shape the shared renderers (the document tabs, the invoice
+ * document on the stage, the missing-documents line) consume. Legacy send
+ * fields are stripped so no legacy gate can pick them up.
  */
 function _msSesSynthRow(jobId, ctx) {
   var base = _msReportingCache[jobId] || { job_id: jobId };
@@ -943,9 +987,11 @@ function _msSmallNumberWord(n) {
 }
 
 /**
- * Render the three exact email routes the release carries (report + photo +
- * invoice), straight from the cockpit's resolved routes: recipients, cc,
- * subject, body excerpt, attachment count, and the backend's ready flag.
+ * Render the exact email routes the release carries (report + photo +
+ * invoice) as full-width, READABLE cards: a clear To / Cc / Subject header,
+ * the body in full at reading size (RV-4 — an excerpt is not "the email
+ * exactly as it will send"), attachments by name, and the recorded
+ * why-this-recipient facts underneath (RV-5).
  */
 function _msSesRenderRoutes(ctx) {
   var sections = (ctx.cockpit && ctx.cockpit.sections) || {};
@@ -958,8 +1004,8 @@ function _msSesRenderRoutes(ctx) {
   });
   var byHash = _msSesArtifactsByHash(ctx);
   var html = '';
-  html += '<div class="msr-sec"><h3>The outgoing email</h3><span class="msr-sec-note">the exact emails SEND IT releases</span></div>';
-  html += '<div class="msr-lede">SEND IT sends <strong>all ' + _msSmallNumberWord(routes.length) + ' routes at once</strong> (report + photos + invoice) to the exact recipients below, exactly as shown &mdash; nothing here is a summary.</div>';
+  html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">the exact emails SEND IT releases</span></div>';
+  html += '<div class="msr-lede">SEND IT sends <strong>all ' + _msSmallNumberWord(routes.length) + ' emails at once</strong> &mdash; report, photos and invoice &mdash; to exactly the people below, exactly as written. Nothing here is a summary.</div>';
   routes.forEach(function(r) {
     r = r || {};
     var label = _MS_SES_ROUTE_LABELS[r.route_kind] || String(r.route_kind || 'Route');
@@ -968,31 +1014,29 @@ function _msSesRenderRoutes(ctx) {
     var cc = Array.isArray(r.cc) ? r.cc.filter(Boolean) : [];
     var hashes = Array.isArray(r.attachment_hashes) ? r.attachment_hashes : [];
 
-    html += '<div class="msr-mail">';
-    html += '<div class="msr-mail-top">';
-    html += '<span class="msr-mail-name">' + escapeHtml(label) + '</span>';
-    html += '<span class="msr-chip" style="background:' + (ready ? 'var(--sw-sage)' : '#C9821B') + ';color:#fff;">' + (ready ? 'Ready' : 'Not ready') + '</span>';
-    html += '</div>';
+    html += '<section class="msr-mail">';
+    html += '<header class="msr-mail-top">';
+    html += '<h4 class="msr-mail-name">' + escapeHtml(label) + '</h4>';
+    html += '<span class="msr-chip ' + (ready ? 'ok' : 'warn') + '">' + (ready ? 'Ready' : 'Not ready') + '</span>';
+    html += '</header>';
 
-    html += '<div class="msr-mail-fields">';
+    html += '<div class="msr-mail-meta">';
     html += '<div class="msr-mail-row"><span class="mk">To</span><span class="mv' + (recipients.length ? '' : ' bad') + '">'
-      + (recipients.length ? escapeHtml(recipients.join(', ')) : 'No recipient on this route')
+      + (recipients.length ? escapeHtml(recipients.join(', ')) : 'No recipient on this email')
       + '</span></div>';
     html += '<div class="msr-mail-row"><span class="mk">Cc</span><span class="mv' + (cc.length ? '' : ' none') + '">'
       + (cc.length ? escapeHtml(cc.join(', ')) : 'Nobody')
       + '</span></div>';
     html += '<div class="msr-mail-row"><span class="mk">Subject</span><span class="mv' + (r.subject ? '' : ' none') + '">'
-      + (r.subject ? escapeHtml(r.subject) : 'No subject on this route')
+      + (r.subject ? escapeHtml(r.subject) : 'No subject on this email')
       + '</span></div>';
     html += '</div>';
 
-    // RV-4: the body in full. An excerpt is not "the email exactly as it will
-    // send", and the old 280-char cut appended a pre-escaped ellipsis entity
-    // that then got escaped again and shipped as literal "&#8230;".
+    // RV-4: the body in full, at reading size.
     if (String(r.body || '').trim()) {
       html += '<div class="msr-mail-body">' + escapeHtml(String(r.body)) + '</div>';
     } else {
-      html += '<div class="msr-mail-body" style="color:var(--sw-mid);font-style:italic;">This route carries no body text.</div>';
+      html += '<div class="msr-mail-body empty">This email carries no body text.</div>';
     }
 
     // RV-4: attachments BY NAME. The route carries content hashes; the pack
@@ -1000,21 +1044,21 @@ function _msSesRenderRoutes(ctx) {
     // unresolved rather than silently dropped from the count.
     html += '<div class="msr-att">';
     if (!hashes.length) {
-      html += '<span class="msr-att-item">No attachments on this route</span>';
+      html += '<span class="msr-att-item">No attachments on this email</span>';
     } else {
       hashes.forEach(function(h) {
         var a = byHash[h];
         if (a) {
-          html += '<span class="msr-att-item">&#128206; ' + escapeHtml(a.fileName) + '</span>';
+          html += '<span class="msr-att-item">' + _MS_SES_ICONS.clip + ' ' + escapeHtml(a.fileName) + '</span>';
         } else {
-          html += '<span class="msr-att-item unresolved">&#9888; Attachment not in this pack (' + escapeHtml(String(h).slice(0, 18)) + '&#8230;)</span>';
+          html += '<span class="msr-att-item unresolved">' + _MS_SES_ICONS.alert + ' Attachment not in this pack (' + escapeHtml(String(h).slice(0, 18)) + '&#8230;)</span>';
         }
       });
     }
     html += '</div>';
 
     html += _msSesRouteWhy(r, byHash);
-    html += '</div>';
+    html += '</section>';
   });
   return html;
 }
@@ -1100,11 +1144,12 @@ function _msSesRouteWhy(r, byHash) {
 }
 
 /**
- * The photo set is FIXED by the SES release revision (the photo route's
- * attachment hashes), so this section is a display-only affirmation: the photos
- * in the photo email (green) plus any other docket photos kept as evidence
- * (grey). No include/exclude toggles — changes go through feedback + a revised
- * pack, never through a send-time payload.
+ * The photo set, as a calm grid. The set is FIXED by the SES release revision
+ * (the photo route's attachment hashes), so this is display-only: a drawn
+ * check badge marks a photo in the photo email; an evidence-only photo keeps
+ * a quiet neutral badge. No include/exclude toggles — a control that cannot
+ * change anything would be a fake one; changes go through Feedback + a
+ * revised pack, never a send-time payload.
  */
 function _msSesRenderPhotos(ctx) {
   if (!ctx.pack) return '';
@@ -1121,20 +1166,21 @@ function _msSesRenderPhotos(ctx) {
   var evidence = photos.filter(function(p) { return !(p.content_hash && routeHashes[p.content_hash]); });
   var html = '';
   html += '<div class="msr-sec"><h3>Photos</h3><span class="msr-sec-note">fixed in the release revision</span></div>';
-  html += '<div class="msr-lede">';
-  html += inRoute.length + ' photo' + (inRoute.length === 1 ? '' : 's') + ' in the photo email';
+  html += '<div class="msr-photocount">';
+  html += inRoute.length + ' of ' + photos.length + ' photo' + (photos.length === 1 ? '' : 's') + ' in the photo email';
   if (evidence.length) html += ' &middot; ' + evidence.length + ' kept as evidence only (not sent)';
-  html += '. The photo set is fixed by the SES release revision and cannot be changed from this screen &mdash; record feedback to request a revised pack.';
   html += '</div>';
   html += '<div class="msr-photos">';
   inRoute.concat(evidence).forEach(function(p) {
     var sent = !!(p.content_hash && routeHashes[p.content_hash]);
-    html += '<figure class="msr-photo' + (sent ? '' : ' evidence') + '" title="' + escapeAttr(sent ? 'In the photo email' : 'Evidence only — not sent') + '">';
+    html += '<figure class="msr-photo ' + (sent ? 'ok' : 'ev') + '" title="' + escapeAttr(sent ? 'In the photo email' : 'Evidence only — not sent') + '">';
     html += '<img src="' + escapeAttr(p.url) + '" alt="' + escapeAttr(p.label || 'Site photo') + '" loading="lazy">';
-    html += '<figcaption class="msr-photo-tag">' + (sent ? '&#10003;' : 'evidence') + '</figcaption>';
+    html += '<span class="mk" aria-hidden="true">' + (sent ? _MS_SES_ICONS.check : _MS_SES_ICONS.cross) + '</span>';
+    html += '<figcaption>' + escapeHtml(p.label || 'Site photo') + '</figcaption>';
     html += '</figure>';
   });
   html += '</div>';
+  html += '<div class="msr-lede">This set is fixed in the release revision &mdash; to swap or drop a photo, say so in Feedback and a revised pack comes back here.</div>';
   return html;
 }
 
@@ -1148,9 +1194,18 @@ function _msDocTabKey(jobId) {
 }
 
 /**
- * Build the doc-tab list for a pack: drafted outputs first (Make Safe Report /
- * Xero Invoice / Draft Invoice / SWMS), then source inputs (Trade Report /
- * Work Order). Photos remain in the photo section (fixed set, display-only).
+ * Build the doc-tab list for a pack: the report, the INVOICE AS A DOCUMENT
+ * (the bound Xero PDF when it exists, else the drafted proposal rendered as an
+ * invoice page — the invoice is a tab like the report, never a separate
+ * section), SWMS, then source inputs (Work Order / Trade Report). Photos stay
+ * in the photo section (fixed set, display-only).
+ *
+ * WORK ORDERS ARE NEVER COLLAPSED: a make-safe card can carry the work orders
+ * of two different builder instructions (AGENTS.md <makesafe-workorder-identity>
+ * — no surface may pick one and hide the rest), so every work-order source doc
+ * gets its own tab, discriminated by the PO ref in its file name when
+ * `extractPoRef` can find one, else numbered.
+ *
  * Each entry: { tabLabel, url, kind } where url already carries #view=Fit for
  * PDFs (via _msReportingBuildCarouselDocs).
  */
@@ -1160,47 +1215,75 @@ function _msReportingDocTabs(d) {
   docs.forEach(function(doc) {
     var label = String(doc.label || '').toLowerCase();
     var tabLabel = null;
+    var isWorkOrder = false;
+    var isInvoiceDoc = false;
     if (doc.kind === 'image') return; // photos stay in the photo section
-    if (/xero/.test(label) && /invoice/.test(label)) tabLabel = 'Xero Invoice';
+    // Only a DRAFTED artifact (the pack's own xero_invoice_pdf) may claim the
+    // Invoice slot: a builder SOURCE attachment named "invoice_*.pdf" is the
+    // builder's paperwork, and taking the slot would hide the SES proposal page.
+    if (doc.isDraft && /invoice/.test(label)) { tabLabel = 'Invoice'; isInvoiceDoc = true; }
     else if (/raw/.test(label) && /trade|service|report/.test(label)) tabLabel = 'Raw Trade Report';
     else if (/trade|service/.test(label) && /pdf/.test(label)) tabLabel = 'Trade Report PDF';
     else if (/trade|service|raw/.test(label)) tabLabel = 'Trade Report';
-    else if (/work\S*\s*order|^wo$/.test(label)) tabLabel = 'Work Order';
+    else if (/work\S*\s*order|^wo$/.test(label)) { tabLabel = 'Work Order'; isWorkOrder = true; }
     else if (/make\s*safe|completion/.test(label) && /report/.test(label)) tabLabel = 'Make Safe Report';
-    else if (/invoice/.test(label)) tabLabel = 'Draft Invoice';
     else if (/swms/.test(label)) tabLabel = 'SWMS';
     else if (/report/.test(label)) tabLabel = 'Trade Report';
     else tabLabel = doc.label || 'Document';
-    // De-dupe by tab label (one report, one invoice, one SWMS).
-    if (out.some(function(o) { return o.tabLabel === tabLabel; })) return;
+    // 'Invoice' is reserved for the drafted money document; a source file that
+    // happens to be named that is relabelled rather than shown as a twin tab.
+    if (!isInvoiceDoc && tabLabel === 'Invoice') tabLabel = 'Builder invoice';
+    // De-dupe by tab label (one report, one invoice, one SWMS) — EXCEPT work
+    // orders, where collapsing would hide a second builder instruction.
+    if (!isWorkOrder && out.some(function(o) { return o.tabLabel === tabLabel; })) return;
     out.push({
       tabLabel: tabLabel,
       url: doc.url,
       kind: doc.kind,
+      isWorkOrder: isWorkOrder,
+      isInvoiceDoc: isInvoiceDoc,
+      srcLabel: doc.label || '',
       created_at: doc.created_at || null,
       received_at: doc.received_at || null,
       source_type: doc.source_type || null,
       raw_report: doc.raw_report || null,
     });
   });
-  // Order: generated pack first, source evidence after it.
+  // Multiple work orders: discriminate by the PO ref embedded in the file name
+  // (the builder claim ref is shared, so only the PO discriminates — same rule
+  // as buildMakesafeWorkOrderSlots), else number them.
+  var woTabs = out.filter(function(o) { return o.isWorkOrder; });
+  if (woTabs.length > 1) {
+    woTabs.forEach(function(o, i) {
+      var po = (typeof extractPoRef === 'function') ? extractPoRef(o.srcLabel) : null;
+      o.tabLabel = po ? ('Work Order ' + po) : ('Work Order ' + (i + 1));
+    });
+  }
+  // The invoice is ALWAYS a document: when no invoice PDF is bound yet, the
+  // drafted proposal renders as an invoice page on the stage (kind 'invdoc').
+  var hasInvoiceTab = out.some(function(o) { return o.isInvoiceDoc; });
+  if (!hasInvoiceTab && d && d.invoice) {
+    out.push({ tabLabel: 'Invoice', url: null, kind: 'invdoc', isInvoiceDoc: true });
+  }
+  // Order: report first (the main document), money second, then the rest.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
-  var order = { 'Make Safe Report': 0, 'Xero Invoice': 1, 'Draft Invoice': 1, 'SWMS': 2, 'Raw Trade Report': 3, 'Trade Report': 4, 'Trade Report PDF': 5, 'Work Order': 6 };
+  var order = { 'Make Safe Report': 0, 'Invoice': 1, 'SWMS': 2, 'Work Order': 3, 'Raw Trade Report': 5, 'Trade Report': 6, 'Trade Report PDF': 7 };
   out.sort(function(a, b) {
-    var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : 9;
-    var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : 9;
+    var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : (a.isWorkOrder ? 4 : 9);
+    var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : (b.isWorkOrder ? 4 : 9);
     return oa - ob;
   });
   return out;
 }
 
 /**
- * Render the whole-page PDF stage for the doc at index idx. Dark stage with the
- * PDF page centered + a "whole page" badge in the corner (matches the design ref
- * .pdfstage / .pdffit). For PDFs we embed an iframe with the Fit-fragment URL; for
- * an image we render it contained; for anything else, an open-in-new-tab fallback.
+ * Render the fit-to-page stage for the doc at index idx. Dark stage with the
+ * page centered + a "fit to page" tag (mockup .pdfstage / .pdffit). PDFs embed
+ * an iframe with the Fit-fragment URL; images render contained; the drafted
+ * invoice (kind 'invdoc') renders as an invoice page from the row's own
+ * figures; anything else gets an open-in-new-tab fallback.
  */
-function _msRenderDocStage(docTabs, idx) {
+function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];
   var metaBits = [];
   if (t && t.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(t.received_at));
@@ -1211,7 +1294,9 @@ function _msRenderDocStage(docTabs, idx) {
       + '</div>'
     : '';
   var inner;
-  if (!t || !t.url) {
+  if (t && t.kind === 'invdoc') {
+    inner = _msSesRenderInvoiceDoc(row);
+  } else if (!t || !t.url) {
     if (t && (t.kind === 'html' || t.raw_report)) {
       inner = _msRenderRawTradeReportDoc(t);
     } else {
@@ -1224,7 +1309,52 @@ function _msRenderDocStage(docTabs, idx) {
   } else {
     inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
-  return metaHtml + '<div class="msr-stage"><span class="msr-stage-tag">whole page</span>' + inner + '</div>';
+  return metaHtml + '<div class="msr-stage"><span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
+}
+
+/**
+ * The drafted invoice AS A DOCUMENT: an invoice page rendered on the stage
+ * from the SES proposal figures (or the Xero binding facts when present but
+ * the PDF is not in this pack). Read-only presentation of backend numbers —
+ * figure changes go through Feedback, never a send-time edit.
+ */
+function _msSesRenderInvoiceDoc(d) {
+  var inv = (d && d.invoice) || {};
+  var lines = Array.isArray(inv.lines) ? inv.lines : [];
+  var statusLine = inv.invoice_number
+    ? escapeHtml(inv.invoice_number) + (inv.status ? ' &middot; ' + escapeHtml(inv.status) : '')
+    : 'DRAFT &mdash; SES proposal, not yet in Xero';
+
+  var html = '<div class="msr-invpage">';
+  html += '<div class="msr-invpage-band"></div>';
+  html += '<div class="msr-invpage-body">';
+  html += '<div class="msr-invpage-head"><h4>Tax Invoice</h4><span class="msr-invpage-status">' + statusLine + '</span></div>';
+  if (lines.length) {
+    html += '<table class="msr-invpage-tbl"><thead><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit ex</th><th class="n">Amount ex</th></tr></thead><tbody>';
+    lines.forEach(function(li, idx) {
+      li = li || {};
+      var desc = li.description || li.name || ('Line ' + (idx + 1));
+      var qty = li.quantity != null ? Number(li.quantity) : null;
+      var unit = li.unit_price != null ? Number(li.unit_price) : (li.unit_amount != null ? Number(li.unit_amount) : null);
+      var total = li.line_total != null ? Number(li.line_total) : (li.amount != null ? Number(li.amount) : null);
+      html += '<tr>';
+      html += '<td>' + escapeHtml(desc) + '</td>';
+      html += '<td class="n">' + (qty != null && isFinite(qty) ? escapeHtml(String(qty)) : '') + '</td>';
+      html += '<td class="n">' + (unit != null && isFinite(unit) ? escapeHtml(_msFmtAud(unit)) : '') + '</td>';
+      html += '<td class="n">' + (total != null && isFinite(total) ? escapeHtml(_msFmtAud(total)) : '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  } else if (inv.lines_unavailable) {
+    html += '<div class="msr-invpage-note">Invoice line detail is unavailable for this draft.</div>';
+  }
+  html += '<div class="msr-invpage-tots">';
+  if (inv.total_ex_gst != null) html += '<div class="row"><span>Subtotal ex GST</span><span>' + escapeHtml(_msFmtAud(inv.total_ex_gst)) + '</span></div>';
+  if (inv.total_inc_gst != null) html += '<div class="row tot"><span>Total inc GST</span><span>' + escapeHtml(_msFmtAud(inv.total_inc_gst)) + '</span></div>';
+  html += '</div>';
+  html += '<div class="msr-invpage-foot">Figures are read-only here. To change pricing, say so in Feedback &mdash; the next pack rebuild re-prices before anything is approved.</div>';
+  html += '</div></div>';
+  return html;
 }
 
 function _msRenderRawTradeReportDoc(t) {
@@ -1311,10 +1441,10 @@ function _msSwitchDocTab(jobId, idx, panelId) {
     }
   }
   var stage = (root.querySelector && root.querySelector('#msDocStage_' + key)) || document.getElementById('msDocStage_' + key);
-  if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx);
+  if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx, d);
 }
 
-// ── CAROUSEL + MONEY-REVIEW HELPERS ─────────────────────────────────────────
+// ── CAROUSEL HELPERS ────────────────────────────────────────────────────────
 
 /**
  * Map the row's draft_docs[] + source_docs[] into the shared doc-viewer entry
@@ -1324,7 +1454,7 @@ function _msSwitchDocTab(jobId, idx, panelId) {
 function _msReportingBuildCarouselDocs(d) {
   var out = [];
   var seen = {};
-  function add(label, url, kind, meta) {
+  function add(label, url, kind, meta, isDraft) {
     meta = meta || {};
     if (!url && !meta.raw_report && kind !== 'html') return;
     var dedupeKey = url || [label || 'Document', meta.source_type || kind || '', meta.received_at || meta.created_at || ''].join('|');
@@ -1341,6 +1471,7 @@ function _msReportingBuildCarouselDocs(d) {
       url: displayUrl,
       kind: k,
       doc: null,
+      isDraft: !!isDraft,
       created_at: meta.created_at || null,
       received_at: meta.received_at || meta.created_at || null,
       source_type: meta.source_type || null,
@@ -1349,18 +1480,13 @@ function _msReportingBuildCarouselDocs(d) {
   }
   // Drafted outputs first.
   if (Array.isArray(d.draft_docs)) {
-    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd); });
+    d.draft_docs.forEach(function(dd) { if (dd) add(dd.label, dd.url, _msReportingNormaliseKind(dd.kind), dd, true); });
   }
   // Source docs next (work order, photos, etc.).
   if (Array.isArray(d.source_docs)) {
-    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd); });
+    d.source_docs.forEach(function(sd) { if (sd) add(sd.label, sd.url, _msReportingNormaliseKind(sd.kind), sd, false); });
   }
   return out;
-}
-
-function _msNeedsMoneyReview(d) {
-  return !!(d && (d.needs_money_review === true ||
-    (d.money_review && d.money_review.needs_money_review === true)));
 }
 
 // Normalise a feed kind ('pdf'|'image'|'html') to the viewer's kind vocabulary.
@@ -1391,175 +1517,125 @@ function _msReportingFormatTimestamp(iso) {
   });
 }
 
-// Render the invoice facts inside the review panel so the operator can check
-// the money before any approve click. Deliberately read-only: pricing changes
-// go through feedback + a revised pack, never through a send-time edit.
-function _msRenderInvoiceReview(d) {
-  var inv = d && d.invoice;
-  if (!inv) return '';
-  var lines = Array.isArray(inv.lines) ? inv.lines : [];
-  var flags = _msReportingFlaggedLineMap(d);
-  var html = '';
-  html += '<div class="msr-sec"><h3>Draft invoice</h3><span class="msr-sec-note">the real ledger draft, read-only here</span></div>';
-  html += '<div class="msr-panel">';
-  if (inv.invoice_number || inv.status) {
-    html += '<div class="msr-inv-head">';
-    if (inv.invoice_number) html += '<span><b>Invoice</b> <span class="msr-num">' + escapeHtml(inv.invoice_number) + '</span></span>';
-    if (inv.status) html += '<span><b>Status</b> ' + escapeHtml(inv.status) + '</span>';
-    html += '</div>';
-  }
-  if (lines.length) {
-    lines.forEach(function(li, idx) {
-      li = li || {};
-      var flag = _msReportingLineFlag(flags, idx, li);
-      var desc = li.description || li.name || ('Line ' + (idx + 1));
-      var qty = li.quantity != null ? Number(li.quantity) : null;
-      var unit = li.unit_price != null ? Number(li.unit_price) : (li.unit_amount != null ? Number(li.unit_amount) : null);
-      var total = li.line_total != null ? Number(li.line_total) : (li.amount != null ? Number(li.amount) : null);
-      html += '<div class="msr-inv-line' + (flag ? ' flagged' : '') + '">';
-      html += '<div class="msr-inv-desc">' + escapeHtml(desc) + '</div>';
-      var bits = [];
-      if (qty != null && isFinite(qty)) bits.push('Qty ' + qty);
-      if (unit != null && isFinite(unit)) bits.push('Unit ' + _msFmtAud(unit));
-      if (total != null && isFinite(total)) bits.push('Line ' + _msFmtAud(total));
-      if (bits.length) html += '<div class="msr-inv-figs msr-num">' + escapeHtml(bits.join(' · ')) + '</div>';
-      if (flag) {
-        var note = flag.note || flag.reason || flag.description || 'Check this line before sending.';
-        html += '<div class="msr-inv-flag">&#9888; ' + escapeHtml(note) + '</div>';
-      }
-      html += '</div>';
-    });
-  } else if (inv.lines_unavailable) {
-    html += '<div class="msr-empty-note">Invoice line detail is unavailable for this draft.</div>';
-  }
-  html += '<div class="msr-inv-tot msr-num">';
-  if (inv.total_ex_gst != null) html += '<span><span class="lbl">ex GST</span>' + escapeHtml(_msFmtAud(inv.total_ex_gst)) + '</span>';
-  if (inv.total_inc_gst != null) html += '<span><span class="lbl">inc GST</span>' + escapeHtml(_msFmtAud(inv.total_inc_gst)) + '</span>';
-  html += '</div>';
-  html += '</div>';
-  return html;
-}
+// (The former standalone Draft-invoice section and Source-evidence link list
+// are gone: the invoice is a DOCUMENT — the Invoice tab on the stage — and
+// every work order and trade doc is its own tab, so nothing is reachable in
+// fewer places than before.)
 
-// Render non-photo source evidence links in the review panel. The photo set is
-// shown in its own fixed-set section; work orders and trade/source PDFs stay
-// visible for draft-vs-source checking.
-function _msRenderSourceEvidence(d) {
-  if (!d || !Array.isArray(d.source_docs)) return '';
-  var docs = d.source_docs.filter(function(sd) {
-    if (!sd || (!sd.url && !sd.raw_report && sd.kind !== 'html')) return false;
-    var kind = sd.kind || _msReportingDocKind(sd.url || '');
-    return kind !== 'image';
-  });
-  if (!docs.length) return '';
-  var html = '';
-  html += '<div class="msr-sec"><h3>Source evidence</h3><span class="msr-sec-note">what the pack was drafted from</span></div>';
-  html += '<div class="msr-panel"><div class="msr-ev">';
-  docs.forEach(function(sd) {
-    var label = sd.label || 'Source document';
-    var metaBits = [];
-    if (sd.received_at) metaBits.push('Received ' + _msReportingFormatTimestamp(sd.received_at));
-    if (sd.created_at && sd.created_at !== sd.received_at) metaBits.push('Created ' + _msReportingFormatTimestamp(sd.created_at));
-    html += '<div class="msr-ev-row">';
-    if (sd.url) {
-      html += '<a href="' + escapeAttr(sd.url) + '" target="_blank" rel="noopener" data-source-url="' + escapeAttr(sd.url) + '" class="msr-ev-link">' + escapeHtml(label) + ' ↗</a>';
-    } else {
-      html += '<div class="msr-ev-name">' + escapeHtml(label) + '</div>';
-    }
-    if (metaBits.length) html += '<div class="msr-ev-meta">' + escapeHtml(metaBits.join(' · ')) + '</div>';
-    html += '</div>';
-  });
-  html += '</div></div>';
-  return html;
-}
-
-// Build a lookup of flagged invoice lines keyed by line_index. Defensive:
-// absent money_review / flagged_lines returns an empty map (no highlights).
-function _msReportingFlaggedLineMap(d) {
-  var map = {};
-  if (!_msNeedsMoneyReview(d) || !d.money_review) return map;
-  var lines = d.money_review.flagged_lines;
-  if (!Array.isArray(lines)) return map;
-  lines.forEach(function(fl) {
-    if (!fl) return;
-    if (fl.line_index != null) map['i:' + fl.line_index] = fl;
-    if (fl.description) map['d:' + String(fl.description).trim().toLowerCase()] = fl;
-  });
-  return map;
-}
-
-// Resolve a flagged line for one invoice row: match by line_index first, then by
-// description (fallback). Returns the flag object or null.
-function _msReportingLineFlag(map, idx, li) {
-  if (!map) return null;
-  if (map['i:' + idx]) return map['i:' + idx];
-  if (li && li.description) {
-    var key = 'd:' + String(li.description).trim().toLowerCase();
-    if (map[key]) return map[key];
-  }
-  return null;
-}
+// (No per-line money-review highlighting here: no feed reaching this pane
+// carries flagged_lines. The board card's amber "Check pricing" chip is driven
+// by the enriched row's needs_money_review and remains the only money-review
+// cue this repo can honestly render.)
 
 // ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 
 /**
- * Build the primary-action block for the panel, keyed off the SES cockpit
- * status + controls:
- *   HOLD                          -> blocker facts, no money/send action
- *   controls.approve_invoice.on   -> "APPROVE INVOICE" -> approveSesInvoice
- *   controls.send_it.enabled      -> "SEND IT"         -> sendSesRelease
- *   neither                       -> honest waiting note (never a legacy action)
+ * The two-step stamp rail, rendered NEAR THE TOP of the pane. BOTH primary
+ * actions are always VISIBLE; only the backend control flags decide which is
+ * pressable:
+ *   controls.approve_invoice.enabled -> APPROVE INVOICE live -> approveSesInvoice
+ *   controls.send_it.enabled         -> SEND IT live         -> sendSesRelease
+ * An enabled stamp's note renders the BACKEND'S OWN plan text verbatim when
+ * the cockpit carries one — the backend describes its own money action; the
+ * fallback copy claims nothing beyond the chain this module calls. A disabled
+ * stamp carries no id and no onclick — nothing for a click or a script to
+ * reach — with the plain reason under it. A HOLD points back at the amber
+ * block above; it is never restated here. (The mockup's single combined
+ * "Approve & send pack" button is the RETIRED 410 path and is deliberately
+ * NOT ported — settled Captain ruling.)
  */
 function _msSesActionBlock(jobId, ctx, dismissAction) {
-  var base = _msReportingCache[jobId] || {};
   var cockpit = ctx.cockpit || {};
   var sections = cockpit.sections || {};
   var controls = cockpit.controls || {};
   var approveInvoice = controls.approve_invoice || {};
   var sendIt = controls.send_it || {};
+  var onHold = cockpit.status === 'HOLD';
+  var blockerCount = onHold ? _msSesHoldBlockers(cockpit).length : 0;
+  var xero = (sections.money && sections.money.xero) ||
+    (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || null;
   var safeId = _msJsAttr(jobId);
   var html = '';
 
-  // HOLD: the backend's blocker facts win — no approve/send action exists.
-  if (cockpit.status === 'HOLD') {
-    html += '<div class="msr-banner stop" style="margin:0;">';
-    html += '<div class="msr-banner-title">On hold &mdash; no approve/send action is available</div>';
-    html += 'Resolve the blocker facts named above; the controls appear here when the backend clears the pack.';
-    html += '</div>';
-    html += '<button type="button" class="msr-btn ghost" onclick="' + dismissAction + '">Hold for later</button>';
-    return html;
+  var holdReason = 'Locked by the hold above'
+    + (blockerCount ? ' &mdash; blocker' + (blockerCount === 1 ? ' 1' : 's 1&#8211;' + blockerCount) + ' must clear first' : '')
+    + '. There is no override.';
+  var captainNote = controls.captain_only ? ' Captain authority is required for this pack.' : '';
+
+  var approveNote;
+  if (approveInvoice.enabled) {
+    approveNote = escapeHtml(approveInvoice.plan || 'Creates the real Xero invoice for the figures on the Invoice tab.')
+      + ' Your click, every time.';
+  } else if (onHold) {
+    approveNote = holdReason;
+  } else if (xero && (xero.invoice_number || xero.status)) {
+    approveNote = 'Already done &mdash; invoice ' + escapeHtml(xero.invoice_number || '')
+      + (xero.status ? ' is ' + escapeHtml(String(xero.status)) : '') + ' in Xero.';
+  } else {
+    approveNote = 'The system has not unlocked this step for this pack yet.' + captainNote;
   }
+
+  var sendNote;
+  if (sendIt.enabled) {
+    sendNote = escapeHtml(sendIt.plan || 'Sends the emails below exactly as shown.')
+      + ' Irreversible. Your click, every time.';
+  } else if (onHold) {
+    sendNote = holdReason;
+  } else if (approveInvoice.enabled) {
+    sendNote = 'Unlocks after APPROVE INVOICE &mdash; the invoice email needs the authorised Xero invoice before anything can send.';
+  } else {
+    sendNote = 'The system has not unlocked sending for this pack yet.' + captainNote;
+  }
+
+  html += '<div class="msr-steps">';
+  html += _msSesStamp({ step: 1, word: 'APPROVE INVOICE', kind: 'approve', enabled: !!approveInvoice.enabled, id: 'msSesApproveInvoiceBtn', onclick: 'approveSesInvoice(\'' + safeId + '\')', note: approveNote });
+  html += _msSesStamp({ step: 2, word: 'SEND IT', kind: 'send', enabled: !!sendIt.enabled, id: 'msSesSendItBtn', onclick: 'sendSesRelease(\'' + safeId + '\')', note: sendNote });
+  html += '</div>';
 
   // The Docs Ready tick state, bound to the exact displayed pack hash. This is
   // the captain's per-job approval record (blueprint: "the approve control is
   // your decision" / RV-10): a tick that dies the moment the pack's bytes
-  // change, never a running approve-all.
-  var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
-  html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
-  if (tickPending) {
-    html += '<span>&#9679;</span><span>Docs Ready tick: <b>not yet recorded</b>. SEND IT records your tick bound to the exact displayed pack hash <code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code> — any later change to this pack voids it.</span>';
-  } else {
-    html += '<span>&#10003;</span><span>Docs Ready tick: <b>already recorded</b> for the exact current pack.</span>';
-  }
-  html += '</div>';
-
-  if (approveInvoice.enabled) {
-    html += '<button type="button" id="msSesApproveInvoiceBtn" class="msr-btn primary" onclick="approveSesInvoice(\'' + safeId + '\')">APPROVE INVOICE</button>';
-    html += '<div class="msr-btn-note">' + escapeHtml(approveInvoice.plan || 'Creates and authorises the real Xero invoice for this exact invoice revision.') + '</div>';
-  }
-  if (sendIt.enabled) {
-    html += '<button type="button" id="msSesSendItBtn" class="msr-btn go" onclick="sendSesRelease(\'' + safeId + '\')">SEND IT</button>';
-    html += '<div class="msr-btn-note">' + escapeHtml(sendIt.plan || 'Sends the approved routes for this exact release revision.') + ' Sends <strong>all routes at once</strong>. This is irreversible.</div>';
-  }
-  if (!approveInvoice.enabled && !sendIt.enabled) {
-    html += '<div class="msr-banner" style="margin:0;">';
-    html += '<div class="msr-banner-title">No action enabled yet</div>';
-    html += 'The backend has not enabled APPROVE INVOICE or SEND IT for this pack'
-      + (controls.captain_only ? ' (Captain authority is required for this pack)' : '')
-      + '. Review the documents and routes, record any feedback, and check back when the reporting routine advances the pack.';
+  // change, never a running approve-all. On hold there is nothing to record.
+  if (!onHold) {
+    var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
+    html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
+    if (tickPending) {
+      html += '<span>Your Docs Ready approval is <b>not yet recorded</b>. Pressing SEND IT records it against exactly this version of the pack (<code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code>) &mdash; if the pack changes afterwards, that approval is void and the pack comes back here.</span>';
+    } else {
+      html += '<span>Your Docs Ready approval is <b>already recorded</b> for exactly this version of the pack.</span>';
+    }
     html += '</div>';
   }
-  html += '<button type="button" class="msr-btn ghost" onclick="' + dismissAction + '">Hold for later</button>';
   return html;
+}
+
+/**
+ * One step of the stamp rail: the lavish rubber-stamp object (heavy border +
+ * inset double rule, letterspaced caps — a captain-pinned element). An
+ * enabled stamp is a live button; a disabled stamp stays fully visible so the
+ * captain always sees what this screen CAN do, but carries no id and no
+ * onclick — there is nothing to press, only the reason underneath.
+ */
+function _msSesStamp(o) {
+  var html = '<div class="msr-step">';
+  if (o.enabled) {
+    html += '<button type="button" id="' + o.id + '" class="msr-stamp ' + o.kind + '" onclick="' + o.onclick + '"><span class="msr-stamp-word">' + o.word + '</span></button>';
+  } else {
+    html += '<button type="button" class="msr-stamp ' + o.kind + '" disabled aria-disabled="true"><span class="msr-stamp-word">' + o.word + '</span></button>';
+  }
+  html += '<div class="msr-stamp-note' + (o.enabled ? '' : ' locked') + '">' + o.note + '</div>';
+  html += '</div>';
+  return html;
+}
+
+// Write progress text into the stamp's word span (never the button itself:
+// textContent on the button would delete the styled span and leave the stamp
+// unstyled until the next full render). Falls back to the button in
+// environments without querySelector (the node smoke's stub elements).
+function _msSesStampProgress(btn, text) {
+  if (!btn) return;
+  var w = btn.querySelector ? btn.querySelector('.msr-stamp-word') : null;
+  (w || btn).textContent = text;
 }
 
 /**
@@ -1588,10 +1664,17 @@ function showMsReportingDetailEmpty() {
 async function approveSesInvoice(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  // The backend control flag is the only thing that can arm this action: a
+  // disabled stamp has no onclick, and even a programmatic call stops here.
+  var approveCtl = ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.approve_invoice;
+  if (!(approveCtl && approveCtl.enabled)) {
+    showToast('APPROVE INVOICE is not enabled for this pack.', 'error');
+    return;
+  }
   if (!confirm('This records your SES approval and creates + AUTHORISES the real Xero invoice for this exact invoice revision, then binds the Xero PDF into a fresh pack for final review. Continue?')) return;
 
   var btn = document.getElementById('msSesApproveInvoiceBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Recording approval...'; }
+  if (btn) { btn.disabled = true; _msSesStampProgress(btn, 'Recording approval...'); }
 
   try {
     var approval = await opsPostJwt('approve_ses_invoice_revision', {
@@ -1607,7 +1690,7 @@ async function approveSesInvoice(jobId) {
     if (!obligationRevisionId) {
       throw new Error('The approved invoice obligation revision could not be resolved.');
     }
-    if (btn) btn.textContent = 'Authorising in Xero...';
+    if (btn) _msSesStampProgress(btn, 'Authorising in Xero...');
     var execBody = { job_id: jobId, invoice_obligation_revision_id: obligationRevisionId };
     var actor = _msSesActor();
     if (actor) execBody.actor = actor;
@@ -1622,7 +1705,7 @@ async function approveSesInvoice(jobId) {
       return;
     }
     showToast('Approve invoice failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'APPROVE INVOICE'; }
+    if (btn) { btn.disabled = false; _msSesStampProgress(btn, 'APPROVE INVOICE'); }
   }
 }
 
@@ -1640,6 +1723,13 @@ async function approveSesInvoice(jobId) {
 async function sendSesRelease(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  // Same fail-closed rule as approveSesInvoice: only the backend's send_it
+  // flag can arm a send, whatever invoked this function.
+  var sendCtl = ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.send_it;
+  if (!(sendCtl && sendCtl.enabled)) {
+    showToast('SEND IT is not enabled for this pack.', 'error');
+    return;
+  }
   var needsSignoff = ctx.reviewState === 'needs_review' && !!ctx.docketRevisionId && !!ctx.outputHash;
   var confirmMsg = 'SEND IT releases ALL THREE routes at once (report + photos + invoice emails) to the exact recipients shown'
     + (needsSignoff
@@ -1649,17 +1739,17 @@ async function sendSesRelease(jobId) {
   if (!confirm(confirmMsg)) return;
 
   var btn = document.getElementById('msSesSendItBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+  if (btn) { btn.disabled = true; _msSesStampProgress(btn, 'Working...'); }
 
   try {
     if (needsSignoff) {
-      if (btn) btn.textContent = 'Recording Docs Ready tick...';
+      if (btn) _msSesStampProgress(btn, 'Recording Docs Ready tick...');
       await opsPostJwt('sign_off_ses_docket', {
         docket_revision_id: ctx.docketRevisionId,
         expected_output_content_hash: ctx.outputHash
       });
     }
-    if (btn) btn.textContent = 'Preparing release...';
+    if (btn) _msSesStampProgress(btn, 'Preparing release...');
     var prepBody = { job_ids: [jobId] };
     var actor = _msSesActor();
     if (actor) prepBody.created_by = actor;
@@ -1668,9 +1758,9 @@ async function sendSesRelease(jobId) {
     if (!releaseRevisionId) {
       throw new Error('The release revision id was not returned by prepare_ses_release_revision.');
     }
-    if (btn) btn.textContent = 'Approving release...';
+    if (btn) _msSesStampProgress(btn, 'Approving release...');
     await opsPostJwt('approve_ses_release_revision', { release_revision_id: releaseRevisionId });
-    if (btn) btn.textContent = 'Sending all three routes...';
+    if (btn) _msSesStampProgress(btn, 'Sending all three routes...');
     var execBody = { release_revision_id: releaseRevisionId };
     if (actor) execBody.actor = actor;
     var executed = await opsPost('execute_ses_release_revision', execBody);
@@ -1684,7 +1774,7 @@ async function sendSesRelease(jobId) {
       return;
     }
     showToast('SEND IT failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'SEND IT'; }
+    if (btn) { btn.disabled = false; _msSesStampProgress(btn, 'SEND IT'); }
   }
 }
 

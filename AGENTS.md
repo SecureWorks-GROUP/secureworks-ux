@@ -385,6 +385,22 @@ the Everyone lens, and it is painted only when the server answers
 `lens: 'company'` — scroll paging then follows the server's `next_offset`
 (`// <all-tab-full-feed>`). Surface-level detail lives in `trade-app.md`.
 
+A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A
+JOB'S SCHEDULE. Ops staff are mirrored onto a job so it shows in their own list;
+that row is not moved when the crew's real assignment is rescheduled, so its date
+goes stale the moment anyone drags the job on the Ops Dash calendar. Both
+calendars (ops.html and the Trade calendar, via `trade_calendar`) read the
+`calendar_events` view, which is defined `WHERE is_ghost = false`, so neither can
+see one. `my_jobs` selects `job_assignments` RAW — only `.neq('status','cancelled')`
+— so the fencing Board is the one surface that receives ghosts and must apply the
+rule itself: `FencingBoardCore.isObserverRow` drops them at intake and reports
+`observerRowsDropped` rather than dropping them silently. Match on `role`, not
+`is_ghost`: the feed does not publish `is_ghost`, and on every live row the two
+agree. This matters because the Board's one-card-per-job dedupe ranks by
+`status` alone, so a ghost TIES with the real crew row and the feed's
+`scheduled_date`-ascending order then hands the tie to the staler date. Guard:
+`scripts/test-fencing-board-ghost-rows.js` (runs in `pr-check.yml`).
+
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`

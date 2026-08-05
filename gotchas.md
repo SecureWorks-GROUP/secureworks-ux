@@ -89,8 +89,8 @@ The handler at cloud.js line 201 only catches `event === 'SIGNED_IN'`. Supabase 
 ### Assignments with user_id NULL are invisible in the Trade App
 `my_jobs` filters by `.eq('user_id', …)`, so an assignment created with only a free-typed `crew_name` (user_id NULL) never appears on any installer's phone. The ops.html Schedule modal now forces picking a real crew member (sends `userId`), and the backend rejects name-only installs — don't reintroduce a free-text crew field.
 
-### job_assignments.role constraint
-Valid values: `lead_installer`, `helper`, `estimator`. Using `lead` or `installer` will fail with a constraint violation. Check migration 001 line 166.
+### job_assignments.role values
+Migration 001 line 166 declared `lead_installer`, `helper`, `estimator`, but live rows also carry `crew`, `lead`, and ghost `observer` (2026-08-04 census in `docs/evidence/fencing-board-stale-schedule-2026-08-04/README.md`) — don't treat the migration list as exhaustive on reads. `role:'observer'` marks an `is_ghost` watcher row (ops staff mirrored onto a job so it shows in their own list), never field work: the `calendar_events` view excludes it and the fencing Board drops it at intake (`FencingBoardCore.isObserverRow`), so never treat one as crew or as the job's schedule.
 
 ### PO line items have inconsistent keys
 Xero-synced POs have line items with keys like `Description`, `Quantity` (Pascal case). Locally created POs use `description`, `quantity` (camel case). The trade detail view handles both: `li.description || li.Description`. Always check both casings.

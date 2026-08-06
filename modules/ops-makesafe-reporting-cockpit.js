@@ -207,7 +207,15 @@ function _msSesIdentityFromCanonicalRow(row) {
     requesting_company_name: builderName,
     requesting_company_slug: (typeof makesafeCompanySlugFallback === 'function' ? makesafeCompanySlugFallback(builderName) : null),
     makesafe_job_family: row.ses_family || row.makesafe_type || null,
-    makesafe_job_family_label: row.ses_family_label || null
+    makesafe_job_family_label: row.ses_family_label || null,
+    // Attendance-cycle identity: the capture tab needs it to say whether a
+    // capture belongs to the visit under review or to an earlier one.
+    attendance_cycle_id: row.attendance_cycle_id || null,
+    cycle_number: (row.cycle_number != null ? row.cycle_number : null),
+    is_reattend: !!(row.presentation && row.presentation.is_reattend),
+    reattend_count: (row.presentation && row.presentation.reattend_count != null)
+      ? row.presentation.reattend_count : null,
+    last_reattend_at: (row.presentation && row.presentation.last_reattend_at) || null
   };
 }
 
@@ -227,7 +235,12 @@ function _msSesIdentityFromBoardCard(card) {
     requesting_company_name: builderName,
     requesting_company_slug: card.requesting_company_slug || null,
     makesafe_job_family: card.ses_family || card.makesafe_job_family || null,
-    makesafe_job_family_label: card.ses_family_label || null
+    makesafe_job_family_label: card.ses_family_label || null,
+    attendance_cycle_id: card.attendance_cycle_id || null,
+    cycle_number: (card.cycle_number != null ? card.cycle_number : null),
+    is_reattend: !!card.is_reattend,
+    reattend_count: (card.reattend_count != null ? card.reattend_count : null),
+    last_reattend_at: card.last_reattend_at || null
   };
 }
 
@@ -288,7 +301,9 @@ function _msSesQueueCardRow(jobId, entry, identity) {
   if (identity) {
     ['job_number', 'builder', 'external_ref', 'site_suburb', 'site_address',
       'client_name', 'requesting_company_name', 'requesting_company_slug',
-      'makesafe_job_family', 'makesafe_job_family_label'].forEach(function(k) {
+      'makesafe_job_family', 'makesafe_job_family_label',
+      'attendance_cycle_id', 'cycle_number', 'is_reattend', 'reattend_count',
+      'last_reattend_at'].forEach(function(k) {
       if (identity[k] != null) row[k] = identity[k];
     });
   }
@@ -475,6 +490,10 @@ async function showMsReportingDetail(jobId, targetPanelId) {
     // separate JWT path. Never invent HTML when this fails; the tab stays
     // honest-unavailable.
     await _msSesHydrateBoundInvoicePdf(ctx);
+    // The capture's own facts (when it was taken, what the observer saw). Never
+    // fatal: without them the capture still renders and the stage says the
+    // facts could not be read rather than implying the capture is current.
+    await _msSesHydratePortalCaptureFacts(ctx);
   } catch (e) {
     panel.innerHTML = _msSesRenderUnavailable(jobId, base, e, targetPanelId);
     return;
@@ -511,7 +530,7 @@ async function _msSesHydrateBoundInvoicePdf(ctx) {
   if (!ctx) return;
   var inv = _msSesMapInvoice(ctx);
   if (!inv || !inv.bound_xero || !inv.xero_invoice_id) return;
-  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts);
+  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts, ctx.portalCaptureFacts);
   var hasPdf = (docs.draft || []).some(function(d) {
     return d && d.kind === 'pdf' && /invoice/i.test(String(d.label || ''));
   });
@@ -562,6 +581,51 @@ async function _msSesHydrateBoundInvoicePdf(ctx) {
     // Leave the tab on honest unavailable — never invent a tax-invoice HTML page.
     console.warn('[ses] get_invoice_pdf fallback failed for bound invoice', e);
   }
+}
+
+/**
+ * Read the portal capture MANIFEST (the JSON `portal_roof_report` artifact)
+ * off the pack so the capture tab can state when the capture was taken, what
+ * the observer actually saw, and which portal share it came from.
+ *
+ * These are facts about EVIDENCE, so a failed read must never be papered over:
+ * on failure the tab still shows the capture and says the capture facts could
+ * not be read, which is different from — and never rendered as — "captured
+ * now" or "current". The manifest is a few hundred bytes and its signed URL is
+ * already in the pack, so this costs one small GET on capture-bearing packs.
+ */
+async function _msSesHydratePortalCaptureFacts(ctx) {
+  if (!ctx || !ctx.pack || !Array.isArray(ctx.pack.artifacts)) return;
+  var manifests = [];
+  ctx.pack.artifacts.forEach(function(a) {
+    if (!a || a.role !== 'portal_roof_report' || !a.signed_url) return;
+    // Bytes decide: JSON is the manifest, a PDF/PNG under this role is the
+    // capture itself and is handled as a document, not read for facts.
+    if (_msSesArtifactIsDocumentBytes(a)) return;
+    manifests.push(a);
+  });
+  if (!manifests.length) return;
+  if (typeof fetch !== 'function') { ctx.portalCaptureFactsFailed = true; return; }
+  // EVERY manifest is kept: a retake pack can carry one manifest per capture,
+  // and each capture's facts must come from the manifest that describes IT
+  // (matched by content fingerprint in _msSesCaptureDocs), never inherited
+  // from whichever manifest happened to be read last.
+  var factsList = [];
+  for (var mi = 0; mi < manifests.length; mi++) {
+    try {
+      var res = await fetch(manifests[mi].signed_url, { cache: 'no-store' });
+      if (!res || !res.ok) { ctx.portalCaptureFactsFailed = true; continue; }
+      var body = await res.json();
+      // The producer writes either the object or a one-entry list of it.
+      var facts = Array.isArray(body) ? (body[0] || null) : body;
+      if (facts && typeof facts === 'object') factsList.push(facts);
+      else ctx.portalCaptureFactsFailed = true;
+    } catch (e) {
+      ctx.portalCaptureFactsFailed = true;
+      console.warn('[ses] portal capture manifest read failed', e);
+    }
+  }
+  if (factsList.length) ctx.portalCaptureFacts = factsList;
 }
 
 async function _msSesLoadPackContext(jobId, retried) {
@@ -769,6 +833,9 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
         : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The emails below are the current truth.')
       + '</div></div>';
   }
+  // A card that owes a portal capture and has none says so HERE, where the
+  // capture tab would be — an absent tab alone reads as "nothing to show".
+  html += _msSesCaptureNotice(row, ctx);
   // RV-1: a missing document is NAMED, never an empty frame.
   html += _msSesMissingLine(row, ctx);
 
@@ -1037,6 +1104,77 @@ function _msSesRenderHoldBanner(cockpit) {
   return html;
 }
 
+// <ses-roof-capture-absence>
+/** The cockpit's family_evidence block, or {} when the read carries none. */
+function _msSesFamilyEvidence(ctx) {
+  var sections = (ctx && ctx.cockpit && ctx.cockpit.sections) || {};
+  var fe = sections.family_evidence;
+  return (fe && typeof fe === 'object') ? fe : {};
+}
+
+/**
+ * True when the BACKEND says this family carries no separate completion-report
+ * PDF (the roof-report rule "report-only-portal-is-the-report"). Read only —
+ * this screen never decides an obligation for itself.
+ */
+function _msSesReportPdfNotApplicable(ctx) {
+  var entry = _msSesFamilyEvidence(ctx).supporting_report_pdf;
+  return !!(entry && String(entry.state || '').toLowerCase() === 'not_applicable');
+}
+
+/**
+ * Does this card OWE a portal capture? The backend's family_evidence answers it
+ * (`roof_report_capture`, marked not_applicable on families that owe none); the
+ * card's own roof family is the fallback when a cockpit read carries no
+ * family_evidence at all. Anything else is "not owed", so ordinary make-safes
+ * gain no new noise.
+ */
+function _msSesCaptureExpectation(ctx, row) {
+  var entry = _msSesFamilyEvidence(ctx).roof_report_capture;
+  if (entry && typeof entry === 'object') {
+    var state = String(entry.state || '').toLowerCase();
+    if (state === 'not_applicable') return { expected: false, entry: entry, state: state };
+    return { expected: true, entry: entry, state: state };
+  }
+  var family = String((row && row.makesafe_job_family) || '').toLowerCase();
+  var familyLabel = String((row && row.makesafe_job_family_label) || '').toLowerCase();
+  if (/roof/.test(family) || /roof/.test(familyLabel)) {
+    return { expected: true, entry: null, state: null };
+  }
+  return { expected: false, entry: null, state: null };
+}
+
+/**
+ * MISSING EVIDENCE MUST LOOK MISSING. On a card that owes a portal capture and
+ * has none in its pack, an absent tab reads as "nothing to show" and invites
+ * approval on a false impression — so the gap is stated where the tabs are, in
+ * the same place the capture would have been. Nothing is substituted: this
+ * screen never borrows another card's document to fill the hole, and it changes
+ * no gate. Returns '' when a capture is present, when none is owed, or when the
+ * byte-exact pack is not in view at all (nothing to be sure about).
+ */
+function _msSesCaptureNotice(row, ctx) {
+  if (!ctx || !ctx.pack) return '';
+  var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
+  if (draft.some(function(d) { return d && d.isCapture; })) return '';
+  var exp = _msSesCaptureExpectation(ctx, row);
+  if (!exp.expected) return '';
+  var html = '<div class="msr-evidence-gap">';
+  html += '<div class="msr-evidence-gap-h">No portal capture in this pack</div>';
+  html += '<div>This card is evidenced by the builder portal form, and no capture of that form is attached here. '
+    + 'Nothing on this screen shows what was submitted, so do not read the other tabs as the roof report.</div>';
+  var entry = exp.entry || {};
+  if (entry.reason) {
+    html += '<div class="msr-evidence-gap-fact"><b>The pack says</b>' + escapeHtml(String(entry.reason)) + '</div>';
+  }
+  if (entry.recovery_action) {
+    html += '<div class="msr-evidence-gap-fact"><b>What clears it</b>' + escapeHtml(String(entry.recovery_action)) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+// </ses-roof-capture-absence>
+
 /**
  * RV-1: a missing document is NAMED in one quiet sentence under the tabs,
  * never an empty frame. Facts come from the pack's own artifacts; SWMS is the
@@ -1048,10 +1186,18 @@ function _msSesMissingLine(row, ctx) {
   var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
   var source = Array.isArray(row.source_docs) ? row.source_docs : [];
   function hasDraft(re) {
-    return draft.some(function(d) { return d && re.test(String(d.label || '')); });
+    // The capture is never matched by label here: "Roof Report Capture" must
+    // not be read as the completion report, and its absence is named by
+    // _msSesCaptureNotice rather than folded into this line's word list.
+    return draft.some(function(d) { return d && !d.isCapture && re.test(String(d.label || '')); });
   }
   var missing = [];
-  if (!hasDraft(/make\s*safe|completion|report/i)) missing.push('the completion report');
+  // A family whose backend rule says the portal IS the report owes no separate
+  // completion-report PDF, so listing one as missing would be a false gap. The
+  // rule is the backend's own family_evidence state, never a guess from here.
+  if (!_msSesReportPdfNotApplicable(ctx) && !hasDraft(/make\s*safe|completion|report/i)) {
+    missing.push('the completion report');
+  }
   if (!source.some(function(s) {
     return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
   })) missing.push('the builder work order');
@@ -1091,7 +1237,7 @@ function _msSesSynthRow(jobId, ctx) {
   var base = _msReportingCache[jobId] || { job_id: jobId };
   var row = {};
   Object.keys(base).forEach(function(k) { row[k] = base[k]; });
-  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts);
+  var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts, ctx.portalCaptureFacts);
   row.draft_docs = docs.draft;
   row.source_docs = docs.source;
   row.photos = docs.photos;
@@ -1107,18 +1253,143 @@ function _msSesSynthRow(jobId, ctx) {
   return row;
 }
 
+// <ses-pack-document-visibility>
 /**
- * Map the reviewable pack's artifacts to viewer docs. Only real document bytes
- * become tabs/evidence: the rendered report PDF, the bound Xero invoice PDF,
- * the SWMS, source attachments (work order), and the photo set. JSON/text plan
- * artifacts (invoice_proposal, photo_selection, *_email_draft, review_spec,
- * envelope, ...) are not viewer docs — the routes + invoice sections render
- * their content.
+ * Does this artifact carry bytes a person READS as a page? PDFs and images do.
+ * JSON/text/HTML plan artifacts (invoice_proposal, *_email_draft, review_spec,
+ * envelope, review.html, ...) do not — the routes + invoice sections render
+ * their content, so they must not become tabs.
+ *
+ * This predicate, not a role allowlist, decides what may become a document.
+ * A role allowlist is what made the portal roof capture invisible: the pack
+ * served it with a working signed URL and this screen dropped it because
+ * nobody had added the role name. Byte-bearing roles are now visible by
+ * DEFAULT and only their LABEL depends on knowing the role.
  */
-function _msSesDocsFromArtifacts(artifacts) {
+function _msSesArtifactIsDocumentBytes(a) {
+  if (!a || !a.signed_url) return false;
+  var kind = _msSesMediaKind(a.media_type, a.object_key);
+  return kind === 'pdf' || kind === 'image';
+}
+
+// The portal capture roles. `portal_roof_report` is the capture MANIFEST when
+// it arrives as JSON (facts about the capture: captured_at, signal, share url)
+// and the capture ITSELF when the producer attaches document bytes under that
+// role instead — so the media type, never the role name, decides which it is.
+var _MS_SES_CAPTURE_ROLES = {
+  portal_roof_report_screenshot: true,
+  portal_roof_report: true,
+};
+
+function _msSesIsCaptureRole(role) {
+  return !!_MS_SES_CAPTURE_ROLES[String(role || '')];
+}
+
+/**
+ * Collapse the pack's capture artifacts into viewer docs.
+ *
+ * TWO IDENTICAL CAPTURES ARE ONE PIECE OF EVIDENCE. A retake that only changed
+ * the file name broke the producer's idempotency and left byte-identical rows
+ * behind (live on Mindarie SWMS-261081), and two tabs would read as two
+ * different observations of the roof — worse than one. So identical bytes
+ * (same content_hash) collapse to ONE tab that SAYS how many copies are
+ * stored; nothing is deleted, here or upstream.
+ *
+ * Captures whose bytes DIFFER are different evidence and each keep a tab —
+ * hiding one would be the <makesafe-workorder-identity> mistake. Captures with
+ * no content_hash cannot be proven identical, so they are never merged and the
+ * stage says the pack did not record their hashes.
+ */
+function _msSesCaptureDocs(captures, facts) {
+  if (!captures.length) return [];
+  var factsList = Array.isArray(facts) ? facts.filter(Boolean) : (facts ? [facts] : []);
+  var groups = [];
+  var byHash = {};
+  var unhashed = 0;
+  captures.forEach(function(a) {
+    var hash = a.content_hash || null;
+    if (hash && byHash[hash]) { byHash[hash].copies++; return; }
+    var g = { artifact: a, copies: 1, hash: hash };
+    if (hash) byHash[hash] = g; else unhashed++;
+    groups.push(g);
+  });
+  return groups.map(function(g, i) {
+    var a = g.artifact;
+    var fileName = String(a.object_key || '').split('/').pop() || 'Capture';
+    // Facts are PER CAPTURE: a group takes only the manifest whose fingerprint
+    // names its own bytes (or the pack's sole manifest when there is only one
+    // capture to describe). A capture no manifest can be tied to states that
+    // its facts are unknown — it never inherits another capture's time, cycle
+    // or signal, which is exactly what would let stale evidence read as current.
+    var gf = _msSesCaptureFactsFor(factsList, g.hash, groups.length);
+    return {
+      label: groups.length > 1 ? ('Roof Report Capture ' + (i + 1)) : 'Roof Report Capture',
+      url: a.signed_url,
+      kind: _msSesMediaKind(a.media_type, a.object_key),
+      isDraft: true,
+      isCapture: true,
+      // An image capture IS the document here, so it must not be filtered out
+      // with the photo set the way every other pack image is.
+      isDocumentImage: true,
+      capture: {
+        fileName: fileName,
+        copies: g.copies,
+        variantCount: groups.length,
+        unhashedCount: g.hash ? 0 : unhashed,
+        contentHash: g.hash,
+        capturedAt: (gf && gf.captured_at) || null,
+        signal: (gf && gf.signal) || null,
+        portalUrl: (gf && gf.url) || null,
+        capturedBy: (gf && gf.captured_by) || null,
+        cycleId: (gf && (gf.attendance_cycle_id || gf.cycle_id)) || null,
+        cycleNumber: (gf && gf.cycle_number != null) ? gf.cycle_number : null,
+        factsMissing: !gf,
+      },
+    };
+  });
+}
+
+// The producer's manifest names the capture it describes by a (possibly
+// truncated) content fingerprint. Normalised to bare hex; anything under 8 hex
+// chars identifies nothing and is treated as absent.
+function _msSesManifestFingerprintHex(f) {
+  var fp = (f && (f.content_fingerprint || f.content_hash)) || null;
+  if (!fp) return null;
+  var hex = String(fp).replace(/^sha\d+:/i, '').toLowerCase();
+  return /^[0-9a-f]{8,}$/.test(hex) ? hex : null;
+}
+
+function _msSesCaptureFactsFor(factsList, hash, groupCount) {
+  if (!factsList.length) return null;
+  var hex = hash ? String(hash).replace(/^sha\d+:/i, '').toLowerCase() : null;
+  if (hex) {
+    for (var i = 0; i < factsList.length; i++) {
+      var fp = _msSesManifestFingerprintHex(factsList[i]);
+      if (fp && (hex.indexOf(fp) === 0 || fp.indexOf(hex) === 0)) return factsList[i];
+    }
+  }
+  // One capture, one manifest: there is no other capture the manifest could
+  // describe, so it attaches even when the fingerprint is absent (the live
+  // Mindarie shape). With several captures, only a fingerprint may claim one.
+  if (factsList.length === 1 && groupCount === 1) return factsList[0];
+  return null;
+}
+
+/**
+ * Map the reviewable pack's artifacts to viewer docs. Every artifact carrying
+ * READABLE bytes becomes a viewer doc (see _msSesArtifactIsDocumentBytes):
+ * the rendered report PDF, the bound Xero invoice PDF, the SWMS, source
+ * attachments (work order), the portal roof capture, the photo set, and
+ * anything else the pack starts shipping. JSON/text plan artifacts are not
+ * viewer docs. A role this screen does not recognise keeps its stored file
+ * name and is marked so the stage can say the role is unlabelled — invisible
+ * is never the default.
+ */
+function _msSesDocsFromArtifacts(artifacts, captureFacts) {
   var draft = [];
   var source = [];
   var photos = [];
+  var captures = [];
   (artifacts || []).forEach(function(a) {
     if (!a) return;
     var fileName = String(a.object_key || '').split('/').pop() || 'Document';
@@ -1149,6 +1420,12 @@ function _msSesDocsFromArtifacts(artifacts) {
       return;
     }
     if (!a.signed_url) return;
+    // The capture roles are decided by BYTES: JSON under portal_roof_report is
+    // the manifest (read separately for the capture facts), not a document.
+    if (_msSesIsCaptureRole(a.role)) {
+      if (_msSesArtifactIsDocumentBytes(a)) captures.push(a);
+      return;
+    }
     if (a.role === 'supporting_report_pdf') {
       draft.push({ label: 'Make safe report', url: a.signed_url, kind: 'pdf', isDraft: true });
     } else if (a.role === 'swms_artifact') {
@@ -1168,13 +1445,26 @@ function _msSesDocsFromArtifacts(artifacts) {
       // renderers filter them); they feed _msGetAllPhotos for the feedback module.
       source.push(p);
       photos.push(p);
+    } else if (_msSesArtifactIsDocumentBytes(a)) {
+      // A role this screen has no label for, carrying real readable bytes.
+      // It gets a tab under its stored file name rather than disappearing.
+      source.push({
+        label: label,
+        url: a.signed_url,
+        kind: _msSesMediaKind(a.media_type, a.object_key),
+        isDocumentImage: true,
+        isUnknownRole: true,
+        roleName: a.role || null,
+      });
     }
   });
+  _msSesCaptureDocs(captures, captureFacts).forEach(function(c) { draft.push(c); });
   photos.sort(function(x, y) {
     return (x.order == null ? 9999 : x.order) - (y.order == null ? 9999 : y.order);
   });
   return { draft: draft, source: source, photos: photos };
 }
+// </ses-pack-document-visibility>
 
 function _msSesMediaKind(mediaType, objectKey) {
   var mt = String(mediaType || '').toLowerCase();
@@ -1577,7 +1867,7 @@ function _msSesRenderPhotos(ctx) {
   routes.forEach(function(r) { if (r && r.route_kind === 'photo') photoRoute = r; });
   var routeHashes = {};
   ((photoRoute && photoRoute.attachment_hashes) || []).forEach(function(h) { routeHashes[h] = true; });
-  var docs = _msSesDocsFromArtifacts(ctx.pack.artifacts);
+  var docs = _msSesDocsFromArtifacts(ctx.pack.artifacts, ctx.portalCaptureFacts);
   var photos = docs.photos;
   if (!photos.length) return '';
   var inRoute = photos.filter(function(p) { return p.content_hash && routeHashes[p.content_hash]; });
@@ -1636,7 +1926,23 @@ function _msReportingDocTabs(d) {
     var tabLabel = null;
     var isWorkOrder = false;
     var isInvoiceDoc = false;
-    if (doc.kind === 'image') return; // photos stay in the photo section
+    // Photos stay in the photo section. A capture (or any other artifact whose
+    // IMAGE bytes are the document) is not a photo and keeps its tab.
+    if (doc.kind === 'image' && !doc.isDocumentImage) return;
+    // The portal capture is a first-class document: it takes its own tab
+    // before any label matching, so "…Report…" in its name cannot route it
+    // into the completion-report slot.
+    if (doc.isCapture) {
+      out.push({
+        tabLabel: doc.label || 'Roof Report Capture',
+        url: doc.url,
+        kind: doc.kind,
+        isCapture: true,
+        capture: doc.capture || null,
+        srcLabel: doc.label || '',
+      });
+      return;
+    }
     // Only a DRAFTED artifact (the pack's own xero_invoice_pdf) may claim the
     // Invoice slot: a builder SOURCE attachment named "invoice_*.pdf" is the
     // builder's paperwork, and taking the slot would hide the SES proposal page.
@@ -1666,6 +1972,8 @@ function _msReportingDocTabs(d) {
       received_at: doc.received_at || null,
       source_type: doc.source_type || null,
       raw_report: doc.raw_report || null,
+      isUnknownRole: !!doc.isUnknownRole,
+      roleName: doc.roleName || null,
     });
   });
   // Multiple work orders: discriminate by the PO ref embedded in the file name
@@ -1699,12 +2007,14 @@ function _msReportingDocTabs(d) {
   }
   // Order: report first (the main document), money second, then the rest.
   // Note: use a has-own check, not `|| 9` — 'Make Safe Report' maps to 0 (falsy).
+  // On a roof-report card the capture IS the report, so it sits where the
+  // completion report would: first, ahead of the money document.
   var order = { 'Make Safe Report': 0, 'Invoice': 1, 'SWMS': 2, 'Work Order': 3, 'Raw Trade Report': 5, 'Trade Report': 6, 'Trade Report PDF': 7 };
-  out.sort(function(a, b) {
-    var oa = (order[a.tabLabel] != null) ? order[a.tabLabel] : (a.isWorkOrder ? 4 : 9);
-    var ob = (order[b.tabLabel] != null) ? order[b.tabLabel] : (b.isWorkOrder ? 4 : 9);
-    return oa - ob;
-  });
+  function rank(t) {
+    if (t.isCapture) return 0.5;
+    return (order[t.tabLabel] != null) ? order[t.tabLabel] : (t.isWorkOrder ? 4 : 9);
+  }
+  out.sort(function(a, b) { return rank(a) - rank(b); });
   return out;
 }
 
@@ -1729,6 +2039,8 @@ function _msRenderDocStage(docTabs, idx, row) {
       + metaBits.map(function(m) { return '<span class="t">' + escapeHtml(m) + '</span>'; }).join('')
       + '</div>'
     : '';
+  if (t && t.isCapture) metaHtml = _msSesCaptureStageMeta(t, row);
+  else if (t && t.isUnknownRole) metaHtml = _msSesUnknownRoleStageMeta(t) + metaHtml;
   var inner;
   if (t && t.kind === 'invoice_unavailable') {
     inner = _msSesRenderInvoiceUnavailable(row || t);
@@ -1760,6 +2072,115 @@ function _msRenderDocStage(docTabs, idx, row) {
   }
   return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
 }
+
+// <ses-roof-capture-provenance>
+/**
+ * Which attendance visit does this capture belong to?
+ *
+ * A capture from an earlier attendance must be LABELLED as one, never shown as
+ * the current visit's evidence. The answer is only ever taken from recorded
+ * facts, in descending order of strength:
+ *   1. the capture names its own cycle and it differs from the card's -> prior;
+ *   2. the capture predates this card's latest re-attendance -> prior;
+ *   3. the card HAS been re-attended but nothing ties the capture to a visit
+ *      -> say exactly that (unknown is a fact, "current" would be a guess);
+ *   4. single-visit card -> no claim beyond the capture time itself.
+ * Returns null when there is nothing honest to add.
+ */
+function _msSesCaptureCycleNote(cap, row) {
+  if (!cap) return null;
+  var jobCycleId = (row && row.attendance_cycle_id) || null;
+  var jobCycleNo = (row && row.cycle_number != null) ? row.cycle_number : null;
+  if (cap.cycleId && jobCycleId && cap.cycleId !== jobCycleId) {
+    return { prior: true, text: 'From an EARLIER attendance visit — not the visit under review.' };
+  }
+  if (cap.cycleNumber != null && jobCycleNo != null && cap.cycleNumber !== jobCycleNo) {
+    return {
+      prior: true,
+      text: 'From attendance visit ' + cap.cycleNumber + ' — this card is on visit ' + jobCycleNo + '.',
+    };
+  }
+  var lastReattend = (row && row.last_reattend_at) || null;
+  if (cap.capturedAt && lastReattend) {
+    var capMs = new Date(cap.capturedAt).getTime();
+    var reMs = new Date(lastReattend).getTime();
+    if (isFinite(capMs) && isFinite(reMs) && capMs < reMs) {
+      return {
+        prior: true,
+        text: 'Captured BEFORE this card was re-attended on ' +
+          _msReportingFormatTimestamp(lastReattend) + ' — it is from an earlier visit.',
+      };
+    }
+  }
+  var reattended = !!(row && (row.is_reattend || (row.reattend_count || 0) > 0));
+  if (reattended) {
+    return {
+      prior: false,
+      text: 'This card has been re-attended and the capture does not record which visit it came from.',
+    };
+  }
+  return null;
+}
+
+/**
+ * The capture tab's provenance line. Everything on it is quoted from the
+ * capture manifest; nothing is inferred. An unread manifest says so — a
+ * capture with no stated time must never read as a fresh one.
+ */
+function _msSesCaptureStageMeta(t, row) {
+  var cap = t.capture || {};
+  var html = '<div class="msr-stage-meta"><span class="k">' + escapeHtml(t.tabLabel || 'Roof Report Capture') + '</span>';
+  if (cap.capturedAt) {
+    html += '<span class="t">Captured ' + escapeHtml(_msReportingFormatTimestamp(cap.capturedAt)) + '</span>';
+  } else {
+    html += '<span class="t">Capture time not recorded in this pack</span>';
+  }
+  if (cap.copies > 1) {
+    html += '<span class="t">' + cap.copies + ' identical copies stored (same bytes) &mdash; shown once</span>';
+  }
+  if (cap.variantCount > 1) {
+    html += '<span class="t">' + cap.variantCount + ' captures on this pack, and their bytes differ</span>';
+  }
+  html += '</div>';
+  var cycle = _msSesCaptureCycleNote(cap, row);
+  var lines = [];
+  if (cycle) {
+    lines.push('<div class="msr-capture-line' + (cycle.prior ? ' prior' : '') + '"><b>'
+      + (cycle.prior ? 'Earlier visit' : 'Which visit') + '</b>' + escapeHtml(cycle.text) + '</div>');
+  }
+  if (cap.signal) {
+    lines.push('<div class="msr-capture-line"><b>What the observer saw</b>' + escapeHtml(cap.signal) + '</div>');
+  } else if (cap.factsMissing) {
+    lines.push('<div class="msr-capture-line"><b>Capture facts</b>The capture manifest could not be read, so this screen cannot state when this capture was taken or what the observer saw. Read the page below on its own terms.</div>');
+  }
+  if (cap.unhashedCount) {
+    lines.push('<div class="msr-capture-line"><b>Copies</b>This pack did not record a content hash for '
+      + cap.unhashedCount + ' capture' + (cap.unhashedCount === 1 ? '' : 's')
+      + ', so this screen cannot tell whether they are the same document.</div>');
+  }
+  // The capture is a picture of a form: text search finds nothing in it. Say
+  // so, or an empty text search reads as an empty document.
+  if (t.kind === 'image' || t.kind === 'pdf') {
+    lines.push('<div class="msr-capture-line"><b>Read it as a page</b>The capture is an image of the portal form, so searching it for text finds nothing. That is not an empty document &mdash; open it full size to read the answers.</div>');
+  }
+  if (cap.portalUrl && (typeof urlIsBuilderPortalLink !== 'function' || urlIsBuilderPortalLink(cap.portalUrl))) {
+    lines.push('<div class="msr-capture-line"><b>Portal share</b><a href="' + escapeAttr(cap.portalUrl)
+      + '" target="_blank" rel="noopener">' + escapeHtml(cap.portalUrl) + '</a> &mdash; builder shares expire after about a month; an expired share is an aged job, not a broken capture.</div>');
+  }
+  return html + (lines.length ? '<div class="msr-capture-facts">' + lines.join('') + '</div>' : '');
+}
+
+/**
+ * A document whose artifact role this screen carries no label for. It is shown
+ * under its stored file name and says so, rather than being dropped — the
+ * failure that hid the roof capture.
+ */
+function _msSesUnknownRoleStageMeta(t) {
+  return '<div class="msr-capture-facts"><div class="msr-capture-line"><b>Unlabelled document</b>'
+    + 'This pack ships a document under the role "' + escapeHtml(t.roleName || 'unknown')
+    + '", which this screen has no name for. It is shown under its stored file name.</div></div>';
+}
+// </ses-roof-capture-provenance>
 
 /**
  * Honest empty state when a Xero DRAFT/AUTHORISED is bound but its PDF could
@@ -2030,6 +2451,14 @@ function _msReportingBuildCarouselDocs(d) {
       raw_report: meta.raw_report || null,
       xero_invoice_id: meta.xero_invoice_id || null,
       invoice_number: meta.invoice_number || null,
+      // Document-visibility flags from _msSesDocsFromArtifacts: what makes an
+      // image a document rather than a photo, and what the capture knows about
+      // itself. Dropping them here would put the capture back in the dark.
+      isCapture: !!meta.isCapture,
+      isDocumentImage: !!meta.isDocumentImage,
+      capture: meta.capture || null,
+      isUnknownRole: !!meta.isUnknownRole,
+      roleName: meta.roleName || null,
     });
   }
   // Drafted outputs first.

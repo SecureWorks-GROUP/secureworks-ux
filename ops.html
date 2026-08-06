@@ -3866,6 +3866,61 @@
     }
     .msr-missing b { color: #8A5A09; font-weight: 700; }
 
+    /* Capture provenance, under the stage: quiet facts quoted from the pack,
+       with the "earlier visit" line the one thing allowed to raise its voice. */
+    .msr-capture-facts {
+      margin: 8px 0 0;
+      display: grid;
+      gap: 5px;
+      max-width: 80ch;
+    }
+    .msr-capture-line {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--sw-mid);
+    }
+    .msr-capture-line b {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--sw-dark);
+    }
+    .msr-capture-line a { color: var(--sw-mid); word-break: break-all; }
+    .msr-capture-line.prior { color: #8A5A09; }
+    .msr-capture-line.prior b { color: #8A5A09; }
+
+    /* Missing evidence must LOOK missing: a card that owes a portal capture and
+       carries none states the gap where the tab would have been. */
+    .msr-evidence-gap {
+      margin: 10px 20px 0;
+      padding: 12px 14px;
+      border: 1px solid #E7C98A;
+      border-left: 3px solid #B45309;
+      border-radius: 8px;
+      background: #FDF6E7;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: #6B4A08;
+      max-width: 80ch;
+    }
+    .msr-evidence-gap-h {
+      font-size: 13px;
+      font-weight: 800;
+      color: #8A5A09;
+      margin-bottom: 4px;
+    }
+    .msr-evidence-gap-fact { margin-top: 6px; }
+    .msr-evidence-gap-fact b {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #8A5A09;
+    }
+
     .msr-empty-note { padding: 14px 16px; font-size: 13px; color: var(--sw-mid); line-height: 1.55; }
 
     .msr-notes {
@@ -4009,7 +4064,7 @@
 
     @media (max-width: 900px) {
       .msr-head { flex-wrap: wrap; padding: 12px 16px; }
-      .msr-next, .msr-hold, .msr-banner { margin-left: 16px; margin-right: 16px; }
+      .msr-next, .msr-hold, .msr-banner, .msr-evidence-gap { margin-left: 16px; margin-right: 16px; }
       .msr-actions:not(.msr-actions-foot) { margin-left: 16px; margin-right: 16px; }
       .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing { padding-left: 16px; padding-right: 16px; }
       .msr-sec { padding-left: 16px; padding-right: 16px; }

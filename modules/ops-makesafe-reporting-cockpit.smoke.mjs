@@ -67,7 +67,7 @@ function flush() {
 }
 
 // ── 1. Stubbed global scope ──────────────────────────────────────────────────
-const calls = { opsPost: [], opsPostJwt: [], opsFetch: [], toasts: [], confirms: [] };
+const calls = { opsPost: [], opsPostJwt: [], opsFetch: [], toasts: [], confirms: [], signedUrl: [] };
 // Every action ever dispatched (never reset) so the retired-action sweep covers
 // the whole run, not just the last section.
 const actionLog = [];
@@ -99,6 +99,8 @@ const behaviour = {
   fetch: {},
   post: {},
   postJwt: {},
+  // Direct signed-URL reads (the portal capture manifest), keyed by URL.
+  signedUrl: {},
   confirmReturns: true,
 };
 function dispatch(map, action) {
@@ -146,6 +148,18 @@ const sandbox = {
   // The actual board degraded-path parser extracted from ops.html. The module
   // consumes this global in production, so the smoke must not carry a mirror.
   makesafeSuburbFromAddress,
+  // The module reads the portal capture manifest straight off its signed URL.
+  // Stubbed so a smoke run never touches the network and an unstubbed URL
+  // behaves like a failed read (which the pane must state, not paper over).
+  fetch: (url) => {
+    calls.signedUrl.push(String(url));
+    const r = behaviour.signedUrl[String(url)];
+    if (r instanceof Error) return Promise.reject(r);
+    if (r === undefined) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve(null) });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(r) });
+  },
   // get_invoice_pdf client fallback needs browser binary helpers.
   atob: (s) => Buffer.from(s, "base64").toString("binary"),
   Blob: class Blob {
@@ -208,6 +222,13 @@ const exposed = [
   "_msSesScopedEl",
   "_msOpenDocFullSize",
   "_msDocTabUrlAt",
+  "_msSesArtifactIsDocumentBytes",
+  "_msSesCaptureDocs",
+  "_msSesCaptureExpectation",
+  "_msSesCaptureNotice",
+  "_msSesCaptureCycleNote",
+  "_msSesMissingLine",
+  "_msSesSynthRow",
   // Legacy symbols that MUST be gone:
   "approveMakesafeReportPack",
   "finishMakesafeCloseOut",
@@ -2419,6 +2440,415 @@ check(
     sandbox.window.open = realOpen;
     behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
   }
+}
+
+// ── 19b. THE PORTAL ROOF CAPTURE IS A FIRST-CLASS DOCUMENT ──────────────────
+// The pack served Mindarie SWMS-261081's capture with a working signed URL and
+// this screen dropped it, because tabs came from a ROLE ALLOWLIST and nobody
+// had added the role. These checks pin the replacement rule: readable BYTES
+// decide what becomes a document, the capture states its own provenance, and a
+// card that owes a capture and has none SAYS SO where the tab would have been.
+{
+  const ROOF_JOB = "job-roof";
+  const ROOF_REV = "22222222-2222-2222-2222-222222222222";
+  const ROOF_HASH = "sha256:" + "7".repeat(64);
+  const CAPTURE_HASH = "sha256:" + "8".repeat(64);
+  const OTHER_CAPTURE_HASH = "sha256:" + "9".repeat(64);
+  const MANIFEST_URL = "https://example.com/portal_roof_report.json";
+  const CAPTURE_URL = "https://example.com/portal_roof_report.png";
+  // The live producer's manifest shape (facts only — no client data). The
+  // share URL and content fingerprint are NEUTERED like the e2e fixture's: a
+  // live share is a pointer to a client-detail document and never sits in a
+  // committed test. The fingerprint names CAPTURE_HASH's bytes.
+  const captureManifest = {
+    builder_reference: "MLB-27100",
+    captured_at: "2026-08-06T00:31:58.239+00:00",
+    captured_by: "ses-prime-portal-observer/2026-08-02.4",
+    content_fingerprint: "sha256:88888888",
+    docket_id: "SWMS-261081",
+    role: "roof_report",
+    signal: "submitted/locked observed, 21 of 23 fields answered",
+    status: "done",
+    url: "https://primeeco.tech/share/00000000-0000-0000-0000-000000000000",
+  };
+  // The manifest artifact is JSON: facts ABOUT the capture, never a tab.
+  const manifestArtifact = {
+    role: "portal_roof_report",
+    object_key: "b/" + ROOF_JOB + "/" + ROOF_REV + "/EVIDENCE/portal_roof_report.json",
+    media_type: "application/json",
+    content_hash: "sha256:" + "1".repeat(64),
+    signed_url: MANIFEST_URL,
+  };
+  const captureArtifact = (name, hash) => ({
+    role: "portal_roof_report_screenshot",
+    object_key: "b/" + ROOF_JOB + "/" + ROOF_REV + "/" + name,
+    media_type: "image/png",
+    content_hash: hash,
+    signed_url: CAPTURE_URL + "?f=" + encodeURIComponent(name),
+  });
+  const woArtifact = {
+    role: "source_attachment",
+    object_key: "b/" + ROOF_JOB + "/" + ROOF_REV + "/work_order_MLB-27100PO-56960.pdf",
+    media_type: "application/pdf",
+    content_hash: "sha256:" + "2".repeat(64),
+    signed_url: "https://example.com/roof-wo.pdf",
+  };
+  const roofCard = {
+    id: ROOF_JOB,
+    job_number: "SWMS-261081",
+    requesting_company_name: "MLB Constructions",
+    builder: { name: "MLB Constructions" },
+    external_ref: "MLB-27100",
+    site_suburb: "Mindarie",
+    requesting_company_slug: "mlb",
+    ses_family: "ordinary_roof_portal",
+    ses_family_label: "Roof Report",
+    attendance_cycle_id: "cycle-1",
+    cycle_number: 1,
+  };
+  // The live cockpit's own family rules for a roof-report card: the portal IS
+  // the report (so no separate report PDF is owed) and a capture IS owed.
+  const roofCockpit = (familyEvidence) => ({
+    schema: "secureworks.makesafe.ses-review-cockpit/v1",
+    status: "INVOICE_CREATE_READY",
+    stale: false,
+    sections: {
+      job_story: { job_id: ROOF_JOB, attendance_cycle_ids: ["cycle-1"] },
+      status: { status: "INVOICE_CREATE_READY", reasons: [] },
+      money: { local_invoice_proposal: null, xero: null },
+      email_drafts: [],
+      family_evidence: familyEvidence === undefined
+        ? {
+          supporting_report_pdf: { state: "not_applicable", rule: "report-only-portal-is-the-report" },
+          roof_report_capture: { state: "ready", evidence: "file:EVIDENCE/portal_roof_report.json" },
+        }
+        : familyEvidence,
+    },
+    controls: {
+      approve_invoice: { enabled: false, label: "APPROVE INVOICE", plan: "", disabled_reason: "No draft yet." },
+      send_it: { enabled: false, label: "SEND IT", plan: "", disabled_reason: "No invoice yet." },
+    },
+  });
+  const roofPack = (artifacts) => ({
+    review: { docket_revision_id: ROOF_REV, review_state: "needs_review", docket_output_content_hash: ROOF_HASH },
+    docket: { id: ROOF_REV, output_content_hash: ROOF_HASH, local_invoice_proposal: null, xero_binding: null },
+    artifacts,
+  });
+  const roofQueueRow = {
+    job_id: ROOF_JOB,
+    docket_revision_id: ROOF_REV,
+    docket_output_content_hash: ROOF_HASH,
+    review_state: "needs_review",
+  };
+  function seedRoof(artifacts, familyEvidence) {
+    behaviour.fetch = {
+      list_ses_docs_ready_reviews: { dockets: [roofQueueRow] },
+      query_ses_review_cockpit: roofCockpit(familyEvidence),
+      get_ses_reviewable_pack: roofPack(artifacts),
+      makesafe_board: { columns: {} },
+    };
+    behaviour.signedUrl = { [MANIFEST_URL]: captureManifest };
+    sandbox._pipelineData.columns = { report_ready: [roofCard] };
+    sandbox._makesafeBoardPayload.columns = null;
+    delete mod._msActiveDocTab[ROOF_JOB];
+  }
+
+  // ── The live Mindarie shape: manifest + capture + a byte-identical RETAKE ──
+  const dupArtifacts = [
+    manifestArtifact,
+    captureArtifact("Prime Portal Roof Report - MLB-27100 - Mindarie.png", CAPTURE_HASH),
+    captureArtifact("Prime Portal Roof Report - MLB-27100 - Mindarie - RETAKE.png", CAPTURE_HASH),
+    woArtifact,
+  ];
+  seedRoof(dupArtifacts);
+  await mod.showMsReportingDetail(ROOF_JOB);
+  const roofHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "the portal capture is a first-class document tab, alongside the Work Order",
+    roofHtml.includes(">Roof Report Capture</button>") &&
+      roofHtml.includes(">Work Order</button>"),
+  );
+  check(
+    "the capture tab is the OPEN tab and its image is on the stage, readable full size",
+    /aria-selected="true"[^>]*>Roof Report Capture</.test(roofHtml) &&
+      roofHtml.includes("<img src=\"" + CAPTURE_URL) &&
+      /msr-stage-open[^>]*>Open document/.test(roofHtml),
+  );
+  check(
+    "the JSON capture manifest is never itself a tab",
+    !roofHtml.includes(MANIFEST_URL) &&
+      !/portal_roof_report<\/button>/.test(roofHtml),
+  );
+  check(
+    "TWO BYTE-IDENTICAL CAPTURES ARE ONE TAB, and the pane says how many copies",
+    (roofHtml.match(/>Roof Report Capture[^<]*<\/button>/g) || []).length === 1 &&
+      /2 identical copies stored/.test(roofHtml),
+  );
+  check(
+    "the capture states when it was taken and what the observer saw, verbatim",
+    /Captured\s/.test(roofHtml) &&
+      roofHtml.includes("submitted/locked observed, 21 of 23 fields answered"),
+  );
+  check(
+    "the portal share link renders on the capture stage",
+    roofHtml.includes("Portal share") &&
+      roofHtml.includes(captureManifest.url),
+  );
+  check(
+    "an image-only capture is explained, never treated as an empty document",
+    /searching it for text finds nothing/i.test(roofHtml) &&
+      /not an empty document/i.test(roofHtml),
+  );
+  check(
+    "the capture is never counted as the completion report",
+    !/Not in this pack:[^<]*completion report/.test(roofHtml),
+  );
+  check(
+    "a card WITH a capture prints no missing-capture warning",
+    !roofHtml.includes("No portal capture in this pack"),
+  );
+  check(
+    "the capture manifest is read from its signed URL, not invented",
+    calls.signedUrl.includes(MANIFEST_URL),
+  );
+  {
+    // The tab switcher rebuilds tabs from the shared cache: the capture must
+    // survive a switch away and back, or it is only visible on first paint.
+    const tabs = mod._msReportingDocTabs(mod._msSesSynthRow(ROOF_JOB, mod._msSesPackCache[ROOF_JOB]));
+    check(
+      "the capture survives a tab rebuild, first in order, with its facts intact",
+      tabs.length === 2 && tabs[0].isCapture === true &&
+        tabs[0].capture.copies === 2 &&
+        tabs[0].capture.signal === captureManifest.signal &&
+        mod._msDocTabUrlAt(ROOF_JOB, 0).indexOf(CAPTURE_URL) === 0,
+    );
+  }
+
+  // ── Two captures whose BYTES DIFFER are two pieces of evidence ────────────
+  seedRoof([
+    manifestArtifact,
+    captureArtifact("capture-a.png", CAPTURE_HASH),
+    captureArtifact("capture-b.png", OTHER_CAPTURE_HASH),
+    woArtifact,
+  ]);
+  await mod.showMsReportingDetail(ROOF_JOB);
+  const twoHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "captures with DIFFERENT bytes each keep a tab — none is hidden",
+    twoHtml.includes(">Roof Report Capture 1</button>") &&
+      twoHtml.includes(">Roof Report Capture 2</button>") &&
+      /captures on this pack, and their bytes differ/.test(twoHtml),
+  );
+  {
+    // Facts are PER CAPTURE: the manifest fingerprints capture-a's bytes, so
+    // capture-b must not inherit its time, cycle or signal — it states that
+    // its facts are unknown instead.
+    const twoTabs = mod._msReportingDocTabs(mod._msSesSynthRow(ROOF_JOB, mod._msSesPackCache[ROOF_JOB]));
+    const capTabs = twoTabs.filter((t) => t.isCapture);
+    const matched = capTabs.find((t) => t.capture.contentHash === CAPTURE_HASH);
+    const unmatched = capTabs.find((t) => t.capture.contentHash === OTHER_CAPTURE_HASH);
+    check(
+      "manifest facts attach only to the capture the fingerprint names",
+      !!matched && matched.capture.signal === captureManifest.signal &&
+        matched.capture.capturedAt === captureManifest.captured_at &&
+        matched.capture.factsMissing === false,
+    );
+    check(
+      "an unmatched capture NEVER inherits another capture's facts",
+      !!unmatched && unmatched.capture.factsMissing === true &&
+        unmatched.capture.signal === null &&
+        unmatched.capture.capturedAt === null &&
+        unmatched.capture.cycleId === null &&
+        unmatched.capture.cycleNumber === null,
+    );
+    const unmatchedStage = mod._msRenderDocStage(twoTabs, twoTabs.indexOf(unmatched), { job_id: ROOF_JOB });
+    check(
+      "the unmatched capture's stage says its facts are unknown, not fresh",
+      /capture manifest could not be read/i.test(unmatchedStage) &&
+        !unmatchedStage.includes(captureManifest.signal),
+    );
+  }
+  {
+    // A retake pack can carry one manifest PER capture: every manifest is read
+    // and each capture takes the one that names its bytes.
+    const manifestB = {
+      ...captureManifest,
+      captured_at: "2026-07-30T02:10:00.000+00:00",
+      content_fingerprint: "sha256:99999999",
+      signal: "submitted/locked observed, 18 of 23 fields answered",
+    };
+    const MANIFEST_B_URL = "https://example.com/portal_roof_report_b.json";
+    seedRoof([
+      manifestArtifact,
+      { ...manifestArtifact, object_key: "b/" + ROOF_JOB + "/" + ROOF_REV + "/EVIDENCE/portal_roof_report_b.json", signed_url: MANIFEST_B_URL },
+      captureArtifact("capture-a.png", CAPTURE_HASH),
+      captureArtifact("capture-b.png", OTHER_CAPTURE_HASH),
+      woArtifact,
+    ]);
+    behaviour.signedUrl = { [MANIFEST_URL]: captureManifest, [MANIFEST_B_URL]: manifestB };
+    await mod.showMsReportingDetail(ROOF_JOB);
+    const pairTabs = mod._msReportingDocTabs(mod._msSesSynthRow(ROOF_JOB, mod._msSesPackCache[ROOF_JOB]))
+      .filter((t) => t.isCapture);
+    const pairA = pairTabs.find((t) => t.capture.contentHash === CAPTURE_HASH);
+    const pairB = pairTabs.find((t) => t.capture.contentHash === OTHER_CAPTURE_HASH);
+    check(
+      "EVERY manifest is kept and each capture carries its own manifest's facts",
+      !!pairA && pairA.capture.signal === captureManifest.signal &&
+        pairA.capture.capturedAt === captureManifest.captured_at &&
+        !!pairB && pairB.capture.signal === manifestB.signal &&
+        pairB.capture.capturedAt === manifestB.captured_at &&
+        pairB.capture.factsMissing === false,
+    );
+  }
+
+  // ── A capture from an EARLIER attendance visit is labelled as one ─────────
+  {
+    const priorRow = {
+      job_id: ROOF_JOB,
+      makesafe_job_family: "ordinary_roof_portal",
+      attendance_cycle_id: "cycle-2",
+      cycle_number: 2,
+      is_reattend: true,
+      reattend_count: 1,
+      last_reattend_at: "2026-08-10T00:00:00.000+00:00",
+    };
+    const note = mod._msSesCaptureCycleNote(
+      { capturedAt: captureManifest.captured_at }, priorRow,
+    );
+    check(
+      "a capture taken before the current re-attendance is called an earlier visit",
+      !!note && note.prior === true && /earlier visit/i.test(note.text),
+    );
+    const stage = mod._msRenderDocStage(
+      [{ tabLabel: "Roof Report Capture", url: CAPTURE_URL, kind: "image", isCapture: true,
+        capture: { capturedAt: captureManifest.captured_at, copies: 1, variantCount: 1 } }],
+      0, priorRow,
+    );
+    check(
+      "the earlier-visit label renders on the capture stage itself",
+      /msr-capture-line prior/.test(stage) && /Earlier visit/.test(stage),
+    );
+    const unknown = mod._msSesCaptureCycleNote(
+      { capturedAt: null }, { is_reattend: true, reattend_count: 1 },
+    );
+    check(
+      "a re-attended card with an untraceable capture says so, never 'current'",
+      !!unknown && unknown.prior === false &&
+        /does not record which visit/i.test(unknown.text),
+    );
+    const single = mod._msSesCaptureCycleNote(
+      { capturedAt: captureManifest.captured_at }, { cycle_number: 1, attendance_cycle_id: "cycle-1" },
+    );
+    check(
+      "a single-visit card gets no invented visit claim",
+      single === null,
+    );
+  }
+
+  // ── ABSENCE MUST LOOK LIKE ABSENCE ───────────────────────────────────────
+  seedRoof([woArtifact]);
+  await mod.showMsReportingDetail(ROOF_JOB);
+  const goneHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "a roof card with NO capture states the gap where the tab would have been",
+    goneHtml.includes("No portal capture in this pack") &&
+      /msr-evidence-gap/.test(goneHtml) &&
+      /do not read the other tabs as the roof report/i.test(goneHtml),
+  );
+  check(
+    "the missing capture never renders an empty tab or an empty stage frame",
+    !goneHtml.includes(">Roof Report Capture</button>") &&
+      !/Document not available/.test(goneHtml),
+  );
+  check(
+    "no other card's document is substituted for the missing capture",
+    !goneHtml.includes(CAPTURE_URL),
+  );
+  {
+    // A blocked family_evidence entry carries the backend's own words: they are
+    // quoted, not paraphrased, exactly as the hold blockers are.
+    seedRoof([woArtifact], {
+      supporting_report_pdf: { state: "not_applicable", rule: "report-only-portal-is-the-report" },
+      roof_report_capture: {
+        state: "blocked",
+        reason: "No portal share link recorded for this claim.",
+        recovery_action: "Ask the builder to re-issue the Prime share, then the observer re-runs.",
+      },
+    });
+    await mod.showMsReportingDetail(ROOF_JOB);
+    const blockedHtml = elements["msReportingDetailPanel"]._html || "";
+    check(
+      "a blocked capture quotes the backend's reason and its recovery action verbatim",
+      blockedHtml.includes("No portal share link recorded for this claim.") &&
+        blockedHtml.includes("Ask the builder to re-issue the Prime share, then the observer re-runs."),
+    );
+  }
+  check(
+    "an ordinary make-safe that owes no capture gains no new warning",
+    !mod._msSesCaptureNotice(
+      { draft_docs: [], makesafe_job_family: "physical_makesafe" },
+      { pack: { artifacts: [] }, cockpit: { sections: { family_evidence: {
+        roof_report_capture: { state: "not_applicable", rule: "not-a-roof-card" },
+      } } } },
+    ),
+  );
+
+  // ── A NEW BYTE-BEARING ROLE IS VISIBLE BY DEFAULT ────────────────────────
+  {
+    const docs = mod._msSesDocsFromArtifacts([
+      {
+        role: "some_future_role_nobody_labelled",
+        object_key: "b/x/y/Structural Engineer Certificate.pdf",
+        media_type: "application/pdf",
+        content_hash: "sha256:" + "3".repeat(64),
+        signed_url: "https://example.com/future.pdf",
+      },
+      // A JSON plan artifact is still not a document: the routes render it.
+      {
+        role: "release_payload",
+        object_key: "b/x/y/release_payload.json",
+        media_type: "application/json",
+        content_hash: "sha256:" + "4".repeat(64),
+        signed_url: "https://example.com/release.json",
+      },
+    ]);
+    const futureTabs = mod._msReportingDocTabs({
+      draft_docs: docs.draft, source_docs: docs.source, photos: docs.photos,
+    });
+    check(
+      "an unrecognised role carrying readable bytes still becomes a tab",
+      futureTabs.length === 1 &&
+        futureTabs[0].tabLabel === "Structural Engineer Certificate" &&
+        futureTabs[0].isUnknownRole === true,
+    );
+    check(
+      "the unlabelled document says the role has no name on this screen",
+      /has no name for/.test(mod._msRenderDocStage(futureTabs, 0, { job_id: "x" })) &&
+        /some_future_role_nobody_labelled/.test(mod._msRenderDocStage(futureTabs, 0, { job_id: "x" })),
+    );
+    check(
+      "a JSON plan artifact is still never a document tab",
+      !futureTabs.some((t) => /release_payload/.test(t.tabLabel)),
+    );
+  }
+
+  // ── A FAILED MANIFEST READ NEVER BECOMES AN INVENTED DATE ────────────────
+  seedRoof(dupArtifacts);
+  behaviour.signedUrl = {};
+  await mod.showMsReportingDetail(ROOF_JOB);
+  const noFactsHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "an unreadable capture manifest is stated, and no capture time is invented",
+    noFactsHtml.includes(">Roof Report Capture</button>") &&
+      /Capture time not recorded in this pack/.test(noFactsHtml) &&
+      /capture manifest could not be read/i.test(noFactsHtml) &&
+      !noFactsHtml.includes("21 of 23 fields answered"),
+  );
+
+  // Leave the shared scenario state as section 19 found it.
+  seedSendReady();
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+  behaviour.signedUrl = {};
 }
 
 // ── 20. No retired action was ever dispatched at runtime ────────────────────

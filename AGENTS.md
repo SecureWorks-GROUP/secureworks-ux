@@ -330,6 +330,38 @@ identity/builder-routing facts only; no client name/phone/street) — the
 reusable pattern for any future before/after screenshot pair of a make-safe
 surface.
 
+WHAT BECOMES A DOCUMENT TAB IS DECIDED BY BYTES, NEVER BY A ROLE ALLOWLIST.
+`_msSesDocsFromArtifacts` used to map six known artifact roles and silently drop
+the rest, so the portal roof capture was invisible on the review screen while
+the pack served it with a working signed URL — and the server label is no help
+(`sesReviewArtifactDisplayLabel` still returns null for 13 of 14 roles, in the
+backend repo). `_msSesArtifactIsDocumentBytes` now admits any artifact carrying
+PDF or IMAGE bytes; the role is consulted only for the tab's NAME, and an
+unrecognised role renders under its stored file name and says the role is
+unlabelled. JSON/text/HTML artifacts stay non-documents — they are plan files the
+routes and invoice sections already render — so a future readable document
+shipped as HTML would still be invisible. Search
+`// <ses-pack-document-visibility>`.
+The capture's own facts come from the pack's JSON `portal_roof_report` manifest,
+read off its signed URL once per load (`_msSesHydratePortalCaptureFacts`); a
+failed read says so and never lets an undated capture read as a fresh one.
+IDENTICAL BYTES ARE ONE PIECE OF EVIDENCE: captures sharing a `content_hash`
+collapse to ONE tab that states the copy count (a retake that only changed a
+file name broke the producer's idempotency), while captures whose bytes differ
+each keep a tab, per `<makesafe-workorder-identity>`. A capture from an earlier
+attendance cycle is labelled as one, and a card that OWES a capture (backend
+`family_evidence.roof_report_capture`) and has none states the gap where the tab
+would be, quoting the backend's reason and recovery action — missing evidence
+must look missing. Search `// <ses-roof-capture-provenance>` and
+`// <ses-roof-capture-absence>`; guards in the module smoke; evidence in
+`docs/evidence/ses-roof-capture-document-tab-2026-08-06/`.
+KNOWN GAP recorded there: for `ordinary_roof_portal` cards the pack's
+`portal_roof_report_screenshot` is a producer PLACARD proving the form was
+submitted and locked, not the form itself; the readable 4-page roof report lives
+only in `job_documents` (`type: roof_report`) and is not in the pack, so this
+pane cannot show it. Do not "fix" that by joining job documents into the pack's
+tab strip without a Captain ruling — this pane renders the byte-exact pack.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

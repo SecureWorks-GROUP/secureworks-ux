@@ -2456,17 +2456,20 @@ check(
   const OTHER_CAPTURE_HASH = "sha256:" + "9".repeat(64);
   const MANIFEST_URL = "https://example.com/portal_roof_report.json";
   const CAPTURE_URL = "https://example.com/portal_roof_report.png";
-  // The live producer's manifest shape (facts only — no client data).
+  // The live producer's manifest shape (facts only — no client data). The
+  // share URL and content fingerprint are NEUTERED like the e2e fixture's: a
+  // live share is a pointer to a client-detail document and never sits in a
+  // committed test. The fingerprint names CAPTURE_HASH's bytes.
   const captureManifest = {
     builder_reference: "MLB-27100",
     captured_at: "2026-08-06T00:31:58.239+00:00",
     captured_by: "ses-prime-portal-observer/2026-08-02.4",
-    content_fingerprint: "sha256:da47eedd",
+    content_fingerprint: "sha256:88888888",
     docket_id: "SWMS-261081",
     role: "roof_report",
     signal: "submitted/locked observed, 21 of 23 fields answered",
     status: "done",
-    url: "https://primeeco.tech/share/d79170a1-db9d-4e7b-bc5d-d5a3aa3fed9f",
+    url: "https://primeeco.tech/share/00000000-0000-0000-0000-000000000000",
   };
   // The manifest artifact is JSON: facts ABOUT the capture, never a tab.
   const manifestArtifact = {
@@ -2587,6 +2590,11 @@ check(
       roofHtml.includes("submitted/locked observed, 21 of 23 fields answered"),
   );
   check(
+    "the portal share link renders on the capture stage",
+    roofHtml.includes("Portal share") &&
+      roofHtml.includes(captureManifest.url),
+  );
+  check(
     "an image-only capture is explained, never treated as an empty document",
     /searching it for text finds nothing/i.test(roofHtml) &&
       /not an empty document/i.test(roofHtml),
@@ -2631,6 +2639,67 @@ check(
       twoHtml.includes(">Roof Report Capture 2</button>") &&
       /captures on this pack, and their bytes differ/.test(twoHtml),
   );
+  {
+    // Facts are PER CAPTURE: the manifest fingerprints capture-a's bytes, so
+    // capture-b must not inherit its time, cycle or signal — it states that
+    // its facts are unknown instead.
+    const twoTabs = mod._msReportingDocTabs(mod._msSesSynthRow(ROOF_JOB, mod._msSesPackCache[ROOF_JOB]));
+    const capTabs = twoTabs.filter((t) => t.isCapture);
+    const matched = capTabs.find((t) => t.capture.contentHash === CAPTURE_HASH);
+    const unmatched = capTabs.find((t) => t.capture.contentHash === OTHER_CAPTURE_HASH);
+    check(
+      "manifest facts attach only to the capture the fingerprint names",
+      !!matched && matched.capture.signal === captureManifest.signal &&
+        matched.capture.capturedAt === captureManifest.captured_at &&
+        matched.capture.factsMissing === false,
+    );
+    check(
+      "an unmatched capture NEVER inherits another capture's facts",
+      !!unmatched && unmatched.capture.factsMissing === true &&
+        unmatched.capture.signal === null &&
+        unmatched.capture.capturedAt === null &&
+        unmatched.capture.cycleId === null &&
+        unmatched.capture.cycleNumber === null,
+    );
+    const unmatchedStage = mod._msRenderDocStage(twoTabs, twoTabs.indexOf(unmatched), { job_id: ROOF_JOB });
+    check(
+      "the unmatched capture's stage says its facts are unknown, not fresh",
+      /capture manifest could not be read/i.test(unmatchedStage) &&
+        !unmatchedStage.includes(captureManifest.signal),
+    );
+  }
+  {
+    // A retake pack can carry one manifest PER capture: every manifest is read
+    // and each capture takes the one that names its bytes.
+    const manifestB = {
+      ...captureManifest,
+      captured_at: "2026-07-30T02:10:00.000+00:00",
+      content_fingerprint: "sha256:99999999",
+      signal: "submitted/locked observed, 18 of 23 fields answered",
+    };
+    const MANIFEST_B_URL = "https://example.com/portal_roof_report_b.json";
+    seedRoof([
+      manifestArtifact,
+      { ...manifestArtifact, object_key: "b/" + ROOF_JOB + "/" + ROOF_REV + "/EVIDENCE/portal_roof_report_b.json", signed_url: MANIFEST_B_URL },
+      captureArtifact("capture-a.png", CAPTURE_HASH),
+      captureArtifact("capture-b.png", OTHER_CAPTURE_HASH),
+      woArtifact,
+    ]);
+    behaviour.signedUrl = { [MANIFEST_URL]: captureManifest, [MANIFEST_B_URL]: manifestB };
+    await mod.showMsReportingDetail(ROOF_JOB);
+    const pairTabs = mod._msReportingDocTabs(mod._msSesSynthRow(ROOF_JOB, mod._msSesPackCache[ROOF_JOB]))
+      .filter((t) => t.isCapture);
+    const pairA = pairTabs.find((t) => t.capture.contentHash === CAPTURE_HASH);
+    const pairB = pairTabs.find((t) => t.capture.contentHash === OTHER_CAPTURE_HASH);
+    check(
+      "EVERY manifest is kept and each capture carries its own manifest's facts",
+      !!pairA && pairA.capture.signal === captureManifest.signal &&
+        pairA.capture.capturedAt === captureManifest.captured_at &&
+        !!pairB && pairB.capture.signal === manifestB.signal &&
+        pairB.capture.capturedAt === manifestB.captured_at &&
+        pairB.capture.factsMissing === false,
+    );
+  }
 
   // ── A capture from an EARLIER attendance visit is labelled as one ─────────
   {

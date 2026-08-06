@@ -596,28 +596,36 @@ async function _msSesHydrateBoundInvoicePdf(ctx) {
  */
 async function _msSesHydratePortalCaptureFacts(ctx) {
   if (!ctx || !ctx.pack || !Array.isArray(ctx.pack.artifacts)) return;
-  var manifest = null;
+  var manifests = [];
   ctx.pack.artifacts.forEach(function(a) {
     if (!a || a.role !== 'portal_roof_report' || !a.signed_url) return;
     // Bytes decide: JSON is the manifest, a PDF/PNG under this role is the
     // capture itself and is handled as a document, not read for facts.
     if (_msSesArtifactIsDocumentBytes(a)) return;
-    manifest = a;
+    manifests.push(a);
   });
-  if (!manifest) return;
+  if (!manifests.length) return;
   if (typeof fetch !== 'function') { ctx.portalCaptureFactsFailed = true; return; }
-  try {
-    var res = await fetch(manifest.signed_url, { cache: 'no-store' });
-    if (!res || !res.ok) { ctx.portalCaptureFactsFailed = true; return; }
-    var body = await res.json();
-    // The producer writes either the object or a one-entry list of it.
-    var facts = Array.isArray(body) ? (body[0] || null) : body;
-    if (facts && typeof facts === 'object') ctx.portalCaptureFacts = facts;
-    else ctx.portalCaptureFactsFailed = true;
-  } catch (e) {
-    ctx.portalCaptureFactsFailed = true;
-    console.warn('[ses] portal capture manifest read failed', e);
+  // EVERY manifest is kept: a retake pack can carry one manifest per capture,
+  // and each capture's facts must come from the manifest that describes IT
+  // (matched by content fingerprint in _msSesCaptureDocs), never inherited
+  // from whichever manifest happened to be read last.
+  var factsList = [];
+  for (var mi = 0; mi < manifests.length; mi++) {
+    try {
+      var res = await fetch(manifests[mi].signed_url, { cache: 'no-store' });
+      if (!res || !res.ok) { ctx.portalCaptureFactsFailed = true; continue; }
+      var body = await res.json();
+      // The producer writes either the object or a one-entry list of it.
+      var facts = Array.isArray(body) ? (body[0] || null) : body;
+      if (facts && typeof facts === 'object') factsList.push(facts);
+      else ctx.portalCaptureFactsFailed = true;
+    } catch (e) {
+      ctx.portalCaptureFactsFailed = true;
+      console.warn('[ses] portal capture manifest read failed', e);
+    }
   }
+  if (factsList.length) ctx.portalCaptureFacts = factsList;
 }
 
 async function _msSesLoadPackContext(jobId, retried) {
@@ -1294,6 +1302,7 @@ function _msSesIsCaptureRole(role) {
  */
 function _msSesCaptureDocs(captures, facts) {
   if (!captures.length) return [];
+  var factsList = Array.isArray(facts) ? facts.filter(Boolean) : (facts ? [facts] : []);
   var groups = [];
   var byHash = {};
   var unhashed = 0;
@@ -1307,6 +1316,12 @@ function _msSesCaptureDocs(captures, facts) {
   return groups.map(function(g, i) {
     var a = g.artifact;
     var fileName = String(a.object_key || '').split('/').pop() || 'Capture';
+    // Facts are PER CAPTURE: a group takes only the manifest whose fingerprint
+    // names its own bytes (or the pack's sole manifest when there is only one
+    // capture to describe). A capture no manifest can be tied to states that
+    // its facts are unknown — it never inherits another capture's time, cycle
+    // or signal, which is exactly what would let stale evidence read as current.
+    var gf = _msSesCaptureFactsFor(factsList, g.hash, groups.length);
     return {
       label: groups.length > 1 ? ('Roof Report Capture ' + (i + 1)) : 'Roof Report Capture',
       url: a.signed_url,
@@ -1320,18 +1335,44 @@ function _msSesCaptureDocs(captures, facts) {
         fileName: fileName,
         copies: g.copies,
         variantCount: groups.length,
-        unhashedCount: unhashed,
+        unhashedCount: g.hash ? 0 : unhashed,
         contentHash: g.hash,
-        capturedAt: (facts && facts.captured_at) || null,
-        signal: (facts && facts.signal) || null,
-        portalUrl: (facts && facts.url) || null,
-        capturedBy: (facts && facts.captured_by) || null,
-        cycleId: (facts && (facts.attendance_cycle_id || facts.cycle_id)) || null,
-        cycleNumber: (facts && facts.cycle_number != null) ? facts.cycle_number : null,
-        factsMissing: !facts,
+        capturedAt: (gf && gf.captured_at) || null,
+        signal: (gf && gf.signal) || null,
+        portalUrl: (gf && gf.url) || null,
+        capturedBy: (gf && gf.captured_by) || null,
+        cycleId: (gf && (gf.attendance_cycle_id || gf.cycle_id)) || null,
+        cycleNumber: (gf && gf.cycle_number != null) ? gf.cycle_number : null,
+        factsMissing: !gf,
       },
     };
   });
+}
+
+// The producer's manifest names the capture it describes by a (possibly
+// truncated) content fingerprint. Normalised to bare hex; anything under 8 hex
+// chars identifies nothing and is treated as absent.
+function _msSesManifestFingerprintHex(f) {
+  var fp = (f && (f.content_fingerprint || f.content_hash)) || null;
+  if (!fp) return null;
+  var hex = String(fp).replace(/^sha\d+:/i, '').toLowerCase();
+  return /^[0-9a-f]{8,}$/.test(hex) ? hex : null;
+}
+
+function _msSesCaptureFactsFor(factsList, hash, groupCount) {
+  if (!factsList.length) return null;
+  var hex = hash ? String(hash).replace(/^sha\d+:/i, '').toLowerCase() : null;
+  if (hex) {
+    for (var i = 0; i < factsList.length; i++) {
+      var fp = _msSesManifestFingerprintHex(factsList[i]);
+      if (fp && (hex.indexOf(fp) === 0 || fp.indexOf(hex) === 0)) return factsList[i];
+    }
+  }
+  // One capture, one manifest: there is no other capture the manifest could
+  // describe, so it attaches even when the fingerprint is absent (the live
+  // Mindarie shape). With several captures, only a fingerprint may claim one.
+  if (factsList.length === 1 && groupCount === 1) return factsList[0];
+  return null;
 }
 
 /**

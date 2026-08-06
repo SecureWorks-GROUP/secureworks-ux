@@ -10604,7 +10604,11 @@ function __renderedStagesFor(typeKey) {
 var FENCING_STAGES = __renderedStagesFor('fencing');
 var PATIO_STAGES = __renderedStagesFor('patio');
 var DECKING_STAGES = __renderedStagesFor('decking');
-var MAKESAFES_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive', 'cancelled'];
+// Release 12 (Rescue SES): 'decision_required' is the Captain Decision column —
+// cards whose evidence contradicts itself (e.g. closed with no issued invoice and
+// no report). The engine refuses to guess their column; the captain resolves each
+// one (his sign-off becomes a terminal-proof row) and the card then derives out.
+var MAKESAFES_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'decision_required', 'completed', 'archive', 'cancelled'];
 
 // Status Mapping Gap diagnostic column key — synthetic, not a real jobs.status value.
 // Pipeline Visibility Guard requires this column to render even when empty so an operator
@@ -13116,7 +13120,7 @@ function renderMakesafeStatusIcons(j, status) {
   return html;
 }
 function makesafeUiStageLabel(stage) {
-  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, completed: 'Completed This Week', archive: 'Archive', cancelled: 'Cancelled' })[stage] || stage;
+  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, decision_required: 'Captain Decision', completed: 'Completed This Week', archive: 'Archive', cancelled: 'Cancelled' })[stage] || stage;
 }
 
 // ── "Docs Ready" honesty ─────────────────────────────────────────────────

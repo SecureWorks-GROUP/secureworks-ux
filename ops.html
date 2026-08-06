@@ -12252,7 +12252,7 @@ function getMakesafeStage(j, rawStatus) {
   // M-F W1-E(c) — a cancelled make-safe buckets to the Cancelled column before
   // anything else (job status wins even if a stale board_stage lingers).
   if (backendStage === 'cancelled' || rawStatus === 'cancelled' || String(j.status || '').toLowerCase() === 'cancelled') return 'cancelled';
-  if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
+  if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'decision_required' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
   if (window.console && console.warn) console.warn('[ops] getMakesafeStage: no canonical stage on payload for', (j.job_number || j.id || '?'), '- rendering as new; fix the caller to read the canonical feed');
   return 'new';
 }

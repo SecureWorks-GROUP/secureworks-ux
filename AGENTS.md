@@ -180,9 +180,21 @@ Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live verification evidence in
 `scripts/makesafe-ui-truth-census.js` — that script is also the pattern for any
 read-only live-board measurement here: it routes every request, aborts non-GETs,
 and redacts client data out of every response body before it can reach the DOM or
-a screenshot. Read-only sessions against the live board must use
-`ops.html?noAutoIntake=1`: loading the board otherwise POSTs
-`auto_approve_clean_intake_drafts`.
+a screenshot.
+
+LOADING THE BOARD IS A READ AND MUST STAY ONE. `loadJobs()` used to await
+`auto_approve_clean_intake_drafts` (`triggered_by: 'ops_board_autoload'`) before
+fetching the board, so opening the board batch-approved intake drafts — which
+CREATE LIVE MAKE-SAFE JOBS — with nobody ticking anything, and made click-to-paint
+~32s against a ~3s board API. Advancement is now the explicit "Advance clean"
+control on the INTAKE column (`runMakesafeCleanIntakeSweep`, trigger
+`ops_intake_review_sweep`); the unattended path is the backend's own clock
+(`makesafe-ses-poll` every 2 minutes, plus `makesafe_reporting_intake_pass`), not
+this page. The old `?noAutoIntake=1` / `?autoIntake=0` escape hatch is GONE
+because it is no longer needed — a read-only live-board session needs no opt-out.
+ops-api independently refuses live approval for any non-allow-listed trigger, so a
+stale cached copy of this page cannot resurrect it. Guard:
+`scripts/test-makesafe-intake-sweep-explicit.js`.
 
 A STORED LINK IS NOT A PORTAL BECAUSE IT SAYS IT IS. 20% of live `external_links`
 rows (59 of 299, all `kind: builder_portal`) are branding images, email signatures

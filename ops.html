@@ -10303,40 +10303,56 @@ function updateJobsDate() {
   el.textContent = now.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
 }
 
-function makesafeAutoIntakeSweepEnabled() {
-  try {
-    var params = new URLSearchParams(window.location.search || '');
-    return params.get('noAutoIntake') !== '1' && params.get('autoIntake') !== '0';
-  } catch (_) {
-    return true;
-  }
-}
+// ── Clean-intake advancement: an EXPLICIT action, never a render side effect ──
+// Approving an intake draft CREATES A LIVE MAKE-SAFE JOB. Until 2026-08-06 this
+// sweep was awaited inside loadJobs() before the board fetch, so merely opening the
+// make-safe board ran a privileged batch approval nobody asked for — and, because
+// every reviewable draft currently duplicates an existing card, spent ~28.6s failing
+// to approve them while the board waited behind it.
+//
+// The Captain's ruling: advancement is either something a human presses or something
+// a clock runs, never something a paint does. The clocks already exist and are
+// untouched (makesafe-ses-poll advances each run's own drafts every 2 minutes;
+// makesafe_reporting_intake_pass re-sweeps the backlog on every SES reporting run),
+// so this button is the deliberate "do it now" path, not the only path.
+//
+// The server enforces this independently of this file: ops-api only performs live
+// approvals for an allow-listed trigger, so a stale cached copy of this page cannot
+// resurrect the render-path behaviour. See makesafe_intake_advance_trigger.ts.
+var _makesafeIntakeSweepInFlight = false;
 
-var _makesafeAutoIntakeSweepInFlight = false;
-var _makesafeAutoIntakeSweepLastRun = 0;
-
-async function autoApproveCleanMakesafeIntakeDraftsIfNeeded() {
-  if (!makesafeAutoIntakeSweepEnabled()) return null;
-  if (_makesafeAutoIntakeSweepInFlight) return null;
-  var now = Date.now();
-  if (now - _makesafeAutoIntakeSweepLastRun < 30000) return null;
-  _makesafeAutoIntakeSweepInFlight = true;
-  _makesafeAutoIntakeSweepLastRun = now;
+async function runMakesafeCleanIntakeSweep() {
+  if (_makesafeIntakeSweepInFlight) return null;
+  _makesafeIntakeSweepInFlight = true;
+  var btn = document.getElementById('btnMakesafeIntakeSweep');
+  if (btn) { btn.disabled = true; btn.textContent = 'Advancing…'; }
   try {
     var result = await opsPost('auto_approve_clean_intake_drafts', {
       limit: 60,
-      triggered_by: 'ops_board_autoload'
+      triggered_by: 'ops_intake_review_sweep'
     });
     var count = Number(result && result.auto_approved_count || 0);
-    if (count > 0) {
-      showToast('Auto-moved ' + count + ' clean MakeSafe intake ' + (count === 1 ? 'job' : 'jobs') + ' to New', 'success');
+    if (result && result.live_approval_authorised === false) {
+      // The server withheld the run. Say so plainly rather than reporting "0 advanced",
+      // which reads as an empty backlog.
+      showToast(result.trigger_refusal || 'Intake advancement was not authorised', 'warning');
+    } else if (count > 0) {
+      showToast('Advanced ' + count + ' clean MakeSafe intake ' + (count === 1 ? 'draft' : 'drafts') + ' to New', 'success');
+    } else {
+      var eligible = Number(result && result.eligible_count || 0);
+      showToast(eligible > 0
+        ? 'No drafts advanced. ' + eligible + ' passed the clean gate but were refused at approval (already minted, or an identity conflict)'
+        : 'No clean drafts ready to advance');
     }
+    // Refresh the INTAKE column and the board so the result is visible immediately.
+    loadJobs();
     return result;
   } catch (e) {
-    console.warn('MakeSafe clean intake auto-approval skipped:', e);
+    showToast('Intake advancement failed: ' + (e && e.message ? e.message : 'unknown error'), 'warning');
     return null;
   } finally {
-    _makesafeAutoIntakeSweepInFlight = false;
+    _makesafeIntakeSweepInFlight = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Advance clean'; }
   }
 }
 
@@ -10347,9 +10363,9 @@ async function loadJobs() {
     if (_pipelineTab === 'makesafes') {
       // Make-safe board: canonical feed only. See <makesafe-board-canonical>.
       // Board search stays client-side (the feed takes no search param).
-      if (_jobView === 'kanban') {
-        await autoApproveCleanMakesafeIntakeDraftsIfNeeded();
-      }
+      // Loading the board is a READ. Nothing privileged may run here — the clean
+      // intake sweep that used to be awaited on this line is now the explicit
+      // "Advance clean" control on the INTAKE column.
       // Returns null when a newer board read (e.g. an in-flight archive load)
       // superseded this one — that read owns the paint, so do not clobber it.
       data = await fetchMakesafeBoardData();
@@ -11292,7 +11308,18 @@ function renderMakesafeIntakeColumn() {
   var drafts = _makesafeIntakeDrafts || [];
   var stageColor = '#D97706'; // make-safe intake amber, matches the +New / Scan accents
   var html = '<div class="kanban-col" data-status="intake">';
-  html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">Intake<span class="count">' + (drafts.length) + '</span></div>';
+  // The header is display:flex/space-between, so the count and the sweep button
+  // share one right-hand group rather than being spread as three siblings.
+  html += '<div class="kanban-col-header" style="border-bottom:3px solid ' + stageColor + ';">Intake';
+  html += '<span style="display:flex;align-items:center;gap:6px;">';
+  html += '<span class="count">' + (drafts.length) + '</span>';
+  // The deliberate replacement for the old board-autoload sweep. It lives here because
+  // this is where the drafts it would approve are already on screen, so pressing it is
+  // a decision taken in front of the evidence.
+  if (drafts.length > 0) {
+    html += '<button class="btn btn-sm" id="btnMakesafeIntakeSweep" onclick="runMakesafeCleanIntakeSweep()" title="Approve every draft that passes the clean gate. This creates live make-safe jobs." style="background:' + stageColor + ';color:#fff;font-weight:600;font-size:10px;padding:3px 9px;border:none;border-radius:4px;cursor:pointer;text-transform:none;letter-spacing:0;">Advance clean</button>';
+  }
+  html += '</span></div>';
   html += '<div class="kanban-body">';
   if (!_makesafeIntakeDraftsLoaded) {
     html += '<div class="kanban-empty">Loading intake…</div>';

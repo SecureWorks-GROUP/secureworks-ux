@@ -10979,6 +10979,9 @@ function renderMakesafeKanban(container, columns) {
     // M3b U5 (D7/G2, Marnin 2026-07-07): this lane means "completion docs
     // drafted, ready to review/send" — NOT "trade reported". Renamed.
     report_ready: 'Docs Ready',
+    // Release 12 (Rescue SES): evidence-contradictory cards the engine refuses
+    // to place — the captain resolves each one.
+    decision_required: 'Captain Decision',
     completed: 'Completed This Week',
     archive: 'Archive',
     cancelled: 'Cancelled',
@@ -10988,6 +10991,7 @@ function renderMakesafeKanban(container, columns) {
     allocated: '#E67E22',
     trade_report_in: '#0E7C7B',
     report_ready: '#9B59B6',
+    decision_required: '#F15A29',
     completed: '#7F8C8D',
     archive: '#64748B',
     cancelled: '#B91C1C',

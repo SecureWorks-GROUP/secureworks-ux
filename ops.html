@@ -12234,19 +12234,18 @@ function getMakesafeAgeParts(j, status) {
   return { label: days + ' days old', color: '#E74C3C', days: days, health: 'red' };
 }
 function getMakesafeStage(j, rawStatus) {
-  var sub = getMakesafeSubstatus(j);
-  var reportStatus = j.report_status || j.service_report_status || (j.service_report && j.service_report.status) || '';
-  var backendStage = j.board_stage || j.makesafe_stage || '';
+  // Rescue SES T2 — the substatus-guessing fallback ladder is GONE. It could
+  // never emit trade_report_in, sent awaiting_portal_completion cards to 'new',
+  // and was overlay-blind — the same client re-derivation PR #226 removed from
+  // the board and the detail pane. The server's canonical_stage is the only
+  // placement authority; rows off the canonical feed carry it (the board mapper
+  // also copies it onto board_stage).
+  var backendStage = j.canonical_stage || j.board_stage || j.makesafe_stage || '';
   // M-F W1-E(c) — a cancelled make-safe buckets to the Cancelled column before
   // anything else (job status wins even if a stale board_stage lingers).
   if (backendStage === 'cancelled' || rawStatus === 'cancelled' || String(j.status || '').toLowerCase() === 'cancelled') return 'cancelled';
   if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
-  if (rawStatus === 'new' || rawStatus === 'allocated' || rawStatus === 'report_ready' || rawStatus === 'completed' || rawStatus === 'archive') return rawStatus;
-  if (rawStatus === 'to_invoice') return 'report_ready';
-  if (sub === 'complete' || rawStatus === 'invoiced' || rawStatus === 'completed') return 'completed';
-  if (sub === 'ready_to_invoice') return 'report_ready';
-  if (sub === 'admin_to_send_report' || reportStatus === 'submitted' || reportStatus === 'ready_for_reporting_skill') return 'report_ready';
-  if (sub === 'waiting_on_trade_report' || rawStatus === 'scheduled' || rawStatus === 'in_progress') return 'allocated';
+  if (window.console && console.warn) console.warn('[ops] getMakesafeStage: no canonical stage on payload for', (j.job_number || j.id || '?'), '- rendering as new; fix the caller to read the canonical feed');
   return 'new';
 }
 
@@ -13159,27 +13158,13 @@ function resolveMakesafeDetailPack(data) {
   if (remembered === undefined) return { known: false, drafted: false };
   return { known: true, drafted: remembered };
 }
-async function moveMakesafeUiStage(jobId, stage) {
-  // MONEY-SAFETY: a drag into the two report columns must move the SUBSTATUS only,
-  // never the job/pack status. The reporting pack lifecycle (drafted → authorised →
-  // sent → closed) is owned by the backend send routine; nudging jobs.status from a
-  // board drag could wrongly imply the pack advanced. So for trade_report_in and
-  // report_ready we send substatus-only (substatusOnly:true) and skip update_job_status.
-  var map = {
-    new: { status: 'accepted', substatus: 'company_contact_required' },
-    allocated: { status: 'scheduled', substatus: 'waiting_on_trade_report' },
-    trade_report_in: { substatus: 'waiting_on_trade_report', substatusOnly: true },
-    report_ready: { substatus: 'admin_to_send_report', substatusOnly: true },
-    completed: { status: 'invoiced', substatus: 'complete' },
-    archive: { status: 'archived', substatus: 'complete' },
-  };
-  var target = map[stage];
-  if (!target) throw new Error('Unknown make-safe stage: ' + stage);
-  if (!target.substatusOnly && target.status) {
-    await opsPost('update_job_status', { jobId: jobId, status: target.status });
-  }
-  await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: target.substatus });
-}
+// Rescue SES T2 (captain ruling 2026-08-06): make-safe drag-to-move is RETIRED.
+// Stages are computed from evidence — a trade report landing IS the move to
+// Trade Report In, a complete family pack IS Docs Ready, a proven send IS
+// Completed. The old drag map was also off by one: trade_report_in and
+// allocated wrote the identical substatus, so a drag could never stick where it
+// was dropped, and dragging to Cancelled threw. The board is a read-out, not a
+// control surface; exceptions are fixed by fixing the evidence on the card.
 
 // Type label -> type-tint class (drives the 3px top-border colour + the type tag).
 function makesafeTypeTintClass(typeLabel) {
@@ -15185,11 +15170,14 @@ async function kanbanDrop(e) {
   }
   try {
     if (_pipelineTab === 'makesafes') {
-      await moveMakesafeUiStage(jobId, toStatus);
-      showToast('Make-safe moved to ' + makesafeUiStageLabel(toStatus), 'success');
-      // A drag is a stage transition too — re-read the canonical feed and repaint
-      // any open detail rather than leave it on the pre-drag stage.
-      await afterMakesafeStageTransition();
+      // Rescue SES T2: drag-to-move retired — stages come from evidence, the
+      // board is a read-out. Repaint so the card snaps back where the server
+      // says it lives.
+      var kcMs = document.querySelector('#jobsBody .kanban-container');
+      _kanbanSavedScroll = kcMs ? kcMs.scrollLeft : 0;
+      if (_pipelineData) renderJobs(_pipelineData);
+      showToast('Make-safe stages move from evidence (trade report in, pack complete, send proven) — drag is retired.', 'warning');
+      return;
     } else {
       await opsPost('update_job_status', { jobId: jobId, status: toStatus });
       showToast('Job moved to ' + (STATUS_LABELS[toStatus] || toStatus), 'success');

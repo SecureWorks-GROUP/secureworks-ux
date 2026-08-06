@@ -22,8 +22,10 @@
  *
  * READ-ONLY BY CONSTRUCTION, same as scripts/ses-f2-workorder-identity-census.js:
  * every ops-api request is routed through this script and a non-GET is ABORTED
- * and fails the run. The board is opened with `?noAutoIntake=1` because loading
- * it otherwise POSTs `auto_approve_clean_intake_drafts`. Nothing is clicked.
+ * and fails the run. Since 2026-08-06 loading the board POSTs nothing at all (the
+ * clean-intake sweep is an explicit control, not a render side effect), so the old
+ * `?noAutoIntake=1` opt-out is gone and the abort rule is the only guard needed.
+ * Nothing is clicked.
  *
  * PRIVACY BY CONSTRUCTION. Every response body is redacted BEFORE it reaches the
  * browser, so the screenshots are of redacted data. Output keeps job number,
@@ -150,8 +152,8 @@ async function main() {
     return route.fallback();
   });
 
-  console.log(`opening ${BASE}/ops.html?noAutoIntake=1#jobs`);
-  await page.goto(`${BASE}/ops.html?noAutoIntake=1#jobs`, { waitUntil: 'domcontentloaded' });
+  console.log(`opening ${BASE}/ops.html#jobs`);
+  await page.goto(`${BASE}/ops.html#jobs`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.setPipelineTab === 'function');
   await page.evaluate(async () => {
     window.setPipelineTab('makesafes');
@@ -424,7 +426,7 @@ async function main() {
 
   const summary = {
     generated_by: 'scripts/ses-f5b-combined-truth-census.js',
-    board: 'ops.html?noAutoIntake=1#jobs → Make-Safes',
+    board: 'ops.html#jobs → Make-Safes',
     ui_read_at_commit: process.env.GIT_HEAD || '(set GIT_HEAD to stamp)',
     population: {
       cards_on_board: census.cards_on_board,

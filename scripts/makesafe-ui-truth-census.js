@@ -11,8 +11,9 @@
  *
  * READ-ONLY BY CONSTRUCTION. Every `ops-api` request the page makes is routed
  * through this script. A non-GET is ABORTED and fails the run, so the session
- * cannot write even if the page tries. The board is opened with `?noAutoIntake=1`
- * because loading it otherwise POSTs `auto_approve_clean_intake_drafts`.
+ * cannot write even if the page tries. Since 2026-08-06 loading the board POSTs
+ * nothing at all (the clean-intake sweep is an explicit control, not a render side
+ * effect), so the old `?noAutoIntake=1` opt-out is gone.
  *
  * PRIVACY BY CONSTRUCTION. Every response body is redacted BEFORE it reaches the
  * browser: client names, phone numbers, email addresses and street lines never
@@ -144,8 +145,8 @@ async function main() {
     return route.fallback();
   });
 
-  console.log(`opening ${BASE}/ops.html?noAutoIntake=1#jobs`);
-  await page.goto(`${BASE}/ops.html?noAutoIntake=1#jobs`, { waitUntil: 'domcontentloaded' });
+  console.log(`opening ${BASE}/ops.html#jobs`);
+  await page.goto(`${BASE}/ops.html#jobs`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.setPipelineTab === 'function');
 
   // The make-safe board, every column expanded, as the census population.
@@ -243,7 +244,7 @@ async function main() {
   const docsReady = rows.filter((r) => r.rendered_column === 'report_ready');
   const summary = {
     generated_by: 'scripts/makesafe-ui-truth-census.js',
-    board: 'ops.html?noAutoIntake=1#jobs → Make-Safes',
+    board: 'ops.html#jobs → Make-Safes',
     feed: 'ops-api?action=makesafe_board&projection=ops (makesafe-board.v1) + makesafe_pipeline?history=all (presentation join)',
     population: {
       canonical_rows_rendered: rows.length,

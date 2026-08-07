@@ -10784,16 +10784,23 @@
     }
     function renderMaterialRows(materials) {
       var rows = Array.isArray(materials) ? materials.slice() : String(materials || '').split(',').map(function(v) { return v.trim(); }).filter(Boolean);
-      var defaults = ['Temp fence panels', 'Bases / feet', 'Tarps / roof materials', 'Fixings / consumables', 'Other / none'];
-      while (rows.length < 5) rows.push(defaults[rows.length] || '');
+      // Captain 2026-08-07: these suggestions used to be PRE-FILLED VALUES, so
+      // any trade who did not clear them submitted "Temp fence panels / Tarps /
+      // Bases" on every job type - poisoning the report's materials evidence
+      // (seen live on SWMS-261157, an interior ceiling job that "used" fence
+      // bases and tarps). Empty rows now start EMPTY with the suggestion as a
+      // placeholder hint; only what the trade actually types is submitted.
+      var hints = ['e.g. Temp fence panels', 'e.g. Bases / feet', 'e.g. Tarps / roof materials', 'e.g. Fixings / consumables', 'Write None if nothing used'];
+      while (rows.length < 5) rows.push('');
       var out = '';
       rows.slice(0, 6).forEach(function(row, idx) {
         var item = String(row || '');
         var qty = '';
         var m = item.match(/^(.*?)(?:\s+x\s+|\s+qty\s+)([\d.]+.*)$/i);
         if (m) { item = m[1]; qty = m[2]; }
+        var hint = hints[idx] || 'Material/equipment';
         out += '<tr data-msr-material-row>';
-        out += '<td style="padding:6px 4px;"><input data-msr-material-item value="' + esc(item) + '" placeholder="Material/equipment" style="width:100%;padding:9px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;box-sizing:border-box;"></td>';
+        out += '<td style="padding:6px 4px;"><input data-msr-material-item value="' + esc(item) + '" placeholder="' + esc(hint) + '" style="width:100%;padding:9px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;box-sizing:border-box;"></td>';
         out += '<td style="padding:6px 4px;width:92px;"><input data-msr-material-qty value="' + esc(qty) + '" placeholder="Qty" style="width:100%;padding:9px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;box-sizing:border-box;"></td>';
         out += '</tr>';
       });

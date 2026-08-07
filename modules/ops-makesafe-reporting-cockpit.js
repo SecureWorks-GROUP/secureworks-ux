@@ -22,19 +22,24 @@
 // (job_id -> docket_revision_id; needs_review dockets only — a signed-off
 // docket has already passed that queue, so the exact-pack view is offered only
 // while the pack is in the queue).
-// ACTIONS (per-job only — never a multi-job release):
-//   APPROVE INVOICE: approve_ses_invoice_revision (JWT, includes_authorise)
-//     -> execute_ses_invoice_revision (AUTHORISES the Xero draft invoice the
-//     agents already minted and binds the Xero PDF into a fresh docket that
-//     needs a new tick).
-//   SEND IT: sign_off_ses_docket (JWT, hash-bound to the displayed pack) ->
-//     prepare_ses_release_revision { job_ids: [job] } ->
-//     approve_ses_release_revision (JWT) -> execute_ses_release_revision.
-//     SEND IT releases every route the release carries (today still report +
-//     photo + invoice — three emails) at once. For AJS the UI may PREVIEW the
-//     intended two-email shape (report+invoice, then photos) when the backend
-//     still builds three; that preview is labelled and never presented as the
-//     send truth.
+// ACTION (per-job only — never a multi-job release): ONE PRESS, running the
+// same guarded server chain the retired two stamps ran, in the same order, with
+// every server guard, both recorded approvals and the hash binding unchanged:
+//   1. approve_ses_invoice_revision (JWT, includes_authorise)
+//      -> execute_ses_invoice_revision (AUTHORISES the Xero draft invoice the
+//      agents already minted and binds the Xero PDF into a FRESH docket) — only
+//      when the backend arms approve_invoice; the pack is then re-read so the
+//      sign-off binds the invoice-bound bytes that are about to be sent.
+//   2. sign_off_ses_docket (JWT, hash-bound to the displayed pack).
+//   3. prepare_ses_release_revision { job_ids: [job] }.
+//   4. approve_ses_release_revision (JWT) — the send approval.
+//   5. execute_ses_release_revision — releases every route the release carries
+//      (today still report + photo + invoice) at once. For AJS the UI may
+//      PREVIEW the intended two-email shape (report+invoice, then photos) when
+//      the backend still builds three; that preview is labelled and never
+//      presented as the send truth.
+// A refusal stops the chain AT that step and shows the server's words verbatim;
+// earlier recorded approvals stand and pressing again resumes from there.
 //
 // Globals consumed (all defined in ops.html):
 //   opsFetch, opsPost, opsPostJwt, showToast, escapeHtml, escapeAttr
@@ -50,6 +55,14 @@ var _msReportingCache = {};
 var _msSesReviewQueue = {};
 var _msSesCockpitCache = {};
 var _msSesPackCache = {};
+// job_id -> the last docket_revision_id this session actually saw in the review
+// queue. The queue only lists needs_review dockets, so the moment a tick is
+// recorded (which the one press does) the job drops out of it and the byte-exact
+// pack — every document tab, including the portal capture — would vanish from
+// this pane for the rest of the session. The remembered id is offered back to
+// get_ses_reviewable_pack, which validates it server-side and refuses with a 409
+// if it is no longer the current pack; nothing here decides the pack is current.
+var _msSesLastKnownDocket = {};
 // When _msSesReviewQueue was last successfully read (0 = never). The board door
 // uses it to re-read a stale queue before deciding a job has no reviewable pack.
 var _msSesReviewQueueFetchedAt = 0;
@@ -648,6 +661,7 @@ async function _msSesLoadPackContext(jobId, retried) {
     fetchedAt: 0
   };
   if (entry) {
+    _msSesLastKnownDocket[jobId] = entry.docket_revision_id;
     try {
       ctx.pack = await opsFetch('get_ses_reviewable_pack', { docket_revision_id: entry.docket_revision_id });
       ctx.fetchedAt = Date.now();
@@ -663,6 +677,31 @@ async function _msSesLoadPackContext(jobId, retried) {
         return _msSesLoadPackContext(jobId, true);
       }
       throw e;
+    }
+    return ctx;
+  }
+  // Signed off: out of the needs_review queue, so nothing on this surface maps
+  // the job to its current docket any more. Offer back the revision this
+  // session last saw — the server decides whether it is still the current pack
+  // (a 409 means it is not, and the documents stay honestly unavailable).
+  var remembered = _msSesLastKnownDocket[jobId];
+  if (remembered) {
+    try {
+      var pack = await opsFetch('get_ses_reviewable_pack', { docket_revision_id: remembered });
+      ctx.pack = pack;
+      ctx.fetchedAt = Date.now();
+      ctx.docketRevisionId = remembered;
+      if (pack && pack.docket && pack.docket.output_content_hash) {
+        ctx.outputHash = pack.docket.output_content_hash;
+      }
+      if (pack && pack.review && pack.review.review_state) {
+        ctx.reviewState = pack.review.review_state;
+      }
+    } catch (_e) {
+      // The remembered revision is no longer the current pack (or cannot be
+      // read). Leave the honest no-documents state rather than showing an
+      // older pack's bytes as though they were this one's.
+      ctx.packRecoveryFailed = true;
     }
   }
   return ctx;
@@ -726,7 +765,7 @@ var _MS_SES_ICONS = {
  * identity, ONE next action, hold story when held, document tabs over a short
  * stage (invoice is a DOCUMENT tab), condensed email previews, then photos /
  * trade notes / feedback collapsed by default. PRIMARY ACTIONS sit at the
- * BOTTOM (APPROVE INVOICE then SEND IT), armed only by backend control flags.
+ * BOTTOM (ONE press: APPROVE AND SEND), armed only by backend control flags.
  * A disabled stamp stays visible with its reason. No combined Approve-and-Send.
  */
 function _msSesRenderDetail(jobId, ctx, targetPanelId) {
@@ -792,6 +831,9 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   // ── ONE clear next action ─────────────────────────────────────────────────
   html += _msSesNextAction(cockpit);
 
+  // ── DONE checklist: what is complete on this pack, before any document ────
+  html += _msSesRenderDoneStrip(row, ctx);
+
   // ── The hold story: ONE amber block, numbered verbatim blockers, each with
   //    its plain-English clear path. Amber is a machine stop wanting a person;
   //    red stays reserved for a read that actually failed. ───────────────────
@@ -815,12 +857,19 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 
   // ── DOCUMENTS — tabs over ONE compact stage. The invoice is a document
   //    here: a tab like the report, never a separate section. ────────────────
-  html += '<div class="msr-sec"><h3>Documents</h3><span class="msr-sec-note">click a tab</span></div>';
+  html += '<div class="msr-sec"><h3>Documents</h3><span class="msr-sec-note">click a tile to read it here</span></div>';
   if (docTabs.length) {
     html += '<div id="msDocTabs_' + safeJobKey + '" class="msr-tabs" role="tablist" aria-label="Pack documents">';
     docTabs.forEach(function(t, i) {
       var active = (i === activeTab);
-      html += '<button type="button" role="tab" class="msr-tab" aria-selected="' + (active ? 'true' : 'false') + '" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')">' + escapeHtml(t.tabLabel) + '</button>';
+      // TILE, not a word: a preview (the image itself, or a drawn page mark for
+      // a PDF) over the stored file name, with the document's name last so the
+      // tile still reads as its label. Clicking it opens the document INLINE on
+      // the same stage below — the reading the captain kept.
+      html += '<button type="button" role="tab" class="msr-tab tile" aria-selected="' + (active ? 'true' : 'false') + '" data-tabidx="' + i + '" data-doc-url="' + escapeAttr(t.url || '') + '" onclick="_msSwitchDocTab(\'' + safeId + '\',' + i + ',\'' + escapeAttr(targetPanelId || 'msReportingDetailPanel') + '\')">'
+        + _msSesTileThumb(t)
+        + '<span class="msr-tile-file">' + escapeHtml(_msSesTileFileName(t)) + '</span>'
+        + escapeHtml(t.tabLabel) + '</button>';
     });
     html += '</div>';
     // Stage (fit-to-page). Signed URLs live 300s; tab switches past that age
@@ -830,9 +879,15 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     html += '<div class="msr-panel"><div class="msr-empty-note">'
       + (ctx.pack
         ? 'No documents are attached to this pack yet.'
-        : 'This pack has already passed Docs Ready review; the byte-exact pack view is available while the pack is in the review queue. The emails below are the current truth.')
+        : 'The documents are not viewable here right now. This pack has already passed Docs Ready review, and the byte-exact pack (every document, including any portal capture) is only served while the pack sits in the review queue'
+          + (ctx.packRecoveryFailed
+            ? '. The revision this screen last saw is no longer the current one, so nothing here is shown in its place.'
+            : '.')
+          + ' This is an absence of the VIEW, not evidence that a document is missing. The emails below are the current truth.')
       + '</div></div>';
   }
+  // The builder portal deliverables: observed state plus the live page.
+  html += _msSesRenderPortalEvidence(row, ctx);
   // A card that owes a portal capture and has none says so HERE, where the
   // capture tab would be — an absent tab alone reads as "nothing to show".
   html += _msSesCaptureNotice(row, ctx);
@@ -945,9 +1000,9 @@ function _msSesNextAction(cockpit) {
       ? ('Clear <strong>' + n + ' blocker' + (n === 1 ? '' : 's') + '</strong> below &mdash; nothing can be approved or sent until then.')
       : 'The system stopped this pack &mdash; nothing can be approved or sent until it clears.';
   } else if (controls.send_it && controls.send_it.enabled) {
-    text = 'Read the pack, then press <strong>SEND IT</strong>. It emails the report, the photos and the invoice exactly as shown below.';
+    text = 'Read the pack, then press <strong>APPROVE AND SEND</strong>. It records your approval for this exact pack and emails the report, the photos and the invoice exactly as shown below.';
   } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
-    text = 'Check the Invoice tab, then press <strong>APPROVE INVOICE</strong>. That authorises the Xero draft invoice already prepared for this pack; the pack comes back here once more before anything sends.';
+    text = 'Check the Invoice tile, then press <strong>APPROVE AND SEND</strong>. One press authorises the Xero draft invoice already prepared for this pack and then sends the emails shown below.';
   } else {
     text = 'Nothing to press yet &mdash; the system is still preparing this pack. Review it and leave feedback if something looks wrong.';
   }
@@ -1174,6 +1229,171 @@ function _msSesCaptureNotice(row, ctx) {
   return html;
 }
 // </ses-roof-capture-absence>
+
+// <ses-portal-link-openers>
+// The builder portal deliverables this pane can open, in reading order. Each
+// entry names the family_evidence item that CARRIES THE LIVE URL (the assembler
+// writes `url:<link>` into the *_link item when it binds exactly one typed link)
+// and the item that records whether the capture of that page succeeded.
+var _MS_SES_PORTAL_ROLES = [
+  { linkItem: 'roof_report_link', captureItem: 'roof_report_capture', label: 'Roof report', open: 'Open the roof report' },
+  { linkItem: 'assessment_report_link', captureItem: 'assessment_report_capture', label: 'Assessment form', open: 'Open the assessment form' },
+  { linkItem: 'assessment_scope_link', captureItem: 'assessment_scope_capture', label: 'Quote form', open: 'Open the quote form' },
+  { linkItem: 'assessment_photos_link', captureItem: 'assessment_photos_capture', label: 'Photos form', open: 'Open the photos form' }
+];
+
+// The live builder-portal URL an evidence item carries, or null. The assembler
+// records it as `url:<link>`; anything else (a file: pointer, a blocker) is not
+// a link and must never be rendered as one.
+function _msSesEvidenceUrl(entry) {
+  var ev = entry && entry.evidence != null ? String(entry.evidence) : '';
+  if (ev.indexOf('url:') !== 0) return null;
+  var url = ev.slice(4).trim();
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (typeof urlIsBuilderPortalLink === 'function' && !urlIsBuilderPortalLink(url)) return null;
+  return url;
+}
+
+/**
+ * The portal deliverables on this card, each with the live link (when the pack
+ * bound one) and the OBSERVED state of the capture — never an inference. A role
+ * the backend marks not_applicable is not on this card at all and is dropped.
+ */
+function _msSesPortalDeliverables(ctx, row) {
+  var fe = _msSesFamilyEvidence(ctx);
+  var captureDocs = (row && Array.isArray(row.draft_docs))
+    ? row.draft_docs.filter(function(d) { return d && d.isCapture; })
+    : [];
+  var out = [];
+  _MS_SES_PORTAL_ROLES.forEach(function(role) {
+    var linkEntry = fe[role.linkItem] || null;
+    var capEntry = fe[role.captureItem] || null;
+    var linkState = String((linkEntry && linkEntry.state) || '').toLowerCase();
+    var capState = String((capEntry && capEntry.state) || '').toLowerCase();
+    if (!linkEntry && !capEntry) return;
+    if (linkState === 'not_applicable' && (capState === 'not_applicable' || !capEntry)) return;
+    out.push({
+      key: role.linkItem,
+      label: role.label,
+      openLabel: role.open,
+      url: _msSesEvidenceUrl(linkEntry),
+      linkEntry: linkEntry,
+      captureEntry: capEntry,
+      captureState: capState,
+      // The capture doc (and therefore its manifest facts) only exists while
+      // the byte-exact pack is in view; the caption says so rather than
+      // implying the capture is missing.
+      captureDoc: captureDocs.length === 1 ? captureDocs[0] : null
+    });
+  });
+  return out;
+}
+
+/**
+ * The observed-state caption for one portal deliverable. PORTAL DONE is only
+ * ever printed when the backend's own capture item says ready; everything else
+ * reads NOT DONE and quotes the reason it gave.
+ */
+function _msSesPortalCaption(item) {
+  if (item.captureState === 'ready') {
+    var cap = item.captureDoc && item.captureDoc.capture;
+    var when = cap && cap.capturedAt ? _msReportingFormatTimestamp(cap.capturedAt) : null;
+    return {
+      done: true,
+      text: when ? ('PORTAL DONE - checked ' + when) : 'PORTAL DONE',
+      detail: (cap && cap.signal) || null
+    };
+  }
+  return {
+    done: false,
+    text: 'NOT DONE',
+    detail: (item.captureEntry && (item.captureEntry.reason || item.captureEntry.recovery_action)) || null
+  };
+}
+
+/**
+ * The portal evidence strip: one tile per portal deliverable, carrying its
+ * observed state and — when the pack bound a live link — an OPEN LINK button
+ * straight into the builder portal. A deliverable with no bound link says so
+ * instead of offering a dead button.
+ */
+function _msSesRenderPortalEvidence(row, ctx) {
+  var items = _msSesPortalDeliverables(ctx, row);
+  if (!items.length) return '';
+  var html = '<div class="msr-sec"><h3>Builder portal</h3><span class="msr-sec-note">what the observer saw, and the live page</span></div>';
+  html += '<div class="msr-portal">';
+  items.forEach(function(item) {
+    var cap = _msSesPortalCaption(item);
+    html += '<div class="msr-portal-tile' + (cap.done ? ' done' : '') + '">';
+    html += '<div class="msr-portal-name">' + escapeHtml(item.label) + '</div>';
+    html += '<div class="msr-portal-state">' + escapeHtml(cap.text) + '</div>';
+    if (cap.detail) html += '<div class="msr-portal-detail">' + escapeHtml(String(cap.detail)) + '</div>';
+    if (item.url) {
+      html += '<a class="msr-portal-open" href="' + escapeAttr(item.url) + '" target="_blank" rel="noopener">'
+        + escapeHtml(item.openLabel) + ' &#8599;</a>';
+    } else {
+      html += '<div class="msr-portal-nolink">No live link is bound to this pack.</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+// </ses-portal-link-openers>
+
+// <ses-done-checklist>
+// The strip at the top of the review: what is complete on this pack, in the
+// captain's reading order. Every state comes from the pack's own artifacts or
+// the backend's family_evidence — a fact this screen cannot read renders as
+// "not in this pack", never as done.
+function _msSesDoneItems(row, ctx) {
+  var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
+  var source = Array.isArray(row.source_docs) ? row.source_docs : [];
+  function hasDraft(re) {
+    return draft.some(function(d) { return d && !d.isCapture && re.test(String(d.label || '')); });
+  }
+  var items = [];
+  items.push({
+    label: 'Work order',
+    done: source.some(function(s) {
+      return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
+    })
+  });
+  if (_msSesReportPdfNotApplicable(ctx)) {
+    items.push({ label: 'Report', na: true, note: 'the portal form is the report' });
+  } else {
+    items.push({ label: 'Report', done: hasDraft(/make\s*safe|completion|report/i) });
+  }
+  var capture = _msSesCaptureExpectation(ctx, row);
+  if (capture.expected) {
+    items.push({ label: 'Portal capture', done: draft.some(function(d) { return d && d.isCapture; }) });
+  }
+  items.push({ label: 'SWMS', done: hasDraft(/swms/i) });
+  items.push({ label: 'Photos', done: !!(Array.isArray(row.photos) && row.photos.length) });
+  items.push({ label: 'Draft invoice', done: !!row.invoice });
+  return items;
+}
+
+function _msSesRenderDoneStrip(row, ctx) {
+  // Without the byte-exact pack this screen cannot see the documents at all, so
+  // a checklist here would be a list of false gaps.
+  if (!ctx || !ctx.pack) return '';
+  var items = _msSesDoneItems(row, ctx);
+  var doneCount = items.filter(function(i) { return i.done; }).length;
+  var checkable = items.filter(function(i) { return !i.na; }).length;
+  var html = '<div class="msr-done">';
+  html += '<div class="msr-done-h">' + doneCount + ' of ' + checkable + ' ready</div>';
+  html += '<div class="msr-done-items">';
+  items.forEach(function(i) {
+    var cls = i.na ? 'na' : (i.done ? 'ok' : 'gap');
+    var mark = i.na ? '&ndash;' : (i.done ? _MS_SES_ICONS.check : _MS_SES_ICONS.cross);
+    html += '<span class="msr-done-item ' + cls + '">' + mark + ' ' + escapeHtml(i.label)
+      + (i.note ? ' <em>(' + escapeHtml(i.note) + ')</em>' : '') + '</span>';
+  });
+  html += '</div></div>';
+  return html;
+}
+// </ses-done-checklist>
 
 /**
  * RV-1: a missing document is NAMED in one quiet sentence under the tabs,
@@ -1758,8 +1978,8 @@ function _msSesRenderCondensedMail(r, byHash) {
  * - Default: one card per backend route (truth), short TO/CC/subject + excerpt.
  * - AJS with the still-live 3-route backend: the INTENDED 2-email shape
  *   (report+invoice, then photos) is the HEADLINE, labelled plainly as a
- *   preview — never as if SEND IT already sent that shape — and the REAL
- *   routes SEND IT releases today stay one click away in a collapsed truth
+ *   preview — never as if the press already sent that shape — and the REAL
+ *   routes one press releases today stay one click away in a collapsed truth
  *   fold. Any route the synthesis did not consume is rendered as its own card
  *   in the headline too: a route is never dropped from this surface. When the
  *   backend has landed 2 routes, the truth IS the headline and there is no
@@ -1786,8 +2006,8 @@ function _msSesRenderRoutes(ctx, identity) {
 
   var html = '';
   if (!useAjsPreview) {
-    html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">what SEND IT releases</span></div>';
-    html += '<div class="msr-lede">SEND IT sends <strong>all ' + realCountWord
+    html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">what one press releases</span></div>';
+    html += '<div class="msr-lede">One press sends <strong>all ' + realCountWord
       + ' email' + realPlural + ' at once</strong> to the people below.</div>';
     routes.forEach(function(r) {
       html += _msSesRenderCondensedMail(r, byHash);
@@ -1798,12 +2018,12 @@ function _msSesRenderRoutes(ctx, identity) {
   var intended = _msSesAjsIntendedEmails(routes);
   html += '<div class="msr-sec"><h3>Outgoing emails</h3><span class="msr-sec-note">AJS send shape (preview)</span></div>';
   html += '<div class="msr-banner info msr-preview-note">';
-  html += '<div class="msr-banner-title">Preview of the intended AJS shape &mdash; not what SEND IT sends today</div>';
+  html += '<div class="msr-banner-title">Preview of the intended AJS shape &mdash; not what one press sends today</div>';
   html += 'AJS packs should go as <strong>two emails</strong>: report + invoice together, then photos as a follow-up. ';
   html += 'The backend still builds <strong>' + escapeHtml(realCountWord) + ' route' + realPlural
-    + '</strong> right now; SEND IT still releases all ' + escapeHtml(realCountWord) + '. ';
+    + '</strong> right now; one press still releases all ' + escapeHtml(realCountWord) + '. ';
   html += 'A separate ship will land the two-email shape &mdash; until then this is a layout preview only. ';
-  html += 'Open <strong>What SEND IT actually sends today</strong> below to read the real emails.';
+  html += 'Open <strong>What one press actually sends today</strong> below to read the real emails.';
   html += '</div>';
   intended.emails.forEach(function(r) {
     html += _msSesRenderCondensedMail(r, byHash);
@@ -1813,17 +2033,17 @@ function _msSesRenderRoutes(ctx, identity) {
     html += '<div class="msr-lede"><strong>' + _msSmallNumberWord(intended.leftovers.length)
       + ' further route' + (intended.leftovers.length === 1 ? '' : 's')
       + '</strong> the two-email shape does not absorb. '
-      + 'SEND IT releases ' + (intended.leftovers.length === 1 ? 'it' : 'them') + ' too, exactly as below.</div>';
+      + 'One press releases ' + (intended.leftovers.length === 1 ? 'it' : 'them') + ' too, exactly as below.</div>';
     intended.leftovers.forEach(function(r) {
       html += _msSesRenderCondensedMail(r, byHash);
     });
   }
   // The truth, one click away: the real routes SEND IT releases today.
   html += '<details class="msr-fold">';
-  html += '<summary class="msr-sec"><h3>What SEND IT actually sends today</h3>'
+  html += '<summary class="msr-sec"><h3>What one press actually sends today</h3>'
     + '<span class="msr-sec-note">' + escapeHtml(realCountWord) + ' real email' + realPlural
     + ' &mdash; open to read them</span></summary>';
-  html += '<div class="msr-lede">These are the backend&rsquo;s own routes. SEND IT releases <strong>all '
+  html += '<div class="msr-lede">These are the backend&rsquo;s own routes. One press releases <strong>all '
     + escapeHtml(realCountWord) + ' email' + realPlural + ' at once</strong>, exactly as below &mdash; '
     + 'the preview above is the shape a later ship will land, not this send.</div>';
   routes.forEach(function(r) {
@@ -2016,6 +2236,28 @@ function _msReportingDocTabs(d) {
   }
   out.sort(function(a, b) { return rank(a) - rank(b); });
   return out;
+}
+
+// The stored file name behind a tile, when the pack recorded one. The capture
+// carries its own; every other tab keeps the label it was built from.
+function _msSesTileFileName(t) {
+  if (t && t.capture && t.capture.fileName) return t.capture.fileName;
+  var src = String((t && t.srcLabel) || '').trim();
+  if (src && src !== t.tabLabel) return src;
+  if (t && t.kind === 'invdoc') return 'SES proposal';
+  if (t && t.kind === 'invoice_unavailable') return 'not available';
+  return t && t.url ? (String(t.url).split('?')[0].split('/').pop() || '') : '';
+}
+
+// A tile preview: the real image for an image document, a drawn page mark for
+// everything else. Never a stand-in that could be mistaken for the document.
+function _msSesTileThumb(t) {
+  if (t && t.kind === 'image' && t.url) {
+    return '<span class="msr-tile-thumb"><img src="' + escapeAttr(t.url) + '" alt="" loading="lazy"></span>';
+  }
+  return '<span class="msr-tile-thumb glyph" aria-hidden="true">'
+    + '<svg viewBox="0 0 16 16"><path d="M4 1.5h5l3 3v10H4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>'
+    + '<path d="M9 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span>';
 }
 
 /**
@@ -2406,10 +2648,10 @@ function _msSwitchDocTab(jobId, idx, panelId) {
   if (tabsWrap) {
     var btns = tabsWrap.querySelectorAll('button[data-tabidx]');
     for (var i = 0; i < btns.length; i++) {
+      // aria-selected is the ONLY selection state: the tile styling hangs off
+      // it in CSS, so inline colour writes here would fight the stylesheet.
       var active = (Number(btns[i].getAttribute('data-tabidx')) === idx);
-      btns[i].style.background = active ? 'var(--sw-orange)' : '#fff';
-      btns[i].style.color = active ? '#fff' : 'var(--sw-dark)';
-      btns[i].style.borderColor = active ? 'var(--sw-orange)' : 'var(--sw-border)';
+      if (btns[i].setAttribute) btns[i].setAttribute('aria-selected', active ? 'true' : 'false');
     }
   }
   var stage = (root.querySelector && root.querySelector('#msDocStage_' + key)) || document.getElementById('msDocStage_' + key);
@@ -2515,19 +2757,22 @@ function _msReportingFormatTimestamp(iso) {
 // ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 
 /**
- * The two-step stamp rail, rendered at the BOTTOM of the pane in the pinned
+ * ONE BUTTON, rendered at the BOTTOM of the pane in the pinned
  * .msr-actions-foot — a flex sibling outside the scroll body, deliberately
  * NOT position:sticky (sticky overlays content on a full-page shot).
- * BOTH primary actions are always VISIBLE; only the backend control flags
- * decide which is pressable:
- *   controls.approve_invoice.enabled -> APPROVE INVOICE live -> approveSesInvoice
- *   controls.send_it.enabled         -> SEND IT live         -> sendSesRelease
- * Order is always APPROVE INVOICE, then SEND IT. An enabled stamp's note
- * renders the BACKEND'S OWN plan text verbatim when the cockpit carries one.
- * A disabled stamp carries no id and no onclick — nothing for a click or a
- * script to reach — with the plain reason under it. A HOLD points back at the
- * amber block above. The mockup's single combined "Approve & send pack"
- * button is the RETIRED 410 path and is deliberately NOT ported.
+ *
+ * One press records BOTH approvals for exactly this docket revision and then
+ * authorises and sends, by running the SAME guarded server actions the old two
+ * stamps ran, in the same order (see sesApproveAndSend). Nothing about the
+ * server contract changes: both approvals are still recorded separately, the
+ * sign-off is still bound to the displayed pack hash, and a pack that changed
+ * still voids the press.
+ *
+ * The stamp is armed only by the backend control flags — approve_invoice when
+ * the invoice still needs authorising, send_it when it does not. A disabled
+ * stamp carries no id and no onclick (nothing for a click or a script to
+ * reach), with the backend's own disabled_reason underneath. A HOLD points back
+ * at the amber block above. The retired 410 combined path is never called.
  */
 function _msSesActionBlock(jobId, ctx, dismissAction) {
   var cockpit = ctx.cockpit || {};
@@ -2540,6 +2785,8 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   var xero = (sections.money && sections.money.xero) ||
     (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || null;
   var safeId = _msJsAttr(jobId);
+  var armed = !onHold && !!(approveInvoice.enabled || sendIt.enabled);
+  var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
 
   var holdReason = 'Locked by the hold above'
@@ -2555,43 +2802,68 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     return reason ? escapeHtml(reason) : fallback;
   }
 
-  var approveNote;
-  if (approveInvoice.enabled) {
-    approveNote = escapeHtml(approveInvoice.plan || 'Authorises the Xero draft invoice already prepared for the figures on the Invoice tab.')
-      + ' Your click, every time.';
+  var note;
+  if (armed) {
+    var emailsPhrase = routeCount
+      ? ('the ' + _msSmallNumberWord(routeCount) + ' email' + (routeCount === 1 ? '' : 's') + ' shown above')
+      : 'the emails shown above';
+    note = approveInvoice.enabled
+      ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
+      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+    note += ' Irreversible. Your press, every time.';
+    note = escapeHtml(note);
+  } else if (onHold) {
+    note = holdReason;
   } else {
-    var approveFallback;
-    if (onHold) {
-      approveFallback = holdReason;
-    } else if (xero && (xero.invoice_number || xero.status)) {
-      approveFallback = 'Already done &mdash; invoice ' + escapeHtml(xero.invoice_number || '')
-        + (xero.status ? ' is ' + escapeHtml(String(xero.status)) : '') + ' in Xero.';
+    // Not armed and not held: whichever control the backend would unlock next
+    // owns the reason. Never invent one.
+    var fallback;
+    if (xero && (xero.invoice_number || xero.status)) {
+      fallback = 'Nothing to press. Invoice ' + escapeHtml(xero.invoice_number || '')
+        + (xero.status ? ' is ' + escapeHtml(String(xero.status)) : '')
+        + ' in Xero and the system has not unlocked sending yet.' + captainNote;
     } else {
-      approveFallback = 'The system has not unlocked this step for this pack yet.' + captainNote;
+      fallback = 'The system has not unlocked this pack yet.' + captainNote;
     }
-    approveNote = controlDisabledNote(approveInvoice, approveFallback);
+    note = controlDisabledNote(sendIt, controlDisabledNote(approveInvoice, fallback));
   }
 
-  var sendNote;
-  if (sendIt.enabled) {
-    sendNote = escapeHtml(sendIt.plan || 'Sends the emails below exactly as shown.')
-      + ' Irreversible. Your click, every time.';
-  } else {
-    var sendFallback;
-    if (onHold) {
-      sendFallback = holdReason;
-    } else if (approveInvoice.enabled) {
-      sendFallback = 'Unlocks after APPROVE INVOICE &mdash; the invoice email needs the authorised Xero invoice before anything can send.';
-    } else {
-      sendFallback = 'The system has not unlocked sending for this pack yet.' + captainNote;
-    }
-    sendNote = controlDisabledNote(sendIt, sendFallback);
-  }
-
-  html += '<div class="msr-steps">';
-  html += _msSesStamp({ step: 1, word: 'APPROVE INVOICE', kind: 'approve', enabled: !!approveInvoice.enabled, id: 'msSesApproveInvoiceBtn', onclick: 'approveSesInvoice(\'' + safeId + '\')', note: approveNote });
-  html += _msSesStamp({ step: 2, word: 'SEND IT', kind: 'send', enabled: !!sendIt.enabled, id: 'msSesSendItBtn', onclick: 'sendSesRelease(\'' + safeId + '\')', note: sendNote });
+  html += '<div class="msr-steps one">';
+  html += _msSesStamp({
+    word: 'APPROVE AND SEND',
+    kind: 'send',
+    enabled: armed,
+    id: 'msSesApproveAndSendBtn',
+    onclick: 'sesApproveAndSend(\'' + safeId + '\')',
+    note: note
+  });
   html += '</div>';
+
+  // Where a stopped chain says which step refused and why, verbatim. Rendered
+  // empty so a refusal never has to create structure while the pane is live.
+  html += '<div class="msr-chain-error" id="msSesChainError-' + safeId + '" hidden></div>';
+
+  if (armed) {
+    html += '<details class="msr-what"><summary>What one press does</summary>';
+    html += '<ol>';
+    if (approveInvoice.enabled) {
+      html += '<li>Records your <b>invoice approval</b> for this exact invoice revision, then authorises the Xero draft invoice already prepared for it and binds its PDF into the pack.</li>';
+    }
+    html += '<li>Records your <b>Docs Ready sign-off</b>, bound to the exact pack hash on screen.</li>';
+    html += '<li>Records your <b>send approval</b> for the release built from that pack.</li>';
+    html += '<li>Sends the emails exactly as shown, and writes the send proofs.</li>';
+    html += '</ol>';
+    // The backend's OWN plan text for each armed step, verbatim. It is the
+    // system describing what it is about to do; this screen never rewrites it.
+    var plans = [];
+    if (approveInvoice.enabled && approveInvoice.plan) plans.push(approveInvoice.plan);
+    if (sendIt.enabled && sendIt.plan) plans.push(sendIt.plan);
+    plans.forEach(function(planText) {
+      html += '<p class="msr-plan">The system&rsquo;s own words: ' + escapeHtml(String(planText)) + '</p>';
+    });
+    html += '<p>Both approvals are recorded separately, against this docket revision only. If a step refuses, the press stops there, the earlier approvals stand, and pressing again picks up from the step that refused.</p>';
+    html += '</details>';
+  }
 
   // The Docs Ready tick state, bound to the exact displayed pack hash. This is
   // the captain's per-job approval record (blueprint: "the approve control is
@@ -2601,7 +2873,7 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
     html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
     if (tickPending) {
-      html += '<span>Your Docs Ready approval is <b>not yet recorded</b>. Pressing SEND IT records it against exactly this version of the pack (<code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code>) &mdash; if the pack changes afterwards, that approval is void and the pack comes back here.</span>';
+      html += '<span>Your Docs Ready approval is <b>not yet recorded</b>. One press records it against exactly this version of the pack (<code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code>). If the pack changes afterwards, that approval is void and the pack comes back here.</span>';
     } else {
       html += '<span>Your Docs Ready approval is <b>already recorded</b> for exactly this version of the pack.</span>';
     }
@@ -2652,131 +2924,241 @@ function showMsReportingDetailEmpty() {
 }
 
 // ────────────────────────────────────────────────────────────
-// 3. ACTIONS - APPROVE INVOICE + SEND IT (SES chains)
+// 3. ACTION - ONE PRESS (the whole guarded SES chain)
 // ────────────────────────────────────────────────────────────
 
-/**
- * APPROVE INVOICE: record the identified operator's approval of the exact
- * current invoice revision (JWT; includes authorise), then execute it — the
- * backend AUTHORISES the Xero draft invoice the agents already minted and binds
- * the Xero PDF into a fresh docket revision, which re-enters the Docs Ready
- * queue for a new tick before SEND IT.
- */
-async function approveSesInvoice(jobId) {
-  var ctx = _msSesPackCache[jobId];
-  if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
-  // The backend control flag is the only thing that can arm this action: a
-  // disabled stamp has no onclick, and even a programmatic call stops here.
-  var approveCtl = ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.approve_invoice;
-  if (!(approveCtl && approveCtl.enabled)) {
-    showToast('APPROVE INVOICE is not enabled for this pack.', 'error');
-    return;
-  }
-  if (!confirm('This records your SES approval and AUTHORISES the Xero draft invoice already prepared for this exact invoice revision, then binds the Xero PDF into a fresh pack for final review. Continue?')) return;
+// The word on the resting stamp. Progress text replaces it during a press and
+// a stopped chain resumes under RESUME, so the captain is never told to press
+// something that would start again from the top.
+var _MS_SES_PRESS_WORD = 'APPROVE AND SEND';
+var _MS_SES_RESUME_WORD = 'RESUME';
 
-  var btn = document.getElementById('msSesApproveInvoiceBtn');
-  if (btn) { btn.disabled = true; _msSesStampProgress(btn, 'Recording approval...'); }
+/** The one press's button, resolved inside the panel that owns the detail. */
+function _msSesPressButton(jobId) {
+  return _msSesScopedEl(jobId, 'msSesApproveAndSendBtn');
+}
 
-  try {
-    var approval = await opsPostJwt('approve_ses_invoice_revision', {
-      job_id: jobId,
-      includes_authorise: true
-    });
-    var obligationRevisionId = approval && approval.approval && approval.approval.invoice_obligation_revision_id;
-    if (!obligationRevisionId) {
-      var ob = await opsFetch('query_ses_invoice_obligation', { job_id: jobId });
-      var revisions = (ob && ob.revisions) || [];
-      obligationRevisionId = revisions.length ? revisions[0].id : null;
-    }
-    if (!obligationRevisionId) {
-      throw new Error('The approved invoice obligation revision could not be resolved.');
-    }
-    if (btn) _msSesStampProgress(btn, 'Authorising in Xero...');
-    var execBody = { job_id: jobId, invoice_obligation_revision_id: obligationRevisionId };
-    var actor = _msSesActor();
-    if (actor) execBody.actor = actor;
-    var executed = await opsPost('execute_ses_invoice_revision', execBody);
-    var invoiceNumber = executed && executed.invoice && executed.invoice.invoice_number;
-    showToast('Invoice authorised in Xero' + (invoiceNumber ? ' (' + invoiceNumber + ')' : '') + '. The invoice-bound pack needs a fresh Docs Ready tick before SEND IT.', 'success');
-    _msSesReloadDetail(jobId);
-  } catch (e) {
-    if (_msSesIsStale(e)) {
-      showToast('The pack changed while you reviewed it. Reloading the fresh pack.', 'info');
-      _msSesReloadDetail(jobId);
-      return;
-    }
-    showToast('Approve invoice failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; _msSesStampProgress(btn, 'APPROVE INVOICE'); }
-  }
+function _msSesClearChainError(jobId) {
+  var el = _msSesScopedEl(jobId, 'msSesChainError-' + jobId);
+  if (!el) return;
+  el.innerHTML = '';
+  if ('hidden' in el) el.hidden = true;
 }
 
 /**
- * SEND IT: the full release chain for THIS job only (never a multi-job
- * release):
- *   1. sign_off_ses_docket (JWT, hash-bound to the exact displayed pack) —
- *      skipped only when the tick is already recorded for the current bytes;
- *   2. prepare_ses_release_revision { job_ids: [jobId] };
- *   3. approve_ses_release_revision (JWT);
- *   4. execute_ses_release_revision — sends ALL THREE routes (report + photo +
- *      invoice emails), writes route proofs, and verifies the closeout.
- * A 409 stale_review anywhere aborts the chain and reloads the fresh pack.
+ * Stop the chain where it refused and SAY SO: which step, and the server's own
+ * words verbatim. Whatever was recorded before this step stands — pressing
+ * again re-runs the chain, and the server actions refuse or no-op the steps
+ * already done, so a resume never double-records or double-sends.
  */
-async function sendSesRelease(jobId) {
+function _msSesChainStopped(jobId, stepLabel, factText, opts) {
+  opts = opts || {};
+  var el = _msSesScopedEl(jobId, 'msSesChainError-' + jobId);
+  if (el) {
+    var html = '<div class="msr-chain-h">Stopped at: ' + escapeHtml(stepLabel) + '</div>';
+    html += '<div class="msr-chain-fact">' + escapeHtml(String(factText || 'The server refused without a reason.')) + '</div>';
+    html += '<div class="msr-chain-foot">'
+      + (opts.recorded
+        ? 'What was already recorded stands. '
+        : 'Nothing was recorded for the step that refused. ')
+      + 'Press again once the reason above is cleared, and the press picks up from this step.</div>';
+    el.innerHTML = html;
+    if ('hidden' in el) el.hidden = false;
+  }
+  var btn = _msSesPressButton(jobId);
+  if (btn) { btn.disabled = false; _msSesStampProgress(btn, _MS_SES_RESUME_WORD); }
+  showToast('Stopped at ' + stepLabel + ': ' + String(factText || 'refused'), 'error');
+}
+
+/**
+ * Re-read the SES context for a job into the cache WITHOUT repainting the pane
+ * (a repaint mid-chain would destroy the button the progress is being written
+ * into). Used after the invoice step, which legitimately produces a fresh
+ * invoice-bound docket revision that the sign-off must bind to instead.
+ */
+async function _msSesRefreshPackContext(jobId) {
+  var panelId = (_msSesPackCache[jobId] && _msSesPackCache[jobId].panelId) || 'msReportingDetailPanel';
+  await _msSesRefreshReviewQueue();
+  var next = await _msSesLoadPackContext(jobId);
+  await _msSesHydrateBoundInvoicePdf(next);
+  await _msSesHydratePortalCaptureFacts(next);
+  next.panelId = panelId;
+  _msSesPackCache[jobId] = next;
+  return next;
+}
+
+/**
+ * ONE PRESS. It runs exactly the guarded server chain the two stamps ran, in
+ * the same order, with every server guard unchanged:
+ *
+ *   1. approve_ses_invoice_revision (JWT, includes_authorise)  ─┐ only when the
+ *      execute_ses_invoice_revision (authorises the Xero draft) ┘ backend arms
+ *      approve_invoice; the invoice bind produces a FRESH docket revision, so
+ *      the pack is re-read before anything is signed off.
+ *   2. sign_off_ses_docket (JWT, bound to the exact displayed pack hash) —
+ *      skipped only when the tick is already recorded for the current bytes.
+ *   3. prepare_ses_release_revision { job_ids: [jobId] }  (this job only).
+ *   4. approve_ses_release_revision (JWT) — the send approval.
+ *   5. execute_ses_release_revision — sends the routes and writes the proofs.
+ *
+ * Both approvals are still recorded separately and per docket revision; the
+ * hash binding is unchanged, so a pack that moved on still voids the press. On
+ * any refusal the chain stops at that step and shows the server's words
+ * verbatim; the earlier recorded approvals stand and pressing again resumes.
+ */
+async function sesApproveAndSend(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
-  // Same fail-closed rule as approveSesInvoice: only the backend's send_it
-  // flag can arm a send, whatever invoked this function.
-  var sendCtl = ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.send_it;
-  if (!(sendCtl && sendCtl.enabled)) {
-    showToast('SEND IT is not enabled for this pack.', 'error');
+  // Fail closed: only the backend control flags can arm a press, whatever
+  // invoked this function. A disabled stamp has no id and no onclick, and even
+  // a programmatic call stops here.
+  var controls = (ctx.cockpit && ctx.cockpit.controls) || {};
+  var approveCtl = controls.approve_invoice || {};
+  var sendCtl = controls.send_it || {};
+  var onHold = ctx.cockpit && ctx.cockpit.status === 'HOLD';
+  if (onHold || !(approveCtl.enabled || sendCtl.enabled)) {
+    showToast('This pack is not armed to approve or send.', 'error');
     return;
   }
-  var needsSignoff = ctx.reviewState === 'needs_review' && !!ctx.docketRevisionId && !!ctx.outputHash;
-  var confirmMsg = 'SEND IT releases ALL THREE routes at once (report + photos + invoice emails) to the exact recipients shown'
-    + (needsSignoff
-      ? ', after recording your Docs Ready tick bound to the exact displayed pack hash'
-      : ' (the Docs Ready tick is already recorded for the current pack)')
-    + '. This is irreversible. Send now?';
+
+  var needsInvoice = !!approveCtl.enabled;
+  var confirmMsg = needsInvoice
+    ? 'ONE PRESS: this records your invoice approval AND your send approval for exactly this docket revision, AUTHORISES the Xero draft invoice already prepared for it, and then sends the emails shown to the exact recipients shown. This is irreversible. Continue?'
+    : 'ONE PRESS: this records your send approval for exactly this docket revision and sends the emails shown to the exact recipients shown. This is irreversible. Continue?';
   if (!confirm(confirmMsg)) return;
 
-  var btn = document.getElementById('msSesSendItBtn');
+  _msSesClearChainError(jobId);
+  var btn = _msSesPressButton(jobId);
   if (btn) { btn.disabled = true; _msSesStampProgress(btn, 'Working...'); }
+  var actor = _msSesActor();
+  var invoiceRecorded = false;
 
+  // Step 1 — the invoice approval, when the pack still needs one.
+  if (needsInvoice) {
+    try {
+      if (btn) _msSesStampProgress(btn, 'Approving invoice...');
+      var approval = await opsPostJwt('approve_ses_invoice_revision', {
+        job_id: jobId,
+        includes_authorise: true
+      });
+      invoiceRecorded = true;
+      var obligationRevisionId = approval && approval.approval && approval.approval.invoice_obligation_revision_id;
+      if (!obligationRevisionId) {
+        var ob = await opsFetch('query_ses_invoice_obligation', { job_id: jobId });
+        var revisions = (ob && ob.revisions) || [];
+        obligationRevisionId = revisions.length ? revisions[0].id : null;
+      }
+      if (!obligationRevisionId) {
+        throw new Error('The approved invoice obligation revision could not be resolved.');
+      }
+      if (btn) _msSesStampProgress(btn, 'Authorising in Xero...');
+      var invExec = { job_id: jobId, invoice_obligation_revision_id: obligationRevisionId };
+      if (actor) invExec.actor = actor;
+      await opsPost('execute_ses_invoice_revision', invExec);
+    } catch (e) {
+      if (_msSesIsStale(e)) return _msSesChainStale(jobId, invoiceRecorded);
+      _msSesChainStopped(jobId, 'approving the invoice', (e && e.message) || e, { recorded: invoiceRecorded });
+      return;
+    }
+
+    // The invoice bind produced a NEW docket revision carrying the Xero PDF.
+    // Sign off THAT pack, never the pre-invoice hash the screen was showing —
+    // the tick must bind the bytes that are about to be sent.
+    try {
+      if (btn) _msSesStampProgress(btn, 'Reloading the pack...');
+      ctx = await _msSesRefreshPackContext(jobId);
+    } catch (e) {
+      _msSesChainStopped(jobId, 'reloading the invoice-bound pack', (e && e.message) || e, { recorded: true });
+      return;
+    }
+    var freshSend = (ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.send_it) || {};
+    if (!freshSend.enabled) {
+      // The invoice approval IS recorded; the backend has simply not armed the
+      // send on the new revision. Say its reason, verbatim, and stop.
+      _msSesChainStopped(
+        jobId,
+        'sending the invoice-bound pack',
+        freshSend.disabled_reason || 'The system has not unlocked sending for the invoice-bound pack yet.',
+        { recorded: true }
+      );
+      showMsReportingDetail(jobId, ctx.panelId);
+      return;
+    }
+  }
+
+  // Step 2 — the Docs Ready sign-off, hash-bound to the pack in view.
+  var releaseRevisionId = null;
   try {
-    if (needsSignoff) {
-      if (btn) _msSesStampProgress(btn, 'Recording Docs Ready tick...');
+    if (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash) {
+      if (btn) _msSesStampProgress(btn, 'Signing off...');
       await opsPostJwt('sign_off_ses_docket', {
         docket_revision_id: ctx.docketRevisionId,
         expected_output_content_hash: ctx.outputHash
       });
     }
-    if (btn) _msSesStampProgress(btn, 'Preparing release...');
+  } catch (e) {
+    if (_msSesIsStale(e)) return _msSesChainStale(jobId, invoiceRecorded);
+    _msSesChainStopped(jobId, 'signing off the pack', (e && e.message) || e, { recorded: invoiceRecorded });
+    return;
+  }
+
+  // Step 3 — build the release for THIS job only.
+  try {
+    if (btn) _msSesStampProgress(btn, 'Preparing the release...');
     var prepBody = { job_ids: [jobId] };
-    var actor = _msSesActor();
     if (actor) prepBody.created_by = actor;
     var prepared = await opsPost('prepare_ses_release_revision', prepBody);
-    var releaseRevisionId = prepared && prepared.release && prepared.release.id;
+    releaseRevisionId = prepared && prepared.release && prepared.release.id;
     if (!releaseRevisionId) {
       throw new Error('The release revision id was not returned by prepare_ses_release_revision.');
     }
-    if (btn) _msSesStampProgress(btn, 'Approving release...');
+  } catch (e) {
+    if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
+    _msSesChainStopped(jobId, 'preparing the release', (e && e.message) || e, { recorded: true });
+    return;
+  }
+
+  // Step 4 — the send approval.
+  try {
+    if (btn) _msSesStampProgress(btn, 'Approving the send...');
     await opsPostJwt('approve_ses_release_revision', { release_revision_id: releaseRevisionId });
-    if (btn) _msSesStampProgress(btn, 'Sending all three routes...');
+  } catch (e) {
+    if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
+    _msSesChainStopped(jobId, 'approving the send', (e && e.message) || e, { recorded: true });
+    return;
+  }
+
+  // Step 5 — send.
+  try {
+    if (btn) _msSesStampProgress(btn, 'Sending...');
     var execBody = { release_revision_id: releaseRevisionId };
     if (actor) execBody.actor = actor;
     var executed = await opsPost('execute_ses_release_revision', execBody);
-    var proofCount = executed && Array.isArray(executed.route_proofs) ? executed.route_proofs.length : 3;
-    showToast('Pack released — ' + proofCount + ' routes sent (report, photos, invoice) and the closeout is verified.', 'success');
+    var proofCount = executed && Array.isArray(executed.route_proofs) ? executed.route_proofs.length : null;
+    showToast('Sent'
+      + (proofCount != null ? ' — ' + proofCount + ' email' + (proofCount === 1 ? '' : 's') + ' released' : '')
+      + (needsInvoice ? ', invoice authorised' : '')
+      + ' and the closeout is verified.', 'success');
     _msReportingAfterSend();
   } catch (e) {
-    if (_msSesIsStale(e)) {
-      showToast('The pack changed while you reviewed it. Reloading the fresh pack — nothing was sent.', 'info');
-      _msSesReloadDetail(jobId);
-      return;
-    }
-    showToast('SEND IT failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; _msSesStampProgress(btn, 'SEND IT'); }
+    if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
+    _msSesChainStopped(jobId, 'sending', (e && e.message) || e, { recorded: true });
   }
+}
+
+/**
+ * A 409 stale_review anywhere in the chain: the pack moved on, so the press is
+ * void from that step. Nothing further is sent and the fresh pack is reloaded.
+ */
+function _msSesChainStale(jobId, recorded) {
+  showToast('The pack changed while you reviewed it. Reloading the fresh pack — nothing further was sent.', 'info');
+  _msSesChainStopped(
+    jobId,
+    'the pack changed',
+    'This pack moved on after the screen loaded, so the press was voided at that step. Read the fresh pack and press again.',
+    { recorded: !!recorded }
+  );
+  _msSesReloadDetail(jobId);
 }
 
 /**
@@ -2925,12 +3307,14 @@ function _msIsPortalBuilder(d) {
 //    enrich to the SES cockpit status (DOCS READY / APPROVE INVOICE /
 //    SEND READY / ON HOLD / NO SES PACK)
 // 4. Clicking a card loads query_ses_review_cockpit + get_ses_reviewable_pack
-//    and renders the doc tabs, invoice lines, the three exact routes, and the
-//    fixed photo set
-// 5. APPROVE INVOICE (when enabled) runs approve_ses_invoice_revision (JWT) ->
-//    execute_ses_invoice_revision; SEND IT (when enabled) runs
-//    sign_off_ses_docket (JWT, hash-bound) -> prepare_ses_release_revision ->
-//    approve_ses_release_revision (JWT) -> execute_ses_release_revision
+//    and renders the DONE strip, the document tiles (inline stage), the portal
+//    evidence tiles with their OPEN LINK buttons, the invoice lines, the exact
+//    routes and the fixed photo set
+// 5. ONE press (when armed) runs approve_ses_invoice_revision (JWT) ->
+//    execute_ses_invoice_revision -> [pack re-read] -> sign_off_ses_docket
+//    (JWT, hash-bound) -> prepare_ses_release_revision ->
+//    approve_ses_release_revision (JWT) -> execute_ses_release_revision, and
+//    stops at the first refusal naming the step and the server's own words
 // 6. A job with no SES docket shows the honest "no reviewable pack" state and
 //    never calls the retired 410 actions
 //

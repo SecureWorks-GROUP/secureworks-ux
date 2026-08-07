@@ -48,7 +48,7 @@ function extractFunction(src, signature) {
 // ── 1 + 2: the render path is a pure read ────────────────────────────────────
 
 check('loadJobs no longer awaits any approval sweep', () => {
-  const loadJobs = extractFunction(ops, 'async function loadJobs()');
+  const loadJobs = extractFunction(ops, 'async function loadJobs(opts)');
   assert.ok(
     !/auto_approve_clean_intake_drafts/.test(loadJobs),
     'loadJobs must not call the approval action',

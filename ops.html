@@ -3686,8 +3686,9 @@
       border-radius: 8px;
     }
 
-    /* Document tabs feeding one stage (mockup State A). */
-    .msr-tabs { display: flex; gap: 6px; padding: 0 20px 8px; flex-wrap: wrap; }
+    /* Document TILES feeding one stage: preview + file name + the document's
+       own name, each opening it inline on the stage below. */
+    .msr-tabs { display: flex; gap: 8px; padding: 0 20px 10px; flex-wrap: wrap; }
     .msr-tab {
       border: 1px solid var(--sw-border);
       background: #fff;
@@ -3707,6 +3708,159 @@
       border-color: var(--sw-orange);
       color: #fff;
     }
+    .msr-tab.tile {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 5px;
+      width: 132px;
+      padding: 8px;
+      text-align: left;
+      background: #fff;
+      color: var(--sw-dark);
+    }
+    .msr-tab.tile[aria-selected="true"] {
+      background: #fff;
+      color: var(--sw-dark);
+      border-color: var(--sw-orange);
+      box-shadow: inset 0 0 0 2px rgba(241, 90, 41, 0.9);
+    }
+    .msr-tile-thumb {
+      width: 100%;
+      height: 62px;
+      border-radius: 5px;
+      background: var(--sw-warm-100);
+      border: 1px solid var(--sw-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .msr-tile-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .msr-tile-thumb.glyph { color: var(--sw-mid-light); }
+    .msr-tile-thumb.glyph svg { width: 22px; height: 22px; }
+    .msr-tab.tile[aria-selected="true"] .msr-tile-thumb.glyph { color: var(--sw-orange); }
+    .msr-tile-file {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--sw-mid-light);
+      line-height: 1.25;
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      order: 3;
+    }
+
+    /* DONE checklist strip: what is complete on this pack, before any document. */
+    .msr-done {
+      margin: 0 20px 4px;
+      padding: 10px 14px;
+      border: 1px solid var(--sw-border);
+      border-radius: 8px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .msr-done-h {
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--sw-mid);
+      white-space: nowrap;
+    }
+    .msr-done-items { display: flex; gap: 8px; flex-wrap: wrap; }
+    .msr-done-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: var(--sw-radius-pill);
+      border: 1px solid var(--sw-border);
+      color: var(--sw-mid);
+      background: var(--sw-warm-100);
+    }
+    .msr-done-item .msr-i { width: 12px; height: 12px; }
+    .msr-done-item.ok { color: #0E7C5A; border-color: #BFE3D2; background: #F1FAF5; }
+    .msr-done-item.gap { color: #8A5A09; border-color: #F0E2A8; background: #FFFBEA; }
+    .msr-done-item.na { color: var(--sw-mid-light); }
+    .msr-done-item em { font-weight: 500; font-style: normal; color: var(--sw-mid-light); }
+
+    /* Builder portal evidence tiles: observed state + the live page. */
+    .msr-portal { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 20px 4px; }
+    .msr-portal-tile {
+      flex: 1 1 240px;
+      max-width: 340px;
+      border: 1px solid var(--sw-border);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px 12px;
+    }
+    .msr-portal-name { font-size: 13px; font-weight: 700; color: var(--sw-dark); }
+    .msr-portal-state {
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      color: #8A5A09;
+    }
+    .msr-portal-tile.done .msr-portal-state { color: #0E7C5A; }
+    .msr-portal-detail { margin-top: 5px; font-size: 12px; line-height: 1.45; color: var(--sw-mid); }
+    .msr-portal-nolink { margin-top: 8px; font-size: 12px; color: var(--sw-mid-light); }
+    .msr-portal-open {
+      display: inline-block;
+      margin-top: 9px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: var(--sw-dark);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .msr-portal-open:hover { background: var(--sw-orange); }
+
+    /* Where a stopped press says which step refused, in the server's words. */
+    .msr-chain-error {
+      margin: 12px 0 0;
+      padding: 11px 14px;
+      border: 1px solid #E8B4AE;
+      border-radius: 8px;
+      background: #FDF1EF;
+      color: #8C2F21;
+      font-size: 12.5px;
+      line-height: 1.5;
+      text-align: left;
+    }
+    .msr-chain-h { font-weight: 800; }
+    .msr-chain-fact { margin-top: 5px; color: #7F1D1D; }
+    .msr-chain-foot { margin-top: 6px; color: var(--sw-mid); }
+    .msr-what {
+      margin-top: 12px;
+      font-size: 12.5px;
+      color: var(--sw-mid);
+      text-align: left;
+    }
+    .msr-what > summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--sw-mid);
+      list-style: none;
+    }
+    .msr-what > summary::-webkit-details-marker { display: none; }
+    .msr-what > summary::before { content: '\25B8 '; }
+    .msr-what[open] > summary::before { content: '\25BE '; }
+    .msr-what ol { margin: 8px 0 0 18px; padding: 0; line-height: 1.55; }
+    .msr-what li { margin-bottom: 4px; }
+    .msr-what b { color: var(--sw-dark); }
+    .msr-what p { margin: 8px 0 0; line-height: 1.5; }
+    .msr-steps.one .msr-step { flex: 1 1 100%; max-width: 560px; }
     .msr-stage-wrap { margin: 0 20px; }
     .msr-stage-meta {
       display: flex;
@@ -4066,7 +4220,8 @@
       .msr-head { flex-wrap: wrap; padding: 12px 16px; }
       .msr-next, .msr-hold, .msr-banner, .msr-evidence-gap { margin-left: 16px; margin-right: 16px; }
       .msr-actions:not(.msr-actions-foot) { margin-left: 16px; margin-right: 16px; }
-      .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing { padding-left: 16px; padding-right: 16px; }
+      .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing, .msr-portal { padding-left: 16px; padding-right: 16px; }
+      .msr-done { margin-left: 16px; margin-right: 16px; }
       .msr-sec { padding-left: 16px; padding-right: 16px; }
       .msr-stage-wrap, .msr-panel, .msr-mail { margin-left: 16px; margin-right: 16px; }
       .msr-foot { padding-left: 16px; padding-right: 16px; }
@@ -5777,7 +5932,7 @@
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=2"></script>
+<script src="modules/ops-makesafe-reporting-cockpit.js?v=3"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
@@ -10411,7 +10566,30 @@ async function runMakesafeCleanIntakeSweep() {
   }
 }
 
-async function loadJobs() {
+// A review overlay OWNS the screen while it is open. Repainting the board
+// underneath it is invisible work whose only visible effect is a toast when a
+// read blips — which is exactly the "Failed to load jobs" the captain kept
+// seeing bottom-right while reading a pack (the 5-minute auto-refresh fires
+// regardless of what is on screen). A background refresh therefore stands down
+// while an overlay is up; an explicit press still loads, always.
+function makesafeReviewOverlayIsOpen() {
+  return !!(document.getElementById('makesafeReportingOverlay') ||
+    document.getElementById('makesafeIntakeOverlay'));
+}
+
+/**
+ * Load the pipeline/board for the active tab.
+ *
+ * `opts.background` marks a load nobody pressed (the 5-minute auto-refresh). A
+ * background load stands down while a review overlay is open, and a genuinely
+ * transient failure is retried ONCE, silently, before anything is said — the
+ * make-safe board read is two chained network calls and a single blip must not
+ * interrupt a captain mid-review. A retry that also fails still toasts: a board
+ * that is really down is never hidden.
+ */
+async function loadJobs(opts) {
+  opts = opts || {};
+  if (opts.background && makesafeReviewOverlayIsOpen()) return;
   updateJobsDate();
   try {
     var data;
@@ -10443,10 +10621,16 @@ async function loadJobs() {
     }
   } catch (e) {
     console.error('loadJobs error:', e);
+    // ONE silent retry for the transient blip, then the honest toast. The retry
+    // runs the same load with `retried` set, so it can never loop.
+    if (!opts.retried) {
+      await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+      return loadJobs(Object.assign({}, opts, { retried: true }));
+    }
     // A board read that owned an in-flight archive load must not leave the
     // Archive column stuck on "loading" with no way back.
     if (_pipelineTab === 'makesafes') failMakesafeArchiveLoadIfPending(e);
-    showToast('Failed to load jobs', 'warning', [
+    showToast('Failed to load jobs: ' + ((e && e.message) || 'unknown error'), 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadJobs()' }
     ]);
   }
@@ -24245,7 +24429,9 @@ setInterval(function() {
   var view = localStorage.getItem('sw_ops_tab') || 'today';
   if (view === 'today') { loadToday(); }
   else if (view === 'calendar') loadCalendar();
-  else if (view === 'jobs') loadJobs();
+  // Nobody pressed this: it stands down under an open review overlay and
+  // retries once silently before it is allowed to say anything.
+  else if (view === 'jobs') loadJobs({ background: true });
   else if (view === 'financials') loadFinancials();
   else if (view === 'materials') loadMaterials();
   else if (view === 'inbox') loadInbox();

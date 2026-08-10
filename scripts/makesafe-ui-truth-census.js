@@ -189,12 +189,11 @@ async function main() {
         // detail resolves it, and the stage the pre-change client derivation
         // would have shown instead.
         const detailStage = resolveMakesafeDetailStage({ job: { id: j.id } });
-        // What the detail showed BEFORE this change: getMakesafeStage over a
-        // `job_detail` payload, which carries no stage of any kind, so the
-        // derivation fell through to substatus. Emulated by hiding every stage
-        // key from it — that is precisely what job_detail does not send.
-        const asDetail = Object.assign({}, j, { board_stage: null, makesafe_stage: null, canonical_stage: null });
-        const legacyStage = getMakesafeStage(asDetail, asDetail.status);
+        // What the detail showed BEFORE this change: the retired client helper
+        // received a `job_detail` payload with no stage of any kind and fell
+        // through to its final `new` fallback. Keep that historical comparison
+        // literal and isolated here; the shipped page must never call it.
+        const legacyStage = 'new';
         rows.push({
           job_number: j.job_number || '',
           canonical_stage: j.canonical_stage || '',

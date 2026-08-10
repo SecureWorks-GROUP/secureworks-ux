@@ -14286,6 +14286,10 @@ function makesafeCanonicalMapFieldsById(payload) {
   return fields;
 }
 
+function makesafeCanonicalSubstatusOf(j) {
+  return String((j && j.substatus) || '').trim().toLowerCase();
+}
+
 function makesafeMapWithCanonicalStages(mapData, boardPayload) {
   var fieldsById = makesafeCanonicalMapFieldsById(boardPayload);
   var source = mapData || {};
@@ -14312,7 +14316,7 @@ function getMakesafeMapVisual(j) {
   else if (stage === 'trade_report_in') { allocationState = 'trade_report_in'; allocationLabel = 'Trade report in'; }
   else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Docs ready'; } // M3b U5 (G2)
   else if (assigned) { allocationState = 'allocated'; allocationLabel = 'Direct allocated'; }
-  else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
+  else if (makesafeCanonicalSubstatusOf(j).indexOf('ring') !== -1) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
   var colors = {
     held: '#E74C3C',
     rung: '#F59E0B',
@@ -15023,7 +15027,7 @@ function renderMakesafeCrewWeek(cache) {
   var backlog = activeJobs.filter(function(j) {
     if (!j || !j.id || plannedJobIds[j.id] || eventJobIds[j.id]) return false;
     var crew = getMakesafeCrewLabel(j);
-    return !crew || crew.toLowerCase() === 'unallocated' || makesafeCanonicalStageOf(j) === 'new' || getMakesafeSubstatus(j) === 'pending_allocation';
+    return !crew || crew.toLowerCase() === 'unallocated' || makesafeCanonicalStageOf(j) === 'new' || makesafeCanonicalSubstatusOf(j) === 'pending_allocation';
   });
   backlog.sort(function(a, b) {
     var aa = getMakesafeAgeParts(a, makesafeCanonicalStageOf(a)).days || 0;

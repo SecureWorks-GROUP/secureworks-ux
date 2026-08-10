@@ -38,7 +38,7 @@ test('the retired stage helper is gone and every map/planner stage read is canon
 
   const plannerRender = extractFunction('function renderMakesafeCrewWeek(cache)');
   expect(plannerRender).toContain('makesafeCanonicalStageOf(j)');
-  expect(plannerRender).toContain("getMakesafeSubstatus(j) === 'pending_allocation'");
+  expect(plannerRender).toContain("makesafeCanonicalSubstatusOf(j) === 'pending_allocation'");
   expect(plannerRender).not.toContain('j.canonical_stage');
   expect(plannerRender).not.toContain('j.substatus');
 });
@@ -55,8 +55,8 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     const map = makesafeMapWithCanonicalStages({
       jobs: [
         { id: 'job-decision', status: 'cancelled', substatus: 'pending_allocation' },
-        { id: 'job-missing', status: 'cancelled', substatus: 'ring_the_bell' },
-        { id: 'job-pending', substatus: 'ring_the_bell', ring_the_bell: true, released_to_trades: true },
+        { id: 'job-missing', status: 'cancelled', substatus: 'ring_the_bell', makesafe_details: { substatus: 'ring_the_bell' } },
+        { id: 'job-pending', substatus: 'ring_the_bell', ring_the_bell: true, released_to_trades: true, makesafe_details: { substatus: 'ring_the_bell' } },
       ],
       no_location: [{ id: 'job-decision', substatus: 'ring_the_bell' }],
     }, board);
@@ -79,6 +79,7 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
       missingTradeLabel: makesafeTradeStageLabel({ board_stage: 'new', substatus: 'ready_to_invoice' }, 'new'),
       missingIsHeld: missing.allocationState === 'held',
       staleFlagsDoNotRing: pending.allocationState === 'held',
+      staleNestedSubstatusDoesNotRing: pending.allocationState === 'held',
       noLocationUsesCanonicalSubstatus: map.no_location[0].substatus === '',
     };
   });
@@ -92,6 +93,7 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     missingTradeLabel: 'Stage not confirmed',
     missingIsHeld: true,
     staleFlagsDoNotRing: true,
+    staleNestedSubstatusDoesNotRing: true,
     noLocationUsesCanonicalSubstatus: true,
   });
 });

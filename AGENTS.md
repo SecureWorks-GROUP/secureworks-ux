@@ -103,8 +103,11 @@ feed's `intake_exceptions.degraded` marker or the enrichment join is missing, th
 board says so in a banner (`renderMakesafeFeedNotices`) rather than losing data
 silently. Guard: `tests/e2e/ops-makesafe-canonical-board.spec.js`; verification
 evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
-The make-safe MAP and CREW WEEK PLANNER overlays still read `makesafe_pipeline`
-directly and remain overlay-blind — migrating them is follow-up work.
+The make-safe MAP pairs its location feed with `makesafe-board.v1` by job id,
+and the CREW WEEK PLANNER reads the canonical board rows directly. Both take
+stage and substatus only from that canonical feed: a missing stage is “Stage not
+confirmed”, never “New”; the planner's active/backlog and age ordering use those
+same canonical values. Guard: `tests/e2e/ops-makesafe-stage-retirement.spec.js`.
 
 Archive is on demand (backend `column_scope=active` default): the default feed
 omits Archive cards but publishes `column_counts.archive` + `archive` meta. The

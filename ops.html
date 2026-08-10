@@ -14312,7 +14312,7 @@ function getMakesafeMapVisual(j) {
   else if (stage === 'trade_report_in') { allocationState = 'trade_report_in'; allocationLabel = 'Trade report in'; }
   else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Docs ready'; } // M3b U5 (G2)
   else if (assigned) { allocationState = 'allocated'; allocationLabel = 'Direct allocated'; }
-  else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1 || j.released_to_trades || j.ring_the_bell) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
+  else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
   var colors = {
     held: '#E74C3C',
     rung: '#F59E0B',

@@ -49,17 +49,20 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     const board = {
       columns: {
         decision_required: [{ id: 'job-decision', canonical_stage: 'decision_required' }],
+        new: [{ id: 'job-pending', canonical_stage: 'new', substatus: 'pending_allocation' }],
       },
     };
     const map = makesafeMapWithCanonicalStages({
       jobs: [
         { id: 'job-decision', status: 'cancelled', substatus: 'pending_allocation' },
         { id: 'job-missing', status: 'cancelled', substatus: 'ring_the_bell' },
+        { id: 'job-pending', substatus: 'ring_the_bell', ring_the_bell: true, released_to_trades: true },
       ],
       no_location: [{ id: 'job-decision', substatus: 'ring_the_bell' }],
     }, board);
     const decision = getMakesafeMapVisual(map.jobs[0]);
     const missing = getMakesafeMapVisual(map.jobs[1]);
+    const pending = getMakesafeMapVisual(map.jobs[2]);
     const missingPill = renderMakesafeCrewJobPill({
       id: 'job-missing',
       type: 'makesafe',
@@ -75,6 +78,7 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
       missingPillSaysUnknown: missingPill.includes('Stage not confirmed'),
       missingTradeLabel: makesafeTradeStageLabel({ board_stage: 'new', substatus: 'ready_to_invoice' }, 'new'),
       missingIsHeld: missing.allocationState === 'held',
+      staleFlagsDoNotRing: pending.allocationState === 'held',
       noLocationUsesCanonicalSubstatus: map.no_location[0].substatus === '',
     };
   });
@@ -87,6 +91,7 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     missingPillSaysUnknown: true,
     missingTradeLabel: 'Stage not confirmed',
     missingIsHeld: true,
+    staleFlagsDoNotRing: true,
     noLocationUsesCanonicalSubstatus: true,
   });
 });

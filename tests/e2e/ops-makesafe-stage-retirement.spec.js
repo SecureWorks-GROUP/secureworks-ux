@@ -25,16 +25,22 @@ test('the retired stage helper is gone and every map/planner stage read is canon
   expect(OPS).toContain("decision_required: 'Captain Decision'");
   expect(OPS).toContain("'decision_required', 'completed'");
 
+  // Both surfaces read canonical stages through the page's shared, contract-checked
+  // boundaries — never a raw board fetch of their own.
   const mapLoader = extractFunction('async function loadMakesafeMapData(filter)');
-  expect(mapLoader).toContain("opsFetch('makesafe_board'");
+  expect(mapLoader).toContain('ensureMakesafeCanonicalStages()');
+  expect(mapLoader).not.toContain("opsFetch('makesafe_board'");
 
   const plannerLoader = extractFunction('async function loadMakesafeCrewDay(dateStr)');
-  expect(plannerLoader).toContain("opsFetch('makesafe_board'");
+  expect(plannerLoader).toContain('fetchMakesafeBoardData()');
+  expect(plannerLoader).not.toContain("opsFetch('makesafe_board'");
   expect(plannerLoader).not.toContain("opsFetch('makesafe_pipeline'");
 
   const plannerRender = extractFunction('function renderMakesafeCrewWeek(cache)');
-  expect(plannerRender).toContain('j.canonical_stage');
-  expect(plannerRender).toContain("j.substatus === 'pending_allocation'");
+  expect(plannerRender).toContain('makesafeCanonicalStageOf(j)');
+  expect(plannerRender).toContain("getMakesafeSubstatus(j) === 'pending_allocation'");
+  expect(plannerRender).not.toContain('j.canonical_stage');
+  expect(plannerRender).not.toContain('j.substatus');
 });
 
 test('canonical decision stage is shown, while missing stage is explicitly unknown', async ({ page }) => {

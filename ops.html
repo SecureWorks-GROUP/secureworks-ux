@@ -14285,6 +14285,7 @@ var _makesafeCrewPlannerCache = null;
 var _makesafeCrewSetupOpen = true;
 
 function makesafeCanonicalStageById(payload) {
+  if (!payload) return _makesafeCanonicalStageById;
   var stages = {};
   Object.keys((payload && payload.columns) || {}).forEach(function(column) {
     ((payload.columns && payload.columns[column]) || []).forEach(function(row) {
@@ -14609,9 +14610,9 @@ async function loadMakesafeMapData(filter) {
   try {
     var results = await Promise.all([
       opsFetch('makesafe_map', { filter: _makesafeMapFilter }),
-      opsFetch('makesafe_board', { projection: 'ops' })
+      Promise.resolve(ensureMakesafeCanonicalStages()).catch(function() { return false; })
     ]);
-    var data = makesafeMapWithCanonicalStages(results[0], results[1]);
+    var data = makesafeMapWithCanonicalStages(results[0], null);
     _makesafeMapInstance.eachLayer(function(layer) {
       if (layer instanceof L.Marker || layer instanceof L.CircleMarker) _makesafeMapInstance.removeLayer(layer);
     });
@@ -15023,15 +15024,18 @@ function renderMakesafeCrewWeek(cache) {
     plannedJobIds[jobId] = true;
   });
 
-  var activeJobs = cache.allMakesafes.filter(function(j) { return j.canonical_stage !== 'completed'; });
+  var activeJobs = cache.allMakesafes.filter(function(j) {
+    var stage = makesafeCanonicalStageOf(j);
+    return stage !== 'completed' && stage !== 'archive';
+  });
   var backlog = activeJobs.filter(function(j) {
     if (!j || !j.id || plannedJobIds[j.id] || eventJobIds[j.id]) return false;
     var crew = getMakesafeCrewLabel(j);
-    return !crew || crew.toLowerCase() === 'unallocated' || j.canonical_stage === 'new' || j.substatus === 'pending_allocation';
+    return !crew || crew.toLowerCase() === 'unallocated' || makesafeCanonicalStageOf(j) === 'new' || getMakesafeSubstatus(j) === 'pending_allocation';
   });
   backlog.sort(function(a, b) {
-    var aa = getMakesafeAgeParts(a, a.canonical_stage).days || 0;
-    var bb = getMakesafeAgeParts(b, b.canonical_stage).days || 0;
+    var aa = getMakesafeAgeParts(a, makesafeCanonicalStageOf(a)).days || 0;
+    var bb = getMakesafeAgeParts(b, makesafeCanonicalStageOf(b)).days || 0;
     return bb - aa || String(a.site_suburb || '').localeCompare(String(b.site_suburb || ''));
   });
 
@@ -15085,10 +15089,17 @@ async function loadMakesafeCrewDay(dateStr) {
     var days = makesafePlannerWeekDays(_makesafeCrewDayDate);
     var results = await Promise.all([
       opsFetch('calendar', { from: days[0], to: days[6] }),
-      opsFetch('makesafe_board', { projection: 'ops' })
+      (async function() {
+        // fetchMakesafeBoardData is the ONE contract-checked canonical board read on
+        // this page; it returns null only when a newer board read superseded this
+        // one, which is a reason to re-read, never to paint an empty planner.
+        var board = await fetchMakesafeBoardData();
+        return board || await fetchMakesafeBoardData();
+      })()
     ]);
+    if (!results[1]) throw new Error('Make-safe board read was superseded by a newer load; reopen the crew week planner.');
     var events = (results[0].events || []).filter(makesafePlannerEventIsMakesafe);
-    var allMakesafes = makesafePlannerFlattenMakesafes(buildMakesafeBoardColumns(results[1], {}));
+    var allMakesafes = makesafePlannerFlattenMakesafes(results[1].columns);
     var jobsById = {};
     allMakesafes.forEach(function(j) { if (j && j.id) jobsById[j.id] = j; });
     _makesafeCrewPlannerCache = { days: days, events: events, allMakesafes: allMakesafes, jobsById: jobsById };

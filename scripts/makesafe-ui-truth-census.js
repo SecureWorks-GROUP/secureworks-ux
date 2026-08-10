@@ -190,10 +190,12 @@ async function main() {
         // would have shown instead.
         const detailStage = resolveMakesafeDetailStage({ job: { id: j.id } });
         // What the detail showed BEFORE this change: the retired client helper
-        // received a `job_detail` payload with no stage of any kind and fell
-        // through to its final `new` fallback. Keep that historical comparison
-        // literal and isolated here; the shipped page must never call it.
-        const legacyStage = 'new';
+        // received a `job_detail` payload with no stage of any kind, so a
+        // cancelled job still bucketed to 'cancelled' on job status alone and
+        // everything else fell through to its final `new` fallback. Keep that
+        // historical comparison literal and isolated here; the shipped page must
+        // never call it.
+        const legacyStage = String(j.status || '').toLowerCase() === 'cancelled' ? 'cancelled' : 'new';
         rows.push({
           job_number: j.job_number || '',
           canonical_stage: j.canonical_stage || '',

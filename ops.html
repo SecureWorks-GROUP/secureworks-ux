@@ -12712,7 +12712,7 @@ function makesafeCompanySlugFallback(name) {
 // Project one canonical `makesafe-board.v1` row onto the field shape the existing
 // make-safe card renderer reads. Enrichment is written FIRST so every canonical
 // assignment below overwrites it — the canonical row always wins.
-function mapCanonicalMakesafeRow(row, enrich) {
+function mapCanonicalMakesafeRow(row, enrich, opts) {
   row = row || {};
   var contact = row.contact || {};
   var builder = row.builder || {};
@@ -12854,7 +12854,7 @@ function mapCanonicalMakesafeRow(row, enrich) {
   // The card's canonical stage is also the ONLY stage the job detail may show
   // for it. Remember it by job id so opening the card cannot re-derive a
   // different one. See <makesafe-detail-canonical-stage>.
-  rememberMakesafeCanonicalStage(row);
+  if (!opts || opts.rememberStage !== false) rememberMakesafeCanonicalStage(row);
 
   // Type label. An enriched card keeps the exact inputs getMakesafeTypeLabel had
   // before (makesafe_details / metadata / notes), so its label is unchanged —
@@ -12867,7 +12867,7 @@ function mapCanonicalMakesafeRow(row, enrich) {
 
 // Canonical columns -> the board's per-stage card map. The server owns placement:
 // this only maps each row and keeps the seven rendered stage keys present.
-function buildMakesafeBoardColumns(payload, enrichById) {
+function buildMakesafeBoardColumns(payload, enrichById, opts) {
   enrichById = enrichById || {};
   var out = {};
   MAKESAFES_STAGES.forEach(function(stage) { out[stage] = []; });
@@ -12875,7 +12875,7 @@ function buildMakesafeBoardColumns(payload, enrichById) {
   Object.keys(columns).forEach(function(stage) {
     var known = Object.prototype.hasOwnProperty.call(out, stage);
     (columns[stage] || []).forEach(function(row) {
-      var card = mapCanonicalMakesafeRow(row, enrichById[row && row.id]);
+      var card = mapCanonicalMakesafeRow(row, enrichById[row && row.id], opts);
       if (known) { out[stage].push(card); return; }
       // A stage this board does not render would otherwise vanish. Keep the card
       // visible in New and say why, rather than lose it silently.
@@ -12925,12 +12925,13 @@ var _makesafeBoardFetchSeq = 0;
 
 async function fetchMakesafeBoardData(opts) {
   opts = opts || {};
+  var commit = opts.commit !== false;
   var includeArchive = (opts.includeArchive != null)
     ? !!opts.includeArchive
     : !!_makesafeArchiveWanted;
   var params = { projection: 'ops' };
   if (includeArchive) params.include_archive = '1';
-  var mySeq = ++_makesafeBoardFetchSeq;
+  var mySeq = commit ? ++_makesafeBoardFetchSeq : 0;
 
   // Card-shaped ops board (default since makesafe-board-perf-v1) stamps the
   // presentation keys the card paints (has_wo, invoice_status, site_suburb, …)
@@ -12977,14 +12978,15 @@ async function fetchMakesafeBoardData(opts) {
   }
   // Nothing above this line mutates page state, so a superseded read can be
   // dropped whole rather than half-applied.
-  if (mySeq !== _makesafeBoardFetchSeq) return null;
-  _makesafeBoardEnrichState = enrichState;
-  _makesafeBoardPayload = payload;
+  if (commit && mySeq !== _makesafeBoardFetchSeq) return null;
   // This load IS a current canonical read, and buildMakesafeBoardColumns has just
   // remembered every row's stage and pack from it. Satisfy the detail's lookup
   // with it so opening a card straight off a fresh board does not re-GET the same
   // feed. A transition still clears this (refreshMakesafeCanonicalStages).
-  var columns = buildMakesafeBoardColumns(payload, enrichById);
+  var columns = buildMakesafeBoardColumns(payload, enrichById, { rememberStage: commit });
+  if (!commit) return { columns: columns, _canonical: payload };
+  _makesafeBoardEnrichState = enrichState;
+  _makesafeBoardPayload = payload;
   // Archive on demand: record census + load state before paint so the Archive
   // column never shows a fake zero when column_scope=active.
   applyMakesafeArchiveStateFromPayload(payload);
@@ -13379,28 +13381,14 @@ function makesafeResumeChip(resumeAction, packStatus) {
 }
 
 // M3b U5 (D7) · what the TRADE app's Board shows for this job — the shared
-// stage language (New / Allocated / Trade Report In / Docs Ready). Derived
-// CLIENT-SIDE from fields already on the card's payload: the backend stage
-// verdict (board_stage/makesafe_stage) first, then substatus, then crew
-// presence. Display-only; completed/archived cards show no chip.
+// stage language (New / Allocated / Trade Report In / Docs Ready). Display-only;
+// completed, archived and cancelled cards show no chip.
 function makesafeTradeStageLabel(j, status) {
   j = j || {};
-  var stage = String(j.board_stage || j.makesafe_stage || status || '').toLowerCase();
-  if (stage === 'completed' || stage === 'archive') return '';
-  // The canonical stage is the Trade board's stage too — both boards read the
-  // same feed — so when the card carries one, say exactly that and stop there.
-  // The substatus/crew chain below is only for a payload without a stage; it can
-  // otherwise print "Docs Ready" on a card sitting in the New column.
   var canonical = makesafeCanonicalStageOf(j);
-  if (canonical) {
-    if (canonical === 'completed' || canonical === 'archive' || canonical === 'cancelled') return '';
-    return makesafeUiStageLabel(canonical);
-  }
-  var sub = getMakesafeSubstatus(j);
-  if (stage === 'report_ready' || sub === 'ready_to_invoice') return 'Docs Ready';
-  if (stage === 'trade_report_in' || sub === 'admin_to_send_report') return 'Trade Report In';
-  if (getMakesafeCrewLabel(j)) return 'Allocated';
-  return 'New';
+  if (!canonical) return 'Stage not confirmed';
+  if (canonical === 'completed' || canonical === 'archive' || canonical === 'cancelled') return '';
+  return makesafeUiStageLabel(canonical);
 }
 
 // ── Builder / family links on the card face ──────────────────────────────
@@ -14284,26 +14272,30 @@ var _makesafeCrewDayDate = (function() { var d = new Date(localDateStr(new Date(
 var _makesafeCrewPlannerCache = null;
 var _makesafeCrewSetupOpen = true;
 
-function makesafeCanonicalStageById(payload) {
-  if (!payload) return _makesafeCanonicalStageById;
-  var stages = {};
+function makesafeCanonicalMapFieldsById(payload) {
+  var fields = {};
   Object.keys((payload && payload.columns) || {}).forEach(function(column) {
     ((payload.columns && payload.columns[column]) || []).forEach(function(row) {
       if (!row || !row.id) return;
-      var stage = makesafeCanonicalStageOf(row);
-      if (stage) stages[row.id] = stage;
+      fields[row.id] = {
+        canonical_stage: makesafeCanonicalStageOf(row),
+        substatus: row.substatus || ''
+      };
     });
   });
-  return stages;
+  return fields;
 }
 
 function makesafeMapWithCanonicalStages(mapData, boardPayload) {
-  var stageById = makesafeCanonicalStageById(boardPayload);
+  var fieldsById = makesafeCanonicalMapFieldsById(boardPayload);
   var source = mapData || {};
+  function canonicalise(job) {
+    var fields = fieldsById[job && job.id] || { canonical_stage: '', substatus: '' };
+    return Object.assign({}, job, fields);
+  }
   return Object.assign({}, source, {
-    jobs: (source.jobs || []).map(function(job) {
-      return Object.assign({}, job, { canonical_stage: stageById[job && job.id] || '' });
-    })
+    jobs: (source.jobs || []).map(canonicalise),
+    no_location: (source.no_location || []).map(canonicalise)
   });
 }
 
@@ -14610,9 +14602,9 @@ async function loadMakesafeMapData(filter) {
   try {
     var results = await Promise.all([
       opsFetch('makesafe_map', { filter: _makesafeMapFilter }),
-      Promise.resolve(ensureMakesafeCanonicalStages()).catch(function() { return false; })
+      fetchMakesafeBoardData({ commit: false })
     ]);
-    var data = makesafeMapWithCanonicalStages(results[0], null);
+    var data = makesafeMapWithCanonicalStages(results[0], results[1]._canonical);
     _makesafeMapInstance.eachLayer(function(layer) {
       if (layer instanceof L.Marker || layer instanceof L.CircleMarker) _makesafeMapInstance.removeLayer(layer);
     });
@@ -15089,13 +15081,7 @@ async function loadMakesafeCrewDay(dateStr) {
     var days = makesafePlannerWeekDays(_makesafeCrewDayDate);
     var results = await Promise.all([
       opsFetch('calendar', { from: days[0], to: days[6] }),
-      (async function() {
-        // fetchMakesafeBoardData is the ONE contract-checked canonical board read on
-        // this page; it returns null only when a newer board read superseded this
-        // one, which is a reason to re-read, never to paint an empty planner.
-        var board = await fetchMakesafeBoardData();
-        return board || await fetchMakesafeBoardData();
-      })()
+      fetchMakesafeBoardData({ commit: false })
     ]);
     if (!results[1]) throw new Error('Make-safe board read was superseded by a newer load; reopen the crew week planner.');
     var events = (results[0].events || []).filter(makesafePlannerEventIsMakesafe);

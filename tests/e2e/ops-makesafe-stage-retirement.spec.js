@@ -28,11 +28,11 @@ test('the retired stage helper is gone and every map/planner stage read is canon
   // Both surfaces read canonical stages through the page's shared, contract-checked
   // boundaries — never a raw board fetch of their own.
   const mapLoader = extractFunction('async function loadMakesafeMapData(filter)');
-  expect(mapLoader).toContain('ensureMakesafeCanonicalStages()');
+  expect(mapLoader).toContain('fetchMakesafeBoardData({ commit: false })');
   expect(mapLoader).not.toContain("opsFetch('makesafe_board'");
 
   const plannerLoader = extractFunction('async function loadMakesafeCrewDay(dateStr)');
-  expect(plannerLoader).toContain('fetchMakesafeBoardData()');
+  expect(plannerLoader).toContain('fetchMakesafeBoardData({ commit: false })');
   expect(plannerLoader).not.toContain("opsFetch('makesafe_board'");
   expect(plannerLoader).not.toContain("opsFetch('makesafe_pipeline'");
 
@@ -54,8 +54,9 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     const map = makesafeMapWithCanonicalStages({
       jobs: [
         { id: 'job-decision', status: 'cancelled', substatus: 'pending_allocation' },
-        { id: 'job-missing', status: 'cancelled', substatus: 'pending_allocation' },
+        { id: 'job-missing', status: 'cancelled', substatus: 'ring_the_bell' },
       ],
+      no_location: [{ id: 'job-decision', substatus: 'ring_the_bell' }],
     }, board);
     const decision = getMakesafeMapVisual(map.jobs[0]);
     const missing = getMakesafeMapVisual(map.jobs[1]);
@@ -72,6 +73,9 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
       missingStage: missing.stage,
       missingLabel: makesafeUiStageLabel(missing.stage),
       missingPillSaysUnknown: missingPill.includes('Stage not confirmed'),
+      missingTradeLabel: makesafeTradeStageLabel({ board_stage: 'new', substatus: 'ready_to_invoice' }, 'new'),
+      missingIsHeld: missing.allocationState === 'held',
+      noLocationUsesCanonicalSubstatus: map.no_location[0].substatus === '',
     };
   });
 
@@ -81,6 +85,9 @@ test('canonical decision stage is shown, while missing stage is explicitly unkno
     missingStage: '',
     missingLabel: 'Stage not confirmed',
     missingPillSaysUnknown: true,
+    missingTradeLabel: 'Stage not confirmed',
+    missingIsHeld: true,
+    noLocationUsesCanonicalSubstatus: true,
   });
 });
 

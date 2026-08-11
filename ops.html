@@ -12425,28 +12425,12 @@ function getMakesafeAgeParts(j, status) {
   if (days === 1) return { label: '1 day old', color: '#F39C12', days: 1, health: 'yellow' };
   return { label: days + ' days old', color: '#E74C3C', days: days, health: 'red' };
 }
-function getMakesafeStage(j, rawStatus) {
-  // Rescue SES T2 — the substatus-guessing fallback ladder is GONE. It could
-  // never emit trade_report_in, sent awaiting_portal_completion cards to 'new',
-  // and was overlay-blind — the same client re-derivation PR #226 removed from
-  // the board and the detail pane. The server's canonical_stage is the only
-  // placement authority; rows off the canonical feed carry it (the board mapper
-  // also copies it onto board_stage).
-  var backendStage = j.canonical_stage || j.board_stage || j.makesafe_stage || '';
-  // M-F W1-E(c) — a cancelled make-safe buckets to the Cancelled column before
-  // anything else (job status wins even if a stale board_stage lingers).
-  if (backendStage === 'cancelled' || rawStatus === 'cancelled' || String(j.status || '').toLowerCase() === 'cancelled') return 'cancelled';
-  if (backendStage === 'new' || backendStage === 'allocated' || backendStage === 'trade_report_in' || backendStage === 'report_ready' || backendStage === 'decision_required' || backendStage === 'completed' || backendStage === 'archive') return backendStage;
-  if (window.console && console.warn) console.warn('[ops] getMakesafeStage: no canonical stage on payload for', (j.job_number || j.id || '?'), '- rendering as new; fix the caller to read the canonical feed');
-  return 'new';
-}
-
 // ════════════════════════════════════════════════════════════
 // <makesafe-detail-canonical-stage>
 // The job detail must NEVER re-derive a make-safe's board stage. It used to call
-// getMakesafeStage on the job_detail payload, which carries no canonical stage,
-// so the derivation fell through to substatus — the same overlay-blind client
-// guess PR #226 removed from the board one level up. Result: an archived card
+// a client-side stage helper on the job_detail payload, which carries no
+// canonical stage, so the derivation fell through to substatus — the same
+// overlay-blind client guess PR #226 removed from the board one level up. Result: an archived card
 // opened as "New", four days old, and the Next step block offered a forward-move
 // button that would undo the captain's display-ledger archive (80 cards
 // contradicted their own column; ses-ui-ground-truth-v1 §3.3).
@@ -12474,7 +12458,7 @@ function getMakesafeStage(j, rawStatus) {
 // can move sibling cards through the display ledger too, and a failed re-read must
 // fail closed to "Stage not confirmed" instead of showing a pre-write stage.
 // ════════════════════════════════════════════════════════════
-var MAKESAFE_CANONICAL_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'completed', 'archive', 'cancelled'];
+var MAKESAFE_CANONICAL_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready', 'decision_required', 'completed', 'archive', 'cancelled'];
 var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready'];
 
 // job id -> canonical stage / canonical pack existence, straight off the
@@ -12728,7 +12712,7 @@ function makesafeCompanySlugFallback(name) {
 // Project one canonical `makesafe-board.v1` row onto the field shape the existing
 // make-safe card renderer reads. Enrichment is written FIRST so every canonical
 // assignment below overwrites it — the canonical row always wins.
-function mapCanonicalMakesafeRow(row, enrich) {
+function mapCanonicalMakesafeRow(row, enrich, opts) {
   row = row || {};
   var contact = row.contact || {};
   var builder = row.builder || {};
@@ -12870,7 +12854,7 @@ function mapCanonicalMakesafeRow(row, enrich) {
   // The card's canonical stage is also the ONLY stage the job detail may show
   // for it. Remember it by job id so opening the card cannot re-derive a
   // different one. See <makesafe-detail-canonical-stage>.
-  rememberMakesafeCanonicalStage(row);
+  if (!opts || opts.rememberStage !== false) rememberMakesafeCanonicalStage(row);
 
   // Type label. An enriched card keeps the exact inputs getMakesafeTypeLabel had
   // before (makesafe_details / metadata / notes), so its label is unchanged —
@@ -12883,7 +12867,7 @@ function mapCanonicalMakesafeRow(row, enrich) {
 
 // Canonical columns -> the board's per-stage card map. The server owns placement:
 // this only maps each row and keeps the seven rendered stage keys present.
-function buildMakesafeBoardColumns(payload, enrichById) {
+function buildMakesafeBoardColumns(payload, enrichById, opts) {
   enrichById = enrichById || {};
   var out = {};
   MAKESAFES_STAGES.forEach(function(stage) { out[stage] = []; });
@@ -12891,7 +12875,7 @@ function buildMakesafeBoardColumns(payload, enrichById) {
   Object.keys(columns).forEach(function(stage) {
     var known = Object.prototype.hasOwnProperty.call(out, stage);
     (columns[stage] || []).forEach(function(row) {
-      var card = mapCanonicalMakesafeRow(row, enrichById[row && row.id]);
+      var card = mapCanonicalMakesafeRow(row, enrichById[row && row.id], opts);
       if (known) { out[stage].push(card); return; }
       // A stage this board does not render would otherwise vanish. Keep the card
       // visible in New and say why, rather than lose it silently.
@@ -12941,12 +12925,13 @@ var _makesafeBoardFetchSeq = 0;
 
 async function fetchMakesafeBoardData(opts) {
   opts = opts || {};
+  var commit = opts.commit !== false;
   var includeArchive = (opts.includeArchive != null)
     ? !!opts.includeArchive
     : !!_makesafeArchiveWanted;
   var params = { projection: 'ops' };
   if (includeArchive) params.include_archive = '1';
-  var mySeq = ++_makesafeBoardFetchSeq;
+  var mySeq = commit ? ++_makesafeBoardFetchSeq : 0;
 
   // Card-shaped ops board (default since makesafe-board-perf-v1) stamps the
   // presentation keys the card paints (has_wo, invoice_status, site_suburb, …)
@@ -12993,14 +12978,15 @@ async function fetchMakesafeBoardData(opts) {
   }
   // Nothing above this line mutates page state, so a superseded read can be
   // dropped whole rather than half-applied.
-  if (mySeq !== _makesafeBoardFetchSeq) return null;
-  _makesafeBoardEnrichState = enrichState;
-  _makesafeBoardPayload = payload;
+  if (commit && mySeq !== _makesafeBoardFetchSeq) return null;
   // This load IS a current canonical read, and buildMakesafeBoardColumns has just
   // remembered every row's stage and pack from it. Satisfy the detail's lookup
   // with it so opening a card straight off a fresh board does not re-GET the same
   // feed. A transition still clears this (refreshMakesafeCanonicalStages).
-  var columns = buildMakesafeBoardColumns(payload, enrichById);
+  var columns = buildMakesafeBoardColumns(payload, enrichById, { rememberStage: commit });
+  if (!commit) return { columns: columns, _canonical: payload };
+  _makesafeBoardEnrichState = enrichState;
+  _makesafeBoardPayload = payload;
   // Archive on demand: record census + load state before paint so the Archive
   // column never shows a fake zero when column_scope=active.
   applyMakesafeArchiveStateFromPayload(payload);
@@ -13308,7 +13294,7 @@ function renderMakesafeStatusIcons(j, status) {
   return html;
 }
 function makesafeUiStageLabel(stage) {
-  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, decision_required: 'Captain Decision', completed: 'Completed This Week', archive: 'Archive', cancelled: 'Cancelled' })[stage] || stage;
+  return ({ new: 'New', allocated: 'Allocated', trade_report_in: 'Trade Report In', report_ready: 'Docs Ready' /* M3b U5 (G2) */, decision_required: 'Captain Decision', completed: 'Completed This Week', archive: 'Archive', cancelled: 'Cancelled' })[stage] || 'Stage not confirmed';
 }
 
 // ── "Docs Ready" honesty ─────────────────────────────────────────────────
@@ -13395,28 +13381,14 @@ function makesafeResumeChip(resumeAction, packStatus) {
 }
 
 // M3b U5 (D7) · what the TRADE app's Board shows for this job — the shared
-// stage language (New / Allocated / Trade Report In / Docs Ready). Derived
-// CLIENT-SIDE from fields already on the card's payload: the backend stage
-// verdict (board_stage/makesafe_stage) first, then substatus, then crew
-// presence. Display-only; completed/archived cards show no chip.
+// stage language (New / Allocated / Trade Report In / Docs Ready). Display-only;
+// completed, archived and cancelled cards show no chip.
 function makesafeTradeStageLabel(j, status) {
   j = j || {};
-  var stage = String(j.board_stage || j.makesafe_stage || status || '').toLowerCase();
-  if (stage === 'completed' || stage === 'archive') return '';
-  // The canonical stage is the Trade board's stage too — both boards read the
-  // same feed — so when the card carries one, say exactly that and stop there.
-  // The substatus/crew chain below is only for a payload without a stage; it can
-  // otherwise print "Docs Ready" on a card sitting in the New column.
   var canonical = makesafeCanonicalStageOf(j);
-  if (canonical) {
-    if (canonical === 'completed' || canonical === 'archive' || canonical === 'cancelled') return '';
-    return makesafeUiStageLabel(canonical);
-  }
-  var sub = getMakesafeSubstatus(j);
-  if (stage === 'report_ready' || sub === 'ready_to_invoice') return 'Docs Ready';
-  if (stage === 'trade_report_in' || sub === 'admin_to_send_report') return 'Trade Report In';
-  if (getMakesafeCrewLabel(j)) return 'Allocated';
-  return 'New';
+  if (!canonical) return 'Stage not confirmed';
+  if (canonical === 'completed' || canonical === 'archive' || canonical === 'cancelled') return '';
+  return makesafeUiStageLabel(canonical);
 }
 
 // ── Builder / family links on the card face ──────────────────────────────
@@ -14300,8 +14272,39 @@ var _makesafeCrewDayDate = (function() { var d = new Date(localDateStr(new Date(
 var _makesafeCrewPlannerCache = null;
 var _makesafeCrewSetupOpen = true;
 
+function makesafeCanonicalMapFieldsById(payload) {
+  var fields = {};
+  Object.keys((payload && payload.columns) || {}).forEach(function(column) {
+    ((payload.columns && payload.columns[column]) || []).forEach(function(row) {
+      if (!row || !row.id) return;
+      fields[row.id] = {
+        canonical_stage: makesafeCanonicalStageOf(row),
+        substatus: row.substatus || ''
+      };
+    });
+  });
+  return fields;
+}
+
+function makesafeCanonicalSubstatusOf(j) {
+  return String((j && j.substatus) || '').trim().toLowerCase();
+}
+
+function makesafeMapWithCanonicalStages(mapData, boardPayload) {
+  var fieldsById = makesafeCanonicalMapFieldsById(boardPayload);
+  var source = mapData || {};
+  function canonicalise(job) {
+    var fields = fieldsById[job && job.id] || { canonical_stage: '', substatus: '' };
+    return Object.assign({}, job, fields);
+  }
+  return Object.assign({}, source, {
+    jobs: (source.jobs || []).map(canonicalise),
+    no_location: (source.no_location || []).map(canonicalise)
+  });
+}
+
 function getMakesafeMapVisual(j) {
-  var stage = getMakesafeStage(j, j.status || j._makesafe_raw_status || '');
+  var stage = makesafeCanonicalStageOf(j);
   var age = getMakesafeAgeParts(j, stage);
   var crew = getMakesafeCrewLabel(j) || j.assigned_trade || '';
   var assigned = !!crew && crew.toLowerCase() !== 'unallocated';
@@ -14313,7 +14316,7 @@ function getMakesafeMapVisual(j) {
   else if (stage === 'trade_report_in') { allocationState = 'trade_report_in'; allocationLabel = 'Trade report in'; }
   else if (stage === 'report_ready') { allocationState = 'report_ready'; allocationLabel = 'Docs ready'; } // M3b U5 (G2)
   else if (assigned) { allocationState = 'allocated'; allocationLabel = 'Direct allocated'; }
-  else if (String(getMakesafeSubstatus(j) || '').toLowerCase().indexOf('ring') !== -1 || j.released_to_trades || j.ring_the_bell) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
+  else if (makesafeCanonicalSubstatusOf(j).indexOf('ring') !== -1) { allocationState = 'rung'; allocationLabel = 'Rung / claimable'; }
   var colors = {
     held: '#E74C3C',
     rung: '#F59E0B',
@@ -14601,7 +14604,11 @@ async function loadMakesafeMapData(filter) {
   if (!_makesafeMapInstance) return;
   _makesafeMapFilter = filter || 'active';
   try {
-    var data = await opsFetch('makesafe_map', { filter: _makesafeMapFilter });
+    var results = await Promise.all([
+      opsFetch('makesafe_map', { filter: _makesafeMapFilter }),
+      fetchMakesafeBoardData({ commit: false })
+    ]);
+    var data = makesafeMapWithCanonicalStages(results[0], results[1]._canonical);
     _makesafeMapInstance.eachLayer(function(layer) {
       if (layer instanceof L.Marker || layer instanceof L.CircleMarker) _makesafeMapInstance.removeLayer(layer);
     });
@@ -14928,7 +14935,7 @@ function toggleMakesafeCrewDay() {
 
 function renderMakesafeCrewJobPill(j, source, opts) {
   opts = opts || {};
-  var stage = getMakesafeStage(j, j.status || j._makesafe_raw_status || '');
+  var stage = makesafeCanonicalStageOf(j);
   var age = getMakesafeAgeParts(j, stage);
   var typeLabel = getMakesafeTypeLabel(j);
   var builder = getMakesafeBuilder(j) || 'Builder TBC';
@@ -14938,6 +14945,7 @@ function renderMakesafeCrewJobPill(j, source, opts) {
     + '<div style="display:flex;justify-content:space-between;gap:8px;"><div style="font-size:10px;font-weight:850;color:#D97706;text-transform:uppercase;">' + escapeHtml(typeLabel) + '</div><span style="font-size:10px;color:' + age.color + ';font-weight:850;">' + escapeHtml(age.label) + '</span></div>'
     + '<div style="font-size:14px;font-weight:850;color:var(--sw-dark);">' + escapeHtml(suburb) + '</div>'
     + '<div style="font-size:12px;color:#D97706;font-weight:800;">' + escapeHtml(builder) + '</div>'
+    + '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px;">Stage: ' + escapeHtml(makesafeUiStageLabel(stage)) + '</div>'
     + '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px;">' + escapeHtml([j.external_ref, j.job_number].filter(Boolean).join(' · ')) + '</div>'
     + (source ? '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:4px;">' + escapeHtml(source) + '</div>' : '')
     + '</div>';
@@ -15012,15 +15020,18 @@ function renderMakesafeCrewWeek(cache) {
     plannedJobIds[jobId] = true;
   });
 
-  var activeJobs = cache.allMakesafes.filter(function(j) { return getMakesafeStage(j, j.status || j._makesafe_raw_status || '') !== 'completed'; });
+  var activeJobs = cache.allMakesafes.filter(function(j) {
+    var stage = makesafeCanonicalStageOf(j);
+    return stage !== 'completed' && stage !== 'archive';
+  });
   var backlog = activeJobs.filter(function(j) {
     if (!j || !j.id || plannedJobIds[j.id] || eventJobIds[j.id]) return false;
     var crew = getMakesafeCrewLabel(j);
-    return !crew || crew.toLowerCase() === 'unallocated' || getMakesafeStage(j, j.status || j._makesafe_raw_status || '') === 'new' || getMakesafeSubstatus(j) === 'pending_allocation';
+    return !crew || crew.toLowerCase() === 'unallocated' || makesafeCanonicalStageOf(j) === 'new' || makesafeCanonicalSubstatusOf(j) === 'pending_allocation';
   });
   backlog.sort(function(a, b) {
-    var aa = getMakesafeAgeParts(a, getMakesafeStage(a, a.status || a._makesafe_raw_status || '')).days || 0;
-    var bb = getMakesafeAgeParts(b, getMakesafeStage(b, b.status || b._makesafe_raw_status || '')).days || 0;
+    var aa = getMakesafeAgeParts(a, makesafeCanonicalStageOf(a)).days || 0;
+    var bb = getMakesafeAgeParts(b, makesafeCanonicalStageOf(b)).days || 0;
     return bb - aa || String(a.site_suburb || '').localeCompare(String(b.site_suburb || ''));
   });
 
@@ -15074,10 +15085,11 @@ async function loadMakesafeCrewDay(dateStr) {
     var days = makesafePlannerWeekDays(_makesafeCrewDayDate);
     var results = await Promise.all([
       opsFetch('calendar', { from: days[0], to: days[6] }),
-      opsFetch('makesafe_pipeline', {})
+      fetchMakesafeBoardData({ commit: false })
     ]);
+    if (!results[1]) throw new Error('Make-safe board read was superseded by a newer load; reopen the crew week planner.');
     var events = (results[0].events || []).filter(makesafePlannerEventIsMakesafe);
-    var allMakesafes = makesafePlannerFlattenMakesafes(results[1].columns || {});
+    var allMakesafes = makesafePlannerFlattenMakesafes(results[1].columns);
     var jobsById = {};
     allMakesafes.forEach(function(j) { if (j && j.id) jobsById[j.id] = j; });
     _makesafeCrewPlannerCache = { days: days, events: events, allMakesafes: allMakesafes, jobsById: jobsById };

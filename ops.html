@@ -10618,6 +10618,7 @@ async function loadJobs(opts) {
     if (_pipelineTab === 'makesafes' && _jobView === 'kanban') {
       loadMakesafeBoardIntakeDrafts();
       loadMakesafeBoardStory();
+      loadMakesafeBoardReviewAffordances();
     }
   } catch (e) {
     console.error('loadJobs error:', e);
@@ -10633,6 +10634,24 @@ async function loadJobs(opts) {
     showToast('Failed to load jobs: ' + ((e && e.message) || 'unknown error'), 'warning', [
       { label: 'Retry', primary: true, onclick: 'loadJobs()' }
     ]);
+  }
+}
+
+// Hydrate the review affordance from the same current SES needs_review queue
+// that openMakesafeJob uses. This stays fire-and-forget so the canonical board
+// paints first; once the read completes, repaint only the still-open make-safe
+// kanban. A fresh queue already participated in the first paint and needs no
+// extra read.
+async function loadMakesafeBoardReviewAffordances() {
+  if (typeof _msSesReviewQueue === 'undefined' || typeof _msSesRefreshReviewQueue !== 'function') return;
+  if (typeof _msSesReviewQueueStale === 'function' && !_msSesReviewQueueStale()) return;
+  try {
+    await _msSesRefreshReviewQueue();
+    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+      renderJobs(_pipelineData);
+    }
+  } catch (e) {
+    console.warn('MakeSafe review affordance queue unavailable:', e && e.message);
   }
 }
 
@@ -13417,6 +13436,20 @@ function renderMakesafeCardLinks(j) {
   return html;
 }
 
+// The visible review button and openMakesafeJob share ONE reviewability fact:
+// membership in the current SES needs_review queue. Canonical stage still owns
+// placement, and the canonical row's pack block still owns pack existence. No
+// substatus, declared stage, or computed status can manufacture this affordance.
+function makesafeCardHasReviewAffordance(j, status) {
+  var queueEntry = (j && j.id && typeof _msSesReviewQueue !== 'undefined')
+    ? _msSesReviewQueue[j.id]
+    : null;
+  return status === 'report_ready'
+    && makesafeCanonicalStageOf(j) === 'report_ready'
+    && !!queueEntry
+    && makesafeHasDraftedPack(j);
+}
+
 // OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
 // type-coloured top-border + small type-tag pill, navy as text, brand orange
 // reserved for the Allocate action. Payload: type, suburb, builder, BOTH job
@@ -13440,9 +13473,10 @@ function renderMakesafeCard(j, status) {
   var ageClass = sla.breached ? 'over' : (sla.watch ? 'amber' : (({ green: 'green', yellow: 'amber', red: 'red' })[age.health] || 'neutral'));
   var ageTxt = (sla.days != null) ? (sla.days + 'd') : String(age.label || '');
 
-  // A Report Ready card whose report pack is DRAFTED (substatus admin_to_send_report)
-  // is the one a click can review-and-send. Surface that distinctly so ops know which
-  // report-ready cards are actionable now vs still waiting on the draft to render.
+  // Keep the legacy resume/send-state chip narrow: it describes the physical
+  // admin_to_send_report path and must not label a pre-Xero roof pack as ready to
+  // send. The visible Review job pack BUTTON has its own queue-backed predicate
+  // below because reviewability and send readiness are different facts.
   // Gate on the AUTHORITATIVE backend verdict, not the locally re-derived stage: the
   // local mapper coerces a not-yet-drafted `trade_report_in` job (substatus
   // admin_to_send_report) into the report_ready column, so the substatus check alone
@@ -13458,6 +13492,7 @@ function renderMakesafeCard(j, status) {
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
     && (backendStage ? backendStage === 'report_ready' : true)
     && makesafeHasDraftedPack(j);
+  var showReviewAffordance = makesafeCardHasReviewAffordance(j, status);
   // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
   // drafts feed supplies (mirrored onto the board payload by the backend). Drives the
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
@@ -13566,10 +13601,10 @@ function renderMakesafeCard(j, status) {
     var btnCls = isReassign ? 'ms-btn-reassign' : 'ms-btn-alloc';
     html += '<button class="' + btnCls + '" onclick="event.stopPropagation();openQuickAllocateModal(\'' + j.id + '\',\'' + escapeHtml((suburb || j.client_name || '').replace(/'/g, '')) + '\')">' + allocLabel + '</button>';
   }
-  // Report-ready & drafted: a primary action that opens the EXISTING reporting review
-  // panel (photos + line items + amount + both PDFs + "Approve and send pack") in an
-  // overlay, so the send decision happens from the board card.
-  if (readyToSend) {
+  // Current SES review-queue member with a canonical pack: a primary action that
+  // opens the EXISTING reporting review overlay through openMakesafeJob. This is
+  // intentionally independent of family-specific substatus wording.
+  if (showReviewAffordance) {
     html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the same approval/reporting pack used by the Approvals tab" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
   }
   // M-F W2-C — cancelled card: reason/who/date + admin-only Reopen. The cancel_*

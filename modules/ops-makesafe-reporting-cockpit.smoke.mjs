@@ -2119,6 +2119,148 @@ function doorEnv(over) {
   return { env, calls: doorCalls };
 }
 
+// The visible card-face affordance must use the same SES queue membership as
+// the door above, while canonical_stage still owns column placement and the
+// canonical pack block still owns whether a pack exists.
+const affordanceStart = opsCode.indexOf("function makesafeCardHasReviewAffordance(j, status) {");
+const affordanceEnd = opsCode.indexOf("// OPT1 card", affordanceStart);
+check(
+  "ops.html review-affordance predicate source located for extraction",
+  affordanceStart > 0 && affordanceEnd > affordanceStart,
+);
+const affordanceSrc = affordanceStart > 0 && affordanceEnd > affordanceStart
+  ? opsCode.slice(affordanceStart, affordanceEnd)
+  : "function makesafeCardHasReviewAffordance() { return false; }";
+check(
+  "review-affordance predicate does not consult legacy substatus, declared stage, or computed status",
+  !/admin_to_send_report|board_stage|computed_status/.test(affordanceSrc),
+);
+function makeReviewAffordance(queue) {
+  return new Function(
+    "_msSesReviewQueue",
+    "makesafeCanonicalStageOf",
+    "makesafeHasDraftedPack",
+    '"use strict";\n' + affordanceSrc + "\nreturn makesafeCardHasReviewAffordance;",
+  )(
+    queue,
+    (row) => String((row && row.canonical_stage) || "").toLowerCase(),
+    (row) => !!(row && row.report_pack && row.report_pack.drafted === true),
+  );
+}
+const makesafeCardHasReviewAffordance = makeReviewAffordance({});
+
+const renderCardStart = opsCode.indexOf("function renderMakesafeCard(j, status) {");
+const renderCardEnd = opsCode.indexOf("// ── Make-Safe Substatus Advance", renderCardStart);
+const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
+  ? opsCode.slice(renderCardStart, renderCardEnd)
+  : "";
+check(
+  "renderMakesafeCard wires the visible Review job pack button to the queue-backed predicate",
+  /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status\)/.test(renderCardSrc) &&
+    /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
+);
+
+const loadJobsStart = opsCode.indexOf("async function loadJobs(opts) {");
+const loadJobsEnd = opsCode.indexOf("function setPipelineTab(tab) {", loadJobsStart);
+const loadJobsSrc = loadJobsStart > 0 && loadJobsEnd > loadJobsStart
+  ? opsCode.slice(loadJobsStart, loadJobsEnd)
+  : "";
+check(
+  "the make-safe board hydrates the queue-backed affordances after first paint",
+  /loadMakesafeBoardReviewAffordances\(\)/.test(loadJobsSrc),
+);
+const loaderStart = opsCode.indexOf("async function loadMakesafeBoardReviewAffordances() {");
+const loaderEnd = opsCode.indexOf("function setPipelineTab(tab) {", loaderStart);
+const loaderSrc = loaderStart > 0 && loaderEnd > loaderStart
+  ? opsCode.slice(loaderStart, loaderEnd)
+  : "async function loadMakesafeBoardReviewAffordances() {}";
+function makeAffordanceLoader(stale) {
+  const loaderCalls = { refresh: 0, render: 0 };
+  const loader = new Function(
+    "_msSesReviewQueue",
+    "_msSesRefreshReviewQueue",
+    "_msSesReviewQueueStale",
+    "_pipelineTab",
+    "_jobView",
+    "_pipelineData",
+    "renderJobs",
+    '"use strict";\n' + loaderSrc + "\nreturn loadMakesafeBoardReviewAffordances;",
+  )(
+    {},
+    async () => { loaderCalls.refresh++; },
+    () => stale,
+    "makesafes",
+    "kanban",
+    { columns: {} },
+    () => { loaderCalls.render++; },
+  );
+  return { loader, calls: loaderCalls };
+}
+const staleLoader = makeAffordanceLoader(true);
+await staleLoader.loader();
+check(
+  "a stale review queue is refreshed once and repaints the open make-safe board once",
+  staleLoader.calls.refresh === 1 && staleLoader.calls.render === 1,
+);
+const freshLoader = makeAffordanceLoader(false);
+await freshLoader.loader();
+check(
+  "a fresh review queue adds no redundant read or repaint",
+  freshLoader.calls.refresh === 0 && freshLoader.calls.render === 0,
+);
+
+for (const substatus of [
+  "awaiting_portal_completion",
+  "company_contact_required",
+  "ready_to_invoice",
+  "admin_to_send_report",
+]) {
+  const jobId = "review-" + substatus;
+  const row = {
+    id: jobId,
+    canonical_stage: "report_ready",
+    substatus,
+    report_pack: { drafted: true },
+  };
+  const queue = {
+    [jobId]: { job_id: jobId, docket_revision_id: DOCKET_REV },
+  };
+  const predicate = makeReviewAffordance(queue);
+  check(
+    "Docs Ready queue hit shows Review job pack for " + substatus,
+    predicate(row, "report_ready") === true,
+  );
+  const door = doorEnv({ _msSesReviewQueue: queue });
+  await makeDoor(door.env)(jobId);
+  check(
+    "the visible " + substatus + " affordance opens the existing SES review overlay",
+    door.calls.overlay.length === 1 && door.calls.detail.length === 1 &&
+      door.calls.detail[0].jobId === jobId && door.calls.jobDetail.length === 0,
+  );
+}
+
+const negativeRow = {
+  id: "review-negative",
+  canonical_stage: "report_ready",
+  substatus: "ready_to_invoice",
+  report_pack: { drafted: true },
+};
+check(
+  "a queue miss has no Review job pack affordance",
+  makesafeCardHasReviewAffordance(negativeRow, "report_ready") === false,
+);
+const noPackPredicate = makeReviewAffordance({
+  "review-negative": { job_id: "review-negative", docket_revision_id: DOCKET_REV },
+});
+check(
+  "a queued Docs Ready card with no canonical pack has no Review job pack affordance",
+  noPackPredicate({ ...negativeRow, report_pack: { drafted: false } }, "report_ready") === false,
+);
+check(
+  "queue membership never overrides canonical placement",
+  noPackPredicate({ ...negativeRow, canonical_stage: "trade_report_in" }, "trade_report_in") === false,
+);
+
 // (a) A queued job opens the SES review overlay in the board host.
 const doorA = doorEnv({
   _msSesReviewQueue: {

@@ -1442,7 +1442,7 @@ async function executeSendRunQuotes(jobId) {
   try {
     var resp = await fetch(window.SUPABASE_URL + '/functions/v1/send-quote/send-runs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({ job_id: jobId }),
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -1464,7 +1464,7 @@ async function resendRunQuote(jobId, runLabel) {
     // Call send-runs which is idempotent — creates new documents for unsent runs
     await fetch(window.SUPABASE_URL + '/functions/v1/send-quote/send-runs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({ job_id: jobId }),
     });
     showToast('Quotes resent for ' + runLabel, 'success');
@@ -3532,4 +3532,3 @@ function refreshActiveView() {
     if (id === 'calendar') loadCalendar();
   }
 }
-

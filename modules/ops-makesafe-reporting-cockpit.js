@@ -498,10 +498,8 @@ async function showMsReportingDetail(jobId, targetPanelId) {
     ctx = await _msSesLoadPackContext(jobId);
     // When a bound Xero DRAFT/AUTHORISED has no pack PDF yet (backend pack
     // inject not deployed, or pack fetch failed), recover the real bytes via
-    // get_invoice_pdf. Dashboard opsFetch always sends x-api-key first, so this
-    // is the same API-key path that already returns INV-1102 live — not a
-    // separate JWT path. Never invent HTML when this fails; the tab stays
-    // honest-unavailable.
+    // get_invoice_pdf through the dashboard's signed-in user JWT. Never invent
+    // HTML when this fails; the tab stays honest-unavailable.
     await _msSesHydrateBoundInvoicePdf(ctx);
     // The capture's own facts (when it was taken, what the observer saw). Never
     // fatal: without them the capture still renders and the stage says the
@@ -533,11 +531,9 @@ async function showMsReportingDetail(jobId, targetPanelId) {
  * Xero-rendered bytes through ops-api get_invoice_pdf and attach them as a
  * synthetic pack artifact so the Invoice tab iframes the bill.
  *
- * Auth note (proved live 2026-08-04): the dashboard's opsFetch always
- * classifies as api_key (x-api-key wins over Bearer ANON). That is the same
- * caller shape that already returns a valid ~52 KB PDF for Bertram INV-1102.
- * This is not a JWT-vs-key gap on the client — it is "pack did not supply
- * the document" recovery using the known-good read path.
+ * Auth note: the dashboard's opsFetch uses the signed-in Supabase user JWT.
+ * This is "pack did not supply the document" recovery using that same read
+ * path, not a separate browser credential.
  */
 async function _msSesHydrateBoundInvoicePdf(ctx) {
   if (!ctx) return;

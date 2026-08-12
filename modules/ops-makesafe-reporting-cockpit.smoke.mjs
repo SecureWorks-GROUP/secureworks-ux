@@ -1363,7 +1363,7 @@ check(
     : "";
   const calledGetPdf = calls.opsFetch.some((c) => c.action === "get_invoice_pdf");
   check(
-    "bound DRAFT with no pack PDF recovers via get_invoice_pdf (api_key path)",
+    "bound DRAFT with no pack PDF recovers via get_invoice_pdf (user JWT path)",
     calledGetPdf &&
       fbHtml.includes(">Invoice</button>") &&
       (fbHtml.includes("blob:smoke-xero-pdf") ||

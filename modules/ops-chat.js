@@ -135,7 +135,7 @@ async function sendChat() {
 
     var resp = await fetch(_opsAiBase, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({ messages: msgs, view: 'ops' }),
     });
     var data = await resp.json();
@@ -180,7 +180,7 @@ async function confirmChatAction(cardIdx) {
   try {
     var resp = await fetch(_opsAiBase, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({ confirm_action: card, view: 'ops' }),
     });
     var data = await resp.json();
@@ -239,7 +239,7 @@ async function loadMorningBrief() {
     // Send to AI for narration
     var resp = await fetch(_opsAiBase, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'Generate a concise morning brief from this data. Use bullet points, be specific with names, numbers, and actions needed. Keep it under 8 bullet points:\n\n' + JSON.stringify(briefData) }],
         view: 'ops',

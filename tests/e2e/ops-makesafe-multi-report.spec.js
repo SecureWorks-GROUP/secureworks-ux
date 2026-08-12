@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
 const PHOTO_DATA_URL = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
 
@@ -85,6 +86,7 @@ function multiVisitJobDetail() {
 test('Ops shows and opens both attendance-cycle reports without duplicating the job', async ({ page }) => {
   const detail = multiVisitJobDetail();
   await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
   await page.evaluate((fixture) => {
     window._currentJobData = fixture;
     document.body.innerHTML = `<main id="multi-report-proof">${renderMakesafeOpsDetail(fixture)}</main>`;

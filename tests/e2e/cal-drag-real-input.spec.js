@@ -15,6 +15,7 @@
 // page runs its real fetch code; writes land in this file's `writes` array.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
+const { installOpsSessionStub } = require('../helpers/ops-auth');
 
 const OPS_BASE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 const OPS_URL = OPS_BASE + '?dragv2=1#calendar';
@@ -66,6 +67,7 @@ function fixtureEvents() {
 async function bootCalendar(page, opts = {}) {
   const state = { events: opts.events || fixtureEvents() };
   const writes = [];
+  await installOpsSessionStub(page);
   await page.route('**/*', async (route) => {
     const url = route.request().url();
     if (url.startsWith('file://')) return route.continue();

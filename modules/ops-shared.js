@@ -3,8 +3,6 @@
 // ════════════════════════════════════════════════════════════
 
 var cloud = null;
-// Auth: use JWT from Supabase session, fall back to API key for backward compat
-var _swApiKey = '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
 var _swAuthToken = null; // populated from Supabase session
 
 // Get fresh JWT from Supabase session
@@ -18,18 +16,15 @@ async function _getAuthToken() {
         return session.access_token;
       }
     }
-  } catch(e) { /* fall back to API key */ }
+  } catch(e) { /* caller fails closed below */ }
   return null;
 }
 
-// Build auth headers — send BOTH JWT and API key for resilience
-// If JWT is expired, ops-api falls through to x-api-key check
+// Build auth headers from the signed-in Supabase user only.
 async function _getAuthHeaders(extra) {
   var token = await _getAuthToken();
-  var h = { 'Content-Type': 'application/json', 'x-api-key': _swApiKey };
-  if (token) {
-    h['Authorization'] = 'Bearer ' + token;
-  }
+  if (!token) throw new Error('Sign in required');
+  var h = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
   if (extra) { for (var k in extra) h[k] = extra[k]; }
   return h;
 }

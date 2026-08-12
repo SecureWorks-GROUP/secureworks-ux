@@ -326,12 +326,11 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
-    window.SW_API_KEY = '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
     window.GHL_LOCATION_ID = window.GHL_LOCATION_ID || '13yKADzN94BRxX4hByYX';
   </script>
   <script src="shared/brand.js"></script>
-  <script src="shared/cloud.js"></script>
-  <script src="shared/auth-gate.js"></script>
+  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
+  <script src="shared/auth-gate.js?v=auth-jwt-20260813"></script>
 
   <style>
     /*
@@ -4692,11 +4691,10 @@ async function opsApiGet(cloud, action, params) {
   var token = await getUserAccessToken(cloud);
   if (!token) throw new Error('Not signed in');
   var base = window.SUPABASE_URL || 'https://kevgrhcjxspbxgovpmfl.supabase.co';
-  var apiKey = window.SW_API_KEY || '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
   var qs = new URLSearchParams({ action: action });
   Object.keys(params || {}).forEach(function (k) { if (params[k] != null) qs.set(k, String(params[k])); });
   var res = await fetch(base + '/functions/v1/ops-api?' + qs.toString(), {
-    headers: { 'Authorization': 'Bearer ' + token, 'x-api-key': apiKey },
+    headers: { 'Authorization': 'Bearer ' + token },
   });
   var data = {};
   try { data = await res.json(); } catch (_) {}

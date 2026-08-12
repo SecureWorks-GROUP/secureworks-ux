@@ -4,6 +4,7 @@
 // lane packer AND produced a negative CSS width, so the bar auto-sized around
 // its own label and superimposed it on its lane-mate.
 const { test, expect } = require('@playwright/test');
+const { revealOpsStaticFixture } = require('../helpers/ops-auth');
 
 function ev(o) {
   return Object.assign({
@@ -110,6 +111,7 @@ async function renderSchedule(page, events) {
 test('schedule view never superimposes two job bars, even on an inverted span', async ({ page }) => {
   await page.goto('/ops.html');
   await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
+  await revealOpsStaticFixture(page);
 
   const { bars, clashes, dayWidth } = await renderSchedule(page, COLLIDING_EVENTS);
 
@@ -131,6 +133,7 @@ test('schedule view never superimposes two job bars, even on an inverted span', 
 test('schedule view leaves a tidy week alone and keeps labels inside their bars', async ({ page }) => {
   await page.goto('/ops.html');
   await page.waitForFunction(() => typeof window.renderScheduleView === 'function');
+  await revealOpsStaticFixture(page);
 
   const { bars, clashes } = await renderSchedule(page, TIDY_EVENTS);
 

@@ -12,14 +12,24 @@
     var meta = document.querySelector('meta[name="sw-allowed-roles"]');
     return meta ? meta.content.split(',').map(function(r){return r.trim();}) : [];
   })();
+  var _unlocked = false;
 
   // ── Hide main content immediately ──
-  var style = document.createElement('style');
-  style.textContent = '#mainApp,.main-content,main{display:none !important;}#swAuthGate{display:flex !important;}';
-  document.head.appendChild(style);
+  function _lock() {
+    _unlocked = false;
+    var style = document.getElementById('swAuthGateStyle');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'swAuthGateStyle';
+      style.textContent = 'body>:not(#swAuthGate):not(script){display:none !important;}#swAuthGate{display:flex !important;}';
+      document.head.appendChild(style);
+    }
+  }
+  _lock();
 
   // ── Inject login modal ──
   function _injectGate() {
+    _lock();
     if (document.getElementById('swAuthGate')) return;
     var gate = document.createElement('div');
     gate.id = 'swAuthGate';
@@ -36,6 +46,9 @@
       '<label style="font-size:12px;font-weight:600;color:#4C6A7C;display:block;margin-bottom:4px;">Password</label>' +
       '<input id="swAuthPassword" type="password" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;margin-bottom:16px;" placeholder="Your password">' +
       '<button id="swAuthSubmit" style="width:100%;padding:12px;background:#F15A29;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;">Sign In</button>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin:16px 0;color:#8FA4B2;font-size:11px;"><span style="height:1px;background:#D4DEE4;flex:1;"></span>OR<span style="height:1px;background:#D4DEE4;flex:1;"></span></div>' +
+      '<button id="swAuthMagic" style="width:100%;padding:11px;background:#fff;color:#293C46;border:1px solid #D4DEE4;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">Email me a magic link</button>' +
+      '<div id="swAuthMessage" style="display:none;margin-top:12px;color:#4C6A7C;font-size:12px;line-height:1.4;"></div>' +
       '</div>';
     document.body.appendChild(gate);
 
@@ -44,6 +57,7 @@
       if (e.key === 'Enter') _doLogin();
     });
     document.getElementById('swAuthSubmit').addEventListener('click', _doLogin);
+    document.getElementById('swAuthMagic').addEventListener('click', _doMagicLink);
   }
 
   function _showError(msg) {
@@ -69,6 +83,23 @@
     });
   }
 
+  function _doMagicLink() {
+    var email = document.getElementById('swAuthEmail').value.trim();
+    if (!email) { _showError('Email required'); return; }
+    var btn = document.getElementById('swAuthMagic');
+    btn.disabled = true; btn.textContent = 'Sending...';
+    _waitForCloud(function(cloud) {
+      cloud.auth.sendMagicLink(email).then(function() {
+        var msg = document.getElementById('swAuthMessage');
+        if (msg) { msg.textContent = 'Check your inbox and open the secure sign-in link.'; msg.style.display = 'block'; }
+        btn.textContent = 'Link sent';
+      }).catch(function(err) {
+        btn.disabled = false; btn.textContent = 'Email me a magic link';
+        _showError(err.message || 'Magic link failed');
+      });
+    });
+  }
+
   function _checkRole(cloud, profile) {
     if (!profile) { _showError('Login failed'); return; }
     var role = profile.role || 'unknown';
@@ -84,13 +115,15 @@
 
   function _unlock() {
     // Remove gate, show content
+    _unlocked = true;
     var gate = document.getElementById('swAuthGate');
     if (gate) gate.remove();
-    var style2 = document.querySelector('style');
-    if (style2 && style2.textContent.indexOf('swAuthGate') >= 0) style2.remove();
+    var style2 = document.getElementById('swAuthGateStyle');
+    if (style2) style2.remove();
     // Show main content
     var main = document.getElementById('mainApp') || document.querySelector('.main-content') || document.querySelector('main');
     if (main) main.style.display = '';
+    window.dispatchEvent(new CustomEvent('sw:auth-unlocked'));
   }
 
   function _waitForCloud(cb) {
@@ -122,7 +155,12 @@
       // Listen for logout
       cloud.on('auth:logout', function() {
         _injectGate();
+        window.dispatchEvent(new CustomEvent('sw:auth-locked'));
       });
     });
   });
+
+  window.SW_AUTH_GATE = {
+    isUnlocked: function() { return _unlocked; }
+  };
 })();

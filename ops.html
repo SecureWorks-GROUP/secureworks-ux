@@ -11,13 +11,13 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
-    window.SW_API_KEY = '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
   </script>
   <!-- jsPDF (for Quick Quote PDF) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- Shared modules -->
   <script src="shared/brand.js"></script>
-  <script src="shared/cloud.js"></script>
+  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
+  <script src="shared/auth-gate.js?v=auth-jwt-20260813"></script>
   <style>
     :root {
       /* ── Architectural Assurance — Brand Colour Families ── */
@@ -6276,7 +6276,22 @@ var MS_CANCEL_REASONS_OPS = [
 ];
 var MS_CANCEL_REASON_LABELS_OPS = MS_CANCEL_REASONS_OPS.reduce(function(m, r) { m[r.code] = r.label; return m; }, {});
 
-function opsFetch(action, params, options) {
+async function opsAuthHeaders(extra) {
+  var token = null;
+  try {
+    if (cloud && cloud.auth && cloud.auth.getAccessToken) token = await cloud.auth.getAccessToken();
+    else if (cloud && cloud.supabase && cloud.supabase.auth) {
+      var sess = await cloud.supabase.auth.getSession();
+      token = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    }
+  } catch (e) { token = null; }
+  if (!token) throw new Error('Sign in required');
+  var headers = { 'Authorization': 'Bearer ' + token };
+  if (extra) Object.keys(extra).forEach(function(k) { headers[k] = extra[k]; });
+  return headers;
+}
+
+async function opsFetch(action, params, options) {
   options = options || {};
   var url = _opsApiBase + '?action=' + action;
   if (params) {
@@ -6284,7 +6299,7 @@ function opsFetch(action, params, options) {
       if (params[k] != null) url += '&' + k + '=' + encodeURIComponent(params[k]);
     });
   }
-  var fetchOpts = { cache: 'no-store', headers: { 'x-api-key': window.SW_API_KEY, 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY } };
+  var fetchOpts = { cache: 'no-store', headers: await opsAuthHeaders() };
   if (options.signal) fetchOpts.signal = options.signal;
   return fetch(url, fetchOpts).then(function(resp) {
     if (!resp.ok) {
@@ -6302,11 +6317,11 @@ function opsFetch(action, params, options) {
   });
 }
 
-function opsPost(action, body) {
+async function opsPost(action, body) {
   body = Object.assign({}, body, { operator_email: _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null });
   return fetch(_opsApiBase + '?action=' + action, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY, 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY },
+    headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   }).then(function(resp) {
     if (!resp.ok) {
@@ -6326,42 +6341,10 @@ function opsPost(action, body) {
   });
 }
 
-// SES JWT-only actions (sign_off_ses_docket, approve_ses_invoice_revision,
-// approve_ses_release_revision, record_ses_review_feedback) 403 ANY request that
-// carries x-api-key: the ops-api classifies x-api-key-first, and the dashboard's
-// default headers (x-api-key + Bearer ANON) always land as authMode='api_key'.
-// This helper OMITS x-api-key and bears the signed-in operator's own Supabase
-// session access_token (magic-link login), so the request classifies as 'jwt'
-// and the server can attribute the approval to the identified operator.
+// Compatibility name retained for existing SES callers. Every dashboard action
+// now uses the same signed-in user JWT path; no browser operator key exists.
 async function opsPostJwt(action, body) {
-  var token = null;
-  try {
-    if (cloud && cloud.supabase && cloud.supabase.auth && cloud.supabase.auth.getSession) {
-      var sess = await cloud.supabase.auth.getSession();
-      token = sess && sess.data && sess.data.session && sess.data.session.access_token;
-    }
-  } catch (e) { token = null; }
-  if (!token) {
-    throw new Error('This action needs a signed-in operator session (magic link). Sign in, then retry.');
-  }
-  body = Object.assign({}, body, { operator_email: _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null });
-  return fetch(_opsApiBase + '?action=' + action, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify(body),
-  }).then(function(resp) {
-    if (!resp.ok) {
-      return resp.json().catch(function() { return {}; }).then(function(err) {
-        var em = err.error;
-        if (em && typeof em === 'object') em = em.message || em.code;
-        var e = new Error(em || 'API error: ' + resp.status);
-        e.status = resp.status;
-        e.refusal = err.refusal || null;
-        throw e;
-      });
-    }
-    return resp.json();
-  });
+  return opsPost(action, body);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -7124,7 +7107,7 @@ async function loadAiAlerts() {
     }
 
     var resp = await fetch(_digestBase, {
-      headers: { 'x-api-key': window.SW_API_KEY }
+      headers: await opsAuthHeaders()
     });
     if (!resp.ok) throw new Error('Digest API error: ' + resp.status);
     var digest = await resp.json();
@@ -17870,7 +17853,7 @@ async function sendAsbestosNotify() {
   try {
     var resp = await fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=send_sms', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+      headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ contactId: LUKA_GHL_CONTACT_ID, message: msg })
     });
     var data = await resp.json();
@@ -18134,7 +18117,7 @@ async function renderJarvisView(data) {
 
   try {
     var reportBase = window.SUPABASE_URL + '/functions/v1/reporting-api';
-    var headers = { 'x-api-key': window.SW_API_KEY, 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY };
+    var headers = await opsAuthHeaders();
     var [intelResp, ctxResp] = await Promise.all([
       fetch(reportBase + '?action=job_intelligence&job_id=' + job.id, { headers: headers }).then(function(r) { return r.ok ? r.json() : {}; }).catch(function() { return {}; }),
       fetch(reportBase + '?action=job_context&job_id=' + job.id, { headers: headers }).then(function(r) { return r.ok ? r.json() : {}; }).catch(function() { return {}; }),
@@ -24469,10 +24452,11 @@ function updateJarvisSummary() {
 }
 
 // Refresh bar status timestamp every 30s
-setInterval(function() { updateJarvisSummary(); }, 30000);
+setInterval(function() { if (_opsAppStarted) updateJarvisSummary(); }, 30000);
 
 // Auto-refresh active tab data every 5 minutes (keeps dashboard live all day)
 setInterval(function() {
+  if (!_opsAppStarted) return;
   var view = localStorage.getItem('sw_ops_tab') || 'today';
   if (view === 'today') { loadToday(); }
   else if (view === 'calendar') loadCalendar();
@@ -25917,7 +25901,7 @@ async function loadConversation(contactId, skipCache) {
   }
 
   try {
-    var resp = await fetch(_commsGHLBase + '?action=get_conversation&contactId=' + contactId, { headers: { 'x-api-key': window.SW_API_KEY } });
+    var resp = await fetch(_commsGHLBase + '?action=get_conversation&contactId=' + contactId, { headers: await opsAuthHeaders() });
     var data = await resp.json();
 
     if (data.error) throw new Error(data.error);
@@ -26086,7 +26070,7 @@ async function uploadCommsFile(file, jobId) {
   // Get signed upload URL
   var r = await fetch(apiBase + '?action=get_comms_upload_url', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+    headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ fileName: file.name, mimeType: file.type, jobId: jobId }),
   });
   var urlData = await r.json();
@@ -26133,7 +26117,7 @@ async function sendCommsMessage() {
         if (sendBtn) sendBtn.textContent = 'Sending...';
         var resp = await fetch(apiBase + '?action=send_comms_message', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+          headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ contactId: j.ghl_contact_id, type: 'SMS', message: text, attachmentUrls: attachmentUrls }),
         });
         var data = await resp.json();
@@ -26142,7 +26126,7 @@ async function sendCommsMessage() {
         // Plain text SMS — existing path
         await fetch(_commsGHLBase + '?action=send_sms', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+          headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ contactId: j.ghl_contact_id, message: text, jobId: j.id }),
         }).then(function(r) { return r.json(); }).then(function(d) { if (!d.success) throw new Error(d.error || 'Send failed'); });
       }
@@ -26174,7 +26158,7 @@ async function sendCommsMessage() {
         if (sendBtn) sendBtn.textContent = 'Sending...';
         var resp = await fetch(apiBase + '?action=send_comms_message', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+          headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             contactId: j.ghl_contact_id, type: 'Email', subject: subject,
             htmlBody: '<p>' + body.replace(/\n/g, '<br>') + '</p>', attachmentUrls: attachmentUrls,
@@ -26185,7 +26169,7 @@ async function sendCommsMessage() {
       } else {
         await fetch(_commsGHLBase + '?action=send_email', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+          headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             contactId: j.ghl_contact_id,
             subject: subject,
@@ -26289,7 +26273,7 @@ async function startBridgeCall() {
   try {
     var resp = await fetch(_commsGHLBase + '?action=initiate_call', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY },
+      headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         contactId: j.ghl_contact_id,
         toNumber: j.client_phone,
@@ -26523,7 +26507,7 @@ async function sendPOEmail() {
   try {
     var resp = await fetch(window.SUPABASE_URL + '/functions/v1/send-po-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY, 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY },
+      headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         po_id: poId,
         to: to,
@@ -26664,8 +26648,11 @@ function togglePOEmailThread(poId, toggleEl) {
 // INIT
 // ════════════════════════════════════════════════════════════
 
+var _opsAppStarted = false;
 function initApp() {
   cloud = window.SECUREWORKS_CLOUD;
+  if (_opsAppStarted || !cloud || !cloud.auth || !cloud.auth.isLoggedIn()) return;
+  _opsAppStarted = true;
   // M-F W1-E(a) — cache the signed-in operator email so opsPost can attach it
   // synchronously (getUser() is a Promise). Also drives the admin cancel gate.
   try {
@@ -26713,11 +26700,23 @@ function initApp() {
   });
 }
 
-// Wait for DOM + cloud.js to be ready
+// Wait for both DOM and a persisted Supabase user session. The static page is
+// public, but no board, pipeline, financial, inbox or approval loader may run
+// until cloud.js has restored an authenticated operator session.
+function bootOpsApp() {
+  cloud = window.SECUREWORKS_CLOUD;
+  if (!cloud || !cloud.auth) {
+    setTimeout(bootOpsApp, 100);
+    return;
+  }
+  cloud.on('auth:login', function() { initApp(); });
+  if (cloud.auth.isLoggedIn()) initApp();
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
+  document.addEventListener('DOMContentLoaded', bootOpsApp);
 } else {
-  initApp();
+  bootOpsApp();
 }
 </script>
 

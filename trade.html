@@ -23,8 +23,8 @@
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
   </script>
   <script src="shared/brand.js"></script>
-  <script src="shared/cloud.js"></script>
-  <script src="shared/auth-gate.js"></script>
+  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
+  <script src="shared/auth-gate.js?v=auth-jwt-20260813"></script>
   <meta name="sw-allowed-roles" content="admin,ops_manager,sales,lead_installer,crew">
 
   <style>
@@ -4045,20 +4045,19 @@
   // API HELPER — JWT auth + timeout
   // ══════════════════════════════════════════════════
 
-  // GHL comms API — uses ghl-proxy edge function (same as Ops dashboard)
-  var _swApiKey = '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
+  // GHL comms API — uses the signed-in trade user's Supabase JWT.
   var _ghlBase = window.SUPABASE_URL + '/functions/v1/ghl-proxy';
 
   function ghlApi(action, params, postBody) {
     return getAuthToken().then(function(token) {
+      if (!token) throw _apiError(401, 'Sign in required');
       var url = _ghlBase + '?action=' + action;
       if (params) {
         Object.keys(params).forEach(function(k) {
           if (params[k] != null) url += '&' + k + '=' + encodeURIComponent(params[k]);
         });
       }
-      var headers = { 'Content-Type': 'application/json', 'x-api-key': _swApiKey };
-      if (token) headers['Authorization'] = 'Bearer ' + token;
+      var headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
       var opts = { headers: headers };
       if (postBody) { opts.method = 'POST'; opts.body = JSON.stringify(postBody); }
       return fetch(url, opts).then(function(r) {
@@ -4092,6 +4091,7 @@
       return Promise.reject(blocked);
     }
     return getAuthToken().then(function(token) {
+      if (!token) throw _apiError(401, 'Sign in required');
       var url = _opsApiBase + '?action=' + action;
       if (params) {
         Object.keys(params).forEach(function(k) {
@@ -4099,8 +4099,7 @@
         });
       }
 
-      var headers = { 'Content-Type': 'application/json', 'x-api-key': _swApiKey };
-      if (token) headers['Authorization'] = 'Bearer ' + token;
+      var headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
 
       var opts = { headers: headers };
       if (postBody) {

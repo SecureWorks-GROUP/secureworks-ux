@@ -121,7 +121,7 @@ async function loadAiAlerts() {
     }
 
     var resp = await fetch(_digestBase, {
-      headers: { 'Authorization': 'Bearer ' + window.SUPABASE_ANON_KEY, 'x-api-key': _swApiKey }
+      headers: await _getAuthHeaders()
     });
     if (!resp.ok) throw new Error('Digest API error: ' + resp.status);
     var digest = await resp.json();
@@ -610,4 +610,3 @@ function renderPipelineOverview(pipeline) {
   });
   container.innerHTML = html;
 }
-

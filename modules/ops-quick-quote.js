@@ -238,7 +238,7 @@ async function sendQuickQuote() {
       try {
         var ghlRes = await fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=create_contact_and_opportunity', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': window.SW_API_KEY || '' },
+          headers: await _getAuthHeaders(),
           body: JSON.stringify({
             firstName: data.client_first_name,
             lastName: data.client_last_name,
@@ -533,4 +533,3 @@ async function generateQuickQuotePDF(savedJob) {
   doc.save(filename);
   showToast('PDF downloaded: ' + filename, 'success');
 }
-

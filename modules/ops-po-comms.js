@@ -884,7 +884,7 @@ async function loadConversation(contactId) {
   }
 
   try {
-    var resp = await fetch(_commsGHLBase + '?action=get_conversation&contactId=' + contactId, { headers: { 'x-api-key': _swApiKey } });
+    var resp = await fetch(_commsGHLBase + '?action=get_conversation&contactId=' + contactId, { headers: await _getAuthHeaders() });
     var data = await resp.json();
 
     if (data.error) throw new Error(data.error);
@@ -1009,7 +1009,7 @@ async function sendCommsMessage() {
     try {
       await fetch(_commsGHLBase + '?action=send_sms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+        headers: await _getAuthHeaders(),
         body: JSON.stringify({
           contactId: j.ghl_contact_id,
           message: text,
@@ -1035,7 +1035,7 @@ async function sendCommsMessage() {
     try {
       await fetch(_commsGHLBase + '?action=send_email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+        headers: await _getAuthHeaders(),
         body: JSON.stringify({
           contactId: j.ghl_contact_id,
           subject: subject,
@@ -1064,7 +1064,7 @@ async function tryAutoLinkGHL() {
     if (!searchQuery) return;
 
     var resp = await fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=search&q=' + encodeURIComponent(searchQuery), {
-      headers: { 'x-api-key': _swApiKey }
+      headers: await _getAuthHeaders()
     });
     var data = await resp.json();
     var opps = data.opportunities || [];
@@ -1118,7 +1118,7 @@ async function autoLinkGHLContact() {
 
     var resp = await fetch(window.SUPABASE_URL + '/functions/v1/ghl-proxy?action=create_contact_and_opportunity', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({
         firstName: firstName,
         lastName: lastName,
@@ -1240,7 +1240,7 @@ async function startBridgeCall() {
   try {
     var resp = await fetch(_commsGHLBase + '?action=initiate_call', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({
         contactId: j.ghl_contact_id,
         toNumber: j.client_phone,
@@ -1526,7 +1526,7 @@ async function sendInlineReply(entityId, type, toEmail, subject) {
       // PO email
       await fetch(window.SUPABASE_URL + '/functions/v1/send-po-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+        headers: await _getAuthHeaders(),
         body: JSON.stringify({
           po_id: entityId,
           to_email: toEmail,
@@ -1822,7 +1822,7 @@ async function sendPOEmail() {
 
     resp = await fetch(window.SUPABASE_URL + '/functions/v1/send-po-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': _swApiKey },
+      headers: await _getAuthHeaders(),
       body: JSON.stringify({
         po_id: poId,
         to_email: to,
@@ -2282,4 +2282,3 @@ window.openJobDetailAndFocus = function(jobId, poId, commType) {
     }, 500);
   }
 };
-

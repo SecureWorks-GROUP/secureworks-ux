@@ -11,10 +11,9 @@
   <script>
     window.SUPABASE_URL = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
     window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtldmdyaGNqeHNwYnhnb3ZwbWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNTQxMDUsImV4cCI6MjA4NzkzMDEwNX0.lPUEvx8u98WL86PcMNv8yfLnd6OQKzTUOCsRewfQiZc';
-    window.SW_API_KEY = '097a1160f9a8b2f517f4770ebbe88dca105a36f816ef728cc8724da25b2667dc';
   </script>
   <script src="shared/brand.js"></script>
-  <script src="shared/cloud.js"></script>
+  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
   <style>
     :root {
       --sw-orange: #F15A29;
@@ -911,11 +910,21 @@
 var CEO_EMAILS = ['marnin@secureworkswa.com.au'];
 var _supaAuth = null;
 
+async function ceoAuthHeaders(extra) {
+  var result = await _supaAuth.auth.getSession();
+  var session = result && result.data && result.data.session;
+  var token = session && session.access_token;
+  if (!token) throw new Error('Sign in required');
+  var headers = { 'Authorization': 'Bearer ' + token };
+  if (extra) Object.keys(extra).forEach(function(k) { headers[k] = extra[k]; });
+  return headers;
+}
+
 (function() {
   // AUDIT FIX: reuse cloud.js Supabase client instead of creating a second one
   // (duplicate clients cause GoTrueClient auth lock contention warnings)
   var cloud = window.SECUREWORKS_CLOUD;
-  _supaAuth = (cloud && cloud.sb) || window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  _supaAuth = (cloud && cloud.supabase) || window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
   _supaAuth.auth.getSession().then(function(result) {
     var session = result.data.session;
@@ -1004,7 +1013,7 @@ var _ceoAmberOpen = false;
 async function loadCeoAlerts() {
   try {
     var digestUrl = window.SUPABASE_URL + '/functions/v1/daily-digest';
-    var resp = await fetch(digestUrl, { headers: { 'x-api-key': window.SW_API_KEY } });
+    var resp = await fetch(digestUrl, { headers: await ceoAuthHeaders() });
     if (!resp.ok) return;
     var digest = await resp.json();
     var alerts = digest.alerts || [];
@@ -1058,7 +1067,7 @@ async function loadReport() {
   try {
     const res = await fetch(
       window.SUPABASE_URL + '/functions/v1/reporting-api?action=ceo_report',
-      { headers: { 'x-api-key': window.SW_API_KEY } }
+      { headers: await ceoAuthHeaders() }
     );
     if (!res.ok) throw new Error('API error: ' + res.status);
     reportData = await res.json();
@@ -2222,7 +2231,7 @@ async function sendChat() {
 
     var resp = await fetch(_opsAiBase, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await ceoAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ messages: msgs, view: 'ceo', session_id: _chatSessionId }),
     });
     var data = await resp.json();

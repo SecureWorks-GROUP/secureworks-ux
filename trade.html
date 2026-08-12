@@ -5201,11 +5201,11 @@
 
   window.filterMyJobs = function() {
     var q = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    if (q.length >= 2) {
-      // Route ANY query (ref-like or plain client name/address/suburb) to global search so
-      // unassigned jobs across all crews/statuses resolve, not just the user's own assignments.
+    if (_jobFilter === 'all' && q.length >= 2) {
+      // Only All is a database search. Today and the other day/assignment lenses
+      // keep filtering the signed-in trade's assignment buckets locally.
       requestGlobalJobSearch(q);
-    } else {
+    } else if (_jobFilter === 'all') {
       requestGlobalJobSearch('');
     }
     if (_lastJobData) renderMyJobs(_lastJobData);
@@ -5398,6 +5398,13 @@
       : _globalJobSearch.results.length;
   }
 
+  function refreshGlobalJobSearchConsumers() {
+    if (_currentView === 'myJobs' && _lastJobData) renderMyJobs(_lastJobData);
+    if (_currentView === 'board' && typeof paintBoardDatabaseSearchResults === 'function') {
+      paintBoardDatabaseSearchResults(_boardSearchQuery);
+    }
+  }
+
   function requestGlobalJobSearch(q) {
     q = String(q || '').toLowerCase().trim();
     var isFeed = !q && allJobsFeedActive('');
@@ -5429,13 +5436,13 @@
         // passing an assignment-scoped list off as every job in the company.
         if (isFeed && (!res || res.lens !== 'company')) {
           _globalJobSearch.denied = true;
-          if (_lastJobData) renderMyJobs(_lastJobData);
+          refreshGlobalJobSearchConsumers();
           return;
         }
         absorbGlobalJobPage(res, 0);
         _globalJobSearch.error = false;
         _globalJobSearch.errorMsg = '';
-        if (_lastJobData) renderMyJobs(_lastJobData);
+        refreshGlobalJobSearchConsumers();
         syncGlobalJobFeedPaging();
       }).catch(function(err) {
         if (token !== _globalJobSearch.token) return;
@@ -5451,7 +5458,7 @@
         _globalJobSearch.nextOffset = null;
         _globalJobSearch.error = true;
         _globalJobSearch.errorMsg = loadFailureHint();
-        if (_lastJobData) renderMyJobs(_lastJobData);
+        refreshGlobalJobSearchConsumers();
       });
     }, isFeed ? 0 : 300);
   }
@@ -5469,7 +5476,7 @@
     _globalJobSearch.paging = true;
     _globalJobSearch.pageError = false;
     _globalJobSearch.pageErrorMsg = '';
-    if (_lastJobData) renderMyJobs(_lastJobData);
+    refreshGlobalJobSearchConsumers();
     fetchGlobalJobPage(q, next).then(function(res) {
       if (token !== _globalJobSearch.token) return;
       _globalJobSearch.paging = false;
@@ -5479,7 +5486,7 @@
       } else {
         absorbGlobalJobPage(res, next);
       }
-      if (_lastJobData) renderMyJobs(_lastJobData);
+      refreshGlobalJobSearchConsumers();
       syncGlobalJobFeedPaging();
     }).catch(function(err) {
       if (token !== _globalJobSearch.token) return;
@@ -5487,7 +5494,7 @@
       _globalJobSearch.paging = false;
       _globalJobSearch.pageError = true;
       _globalJobSearch.pageErrorMsg = loadFailureHint();
-      if (_lastJobData) renderMyJobs(_lastJobData);
+      refreshGlobalJobSearchConsumers();
     });
   }
   window.loadMoreGlobalJobs = loadMoreGlobalJobs;
@@ -5519,7 +5526,7 @@
     if (!isFeed && (!q || q.length < 2)) return;
     resetGlobalJobSearchState();
     requestGlobalJobSearch(q);
-    if (_lastJobData) renderMyJobs(_lastJobData);
+    refreshGlobalJobSearchConsumers();
   }
   window.retryGlobalJobSearch = retryGlobalJobSearch;
 
@@ -5734,7 +5741,7 @@
     if (searchBar) searchBar.style.display = 'block';
 
     var query = ((document.getElementById('jobSearchInput') || {}).value || '').toLowerCase().trim();
-    var _needsGlobalSearch = query.length >= 2;
+    var _needsGlobalSearch = _jobFilter === 'all' && query.length >= 2;
     // All tab with an empty query: the whole company job feed, for the roles that
     // already hold the Everyone lens. Installer-scoped tabs are untouched.
     var _needsAllJobsFeed = allJobsFeedActive(query);
@@ -5779,7 +5786,6 @@
     // Today/allocated sections remain assignment-based for trades. The separate All-tab search
     // below is the deliberate exception: it reaches the full historical job database across
     // crews/statuses, including old completed/archived jobs.
-    // On non-All tabs, also surface global results when the query looks like a builder/job ref.
     if (_needsGlobalSearch) html += renderGlobalJobSearchResults(data, query);
 
     var managedPrimary = primaryManagedTradeVertical();
@@ -18944,6 +18950,7 @@
     _boardCache = null;
     _boardVert = null;
     _boardCardById = {};
+    _boardSearchQuery = '';
     _fieldBoardCacheByKey = {};
     _fencingBoardWeekStart = null;
     _fencingBoardUnscheduled = false;
@@ -19179,6 +19186,60 @@
     });
   }
 
+  // The canonical trade projection may be assignment-scoped for an installer.
+  // A typed MakeSafe Board search therefore uses the existing authenticated
+  // job-database search and adds only make-safe hits that are absent from the
+  // projection. Those hits stay in a separate list because search_all_jobs does
+  // not carry canonical board-stage truth and must never invent a column.
+  function renderBoardDatabaseSearchResults(query) {
+    query = String(query || '').toLowerCase().trim();
+    if (_boardVert !== 'makesafe' || query.length < 2) return '';
+    var matched = globalJobStateMatches(query, false);
+    var h = '<div data-makesafe-database-search="true" style="border:1px solid var(--sw-border);border-radius:10px;padding:12px;margin:0 0 12px">';
+    h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:3px">MakeSafe database matches</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4">Includes jobs not allocated to you. Open a match to view its work order and report.</div>';
+    if (!matched || _globalJobSearch.loading) {
+      return h + '<div style="font-size:12px;color:var(--sw-text-sec)">Searching the job database...</div></div>';
+    }
+    if (_globalJobSearch.error) {
+      return h + loadFailureCard(
+        'Could not search MakeSafe jobs',
+        'The board cards below are still available. Retry the database search to find jobs outside this board.',
+        _globalJobSearch.errorMsg,
+        'retryGlobalJobSearch') + '</div>';
+    }
+
+    var boardIds = {};
+    if (_boardCache && _boardCache.feed) {
+      MakesafeTradeV5.rows(_boardCache.feed).forEach(function(row) { boardIds[String(row.id)] = true; });
+    }
+    var matches = (_globalJobSearch.results || []).filter(function(job) {
+      return getTradeJobType(job) === 'makesafe' && !boardIds[String(job.id)];
+    });
+    if (!matches.length) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec)">No additional MakeSafe jobs match outside the board cards below.</div>';
+    } else {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px">' + matches.length + ' additional ' + (matches.length === 1 ? 'match' : 'matches') + '</div>';
+      matches.forEach(function(job, idx) {
+        cacheTradeJob(job, findAssignmentForGlobalJob(_lastJobData || {}, job.id));
+        h += renderGlobalJobSearchCard(job, _lastJobData || {}, idx);
+      });
+    }
+    if (_globalJobSearch.paging) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding-top:10px">Loading more matches...</div>';
+    } else if (_globalJobSearch.pageError) {
+      h += '<div style="font-size:12px;color:#B35309;padding-top:10px">The next page failed to load. <button type="button" onclick="loadMoreGlobalJobs()">Retry</button></div>';
+    } else if (typeof _globalJobSearch.nextOffset === 'number') {
+      h += '<button type="button" class="btn btn-secondary btn-small" style="width:auto;margin-top:10px" onclick="loadMoreGlobalJobs()">Load more matches</button>';
+    }
+    return h + '</div>';
+  }
+
+  function paintBoardDatabaseSearchResults(query) {
+    var host = document.getElementById('boardDatabaseSearchResults');
+    if (host) host.innerHTML = renderBoardDatabaseSearchResults(query);
+  }
+
   function _renderBoard() {
     var container = document.getElementById('boardContent');
     if (!container || !_boardCache) return;
@@ -19220,11 +19281,12 @@
     }
     // M3d — client-side search over the board cards (name / suburb / ref).
     html += '<input id="boardSearchInput" type="search" oninput="filterBoard()" autocomplete="off" ' +
-      'placeholder="Search ' + esc(active.label.toLowerCase()) + ' by name, suburb or ref" ' +
+      'placeholder="' + (isFencing ? 'Search fencing by name, suburb or ref' : 'Search all make-safe jobs by name, suburb or ref') + '" ' +
       'style="width:100%;box-sizing:border-box;margin:2px 0 10px;padding:11px 13px;font-size:14px;' +
       'font-family:inherit;color:var(--sw-text);background:var(--sw-card);' +
       'border:1px solid var(--sw-border);border-radius:10px;outline:none">' +
-      '<div id="boardSearchCount" class="tjb-note">' + active.total + ' jobs · showing all ' + active.total + '</div>';
+      '<div id="boardSearchCount" class="tjb-note">' + active.total + ' jobs · showing all ' + active.total + '</div>' +
+      '<div id="boardDatabaseSearchResults"></div>';
     // vertical selector (only when the manager owns more than one)
     if (board.verticals.length > 1) {
       html += '<div class="tjb-verts">';
@@ -19289,9 +19351,9 @@
     }
   }
 
-  // M3d — filter visible Board cards client-side by the search box (name /
-  // suburb / ref). Toggles card display only — no re-fetch, no innerHTML
-  // rebuild, so the input keeps focus while typing.
+  // Fencing remains a local board filter. MakeSafe also queries the authenticated
+  // job database so an allocation-scoped board can find and open off-board jobs.
+  // The board cards still toggle in place, preserving input focus while typing.
   window.filterBoard = function () {
     var input = document.getElementById('boardSearchInput');
     var q = input ? String(input.value || '').toLowerCase().trim() : '';
@@ -19304,7 +19366,9 @@
       if (visible) shown++;
     }
     var count = document.getElementById('boardSearchCount');
-    if (count) count.textContent = q ? (shown + ' matches · showing all ' + shown) : (cards.length + ' jobs · showing all ' + cards.length);
+    if (count) count.textContent = q ? (shown + ' board matches') : (cards.length + ' jobs · showing all ' + cards.length);
+    if (_boardVert === 'makesafe' && q.length >= 2) requestGlobalJobSearch(q);
+    paintBoardDatabaseSearchResults(q);
   };
 
   // ══════════════════════════════════════════════════════════════════════

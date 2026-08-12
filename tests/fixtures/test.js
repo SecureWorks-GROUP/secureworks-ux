@@ -172,6 +172,19 @@ const test = base.extend({
       type: index % 2 === 0 ? 'fencing' : 'patio',
       status: index % 3 === 0 ? 'complete' : 'scheduled'
     }));
+    const searchableMakesafeJob = {
+      id: 'e2e-makesafe-search-only',
+      job_number: 'E2E-MS-HIDDEN-001',
+      client_name: 'Search Fixture Client',
+      site_suburb: 'Searchville',
+      site_address: '1 Search Lane, Searchville WA 6000',
+      type: 'makesafe',
+      status: 'scheduled',
+      makesafe_details: {
+        substatus: 'waiting_on_trade_report',
+        makesafe_type: 'Storm damage roof report'
+      }
+    };
     // ── Crew roster + lead installer (secureworks-backend PR #513) ──
     // Its own rows rather than the shared fencing fixture, so spec 11 keeps the
     // exact assignment set it recorded. Deliberately shaped like production:
@@ -234,11 +247,25 @@ const test = base.extend({
       actions: {
         makesafe_board: makesafeResponse,
         search_all_jobs: ({ url }) => {
-          if (feedScenario !== 'all-jobs-feed' && feedScenario !== 'all-jobs-feed-denied') {
+          if (!['all-jobs-feed', 'all-jobs-feed-denied', 'trade-makesafe-search'].includes(feedScenario)) {
             return { status: 404, body: { error: 'No E2E fixture registered for search_all_jobs' } };
           }
           const q = (url.searchParams.get('q') || '').trim().toLowerCase();
           const offset = Number(url.searchParams.get('offset') || 0);
+          if (feedScenario === 'trade-makesafe-search') {
+            const haystack = [searchableMakesafeJob.job_number, searchableMakesafeJob.client_name,
+              searchableMakesafeJob.site_suburb, searchableMakesafeJob.site_address].join(' ').toLowerCase();
+            const jobs = q && haystack.includes(q) ? [searchableMakesafeJob] : [];
+            return {
+              jobs,
+              lens: q ? 'search' : 'assigned',
+              total: jobs.length,
+              page_size: ALL_FEED_PAGE_SIZE,
+              offset,
+              truncated: false,
+              next_offset: null
+            };
+          }
           if (!q && feedScenario === 'all-jobs-feed-denied') {
             // Server declined the company lens: the client must not paint this
             // assignment-scoped answer as "every job in the company".
@@ -334,6 +361,18 @@ const test = base.extend({
         },
         trade_job_detail: ({ url }) => {
           const jobId = url.searchParams.get('jobId');
+          if (feedScenario === 'trade-makesafe-search' && jobId === searchableMakesafeJob.id) {
+            return {
+              job: searchableMakesafeJob,
+              crew: [],
+              purchaseOrders: [],
+              documents: [],
+              media: [],
+              notes: [],
+              serviceReport: null,
+              makesafe_details: searchableMakesafeJob.makesafe_details
+            };
+          }
           if (CREW_LEAD_SCENARIOS.includes(feedScenario)) return crewLeadDetail(jobId);
           if (persona !== 'fencing_manager') return loadJsonFixture('job-detail.json');
           const assignment = fencingRows().find((row) => row.jobs && row.jobs.id === jobId);

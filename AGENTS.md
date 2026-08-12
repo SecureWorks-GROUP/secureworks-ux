@@ -396,17 +396,18 @@ changes.
 
 ## Trade visibility & the manager view (`trade.html`)
 
-Make-safe visibility is 100% SERVER-DRIVEN by the `makesafe_board` feed
-(`makesafe-board.v1`, edge function — not in this repo). The client applies NO
-allocation-based hiding: `MakesafeTradeV5.board()` just renders whatever columns
-the server sends, and the Board (`_renderBoard`, search `Make-safe Board v5`) shows
-every card in every column. A MANAGER seeing all cards (allocated or not) is the
-feed returning `permissions.sees_all_makesafes:true` / `can_allocate:true` for that
-user; a non-manager gets `allocated_only` + `can_allocate:false` and a view-only
-board (no `button.act.primary` Allocate action). Allocation ≠ visibility: an
-assignment means "this person is doing the job", never "may see it". So if a real
-manager (e.g. Hugo) can't see everything, the fix is his server role / the feed's
-permission logic — NOT trade.html.
+Canonical make-safe BOARD PLACEMENT is 100% SERVER-DRIVEN by the `makesafe_board`
+feed (`makesafe-board.v1`, edge function — not in this repo).
+`MakesafeTradeV5.board()` renders every returned card in its returned column and
+never derives stage or action rights locally. A manager's full board still comes
+from `permissions.sees_all_makesafes:true` / `can_allocate:true`; a non-manager's
+canonical rows may still be `allocated_only` + `can_allocate:false`. FINDABILITY
+is deliberately broader than those columns: a typed MakeSafe Board search also
+uses authenticated `search_all_jobs`, keeps only make-safe hits absent from the
+feed, and renders them in the uncolumned **MakeSafe database matches** list. Never
+merge those search rows into canonical columns because that feed carries no stage.
+They may open the report path, but search visibility grants no Allocate or write
+authority.
 
 A managed-vertical lead (`users.managed_verticals`, e.g. Henry with `['fencing']`)
 is NOT an ops manager — he keeps `role = lead_installer` and gains only his own
@@ -430,7 +431,10 @@ on the job table instead of the assignment table: an empty query asks
 `search_all_jobs` for the whole company feed only when the viewer already holds
 the Everyone lens, and it is painted only when the server answers
 `lens: 'company'` — scroll paging then follows the server's `next_offset`
-(`// <all-tab-full-feed>`). Surface-level detail lives in `trade-app.md`.
+(`// <all-tab-full-feed>`). A typed All query is available to every authenticated
+trade and can open an unallocated make-safe; global results render ONLY on All.
+Today, Assigned, This Week, Active, and History remain assignment/day-scoped.
+Surface-level detail lives in `trade-app.md`.
 
 A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A
 JOB'S SCHEDULE. Ops staff are mirrored onto a job so it shows in their own list;
@@ -453,9 +457,10 @@ unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-onl
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`
 (managed fencing lead across multi-week/Unscheduled Board rows, My Jobs and
 Calendar, other-crew read-only, one explicitly stubbed `allocate_job` write, and
-own-assignment lifecycle refresh writes with no unapproved write), and
-`all-jobs-feed.spec.js` (All-tab company feed paging, server-lens authority,
-installer All tab unchanged).
+own-assignment lifecycle refresh writes with no unapproved write),
+`all-jobs-feed.spec.js` (All-tab company feed paging and server-lens authority),
+and `trade-makesafe-search-visibility.spec.js` (unallocated make-safe search/open
+from All and Board while Today remains assignment-scoped).
 NB: board cards are `role="button"` and their accessible names contain
 "Allocated"/"Nobody allocated", so a `getByRole('button',{name:'Allocate'})` count
 matches cards too — target the `button.act.primary` class for the real Allocate

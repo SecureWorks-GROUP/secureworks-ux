@@ -31,10 +31,14 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 
 - **Empty query** = the company feed. `allJobsFeedActive()` only asks for it when
   the viewer already holds the Everyone lens (`canUseEveryoneLens()`), so an
-  installer's All tab is unchanged and still query-driven. Visibility is not the
+  installer's All tab remains query-driven. Visibility is not the
   client's to widen: the response must come back with `lens: 'company'` or the
   block says the list is unavailable for this account rather than passing an
   assignment-scoped answer off as every job.
+- **Typed query** = authenticated database search for every trade, but only while
+  the **All** tab is active. A make-safe hit is openable without an assignment;
+  Today, Assigned, This Week, Active, and History only filter the viewer's own
+  assignment buckets and never render these global results.
 - **Paging** follows the server's `next_offset` — never a client-invented
   `page_size`. `syncGlobalJobFeedPaging()` runs on window scroll and after every
   My Jobs repaint (a first page shorter than the viewport would otherwise wait
@@ -117,7 +121,9 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 
 ### Auth & Security
 - JWT auth on all trade endpoints (via `authTrade` in ops-api)
-- `assertAssigned` check — trades can only access jobs they're assigned to
+- Endpoint-specific authorization stays server-owned: authenticated database
+  search and MakeSafe detail may read an unallocated make-safe, while assignment
+  lifecycle and report writes keep their existing server relationship checks.
 - Auth-failure handling distinguishes authorisation from authentication and never logs a signed-in user out on a feed failure:
   - **403** is a role rejection, not an expired session — the same valid JWT is never refreshed and the user is never signed out; the surface shows an in-page "no trade access" state.
   - **401** may be an expired JWT — refreshed once. Read-only feed callers pass `{ preserveSessionOnAuthFailure: true }` to `api()` so a failed refresh prompts explicit re-login in place instead of auto sign-out. Write/action callers that omit the flag still fall back to `handleSessionExpiry()` / `_forceLogout()`.
@@ -125,11 +131,16 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 - Prices stripped from PO line items (trades see items + quantities, not costs)
 
 ## Make-Safe Board (Trade v5)
-The make-safe experience is driven by a single canonical read model — the `makesafe_board` feed fetched with `api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true })`, contract `makesafe-board.v1`. The `preserveSessionOnAuthFailure` flag keeps a signed-in user in place when the feed rejects: a 403 (no trade role) or an unrefreshable 401 renders an in-page state instead of logging the user out. The `MakesafeTradeV5` module in `trade.html` (delimited by the `// <makesafe-trade-v5>` markers) validates it and supplies the board read model. Every card now renders through the shared `UnifiedJobCard` grammar (`// <unified-jobcard>` → `.jc-*` CSS, quick-look `.ql-*`, detail header `.dh-*`), which replaced the retired `.tjc-*` v5 board body, the legacy `.ms-*` red-banner run card, and the standard `TradeJobCard` body across every view (board, My Jobs, history, global search, make-safe quick-look, full-job detail header). The primary/Allocate action follows the job-type accent (`var(--jc-a)`), never brand orange. Every make-safe view state is server-owned: the client never derives make-safe columns, visibility, or action rights from assignment status or from role/name logic. The fencing vertical documented below is the one board that maps its own columns, and only over rows the backend already authorized — it never touches make-safe placement.
+The make-safe experience is driven by the canonical `makesafe_board` read model fetched with `api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true })`, contract `makesafe-board.v1`. The `preserveSessionOnAuthFailure` flag keeps a signed-in user in place when the feed rejects: a 403 (no trade role) or an unrefreshable 401 renders an in-page state instead of logging the user out. The `MakesafeTradeV5` module in `trade.html` (delimited by the `// <makesafe-trade-v5>` markers) validates it and supplies the board read model. Every card now renders through the shared `UnifiedJobCard` grammar (`// <unified-jobcard>` → `.jc-*` CSS, quick-look `.ql-*`, detail header `.dh-*`), which replaced the retired `.tjc-*` v5 board body, the legacy `.ms-*` red-banner run card, and the standard `TradeJobCard` body across every view (board, My Jobs, history, global search, make-safe quick-look, full-job detail header). The primary/Allocate action follows the job-type accent (`var(--jc-a)`), never brand orange. Canonical make-safe columns and action rights remain server-owned: the client never derives them from assignment status or role/name logic. The one search exception is explicitly uncolumned: a typed MakeSafe Board query also uses `search_all_jobs`, filters to make-safe hits absent from the current projection, and renders them under **MakeSafe database matches** so an installer can open an unallocated job without inventing a board stage. The fencing vertical documented below is the one board that maps its own columns, and only over rows the backend already authorized — it never touches make-safe placement.
 
 ### Board
 - Exactly four columns from the feed: **New**, **Allocated**, **Complete**, **Archive** (no client-side column override; the old assignment-derived `MS_COLUMN_OVERRIDE` / `COLUMNS_MAKESAFE` paths are retired). The server-supplied `column` wins even if an assignment reads `complete`. These four (plus the live **On site** state) are the only status words on any make-safe surface; the fencing vertical below carries its own column labels.
 - Cards show make-safe type, suburb, full address, builder/client, refs, primary assignment date/time, crew (or "Nobody allocated"), and latest note. Because the column already names the status, the board card drops the in-column status chip. No pricing or other trades' invoice data is ever rendered on Trade v5 surfaces.
+- Board search filters the canonical cards immediately and, from two characters,
+  runs the same authenticated `search_all_jobs` plumbing as My Jobs All. Make-safe
+  results missing from the assignment-scoped projection render in a separate
+  database list and open the MakeSafe report path; they are never assigned a
+  client-derived column.
 - `validate()` is a hard gate: it rejects a feed whose `contract_version`/`projection` don't match, whose `parity.ok` is not `true`, whose columns don't match the four, that contains a duplicate card id or a column mismatch, or that carries a broken/unstated contact action.
 - Load failure is rendered by the shared `MakesafeTradeV5.failureHTML(err, surface, retryCall, wrapperClass)` state renderer (also used by the calendar), which maps the feed error to one of three states, each tagged `data-feed-failure`:
   - **access** (403) — "No trade access for this account" with a "Sign in with another account" button (calls `doLogout()`); no Retry, since retrying a role rejection is pointless.
@@ -186,6 +197,9 @@ The make-safe experience is driven by a single canonical read model — the `mak
 ### Permissions
 - Action rights come from `permissions` on the feed: board buttons key off `_boardCache.permissions.can_allocate`, calendar actions off `NC.model.permissions` (`ncBoardAllowed()`). A server-filtered `allocated-only` trade still sees the board.
 - Visibility (`allocated_only` / `all_makesafes`), `can_allocate`, and view-only flags (e.g. Khairo's fencing view-only, `can_allocate=false`) are honoured as delivered — never recomputed client-side.
+- `allocated_only` limits the canonical board/calendar rows, not findability:
+  typed All and MakeSafe Board database search may surface another make-safe for
+  read/open. This does not grant Allocate or any write authority.
 - The My Jobs lens (`#adminJobToggle`, labelled **Everyone** / **Mine**) is offered to dispatchers (`admin` / `ops_manager`) and to managed-vertical leads; ops managers and managed leads open on Everyone, global admins still opt in. It only chooses the `mode` sent to `my_jobs` — an authorization request the backend answers with its own tenant/vertical set, never a client-side widening. An ordinary installer gets no toggle and stays own-only. The open MakeSafe pool fallback (`loadMakesafePoolJobs`) remains dispatcher-only, and for a fencing lead the open-pool section is labelled **Fencing Ready for Crew** rather than Open MakeSafe Jobs.
 - Visibility is not authority: when the crew on a job is somebody else, the detail view renders view-only (`// <foreign-job-readonly>` → `#jobViewOnlyBanner`) with no clock/accept actions and no note, photo, comms, crew-charge or work-order invoice controls, and `blockedForeignJobWrite` rejects such a write inside `api()` before it reaches the network or the offline retry queue. Make-safe detail keeps its own server-driven authority model and is untouched by this gate.
 

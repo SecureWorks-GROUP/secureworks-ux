@@ -405,6 +405,24 @@ only in `job_documents` (`type: roof_report`) and is not in the pack, so this
 pane cannot show it. Do not "fix" that by joining job documents into the pack's
 tab strip without a Captain ruling — this pane renders the byte-exact pack.
 
+The LIVE PORTAL READER THUMB on roof/assessment cards (kanban + Docs Ready
+cockpit header) shows the board's stored Prime/PrimeEco screenshot and an honest
+chip WITHOUT a human opening the portal: Locked / Filling n-of-n / Link gone /
+Locked · link gone. The chip's LATEST result decides reachability, the SHOWN shot
+decides "was it ever locked" — a later `unreachable` never erases a prior `done`
+(an expired link after lock is an aged job, not waiting). The thumb opens the
+STORED screenshot only; the Prime share URL is never carried here (it expires
+~30 days and would read as a dead click). Source: the canonical board row's
+`portal_capture` block (backend sweep lane owns writing it from
+`makesafe_portal_capture_revisions`); the UX reads only those fields and derives
+the chip. Search `// <makesafe-portal-live-thumb>` in `ops.html`; the cockpit
+header calls `renderMakesafePortalThumbForJob`. Only a signed http(s) read (or an
+inline `data:image` from the offline harness) is showable — never a storage key
+or `data:text/html`. Guard: `tests/e2e/ops-makesafe-portal-live-thumb.spec.js`;
+visual proof `scripts/ses-portal-thumb-shot.js` +
+`tests/e2e/fixtures/ses-portal-thumb-glendalough.js` (drawn facsimile, never the
+live capture), evidence in `docs/evidence/ses-portal-live-thumb-2026-08-13/`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno) render through ONE card

@@ -1609,6 +1609,43 @@
     .ms-card-v2 .ms-crew-chip.off .ms-crew-name { color: var(--sw-mid-light); }
 
     /* ════════════════════════════════════════════════════════════
+       LIVE PORTAL READER CAPTURE — stored screenshot thumb + honest chip
+       (<makesafe-portal-live-thumb>). Light board chrome only, no dark stage.
+       The thumb opens the STORED screenshot, never the dead Prime share URL.
+       ════════════════════════════════════════════════════════════ */
+    .ms-card-v2 .ms-portal-cap { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .ms-portal-thumb {
+      flex-shrink: 0; width: 46px; height: 46px; padding: 0; border-radius: 7px;
+      border: 1px solid var(--sw-border); background: var(--sw-warm-200);
+      overflow: hidden; cursor: pointer; display: block; line-height: 0;
+      box-shadow: 0 1px 2px rgba(41,60,70,0.08);
+    }
+    .ms-portal-thumb:hover { border-color: var(--sw-mid-light); box-shadow: 0 2px 6px rgba(41,60,70,0.16); }
+    .ms-portal-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+    .ms-portal-cap-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+    .ms-portal-chip {
+      display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+      font-size: 9px; font-weight: 800; letter-spacing: 0.2px; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 100px;
+    }
+    /* Locked = the form is submitted; the shot IS the report → confident green. */
+    .ms-portal-chip.locked { background: color-mix(in srgb, var(--sw-green) 16%, #fff); color: #1E7A45; }
+    /* Filling = live, not yet locked → amber "still in progress". */
+    .ms-portal-chip.filling { background: color-mix(in srgb, var(--sw-yellow) 16%, #fff); color: var(--sw-yellow); }
+    /* Link gone with no prior lock → muted grey, an aged link, not an error. */
+    .ms-portal-chip.gone { background: var(--sw-warm-200); color: var(--sw-mid); }
+    /* Locked then link expired → still green (locked stands), a struck link glyph. */
+    .ms-portal-chip.locked-gone {
+      background: color-mix(in srgb, var(--sw-green) 14%, #fff); color: #1E7A45;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sw-green) 30%, #fff);
+    }
+    .ms-portal-when { font-size: 8px; font-weight: 600; color: var(--sw-text-sec); }
+    /* Review-pane variant: a touch larger, same light chrome. */
+    .ms-portal-cap.review { margin-top: 0; }
+    .ms-portal-cap.review .ms-portal-thumb { width: 58px; height: 58px; }
+    .ms-portal-cap.review .ms-portal-chip { font-size: 10px; }
+
+    /* ════════════════════════════════════════════════════════════
        DOC-COMPLETENESS ICON ROW (OPT1 — line icons in soft square chips)
        5 icons, fixed order: WO · Report · SWMS · Invoice · Sent. State reads
        at a glance from the chip: done = sage tint + forest glyph + tiny check;
@@ -3413,6 +3450,9 @@
       gap: 4px 14px;
     }
     .msr-submeta b { color: var(--sw-dark); font-weight: 600; }
+    /* Live portal reader capture in the header — reuses the board card's
+       .ms-portal-* thumb + chip (<makesafe-portal-live-thumb>). */
+    .msr-portal-thumb-row { margin-top: 8px; }
 
     .msr-chip {
       display: inline-block;
@@ -12688,6 +12728,12 @@ function rememberMakesafeCanonicalStage(row) {
   if (row.pack && typeof row.pack === 'object') {
     _makesafeCanonicalPackById[row.id] = makesafeHasDraftedPack({ report_pack: row.pack });
   }
+  // Remember the normalised live portal capture so the Docs Ready cockpit (a
+  // separate module) can show the same thumb + chip by job id without re-deriving.
+  // See <makesafe-portal-live-thumb>.
+  var cap = normaliseMakesafePortalCapture(row.portal_capture);
+  if (cap) _makesafePortalCaptureById[row.id] = cap;
+  else delete _makesafePortalCaptureById[row.id];
 }
 
 // Job ids whose canonical stage could not be re-read after a transition.
@@ -13050,6 +13096,12 @@ function mapCanonicalMakesafeRow(row, enrich, opts) {
   j.readiness_revision = row.readiness_revision || null;
   j.commercial_warning = row.commercial_warning || null;
   j.computed_status = row.computed_status || null;
+  // Live portal reader capture (roof/assessment cards with a Prime share URL) —
+  // canonical row only. The card + review pane show its stored screenshot and an
+  // honest chip. See <makesafe-portal-live-thumb>. Passed through verbatim; the
+  // normaliser owns shape tolerance.
+  j.portal_capture = row.portal_capture || null;
+
   // SES family identity — canonical row only. `ses_family` is the key the family
   // tag renders from; `ses_family_label` is the feed's stable wording for it.
   j.ses_family = row.ses_family || null;
@@ -13622,6 +13674,152 @@ function renderMakesafeCardLinks(j) {
   return html;
 }
 
+// <makesafe-portal-live-thumb>
+// The board keeps a headless reader (capture_portal_evidence.py/v1) screenshotting
+// the Prime/PrimeEco share page for roof + assessment cards, persisting a revision
+// only when something changed (makesafe_portal_capture_revisions). This surface
+// shows that shot and its honest state on the card face WITHOUT a human — and never
+// opens the live Prime URL, which expires ~30 days and would read as a dead click.
+//
+// DATA CONTRACT — the canonical board row carries, for a roof/assessment card that
+// has a Prime share URL, a `portal_capture` object. The UX reads only these fields
+// and derives the chip itself; the backend sweep lane owns writing them:
+//   {
+//     role:               'roof_report' | 'assessment',
+//     screenshot_url:     signed https URL of the shot to SHOW. Prefer the last
+//                         SUCCESSFUL `done` shot even when the latest capture is
+//                         unreachable — a locked form stays the report.
+//     shown_result:       'done' | 'not_done' | 'unreachable'  (result of the shown shot)
+//     shown_captured_at:  ISO timestamp of the shown shot
+//     shown_signal:       the reader's signal string for the shown shot
+//     latest_result:      'done' | 'not_done' | 'unreachable'  (the most recent
+//                         capture, even if we are showing an older `done`)
+//     answered, total:    parsed n-of-n (optional; parsed from the signal otherwise)
+//   }
+// Absent field, absent screenshot, or a non-roof/assessment card => renders nothing.
+// A stored screenshot is a private object; the URL must be a signed read. This
+// surface NEVER receives or opens the Prime share URL.
+var _makesafePortalCaptureById = {};
+var MAKESAFE_PORTAL_CAPTURE_ROLES = { roof_report: 1, assessment: 1 };
+
+// Parse "22 of 24 answered" / "21 of 23 fields answered" out of a reader signal.
+function makesafePortalNofN(signal) {
+  var m = /(\d+)\s+of\s+(\d+)/.exec(String(signal || ''));
+  if (!m) return null;
+  var answered = parseInt(m[1], 10);
+  var total = parseInt(m[2], 10);
+  if (!isFinite(answered) || !isFinite(total) || total <= 0) return null;
+  return { answered: answered, total: total };
+}
+
+// Normalise the raw board `portal_capture` object into the shape the thumb + chip
+// read. Returns null when there is no showable shot. Tolerant of a couple of
+// plausible field spellings so a small backend shape drift does not blank the card.
+function normaliseMakesafePortalCapture(pc) {
+  if (!pc || typeof pc !== 'object') return null;
+  var url = pc.screenshot_url || pc.thumb_url || pc.shot_url || pc.screenshot || '';
+  url = String(url || '').trim();
+  // Only a real signed http(s) read (or an inline data:image, used by the
+  // offline proof harness) is showable — never a bare storage key, and never a
+  // Prime share URL or a data:text/html payload leaking through.
+  if (!/^(https?:\/\/|data:image\/)/i.test(url)) return null;
+  var role = String(pc.role || '').trim().toLowerCase();
+  // If a role is stated it must be a portal role; an unstated role is allowed
+  // (the backend only attaches this object to roof/assessment cards).
+  if (role && !MAKESAFE_PORTAL_CAPTURE_ROLES[role]) return null;
+  var shown = String(pc.shown_result || pc.result || '').trim().toLowerCase();
+  var latest = String(pc.latest_result || pc.result || shown || '').trim().toLowerCase();
+  var signal = pc.shown_signal || pc.signal || '';
+  var nofn = (pc.answered != null && pc.total != null)
+    ? { answered: pc.answered, total: pc.total }
+    : makesafePortalNofN(signal);
+  return {
+    url: url,
+    role: role || null,
+    shownResult: shown || null,
+    latestResult: latest || null,
+    signal: String(signal || ''),
+    capturedAt: pc.shown_captured_at || pc.captured_at || null,
+    answered: nofn ? nofn.answered : null,
+    total: nofn ? nofn.total : null
+  };
+}
+
+// The honest status chip: Locked / Filling n-of-n / Link gone / Locked (link gone).
+// The LATEST result decides "is the link still reachable"; the SHOWN shot decides
+// "was it ever locked". A later unreachable never erases a prior locked capture.
+function makesafePortalCaptureChip(cap) {
+  if (!cap) return null;
+  var latest = cap.latestResult || cap.shownResult;
+  var lockedShot = cap.shownResult === 'done';
+  var nofn = (cap.answered != null && cap.total != null)
+    ? (cap.answered + '/' + cap.total) : '';
+  if (latest === 'unreachable') {
+    if (lockedShot) {
+      return { label: 'Locked · link gone', cls: 'locked-gone',
+        title: 'The portal form was locked/submitted before the builder share link expired. The stored screenshot is the report; the live link is gone (not waiting).' };
+    }
+    return { label: 'Link gone', cls: 'gone',
+      title: 'The builder share link is expired or no longer active. No locked capture is on file yet.' };
+  }
+  if (latest === 'not_done') {
+    return { label: nofn ? ('Filling ' + nofn) : 'Filling', cls: 'filling',
+      title: 'The portal form is live and not yet locked' + (nofn ? (' — ' + nofn + ' answered') : '') + '. The trade has not submitted it.' };
+  }
+  if (latest === 'done') {
+    return { label: 'Locked', cls: 'locked',
+      title: 'The portal form is locked/submitted' + (nofn ? (' — ' + nofn + ' answered') : '') + '. The stored screenshot is the report.' };
+  }
+  return null;
+}
+
+// Open the STORED screenshot (a signed read), never the dead Prime share URL.
+// The url is escaped into the attribute and re-checked here as http(s).
+function openMakesafePortalShot(url) {
+  url = String(url || '');
+  // http(s) signed read or an inline data:image only — never data:text/html or
+  // a Prime share URL (which is never carried here in the first place).
+  if (!/^(https?:\/\/|data:image\/)/i.test(url)) return;
+  window.open(url, '_blank', 'noopener');
+}
+
+// Render the thumbnail + chip for a normalised capture. `variant` is 'card'
+// (kanban face) or 'review' (the Docs Ready cockpit header). Light MakeSafe
+// chrome only — no dark stage.
+function renderMakesafePortalThumb(cap, variant) {
+  if (!cap || !cap.url) return '';
+  var chip = makesafePortalCaptureChip(cap);
+  if (!chip) return '';
+  var v = variant === 'review' ? ' review' : '';
+  var when = cap.capturedAt ? fmtDate(String(cap.capturedAt).slice(0, 10)) : '';
+  var alt = 'Portal reader screenshot' + (chip.label ? (' — ' + chip.label) : '');
+  var thumbTitle = 'Open the stored portal screenshot' + (when ? (' (captured ' + when + ')') : '');
+  var html = '<div class="ms-portal-cap' + v + '">';
+  html += '<button type="button" class="ms-portal-thumb" title="' + escapeAttr(thumbTitle) + '"'
+    + ' onclick="event.stopPropagation();openMakesafePortalShot(\'' + escapeAttr(cap.url) + '\')">';
+  html += '<img src="' + escapeAttr(cap.url) + '" alt="' + escapeAttr(alt) + '" loading="lazy" draggable="false">';
+  html += '</button>';
+  html += '<div class="ms-portal-cap-meta">';
+  html += '<span class="ms-portal-chip ' + chip.cls + '" title="' + escapeAttr(chip.title) + '">' + escapeHtml(chip.label) + '</span>';
+  if (when) html += '<span class="ms-portal-when">Read ' + escapeHtml(when) + '</span>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+// The card face: normalise the row's portal_capture and render, or nothing.
+function renderMakesafeCardPortalThumb(j) {
+  return renderMakesafePortalThumb(normaliseMakesafePortalCapture(j && j.portal_capture), 'card');
+}
+
+// Cross-surface lookup by job id (the Docs Ready cockpit lives in a module and
+// reads this rather than re-deriving). Remembered when the board maps each row.
+function renderMakesafePortalThumbForJob(jobId, variant) {
+  var cap = jobId ? _makesafePortalCaptureById[jobId] : null;
+  return renderMakesafePortalThumb(cap, variant || 'review');
+}
+// </makesafe-portal-live-thumb>
+
 // The visible review button and openMakesafeJob share ONE reviewability fact:
 // membership in the current SES needs_review queue. Canonical stage still owns
 // placement, and the canonical row's pack block still owns pack existence. No
@@ -13775,6 +13973,9 @@ function renderMakesafeCard(j, status) {
     html += '<div class="ms-crew-when">Needs allocation</div></div></div>';
   }
 
+  // live portal reader capture: stored screenshot thumb + honest chip (roof /
+  // assessment cards with a Prime share URL). See <makesafe-portal-live-thumb>.
+  html += renderMakesafeCardPortalThumb(j);
   // doc-icon row (WO / Report / SWMS / Invoice / Sent) + X/5 count
   html += renderMakesafeStatusIcons(j, status);
   // builder / family links the row already carries — clickable on the face

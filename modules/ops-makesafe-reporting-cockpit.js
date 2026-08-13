@@ -819,6 +819,15 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
     });
     html += '</div>';
   }
+  // Live portal reader capture: the stored screenshot + honest chip the board
+  // card also shows, looked up by job id from the canonical board feed. The
+  // pack-driven "Builder portal" evidence + capture doc tab below are unchanged;
+  // this is the same at-a-glance thumb the kanban card carries. Defensive: only
+  // when ops.html is present and the board has a capture for this job.
+  if (typeof renderMakesafePortalThumbForJob === 'function') {
+    var portalThumb = renderMakesafePortalThumbForJob(jobId, 'review');
+    if (portalThumb) html += '<div class="msr-portal-thumb-row">' + portalThumb + '</div>';
+  }
   html += '</div>';
   html += '<div class="msr-state"><span class="msr-chip" style="background:' + statusChip.bg + ';color:' + statusChip.fg + ';">' + escapeHtml(statusChip.label) + '</span></div>';
   html += '</div>';

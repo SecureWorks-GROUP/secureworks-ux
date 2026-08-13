@@ -370,7 +370,13 @@ it too (`_msNotesEl`). A bare `getElementById` here writes to whichever copy is
 first in the DOM, which is the hidden one. PRIMARY ACTIONS sit in a pinned
 panel foot at the BOTTOM — a flex sibling OUTSIDE the scroll body, deliberately
 not `position:sticky` (sticky overlays content on a full-page shot and fights
-the flex column) — APPROVE INVOICE then SEND IT, always visible; armed ONLY by
+the flex column). THE FOOT IS ONE COMPACT BAND (captain ruling 2026-08-13,
+`docs/evidence/makesafe-review-pane-layout-2026-08-13/`): small stamp beside a
+one-line note that always keeps the irreversibility warning visible, with the
+full press sentence folded verbatim into "What one press does" — decoration
+never keeps its size at the document preview's expense (viewport-realistic
+capture pattern: `scripts/ses-review-pane-viewport-shot.js`; full-page shots
+hide foot-vs-preview bugs). APPROVE INVOICE then SEND IT, always visible; armed ONLY by
 `controls.approve_invoice.enabled` / `controls.send_it.enabled`; a disabled
 stamp has no id and no onclick, both action functions re-check the flag, and
 an enabled stamp's note renders the backend's own `plan` text verbatim. A

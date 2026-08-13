@@ -2549,10 +2549,10 @@ function _msSesTileThumb(t) {
  * page from the row's own figures; anything else gets an open-in-new-tab
  * fallback.
  *
- * The stage height is viewport-relative (see `.msr-stage` in ops.html): the
- * preview owns the pane's vertical space so the captain can read what he is
- * approving. A PDF or image still carries an "Open document" escape hatch to a
- * full-size read in a new tab.
+ * The stage renders the document at page width and GROWS with it, so the whole
+ * pane body scrolls as one page (see `.msr-stage` in ops.html) and the captain
+ * can read what he is approving. A PDF or image still carries an "Open
+ * document" escape hatch to a full-size read in a new tab.
  */
 function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];

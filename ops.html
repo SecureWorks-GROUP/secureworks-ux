@@ -3959,17 +3959,26 @@
       padding: 3px 10px;
     }
     /* LIGHT stage — same chrome as the board (white card, hairline border).
-       The PDF viewer paints pages to canvas inside it and scrolls. */
+       READABLE-FIRST (Captain ruling 2026-08-13): the document renders at page
+       WIDTH and the stage GROWS with it, so the whole pane (.msr-body) scrolls
+       as one page. It is deliberately NOT a short fixed-height inner scroll box
+       any more — that clamp turned tall pages into a sliver AND trapped the
+       mouse wheel on a dead frame. A generous min-height keeps a short document
+       from looking lost; max-height caps a very tall pack so the action foot is
+       still reachable, and only THEN does the stage scroll internally. */
     .msr-stage {
       background: var(--sw-warm-100);
       border: 1px solid var(--sw-border);
       border-radius: 8px;
-      height: clamp(240px, 42vh, 460px);
+      min-height: 300px;
+      max-height: 200vh;
       display: flex;
-      align-items: flex-start;
-      justify-content: center;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
       position: relative;
       overflow: auto;
+      overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
     .msr-stage-tag {
@@ -4007,6 +4016,19 @@
     .msr-stage-open:hover { border-color: var(--sw-mid); color: var(--sw-orange); }
     .msr-stage-open:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 2px; }
     .msr-stage img { max-width: 96%; height: auto; margin: 3%; object-fit: contain; }
+    /* A document image (Prime/roof capture) reads at page WIDTH, top-aligned,
+       natural height — the stage scrolls to it. Never height-crushed. */
+    .msr-stage-doc .msr-doc-img {
+      width: min(100%, 720px);
+      max-width: 96%;
+      height: auto;
+      margin: 0;
+      background: #fff;
+      border: 1px solid var(--sw-border);
+      border-radius: 4px;
+      box-shadow: 0 2px 10px rgba(41, 60, 70, 0.12);
+      object-fit: contain;
+    }
     .msr-stage .msr-stage-html { width: 100%; border: 0; }
     .msr-stage-html { background: #fff; overflow: auto; padding: 18px 20px; color: var(--sw-text); text-align: left; }
     .msr-stage-empty { color: var(--sw-mid); font-size: 13px; padding: 24px 20px; text-align: center; max-width: 46ch; line-height: 1.55; align-self: center; }
@@ -4340,7 +4362,7 @@
       .msr-foot { padding-left: 16px; padding-right: 16px; }
       .msr-fb-host { padding-left: 16px; padding-right: 16px; }
       .msr-mail-line { flex-direction: column; gap: 2px; }
-      .msr-stage { height: clamp(200px, 36vh, 320px); }
+      .msr-stage { min-height: 240px; max-height: 220vh; }
       .msr-stamp { padding: 11px 18px; }
       .msr-stamp .msr-stamp-word { white-space: normal; font-size: 14px; letter-spacing: 0.1em; }
       .msr-invpage-body { padding: 18px 20px; }

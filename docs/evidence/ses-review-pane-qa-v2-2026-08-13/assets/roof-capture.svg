@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="1160" viewBox="0 0 820 1160">
+  <rect width="820" height="1160" fill="#ffffff"/>
+  <rect x="0" y="0" width="820" height="96" fill="#293C46"/>
+  <text x="40" y="60" font-family="Arial, sans-serif" font-size="34" fill="#ffffff" font-weight="bold">Prime Roof Report — locked capture</text>
+  <text x="40" y="150" font-family="Arial, sans-serif" font-size="22" fill="#293C46" font-weight="bold">Claim / Job: SWMS-261146 (Mosman Park)</text>
+  <line x1="40" y1="180" x2="780" y2="180" stroke="#cdd6dc" stroke-width="2"/>
+  <text x="40" y="230" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">1. Roof type: Concrete tile</text>
+  <text x="40" y="278" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">2. Storm damage: Ridge capping dislodged, 6 tiles cracked</text>
+  <text x="40" y="326" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">3. Make-safe applied: Tarped exposed section, secured ridge</text>
+  <text x="40" y="374" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">4. Access: 2-storey, harness anchor used</text>
+  <text x="40" y="422" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">5. Attendance: 11 Aug 2026, 08:40</text>
+  <rect x="40" y="470" width="740" height="360" fill="#eef3f6" stroke="#cdd6dc" stroke-width="2"/>
+  <text x="60" y="520" font-family="Arial, sans-serif" font-size="18" fill="#4C6A7C">[ roof photograph — tarped ridge line ]</text>
+  <text x="40" y="900" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">6. Temporary repair holds until full re-roof scheduled.</text>
+  <text x="40" y="948" font-family="Arial, sans-serif" font-size="20" fill="#4C6A7C">7. Form submitted and LOCKED in Prime portal.</text>
+  <line x1="40" y1="1000" x2="780" y2="1000" stroke="#cdd6dc" stroke-width="2"/>
+  <text x="40" y="1050" font-family="Arial, sans-serif" font-size="18" fill="#8a97a0">This capture is the report for a roof-portal make-safe.</text>
+  <text x="40" y="1090" font-family="Arial, sans-serif" font-size="18" fill="#8a97a0">No separate make-safe PDF is produced for this family.</text>
+</svg>

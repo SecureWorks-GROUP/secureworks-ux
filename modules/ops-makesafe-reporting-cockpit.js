@@ -1112,7 +1112,21 @@ function _msSesHoldBlockers(cockpit) {
  */
 function _msSesBlockerIsSoftDraft(b) {
   var fact = String((b && b.fact) || '').toLowerCase();
-  return /email\s*draft/.test(fact) || /no\s+draft\s+on\s+docket/.test(fact);
+  // Every phrasing the backend uses for "an outgoing email is not drafted yet".
+  // The old test only caught "email draft" and the exact "no draft on docket";
+  // live packs say "REPORT/PHOTO/INVOICE EMAIL — no draft on CURRENT docket",
+  // which slipped through and (wrongly) HARD-locked SEND. Match the family:
+  //   - anything naming an email draft ("email draft", "email is not drafted"),
+  //   - "no draft on [current] docket" with the optional interior word,
+  //   - a "… EMAIL … no draft / not drafted / missing draft" caveat.
+  // The soft category is the outgoing EMAIL draft only. A missing REPORT
+  // DOCUMENT / invoice / work order is a hard artefact gap and must NOT be
+  // softened here, so every branch is anchored on "email" or the "no draft on
+  // docket" idiom — never on the bare word "report"/"invoice".
+  if (/email\s*draft/.test(fact)) return true;
+  if (/no\s+draft\s+on\s+(?:\w+\s+)?docket/.test(fact)) return true;
+  if (/\bemail\b/.test(fact) && /\b(no|not|missing|pending|awaiting)\b[^.]*\bdraft(?:ed)?\b/.test(fact)) return true;
+  return false;
 }
 
 /**
@@ -1225,6 +1239,35 @@ function _msSesFamilyEvidence(ctx) {
 function _msSesReportPdfNotApplicable(ctx) {
   var entry = _msSesFamilyEvidence(ctx).supporting_report_pdf;
   return !!(entry && String(entry.state || '').toLowerCase() === 'not_applicable');
+}
+
+/**
+ * True when THIS family carries no SWMS obligation, so an absent SWMS is not a
+ * gap and must show NO cross and NO "not in this pack" line (Captain ruling
+ * 2026-08-13: a SWMS red X on an AJS temporary-fence job is a family lie).
+ *
+ * Prefer the backend's own family_evidence.swms state (the same not_applicable
+ * signal that already governs the roof report PDF). When the read carries no
+ * such entry, fall back to the one family the captain named: temporary fencing
+ * (AJS builder), identified from the job's own family/type facts — never a guess
+ * for anything else, so ordinary make-safes keep the deliberately-soft SWMS
+ * clause ("not in this pack", never "not required").
+ */
+function _msSesSwmsNotApplicable(ctx, row) {
+  var entry = _msSesFamilyEvidence(ctx).swms;
+  if (entry && typeof entry === 'object') {
+    var state = String(entry.state || '').toLowerCase();
+    if (state === 'not_applicable') return true;
+    if (state === 'required' || state === 'expected' || state === 'present' || state === 'missing') return false;
+  }
+  var hay = [
+    (row && row.makesafe_job_family), (row && row.makesafe_job_family_label),
+    (row && row.ses_family), (row && row.ses_family_label), (row && row.trade_notes)
+  ].map(function(s) { return String(s || '').toLowerCase(); }).join(' ');
+  // Temporary fencing make-safes carry no SWMS. Match the family label / job
+  // type, not the builder alone (AJS also runs physical make-safes that DO owe
+  // a SWMS), so the suppression is scoped to the fence work the captain named.
+  return /temp(?:orary)?\s*fenc|temp\s*fence|\bfencing\s*make-?safe\b/.test(hay);
 }
 
 /**
@@ -1418,7 +1461,12 @@ function _msSesDoneItems(row, ctx) {
   if (capture.expected) {
     items.push({ label: 'Portal capture', done: draft.some(function(d) { return d && d.isCapture; }) });
   }
-  items.push({ label: 'SWMS', done: hasDraft(/swms/i) });
+  // SWMS only appears for families that owe one. On a temporary-fence make-safe
+  // it is not applicable, so it shows NO tile and NO cross (Captain ruling
+  // 2026-08-13) rather than a red X that reads as a missing document.
+  if (!_msSesSwmsNotApplicable(ctx, row)) {
+    items.push({ label: 'SWMS', done: hasDraft(/swms/i) });
+  }
   items.push({ label: 'Photos', done: !!(Array.isArray(row.photos) && row.photos.length) });
   items.push({ label: 'Draft invoice', done: !!row.invoice });
   return items;
@@ -1474,7 +1522,9 @@ function _msSesMissingLine(row, ctx) {
   if (!(Array.isArray(row.photos) && row.photos.length)) missing.push('site photos');
   if (!row.invoice) missing.push('a draft invoice');
   var invoicePdfMissing = row.invoice && !hasDraft(/invoice/i);
-  var swmsAbsent = !hasDraft(/swms/i);
+  // A family that owes no SWMS (temporary fencing) says nothing about SWMS —
+  // no "not in this pack" line, mirroring the suppressed tile.
+  var swmsAbsent = !_msSesSwmsNotApplicable(ctx, row) && !hasDraft(/swms/i);
   if (!missing.length && !invoicePdfMissing && !swmsAbsent) return '';
   var bits = [];
   if (missing.length) bits.push('<b>Not in this pack:</b> ' + escapeHtml(missing.join(', ')) + '.');
@@ -1689,7 +1739,20 @@ function _msSesDocsFromArtifacts(artifacts, captureFacts) {
       }
       return;
     }
-    if (!a.signed_url) return;
+    // A named DOCUMENT role that ships in the pack but whose signed URL was not
+    // minted must not vanish: dropping it is how "closeout.report = true" still
+    // rendered NO report tile and the pane lied "no trade report submitted"
+    // (Captain live proof, Ellenbrook/Stratton). The tile EXISTS and says the
+    // link could not be loaded (mirror of the Xero invoice_unavailable state),
+    // so the captain sees the report is there and can Open document / retry.
+    if (!a.signed_url) {
+      if (a.role === 'supporting_report_pdf') {
+        draft.push({ label: 'Make safe report', url: null, kind: 'doc_unavailable', isDraft: true, docLabel: 'report' });
+      } else if (a.role === 'swms_artifact') {
+        draft.push({ label: 'SWMS', url: null, kind: 'doc_unavailable', isDraft: true, docLabel: 'SWMS' });
+      }
+      return;
+    }
     // The capture roles are decided by BYTES: JSON under portal_roof_report is
     // the manifest (read separately for the capture facts), not a document.
     if (_msSesIsCaptureRole(a.role)) {
@@ -2244,6 +2307,7 @@ function _msReportingDocTabs(d) {
       raw_report: doc.raw_report || null,
       isUnknownRole: !!doc.isUnknownRole,
       roleName: doc.roleName || null,
+      docLabel: doc.docLabel || null,
     });
   });
   // Multiple work orders: discriminate by the PO ref embedded in the file name
@@ -2352,10 +2416,17 @@ function _msPdfGetDoc(url) {
   return p;
 }
 
+// The readable default width for a stage page. Page-WIDTH (not fit-whole-page):
+// the captain must be able to read the invoice/report without Open Document.
+var _MS_PDF_STAGE_WIDTH = 700;
+
 // Render one pdf.js page into a canvas sized to `cssWidth` (device-pixel aware).
+// A zero/absent cssWidth (a not-yet-laid-out or hidden host) would collapse the
+// canvas to a 1px sliver, so it clamps to a readable default instead of 0.
 function _msPdfPaintPage(page, canvas, cssWidth) {
   var base = page.getViewport({ scale: 1 });
-  var scale = cssWidth / base.width;
+  var w = (cssWidth && cssWidth > 40) ? cssWidth : _MS_PDF_STAGE_WIDTH;
+  var scale = w / base.width;
   var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
   var viewport = page.getViewport({ scale: scale * dpr });
   canvas.width = Math.max(1, Math.floor(viewport.width));
@@ -2406,8 +2477,26 @@ function _msPdfFillThumb(el, doc) {
 
 function _msPdfFillViewer(el, doc) {
   var cap = Math.min(doc.numPages, 6); // make-safe packs are short; cap for safety
-  el.innerHTML = '';
-  var width = Math.min(el.clientWidth || 640, 720);
+  // NEVER blank the pane before a page has painted: the old code cleared el
+  // first, so a slow/failed render left a white void (the Stratton bug). Paint
+  // into a detached container and swap it in only when the first page is on
+  // screen; keep the "Rendering…" line visible until then.
+  var rectW = (el.getBoundingClientRect && el.getBoundingClientRect().width) || 0;
+  var width = Math.min(el.clientWidth || rectW || _MS_PDF_STAGE_WIDTH, 720);
+  if (!(width > 40)) width = _MS_PDF_STAGE_WIDTH;
+  var frag = document.createElement('div');
+  frag.style.width = '100%';
+  frag.style.display = 'flex';
+  frag.style.flexDirection = 'column';
+  frag.style.alignItems = 'center';
+  frag.style.gap = '12px';
+  var swapped = false;
+  function swapIn() {
+    if (swapped) return;
+    swapped = true;
+    el.innerHTML = '';
+    el.appendChild(frag);
+  }
   var chain = Promise.resolve();
   var i;
   for (i = 1; i <= cap; i++) {
@@ -2416,8 +2505,8 @@ function _msPdfFillViewer(el, doc) {
         return doc.getPage(pageNum).then(function(page) {
           var canvas = document.createElement('canvas');
           canvas.className = 'msr-pdf-page';
-          el.appendChild(canvas);
-          return _msPdfPaintPage(page, canvas, width);
+          frag.appendChild(canvas);
+          return _msPdfPaintPage(page, canvas, width).then(swapIn);
         });
       });
     })(i);
@@ -2427,8 +2516,9 @@ function _msPdfFillViewer(el, doc) {
       var more = document.createElement('div');
       more.className = 'msr-pdf-more';
       more.textContent = (doc.numPages - cap) + ' more page' + (doc.numPages - cap === 1 ? '' : 's') + ' — use Open document for the full read';
-      el.appendChild(more);
+      frag.appendChild(more);
     }
+    swapIn(); // 0-page edge case: still swap so the loading line never lingers
   });
 }
 
@@ -2478,6 +2568,8 @@ function _msRenderDocStage(docTabs, idx, row) {
   var inner;
   if (t && t.kind === 'invoice_unavailable') {
     inner = _msSesRenderInvoiceUnavailable(row || t);
+  } else if (t && t.kind === 'doc_unavailable') {
+    inner = _msSesRenderDocUnavailable(t);
   } else if (t && t.kind === 'invdoc') {
     // Pre-Xero proposal page only. Callers must not route a bound Xero DRAFT
     // here — that path is invoice_unavailable or the real PDF iframe.
@@ -2489,7 +2581,12 @@ function _msRenderDocStage(docTabs, idx, row) {
       inner = '<div class="msr-stage-empty">Document not available.</div>';
     }
   } else if (t.kind === 'image') {
-    inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;">';
+    // Page-WIDTH readable, never height-crushed. A tall Prime/roof capture used
+    // to render at max-height:94% of the short stage — a toothpick sliver. Now
+    // it renders at readable page width and the stage scrolls (same as a PDF
+    // page), so the answers on the portal form are legible in place.
+    inner = '<div class="msr-stage-doc"><img class="msr-doc-img" src="' + escapeAttr(t.url)
+      + '" alt="' + escapeAttr(t.tabLabel) + '" loading="lazy"></div>';
   } else if (t.kind === 'pdf') {
     // The selected PDF is PAINTED here (pdf.js -> canvas) by _msHydratePdfSurfaces,
     // not handed to the native plugin — see <makesafe-pdf-preview>. The loading
@@ -2509,7 +2606,7 @@ function _msRenderDocStage(docTabs, idx, row) {
     openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener"'
       + freshnessGate + '>Open document &#8599;</a>';
   }
-  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
+  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">page width</span>' + inner + '</div>';
 }
 
 // <ses-roof-capture-provenance>
@@ -2640,6 +2737,25 @@ function _msSesRenderInvoiceUnavailable(d) {
     html += '<div class="msr-invpage-note" style="margin-top:8px;">The real Xero invoice PDF could not be loaded for this view.</div>';
   }
   html += '<div class="msr-invpage-foot" style="margin-top:12px;">This screen will not invent a tax invoice. Retry after the pack reloads, or open the invoice from Xero.</div>';
+  html += '</div></div>';
+  return html;
+}
+
+/**
+ * Honest empty state for a named document (report / SWMS) that IS in the pack
+ * but whose signed URL was not minted for this view. It keeps the tile present
+ * (the document exists) and says the link could not be loaded — never the old
+ * silent drop that read as "no report submitted" while the board closeout said
+ * report = true.
+ */
+function _msSesRenderDocUnavailable(t) {
+  var name = (t && t.docLabel) ? String(t.docLabel) : (t && t.tabLabel ? String(t.tabLabel) : 'document');
+  var html = '<div class="msr-invpage" style="display:flex;align-items:center;justify-content:center;">';
+  html += '<div class="msr-invpage-body" style="text-align:center;max-width:30rem;">';
+  html += '<div class="msr-invpage-head" style="justify-content:center;"><h4>' + escapeHtml(t && t.tabLabel ? t.tabLabel : 'Document') + '</h4></div>';
+  html += '<div class="msr-invpage-note" style="margin-top:8px;">This ' + escapeHtml(name)
+    + ' is on the pack, but its file link could not be loaded for this view.</div>';
+  html += '<div class="msr-invpage-foot" style="margin-top:12px;">Use <b>Open document</b> if a link is offered, or reopen this pack once it rebuilds. This screen will not invent the document.</div>';
   html += '</div></div>';
   return html;
 }
@@ -2870,8 +2986,9 @@ function _msReportingBuildCarouselDocs(d) {
   var seen = {};
   function add(label, url, kind, meta, isDraft) {
     meta = meta || {};
-    // invoice_unavailable has no URL by design — honest empty state, not a fake.
-    if (!url && !meta.raw_report && kind !== 'html' && kind !== 'invoice_unavailable') return;
+    // invoice_unavailable / doc_unavailable have no URL by design — an honest
+    // "the document is here but its link could not be loaded" tile, not a fake.
+    if (!url && !meta.raw_report && kind !== 'html' && kind !== 'invoice_unavailable' && kind !== 'doc_unavailable') return;
     var dedupeKey = url || [label || 'Document', meta.source_type || kind || '', meta.received_at || meta.created_at || ''].join('|');
     if (seen[dedupeKey]) return;
     seen[dedupeKey] = true;
@@ -2901,6 +3018,7 @@ function _msReportingBuildCarouselDocs(d) {
       capture: meta.capture || null,
       isUnknownRole: !!meta.isUnknownRole,
       roleName: meta.roleName || null,
+      docLabel: meta.docLabel || null,
     });
   }
   // Drafted outputs first.
@@ -2917,7 +3035,8 @@ function _msReportingBuildCarouselDocs(d) {
 // Normalise a feed kind to the viewer's kind vocabulary.
 // Unknown kinds get classified by URL (null → doc-kind from URL).
 function _msReportingNormaliseKind(kind) {
-  if (kind === 'pdf' || kind === 'image' || kind === 'html' || kind === 'invoice_unavailable') {
+  if (kind === 'pdf' || kind === 'image' || kind === 'html' ||
+      kind === 'invoice_unavailable' || kind === 'doc_unavailable') {
     return kind;
   }
   return null;

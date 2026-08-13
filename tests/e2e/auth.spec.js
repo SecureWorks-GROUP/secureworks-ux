@@ -29,10 +29,15 @@ test.describe('Trade App authentication', () => {
       await signIn(page, PERSONAS.installer);
 
       await expect(page.locator('#ncalRoot [data-feed-failure="access"]')).toContainText('No trade access for this account');
-      await expect(page.locator('#swAuthGate')).toHaveCount(0);
+      await expect(page.locator('#viewLogin')).toBeHidden();
+      await expect(page.locator('#bottomNav')).toBeVisible();
       await expect(page.locator('#headerUser')).toHaveText('E2E Installer');
-      await page.waitForTimeout(500);
-      await expect(page.locator('#swAuthGate')).toHaveCount(0);
+      // _forceLogout repaints the login view on a 1500ms timeout — wait past it
+      // so a relapsed logout loop cannot hide behind the delay.
+      await page.waitForTimeout(1600);
+      await expect(page.locator('#viewLogin')).toBeHidden();
+      await expect(page.locator('#bottomNav')).toBeVisible();
+      await expect(page.locator('#headerUser')).toHaveText('E2E Installer');
     });
   });
 });

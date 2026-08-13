@@ -101,10 +101,63 @@ function makeEl() {
     querySelectorAll: () => [],
   };
 }
+// A structural node for the pdf.js paint-queue checks: parent/child links,
+// attributes, and class-based descendant queries — just enough for the
+// module's viewer code paths, with none of a real DOM's layout.
+function makeNode(tag) {
+  const node = {
+    tagName: String(tag || "div").toUpperCase(),
+    className: "",
+    style: {},
+    textContent: "",
+    attrs: {},
+    children: [],
+    _html: "",
+    appendChild(child) {
+      node.children.push(child);
+      return child;
+    },
+    setAttribute(k, v) {
+      node.attrs[k] = String(v);
+    },
+    getAttribute(k) {
+      return k in node.attrs ? node.attrs[k] : null;
+    },
+    getContext() {
+      return { canvas: node };
+    },
+    set innerHTML(v) {
+      node.children.length = 0;
+      node._html = String(v);
+    },
+    get innerHTML() {
+      return node._html;
+    },
+    querySelectorAll(selector) {
+      const wantClass = (String(selector).match(/\.([\w-]+)/g) || [])
+        .map((c) => c.slice(1));
+      const out = [];
+      (function walk(n) {
+        for (const c of n.children || []) {
+          if (wantClass.some((cls) => String(c.className).split(/\s+/).includes(cls))) {
+            out.push(c);
+          }
+          walk(c);
+        }
+      })(node);
+      return out;
+    },
+    querySelector(selector) {
+      return node.querySelectorAll(selector)[0] || null;
+    },
+  };
+  return node;
+}
 const elements = {};
 const documentStub = {
   getElementById: (id) => (elements[id] ||= makeEl()),
   querySelector: () => null,
+  createElement: (tag) => makeNode(tag),
 };
 
 // Per-action behaviour maps; an Error value rejects.
@@ -229,6 +282,8 @@ const exposed = [
   "_msSesReviewQueueStale",
   "_msSwitchDocTab",
   "_msStageZoom",
+  "_msPdfFillViewer",
+  "_msPdfRepaintViewer",
   "_msReportingDocTabs",
   "_msRenderDocStage",
   "_msReportingHideJobFromActiveList",
@@ -265,7 +320,8 @@ const wrapped = '"use strict";\n' + code + "\nreturn { " +
   exposed.map((n) => `${n}: typeof ${n} !== 'undefined' ? ${n} : undefined`)
     .join(", ") +
   ', _msSesPackCache: typeof _msSesPackCache !== "undefined" ? _msSesPackCache : undefined' +
-  ', _msActiveDocTab: typeof _msActiveDocTab !== "undefined" ? _msActiveDocTab : undefined };';
+  ', _msActiveDocTab: typeof _msActiveDocTab !== "undefined" ? _msActiveDocTab : undefined' +
+  ', _msPdfDocCache: typeof _msPdfDocCache !== "undefined" ? _msPdfDocCache : undefined };';
 
 let mod;
 try {
@@ -3356,6 +3412,66 @@ check(
   seedSendReady();
   sandbox._pipelineData.columns = { report_ready: [mappedCard] };
   behaviour.signedUrl = {};
+}
+
+// ── 19c. A zoom repaint queues behind the in-flight page fill ────────────────
+// pdf.js rejects two render() calls on one canvas, and a repaint pass racing
+// _msPdfFillViewer also left pages painted after the press at fit width while
+// the stage stayed zoomed. The repaint must QUEUE behind the viewer's paint
+// chain and then size EVERY page, including ones painted after the press.
+{
+  const PDF_URL = "signed://pack/report.pdf";
+  const renders = [];
+  const inFlight = new Map();
+  let overlapped = false;
+  function fakePage() {
+    return {
+      getViewport: ({ scale }) => ({ width: 600 * scale, height: 800 * scale }),
+      render: ({ canvasContext }) => {
+        const canvas = canvasContext.canvas;
+        inFlight.set(canvas, (inFlight.get(canvas) || 0) + 1);
+        if (inFlight.get(canvas) > 1) overlapped = true;
+        let done;
+        const promise = new Promise((r) => { done = r; });
+        renders.push({
+          resolve() {
+            inFlight.set(canvas, inFlight.get(canvas) - 1);
+            done();
+          },
+        });
+        return { promise };
+      },
+    };
+  }
+  const fakeDoc = { numPages: 2, getPage: () => Promise.resolve(fakePage()) };
+  mod._msPdfDocCache[PDF_URL] = Promise.resolve(fakeDoc);
+  const viewer = documentStub.createElement("div");
+  viewer.setAttribute("data-pdf-url", PDF_URL);
+  const fillDone = mod._msPdfFillViewer(viewer, fakeDoc);
+  await flush();
+  renders.shift().resolve(); // page 1 painted; the viewer swaps in mid-fill
+  await flush();
+  mod._msPdfRepaintViewer(viewer, 1.25, 875); // zoom while page 2 renders
+  await flush();
+  await flush();
+  check(
+    "a zoom press mid-fill starts no render while the fill still holds a canvas",
+    renders.length === 1 && overlapped === false,
+  );
+  let spins = 0;
+  while (renders.length && spins++ < 20) {
+    renders.shift().resolve();
+    await flush();
+    await flush();
+  }
+  await fillDone;
+  const zoomedPages = viewer.querySelectorAll("canvas.msr-pdf-page");
+  check(
+    "the queued repaint then sizes every page — including one painted after the press",
+    zoomedPages.length === 2 && overlapped === false &&
+      zoomedPages.every((c) => c.style.width === "875px"),
+  );
+  delete mod._msPdfDocCache[PDF_URL];
 }
 
 // ── 20. No retired action was ever dispatched at runtime ────────────────────

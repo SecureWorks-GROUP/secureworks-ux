@@ -2513,7 +2513,7 @@ function _msPdfFillViewer(el, doc) {
       });
     })(i);
   }
-  return chain.then(function() {
+  var done = chain.then(function() {
     if (doc.numPages > cap) {
       var more = document.createElement('div');
       more.className = 'msr-pdf-more';
@@ -2522,6 +2522,11 @@ function _msPdfFillViewer(el, doc) {
     }
     swapIn(); // 0-page edge case: still swap so the loading line never lingers
   });
+  // pdf.js rejects two render() calls on one canvas, so every paint pass over
+  // this viewer (this fill, later zoom repaints) queues on one per-element
+  // chain rather than racing it.
+  el._msPdfPaintChain = done.catch(function() {});
+  return done;
 }
 
 // ── STAGE ZOOM ──────────────────────────────────────────────────────────────
@@ -2593,31 +2598,38 @@ function _msStageApplyZoom(stage, z) {
  * what is on screen. The document promise is already cached per URL
  * (_msPdfGetDoc), so this re-rasterises fetched bytes — no re-fetch, and it
  * works past the signed URL's 300s life. A newer zoom bumps data-zoom-seq and
- * the stale pass stops repainting mid-chain.
+ * the stale pass stops repainting mid-chain. Each pass queues behind the
+ * viewer's in-flight paint work (_msPdfPaintChain: the initial fill or a prior
+ * repaint) — pdf.js rejects concurrent render() on one canvas, and a pass that
+ * ran beside the fill would also leave pages painted after it at fit width.
  */
 function _msPdfRepaintViewer(viewerEl, z, cssWidth) {
   var url = viewerEl.getAttribute('data-pdf-url');
   if (!url) return;
   var seq = (Number(viewerEl.getAttribute('data-zoom-seq')) || 0) + 1;
   viewerEl.setAttribute('data-zoom-seq', String(seq));
-  _msPdfGetDoc(url).then(function(doc) {
-    var canvases = viewerEl.querySelectorAll('canvas.msr-pdf-page');
-    var chain = Promise.resolve();
-    Array.prototype.forEach.call(canvases, function(canvas, i) {
-      chain = chain.then(function() {
-        if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return; // superseded
-        return doc.getPage(i + 1).then(function(page) {
-          if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return;
-          return _msPdfPaintPage(page, canvas, cssWidth).then(function() {
-            // The painter resets style.width to '100%'; reassert the zoom width.
-            if (z !== 1 && Number(viewerEl.getAttribute('data-zoom-seq')) === seq) {
-              canvas.style.width = cssWidth + 'px';
-            }
+  var prior = viewerEl._msPdfPaintChain || Promise.resolve();
+  viewerEl._msPdfPaintChain = prior.then(function() {
+    if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return; // superseded
+    return _msPdfGetDoc(url).then(function(doc) {
+      var canvases = viewerEl.querySelectorAll('canvas.msr-pdf-page');
+      var chain = Promise.resolve();
+      Array.prototype.forEach.call(canvases, function(canvas, i) {
+        chain = chain.then(function() {
+          if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return; // superseded
+          return doc.getPage(i + 1).then(function(page) {
+            if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return;
+            return _msPdfPaintPage(page, canvas, cssWidth).then(function() {
+              // The painter resets style.width to '100%'; reassert the zoom width.
+              if (z !== 1 && Number(viewerEl.getAttribute('data-zoom-seq')) === seq) {
+                canvas.style.width = cssWidth + 'px';
+              }
+            });
           });
         });
       });
+      return chain;
     });
-    return chain;
   }).catch(function() {
     // Keep the CSS-scaled paint; "Open document" remains the full-fidelity read.
   });

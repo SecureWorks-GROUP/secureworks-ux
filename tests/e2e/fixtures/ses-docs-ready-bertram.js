@@ -217,6 +217,29 @@ function cockpitHold(reasons) {
   return c;
 }
 
+/**
+ * A hold whose ONLY caveats are email-draft walls (the pipeline still has to
+ * draft the outgoing emails). The invoice is ready, so the backend arms
+ * approve_invoice. Per the Captain ruling 2026-08-13 this must NOT wall SEND:
+ * the pane arms APPROVE AND SEND, and the backend still guards the actual send.
+ */
+function cockpitDraftOnlyHold() {
+  const c = cockpitSendReady();
+  c.status = 'HOLD';
+  c.verdict = {
+    clean: false,
+    blockers: [
+      { code: 'route_draft_missing', fact: 'Builder email draft missing.', evidence: { route_kind: 'report' } },
+      { code: 'route_draft_missing', fact: 'Builder email draft missing.', evidence: { route_kind: 'photo' } },
+    ],
+  };
+  c.sections.status = { status: 'HOLD', stale: false, reasons: [] };
+  // Invoice is ready to authorise; only the email drafts are pending.
+  c.controls.approve_invoice.enabled = true;
+  c.controls.send_it.enabled = false;
+  return c;
+}
+
 function reviewablePack() {
   return {
     review: {
@@ -264,6 +287,7 @@ module.exports = {
   artifacts,
   cockpitSendReady,
   cockpitHold,
+  cockpitDraftOnlyHold,
   reviewablePack,
   context,
 };

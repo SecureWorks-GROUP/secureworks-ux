@@ -786,6 +786,10 @@ check(
     detailHtml.includes(">Invoice</button>"),
 );
 check(
+  "a PDF tile carries a real first-page preview hook (pdf.js hydration), not a bare glyph",
+  /msr-tile-thumb pdf glyph[^>]*data-pdf-url="[^"]+"[^>]*data-pdf-role="thumb"/.test(detailHtml),
+);
+check(
   "photos / feedback folds collapse by default",
   /msr-fold/.test(detailHtml) &&
     detailHtml.includes(">Photos</h3>") &&
@@ -886,7 +890,7 @@ check(
     "a bound Xero DRAFT with PDF shows the real PDF, not the proposal HTML",
     !!invTab && invTab.kind === "pdf" &&
       /xero-draft-inv-1102\.pdf/.test(invTab.url || "") &&
-      draftStage.includes("<iframe") &&
+      draftStage.includes('data-pdf-role="viewer"') &&
       draftStage.includes("xero-draft-inv-1102.pdf") &&
       !draftStage.includes("Proposed invoice") &&
       !draftStage.includes("Tax Invoice") &&
@@ -978,7 +982,7 @@ check(
 check(
   "detail opens the report PDF fit-to-page in the stage",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
-    detailHtml.includes("<iframe") &&
+    detailHtml.includes('data-pdf-role="viewer"') &&
     detailHtml.includes("fit to page"),
 );
 check(
@@ -1124,7 +1128,7 @@ check(
   signedOffHtml.includes(">Invoice</button>") &&
     (signedOffHtml.includes("Invoice document not available") ||
       signedOffHtml.includes("xero-invoice.pdf") ||
-      signedOffHtml.includes("<iframe")) &&
+      signedOffHtml.includes('data-pdf-role="viewer"')) &&
     !signedOffHtml.includes("Tax Invoice") &&
     !signedOffHtml.includes("Proposed invoice"),
 );
@@ -1306,7 +1310,7 @@ check(
       draftHtml.includes("INV-1102") &&
       (draftHtml.includes("xero-draft-inv-1102.pdf") ||
         draftStageHtml.includes("xero-draft-inv-1102.pdf")) &&
-      (draftHtml.includes("<iframe") || draftStageHtml.includes("<iframe")) &&
+      (draftHtml.includes('data-pdf-role="viewer"') || draftStageHtml.includes('data-pdf-role="viewer"')) &&
       !draftStageHtml.includes("Proposed invoice") &&
       !draftStageHtml.includes("Tax Invoice") &&
       !draftHtml.includes("Tax Invoice"),
@@ -1368,8 +1372,8 @@ check(
       fbHtml.includes(">Invoice</button>") &&
       (fbHtml.includes("blob:smoke-xero-pdf") ||
         fbStage.includes("blob:smoke-xero-pdf") ||
-        fbHtml.includes("<iframe") ||
-        fbStage.includes("<iframe")) &&
+        fbHtml.includes('data-pdf-role="viewer"') ||
+        fbStage.includes('data-pdf-role="viewer"')) &&
       !fbStage.includes("Invoice document not available") &&
       !fbStage.includes("Proposed invoice") &&
       !fbHtml.includes("created at APPROVE"),
@@ -1634,22 +1638,22 @@ check(
   holdHtml.split("Builder email draft missing.").length - 1 === 1,
 );
 check(
-  "HOLD renders exactly ONE amber block, numbered, with a clear path per blocker",
+  "HOLD renders ONE compact caveat block: one line each, no clear-path essay, no 'no override'",
   holdHtml.split('class="msr-hold"').length - 1 === 1 &&
-    holdHtml.includes('<ol class="msr-blockers">') &&
-    holdHtml.split("What clears it").length - 1 === 2 &&
-    /There is no override/.test(holdHtml),
+    holdHtml.includes('<ul class="msr-blockers">') &&
+    holdHtml.split("What clears it").length - 1 === 0 &&
+    !/There is no override/.test(holdHtml),
 );
 check(
-  "the HOLD next action counts the deduped blockers",
-  /Clear <strong>2 blockers<\/strong> below/.test(holdHtml),
+  "the HARD-HOLD next action counts the deduped caveats (not a lock wall)",
+  /Review <strong>2 caveats<\/strong> below/.test(holdHtml),
 );
 check(
-  "HOLD arms NO action: the stamp is visible but disabled, no id, no onclick",
+  "a HARD hold arms NO action: the stamp is visible but disabled, no id, no onclick",
   !holdHtml.includes('id="msSesApproveAndSendBtn"') &&
     !holdHtml.includes("sesApproveAndSend(") &&
     /msr-stamp send" disabled/.test(holdHtml) &&
-    /Locked by the hold above/.test(holdHtml) &&
+    /The caveats above are still open/.test(holdHtml) &&
     !/msr-what/.test(holdHtml),
 );
 // Even a programmatic call cannot act while the backend flags are off.
@@ -1661,6 +1665,43 @@ check(
   "the press refuses to run while the backend flags are off",
   calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
     calls.confirms.length === 0,
+);
+
+// ── 11a2. SEND is NOT walled by email-draft caveats (Captain ruling 2026-08-13).
+//         An email-draft-ONLY hold with the invoice ready is a SOFT hold: the
+//         pane arms APPROVE AND SEND and the guarded chain (not the client)
+//         governs the actual send. A HARD blocker would still lock it. ─────────
+const draftOnlyHold = cockpitSendReady();
+draftOnlyHold.status = "HOLD";
+draftOnlyHold.verdict = {
+  clean: false,
+  blockers: [
+    { code: "route_draft_missing", fact: "Builder email draft missing.", evidence: { route_kind: "report" } },
+    { code: "route_draft_missing", fact: "Builder email draft missing.", evidence: { route_kind: "photo" } },
+  ],
+};
+draftOnlyHold.sections.status = { status: "HOLD", stale: false, reasons: [] };
+draftOnlyHold.controls.approve_invoice.enabled = true; // invoice ready
+draftOnlyHold.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = draftOnlyHold;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const draftOnlyHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "email-draft-only hold is SOFT and does NOT wall SEND: the stamp is armed (id + onclick)",
+  /class="msr-hold soft"/.test(draftOnlyHtml) &&
+    draftOnlyHtml.includes('id="msSesApproveAndSendBtn"') &&
+    draftOnlyHtml.includes("sesApproveAndSend(") &&
+    !/msr-stamp send" disabled/.test(draftOnlyHtml) &&
+    /press <strong>APPROVE AND SEND<\/strong>/.test(draftOnlyHtml),
+);
+// The relaxed gate still hands the real send to the backend chain: the press
+// gets PAST the client guard (reaches the confirm) instead of refusing outright.
+calls.confirms.length = 0;
+await mod.sesApproveAndSend(JOB);
+check(
+  "email-draft-only hold: the press is not refused at the client gate (chain still governs)",
+  calls.confirms.length === 1,
 );
 
 // ── 11b. PR 563 cockpit honesty — read recovery_action, route evidence,
@@ -1736,19 +1777,28 @@ check(
   ),
 );
 check(
-  "honesty: What clears it uses recovery_action (photo-specific), not the hardcoded email-draft remedy",
+  "honesty: an email-draft caveat is compact — the fact only, no recovery-essay wall",
   honestyHtml.includes(
-    "The photo email is drafted but has no attachments bound to this docket revision",
+    "A required builder email draft is missing from the current docket revision.",
   ) &&
+    !honestyHtml.includes(
+      "The photo email is drafted but has no attachments bound to this docket revision",
+    ) &&
     !honestyHtml.includes("APPROVE INVOICE authorises the Xero draft invoice") &&
     !honestyHtml.includes(
       "The system still has to draft this email. It normally clears on the next run",
     ),
 );
 check(
-  "honesty: the photo-route blocker carries its route label beside the verbatim fact",
+  "honesty: an email-draft-only hold is SOFT (fills in on the next run), not an alarm",
+  /class="msr-hold soft"/.test(honestyHtml) &&
+    /Still drafting/.test(honestyHtml) &&
+    honestyHtml.includes('<span class="msr-blocker-auto">fills in on the next run</span>'),
+);
+check(
+  "honesty: the photo-route caveat carries its route label beside the verbatim fact",
   honestyHtml.includes(
-    '<span class="msr-blocker-route">Photo email</span> A required builder email draft is missing',
+    '<span class="msr-blocker-route">Photo email</span> <span class="msr-blocker-fact">A required builder email draft is missing',
   ),
 );
 check(
@@ -1787,15 +1837,15 @@ await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
 const fallbackHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "honesty: when recovery_action is absent, the local clear-path fallback still renders",
+  "honesty: an email-draft caveat renders its fact compactly, with no clear-path essay",
   fallbackHtml.includes("Builder email draft missing.") &&
-    fallbackHtml.includes(
+    !fallbackHtml.includes(
       "The system still has to draft this email. It normally clears on the next run",
     ),
 );
 check(
-  "honesty: when disabled_reason is absent, the hold-lock fallback still renders",
-  /Locked by the hold above/.test(fallbackHtml),
+  "honesty: a soft hold with no disabled_reason falls back to honest not-unlocked copy",
+  /has not unlocked/.test(fallbackHtml),
 );
 check(
   "honesty: a held pack offers no what-one-press-does disclosure to read as an invitation",
@@ -1837,14 +1887,15 @@ await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
 const routeHtml = elements["msReportingDetailPanel"]._html || "";
 const routeItems = routeHtml
-  .split('<ol class="msr-blockers">')[1]
-  .split("</ol>")[0]
-  .split("<li>")
+  .split('<ul class="msr-blockers">')[1]
+  .split("</ul>")[0]
+  .split('<li class="msr-blocker')
   .slice(1);
 check(
   "route holds: one item per route, the per-route duplicate collapsed",
   routeItems.length === 2 &&
-    /Clear <strong>2 blockers<\/strong> below/.test(routeHtml),
+    // Email-draft-only hold is SOFT: the count lives in the calm banner header.
+    /Still drafting &mdash; 2 caveats to review/.test(routeHtml),
 );
 check(
   "route holds: the two items are not byte-identical — each names its route",
@@ -1876,10 +1927,10 @@ const routeAliasHtml = elements["msReportingDetailPanel"]._html || "";
 check(
   "route labels: the plural photos alias resolves, an unknown route degrades to its own name",
   routeAliasHtml.includes(
-    '<span class="msr-blocker-route">Photo email</span> Attachments missing.',
+    '<span class="msr-blocker-route">Photo email</span> <span class="msr-blocker-fact">Attachments missing.</span>',
   ) &&
     routeAliasHtml.includes(
-      '<span class="msr-blocker-route">Remittance route</span> Attachments missing.',
+      '<span class="msr-blocker-route">Remittance route</span> <span class="msr-blocker-fact">Attachments missing.</span>',
     ),
 );
 
@@ -1909,8 +1960,8 @@ check(
   shapelessHtml.includes(
     "The insurance work order is missing from this docket.",
   ) &&
-    shapelessHtml.includes('<ol class="msr-blockers">') &&
-    /Clear <strong>1 blocker<\/strong> below/.test(shapelessHtml) &&
+    shapelessHtml.includes('<ul class="msr-blockers">') &&
+    /Review <strong>1 caveat<\/strong> below/.test(shapelessHtml) &&
     !/this pack cannot move yet/.test(shapelessHtml),
 );
 

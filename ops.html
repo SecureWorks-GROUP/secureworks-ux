@@ -3974,19 +3974,22 @@
       padding: 3px 10px;
     }
     /* LIGHT stage — same chrome as the board (white card, hairline border).
-       READABLE-FIRST (Captain ruling 2026-08-13): the document renders at page
-       WIDTH and the stage GROWS with it, so the whole pane (.msr-body) scrolls
-       as one page. It is deliberately NOT a short fixed-height inner scroll box
-       any more — that clamp turned tall pages into a sliver AND trapped the
-       mouse wheel on a dead frame. A generous min-height keeps a short document
-       from looking lost; max-height caps a very tall pack so the action foot is
-       still reachable, and only THEN does the stage scroll internally. */
+       BOUNDED VIEWER (Captain ruling 2026-08-13, second pass: "the PDF is now
+       too big … I want that scrollable and magnifiable/smallerizable PDF
+       scroll"): the document still renders READABLE (page width by default,
+       zoomable via the .msr-stage-zoom cluster), but the stage owns a
+       viewport-relative height and the document scrolls INSIDE it, so the pane
+       never grows to the document's full height and the compact approve foot
+       stays a glance away. The 560px constant is the chrome sharing the window
+       (nav + chips + command header + pane head + compact foot).
+       overscroll-behavior keeps the wheel on the document while the pointer is
+       over a scrollable stage; a document that fits lets the wheel fall
+       through to the pane, so there is no dead frame. */
     .msr-stage {
       background: var(--sw-warm-100);
       border: 1px solid var(--sw-border);
       border-radius: 8px;
-      min-height: 300px;
-      max-height: 200vh;
+      height: clamp(300px, calc(100vh - 560px), 920px);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -3996,11 +3999,24 @@
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
+    /* Zero-height sticky rail pinning the Open-document hatch (left) and the
+       zoom cluster / tag (right) to the top of the stage while the document
+       scrolls under them. */
+    .msr-stage-bar {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      align-self: stretch;
+      height: 0;
+      overflow: visible;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      padding: 0 14px;
+      pointer-events: none;
+    }
+    .msr-stage-bar > * { pointer-events: auto; margin-top: 10px; }
     .msr-stage-tag {
-      position: absolute;
-      top: 10px;
-      right: 14px;
-      z-index: 2;
       font-size: 10.5px;
       font-weight: 700;
       letter-spacing: 0.05em;
@@ -4010,13 +4026,38 @@
       border: 1px solid var(--sw-border);
       border-radius: 5px;
       padding: 3px 9px;
+      margin-left: auto;
     }
-    /* The stage is short by design; this is the full-size read escape hatch. */
+    /* Magnify / shrink / fit-to-page cluster: FIT PAGE is both the resting
+       label (the default view) and the reset press. */
+    .msr-stage-zoom {
+      display: flex;
+      align-items: stretch;
+      margin-left: auto;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid var(--sw-border);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .msr-stage-zoom button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      color: var(--sw-dark);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1.5;
+      padding: 3px 9px;
+    }
+    .msr-stage-zoom button + button { border-left: 1px solid var(--sw-border); }
+    .msr-stage-zoom .msr-zoom-step { font-size: 13px; line-height: 1.15; padding: 2px 10px; }
+    .msr-stage-zoom button:hover { color: var(--sw-orange); }
+    .msr-stage-zoom button:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: -2px; }
+    /* The stage is bounded by design; this is the full-size read escape hatch. */
     .msr-stage-open {
-      position: absolute;
-      top: 10px;
-      left: 14px;
-      z-index: 3;
       font-size: 10.5px;
       font-weight: 700;
       letter-spacing: 0.05em;
@@ -4047,14 +4088,32 @@
     .msr-stage .msr-stage-html { width: 100%; border: 0; }
     .msr-stage-html { background: #fff; overflow: auto; padding: 18px 20px; color: var(--sw-text); text-align: left; }
     .msr-stage-empty { color: var(--sw-mid); font-size: 13px; padding: 24px 20px; text-align: center; max-width: 46ch; line-height: 1.55; align-self: center; }
-    /* PDF viewer: stacked page canvases on the light stage. */
+    /* PDF viewer: stacked page canvases on the light stage. align-self:stretch
+       (not width:100%) so a magnified document can widen it past the stage and
+       scroll horizontally with every edge reachable — a centred flex item wider
+       than its container loses its left edge. */
     .msr-stage-doc {
-      width: 100%;
+      align-self: stretch;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 12px;
       padding: 14px 12px;
+    }
+    /* Zoomed (non-fit) state, set by _msStageZoom: page widths are explicit
+       pixels there, so max-content is well-defined and the max-width caps that
+       normally fit pages to the panel come off. */
+    .msr-stage-doc.msr-zoomed { min-width: max-content; }
+    .msr-stage-doc.msr-zoomed .msr-pdf-pages { width: max-content; }
+    .msr-stage-doc.msr-zoomed .msr-doc-img,
+    .msr-stage-doc.msr-zoomed .msr-pdf-page { max-width: none; }
+    /* The viewer's swap-in page stack (see _msPdfFillViewer). */
+    .msr-pdf-pages {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
     }
     .msr-stage-doc .msr-pdf-page {
       width: min(100%, 720px);
@@ -4377,7 +4436,7 @@
       .msr-foot { padding-left: 16px; padding-right: 16px; }
       .msr-fb-host { padding-left: 16px; padding-right: 16px; }
       .msr-mail-line { flex-direction: column; gap: 2px; }
-      .msr-stage { min-height: 240px; max-height: 220vh; }
+      .msr-stage { height: clamp(240px, 46vh, 560px); }
       .msr-stamp { padding: 9px 16px; }
       .msr-stamp .msr-stamp-word { white-space: normal; font-size: 13px; letter-spacing: 0.1em; }
       /* Narrow screens: stamp back above its note; the row would wrap badly. */

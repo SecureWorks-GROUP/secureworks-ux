@@ -2420,6 +2420,11 @@ function _msPdfGetDoc(url) {
 // the captain must be able to read the invoice/report without Open Document.
 var _MS_PDF_STAGE_WIDTH = 700;
 
+// Backing-store cap for one painted page: a zoomed-in re-render on a high-dpr
+// screen must sharpen the text, never balloon canvas memory across a stacked
+// multi-page pack.
+var _MS_PDF_MAX_CANVAS_W = 2400;
+
 // Render one pdf.js page into a canvas sized to `cssWidth` (device-pixel aware).
 // A zero/absent cssWidth (a not-yet-laid-out or hidden host) would collapse the
 // canvas to a 1px sliver, so it clamps to a readable default instead of 0.
@@ -2428,6 +2433,7 @@ function _msPdfPaintPage(page, canvas, cssWidth) {
   var w = (cssWidth && cssWidth > 40) ? cssWidth : _MS_PDF_STAGE_WIDTH;
   var scale = w / base.width;
   var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+  if (w * dpr > _MS_PDF_MAX_CANVAS_W) dpr = _MS_PDF_MAX_CANVAS_W / w;
   var viewport = page.getViewport({ scale: scale * dpr });
   canvas.width = Math.max(1, Math.floor(viewport.width));
   canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -2485,11 +2491,7 @@ function _msPdfFillViewer(el, doc) {
   var width = Math.min(el.clientWidth || rectW || _MS_PDF_STAGE_WIDTH, 720);
   if (!(width > 40)) width = _MS_PDF_STAGE_WIDTH;
   var frag = document.createElement('div');
-  frag.style.width = '100%';
-  frag.style.display = 'flex';
-  frag.style.flexDirection = 'column';
-  frag.style.alignItems = 'center';
-  frag.style.gap = '12px';
+  frag.className = 'msr-pdf-pages'; // styled in ops.html; .msr-zoomed widens it
   var swapped = false;
   function swapIn() {
     if (swapped) return;
@@ -2522,6 +2524,105 @@ function _msPdfFillViewer(el, doc) {
   });
 }
 
+// ── STAGE ZOOM ──────────────────────────────────────────────────────────────
+// Captain ruling 2026-08-13, second pass: the stage is a bounded viewer again
+// ("that scrollable and magnifiable/smallerizable PDF scroll") — fit-to-page
+// default, explicit magnify/shrink steps, the document scrolls INSIDE the
+// stage. Fit (1) is always a level; a tab switch re-renders the stage and so
+// always reopens at fit.
+var _MS_STAGE_ZOOM_LEVELS = [0.5, 0.65, 0.8, 1, 1.25, 1.5, 1.75, 2];
+
+/**
+ * Zoom the stage the pressed button lives in. dir: 1 = magnify one step,
+ * -1 = shrink one step, 0 = reset to fit. Resolved from the button (`this` in
+ * the inline handler), so the inline Approvals panel and the board overlay —
+ * which can both hold the same job — can never cross-write (the _msSwitchDocTab
+ * scoping hazard).
+ */
+function _msStageZoom(btn, dir) {
+  var stage = btn && btn.closest ? btn.closest('.msr-stage') : null;
+  if (!stage) return;
+  var z = 1;
+  if (dir) {
+    var current = parseFloat(stage.getAttribute('data-zoom')) || 1;
+    var idx = 0;
+    var best = Infinity;
+    for (var i = 0; i < _MS_STAGE_ZOOM_LEVELS.length; i++) {
+      var d = Math.abs(_MS_STAGE_ZOOM_LEVELS[i] - current);
+      if (d < best) { best = d; idx = i; }
+    }
+    idx = Math.max(0, Math.min(_MS_STAGE_ZOOM_LEVELS.length - 1, idx + (dir > 0 ? 1 : -1)));
+    z = _MS_STAGE_ZOOM_LEVELS[idx];
+  }
+  stage.setAttribute('data-zoom', String(z));
+  _msStageApplyZoom(stage, z);
+}
+
+/**
+ * Apply a zoom level to the stage's document: explicit pixel widths on every
+ * page (canvas) and document image, sized from the fit width measured off the
+ * live layout the first time zoom is touched. Fit hands width control back to
+ * the painter/stylesheet defaults. Canvases are then re-painted at the new
+ * width so magnified text is sharp, not CSS-stretched blur.
+ */
+function _msStageApplyZoom(stage, z) {
+  var doc = stage.querySelector && stage.querySelector('.msr-stage-doc');
+  if (!doc) return;
+  var pages = doc.querySelectorAll('.msr-pdf-page, .msr-doc-img');
+  if (!pages.length) return; // still "Rendering…" — nothing to size yet
+  var basew = parseFloat(stage.getAttribute('data-zoom-basew'));
+  if (!(basew > 40)) {
+    basew = (pages[0].getBoundingClientRect && pages[0].getBoundingClientRect().width) || 0;
+    if (!(basew > 40)) basew = _MS_PDF_STAGE_WIDTH;
+    stage.setAttribute('data-zoom-basew', String(Math.round(basew)));
+    basew = Math.round(basew);
+  }
+  var target = Math.round(basew * z);
+  doc.classList.toggle('msr-zoomed', z !== 1);
+  Array.prototype.forEach.call(pages, function(el) {
+    if (z === 1) el.style.width = (el.tagName === 'CANVAS') ? '100%' : '';
+    else el.style.width = target + 'px';
+  });
+  if (doc.getAttribute('data-pdf-url') && !doc.getAttribute('data-pdf-failed')) {
+    _msPdfRepaintViewer(doc, z, target);
+  }
+}
+
+/**
+ * Re-paint the viewer's canvases at the zoomed CSS width so the raster matches
+ * what is on screen. The document promise is already cached per URL
+ * (_msPdfGetDoc), so this re-rasterises fetched bytes — no re-fetch, and it
+ * works past the signed URL's 300s life. A newer zoom bumps data-zoom-seq and
+ * the stale pass stops repainting mid-chain.
+ */
+function _msPdfRepaintViewer(viewerEl, z, cssWidth) {
+  var url = viewerEl.getAttribute('data-pdf-url');
+  if (!url) return;
+  var seq = (Number(viewerEl.getAttribute('data-zoom-seq')) || 0) + 1;
+  viewerEl.setAttribute('data-zoom-seq', String(seq));
+  _msPdfGetDoc(url).then(function(doc) {
+    var canvases = viewerEl.querySelectorAll('canvas.msr-pdf-page');
+    var chain = Promise.resolve();
+    Array.prototype.forEach.call(canvases, function(canvas, i) {
+      chain = chain.then(function() {
+        if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return; // superseded
+        return doc.getPage(i + 1).then(function(page) {
+          if (Number(viewerEl.getAttribute('data-zoom-seq')) !== seq) return;
+          return _msPdfPaintPage(page, canvas, cssWidth).then(function() {
+            // The painter resets style.width to '100%'; reassert the zoom width.
+            if (z !== 1 && Number(viewerEl.getAttribute('data-zoom-seq')) === seq) {
+              canvas.style.width = cssWidth + 'px';
+            }
+          });
+        });
+      });
+    });
+    return chain;
+  }).catch(function() {
+    // Keep the CSS-scaled paint; "Open document" remains the full-fidelity read.
+  });
+}
+
 // A tile preview: the real image for an image document, a real first-page PDF
 // render for a PDF (hydrated after mount), a drawn page mark for everything
 // else. Never a stand-in that could be mistaken for the document.
@@ -2542,17 +2643,19 @@ function _msSesTileThumb(t) {
 }
 
 /**
- * Render the fit-to-page stage for the doc at index idx. LIGHT stage (same
- * chrome as the board) with a "fit to page" tag. PDFs are painted to canvas by
- * pdf.js (<makesafe-pdf-preview>), not embedded via the native plugin; images
- * render contained; the drafted invoice (kind 'invdoc') renders as an invoice
+ * Render the document stage for the doc at index idx. LIGHT stage (same
+ * chrome as the board). PDFs are painted to canvas by pdf.js
+ * (<makesafe-pdf-preview>), not embedded via the native plugin; images render
+ * at page width; the drafted invoice (kind 'invdoc') renders as an invoice
  * page from the row's own figures; anything else gets an open-in-new-tab
  * fallback.
  *
- * The stage renders the document at page width and GROWS with it, so the whole
- * pane body scrolls as one page (see `.msr-stage` in ops.html) and the captain
- * can read what he is approving. A PDF or image still carries an "Open
- * document" escape hatch to a full-size read in a new tab.
+ * The stage is a BOUNDED viewer (see `.msr-stage` in ops.html): the document
+ * opens fit-to-page-width — readable in place — and scrolls INSIDE the stage,
+ * so the pane never grows to the document's full height and the approve foot
+ * stays a glance away. A pdf/image stage carries a zoom cluster
+ * (`_msStageZoom`: magnify / shrink / FIT PAGE reset) on a sticky rail, plus
+ * the "Open document" escape hatch to a full-size read in a new tab.
  */
 function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];
@@ -2607,7 +2710,17 @@ function _msRenderDocStage(docTabs, idx, row) {
     openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener"'
       + freshnessGate + '>Open document &#8599;</a>';
   }
-  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">page width</span>' + inner + '</div>';
+  // Zoomable documents (pdf/image on the stage) get the magnify/shrink/fit
+  // cluster; everything else keeps the plain fit-to-page tag.
+  var zoomable = !!(t && t.url && (t.kind === 'pdf' || t.kind === 'image'));
+  var rightControl = zoomable
+    ? '<div class="msr-stage-zoom" role="group" aria-label="Document zoom">'
+      + '<button type="button" class="msr-zoom-step" aria-label="Zoom out" title="Zoom out" onclick="_msStageZoom(this,-1)">&minus;</button>'
+      + '<button type="button" class="msr-zoom-fit" aria-label="Fit to page" title="Fit to page" onclick="_msStageZoom(this,0)">Fit page</button>'
+      + '<button type="button" class="msr-zoom-step" aria-label="Zoom in" title="Zoom in" onclick="_msStageZoom(this,1)">+</button>'
+      + '</div>'
+    : '<span class="msr-stage-tag">fit to page</span>';
+  return metaHtml + '<div class="msr-stage"><div class="msr-stage-bar">' + openHatch + rightControl + '</div>' + inner + '</div>';
 }
 
 // <ses-roof-capture-provenance>

@@ -323,13 +323,22 @@ LIGHT stage (same chrome as the board). A native `<iframe>` is blank in headless
 Chrome AND in real Chrome when the signed URL is served
 `Content-Disposition: attachment` — that was the "grey empty pane" bug. The lib
 is vendored (lazy) at `shared/vendor/pdfjs/`; if it cannot load, tiles fall back
-to the page glyph and the stage to the Open-document hatch. READABLE-FIRST
-(Captain ruling 2026-08-13): the stage renders the document at page WIDTH (tag
-reads "page width", not "fit to page") and GROWS with it (`.msr-stage`
-min-height + max-height, NOT a short fixed-height clamp) so the whole `.msr-body`
-scrolls as one page — the old `height: clamp(...)` turned a tall page into a
-sliver AND trapped the mouse wheel on a dead frame. A document IMAGE (Prime/roof
-capture) renders through `.msr-stage-doc .msr-doc-img` at page width, never
+to the page glyph and the stage to the Open-document hatch. BOUNDED VIEWER
+(Captain ruling 2026-08-13, second pass: "the PDF is now too big … I want that
+scrollable and magnifiable/smallerizable PDF scroll"): the stage owns a
+viewport-relative height (`.msr-stage height: clamp(300px, calc(100vh - 560px),
+920px)` — generous, never the pre-fix ~40px sliver) and the document scrolls
+INSIDE it, so the pane never grows to the document's full height and the
+compact approve foot (PR 264) stays reachable without scrolling past the
+document. The document still opens READABLE: fit to page width by default, with
+an explicit zoom cluster (`_msStageZoom`: − / FIT PAGE / +) on a sticky
+zero-height rail (`.msr-stage-bar`) beside the Open-document hatch. Zoom sets
+explicit pixel widths (fit width × level), re-paints the pdf.js canvases at the
+new width from the cached document (no re-fetch, works past the signed URL's
+300s life), and `.msr-zoomed` lifts the fit-width caps so a magnified page
+scrolls horizontally with every edge reachable. A tab switch re-renders the
+stage, so every document opens at fit. A document IMAGE (Prime/roof capture)
+renders through `.msr-stage-doc .msr-doc-img` at page width, never
 height-crushed. The pdf VIEWER paints into a detached fragment and swaps in only
 after the first page renders (`_msPdfFillViewer`), so a slow/failed render never
 leaves the white void that was the Stratton "blank invoice" bug; a 0-width host

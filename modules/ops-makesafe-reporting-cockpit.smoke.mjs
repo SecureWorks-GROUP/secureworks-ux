@@ -228,6 +228,7 @@ const exposed = [
   "_msSesQueueCardRow",
   "_msSesReviewQueueStale",
   "_msSwitchDocTab",
+  "_msStageZoom",
   "_msReportingDocTabs",
   "_msRenderDocStage",
   "_msReportingHideJobFromActiveList",
@@ -980,10 +981,13 @@ check(
     detailHtml.includes("Work Order"),
 );
 check(
-  "detail opens the report PDF at readable page width in the stage",
+  "detail opens the report PDF in a bounded stage with zoom controls, fit default",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
     detailHtml.includes('data-pdf-role="viewer"') &&
-    detailHtml.includes("page width"),
+    detailHtml.includes("msr-stage-zoom") &&
+    detailHtml.includes(">Fit page</button>") &&
+    detailHtml.includes('aria-label="Zoom in"') &&
+    detailHtml.includes('aria-label="Zoom out"'),
 );
 check(
   "the trade-notes section renders only when a feed carries raw trade notes",
@@ -2761,7 +2765,7 @@ check(
   }
 }
 
-// ── 19. The short stage always offers a full-size read ──────────────────────
+// ── 19. The bounded stage always offers a full-size read ────────────────────
 {
   const pdfStage = mod._msRenderDocStage(
     [{ tabLabel: "Invoice", kind: "pdf", url: "https://example.com/invoice.pdf#view=Fit" }],
@@ -2788,6 +2792,13 @@ check(
   check(
     "the Open document hatch opens in a new tab safely",
     /target="_blank"/.test(pdfStage) && /rel="noopener"/.test(pdfStage),
+  );
+  check(
+    "a PDF or image stage carries the zoom cluster; other stages keep the plain tag",
+    /msr-stage-zoom/.test(pdfStage) && /_msStageZoom\(this,1\)/.test(pdfStage) &&
+      /_msStageZoom\(this,-1\)/.test(pdfStage) && /_msStageZoom\(this,0\)/.test(pdfStage) &&
+      /msr-stage-zoom/.test(imgStage) &&
+      !/msr-stage-zoom/.test(invDocStage) && /msr-stage-tag/.test(invDocStage),
   );
   // A signed pack URL lives 300s and this pane never auto-refreshes, so the
   // hatch runs through the SAME freshness gate as a tab switch.

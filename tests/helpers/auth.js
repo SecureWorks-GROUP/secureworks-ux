@@ -92,7 +92,23 @@ async function installSupabaseAuthStub(page, {
   });
 }
 
+// Two static tools ship two different login surfaces. trade.html carries its OWN
+// Trade Login (#loginEmail/#loginPassword/#btnLogin, no shared/auth-gate.js since
+// PR 260); ops.html and the other dashboards still boot behind the ops auth-gate
+// overlay (#swAuthGate + #swAuthEmail/#swAuthPassword/#swAuthSubmit). Detect the
+// trade surface and drive its fields, waiting for the trade post-login UI
+// (#bottomNav appears, #viewLogin goes inactive) — the ops #swAuthGate never
+// exists on trade.html, so waiting for it to detach would hang forever.
 async function signIn(page, { email, password }) {
+  const isTradeLogin = await page.locator('#loginEmail').count() > 0;
+  if (isTradeLogin) {
+    await page.locator('#loginEmail').fill(email);
+    await page.locator('#loginPassword').fill(password);
+    await page.locator('#btnLogin').click();
+    await page.locator('#bottomNav').waitFor({ state: 'visible' });
+    await page.locator('#viewLogin').waitFor({ state: 'hidden' });
+    return;
+  }
   await page.locator('#swAuthEmail').fill(email);
   await page.locator('#swAuthPassword').fill(password);
   await page.locator('#swAuthSubmit').click();

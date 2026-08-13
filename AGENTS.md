@@ -284,7 +284,11 @@ invoice page; never a separate section) and MULTIPLE WORK
 ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
 one and hide the rest; discriminated by `extractPoRef` when possible) — then
 missing documents named in one line (RV-1; SWMS stays "not in this pack",
-never "not required"), condensed email previews (one-line To/Cc/Subject +
+never "not required" — EXCEPT where the family owes no SWMS, when it shows NO
+tile and NO cross at all: `_msSesSwmsNotApplicable` reads the backend
+`family_evidence.swms` not_applicable state, else a temporary-fencing family
+fallback. Captain ruling 2026-08-13: a SWMS red X on an AJS temp-fence job is a
+family lie), condensed email previews (one-line To/Cc/Subject +
 short body excerpt + attachment chips only — no "why this" essays). THE HOLD
 BLOCK IS BACKEND-SOURCED AND COMPACT (Captain ruling 2026-08-13, no yellow
 novel): blockers come from `cockpit.verdict.blockers` (structured entries that
@@ -296,8 +300,13 @@ reasons. Each caveat renders as ONE line: a short route tag + the fact VERBATIM
 and no "no override" copy — those were the essay the captain rejected
 (`_msSesBlockerClears` survives only inside the dedupe key). SOFT vs HARD is the
 load-bearing split (`_msSesClassifyHold` / `_msSesBlockerIsSoftDraft`, the ONE
-place it is derived): an email-draft wall ("email draft"/"no draft on docket") is
-SOFT — it must NEVER wall SEND. A hold with ANY hard blocker (missing invoice,
+place it is derived): an email-draft wall is SOFT — it must NEVER wall SEND. The
+match covers every live phrasing, not just "email draft"/"no draft on docket":
+`_msSesBlockerIsSoftDraft` also catches "… EMAIL — no draft on CURRENT docket"
+(the interior word the old regex missed, which HARD-locked SEND live on
+2026-08-13). It stays anchored on "email"/the "no draft on docket" idiom, never
+on the bare word report/invoice, so a missing REPORT DOCUMENT is still hard.
+A hold with ANY hard blocker (missing invoice,
 off-schedule rate, missing WO/photo/SWMS) is a HARD hold: amber, the stamp is
 disabled, the next action reads "Review N caveats". An email-draft-ONLY hold is
 SOFT: calm blue "Still drafting", and arming falls through to the backend control
@@ -314,9 +323,22 @@ LIGHT stage (same chrome as the board). A native `<iframe>` is blank in headless
 Chrome AND in real Chrome when the signed URL is served
 `Content-Disposition: attachment` — that was the "grey empty pane" bug. The lib
 is vendored (lazy) at `shared/vendor/pdfjs/`; if it cannot load, tiles fall back
-to the page glyph and the stage to the Open-document hatch. The stage is
-deliberately short for density, so every pdf/image stage carries an "Open
-document" link to a full-size read in a new tab — keep that escape hatch if
+to the page glyph and the stage to the Open-document hatch. READABLE-FIRST
+(Captain ruling 2026-08-13): the stage renders the document at page WIDTH (tag
+reads "page width", not "fit to page") and GROWS with it (`.msr-stage`
+min-height + max-height, NOT a short fixed-height clamp) so the whole `.msr-body`
+scrolls as one page — the old `height: clamp(...)` turned a tall page into a
+sliver AND trapped the mouse wheel on a dead frame. A document IMAGE (Prime/roof
+capture) renders through `.msr-stage-doc .msr-doc-img` at page width, never
+height-crushed. The pdf VIEWER paints into a detached fragment and swaps in only
+after the first page renders (`_msPdfFillViewer`), so a slow/failed render never
+leaves the white void that was the Stratton "blank invoice" bug; a 0-width host
+falls back to `_MS_PDF_STAGE_WIDTH` instead of a 1px canvas. A named DOCUMENT
+role (`supporting_report_pdf`/`swms_artifact`) that ships in the pack with NO
+minted signed URL renders an honest `doc_unavailable` tile ("on the pack, link
+could not be loaded"), never the old silent drop that read as "no report
+submitted" while `closeout.report` was true. Every pdf/image stage still carries
+an "Open document" link to a full-size read in a new tab — keep that escape hatch if
 you touch `_msRenderDocStage`, and keep it behind `_msOpenDocFullSize`: signed
 pack URLs live 300s, this pane never auto-refreshes, and a calm read easily
 outlasts them, so the hatch shares `_msSesPackUrlsStale` with the tab switcher

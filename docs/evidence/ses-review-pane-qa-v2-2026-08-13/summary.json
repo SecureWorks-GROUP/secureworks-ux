@@ -1,0 +1,57 @@
+[
+  {
+    "name": "mlb-ellenbrook",
+    "armed": true,
+    "doneItems": [
+      "Work order",
+      "Report",
+      "SWMS",
+      "Photos",
+      "Draft invoice"
+    ]
+  },
+  {
+    "name": "mlb-invoice-selected",
+    "armed": true,
+    "doneItems": [
+      "Work order",
+      "Report",
+      "SWMS",
+      "Photos",
+      "Draft invoice"
+    ]
+  },
+  {
+    "name": "mlb-report-unminted",
+    "armed": true,
+    "doneItems": [
+      "Work order",
+      "Report",
+      "SWMS",
+      "Photos",
+      "Draft invoice"
+    ]
+  },
+  {
+    "name": "ajs-heathridge",
+    "armed": true,
+    "doneItems": [
+      "Work order",
+      "Report",
+      "Photos",
+      "Draft invoice"
+    ]
+  },
+  {
+    "name": "roof-mosman",
+    "armed": true,
+    "doneItems": [
+      "Work order",
+      "– Report (the portal form is the report)",
+      "Portal capture",
+      "SWMS",
+      "Photos",
+      "Draft invoice"
+    ]
+  }
+]

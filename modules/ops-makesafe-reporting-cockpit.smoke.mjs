@@ -980,10 +980,10 @@ check(
     detailHtml.includes("Work Order"),
 );
 check(
-  "detail opens the report PDF fit-to-page in the stage",
+  "detail opens the report PDF at readable page width in the stage",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
     detailHtml.includes('data-pdf-role="viewer"') &&
-    detailHtml.includes("fit to page"),
+    detailHtml.includes("page width"),
 );
 check(
   "the trade-notes section renders only when a feed carries raw trade notes",
@@ -1702,6 +1702,35 @@ await mod.sesApproveAndSend(JOB);
 check(
   "email-draft-only hold: the press is not refused at the client gate (chain still governs)",
   calls.confirms.length === 1,
+);
+
+// ── 11a3. QA-v2 (Captain live proof 2026-08-13): the LIVE email-draft phrasing
+//         "… EMAIL — no draft on current docket" must classify SOFT too. The old
+//         regex only caught "no draft on docket" (no interior word), so the live
+//         caveat HARD-locked SEND. This is the exact string the captain saw. ────
+const liveDraftOnlyHold = cockpitSendReady();
+liveDraftOnlyHold.status = "HOLD";
+liveDraftOnlyHold.verdict = {
+  clean: false,
+  blockers: [
+    { code: "route_draft_missing", fact: "REPORT EMAIL — no draft on current docket.", evidence: { route_kind: "report" } },
+    { code: "route_draft_missing", fact: "PHOTO EMAIL — no draft on current docket.", evidence: { route_kind: "photo" } },
+    { code: "route_draft_missing", fact: "INVOICE EMAIL — no draft on current docket.", evidence: { route_kind: "invoice" } },
+  ],
+};
+liveDraftOnlyHold.sections.status = { status: "HOLD", stale: false, reasons: [] };
+liveDraftOnlyHold.controls.approve_invoice.enabled = true;
+liveDraftOnlyHold.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = liveDraftOnlyHold;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const liveDraftOnlyHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "LIVE 'no draft on current docket' email caveats are SOFT and do NOT wall SEND (armed)",
+  /class="msr-hold soft"/.test(liveDraftOnlyHtml) &&
+    liveDraftOnlyHtml.includes('id="msSesApproveAndSendBtn"') &&
+    liveDraftOnlyHtml.includes("sesApproveAndSend(") &&
+    /Still drafting/.test(liveDraftOnlyHtml),
 );
 
 // ── 11b. PR 563 cockpit honesty — read recovery_action, route evidence,

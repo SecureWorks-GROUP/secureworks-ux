@@ -84,6 +84,28 @@ ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
 
+## Ops Insurance Repairs board (`ops.html`)
+
+A NEW pipeline tab (`Repairs`, next to Patio) that is PARALLEL to and separate
+from the make-safe (SES) board. Repair-family work (RAPID REPAIR / repair WO)
+lives here, never in the make-safe Docs Ready / TRI / Prime columns. It is ONE
+cohesive LIGHT kanban (same `.kanban-col` chrome + `renderKanbanCard` as
+Fencing/Patio) with nine fixed columns: WO In → Scoping → Quoted → Variation →
+Approved → Materials → Scheduled → On Site → Complete, split by a quiet
+`Quote`/`Job` section label over the first four / last five columns. Captain UI
+lock: NO dark Sales drawer, NO inverted theme, NO dark cards, no council/deposit
+in v1 — do not port Patio's dark Sales column here. Search
+`// <insurance-repairs-board>` (`renderRepairKanban`, `REPAIR_STAGES`,
+`isRepairJob`, `repairStageOf`). Placement prefers the server `repair_stage`
+(then `board_stage`, then a status fallback map); non-repair rows are dropped and
+an unrecognised stage surfaces in a subtle "Unmapped" column rather than
+vanishing. The intake→board FEED that routes repair rows here (and off the
+make-safe board) is owned by the backend sibling lane
+`insurance-repairs-intake-board-v1`; this UX adds NO client filter to the
+make-safe board (it stays server-driven). Guard:
+`tests/e2e/ops-repairs-board.spec.js`; evidence in
+`docs/evidence/insurance-repairs-board-2026-08-13/`.
+
 ## Ops make-safe board (`ops.html`)
 
 The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1`,

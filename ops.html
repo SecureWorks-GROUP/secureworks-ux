@@ -415,6 +415,7 @@
     .type-badge.decking { background: rgba(230,126,34,0.08); color: var(--sw-yellow); }
     .type-badge.delivery { background: rgba(142,68,173,0.08); color: var(--sw-purple); }
     .type-badge.miscellaneous { background: rgba(142,68,173,0.12); color: #8E44AD; }
+    .type-badge.repair { background: rgba(76,106,124,0.12); color: var(--sw-mid); }
 
     /* ── Quick Quote Modal ── */
     .qq-overlay {
@@ -1042,6 +1043,20 @@
     .kanban-col[data-status="final_payment"] .kanban-col-header { border-bottom-color: #F39C12; }
     .kanban-col[data-status="get_review"] .kanban-col-header { border-bottom-color: #9B59B6; }
     .kanban-col[data-status="archived"] .kanban-col-header { border-bottom-color: #7F8C8D; }
+    /* ── Insurance Repairs board: ONE cohesive LIGHT kanban (same .kanban-col
+       chrome as Fencing/Patio). Two quiet section groups — "Quote" over the
+       first four columns, "Job" over the rest — separated by a wider gap and a
+       small muted label. Deliberately NO dark sales drawer, NO inverted theme,
+       NO dark cards (captain UI lock). See renderRepairKanban(). */
+    #jobsBody .kanban-container.repair-kanban { gap: 34px; }
+    .repair-group { display: flex; flex-direction: column; min-height: 0; }
+    #jobsBody .kanban-container.repair-kanban .repair-group { align-self: stretch; }
+    .repair-group-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.4px; color: var(--sw-text-sec); opacity: 0.7;
+      padding: 0 0 8px 6px; flex-shrink: 0;
+    }
+    .repair-group-cols { display: flex; gap: 12px; flex: 1; min-height: 0; align-items: stretch; }
     .pipeline-tab {
       padding: 7px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
       border: 1px solid rgba(0,0,0,0.08); background: #fff; color: var(--sw-text-sec);
@@ -4509,6 +4524,7 @@
       <div class="filter-bar">
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
         <button class="pipeline-tab" onclick="setPipelineTab('patio')" data-pipeline="patio">Patio</button>
+        <button class="pipeline-tab" onclick="setPipelineTab('repairs')" data-pipeline="repairs">Repairs</button>
         <button class="pipeline-tab" onclick="setPipelineTab('decking')" data-pipeline="decking">Decking</button>
         <button class="pipeline-tab" onclick="setPipelineTab('makesafes')" data-pipeline="makesafes">Make Safes</button>
         <button class="pipeline-tab" onclick="setPipelineTab('misc')" data-pipeline="misc">Misc</button>
@@ -6001,7 +6017,7 @@ var _jobView = 'kanban'; // 'kanban' or 'list'
 var _pipelineTab = 'fencing'; // 'fencing', 'patio', 'decking', 'misc'
 // Job type each pipeline tab already implies — used to suppress the redundant
 // type badge on kanban cards. 'misc' is deliberately absent: that board mixes types.
-var KANBAN_TAB_IMPLIED_TYPE = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe' };
+var KANBAN_TAB_IMPLIED_TYPE = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe', repairs: 'repair' };
 var _jobFilter = 'fencing'; // API type filter — set by setPipelineTab()
 var _jobSearch = '';
 var _invFilter = 'ACCREC';
@@ -10640,7 +10656,7 @@ async function loadMakesafeBoardReviewAffordances() {
 
 function setPipelineTab(tab) {
   _pipelineTab = tab;
-  var typeMap = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe', misc: 'miscellaneous' };
+  var typeMap = { fencing: 'fencing', patio: 'patio', decking: 'decking', makesafes: 'makesafe', repairs: 'repair', misc: 'miscellaneous' };
   _jobFilter = typeMap[tab] || '';
   document.querySelectorAll('[data-pipeline]').forEach(function(el) {
     el.classList.toggle('active', el.dataset.pipeline === tab);
@@ -10828,6 +10844,8 @@ function renderJobs(data) {
       renderFencingKanban(container, data.columns);
     } else if (_pipelineTab === 'patio' || _pipelineTab === 'decking') {
       renderPatioKanban(container, data.columns);
+    } else if (_pipelineTab === 'repairs') {
+      renderRepairKanban(container, data.columns);
     } else if (_pipelineTab === 'makesafes') {
       // Only a canonical makesafe_board payload can place make-safe cards. A
       // stale non-make-safe payload (mid tab-switch, before loadJobs resolves)
@@ -11153,6 +11171,133 @@ function renderKanban(container, columns) {
 
   html += '</div>';
   html += '</div>'; // close flex wrapper
+  container.innerHTML = html;
+  setupKanbanHorizontalScroll();
+}
+
+// ════════════════════════════════════════════════════════════
+// <insurance-repairs-board>
+// Insurance Repair pipeline — a NEW, parallel board that is NOT the make-safe
+// (SES) board. Repair-family work minted from a RAPID REPAIR / repair work order
+// lands here, never in the make-safe Docs Ready / TRI / Prime columns. The
+// intake→board feed for repairs is owned by the backend sibling lane
+// (insurance-repairs-intake-board-v1): its job is to route repair-family rows to
+// this pipeline and off the make-safe board. This UX renders whatever repair rows
+// the pipeline feed returns into a fixed 9-stage kanban.
+//
+// CAPTAIN UI LOCK: ONE cohesive LIGHT kanban. Same card chrome (renderKanbanCard)
+// and same light .kanban-col columns as Fencing/Patio/Approvals. Deliberately NO
+// dark Sales column/drawer, NO inverted theme, NO dark cards. The only nod to the
+// quoting half is a QUIET section label ("Quote" over the first four columns,
+// "Job" over the rest) — the sales work here is in-job quoting against an existing
+// work order, not a lead hunt, so it shares the board rather than splitting off.
+// No council, no deposit column in v1.
+var REPAIR_STAGES = [
+  { key: 'wo_in',     label: 'WO In',     accent: '#4C6A7C' },
+  { key: 'scoping',   label: 'Scoping',   accent: '#4C6A7C' },
+  { key: 'quoted',    label: 'Quoted',    accent: '#1ABC9C' },
+  { key: 'variation', label: 'Variation', accent: '#F39C12' },
+  { key: 'approved',  label: 'Approved',  accent: '#27AE60' },
+  { key: 'materials', label: 'Materials', accent: '#3498DB' },
+  { key: 'scheduled', label: 'Scheduled', accent: '#3498DB' },
+  { key: 'on_site',   label: 'On Site',   accent: '#F15A29' },
+  { key: 'complete',  label: 'Complete',  accent: '#27AE60' },
+];
+// The quoting half is the first four columns (in-job quoting), the delivery half
+// the remaining five. Used only to draw the two quiet section labels.
+var REPAIR_QUOTE_STAGE_KEYS = ['wo_in', 'scoping', 'quoted', 'variation'];
+var REPAIR_STAGE_KEYS = REPAIR_STAGES.map(function (s) { return s.key; });
+// Best-effort fallback so a repair row whose feed has not yet stamped an explicit
+// `repair_stage` still lands in a sensible column instead of being dropped. The
+// server-provided `repair_stage` (or `board_stage`) always wins; this maps the
+// generic job.status vocabulary only when neither is present.
+var REPAIR_STATUS_TO_STAGE = {
+  new: 'wo_in', intake: 'wo_in', wo_in: 'wo_in', work_order_in: 'wo_in',
+  scoping: 'scoping', scope: 'scoping', assessing: 'scoping',
+  quoted: 'quoted', quote_sent: 'quoted', quote: 'quoted',
+  variation: 'variation', variation_pending: 'variation',
+  approved: 'approved', accepted: 'approved',
+  materials: 'materials', order_materials: 'materials', ordering: 'materials', awaiting_supplier: 'materials',
+  scheduled: 'scheduled', schedule_install: 'scheduled',
+  on_site: 'on_site', in_progress: 'on_site', processing: 'on_site',
+  complete: 'complete', completed: 'complete', invoiced: 'complete', final_payment: 'complete',
+};
+// A repair row identifies itself by family/type — the belt-and-suspenders guard
+// that keeps this board correct even if the pipeline feed has not yet been taught
+// the `repair` type filter (it then returns empty here rather than borrowing
+// another vertical's jobs). Backend routing is authoritative once live.
+function isRepairJob(j) {
+  if (!j) return false;
+  var vals = [j.type, j.job_type, j.family, j.job_family, j.ses_family, j.vertical].filter(Boolean);
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i]).trim().toLowerCase() === 'repair') return true;
+  }
+  return false;
+}
+// Resolve a repair row's column. Server field first (repair_stage, then the
+// canonical board_stage), then the status fallback map. Returns '' when unknown so
+// the caller can surface it rather than guess.
+function repairStageOf(j) {
+  var explicit = String((j && (j.repair_stage || j.board_stage)) || '').trim().toLowerCase();
+  if (REPAIR_STAGE_KEYS.indexOf(explicit) >= 0) return explicit;
+  var status = String((j && j.status) || '').trim().toLowerCase();
+  return REPAIR_STATUS_TO_STAGE[status] || '';
+}
+function _renderRepairColumn(stage, jobs) {
+  var html = '<div class="kanban-col" data-status="repair_' + stage.key + '">';
+  html += '<div class="kanban-col-header" style="border-bottom-color:' + stage.accent + ';">'
+    + stage.label + '<span class="count">' + jobs.length + '</span></div>';
+  html += '<div class="kanban-body">';
+  if (jobs.length === 0) {
+    html += '<div style="text-align:center; padding:20px; color:var(--sw-text-sec); font-size:12px;">No jobs</div>';
+  } else {
+    jobs.forEach(function (j) { html += renderKanbanCard(j, stage.key); });
+  }
+  html += '</div></div>';
+  return html;
+}
+function renderRepairKanban(container, columns) {
+  // Flatten every job the feed returned (pipeline columns are keyed by status),
+  // keep only repair rows, then re-bucket by repair stage. No make-safe stage
+  // logic runs here — this board never touches the SES board's data or columns.
+  var all = [];
+  if (columns) {
+    Object.keys(columns).forEach(function (k) {
+      (columns[k] || []).forEach(function (j) { if (isRepairJob(j)) all.push(j); });
+    });
+  }
+  var buckets = {};
+  REPAIR_STAGE_KEYS.forEach(function (k) { buckets[k] = []; });
+  var unmapped = [];
+  all.forEach(function (j) {
+    var stage = repairStageOf(j);
+    if (stage) buckets[stage].push(j); else unmapped.push(j);
+  });
+
+  var quoteStages = REPAIR_STAGES.filter(function (s) { return REPAIR_QUOTE_STAGE_KEYS.indexOf(s.key) >= 0; });
+  var jobStages = REPAIR_STAGES.filter(function (s) { return REPAIR_QUOTE_STAGE_KEYS.indexOf(s.key) < 0; });
+
+  function renderGroup(label, stages) {
+    var h = '<div class="repair-group">';
+    h += '<div class="repair-group-label">' + label + '</div>';
+    h += '<div class="repair-group-cols">';
+    stages.forEach(function (stage) { h += _renderRepairColumn(stage, buckets[stage.key]); });
+    h += '</div></div>';
+    return h;
+  }
+
+  var html = '<div class="kanban-container repair-kanban" style="flex:1;">';
+  html += renderGroup('Quote', quoteStages);
+  html += renderGroup('Job', jobStages);
+  // No-silent-drop: a repair row with an unrecognised stage stays visible in its
+  // own subtle column rather than vanishing. Rendered only when non-empty, so the
+  // clean empty-state board is exactly the nine agreed columns.
+  if (unmapped.length > 0) {
+    html += '<div class="repair-group"><div class="repair-group-label" style="color:#E74C3C;opacity:0.85;">Unmapped</div><div class="repair-group-cols">';
+    html += _renderRepairColumn({ key: 'unmapped', label: 'Stage unknown', accent: '#E74C3C' }, unmapped);
+    html += '</div></div>';
+  }
+  html += '</div>';
   container.innerHTML = html;
   setupKanbanHorizontalScroll();
 }
@@ -24971,7 +25116,7 @@ var QQ_TEMPLATES = {
   custom:          { description: '',                    quantity: 1,  unit: 'ea',  unit_price: 0,  cost_price: 0 },
 };
 
-var TYPE_LABELS = { miscellaneous: 'misc' };
+var TYPE_LABELS = { miscellaneous: 'misc', repair: 'Repair' };
 
 function typeBadgeLabel(type) {
   return TYPE_LABELS[type] || type || '';

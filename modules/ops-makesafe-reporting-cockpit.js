@@ -2549,9 +2549,10 @@ function _msSesTileThumb(t) {
  * page from the row's own figures; anything else gets an open-in-new-tab
  * fallback.
  *
- * The stage is deliberately short (density). A PDF or image therefore carries
- * an "Open document" escape hatch to a full-size read in a new tab, so nothing
- * on this screen is only readable at stage size.
+ * The stage renders the document at page width and GROWS with it, so the whole
+ * pane body scrolls as one page (see `.msr-stage` in ops.html) and the captain
+ * can read what he is approving. A PDF or image still carries an "Open
+ * document" escape hatch to a full-size read in a new tab.
  */
 function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];
@@ -3128,15 +3129,22 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   }
 
   var note;
+  var fullNote = '';
   if (armed) {
     var emailsPhrase = routeCount
       ? ('the ' + _msSmallNumberWord(routeCount) + ' email' + (routeCount === 1 ? '' : 's') + ' shown above')
       : 'the emails shown above';
+    // Beside the stamp: ONE short line ending with the irreversibility warning
+    // (captain ruling 2026-08-13: the preview owns the pane, the explanation
+    // folds). The full sentence moves verbatim into "What one press does".
     note = approveInvoice.enabled
-      ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
-      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+      ? ('One press records both approvals for this exact pack, authorises the Xero invoice, then sends ' + emailsPhrase + '.')
+      : ('One press records your send approval for this exact pack and sends ' + emailsPhrase + '.');
     note += ' Irreversible. Your press, every time.';
     note = escapeHtml(note);
+    fullNote = approveInvoice.enabled
+      ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
+      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
   } else if (hardHold) {
     note = holdReason;
   } else {
@@ -3170,6 +3178,9 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
 
   if (armed) {
     html += '<details class="msr-what"><summary>What one press does</summary>';
+    // The full press sentence, verbatim — folded here (not deleted) when the
+    // beside-the-stamp note was condensed to keep the foot compact.
+    html += '<p>' + escapeHtml(fullNote) + '</p>';
     html += '<ol>';
     if (approveInvoice.enabled) {
       html += '<li>Records your <b>invoice approval</b> for this exact invoice revision, then authorises the Xero draft invoice already prepared for it and binds its PDF into the pack.</li>';

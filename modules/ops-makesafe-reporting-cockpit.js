@@ -3009,15 +3009,22 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   }
 
   var note;
+  var fullNote = '';
   if (armed) {
     var emailsPhrase = routeCount
       ? ('the ' + _msSmallNumberWord(routeCount) + ' email' + (routeCount === 1 ? '' : 's') + ' shown above')
       : 'the emails shown above';
+    // Beside the stamp: ONE short line ending with the irreversibility warning
+    // (captain ruling 2026-08-13: the preview owns the pane, the explanation
+    // folds). The full sentence moves verbatim into "What one press does".
     note = approveInvoice.enabled
-      ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
-      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+      ? ('One press records both approvals for this exact pack, authorises the Xero invoice, then sends ' + emailsPhrase + '.')
+      : ('One press records your send approval for this exact pack and sends ' + emailsPhrase + '.');
     note += ' Irreversible. Your press, every time.';
     note = escapeHtml(note);
+    fullNote = approveInvoice.enabled
+      ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
+      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
   } else if (hardHold) {
     note = holdReason;
   } else {
@@ -3051,6 +3058,9 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
 
   if (armed) {
     html += '<details class="msr-what"><summary>What one press does</summary>';
+    // The full press sentence, verbatim — folded here (not deleted) when the
+    // beside-the-stamp note was condensed to keep the foot compact.
+    html += '<p>' + escapeHtml(fullNote) + '</p>';
     html += '<ol>';
     if (approveInvoice.enabled) {
       html += '<li>Records your <b>invoice approval</b> for this exact invoice revision, then authorises the Xero draft invoice already prepared for it and binds its PDF into the pack.</li>';

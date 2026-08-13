@@ -314,8 +314,15 @@ LIGHT stage (same chrome as the board). A native `<iframe>` is blank in headless
 Chrome AND in real Chrome when the signed URL is served
 `Content-Disposition: attachment` — that was the "grey empty pane" bug. The lib
 is vendored (lazy) at `shared/vendor/pdfjs/`; if it cannot load, tiles fall back
-to the page glyph and the stage to the Open-document hatch. The stage is
-deliberately short for density, so every pdf/image stage carries an "Open
+to the page glyph and the stage to the Open-document hatch. The stage height
+is VIEWPORT-RELATIVE (`clamp(280px, calc(100vh - 560px), 920px)`) and the
+approve foot is one compact band — captain ruling 2026-08-13: he must be able
+to READ the document he is approving, so the preview owns the pane's vertical
+space and decoration never keeps its size at the preview's expense (evidence +
+the viewport-realistic capture pattern:
+`docs/evidence/makesafe-review-pane-layout-2026-08-13/`,
+`scripts/ses-review-pane-viewport-shot.js` — full-page shots hide this bug).
+Every pdf/image stage still carries an "Open
 document" link to a full-size read in a new tab — keep that escape hatch if
 you touch `_msRenderDocStage`, and keep it behind `_msOpenDocFullSize`: signed
 pack URLs live 300s, this pane never auto-refreshes, and a calm read easily

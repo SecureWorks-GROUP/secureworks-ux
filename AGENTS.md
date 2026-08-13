@@ -254,8 +254,9 @@ INSTRUCTION — one type family, tight scale, one accent at a time. Compact is
 the product goal: the captain should scan the whole pack in a couple of
 seconds without endless scrolling. The reading order is a design contract:
 identity (job number + suburb — no client name/street on this surface), ONE
-next action (derived from the backend control flags alone), the single amber
-hold block when held, then document tabs over ONE compact stage — THE INVOICE
+next action (derived from the backend control flags alone), the compact
+caveat block when held (amber for a hard hold, calm blue for an email-draft-only
+soft hold), then document tabs over ONE compact stage — THE INVOICE
 IS A DOCUMENT here (the bound Xero PDF, else the proposal rendered as an
 invoice page; never a separate section) and MULTIPLE WORK
 ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
@@ -263,20 +264,37 @@ one and hide the rest; discriminated by `extractPoRef` when possible) — then
 missing documents named in one line (RV-1; SWMS stays "not in this pack",
 never "not required"), condensed email previews (one-line To/Cc/Subject +
 short body excerpt + attachment chips only — no "why this" essays). THE HOLD
-BLOCK IS BACKEND-SOURCED: blockers come from `cockpit.verdict.blockers`
-(structured entries that may carry `recovery_action` and `evidence.route_kind`)
-and fall back to the legacy `sections.status.reasons` strings only when that
-list is absent or yields no readable fact — a blockers array that all normalises
-away must never silence the reasons, or the pane says "cannot move" and names
-nothing. Each numbered entry renders the fact VERBATIM (never paraphrased to
-read better), prefixed by a short route tag when the evidence names a route, and
-its "what clears it" line is the backend's `recovery_action` whenever supplied —
-the local pattern table is a fallback for absence only and never overwrites a
-supplied one. Dedupe is over exactly what renders (fact, case-insensitively +
-route tag + resolved clear path), so the known backend habit of emitting one
-blocker per route collapses while a genuinely route-specific or
-differently-remedied hold survives. The stage is deliberately short for
-density, so every pdf/image stage carries an "Open document" link to a full-size read in a new tab — keep that escape hatch if
+BLOCK IS BACKEND-SOURCED AND COMPACT (Captain ruling 2026-08-13, no yellow
+novel): blockers come from `cockpit.verdict.blockers` (structured entries that
+may carry `evidence.route_kind`) and fall back to the legacy
+`sections.status.reasons` strings only when that list is absent or yields no
+readable fact — a blockers array that all normalises away must never silence the
+reasons. Each caveat renders as ONE line: a short route tag + the fact VERBATIM
+(never paraphrased). There is NO per-blocker "what clears it" paragraph, no lede,
+and no "no override" copy — those were the essay the captain rejected
+(`_msSesBlockerClears` survives only inside the dedupe key). SOFT vs HARD is the
+load-bearing split (`_msSesClassifyHold` / `_msSesBlockerIsSoftDraft`, the ONE
+place it is derived): an email-draft wall ("email draft"/"no draft on docket") is
+SOFT — it must NEVER wall SEND. A hold with ANY hard blocker (missing invoice,
+off-schedule rate, missing WO/photo/SWMS) is a HARD hold: amber, the stamp is
+disabled, the next action reads "Review N caveats". An email-draft-ONLY hold is
+SOFT: calm blue "Still drafting", and arming falls through to the backend control
+flags alone (`armed = !hardHold && (approve_invoice||send_it)`), so APPROVE AND
+SEND arms when the invoice is ready. `sesApproveAndSend` relaxes the same gate
+(hard-hold-only), and the backend chain still guards every real write/send, so
+this is a client gate relaxation, not a bypass. Dedupe is over exactly what
+renders (fact, case-insensitively + route tag + resolved clear path), so the
+backend habit of emitting one blocker per route collapses while a genuinely
+route-specific hold survives. PDF TILES AND THE INLINE STAGE ARE PAINTED BY
+pdf.js, not the native plugin (`<makesafe-pdf-preview>`): `_msHydratePdfSurfaces`
+renders each PDF tile's first page and the selected doc into `<canvas>` on a
+LIGHT stage (same chrome as the board). A native `<iframe>` is blank in headless
+Chrome AND in real Chrome when the signed URL is served
+`Content-Disposition: attachment` — that was the "grey empty pane" bug. The lib
+is vendored (lazy) at `shared/vendor/pdfjs/`; if it cannot load, tiles fall back
+to the page glyph and the stage to the Open-document hatch. The stage is
+deliberately short for density, so every pdf/image stage carries an "Open
+document" link to a full-size read in a new tab — keep that escape hatch if
 you touch `_msRenderDocStage`, and keep it behind `_msOpenDocFullSize`: signed
 pack URLs live 300s, this pane never auto-refreshes, and a calm read easily
 outlasts them, so the hatch shares `_msSesPackUrlsStale` with the tab switcher

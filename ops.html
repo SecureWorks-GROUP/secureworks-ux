@@ -3465,34 +3465,50 @@
       line-height: 1.55;
       color: #7a6a1f;
     }
-    .msr-hold-h { font-size: 14px; font-weight: 700; color: #6B4708; margin-bottom: 4px; }
-    .msr-hold-lede { max-width: 72ch; }
-    .msr-blockers { margin: 12px 0 0; padding-left: 24px; }
-    .msr-blockers li { margin-top: 10px; padding-left: 5px; max-width: 72ch; }
-    .msr-blockers li::marker { font-weight: 700; color: #8A5A09; }
-    .msr-blocker-fact { font-weight: 700; color: #6B4708; }
+    .msr-hold-h { font-size: 14px; font-weight: 700; color: #6B4708; margin-bottom: 2px; }
+    .msr-hold-oneline { font-size: 13px; color: #7a6a1f; }
+    /* Compact caveat list: ONE line each (route tag + verbatim fact). No essay. */
+    .msr-blockers { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+    .msr-blocker {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 78ch;
+    }
+    .msr-blocker-fact { font-weight: 600; color: #6B4708; }
     .msr-blocker-route {
       display: inline-block;
-      margin-right: 7px;
       padding: 0 6px;
       border: 1px solid #E4CE8C;
       border-radius: 4px;
       background: #FFF4D2;
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
       color: #8A5A09;
-      vertical-align: 1px;
+      flex-shrink: 0;
     }
-    .msr-clears { margin-top: 2px; font-size: 13px; }
-    .msr-clears b {
-      color: #8A5A09;
+    /* A soft (email-draft) caveat is calm: it fills in on the next run. */
+    .msr-blocker.soft .msr-blocker-fact { font-weight: 500; color: var(--sw-mid); }
+    .msr-blocker-auto {
+      font-size: 10px;
       font-weight: 700;
-      margin-right: 6px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--sw-mid-light);
     }
-    .msr-clears b::after { content: ':'; }
-    .msr-hold-foot { margin-top: 12px; font-size: 12.5px; }
+    /* Soft hold = blue calm chrome, not an amber alarm. */
+    .msr-hold.soft {
+      background: var(--sw-cool-50, #EEF4F8);
+      border-color: var(--sw-light, #D5E0E7);
+      color: var(--sw-mid);
+    }
+    .msr-hold.soft .msr-hold-h { color: var(--sw-dark); }
+    .msr-hold.soft .msr-blocker-route { border-color: #C7D8E2; background: #E7F0F6; color: var(--sw-mid); }
 
     /* Banners kept for portal / stale / failed-read / preview-note states. */
     .msr-banner {
@@ -3738,6 +3754,9 @@
       flex-shrink: 0;
     }
     .msr-tile-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    /* Real first-page PDF preview (pdf.js -> canvas), top-cropped like a page. */
+    .msr-tile-thumb canvas { width: 100%; height: 100%; object-fit: cover; object-position: top center; background: #fff; }
+    .msr-tile-thumb.pdf:not(.glyph) { background: #fff; align-items: flex-start; }
     .msr-tile-thumb.glyph { color: var(--sw-mid-light); }
     .msr-tile-thumb.glyph svg { width: 22px; height: 22px; }
     .msr-tab.tile[aria-selected="true"] .msr-tile-thumb.glyph { color: var(--sw-orange); }
@@ -3884,26 +3903,32 @@
       border-radius: var(--sw-radius-pill);
       padding: 3px 10px;
     }
+    /* LIGHT stage — same chrome as the board (white card, hairline border).
+       The PDF viewer paints pages to canvas inside it and scrolls. */
     .msr-stage {
-      background: #3A464D;
+      background: var(--sw-warm-100);
+      border: 1px solid var(--sw-border);
       border-radius: 8px;
-      height: clamp(220px, 32vh, 360px);
+      height: clamp(240px, 42vh, 460px);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       position: relative;
-      overflow: hidden;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .msr-stage-tag {
       position: absolute;
       top: 10px;
       right: 14px;
+      z-index: 2;
       font-size: 10.5px;
       font-weight: 700;
       letter-spacing: 0.05em;
       text-transform: uppercase;
-      color: #CDD8DF;
-      background: rgba(0, 0, 0, 0.32);
+      color: var(--sw-mid);
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--sw-border);
       border-radius: 5px;
       padding: 3px 9px;
     }
@@ -3912,23 +3937,56 @@
       position: absolute;
       top: 10px;
       left: 14px;
-      z-index: 2;
+      z-index: 3;
       font-size: 10.5px;
       font-weight: 700;
       letter-spacing: 0.05em;
       text-transform: uppercase;
-      color: #fff;
-      background: rgba(0, 0, 0, 0.42);
+      color: var(--sw-dark);
+      background: #fff;
+      border: 1px solid var(--sw-border);
       border-radius: 5px;
       padding: 3px 9px;
       text-decoration: none;
     }
-    .msr-stage-open:hover { background: rgba(0, 0, 0, 0.66); }
+    .msr-stage-open:hover { border-color: var(--sw-mid); color: var(--sw-orange); }
     .msr-stage-open:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 2px; }
-    .msr-stage iframe, .msr-stage img, .msr-stage .msr-stage-html { width: 100%; height: 100%; border: 0; }
-    .msr-stage img { object-fit: contain; }
+    .msr-stage img { max-width: 96%; height: auto; margin: 3%; object-fit: contain; }
+    .msr-stage .msr-stage-html { width: 100%; border: 0; }
     .msr-stage-html { background: #fff; overflow: auto; padding: 18px 20px; color: var(--sw-text); text-align: left; }
-    .msr-stage-empty { color: #CDD8DF; font-size: 13px; padding: 20px; text-align: center; max-width: 46ch; line-height: 1.55; }
+    .msr-stage-empty { color: var(--sw-mid); font-size: 13px; padding: 24px 20px; text-align: center; max-width: 46ch; line-height: 1.55; align-self: center; }
+    /* PDF viewer: stacked page canvases on the light stage. */
+    .msr-stage-doc {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 12px;
+    }
+    .msr-stage-doc .msr-pdf-page {
+      width: min(100%, 720px);
+      height: auto;
+      background: #fff;
+      border: 1px solid var(--sw-border);
+      border-radius: 4px;
+      box-shadow: 0 2px 10px rgba(41, 60, 70, 0.12);
+    }
+    .msr-stage-loading { color: var(--sw-mid); font-size: 12.5px; padding: 28px 12px; align-self: center; }
+    .msr-pdf-more { color: var(--sw-mid); font-size: 12px; padding: 4px 0 2px; }
+    .msr-stage-fallback {
+      align-self: center;
+      color: var(--sw-dark);
+      background: #fff;
+      border: 1px solid var(--sw-border);
+      border-radius: 6px;
+      padding: 10px 16px;
+      margin: auto;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .msr-stage-fallback:hover { border-color: var(--sw-orange); color: var(--sw-orange); }
 
     /* The invoice AS A DOCUMENT on the stage. */
     .msr-invpage {

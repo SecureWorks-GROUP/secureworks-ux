@@ -512,6 +512,9 @@ async function showMsReportingDetail(jobId, targetPanelId) {
   ctx.panelId = targetPanelId || 'msReportingDetailPanel';
   _msSesPackCache[jobId] = ctx;
   panel.innerHTML = _msSesRenderDetail(jobId, ctx, targetPanelId);
+  // Paint the PDF tile thumbnails + the inline viewer (pdf.js, lazy). Safe to
+  // call unconditionally — it no-ops when there is no PDF surface.
+  _msHydratePdfSurfaces(panel);
   // Populate the feedback thread after the container exists. Guarded so the
   // review panel still works if the feedback module is absent/still loading.
   if (typeof loadMsNotes === 'function') {
@@ -986,15 +989,16 @@ function _msSesOnFeedbackThreadRendered(jobId, state) {
  */
 function _msSesNextAction(cockpit) {
   var controls = (cockpit && cockpit.controls) || {};
-  var onHold = cockpit && cockpit.status === 'HOLD';
+  var hold = _msSesClassifyHold(cockpit);
   var cls = '';
   var text;
-  if (onHold) {
+  if (hold.hardHold) {
+    // Only a HARD hold reads as a stop. An email-draft-only hold is not a stop
+    // — it falls through to the armed copy below so SEND is never walled by a
+    // draft the pipeline still has to write.
     cls = ' hold';
-    var n = _msSesHoldBlockers(cockpit).length;
-    text = n
-      ? ('Clear <strong>' + n + ' blocker' + (n === 1 ? '' : 's') + '</strong> below &mdash; nothing can be approved or sent until then.')
-      : 'The system stopped this pack &mdash; nothing can be approved or sent until it clears.';
+    var n = hold.blockers.length;
+    text = 'Review <strong>' + n + ' caveat' + (n === 1 ? '' : 's') + '</strong> below before this pack is approved or sent.';
   } else if (controls.send_it && controls.send_it.enabled) {
     text = 'Read the pack, then press <strong>APPROVE AND SEND</strong>. It records your approval for this exact pack and emails the report, the photos and the invoice exactly as shown below.';
   } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
@@ -1089,6 +1093,36 @@ function _msSesHoldBlockers(cockpit) {
   return _msSesDedupeBlockers(sections.status && sections.status.reasons);
 }
 
+/**
+ * An "email-draft wall" is a SOFT caveat: the pipeline has not yet drafted an
+ * outgoing email for this pack. It is a prep state that fills itself in on the
+ * next reporting run — NOT a content problem the captain must fix, and (Captain
+ * ruling 2026-08-13) it must never wall the SEND. Everything else — a missing
+ * invoice, an off-schedule rate, a missing work order / photo / SWMS — is a
+ * HARD blocker that still locks the pack.
+ */
+function _msSesBlockerIsSoftDraft(b) {
+  var fact = String((b && b.fact) || '').toLowerCase();
+  return /email\s*draft/.test(fact) || /no\s+draft\s+on\s+docket/.test(fact);
+}
+
+/**
+ * Classify a cockpit's hold. `hard` blockers lock the pack; `soft` blockers are
+ * email-draft walls that do not. A hold that carries ANY hard blocker is a
+ * `hardHold` (the alarm state); a hold whose caveats are all email-draft walls
+ * is a soft hold that leaves arming to the backend control flags alone. This is
+ * the ONE place the soft/hard split is derived — the banner, the next action,
+ * the stamp arming and the send guard all read it, so they can never disagree.
+ */
+function _msSesClassifyHold(cockpit) {
+  var onHold = !!(cockpit && cockpit.status === 'HOLD');
+  var blockers = onHold ? _msSesHoldBlockers(cockpit) : [];
+  var soft = [];
+  var hard = [];
+  blockers.forEach(function(b) { (_msSesBlockerIsSoftDraft(b) ? soft : hard).push(b); });
+  return { onHold: onHold, blockers: blockers, soft: soft, hard: hard, hardHold: onHold && hard.length > 0 };
+}
+
 // Fallback only — used when the backend does NOT supply recovery_action.
 // These are PROCESS explanations (how this pipeline works), not claims about
 // the job's state. A supplied recovery_action always wins and is never
@@ -1132,25 +1166,36 @@ function _msSesBlockerClears(blocker) {
  * when supplied, else the local fallback table).
  */
 function _msSesRenderHoldBanner(cockpit) {
-  var blockers = _msSesHoldBlockers(cockpit);
+  var cls = _msSesClassifyHold(cockpit);
+  var blockers = cls.blockers;
   var n = blockers.length;
-  var html = '<div class="msr-hold">';
-  html += '<div class="msr-hold-h">On hold &mdash; '
-    + (n ? (n + ' thing' + (n === 1 ? '' : 's') + ' must clear before this pack can move') : 'this pack cannot move yet')
-    + '</div>';
-  html += '<div class="msr-hold-lede">The system stopped this pack because something is missing or looks wrong. There is no override on this screen.</div>';
-  if (n) {
-    html += '<ol class="msr-blockers">';
-    blockers.forEach(function(b) {
-      var route = _msSesBlockerRouteLabel(b);
-      html += '<li><div class="msr-blocker-fact">'
-        + (route ? '<span class="msr-blocker-route">' + escapeHtml(route) + '</span> ' : '')
-        + escapeHtml(b.fact) + '</div>';
-      html += '<div class="msr-clears"><b>What clears it</b>' + escapeHtml(_msSesBlockerClears(b)) + '</div></li>';
-    });
-    html += '</ol>';
+  if (!n) {
+    // Held with nothing to name: one calm line, no essay.
+    return '<div class="msr-hold soft"><div class="msr-hold-h">On hold</div>'
+      + '<div class="msr-hold-oneline">The system paused this pack. If that looks wrong, say so in Feedback below.</div></div>';
   }
-  html += '<div class="msr-hold-foot">Blockers clear on their own the next time the pack rebuilds. If one of them is wrong, say so in Feedback at the bottom.</div>';
+  // A hold that is only email-draft walls is calm (blue), not an alarm (amber):
+  // the captain can still review and approve; sending waits on the backend.
+  var soft = !cls.hardHold;
+  var html = '<div class="msr-hold' + (soft ? ' soft' : '') + '">';
+  html += '<div class="msr-hold-h">'
+    + (soft ? 'Still drafting &mdash; ' : 'On hold &mdash; ')
+    + n + ' caveat' + (n === 1 ? '' : 's')
+    + (soft ? ' to review' : '')
+    + '</div>';
+  // Each caveat is ONE compact line: route tag + the backend fact, verbatim.
+  // No per-blocker essay, no "what clears it" wall, no "no override" copy.
+  html += '<ul class="msr-blockers">';
+  blockers.forEach(function(b) {
+    var route = _msSesBlockerRouteLabel(b);
+    var isSoft = _msSesBlockerIsSoftDraft(b);
+    html += '<li class="msr-blocker' + (isSoft ? ' soft' : '') + '">'
+      + (route ? '<span class="msr-blocker-route">' + escapeHtml(route) + '</span> ' : '')
+      + '<span class="msr-blocker-fact">' + escapeHtml(b.fact) + '</span>'
+      + (isSoft ? '<span class="msr-blocker-auto">fills in on the next run</span>' : '')
+      + '</li>';
+  });
+  html += '</ul>';
   html += '</div>';
   return html;
 }
@@ -2245,11 +2290,152 @@ function _msSesTileFileName(t) {
   return t && t.url ? (String(t.url).split('?')[0].split('/').pop() || '') : '';
 }
 
-// A tile preview: the real image for an image document, a drawn page mark for
-// everything else. Never a stand-in that could be mistaken for the document.
+// ── PDF RENDERING (vendored pdf.js, lazy) ───────────────────────────────────
+// The document tiles and the inline stage render PDF pages to <canvas> with
+// pdf.js instead of handing the URL to the browser's native PDF plugin. Two
+// reasons: (1) a native <iframe> gives no first-page THUMBNAIL, and (2) the
+// plugin is absent in headless Chrome and refuses to render a signed URL inline
+// when the storage host serves it with `Content-Disposition: attachment` — the
+// "grey empty pane" bug this replaced. pdf.js fetches the bytes itself and
+// paints them, so it works everywhere and needs no plugin.
+//
+// The library (~1.5MB with its worker) loads LAZILY the first time a pack opens,
+// from the vendored copy under shared/vendor/pdfjs/. If it cannot load, or a
+// render throws, every surface falls back to its pre-existing behaviour (the
+// drawn page glyph on a tile, the "Open document" hatch on the stage) — nothing
+// regresses. Search <makesafe-pdf-preview>.
+var _MS_PDF_BASE = 'shared/vendor/pdfjs/';
+var _msPdfLibPromise = null;
+var _msPdfDocCache = {};
+
+// Load pdf.js once and resolve window.pdfjsLib. Rejects if the vendored script
+// is unreachable; callers catch and fall back.
+function _msPdfEnsureLib() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.reject(new Error('no DOM'));
+  }
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_msPdfLibPromise) return _msPdfLibPromise;
+  _msPdfLibPromise = new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = _MS_PDF_BASE + 'pdf.min.js';
+    s.async = true;
+    s.onload = function() {
+      if (!window.pdfjsLib) { reject(new Error('pdfjsLib missing after load')); return; }
+      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = _MS_PDF_BASE + 'pdf.worker.min.js'; } catch (_e) { /* set best-effort */ }
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = function() { _msPdfLibPromise = null; reject(new Error('pdf.js failed to load')); };
+    document.head.appendChild(s);
+  });
+  return _msPdfLibPromise;
+}
+
+// A cached pdf.js document promise per URL (the tile thumbnail and the stage
+// viewer for the same doc then share one fetch/parse).
+function _msPdfGetDoc(url) {
+  if (_msPdfDocCache[url]) return _msPdfDocCache[url];
+  var p = _msPdfEnsureLib().then(function(lib) {
+    return lib.getDocument({ url: url }).promise;
+  });
+  p.catch(function() { delete _msPdfDocCache[url]; }); // let a transient failure retry
+  _msPdfDocCache[url] = p;
+  return p;
+}
+
+// Render one pdf.js page into a canvas sized to `cssWidth` (device-pixel aware).
+function _msPdfPaintPage(page, canvas, cssWidth) {
+  var base = page.getViewport({ scale: 1 });
+  var scale = cssWidth / base.width;
+  var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+  var viewport = page.getViewport({ scale: scale * dpr });
+  canvas.width = Math.max(1, Math.floor(viewport.width));
+  canvas.height = Math.max(1, Math.floor(viewport.height));
+  canvas.style.width = '100%';
+  canvas.style.height = 'auto';
+  var ctx2d = canvas.getContext('2d');
+  return page.render({ canvasContext: ctx2d, viewport: viewport }).promise;
+}
+
+// Hydrate every not-yet-rendered PDF surface under `root`: tile thumbnails
+// (first page, cover-cropped) and the stage viewer (up to a page cap, stacked).
+// Idempotent — a surface is marked done so a re-scan never repaints it.
+function _msHydratePdfSurfaces(root) {
+  if (!root || !root.querySelectorAll) return;
+  var nodes = root.querySelectorAll('[data-pdf-url]:not([data-pdf-done])');
+  if (!nodes.length) return;
+  Array.prototype.forEach.call(nodes, function(el) {
+    el.setAttribute('data-pdf-done', '1');
+    var url = el.getAttribute('data-pdf-url');
+    var role = el.getAttribute('data-pdf-role') || 'thumb';
+    if (!url) return;
+    _msPdfGetDoc(url).then(function(doc) {
+      if (role === 'viewer') return _msPdfFillViewer(el, doc);
+      return _msPdfFillThumb(el, doc);
+    }).catch(function() {
+      // Leave the pre-rendered fallback (glyph / hatch) and mark the failure so
+      // the stage can show an honest message instead of a silent void.
+      el.setAttribute('data-pdf-failed', '1');
+      if (role === 'viewer') {
+        el.innerHTML = '<div class="msr-stage-empty">This PDF could not be shown inline. Use <b>Open document</b> above to read it.</div>';
+      }
+    });
+  });
+}
+
+function _msPdfFillThumb(el, doc) {
+  return doc.getPage(1).then(function(page) {
+    var w = el.clientWidth || 120;
+    var canvas = document.createElement('canvas');
+    return _msPdfPaintPage(page, canvas, w).then(function() {
+      el.classList.remove('glyph');
+      el.innerHTML = '';
+      el.appendChild(canvas);
+    });
+  });
+}
+
+function _msPdfFillViewer(el, doc) {
+  var cap = Math.min(doc.numPages, 6); // make-safe packs are short; cap for safety
+  el.innerHTML = '';
+  var width = Math.min(el.clientWidth || 640, 720);
+  var chain = Promise.resolve();
+  var i;
+  for (i = 1; i <= cap; i++) {
+    (function(pageNum) {
+      chain = chain.then(function() {
+        return doc.getPage(pageNum).then(function(page) {
+          var canvas = document.createElement('canvas');
+          canvas.className = 'msr-pdf-page';
+          el.appendChild(canvas);
+          return _msPdfPaintPage(page, canvas, width);
+        });
+      });
+    })(i);
+  }
+  return chain.then(function() {
+    if (doc.numPages > cap) {
+      var more = document.createElement('div');
+      more.className = 'msr-pdf-more';
+      more.textContent = (doc.numPages - cap) + ' more page' + (doc.numPages - cap === 1 ? '' : 's') + ' — use Open document for the full read';
+      el.appendChild(more);
+    }
+  });
+}
+
+// A tile preview: the real image for an image document, a real first-page PDF
+// render for a PDF (hydrated after mount), a drawn page mark for everything
+// else. Never a stand-in that could be mistaken for the document.
 function _msSesTileThumb(t) {
   if (t && t.kind === 'image' && t.url) {
     return '<span class="msr-tile-thumb"><img src="' + escapeAttr(t.url) + '" alt="" loading="lazy"></span>';
+  }
+  if (t && t.kind === 'pdf' && t.url) {
+    // Real first-page preview, hydrated by _msHydratePdfSurfaces. The page glyph
+    // shows until it paints (and stays if pdf.js cannot load).
+    return '<span class="msr-tile-thumb pdf glyph" data-pdf-url="' + escapeAttr(t.url) + '" data-pdf-role="thumb" aria-hidden="true">'
+      + '<svg viewBox="0 0 16 16"><path d="M4 1.5h5l3 3v10H4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>'
+      + '<path d="M9 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span>';
   }
   return '<span class="msr-tile-thumb glyph" aria-hidden="true">'
     + '<svg viewBox="0 0 16 16"><path d="M4 1.5h5l3 3v10H4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>'
@@ -2257,11 +2443,12 @@ function _msSesTileThumb(t) {
 }
 
 /**
- * Render the fit-to-page stage for the doc at index idx. Dark stage with the
- * page centered + a "fit to page" tag (mockup .pdfstage / .pdffit). PDFs embed
- * an iframe with the Fit-fragment URL; images render contained; the drafted
- * invoice (kind 'invdoc') renders as an invoice page from the row's own
- * figures; anything else gets an open-in-new-tab fallback.
+ * Render the fit-to-page stage for the doc at index idx. LIGHT stage (same
+ * chrome as the board) with a "fit to page" tag. PDFs are painted to canvas by
+ * pdf.js (<makesafe-pdf-preview>), not embedded via the native plugin; images
+ * render contained; the drafted invoice (kind 'invdoc') renders as an invoice
+ * page from the row's own figures; anything else gets an open-in-new-tab
+ * fallback.
  *
  * The stage is deliberately short (density). A PDF or image therefore carries
  * an "Open document" escape hatch to a full-size read in a new tab, so nothing
@@ -2295,9 +2482,14 @@ function _msRenderDocStage(docTabs, idx, row) {
   } else if (t.kind === 'image') {
     inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;">';
   } else if (t.kind === 'pdf') {
-    inner = '<iframe title="' + escapeAttr(t.tabLabel) + '" src="' + escapeAttr(t.url) + '" style="width:min(92%,720px);height:96%;background:#fff;"></iframe>';
+    // The selected PDF is PAINTED here (pdf.js -> canvas) by _msHydratePdfSurfaces,
+    // not handed to the native plugin — see <makesafe-pdf-preview>. The loading
+    // line shows until it paints, and stays as an honest message if pdf.js
+    // cannot load (the "Open document" hatch above is always the full read).
+    inner = '<div class="msr-stage-doc" data-pdf-url="' + escapeAttr(t.url) + '" data-pdf-role="viewer">'
+      + '<div class="msr-stage-loading">Rendering ' + escapeHtml(t.tabLabel || 'document') + '&#8230;</div></div>';
   } else {
-    inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
+    inner = '<a class="msr-stage-fallback" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
   var openHatch = '';
   if (t && t.url && (t.kind === 'pdf' || t.kind === 'image')) {
@@ -2651,7 +2843,10 @@ function _msSwitchDocTab(jobId, idx, panelId) {
     }
   }
   var stage = (root.querySelector && root.querySelector('#msDocStage_' + key)) || document.getElementById('msDocStage_' + key);
-  if (stage) stage.innerHTML = _msRenderDocStage(docTabs, idx, d);
+  if (stage) {
+    stage.innerHTML = _msRenderDocStage(docTabs, idx, d);
+    _msHydratePdfSurfaces(stage); // paint the newly-selected PDF
+  }
 }
 
 // ── CAROUSEL HELPERS ────────────────────────────────────────────────────────
@@ -2776,18 +2971,24 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   var controls = cockpit.controls || {};
   var approveInvoice = controls.approve_invoice || {};
   var sendIt = controls.send_it || {};
-  var onHold = cockpit.status === 'HOLD';
-  var blockerCount = onHold ? _msSesHoldBlockers(cockpit).length : 0;
+  // Only a HARD hold locks the stamp. An email-draft-only hold leaves arming to
+  // the backend flags — sending is never walled by a draft the pipeline still
+  // has to write (Captain ruling 2026-08-13). The backend still guards every
+  // real write/send inside sesApproveAndSend, so this is presentation + gate
+  // relaxation, not a bypass of any server check.
+  var hold = _msSesClassifyHold(cockpit);
+  var hardHold = hold.hardHold;
+  var blockerCount = hold.blockers.length;
   var xero = (sections.money && sections.money.xero) ||
     (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || null;
   var safeId = _msJsAttr(jobId);
-  var armed = !onHold && !!(approveInvoice.enabled || sendIt.enabled);
+  var armed = !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
 
-  var holdReason = 'Locked by the hold above'
-    + (blockerCount ? ' &mdash; blocker' + (blockerCount === 1 ? ' 1' : 's 1&#8211;' + blockerCount) + ' must clear first' : '')
-    + '. There is no override.';
+  var holdReason = blockerCount
+    ? ('The caveat' + (blockerCount === 1 ? '' : 's') + ' above ' + (blockerCount === 1 ? 'is' : 'are') + ' still open on this pack.')
+    : 'The system has not unlocked this pack yet.';
   var captainNote = controls.captain_only ? ' Captain authority is required for this pack.' : '';
 
   // disabled_reason is the backend's honest closed-door text (PR 563). Prefer
@@ -2808,7 +3009,7 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
       : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
     note += ' Irreversible. Your press, every time.';
     note = escapeHtml(note);
-  } else if (onHold) {
+  } else if (hardHold) {
     note = holdReason;
   } else {
     // Not armed and not held: whichever control the backend would unlock next
@@ -2864,8 +3065,9 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // The Docs Ready tick state, bound to the exact displayed pack hash. This is
   // the captain's per-job approval record (blueprint: "the approve control is
   // your decision" / RV-10): a tick that dies the moment the pack's bytes
-  // change, never a running approve-all. On hold there is nothing to record.
-  if (!onHold) {
+  // change, never a running approve-all. A hard hold has nothing to record; an
+  // email-draft-only hold still shows the tick because it can still be approved.
+  if (!hardHold) {
     var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
     html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
     if (tickPending) {
@@ -3011,8 +3213,11 @@ async function sesApproveAndSend(jobId) {
   var controls = (ctx.cockpit && ctx.cockpit.controls) || {};
   var approveCtl = controls.approve_invoice || {};
   var sendCtl = controls.send_it || {};
-  var onHold = ctx.cockpit && ctx.cockpit.status === 'HOLD';
-  if (onHold || !(approveCtl.enabled || sendCtl.enabled)) {
+  // Fail closed on a HARD hold only; an email-draft-only hold is not a lock.
+  // Either way the backend still guards every step of the chain below, so a
+  // relaxed client gate can never force a send the server refuses.
+  var hardHold = _msSesClassifyHold(ctx.cockpit).hardHold;
+  if (hardHold || !(approveCtl.enabled || sendCtl.enabled)) {
     showToast('This pack is not armed to approve or send.', 'error');
     return;
   }

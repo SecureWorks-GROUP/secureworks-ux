@@ -1,5 +1,10 @@
 # Docs Ready review pane — QA v2 (fm/review-pane-qa-v2)
 
+> Stage sizing (fix 1 below) superseded by
+> `docs/evidence/makesafe-review-pdf-viewer-zoom-2026-08-13/`: the stage is a
+> BOUNDED viewer again (viewport-relative height, zoom cluster, document
+> scrolls inside). Fixes 2–4 remain current; owner contract in `AGENTS.md`.
+
 Captain live proof 2026-08-13 ~15:46 Perth: PR 262's review pane was still
 unusable live. This branch is the isolated UX follow-up. No pack-build rewrite,
 no send, no backend stage-engine change.

@@ -1,5 +1,10 @@
 # MakeSafe review pane: compact approve foot (2026-08-13)
 
+> The #265 stage behaviour referenced below (grows with the document) was
+> superseded by `docs/evidence/makesafe-review-pdf-viewer-zoom-2026-08-13/`
+> (bounded viewer with zoom). The compact foot this record proves is
+> unchanged and current; owner contract in `AGENTS.md`.
+
 Captain report (screenshot, job SWMS-261133 / MLB-RR-26836): the document
 preview in the "review & send" pane was an unreadable sliver while the
 APPROVE AND SEND stamp and its four-line explanation kept ~250px of the

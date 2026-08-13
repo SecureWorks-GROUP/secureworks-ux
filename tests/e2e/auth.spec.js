@@ -3,21 +3,23 @@ const { signIn } = require('../helpers/auth');
 
 test.describe('Trade App authentication', () => {
   test('sign-in renders and bad credentials are rejected without a logout loop', async ({ appPage: page }) => {
-    await expect(page.getByText('Sign in to continue', { exact: true })).toBeVisible();
-    await expect(page.locator('#swAuthEmail')).toBeVisible();
-    await expect(page.locator('#swAuthPassword')).toBeVisible();
+    // trade.html signs in through its NATIVE login view — the ops auth-gate
+    // was deliberately removed from this page (PR #260: it hid crew login).
+    await expect(page.getByRole('heading', { name: 'Trade Login' })).toBeVisible();
+    await expect(page.locator('#loginEmail')).toBeVisible();
+    await expect(page.locator('#loginPassword')).toBeVisible();
 
-    await page.locator('#swAuthEmail').fill('unknown@example.test');
-    await page.locator('#swAuthPassword').fill('definitely-wrong');
-    await page.locator('#swAuthSubmit').click();
+    await page.locator('#loginEmail').fill('unknown@example.test');
+    await page.locator('#loginPassword').fill('definitely-wrong');
+    await page.locator('#btnLogin').click();
 
-    await expect(page.locator('#swAuthError')).toHaveText('Invalid login credentials');
-    await expect(page.locator('#swAuthGate')).toBeVisible();
+    await expect(page.locator('#loginError')).toContainText('Wrong email or password');
+    await expect(page.locator('#viewLogin')).toBeVisible();
     await expect(page.locator('#bottomNav')).toBeHidden();
-    await expect(page.locator('#swAuthSubmit')).toBeEnabled();
+    await expect(page.locator('#btnLogin')).toBeEnabled();
 
     await page.waitForTimeout(500);
-    await expect(page.locator('#swAuthGate')).toBeVisible();
+    await expect(page.locator('#viewLogin')).toBeVisible();
   });
 
   test.describe('calendar feed auth regression', () => {

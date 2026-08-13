@@ -93,10 +93,22 @@ async function installSupabaseAuthStub(page, {
 }
 
 async function signIn(page, { email, password }) {
-  await page.locator('#swAuthEmail').fill(email);
-  await page.locator('#swAuthPassword').fill(password);
-  await page.locator('#swAuthSubmit').click();
-  await page.locator('#swAuthGate').waitFor({ state: 'detached' });
+  // Two login surfaces exist: the ops auth-gate (#swAuth*) and trade.html's
+  // native login view (#loginEmail). PR #260 removed the gate from trade.html
+  // (it hid the crew login), so drive whichever surface the page presents.
+  const gateEmail = page.locator('#swAuthEmail');
+  const tradeEmail = page.locator('#loginEmail');
+  await gateEmail.or(tradeEmail).first().waitFor({ state: 'visible' });
+  if (await gateEmail.count()) {
+    await gateEmail.fill(email);
+    await page.locator('#swAuthPassword').fill(password);
+    await page.locator('#swAuthSubmit').click();
+    await page.locator('#swAuthGate').waitFor({ state: 'detached' });
+  } else {
+    await tradeEmail.fill(email);
+    await page.locator('#loginPassword').fill(password);
+    await page.locator('#btnLogin').click();
+  }
   await page.locator('#bottomNav').waitFor({ state: 'visible' });
 }
 

@@ -1180,6 +1180,49 @@ check(
   calls.opsFetch.some((c) => c.action === "list_ses_docs_ready_reviews"),
 );
 
+// ── 9b. A non-stale 409 (e.g. docket_pricing_stale) surfaces the server's own
+//        refusal text and does NOT trigger the stale-pack reload loop ───────
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.toasts.length = 0;
+calls.opsFetch.length = 0;
+const pricingStaleErr = new Error("The docket pricing has moved since this pack was reviewed.");
+pricingStaleErr.status = 409;
+pricingStaleErr.refusal = {
+  code: "docket_pricing_stale",
+  fact: "The docket pricing has moved since this pack was reviewed.",
+};
+behaviour.postJwt["sign_off_ses_docket"] = { review: { review_state: "signed_off" } };
+behaviour.post["prepare_ses_release_revision"] = { release: { id: "rel-3" } };
+behaviour.postJwt["approve_ses_release_revision"] = pricingStaleErr;
+await mod.sesApproveAndSend(JOB);
+check(
+  "a non-stale 409 aborts BEFORE execute_ses_release_revision",
+  !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
+);
+check(
+  "a non-stale 409 surfaces the server's own refusal text, not the stale-pack text",
+  calls.toasts.some((t) =>
+    t.kind === "error" && /docket pricing has moved/i.test(t.msg || "")
+  ) &&
+    !calls.toasts.some((t) => /nothing further was sent/i.test(t.msg || "")),
+);
+check(
+  "a non-stale 409 names the step it stopped at (chain-stopped, not stale-pack)",
+  (elements["msSesChainError-" + JOB]._html || "").includes("Stopped at:") &&
+    (elements["msSesChainError-" + JOB]._html || "").includes(
+      "The docket pricing has moved since this pack was reviewed.",
+    ),
+);
+await flush();
+check(
+  "a non-stale 409 does NOT reload the SES queue (no stale-pack reload loop)",
+  !calls.opsFetch.some((c) => c.action === "list_ses_docs_ready_reviews"),
+);
+
 // ── 10. APPROVE INVOICE: JWT approval -> Xero execute ────────────────────────
 function cockpitInvoiceReady() {
   const c = cockpitSendReady();
@@ -2099,9 +2142,11 @@ check(
     mod._msSesStatusChip("whatever").label === "SES UNKNOWN",
 );
 check(
-  "_msSesIsStale classifies 409s and stale_review refusals",
-  mod._msSesIsStale({ status: 409 }) &&
-    mod._msSesIsStale({ refusal: { code: "stale_review" } }) &&
+  "_msSesIsStale keys ONLY on refusal.code stale_review, not on bare 409 status",
+  mod._msSesIsStale({ refusal: { code: "stale_review" } }) &&
+    !mod._msSesIsStale({ status: 409 }) &&
+    !mod._msSesIsStale({ status: 409, refusal: { code: "docket_pricing_stale" } }) &&
+    !mod._msSesIsStale({ status: 409, refusal: { state: "refused", fact: "no code" } }) &&
     !mod._msSesIsStale({ status: 500 }) &&
     !mod._msSesIsStale(null),
 );

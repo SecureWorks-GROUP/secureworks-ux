@@ -706,11 +706,16 @@ async function _msSesLoadPackContext(jobId, retried) {
   return ctx;
 }
 
-// A 409 from the SES reads/actions means the displayed pack or tick no longer
-// matches the current docket bytes (stale_review and friends) — re-fetch and
-// re-render rather than acting on stale bytes.
+// A 409 from the SES reads/actions is stale ONLY when the server names
+// stale_review — the displayed pack or tick no longer matches the current
+// docket bytes, so re-fetch and re-render rather than acting on stale bytes.
+// Every other 409 (docket_pricing_stale, pricing_evidence_missing, an
+// already-bound invoice, a superseded obligation, ...) is a distinct,
+// differently-actionable refusal and must fall through to
+// _msSesChainStopped(), which prints the server's own words verbatim instead
+// of the stale-pack text.
 function _msSesIsStale(e) {
-  return !!(e && (e.status === 409 || (e.refusal && e.refusal.code === 'stale_review')));
+  return !!(e && e.refusal && e.refusal.code === 'stale_review');
 }
 
 // The operator label recorded on api_key-allowed SES writes (prepare/execute).

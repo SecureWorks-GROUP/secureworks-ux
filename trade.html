@@ -5233,7 +5233,7 @@
   }
 
   function isOpenMakesafePoolJob(job) {
-    if (!job || !isOpenMakesafePoolStatus(job.status)) return false;
+    if (!job || job.archived === true || !isOpenMakesafePoolStatus(job.status)) return false;
     var md = job.makesafe_details || job.metadata || {};
     var sub = String(job.substatus || job.makesafe_substatus || md.substatus || '').toLowerCase();
     var reportStatus = String(job.service_report_status || job.report_status || (job.service_report && job.service_report.status) || '').toLowerCase();
@@ -5241,6 +5241,19 @@
     if (['submitted', 'approved', 'sent'].indexOf(reportStatus) !== -1) return false;
     return true;
   }
+
+  // <trade-today-leftover-eligibility>
+  // Borrowed make-safe strips on Today are report debt, not history. Ignore the
+  // assignment's completed attendance when the live job still genuinely owes
+  // this trade a report; the job/report state is the source of truth here.
+  function shouldShowTodayMakesafeLeftover(assignment) {
+    var job = (assignment && assignment.jobs) || {};
+    return isOpenMakesafePoolJob(job) && !isReportSubmittedForTradeCard(job, {});
+  }
+
+  window.__SW_TRADE_TODAY_RUN_LIST_TESTS.isOpenMakesafePoolJob = isOpenMakesafePoolJob;
+  window.__SW_TRADE_TODAY_RUN_LIST_TESTS.shouldShowTodayMakesafeLeftover = shouldShowTodayMakesafeLeftover;
+  // </trade-today-leftover-eligibility>
 
   function hasJobInAssignmentGroups(data, jobId) {
     if (!data || !jobId) return false;
@@ -5883,6 +5896,7 @@
       // On the Today view, the borrowed thisWeek/upcoming sections show make-safes only.
       if (makesafeOnly) {
         filtered = filtered.filter(function(a) { return getTradeJobType(a.jobs || {}, a) === 'makesafe'; });
+        filtered = filtered.filter(shouldShowTodayMakesafeLeftover);
       }
       if (filtered.length === 0) return;
       // Deduplicate by job_id in admin view — group multiple crew assignments into one card

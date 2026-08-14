@@ -471,6 +471,15 @@ The legacy `.ms-*` run card, `.tjc-*` card bodies, and the runsheet reorder
 controls are retired — do not revive them. The calendar keeps its own
 `.ncal`/`.sh-*` timeline grammar (shares the type accents).
 
+Trade Today deliberately borrows make-safe assignments from This Week/Upcoming
+and past-dated work from Needs Report. Those borrowed strips are report-debt
+views, not history: filter them through `shouldShowTodayMakesafeLeftover`, which
+reuses `isOpenMakesafePoolJob` and `isReportSubmittedForTradeCard` so archived or
+terminal jobs and submitted/post-trade reports cannot leak back in. A live
+make-safe that still owes the trade's report remains visible even after the
+attendance assignment is complete. All and History keep their historical scope.
+Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
+
 ## Crew roster & lead installer (`trade.html`)
 
 The authoritative crew and lead-installer contract, including absence semantics,

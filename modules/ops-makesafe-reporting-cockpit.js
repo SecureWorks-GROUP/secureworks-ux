@@ -526,8 +526,8 @@ async function showMsReportingDetail(jobId, targetPanelId) {
  * Load the full SES context for a job: the cockpit view first (the authority
  * for status + controls + routes), then the byte-exact reviewable pack when the
  * docket is still in the Docs Ready queue. One stale_review retry: the queue
- * row can lag a fresh docket revision, so on a 409 we refresh the queue and
- * retry once before surfacing the refusal.
+ * row can lag a fresh docket revision, so on a stale_review refusal we refresh
+ * the queue and retry once before surfacing the refusal.
  */
 /**
  * When a bound Xero invoice has no signed PDF in the pack, fetch the real

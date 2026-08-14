@@ -3,10 +3,11 @@
     "serve:e2e": "python3 -m http.server 4173 --bind 127.0.0.1",
     "test:portal-confirmation": "node scripts/test-trade-portal-confirmation.js",
     "test:portal-link-hygiene": "node scripts/test-f5-portal-link-hygiene.js",
+    "test:trade-today": "node scripts/test-trade-today-run-list.js",
     "test:crew-lead-core": "node scripts/test-trade-crew-lead-core.js",
     "test:makesafe-intake-sweep": "node scripts/test-makesafe-intake-sweep-explicit.js",
     "test:makesafe-reporting-cockpit": "node modules/ops-makesafe-reporting-cockpit.smoke.mjs",
-    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:crew-lead-core && npm run test:makesafe-intake-sweep && npm run test:makesafe-reporting-cockpit && playwright test",
+    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:crew-lead-core && npm run test:makesafe-intake-sweep && npm run test:makesafe-reporting-cockpit && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {

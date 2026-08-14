@@ -5,7 +5,7 @@ const assert = require('assert')
 
 const html = fs.readFileSync('trade.html', 'utf8')
 const start = html.indexOf("var TODAY_RUN_LIST_STORAGE_PREFIX = 'sw_today_run_list_v1'")
-const end = html.indexOf('\n\n  window.setJobFilter', start)
+const end = html.indexOf('\n\n  function hasJobInAssignmentGroups', start)
 assert(start !== -1 && end !== -1, 'Today Run List helper block is present and extractable')
 const helperBlock = html.slice(start, end)
 
@@ -53,6 +53,27 @@ assert.notStrictEqual(otherCrewKey, state.key, 'different crew gets a separate p
 assert.strictEqual(helpers.isReportSubmittedForTradeCard({ service_report_status: 'submitted' }, {}), true, 'submitted service report marks card complete')
 assert.strictEqual(helpers.isReportSubmittedForTradeCard({ makesafe_details: { substatus: 'admin_to_send_report' } }, {}), true, 'MakeSafe post-submit substatus marks card complete')
 assert.strictEqual(helpers.isReportSubmittedForTradeCard({ status: 'scheduled' }, { status: 'scheduled' }), false, 'scheduled job is not complete-looking')
+
+const leftover = (job, assignmentStatus = 'scheduled') => ({
+  id: `asg-${job.id}`,
+  scheduled_date: '2026-06-01',
+  status: assignmentStatus,
+  jobs: { type: 'makesafe', ...job }
+})
+
+assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: 'archived-flag', status: 'scheduled', archived: true })), false, 'archived flag drops a past-dated card from Today leftovers')
+for (const status of ['archived', 'cancelled', 'complete', 'completed', 'invoiced', 'paid', 'closed', 'void', 'deleted', 'duplicate', 'duplicated', 'voided']) {
+  assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: `dead-${status}`, status })), false, `${status} job drops from Today leftovers`)
+}
+for (const reportStatus of ['submitted', 'approved', 'sent', 'report_ready']) {
+  assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: `reported-${reportStatus}`, status: 'scheduled', service_report_status: reportStatus })), false, `${reportStatus} report drops from Needs Report`)
+}
+for (const substatus of ['admin_to_send_report', 'ready_to_invoice', 'complete', 'report_ready', 'to_invoice', 'invoiced']) {
+  assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: `past-trade-${substatus}`, status: 'scheduled', makesafe_details: { substatus } })), false, `${substatus} make-safe drops from Needs Report`)
+}
+assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: 'live-report-owed', status: 'scheduled' })), true, 'past-dated live make-safe with no report stays on Needs Report')
+assert.strictEqual(helpers.shouldShowTodayMakesafeLeftover(leftover({ id: 'completed-attendance-report-owed', status: 'scheduled' }, 'complete')), true, 'completed attendance stays visible while the live job still genuinely owes the trade report')
+assert(html.includes('filtered = filtered.filter(shouldShowTodayMakesafeLeftover);'), 'Today borrowed make-safe strips apply the shared leftover eligibility helper')
 
 assert(html.includes("var _jobFilter = 'today'"), 'Jobs view defaults to Today filter')
 assert(html.includes('data-filter="today"') && html.includes('filter-chip active'), 'Today filter chip is active by default')

@@ -1,5 +1,10 @@
 # Docs Ready review pane fix — evidence (2026-08-13)
 
+> **HISTORICAL SNAPSHOT.** The pdf.js canvas stage viewer introduced here (ask 4)
+> was superseded on 2026-08-14 by the native iframe reader — see
+> `docs/evidence/makesafe-review-native-reader-2026-08-14/` and AGENTS.md.
+> Asks 1–3 (compact holds, soft-hold arming, real PDF tiles) still stand.
+
 Branch `fm/ses-review-pane-fix-v1`. Isolated UX fix to the make-safe **Docs Ready
 review pane** (`_msSesRenderDetail` in `modules/ops-makesafe-reporting-cockpit.js`,
 CSS `/* MAKE-SAFE DOCS READY REVIEW PANE */` in `ops.html`). Repairs tab and the

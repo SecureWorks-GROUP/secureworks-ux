@@ -890,7 +890,7 @@ check(
     "a bound Xero DRAFT with PDF shows the real PDF, not the proposal HTML",
     !!invTab && invTab.kind === "pdf" &&
       /xero-draft-inv-1102\.pdf/.test(invTab.url || "") &&
-      draftStage.includes('data-pdf-role="viewer"') &&
+      draftStage.includes("<iframe") &&
       draftStage.includes("xero-draft-inv-1102.pdf") &&
       !draftStage.includes("Proposed invoice") &&
       !draftStage.includes("Tax Invoice") &&
@@ -980,10 +980,10 @@ check(
     detailHtml.includes("Work Order"),
 );
 check(
-  "detail opens the report PDF at readable page width in the stage",
+  "detail opens the report PDF in the native fit-to-page iframe stage",
   detailHtml.includes("https://example.com/report.pdf#view=Fit") &&
-    detailHtml.includes('data-pdf-role="viewer"') &&
-    detailHtml.includes("page width"),
+    detailHtml.includes("<iframe") &&
+    detailHtml.includes("fit to page"),
 );
 check(
   "the trade-notes section renders only when a feed carries raw trade notes",
@@ -1128,7 +1128,7 @@ check(
   signedOffHtml.includes(">Invoice</button>") &&
     (signedOffHtml.includes("Invoice document not available") ||
       signedOffHtml.includes("xero-invoice.pdf") ||
-      signedOffHtml.includes('data-pdf-role="viewer"')) &&
+      signedOffHtml.includes("<iframe")) &&
     !signedOffHtml.includes("Tax Invoice") &&
     !signedOffHtml.includes("Proposed invoice"),
 );
@@ -1310,7 +1310,7 @@ check(
       draftHtml.includes("INV-1102") &&
       (draftHtml.includes("xero-draft-inv-1102.pdf") ||
         draftStageHtml.includes("xero-draft-inv-1102.pdf")) &&
-      (draftHtml.includes('data-pdf-role="viewer"') || draftStageHtml.includes('data-pdf-role="viewer"')) &&
+      (draftHtml.includes("<iframe") || draftStageHtml.includes("<iframe")) &&
       !draftStageHtml.includes("Proposed invoice") &&
       !draftStageHtml.includes("Tax Invoice") &&
       !draftHtml.includes("Tax Invoice"),
@@ -1372,8 +1372,8 @@ check(
       fbHtml.includes(">Invoice</button>") &&
       (fbHtml.includes("blob:smoke-xero-pdf") ||
         fbStage.includes("blob:smoke-xero-pdf") ||
-        fbHtml.includes('data-pdf-role="viewer"') ||
-        fbStage.includes('data-pdf-role="viewer"')) &&
+        fbHtml.includes("<iframe") ||
+        fbStage.includes("<iframe")) &&
       !fbStage.includes("Invoice document not available") &&
       !fbStage.includes("Proposed invoice") &&
       !fbHtml.includes("created at APPROVE"),

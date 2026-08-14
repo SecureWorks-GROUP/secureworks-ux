@@ -1,5 +1,10 @@
 # Docs Ready review pane — QA v2 (fm/review-pane-qa-v2)
 
+> **HISTORICAL SNAPSHOT.** The page-width pdf.js canvas stage these captures show
+> was superseded on 2026-08-14 by the native iframe reader — see
+> `docs/evidence/makesafe-review-native-reader-2026-08-14/` and AGENTS.md. The
+> family-behaviour proofs (SWMS, soft-hold arming, tiles) still stand.
+
 Captain live proof 2026-08-13 ~15:46 Perth: PR 262's review pane was still
 unusable live. This branch is the isolated UX follow-up. No pack-build rewrite,
 no send, no backend stage-engine change.

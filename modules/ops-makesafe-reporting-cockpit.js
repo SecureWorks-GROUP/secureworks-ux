@@ -2363,20 +2363,19 @@ function _msSesTileFileName(t) {
   return t && t.url ? (String(t.url).split('?')[0].split('/').pop() || '') : '';
 }
 
-// ── PDF RENDERING (vendored pdf.js, lazy) ───────────────────────────────────
-// The document tiles and the inline stage render PDF pages to <canvas> with
-// pdf.js instead of handing the URL to the browser's native PDF plugin. Two
-// reasons: (1) a native <iframe> gives no first-page THUMBNAIL, and (2) the
-// plugin is absent in headless Chrome and refuses to render a signed URL inline
-// when the storage host serves it with `Content-Disposition: attachment` — the
-// "grey empty pane" bug this replaced. pdf.js fetches the bytes itself and
-// paints them, so it works everywhere and needs no plugin.
+// ── PDF RENDERING (vendored pdf.js, lazy — TILE THUMBNAILS ONLY) ────────────
+// The document tiles render a real first-page preview to <canvas> with pdf.js
+// (a native <iframe> gives no thumbnail). The inline STAGE does NOT use this:
+// it embeds the browser's built-in PDF viewer via <iframe> (Captain ruling
+// 2026-08-14 — the native reader, just tall). Known trade-off carried from the
+// 13-Aug history: the native plugin can refuse to render a signed URL inline
+// when the storage host serves it with `Content-Disposition: attachment` (the
+// pre-#262 "grey empty pane"); the Open-document hatch stays as the escape.
 //
 // The library (~1.5MB with its worker) loads LAZILY the first time a pack opens,
 // from the vendored copy under shared/vendor/pdfjs/. If it cannot load, or a
-// render throws, every surface falls back to its pre-existing behaviour (the
-// drawn page glyph on a tile, the "Open document" hatch on the stage) — nothing
-// regresses. Search <makesafe-pdf-preview>.
+// render throws, the tile keeps its drawn page glyph — nothing regresses.
+// Search <makesafe-pdf-preview>.
 var _MS_PDF_BASE = 'shared/vendor/pdfjs/';
 var _msPdfLibPromise = null;
 var _msPdfDocCache = {};
@@ -2416,8 +2415,7 @@ function _msPdfGetDoc(url) {
   return p;
 }
 
-// The readable default width for a stage page. Page-WIDTH (not fit-whole-page):
-// the captain must be able to read the invoice/report without Open Document.
+// Fallback raster width when a thumbnail host has no measurable width yet.
 var _MS_PDF_STAGE_WIDTH = 700;
 
 // Render one pdf.js page into a canvas sized to `cssWidth` (device-pixel aware).
@@ -2437,9 +2435,9 @@ function _msPdfPaintPage(page, canvas, cssWidth) {
   return page.render({ canvasContext: ctx2d, viewport: viewport }).promise;
 }
 
-// Hydrate every not-yet-rendered PDF surface under `root`: tile thumbnails
-// (first page, cover-cropped) and the stage viewer (up to a page cap, stacked).
-// Idempotent — a surface is marked done so a re-scan never repaints it.
+// Hydrate every not-yet-rendered PDF tile thumbnail under `root` (first page,
+// cover-cropped). Idempotent — a surface is marked done so a re-scan never
+// repaints it.
 function _msHydratePdfSurfaces(root) {
   if (!root || !root.querySelectorAll) return;
   var nodes = root.querySelectorAll('[data-pdf-url]:not([data-pdf-done])');
@@ -2447,18 +2445,12 @@ function _msHydratePdfSurfaces(root) {
   Array.prototype.forEach.call(nodes, function(el) {
     el.setAttribute('data-pdf-done', '1');
     var url = el.getAttribute('data-pdf-url');
-    var role = el.getAttribute('data-pdf-role') || 'thumb';
     if (!url) return;
     _msPdfGetDoc(url).then(function(doc) {
-      if (role === 'viewer') return _msPdfFillViewer(el, doc);
       return _msPdfFillThumb(el, doc);
     }).catch(function() {
-      // Leave the pre-rendered fallback (glyph / hatch) and mark the failure so
-      // the stage can show an honest message instead of a silent void.
+      // Leave the drawn page glyph and mark the failure.
       el.setAttribute('data-pdf-failed', '1');
-      if (role === 'viewer') {
-        el.innerHTML = '<div class="msr-stage-empty">This PDF could not be shown inline. Use <b>Open document</b> above to read it.</div>';
-      }
     });
   });
 }
@@ -2472,53 +2464,6 @@ function _msPdfFillThumb(el, doc) {
       el.innerHTML = '';
       el.appendChild(canvas);
     });
-  });
-}
-
-function _msPdfFillViewer(el, doc) {
-  var cap = Math.min(doc.numPages, 6); // make-safe packs are short; cap for safety
-  // NEVER blank the pane before a page has painted: the old code cleared el
-  // first, so a slow/failed render left a white void (the Stratton bug). Paint
-  // into a detached container and swap it in only when the first page is on
-  // screen; keep the "Rendering…" line visible until then.
-  var rectW = (el.getBoundingClientRect && el.getBoundingClientRect().width) || 0;
-  var width = Math.min(el.clientWidth || rectW || _MS_PDF_STAGE_WIDTH, 720);
-  if (!(width > 40)) width = _MS_PDF_STAGE_WIDTH;
-  var frag = document.createElement('div');
-  frag.style.width = '100%';
-  frag.style.display = 'flex';
-  frag.style.flexDirection = 'column';
-  frag.style.alignItems = 'center';
-  frag.style.gap = '12px';
-  var swapped = false;
-  function swapIn() {
-    if (swapped) return;
-    swapped = true;
-    el.innerHTML = '';
-    el.appendChild(frag);
-  }
-  var chain = Promise.resolve();
-  var i;
-  for (i = 1; i <= cap; i++) {
-    (function(pageNum) {
-      chain = chain.then(function() {
-        return doc.getPage(pageNum).then(function(page) {
-          var canvas = document.createElement('canvas');
-          canvas.className = 'msr-pdf-page';
-          frag.appendChild(canvas);
-          return _msPdfPaintPage(page, canvas, width).then(swapIn);
-        });
-      });
-    })(i);
-  }
-  return chain.then(function() {
-    if (doc.numPages > cap) {
-      var more = document.createElement('div');
-      more.className = 'msr-pdf-more';
-      more.textContent = (doc.numPages - cap) + ' more page' + (doc.numPages - cap === 1 ? '' : 's') + ' — use Open document for the full read';
-      frag.appendChild(more);
-    }
-    swapIn(); // 0-page edge case: still swap so the loading line never lingers
   });
 }
 
@@ -2542,17 +2487,16 @@ function _msSesTileThumb(t) {
 }
 
 /**
- * Render the fit-to-page stage for the doc at index idx. LIGHT stage (same
- * chrome as the board) with a "fit to page" tag. PDFs are painted to canvas by
- * pdf.js (<makesafe-pdf-preview>), not embedded via the native plugin; images
- * render contained; the drafted invoice (kind 'invdoc') renders as an invoice
- * page from the row's own figures; anything else gets an open-in-new-tab
- * fallback.
+ * Render the fit-to-page stage for the doc at index idx. Dark stage with the
+ * page centered + a "fit to page" tag (mockup .pdfstage / .pdffit). PDFs embed
+ * an iframe with the Fit-fragment URL — the browser's built-in reader (Captain
+ * ruling 2026-08-14: the native reader, just tall); images render contained;
+ * the drafted invoice (kind 'invdoc') renders as an invoice page from the
+ * row's own figures; anything else gets an open-in-new-tab fallback.
  *
- * The stage renders the document at page width and GROWS with it, so the whole
- * pane body scrolls as one page (see `.msr-stage` in ops.html) and the captain
- * can read what he is approving. A PDF or image still carries an "Open
- * document" escape hatch to a full-size read in a new tab.
+ * The stage is a TALL fixed-height box (--msr-stage-h in ops.html). A PDF or
+ * image carries an "Open document" escape hatch to a full-size read in a new
+ * tab, so nothing on this screen is only readable at stage size.
  */
 function _msRenderDocStage(docTabs, idx, row) {
   var t = docTabs[idx];
@@ -2582,21 +2526,11 @@ function _msRenderDocStage(docTabs, idx, row) {
       inner = '<div class="msr-stage-empty">Document not available.</div>';
     }
   } else if (t.kind === 'image') {
-    // Page-WIDTH readable, never height-crushed. A tall Prime/roof capture used
-    // to render at max-height:94% of the short stage — a toothpick sliver. Now
-    // it renders at readable page width and the stage scrolls (same as a PDF
-    // page), so the answers on the portal form are legible in place.
-    inner = '<div class="msr-stage-doc"><img class="msr-doc-img" src="' + escapeAttr(t.url)
-      + '" alt="' + escapeAttr(t.tabLabel) + '" loading="lazy"></div>';
+    inner = '<img src="' + escapeAttr(t.url) + '" alt="' + escapeAttr(t.tabLabel) + '" style="max-width:94%;max-height:94%;">';
   } else if (t.kind === 'pdf') {
-    // The selected PDF is PAINTED here (pdf.js -> canvas) by _msHydratePdfSurfaces,
-    // not handed to the native plugin — see <makesafe-pdf-preview>. The loading
-    // line shows until it paints, and stays as an honest message if pdf.js
-    // cannot load (the "Open document" hatch above is always the full read).
-    inner = '<div class="msr-stage-doc" data-pdf-url="' + escapeAttr(t.url) + '" data-pdf-role="viewer">'
-      + '<div class="msr-stage-loading">Rendering ' + escapeHtml(t.tabLabel || 'document') + '&#8230;</div></div>';
+    inner = '<iframe title="' + escapeAttr(t.tabLabel) + '" src="' + escapeAttr(t.url) + '" style="width:min(92%,720px);height:96%;background:#fff;"></iframe>';
   } else {
-    inner = '<a class="msr-stage-fallback" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
+    inner = '<a href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener" style="color:#fff;background:rgba(255,255,255,0.12);padding:10px 16px;text-decoration:none;font-size:13px;font-weight:700;">Open ' + escapeHtml(t.tabLabel) + ' &#8599;</a>';
   }
   var openHatch = '';
   if (t && t.url && (t.kind === 'pdf' || t.kind === 'image')) {
@@ -2607,7 +2541,7 @@ function _msRenderDocStage(docTabs, idx, row) {
     openHatch = '<a class="msr-stage-open" href="' + escapeAttr(t.url) + '" target="_blank" rel="noopener"'
       + freshnessGate + '>Open document &#8599;</a>';
   }
-  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">page width</span>' + inner + '</div>';
+  return metaHtml + '<div class="msr-stage">' + openHatch + '<span class="msr-stage-tag">fit to page</span>' + inner + '</div>';
 }
 
 // <ses-roof-capture-provenance>
@@ -2971,7 +2905,6 @@ function _msSwitchDocTab(jobId, idx, panelId) {
   var stage = (root.querySelector && root.querySelector('#msDocStage_' + key)) || document.getElementById('msDocStage_' + key);
   if (stage) {
     stage.innerHTML = _msRenderDocStage(docTabs, idx, d);
-    _msHydratePdfSurfaces(stage); // paint the newly-selected PDF
   }
 }
 

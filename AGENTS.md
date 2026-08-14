@@ -316,24 +316,23 @@ SEND arms when the invoice is ready. `sesApproveAndSend` relaxes the same gate
 this is a client gate relaxation, not a bypass. Dedupe is over exactly what
 renders (fact, case-insensitively + route tag + resolved clear path), so the
 backend habit of emitting one blocker per route collapses while a genuinely
-route-specific hold survives. PDF TILES AND THE INLINE STAGE ARE PAINTED BY
-pdf.js, not the native plugin (`<makesafe-pdf-preview>`): `_msHydratePdfSurfaces`
-renders each PDF tile's first page and the selected doc into `<canvas>` on a
-LIGHT stage (same chrome as the board). A native `<iframe>` is blank in headless
-Chrome AND in real Chrome when the signed URL is served
-`Content-Disposition: attachment` — that was the "grey empty pane" bug. The lib
-is vendored (lazy) at `shared/vendor/pdfjs/`; if it cannot load, tiles fall back
-to the page glyph and the stage to the Open-document hatch. READABLE-FIRST
-(Captain ruling 2026-08-13): the stage renders the document at page WIDTH (tag
-reads "page width", not "fit to page") and GROWS with it (`.msr-stage`
-min-height + max-height, NOT a short fixed-height clamp) so the whole `.msr-body`
-scrolls as one page — the old `height: clamp(...)` turned a tall page into a
-sliver AND trapped the mouse wheel on a dead frame. A document IMAGE (Prime/roof
-capture) renders through `.msr-stage-doc .msr-doc-img` at page width, never
-height-crushed. The pdf VIEWER paints into a detached fragment and swaps in only
-after the first page renders (`_msPdfFillViewer`), so a slow/failed render never
-leaves the white void that was the Stratton "blank invoice" bug; a 0-width host
-falls back to `_MS_PDF_STAGE_WIDTH` instead of a 1px canvas. A named DOCUMENT
+route-specific hold survives. THE INLINE STAGE IS THE BROWSER'S BUILT-IN PDF
+READER, JUST TALL (Captain ruling 2026-08-14, superseding the 13-Aug custom
+canvas viewers): a PDF embeds via `<iframe src="...#view=Fit">` in a
+fixed-height dark stage whose height is the single knob
+`--msr-stage-h: clamp(420px, 65vh, 900px)` in `ops.html` (mobile override in the
+same file). Do NOT reintroduce a custom canvas/zoom viewer on the stage — the
+native toolbar owns scroll and zoom. Corner chrome: OPEN DOCUMENT top-left
+(`.msr-stage-open`), FIT TO PAGE tag top-right. Known, ruled-acceptable
+trade-off: the native plugin can refuse a signed URL served
+`Content-Disposition: attachment` (the pre-#262 "grey empty pane"); the
+Open-document hatch is the escape. PDF TILE THUMBNAILS are still painted by
+pdf.js (`<makesafe-pdf-preview>`, vendored lazily at `shared/vendor/pdfjs/`,
+tiles fall back to the page glyph if it cannot load) because an iframe gives no
+thumbnail. Headless captures of the stage need the FULL browser
+(`channel: 'chromium'`; the headless shell has no PDF viewer) and no catch-all
+`page.route` (interception starves the viewer's stream) — see
+`scripts/ses-review-pane-native-shot.js`. A named DOCUMENT
 role (`supporting_report_pdf`/`swms_artifact`) that ships in the pack with NO
 minted signed URL renders an honest `doc_unavailable` tile ("on the pack, link
 could not be loaded"), never the old silent drop that read as "no report

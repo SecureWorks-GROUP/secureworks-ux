@@ -1,5 +1,10 @@
 # MakeSafe review pane: compact approve foot (2026-08-13)
 
+> **Note (2026-08-14):** the STAGE half described below (PR #265's page-width
+> growing stage) was superseded by the native iframe reader — see
+> `docs/evidence/makesafe-review-native-reader-2026-08-14/`. The compact FOOT
+> ruling recorded here still stands.
+
 Captain report (screenshot, job SWMS-261133 / MLB-RR-26836): the document
 preview in the "review & send" pane was an unreadable sliver while the
 APPROVE AND SEND stamp and its four-line explanation kept ~250px of the

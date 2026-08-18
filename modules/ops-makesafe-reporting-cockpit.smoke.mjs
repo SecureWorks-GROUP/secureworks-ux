@@ -438,7 +438,14 @@ function cockpitSendReady() {
     status: "SEND_READY",
     stale: false,
     sections: {
-      job_story: { job_id: JOB, job_number: "261065", attendance_cycle_ids: [] },
+      job_story: {
+        job_id: JOB,
+        job_number: "261065",
+        attendance_cycle_ids: [],
+        docket_revision_id: DOCKET_REV,
+        docket_output_content_hash: HASH,
+        invoice_obligation_revision_id: "obr-1",
+      },
       status: { status: "SEND_READY", stale: false, reasons: [] },
       money: {
         local_invoice_proposal: proposal,
@@ -509,6 +516,7 @@ function reviewablePack() {
     docket: {
       id: DOCKET_REV,
       output_content_hash: HASH,
+      invoice_obligation_revision_id: "obr-1",
       local_invoice_proposal: proposal,
       xero_binding: { invoice_number: "INV-1234", status: "AUTHORISED" },
     },
@@ -1521,7 +1529,10 @@ check(
   "the press records the JWT invoice approval with includes_authorise",
   !!invApproveCall &&
     invApproveCall.body.job_id === JOB &&
-    invApproveCall.body.includes_authorise === true,
+    invApproveCall.body.includes_authorise === true &&
+    invApproveCall.body.expected_docket_revision_id === DOCKET_REV &&
+    invApproveCall.body.expected_output_content_hash === HASH &&
+    invApproveCall.body.expected_invoice_obligation_revision_id === "obr-1",
 );
 const invExecCall = calls.opsPost.find((c) =>
   c.action === "execute_ses_invoice_revision"

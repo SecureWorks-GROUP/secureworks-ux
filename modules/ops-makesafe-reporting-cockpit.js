@@ -3294,11 +3294,15 @@ async function _msSesRefreshPackContext(jobId) {
 function _msSesEchoedReviewCoordinates(ctx) {
   var story = ((ctx && ctx.cockpit && ctx.cockpit.sections) || {}).job_story || {};
   var packDock = (ctx && ctx.pack && ctx.pack.docket) || {};
+  var money = ((ctx && ctx.cockpit && ctx.cockpit.sections) || {}).money || {};
+  var bound = money.bound_invoice || money.xero || {};
+  var packXero = packDock.xero_binding || {};
   return {
     expected_docket_revision_id: ctx.docketRevisionId || story.docket_revision_id || packDock.id || null,
     expected_output_content_hash: ctx.outputHash || story.docket_output_content_hash || packDock.output_content_hash || null,
     expected_invoice_obligation_revision_id: story.invoice_obligation_revision_id ||
-      packDock.invoice_obligation_revision_id || null
+      packDock.invoice_obligation_revision_id || null,
+    expected_draft_pdf_content_hash: bound.pdf_content_hash || packXero.pdf_content_hash || null
   };
 }
 
@@ -3349,13 +3353,17 @@ async function sesApproveAndSend(jobId) {
       ) {
         throw new Error('This pack is missing the exact review coordinates needed to approve the invoice.');
       }
-      var approval = await opsPostJwt('approve_ses_invoice_revision', {
+      var approveBody = {
         job_id: jobId,
         includes_authorise: true,
         expected_docket_revision_id: echo.expected_docket_revision_id,
         expected_invoice_obligation_revision_id: echo.expected_invoice_obligation_revision_id,
         expected_output_content_hash: echo.expected_output_content_hash
-      });
+      };
+      if (echo.expected_draft_pdf_content_hash) {
+        approveBody.expected_draft_pdf_content_hash = echo.expected_draft_pdf_content_hash;
+      }
+      var approval = await opsPostJwt('approve_ses_invoice_revision', approveBody);
       invoiceRecorded = true;
       var obligationRevisionId = approval && approval.approval && approval.approval.invoice_obligation_revision_id;
       if (!obligationRevisionId) {

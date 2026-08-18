@@ -795,21 +795,49 @@ var _MS_SES_ICONS = {
  * BOTTOM (ONE press: APPROVE AND SEND), armed only by backend control flags.
  * A disabled stamp stays visible with its reason. No combined Approve-and-Send.
  */
-// Local send-preview edits for hours and email wording. Changing these
-// updates the invoice lines and outgoing-email cards on THIS view so the
-// next paint is what would send. Nothing here authorises an invoice or
-// releases a route.
+// Hours/wording edits on the review pane. Applying an edit RECORDS it on the
+// exact docket revision via record_ses_review_feedback — the same channel as
+// the Feedback composer — so the revised pack the reporting routine assembles
+// carries the edit, and APPROVE AND SEND only ever sends a pack that matches
+// what is on screen. Until the revised pack lands, the edited values overlay
+// this view as an explicit in-flight preview keyed to the docket revision they
+// were recorded against, and the press stays locked (see _msSesPreviewOf).
+// Nothing here authorises an invoice or releases a route.
 var _msSesSendPreview = {};
 
-function _msSesPreviewOf(jobId) {
-  return (_msSesSendPreview && _msSesSendPreview[jobId]) || null;
+// The ONE derivation of "this job has an active edit preview". Keyed to the
+// docket revision + output hash the edit was recorded against: a ctx carrying
+// a different revision (the revised pack, or the invoice-bound repack) clears
+// the preview here in the resolver, so a stale edit can never overlay a fresh
+// pack's money or routes.
+function _msSesPreviewOf(jobId, ctx) {
+  var preview = (_msSesSendPreview && _msSesSendPreview[jobId]) || null;
+  if (!preview) return null;
+  if (ctx && ((preview.docketRevisionId || null) !== (ctx.docketRevisionId || null)
+      || (preview.outputHash || null) !== (ctx.outputHash || null))) {
+    delete _msSesSendPreview[jobId];
+    return null;
+  }
+  return preview;
 }
 
-function _msSesLabourHoursFromCtx(ctx) {
-  var preview = ctx && _msSesPreviewOf(ctx.jobId);
-  if (preview && preview.hours != null && isFinite(Number(preview.hours))) {
-    return Number(preview.hours);
-  }
+// A line is labour only when it says so: an explicit labour line type, or a
+// description carrying a labour/attendance word without a non-labour noun
+// (hire, materials, surcharge...). Never "the first line" and never a bare
+// "hour" match — an After Hours Surcharge or a Temp Fence Hire line must not
+// be rewritten by an hours edit.
+function _msSesInvoiceLineIsLabour(li) {
+  if (!li) return false;
+  var typed = String(li.line_type || li.type || '').toLowerCase();
+  if (/labou?r/.test(typed)) return true;
+  if (typed) return false;
+  var desc = String(li.description || '').toLowerCase();
+  if (/surcharge|material|hire|equipment|delivery|travel|disposal|skip bin/.test(desc)) return false;
+  return /\blabou?r\b|\battendance\b/.test(desc);
+}
+
+// Labour hours as the pack itself states them — never the preview.
+function _msSesPackLabourHours(ctx) {
   var money = (ctx && ctx.cockpit && ctx.cockpit.sections && ctx.cockpit.sections.money) || {};
   if (money.labour_hours != null && isFinite(Number(money.labour_hours))) {
     return Number(money.labour_hours);
@@ -819,13 +847,19 @@ function _msSesLabourHoursFromCtx(ctx) {
   var lines = proposal && Array.isArray(proposal.line_items) ? proposal.line_items : [];
   for (var i = 0; i < lines.length; i++) {
     var li = lines[i] || {};
-    var desc = String(li.description || '').toLowerCase();
-    if (li.quantity != null && isFinite(Number(li.quantity))
-        && (/labour|hour|attendance|make-?safe/.test(desc) || i === 0)) {
+    if (li.quantity != null && isFinite(Number(li.quantity)) && _msSesInvoiceLineIsLabour(li)) {
       return Number(li.quantity);
     }
   }
   return null;
+}
+
+function _msSesLabourHoursFromCtx(ctx) {
+  var preview = ctx && _msSesPreviewOf(ctx.jobId, ctx);
+  if (preview && preview.hours != null && isFinite(Number(preview.hours))) {
+    return Number(preview.hours);
+  }
+  return _msSesPackLabourHours(ctx);
 }
 
 function _msSesApplyPreviewToProposal(proposal, hours) {
@@ -834,13 +868,11 @@ function _msSesApplyPreviewToProposal(proposal, hours) {
   var src = proposal;
   var out = {};
   Object.keys(src).forEach(function(k) { out[k] = src[k]; });
-  var lines = Array.isArray(src.line_items) ? src.line_items.map(function(li, idx) {
+  var lines = Array.isArray(src.line_items) ? src.line_items.map(function(li) {
     li = li || {};
     var copy = {};
     Object.keys(li).forEach(function(k) { copy[k] = li[k]; });
-    var desc = String(li.description || '').toLowerCase();
-    var isLabour = /labour|hour|attendance|make-?safe/.test(desc) || idx === 0;
-    if (!isLabour) return copy;
+    if (!_msSesInvoiceLineIsLabour(li)) return copy;
     var unit = (li.unit_price_ex_gst != null ? Number(li.unit_price_ex_gst) : Number(li.unit_price));
     copy.quantity = hours;
     if (isFinite(unit)) {
@@ -879,7 +911,7 @@ function _msSesApplyPreviewToRoutes(routes, preview) {
 
 function _msSesCtxWithPreview(ctx) {
   if (!ctx) return ctx;
-  var preview = _msSesPreviewOf(ctx.jobId);
+  var preview = _msSesPreviewOf(ctx.jobId, ctx);
   if (!preview) return ctx;
   var out = {};
   Object.keys(ctx).forEach(function(k) { out[k] = ctx[k]; });
@@ -924,15 +956,15 @@ function _msSesCtxWithPreview(ctx) {
 function _msSesRenderSendEditors(jobId, ctx) {
   var routes = ((ctx.cockpit && ctx.cockpit.sections) || {}).email_drafts || [];
   var hours = _msSesLabourHoursFromCtx(ctx);
-  var preview = _msSesPreviewOf(jobId);
+  var preview = _msSesPreviewOf(jobId, ctx);
   var safeId = _msJsAttr(jobId);
   var html = '<div class="msr-edit" id="msSesEdit-' + safeId + '">';
   html += '<div class="msr-edit-h"><h3>Hours &amp; wording</h3>';
-  html += '<span class="msr-sec-note">updates the send preview &mdash; does not send</span></div>';
+  html += '<span class="msr-sec-note">records on this docket &mdash; does not send</span></div>';
   html += '<div class="msr-edit-row">';
   html += '<label class="hours">Hours<input type="number" step="0.5" min="0" id="msSesHours-' + safeId + '" value="'
     + (hours != null ? escapeAttr(String(hours)) : '') + '"></label>';
-  html += '<button type="button" class="msr-edit-apply" onclick="_msSesApplySendPreview(\'' + safeId + '\')">Update send preview</button>';
+  html += '<button type="button" class="msr-edit-apply" id="msSesEditApply-' + safeId + '" onclick="_msSesApplySendPreview(\'' + safeId + '\')">Update send pack</button>';
   html += '</div>';
   if (Array.isArray(routes) && routes.length) {
     routes.forEach(function(r, idx) {
@@ -949,36 +981,130 @@ function _msSesRenderSendEditors(jobId, ctx) {
   }
   html += '<p class="msr-edit-note' + (preview ? ' ok' : '') + '">';
   html += preview
-    ? 'This view is the send preview after your last edit. Nothing has been sent or authorised.'
-    : 'Change hours or wording, then Update send preview. The emails and invoice below become what one press would send.';
+    ? 'Your edits are recorded on this docket and shown below as the send preview. APPROVE AND SEND stays locked until the revised pack carrying them lands here. Nothing has been sent or authorised.'
+    : 'Change hours or wording, then Update send pack. The edit is recorded on this exact docket, the emails and invoice below preview it, and the press unlocks on the revised pack that carries it.';
   html += '</p></div>';
   return html;
 }
 
-function _msSesApplySendPreview(jobId) {
+// The route edits actually entered, compared against what the pack itself says.
+// Only a CHANGED subject/body counts — an untouched field is not an edit.
+function _msSesCollectRouteEdits(jobId, ctx) {
+  var edits = {};
+  var host = _msSesScopedEl(jobId, 'msSesEdit-' + jobId);
+  if (!host || !host.querySelectorAll) return edits;
+  var byKind = {};
+  var routes = ((ctx.cockpit && ctx.cockpit.sections) || {}).email_drafts || [];
+  (Array.isArray(routes) ? routes : []).forEach(function(r) {
+    if (r && r.route_kind != null) byKind[String(r.route_kind)] = r;
+  });
+  host.querySelectorAll('[data-ses-edit][data-route-kind]').forEach(function(el) {
+    var kind = el.getAttribute('data-route-kind');
+    var field = el.getAttribute('data-ses-edit');
+    if (!kind || (field !== 'subject' && field !== 'body')) return;
+    var base = byKind[kind] ? String(byKind[kind][field] || '') : '';
+    var entered = String(el.value == null ? '' : el.value);
+    if (entered === base) return;
+    if (!edits[kind]) edits[kind] = {};
+    edits[kind][field] = entered;
+  });
+  return edits;
+}
+
+// Apply the entered hours/wording: record them on the exact docket revision via
+// record_ses_review_feedback (identified-operator JWT — the same channel and
+// payload shape as the Feedback composer), then keep them as the on-screen send
+// preview keyed to that revision. The backend invalidates the pack's readiness,
+// the reporting routine assembles a revised pack carrying the edits, and the
+// press unlocks on that pack — so what sends is always what the screen shows.
+// Nothing here approves an invoice or releases a route.
+async function _msSesApplySendPreview(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) return;
+  if (!ctx.docketRevisionId) {
+    showToast('This pack has already passed Docs Ready review, so edits can no longer be recorded on it.', 'error');
+    return;
+  }
   var hoursEl = _msSesScopedEl(jobId, 'msSesHours-' + jobId);
   var hoursVal = hoursEl ? parseFloat(hoursEl.value) : NaN;
-  var preview = { routes: {} };
-  if (isFinite(hoursVal) && hoursVal >= 0) preview.hours = hoursVal;
-  var host = _msSesScopedEl(jobId, 'msSesEdit-' + jobId);
-  if (host) {
-    host.querySelectorAll('[data-ses-edit][data-route-kind]').forEach(function(el) {
-      var kind = el.getAttribute('data-route-kind');
-      if (!kind) return;
-      if (!preview.routes[kind]) preview.routes[kind] = {};
-      preview.routes[kind][el.getAttribute('data-ses-edit')] = el.value;
+  var baseHours = _msSesPackLabourHours(ctx);
+  var routeEdits = _msSesCollectRouteEdits(jobId, ctx);
+  var preview = {
+    docketRevisionId: ctx.docketRevisionId || null,
+    outputHash: ctx.outputHash || null,
+    routes: routeEdits
+  };
+  var noteLines = [];
+  if (isFinite(hoursVal) && hoursVal >= 0 && hoursVal !== baseHours) {
+    preview.hours = hoursVal;
+    noteLines.push('Set the invoice labour hours to ' + hoursVal
+      + (baseHours != null ? ' (currently ' + baseHours + ')' : '') + '.');
+  }
+  Object.keys(routeEdits).forEach(function(kind) {
+    var label = _MS_SES_ROUTE_LABELS[kind] || (kind + ' email');
+    if (routeEdits[kind].subject != null) {
+      noteLines.push('Use this subject for the ' + label + ': ' + routeEdits[kind].subject);
+    }
+    if (routeEdits[kind].body != null) {
+      noteLines.push('Use this wording for the ' + label + ':\n' + routeEdits[kind].body);
+    }
+  });
+
+  function repaint() {
+    var panel = document.getElementById(ctx.panelId || 'msReportingDetailPanel');
+    if (!panel) return;
+    panel.innerHTML = _msSesRenderDetail(jobId, ctx, ctx.panelId);
+    _msHydratePdfSurfaces(panel);
+    if (typeof loadMsNotes === 'function') {
+      loadMsNotes(jobId, 'msNotesPanel-' + jobId);
+    }
+  }
+
+  if (!noteLines.length) {
+    delete _msSesSendPreview[jobId];
+    showToast('No changes to record — the pack already matches these values.', 'info');
+    repaint();
+    return;
+  }
+
+  // Re-pressing with nothing new entered must not re-record the same feedback.
+  var active = _msSesPreviewOf(jobId, ctx);
+  if (active && JSON.stringify({ h: active.hours, r: active.routes })
+      === JSON.stringify({ h: preview.hours, r: preview.routes })) {
+    showToast('These edits are already recorded on this docket — waiting for the revised pack.', 'info');
+    repaint();
+    return;
+  }
+
+  var btn = _msSesScopedEl(jobId, 'msSesEditApply-' + jobId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Recording...'; }
+  var author = (typeof _MS_NOTES_DEFAULT_AUTHOR !== 'undefined' && _MS_NOTES_DEFAULT_AUTHOR) || 'Ops';
+  try {
+    await opsPostJwt('record_ses_review_feedback', {
+      docket_revision_id: ctx.docketRevisionId,
+      job_id: jobId,
+      change_type: 'human_review_feedback',
+      before: null,
+      after: { note: noteLines.join('\n'), author: author }
     });
+  } catch (e) {
+    showToast('The edit could not be recorded on the docket: ' + ((e && e.message) || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Update send pack'; }
+    return;
+  }
+  // Echo into the session feedback thread (docket feedback has no read-back).
+  if (typeof _msSesEchoCache !== 'undefined' && _msSesEchoCache) {
+    _msSesEchoCache[jobId] = (_msSesEchoCache[jobId] || []).concat([{
+      role: 'human',
+      author: author,
+      body: noteLines.join('\n'),
+      created_at: new Date().toISOString(),
+      ses_recorded: true
+    }]);
   }
   _msSesSendPreview[jobId] = preview;
-  var panel = document.getElementById(ctx.panelId || 'msReportingDetailPanel');
-  if (!panel) return;
-  panel.innerHTML = _msSesRenderDetail(jobId, ctx, ctx.panelId);
-  _msHydratePdfSurfaces(panel);
-  if (typeof loadMsNotes === 'function') {
-    loadMsNotes(jobId, 'msNotesPanel-' + jobId);
-  }
+  showToast('Edits recorded on the SES docket. The revised pack will carry them; the send preview below shows them now.', 'success');
+  repaint();
 }
 
 function _msSesRenderDetail(jobId, ctx, targetPanelId) {
@@ -3268,7 +3394,11 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   var xero = (sections.money && sections.money.xero) ||
     (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || null;
   var safeId = _msJsAttr(jobId);
-  var armed = !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
+  // Recorded hours/wording edits the pack does not carry yet lock the press:
+  // the screen shows the edited preview, so a send of the unedited pack would
+  // send something other than what is shown.
+  var previewLock = _msSesPreviewOf(jobId, ctx);
+  var armed = !previewLock && !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
 
@@ -3304,6 +3434,8 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
       : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
   } else if (hardHold) {
     note = holdReason;
+  } else if (previewLock) {
+    note = 'Your hours/wording edits are recorded on this docket, but this pack does not carry them yet. The press unlocks on the revised pack that does.';
   } else {
     // Not armed and not held: whichever control the backend would unlock next
     // owns the reason. Never invent one.
@@ -3534,6 +3666,13 @@ async function sesApproveAndSend(jobId) {
   var hardHold = _msSesClassifyHold(ctx.cockpit).hardHold;
   if (hardHold || !(approveCtl.enabled || sendCtl.enabled)) {
     showToast('This pack is not armed to approve or send.', 'error');
+    return;
+  }
+  // Fail closed while recorded hours/wording edits are still in flight: the
+  // screen shows the edited preview, and this pack does not carry it. Sending
+  // now would send something other than what is shown.
+  if (_msSesPreviewOf(jobId, ctx)) {
+    showToast('Your edits are recorded on this docket but this pack does not carry them yet. Wait for the revised pack, review it, then press.', 'error');
     return;
   }
 

@@ -418,7 +418,7 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  expect(result.cards.drafted).toMatch(/ms-btn-alloc[\s\S]*Review job pack/);
+  expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 
 test('the Docs Ready column states how many cards actually have a pack', async ({ page }) => {
@@ -538,7 +538,7 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
   expect(result.facts).toMatchObject({ wo: true, report: true, swms: true, invoice: true, fromPack: true });
   expect(result.html).toContain('Work order: attached');
   expect(result.html).not.toContain('Work order: missing (expected)');
-  expect(result.html).toMatch(/ms-btn-alloc[\s\S]*Review job pack/);
+  expect(result.html).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(Number(result.count[0])).toBeGreaterThanOrEqual(4);
 });
 

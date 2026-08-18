@@ -14026,8 +14026,9 @@ function renderMakesafeCard(j, status) {
 
   // Keep the legacy resume/send-state chip narrow: it describes the physical
   // admin_to_send_report path and must not label a pre-Xero roof pack as ready to
-  // send. The visible Review job pack BUTTON has its own queue-backed predicate
-  // below because reviewability and send readiness are different facts.
+  // send. The visible Review job pack BUTTON has its own drafted-pack-backed
+  // predicate (makesafeCardHasReviewAffordance) because reviewability and send
+  // readiness are different facts.
   // Gate on the AUTHORITATIVE backend verdict, not the locally re-derived stage: the
   // local mapper coerces a not-yet-drafted `trade_report_in` job (substatus
   // admin_to_send_report) into the report_ready column, so the substatus check alone

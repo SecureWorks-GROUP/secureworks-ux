@@ -33,7 +33,7 @@ test('Docs Ready cards: drafted pack opens review/send; chips match pack; no inv
   }, fixture);
 
   expect(result.affordance['SWMS-261237']).toBe(true);
-  expect(result.cards['SWMS-261237']).toMatch(/ms-btn-alloc[\s\S]*Review job pack/);
+  expect(result.cards['SWMS-261237']).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 
   expect(result.affordance['SWMS-261241']).toBe(true);
   expect(result.cards['SWMS-261241']).toContain('Work order: attached');
@@ -42,10 +42,10 @@ test('Docs Ready cards: drafted pack opens review/send; chips match pack; no inv
 
   expect(result.affordance['SWMS-261243']).toBe(false);
   expect(result.cards['SWMS-261243']).toContain('No pack drafted');
-  expect(result.cards['SWMS-261243']).not.toMatch(/ms-btn-alloc[\s\S]*Review job pack/);
+  expect(result.cards['SWMS-261243']).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 
-test('hours and wording editors update the send preview without sending', async ({ page }) => {
+test('hours and wording edits preview on the pane, lock the press, and die with the docket revision', async ({ page }) => {
   await page.goto('/ops.html');
   const result = await page.evaluate((fx) => {
     const jobId = fx.overlay.jobId;
@@ -56,18 +56,28 @@ test('hours and wording editors update the send preview without sending', async 
     window._msSesSendPreview = {};
     const before = window._msSesRenderDetail(jobId, fx.overlay.ctx, 'msReportingDetailPanel');
     window._msSesSendPreview[jobId] = {
+      docketRevisionId: fx.overlay.ctx.docketRevisionId,
+      outputHash: fx.overlay.ctx.outputHash || null,
       hours: 5,
       routes: { report: { subject: 'Edited subject', body: 'Edited wording for the builder.' } },
     };
     const after = window._msSesRenderDetail(jobId, fx.overlay.ctx, 'msReportingDetailPanel');
-    return { before, after };
+    // A revised pack lands as a NEW docket revision: the stale edit must not
+    // overlay it, and the resolver clears the dead preview.
+    const revisedCtx = Object.assign({}, fx.overlay.ctx, { docketRevisionId: 'revised-docket-rev' });
+    const revised = window._msSesRenderDetail(jobId, revisedCtx, 'msReportingDetailPanel');
+    return { before, after, revised, previewCleared: !window._msSesSendPreview[jobId] };
   }, fixture);
 
   expect(result.before).toContain('Hours &amp; wording');
-  expect(result.before).toContain('Update send preview');
+  expect(result.before).toContain('Update send pack');
   expect(result.after).toContain('Edited subject');
   expect(result.after).toContain('Edited wording for the builder.');
-  expect(result.after).toContain('This view is the send preview after your last edit');
+  expect(result.after).toContain('Your edits are recorded on this docket');
+  expect(result.after).toContain('does not carry them yet');
   expect(result.after).not.toContain('approve_ses_invoice_revision');
   expect(result.after).not.toContain('execute_ses_release_revision');
+  expect(result.revised).not.toContain('Edited subject');
+  expect(result.revised).not.toContain('Edited wording for the builder.');
+  expect(result.previewCleared).toBe(true);
 });

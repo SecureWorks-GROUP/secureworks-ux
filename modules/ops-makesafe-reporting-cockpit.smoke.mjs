@@ -262,9 +262,13 @@ const exposed = [
   "_msSesMissingLine",
   "_msSesSynthRow",
   "_msSesRenderSendEditors",
+  "_msSesApplySendPreview",
   "_msSesApplyPreviewToProposal",
   "_msSesApplyPreviewToRoutes",
   "_msSesCtxWithPreview",
+  "_msSesPreviewOf",
+  "_msSesInvoiceLineIsLabour",
+  "_msSesPackLabourHours",
   "_msSesCanonicalPackDocket",
   "_msSesStampBoardPackChips",
   // Legacy symbols that MUST be gone:
@@ -285,6 +289,7 @@ const wrapped = '"use strict";\n' + code + "\nreturn { " +
   exposed.map((n) => `${n}: typeof ${n} !== 'undefined' ? ${n} : undefined`)
     .join(", ") +
   ', _msSesPackCache: typeof _msSesPackCache !== "undefined" ? _msSesPackCache : undefined' +
+  ', _msSesSendPreview: typeof _msSesSendPreview !== "undefined" ? _msSesSendPreview : undefined' +
   ', _msActiveDocTab: typeof _msActiveDocTab !== "undefined" ? _msActiveDocTab : undefined };';
 
 let mod;
@@ -766,15 +771,116 @@ check(
   "detail has Hours & wording editors, not only Feedback",
   detailHtml.includes("Hours &amp; wording") &&
     detailHtml.includes("msSesHours-") &&
-    detailHtml.includes("Update send preview") &&
+    detailHtml.includes("Update send pack") &&
     detailHtml.includes("data-ses-edit=\"subject\"") &&
     detailHtml.includes("data-ses-edit=\"body\""),
 );
+
+// ── 6b. Applying an edit RECORDS it on the exact docket revision and locks the
+// press until the revised pack carries it — proven by running the real apply
+// path against the stubbed writes. ──────────────────────────────────────────
+const SEND_CHAIN_ACTIONS = [
+  "approve_ses_invoice_revision",
+  "execute_ses_invoice_revision",
+  "sign_off_ses_docket",
+  "prepare_ses_release_revision",
+  "approve_ses_release_revision",
+  "execute_ses_release_revision",
+];
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
+calls.toasts.length = 0;
+calls.confirms.length = 0;
+behaviour.postJwt["record_ses_review_feedback"] = { recorded: true };
+const editedSubject = "Edited subject - MLB-25248";
+documentStub.getElementById("msSesHours-" + JOB).value = "5";
+documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [{
+  getAttribute: (name) =>
+    name === "data-route-kind" ? "report"
+      : name === "data-ses-edit" ? "subject" : null,
+  value: editedSubject,
+}];
+await mod._msSesApplySendPreview(JOB);
+const feedbackWrites = calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback");
 check(
-  "hours/wording apply is a local preview — no send or invoice approve",
-  typeof mod._msSesApplyPreviewToProposal === "function" &&
-    !/_msSesApplySendPreview[\s\S]{0,400}approve_ses_invoice/.test(code) &&
-    !/_msSesApplySendPreview[\s\S]{0,400}execute_ses_release/.test(code),
+  "applying an edit records it on the exact docket revision (record_ses_review_feedback)",
+  feedbackWrites.length === 1 &&
+    feedbackWrites[0].body.docket_revision_id === DOCKET_REV &&
+    feedbackWrites[0].body.job_id === JOB &&
+    /labour hours to 5/.test(feedbackWrites[0].body.after.note) &&
+    feedbackWrites[0].body.after.note.includes(editedSubject),
+);
+check(
+  "applying an edit performs NO send, sign-off, release, or invoice write",
+  SEND_CHAIN_ACTIONS.every((a) =>
+    !calls.opsPost.some((c) => c.action === a) &&
+    !calls.opsPostJwt.some((c) => c.action === a) &&
+    !calls.opsFetch.some((c) => c.action === a)
+  ),
+);
+check(
+  "the recorded edit becomes the on-screen send preview, keyed to this docket revision",
+  !!mod._msSesSendPreview[JOB] &&
+    mod._msSesSendPreview[JOB].docketRevisionId === DOCKET_REV &&
+    mod._msSesSendPreview[JOB].hours === 5 &&
+    (elements["msReportingDetailPanel"]._html || "").includes(editedSubject),
+);
+check(
+  "the repainted pane locks the press while the pack does not carry the edits",
+  !(elements["msReportingDetailPanel"]._html || "").includes('id="msSesApproveAndSendBtn"') &&
+    /does not carry them yet/.test(elements["msReportingDetailPanel"]._html || ""),
+);
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.sesApproveAndSend(JOB);
+check(
+  "APPROVE AND SEND fails closed while recorded edits are not yet in the pack",
+  calls.confirms.length === 0 &&
+    calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /does not carry them yet/.test(t.msg || "")),
+);
+calls.opsPostJwt.length = 0;
+await mod._msSesApplySendPreview(JOB);
+check(
+  "re-applying unchanged edits does not re-record feedback",
+  !calls.opsPostJwt.some((c) => c.action === "record_ses_review_feedback"),
+);
+mod._msSesPackCache[JOB].docketRevisionId = "revised-rev";
+check(
+  "the preview is invalidated when the docket revision changes (revised pack lands)",
+  mod._msSesPreviewOf(JOB, mod._msSesPackCache[JOB]) === null &&
+    !mod._msSesSendPreview[JOB],
+);
+mod._msSesPackCache[JOB].docketRevisionId = DOCKET_REV;
+check(
+  "a line is labour only when it says so — first line and 'After hours' never qualify",
+  mod._msSesInvoiceLineIsLabour({ description: "Make-safe labour" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ description: "propped fence upright, including site attendance" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ line_type: "labour", description: "crew" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ description: "After hours surcharge" }) === false &&
+    mod._msSesInvoiceLineIsLabour({ description: "Temp fence hire" }) === false &&
+    mod._msSesInvoiceLineIsLabour({ description: "Callout fee" }) === false,
+);
+check(
+  "an hours edit rescales ONLY the labour line of a multi-line proposal",
+  (() => {
+    const next = mod._msSesApplyPreviewToProposal({
+      line_items: [
+        { description: "Callout fee", quantity: 1, unit_price_ex_gst: 120, amount_ex_gst: 120 },
+        { description: "Make-safe labour", quantity: 3, unit_price_ex_gst: 80, amount_ex_gst: 240 },
+        { description: "After hours surcharge", quantity: 1, unit_price_ex_gst: 50, amount_ex_gst: 50 },
+      ],
+      subtotal_ex_gst: 410,
+      total_inc_gst: 451,
+    }, 5);
+    return next.line_items[0].quantity === 1 && next.line_items[0].amount_ex_gst === 120 &&
+      next.line_items[1].quantity === 5 && next.line_items[1].amount_ex_gst === 400 &&
+      next.line_items[2].quantity === 1 && next.line_items[2].amount_ex_gst === 50 &&
+      next.subtotal_ex_gst === 570 && next.total_inc_gst === 627;
+  })(),
 );
 check(
   "changing hours updates the invoice proposal that would send",

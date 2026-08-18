@@ -90,7 +90,12 @@ async function paintOverlay(page, edited) {
     window._msSesPackCache = window._msSesPackCache || {};
     window._msSesPackCache[jobId] = fx.overlay.ctx;
     window._msSesSendPreview = edited
-      ? { [jobId]: { hours: 5, routes: { report: { subject: 'Edited subject — MLB-261241', body: 'Edited wording. This is what would send.' } } } }
+      ? { [jobId]: {
+          docketRevisionId: fx.overlay.ctx.docketRevisionId,
+          outputHash: fx.overlay.ctx.outputHash || null,
+          hours: 5,
+          routes: { report: { subject: 'Edited subject — MLB-261241', body: 'Edited wording. This is what would send.' } },
+        } }
       : {};
     let host = document.getElementById('shotHost');
     if (!host) {

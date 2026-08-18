@@ -416,9 +416,9 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.hasPack).toEqual({ none: false, inferred: false, drafted: true, sent: true });
   expect(result.cards.none).toContain('No pack drafted');
   expect(result.cards.inferred).toContain('No pack drafted');
-  expect(result.cards.inferred).not.toContain('Review job pack');
+  expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  expect(result.cards.drafted).toContain('Review job pack');
+  expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 
 test('the Docs Ready column states how many cards actually have a pack', async ({ page }) => {
@@ -502,6 +502,44 @@ test('a card with no links renders no link row', async ({ page }) => {
   const card = await page.evaluate(() => renderMakesafeCard(
     { id: 'x', job_number: 'SWMS-NOLINK', canonical_stage: 'new', board_stage: 'new', site_suburb: 'Perth' }, 'new'));
   expect(card).not.toContain('ms-links');
+});
+
+test('card chips follow the pack, not a stale WO-missing enrichment join', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await page.evaluate(() => {
+    const pack = {
+      drafted: true, state: 'drafted', sent: false,
+      artifacts: [
+        { role: 'work_order', object_key: 'wo/work_order_MLB-26183PO-54000.pdf', media_type: 'application/pdf' },
+        { role: 'supporting_report_pdf', object_key: 'r/Make Safe Report.pdf', media_type: 'application/pdf' },
+        { role: 'swms_artifact', object_key: 's/SWMS.pdf', media_type: 'application/pdf' },
+        { role: 'xero_invoice_pdf', object_key: 'i/invoice.pdf', media_type: 'application/pdf', signed_url: 'about:blank#inv' },
+        { role: 'site_photo', object_key: 'p/site.jpg', media_type: 'image/jpeg' },
+      ],
+    };
+    window._makesafePackChipById = window._makesafePackChipById || {};
+    window._makesafePackChipById['job-241'] = makesafeChipFactsFromSesPack(pack);
+    const stale = {
+      id: 'job-241', job_number: 'SWMS-261241', canonical_stage: 'report_ready', board_stage: 'report_ready',
+      substatus: 'admin_to_send_report', site_suburb: 'Perth', ses_family: 'physical_makesafe',
+      requesting_company_slug: 'mlb',
+      has_wo: false, missing_docs: ['wo'], has_report_doc: false, has_swms_doc: false,
+      invoice_status: 'not_ready',
+      report_pack: { drafted: true, state: 'drafted', sent: false },
+    };
+    const html = renderMakesafeCard(stale, 'report_ready');
+    return {
+      facts: makesafeChipFactsFromSesPack(pack),
+      html,
+      count: (html.match(/(\d+)\s*\/\s*(\d+)/) || []).slice(1),
+    };
+  });
+
+  expect(result.facts).toMatchObject({ wo: true, report: true, swms: true, invoice: true, fromPack: true });
+  expect(result.html).toContain('Work order: attached');
+  expect(result.html).not.toContain('Work order: missing (expected)');
+  expect(result.html).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
+  expect(Number(result.count[0])).toBeGreaterThanOrEqual(4);
 });
 
 test('the card Trade chip never contradicts the canonical column', async ({ page }) => {

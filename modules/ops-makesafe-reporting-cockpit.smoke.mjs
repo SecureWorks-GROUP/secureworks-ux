@@ -158,6 +158,21 @@ const sandbox = {
   _pipelineTab: "makesafes",
   _pipelineData: { columns: {} },
   _makesafeBoardPayload: { columns: null },
+  _makesafeCanonicalPackById: {},
+  _makesafeCanonicalPackMetaById: {},
+  _makesafePackChipById: {},
+  makesafeChipFactsFromSesPack: (pack) => {
+    const artifacts = (pack && pack.artifacts) || [];
+    const facts = { wo: false, report: false, swms: false, invoice: false, photos: false, sent: !!(pack && pack.sent), fromPack: true };
+    artifacts.forEach((a) => {
+      const hay = String((a && (a.role || '')) + ' ' + (a && (a.object_key || ''))).toLowerCase();
+      if (/work[\s_-]*order|work_order|\bwo\b/.test(hay)) facts.wo = true;
+      if (/supporting_report|make\s*safe|completion|\breport\b/.test(hay)) facts.report = true;
+      if (/\bswms\b/.test(hay)) facts.swms = true;
+      if (/invoice/.test(hay)) facts.invoice = true;
+    });
+    return facts;
+  },
   // The actual board degraded-path parser extracted from ops.html. The module
   // consumes this global in production, so the smoke must not carry a mirror.
   makesafeSuburbFromAddress,
@@ -246,6 +261,16 @@ const exposed = [
   "_msSesCaptureCycleNote",
   "_msSesMissingLine",
   "_msSesSynthRow",
+  "_msSesRenderSendEditors",
+  "_msSesApplySendPreview",
+  "_msSesApplyPreviewToProposal",
+  "_msSesApplyPreviewToRoutes",
+  "_msSesCtxWithPreview",
+  "_msSesPreviewOf",
+  "_msSesInvoiceLineIsLabour",
+  "_msSesPackLabourHours",
+  "_msSesCanonicalPackDocket",
+  "_msSesStampBoardPackChips",
   // Legacy symbols that MUST be gone:
   // The two-press pair is retired: ONE press runs the whole guarded chain, so
   // no second entry point may survive for a click or a script to reach.
@@ -264,6 +289,7 @@ const wrapped = '"use strict";\n' + code + "\nreturn { " +
   exposed.map((n) => `${n}: typeof ${n} !== 'undefined' ? ${n} : undefined`)
     .join(", ") +
   ', _msSesPackCache: typeof _msSesPackCache !== "undefined" ? _msSesPackCache : undefined' +
+  ', _msSesSendPreview: typeof _msSesSendPreview !== "undefined" ? _msSesSendPreview : undefined' +
   ', _msActiveDocTab: typeof _msActiveDocTab !== "undefined" ? _msActiveDocTab : undefined };';
 
 let mod;
@@ -740,6 +766,190 @@ check(
 check(
   "detail states one press sends all three emails at once",
   /all three emails? at once/i.test(detailHtml),
+);
+check(
+  "detail has Hours & wording editors, not only Feedback",
+  detailHtml.includes("Hours &amp; wording") &&
+    detailHtml.includes("msSesHours-") &&
+    detailHtml.includes("Update send pack") &&
+    detailHtml.includes("data-ses-edit=\"subject\"") &&
+    detailHtml.includes("data-ses-edit=\"body\""),
+);
+
+// ── 6b. Applying an edit RECORDS it on the exact docket revision and locks the
+// press until the revised pack carries it — proven by running the real apply
+// path against the stubbed writes. ──────────────────────────────────────────
+const SEND_CHAIN_ACTIONS = [
+  "approve_ses_invoice_revision",
+  "execute_ses_invoice_revision",
+  "sign_off_ses_docket",
+  "prepare_ses_release_revision",
+  "approve_ses_release_revision",
+  "execute_ses_release_revision",
+];
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
+calls.toasts.length = 0;
+calls.confirms.length = 0;
+behaviour.postJwt["record_ses_review_feedback"] = { recorded: true };
+const editedSubject = "Edited subject - MLB-25248";
+documentStub.getElementById("msSesHours-" + JOB).value = "5";
+documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [{
+  getAttribute: (name) =>
+    name === "data-route-kind" ? "report"
+      : name === "data-ses-edit" ? "subject" : null,
+  value: editedSubject,
+}];
+await mod._msSesApplySendPreview(JOB);
+const feedbackWrites = calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback");
+check(
+  "applying an edit records it on the exact docket revision (record_ses_review_feedback)",
+  feedbackWrites.length === 1 &&
+    feedbackWrites[0].body.docket_revision_id === DOCKET_REV &&
+    feedbackWrites[0].body.job_id === JOB &&
+    /labour hours to 5/.test(feedbackWrites[0].body.after.note) &&
+    feedbackWrites[0].body.after.note.includes(editedSubject),
+);
+check(
+  "applying an edit performs NO send, sign-off, release, or invoice write",
+  SEND_CHAIN_ACTIONS.every((a) =>
+    !calls.opsPost.some((c) => c.action === a) &&
+    !calls.opsPostJwt.some((c) => c.action === a) &&
+    !calls.opsFetch.some((c) => c.action === a)
+  ),
+);
+check(
+  "the recorded edit becomes the on-screen send preview, keyed to this docket revision",
+  !!mod._msSesSendPreview[JOB] &&
+    mod._msSesSendPreview[JOB].docketRevisionId === DOCKET_REV &&
+    mod._msSesSendPreview[JOB].hours === 5 &&
+    (elements["msReportingDetailPanel"]._html || "").includes(editedSubject),
+);
+check(
+  "the repainted pane locks the press while the pack does not carry the edits",
+  !(elements["msReportingDetailPanel"]._html || "").includes('id="msSesApproveAndSendBtn"') &&
+    /does not carry them yet/.test(elements["msReportingDetailPanel"]._html || ""),
+);
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.sesApproveAndSend(JOB);
+check(
+  "APPROVE AND SEND fails closed while recorded edits are not yet in the pack",
+  calls.confirms.length === 0 &&
+    calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /does not carry them yet/.test(t.msg || "")),
+);
+calls.opsPostJwt.length = 0;
+await mod._msSesApplySendPreview(JOB);
+check(
+  "re-applying unchanged edits does not re-record feedback",
+  !calls.opsPostJwt.some((c) => c.action === "record_ses_review_feedback"),
+);
+mod._msSesPackCache[JOB].docketRevisionId = "revised-rev";
+check(
+  "the preview is invalidated when the docket revision changes (revised pack lands)",
+  mod._msSesPreviewOf(JOB, mod._msSesPackCache[JOB]) === null &&
+    !mod._msSesSendPreview[JOB],
+);
+mod._msSesPackCache[JOB].docketRevisionId = DOCKET_REV;
+
+// Retyping the pack's ORIGINAL values withdraws the recorded edit: one
+// countermanding feedback write, the lock clears, and the press re-arms only
+// from a fresh pack read.
+calls.opsPostJwt.length = 0;
+documentStub.getElementById("msSesHours-" + JOB).value = "5";
+await mod._msSesApplySendPreview(JOB);
+check(
+  "an edit re-applied after invalidation records again and re-locks",
+  calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback").length === 1 &&
+    !!mod._msSesSendPreview[JOB],
+);
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
+calls.toasts.length = 0;
+documentStub.getElementById("msSesHours-" + JOB).value = "";
+documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [{
+  getAttribute: (name) =>
+    name === "data-route-kind" ? "report"
+      : name === "data-ses-edit" ? "subject" : null,
+  value: "Make Safe Completion - MLB-25248",
+}];
+await mod._msSesApplySendPreview(JOB);
+const withdrawWrites = calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback");
+check(
+  "retyping the original values records ONE countermanding withdrawal note on the docket",
+  withdrawWrites.length === 1 &&
+    withdrawWrites[0].body.docket_revision_id === DOCKET_REV &&
+    /[Ww]ithdraw/.test(withdrawWrites[0].body.after.note) &&
+    /labour hours to 5/.test(withdrawWrites[0].body.after.note) &&
+    /edited subject/.test(withdrawWrites[0].body.after.note),
+);
+check(
+  "the withdrawal clears the preview lock",
+  !mod._msSesSendPreview[JOB] &&
+    calls.toasts.some((t) => /withdrawn/i.test(t.msg || "")),
+);
+await flush();
+await flush();
+await flush();
+check(
+  "after a withdrawal the press re-arms from a FRESH pack read, never the stale context",
+  calls.opsFetch.some((c) =>
+    c.action === "query_ses_review_cockpit" && c.params.job_id === JOB
+  ) &&
+    (elements["msReportingDetailPanel"]._html || "").includes('id="msSesApproveAndSendBtn"'),
+);
+check(
+  "a line is labour only when it says so — first line and 'After hours' never qualify",
+  mod._msSesInvoiceLineIsLabour({ description: "Make-safe labour" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ description: "propped fence upright, including site attendance" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ line_type: "labour", description: "crew" }) === true &&
+    mod._msSesInvoiceLineIsLabour({ description: "After hours surcharge" }) === false &&
+    mod._msSesInvoiceLineIsLabour({ description: "Temp fence hire" }) === false &&
+    mod._msSesInvoiceLineIsLabour({ description: "Callout fee" }) === false,
+);
+check(
+  "an hours edit rescales ONLY the labour line of a multi-line proposal",
+  (() => {
+    const next = mod._msSesApplyPreviewToProposal({
+      line_items: [
+        { description: "Callout fee", quantity: 1, unit_price_ex_gst: 120, amount_ex_gst: 120 },
+        { description: "Make-safe labour", quantity: 3, unit_price_ex_gst: 80, amount_ex_gst: 240 },
+        { description: "After hours surcharge", quantity: 1, unit_price_ex_gst: 50, amount_ex_gst: 50 },
+      ],
+      subtotal_ex_gst: 410,
+      total_inc_gst: 451,
+    }, 5);
+    return next.line_items[0].quantity === 1 && next.line_items[0].amount_ex_gst === 120 &&
+      next.line_items[1].quantity === 5 && next.line_items[1].amount_ex_gst === 400 &&
+      next.line_items[2].quantity === 1 && next.line_items[2].amount_ex_gst === 50 &&
+      next.subtotal_ex_gst === 570 && next.total_inc_gst === 627;
+  })(),
+);
+check(
+  "changing hours updates the invoice proposal that would send",
+  (() => {
+    const next = mod._msSesApplyPreviewToProposal({
+      line_items: [{ description: "Make-safe labour", quantity: 3, unit_price_ex_gst: 80, amount_ex_gst: 240 }],
+      subtotal_ex_gst: 240,
+      total_inc_gst: 264,
+    }, 4);
+    return next.line_items[0].quantity === 4 && next.line_items[0].amount_ex_gst === 320
+      && next.subtotal_ex_gst === 320 && next.total_inc_gst === 352;
+  })(),
+);
+check(
+  "changing wording updates the email route that would send",
+  (() => {
+    const next = mod._msSesApplyPreviewToRoutes(
+      [{ route_kind: "report", subject: "Old", body: "Old body" }],
+      { routes: { report: { subject: "New subject", body: "New wording" } } },
+    );
+    return next[0].subject === "New subject" && next[0].body === "New wording";
+  })(),
 );
 check(
   "detail uses condensed TO/CC/subject line — no 'why this' essays",
@@ -2272,6 +2482,7 @@ function doorEnv(over) {
   };
   const env = {
     _msSesReviewQueue: {},
+    _makesafeCanonicalPackById: {},
     _msReportingCache: {},
     _msSesReviewQueueStale: () => false,
     _msSesRefreshReviewQueue: async () => {
@@ -2328,7 +2539,7 @@ const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
   ? opsCode.slice(renderCardStart, renderCardEnd)
   : "";
 check(
-  "renderMakesafeCard wires the visible Review job pack button to the queue-backed predicate",
+  "renderMakesafeCard wires the visible Review job pack button to the drafted-pack predicate",
   /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status\)/.test(renderCardSrc) &&
     /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
 );
@@ -2419,8 +2630,8 @@ const negativeRow = {
   report_pack: { drafted: true },
 };
 check(
-  "a queue miss has no Review job pack affordance",
-  makesafeCardHasReviewAffordance(negativeRow, "report_ready") === false,
+  "a drafted Docs Ready card shows Review job pack even on a queue miss",
+  makesafeCardHasReviewAffordance(negativeRow, "report_ready") === true,
 );
 const noPackPredicate = makeReviewAffordance({
   "review-negative": { job_id: "review-negative", docket_revision_id: DOCKET_REV },
@@ -2449,6 +2660,29 @@ check(
     doorA.calls.detail[0].jobId === "job-1" &&
     doorA.calls.detail[0].panelId === "msReportingDetailPanelBoard" &&
     doorA.calls.jobDetail.length === 0,
+);
+const doorDrafted = doorEnv({
+  _msSesReviewQueue: {},
+  _makesafeCanonicalPackById: { "job-237": true },
+});
+await makeDoor(doorDrafted.env)("job-237");
+check(
+  "door opens the same review overlay for a drafted pack that missed the queue",
+  doorDrafted.calls.overlay.length === 1 &&
+    doorDrafted.calls.detail.length === 1 &&
+    doorDrafted.calls.detail[0].jobId === "job-237" &&
+    doorDrafted.calls.jobDetail.length === 0,
+);
+const doorNoPack = doorEnv({
+  _msSesReviewQueue: {},
+  _makesafeCanonicalPackById: {},
+});
+await makeDoor(doorNoPack.env)("job-243");
+check(
+  "door does not invent a pack for a card with no drafted pack",
+  doorNoPack.calls.overlay.length === 0 &&
+    doorNoPack.calls.jobDetail.length === 1 &&
+    doorNoPack.calls.jobDetail[0] === "job-243",
 );
 check(
   "door does not re-read the queue on a hit",
@@ -3438,6 +3672,54 @@ check(
   seedSendReady();
   sandbox._pipelineData.columns = { report_ready: [mappedCard] };
   behaviour.signedUrl = {};
+}
+
+// ── 19b. A withdrawal on a drafted-NOT-in-queue card (docket id off the
+// canonical row, board-overlay host) must reopen the detail from a fresh read:
+// the reload may not depend on needs_review queue membership. ────────────────
+{
+  seedSendReady();
+  behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [] };
+  sandbox._makesafeCanonicalPackMetaById[JOB] = {
+    drafted: true,
+    docket_revision_id: DOCKET_REV,
+  };
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+  const OVERLAY_PANEL = "msMakesafeOverlayDetailPanel";
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB, OVERLAY_PANEL);
+  check(
+    "a drafted card with no queue row still opens the review pane in the overlay",
+    (elements[OVERLAY_PANEL]._html || "").includes("Hours &amp; wording"),
+  );
+  behaviour.postJwt["record_ses_review_feedback"] = { recorded: true };
+  documentStub.getElementById("msSesHours-" + JOB).value = "5";
+  documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [];
+  await mod._msSesApplySendPreview(JOB);
+  check(
+    "the overlay-hosted edit records and locks as usual on the unqueued card",
+    !!mod._msSesSendPreview[JOB] &&
+      !(elements[OVERLAY_PANEL]._html || "").includes('id="msSesApproveAndSendBtn"'),
+  );
+  calls.opsPostJwt.length = 0;
+  documentStub.getElementById("msSesHours-" + JOB).value = "";
+  await mod._msSesApplySendPreview(JOB);
+  await flush();
+  await flush();
+  await flush();
+  check(
+    "the withdrawal records once and clears the lock on the unqueued card",
+    calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback").length === 1 &&
+      !mod._msSesSendPreview[JOB],
+  );
+  check(
+    "after the withdrawal the overlay repaints from a fresh read — armed press, apply button restored",
+    (elements[OVERLAY_PANEL]._html || "").includes('id="msSesApproveAndSendBtn"') &&
+      (elements[OVERLAY_PANEL]._html || "").includes("Update send pack"),
+  );
+  seedSendReady();
+  delete sandbox._makesafeCanonicalPackMetaById[JOB];
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
 }
 
 // ── 20. No retired action was ever dispatched at runtime ────────────────────

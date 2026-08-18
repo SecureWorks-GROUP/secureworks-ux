@@ -199,6 +199,29 @@ never `stage + substatus`, which describe a column and a workflow flag rather
 than a document. Docs Ready keeps its name and meaning (captain decision C.4 is
 still open) but a card the canonical row cannot prove has a pack says "No pack
 drafted", and the column states how many packs exist.
+THE REVIEW/SEND DOOR IS THE DRAFTED PACK, NOT THE QUEUE.
+`makesafeCardHasReviewAffordance` / `openMakesafeJob` open the same overlay for
+any Docs Ready card with a canonical drafted pack (`_makesafeCanonicalPackById`).
+Queue membership is not the door — a drafted card missing `_msSesReviewQueue`
+used to click into job detail. An assessment with no pack must stay on job
+detail; do not invent a pack. Card chips prefer pack artifacts
+(`makesafeChipFactsFromSesPack` / `_makesafePackChipById`) over enrichment
+`has_wo` / `missing_docs`; READY TO SEND is withheld when the chips still say
+WO missing and pack facts have not loaded. Hours and wording edits on the
+overlay (`_msSesRenderSendEditors` / `_msSesApplySendPreview`) are RECORDED on
+the exact docket revision via `record_ses_review_feedback` (the Feedback
+channel), so the revised pack carries them; until it lands, the edited values
+overlay the view as a preview keyed to that docket revision
+(`_msSesSendPreview`, invalidated by `_msSesPreviewOf` on any revision/hash
+change) and APPROVE AND SEND is locked — the press may never send content
+different from what is shown. Retyping the pack's original values WITHDRAWS
+the recorded edit: a countermanding note is recorded on the same docket, the
+lock clears, and the press re-arms only from a fresh pack read — never from
+the stale context. Only an explicitly labour line
+(`_msSesInvoiceLineIsLabour`) is rescaled by an hours edit — never "the first
+line" and never a bare "hour" match. Guard:
+`tests/e2e/ops-ses-loop-overlay.spec.js`;
+proof shots `docs/evidence/ses-loop-ux-overlay-v1/`.
 
 Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live verification evidence in
 `docs/evidence/ses-b2-ui-truth-2026-08-02/`, regenerated end to end by

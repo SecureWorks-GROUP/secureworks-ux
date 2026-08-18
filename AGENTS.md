@@ -217,8 +217,10 @@ change) and APPROVE AND SEND is locked — the press may never send content
 different from what is shown. Retyping the pack's original values WITHDRAWS
 the recorded edit: a countermanding note is recorded on the same docket, the
 lock clears, and the press re-arms only from a fresh pack read — never from
-the stale context. Only an explicitly labour line
-(`_msSesInvoiceLineIsLabour`) is rescaled by an hours edit — never "the first
+the stale context. Only a labour line (`_msSesInvoiceLineIsLabour`: an
+explicit labour line type, or a labour/attendance/make-safe work description
+with no hire/material/surcharge-style noun — the same predicate that prefills
+the Hours field from the pack) is rescaled by an hours edit — never "the first
 line" and never a bare "hour" match. Guard:
 `tests/e2e/ops-ses-loop-overlay.spec.js`;
 proof shots `docs/evidence/ses-loop-ux-overlay-v1/`.

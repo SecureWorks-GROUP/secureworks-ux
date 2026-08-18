@@ -199,6 +199,18 @@ never `stage + substatus`, which describe a column and a workflow flag rather
 than a document. Docs Ready keeps its name and meaning (captain decision C.4 is
 still open) but a card the canonical row cannot prove has a pack says "No pack
 drafted", and the column states how many packs exist.
+THE REVIEW/SEND DOOR IS THE DRAFTED PACK, NOT THE QUEUE.
+`makesafeCardHasReviewAffordance` / `openMakesafeJob` open the same overlay for
+any Docs Ready card with a canonical drafted pack (`_makesafeCanonicalPackById`).
+Queue membership is not the door — a drafted card missing `_msSesReviewQueue`
+used to click into job detail. An assessment with no pack must stay on job
+detail; do not invent a pack. Card chips prefer pack artifacts
+(`makesafeChipFactsFromSesPack` / `_makesafePackChipById`) over enrichment
+`has_wo` / `missing_docs`; READY TO SEND is withheld when the chips still say
+WO missing and pack facts have not loaded. Hours and wording on the overlay
+(`_msSesRenderSendEditors`) are a local send preview (`_msSesSendPreview`);
+they do not send or approve. Guard: `tests/e2e/ops-ses-loop-overlay.spec.js`;
+proof shots `docs/evidence/ses-loop-ux-overlay-v1/`.
 
 Guard: `tests/e2e/ops-makesafe-ui-truth.spec.js`. Live verification evidence in
 `docs/evidence/ses-b2-ui-truth-2026-08-02/`, regenerated end to end by

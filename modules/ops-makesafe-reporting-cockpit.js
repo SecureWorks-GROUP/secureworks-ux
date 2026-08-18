@@ -640,12 +640,32 @@ async function _msSesHydratePortalCaptureFacts(ctx) {
   if (factsList.length) ctx.portalCaptureFacts = factsList;
 }
 
+function _msSesCanonicalPackDocket(jobId) {
+  var meta = (typeof _makesafeCanonicalPackMetaById !== 'undefined')
+    ? _makesafeCanonicalPackMetaById[jobId] : null;
+  return (meta && meta.docket_revision_id) || null;
+}
+
+// Publish pack-derived chip facts onto the board so the card face cannot say
+// WO missing / 2/5 while this overlay says 5 of 5 including the work order.
+function _msSesStampBoardPackChips(jobId, pack) {
+  if (!jobId || !pack) return;
+  if (typeof makesafeChipFactsFromSesPack === 'function'
+      && typeof _makesafePackChipById !== 'undefined') {
+    _makesafePackChipById[jobId] = makesafeChipFactsFromSesPack(pack);
+  }
+}
+
 async function _msSesLoadPackContext(jobId, retried) {
   var cockpit = await opsFetch('query_ses_review_cockpit', { job_id: jobId });
   var entry = _msSesReviewQueue[jobId] || null;
   if (!entry && !retried) {
     await _msSesRefreshReviewQueue();
     entry = _msSesReviewQueue[jobId] || null;
+  }
+  var rowDocket = _msSesCanonicalPackDocket(jobId);
+  if (!entry && rowDocket) {
+    entry = { job_id: jobId, docket_revision_id: rowDocket };
   }
   var ctx = {
     jobId: jobId,
@@ -654,8 +674,9 @@ async function _msSesLoadPackContext(jobId, retried) {
     pack: null,
     docketRevisionId: entry ? entry.docket_revision_id : null,
     outputHash: entry ? (entry.docket_output_content_hash || null) : null,
-    // No queue entry + a loading cockpit means the current docket has already
-    // passed the needs_review queue, i.e. its Docs Ready tick is recorded.
+    // No queue entry and no canonical docket means the current docket has
+    // already passed the needs_review queue, i.e. its Docs Ready tick is recorded.
+    // A drafted pack whose docket id rides on the canonical row is still reviewable.
     reviewState: entry ? (entry.review_state || 'needs_review') : 'signed_off',
     fetchedAt: 0
   };
@@ -670,6 +691,7 @@ async function _msSesLoadPackContext(jobId, retried) {
       if (ctx.pack && ctx.pack.review && ctx.pack.review.review_state) {
         ctx.reviewState = ctx.pack.review.review_state;
       }
+      _msSesStampBoardPackChips(jobId, ctx.pack);
     } catch (e) {
       if (_msSesIsStale(e) && !retried) {
         await _msSesRefreshReviewQueue();
@@ -696,6 +718,7 @@ async function _msSesLoadPackContext(jobId, retried) {
       if (pack && pack.review && pack.review.review_state) {
         ctx.reviewState = pack.review.review_state;
       }
+      _msSesStampBoardPackChips(jobId, pack);
     } catch (_e) {
       // The remembered revision is no longer the current pack (or cannot be
       // read). Leave the honest no-documents state rather than showing an
@@ -772,7 +795,194 @@ var _MS_SES_ICONS = {
  * BOTTOM (ONE press: APPROVE AND SEND), armed only by backend control flags.
  * A disabled stamp stays visible with its reason. No combined Approve-and-Send.
  */
+// Local send-preview edits for hours and email wording. Changing these
+// updates the invoice lines and outgoing-email cards on THIS view so the
+// next paint is what would send. Nothing here authorises an invoice or
+// releases a route.
+var _msSesSendPreview = {};
+
+function _msSesPreviewOf(jobId) {
+  return (_msSesSendPreview && _msSesSendPreview[jobId]) || null;
+}
+
+function _msSesLabourHoursFromCtx(ctx) {
+  var preview = ctx && _msSesPreviewOf(ctx.jobId);
+  if (preview && preview.hours != null && isFinite(Number(preview.hours))) {
+    return Number(preview.hours);
+  }
+  var money = (ctx && ctx.cockpit && ctx.cockpit.sections && ctx.cockpit.sections.money) || {};
+  if (money.labour_hours != null && isFinite(Number(money.labour_hours))) {
+    return Number(money.labour_hours);
+  }
+  var proposal = (ctx && ctx.pack && ctx.pack.docket && ctx.pack.docket.local_invoice_proposal)
+    || money.local_invoice_proposal || null;
+  var lines = proposal && Array.isArray(proposal.line_items) ? proposal.line_items : [];
+  for (var i = 0; i < lines.length; i++) {
+    var li = lines[i] || {};
+    var desc = String(li.description || '').toLowerCase();
+    if (li.quantity != null && isFinite(Number(li.quantity))
+        && (/labour|hour|attendance|make-?safe/.test(desc) || i === 0)) {
+      return Number(li.quantity);
+    }
+  }
+  return null;
+}
+
+function _msSesApplyPreviewToProposal(proposal, hours) {
+  if (!proposal || hours == null || !isFinite(Number(hours))) return proposal;
+  hours = Number(hours);
+  var src = proposal;
+  var out = {};
+  Object.keys(src).forEach(function(k) { out[k] = src[k]; });
+  var lines = Array.isArray(src.line_items) ? src.line_items.map(function(li, idx) {
+    li = li || {};
+    var copy = {};
+    Object.keys(li).forEach(function(k) { copy[k] = li[k]; });
+    var desc = String(li.description || '').toLowerCase();
+    var isLabour = /labour|hour|attendance|make-?safe/.test(desc) || idx === 0;
+    if (!isLabour) return copy;
+    var unit = (li.unit_price_ex_gst != null ? Number(li.unit_price_ex_gst) : Number(li.unit_price));
+    copy.quantity = hours;
+    if (isFinite(unit)) {
+      copy.unit_price_ex_gst = unit;
+      copy.amount_ex_gst = Math.round(hours * unit * 100) / 100;
+    }
+    return copy;
+  }) : [];
+  out.line_items = lines;
+  var sub = 0;
+  lines.forEach(function(li) {
+    if (li && li.amount_ex_gst != null && isFinite(Number(li.amount_ex_gst))) {
+      sub += Number(li.amount_ex_gst);
+    }
+  });
+  if (lines.length) {
+    out.subtotal_ex_gst = Math.round(sub * 100) / 100;
+    out.total_inc_gst = Math.round(sub * 1.1 * 100) / 100;
+  }
+  return out;
+}
+
+function _msSesApplyPreviewToRoutes(routes, preview) {
+  if (!Array.isArray(routes) || !preview || !preview.routes) return routes;
+  return routes.map(function(r) {
+    r = r || {};
+    var over = preview.routes[r.route_kind] || preview.routes[String(r.route_kind || '')];
+    if (!over) return r;
+    var copy = {};
+    Object.keys(r).forEach(function(k) { copy[k] = r[k]; });
+    if (over.subject != null) copy.subject = over.subject;
+    if (over.body != null) copy.body = over.body;
+    return copy;
+  });
+}
+
+function _msSesCtxWithPreview(ctx) {
+  if (!ctx) return ctx;
+  var preview = _msSesPreviewOf(ctx.jobId);
+  if (!preview) return ctx;
+  var out = {};
+  Object.keys(ctx).forEach(function(k) { out[k] = ctx[k]; });
+  var cockpit = ctx.cockpit ? {} : null;
+  if (ctx.cockpit) {
+    Object.keys(ctx.cockpit).forEach(function(k) { cockpit[k] = ctx.cockpit[k]; });
+    var sections = ctx.cockpit.sections ? {} : null;
+    if (ctx.cockpit.sections) {
+      Object.keys(ctx.cockpit.sections).forEach(function(k) { sections[k] = ctx.cockpit.sections[k]; });
+      if (Array.isArray(sections.email_drafts)) {
+        sections.email_drafts = _msSesApplyPreviewToRoutes(sections.email_drafts, preview);
+      }
+      if (sections.money) {
+        var money = {};
+        Object.keys(sections.money).forEach(function(k) { money[k] = sections.money[k]; });
+        if (preview.hours != null) money.labour_hours = Number(preview.hours);
+        if (money.local_invoice_proposal) {
+          money.local_invoice_proposal = _msSesApplyPreviewToProposal(
+            money.local_invoice_proposal, preview.hours);
+        }
+        sections.money = money;
+      }
+      cockpit.sections = sections;
+    }
+    out.cockpit = cockpit;
+  }
+  if (ctx.pack && ctx.pack.docket && preview.hours != null) {
+    var pack = {};
+    Object.keys(ctx.pack).forEach(function(k) { pack[k] = ctx.pack[k]; });
+    var docket = {};
+    Object.keys(ctx.pack.docket).forEach(function(k) { docket[k] = ctx.pack.docket[k]; });
+    if (docket.local_invoice_proposal) {
+      docket.local_invoice_proposal = _msSesApplyPreviewToProposal(
+        docket.local_invoice_proposal, preview.hours);
+    }
+    pack.docket = docket;
+    out.pack = pack;
+  }
+  return out;
+}
+
+function _msSesRenderSendEditors(jobId, ctx) {
+  var routes = ((ctx.cockpit && ctx.cockpit.sections) || {}).email_drafts || [];
+  var hours = _msSesLabourHoursFromCtx(ctx);
+  var preview = _msSesPreviewOf(jobId);
+  var safeId = _msJsAttr(jobId);
+  var html = '<div class="msr-edit" id="msSesEdit-' + safeId + '">';
+  html += '<div class="msr-edit-h"><h3>Hours &amp; wording</h3>';
+  html += '<span class="msr-sec-note">updates the send preview &mdash; does not send</span></div>';
+  html += '<div class="msr-edit-row">';
+  html += '<label class="hours">Hours<input type="number" step="0.5" min="0" id="msSesHours-' + safeId + '" value="'
+    + (hours != null ? escapeAttr(String(hours)) : '') + '"></label>';
+  html += '<button type="button" class="msr-edit-apply" onclick="_msSesApplySendPreview(\'' + safeId + '\')">Update send preview</button>';
+  html += '</div>';
+  if (Array.isArray(routes) && routes.length) {
+    routes.forEach(function(r, idx) {
+      r = r || {};
+      var kind = String(r.route_kind || ('route' + idx));
+      var label = r.label || _MS_SES_ROUTE_LABELS[r.route_kind] || kind;
+      html += '<label>' + escapeHtml(label) + ' subject';
+      html += '<input type="text" data-ses-edit="subject" data-route-kind="' + escapeAttr(kind) + '" value="'
+        + escapeAttr(r.subject || '') + '"></label>';
+      html += '<label>' + escapeHtml(label) + ' wording';
+      html += '<textarea data-ses-edit="body" data-route-kind="' + escapeAttr(kind) + '">'
+        + escapeHtml(r.body || '') + '</textarea></label>';
+    });
+  }
+  html += '<p class="msr-edit-note' + (preview ? ' ok' : '') + '">';
+  html += preview
+    ? 'This view is the send preview after your last edit. Nothing has been sent or authorised.'
+    : 'Change hours or wording, then Update send preview. The emails and invoice below become what one press would send.';
+  html += '</p></div>';
+  return html;
+}
+
+function _msSesApplySendPreview(jobId) {
+  var ctx = _msSesPackCache[jobId];
+  if (!ctx) return;
+  var hoursEl = _msSesScopedEl(jobId, 'msSesHours-' + jobId);
+  var hoursVal = hoursEl ? parseFloat(hoursEl.value) : NaN;
+  var preview = { routes: {} };
+  if (isFinite(hoursVal) && hoursVal >= 0) preview.hours = hoursVal;
+  var host = _msSesScopedEl(jobId, 'msSesEdit-' + jobId);
+  if (host) {
+    host.querySelectorAll('[data-ses-edit][data-route-kind]').forEach(function(el) {
+      var kind = el.getAttribute('data-route-kind');
+      if (!kind) return;
+      if (!preview.routes[kind]) preview.routes[kind] = {};
+      preview.routes[kind][el.getAttribute('data-ses-edit')] = el.value;
+    });
+  }
+  _msSesSendPreview[jobId] = preview;
+  var panel = document.getElementById(ctx.panelId || 'msReportingDetailPanel');
+  if (!panel) return;
+  panel.innerHTML = _msSesRenderDetail(jobId, ctx, ctx.panelId);
+  _msHydratePdfSurfaces(panel);
+  if (typeof loadMsNotes === 'function') {
+    loadMsNotes(jobId, 'msNotesPanel-' + jobId);
+  }
+}
+
 function _msSesRenderDetail(jobId, ctx, targetPanelId) {
+  ctx = _msSesCtxWithPreview(ctx);
   var base = _msReportingCache[jobId] || { job_id: jobId };
   var row = _msSesSynthRow(jobId, ctx);
   // The doc-tab switcher + shared renderers read the synthesized row from the
@@ -846,6 +1056,9 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 
   // ── DONE checklist: what is complete on this pack, before any document ────
   html += _msSesRenderDoneStrip(row, ctx);
+
+  // ── Hours & wording: the send-preview editors. Feedback stays for the rest.
+  html += _msSesRenderSendEditors(jobId, ctx);
 
   // ── The hold story: ONE amber block, numbered verbatim blockers, each with
   //    its plain-English clear path. Amber is a machine stop wanting a person;

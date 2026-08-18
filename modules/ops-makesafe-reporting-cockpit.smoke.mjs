@@ -158,6 +158,21 @@ const sandbox = {
   _pipelineTab: "makesafes",
   _pipelineData: { columns: {} },
   _makesafeBoardPayload: { columns: null },
+  _makesafeCanonicalPackById: {},
+  _makesafeCanonicalPackMetaById: {},
+  _makesafePackChipById: {},
+  makesafeChipFactsFromSesPack: (pack) => {
+    const artifacts = (pack && pack.artifacts) || [];
+    const facts = { wo: false, report: false, swms: false, invoice: false, photos: false, sent: !!(pack && pack.sent), fromPack: true };
+    artifacts.forEach((a) => {
+      const hay = String((a && (a.role || '')) + ' ' + (a && (a.object_key || ''))).toLowerCase();
+      if (/work[\s_-]*order|work_order|\bwo\b/.test(hay)) facts.wo = true;
+      if (/supporting_report|make\s*safe|completion|\breport\b/.test(hay)) facts.report = true;
+      if (/\bswms\b/.test(hay)) facts.swms = true;
+      if (/invoice/.test(hay)) facts.invoice = true;
+    });
+    return facts;
+  },
   // The actual board degraded-path parser extracted from ops.html. The module
   // consumes this global in production, so the smoke must not carry a mirror.
   makesafeSuburbFromAddress,
@@ -246,6 +261,12 @@ const exposed = [
   "_msSesCaptureCycleNote",
   "_msSesMissingLine",
   "_msSesSynthRow",
+  "_msSesRenderSendEditors",
+  "_msSesApplyPreviewToProposal",
+  "_msSesApplyPreviewToRoutes",
+  "_msSesCtxWithPreview",
+  "_msSesCanonicalPackDocket",
+  "_msSesStampBoardPackChips",
   // Legacy symbols that MUST be gone:
   // The two-press pair is retired: ONE press runs the whole guarded chain, so
   // no second entry point may survive for a click or a script to reach.
@@ -740,6 +761,42 @@ check(
 check(
   "detail states one press sends all three emails at once",
   /all three emails? at once/i.test(detailHtml),
+);
+check(
+  "detail has Hours & wording editors, not only Feedback",
+  detailHtml.includes("Hours &amp; wording") &&
+    detailHtml.includes("msSesHours-") &&
+    detailHtml.includes("Update send preview") &&
+    detailHtml.includes("data-ses-edit=\"subject\"") &&
+    detailHtml.includes("data-ses-edit=\"body\""),
+);
+check(
+  "hours/wording apply is a local preview — no send or invoice approve",
+  typeof mod._msSesApplyPreviewToProposal === "function" &&
+    !/_msSesApplySendPreview[\s\S]{0,400}approve_ses_invoice/.test(code) &&
+    !/_msSesApplySendPreview[\s\S]{0,400}execute_ses_release/.test(code),
+);
+check(
+  "changing hours updates the invoice proposal that would send",
+  (() => {
+    const next = mod._msSesApplyPreviewToProposal({
+      line_items: [{ description: "Make-safe labour", quantity: 3, unit_price_ex_gst: 80, amount_ex_gst: 240 }],
+      subtotal_ex_gst: 240,
+      total_inc_gst: 264,
+    }, 4);
+    return next.line_items[0].quantity === 4 && next.line_items[0].amount_ex_gst === 320
+      && next.subtotal_ex_gst === 320 && next.total_inc_gst === 352;
+  })(),
+);
+check(
+  "changing wording updates the email route that would send",
+  (() => {
+    const next = mod._msSesApplyPreviewToRoutes(
+      [{ route_kind: "report", subject: "Old", body: "Old body" }],
+      { routes: { report: { subject: "New subject", body: "New wording" } } },
+    );
+    return next[0].subject === "New subject" && next[0].body === "New wording";
+  })(),
 );
 check(
   "detail uses condensed TO/CC/subject line — no 'why this' essays",
@@ -2272,6 +2329,7 @@ function doorEnv(over) {
   };
   const env = {
     _msSesReviewQueue: {},
+    _makesafeCanonicalPackById: {},
     _msReportingCache: {},
     _msSesReviewQueueStale: () => false,
     _msSesRefreshReviewQueue: async () => {
@@ -2328,7 +2386,7 @@ const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
   ? opsCode.slice(renderCardStart, renderCardEnd)
   : "";
 check(
-  "renderMakesafeCard wires the visible Review job pack button to the queue-backed predicate",
+  "renderMakesafeCard wires the visible Review job pack button to the drafted-pack predicate",
   /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status\)/.test(renderCardSrc) &&
     /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
 );
@@ -2419,8 +2477,8 @@ const negativeRow = {
   report_pack: { drafted: true },
 };
 check(
-  "a queue miss has no Review job pack affordance",
-  makesafeCardHasReviewAffordance(negativeRow, "report_ready") === false,
+  "a drafted Docs Ready card shows Review job pack even on a queue miss",
+  makesafeCardHasReviewAffordance(negativeRow, "report_ready") === true,
 );
 const noPackPredicate = makeReviewAffordance({
   "review-negative": { job_id: "review-negative", docket_revision_id: DOCKET_REV },
@@ -2449,6 +2507,29 @@ check(
     doorA.calls.detail[0].jobId === "job-1" &&
     doorA.calls.detail[0].panelId === "msReportingDetailPanelBoard" &&
     doorA.calls.jobDetail.length === 0,
+);
+const doorDrafted = doorEnv({
+  _msSesReviewQueue: {},
+  _makesafeCanonicalPackById: { "job-237": true },
+});
+await makeDoor(doorDrafted.env)("job-237");
+check(
+  "door opens the same review overlay for a drafted pack that missed the queue",
+  doorDrafted.calls.overlay.length === 1 &&
+    doorDrafted.calls.detail.length === 1 &&
+    doorDrafted.calls.detail[0].jobId === "job-237" &&
+    doorDrafted.calls.jobDetail.length === 0,
+);
+const doorNoPack = doorEnv({
+  _msSesReviewQueue: {},
+  _makesafeCanonicalPackById: {},
+});
+await makeDoor(doorNoPack.env)("job-243");
+check(
+  "door does not invent a pack for a card with no drafted pack",
+  doorNoPack.calls.overlay.length === 0 &&
+    doorNoPack.calls.jobDetail.length === 1 &&
+    doorNoPack.calls.jobDetail[0] === "job-243",
 );
 check(
   "door does not re-read the queue on a hit",

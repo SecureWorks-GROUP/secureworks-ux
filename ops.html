@@ -4221,6 +4221,84 @@
     }
     .msr-mail-line em { font-style: italic; color: var(--sw-mid-light); font-weight: 500; }
     .msr-mail-line em.bad { color: #8C2F21; font-weight: 700; font-style: normal; }
+    /* Hours & wording: the only send-preview editors on this pane. Feedback
+       stays for everything else. One compact band, same type scale. */
+    .msr-edit {
+      margin: 0 20px 12px;
+      padding: 10px 14px 12px;
+      background: #fff;
+      border: 1px solid var(--sw-border);
+      border-radius: 8px;
+    }
+    .msr-edit-h {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .msr-edit-h h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--sw-dark);
+    }
+    .msr-edit-h .msr-sec-note { margin: 0; }
+    .msr-edit-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 10px 14px;
+      margin-bottom: 8px;
+    }
+    .msr-edit label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--sw-mid-light);
+      flex: 1 1 160px;
+      min-width: 0;
+    }
+    .msr-edit label.hours { flex: 0 0 88px; }
+    .msr-edit input,
+    .msr-edit textarea {
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--sw-dark);
+      border: 1px solid var(--sw-border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #fff;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .msr-edit textarea { min-height: 72px; resize: vertical; line-height: 1.45; }
+    .msr-edit-apply {
+      background: #1F3A44;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .msr-edit-apply:focus-visible { outline: 2px solid var(--sw-orange); outline-offset: 2px; }
+    .msr-edit-note {
+      margin: 6px 0 0;
+      font-size: 11.5px;
+      color: var(--sw-mid);
+      line-height: 1.45;
+    }
+    .msr-edit-note.ok { color: #0E7C5A; }
+
     .msr-mail-excerpt {
       margin: 4px 14px 8px;
       padding: 8px 12px;
@@ -4316,7 +4394,7 @@
       .msr-tabs, .msr-lede, .msr-photocount, .msr-photos, .msr-missing, .msr-portal { padding-left: 16px; padding-right: 16px; }
       .msr-done { margin-left: 16px; margin-right: 16px; }
       .msr-sec { padding-left: 16px; padding-right: 16px; }
-      .msr-stage-wrap, .msr-panel, .msr-mail { margin-left: 16px; margin-right: 16px; }
+      .msr-stage-wrap, .msr-panel, .msr-mail, .msr-edit { margin-left: 16px; margin-right: 16px; }
       .msr-foot { padding-left: 16px; padding-right: 16px; }
       .msr-fb-host { padding-left: 16px; padding-right: 16px; }
       .msr-mail-line { flex-direction: column; gap: 2px; }
@@ -6028,7 +6106,7 @@
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=5"></script>
+<script src="modules/ops-makesafe-reporting-cockpit.js?v=6"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
@@ -10698,6 +10776,7 @@ async function loadJobs(opts) {
       loadMakesafeBoardIntakeDrafts();
       loadMakesafeBoardStory();
       loadMakesafeBoardReviewAffordances();
+      loadMakesafeBoardPackChips();
     }
   } catch (e) {
     console.error('loadJobs error:', e);
@@ -10775,6 +10854,41 @@ function setJobView(view) {
   document.getElementById('btnKanban').style.fontWeight = view === 'kanban' ? '700' : '400';
   document.getElementById('btnListView').style.fontWeight = view === 'list' ? '700' : '400';
   if (_pipelineData) renderJobs(_pipelineData);
+}
+
+// Stamp card-face chips from the byte-exact pack when a drafted Docs Ready card
+// already names its docket. Does not invent a pack: no drafted pack, no
+// docket_revision_id, no fetch (assessment 261243 stays chip-honest).
+async function loadMakesafeBoardPackChips() {
+  if (typeof opsFetch !== 'function') return;
+  if (typeof _pipelineTab !== 'undefined' && _pipelineTab !== 'makesafes') return;
+  var cols = (typeof _pipelineData !== 'undefined' && _pipelineData && _pipelineData.columns)
+    ? _pipelineData.columns : null;
+  if (!cols) return;
+  var cards = cols.report_ready || [];
+  var changed = false;
+  for (var i = 0; i < cards.length; i++) {
+    var card = cards[i];
+    if (!card || !card.id || !makesafeHasDraftedPack(card)) continue;
+    if (_makesafePackChipById[card.id]) continue;
+    var queueEntry = (typeof _msSesReviewQueue !== 'undefined') ? _msSesReviewQueue[card.id] : null;
+    var meta = _makesafeCanonicalPackMetaById[card.id] || {};
+    var docketId = (queueEntry && queueEntry.docket_revision_id)
+      || meta.docket_revision_id
+      || (card.report_pack && card.report_pack.docket_revision_id)
+      || null;
+    if (!docketId) continue;
+    try {
+      var pack = await opsFetch('get_ses_reviewable_pack', { docket_revision_id: docketId });
+      if (pack) {
+        _makesafePackChipById[card.id] = makesafeChipFactsFromSesPack(pack);
+        changed = true;
+      }
+    } catch (_e) { /* leave enrichment chips; do not invent */ }
+  }
+  if (changed && _pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    renderJobs(_pipelineData);
+  }
 }
 
 function searchJobs(q) {
@@ -11916,6 +12030,9 @@ function closeMakesafeReportingOverlay() {
  *   - if the job has a CURRENT SES Docs Ready docket (it sits in the
  *     list_ses_docs_ready_reviews queue) -> the SES review pack
  *     (showMsReportingDetail in a board overlay),
+ *   - else if the canonical row already proves a drafted pack -> the SAME
+ *     overlay (cockpit is keyed by job_id; a queue miss must not send a
+ *     READY TO SEND card to job detail),
  *   - else if a legacy drafted pack is cached and genuinely actionable -> the
  *     same overlay (safety only: the legacy feed is empty in production and its
  *     combined send is retired server-side, and the SES gate runs first, so
@@ -11924,10 +12041,12 @@ function closeMakesafeReportingOverlay() {
  *     status / crew / work order (design ref state B).
  * Same door, the screen adapts. Used by the make-safe card click + the explicit
  * "Review job pack" button so there is a single code path.
+ * Never invents a pack: a card the canonical row cannot prove has one stays
+ * on job detail (assessment 261243 and every other no-pack card).
  */
 async function openMakesafeJob(jobId) {
   // The SES Docs Ready queue (job_id -> current needs_review docket) is the
-  // door's source of truth for a reviewable pack. When this job is not in the
+  // preferred map onto a byte-exact pack. When this job is not in the
   // map and the map has never been read or has gone stale, re-read it before
   // the gate — a docket that entered review since the last read must not send
   // the captain to the wrong screen. A queue HIT needs no re-read: a docket
@@ -11938,7 +12057,8 @@ async function openMakesafeJob(jobId) {
     try { await _msSesRefreshReviewQueue(); } catch (e) { /* fall through to the gates */ }
   }
   var sesEntry = (typeof _msSesReviewQueue !== 'undefined') ? _msSesReviewQueue[jobId] : null;
-  if (sesEntry && typeof showMsReportingDetail === 'function') {
+  var hasDraftedPack = (typeof _makesafeCanonicalPackById !== 'undefined') && !!_makesafeCanonicalPackById[jobId];
+  if ((sesEntry || hasDraftedPack) && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
@@ -12692,6 +12812,13 @@ var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready
 // canonical feed's rows. Both are dropped together on every transition.
 var _makesafeCanonicalStageById = {};
 var _makesafeCanonicalPackById = {};
+// job id -> { drafted, docket_revision_id } from the canonical pack block.
+// The door uses drafted to open the review overlay without a queue hit; the
+// pack loader uses docket_revision_id when the needs_review queue missed.
+var _makesafeCanonicalPackMetaById = {};
+// job id -> pack-derived chip facts { wo, report, swms, invoice, photos, sent, fromPack }.
+// When present, the card face prefers these over the enrichment has_wo join.
+var _makesafePackChipById = {};
 var _makesafeCanonicalStageFetch = null;
 // The archive-inclusive read of the same feed, and whether the remembered map is
 // known to cover archived rows at all. See <makesafe-archive-on-demand>.
@@ -12709,6 +12836,10 @@ function rememberMakesafeCanonicalStage(row) {
   if (stage) _makesafeCanonicalStageById[row.id] = stage;
   if (row.pack && typeof row.pack === 'object') {
     _makesafeCanonicalPackById[row.id] = makesafeHasDraftedPack({ report_pack: row.pack });
+    _makesafeCanonicalPackMetaById[row.id] = {
+      drafted: !!_makesafeCanonicalPackById[row.id],
+      docket_revision_id: row.pack.docket_revision_id || null
+    };
   }
   // Remember the normalised live portal capture so the Docs Ready cockpit (a
   // separate module) can show the same thumb + chip by job id without re-deriving.
@@ -12831,6 +12962,8 @@ function ensureMakesafeCanonicalStageForJob(jobId) {
 function refreshMakesafeCanonicalStages(jobId) {
   _makesafeCanonicalStageById = {};
   _makesafeCanonicalPackById = {};
+  _makesafeCanonicalPackMetaById = {};
+  _makesafePackChipById = {};
   _makesafeCanonicalStageFetch = null;
   _makesafeCanonicalStageArchiveFetch = null;
   _makesafeCanonicalStagesCoverArchive = false;
@@ -13467,10 +13600,58 @@ function renderMakesafeDocIcon(key, state, shortName, label) {
     + '<span class="ms-doc-name">' + escapeHtml(shortName) + '</span>'
     + '</div>';
 }
+// Chip facts from a SES reviewable pack. The board enrichment has_wo join can
+// lag the pack (SWMS-261241: card said WO missing / 2/5 while the pack had
+// the work order and 5 of 5). When these facts exist the card face uses them.
+function makesafeChipFactsFromSesPack(pack) {
+  pack = pack || {};
+  var artifacts = Array.isArray(pack.artifacts) ? pack.artifacts : [];
+  var closeout = pack.closeout_documents
+    || (pack.docket && pack.docket.closeout_documents)
+    || {};
+  var facts = {
+    wo: false, report: false, swms: false, invoice: false, photos: false,
+    sent: pack.sent === true, fromPack: true
+  };
+  artifacts.forEach(function(a) {
+    if (!a) return;
+    var role = String(a.role || '').toLowerCase();
+    var name = String(a.object_key || a.file_name || a.label || '').toLowerCase();
+    var hay = role + ' ' + name;
+    if (/work[\s_-]*order|works[\s_-]*order|work_order|\bwo\b/.test(hay)) facts.wo = true;
+    if (a.media_type && String(a.media_type).indexOf('image/') === 0 && !/portal|capture/.test(role)) {
+      facts.photos = true;
+    }
+    if (/portal|capture|roof_report_screenshot/.test(role)) return;
+    if (/supporting_report|make\s*safe|completion/.test(hay) || (/\breport\b/.test(hay) && !/invoice|photo/.test(hay))) {
+      facts.report = true;
+    }
+    if (/\bswms\b/.test(hay)) facts.swms = true;
+    if (/invoice|xero_invoice/.test(hay)) facts.invoice = true;
+  });
+  if (closeout.work_order === true || closeout.wo === true) facts.wo = true;
+  if (closeout.report === true) facts.report = true;
+  if (closeout.swms === true) facts.swms = true;
+  if (closeout.invoice === true) facts.invoice = true;
+  return facts;
+}
+
+function makesafePackChipFactsFor(j) {
+  if (!j) return null;
+  if (j.id && typeof _makesafePackChipById !== 'undefined' && _makesafePackChipById[j.id]) {
+    return _makesafePackChipById[j.id];
+  }
+  if (j.report_pack && typeof j.report_pack === 'object' && Array.isArray(j.report_pack.artifacts)) {
+    return makesafeChipFactsFromSesPack(j.report_pack);
+  }
+  return null;
+}
+
 function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);
   var slug = String(j.requesting_company_slug || '').toLowerCase();
   var builder = getMakesafeBuilder(j) || 'this builder';
+  var packFacts = makesafePackChipFactsFor(j);
   var icons = [];
   var done = 0;     // count of "done" docs
   var applicable = 0; // docs that count toward the X / N (N/A excluded)
@@ -13481,29 +13662,32 @@ function renderMakesafeStatusIcons(j, status) {
     icons.push(renderMakesafeDocIcon(key, state, shortName, label));
   }
 
-  // 1) Work Order
-  if (j.has_wo) add('wo', 'done', 'WO', 'Work order: attached');
-  else if (missing.wo || missing.work_order) add('wo', 'missing', 'WO', 'Work order: missing (expected)');
-  else add('wo', 'pending', 'WO', 'Work order: not yet attached');
+  // 1) Work Order — pack artifacts win over the stale enrichment has_wo join.
+  var hasWo = packFacts ? !!packFacts.wo : !!j.has_wo;
+  if (hasWo) add('wo', 'done', 'WO', 'Work order: attached');
+  else if (!packFacts && (missing.wo || missing.work_order)) add('wo', 'missing', 'WO', 'Work order: missing (expected)');
+  else add('wo', 'pending', 'WO', packFacts ? 'Work order: not in this pack' : 'Work order: not yet attached');
 
   // 2) Make-safe report
   var reportStatus = String(j.report_status || '').toLowerCase();
-  if (j.has_report_doc) add('report', 'done', 'Report', 'Report: attached');
-  else if (missing.report) add('report', 'missing', 'Report', 'Report: missing (expected)');
-  else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') add('report', 'missing', 'Report', 'Report submitted: PDF missing');
+  var hasReport = packFacts ? !!packFacts.report : !!j.has_report_doc;
+  if (hasReport) add('report', 'done', 'Report', 'Report: attached');
+  else if (!packFacts && missing.report) add('report', 'missing', 'Report', 'Report: missing (expected)');
+  else if (!packFacts && (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted')) add('report', 'missing', 'Report', 'Report submitted: PDF missing');
   else add('report', 'pending', 'Report', 'Report: awaiting trade report');
 
   // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
-  if (slug !== 'mlb') add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
-  else if (j.has_swms_doc) add('swms', 'done', 'SWMS', 'SWMS: attached');
-  else if (missing.swms) add('swms', 'missing', 'SWMS', 'SWMS: missing (required for MLB)');
+  if (slug !== 'mlb' && !(packFacts && packFacts.swms)) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
+  else if (packFacts ? packFacts.swms : j.has_swms_doc) add('swms', 'done', 'SWMS', 'SWMS: attached');
+  else if (!packFacts && missing.swms) add('swms', 'missing', 'SWMS', 'SWMS: missing (required for MLB)');
   else add('swms', 'pending', 'SWMS', 'SWMS: needed for MLB');
 
-  // 4) Invoice — driven by invoice_status, escalated to missing if flagged.
+  // 4) Invoice — pack draft invoice wins over enrichment invoice_status.
   var inv = String(j.invoice_status || '').toLowerCase();
-  if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
-  else if (inv === 'invoiced') add('invoice', 'done', 'Inv', 'Invoice: invoiced');
-  else if (missing.invoice) add('invoice', 'missing', 'Inv', 'Invoice: missing (expected)');
+  if (packFacts && packFacts.invoice) add('invoice', 'done', 'Inv', 'Invoice: on the pack');
+  else if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
+  else if (inv === 'invoiced' || j.has_invoice_doc) add('invoice', 'done', 'Inv', 'Invoice: invoiced');
+  else if (!packFacts && missing.invoice) add('invoice', 'missing', 'Inv', 'Invoice: missing (expected)');
   else if (inv === 'draft' || inv === 'report_ready') add('invoice', 'pending', 'Inv', 'Invoice: draft / not sent');
   else if (!inv || inv === 'not_ready') add('invoice', 'na', 'Inv', 'Invoice: not ready yet');
   else add('invoice', 'pending', 'Inv', 'Invoice: ' + inv);
@@ -13516,9 +13700,11 @@ function renderMakesafeStatusIcons(j, status) {
   // send record now honestly reads "not yet emailed". Fallback (older payloads with
   // no sent_to_builder field, e.g. a UX deploy ahead of the backend): use the legacy
   // proxy so no truly-sent card silently blanks during the deploy skew.
-  var sentToBuilder = (typeof j.sent_to_builder === 'boolean')
-    ? j.sent_to_builder
-    : ((String(j.report_status || '').toLowerCase() === 'processed') || j.pack_sent === true);
+  var sentToBuilder = packFacts && packFacts.sent === true
+    ? true
+    : ((typeof j.sent_to_builder === 'boolean')
+      ? j.sent_to_builder
+      : ((String(j.report_status || '').toLowerCase() === 'processed') || j.pack_sent === true));
   if (sentToBuilder) add('sent', 'done', 'Sent', 'Pack sent to builder (open card for send log)');
   else add('sent', 'pending', 'Sent', 'Not yet emailed to builder');
 
@@ -13803,16 +13989,15 @@ function renderMakesafePortalThumbForJob(jobId, variant) {
 // </makesafe-portal-live-thumb>
 
 // The visible review button and openMakesafeJob share ONE reviewability fact:
-// membership in the current SES needs_review queue. Canonical stage still owns
-// placement, and the canonical row's pack block still owns pack existence. No
-// substatus, declared stage, or computed status can manufacture this affordance.
+// a Docs Ready card whose canonical row proves a drafted pack. The SES
+// needs_review queue is how we find the current docket id, not whether the
+// card may open the review/send surface. A READY TO SEND card that missed
+// the queue (SWMS-261237) must still offer the same overlay as a queued peer.
+// No substatus, declared stage, or computed status can manufacture this
+// affordance, and a card with no drafted pack never gets one (261243).
 function makesafeCardHasReviewAffordance(j, status) {
-  var queueEntry = (j && j.id && typeof _msSesReviewQueue !== 'undefined')
-    ? _msSesReviewQueue[j.id]
-    : null;
   return status === 'report_ready'
     && makesafeCanonicalStageOf(j) === 'report_ready'
-    && !!queueEntry
     && makesafeHasDraftedPack(j);
 }
 
@@ -13858,6 +14043,14 @@ function renderMakesafeCard(j, status) {
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
     && (backendStage ? backendStage === 'report_ready' : true)
     && makesafeHasDraftedPack(j);
+  // A READY TO SEND chip whose face still says WO missing / 2/5 is a lie
+  // against the pack. Prefer pack chip facts when we have them; until then
+  // withhold the send chip rather than advertise a send on incomplete chips.
+  var packFactsForReady = makesafePackChipFactsFor(j);
+  if (readyToSend && !packFactsForReady) {
+    var missingForReady = makesafeMissingDocsSet(j);
+    if (!j.has_wo && (missingForReady.wo || missingForReady.work_order)) readyToSend = false;
+  }
   var showReviewAffordance = makesafeCardHasReviewAffordance(j, status);
   // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
   // drafts feed supplies (mirrored onto the board payload by the backend). Drives the

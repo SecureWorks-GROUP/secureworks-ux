@@ -70,6 +70,9 @@ test('hours and wording edits preview on the pane, lock the press, and die with 
   }, fixture);
 
   expect(result.before).toContain('Hours &amp; wording');
+  expect(result.before).toContain('Edits this pack. Does not send.');
+  expect(result.before).not.toContain('records on this docket');
+  expect(result.before).toContain('value="3"');
   expect(result.before).toContain('Update send pack');
   expect(result.after).toContain('Edited subject');
   expect(result.after).toContain('Edited wording for the builder.');

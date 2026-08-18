@@ -822,10 +822,12 @@ function _msSesPreviewOf(jobId, ctx) {
 }
 
 // A line is labour only when it says so: an explicit labour line type, or a
-// description carrying a labour/attendance word without a non-labour noun
-// (hire, materials, surcharge...). Never "the first line" and never a bare
-// "hour" match — an After Hours Surcharge or a Temp Fence Hire line must not
-// be rewritten by an hours edit.
+// description carrying a labour/attendance/make-safe work word without a
+// non-labour noun (hire, materials, surcharge...). Never "the first line" and
+// never a bare "hour" match — an After Hours Surcharge or a Temp Fence Hire
+// line must not be rewritten by an hours edit. Make-safe work lines (e.g.
+// SAMPLE-AJS-WALK "…temporary fencing make-safe - 2 trades x 2 hours") are
+// labour even when they omit the words labour/attendance.
 function _msSesInvoiceLineIsLabour(li) {
   if (!li) return false;
   var typed = String(li.line_type || li.type || '').toLowerCase();
@@ -833,7 +835,7 @@ function _msSesInvoiceLineIsLabour(li) {
   if (typed) return false;
   var desc = String(li.description || '').toLowerCase();
   if (/surcharge|material|hire|equipment|delivery|travel|disposal|skip bin/.test(desc)) return false;
-  return /\blabou?r\b|\battendance\b/.test(desc);
+  return /\blabou?r\b|\battendance\b|\bmake[-\s]?safe\b/.test(desc);
 }
 
 // Labour hours as the pack itself states them — never the preview.
@@ -960,7 +962,7 @@ function _msSesRenderSendEditors(jobId, ctx) {
   var safeId = _msJsAttr(jobId);
   var html = '<div class="msr-edit" id="msSesEdit-' + safeId + '">';
   html += '<div class="msr-edit-h"><h3>Hours &amp; wording</h3>';
-  html += '<span class="msr-sec-note">records on this docket &mdash; does not send</span></div>';
+  html += '<span class="msr-sec-note">Edits this pack. Does not send.</span></div>';
   html += '<div class="msr-edit-row">';
   html += '<label class="hours">Hours<input type="number" step="0.5" min="0" id="msSesHours-' + safeId + '" value="'
     + (hours != null ? escapeAttr(String(hours)) : '') + '"></label>';

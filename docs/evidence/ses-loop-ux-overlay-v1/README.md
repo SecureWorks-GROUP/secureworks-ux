@@ -7,6 +7,6 @@ Regenerate: `node scripts/ses-loop-overlay-shot.js docs/evidence/ses-loop-ux-ove
 |---|---|
 | `ses-loop-cards.png` | SWMS-261237 (drafted, not in queue) has Review job pack. SWMS-261241 chips match the pack (WO attached, 4/5; Sent still pending). SWMS-261243 assessment stays No pack drafted with no Review button. |
 | `ses-loop-overlay-before.png` | Same review/send overlay as 261241: Hours & wording editors, Feedback is not the only box. |
-| `ses-loop-overlay-after-edit.png` | Hours 5 + edited subject/body; outgoing email preview is what would send. APPROVE AND SEND stays unused. |
+| `ses-loop-overlay-after-edit.png` | Hours 5 + edited subject/body recorded on the docket: the pane previews them, and APPROVE AND SEND is locked until the revised pack carries them. Nothing sent or authorised. |
 
 Identity only (job number + suburb). No client name, street, or phone.

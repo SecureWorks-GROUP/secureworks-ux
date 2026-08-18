@@ -1061,9 +1061,58 @@ async function _msSesApplySendPreview(jobId) {
   }
 
   if (!noteLines.length) {
+    var recorded = _msSesPreviewOf(jobId, ctx);
+    if (!recorded) {
+      delete _msSesSendPreview[jobId];
+      showToast('No changes to record — the pack already matches these values.', 'info');
+      repaint();
+      return;
+    }
+    // Retyping the pack's original values WITHDRAWS the recorded edit: the
+    // withdrawal is itself recorded on the docket (the earlier note must not
+    // be applied by the revise pass), and the press re-arms only from a fresh
+    // pack read — never from this stale context.
+    var withdrawLines = ['Withdraw the earlier review edits below — keep the pack as drafted.'];
+    if (recorded.hours != null) {
+      withdrawLines.push('Withdrawn: set the invoice labour hours to ' + recorded.hours + '.');
+    }
+    Object.keys(recorded.routes || {}).forEach(function(kind) {
+      var wLabel = _MS_SES_ROUTE_LABELS[kind] || (kind + ' email');
+      if (recorded.routes[kind].subject != null) {
+        withdrawLines.push('Withdrawn: the edited subject for the ' + wLabel + '.');
+      }
+      if (recorded.routes[kind].body != null) {
+        withdrawLines.push('Withdrawn: the edited wording for the ' + wLabel + '.');
+      }
+    });
+    var wBtn = _msSesScopedEl(jobId, 'msSesEditApply-' + jobId);
+    if (wBtn) { wBtn.disabled = true; wBtn.textContent = 'Recording...'; }
+    var wAuthor = (typeof _MS_NOTES_DEFAULT_AUTHOR !== 'undefined' && _MS_NOTES_DEFAULT_AUTHOR) || 'Ops';
+    try {
+      await opsPostJwt('record_ses_review_feedback', {
+        docket_revision_id: ctx.docketRevisionId,
+        job_id: jobId,
+        change_type: 'human_review_feedback',
+        before: null,
+        after: { note: withdrawLines.join('\n'), author: wAuthor }
+      });
+    } catch (e) {
+      showToast('The withdrawal could not be recorded on the docket: ' + ((e && e.message) || e), 'error');
+      if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Update send pack'; }
+      return;
+    }
+    if (typeof _msSesEchoCache !== 'undefined' && _msSesEchoCache) {
+      _msSesEchoCache[jobId] = (_msSesEchoCache[jobId] || []).concat([{
+        role: 'human',
+        author: wAuthor,
+        body: withdrawLines.join('\n'),
+        created_at: new Date().toISOString(),
+        ses_recorded: true
+      }]);
+    }
     delete _msSesSendPreview[jobId];
-    showToast('No changes to record — the pack already matches these values.', 'info');
-    repaint();
+    showToast('Earlier edits withdrawn on the SES docket. Re-reading the pack before the press can re-arm.', 'success');
+    _msSesReloadDetail(jobId);
     return;
   }
 

@@ -855,6 +855,53 @@ check(
     !mod._msSesSendPreview[JOB],
 );
 mod._msSesPackCache[JOB].docketRevisionId = DOCKET_REV;
+
+// Retyping the pack's ORIGINAL values withdraws the recorded edit: one
+// countermanding feedback write, the lock clears, and the press re-arms only
+// from a fresh pack read.
+calls.opsPostJwt.length = 0;
+documentStub.getElementById("msSesHours-" + JOB).value = "5";
+await mod._msSesApplySendPreview(JOB);
+check(
+  "an edit re-applied after invalidation records again and re-locks",
+  calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback").length === 1 &&
+    !!mod._msSesSendPreview[JOB],
+);
+calls.opsPostJwt.length = 0;
+calls.opsFetch.length = 0;
+calls.toasts.length = 0;
+documentStub.getElementById("msSesHours-" + JOB).value = "";
+documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [{
+  getAttribute: (name) =>
+    name === "data-route-kind" ? "report"
+      : name === "data-ses-edit" ? "subject" : null,
+  value: "Make Safe Completion - MLB-25248",
+}];
+await mod._msSesApplySendPreview(JOB);
+const withdrawWrites = calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback");
+check(
+  "retyping the original values records ONE countermanding withdrawal note on the docket",
+  withdrawWrites.length === 1 &&
+    withdrawWrites[0].body.docket_revision_id === DOCKET_REV &&
+    /[Ww]ithdraw/.test(withdrawWrites[0].body.after.note) &&
+    /labour hours to 5/.test(withdrawWrites[0].body.after.note) &&
+    /edited subject/.test(withdrawWrites[0].body.after.note),
+);
+check(
+  "the withdrawal clears the preview lock",
+  !mod._msSesSendPreview[JOB] &&
+    calls.toasts.some((t) => /withdrawn/i.test(t.msg || "")),
+);
+await flush();
+await flush();
+await flush();
+check(
+  "after a withdrawal the press re-arms from a FRESH pack read, never the stale context",
+  calls.opsFetch.some((c) =>
+    c.action === "query_ses_review_cockpit" && c.params.job_id === JOB
+  ) &&
+    (elements["msReportingDetailPanel"]._html || "").includes('id="msSesApproveAndSendBtn"'),
+);
 check(
   "a line is labour only when it says so — first line and 'After hours' never qualify",
   mod._msSesInvoiceLineIsLabour({ description: "Make-safe labour" }) === true &&

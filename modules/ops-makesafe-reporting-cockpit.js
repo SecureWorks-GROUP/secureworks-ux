@@ -3287,6 +3287,25 @@ async function _msSesRefreshPackContext(jobId) {
  * any refusal the chain stops at that step and shows the server's words
  * verbatim; the earlier recorded approvals stand and pressing again resumes.
  */
+/**
+ * Exact review coordinates the approve door requires (ops-api T8).
+ * Echoed from the pack on screen, never invented.
+ */
+function _msSesEchoedReviewCoordinates(ctx) {
+  var story = ((ctx && ctx.cockpit && ctx.cockpit.sections) || {}).job_story || {};
+  var packDock = (ctx && ctx.pack && ctx.pack.docket) || {};
+  var money = ((ctx && ctx.cockpit && ctx.cockpit.sections) || {}).money || {};
+  var bound = money.bound_invoice || money.xero || {};
+  var packXero = packDock.xero_binding || {};
+  return {
+    expected_docket_revision_id: ctx.docketRevisionId || story.docket_revision_id || packDock.id || null,
+    expected_output_content_hash: ctx.outputHash || story.docket_output_content_hash || packDock.output_content_hash || null,
+    expected_invoice_obligation_revision_id: story.invoice_obligation_revision_id ||
+      packDock.invoice_obligation_revision_id || null,
+    expected_draft_pdf_content_hash: bound.pdf_content_hash || packXero.pdf_content_hash || null
+  };
+}
+
 async function sesApproveAndSend(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
@@ -3321,10 +3340,30 @@ async function sesApproveAndSend(jobId) {
   if (needsInvoice) {
     try {
       if (btn) _msSesStampProgress(btn, 'Approving invoice...');
-      var approval = await opsPostJwt('approve_ses_invoice_revision', {
+      var echo = _msSesEchoedReviewCoordinates(ctx);
+      if (!echo.expected_invoice_obligation_revision_id) {
+        var ob = await opsFetch('query_ses_invoice_obligation', { job_id: jobId });
+        var revisions = (ob && ob.revisions) || [];
+        echo.expected_invoice_obligation_revision_id = revisions.length ? revisions[0].id : null;
+      }
+      if (
+        !echo.expected_docket_revision_id ||
+        !echo.expected_invoice_obligation_revision_id ||
+        !echo.expected_output_content_hash
+      ) {
+        throw new Error('This pack is missing the exact review coordinates needed to approve the invoice.');
+      }
+      var approveBody = {
         job_id: jobId,
-        includes_authorise: true
-      });
+        includes_authorise: true,
+        expected_docket_revision_id: echo.expected_docket_revision_id,
+        expected_invoice_obligation_revision_id: echo.expected_invoice_obligation_revision_id,
+        expected_output_content_hash: echo.expected_output_content_hash
+      };
+      if (echo.expected_draft_pdf_content_hash) {
+        approveBody.expected_draft_pdf_content_hash = echo.expected_draft_pdf_content_hash;
+      }
+      var approval = await opsPostJwt('approve_ses_invoice_revision', approveBody);
       invoiceRecorded = true;
       var obligationRevisionId = approval && approval.approval && approval.approval.invoice_obligation_revision_id;
       if (!obligationRevisionId) {

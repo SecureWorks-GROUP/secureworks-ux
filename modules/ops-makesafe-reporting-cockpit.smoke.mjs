@@ -770,6 +770,8 @@ check(
 check(
   "detail has Hours & wording editors, not only Feedback",
   detailHtml.includes("Hours &amp; wording") &&
+    detailHtml.includes("Edits this pack. Does not send.") &&
+    !detailHtml.includes("records on this docket") &&
     detailHtml.includes("msSesHours-") &&
     detailHtml.includes("Update send pack") &&
     detailHtml.includes("data-ses-edit=\"subject\"") &&
@@ -906,10 +908,37 @@ check(
   "a line is labour only when it says so — first line and 'After hours' never qualify",
   mod._msSesInvoiceLineIsLabour({ description: "Make-safe labour" }) === true &&
     mod._msSesInvoiceLineIsLabour({ description: "propped fence upright, including site attendance" }) === true &&
+    mod._msSesInvoiceLineIsLabour({
+      description: "SAMPLE-AJS-WALK-1 - temporary fencing make-safe - 2 trades x 2 hours",
+    }) === true &&
     mod._msSesInvoiceLineIsLabour({ line_type: "labour", description: "crew" }) === true &&
     mod._msSesInvoiceLineIsLabour({ description: "After hours surcharge" }) === false &&
     mod._msSesInvoiceLineIsLabour({ description: "Temp fence hire" }) === false &&
     mod._msSesInvoiceLineIsLabour({ description: "Callout fee" }) === false,
+);
+check(
+  "hours input prefills from the pack labour line when money.labour_hours is absent",
+  (() => {
+    const hours = mod._msSesPackLabourHours({
+      cockpit: {
+        sections: {
+          money: {
+            local_invoice_proposal: {
+              line_items: [{
+                description: "SAMPLE-AJS-WALK-1 - temporary fencing make-safe - 2 trades x 2 hours",
+                quantity: 4,
+                unit_price_ex_gst: 80,
+                amount_ex_gst: 320,
+              }],
+              subtotal_ex_gst: 320,
+              total_inc_gst: 352,
+            },
+          },
+        },
+      },
+    });
+    return hours === 4;
+  })(),
 );
 check(
   "an hours edit rescales ONLY the labour line of a multi-line proposal",
@@ -939,6 +968,23 @@ check(
     }, 4);
     return next.line_items[0].quantity === 4 && next.line_items[0].amount_ex_gst === 320
       && next.subtotal_ex_gst === 320 && next.total_inc_gst === 352;
+  })(),
+);
+check(
+  "hours edit rescales a make-safe work line that omits the word labour",
+  (() => {
+    const next = mod._msSesApplyPreviewToProposal({
+      line_items: [{
+        description: "SAMPLE-AJS-WALK-1 - temporary fencing make-safe - 2 trades x 2 hours",
+        quantity: 4,
+        unit_price_ex_gst: 80,
+        amount_ex_gst: 320,
+      }],
+      subtotal_ex_gst: 320,
+      total_inc_gst: 352,
+    }, 5);
+    return next.line_items[0].quantity === 5 && next.line_items[0].amount_ex_gst === 400
+      && next.subtotal_ex_gst === 400 && next.total_inc_gst === 440;
   })(),
 );
 check(

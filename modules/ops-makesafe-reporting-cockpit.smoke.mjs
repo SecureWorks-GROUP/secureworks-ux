@@ -1776,6 +1776,37 @@ check(
     /Still drafting/.test(liveDraftOnlyHtml),
 );
 
+// ── 11a4. SWMS-261237: C11 "report invoice email is not marked ready" while
+//         the Xero invoice is still DRAFT. That is a send-route wall, not a
+//         missing work order. APPROVE is already armed; the stamp must not lock.
+const ajsDraftReadyHold = cockpitSendReady();
+ajsDraftReadyHold.status = "HOLD";
+ajsDraftReadyHold.verdict = {
+  clean: false,
+  blockers: [
+    {
+      code: "route_draft_missing",
+      fact: "The report invoice email is not marked ready on the current docket revision.",
+      evidence: { route_kind: "report_invoice", route_ready: false },
+    },
+  ],
+};
+ajsDraftReadyHold.sections.status = { status: "HOLD", stale: false, reasons: [] };
+ajsDraftReadyHold.controls.approve_invoice.enabled = true;
+ajsDraftReadyHold.controls.send_it.enabled = false;
+behaviour.fetch["query_ses_review_cockpit"] = ajsDraftReadyHold;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const ajsDraftReadyHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "LIVE AJS DRAFT 'email is not marked ready' is SOFT and does NOT wall APPROVE AND SEND",
+  /class="msr-hold soft"/.test(ajsDraftReadyHtml) &&
+    ajsDraftReadyHtml.includes('id="msSesApproveAndSendBtn"') &&
+    ajsDraftReadyHtml.includes("sesApproveAndSend(") &&
+    /Still drafting/.test(ajsDraftReadyHtml) &&
+    /press <strong>APPROVE AND SEND<\/strong>/.test(ajsDraftReadyHtml),
+);
+
 // ── 11b. PR 563 cockpit honesty — read recovery_action, route evidence,
 //        and control.disabled_reason (Bertram live shape, PII-free). ─────────
 // Live SWMS-261109: HOLD on photo route (0 attachments), invoice AUTHORISED

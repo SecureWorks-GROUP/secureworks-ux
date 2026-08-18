@@ -3674,6 +3674,54 @@ check(
   behaviour.signedUrl = {};
 }
 
+// ── 19b. A withdrawal on a drafted-NOT-in-queue card (docket id off the
+// canonical row, board-overlay host) must reopen the detail from a fresh read:
+// the reload may not depend on needs_review queue membership. ────────────────
+{
+  seedSendReady();
+  behaviour.fetch["list_ses_docs_ready_reviews"] = { dockets: [] };
+  sandbox._makesafeCanonicalPackMetaById[JOB] = {
+    drafted: true,
+    docket_revision_id: DOCKET_REV,
+  };
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+  const OVERLAY_PANEL = "msMakesafeOverlayDetailPanel";
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB, OVERLAY_PANEL);
+  check(
+    "a drafted card with no queue row still opens the review pane in the overlay",
+    (elements[OVERLAY_PANEL]._html || "").includes("Hours &amp; wording"),
+  );
+  behaviour.postJwt["record_ses_review_feedback"] = { recorded: true };
+  documentStub.getElementById("msSesHours-" + JOB).value = "5";
+  documentStub.getElementById("msSesEdit-" + JOB).querySelectorAll = () => [];
+  await mod._msSesApplySendPreview(JOB);
+  check(
+    "the overlay-hosted edit records and locks as usual on the unqueued card",
+    !!mod._msSesSendPreview[JOB] &&
+      !(elements[OVERLAY_PANEL]._html || "").includes('id="msSesApproveAndSendBtn"'),
+  );
+  calls.opsPostJwt.length = 0;
+  documentStub.getElementById("msSesHours-" + JOB).value = "";
+  await mod._msSesApplySendPreview(JOB);
+  await flush();
+  await flush();
+  await flush();
+  check(
+    "the withdrawal records once and clears the lock on the unqueued card",
+    calls.opsPostJwt.filter((c) => c.action === "record_ses_review_feedback").length === 1 &&
+      !mod._msSesSendPreview[JOB],
+  );
+  check(
+    "after the withdrawal the overlay repaints from a fresh read — armed press, apply button restored",
+    (elements[OVERLAY_PANEL]._html || "").includes('id="msSesApproveAndSendBtn"') &&
+      (elements[OVERLAY_PANEL]._html || "").includes("Update send pack"),
+  );
+  seedSendReady();
+  delete sandbox._makesafeCanonicalPackMetaById[JOB];
+  sandbox._pipelineData.columns = { report_ready: [mappedCard] };
+}
+
 // ── 20. No retired action was ever dispatched at runtime ────────────────────
 check(
   "no retired action was ever called at runtime",

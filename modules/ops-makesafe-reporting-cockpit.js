@@ -3892,10 +3892,13 @@ function _msSesChainStale(jobId, recorded) {
 function _msSesReloadDetail(jobId) {
   var panelId = (_msSesPackCache[jobId] && _msSesPackCache[jobId].panelId) || 'msReportingDetailPanel';
   loadMakesafeReportingCockpit().then(function() {
-    if (_msReportingCache[jobId]) {
+    // Reopen whenever the host panel is still mounted — never only when the
+    // needs_review queue re-seeded the cache row. A drafted pack can be
+    // reviewable WITHOUT queue membership (docket id off the canonical row),
+    // and showMsReportingDetail self-seeds identity when the row is absent;
+    // skipping the reopen here would strand the pre-reload DOM.
+    if (document.getElementById(panelId)) {
       showMsReportingDetail(jobId, panelId);
-    } else if (panelId === 'msReportingDetailPanel') {
-      showMsReportingDetailEmpty();
     }
   });
 }

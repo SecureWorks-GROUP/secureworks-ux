@@ -1116,6 +1116,10 @@ function _msSesHoldBlockers(cockpit) {
  * HARD blocker that still locks the pack.
  */
 function _msSesBlockerIsSoftDraft(b) {
+  var code = String((b && b.code) || '');
+  // The coded refusal is the family. Regex on facts keeps missing the next
+  // live phrasing (SWMS-261237: "report invoice email is not marked ready").
+  if (code === 'route_draft_missing') return true;
   var fact = String((b && b.fact) || '').toLowerCase();
   // Every phrasing the backend uses for "an outgoing email is not drafted yet".
   // The old test only caught "email draft" and the exact "no draft on docket";
@@ -1123,7 +1127,8 @@ function _msSesBlockerIsSoftDraft(b) {
   // which slipped through and (wrongly) HARD-locked SEND. Match the family:
   //   - anything naming an email draft ("email draft", "email is not drafted"),
   //   - "no draft on [current] docket" with the optional interior word,
-  //   - a "… EMAIL … no draft / not drafted / missing draft" caveat.
+  //   - a "… EMAIL … no draft / not drafted / missing draft" caveat,
+  //   - "email is not marked ready" (C11 on an AJS DRAFT pack).
   // The soft category is the outgoing EMAIL draft only. A missing REPORT
   // DOCUMENT / invoice / work order is a hard artefact gap and must NOT be
   // softened here, so every branch is anchored on "email" or the "no draft on
@@ -1131,6 +1136,7 @@ function _msSesBlockerIsSoftDraft(b) {
   if (/email\s*draft/.test(fact)) return true;
   if (/no\s+draft\s+on\s+(?:\w+\s+)?docket/.test(fact)) return true;
   if (/\bemail\b/.test(fact) && /\b(no|not|missing|pending|awaiting)\b[^.]*\bdraft(?:ed)?\b/.test(fact)) return true;
+  if (/\bemail\b/.test(fact) && /\bnot\s+marked\s+ready\b/.test(fact)) return true;
   return false;
 }
 

@@ -43,6 +43,8 @@ async function mockedFeedFailure(statuses) {
     AbortController,
     setTimeout,
     clearTimeout,
+    // foreign-job-readonly exports helpers on window for regression pins
+    window: {},
     _opsApiBase: 'https://example.supabase.co/functions/v1/ops-api',
     _swApiKey: 'test-api-key',
     _cachedAccessToken: 'signed-in-jwt',

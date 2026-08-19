@@ -3809,7 +3809,10 @@
     if (_clockState === 'on') return; // already clocked on locally
     try {
       // Each item in these arrays IS an assignment (flat structure from my_jobs)
-      var allAssignments = [].concat(data.today || [], data.thisWeek || [], data.upcoming || [], data.recent || []);
+      var allAssignments = [].concat(
+        data.today || [], data.thisWeek || [], data.upcoming || [], data.recent || [],
+        data.recentCompleted || [], data.unscheduled || []
+      );
       for (var i = 0; i < allAssignments.length; i++) {
         var asg = allAssignments[i];
         if (asg.clocked_on_at && !asg.clocked_off_at) {
@@ -5257,7 +5260,7 @@
 
   function hasJobInAssignmentGroups(data, jobId) {
     if (!data || !jobId) return false;
-    var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'];
+    var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'];
     for (var g = 0; g < groups.length; g++) {
       var items = data[groups[g]] || [];
       for (var i = 0; i < items.length; i++) {
@@ -5545,7 +5548,7 @@
 
   function findAssignmentForGlobalJob(data, jobId) {
     if (!data || !jobId) return null;
-    var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'];
+    var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'];
     for (var g = 0; g < groups.length; g++) {
       var items = data[groups[g]] || [];
       for (var i = 0; i < items.length; i++) {
@@ -5765,7 +5768,7 @@
 
     // Cache all assignments for Camera/Schedule views, preserving today's manual run-list order.
     _cachedMyJobs = [];
-    ['today', 'thisWeek', 'upcoming', 'recent'].forEach(function(k) {
+    ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'].forEach(function(k) {
       var source = k === 'today' ? todayJobs : (data[k] || []);
       source.forEach(function(a) { _cachedMyJobs.push(a); });
     });
@@ -5806,6 +5809,8 @@
     var sections = [
       { key: 'today', label: 'Today' },
       { key: 'recent', label: 'Needs Report' },
+      { key: 'recentCompleted', label: 'My recent completed' },
+      { key: 'unscheduled', label: 'Unscheduled' },
       { key: 'makesafePool', label: readyPoolLabel },
       { key: 'thisWeek', label: 'This Week' },
       { key: 'upcoming', label: 'Upcoming' },
@@ -5887,7 +5892,7 @@
       }
       if (_jobFilter === 'thisWeek' && sec.key !== 'today' && sec.key !== 'thisWeek') return;
       // M3 D7 (DA-M3-1 / ledger item 1): "Assigned" = the viewer's real assignment
-      // buckets (today/thisWeek/upcoming/recent), EXCLUDING the unassigned open pool.
+      // buckets (dated + recentCompleted + unscheduled), EXCLUDING the unassigned open pool.
       if (_jobFilter === 'assigned' && sec.key === 'makesafePool') return;
       // Apply search + status filter
       var filtered = items.filter(function(a) {
@@ -5936,6 +5941,12 @@
       }
       if (sec.key === 'recent') {
         html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Past-dated jobs still waiting on your report. They stay here until the report is submitted.</div>';
+      }
+      if (sec.key === 'recentCompleted') {
+        html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Your finished allocations from the recent window. Open a card for scope, or use Pay to invoice the week.</div>';
+      }
+      if (sec.key === 'unscheduled') {
+        html += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px">Allocated to you with no day set yet.</div>';
       }
       // Runsheet removed (captain ruling): Today is simply the day's cards in
       // time order — no run numbering, no reorder controls, no run-list note.
@@ -5991,6 +6002,8 @@
       html = '<div class="empty-state">';
       html += '  <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
       html += '  <p>No jobs assigned to you yet</p>';
+      html += '  <p style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.4">Finished work for pay lives under Pay → Weekly Invoice.</p>';
+      html += '  <button type="button" onclick="showView(\'hours\')" style="margin-top:12px;padding:10px 16px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);min-height:44px">Open Pay</button>';
       html += '</div>';
     }
 
@@ -6749,7 +6762,7 @@
   function getCachedTradeJob(jobId) {
     var cached = _tradeJobCacheById[jobId];
     if (cached) return cached;
-    var groups = _lastJobData ? ['today', 'thisWeek', 'upcoming', 'recent', 'makesafePool'] : [];
+    var groups = _lastJobData ? ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'] : [];
     for (var g = 0; g < groups.length; g++) {
       var items = _lastJobData[groups[g]] || [];
       for (var i = 0; i < items.length; i++) {
@@ -7130,14 +7143,26 @@
   // <foreign-job-readonly>
   // Visibility is not authority. A managed-vertical viewer (Henry sees every
   // fencing job) can open work allocated to another crew; that detail is
-  // VIEW-ONLY. The server is the real gate — this stops the client offering, or
-  // firing, a write it has no standing to make. Rows with no user_id (open pool,
-  // or a feed that omits it) are not another crew's, so legacy behaviour stands.
+  // VIEW-ONLY for an ordinary allocated trade. Office / division_manager tiers
+  // from trade_job_detail must NOT be forced view-only by crew membership —
+  // the server already granted them the vertical (access_tier / quote_visible).
+  // The server is still the real write gate; this only stops the client offering
+  // writes an allocated viewer has no standing to make. Rows with no user_id
+  // (open pool, or a feed that omits it) are not another crew's, so legacy
+  // behaviour stands.
   function isOtherCrewAssignment(assignment) {
     return !!(assignment && assignment.user_id && _user && assignment.user_id !== _user.id);
   }
 
+  function tradeDetailGrantsManagerAccess(data) {
+    if (!data) return false;
+    var tier = String(data.access_tier || '');
+    if (tier === 'office' || tier === 'division_manager') return true;
+    return data.quote_visible === true;
+  }
+
   function isForeignCrewJob(data) {
+    if (tradeDetailGrantsManagerAccess(data)) return false;
     var crew = (data && data.crew) || [];
     if (!_user || !crew.length) return false;
     var ownsOne = crew.some(function(a) { return a.user_id && a.user_id === _user.id; });
@@ -7177,6 +7202,14 @@
     var payload = JSON.stringify([params || {}, postBody]);
     return ids.some(function(id) { return payload.indexOf(id) !== -1; });
   }
+
+  window.__SW_TRADE_FOREIGN_JOB_TESTS = {
+    isOtherCrewAssignment: isOtherCrewAssignment,
+    tradeDetailGrantsManagerAccess: tradeDetailGrantsManagerAccess,
+    isForeignCrewJob: isForeignCrewJob,
+    blockedForeignJobWrite: blockedForeignJobWrite,
+    FOREIGN_JOB_WRITE_EXEMPT_ACTIONS: FOREIGN_JOB_WRITE_EXEMPT_ACTIONS
+  };
   // </foreign-job-readonly>
 
   function getMaterialsStatus(pos) {
@@ -18765,7 +18798,7 @@
       data = data || {};
       makeCard = typeof makeCard === 'function' ? makeCard : function (job, row) { return { job: job, row: row, _boardRow: row }; };
       var assigned = [], pool = [], observerRowsDropped = 0;
-      ['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool'].forEach(function (bucket) {
+      ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'].forEach(function (bucket) {
         (data[bucket] || []).forEach(function (row) {
           if (!isFencingRow(row) || !isSameOrg(row, orgId)) return;
           // Dropped before the pool/assigned split so an observer row can never

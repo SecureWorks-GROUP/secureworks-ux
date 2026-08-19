@@ -196,8 +196,8 @@ Array.from(mobileBlock[1].matchAll(/([^{}]+)\{[^{}]*\}/g)).forEach((rule) => {
 });
 assert(/if \(isFencing\) _wireBoardPager\(\);/.test(html),
   'only the fencing board wires the horizontal pager');
-assert(/\['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool'\]/.test(html),
-  'the Board ingests the backend unscheduled bucket');
+assert(/\['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'\]/.test(html),
+  'the Board ingests the backend unscheduled + recentCompleted buckets');
 assert(/if \(unscheduled\) return pool \|\| !scheduled;/.test(html),
   'open pool rows stay under Unscheduled even when production supplies a synthetic date');
 assert(/function _invalidateAssignmentLifecycleCaches\(\)/.test(html),

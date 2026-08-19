@@ -88,7 +88,7 @@ const test = base.extend({
     let fencingAll = loadJsonFixture('fencing-manager-jobs.json');
     const fencingMine = loadJsonFixture('fencing-manager-mine.json');
     const fencingCalendar = loadJsonFixture('trade-calendar-fencing.json');
-    const fencingRows = () => ['today', 'thisWeek', 'upcoming', 'recent', 'unscheduled', 'makesafePool']
+    const fencingRows = () => ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool']
       .flatMap((bucket) => fencingAll[bucket] || []);
     const fencingAssignment = (assignmentId) => fencingRows().find((row) => row.id === assignmentId);
     const weekStart = perthWeekMonday();

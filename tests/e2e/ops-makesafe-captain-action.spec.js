@@ -58,3 +58,202 @@ test('make-safe card shows an identified gap for an incomplete Captain action en
     'Action unavailable — needs attention — SWMS-GAP',
   );
 });
+
+test('report-ready placement never renders send controls for an incomplete pack', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-missing-report-bind',
+      job_number: 'SWMS-26980',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      ses_family_label: 'Roof Report',
+      site_suburb: 'Gwelup',
+      created_at: new Date().toISOString(),
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        // Deliberately contradictory: the shared UX verdict must fail closed
+        // even if a stale server label says ready.
+        presentation_kind: 'ready',
+        presentation_reason:
+          'The pack has no bound report_doc_id — <script>bad()</script>.',
+        required_documents: { report: true, invoice: true, swms: false },
+        closeout_documents: { report: false, invoice: true, swms: false },
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('Report: required pack pointer is missing or unresolved');
+  expect(rendered).not.toContain('Ready to send');
+  expect(rendered).not.toContain('Review job pack');
+  expect(rendered).not.toContain('<script>bad()</script>');
+});
+
+test('resolved ready presentation still renders the review control', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-ready-pack',
+      job_number: 'SWMS-READY',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      ses_family_label: 'MakeSafe',
+      site_suburb: 'Perth',
+      created_at: new Date().toISOString(),
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-ready-pack',
+        required_documents: { report: true, invoice: true, swms: true },
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Ready to send');
+  expect(rendered).toContain('Review job pack');
+  expect(rendered).not.toContain('Pack incomplete');
+});
+
+test('ready label with empty document maps fails closed', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-empty-document-maps',
+      job_number: 'SWMS-EMPTY-MAPS',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-empty-maps',
+        required_documents: {},
+        closeout_documents: {},
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).not.toContain('Ready to send');
+  expect(rendered).not.toContain('Review job pack');
+});
+
+test('ready label with explicitly null document maps fails closed', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-null-document-maps',
+      job_number: 'SWMS-NULL-MAPS',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-null-maps',
+        required_documents: null,
+        closeout_documents: null,
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('empty or malformed');
+  expect(rendered).not.toContain('Ready to send');
+  expect(rendered).not.toContain('Review job pack');
+});
+
+test('map-less legacy pack requires both bound report pointer and selected cycle report', async ({ page }) => {
+  await page.goto('/ops.html');
+  const cards = await page.evaluate(() => {
+    function render(id, report, reportDocId) {
+      return renderMakesafeCard(mapCanonicalMakesafeRow({
+        id,
+        job_number: id,
+        canonical_stage: 'report_ready',
+        substatus: 'admin_to_send_report',
+        report,
+        pack: {
+          drafted: true,
+          state: 'drafted',
+          report_doc_id: reportDocId,
+        },
+      }, null, { rememberStage: false }), 'report_ready');
+    }
+    return {
+      proved: render('legacy-proved', { state: 'submitted', cycle_number: 1 }, 'report-doc-legacy'),
+      noPointer: render('legacy-no-pointer', { state: 'submitted', cycle_number: 1 }, null),
+      noSelectedReport: render('legacy-no-report', { state: 'waiting_on_trade_report', cycle_number: 1 }, 'report-doc-legacy'),
+    };
+  });
+
+  expect(cards.proved).toContain('Ready to send');
+  expect(cards.proved).toContain('Review job pack');
+  expect(cards.noPointer).toContain('Pack incomplete');
+  expect(cards.noPointer).not.toContain('Review job pack');
+  expect(cards.noSelectedReport).toContain('Pack incomplete');
+  expect(cards.noSelectedReport).not.toContain('Review job pack');
+});
+
+test('whole-card open path uses the same required-document completeness verdict', async ({ page }) => {
+  await page.goto('/ops.html');
+  const calls = await page.evaluate(async () => {
+    const observed = { review: [], detail: [] };
+    globalThis.showMsReportingDetail = (jobId) => observed.review.push(jobId);
+    globalThis.openMakesafeReviewOverlay = () => {};
+    globalThis.openJobDetail = (jobId) => observed.detail.push(jobId);
+    globalThis._msReportingCache = {};
+    globalThis._msSesReviewQueue = {};
+
+    function mountCard(id, pack) {
+      const card = mapCanonicalMakesafeRow({
+        id,
+        job_number: id,
+        canonical_stage: 'report_ready',
+        substatus: 'admin_to_send_report',
+        ses_family_label: 'MakeSafe',
+        site_suburb: 'Perth',
+        created_at: new Date().toISOString(),
+        report: { state: 'submitted', cycle_number: 1 },
+        pack,
+      });
+      _msSesReviewQueue[id] = { job_id: id, docket_revision_id: 'docket-' + id };
+      const host = document.createElement('div');
+      host.innerHTML = renderMakesafeCard(card, 'report_ready');
+      document.body.appendChild(host);
+      return host.querySelector('[data-job-id="' + id + '"]');
+    }
+
+    const basePack = {
+      drafted: true,
+      state: 'drafted',
+      presentation_kind: 'ready',
+      report_doc_id: 'report-doc-open-path',
+      required_documents: { report: true, invoice: true, swms: false },
+      closeout_documents: { report: true, invoice: true, swms: false },
+    };
+    mountCard('job-open-incomplete', {
+      ...basePack,
+      closeout_documents: { report: false, invoice: true, swms: false },
+    }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    mountCard('job-open-ready', basePack).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return observed;
+  });
+
+  expect(calls.detail).toEqual(['job-open-incomplete']);
+  expect(calls.review).toEqual(['job-open-ready']);
+});

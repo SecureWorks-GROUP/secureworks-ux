@@ -224,6 +224,8 @@ const sandbox = {
 const exposed = [
   "loadMakesafeReportingCockpit",
   "renderMsReportingCard",
+  "makesafePackCompletenessVerdict",
+  "makesafePackTruthFromCanonicalRow",
   "showMsReportingDetail",
   "showMsReportingDetailEmpty",
   "sesApproveAndSend",
@@ -423,7 +425,15 @@ const boardRawRow = {
   builder: { name: "MLB Constructions", external_ref: "MLB-25248" },
   ses_family: "physical_makesafe",
   ses_family_label: "Physical make safe",
-  pack: { drafted: true, state: "drafted" },
+  report: { state: "submitted", cycle_number: 1 },
+  pack: {
+    drafted: true,
+    state: "drafted",
+    presentation_kind: "ready",
+    report_doc_id: "report-doc-1",
+    required_documents: { report: true, invoice: true, swms: true },
+    closeout_documents: { report: true, invoice: true, swms: true },
+  },
 };
 const boardPayloadStub = {
   contract_version: "makesafe-board.v1",
@@ -445,6 +455,8 @@ const mappedCard = {
   requesting_company_slug: "mlb",
   ses_family: "physical_makesafe",
   ses_family_label: "Physical make safe",
+  report: { state: "submitted", cycle_number: 1 },
+  report_pack: boardRawRow.pack,
 };
 
 const proposal = {
@@ -534,6 +546,12 @@ const queueRow = {
 
 function reviewablePack() {
   return {
+    drafted: true,
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+    required_documents: { report: true, invoice: true, swms: true },
+    closeout_documents: { report: true, invoice: true, swms: true },
+    presentation: { kind: "ready", reason: null },
     review: {
       docket_revision_id: DOCKET_REV,
       review_state: "needs_review",
@@ -777,6 +795,40 @@ check(
     detailHtml.includes("data-ses-edit=\"subject\"") &&
     detailHtml.includes("data-ses-edit=\"body\""),
 );
+
+// The direct Approvals/detail route must not bypass the board verdict. Backend
+// controls alone cannot arm a send when the exact required-document truth is
+// incomplete, and a programmatic call must stop before confirmation or writes.
+const incompleteReviewPack = {
+  ...reviewablePack(),
+  closeout_documents: { report: false, invoice: true, swms: true },
+  presentation: { kind: "ready", reason: "stale ready label" },
+};
+behaviour.fetch.get_ses_reviewable_pack = incompleteReviewPack;
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.showMsReportingDetail(JOB);
+const incompleteDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "direct detail leaves APPROVE AND SEND unarmed when a required pointer is missing",
+  incompleteDetailHtml.includes("APPROVE AND SEND") &&
+    !incompleteDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    incompleteDetailHtml.includes("Required pack pointer is missing or unresolved: report"),
+);
+await mod.sesApproveAndSend(JOB);
+check(
+  "programmatic send entry fails closed before confirm or any write",
+  calls.confirms.length === 0 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /missing or unresolved: report/i.test(t.msg)),
+);
+
+// Restore the fully proved pack for the remaining guarded-chain assertions.
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
 
 // ── 6b. Applying an edit RECORDS it on the exact docket revision and locks the
 // press until the revised pack carries it — proven by running the real apply
@@ -2467,10 +2519,28 @@ check(
     bareCardHtml.includes("(no builder)"),
 );
 check(
-  "a bare card still carries the enrichment hooks + review action",
+  "a bare queue card keeps enrichment hooks but exposes no review action",
   bareCardHtml.includes("msCardBadge_job_bare") &&
     bareCardHtml.includes("msCardMoney_job_bare") &&
-    bareCardHtml.includes("Review job pack"),
+    bareCardHtml.includes("PACK INCOMPLETE") &&
+    !bareCardHtml.includes("Review job pack"),
+);
+const emptyMapsCardHtml = mod.renderMsReportingCard({
+  job_id: "job-empty-maps",
+  pack_truth: {
+    drafted: true,
+    presentation_kind: "ready",
+    required_documents: {},
+    closeout_documents: {},
+    report_doc_id: "report-doc-empty-maps",
+    has_selected_current_cycle_trade_report: true,
+  },
+});
+check(
+  "Approvals card rejects empty document maps and suppresses Review job pack",
+  emptyMapsCardHtml.includes("PACK INCOMPLETE") &&
+    !emptyMapsCardHtml.includes("Review job pack") &&
+    !emptyMapsCardHtml.includes("showMsReportingDetail('job-empty-maps')"),
 );
 const joinedCardHtml = mod.renderMsReportingCard(
   mod._msSesQueueCardRow(JOB, queueRow, {
@@ -2494,6 +2564,12 @@ check(
 // ── 16. The board door (openMakesafeJob, extracted from ops.html) ───────────
 const OPS_SRC = join(__dirname, "..", "ops.html");
 const opsCode = readFileSync(OPS_SRC, "utf8");
+const makesafePackCompletenessVerdict = mod.makesafePackCompletenessVerdict;
+check(
+  "cockpit module exports the one pack-completeness verdict used by ops.html",
+  typeof makesafePackCompletenessVerdict === "function" &&
+    !opsCode.includes("function makesafePackCompletenessVerdict(pack) {"),
+);
 const doorStart = opsCode.indexOf("async function openMakesafeJob(jobId) {");
 const doorEnd = opsCode.indexOf("/**\n * Mount a board overlay", doorStart);
 check(
@@ -2529,7 +2605,9 @@ function doorEnv(over) {
   const env = {
     _msSesReviewQueue: {},
     _makesafeCanonicalPackById: {},
+    _makesafeCanonicalPackMetaById: {},
     _msReportingCache: {},
+    makesafePackCompletenessVerdict,
     _msSesReviewQueueStale: () => false,
     _msSesRefreshReviewQueue: async () => {
       doorCalls.queueRefresh++;
@@ -2552,7 +2630,7 @@ function doorEnv(over) {
 // The visible card-face affordance must use the same SES queue membership as
 // the door above, while canonical_stage still owns column placement and the
 // canonical pack block still owns whether a pack exists.
-const affordanceStart = opsCode.indexOf("function makesafeCardHasReviewAffordance(j, status) {");
+const affordanceStart = opsCode.indexOf("function makesafeCardHasReviewAffordance(j, status, packCompleteness) {");
 const affordanceEnd = opsCode.indexOf("// OPT1 card", affordanceStart);
 check(
   "ops.html review-affordance predicate source located for extraction",
@@ -2570,11 +2648,15 @@ function makeReviewAffordance(queue) {
     "_msSesReviewQueue",
     "makesafeCanonicalStageOf",
     "makesafeHasDraftedPack",
+    "makesafePackCompletenessVerdict",
+    "makesafePackTruthFromCanonicalRow",
     '"use strict";\n' + affordanceSrc + "\nreturn makesafeCardHasReviewAffordance;",
   )(
     queue,
     (row) => String((row && row.canonical_stage) || "").toLowerCase(),
     (row) => !!(row && row.report_pack && row.report_pack.drafted === true),
+    makesafePackCompletenessVerdict,
+    mod.makesafePackTruthFromCanonicalRow,
   );
 }
 const makesafeCardHasReviewAffordance = makeReviewAffordance({});
@@ -2585,8 +2667,8 @@ const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
   ? opsCode.slice(renderCardStart, renderCardEnd)
   : "";
 check(
-  "renderMakesafeCard wires the visible Review job pack button to the drafted-pack predicate",
-  /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status\)/.test(renderCardSrc) &&
+  "renderMakesafeCard wires the visible Review job pack button to the shared completeness verdict",
+  /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status,\s*packCompleteness\)/.test(renderCardSrc) &&
     /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
 );
 
@@ -2639,6 +2721,63 @@ check(
   freshLoader.calls.refresh === 0 && freshLoader.calls.render === 0,
 );
 
+const COMPLETE_PACK = {
+  drafted: true,
+  state: "drafted",
+  presentation_kind: "ready",
+  report_doc_id: "report-doc-1",
+  has_selected_current_cycle_trade_report: true,
+  required_documents: { report: true, invoice: true, swms: false },
+  closeout_documents: { report: true, invoice: true, swms: false },
+};
+const INCOMPLETE_PACK = {
+  ...COMPLETE_PACK,
+  closeout_documents: { report: false, invoice: true, swms: false },
+};
+
+check(
+  "empty document maps fail closed instead of laundering a ready label",
+  makesafePackCompletenessVerdict({
+    drafted: true,
+    presentation_kind: "ready",
+    required_documents: {},
+    closeout_documents: {},
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+  }).ready === false,
+);
+const nullMapsVerdict = makesafePackCompletenessVerdict({
+  drafted: true,
+  presentation_kind: "ready",
+  required_documents: null,
+  closeout_documents: null,
+  report_doc_id: "report-doc-1",
+  has_selected_current_cycle_trade_report: true,
+});
+check(
+  "explicitly null document maps are malformed, never legacy pointer evidence",
+  nullMapsVerdict.ready === false &&
+    nullMapsVerdict.evidence === "incomplete" &&
+    nullMapsVerdict.reason.includes("empty or malformed"),
+);
+check(
+  "map-less legacy readiness requires both the report pointer and selected current-cycle report",
+  makesafePackCompletenessVerdict({
+    drafted: true,
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+  }).ready === true &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      report_doc_id: "report-doc-1",
+      has_selected_current_cycle_trade_report: false,
+    }).ready === false &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      has_selected_current_cycle_trade_report: true,
+    }).ready === false,
+);
+
 for (const substatus of [
   "awaiting_portal_completion",
   "company_contact_required",
@@ -2650,7 +2789,7 @@ for (const substatus of [
     id: jobId,
     canonical_stage: "report_ready",
     substatus,
-    report_pack: { drafted: true },
+    report_pack: COMPLETE_PACK,
   };
   const queue = {
     [jobId]: { job_id: jobId, docket_revision_id: DOCKET_REV },
@@ -2660,7 +2799,11 @@ for (const substatus of [
     "Docs Ready queue hit shows Review job pack for " + substatus,
     predicate(row, "report_ready") === true,
   );
-  const door = doorEnv({ _msSesReviewQueue: queue });
+  const door = doorEnv({
+    _msSesReviewQueue: queue,
+    _makesafeCanonicalPackById: { [jobId]: true },
+    _makesafeCanonicalPackMetaById: { [jobId]: COMPLETE_PACK },
+  });
   await makeDoor(door.env)(jobId);
   check(
     "the visible " + substatus + " affordance opens the existing SES review overlay",
@@ -2673,18 +2816,22 @@ const negativeRow = {
   id: "review-negative",
   canonical_stage: "report_ready",
   substatus: "ready_to_invoice",
-  report_pack: { drafted: true },
+  report_pack: COMPLETE_PACK,
 };
 check(
-  "a drafted Docs Ready card shows Review job pack even on a queue miss",
+  "a complete drafted Docs Ready card shows Review job pack even on a queue miss",
   makesafeCardHasReviewAffordance(negativeRow, "report_ready") === true,
+);
+check(
+  "a ready-labelled card with a missing required closeout has no review affordance",
+  makesafeCardHasReviewAffordance({ ...negativeRow, report_pack: INCOMPLETE_PACK }, "report_ready") === false,
 );
 const noPackPredicate = makeReviewAffordance({
   "review-negative": { job_id: "review-negative", docket_revision_id: DOCKET_REV },
 });
 check(
   "a queued Docs Ready card with no canonical pack has no Review job pack affordance",
-  noPackPredicate({ ...negativeRow, report_pack: { drafted: false } }, "report_ready") === false,
+  noPackPredicate({ ...negativeRow, report_pack: { ...COMPLETE_PACK, drafted: false, state: "not_started" } }, "report_ready") === false,
 );
 check(
   "queue membership never overrides canonical placement",
@@ -2696,6 +2843,8 @@ const doorA = doorEnv({
   _msSesReviewQueue: {
     "job-1": { job_id: "job-1", docket_revision_id: DOCKET_REV },
   },
+  _makesafeCanonicalPackById: { "job-1": true },
+  _makesafeCanonicalPackMetaById: { "job-1": COMPLETE_PACK },
 });
 await makeDoor(doorA.env)("job-1");
 check(
@@ -2710,6 +2859,7 @@ check(
 const doorDrafted = doorEnv({
   _msSesReviewQueue: {},
   _makesafeCanonicalPackById: { "job-237": true },
+  _makesafeCanonicalPackMetaById: { "job-237": COMPLETE_PACK },
 });
 await makeDoor(doorDrafted.env)("job-237");
 check(
@@ -2751,7 +2901,11 @@ check(
 
 // (c1) A stale queue is re-read on a miss; a docket that just entered review
 // opens the SES overlay.
-const doorC1 = doorEnv({ _msSesReviewQueueStale: () => true });
+const doorC1 = doorEnv({
+  _msSesReviewQueueStale: () => true,
+  _makesafeCanonicalPackById: { "job-3": true },
+  _makesafeCanonicalPackMetaById: { "job-3": COMPLETE_PACK },
+});
 doorC1.env._msSesRefreshReviewQueue = async () => {
   doorC1.calls.queueRefresh++;
   // Mutate the SAME object the door holds (the real refresh reassigns the
@@ -2782,6 +2936,7 @@ check(
 // the SES gate ran first).
 const doorD = doorEnv({
   _msReportingCache: { "job-5": { job_id: "job-5", resume_action: "send" } },
+  _makesafeCanonicalPackMetaById: { "job-5": COMPLETE_PACK },
 });
 await makeDoor(doorD.env)("job-5");
 check(
@@ -2798,6 +2953,8 @@ const doorE = doorEnv({
   _msReportingCache: {
     "job-6": { job_id: "job-6", pack_status: { status: "failed" } },
   },
+  _makesafeCanonicalPackById: { "job-6": true },
+  _makesafeCanonicalPackMetaById: { "job-6": COMPLETE_PACK },
 });
 await makeDoor(doorE.env)("job-6");
 check(

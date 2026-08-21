@@ -403,7 +403,14 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
     canonicalRow({ id: 'job-inferred', job_number: 'SWMS-INFER', canonical_stage: 'report_ready', substatus: 'admin_to_send_report' }),
     canonicalRow({
       id: 'job-drafted', job_number: 'SWMS-PACK', canonical_stage: 'report_ready', substatus: 'admin_to_send_report',
-      pack: { state: 'drafted', sent: false, sent_at: null, drafted: true, docket_revision_id: null, pre_xero_docs_ready: false, closeout_documents: {} },
+      // Legacy shape: no required/closeout maps yet. It is reviewable only
+      // because the canonical row proves both authoritative fallback facts.
+      report: { state: 'submitted', submitted_at: '2026-07-30T01:00:00Z', cycle_number: 1 },
+      pack: {
+        state: 'drafted', sent: false, sent_at: null, drafted: true,
+        docket_revision_id: null, pre_xero_docs_ready: false,
+        report_doc_id: 'report-doc-job-drafted',
+      },
     }),
     canonicalRow({
       id: 'job-sent', job_number: 'SWMS-SENT', canonical_stage: 'report_ready', substatus: 'complete',
@@ -418,6 +425,11 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
+  // A map-less legacy pack does not inherit readiness from `drafted`. It proves
+  // the fallback with a real report_doc_id plus the selected current-cycle
+  // submitted report, so the existing card remains reviewable without a
+  // permissive assumed-ready branch.
+  expect(result.cards.drafted).toContain('Ready to send');
   expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 
@@ -509,6 +521,10 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
   const result = await page.evaluate(() => {
     const pack = {
       drafted: true, state: 'drafted', sent: false,
+      presentation_kind: 'ready',
+      report_doc_id: 'report-doc-job-241',
+      required_documents: { report: true, invoice: true, swms: true },
+      closeout_documents: { report: true, invoice: true, swms: true },
       artifacts: [
         { role: 'work_order', object_key: 'wo/work_order_MLB-26183PO-54000.pdf', media_type: 'application/pdf' },
         { role: 'supporting_report_pdf', object_key: 'r/Make Safe Report.pdf', media_type: 'application/pdf' },
@@ -525,7 +541,8 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
       requesting_company_slug: 'mlb',
       has_wo: false, missing_docs: ['wo'], has_report_doc: false, has_swms_doc: false,
       invoice_status: 'not_ready',
-      report_pack: { drafted: true, state: 'drafted', sent: false },
+      report: { state: 'submitted', cycle_number: 1 },
+      report_pack: pack,
     };
     const html = renderMakesafeCard(stale, 'report_ready');
     return {

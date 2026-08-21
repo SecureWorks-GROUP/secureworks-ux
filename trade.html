@@ -10652,6 +10652,8 @@
           if (u && urlIsBuilderPortalLink(u)) return u;
         }
       }
+      // Ownership is typed or labelled. A share-shaped source_email is still
+      // an email provenance link, never the builder portal CTA.
       return '';
     }
     // Builder portal link: the backend ARRAY shape wins; the legacy OBJECT

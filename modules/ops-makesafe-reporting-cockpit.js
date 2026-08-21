@@ -9,9 +9,9 @@
 // LIST: the SES Docs Ready queue itself (list_ses_docs_ready_reviews — every
 // job with a current needs_review docket). The queue row carries only
 // job_id / docket_revision_id / stage / hashes / timestamps, so each card's
-// identity (job number / builder / suburb / ref / family) is joined from the
-// canonical makesafe_board feed already cached by the board load, and the
-// status chip + invoice glance are enriched per card from
+// identity (job number / builder / suburb / ref / family) and exact pack truth
+// are joined from the canonical makesafe_board feed already cached by the
+// board load, and the status chip + invoice glance are enriched per card from
 // query_ses_review_cockpit. The legacy makesafe_report_drafts read is DROPPED
 // from this surface: it returns zero drafts in production and its combined
 // approve/send path is retired server-side (410), so a card rendered from it
@@ -55,6 +55,7 @@ var _msReportingCache = {};
 var _msSesReviewQueue = {};
 var _msSesCockpitCache = {};
 var _msSesPackCache = {};
+var _msSesPackCompletenessById = {};
 // job_id -> the last docket_revision_id this session actually saw in the review
 // queue. The queue only lists needs_review dockets, so the moment a tick is
 // recorded (which the one press does) the job drops out of it and the byte-exact
@@ -82,6 +83,120 @@ function _msJsAttr(s) {
   // Safe for: onclick="fn('<HERE>')" — JS-escape first, then HTML-attr-escape so the
   // double-quoted attribute and the single-quoted JS string are both intact.
   return escapeAttr(_msJsStr(s));
+}
+
+function _msSesPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function _msSesHasOwn(value, key) {
+  return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function _msSesReportIsSelected(report) {
+  if (!report || typeof report !== 'object') return false;
+  var state = String(report.state || report.status || '').trim().toLowerCase();
+  return state === 'submitted' || state === 'approved';
+}
+
+// Project the exact canonical inputs the readiness door is allowed to trust.
+// The board's `report` field is already selected for the current attendance
+// cycle server-side; only a submitted/approved selection counts here. A coarse
+// has_report_doc flag is deliberately ignored because attachment is not bind.
+function makesafePackTruthFromCanonicalRow(row) {
+  row = (row && typeof row === 'object') ? row : {};
+  var pack = _msSesPlainObject(row.pack)
+    ? row.pack
+    : (_msSesPlainObject(row.report_pack) ? row.report_pack : {});
+  var selected = pack.has_selected_current_cycle_trade_report;
+  if (selected !== true && selected !== false) {
+    selected = _msSesReportIsSelected(row.report);
+  }
+  var truth = {
+    drafted: pack.drafted === true,
+    presentation_kind: pack.presentation_kind || null,
+    presentation_reason: pack.presentation_reason || null,
+    report_doc_id: pack.report_doc_id || row.report_doc_id || null,
+    report_doc_resolved: pack.report_doc_resolved,
+    has_selected_current_cycle_trade_report: selected === true
+  };
+  // Preserve the distinction between a genuinely legacy payload (key absent)
+  // and a current payload that supplied broken null/malformed document truth.
+  if (_msSesHasOwn(pack, 'required_documents')) {
+    truth.required_documents = pack.required_documents;
+  }
+  if (_msSesHasOwn(pack, 'closeout_documents')) {
+    truth.closeout_documents = pack.closeout_documents;
+  }
+  return truth;
+}
+
+// ONE fail-closed verdict owns the board card, whole-card open path, Approvals
+// card, detail action rail and the programmatic send entry point.
+//
+// New payloads must provide non-empty required/closeout maps and every required
+// key must have exact closeout truth. A map-less legacy payload may remain
+// actionable only when it proves the captain's authoritative fallback: a real
+// report_doc_id plus a selected current-cycle trade report. Empty/malformed
+// maps are never treated as legacy and never inherit an assumed-ready state.
+function makesafePackCompletenessVerdict(pack) {
+  pack = (pack && typeof pack === 'object') ? pack : {};
+  var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
+  var requiredSupplied = _msSesHasOwn(pack, 'required_documents');
+  var closeoutSupplied = _msSesHasOwn(pack, 'closeout_documents');
+  var required = _msSesPlainObject(pack.required_documents) ? pack.required_documents : null;
+  var closeout = _msSesPlainObject(pack.closeout_documents) ? pack.closeout_documents : null;
+  var requiredKeys = required ? Object.keys(required) : [];
+  var closeoutKeys = closeout ? Object.keys(closeout) : [];
+  var mapsAbsent = !requiredSupplied && !closeoutSupplied;
+  var mapsComplete = !!required && !!closeout && requiredKeys.length > 0 && closeoutKeys.length > 0;
+  var missingRequired = [];
+  if (mapsComplete) {
+    requiredKeys.forEach(function(key) {
+      if (required[key] === true && closeout[key] !== true) missingRequired.push(key);
+    });
+  }
+
+  var reportDocId = String(pack.report_doc_id || '').trim();
+  var selectedTradeReport = pack.has_selected_current_cycle_trade_report === true;
+  var pointerResolved = pack.report_doc_resolved !== false;
+  if (mapsComplete && required.report === true && (
+    !reportDocId || !pointerResolved || !selectedTradeReport
+  ) && missingRequired.indexOf('report') < 0) {
+    missingRequired.push('report');
+  }
+  var legacyPointerReady = mapsAbsent
+    && pack.drafted === true
+    && !!reportDocId
+    && pointerResolved
+    && selectedTradeReport
+    && (!presentationKind || presentationKind === 'ready');
+  var mapReady = mapsComplete
+    && presentationKind === 'ready'
+    && missingRequired.length === 0;
+  var ready = mapReady || legacyPointerReady;
+  var reason = '';
+  if (!ready) {
+    if ((requiredSupplied || closeoutSupplied) && !mapsComplete) {
+      reason = 'Required and closeout document truth is empty or malformed';
+    } else if (missingRequired.length) {
+      reason = 'Required pack pointer is missing or unresolved: ' + missingRequired.join(', ');
+    } else if (mapsAbsent && (!reportDocId || !pointerResolved)) {
+      reason = 'A bound report_doc_id is required before this pack can be reviewed or sent';
+    } else if (mapsAbsent && !selectedTradeReport) {
+      reason = 'A selected current-cycle trade report is required before this pack can be reviewed or sent';
+    } else {
+      reason = String(pack.presentation_reason || '').trim()
+        || 'The pack is not presented as ready';
+    }
+  }
+  return {
+    ready: ready,
+    presentation_kind: presentationKind,
+    missing_required: missingRequired,
+    reason: reason,
+    evidence: mapReady ? 'document_maps' : (legacyPointerReady ? 'legacy_report_pointer' : 'incomplete')
+  };
 }
 
 function _msReportingCanonicalBuilderName(d) {
@@ -228,7 +343,8 @@ function _msSesIdentityFromCanonicalRow(row) {
     is_reattend: !!(row.presentation && row.presentation.is_reattend),
     reattend_count: (row.presentation && row.presentation.reattend_count != null)
       ? row.presentation.reattend_count : null,
-    last_reattend_at: (row.presentation && row.presentation.last_reattend_at) || null
+    last_reattend_at: (row.presentation && row.presentation.last_reattend_at) || null,
+    pack_truth: makesafePackTruthFromCanonicalRow(row)
   };
 }
 
@@ -253,7 +369,8 @@ function _msSesIdentityFromBoardCard(card) {
     cycle_number: (card.cycle_number != null ? card.cycle_number : null),
     is_reattend: !!card.is_reattend,
     reattend_count: (card.reattend_count != null ? card.reattend_count : null),
-    last_reattend_at: card.last_reattend_at || null
+    last_reattend_at: card.last_reattend_at || null,
+    pack_truth: makesafePackTruthFromCanonicalRow(card)
   };
 }
 
@@ -316,7 +433,7 @@ function _msSesQueueCardRow(jobId, entry, identity) {
       'client_name', 'requesting_company_name', 'requesting_company_slug',
       'makesafe_job_family', 'makesafe_job_family_label',
       'attendance_cycle_id', 'cycle_number', 'is_reattend', 'reattend_count',
-      'last_reattend_at'].forEach(function(k) {
+      'last_reattend_at', 'pack_truth'].forEach(function(k) {
       if (identity[k] != null) row[k] = identity[k];
     });
   }
@@ -365,7 +482,10 @@ function _msSesEnrichCards(rows) {
 function _msSesUpdateCardBadge(jobId, status) {
   var el = document.getElementById('msCardBadge_' + _msDocTabKey(jobId));
   if (!el) return;
-  var chip = _msSesStatusChip(status);
+  var verdict = _msSesPackCompletenessById[jobId];
+  var chip = status !== 'NO_DOCKET' && verdict && !verdict.ready
+    ? { label: 'PACK INCOMPLETE', bg: '#991B1B', fg: '#fff' }
+    : _msSesStatusChip(status);
   el.textContent = chip.label;
   el.style.background = chip.bg;
   el.style.color = chip.fg;
@@ -430,11 +550,14 @@ function renderMsReportingCard(d) {
 
   var safeId = _msJsAttr(d.job_id);
   var cardKey = _msDocTabKey(d.job_id);
-  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '" onclick="showMsReportingDetail(\'' + safeId + '\')" style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:pointer;box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid #94A3B8;">';
+  var completeness = makesafePackCompletenessVerdict(d.pack_truth);
+  _msSesPackCompletenessById[d.job_id] = completeness;
+  var openAttr = completeness.ready ? ' onclick="showMsReportingDetail(\'' + safeId + '\')"' : '';
+  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '"' + openAttr + ' style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:' + (completeness.ready ? 'pointer' : 'default') + ';box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + (completeness.ready ? '#94A3B8' : '#991B1B') + ';">';
 
   // Top row: the SES status chip (enriched async from query_ses_review_cockpit).
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
-  html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:#6B7280;color:#fff;">CHECKING SES&#8230;</span>';
+  html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + (completeness.ready ? '#6B7280' : '#991B1B') + ';color:#fff;">' + (completeness.ready ? 'CHECKING SES&#8230;' : 'PACK INCOMPLETE') + '</span>';
   html += '</div>';
 
   // Builder name
@@ -451,13 +574,88 @@ function renderMsReportingCard(d) {
   // from sections.money.local_invoice_proposal.
   html += '<div id="msCardMoney_' + escapeAttr(cardKey) + '" style="margin-top:8px;font-size:18px;font-weight:800;color:var(--sw-dark);"></div>';
 
-  // Review button. Same review mechanism as the board "Review job pack" action.
-  html += '<div style="margin-top:10px;">';
-  html += '<button onclick="event.stopPropagation();showMsReportingDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review job pack</button>';
-  html += '</div>';
+  // The same completeness verdict as the board door owns this direct route.
+  if (completeness.ready) {
+    html += '<div style="margin-top:10px;">';
+    html += '<button onclick="event.stopPropagation();showMsReportingDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review job pack</button>';
+    html += '</div>';
+  } else {
+    html += '<div style="margin-top:10px;font-size:11px;font-weight:600;color:#991B1B;">' + escapeHtml(completeness.reason) + '</div>';
+  }
 
   html += '</div>';
   return html;
+}
+
+function _msSesPackCompletenessInput(jobId, ctx, base) {
+  base = base || _msReportingCache[jobId] || {};
+  var canonical = base.pack_truth || (
+    typeof _makesafeCanonicalPackMetaById !== 'undefined'
+      ? _makesafeCanonicalPackMetaById[jobId]
+      : null
+  ) || {};
+  var reviewPack = (ctx && ctx.pack) || {};
+  var presentation = _msSesPlainObject(reviewPack.presentation)
+    ? reviewPack.presentation
+    : {};
+  var docket = _msSesPlainObject(reviewPack.docket) ? reviewPack.docket : {};
+
+  function firstDefined() {
+    for (var i = 0; i < arguments.length; i++) {
+      if (arguments[i] !== undefined && arguments[i] !== null) return arguments[i];
+    }
+    return null;
+  }
+
+  function firstOwned(key) {
+    var sources = [reviewPack, docket, canonical];
+    for (var i = 0; i < sources.length; i++) {
+      if (_msSesHasOwn(sources[i], key)) {
+        return { supplied: true, value: sources[i][key] };
+      }
+    }
+    return { supplied: false, value: undefined };
+  }
+
+  var requiredTruth = firstOwned('required_documents');
+  var closeoutTruth = firstOwned('closeout_documents');
+  var input = {
+    drafted: firstDefined(reviewPack.drafted, docket.drafted, canonical.drafted) === true,
+    presentation_kind: firstDefined(
+      presentation.kind,
+      reviewPack.presentation_kind,
+      canonical.presentation_kind
+    ),
+    presentation_reason: firstDefined(
+      presentation.reason,
+      reviewPack.presentation_reason,
+      canonical.presentation_reason
+    ),
+    report_doc_id: firstDefined(
+      reviewPack.report_doc_id,
+      docket.report_doc_id,
+      canonical.report_doc_id
+    ),
+    report_doc_resolved: firstDefined(
+      reviewPack.report_doc_resolved,
+      docket.report_doc_resolved,
+      canonical.report_doc_resolved
+    ),
+    has_selected_current_cycle_trade_report: firstDefined(
+      reviewPack.has_selected_current_cycle_trade_report,
+      docket.has_selected_current_cycle_trade_report,
+      canonical.has_selected_current_cycle_trade_report
+    ) === true
+  };
+  if (requiredTruth.supplied) input.required_documents = requiredTruth.value;
+  if (closeoutTruth.supplied) input.closeout_documents = closeoutTruth.value;
+  return input;
+}
+
+function _msSesPackCompleteness(jobId, ctx, base) {
+  return makesafePackCompletenessVerdict(
+    _msSesPackCompletenessInput(jobId, ctx, base)
+  );
 }
 
 // ────────────────────────────────────────────────────────────
@@ -509,6 +707,11 @@ async function showMsReportingDetail(jobId, targetPanelId) {
     panel.innerHTML = _msSesRenderUnavailable(jobId, base, e, targetPanelId);
     return;
   }
+  // A direct Approvals/detail entry must pass the exact same verdict as the
+  // board card and whole-card door. The detail may still show the evidence for
+  // diagnosis, but its send stamp stays unarmed until this verdict is ready.
+  ctx.packCompleteness = _msSesPackCompleteness(jobId, ctx, base);
+  _msSesPackCompletenessById[jobId] = ctx.packCompleteness;
   ctx.panelId = targetPanelId || 'msReportingDetailPanel';
   _msSesPackCache[jobId] = ctx;
   panel.innerHTML = _msSesRenderDetail(jobId, ctx, targetPanelId);
@@ -3422,11 +3625,12 @@ function _msReportingFormatTimestamp(iso) {
  * sign-off is still bound to the displayed pack hash, and a pack that changed
  * still voids the press.
  *
- * The stamp is armed only by the backend control flags — approve_invoice when
- * the invoice still needs authorising, send_it when it does not. A disabled
- * stamp carries no id and no onclick (nothing for a click or a script to
- * reach), with the backend's own disabled_reason underneath. A HOLD points back
- * at the amber block above. The retired 410 combined path is never called.
+ * The stamp needs both the shared exact-document completeness verdict and the
+ * backend control flags — approve_invoice when the invoice still needs
+ * authorising, send_it when it does not. A disabled stamp carries no id and no
+ * onclick (nothing for a click or a script to reach), with the owning refusal
+ * underneath. A HOLD points back at the amber block above. The retired 410
+ * combined path is never called.
  */
 function _msSesActionBlock(jobId, ctx, dismissAction) {
   var cockpit = ctx.cockpit || {};
@@ -3449,7 +3653,12 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // the screen shows the edited preview, so a send of the unedited pack would
   // send something other than what is shown.
   var previewLock = _msSesPreviewOf(jobId, ctx);
-  var armed = !previewLock && !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
+  var completeness = ctx.packCompleteness || _msSesPackCompleteness(
+    jobId,
+    ctx,
+    _msReportingCache[jobId]
+  );
+  var armed = completeness.ready && !previewLock && !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
 
@@ -3483,6 +3692,8 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     fullNote = approveInvoice.enabled
       ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
       : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+  } else if (!completeness.ready) {
+    note = escapeHtml(completeness.reason || 'Required pack documents are incomplete.');
   } else if (hardHold) {
     note = holdReason;
   } else if (previewLock) {
@@ -3659,6 +3870,12 @@ async function _msSesRefreshPackContext(jobId) {
   var next = await _msSesLoadPackContext(jobId);
   await _msSesHydrateBoundInvoicePdf(next);
   await _msSesHydratePortalCaptureFacts(next);
+  next.packCompleteness = _msSesPackCompleteness(
+    jobId,
+    next,
+    _msReportingCache[jobId]
+  );
+  _msSesPackCompletenessById[jobId] = next.packCompleteness;
   next.panelId = panelId;
   _msSesPackCache[jobId] = next;
   return next;
@@ -3705,6 +3922,15 @@ function _msSesEchoedReviewCoordinates(ctx) {
 async function sesApproveAndSend(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  var completeness = ctx.packCompleteness || _msSesPackCompleteness(
+    jobId,
+    ctx,
+    _msReportingCache[jobId]
+  );
+  if (!completeness.ready) {
+    showToast(completeness.reason || 'This pack is incomplete and cannot be approved or sent.', 'error');
+    return;
+  }
   // Fail closed: only the backend control flags can arm a press, whatever
   // invoked this function. A disabled stamp has no id and no onclick, and even
   // a programmatic call stops here.
@@ -4054,6 +4280,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     loadMakesafeReportingCockpit: typeof loadMakesafeReportingCockpit !== 'undefined' ? loadMakesafeReportingCockpit : undefined,
     renderMsReportingCard: typeof renderMsReportingCard !== 'undefined' ? renderMsReportingCard : undefined,
+    makesafePackCompletenessVerdict: typeof makesafePackCompletenessVerdict !== 'undefined' ? makesafePackCompletenessVerdict : undefined,
+    makesafePackTruthFromCanonicalRow: typeof makesafePackTruthFromCanonicalRow !== 'undefined' ? makesafePackTruthFromCanonicalRow : undefined,
     _msSesQueueCardRow: typeof _msSesQueueCardRow !== 'undefined' ? _msSesQueueCardRow : undefined,
     _msSesReviewQueueStale: typeof _msSesReviewQueueStale !== 'undefined' ? _msSesReviewQueueStale : undefined
   };

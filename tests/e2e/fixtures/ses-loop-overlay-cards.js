@@ -2,8 +2,8 @@
  * Three live-shaped sample cards for the SES loop overlay ship.
  * Identity only: job numbers + suburb. No client name / street / phone.
  *
- *   SWMS-261237  Docs Ready, drafted pack, NOT in the SES queue
- *   SWMS-261241  Docs Ready, drafted pack, pack has WO + report + SWMS + invoice
+ *   SWMS-261237  Docs Ready, complete drafted pack, NOT in the SES queue
+ *   SWMS-261241  Docs Ready, complete drafted pack with WO + report + SWMS + invoice
  *   SWMS-261243  assessment, no pack — do not invent one
  */
 
@@ -27,16 +27,32 @@ function baseRow(over) {
     has_wo: false,
     missing_docs: ['wo'],
     has_report_doc: false,
+    report: { state: 'submitted', cycle_number: 1 },
     has_swms_doc: false,
     invoice_status: 'not_ready',
   }, over || {});
 }
+
+const pack237 = {
+  drafted: true,
+  state: 'drafted',
+  sent: false,
+  docket_revision_id: DOCKET_237,
+  presentation_kind: 'ready',
+  report_doc_id: 'report-doc-261237',
+  required_documents: { report: true, invoice: true, swms: true },
+  closeout_documents: { report: true, invoice: true, swms: true },
+};
 
 const pack241 = {
   drafted: true,
   state: 'drafted',
   sent: false,
   docket_revision_id: DOCKET_241,
+  presentation_kind: 'ready',
+  report_doc_id: 'report-doc-261241',
+  required_documents: { report: true, invoice: true, swms: true },
+  closeout_documents: { report: true, invoice: true, swms: true },
   artifacts: [
     { role: 'work_order', object_key: 'wo/work_order_MLB-26183.pdf', media_type: 'application/pdf' },
     { role: 'supporting_report_pdf', object_key: 'r/Make Safe Report.pdf', media_type: 'application/pdf' },
@@ -50,12 +66,12 @@ const cards = [
   {
     id: JOB_237,
     job_number: 'SWMS-261237',
-    pack: { drafted: true, state: 'drafted', sent: false, docket_revision_id: DOCKET_237 },
+    pack: pack237,
     row: baseRow({
       id: JOB_237,
       job_number: 'SWMS-261237',
       external_ref: 'MLB-261237',
-      report_pack: { drafted: true, state: 'drafted', sent: false, docket_revision_id: DOCKET_237 },
+      report_pack: pack237,
     }),
   },
   {
@@ -69,7 +85,7 @@ const cards = [
       id: JOB_241,
       job_number: 'SWMS-261241',
       external_ref: 'MLB-261241',
-      report_pack: { drafted: true, state: 'drafted', sent: false, docket_revision_id: DOCKET_241 },
+      report_pack: pack241,
     }),
   },
   {
@@ -98,6 +114,14 @@ const overlay = {
     site_suburb: 'Perth',
     makesafe_job_family: 'physical_makesafe',
     makesafe_job_family_label: 'Make safe',
+    pack_truth: {
+      drafted: true,
+      presentation_kind: 'ready',
+      report_doc_id: 'report-doc-261241',
+      has_selected_current_cycle_trade_report: true,
+      required_documents: pack241.required_documents,
+      closeout_documents: pack241.closeout_documents,
+    },
   },
   ctx: {
     jobId: JOB_241,
@@ -139,6 +163,12 @@ const overlay = {
       },
     },
     pack: {
+      drafted: true,
+      presentation: { kind: 'ready', reason: null },
+      report_doc_id: 'report-doc-261241',
+      has_selected_current_cycle_trade_report: true,
+      required_documents: pack241.required_documents,
+      closeout_documents: pack241.closeout_documents,
       docket: {
         id: DOCKET_241,
         local_invoice_proposal: {

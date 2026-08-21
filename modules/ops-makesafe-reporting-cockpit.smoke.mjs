@@ -278,6 +278,7 @@ const exposed = [
   "_msSesPickRelease",
   "_msSesResumableRelease",
   "_msSesReleaseAlreadySendable",
+  "_msSesReleaseApproveAlreadyDone",
   // Legacy symbols that MUST be gone:
   // The two-press pair is retired: ONE press runs the whole guarded chain, so
   // no second entry point may survive for a click or a script to reach.
@@ -1426,6 +1427,7 @@ check(
   northamCockpit.controls.send_it.label = "SEND IT";
   northamCockpit.controls.send_it.disabled_reason =
     "Release already dispatching.";
+  northamCockpit.controls.send_it.release_revision_id = "rel-northam";
   const northamPack = reviewablePack();
   northamPack.review.review_state = "signed_off";
   behaviour.fetch["query_ses_review_cockpit"] = northamCockpit;
@@ -1501,7 +1503,158 @@ check(
       !calls.opsPost.some((c) => c.action === "sendSesRelease") &&
       !calls.opsPostJwt.some((c) => c.action === "sendSesRelease"),
   );
+  check(
+    "a bare send_it.release_revision_id does not hide inspect.release dispatching",
+    typeof mod._msSesPickRelease === "function" &&
+      mod._msSesPickRelease({
+        cockpit: {
+          controls: { send_it: { enabled: false, release_revision_id: "rel-northam" } },
+        },
+        sesInspect: {
+          release: { release_revision_id: "rel-northam", state: "dispatching" },
+        },
+      }).release_revision_id === "rel-northam" &&
+      mod._msSesPickRelease({
+        cockpit: {
+          controls: { send_it: { enabled: false, release_revision_id: "rel-northam" } },
+        },
+        sesInspect: {
+          release: { release_revision_id: "rel-northam", state: "dispatching" },
+        },
+      }).state === "dispatching",
+  );
+  check(
+    "pack/docket/sections .id, revision_id and kind-as-progress are not a release",
+    mod._msSesPickRelease({
+      cockpit: {
+        sections: { release: { id: "docket-id", revision_id: "rev-id", kind: "dispatching" } },
+      },
+      pack: { id: "pack-id", kind: "dispatching", docket: { id: "docket-id", kind: "releasing" } },
+    }) === null &&
+      mod._msSesPickRelease({
+        cockpit: {
+          sections: { release: { id: "docket-id", kind: "dispatching" } },
+        },
+        sesInspect: {
+          release: { release_revision_id: "rel-real", state: "dispatching" },
+        },
+      }).release_revision_id === "rel-real",
+  );
   delete behaviour.fetch.inspect_ses_pack;
+  seedSendReady();
+}
+
+// ── 8c. Prepare-failure recovery re-hydrates inspect (or reads the refusal
+//        revision id) before giving up, then resumes execute. ────────────────
+{
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const prepExists = new Error("A release revision already exists for this docket.");
+  prepExists.status = 409;
+  prepExists.refusal = { code: "release_already_prepared" };
+  behaviour.post["prepare_ses_release_revision"] = prepExists;
+  behaviour.fetch["inspect_ses_pack"] = {
+    release: { release_revision_id: "rel-existing", state: "dispatching" },
+  };
+  behaviour.post["execute_ses_release_revision"] = {
+    state: "released",
+    route_proofs: [{ route_kind: "report" }],
+  };
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  calls.opsFetch.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "prepare failure re-fetches inspect_ses_pack before giving up",
+    calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+      calls.opsFetch.some((c) => c.action === "inspect_ses_pack"),
+  );
+  check(
+    "prepare failure then executes the inspect-discovered in-flight release",
+    !calls.opsPostJwt.some((c) => c.action === "approve_ses_release_revision") &&
+      calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "rel-existing",
+      ),
+  );
+  seedSendReady();
+  behaviour.fetch["inspect_ses_pack"] = {};
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const prepNamed = new Error("Release already exists.");
+  prepNamed.status = 409;
+  prepNamed.refusal = {
+    code: "release_already_exists",
+    release_revision_id: "aa111111-1111-4111-8111-111111111111",
+  };
+  behaviour.post["prepare_ses_release_revision"] = prepNamed;
+  behaviour.post["execute_ses_release_revision"] = {
+    state: "released",
+    route_proofs: [{ route_kind: "report" }],
+  };
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "prepare failure can parse a release_revision_id off the refusal when inspect is empty",
+    calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+      calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "aa111111-1111-4111-8111-111111111111",
+      ),
+  );
+  delete behaviour.fetch.inspect_ses_pack;
+  seedSendReady();
+}
+
+// ── 8d. Approve-already-done continues ONLY on a release-specific refusal
+//        code, never on "already signed" / "already recorded" phrasing. ──────
+{
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  behaviour.post["prepare_ses_release_revision"] = { release: { id: "rel-1" } };
+  const signedPhrase = new Error("Your Docs Ready approval is already recorded. The pack is already signed.");
+  signedPhrase.status = 409;
+  behaviour.postJwt["approve_ses_release_revision"] = signedPhrase;
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "'already signed' / 'already recorded' phrasing does NOT continue to execute",
+    calls.opsPostJwt.some((c) => c.action === "approve_ses_release_revision") &&
+      !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
+  );
+  check(
+    "phrase-only already-recorded is not a release-already-approved refusal",
+    typeof mod._msSesReleaseApproveAlreadyDone === "function" &&
+      !mod._msSesReleaseApproveAlreadyDone(signedPhrase) &&
+      !mod._msSesReleaseApproveAlreadyDone(new Error("already signed")) &&
+      !mod._msSesReleaseApproveAlreadyDone("already recorded"),
+  );
+  const releaseCode = new Error("Release already approved.");
+  releaseCode.status = 409;
+  releaseCode.refusal = { code: "release_already_approved" };
+  behaviour.postJwt["approve_ses_release_revision"] = releaseCode;
+  behaviour.post["execute_ses_release_revision"] = {
+    state: "released",
+    route_proofs: [{ route_kind: "report" }],
+  };
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "a release_already_approved refusal continues to execute_ses_release_revision",
+    !!mod._msSesReleaseApproveAlreadyDone(releaseCode) &&
+      calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "rel-1",
+      ),
+  );
   seedSendReady();
 }
 

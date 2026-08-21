@@ -3468,12 +3468,14 @@ function _msSesRelId(obj, allowId) {
   if (obj == null) return '';
   if (typeof obj === 'string' || typeof obj === 'number') return String(obj).trim();
   if (typeof obj !== 'object') return '';
-  var id = obj.release_revision_id || obj.releaseRevisionId || obj.revision_id || '';
+  var id = obj.release_revision_id || obj.releaseRevisionId || '';
   if (!id && allowId) id = obj.id;
   return String(id || '').trim();
 }
 
-function _msSesAsRelease(obj, allowId) {
+function _msSesAsRelease(obj, opts) {
+  if (opts === true) opts = { allowId: true };
+  opts = opts || {};
   if (!obj) return null;
   if (typeof obj === 'string' || typeof obj === 'number') {
     var sid = String(obj).trim();
@@ -3481,18 +3483,19 @@ function _msSesAsRelease(obj, allowId) {
     return { release_revision_id: sid };
   }
   if (typeof obj !== 'object') return null;
-  var id = _msSesRelId(obj, allowId);
+  var id = _msSesRelId(obj, !!opts.allowId);
   if (!id || id === 'undefined' || id === 'null') return null;
-  var copy = {};
-  var k;
-  for (k in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, k)) copy[k] = obj[k];
+  var copy = { release_revision_id: id };
+  if (obj.state) copy.state = obj.state;
+  if (obj.release_state) copy.release_state = obj.release_state;
+  if (obj.progress) copy.progress = obj.progress;
+  if (obj.release_progress) copy.release_progress = obj.release_progress;
+  if (obj.progress_summary && typeof obj.progress_summary === 'object') {
+    copy.progress_summary = obj.progress_summary;
   }
-  copy.release_revision_id = id;
-  if (obj.state && !copy.state) copy.state = obj.state;
-  if (obj.release_state && !copy.release_state) copy.release_state = obj.release_state;
-  if (obj.progress && !copy.progress) copy.progress = obj.progress;
-  if (obj.kind && !copy.kind) copy.kind = obj.kind;
+  // kind-as-progress is only honest on inspect release/progress objects.
+  // Pack, docket and sections objects use kind for document/route roles.
+  if (opts.kindAsProgress && obj.kind) copy.kind = obj.kind;
   return copy;
 }
 
@@ -3506,26 +3509,33 @@ function _msSesPickRelease(ctx) {
   var docket = inner.docket && typeof inner.docket === 'object' ? inner.docket : {};
   var inspect = ctx.sesInspect && typeof ctx.sesInspect === 'object' ? ctx.sesInspect : {};
   var inspectPack = inspect.pack && typeof inspect.pack === 'object' ? inspect.pack : {};
+  // Walk until an IN-FLIGHT release, not the first id-bearing object. A bare
+  // send_it.release_revision_id is only an id — returning it would hide
+  // inspect.release { state: dispatching } and leave Northam SEND IT disabled.
+  // Pack / docket / sections never donate .id, revision_id, or kind-as-progress.
   var candidates = [
-    { obj: sendIt.release, allowId: true },
-    { obj: sendIt.release_revision, allowId: true },
-    { obj: sendIt.release_revision_id, allowId: false },
-    { obj: sections.release, allowId: true },
-    { obj: sections.release_revision, allowId: true },
-    { obj: ctx.sesRelease, allowId: true },
-    { obj: inspect.release, allowId: true },
-    { obj: inspect.release_revision, allowId: true },
-    { obj: inspect.release_send_progress, allowId: false },
-    { obj: inspectPack.release, allowId: true },
-    { obj: inner.release, allowId: true },
-    { obj: inner.release_revision, allowId: true },
-    { obj: pack.release, allowId: true },
-    { obj: docket.release, allowId: true }
+    { obj: sendIt.release, allowId: false, kindAsProgress: false },
+    { obj: sendIt.release_revision, allowId: false, kindAsProgress: false },
+    { obj: sendIt.release_revision_id, allowId: false, kindAsProgress: false },
+    { obj: sections.release, allowId: false, kindAsProgress: false },
+    { obj: sections.release_revision, allowId: false, kindAsProgress: false },
+    { obj: ctx.sesRelease, allowId: false, kindAsProgress: false },
+    { obj: inspect.release, allowId: true, kindAsProgress: true },
+    { obj: inspect.release_revision, allowId: true, kindAsProgress: true },
+    { obj: inspect.release_send_progress, allowId: false, kindAsProgress: true },
+    { obj: inspectPack.release, allowId: true, kindAsProgress: true },
+    { obj: inner.release, allowId: false, kindAsProgress: false },
+    { obj: inner.release_revision, allowId: false, kindAsProgress: false },
+    { obj: pack.release, allowId: false, kindAsProgress: false },
+    { obj: docket.release, allowId: false, kindAsProgress: false }
   ];
   var i, rel;
   for (i = 0; i < candidates.length; i++) {
-    rel = _msSesAsRelease(candidates[i].obj, candidates[i].allowId);
-    if (rel) return rel;
+    rel = _msSesAsRelease(candidates[i].obj, {
+      allowId: candidates[i].allowId,
+      kindAsProgress: candidates[i].kindAsProgress
+    });
+    if (rel && _msSesReleaseAlreadySendable(rel)) return rel;
   }
   return null;
 }
@@ -3571,36 +3581,54 @@ function _msSesResumableRelease(ctx) {
 
 function _msSesReleaseApproveAlreadyDone(errOrRel) {
   if (!errOrRel) return false;
-  if (typeof errOrRel === 'object' && !errOrRel.message && (_msSesReleaseState(errOrRel) || _msSesReleaseProgress(errOrRel))) {
-    var st = _msSesReleaseState(errOrRel);
-    var pr = _msSesReleaseProgress(errOrRel);
-    return (
-      st === 'approved' ||
-      st === 'dispatching' ||
-      st === 'releasing' ||
-      st === 'execute_ready' ||
-      st === 'partially_released' ||
-      pr === 'dispatching' ||
-      pr === 'partially_released' ||
-      pr === 'releasing'
-    );
+  if (typeof errOrRel === 'object' && _msSesReleaseAlreadySendable(errOrRel) &&
+      !errOrRel.refusal && errOrRel.status == null && !(errOrRel instanceof Error)) {
+    return true;
   }
-  var text = '';
-  if (typeof errOrRel === 'string') text = errOrRel;
-  else {
-    var refusal = errOrRel.refusal || {};
-    text = [
-      errOrRel.message,
-      errOrRel.error,
-      errOrRel.code,
-      errOrRel.refusal_code,
-      refusal.code,
-      refusal.fact,
-      errOrRel.reason
-    ].filter(Boolean).join(' ');
+  var refusal = (errOrRel && typeof errOrRel === 'object' && errOrRel.refusal) || {};
+  var codes = [
+    errOrRel && errOrRel.code,
+    errOrRel && errOrRel.refusal_code,
+    refusal.code,
+    refusal.refusal_code
+  ].filter(Boolean).map(function(c) {
+    return String(c).toLowerCase().replace(/[-\s]/g, '_');
+  });
+  return codes.some(function(n) {
+    if (!n || n === 'stale_review') return false;
+    if (n === 'release_already_approved' ||
+        n === 'release_already_decided' ||
+        n === 'release_approval_already_recorded' ||
+        n === 'release_already_approved_revision') return true;
+    return n.indexOf('release') >= 0 &&
+      n.indexOf('already') >= 0 &&
+      /(approv|decid|record)/.test(n);
+  });
+}
+
+function _msSesReleaseIdFromRefusal(err) {
+  if (!err) return '';
+  if (typeof err === 'string') {
+    var fromText = err.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    return fromText ? fromText[0] : '';
   }
-  text = String(text).toLowerCase();
-  return /already[_\s-]*(approved|recorded|decided|signed)|release already approved|already been approved/.test(text);
+  if (typeof err !== 'object') return '';
+  var refusal = err.refusal || {};
+  var id = _msSesRelId(refusal, false) || _msSesRelId(err, false);
+  if (id) return id;
+  var blob = [err.message, err.error, err.reason, refusal.fact, refusal.message]
+    .filter(Boolean).join(' ');
+  var m = String(blob).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : '';
+}
+
+async function _msSesRecoverExistingRelease(ctx, err) {
+  await _msSesHydrateSesInspect(ctx);
+  var existing = _msSesResumableRelease(ctx);
+  if (existing) return existing;
+  var parsedId = _msSesReleaseIdFromRefusal(err);
+  if (!parsedId) return null;
+  return { release_revision_id: parsedId };
 }
 
 function _msSesActionBlock(jobId, ctx, dismissAction) {
@@ -4047,8 +4075,8 @@ async function sesApproveAndSend(jobId) {
       if (_msSesReleaseAlreadySendable(preparedRel)) skipApprove = true;
     } catch (e) {
       if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
-      var existingAfterPrep = _msSesResumableRelease(ctx);
-      if (existingAfterPrep) {
+      var existingAfterPrep = await _msSesRecoverExistingRelease(ctx, e);
+      if (existingAfterPrep && existingAfterPrep.release_revision_id) {
         releaseRevisionId = existingAfterPrep.release_revision_id;
         skipApprove = true;
       } else {

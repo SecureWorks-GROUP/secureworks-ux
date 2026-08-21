@@ -89,6 +89,10 @@ function _msSesPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function _msSesHasOwn(value, key) {
+  return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function _msSesReportIsSelected(report) {
   if (!report || typeof report !== 'object') return false;
   var state = String(report.state || report.status || '').trim().toLowerCase();
@@ -108,16 +112,23 @@ function makesafePackTruthFromCanonicalRow(row) {
   if (selected !== true && selected !== false) {
     selected = _msSesReportIsSelected(row.report);
   }
-  return {
+  var truth = {
     drafted: pack.drafted === true,
     presentation_kind: pack.presentation_kind || null,
     presentation_reason: pack.presentation_reason || null,
-    required_documents: pack.required_documents == null ? null : pack.required_documents,
-    closeout_documents: pack.closeout_documents == null ? null : pack.closeout_documents,
     report_doc_id: pack.report_doc_id || row.report_doc_id || null,
     report_doc_resolved: pack.report_doc_resolved,
     has_selected_current_cycle_trade_report: selected === true
   };
+  // Preserve the distinction between a genuinely legacy payload (key absent)
+  // and a current payload that supplied broken null/malformed document truth.
+  if (_msSesHasOwn(pack, 'required_documents')) {
+    truth.required_documents = pack.required_documents;
+  }
+  if (_msSesHasOwn(pack, 'closeout_documents')) {
+    truth.closeout_documents = pack.closeout_documents;
+  }
+  return truth;
 }
 
 // ONE fail-closed verdict owns the board card, whole-card open path, Approvals
@@ -131,8 +142,8 @@ function makesafePackTruthFromCanonicalRow(row) {
 function makesafePackCompletenessVerdict(pack) {
   pack = (pack && typeof pack === 'object') ? pack : {};
   var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
-  var requiredSupplied = pack.required_documents != null;
-  var closeoutSupplied = pack.closeout_documents != null;
+  var requiredSupplied = _msSesHasOwn(pack, 'required_documents');
+  var closeoutSupplied = _msSesHasOwn(pack, 'closeout_documents');
   var required = _msSesPlainObject(pack.required_documents) ? pack.required_documents : null;
   var closeout = _msSesPlainObject(pack.closeout_documents) ? pack.closeout_documents : null;
   var requiredKeys = required ? Object.keys(required) : [];
@@ -596,7 +607,19 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
     return null;
   }
 
-  return {
+  function firstOwned(key) {
+    var sources = [reviewPack, docket, canonical];
+    for (var i = 0; i < sources.length; i++) {
+      if (_msSesHasOwn(sources[i], key)) {
+        return { supplied: true, value: sources[i][key] };
+      }
+    }
+    return { supplied: false, value: undefined };
+  }
+
+  var requiredTruth = firstOwned('required_documents');
+  var closeoutTruth = firstOwned('closeout_documents');
+  var input = {
     drafted: firstDefined(reviewPack.drafted, docket.drafted, canonical.drafted) === true,
     presentation_kind: firstDefined(
       presentation.kind,
@@ -607,16 +630,6 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       presentation.reason,
       reviewPack.presentation_reason,
       canonical.presentation_reason
-    ),
-    required_documents: firstDefined(
-      reviewPack.required_documents,
-      docket.required_documents,
-      canonical.required_documents
-    ),
-    closeout_documents: firstDefined(
-      reviewPack.closeout_documents,
-      docket.closeout_documents,
-      canonical.closeout_documents
     ),
     report_doc_id: firstDefined(
       reviewPack.report_doc_id,
@@ -634,6 +647,9 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       canonical.has_selected_current_cycle_trade_report
     ) === true
   };
+  if (requiredTruth.supplied) input.required_documents = requiredTruth.value;
+  if (closeoutTruth.supplied) input.closeout_documents = closeoutTruth.value;
+  return input;
 }
 
 function _msSesPackCompleteness(jobId, ctx, base) {

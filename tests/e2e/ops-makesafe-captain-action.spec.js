@@ -147,6 +147,33 @@ test('ready label with empty document maps fails closed', async ({ page }) => {
   expect(rendered).not.toContain('Review job pack');
 });
 
+test('ready label with explicitly null document maps fails closed', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-null-document-maps',
+      job_number: 'SWMS-NULL-MAPS',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-null-maps',
+        required_documents: null,
+        closeout_documents: null,
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('empty or malformed');
+  expect(rendered).not.toContain('Ready to send');
+  expect(rendered).not.toContain('Review job pack');
+});
+
 test('map-less legacy pack requires both bound report pointer and selected cycle report', async ({ page }) => {
   await page.goto('/ops.html');
   const cards = await page.evaluate(() => {

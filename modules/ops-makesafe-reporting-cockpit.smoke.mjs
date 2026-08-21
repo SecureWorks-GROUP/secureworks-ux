@@ -2746,6 +2746,20 @@ check(
     has_selected_current_cycle_trade_report: true,
   }).ready === false,
 );
+const nullMapsVerdict = makesafePackCompletenessVerdict({
+  drafted: true,
+  presentation_kind: "ready",
+  required_documents: null,
+  closeout_documents: null,
+  report_doc_id: "report-doc-1",
+  has_selected_current_cycle_trade_report: true,
+});
+check(
+  "explicitly null document maps are malformed, never legacy pointer evidence",
+  nullMapsVerdict.ready === false &&
+    nullMapsVerdict.evidence === "incomplete" &&
+    nullMapsVerdict.reason.includes("empty or malformed"),
+);
 check(
   "map-less legacy readiness requires both the report pointer and selected current-cycle report",
   makesafePackCompletenessVerdict({

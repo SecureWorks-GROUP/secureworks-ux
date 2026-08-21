@@ -157,4 +157,70 @@ const overlay = {
   },
 };
 
-module.exports = { cards, overlay, JOB_237, JOB_241, JOB_243 };
+const sendReady = {
+  jobId: JOB_241,
+  ctx: Object.assign({}, JSON.parse(JSON.stringify(overlay.ctx)), {
+    jobId: JOB_241,
+    reviewState: 'needs_review',
+    cockpit: Object.assign({}, JSON.parse(JSON.stringify(overlay.ctx.cockpit)), {
+      status: 'SEND_READY',
+      controls: {
+        approve_invoice: { enabled: false, label: 'APPROVE INVOICE' },
+        send_it: {
+          enabled: true,
+          label: 'SEND IT',
+          plan: 'Send the approved report, photo, and invoice routes for this exact release revision.',
+        },
+      },
+    }),
+  }),
+};
+
+const northam = {
+  jobId: 'a6eac431-01f0-41df-8ec6-e79e6925f76e',
+  ctx: {
+    jobId: 'a6eac431-01f0-41df-8ec6-e79e6925f76e',
+    panelId: 'msReportingDetailPanel',
+    docketRevisionId: 'd-northam',
+    outputHash: 'sha256:northam',
+    reviewState: 'signed_off',
+    cockpit: {
+      status: 'SEND_READY',
+      controls: {
+        approve_invoice: { enabled: false, disabled_reason: 'Invoice already authorised (INV-1179).' },
+        send_it: {
+          enabled: false,
+          label: 'SEND IT',
+          disabled_reason: 'Release already dispatching.',
+        },
+      },
+      sections: {
+        email_drafts: [
+          { route_kind: 'report', ready: true, recipients: ['mlb.mailer@primeeco.tech'], cc: [], subject: 'Report', body: 'Report body' },
+          { route_kind: 'photo', ready: true, recipients: ['mlb.mailer@primeeco.tech'], cc: [], subject: 'Photos', body: 'Photo body' },
+          { route_kind: 'invoice', ready: true, recipients: ['makesafes@mlbuilders.com.au'], cc: [], subject: 'Invoice', body: 'Invoice body' },
+        ],
+        money: { xero: { invoice_number: 'INV-1179', status: 'AUTHORISED' } },
+      },
+    },
+    pack: {
+      docket: { id: 'd-northam', output_content_hash: 'sha256:northam' },
+      review: { review_state: 'signed_off' },
+      artifacts: [],
+    },
+    sesInspect: {
+      release: {
+        release_revision_id: '1be0f185-b8c9-572c-b57f-00dde333b591',
+        state: 'dispatching',
+      },
+      release_send_progress: {
+        kind: 'partially_released',
+        release_revision_id: '1be0f185-b8c9-572c-b57f-00dde333b591',
+        release_state: 'dispatching',
+        missing_route_kinds: ['invoice', 'photo'],
+      },
+    },
+  },
+};
+
+module.exports = { cards, overlay, sendReady, northam, JOB_237, JOB_241, JOB_243 };

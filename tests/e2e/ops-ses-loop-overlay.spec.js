@@ -84,3 +84,60 @@ test('hours and wording edits preview on the pane, lock the press, and die with 
   expect(result.revised).not.toContain('Edited wording for the builder.');
   expect(result.previewCleared).toBe(true);
 });
+
+test('SEND IT is visible, enabled, and bound to sesApproveAndSend on a sendable Docs Ready pane', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await page.evaluate((fx) => {
+    window._msSesPackCache = window._msSesPackCache || {};
+    window._msSesSendPreview = {};
+    const sendHtml = window._msSesRenderDetail(fx.sendReady.jobId, fx.sendReady.ctx, 'msReportingDetailPanel');
+    const northamHtml = window._msSesRenderDetail(fx.northam.jobId, fx.northam.ctx, 'msReportingDetailPanel');
+    return { sendHtml, northamHtml };
+  }, fixture);
+
+  expect(result.sendHtml).toContain('SEND IT');
+  expect(result.sendHtml).toContain('id="msSesApproveAndSendBtn"');
+  expect(result.sendHtml).toContain("sesApproveAndSend('" + fixture.sendReady.jobId + "')");
+  expect(result.sendHtml).not.toMatch(/msr-stamp send" disabled/);
+  expect(result.sendHtml).not.toContain('sendSesRelease(');
+  expect(result.sendHtml).toMatch(/press <strong>SEND IT<\/strong>/);
+
+  expect(result.northamHtml).toContain('SEND IT');
+  expect(result.northamHtml).toContain('id="msSesApproveAndSendBtn"');
+  expect(result.northamHtml).toContain("sesApproveAndSend('" + fixture.northam.jobId + "')");
+  expect(result.northamHtml).not.toMatch(/msr-stamp send" disabled/);
+  expect(result.northamHtml).toMatch(/press <strong>SEND IT<\/strong>/);
+});
+
+test('SEND IT click on a dispatching release reaches execute_ses_release_revision only', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await page.evaluate(async (fx) => {
+    const jobId = fx.northam.jobId;
+    const ctx = JSON.parse(JSON.stringify(fx.northam.ctx));
+    window._msSesPackCache = window._msSesPackCache || {};
+    window._msSesPackCache[jobId] = ctx;
+    window._msSesSendPreview = {};
+    const posts = [];
+    const postJwts = [];
+    window.opsPost = (action, body) => {
+      posts.push({ action, body });
+      if (action === 'execute_ses_release_revision') {
+        return Promise.resolve({ state: 'released', route_proofs: [{ route_kind: 'report' }] });
+      }
+      return Promise.resolve({});
+    };
+    window.opsPostJwt = (action, body) => {
+      postJwts.push({ action, body });
+      return Promise.resolve({});
+    };
+    window.confirm = () => true;
+    await window.sesApproveAndSend(jobId);
+    return { posts, postJwts };
+  }, fixture);
+
+  expect(result.posts.some((p) => p.action === 'execute_ses_release_revision' && p.body.release_revision_id === fixture.northam.ctx.sesInspect.release.release_revision_id)).toBe(true);
+  expect(result.posts.some((p) => p.action === 'prepare_ses_release_revision')).toBe(false);
+  expect(result.postJwts.some((p) => p.action === 'approve_ses_release_revision')).toBe(false);
+  expect(result.posts.some((p) => p.action === 'makesafe_send_pack')).toBe(false);
+  expect(result.postJwts.some((p) => p.action === 'sendSesRelease')).toBe(false);
+});

@@ -21,7 +21,10 @@
 // tick binds to), discovered via list_ses_docs_ready_reviews
 // (job_id -> docket_revision_id; needs_review dockets only — a signed-off
 // docket has already passed that queue, so the exact-pack view is offered only
-// while the pack is in the queue).
+// while the pack is in the queue). inspect_ses_pack is a READ used to see an
+// in-flight release (Northam-class: already approved, still dispatching) so
+// SEND IT can resume execute_ses_release_revision instead of preparing a new
+// one. It is not a third send verb.
 // ACTION (per-job only — never a multi-job release): ONE PRESS, running the
 // same guarded server chain the retired two stamps ran, in the same order, with
 // every server guard, both recorded approvals and the hash binding unchanged:
@@ -31,13 +34,19 @@
 //      when the backend arms approve_invoice; the pack is then re-read so the
 //      sign-off binds the invoice-bound bytes that are about to be sent.
 //   2. sign_off_ses_docket (JWT, hash-bound to the displayed pack).
-//   3. prepare_ses_release_revision { job_ids: [job] }.
-//   4. approve_ses_release_revision (JWT) — the send approval.
+//   3. prepare_ses_release_revision { job_ids: [job] } — skipped when a
+//      resumable release already exists (approved / dispatching / partially
+//      released).
+//   4. approve_ses_release_revision (JWT) — the send approval; skipped when
+//      that release is already approved, or continued past an already-approved
+//      refusal so execute can finish the send.
 //   5. execute_ses_release_revision — releases every route the release carries
 //      (today still report + photo + invoice) at once. For AJS the UI may
 //      PREVIEW the intended two-email shape (report+invoice, then photos) when
 //      the backend still builds three; that preview is labelled and never
 //      presented as the send truth.
+// The send-only stamp word is SEND IT (backend controls.send_it.label). The
+// combined invoice+send word stays APPROVE AND SEND. Both press sesApproveAndSend.
 // A refusal stops the chain AT that step and shows the server's words verbatim;
 // earlier recorded approvals stand and pressing again resumes from there.
 //
@@ -699,6 +708,7 @@ async function _msSesLoadPackContext(jobId, retried) {
       }
       throw e;
     }
+    await _msSesHydrateSesInspect(ctx);
     return ctx;
   }
   // Signed off: out of the needs_review queue, so nothing on this surface maps
@@ -726,7 +736,23 @@ async function _msSesLoadPackContext(jobId, retried) {
       ctx.packRecoveryFailed = true;
     }
   }
+  await _msSesHydrateSesInspect(ctx);
   return ctx;
+}
+
+/**
+ * READ-ONLY: attach the shared pack inspection (release id + send progress)
+ * so SEND IT can resume an in-flight execute without a new send verb.
+ * A miss leaves arming on the cockpit flags alone.
+ */
+async function _msSesHydrateSesInspect(ctx) {
+  if (!ctx || !ctx.jobId) return;
+  try {
+    var inspect = await opsFetch('inspect_ses_pack', { job_id: ctx.jobId });
+    if (inspect && typeof inspect === 'object') ctx.sesInspect = inspect;
+  } catch (_e) {
+    /* cockpit flags still govern; do not invent a release */
+  }
 }
 
 // A 409 from the SES reads/actions is stale ONLY when the server names
@@ -1229,7 +1255,7 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
   html += '<div class="msr-body">';
 
   // ── ONE clear next action ─────────────────────────────────────────────────
-  html += _msSesNextAction(cockpit);
+  html += _msSesNextAction(cockpit, ctx);
 
   // ── DONE checklist: what is complete on this pack, before any document ────
   html += _msSesRenderDoneStrip(row, ctx);
@@ -1388,14 +1414,19 @@ function _msSesOnFeedbackThreadRendered(jobId, state) {
 }
 
 /**
- * The one next action, chosen from the backend control flags alone. It never
- * names an action the backend has not enabled.
+ * The one next action. Backend control flags own the words when they are
+ * armed. An in-flight SES release (already approved, still dispatching) is
+ * also a sendable next action — that is SEND IT resuming execute, not a new
+ * send verb.
  */
-function _msSesNextAction(cockpit) {
+function _msSesNextAction(cockpit, ctx) {
   var controls = (cockpit && cockpit.controls) || {};
   var hold = _msSesClassifyHold(cockpit);
   var cls = '';
   var text;
+  var approveOn = !!(controls.approve_invoice && controls.approve_invoice.enabled);
+  var sendOn = !!(controls.send_it && controls.send_it.enabled);
+  var resumable = !!_msSesResumableRelease(ctx);
   if (hold.hardHold) {
     // Only a HARD hold reads as a stop. An email-draft-only hold is not a stop
     // — it falls through to the armed copy below so SEND is never walled by a
@@ -1403,9 +1434,11 @@ function _msSesNextAction(cockpit) {
     cls = ' hold';
     var n = hold.blockers.length;
     text = 'Review <strong>' + n + ' caveat' + (n === 1 ? '' : 's') + '</strong> below before this pack is approved or sent.';
-  } else if (controls.send_it && controls.send_it.enabled) {
-    text = 'Read the pack, then press <strong>APPROVE AND SEND</strong>. It records your approval for this exact pack and emails the report, the photos and the invoice exactly as shown below.';
-  } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
+  } else if (approveOn && (sendOn || resumable)) {
+    text = 'Check the Invoice tile, then press <strong>APPROVE AND SEND</strong>. One press authorises the Xero draft invoice already prepared for this pack and then sends the emails shown below.';
+  } else if (sendOn || resumable) {
+    text = 'Read the pack, then press <strong>SEND IT</strong>. It records your send approval for this exact pack (or resumes the release already in flight) and emails the report, the photos and the invoice exactly as shown below.';
+  } else if (approveOn) {
     text = 'Check the Invoice tile, then press <strong>APPROVE AND SEND</strong>. One press authorises the Xero draft invoice already prepared for this pack and then sends the emails shown below.';
   } else {
     text = 'Nothing to press yet &mdash; the system is still preparing this pack. Review it and leave feedback if something looks wrong.';
@@ -3422,12 +3455,154 @@ function _msReportingFormatTimestamp(iso) {
  * sign-off is still bound to the displayed pack hash, and a pack that changed
  * still voids the press.
  *
- * The stamp is armed only by the backend control flags — approve_invoice when
- * the invoice still needs authorising, send_it when it does not. A disabled
- * stamp carries no id and no onclick (nothing for a click or a script to
- * reach), with the backend's own disabled_reason underneath. A HOLD points back
- * at the amber block above. The retired 410 combined path is never called.
+ * The stamp is armed by the backend control flags — approve_invoice when the
+ * invoice still needs authorising, send_it when it does not — OR by a
+ * resumable in-flight release (already approved / dispatching / partially
+ * released). A disabled stamp carries no id and no onclick (nothing for a
+ * click or a script to reach), with the backend's own disabled_reason
+ * underneath. A HOLD points back at the amber block above. The retired 410
+ * combined path is never called. Send-only word is SEND IT; invoice+send stays
+ * APPROVE AND SEND. Both press sesApproveAndSend.
  */
+function _msSesRelId(obj, allowId) {
+  if (obj == null) return '';
+  if (typeof obj === 'string' || typeof obj === 'number') return String(obj).trim();
+  if (typeof obj !== 'object') return '';
+  var id = obj.release_revision_id || obj.releaseRevisionId || obj.revision_id || '';
+  if (!id && allowId) id = obj.id;
+  return String(id || '').trim();
+}
+
+function _msSesAsRelease(obj, allowId) {
+  if (!obj) return null;
+  if (typeof obj === 'string' || typeof obj === 'number') {
+    var sid = String(obj).trim();
+    if (!sid || sid === 'undefined' || sid === 'null') return null;
+    return { release_revision_id: sid };
+  }
+  if (typeof obj !== 'object') return null;
+  var id = _msSesRelId(obj, allowId);
+  if (!id || id === 'undefined' || id === 'null') return null;
+  var copy = {};
+  var k;
+  for (k in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) copy[k] = obj[k];
+  }
+  copy.release_revision_id = id;
+  if (obj.state && !copy.state) copy.state = obj.state;
+  if (obj.release_state && !copy.release_state) copy.release_state = obj.release_state;
+  if (obj.progress && !copy.progress) copy.progress = obj.progress;
+  if (obj.kind && !copy.kind) copy.kind = obj.kind;
+  return copy;
+}
+
+function _msSesPickRelease(ctx) {
+  ctx = ctx || {};
+  var cockpit = ctx.cockpit || {};
+  var sendIt = (cockpit.controls && cockpit.controls.send_it) || {};
+  var sections = cockpit.sections || {};
+  var pack = ctx.pack && typeof ctx.pack === 'object' ? ctx.pack : {};
+  var inner = pack.pack && typeof pack.pack === 'object' ? pack.pack : pack;
+  var docket = inner.docket && typeof inner.docket === 'object' ? inner.docket : {};
+  var inspect = ctx.sesInspect && typeof ctx.sesInspect === 'object' ? ctx.sesInspect : {};
+  var inspectPack = inspect.pack && typeof inspect.pack === 'object' ? inspect.pack : {};
+  var candidates = [
+    { obj: sendIt.release, allowId: true },
+    { obj: sendIt.release_revision, allowId: true },
+    { obj: sendIt.release_revision_id, allowId: false },
+    { obj: sections.release, allowId: true },
+    { obj: sections.release_revision, allowId: true },
+    { obj: ctx.sesRelease, allowId: true },
+    { obj: inspect.release, allowId: true },
+    { obj: inspect.release_revision, allowId: true },
+    { obj: inspect.release_send_progress, allowId: false },
+    { obj: inspectPack.release, allowId: true },
+    { obj: inner.release, allowId: true },
+    { obj: inner.release_revision, allowId: true },
+    { obj: pack.release, allowId: true },
+    { obj: docket.release, allowId: true }
+  ];
+  var i, rel;
+  for (i = 0; i < candidates.length; i++) {
+    rel = _msSesAsRelease(candidates[i].obj, candidates[i].allowId);
+    if (rel) return rel;
+  }
+  return null;
+}
+
+function _msSesReleaseProgress(rel) {
+  if (!rel || typeof rel !== 'object') return '';
+  return String(
+    rel.progress ||
+    rel.release_progress ||
+    rel.kind ||
+    (rel.progress_summary && rel.progress_summary.state) ||
+    ''
+  ).trim().toLowerCase();
+}
+
+function _msSesReleaseState(rel) {
+  if (!rel || typeof rel !== 'object') return '';
+  return String(rel.state || rel.release_state || '').trim().toLowerCase();
+}
+
+function _msSesReleaseAlreadySendable(rel) {
+  if (!rel || typeof rel !== 'object') return false;
+  var state = _msSesReleaseState(rel);
+  var progress = _msSesReleaseProgress(rel);
+  if (state === 'released' || progress === 'released') return false;
+  return (
+    state === 'approved' ||
+    state === 'dispatching' ||
+    state === 'releasing' ||
+    state === 'execute_ready' ||
+    state === 'partially_released' ||
+    progress === 'dispatching' ||
+    progress === 'partially_released' ||
+    progress === 'releasing'
+  );
+}
+
+function _msSesResumableRelease(ctx) {
+  var rel = _msSesPickRelease(ctx);
+  if (!rel || !_msSesReleaseAlreadySendable(rel)) return null;
+  return rel;
+}
+
+function _msSesReleaseApproveAlreadyDone(errOrRel) {
+  if (!errOrRel) return false;
+  if (typeof errOrRel === 'object' && !errOrRel.message && (_msSesReleaseState(errOrRel) || _msSesReleaseProgress(errOrRel))) {
+    var st = _msSesReleaseState(errOrRel);
+    var pr = _msSesReleaseProgress(errOrRel);
+    return (
+      st === 'approved' ||
+      st === 'dispatching' ||
+      st === 'releasing' ||
+      st === 'execute_ready' ||
+      st === 'partially_released' ||
+      pr === 'dispatching' ||
+      pr === 'partially_released' ||
+      pr === 'releasing'
+    );
+  }
+  var text = '';
+  if (typeof errOrRel === 'string') text = errOrRel;
+  else {
+    var refusal = errOrRel.refusal || {};
+    text = [
+      errOrRel.message,
+      errOrRel.error,
+      errOrRel.code,
+      errOrRel.refusal_code,
+      refusal.code,
+      refusal.fact,
+      errOrRel.reason
+    ].filter(Boolean).join(' ');
+  }
+  text = String(text).toLowerCase();
+  return /already[_\s-]*(approved|recorded|decided|signed)|release already approved|already been approved/.test(text);
+}
+
 function _msSesActionBlock(jobId, ctx, dismissAction) {
   var cockpit = ctx.cockpit || {};
   var sections = cockpit.sections || {};
@@ -3449,7 +3624,12 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // the screen shows the edited preview, so a send of the unedited pack would
   // send something other than what is shown.
   var previewLock = _msSesPreviewOf(jobId, ctx);
-  var armed = !previewLock && !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
+  var resumable = _msSesResumableRelease(ctx);
+  var sendArmed = !!(sendIt.enabled || resumable);
+  var invoiceArmed = !!approveInvoice.enabled;
+  var armed = !previewLock && !hardHold && !!(invoiceArmed || sendArmed);
+  var sendOnly = armed && sendArmed && !invoiceArmed;
+  var stampWord = sendOnly ? (sendIt.label || 'SEND IT') : 'APPROVE AND SEND';
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
 
@@ -3475,14 +3655,18 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     // Beside the stamp: ONE short line ending with the irreversibility warning
     // (captain ruling 2026-08-13: the preview owns the pane, the explanation
     // folds). The full sentence moves verbatim into "What one press does".
-    note = approveInvoice.enabled
+    note = invoiceArmed
       ? ('One press records both approvals for this exact pack, authorises the Xero invoice, then sends ' + emailsPhrase + '.')
-      : ('One press records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+      : (resumable
+        ? ('One press resumes the existing SES release and sends ' + emailsPhrase + '.')
+        : ('One press records your send approval for this exact pack and sends ' + emailsPhrase + '.'));
     note += ' Irreversible. Your press, every time.';
     note = escapeHtml(note);
-    fullNote = approveInvoice.enabled
+    fullNote = invoiceArmed
       ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
-      : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+      : (resumable
+        ? ('Executes the existing SES release already in flight and sends ' + emailsPhrase + '.')
+        : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.'));
   } else if (hardHold) {
     note = holdReason;
   } else if (previewLock) {
@@ -3503,7 +3687,7 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
 
   html += '<div class="msr-steps one">';
   html += _msSesStamp({
-    word: 'APPROVE AND SEND',
+    word: stampWord,
     kind: 'send',
     enabled: armed,
     id: 'msSesApproveAndSendBtn',
@@ -3525,9 +3709,13 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     if (approveInvoice.enabled) {
       html += '<li>Records your <b>invoice approval</b> for this exact invoice revision, then authorises the Xero draft invoice already prepared for it and binds its PDF into the pack.</li>';
     }
-    html += '<li>Records your <b>Docs Ready sign-off</b>, bound to the exact pack hash on screen.</li>';
-    html += '<li>Records your <b>send approval</b> for the release built from that pack.</li>';
-    html += '<li>Sends the emails exactly as shown, and writes the send proofs.</li>';
+    if (!(sendOnly && resumable)) {
+      html += '<li>Records your <b>Docs Ready sign-off</b>, bound to the exact pack hash on screen.</li>';
+      html += '<li>Records your <b>send approval</b> for the release built from that pack.</li>';
+    }
+    html += '<li>' + (resumable && sendOnly
+      ? 'Resumes the existing SES release and sends the emails exactly as shown, writing the send proofs.'
+      : 'Sends the emails exactly as shown, and writes the send proofs.') + '</li>';
     html += '</ol>';
     // The backend's OWN plan text for each armed step, verbatim. It is the
     // system describing what it is about to do; this screen never rewrites it.
@@ -3674,8 +3862,11 @@ async function _msSesRefreshPackContext(jobId) {
  *      the pack is re-read before anything is signed off.
  *   2. sign_off_ses_docket (JWT, bound to the exact displayed pack hash) —
  *      skipped only when the tick is already recorded for the current bytes.
- *   3. prepare_ses_release_revision { job_ids: [jobId] }  (this job only).
- *   4. approve_ses_release_revision (JWT) — the send approval.
+ *   3. prepare_ses_release_revision { job_ids: [jobId] }  (this job only) —
+ *      skipped when a resumable release already exists.
+ *   4. approve_ses_release_revision (JWT) — the send approval; skipped when
+ *      that release is already approved, or continued past an already-approved
+ *      refusal so execute can finish.
  *   5. execute_ses_release_revision — sends the routes and writes the proofs.
  *
  * Both approvals are still recorded separately and per docket revision; the
@@ -3715,7 +3906,8 @@ async function sesApproveAndSend(jobId) {
   // Either way the backend still guards every step of the chain below, so a
   // relaxed client gate can never force a send the server refuses.
   var hardHold = _msSesClassifyHold(ctx.cockpit).hardHold;
-  if (hardHold || !(approveCtl.enabled || sendCtl.enabled)) {
+  var resumable = _msSesResumableRelease(ctx);
+  if (hardHold || !(approveCtl.enabled || sendCtl.enabled || resumable)) {
     showToast('This pack is not armed to approve or send.', 'error');
     return;
   }
@@ -3730,7 +3922,9 @@ async function sesApproveAndSend(jobId) {
   var needsInvoice = !!approveCtl.enabled;
   var confirmMsg = needsInvoice
     ? 'ONE PRESS: this records your invoice approval AND your send approval for exactly this docket revision, AUTHORISES the Xero draft invoice already prepared for it, and then sends the emails shown to the exact recipients shown. This is irreversible. Continue?'
-    : 'ONE PRESS: this records your send approval for exactly this docket revision and sends the emails shown to the exact recipients shown. This is irreversible. Continue?';
+    : (resumable
+      ? 'ONE PRESS: this resumes the existing SES release and sends the emails shown to the exact recipients shown. This is irreversible. Continue?'
+      : 'ONE PRESS: this records your send approval for exactly this docket revision and sends the emails shown to the exact recipients shown. This is irreversible. Continue?');
   if (!confirm(confirmMsg)) return;
 
   _msSesClearChainError(jobId);
@@ -3798,9 +3992,11 @@ async function sesApproveAndSend(jobId) {
       return;
     }
     var freshSend = (ctx.cockpit && ctx.cockpit.controls && ctx.cockpit.controls.send_it) || {};
-    if (!freshSend.enabled) {
+    resumable = _msSesResumableRelease(ctx);
+    if (!freshSend.enabled && !resumable) {
       // The invoice approval IS recorded; the backend has simply not armed the
-      // send on the new revision. Say its reason, verbatim, and stop.
+      // send on the new revision and there is no in-flight release to resume.
+      // Say its reason, verbatim, and stop.
       _msSesChainStopped(
         jobId,
         'sending the invoice-bound pack',
@@ -3828,30 +4024,53 @@ async function sesApproveAndSend(jobId) {
     return;
   }
 
-  // Step 3 — build the release for THIS job only.
-  try {
-    if (btn) _msSesStampProgress(btn, 'Preparing the release...');
-    var prepBody = { job_ids: [jobId] };
-    if (actor) prepBody.created_by = actor;
-    var prepared = await opsPost('prepare_ses_release_revision', prepBody);
-    releaseRevisionId = prepared && prepared.release && prepared.release.id;
-    if (!releaseRevisionId) {
-      throw new Error('The release revision id was not returned by prepare_ses_release_revision.');
+  // Step 3 — build the release for THIS job only, unless one is already
+  // in flight (approved / dispatching / partially released). Preparing a
+  // second release is what left Northam-class SEND IT piles on a dead door.
+  resumable = _msSesResumableRelease(ctx);
+  var skipApprove = false;
+  if (resumable) {
+    releaseRevisionId = resumable.release_revision_id;
+    skipApprove = _msSesReleaseAlreadySendable(resumable) || _msSesReleaseApproveAlreadyDone(resumable);
+  } else {
+    try {
+      if (btn) _msSesStampProgress(btn, 'Preparing the release...');
+      var prepBody = { job_ids: [jobId] };
+      if (actor) prepBody.created_by = actor;
+      var prepared = await opsPost('prepare_ses_release_revision', prepBody);
+      var preparedRel = _msSesAsRelease(prepared && prepared.release, true) ||
+        _msSesAsRelease(prepared, true);
+      releaseRevisionId = preparedRel && preparedRel.release_revision_id;
+      if (!releaseRevisionId) {
+        throw new Error('The release revision id was not returned by prepare_ses_release_revision.');
+      }
+      if (_msSesReleaseAlreadySendable(preparedRel)) skipApprove = true;
+    } catch (e) {
+      if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
+      var existingAfterPrep = _msSesResumableRelease(ctx);
+      if (existingAfterPrep) {
+        releaseRevisionId = existingAfterPrep.release_revision_id;
+        skipApprove = true;
+      } else {
+        _msSesChainStopped(jobId, 'preparing the release', (e && e.message) || e, { recorded: true });
+        return;
+      }
     }
-  } catch (e) {
-    if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
-    _msSesChainStopped(jobId, 'preparing the release', (e && e.message) || e, { recorded: true });
-    return;
   }
 
-  // Step 4 — the send approval.
-  try {
-    if (btn) _msSesStampProgress(btn, 'Approving the send...');
-    await opsPostJwt('approve_ses_release_revision', { release_revision_id: releaseRevisionId });
-  } catch (e) {
-    if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
-    _msSesChainStopped(jobId, 'approving the send', (e && e.message) || e, { recorded: true });
-    return;
+  // Step 4 — the send approval. An already-approved / dispatching release
+  // skips this; an already-approved refusal still continues to execute.
+  if (!skipApprove) {
+    try {
+      if (btn) _msSesStampProgress(btn, 'Approving the send...');
+      await opsPostJwt('approve_ses_release_revision', { release_revision_id: releaseRevisionId });
+    } catch (e) {
+      if (_msSesIsStale(e)) return _msSesChainStale(jobId, true);
+      if (!_msSesReleaseApproveAlreadyDone(e)) {
+        _msSesChainStopped(jobId, 'approving the send', (e && e.message) || e, { recorded: true });
+        return;
+      }
+    }
   }
 
   // Step 5 — send.

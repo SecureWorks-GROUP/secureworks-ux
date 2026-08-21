@@ -17,7 +17,11 @@
 //   - APPROVE INVOICE runs approve_ses_invoice_revision (JWT) ->
 //     execute_ses_invoice_revision; SEND IT runs sign_off_ses_docket (JWT,
 //     hash-bound) -> prepare_ses_release_revision -> approve_ses_release_revision
-//     (JWT) -> execute_ses_release_revision;
+//     (JWT) -> execute_ses_release_revision. An in-flight release (approved /
+//     dispatching / partially_released, as on Northam-class finish-send cards)
+//     arms SEND IT even when send_it.enabled is false, skips prepare+approve, and
+//     resumes execute_ses_release_revision on that revision. inspect_ses_pack is
+//     a READ used to find that revision; it is not a third send verb.
 //   - the retired legacy actions (makesafe_send_pack, makesafe_resume_close,
 //     makesafe_reset_failed_pack, makesafe_send_photo_followup) are never
 //     called — at runtime or in source.
@@ -271,6 +275,9 @@ const exposed = [
   "_msSesPackLabourHours",
   "_msSesCanonicalPackDocket",
   "_msSesStampBoardPackChips",
+  "_msSesPickRelease",
+  "_msSesResumableRelease",
+  "_msSesReleaseAlreadySendable",
   // Legacy symbols that MUST be gone:
   // The two-press pair is retired: ONE press runs the whole guarded chain, so
   // no second entry point may survive for a click or a script to reach.
@@ -1015,7 +1022,7 @@ check(
   "there is exactly ONE pressable stamp on an armed pack, and no second button",
   (detailHtml.match(/class="msr-stamp /g) || []).length === 1 &&
     detailHtml.includes('id="msSesApproveAndSendBtn"') &&
-    detailHtml.includes("APPROVE AND SEND") &&
+    detailHtml.includes("SEND IT") &&
     !detailHtml.includes("msSesSendItBtn") &&
     !detailHtml.includes("msSesApproveInvoiceBtn") &&
     !detailHtml.includes("approveSesInvoice(") &&
@@ -1063,8 +1070,8 @@ check(
 check(
   "detail leads with the one next action, naming the single press",
   /Next</.test(detailHtml) &&
-    /press <strong>APPROVE AND SEND<\/strong>/.test(detailHtml) &&
-    !/press <strong>SEND IT<\/strong>/.test(detailHtml) &&
+    /press <strong>SEND IT<\/strong>/.test(detailHtml) &&
+    !/press <strong>APPROVE AND SEND<\/strong>/.test(detailHtml) &&
     !/press <strong>APPROVE INVOICE<\/strong>/.test(detailHtml),
 );
 check(
@@ -1409,6 +1416,95 @@ check(
     calls.opsPost.some((c) => c.action === "prepare_ses_release_revision"),
 );
 
+// ── 8b. SEND IT on a Northam-class in-flight release: stamp is armed even
+//        when send_it.enabled is false, and the press resumes execute on the
+//        existing revision (no new prepare, no second approve). ──────────────
+{
+  const northamCockpit = cockpitSendReady();
+  northamCockpit.controls.approve_invoice.enabled = false;
+  northamCockpit.controls.send_it.enabled = false;
+  northamCockpit.controls.send_it.label = "SEND IT";
+  northamCockpit.controls.send_it.disabled_reason =
+    "Release already dispatching.";
+  const northamPack = reviewablePack();
+  northamPack.review.review_state = "signed_off";
+  behaviour.fetch["query_ses_review_cockpit"] = northamCockpit;
+  behaviour.fetch["get_ses_reviewable_pack"] = northamPack;
+  behaviour.fetch["inspect_ses_pack"] = {
+    release: {
+      release_revision_id: "rel-northam",
+      state: "dispatching",
+    },
+    release_send_progress: {
+      kind: "partially_released",
+      release_revision_id: "rel-northam",
+      release_state: "dispatching",
+      proved_route_kinds: ["report"],
+      missing_route_kinds: ["invoice", "photo"],
+    },
+  };
+  behaviour.post["execute_ses_release_revision"] = {
+    state: "released",
+    route_proofs: [
+      { route_kind: "report" },
+      { route_kind: "photo" },
+      { route_kind: "invoice" },
+    ],
+  };
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const northamHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    "Northam-class SEND IT is visible, enabled, and bound to sesApproveAndSend",
+    northamHtml.includes("SEND IT") &&
+      northamHtml.includes('id="msSesApproveAndSendBtn"') &&
+      northamHtml.includes("sesApproveAndSend('" + JOB + "')") &&
+      !/msr-stamp send" disabled/.test(northamHtml) &&
+      /press <strong>SEND IT<\/strong>/.test(northamHtml),
+  );
+  check(
+    "a dispatching inspect release is resumable; a released one is not",
+    typeof mod._msSesResumableRelease === "function" &&
+      !!mod._msSesResumableRelease({
+        sesInspect: {
+          release: { release_revision_id: "rel-northam", state: "dispatching" },
+        },
+      }) &&
+      !mod._msSesResumableRelease({
+        sesInspect: {
+          release: { release_revision_id: "rel-done", state: "released" },
+        },
+      }),
+  );
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  calls.confirms.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "Northam-class press is not refused at the client gate",
+    calls.confirms.length === 1,
+  );
+  check(
+    "Northam-class SEND IT skips prepare and approve, then executes the existing release",
+    !calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+      !calls.opsPostJwt.some((c) => c.action === "approve_ses_release_revision") &&
+      !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
+      calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "rel-northam",
+      ),
+  );
+  check(
+    "Northam-class SEND IT never invents a second send verb",
+    !calls.opsPost.some((c) => c.action === "makesafe_send_pack") &&
+      !calls.opsPost.some((c) => c.action === "sendSesRelease") &&
+      !calls.opsPostJwt.some((c) => c.action === "sendSesRelease"),
+  );
+  delete behaviour.fetch.inspect_ses_pack;
+  seedSendReady();
+}
+
 // ── 9. A 409 stale_review anywhere aborts the chain and reloads ─────────────
 seedSendReady();
 await mod.loadMakesafeReportingCockpit();
@@ -1512,6 +1608,7 @@ const invoiceHtml = elements["msReportingDetailPanel"]._html || "";
 check(
   "INVOICE_CREATE_READY arms the ONE press, and no second button exists",
   invoiceHtml.includes('id="msSesApproveAndSendBtn"') &&
+    invoiceHtml.includes("APPROVE AND SEND") &&
     (invoiceHtml.match(/class="msr-stamp /g) || []).length === 1 &&
     !invoiceHtml.includes("msSesSendItBtn") &&
     !invoiceHtml.includes("msSesApproveInvoiceBtn"),
@@ -1750,6 +1847,7 @@ calls.toasts.length = 0;
     "both stages armed still render exactly ONE pressable stamp",
     (bothHtml.match(/class="msr-stamp /g) || []).length === 1 &&
       bothHtml.includes('id="msSesApproveAndSendBtn"') &&
+      bothHtml.includes("APPROVE AND SEND") &&
       /Records your invoice approval and your send approval/.test(bothHtml),
   );
   behaviour.fetch["query_ses_review_cockpit"] = cockpitSendReady();

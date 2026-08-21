@@ -103,10 +103,12 @@ test('resolved ready presentation still renders the review control', async ({ pa
       ses_family_label: 'MakeSafe',
       site_suburb: 'Perth',
       created_at: new Date().toISOString(),
+      report: { state: 'submitted', cycle_number: 1 },
       pack: {
         drafted: true,
         state: 'drafted',
         presentation_kind: 'ready',
+        report_doc_id: 'report-doc-ready-pack',
         required_documents: { report: true, invoice: true, swms: true },
         closeout_documents: { report: true, invoice: true, swms: true },
       },
@@ -117,6 +119,64 @@ test('resolved ready presentation still renders the review control', async ({ pa
   expect(rendered).toContain('Ready to send');
   expect(rendered).toContain('Review job pack');
   expect(rendered).not.toContain('Pack incomplete');
+});
+
+test('ready label with empty document maps fails closed', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'job-empty-document-maps',
+      job_number: 'SWMS-EMPTY-MAPS',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-empty-maps',
+        required_documents: {},
+        closeout_documents: {},
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).not.toContain('Ready to send');
+  expect(rendered).not.toContain('Review job pack');
+});
+
+test('map-less legacy pack requires both bound report pointer and selected cycle report', async ({ page }) => {
+  await page.goto('/ops.html');
+  const cards = await page.evaluate(() => {
+    function render(id, report, reportDocId) {
+      return renderMakesafeCard(mapCanonicalMakesafeRow({
+        id,
+        job_number: id,
+        canonical_stage: 'report_ready',
+        substatus: 'admin_to_send_report',
+        report,
+        pack: {
+          drafted: true,
+          state: 'drafted',
+          report_doc_id: reportDocId,
+        },
+      }, null, { rememberStage: false }), 'report_ready');
+    }
+    return {
+      proved: render('legacy-proved', { state: 'submitted', cycle_number: 1 }, 'report-doc-legacy'),
+      noPointer: render('legacy-no-pointer', { state: 'submitted', cycle_number: 1 }, null),
+      noSelectedReport: render('legacy-no-report', { state: 'waiting_on_trade_report', cycle_number: 1 }, 'report-doc-legacy'),
+    };
+  });
+
+  expect(cards.proved).toContain('Ready to send');
+  expect(cards.proved).toContain('Review job pack');
+  expect(cards.noPointer).toContain('Pack incomplete');
+  expect(cards.noPointer).not.toContain('Review job pack');
+  expect(cards.noSelectedReport).toContain('Pack incomplete');
+  expect(cards.noSelectedReport).not.toContain('Review job pack');
 });
 
 test('whole-card open path uses the same required-document completeness verdict', async ({ page }) => {
@@ -138,6 +198,7 @@ test('whole-card open path uses the same required-document completeness verdict'
         ses_family_label: 'MakeSafe',
         site_suburb: 'Perth',
         created_at: new Date().toISOString(),
+        report: { state: 'submitted', cycle_number: 1 },
         pack,
       });
       _msSesReviewQueue[id] = { job_id: id, docket_revision_id: 'docket-' + id };
@@ -151,6 +212,7 @@ test('whole-card open path uses the same required-document completeness verdict'
       drafted: true,
       state: 'drafted',
       presentation_kind: 'ready',
+      report_doc_id: 'report-doc-open-path',
       required_documents: { report: true, invoice: true, swms: false },
       closeout_documents: { report: true, invoice: true, swms: false },
     };

@@ -224,6 +224,8 @@ const sandbox = {
 const exposed = [
   "loadMakesafeReportingCockpit",
   "renderMsReportingCard",
+  "makesafePackCompletenessVerdict",
+  "makesafePackTruthFromCanonicalRow",
   "showMsReportingDetail",
   "showMsReportingDetailEmpty",
   "sesApproveAndSend",
@@ -423,7 +425,15 @@ const boardRawRow = {
   builder: { name: "MLB Constructions", external_ref: "MLB-25248" },
   ses_family: "physical_makesafe",
   ses_family_label: "Physical make safe",
-  pack: { drafted: true, state: "drafted" },
+  report: { state: "submitted", cycle_number: 1 },
+  pack: {
+    drafted: true,
+    state: "drafted",
+    presentation_kind: "ready",
+    report_doc_id: "report-doc-1",
+    required_documents: { report: true, invoice: true, swms: true },
+    closeout_documents: { report: true, invoice: true, swms: true },
+  },
 };
 const boardPayloadStub = {
   contract_version: "makesafe-board.v1",
@@ -445,6 +455,8 @@ const mappedCard = {
   requesting_company_slug: "mlb",
   ses_family: "physical_makesafe",
   ses_family_label: "Physical make safe",
+  report: { state: "submitted", cycle_number: 1 },
+  report_pack: boardRawRow.pack,
 };
 
 const proposal = {
@@ -534,6 +546,12 @@ const queueRow = {
 
 function reviewablePack() {
   return {
+    drafted: true,
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+    required_documents: { report: true, invoice: true, swms: true },
+    closeout_documents: { report: true, invoice: true, swms: true },
+    presentation: { kind: "ready", reason: null },
     review: {
       docket_revision_id: DOCKET_REV,
       review_state: "needs_review",
@@ -777,6 +795,40 @@ check(
     detailHtml.includes("data-ses-edit=\"subject\"") &&
     detailHtml.includes("data-ses-edit=\"body\""),
 );
+
+// The direct Approvals/detail route must not bypass the board verdict. Backend
+// controls alone cannot arm a send when the exact required-document truth is
+// incomplete, and a programmatic call must stop before confirmation or writes.
+const incompleteReviewPack = {
+  ...reviewablePack(),
+  closeout_documents: { report: false, invoice: true, swms: true },
+  presentation: { kind: "ready", reason: "stale ready label" },
+};
+behaviour.fetch.get_ses_reviewable_pack = incompleteReviewPack;
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.showMsReportingDetail(JOB);
+const incompleteDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "direct detail leaves APPROVE AND SEND unarmed when a required pointer is missing",
+  incompleteDetailHtml.includes("APPROVE AND SEND") &&
+    !incompleteDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    incompleteDetailHtml.includes("Required pack pointer is missing or unresolved: report"),
+);
+await mod.sesApproveAndSend(JOB);
+check(
+  "programmatic send entry fails closed before confirm or any write",
+  calls.confirms.length === 0 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /missing or unresolved: report/i.test(t.msg)),
+);
+
+// Restore the fully proved pack for the remaining guarded-chain assertions.
+seedSendReady();
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
 
 // ── 6b. Applying an edit RECORDS it on the exact docket revision and locks the
 // press until the revised pack carries it — proven by running the real apply
@@ -2467,10 +2519,28 @@ check(
     bareCardHtml.includes("(no builder)"),
 );
 check(
-  "a bare card still carries the enrichment hooks + review action",
+  "a bare queue card keeps enrichment hooks but exposes no review action",
   bareCardHtml.includes("msCardBadge_job_bare") &&
     bareCardHtml.includes("msCardMoney_job_bare") &&
-    bareCardHtml.includes("Review job pack"),
+    bareCardHtml.includes("PACK INCOMPLETE") &&
+    !bareCardHtml.includes("Review job pack"),
+);
+const emptyMapsCardHtml = mod.renderMsReportingCard({
+  job_id: "job-empty-maps",
+  pack_truth: {
+    drafted: true,
+    presentation_kind: "ready",
+    required_documents: {},
+    closeout_documents: {},
+    report_doc_id: "report-doc-empty-maps",
+    has_selected_current_cycle_trade_report: true,
+  },
+});
+check(
+  "Approvals card rejects empty document maps and suppresses Review job pack",
+  emptyMapsCardHtml.includes("PACK INCOMPLETE") &&
+    !emptyMapsCardHtml.includes("Review job pack") &&
+    !emptyMapsCardHtml.includes("showMsReportingDetail('job-empty-maps')"),
 );
 const joinedCardHtml = mod.renderMsReportingCard(
   mod._msSesQueueCardRow(JOB, queueRow, {
@@ -2494,18 +2564,12 @@ check(
 // ── 16. The board door (openMakesafeJob, extracted from ops.html) ───────────
 const OPS_SRC = join(__dirname, "..", "ops.html");
 const opsCode = readFileSync(OPS_SRC, "utf8");
-const completenessStart = opsCode.indexOf("function makesafePackCompletenessVerdict(pack) {");
-const completenessEnd = opsCode.indexOf("/**\n * ONE adaptive entry", completenessStart);
+const makesafePackCompletenessVerdict = mod.makesafePackCompletenessVerdict;
 check(
-  "ops.html pack-completeness verdict source located for extraction",
-  completenessStart > 0 && completenessEnd > completenessStart,
+  "cockpit module exports the one pack-completeness verdict used by ops.html",
+  typeof makesafePackCompletenessVerdict === "function" &&
+    !opsCode.includes("function makesafePackCompletenessVerdict(pack) {"),
 );
-const completenessSrc = completenessStart > 0 && completenessEnd > completenessStart
-  ? opsCode.slice(completenessStart, completenessEnd)
-  : "function makesafePackCompletenessVerdict() { return { ready: false }; }";
-const makesafePackCompletenessVerdict = new Function(
-  '"use strict";\n' + completenessSrc + "\nreturn makesafePackCompletenessVerdict;",
-)();
 const doorStart = opsCode.indexOf("async function openMakesafeJob(jobId) {");
 const doorEnd = opsCode.indexOf("/**\n * Mount a board overlay", doorStart);
 check(
@@ -2585,12 +2649,14 @@ function makeReviewAffordance(queue) {
     "makesafeCanonicalStageOf",
     "makesafeHasDraftedPack",
     "makesafePackCompletenessVerdict",
+    "makesafePackTruthFromCanonicalRow",
     '"use strict";\n' + affordanceSrc + "\nreturn makesafeCardHasReviewAffordance;",
   )(
     queue,
     (row) => String((row && row.canonical_stage) || "").toLowerCase(),
     (row) => !!(row && row.report_pack && row.report_pack.drafted === true),
     makesafePackCompletenessVerdict,
+    mod.makesafePackTruthFromCanonicalRow,
   );
 }
 const makesafeCardHasReviewAffordance = makeReviewAffordance({});
@@ -2659,6 +2725,8 @@ const COMPLETE_PACK = {
   drafted: true,
   state: "drafted",
   presentation_kind: "ready",
+  report_doc_id: "report-doc-1",
+  has_selected_current_cycle_trade_report: true,
   required_documents: { report: true, invoice: true, swms: false },
   closeout_documents: { report: true, invoice: true, swms: false },
 };
@@ -2666,6 +2734,35 @@ const INCOMPLETE_PACK = {
   ...COMPLETE_PACK,
   closeout_documents: { report: false, invoice: true, swms: false },
 };
+
+check(
+  "empty document maps fail closed instead of laundering a ready label",
+  makesafePackCompletenessVerdict({
+    drafted: true,
+    presentation_kind: "ready",
+    required_documents: {},
+    closeout_documents: {},
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+  }).ready === false,
+);
+check(
+  "map-less legacy readiness requires both the report pointer and selected current-cycle report",
+  makesafePackCompletenessVerdict({
+    drafted: true,
+    report_doc_id: "report-doc-1",
+    has_selected_current_cycle_trade_report: true,
+  }).ready === true &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      report_doc_id: "report-doc-1",
+      has_selected_current_cycle_trade_report: false,
+    }).ready === false &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      has_selected_current_cycle_trade_report: true,
+    }).ready === false,
+);
 
 for (const substatus of [
   "awaiting_portal_completion",

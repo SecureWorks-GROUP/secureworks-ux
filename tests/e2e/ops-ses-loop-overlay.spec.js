@@ -17,6 +17,8 @@ test('Docs Ready cards: complete drafted pack opens review/send; chips match pac
           drafted: true,
           docket_revision_id: c.pack.docket_revision_id || null,
           presentation_kind: c.pack.presentation_kind,
+          report_doc_id: c.pack.report_doc_id,
+          has_selected_current_cycle_trade_report: true,
           required_documents: c.pack.required_documents,
           closeout_documents: c.pack.closeout_documents,
         };

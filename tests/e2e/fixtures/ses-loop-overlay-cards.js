@@ -27,6 +27,7 @@ function baseRow(over) {
     has_wo: false,
     missing_docs: ['wo'],
     has_report_doc: false,
+    report: { state: 'submitted', cycle_number: 1 },
     has_swms_doc: false,
     invoice_status: 'not_ready',
   }, over || {});
@@ -38,6 +39,7 @@ const pack237 = {
   sent: false,
   docket_revision_id: DOCKET_237,
   presentation_kind: 'ready',
+  report_doc_id: 'report-doc-261237',
   required_documents: { report: true, invoice: true, swms: true },
   closeout_documents: { report: true, invoice: true, swms: true },
 };
@@ -48,6 +50,7 @@ const pack241 = {
   sent: false,
   docket_revision_id: DOCKET_241,
   presentation_kind: 'ready',
+  report_doc_id: 'report-doc-261241',
   required_documents: { report: true, invoice: true, swms: true },
   closeout_documents: { report: true, invoice: true, swms: true },
   artifacts: [
@@ -111,6 +114,14 @@ const overlay = {
     site_suburb: 'Perth',
     makesafe_job_family: 'physical_makesafe',
     makesafe_job_family_label: 'Make safe',
+    pack_truth: {
+      drafted: true,
+      presentation_kind: 'ready',
+      report_doc_id: 'report-doc-261241',
+      has_selected_current_cycle_trade_report: true,
+      required_documents: pack241.required_documents,
+      closeout_documents: pack241.closeout_documents,
+    },
   },
   ctx: {
     jobId: JOB_241,
@@ -152,6 +163,12 @@ const overlay = {
       },
     },
     pack: {
+      drafted: true,
+      presentation: { kind: 'ready', reason: null },
+      report_doc_id: 'report-doc-261241',
+      has_selected_current_cycle_trade_report: true,
+      required_documents: pack241.required_documents,
+      closeout_documents: pack241.closeout_documents,
       docket: {
         id: DOCKET_241,
         local_invoice_proposal: {

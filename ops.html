@@ -6106,7 +6106,7 @@
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=6"></script>
+<script src="modules/ops-makesafe-reporting-cockpit.js?v=7"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
@@ -12024,44 +12024,6 @@ function closeMakesafeReportingOverlay() {
   if (el) el.remove();
 }
 
-// One fail-closed verdict owns every send/review affordance. The backend's
-// presentation_kind is necessary but not sufficient: every document marked
-// required must also have exact closeout truth. This prevents a stale or
-// contradictory `ready` label from laundering a missing pack pointer.
-function makesafePackCompletenessVerdict(pack) {
-  pack = (pack && typeof pack === 'object') ? pack : {};
-  var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
-  var required = (pack.required_documents && typeof pack.required_documents === 'object'
-    && !Array.isArray(pack.required_documents)) ? pack.required_documents : null;
-  var closeout = (pack.closeout_documents && typeof pack.closeout_documents === 'object'
-    && !Array.isArray(pack.closeout_documents)) ? pack.closeout_documents : null;
-  var missingRequired = [];
-  if (required && closeout) {
-    Object.keys(required).forEach(function(key) {
-      if (required[key] === true && closeout[key] !== true) missingRequired.push(key);
-    });
-  }
-  var ready = presentationKind === 'ready' && !!required && !!closeout
-    && missingRequired.length === 0;
-  var reason = '';
-  if (!ready) {
-    if (missingRequired.length) {
-      reason = 'Required pack pointer is missing or unresolved: ' + missingRequired.join(', ');
-    } else if (!required || !closeout) {
-      reason = 'Required and closeout document truth is unavailable';
-    } else {
-      reason = String(pack.presentation_reason || '').trim()
-        || 'The pack is not presented as ready';
-    }
-  }
-  return {
-    ready: ready,
-    presentation_kind: presentationKind,
-    missing_required: missingRequired,
-    reason: reason
-  };
-}
-
 /**
  * ONE adaptive entry for a make-safe board card. A single click opens ONE screen
  * that ADAPTS to the pack state:
@@ -12879,14 +12841,10 @@ function rememberMakesafeCanonicalStage(row) {
   if (stage) _makesafeCanonicalStageById[row.id] = stage;
   if (row.pack && typeof row.pack === 'object') {
     _makesafeCanonicalPackById[row.id] = makesafeHasDraftedPack({ report_pack: row.pack });
-    _makesafeCanonicalPackMetaById[row.id] = {
-      drafted: !!_makesafeCanonicalPackById[row.id],
-      docket_revision_id: row.pack.docket_revision_id || null,
-      presentation_kind: row.pack.presentation_kind || null,
-      presentation_reason: row.pack.presentation_reason || null,
-      required_documents: row.pack.required_documents || null,
-      closeout_documents: row.pack.closeout_documents || null
-    };
+    _makesafeCanonicalPackMetaById[row.id] = Object.assign(
+      makesafePackTruthFromCanonicalRow(row),
+      { docket_revision_id: row.pack.docket_revision_id || null }
+    );
   }
   // Remember the normalised live portal capture so the Docs Ready cockpit (a
   // separate module) can show the same thumb + chip by job id without re-deriving.
@@ -13199,6 +13157,7 @@ function mapCanonicalMakesafeRow(row, enrich, opts) {
   j.report_status = report.state || null;
   j.report = report;
   j.report_pack = pack;
+  j.report_doc_id = pack.report_doc_id || row.report_doc_id || null;
   j.pack_sent = pack.sent === true;
   j.sent_to_builder = pack.sent === true;
   j.has_report_doc = docs.report === true;
@@ -14059,10 +14018,9 @@ function renderMakesafePortalThumbForJob(jobId, variant) {
 // No substatus, declared stage, or computed status can manufacture this
 // affordance, and a card with no drafted pack never gets one (261243).
 function makesafeCardHasReviewAffordance(j, status, packCompleteness) {
-  var pack = (j && j.pack && typeof j.pack === 'object')
-    ? j.pack
-    : ((j && j.report_pack && typeof j.report_pack === 'object') ? j.report_pack : {});
-  packCompleteness = packCompleteness || makesafePackCompletenessVerdict(pack);
+  packCompleteness = packCompleteness || makesafePackCompletenessVerdict(
+    makesafePackTruthFromCanonicalRow(j)
+  );
   return status === 'report_ready'
     && makesafeCanonicalStageOf(j) === 'report_ready'
     && packCompleteness.ready
@@ -14107,9 +14065,11 @@ function renderMakesafeCard(j, status) {
   // reads "Report pack drafted", so stage + substatus alone must not be allowed to
   // assert one (see makesafeHasDraftedPack).
   var backendStage = j.board_stage || j.makesafe_stage || '';
-  var packForCompleteness = (j.pack && typeof j.pack === 'object')
-    ? j.pack
-    : ((j.report_pack && typeof j.report_pack === 'object') ? j.report_pack : {});
+  var packForCompleteness = makesafePackTruthFromCanonicalRow({
+    pack: (j.pack && typeof j.pack === 'object') ? j.pack : j.report_pack,
+    report: j.report,
+    report_doc_id: j.report_doc_id
+  });
   var packCompleteness = makesafePackCompletenessVerdict(packForCompleteness);
   var packPresentationReason = String(
     packCompleteness.reason ||

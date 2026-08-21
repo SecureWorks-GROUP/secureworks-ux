@@ -418,7 +418,10 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
+  // Drafted proves existence only. Without canonical presentation + required
+  // closeout truth it must not manufacture a review/send affordance.
+  expect(result.cards.drafted).toContain('Pack incomplete');
+  expect(result.cards.drafted).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 
 test('the Docs Ready column states how many cards actually have a pack', async ({ page }) => {
@@ -509,6 +512,9 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
   const result = await page.evaluate(() => {
     const pack = {
       drafted: true, state: 'drafted', sent: false,
+      presentation_kind: 'ready',
+      required_documents: { report: true, invoice: true, swms: true },
+      closeout_documents: { report: true, invoice: true, swms: true },
       artifacts: [
         { role: 'work_order', object_key: 'wo/work_order_MLB-26183PO-54000.pdf', media_type: 'application/pdf' },
         { role: 'supporting_report_pdf', object_key: 'r/Make Safe Report.pdf', media_type: 'application/pdf' },
@@ -525,7 +531,7 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
       requesting_company_slug: 'mlb',
       has_wo: false, missing_docs: ['wo'], has_report_doc: false, has_swms_doc: false,
       invoice_status: 'not_ready',
-      report_pack: { drafted: true, state: 'drafted', sent: false },
+      report_pack: pack,
     };
     const html = renderMakesafeCard(stale, 'report_ready');
     return {

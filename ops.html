@@ -13724,14 +13724,14 @@ function renderMakesafeStatusIcons(j, status) {
 
   // 2) Make-safe report
   var reportStatus = String(j.report_status || '').toLowerCase();
-  if (requiredDocs && requiredDocs.report === false) add('report', 'na', 'Rep', 'Local report: not required for this pack');
-  else if (closeoutDocs && closeoutDocs.report === true) add('report', 'done', 'Rep', 'Report: bound to this pack');
-  else if (requiredDocs && requiredDocs.report === true) add('report', 'missing', 'Rep', 'Report: required pack pointer is missing or unresolved');
-  else if (packFacts && packFacts.report) add('report', 'done', 'Rep', 'Report: attached');
-  else if (!packFacts && j.has_report_doc) add('report', 'done', 'Rep', 'Report: attached');
-  else if (!packFacts && missing.report) add('report', 'missing', 'Rep', 'Report: missing (expected)');
-  else if (!packFacts && (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted')) add('report', 'missing', 'Rep', 'Report submitted: PDF missing');
-  else add('report', 'pending', 'Rep', packFacts ? 'Report: not in this pack' : 'Report: awaiting trade report');
+  if (requiredDocs && requiredDocs.report === false) add('report', 'na', 'Report', 'Local report: not required for this pack');
+  else if (closeoutDocs && closeoutDocs.report === true) add('report', 'done', 'Report', 'Report: bound to this pack');
+  else if (requiredDocs && requiredDocs.report === true) add('report', 'missing', 'Report', 'Report: required pack pointer is missing or unresolved');
+  else if (packFacts && packFacts.report) add('report', 'done', 'Report', 'Report: attached');
+  else if (!packFacts && j.has_report_doc) add('report', 'done', 'Report', 'Report: attached');
+  else if (!packFacts && missing.report) add('report', 'missing', 'Report', 'Report: missing (expected)');
+  else if (!packFacts && (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted')) add('report', 'missing', 'Report', 'Report submitted: PDF missing');
+  else add('report', 'pending', 'Report', packFacts ? 'Report: not in this pack' : 'Report: awaiting trade report');
 
   // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
   if (requiredDocs && requiredDocs.swms === false) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);

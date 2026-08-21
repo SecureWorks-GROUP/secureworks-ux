@@ -12024,16 +12024,54 @@ function closeMakesafeReportingOverlay() {
   if (el) el.remove();
 }
 
+// One fail-closed verdict owns every send/review affordance. The backend's
+// presentation_kind is necessary but not sufficient: every document marked
+// required must also have exact closeout truth. This prevents a stale or
+// contradictory `ready` label from laundering a missing pack pointer.
+function makesafePackCompletenessVerdict(pack) {
+  pack = (pack && typeof pack === 'object') ? pack : {};
+  var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
+  var required = (pack.required_documents && typeof pack.required_documents === 'object'
+    && !Array.isArray(pack.required_documents)) ? pack.required_documents : null;
+  var closeout = (pack.closeout_documents && typeof pack.closeout_documents === 'object'
+    && !Array.isArray(pack.closeout_documents)) ? pack.closeout_documents : null;
+  var missingRequired = [];
+  if (required && closeout) {
+    Object.keys(required).forEach(function(key) {
+      if (required[key] === true && closeout[key] !== true) missingRequired.push(key);
+    });
+  }
+  var ready = presentationKind === 'ready' && !!required && !!closeout
+    && missingRequired.length === 0;
+  var reason = '';
+  if (!ready) {
+    if (missingRequired.length) {
+      reason = 'Required pack pointer is missing or unresolved: ' + missingRequired.join(', ');
+    } else if (!required || !closeout) {
+      reason = 'Required and closeout document truth is unavailable';
+    } else {
+      reason = String(pack.presentation_reason || '').trim()
+        || 'The pack is not presented as ready';
+    }
+  }
+  return {
+    ready: ready,
+    presentation_kind: presentationKind,
+    missing_required: missingRequired,
+    reason: reason
+  };
+}
+
 /**
  * ONE adaptive entry for a make-safe board card. A single click opens ONE screen
  * that ADAPTS to the pack state:
- *   - if the job has a CURRENT SES Docs Ready docket (it sits in the
+ *   - if the job has a CURRENT, complete SES Docs Ready docket (it sits in the
  *     list_ses_docs_ready_reviews queue) -> the SES review pack
  *     (showMsReportingDetail in a board overlay),
- *   - else if the canonical row already proves a drafted pack -> the SAME
+ *   - else if the canonical row already proves a complete drafted pack -> the SAME
  *     overlay (cockpit is keyed by job_id; a queue miss must not send a
  *     READY TO SEND card to job detail),
- *   - else if a legacy drafted pack is cached and genuinely actionable -> the
+ *   - else if a legacy drafted pack is cached, complete, and actionable -> the
  *     same overlay (safety only: the legacy feed is empty in production and its
  *     combined send is retired server-side, and the SES gate runs first, so
  *     this branch can never shadow an SES card),
@@ -12060,11 +12098,8 @@ async function openMakesafeJob(jobId) {
   var hasDraftedPack = (typeof _makesafeCanonicalPackById !== 'undefined') && !!_makesafeCanonicalPackById[jobId];
   var canonicalPackMeta = (typeof _makesafeCanonicalPackMetaById !== 'undefined')
     ? _makesafeCanonicalPackMetaById[jobId] : null;
-  var presentationKind = String((canonicalPackMeta && canonicalPackMeta.presentation_kind) || '').toLowerCase();
-  // A server presentation verdict is authoritative. Legacy payloads with no
-  // verdict keep the established drafted-pack fallback during deploy skew.
-  var presentationAllowsReview = !presentationKind || presentationKind === 'ready';
-  if (presentationAllowsReview && (sesEntry || hasDraftedPack) && typeof showMsReportingDetail === 'function') {
+  var packCompleteness = makesafePackCompletenessVerdict(canonicalPackMeta);
+  if (packCompleteness.ready && (sesEntry || hasDraftedPack) && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
@@ -12079,7 +12114,7 @@ async function openMakesafeJob(jobId) {
   var isFailedPack = !!(pack && pack.pack_status && pack.pack_status.status === 'failed');
   var isPortalPack = pack && !isFailedPack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
   var isActionable = pack && !isFailedPack && (pack.resume_action || isPortalPack);
-  if (presentationAllowsReview && isActionable && typeof showMsReportingDetail === 'function') {
+  if (packCompleteness.ready && isActionable && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
@@ -12818,7 +12853,9 @@ var MAKESAFE_LIVE_STAGES = ['new', 'allocated', 'trade_report_in', 'report_ready
 // canonical feed's rows. Both are dropped together on every transition.
 var _makesafeCanonicalStageById = {};
 var _makesafeCanonicalPackById = {};
-// job id -> { drafted, docket_revision_id, presentation_kind } from the canonical pack block.
+// job id -> drafted/docket coordinates plus the exact presentation inputs from
+// the canonical pack block. openMakesafeJob runs the same completeness verdict
+// as the card renderer over these fields.
 // The door uses drafted to open the review overlay without a queue hit; the
 // pack loader uses docket_revision_id when the needs_review queue missed.
 var _makesafeCanonicalPackMetaById = {};
@@ -12845,7 +12882,10 @@ function rememberMakesafeCanonicalStage(row) {
     _makesafeCanonicalPackMetaById[row.id] = {
       drafted: !!_makesafeCanonicalPackById[row.id],
       docket_revision_id: row.pack.docket_revision_id || null,
-      presentation_kind: row.pack.presentation_kind || null
+      presentation_kind: row.pack.presentation_kind || null,
+      presentation_reason: row.pack.presentation_reason || null,
+      required_documents: row.pack.required_documents || null,
+      closeout_documents: row.pack.closeout_documents || null
     };
   }
   // Remember the normalised live portal capture so the Docs Ready cockpit (a
@@ -14018,14 +14058,15 @@ function renderMakesafePortalThumbForJob(jobId, variant) {
 // the queue (SWMS-261237) must still offer the same overlay as a queued peer.
 // No substatus, declared stage, or computed status can manufacture this
 // affordance, and a card with no drafted pack never gets one (261243).
-function makesafeCardHasReviewAffordance(j, status) {
+function makesafeCardHasReviewAffordance(j, status, packCompleteness) {
   var pack = (j && j.pack && typeof j.pack === 'object')
     ? j.pack
     : ((j && j.report_pack && typeof j.report_pack === 'object') ? j.report_pack : {});
-  var presentationKind = String(pack.presentation_kind || '').toLowerCase();
+  packCompleteness = packCompleteness || makesafePackCompletenessVerdict(pack);
   return status === 'report_ready'
     && makesafeCanonicalStageOf(j) === 'report_ready'
-    && (presentationKind === 'ready' || (!presentationKind && makesafeHasDraftedPack(j)));
+    && packCompleteness.ready
+    && makesafeHasDraftedPack(j);
 }
 
 // OPT1 card ("C refined", approved 2026-06-16): a light warm card with a 3px
@@ -14053,40 +14094,32 @@ function renderMakesafeCard(j, status) {
 
   // Keep the legacy resume/send-state chip narrow: it describes the physical
   // admin_to_send_report path and must not label a pre-Xero roof pack as ready to
-  // send. The visible Review job pack BUTTON has its own drafted-pack-backed
-  // predicate (makesafeCardHasReviewAffordance) because reviewability and send
-  // readiness are different facts.
+  // send. The visible Review job pack BUTTON and the ready chip share the same
+  // exact-document completeness verdict; their remaining stage/substatus
+  // conditions only decide where that verdict is displayed.
   // Gate on the AUTHORITATIVE backend verdict, not the locally re-derived stage: the
   // local mapper coerces a not-yet-drafted `trade_report_in` job (substatus
   // admin_to_send_report) into the report_ready column, so the substatus check alone
   // would falsely advertise it as ready-to-send even though no pack is drafted (the
   // cockpit feed excludes it → "no pack found"). The backend's drafted-not-sent verdict
   // is board_stage === 'report_ready'; a report-in-but-undrafted job is 'trade_report_in'.
-  // Fallback: if a pre-#193 payload carries no board_stage, keep the old substatus-only
-  // behaviour so nothing regresses.
   // ...and, since #227, on the canonical row actually carrying a pack: the chip
   // reads "Report pack drafted", so stage + substatus alone must not be allowed to
   // assert one (see makesafeHasDraftedPack).
   var backendStage = j.board_stage || j.makesafe_stage || '';
-  var packPresentationKind = String(
-    (j.pack && j.pack.presentation_kind) ||
-    (j.report_pack && j.report_pack.presentation_kind) ||
-    (j.pack_presentation && j.pack_presentation.kind) ||
-    ''
-  ).toLowerCase();
+  var packForCompleteness = (j.pack && typeof j.pack === 'object')
+    ? j.pack
+    : ((j.report_pack && typeof j.report_pack === 'object') ? j.report_pack : {});
+  var packCompleteness = makesafePackCompletenessVerdict(packForCompleteness);
   var packPresentationReason = String(
-    (j.pack && j.pack.presentation_reason) ||
-    (j.report_pack && j.report_pack.presentation_reason) ||
-    (j.pack_presentation && j.pack_presentation.reason) ||
+    packCompleteness.reason ||
+    packForCompleteness.presentation_reason ||
     ''
   );
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
     && (backendStage ? backendStage === 'report_ready' : true)
-    && (packPresentationKind === 'ready' || (!packPresentationKind && makesafeHasDraftedPack(j)))
-    // Compatibility fallback only for older payloads that predate the honesty
-    // field. Once the server publishes a verdict, placement alone can never
-    // advertise or open a send-ready pack.
-    && (!packPresentationKind || packPresentationKind === 'ready');
+    && packCompleteness.ready
+    && makesafeHasDraftedPack(j);
   // A READY TO SEND chip whose face still says WO missing / 2/5 is a lie
   // against the pack. Prefer pack chip facts when we have them; until then
   // withhold the send chip rather than advertise a send on incomplete chips.
@@ -14095,7 +14128,7 @@ function renderMakesafeCard(j, status) {
     var missingForReady = makesafeMissingDocsSet(j);
     if (!j.has_wo && (missingForReady.wo || missingForReady.work_order)) readyToSend = false;
   }
-  var showReviewAffordance = makesafeCardHasReviewAffordance(j, status);
+  var showReviewAffordance = makesafeCardHasReviewAffordance(j, status, packCompleteness);
   // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
   // drafts feed supplies (mirrored onto the board payload by the backend). Drives the
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
@@ -14111,7 +14144,7 @@ function renderMakesafeCard(j, status) {
     + '>' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
-  } else if (status === 'report_ready' && packPresentationKind && packPresentationKind !== 'ready') {
+  } else if (status === 'report_ready' && makesafeHasDraftedPack(j) && !packCompleteness.ready) {
     html += '<span title="' + escapeAttr(packPresentationReason || 'Required pack artifacts are missing or unresolved') + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#991B1B;color:#fff;text-transform:uppercase;white-space:nowrap;">Pack incomplete</span>';
   } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
     // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).

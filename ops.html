@@ -10506,6 +10506,11 @@ function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);
   var slug = String(j.requesting_company_slug || '').toLowerCase();
   var builder = getMakesafeBuilder(j) || 'this builder';
+  var pack = j.pack && typeof j.pack === 'object' ? j.pack : {};
+  var requiredDocs = pack.required_documents && typeof pack.required_documents === 'object'
+    ? pack.required_documents : null;
+  var closeoutDocs = pack.closeout_documents && typeof pack.closeout_documents === 'object'
+    ? pack.closeout_documents : null;
   var icons = [];
   var done = 0;     // count of "done" docs
   var applicable = 0; // docs that count toward the X / N (N/A excluded)
@@ -10523,20 +10528,29 @@ function renderMakesafeStatusIcons(j, status) {
 
   // 2) Make-safe report
   var reportStatus = String(j.report_status || '').toLowerCase();
-  if (j.has_report_doc) add('report', 'done', 'Rep', 'Report: attached');
+  if (requiredDocs && requiredDocs.report === false) add('report', 'na', 'Rep', 'Local report: not required for this pack');
+  else if (closeoutDocs && closeoutDocs.report === true) add('report', 'done', 'Rep', 'Report: bound to this pack');
+  else if (requiredDocs && requiredDocs.report === true) add('report', 'missing', 'Rep', 'Report: required pack pointer is missing or unresolved');
+  else if (j.has_report_doc) add('report', 'done', 'Rep', 'Report: attached');
   else if (missing.report) add('report', 'missing', 'Rep', 'Report: missing (expected)');
   else if (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted') add('report', 'missing', 'Rep', 'Report submitted: PDF missing');
   else add('report', 'pending', 'Rep', 'Report: awaiting trade report');
 
   // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
-  if (slug !== 'mlb') add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
+  if (requiredDocs && requiredDocs.swms === false) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
+  else if (closeoutDocs && closeoutDocs.swms === true) add('swms', 'done', 'SWMS', 'SWMS: bound to this pack');
+  else if (requiredDocs && requiredDocs.swms === true) add('swms', 'missing', 'SWMS', 'SWMS: required pack pointer is missing or unresolved');
+  else if (slug !== 'mlb') add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
   else if (j.has_swms_doc) add('swms', 'done', 'SWMS', 'SWMS: attached');
   else if (missing.swms) add('swms', 'missing', 'SWMS', 'SWMS: missing (required for MLB)');
   else add('swms', 'pending', 'SWMS', 'SWMS: needed for MLB');
 
   // 4) Invoice — driven by invoice_status, escalated to missing if flagged.
   var inv = String(j.invoice_status || '').toLowerCase();
-  if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
+  if (requiredDocs && requiredDocs.invoice === false) add('invoice', 'na', 'Inv', 'Invoice: not required for this no-charge pack');
+  else if (closeoutDocs && closeoutDocs.invoice === true) add('invoice', 'done', 'Inv', 'Invoice: bound to this pack');
+  else if (requiredDocs && requiredDocs.invoice === true) add('invoice', 'missing', 'Inv', 'Invoice: required pack pointer is missing or unresolved');
+  else if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
   else if (inv === 'invoiced') add('invoice', 'done', 'Inv', 'Invoice: invoiced');
   else if (missing.invoice) add('invoice', 'missing', 'Inv', 'Invoice: missing (expected)');
   else if (inv === 'draft' || inv === 'report_ready') add('invoice', 'pending', 'Inv', 'Invoice: draft / not sent');
@@ -10678,8 +10692,22 @@ function renderMakesafeCard(j, status) {
   // Fallback: if a pre-#193 payload carries no board_stage, keep the old substatus-only
   // behaviour so nothing regresses.
   var backendStage = j.board_stage || j.makesafe_stage || '';
+  var packPresentationKind = String(
+    (j.pack && j.pack.presentation_kind) ||
+    (j.pack_presentation && j.pack_presentation.kind) ||
+    ''
+  ).toLowerCase();
+  var packPresentationReason = String(
+    (j.pack && j.pack.presentation_reason) ||
+    (j.pack_presentation && j.pack_presentation.reason) ||
+    ''
+  );
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
-    && (backendStage ? backendStage === 'report_ready' : true);
+    && (backendStage ? backendStage === 'report_ready' : true)
+    // Compatibility fallback only for older payloads that predate the honesty
+    // field. Once the server publishes a verdict, placement alone can never
+    // advertise or open a send-ready pack.
+    && (!packPresentationKind || packPresentationKind === 'ready');
   // Resume-aware chip text + colour, keyed off the per-job resume_action the report-
   // drafts feed supplies (mirrored onto the board payload by the backend). Drives the
   // Report Ready chip label so ops can tell at a glance which kind of action a card needs.
@@ -10692,6 +10720,8 @@ function renderMakesafeCard(j, status) {
   html += '<span class="ms-ttag">' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
+  } else if (status === 'report_ready' && packPresentationKind && packPresentationKind !== 'ready') {
+    html += '<span title="' + escapeAttr(packPresentationReason || 'Required pack artifacts are missing or unresolved') + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#991B1B;color:#fff;text-transform:uppercase;white-space:nowrap;">Pack incomplete</span>';
   } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
     // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).
     // Neutral chip — deliberately NOT teal/"ready" — so the card reads honestly while

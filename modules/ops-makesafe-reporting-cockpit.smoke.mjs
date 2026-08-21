@@ -278,6 +278,8 @@ const exposed = [
   "_msSesPickRelease",
   "_msSesResumableRelease",
   "_msSesReleaseAlreadySendable",
+  "_msSesReleaseInFlight",
+  "_msSesReleaseBoundToCurrentPack",
   "_msSesReleaseApproveAlreadyDone",
   // Legacy symbols that MUST be gone:
   // The two-press pair is retired: ONE press runs the whole guarded chain, so
@@ -408,6 +410,47 @@ const PHOTO_HASH_1 = "sha256:" + "b".repeat(64);
 const PHOTO_HASH_2 = "sha256:" + "c".repeat(64);
 const REPORT_HASH = "sha256:" + "d".repeat(64);
 const XERO_PDF_HASH = "sha256:" + "e".repeat(64);
+const STALE_DOCKET = "22222222-2222-4222-8222-222222222222";
+const STALE_HASH = "sha256:" + "f".repeat(64);
+
+function inspectInFlight(over) {
+  const o = over || {};
+  const docketId = o.docketRevisionId || DOCKET_REV;
+  const hash = o.outputHash || HASH;
+  const relId = o.releaseRevisionId || "rel-northam";
+  const state = o.state || "dispatching";
+  const memberDocket = o.memberDocketRevisionId || docketId;
+  return {
+    docket: { docket_revision_id: docketId, output_content_hash: hash },
+    review: {
+      docket_revision_id: docketId,
+      docket_output_content_hash: hash,
+      review_state: "signed_off",
+    },
+    release: {
+      release_revision_id: relId,
+      state: state,
+      members: [{ job_id: JOB, docket_revision_id: memberDocket }],
+    },
+    release_send_progress: {
+      kind: o.progress || "partially_released",
+      release_revision_id: relId,
+      release_state: state,
+      proved_route_kinds: ["report"],
+      missing_route_kinds: ["invoice", "photo"],
+    },
+  };
+}
+
+function resumableCtx(over) {
+  const o = over || {};
+  return {
+    jobId: JOB,
+    docketRevisionId: o.screenDocket || DOCKET_REV,
+    outputHash: o.screenHash || HASH,
+    sesInspect: inspectInFlight(o),
+  };
+}
 
 // The legacy drafts feed row. Still stubbed so the smoke proves the module
 // chooses NOT to read it — a card can only ever come from the SES queue.
@@ -1418,8 +1461,9 @@ check(
 );
 
 // ── 8b. SEND IT on a Northam-class in-flight release: stamp is armed even
-//        when send_it.enabled is false, and the press resumes execute on the
-//        existing revision (no new prepare, no second approve). ──────────────
+//        when send_it.enabled is false ONLY if inspect is already dispatching
+//        the current on-screen docket, and the press resumes execute on that
+//        revision (no new prepare, no second approve). ───────────────────────
 {
   const northamCockpit = cockpitSendReady();
   northamCockpit.controls.approve_invoice.enabled = false;
@@ -1432,19 +1476,9 @@ check(
   northamPack.review.review_state = "signed_off";
   behaviour.fetch["query_ses_review_cockpit"] = northamCockpit;
   behaviour.fetch["get_ses_reviewable_pack"] = northamPack;
-  behaviour.fetch["inspect_ses_pack"] = {
-    release: {
-      release_revision_id: "rel-northam",
-      state: "dispatching",
-    },
-    release_send_progress: {
-      kind: "partially_released",
-      release_revision_id: "rel-northam",
-      release_state: "dispatching",
-      proved_route_kinds: ["report"],
-      missing_route_kinds: ["invoice", "photo"],
-    },
-  };
+  behaviour.fetch["inspect_ses_pack"] = inspectInFlight({
+    releaseRevisionId: "rel-northam",
+  });
   behaviour.post["execute_ses_release_revision"] = {
     state: "released",
     route_proofs: [
@@ -1465,18 +1499,14 @@ check(
       /press <strong>SEND IT<\/strong>/.test(northamHtml),
   );
   check(
-    "a dispatching inspect release is resumable; a released one is not",
+    "a dispatching inspect release bound to the on-screen docket is resumable; a released one is not",
     typeof mod._msSesResumableRelease === "function" &&
-      !!mod._msSesResumableRelease({
-        sesInspect: {
-          release: { release_revision_id: "rel-northam", state: "dispatching" },
-        },
-      }) &&
-      !mod._msSesResumableRelease({
-        sesInspect: {
-          release: { release_revision_id: "rel-done", state: "released" },
-        },
-      }),
+      !!mod._msSesResumableRelease(resumableCtx({ releaseRevisionId: "rel-northam" })) &&
+      !mod._msSesResumableRelease(resumableCtx({
+        releaseRevisionId: "rel-done",
+        state: "released",
+        progress: "released",
+      })),
   );
   calls.opsPost.length = 0;
   calls.opsPostJwt.length = 0;
@@ -1510,17 +1540,13 @@ check(
         cockpit: {
           controls: { send_it: { enabled: false, release_revision_id: "rel-northam" } },
         },
-        sesInspect: {
-          release: { release_revision_id: "rel-northam", state: "dispatching" },
-        },
+        sesInspect: inspectInFlight({ releaseRevisionId: "rel-northam" }),
       }).release_revision_id === "rel-northam" &&
       mod._msSesPickRelease({
         cockpit: {
           controls: { send_it: { enabled: false, release_revision_id: "rel-northam" } },
         },
-        sesInspect: {
-          release: { release_revision_id: "rel-northam", state: "dispatching" },
-        },
+        sesInspect: inspectInFlight({ releaseRevisionId: "rel-northam" }),
       }).state === "dispatching",
   );
   check(
@@ -1535,9 +1561,7 @@ check(
         cockpit: {
           sections: { release: { id: "docket-id", kind: "dispatching" } },
         },
-        sesInspect: {
-          release: { release_revision_id: "rel-real", state: "dispatching" },
-        },
+        sesInspect: inspectInFlight({ releaseRevisionId: "rel-real" }),
       }).release_revision_id === "rel-real",
   );
   delete behaviour.fetch.inspect_ses_pack;
@@ -1554,9 +1578,9 @@ check(
   prepExists.status = 409;
   prepExists.refusal = { code: "release_already_prepared" };
   behaviour.post["prepare_ses_release_revision"] = prepExists;
-  behaviour.fetch["inspect_ses_pack"] = {
-    release: { release_revision_id: "rel-existing", state: "dispatching" },
-  };
+  behaviour.fetch["inspect_ses_pack"] = inspectInFlight({
+    releaseRevisionId: "rel-existing",
+  });
   behaviour.post["execute_ses_release_revision"] = {
     state: "released",
     route_proofs: [{ route_kind: "report" }],
@@ -1598,13 +1622,9 @@ check(
   calls.opsPostJwt.length = 0;
   await mod.sesApproveAndSend(JOB);
   check(
-    "prepare failure can parse a release_revision_id off the refusal when inspect is empty",
+    "a refusal id with no inspect in-flight bind is not resumed",
     calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
-      calls.opsPost.some(
-        (c) =>
-          c.action === "execute_ses_release_revision" &&
-          c.body.release_revision_id === "aa111111-1111-4111-8111-111111111111",
-      ),
+      !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
   );
   delete behaviour.fetch.inspect_ses_pack;
   seedSendReady();
@@ -1654,6 +1674,136 @@ check(
           c.action === "execute_ses_release_revision" &&
           c.body.release_revision_id === "rel-1",
       ),
+  );
+  seedSendReady();
+}
+
+// ── 8e. Firstmate locks: arm only inspect-dispatching-bound; resume only
+//        when the release members / hashes match the pack on screen. ─────────
+{
+  const leftoverApproved = {
+    jobId: JOB,
+    docketRevisionId: DOCKET_REV,
+    outputHash: HASH,
+    cockpit: {
+      controls: {
+        approve_invoice: { enabled: false },
+        send_it: {
+          enabled: false,
+          disabled_reason: "The system has not unlocked sending yet.",
+          label: "SEND IT",
+        },
+      },
+      sections: {},
+    },
+    sesInspect: {
+      docket: { docket_revision_id: DOCKET_REV, output_content_hash: HASH },
+      release: {
+        release_revision_id: "rel-leftover",
+        state: "approved",
+        members: [{ job_id: JOB, docket_revision_id: DOCKET_REV }],
+      },
+    },
+  };
+  const leftoverHtml = mod._msSesActionBlock(JOB, leftoverApproved);
+  check(
+    "a leftover approved inspect release does not arm SEND IT when send_it.enabled is false",
+    /msr-stamp send" disabled/.test(leftoverHtml) &&
+      !leftoverHtml.includes('id="msSesApproveAndSendBtn"') &&
+      !mod._msSesResumableRelease(leftoverApproved) &&
+      !mod._msSesReleaseInFlight(leftoverApproved.sesInspect.release),
+  );
+
+  check(
+    "a dispatching inspect release for an older docket is not resumable",
+    !mod._msSesResumableRelease(resumableCtx({
+      memberDocketRevisionId: STALE_DOCKET,
+    })) &&
+      !mod._msSesReleaseBoundToCurrentPack(
+        inspectInFlight({ memberDocketRevisionId: STALE_DOCKET }).release,
+        { jobId: JOB, docketRevisionId: DOCKET_REV, outputHash: HASH },
+      ),
+  );
+
+  check(
+    "a dispatching inspect release with no bind coords is not resumable",
+    !mod._msSesResumableRelease({
+      jobId: JOB,
+      docketRevisionId: DOCKET_REV,
+      outputHash: HASH,
+      sesInspect: {
+        release: { release_revision_id: "rel-unbound", state: "dispatching" },
+      },
+    }),
+  );
+
+  check(
+    "release.content_hash is not treated as the docket output hash",
+    !mod._msSesReleaseBoundToCurrentPack(
+      {
+        release_revision_id: "rel-hash",
+        state: "dispatching",
+        content_hash: HASH,
+      },
+      { jobId: JOB, docketRevisionId: DOCKET_REV, outputHash: HASH },
+    ) &&
+      !!mod._msSesResumableRelease(resumableCtx()),
+  );
+
+  seedSendReady();
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  mod._msSesPackCache[JOB].sesInspect = inspectInFlight({
+    memberDocketRevisionId: STALE_DOCKET,
+    releaseRevisionId: "rel-stale",
+  });
+  behaviour.post["prepare_ses_release_revision"] = { release: { id: "rel-fresh" } };
+  behaviour.postJwt["approve_ses_release_revision"] = { approval: { id: "ap-fresh" } };
+  behaviour.post["execute_ses_release_revision"] = {
+    state: "released",
+    route_proofs: [{ route_kind: "report" }],
+  };
+  calls.opsPost.length = 0;
+  calls.opsPostJwt.length = 0;
+  await mod.sesApproveAndSend(JOB);
+  check(
+    "send_it.enabled with a stale in-flight inspect release prepares a new one instead of executing the old",
+    calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+      calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "rel-fresh",
+      ) &&
+      !calls.opsPost.some(
+        (c) =>
+          c.action === "execute_ses_release_revision" &&
+          c.body.release_revision_id === "rel-stale",
+      ),
+  );
+
+  const staleArmCtx = {
+    jobId: JOB,
+    docketRevisionId: DOCKET_REV,
+    outputHash: HASH,
+    cockpit: {
+      controls: {
+        approve_invoice: { enabled: false },
+        send_it: {
+          enabled: false,
+          disabled_reason: "Release already dispatching.",
+          label: "SEND IT",
+        },
+      },
+      sections: {},
+    },
+    sesInspect: inspectInFlight({ memberDocketRevisionId: STALE_DOCKET }),
+  };
+  const staleArmHtml = mod._msSesActionBlock(JOB, staleArmCtx);
+  check(
+    "send_it.enabled false stays unarmed when inspect is dispatching an older revise",
+    /msr-stamp send" disabled/.test(staleArmHtml) &&
+      !staleArmHtml.includes('id="msSesApproveAndSendBtn"') &&
+      !mod._msSesResumableRelease(staleArmCtx),
   );
   seedSendReady();
 }

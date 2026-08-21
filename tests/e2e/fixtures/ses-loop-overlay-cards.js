@@ -209,9 +209,24 @@ const northam = {
       artifacts: [],
     },
     sesInspect: {
+      docket: {
+        docket_revision_id: 'd-northam',
+        output_content_hash: 'sha256:northam',
+      },
+      review: {
+        docket_revision_id: 'd-northam',
+        docket_output_content_hash: 'sha256:northam',
+        review_state: 'signed_off',
+      },
       release: {
         release_revision_id: '1be0f185-b8c9-572c-b57f-00dde333b591',
         state: 'dispatching',
+        members: [
+          {
+            job_id: 'a6eac431-01f0-41df-8ec6-e79e6925f76e',
+            docket_revision_id: 'd-northam',
+          },
+        ],
       },
       release_send_progress: {
         kind: 'partially_released',

@@ -22,9 +22,13 @@
 // (job_id -> docket_revision_id; needs_review dockets only — a signed-off
 // docket has already passed that queue, so the exact-pack view is offered only
 // while the pack is in the queue). inspect_ses_pack is a READ used to see an
-// in-flight release (Northam-class: already approved, still dispatching) so
-// SEND IT can resume execute_ses_release_revision instead of preparing a new
-// one. It is not a third send verb.
+// in-flight release (Northam-class: already dispatching / partially released)
+// so SEND IT can resume execute_ses_release_revision instead of preparing a
+// new one. Arming ignores send_it.enabled only for that current inspect
+// release, and only while it is already underway AND bound to the docket /
+// output hash on screen. A leftover approved/execute_ready object, or a
+// release for an older revise, does not arm and is not resumed. It is not a
+// third send verb.
 // ACTION (per-job only — never a multi-job release): ONE PRESS, running the
 // same guarded server chain the retired two stamps ran, in the same order, with
 // every server guard, both recorded approvals and the hash binding unchanged:
@@ -34,9 +38,9 @@
 //      when the backend arms approve_invoice; the pack is then re-read so the
 //      sign-off binds the invoice-bound bytes that are about to be sent.
 //   2. sign_off_ses_docket (JWT, hash-bound to the displayed pack).
-//   3. prepare_ses_release_revision { job_ids: [job] } — skipped when a
-//      resumable release already exists (approved / dispatching / partially
-//      released).
+//   3. prepare_ses_release_revision { job_ids: [job] } — skipped when the
+//      current inspect release is already dispatching (or equivalent in-flight)
+//      AND bound to the docket_revision_id / output hash on screen.
 //   4. approve_ses_release_revision (JWT) — the send approval; skipped when
 //      that release is already approved, or continued past an already-approved
 //      refusal so execute can finish the send.
@@ -741,9 +745,11 @@ async function _msSesLoadPackContext(jobId, retried) {
 }
 
 /**
- * READ-ONLY: attach the shared pack inspection (release id + send progress)
- * so SEND IT can resume an in-flight execute without a new send verb.
- * A miss leaves arming on the cockpit flags alone.
+ * READ-ONLY: attach the shared pack inspection (release id + send progress
+ * + docket / output hash) so SEND IT can resume an in-flight execute that
+ * is bound to the bytes on screen, without a new send verb. A miss, a
+ * leftover approved object, or a release for an older revise leaves arming
+ * on the cockpit flags alone.
  */
 async function _msSesHydrateSesInspect(ctx) {
   if (!ctx || !ctx.jobId) return;
@@ -1415,9 +1421,9 @@ function _msSesOnFeedbackThreadRendered(jobId, state) {
 
 /**
  * The one next action. Backend control flags own the words when they are
- * armed. An in-flight SES release (already approved, still dispatching) is
- * also a sendable next action — that is SEND IT resuming execute, not a new
- * send verb.
+ * armed. A current inspect release already dispatching (bound to the pack
+ * on screen) is also a sendable next action — that is SEND IT resuming
+ * execute, not a new send verb. Leftover approved objects do not qualify.
  */
 function _msSesNextAction(cockpit, ctx) {
   var controls = (cockpit && cockpit.controls) || {};
@@ -3456,13 +3462,16 @@ function _msReportingFormatTimestamp(iso) {
  * still voids the press.
  *
  * The stamp is armed by the backend control flags — approve_invoice when the
- * invoice still needs authorising, send_it when it does not — OR by a
- * resumable in-flight release (already approved / dispatching / partially
- * released). A disabled stamp carries no id and no onclick (nothing for a
- * click or a script to reach), with the backend's own disabled_reason
- * underneath. A HOLD points back at the amber block above. The retired 410
- * combined path is never called. Send-only word is SEND IT; invoice+send stays
- * APPROVE AND SEND. Both press sesApproveAndSend.
+ * invoice still needs authorising, send_it when it does not — OR by the
+ * current inspect release already dispatching (or equivalent in-flight) and
+ * bound to the docket / output hash on screen. send_it.enabled /
+ * disabled_reason still apply unless that inspect release is already
+ * underway. A leftover approved object, or a release for an older pack
+ * revise, does not arm. A disabled stamp carries no id and no onclick
+ * (nothing for a click or a script to reach), with the backend's own
+ * disabled_reason underneath. A HOLD points back at the amber block above.
+ * The retired 410 combined path is never called. Send-only word is SEND IT;
+ * invoice+send stays APPROVE AND SEND. Both press sesApproveAndSend.
  */
 function _msSesRelId(obj, allowId) {
   if (obj == null) return '';
@@ -3496,7 +3505,40 @@ function _msSesAsRelease(obj, opts) {
   // kind-as-progress is only honest on inspect release/progress objects.
   // Pack, docket and sections objects use kind for document/route roles.
   if (opts.kindAsProgress && obj.kind) copy.kind = obj.kind;
+  // Binding coords: docket revision + output hash. Never copy content_hash —
+  // on inspect.release that is the RELEASE hash, not the docket output hash.
+  if (obj.docket_revision_id) copy.docket_revision_id = obj.docket_revision_id;
+  if (obj.ses_docket_revision_id) copy.ses_docket_revision_id = obj.ses_docket_revision_id;
+  if (obj.expected_docket_revision_id) copy.expected_docket_revision_id = obj.expected_docket_revision_id;
+  if (obj.output_content_hash) copy.output_content_hash = obj.output_content_hash;
+  if (obj.docket_output_content_hash) copy.docket_output_content_hash = obj.docket_output_content_hash;
+  if (obj.expected_output_content_hash) copy.expected_output_content_hash = obj.expected_output_content_hash;
+  if (Array.isArray(obj.members)) {
+    copy.members = [];
+    for (var mi = 0; mi < obj.members.length; mi++) {
+      var m = obj.members[mi];
+      if (!m || typeof m !== 'object') continue;
+      var mc = {};
+      if (m.job_id) mc.job_id = m.job_id;
+      if (m.docket_revision_id) mc.docket_revision_id = m.docket_revision_id;
+      if (m.output_content_hash) mc.output_content_hash = m.output_content_hash;
+      if (m.docket_output_content_hash) mc.docket_output_content_hash = m.docket_output_content_hash;
+      copy.members.push(mc);
+    }
+  }
   return copy;
+}
+
+function _msSesInspectReleaseCandidates(ctx) {
+  ctx = ctx || {};
+  var inspect = ctx.sesInspect && typeof ctx.sesInspect === 'object' ? ctx.sesInspect : {};
+  var inspectPack = inspect.pack && typeof inspect.pack === 'object' ? inspect.pack : {};
+  return [
+    { obj: inspect.release, allowId: true, kindAsProgress: true },
+    { obj: inspect.release_revision, allowId: true, kindAsProgress: true },
+    { obj: inspect.release_send_progress, allowId: false, kindAsProgress: true },
+    { obj: inspectPack.release, allowId: true, kindAsProgress: true }
+  ];
 }
 
 function _msSesPickRelease(ctx) {
@@ -3507,35 +3549,31 @@ function _msSesPickRelease(ctx) {
   var pack = ctx.pack && typeof ctx.pack === 'object' ? ctx.pack : {};
   var inner = pack.pack && typeof pack.pack === 'object' ? pack.pack : pack;
   var docket = inner.docket && typeof inner.docket === 'object' ? inner.docket : {};
-  var inspect = ctx.sesInspect && typeof ctx.sesInspect === 'object' ? ctx.sesInspect : {};
-  var inspectPack = inspect.pack && typeof inspect.pack === 'object' ? inspect.pack : {};
   // Walk until an IN-FLIGHT release, not the first id-bearing object. A bare
   // send_it.release_revision_id is only an id — returning it would hide
   // inspect.release { state: dispatching } and leave Northam SEND IT disabled.
-  // Pack / docket / sections never donate .id, revision_id, or kind-as-progress.
+  // Leftover approved / execute_ready is not in-flight. Pack / docket /
+  // sections never donate .id, revision_id, or kind-as-progress.
   var candidates = [
     { obj: sendIt.release, allowId: false, kindAsProgress: false },
     { obj: sendIt.release_revision, allowId: false, kindAsProgress: false },
     { obj: sendIt.release_revision_id, allowId: false, kindAsProgress: false },
     { obj: sections.release, allowId: false, kindAsProgress: false },
     { obj: sections.release_revision, allowId: false, kindAsProgress: false },
-    { obj: ctx.sesRelease, allowId: false, kindAsProgress: false },
-    { obj: inspect.release, allowId: true, kindAsProgress: true },
-    { obj: inspect.release_revision, allowId: true, kindAsProgress: true },
-    { obj: inspect.release_send_progress, allowId: false, kindAsProgress: true },
-    { obj: inspectPack.release, allowId: true, kindAsProgress: true },
+    { obj: ctx.sesRelease, allowId: false, kindAsProgress: false }
+  ].concat(_msSesInspectReleaseCandidates(ctx)).concat([
     { obj: inner.release, allowId: false, kindAsProgress: false },
     { obj: inner.release_revision, allowId: false, kindAsProgress: false },
     { obj: pack.release, allowId: false, kindAsProgress: false },
     { obj: docket.release, allowId: false, kindAsProgress: false }
-  ];
+  ]);
   var i, rel;
   for (i = 0; i < candidates.length; i++) {
     rel = _msSesAsRelease(candidates[i].obj, {
       allowId: candidates[i].allowId,
       kindAsProgress: candidates[i].kindAsProgress
     });
-    if (rel && _msSesReleaseAlreadySendable(rel)) return rel;
+    if (rel && _msSesReleaseInFlight(rel)) return rel;
   }
   return null;
 }
@@ -3556,16 +3594,14 @@ function _msSesReleaseState(rel) {
   return String(rel.state || rel.release_state || '').trim().toLowerCase();
 }
 
-function _msSesReleaseAlreadySendable(rel) {
+function _msSesReleaseInFlight(rel) {
   if (!rel || typeof rel !== 'object') return false;
   var state = _msSesReleaseState(rel);
   var progress = _msSesReleaseProgress(rel);
   if (state === 'released' || progress === 'released') return false;
   return (
-    state === 'approved' ||
     state === 'dispatching' ||
     state === 'releasing' ||
-    state === 'execute_ready' ||
     state === 'partially_released' ||
     progress === 'dispatching' ||
     progress === 'partially_released' ||
@@ -3573,9 +3609,135 @@ function _msSesReleaseAlreadySendable(rel) {
   );
 }
 
+function _msSesReleaseAlreadySendable(rel) {
+  if (!rel || typeof rel !== 'object') return false;
+  if (_msSesReleaseInFlight(rel)) return true;
+  var state = _msSesReleaseState(rel);
+  // approved / execute_ready: skip-approve on a just-prepared release. Not an
+  // arm/resume reason on their own (leftover, not already underway).
+  return state === 'approved' || state === 'execute_ready';
+}
+
+function _msSesNormCoord(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function _msSesPushCoord(list, v) {
+  var n = _msSesNormCoord(v);
+  if (n && list.indexOf(n) < 0) list.push(n);
+}
+
+function _msSesCurrentPackCoords(ctx) {
+  ctx = ctx || {};
+  var pack = ctx.pack && typeof ctx.pack === 'object' ? ctx.pack : {};
+  var inner = pack.pack && typeof pack.pack === 'object' ? pack.pack : pack;
+  var docket = inner.docket && typeof inner.docket === 'object' ? inner.docket : {};
+  var review = inner.review && typeof inner.review === 'object' ? inner.review : {};
+  var story = ((ctx.cockpit && ctx.cockpit.sections) || {}).job_story || {};
+  return {
+    id: _msSesNormCoord(
+      ctx.docketRevisionId ||
+      docket.docket_revision_id ||
+      docket.id ||
+      review.docket_revision_id ||
+      story.docket_revision_id
+    ),
+    hash: _msSesNormCoord(
+      ctx.outputHash ||
+      docket.output_content_hash ||
+      review.docket_output_content_hash ||
+      story.docket_output_content_hash
+    )
+  };
+}
+
+function _msSesInspectPackCoords(ctx) {
+  var inspect = (ctx && ctx.sesInspect && typeof ctx.sesInspect === 'object')
+    ? ctx.sesInspect : {};
+  var docket = inspect.docket && typeof inspect.docket === 'object' ? inspect.docket : {};
+  var review = inspect.review && typeof inspect.review === 'object' ? inspect.review : {};
+  return {
+    id: _msSesNormCoord(docket.docket_revision_id || review.docket_revision_id),
+    hash: _msSesNormCoord(docket.output_content_hash || review.docket_output_content_hash)
+  };
+}
+
+function _msSesTakeBindCoords(obj, jobId, ids, hashes) {
+  if (!obj || typeof obj !== 'object') return;
+  _msSesPushCoord(ids, obj.docket_revision_id);
+  _msSesPushCoord(ids, obj.ses_docket_revision_id);
+  _msSesPushCoord(ids, obj.expected_docket_revision_id);
+  // Never content_hash: on inspect.release that is the RELEASE hash.
+  _msSesPushCoord(hashes, obj.output_content_hash);
+  _msSesPushCoord(hashes, obj.docket_output_content_hash);
+  _msSesPushCoord(hashes, obj.expected_output_content_hash);
+  if (!Array.isArray(obj.members)) return;
+  var wantJob = _msSesNormCoord(jobId);
+  for (var i = 0; i < obj.members.length; i++) {
+    var m = obj.members[i];
+    if (!m || typeof m !== 'object') continue;
+    if (wantJob && m.job_id && _msSesNormCoord(m.job_id) !== wantJob) continue;
+    _msSesPushCoord(ids, m.docket_revision_id);
+    _msSesPushCoord(hashes, m.output_content_hash);
+    _msSesPushCoord(hashes, m.docket_output_content_hash);
+  }
+}
+
+function _msSesReleaseBindCoords(rel, ctx) {
+  var ids = [];
+  var hashes = [];
+  var inspect = (ctx && ctx.sesInspect && typeof ctx.sesInspect === 'object')
+    ? ctx.sesInspect : {};
+  var inspectPack = inspect.pack && typeof inspect.pack === 'object' ? inspect.pack : {};
+  var jobId = ctx && ctx.jobId;
+  _msSesTakeBindCoords(rel, jobId, ids, hashes);
+  _msSesTakeBindCoords(inspect.release, jobId, ids, hashes);
+  _msSesTakeBindCoords(inspect.release_revision, jobId, ids, hashes);
+  _msSesTakeBindCoords(inspectPack.release, jobId, ids, hashes);
+  return { ids: ids, hashes: hashes };
+}
+
+function _msSesReleaseBoundToCurrentPack(rel, ctx) {
+  if (!rel || typeof rel !== 'object') return false;
+  var screen = _msSesCurrentPackCoords(ctx);
+  if (!screen.id && !screen.hash) return false;
+  var bind = _msSesReleaseBindCoords(rel, ctx);
+  if (!bind.ids.length && !bind.hashes.length) return false;
+  var i;
+  if (bind.ids.length) {
+    if (!screen.id) return false;
+    for (i = 0; i < bind.ids.length; i++) {
+      if (bind.ids[i] !== screen.id) return false;
+    }
+  }
+  if (bind.hashes.length) {
+    if (!screen.hash) return false;
+    for (i = 0; i < bind.hashes.length; i++) {
+      if (bind.hashes[i] !== screen.hash) return false;
+    }
+  }
+  var inspectCoords = _msSesInspectPackCoords(ctx);
+  if (inspectCoords.id && screen.id && inspectCoords.id !== screen.id) return false;
+  if (inspectCoords.hash && screen.hash && inspectCoords.hash !== screen.hash) return false;
+  return true;
+}
+
+function _msSesInspectInFlightRelease(ctx) {
+  var candidates = _msSesInspectReleaseCandidates(ctx);
+  var i, rel;
+  for (i = 0; i < candidates.length; i++) {
+    rel = _msSesAsRelease(candidates[i].obj, {
+      allowId: candidates[i].allowId,
+      kindAsProgress: candidates[i].kindAsProgress
+    });
+    if (rel && _msSesReleaseInFlight(rel)) return rel;
+  }
+  return null;
+}
+
 function _msSesResumableRelease(ctx) {
-  var rel = _msSesPickRelease(ctx);
-  if (!rel || !_msSesReleaseAlreadySendable(rel)) return null;
+  var rel = _msSesInspectInFlightRelease(ctx);
+  if (!rel || !_msSesReleaseBoundToCurrentPack(rel, ctx)) return null;
   return rel;
 }
 
@@ -3622,13 +3784,9 @@ function _msSesReleaseIdFromRefusal(err) {
   return m ? m[0] : '';
 }
 
-async function _msSesRecoverExistingRelease(ctx, err) {
+async function _msSesRecoverExistingRelease(ctx) {
   await _msSesHydrateSesInspect(ctx);
-  var existing = _msSesResumableRelease(ctx);
-  if (existing) return existing;
-  var parsedId = _msSesReleaseIdFromRefusal(err);
-  if (!parsedId) return null;
-  return { release_revision_id: parsedId };
+  return _msSesResumableRelease(ctx);
 }
 
 function _msSesActionBlock(jobId, ctx, dismissAction) {
@@ -3891,7 +4049,8 @@ async function _msSesRefreshPackContext(jobId) {
  *   2. sign_off_ses_docket (JWT, bound to the exact displayed pack hash) —
  *      skipped only when the tick is already recorded for the current bytes.
  *   3. prepare_ses_release_revision { job_ids: [jobId] }  (this job only) —
- *      skipped when a resumable release already exists.
+ *      skipped when the current inspect release is already dispatching (or
+ *      equivalent in-flight) and bound to the docket / output hash on screen.
  *   4. approve_ses_release_revision (JWT) — the send approval; skipped when
  *      that release is already approved, or continued past an already-approved
  *      refusal so execute can finish.
@@ -4052,9 +4211,11 @@ async function sesApproveAndSend(jobId) {
     return;
   }
 
-  // Step 3 — build the release for THIS job only, unless one is already
-  // in flight (approved / dispatching / partially released). Preparing a
-  // second release is what left Northam-class SEND IT piles on a dead door.
+  // Step 3 — build the release for THIS job only, unless the current inspect
+  // release is already dispatching (or equivalent in-flight) AND bound to
+  // the docket / output hash on screen. A leftover approved object, or a
+  // release for an older pack revise, is not resumed — prepare a new one
+  // when send_it is armed, otherwise stay unarmed.
   resumable = _msSesResumableRelease(ctx);
   var skipApprove = false;
   if (resumable) {

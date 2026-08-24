@@ -12905,7 +12905,7 @@ function resolveMakesafeDetailStage(data) {
 function readMakesafeCanonicalStagesFromFeed(params) {
   return opsFetch('makesafe_board', params)
     .then(function(payload) {
-      if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) return false;
+      if (!payload || !isSupportedMakesafeBoardContract(payload.contract_version)) return false;
       Object.keys(payload.columns || {}).forEach(function(stage) {
         (payload.columns[stage] || []).forEach(rememberMakesafeCanonicalStage);
       });
@@ -13003,7 +13003,7 @@ async function afterMakesafeStageTransition() {
 // ════════════════════════════════════════════════════════════
 // <makesafe-board-canonical>
 // The ops make-safe board's data source is `ops-api?action=makesafe_board`
-// (contract `makesafe-board.v1`, projection `ops`) — the same canonical feed the
+// (contract `makesafe-board.v1.2`, projection `ops`) — the same canonical feed the
 // Trade board consumes. It is the ONLY feed carrying `canonical_stage`: the raw
 // declared `board_stage` with the captain display ledger (`status_application`)
 // already applied.
@@ -13026,7 +13026,16 @@ async function afterMakesafeStageTransition() {
 // Never widen that whitelist with a stage/status key — that is precisely the
 // overlay-blindness this migration removed.
 // ════════════════════════════════════════════════════════════
-var MAKESAFE_BOARD_CONTRACT = 'makesafe-board.v1';
+var MAKESAFE_BOARD_CONTRACT = 'makesafe-board.v1.2';
+// Live producer is v1.2 (family-matrix required-document map). v1 stays accepted
+// so fixtures and any un-upgraded edge still paint. Unknown versions fail closed.
+var MAKESAFE_BOARD_CONTRACTS_ACCEPTED = {
+  'makesafe-board.v1': true,
+  'makesafe-board.v1.2': true
+};
+function isSupportedMakesafeBoardContract(version) {
+  return !!(version && MAKESAFE_BOARD_CONTRACTS_ACCEPTED[version]);
+}
 
 // Presentation-only keys copied verbatim off the enriched pipeline row. Every
 // one of these is dropped by the canonical projection and read by the existing
@@ -13322,7 +13331,7 @@ async function fetchMakesafeBoardData(opts) {
   // deploy does not blank the doc chips — and so a PARTIAL join still announces
   // itself rather than silently painting incomplete cards.
   var payload = await opsFetch('makesafe_board', params);
-  if (!payload || payload.contract_version !== MAKESAFE_BOARD_CONTRACT) {
+  if (!payload || !isSupportedMakesafeBoardContract(payload.contract_version)) {
     throw new Error('Unsupported make-safe board contract: ' + ((payload && payload.contract_version) || 'none'));
   }
   var canonicalRows = [];

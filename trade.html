@@ -13512,13 +13512,17 @@
 
   // ══════════════════════════════════════════════════════════════════════
   // Make-safe Trade v5 consumer. This is the only client adapter for
-  // makesafe-board.v1. It projects presentation fields only: columns and
-  // visibility are accepted exactly as the server sent them, never inferred
-  // from job_assignments.status or a display name.
+  // makesafe-board.v1.2 (v1 still accepted). It projects presentation fields
+  // only: columns and visibility are accepted exactly as the server sent them,
+  // never inferred from job_assignments.status or a display name.
   // <makesafe-trade-v5>
   var MakesafeTradeV5 = (function () {
     'use strict';
-    var VERSION = 'makesafe-board.v1';
+    var VERSION = 'makesafe-board.v1.2';
+    var ACCEPTED_VERSIONS = { 'makesafe-board.v1': true, 'makesafe-board.v1.2': true };
+    function isSupportedContract(version) {
+      return !!(version && ACCEPTED_VERSIONS[version]);
+    }
     var COLUMNS = ['New', 'Allocated', 'Complete', 'Archive'];
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
     function action(row, key) { return (((row || {}).contact || {}).actions || {})[key] || {}; }
@@ -13568,7 +13572,7 @@
       });
     }
     function validate(payload) {
-      if (!payload || payload.contract_version !== VERSION || payload.projection !== 'trade') throw new Error('Unsupported make-safe board feed');
+      if (!payload || !isSupportedContract(payload.contract_version) || payload.projection !== 'trade') throw new Error('Unsupported make-safe board feed');
       if (!payload.parity || payload.parity.ok !== true) throw new Error('Make-safe board parity check failed');
       var keys = Object.keys(payload.columns || {});
       if (keys.length !== COLUMNS.length || COLUMNS.some(function (c) { return keys.indexOf(c) < 0; })) throw new Error('Make-safe board columns do not match v5');

@@ -635,12 +635,19 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       ? _makesafeCanonicalPackMetaById[jobId]
       : null
   ) || {};
-  var reviewPack = (ctx && ctx.pack) || {};
+  var hasFreshReviewPack = !!(ctx && _msSesPlainObject(ctx.pack));
+  var reviewPack = hasFreshReviewPack ? ctx.pack : {};
   var presentation = _msSesPlainObject(reviewPack.presentation)
     ? reviewPack.presentation
     : {};
   var docket = _msSesPlainObject(reviewPack.docket) ? reviewPack.docket : {};
-  var truthSources = [reviewPack, docket, canonical];
+  // A loaded review pack is the byte-exact presentation boundary. Its document
+  // truth may use the nested docket from that same response, but it must never
+  // fall through to an older canonical board row. The cache is fallback only
+  // while no fresh review pack exists.
+  var documentTruthSources = hasFreshReviewPack
+    ? [reviewPack, docket]
+    : [canonical];
 
   function firstDefined() {
     for (var i = 0; i < arguments.length; i++) {
@@ -649,26 +656,34 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
     return null;
   }
 
-  function firstOwned(key) {
-    for (var i = 0; i < truthSources.length; i++) {
-      if (_msSesHasOwn(truthSources[i], key)) {
-        return { supplied: true, value: truthSources[i][key] };
+  function firstDefinedFrom(sources, key) {
+    for (var i = 0; i < sources.length; i++) {
+      if (sources[i][key] !== undefined && sources[i][key] !== null) {
+        return sources[i][key];
+      }
+    }
+    return null;
+  }
+
+  function firstOwnedFrom(sources, key) {
+    for (var i = 0; i < sources.length; i++) {
+      if (_msSesHasOwn(sources[i], key)) {
+        return { supplied: true, value: sources[i][key] };
       }
     }
     return { supplied: false, value: undefined };
   }
 
   // Select the engine's resolution marker, map and refusal reason from one
-  // payload object. The current byte-exact review pack outranks its docket and
-  // the cached canonical row; mixing producers or preferring the cache would
-  // manufacture requirements the reviewed revision never published.
+  // payload object. Once the byte-exact review pack is loaded, an omitted
+  // envelope stays omitted/unknown; a cached envelope cannot complete it.
   function firstRequirementEnvelope() {
     var keys = [
       'required_documents_resolved',
       'required_documents',
       'required_documents_unresolved_reason'
     ];
-    var requirementSources = [reviewPack, docket, canonical];
+    var requirementSources = hasFreshReviewPack ? [reviewPack] : [canonical];
     for (var i = 0; i < requirementSources.length; i++) {
       var source = requirementSources[i];
       if (keys.some(function(key) { return _msSesHasOwn(source, key); })) return source;
@@ -677,7 +692,7 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
   }
 
   var requirementEnvelope = firstRequirementEnvelope();
-  var closeoutTruth = firstOwned('closeout_documents');
+  var closeoutTruth = firstOwnedFrom(documentTruthSources, 'closeout_documents');
   var input = {
     drafted: firstDefined(reviewPack.drafted, docket.drafted, canonical.drafted) === true,
     presentation_kind: firstDefined(
@@ -690,30 +705,13 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       reviewPack.presentation_reason,
       canonical.presentation_reason
     ),
-    report_doc_id: firstDefined(
-      reviewPack.report_doc_id,
-      docket.report_doc_id,
-      canonical.report_doc_id
-    ),
-    invoice_doc_id: firstDefined(
-      reviewPack.invoice_doc_id,
-      docket.invoice_doc_id,
-      canonical.invoice_doc_id
-    ),
-    swms_doc_id: firstDefined(
-      reviewPack.swms_doc_id,
-      docket.swms_doc_id,
-      canonical.swms_doc_id
-    ),
-    report_doc_resolved: firstDefined(
-      reviewPack.report_doc_resolved,
-      docket.report_doc_resolved,
-      canonical.report_doc_resolved
-    ),
-    has_selected_current_cycle_trade_report: firstDefined(
-      reviewPack.has_selected_current_cycle_trade_report,
-      docket.has_selected_current_cycle_trade_report,
-      canonical.has_selected_current_cycle_trade_report
+    report_doc_id: firstDefinedFrom(documentTruthSources, 'report_doc_id'),
+    invoice_doc_id: firstDefinedFrom(documentTruthSources, 'invoice_doc_id'),
+    swms_doc_id: firstDefinedFrom(documentTruthSources, 'swms_doc_id'),
+    report_doc_resolved: firstDefinedFrom(documentTruthSources, 'report_doc_resolved'),
+    has_selected_current_cycle_trade_report: firstDefinedFrom(
+      documentTruthSources,
+      'has_selected_current_cycle_trade_report'
     ) === true
   };
   if (requirementEnvelope) {

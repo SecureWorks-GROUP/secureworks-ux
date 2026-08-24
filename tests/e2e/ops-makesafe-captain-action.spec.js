@@ -341,6 +341,83 @@ test('byte-exact review requirements outrank a stale canonical invoice demand', 
   expect(verdict.missing_required).toEqual([]);
 });
 
+test('fresh review pack without requirements stays unknown despite a stale canonical map', async ({ page }) => {
+  await page.goto('/ops.html');
+  const verdict = await page.evaluate(() => _msSesPackCompleteness(
+    'job-fresh-map-absent',
+    {
+      pack: {
+        drafted: true,
+        presentation: { kind: 'ready', reason: null },
+        report_doc_id: 'report-doc-fresh',
+        invoice_doc_id: 'invoice-doc-fresh',
+        swms_doc_id: 'swms-doc-fresh',
+        has_selected_current_cycle_trade_report: true,
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    },
+    {
+      pack_truth: {
+        drafted: true,
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-stale',
+        invoice_doc_id: 'invoice-doc-stale',
+        swms_doc_id: 'swms-doc-stale',
+        has_selected_current_cycle_trade_report: true,
+        required_documents_resolved: true,
+        required_documents: { report: true, invoice: true, swms: true },
+        required_documents_unresolved_reason: null,
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    },
+  ));
+
+  expect(verdict.reviewable).toBe(true);
+  expect(verdict.complete).toBe(false);
+  expect(verdict.requirements_resolved).toBe(false);
+  expect(verdict.required_documents).toBeNull();
+  expect(verdict.warning_label).toBe('REQUIREMENTS UNKNOWN');
+});
+
+test('fresh required pack cannot borrow a missing invoice pointer from canonical cache', async ({ page }) => {
+  await page.goto('/ops.html');
+  const verdict = await page.evaluate(() => _msSesPackCompleteness(
+    'job-fresh-invoice-pointer-absent',
+    {
+      pack: {
+        drafted: true,
+        presentation: { kind: 'ready', reason: null },
+        report_doc_id: 'report-doc-fresh',
+        swms_doc_id: 'swms-doc-fresh',
+        has_selected_current_cycle_trade_report: true,
+        required_documents_resolved: true,
+        required_documents: { report: true, invoice: true, swms: true },
+        required_documents_unresolved_reason: null,
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    },
+    {
+      pack_truth: {
+        drafted: true,
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-stale',
+        invoice_doc_id: 'invoice-doc-stale',
+        swms_doc_id: 'swms-doc-stale',
+        has_selected_current_cycle_trade_report: true,
+        required_documents_resolved: true,
+        required_documents: { report: true, invoice: true, swms: true },
+        required_documents_unresolved_reason: null,
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    },
+  ));
+
+  expect(verdict.reviewable).toBe(true);
+  expect(verdict.complete).toBe(false);
+  expect(verdict.missing_required).toContain('invoice');
+  expect(verdict.warning_label).toBe('PACK INCOMPLETE');
+});
+
 test('every required document needs its producer proof pointer', async ({ page }) => {
   await page.goto('/ops.html');
   const verdicts = await page.evaluate(() => {

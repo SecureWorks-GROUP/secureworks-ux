@@ -779,9 +779,10 @@ check(
 );
 
 // PR 277 legacy-transition shape: until the merged engine is redeployed, the
-// board/review payload carries closeout truth and real bound pointers but no
-// required-document map. The omission is requirements-unknown, never a local
-// invitation to invent demands, and must not hide the backend-armed press.
+// fresh review payload carries closeout truth and real bound pointers but no
+// required-document map. Even when the board cache still carries a stale map,
+// the omission is requirements-unknown, never a local invitation to invent
+// demands, and must not hide the backend-armed press.
 const liveShapeReviewPack = {
   ...reviewablePack(),
   closeout_documents: { report: true, invoice: true, swms: true },
@@ -792,9 +793,6 @@ delete liveShapeReviewPack.required_documents_unresolved_reason;
 const completeRequiredTruth = boardRawRow.pack.required_documents;
 const completeRequiredResolved = boardRawRow.pack.required_documents_resolved;
 const completeRequiredReason = boardRawRow.pack.required_documents_unresolved_reason;
-delete boardRawRow.pack.required_documents;
-delete boardRawRow.pack.required_documents_resolved;
-delete boardRawRow.pack.required_documents_unresolved_reason;
 behaviour.fetch.get_ses_reviewable_pack = liveShapeReviewPack;
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
@@ -804,7 +802,7 @@ await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
 const liveShapeDetailHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "legacy closeout-only detail keeps APPROVE AND SEND armed and names requirements unknown",
+  "legacy closeout-only detail ignores stale cached requirements and keeps APPROVE AND SEND armed",
   liveShapeDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
     liveShapeDetailHtml.includes("REQUIREMENTS UNKNOWN") &&
     liveShapeDetailHtml.includes("Requirements unknown"),

@@ -108,8 +108,8 @@ make-safe board (it stays server-driven). Guard:
 
 ## Ops make-safe board (`ops.html`)
 
-The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1`,
-projection `ops`) — the same canonical feed the Trade board uses, and the only one
+The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1.2`,
+projection `ops`; v1 still accepted) — the same canonical feed the Trade board uses, and the only one
 carrying `canonical_stage` (declared `board_stage` + the captain display ledger).
 Column placement comes from `canonical_stage` and nothing else; the client
 re-derives no stage. Search `// <makesafe-board-canonical>` in `ops.html`.
@@ -125,7 +125,7 @@ feed's `intake_exceptions.degraded` marker or the enrichment join is missing, th
 board says so in a banner (`renderMakesafeFeedNotices`) rather than losing data
 silently. Guard: `tests/e2e/ops-makesafe-canonical-board.spec.js`; verification
 evidence in `docs/evidence/ops-makesafe-canonical-board-2026-08-01/`.
-The make-safe MAP pairs its location feed with `makesafe-board.v1` by job id,
+The make-safe MAP pairs its location feed with `makesafe-board.v1.2` by job id,
 and the CREW WEEK PLANNER reads the canonical board rows directly. Both take
 stage and substatus only from that canonical feed: a missing stage is “Stage not
 confirmed”, never “New”; the planner's active/backlog and age ordering use those
@@ -418,10 +418,11 @@ surface. DOCUMENT COMPLETENESS AND CAPTAIN REVIEWABILITY ARE SEPARATE (Captain
 ruling 2026-08-24): `makesafePackCompletenessVerdict` marks a drafted pack
 `reviewable` even when required/closeout truth is missing, malformed or reports
 gaps, while `complete` alone may drive a Ready-to-send claim. The current live
-`makesafe-board.v1` producer supplies `pack.closeout_documents` but no
-`pack.required_documents`; show CHECK DOCUMENTS, keep Review job pack and any
-backend-armed APPROVE AND SEND control visible, and never infer a requirement or
-document presence the payload did not state. PREVIEW AVAILABILITY IS THE ONLY
+`makesafe-board.v1.2` producer supplies `pack.required_documents` (null when
+family/builder authority is unresolved) plus `pack.closeout_documents`. A v1
+payload, or a v1.2 row with unresolved requirements, still shows CHECK DOCUMENTS.
+Keep Review job pack and any backend-armed APPROVE AND SEND control visible, and
+never infer a requirement or document presence the payload did not state. PREVIEW AVAILABILITY IS THE ONLY
 ADDITIONAL CLIENT GATE: the byte-exact pack and at least one outgoing route must
 be visible before the control arms. If invoice authorisation creates a fresh
 docket revision, repaint it and stop for renewed Captain review; the next press
@@ -519,7 +520,7 @@ changes.
 ## Trade visibility & the manager view (`trade.html`)
 
 Canonical make-safe BOARD PLACEMENT is 100% SERVER-DRIVEN by the `makesafe_board`
-feed (`makesafe-board.v1`, edge function — not in this repo).
+feed (`makesafe-board.v1.2`, edge function — not in this repo).
 `MakesafeTradeV5.board()` renders every returned card in its returned column and
 never derives stage or action rights locally. A manager's full board still comes
 from `permissions.sees_all_makesafes:true` / `can_allocate:true`; a non-manager's

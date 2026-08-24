@@ -149,6 +149,15 @@ const payload = {
 };
 
 assert.deepStrictEqual(Array.from(V5.COLUMNS), ['New', 'Allocated', 'Complete', 'Archive']);
+assert.strictEqual(V5.VERSION, 'makesafe-board.v1.2');
+assert.doesNotThrow(() => V5.validate(payload), 'v1 fixtures remain accepted');
+const v12Payload = JSON.parse(JSON.stringify(payload));
+v12Payload.contract_version = 'makesafe-board.v1.2';
+v12Payload.parity.contract_version = 'makesafe-board.v1.2';
+assert.doesNotThrow(() => V5.validate(v12Payload), 'live v1.2 feed is accepted');
+const v0Payload = JSON.parse(JSON.stringify(payload));
+v0Payload.contract_version = 'makesafe-board.v0';
+assert.throws(() => V5.validate(v0Payload), /Unsupported make-safe board feed/);
 const board = V5.board(payload);
 assert.strictEqual(board.columns[1].cards[0].id, 'allocated', 'server Allocated wins over assignment complete');
 assert(!board.columns.some(c => /office/i.test(c.label)), 'no office column');

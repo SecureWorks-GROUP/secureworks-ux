@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 // Regression guards for the ops make-safe board's canonical data source
-// (ops-api?action=makesafe_board, contract makesafe-board.v1 / projection ops).
+// (ops-api?action=makesafe_board, contract makesafe-board.v1.2 / projection ops).
 // The board used to render makesafe_pipeline, which is keyed on the raw
 // board_stage and therefore never showed a captain display-ledger transition.
 // See the <makesafe-board-canonical> block in ops.html.
@@ -297,6 +297,32 @@ test('an unsupported board contract fails loudly instead of rendering a partial 
     }
   });
   expect(message).toContain('Unsupported make-safe board contract');
+});
+
+test('the live v1.2 board contract loads and v1 fixtures still load', async ({ page }) => {
+  await page.goto('/ops.html');
+  const result = await page.evaluate(async () => {
+    const realFetch = window.opsFetch;
+    async function load(version) {
+      window.opsFetch = (action) => Promise.resolve(action === 'makesafe_board'
+        ? { contract_version: version, columns: {} }
+        : { columns: {} });
+      const board = await fetchMakesafeBoardData();
+      return board ? 'loaded' : 'empty';
+    }
+    try {
+      return {
+        v12: await load('makesafe-board.v1.2'),
+        v1: await load('makesafe-board.v1'),
+        current: MAKESAFE_BOARD_CONTRACT,
+      };
+    } finally {
+      window.opsFetch = realFetch;
+    }
+  });
+  expect(result.current).toBe('makesafe-board.v1.2');
+  expect(result.v12).toBe('loaded');
+  expect(result.v1).toBe('loaded');
 });
 
 test('getMakesafeBuilder falls through a nameless company object to requesting_company_name', async ({ page }) => {

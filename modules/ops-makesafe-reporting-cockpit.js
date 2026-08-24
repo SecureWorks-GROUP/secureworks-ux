@@ -137,10 +137,10 @@ function makesafePackTruthFromCanonicalRow(row) {
 //   - `complete`: the payload positively proves every declared requirement.
 //
 // Missing, partial or malformed document truth is a visible caveat, never a
-// client-side wall around Captain review/send authority. In particular the live
-// makesafe-board.v1 shape supplies closeout_documents but not
-// required_documents. That producer gap must remain visible without hiding the
-// review door or the backend-armed APPROVE AND SEND control.
+// client-side wall around Captain review/send authority. Live v1.2 publishes
+// required_documents (null when unresolved). A v1 payload, or unresolved v1.2
+// requirements, must remain visible without hiding the review door or the
+// backend-armed APPROVE AND SEND control.
 function makesafePackCompletenessVerdict(pack) {
   pack = (pack && typeof pack === 'object') ? pack : {};
   var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();

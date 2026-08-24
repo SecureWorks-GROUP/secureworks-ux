@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const fixture = require('./fixtures/ses-loop-overlay-cards.js');
 
-test('Docs Ready cards: complete drafted pack opens review/send; chips match pack; no invented pack', async ({ page }) => {
+test('Docs Ready cards: live closeout-only pack opens review/send; chips match pack; no invented pack', async ({ page }) => {
   await page.goto('/ops.html');
   const result = await page.evaluate((fx) => {
     window._msSesReviewQueue = {};
@@ -13,15 +13,18 @@ test('Docs Ready cards: complete drafted pack opens review/send; chips match pac
     fx.cards.forEach((c) => {
       if (c.pack && c.pack.drafted) {
         window._makesafeCanonicalPackById[c.id] = true;
-        window._makesafeCanonicalPackMetaById[c.id] = {
+        const packMeta = {
           drafted: true,
           docket_revision_id: c.pack.docket_revision_id || null,
           presentation_kind: c.pack.presentation_kind,
           report_doc_id: c.pack.report_doc_id,
           has_selected_current_cycle_trade_report: true,
-          required_documents: c.pack.required_documents,
           closeout_documents: c.pack.closeout_documents,
         };
+        if (Object.prototype.hasOwnProperty.call(c.pack, 'required_documents')) {
+          packMeta.required_documents = c.pack.required_documents;
+        }
+        window._makesafeCanonicalPackMetaById[c.id] = packMeta;
       }
       if (c.packFacts) window._makesafePackChipById[c.id] = c.packFacts;
       cards[c.job_number] = renderMakesafeCard(c.row, 'report_ready');
@@ -39,6 +42,8 @@ test('Docs Ready cards: complete drafted pack opens review/send; chips match pac
 
   expect(result.affordance['SWMS-261237']).toBe(true);
   expect(result.cards['SWMS-261237']).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
+  expect(result.cards['SWMS-261237']).toContain('CHECK DOCUMENTS');
+  expect(result.cards['SWMS-261237']).not.toContain('Ready to send');
 
   expect(result.affordance['SWMS-261241']).toBe(true);
   expect(result.cards['SWMS-261241']).toContain('Work order: attached');

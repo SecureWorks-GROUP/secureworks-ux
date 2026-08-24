@@ -301,9 +301,8 @@ INSTRUCTION — one type family, tight scale, one accent at a time. Compact is
 the product goal: the captain should scan the whole pack in a couple of
 seconds without endless scrolling. The reading order is a design contract:
 identity (job number + suburb — no client name/street on this surface), ONE
-next action (derived from the backend control flags alone), the compact
-caveat block when held (amber for a hard hold, calm blue for an email-draft-only
-soft hold), then document tabs over ONE compact stage — THE INVOICE
+next action (derived from the backend control flags alone), the compact calm-blue
+caveat block when held, then document tabs over ONE compact stage — THE INVOICE
 IS A DOCUMENT here (the bound Xero PDF, else the proposal rendered as an
 invoice page; never a separate section) and MULTIPLE WORK
 ORDERS EACH GET A TAB (`<makesafe-workorder-identity>`: no surface may pick
@@ -323,22 +322,14 @@ readable fact — a blockers array that all normalises away must never silence t
 reasons. Each caveat renders as ONE line: a short route tag + the fact VERBATIM
 (never paraphrased). There is NO per-blocker "what clears it" paragraph, no lede,
 and no "no override" copy — those were the essay the captain rejected
-(`_msSesBlockerClears` survives only inside the dedupe key). SOFT vs HARD is the
-load-bearing split (`_msSesClassifyHold` / `_msSesBlockerIsSoftDraft`, the ONE
-place it is derived): an email-draft wall is SOFT — it must NEVER wall SEND. The
-match covers every live phrasing, not just "email draft"/"no draft on docket":
-`_msSesBlockerIsSoftDraft` also catches "… EMAIL — no draft on CURRENT docket"
-(the interior word the old regex missed, which HARD-locked SEND live on
-2026-08-13). It stays anchored on "email"/the "no draft on docket" idiom, never
-on the bare word report/invoice, so a missing REPORT DOCUMENT is still hard.
-A hold with ANY hard blocker (missing invoice,
-off-schedule rate, missing WO/photo/SWMS) is a HARD hold: amber, the stamp is
-disabled, the next action reads "Review N caveats". An email-draft-ONLY hold is
-SOFT: calm blue "Still drafting", and arming falls through to the backend control
-flags alone (`armed = !hardHold && (approve_invoice||send_it)`), so APPROVE AND
-SEND arms when the invoice is ready. `sesApproveAndSend` relaxes the same gate
-(hard-hold-only), and the backend chain still guards every real write/send, so
-this is a client gate relaxation, not a bypass. Dedupe is over exactly what
+(`_msSesBlockerClears` survives only inside the dedupe key). Captain ruling
+2026-08-24 supersedes the former SOFT/HARD split: every missing-document,
+pricing, work-order, photo, SWMS and email-draft fact is a caveat for the Captain
+to weigh, never a client-side send wall. `_msSesBlockerIsSoftDraft` now only adds
+the "fills in on the next run" hint to email-draft caveats; `_msSesClassifyHold`
+returns no hard hold. Arming falls through to the backend control flags alone
+(`approve_invoice.enabled || send_it.enabled`), while the exact-revision chain
+still guards every real write/send. Dedupe is over exactly what
 renders (fact, case-insensitively + route tag + resolved clear path), so the
 backend habit of emitting one blocker per route collapses while a genuinely
 route-specific hold survives. THE INLINE STAGE IS THE BROWSER'S BUILT-IN PDF
@@ -407,7 +398,7 @@ an enabled stamp's note renders the backend's own `plan` text verbatim. A
 DISABLED STAMP OWES A REASON: its note is `controls.<stamp>.disabled_reason`
 verbatim when the backend sends one (that is how an invoice already AUTHORISED
 in Xero reads as "already authorised" instead of a silent grey stamp), and only
-when that field is absent does it fall back to the local hold-lock / Xero
+when that field is absent does it fall back to the local Xero
 status / not-unlocked copy. A missing field means honest fallback text, never a
 placeholder implying a value that is not there. Note the money semantics that
 copy must respect (Option B, backend PR 563): the agents mint the Xero DRAFT
@@ -423,7 +414,19 @@ deliberately when this pane's wording changes, not to route around them.
 network) from a fixture built off the live Bertram AJBR-70271 job (job
 identity/builder-routing facts only; no client name/phone/street) — the
 reusable pattern for any future before/after screenshot pair of a make-safe
-surface.
+surface. DOCUMENT COMPLETENESS AND CAPTAIN REVIEWABILITY ARE SEPARATE (Captain
+ruling 2026-08-24): `makesafePackCompletenessVerdict` marks a drafted pack
+`reviewable` even when required/closeout truth is missing, malformed or reports
+gaps, while `complete` alone may drive a Ready-to-send claim. The current live
+`makesafe-board.v1` producer supplies `pack.closeout_documents` but no
+`pack.required_documents`; show CHECK DOCUMENTS, keep Review job pack and any
+backend-armed APPROVE AND SEND control visible, and never infer a requirement or
+document presence the payload did not state. PREVIEW AVAILABILITY IS THE ONLY
+ADDITIONAL CLIENT GATE: the byte-exact pack and at least one outgoing route must
+be visible before the control arms. If invoice authorisation creates a fresh
+docket revision, repaint it and stop for renewed Captain review; the next press
+sends that displayed revision. Never carry a same-press send across an unseen
+invoice-bound repack.
 
 WHAT BECOMES A DOCUMENT TAB IS DECIDED BY BYTES, NEVER BY A ROLE ALLOWLIST.
 `_msSesDocsFromArtifacts` used to map six known artifact roles and silently drop

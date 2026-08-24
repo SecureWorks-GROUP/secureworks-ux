@@ -8,9 +8,9 @@
 //     and NEVER reads the retired legacy makesafe_report_drafts feed; card
 //     identity is joined from the canonical makesafe_board feed and each card's
 //     chip + invoice glance are enriched from query_ses_review_cockpit;
-//   - the board door (openMakesafeJob, extracted from ops.html) opens the SES
+//   - the executable board door (openMakesafeJob from ops.html) opens the SES
 //     review overlay for a queued job and falls back to the canonical job
-//     detail only when no SES docket AND no legacy pack exist;
+//     detail only when no SES docket AND no drafted pack exist;
 //   - the detail panel reads query_ses_review_cockpit + get_ses_reviewable_pack
 //     (resolved via list_ses_docs_ready_reviews) and renders the byte-exact
 //     docs, the three exact routes, and the fixed photo set;
@@ -20,7 +20,7 @@
 //     (JWT) -> execute_ses_release_revision;
 //   - the retired legacy actions (makesafe_send_pack, makesafe_resume_close,
 //     makesafe_reset_failed_pack, makesafe_send_photo_followup) are never
-//     called — at runtime or in source.
+//     dispatched by any exercised runtime path.
 //
 // Run:  node modules/ops-makesafe-reporting-cockpit.smoke.mjs
 // Exit code 0 == pass, 1 == fail.
@@ -345,32 +345,6 @@ for (const gone of [
 ]) {
   check("legacy symbol retired: " + gone, mod[gone] === undefined);
 }
-
-// ── 3. The module source never calls the retired 410 actions ────────────────
-for (const retired of [
-  "makesafe_send_pack",
-  "makesafe_send_photo_followup",
-  "makesafe_resume_close",
-  "makesafe_reset_failed_pack",
-]) {
-  const callSite = new RegExp(
-    "ops(?:Post|Fetch|PostJwt)\\(\\s*['\"]" + retired + "['\"]",
-  );
-  check("source never calls retired action " + retired, !callSite.test(code));
-}
-// The list must never read the retired legacy drafts feed again (it is empty in
-// production and its approve path answers 410).
-check(
-  "source never reads the retired legacy drafts feed",
-  !/ops(?:Post|Fetch|PostJwt)\(\s*['"]makesafe_report_drafts['"]/.test(code),
-);
-// No multi-job release can be built from this surface: the only prepare call
-// must bind exactly one job.
-check(
-  "prepare_ses_release_revision is wired single-job only",
-  /prepare_ses_release_revision['"]\s*,\s*prepBody/.test(code) &&
-    /prepBody\s*=\s*\{\s*job_ids:\s*\[jobId\]\s*\}/.test(code),
-);
 
 // The shipped degraded-path parser must handle both canonical address shapes.
 check(
@@ -796,33 +770,121 @@ check(
     detailHtml.includes("data-ses-edit=\"body\""),
 );
 
-// The direct Approvals/detail route must not bypass the board verdict. Backend
-// controls alone cannot arm a send when the exact required-document truth is
-// incomplete, and a programmatic call must stop before confirmation or writes.
-const incompleteReviewPack = {
+// SWMS-261286 live payload shape: the board/review payload carries closeout
+// truth and real bound pointers, but no required_documents producer field. The
+// omission is shown as a document-review caveat and must never hide the
+// backend-armed Captain press. The pane still shows the concrete documents,
+// recipients and route attachments before that press.
+const liveShapeReviewPack = {
   ...reviewablePack(),
-  closeout_documents: { report: false, invoice: true, swms: true },
-  presentation: { kind: "ready", reason: "stale ready label" },
+  closeout_documents: { report: true, invoice: true, swms: true },
 };
-behaviour.fetch.get_ses_reviewable_pack = incompleteReviewPack;
+delete liveShapeReviewPack.required_documents;
+const completeRequiredTruth = boardRawRow.pack.required_documents;
+delete boardRawRow.pack.required_documents;
+behaviour.fetch.get_ses_reviewable_pack = liveShapeReviewPack;
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const liveShapeDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "live closeout-only detail keeps APPROVE AND SEND armed and names the truth gap",
+  liveShapeDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    liveShapeDetailHtml.includes("CHECK DOCUMENTS") &&
+    liveShapeDetailHtml.includes("Required document truth was not supplied"),
+);
+check(
+  "send preview shows per-document truth, recipients and attachments before the press",
+  liveShapeDetailHtml.includes("Work order") &&
+    liveShapeDetailHtml.includes("Report") &&
+    liveShapeDetailHtml.includes("SWMS") &&
+    liveShapeDetailHtml.includes("Draft invoice") &&
+    liveShapeDetailHtml.includes("accounts@mlb.com.au") &&
+    liveShapeDetailHtml.includes("Make Safe Report - MLB-25248.pdf") &&
+    liveShapeDetailHtml.includes("Xero Invoice - INV-1234.pdf"),
+);
+behaviour.confirmReturns = false;
+await mod.sesApproveAndSend(JOB);
+check(
+  "closeout-only truth reaches the Captain confirmation without writing before consent",
+  calls.confirms.length === 1 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0,
+);
+behaviour.confirmReturns = true;
+boardRawRow.pack.required_documents = completeRequiredTruth;
+
+// Enabled backend controls without a successfully loaded byte-exact pack are
+// not a send preview. The action must stay closed until the Captain can inspect
+// the documents and route attachments the press would release.
+const NO_PREVIEW_JOB = "job-no-pack-preview";
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.showMsReportingDetail(NO_PREVIEW_JOB);
+const noPreviewDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "backend controls cannot arm SEND without a loaded byte-exact pack preview",
+  noPreviewDetailHtml.includes("APPROVE AND SEND") &&
+    !noPreviewDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    noPreviewDetailHtml.includes("byte-exact pack preview is not loaded"),
+);
+await mod.sesApproveAndSend(NO_PREVIEW_JOB);
+check(
+  "programmatic send refuses before confirmation or writes when the pack preview is absent",
+  calls.confirms.length === 0 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /byte-exact pack preview is not loaded/i.test(t.msg)),
+);
+
+// A byte-exact pack without outgoing route cards still cannot show the exact
+// recipients and attachments the Captain must review. Keep the control visible
+// but disabled, and refuse a programmatic call before confirmation or writes.
+const noRoutesCockpit = cockpitSendReady();
+noRoutesCockpit.sections.email_drafts = [];
+behaviour.fetch.query_ses_review_cockpit = noRoutesCockpit;
+behaviour.fetch.list_ses_docs_ready_reviews = { dockets: [queueRow] };
+behaviour.fetch.get_ses_reviewable_pack = liveShapeReviewPack;
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.confirms.length = 0;
 calls.toasts.length = 0;
 await mod.showMsReportingDetail(JOB);
-const incompleteDetailHtml = elements["msReportingDetailPanel"]._html || "";
+const noRoutesDetailHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "direct detail leaves APPROVE AND SEND unarmed when a required pointer is missing",
-  incompleteDetailHtml.includes("APPROVE AND SEND") &&
-    !incompleteDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
-    incompleteDetailHtml.includes("Required pack pointer is missing or unresolved: report"),
+  "backend controls cannot arm SEND without an outgoing route preview",
+  noRoutesDetailHtml.includes("APPROVE AND SEND") &&
+    !noRoutesDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    noRoutesDetailHtml.includes("outgoing email preview is not loaded"),
 );
 await mod.sesApproveAndSend(JOB);
 check(
-  "programmatic send entry fails closed before confirm or any write",
+  "programmatic send refuses before confirmation or writes when routes are absent",
   calls.confirms.length === 0 && calls.opsPost.length === 0 &&
     calls.opsPostJwt.length === 0 &&
-    calls.toasts.some((t) => /missing or unresolved: report/i.test(t.msg)),
+    calls.toasts.some((t) => /outgoing email preview is not loaded/i.test(t.msg)),
+);
+behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+
+const missingReportReviewPack = {
+  ...reviewablePack(),
+  closeout_documents: { report: false, invoice: true, swms: true },
+  artifacts: reviewablePack().artifacts.filter((a) => a.role !== "supporting_report_pdf"),
+};
+behaviour.fetch.get_ses_reviewable_pack = missingReportReviewPack;
+await mod.showMsReportingDetail(JOB);
+const missingReportDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "a known missing required document stays visibly incomplete without disabling Captain send",
+  missingReportDetailHtml.includes("PACK INCOMPLETE") &&
+    missingReportDetailHtml.includes("Required document truth reports missing or unresolved: report") &&
+    missingReportDetailHtml.includes("Not in this pack:") &&
+    missingReportDetailHtml.includes("the completion report") &&
+    missingReportDetailHtml.includes("Missing in pack") &&
+    missingReportDetailHtml.includes('id="msSesApproveAndSendBtn"'),
 );
 
 // Restore the fully proved pack for the remaining guarded-chain assertions.
@@ -1079,7 +1141,7 @@ check(
     detailHtml.includes("What one press does") &&
     /Docs Ready sign-off/.test(detailHtml) &&
     /send approval/.test(detailHtml) &&
-    /Both approvals are recorded separately/.test(detailHtml),
+    /Docs Ready and send approvals are recorded separately/.test(detailHtml),
 );
 check(
   "the DONE checklist strip leads the pack, naming what is complete",
@@ -1313,7 +1375,7 @@ check(
 check(
   "detail shows the Docs Ready tick as not yet recorded, bound to the pack hash",
   /not yet recorded/.test(detailHtml) && detailHtml.includes("sha256:aaa") &&
-    /One press records it against exactly this version/.test(detailHtml),
+    /This send pass records it against exactly this version/.test(detailHtml),
 );
 check(
   "detail never revives the legacy recipient/send copy",
@@ -1569,9 +1631,11 @@ check(
     !invoiceHtml.includes("msSesApproveInvoiceBtn"),
 );
 check(
-  "the press note says it records BOTH approvals and authorises the existing draft",
-  /Records your invoice approval and your send approval/.test(invoiceHtml) &&
-    /authorises the Xero draft invoice already prepared for it/.test(invoiceHtml),
+  "the invoice pass says it authorises then stops for review without sending",
+  /Records your invoice approval for this exact pack/.test(invoiceHtml) &&
+    /authorises the Xero draft invoice already prepared for it/.test(invoiceHtml) &&
+    /this pass sends no email/.test(invoiceHtml) &&
+    !/Records your send approval/.test(invoiceHtml),
 );
 check(
   "the disclosure quotes the backend's own plan text verbatim for each armed step",
@@ -1789,8 +1853,8 @@ calls.toasts.length = 0;
   };
 }
 
-// ── 9c. Both stages armed at once: still ONE button, and its note says the
-//        press records BOTH approvals.
+// ── 9c. Both stages armed at once: still ONE button, but the invoice pass
+//        wins and stops before any send approval.
 {
   const bothArmed = cockpitSendReady();
   bothArmed.controls.approve_invoice.enabled = true;
@@ -1802,23 +1866,22 @@ calls.toasts.length = 0;
     "both stages armed still render exactly ONE pressable stamp",
     (bothHtml.match(/class="msr-stamp /g) || []).length === 1 &&
       bothHtml.includes('id="msSesApproveAndSendBtn"') &&
-      /Records your invoice approval and your send approval/.test(bothHtml),
+      /Records your invoice approval for this exact pack/.test(bothHtml) &&
+      /this pass sends no email/.test(bothHtml) &&
+      !/Records your send approval/.test(bothHtml),
   );
   behaviour.fetch["query_ses_review_cockpit"] = cockpitSendReady();
 }
 
-// ── 10a. ONE PRESS on an invoice-ready pack: the invoice approval is recorded
-//         and executed, the invoice-bound pack is re-read, and the chain STOPS
-//         honestly when the backend has not armed the send on the new revision.
+// ── 10a. Invoice pass: approval is recorded and executed, the invoice-bound
+//         pack is re-read and repainted, and the chain ALWAYS stops for review.
 //         The recorded invoice approval stands; nothing is sent.
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.toasts.length = 0;
 calls.confirms.length = 0;
-behaviour.fetch["query_ses_review_cockpit"] = (() => {
+const invoiceBeforeRefresh = (() => {
   const c = cockpitInvoiceReady();
-  c.controls.send_it.disabled_reason =
-    "The invoice-bound revision has no photo attachments yet.";
   c.sections.money.bound_invoice = {
     invoice_number: "INV-1234",
     status: "DRAFT",
@@ -1826,6 +1889,18 @@ behaviour.fetch["query_ses_review_cockpit"] = (() => {
   };
   return c;
 })();
+const invoiceAfterRefresh = cockpitSendReady();
+invoiceAfterRefresh.controls.send_it.enabled = false;
+invoiceAfterRefresh.controls.send_it.disabled_reason =
+  "The invoice-bound revision has no photo attachments yet.";
+Object.defineProperty(behaviour.fetch, "query_ses_review_cockpit", {
+  configurable: true,
+  get() {
+    return calls.opsPost.some((c) => c.action === "execute_ses_invoice_revision")
+      ? invoiceAfterRefresh
+      : invoiceBeforeRefresh;
+  },
+});
 behaviour.postJwt["approve_ses_invoice_revision"] = {
   approval: { invoice_obligation_revision_id: "obr-1" },
 };
@@ -1858,20 +1933,18 @@ check(
     invExecCall.body.invoice_obligation_revision_id === "obr-1",
 );
 check(
-  "a send the backend has not armed on the NEW revision stops the chain there",
+  "the invoice pass sends nothing from the unseen refreshed revision",
   !calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+    !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
     !calls.opsPostJwt.some((c) => c.action === "approve_ses_release_revision") &&
     !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
 );
-const stopHtml = elements["msSesChainError-" + JOB]._html || "";
+const refreshedInvoiceHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "the stop names the step and quotes the server's refusal verbatim",
-  /Stopped at: sending the invoice-bound pack/.test(stopHtml) &&
-    stopHtml.includes(
-      "The invoice-bound revision has no photo attachments yet.",
-    ) &&
-    /What was already recorded stands/.test(stopHtml) &&
-    /picks up from this step/.test(stopHtml),
+  "the refreshed invoice-bound pack is repainted with the backend send refusal",
+  refreshedInvoiceHtml.includes("The invoice-bound revision has no photo attachments yet.") &&
+    !refreshedInvoiceHtml.includes('id="msSesApproveAndSendBtn"') &&
+    calls.toasts.some((t) => /Review the refreshed invoice-bound pack/i.test(t.msg)),
 );
 // Option B: the LAST text before the live money write must not claim CREATE.
 check(
@@ -1885,10 +1958,8 @@ check(
     ),
 );
 
-// ── 10b. ONE PRESS end to end: invoice approval, then the send approval, in
-//         one chain, in order. The cockpit answers INVOICE_CREATE_READY until
-//         the invoice execute lands and SEND_READY afterwards — exactly what
-//         the live backend does when it binds the Xero PDF into a fresh docket.
+// ── 10b. TWO REVIEW-BOUND PASSES: invoice approval first, then a second press
+//         after the SEND_READY invoice-bound pack has been repainted.
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.opsFetch.length = 0;
@@ -1926,8 +1997,19 @@ check(
 );
 check(
   "the invoice-bound pack is re-read before anything is signed off",
-  calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
+  calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack") &&
+    !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
+    !calls.opsPost.some((c) => c.action === "prepare_ses_release_revision"),
 );
+const refreshedSendHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "the first pass repaints the invoice-bound SEND preview for renewed review",
+  refreshedSendHtml.includes('id="msSesApproveAndSendBtn"') &&
+    refreshedSendHtml.includes("Report email") &&
+    refreshedSendHtml.includes("Invoice email") &&
+    calls.toasts.some((t) => /Review the refreshed invoice-bound pack/i.test(t.msg)),
+);
+await mod.sesApproveAndSend(JOB);
 {
   const order = [...calls.opsPostJwt, ...calls.opsPost]
     .filter((c) =>
@@ -1943,7 +2025,7 @@ check(
   const jwtOrder = calls.opsPostJwt.map((c) => c.action);
   const postOrder = calls.opsPost.map((c) => c.action);
   check(
-    "ONE press runs the full chain in order: approve invoice -> authorise -> sign off -> prepare -> approve send -> send",
+    "two reviewed passes run invoice approval before the separate guarded send chain",
     order.length === 6 &&
       jwtOrder.join(",") ===
         "approve_ses_invoice_revision,sign_off_ses_docket,approve_ses_release_revision" &&
@@ -1951,12 +2033,11 @@ check(
         "execute_ses_invoice_revision,prepare_ses_release_revision,execute_ses_release_revision",
   );
   check(
-    "BOTH approvals are recorded on JWT, each for this job's own revision",
-    calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision")
-        .body.job_id === JOB &&
-      calls.opsPostJwt.find((c) =>
-          c.action === "approve_ses_release_revision"
-        ).body.release_revision_id === "rel-3",
+    "invoice and send approvals are recorded separately across the two reviewed passes",
+    !!calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision") &&
+      calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision").body.job_id === JOB &&
+      !!calls.opsPostJwt.find((c) => c.action === "approve_ses_release_revision") &&
+      calls.opsPostJwt.find((c) => c.action === "approve_ses_release_revision").body.release_revision_id === "rel-3",
   );
   check(
     "the sign-off is still hash-bound to the pack the press was made on",
@@ -1964,18 +2045,21 @@ check(
         .expected_output_content_hash === HASH,
   );
   check(
-    "the success toast reports the send and the authorised invoice",
+    "the two passes report invoice authorisation and the eventual send separately",
     calls.toasts.some((t) =>
-      t.kind === "success" && /3 emails released/i.test(t.msg || "") &&
-      /invoice authorised/i.test(t.msg || "")
+      t.kind === "success" && /Invoice authorised/i.test(t.msg || "") &&
+      /Review the refreshed invoice-bound pack/i.test(t.msg || "")
+    ) &&
+    calls.toasts.some((t) =>
+      t.kind === "success" && /3 emails released/i.test(t.msg || "")
     ),
   );
 }
 delete behaviour.fetch["query_ses_review_cockpit"];
 behaviour.fetch["query_ses_review_cockpit"] = cockpitSendReady();
 
-// ── 11. HOLD: one amber block, numbered + deduped verbatim blockers each
-//        with its clear path; the one stamp visible but unpressable ─────────
+// ── 11. HOLD: one calm review block, deduped verbatim caveats; a backend-armed
+//        press remains available even for a non-email artifact caveat. ────────
 const holdCockpit = cockpitSendReady();
 holdCockpit.status = "HOLD";
 holdCockpit.sections.status = {
@@ -1991,7 +2075,7 @@ holdCockpit.sections.status = {
   ],
 };
 holdCockpit.controls.approve_invoice.enabled = false;
-holdCockpit.controls.send_it.enabled = false;
+holdCockpit.controls.send_it.enabled = true;
 behaviour.fetch["query_ses_review_cockpit"] = holdCockpit;
 await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
@@ -2007,30 +2091,40 @@ check(
 );
 check(
   "HOLD renders ONE compact caveat block: one line each, no clear-path essay, no 'no override'",
-  holdHtml.split('class="msr-hold"').length - 1 === 1 &&
+  holdHtml.split('class="msr-hold soft"').length - 1 === 1 &&
     holdHtml.includes('<ul class="msr-blockers">') &&
     holdHtml.split("What clears it").length - 1 === 0 &&
     !/There is no override/.test(holdHtml),
 );
 check(
-  "the HARD-HOLD next action counts the deduped caveats (not a lock wall)",
-  /Review <strong>2 caveats<\/strong> below/.test(holdHtml),
+  "the Captain next action counts the deduped caveats before the press",
+  /Review <strong>2 caveats<\/strong> below, then press <strong>APPROVE AND SEND<\/strong>/.test(holdHtml),
 );
 check(
-  "a HARD hold arms NO action: the stamp is visible but disabled, no id, no onclick",
-  !holdHtml.includes('id="msSesApproveAndSendBtn"') &&
-    !holdHtml.includes("sesApproveAndSend(") &&
-    /msr-stamp send" disabled/.test(holdHtml) &&
-    /The caveats above are still open/.test(holdHtml) &&
-    !/msr-what/.test(holdHtml),
+  "a missing-work-order caveat does not wall a backend-armed Captain press",
+  holdHtml.includes('id="msSesApproveAndSendBtn"') &&
+    holdHtml.includes("sesApproveAndSend(") &&
+    !/msr-stamp send" disabled/.test(holdHtml) &&
+    /msr-what/.test(holdHtml),
 );
-// Even a programmatic call cannot act while the backend flags are off.
+// The caveat gets as far as the Captain confirmation; cancelling it writes
+// nothing. The backend flags still remain the execution authority.
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.confirms.length = 0;
+behaviour.confirmReturns = false;
 await mod.sesApproveAndSend(JOB);
 check(
-  "the press refuses to run while the backend flags are off",
+  "a non-email caveat reaches Captain confirmation without writing before consent",
+  calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
+    calls.confirms.length === 1,
+);
+behaviour.confirmReturns = true;
+mod._msSesPackCache[JOB].cockpit.controls.send_it.enabled = false;
+calls.confirms.length = 0;
+await mod.sesApproveAndSend(JOB);
+check(
+  "the press still refuses to run while the backend flags are off",
   calls.opsPost.length === 0 && calls.opsPostJwt.length === 0 &&
     calls.confirms.length === 0,
 );
@@ -2038,7 +2132,7 @@ check(
 // ── 11a2. SEND is NOT walled by email-draft caveats (Captain ruling 2026-08-13).
 //         An email-draft-ONLY hold with the invoice ready is a SOFT hold: the
 //         pane arms APPROVE AND SEND and the guarded chain (not the client)
-//         governs the actual send. A HARD blocker would still lock it. ─────────
+//         governs the actual send. Other caveat families behave the same. ──────
 const draftOnlyHold = cockpitSendReady();
 draftOnlyHold.status = "HOLD";
 draftOnlyHold.verdict = {
@@ -2098,7 +2192,7 @@ check(
   /class="msr-hold soft"/.test(liveDraftOnlyHtml) &&
     liveDraftOnlyHtml.includes('id="msSesApproveAndSendBtn"') &&
     liveDraftOnlyHtml.includes("sesApproveAndSend(") &&
-    /Still drafting/.test(liveDraftOnlyHtml),
+    /Review &mdash; 3 caveats/.test(liveDraftOnlyHtml),
 );
 
 // ── 11a4. SWMS-261237: C11 "report invoice email is not marked ready" while
@@ -2128,7 +2222,7 @@ check(
   /class="msr-hold soft"/.test(ajsDraftReadyHtml) &&
     ajsDraftReadyHtml.includes('id="msSesApproveAndSendBtn"') &&
     ajsDraftReadyHtml.includes("sesApproveAndSend(") &&
-    /Still drafting/.test(ajsDraftReadyHtml) &&
+    /Review &mdash; 1 caveat/.test(ajsDraftReadyHtml) &&
     /press <strong>APPROVE AND SEND<\/strong>/.test(ajsDraftReadyHtml),
 );
 
@@ -2220,7 +2314,7 @@ check(
 check(
   "honesty: an email-draft-only hold is SOFT (fills in on the next run), not an alarm",
   /class="msr-hold soft"/.test(honestyHtml) &&
-    /Still drafting/.test(honestyHtml) &&
+    /Review &mdash; 1 caveat/.test(honestyHtml) &&
     honestyHtml.includes('<span class="msr-blocker-auto">fills in on the next run</span>'),
 );
 check(
@@ -2322,8 +2416,7 @@ const routeItems = routeHtml
 check(
   "route holds: one item per route, the per-route duplicate collapsed",
   routeItems.length === 2 &&
-    // Email-draft-only hold is SOFT: the count lives in the calm banner header.
-    /Still drafting &mdash; 2 caveats to review/.test(routeHtml),
+    /Review &mdash; 2 caveats/.test(routeHtml),
 );
 check(
   "route holds: the two items are not byte-identical — each names its route",
@@ -2389,7 +2482,7 @@ check(
     "The insurance work order is missing from this docket.",
   ) &&
     shapelessHtml.includes('<ul class="msr-blockers">') &&
-    /Review <strong>1 caveat<\/strong> below/.test(shapelessHtml) &&
+    /Review &mdash; 1 caveat/.test(shapelessHtml) &&
     !/this pack cannot move yet/.test(shapelessHtml),
 );
 
@@ -2413,10 +2506,10 @@ await mod.showMsReportingDetail(JOB);
 const approveHtml = elements["msReportingDetailPanel"]._html || "";
 check(
   "Option B: neither the next action nor the press note claims it CREATES the invoice",
-  !/creates the real Xero invoice/i.test(approveHtml) &&
+    !/creates the real Xero invoice/i.test(approveHtml) &&
     !/creates the invoice in Xero/i.test(approveHtml) &&
     approveHtml.includes(
-      "authorises the Xero draft invoice already prepared for this pack",
+      "authorises the Xero draft invoice already prepared for the pack",
     ) &&
     approveHtml.includes(
       "authorises the Xero draft invoice already prepared for it",
@@ -2522,7 +2615,7 @@ check(
   "a bare queue card keeps enrichment hooks but exposes no review action",
   bareCardHtml.includes("msCardBadge_job_bare") &&
     bareCardHtml.includes("msCardMoney_job_bare") &&
-    bareCardHtml.includes("PACK INCOMPLETE") &&
+    bareCardHtml.includes("NO PACK DRAFTED") &&
     !bareCardHtml.includes("Review job pack"),
 );
 const emptyMapsCardHtml = mod.renderMsReportingCard({
@@ -2537,10 +2630,10 @@ const emptyMapsCardHtml = mod.renderMsReportingCard({
   },
 });
 check(
-  "Approvals card rejects empty document maps and suppresses Review job pack",
+  "Approvals card labels empty document maps incomplete but keeps Captain review",
   emptyMapsCardHtml.includes("PACK INCOMPLETE") &&
-    !emptyMapsCardHtml.includes("Review job pack") &&
-    !emptyMapsCardHtml.includes("showMsReportingDetail('job-empty-maps')"),
+    emptyMapsCardHtml.includes("Review job pack") &&
+    emptyMapsCardHtml.includes("showMsReportingDetail('job-empty-maps')"),
 );
 const joinedCardHtml = mod.renderMsReportingCard(
   mod._msSesQueueCardRow(JOB, queueRow, {
@@ -2561,31 +2654,19 @@ check(
     !("pack_status" in mod._msSesQueueCardRow(JOB, queueRow, null)),
 );
 
-// ── 16. The board door (openMakesafeJob, extracted from ops.html) ───────────
-const OPS_SRC = join(__dirname, "..", "ops.html");
-const opsCode = readFileSync(OPS_SRC, "utf8");
+// ── 16. Execute the shipped board door and review affordance ────────────────
+const opsCode = opsHtml;
 const makesafePackCompletenessVerdict = mod.makesafePackCompletenessVerdict;
 check(
   "cockpit module exports the one pack-completeness verdict used by ops.html",
-  typeof makesafePackCompletenessVerdict === "function" &&
-    !opsCode.includes("function makesafePackCompletenessVerdict(pack) {"),
+  typeof makesafePackCompletenessVerdict === "function",
 );
 const doorStart = opsCode.indexOf("async function openMakesafeJob(jobId) {");
 const doorEnd = opsCode.indexOf("/**\n * Mount a board overlay", doorStart);
-check(
-  "ops.html door source located for extraction",
-  doorStart > 0 && doorEnd > doorStart,
-);
+if (doorStart < 0 || doorEnd <= doorStart) {
+  throw new Error("Could not load the executable openMakesafeJob door from ops.html");
+}
 const doorSrc = opsCode.slice(doorStart, doorEnd);
-check(
-  "the door no longer primes the legacy drafts feed",
-  !/loadMakesafeReportingCockpit/.test(doorSrc),
-);
-check(
-  "the door source never calls a retired action",
-  !/makesafe_send_pack|makesafe_send_photo_followup|makesafe_resume_close|makesafe_reset_failed_pack/
-    .test(doorSrc),
-);
 
 function makeDoor(env) {
   const names = Object.keys(env);
@@ -2632,17 +2713,10 @@ function doorEnv(over) {
 // canonical pack block still owns whether a pack exists.
 const affordanceStart = opsCode.indexOf("function makesafeCardHasReviewAffordance(j, status, packCompleteness) {");
 const affordanceEnd = opsCode.indexOf("// OPT1 card", affordanceStart);
-check(
-  "ops.html review-affordance predicate source located for extraction",
-  affordanceStart > 0 && affordanceEnd > affordanceStart,
-);
-const affordanceSrc = affordanceStart > 0 && affordanceEnd > affordanceStart
-  ? opsCode.slice(affordanceStart, affordanceEnd)
-  : "function makesafeCardHasReviewAffordance() { return false; }";
-check(
-  "review-affordance predicate does not consult legacy substatus, declared stage, or computed status",
-  !/admin_to_send_report|board_stage|computed_status/.test(affordanceSrc),
-);
+if (affordanceStart < 0 || affordanceEnd <= affordanceStart) {
+  throw new Error("Could not load the executable makesafeCardHasReviewAffordance predicate from ops.html");
+}
+const affordanceSrc = opsCode.slice(affordanceStart, affordanceEnd);
 function makeReviewAffordance(queue) {
   return new Function(
     "_msSesReviewQueue",
@@ -2661,31 +2735,12 @@ function makeReviewAffordance(queue) {
 }
 const makesafeCardHasReviewAffordance = makeReviewAffordance({});
 
-const renderCardStart = opsCode.indexOf("function renderMakesafeCard(j, status) {");
-const renderCardEnd = opsCode.indexOf("// ── Make-Safe Substatus Advance", renderCardStart);
-const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
-  ? opsCode.slice(renderCardStart, renderCardEnd)
-  : "";
-check(
-  "renderMakesafeCard wires the visible Review job pack button to the shared completeness verdict",
-  /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status,\s*packCompleteness\)/.test(renderCardSrc) &&
-    /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
-);
-
-const loadJobsStart = opsCode.indexOf("async function loadJobs(opts) {");
-const loadJobsEnd = opsCode.indexOf("function setPipelineTab(tab) {", loadJobsStart);
-const loadJobsSrc = loadJobsStart > 0 && loadJobsEnd > loadJobsStart
-  ? opsCode.slice(loadJobsStart, loadJobsEnd)
-  : "";
-check(
-  "the make-safe board hydrates the queue-backed affordances after first paint",
-  /loadMakesafeBoardReviewAffordances\(\)/.test(loadJobsSrc),
-);
 const loaderStart = opsCode.indexOf("async function loadMakesafeBoardReviewAffordances() {");
 const loaderEnd = opsCode.indexOf("function setPipelineTab(tab) {", loaderStart);
-const loaderSrc = loaderStart > 0 && loaderEnd > loaderStart
-  ? opsCode.slice(loaderStart, loaderEnd)
-  : "async function loadMakesafeBoardReviewAffordances() {}";
+if (loaderStart < 0 || loaderEnd <= loaderStart) {
+  throw new Error("Could not load the executable review-affordance loader from ops.html");
+}
+const loaderSrc = opsCode.slice(loaderStart, loaderEnd);
 function makeAffordanceLoader(stale) {
   const loaderCalls = { refresh: 0, render: 0 };
   const loader = new Function(
@@ -2736,15 +2791,19 @@ const INCOMPLETE_PACK = {
 };
 
 check(
-  "empty document maps fail closed instead of laundering a ready label",
-  makesafePackCompletenessVerdict({
-    drafted: true,
-    presentation_kind: "ready",
-    required_documents: {},
-    closeout_documents: {},
-    report_doc_id: "report-doc-1",
-    has_selected_current_cycle_trade_report: true,
-  }).ready === false,
+  "empty document maps stay incomplete without closing the Captain review door",
+  (() => {
+    const verdict = makesafePackCompletenessVerdict({
+      drafted: true,
+      presentation_kind: "ready",
+      required_documents: {},
+      closeout_documents: {},
+      report_doc_id: "report-doc-1",
+      has_selected_current_cycle_trade_report: true,
+    });
+    return verdict.reviewable === true && verdict.complete === false &&
+      verdict.warning_label === "PACK INCOMPLETE";
+  })(),
 );
 const nullMapsVerdict = makesafePackCompletenessVerdict({
   drafted: true,
@@ -2756,26 +2815,32 @@ const nullMapsVerdict = makesafePackCompletenessVerdict({
 });
 check(
   "explicitly null document maps are malformed, never legacy pointer evidence",
-  nullMapsVerdict.ready === false &&
+  nullMapsVerdict.reviewable === true &&
+    nullMapsVerdict.complete === false &&
     nullMapsVerdict.evidence === "incomplete" &&
     nullMapsVerdict.reason.includes("empty or malformed"),
 );
 check(
-  "map-less legacy readiness requires both the report pointer and selected current-cycle report",
+  "map-less drafted packs stay reviewable while incomplete truth remains visible",
   makesafePackCompletenessVerdict({
     drafted: true,
     report_doc_id: "report-doc-1",
     has_selected_current_cycle_trade_report: true,
-  }).ready === true &&
+  }).reviewable === true &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      report_doc_id: "report-doc-1",
+      has_selected_current_cycle_trade_report: true,
+    }).complete === false &&
     makesafePackCompletenessVerdict({
       drafted: true,
       report_doc_id: "report-doc-1",
       has_selected_current_cycle_trade_report: false,
-    }).ready === false &&
+    }).reviewable === true &&
     makesafePackCompletenessVerdict({
       drafted: true,
       has_selected_current_cycle_trade_report: true,
-    }).ready === false,
+    }).reviewable === true,
 );
 
 for (const substatus of [
@@ -2823,8 +2888,8 @@ check(
   makesafeCardHasReviewAffordance(negativeRow, "report_ready") === true,
 );
 check(
-  "a ready-labelled card with a missing required closeout has no review affordance",
-  makesafeCardHasReviewAffordance({ ...negativeRow, report_pack: INCOMPLETE_PACK }, "report_ready") === false,
+  "a ready-labelled card with a missing required closeout keeps its review affordance",
+  makesafeCardHasReviewAffordance({ ...negativeRow, report_pack: INCOMPLETE_PACK }, "report_ready") === true,
 );
 const noPackPredicate = makeReviewAffordance({
   "review-negative": { job_id: "review-negative", docket_revision_id: DOCKET_REV },

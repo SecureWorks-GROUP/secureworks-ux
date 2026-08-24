@@ -403,13 +403,15 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
     canonicalRow({ id: 'job-inferred', job_number: 'SWMS-INFER', canonical_stage: 'report_ready', substatus: 'admin_to_send_report' }),
     canonicalRow({
       id: 'job-drafted', job_number: 'SWMS-PACK', canonical_stage: 'report_ready', substatus: 'admin_to_send_report',
-      // Legacy shape: no required/closeout maps yet. It is reviewable only
-      // because the canonical row proves both authoritative fallback facts.
+      // Live read-model shape: closeout truth is supplied, but there is no
+      // required_documents producer field. The card must stay reviewable while
+      // refusing to invent a complete/ready claim.
       report: { state: 'submitted', submitted_at: '2026-07-30T01:00:00Z', cycle_number: 1 },
       pack: {
         state: 'drafted', sent: false, sent_at: null, drafted: true,
         docket_revision_id: null, pre_xero_docs_ready: false,
         report_doc_id: 'report-doc-job-drafted',
+        closeout_documents: { report: true, invoice: true, swms: true },
       },
     }),
     canonicalRow({
@@ -425,11 +427,8 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  // A map-less legacy pack does not inherit readiness from `drafted`. It proves
-  // the fallback with a real report_doc_id plus the selected current-cycle
-  // submitted report, so the existing card remains reviewable without a
-  // permissive assumed-ready branch.
-  expect(result.cards.drafted).toContain('Ready to send');
+  expect(result.cards.drafted).toContain('CHECK DOCUMENTS');
+  expect(result.cards.drafted).not.toContain('Ready to send');
   expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
 

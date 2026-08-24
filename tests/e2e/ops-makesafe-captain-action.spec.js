@@ -59,7 +59,7 @@ test('make-safe card shows an identified gap for an incomplete Captain action en
   );
 });
 
-test('report-ready placement never renders send controls for an incomplete pack', async ({ page }) => {
+test('report-ready placement labels an incomplete pack without hiding Captain review', async ({ page }) => {
   await page.goto('/ops.html');
   const rendered = await page.evaluate(() => {
     const card = mapCanonicalMakesafeRow({
@@ -73,8 +73,8 @@ test('report-ready placement never renders send controls for an incomplete pack'
       pack: {
         drafted: true,
         state: 'drafted',
-        // Deliberately contradictory: the shared UX verdict must fail closed
-        // even if a stale server label says ready.
+        // Deliberately contradictory: a stale ready label cannot erase the
+        // visible document caveat, but the Captain still owns manual review.
         presentation_kind: 'ready',
         presentation_reason:
           'The pack has no bound report_doc_id — <script>bad()</script>.',
@@ -85,10 +85,10 @@ test('report-ready placement never renders send controls for an incomplete pack'
     return renderMakesafeCard(card, 'report_ready');
   });
 
-  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('PACK INCOMPLETE');
   expect(rendered).toContain('Report: required pack pointer is missing or unresolved');
   expect(rendered).not.toContain('Ready to send');
-  expect(rendered).not.toContain('Review job pack');
+  expect(rendered).toContain('Review job pack');
   expect(rendered).not.toContain('<script>bad()</script>');
 });
 
@@ -118,10 +118,44 @@ test('resolved ready presentation still renders the review control', async ({ pa
 
   expect(rendered).toContain('Ready to send');
   expect(rendered).toContain('Review job pack');
-  expect(rendered).not.toContain('Pack incomplete');
+  expect(rendered).not.toContain('PACK INCOMPLETE');
 });
 
-test('ready label with empty document maps fails closed', async ({ page }) => {
+test('live closeout-only pack truth keeps the Captain review control visible', async ({ page }) => {
+  await page.goto('/ops.html');
+  const rendered = await page.evaluate(() => {
+    const card = mapCanonicalMakesafeRow({
+      id: 'f6dba284-43b6-41ee-8ccd-6a625c371193',
+      job_number: 'SWMS-261286',
+      canonical_stage: 'report_ready',
+      substatus: 'admin_to_send_report',
+      ses_family_label: 'MakeSafe',
+      site_suburb: 'Perth',
+      created_at: new Date().toISOString(),
+      report: { state: 'submitted', cycle_number: 1 },
+      pack: {
+        drafted: true,
+        state: 'drafted',
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-live-shape',
+        invoice_doc_id: 'invoice-doc-live-shape',
+        swms_doc_id: 'swms-doc-live-shape',
+        // makesafe-board.v1 supplies this map but does not currently supply
+        // required_documents. That missing producer field cannot erase the
+        // Captain's review/send door.
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    }, null, { rememberStage: false });
+    return renderMakesafeCard(card, 'report_ready');
+  });
+
+  expect(rendered).toContain('Review job pack');
+  expect(rendered).toContain('CHECK DOCUMENTS');
+  expect(rendered).toContain('Required document truth was not supplied');
+  expect(rendered).not.toContain('Required and closeout document truth is empty or malformed');
+});
+
+test('ready label with empty document maps stays visibly incomplete but reviewable', async ({ page }) => {
   await page.goto('/ops.html');
   const rendered = await page.evaluate(() => {
     const card = mapCanonicalMakesafeRow({
@@ -142,12 +176,12 @@ test('ready label with empty document maps fails closed', async ({ page }) => {
     return renderMakesafeCard(card, 'report_ready');
   });
 
-  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('PACK INCOMPLETE');
   expect(rendered).not.toContain('Ready to send');
-  expect(rendered).not.toContain('Review job pack');
+  expect(rendered).toContain('Review job pack');
 });
 
-test('ready label with explicitly null document maps fails closed', async ({ page }) => {
+test('ready label with explicitly null document maps stays visibly incomplete but reviewable', async ({ page }) => {
   await page.goto('/ops.html');
   const rendered = await page.evaluate(() => {
     const card = mapCanonicalMakesafeRow({
@@ -168,13 +202,13 @@ test('ready label with explicitly null document maps fails closed', async ({ pag
     return renderMakesafeCard(card, 'report_ready');
   });
 
-  expect(rendered).toContain('Pack incomplete');
+  expect(rendered).toContain('PACK INCOMPLETE');
   expect(rendered).toContain('empty or malformed');
   expect(rendered).not.toContain('Ready to send');
-  expect(rendered).not.toContain('Review job pack');
+  expect(rendered).toContain('Review job pack');
 });
 
-test('map-less legacy pack requires both bound report pointer and selected cycle report', async ({ page }) => {
+test('map-less drafted packs remain reviewable without inventing document completeness', async ({ page }) => {
   await page.goto('/ops.html');
   const cards = await page.evaluate(() => {
     function render(id, report, reportDocId) {
@@ -198,15 +232,14 @@ test('map-less legacy pack requires both bound report pointer and selected cycle
     };
   });
 
-  expect(cards.proved).toContain('Ready to send');
-  expect(cards.proved).toContain('Review job pack');
-  expect(cards.noPointer).toContain('Pack incomplete');
-  expect(cards.noPointer).not.toContain('Review job pack');
-  expect(cards.noSelectedReport).toContain('Pack incomplete');
-  expect(cards.noSelectedReport).not.toContain('Review job pack');
+  for (const rendered of Object.values(cards)) {
+    expect(rendered).toContain('CHECK DOCUMENTS');
+    expect(rendered).toContain('Review job pack');
+    expect(rendered).not.toContain('Ready to send');
+  }
 });
 
-test('whole-card open path uses the same required-document completeness verdict', async ({ page }) => {
+test('whole-card open path sends complete and incomplete drafted packs to Captain review', async ({ page }) => {
   await page.goto('/ops.html');
   const calls = await page.evaluate(async () => {
     const observed = { review: [], detail: [] };
@@ -254,6 +287,6 @@ test('whole-card open path uses the same required-document completeness verdict'
     return observed;
   });
 
-  expect(calls.detail).toEqual(['job-open-incomplete']);
-  expect(calls.review).toEqual(['job-open-ready']);
+  expect(calls.detail).toEqual([]);
+  expect(calls.review).toEqual(['job-open-incomplete', 'job-open-ready']);
 });

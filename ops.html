@@ -6106,7 +6106,7 @@
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=7"></script>
+<script src="modules/ops-makesafe-reporting-cockpit.js?v=8"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
@@ -12061,7 +12061,7 @@ async function openMakesafeJob(jobId) {
   var canonicalPackMeta = (typeof _makesafeCanonicalPackMetaById !== 'undefined')
     ? _makesafeCanonicalPackMetaById[jobId] : null;
   var packCompleteness = makesafePackCompletenessVerdict(canonicalPackMeta);
-  if (packCompleteness.ready && (sesEntry || hasDraftedPack) && typeof showMsReportingDetail === 'function') {
+  if (packCompleteness.reviewable && (sesEntry || hasDraftedPack) && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
@@ -12076,7 +12076,7 @@ async function openMakesafeJob(jobId) {
   var isFailedPack = !!(pack && pack.pack_status && pack.pack_status.status === 'failed');
   var isPortalPack = pack && !isFailedPack && typeof _msIsPortalBuilder === 'function' && _msIsPortalBuilder(pack);
   var isActionable = pack && !isFailedPack && (pack.resume_action || isPortalPack);
-  if (packCompleteness.ready && isActionable && typeof showMsReportingDetail === 'function') {
+  if (packCompleteness.reviewable && isActionable && typeof showMsReportingDetail === 'function') {
     openMakesafeReviewOverlay('makesafeReportingOverlay', 'msReportingDetailPanelBoard', 'MakeSafe report pack — review & send');
     showMsReportingDetail(jobId, 'msReportingDetailPanelBoard');
     return;
@@ -14023,7 +14023,7 @@ function makesafeCardHasReviewAffordance(j, status, packCompleteness) {
   );
   return status === 'report_ready'
     && makesafeCanonicalStageOf(j) === 'report_ready'
-    && packCompleteness.ready
+    && packCompleteness.reviewable
     && makesafeHasDraftedPack(j);
 }
 
@@ -14052,9 +14052,9 @@ function renderMakesafeCard(j, status) {
 
   // Keep the legacy resume/send-state chip narrow: it describes the physical
   // admin_to_send_report path and must not label a pre-Xero roof pack as ready to
-  // send. The visible Review job pack BUTTON and the ready chip share the same
-  // exact-document completeness verdict; their remaining stage/substatus
-  // conditions only decide where that verdict is displayed.
+  // send. The visible Review job pack BUTTON requires a drafted pack; the ready
+  // chip separately requires positive document-completeness truth. Their
+  // remaining stage/substatus conditions only decide where each fact appears.
   // Gate on the AUTHORITATIVE backend verdict, not the locally re-derived stage: the
   // local mapper coerces a not-yet-drafted `trade_report_in` job (substatus
   // admin_to_send_report) into the report_ready column, so the substatus check alone
@@ -14078,7 +14078,7 @@ function renderMakesafeCard(j, status) {
   );
   var readyToSend = status === 'report_ready' && getMakesafeSubstatus(j) === 'admin_to_send_report'
     && (backendStage ? backendStage === 'report_ready' : true)
-    && packCompleteness.ready
+    && packCompleteness.complete
     && makesafeHasDraftedPack(j);
   // A READY TO SEND chip whose face still says WO missing / 2/5 is a lie
   // against the pack. Prefer pack chip facts when we have them; until then
@@ -14104,8 +14104,10 @@ function renderMakesafeCard(j, status) {
     + '>' + escapeHtml(String(typeLabel || 'Make Safe')) + '</span>';
   if (readyToSend) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
-  } else if (status === 'report_ready' && makesafeHasDraftedPack(j) && !packCompleteness.ready) {
-    html += '<span title="' + escapeAttr(packPresentationReason || 'Required pack artifacts are missing or unresolved') + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:#991B1B;color:#fff;text-transform:uppercase;white-space:nowrap;">Pack incomplete</span>';
+  } else if (status === 'report_ready' && makesafeHasDraftedPack(j) && !packCompleteness.complete) {
+    var packCaveatLabel = packCompleteness.warning_label || 'PACK INCOMPLETE';
+    var packCaveatColour = packCaveatLabel === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B';
+    html += '<span title="' + escapeAttr(packPresentationReason || 'Pack document truth needs review') + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + packCaveatColour + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(packCaveatLabel) + '</span>';
   } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
     // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).
     // Neutral chip — deliberately NOT teal/"ready" — so the card reads honestly while

@@ -131,14 +131,16 @@ function makesafePackTruthFromCanonicalRow(row) {
   return truth;
 }
 
-// ONE fail-closed verdict owns the board card, whole-card open path, Approvals
-// card, detail action rail and the programmatic send entry point.
+// ONE document-honesty verdict owns the board card, whole-card open path and
+// Approvals card. It has two deliberately separate answers:
+//   - `reviewable`: a real drafted pack exists, so the Captain may open it;
+//   - `complete`: the payload positively proves every declared requirement.
 //
-// New payloads must provide non-empty required/closeout maps and every required
-// key must have exact closeout truth. A map-less legacy payload may remain
-// actionable only when it proves the captain's authoritative fallback: a real
-// report_doc_id plus a selected current-cycle trade report. Empty/malformed
-// maps are never treated as legacy and never inherit an assumed-ready state.
+// Missing, partial or malformed document truth is a visible caveat, never a
+// client-side wall around Captain review/send authority. In particular the live
+// makesafe-board.v1 shape supplies closeout_documents but not
+// required_documents. That producer gap must remain visible without hiding the
+// review door or the backend-armed APPROVE AND SEND control.
 function makesafePackCompletenessVerdict(pack) {
   pack = (pack && typeof pack === 'object') ? pack : {};
   var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
@@ -148,8 +150,10 @@ function makesafePackCompletenessVerdict(pack) {
   var closeout = _msSesPlainObject(pack.closeout_documents) ? pack.closeout_documents : null;
   var requiredKeys = required ? Object.keys(required) : [];
   var closeoutKeys = closeout ? Object.keys(closeout) : [];
+  var requiredWellFormed = !!required && requiredKeys.length > 0;
+  var closeoutWellFormed = !!closeout && closeoutKeys.length > 0;
   var mapsAbsent = !requiredSupplied && !closeoutSupplied;
-  var mapsComplete = !!required && !!closeout && requiredKeys.length > 0 && closeoutKeys.length > 0;
+  var mapsComplete = requiredWellFormed && closeoutWellFormed;
   var missingRequired = [];
   if (mapsComplete) {
     requiredKeys.forEach(function(key) {
@@ -165,37 +169,56 @@ function makesafePackCompletenessVerdict(pack) {
   ) && missingRequired.indexOf('report') < 0) {
     missingRequired.push('report');
   }
-  var legacyPointerReady = mapsAbsent
-    && pack.drafted === true
+  var legacyPointerEvidence = mapsAbsent
     && !!reportDocId
     && pointerResolved
-    && selectedTradeReport
-    && (!presentationKind || presentationKind === 'ready');
-  var mapReady = mapsComplete
+    && selectedTradeReport;
+  var complete = mapsComplete
     && presentationKind === 'ready'
     && missingRequired.length === 0;
-  var ready = mapReady || legacyPointerReady;
+  var reviewable = pack.drafted === true;
   var reason = '';
-  if (!ready) {
-    if ((requiredSupplied || closeoutSupplied) && !mapsComplete) {
-      reason = 'Required and closeout document truth is empty or malformed';
+  var warningLabel = '';
+  if (!reviewable) {
+    reason = 'No drafted pack is available to review.';
+    warningLabel = 'NO PACK DRAFTED';
+  } else if (!complete) {
+    if (requiredSupplied && !requiredWellFormed) {
+      reason = 'Required document truth is empty or malformed. Review the documents and send preview below.';
+      warningLabel = 'PACK INCOMPLETE';
+    } else if (closeoutSupplied && !closeoutWellFormed) {
+      reason = 'Closeout document truth is empty or malformed. Review the documents and send preview below.';
+      warningLabel = 'PACK INCOMPLETE';
+    } else if (!requiredSupplied) {
+      reason = 'Required document truth was not supplied. Review each present or missing document below before sending.';
+      warningLabel = 'CHECK DOCUMENTS';
+    } else if (!closeoutSupplied) {
+      reason = 'Closeout document truth was not supplied. Review each present or missing document below before sending.';
+      warningLabel = 'CHECK DOCUMENTS';
     } else if (missingRequired.length) {
-      reason = 'Required pack pointer is missing or unresolved: ' + missingRequired.join(', ');
-    } else if (mapsAbsent && (!reportDocId || !pointerResolved)) {
-      reason = 'A bound report_doc_id is required before this pack can be reviewed or sent';
-    } else if (mapsAbsent && !selectedTradeReport) {
-      reason = 'A selected current-cycle trade report is required before this pack can be reviewed or sent';
+      reason = 'Required document truth reports missing or unresolved: ' + missingRequired.join(', ') + '. Review this caveat before sending.';
+      warningLabel = 'PACK INCOMPLETE';
     } else {
       reason = String(pack.presentation_reason || '').trim()
-        || 'The pack is not presented as ready';
+        || 'The pack is not presented as complete. Review the documents and send preview below.';
+      warningLabel = 'PACK INCOMPLETE';
     }
   }
   return {
-    ready: ready,
+    // `ready` remains as a compatibility alias for the review door. New callers
+    // should say `reviewable`; document claims must use `complete`.
+    ready: reviewable,
+    reviewable: reviewable,
+    complete: complete,
     presentation_kind: presentationKind,
     missing_required: missingRequired,
+    warning_label: warningLabel,
     reason: reason,
-    evidence: mapReady ? 'document_maps' : (legacyPointerReady ? 'legacy_report_pointer' : 'incomplete')
+    evidence: complete
+      ? 'document_maps'
+      : (!requiredSupplied && closeoutWellFormed
+        ? 'closeout_only'
+        : (legacyPointerEvidence ? 'legacy_report_pointer' : 'incomplete'))
   };
 }
 
@@ -483,8 +506,12 @@ function _msSesUpdateCardBadge(jobId, status) {
   var el = document.getElementById('msCardBadge_' + _msDocTabKey(jobId));
   if (!el) return;
   var verdict = _msSesPackCompletenessById[jobId];
-  var chip = status !== 'NO_DOCKET' && verdict && !verdict.ready
-    ? { label: 'PACK INCOMPLETE', bg: '#991B1B', fg: '#fff' }
+  var chip = status !== 'NO_DOCKET' && verdict && !verdict.complete
+    ? {
+      label: verdict.warning_label || 'PACK INCOMPLETE',
+      bg: verdict.warning_label === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B',
+      fg: '#fff'
+    }
     : _msSesStatusChip(status);
   el.textContent = chip.label;
   el.style.background = chip.bg;
@@ -552,12 +579,13 @@ function renderMsReportingCard(d) {
   var cardKey = _msDocTabKey(d.job_id);
   var completeness = makesafePackCompletenessVerdict(d.pack_truth);
   _msSesPackCompletenessById[d.job_id] = completeness;
-  var openAttr = completeness.ready ? ' onclick="showMsReportingDetail(\'' + safeId + '\')"' : '';
-  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '"' + openAttr + ' style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:' + (completeness.ready ? 'pointer' : 'default') + ';box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + (completeness.ready ? '#94A3B8' : '#991B1B') + ';">';
+  var openAttr = completeness.reviewable ? ' onclick="showMsReportingDetail(\'' + safeId + '\')"' : '';
+  var caveatColour = completeness.warning_label === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B';
+  var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '"' + openAttr + ' style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:' + (completeness.reviewable ? 'pointer' : 'default') + ';box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + (completeness.complete ? '#94A3B8' : caveatColour) + ';">';
 
   // Top row: the SES status chip (enriched async from query_ses_review_cockpit).
   html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
-  html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + (completeness.ready ? '#6B7280' : '#991B1B') + ';color:#fff;">' + (completeness.ready ? 'CHECKING SES&#8230;' : 'PACK INCOMPLETE') + '</span>';
+  html += '<span id="msCardBadge_' + escapeAttr(cardKey) + '" style="font-size:9px;font-weight:800;letter-spacing:0.04em;padding:2px 7px;border-radius:10px;background:' + (completeness.complete ? '#6B7280' : caveatColour) + ';color:#fff;">' + (completeness.complete ? 'CHECKING SES&#8230;' : escapeHtml(completeness.warning_label || 'PACK INCOMPLETE')) + '</span>';
   html += '</div>';
 
   // Builder name
@@ -574,12 +602,14 @@ function renderMsReportingCard(d) {
   // from sections.money.local_invoice_proposal.
   html += '<div id="msCardMoney_' + escapeAttr(cardKey) + '" style="margin-top:8px;font-size:18px;font-weight:800;color:var(--sw-dark);"></div>';
 
-  // The same completeness verdict as the board door owns this direct route.
-  if (completeness.ready) {
+  // A drafted pack always opens for Captain review. Document gaps remain visible
+  // on the card and again beside the exact documents/routes in the detail.
+  if (completeness.reviewable) {
     html += '<div style="margin-top:10px;">';
     html += '<button onclick="event.stopPropagation();showMsReportingDetail(\'' + safeId + '\')" style="width:100%;background:#1F3A44;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Review job pack</button>';
     html += '</div>';
-  } else {
+  }
+  if (!completeness.complete && completeness.reason) {
     html += '<div style="margin-top:10px;font-size:11px;font-weight:600;color:#991B1B;">' + escapeHtml(completeness.reason) + '</div>';
   }
 
@@ -707,9 +737,10 @@ async function showMsReportingDetail(jobId, targetPanelId) {
     panel.innerHTML = _msSesRenderUnavailable(jobId, base, e, targetPanelId);
     return;
   }
-  // A direct Approvals/detail entry must pass the exact same verdict as the
-  // board card and whole-card door. The detail may still show the evidence for
-  // diagnosis, but its send stamp stays unarmed until this verdict is ready.
+  // A direct Approvals/detail entry computes the same document-honesty verdict
+  // as the board card and whole-card door. The detail renders every caveat, but
+  // only the backend control flags (plus exact preview/revision guards) arm the
+  // send stamp.
   ctx.packCompleteness = _msSesPackCompleteness(jobId, ctx, base);
   _msSesPackCompletenessById[jobId] = ctx.packCompleteness;
   ctx.panelId = targetPanelId || 'msReportingDetailPanel';
@@ -1436,6 +1467,7 @@ function _msSesRenderDetail(jobId, ctx, targetPanelId) {
 
   // ── DONE checklist: what is complete on this pack, before any document ────
   html += _msSesRenderDoneStrip(row, ctx);
+  html += _msSesPackTruthNotice(ctx);
 
   // ── Hours & wording: the send-preview editors. Feedback stays for the rest.
   html += _msSesRenderSendEditors(jobId, ctx);
@@ -1599,17 +1631,13 @@ function _msSesNextAction(cockpit) {
   var hold = _msSesClassifyHold(cockpit);
   var cls = '';
   var text;
-  if (hold.hardHold) {
-    // Only a HARD hold reads as a stop. An email-draft-only hold is not a stop
-    // — it falls through to the armed copy below so SEND is never walled by a
-    // draft the pipeline still has to write.
-    cls = ' hold';
-    var n = hold.blockers.length;
-    text = 'Review <strong>' + n + ' caveat' + (n === 1 ? '' : 's') + '</strong> below before this pack is approved or sent.';
-  } else if (controls.send_it && controls.send_it.enabled) {
-    text = 'Read the pack, then press <strong>APPROVE AND SEND</strong>. It records your approval for this exact pack and emails the report, the photos and the invoice exactly as shown below.';
+  var caveatLead = hold.blockers.length
+    ? ('Review <strong>' + hold.blockers.length + ' caveat' + (hold.blockers.length === 1 ? '' : 's') + '</strong> below, then ')
+    : '';
+  if (controls.send_it && controls.send_it.enabled) {
+    text = caveatLead + 'press <strong>APPROVE AND SEND</strong>. It records your approval for this exact pack and emails the report, the photos and the invoice exactly as shown below.';
   } else if (controls.approve_invoice && controls.approve_invoice.enabled) {
-    text = 'Check the Invoice tile, then press <strong>APPROVE AND SEND</strong>. One press authorises the Xero draft invoice already prepared for this pack and then sends the emails shown below.';
+    text = caveatLead + 'check the Invoice tile and press <strong>APPROVE AND SEND</strong>. One press authorises the Xero draft invoice already prepared for this pack and then sends the emails shown below.';
   } else {
     text = 'Nothing to press yet &mdash; the system is still preparing this pack. Review it and leave feedback if something looks wrong.';
   }
@@ -1701,12 +1729,10 @@ function _msSesHoldBlockers(cockpit) {
 }
 
 /**
- * An "email-draft wall" is a SOFT caveat: the pipeline has not yet drafted an
- * outgoing email for this pack. It is a prep state that fills itself in on the
- * next reporting run — NOT a content problem the captain must fix, and (Captain
- * ruling 2026-08-13) it must never wall the SEND. Everything else — a missing
- * invoice, an off-schedule rate, a missing work order / photo / SWMS — is a
- * HARD blocker that still locks the pack.
+ * Identify the outgoing-email-draft caveat so its line can say it normally
+ * fills itself in on the next reporting run. Captain ruling 2026-08-24 makes
+ * every listed issue a review caveat rather than a client-side send wall; this
+ * predicate now controls only that explanatory hint.
  */
 function _msSesBlockerIsSoftDraft(b) {
   var code = String((b && b.code) || '');
@@ -1722,10 +1748,10 @@ function _msSesBlockerIsSoftDraft(b) {
   //   - "no draft on [current] docket" with the optional interior word,
   //   - a "… EMAIL … no draft / not drafted / missing draft" caveat,
   //   - "email is not marked ready" (C11 on an AJS DRAFT pack).
-  // The soft category is the outgoing EMAIL draft only. A missing REPORT
-  // DOCUMENT / invoice / work order is a hard artefact gap and must NOT be
-  // softened here, so every branch is anchored on "email" or the "no draft on
-  // docket" idiom — never on the bare word "report"/"invoice".
+  // The auto-fill hint is for outgoing EMAIL drafts only. A missing REPORT
+  // DOCUMENT / invoice / work order remains a different caveat, so every branch
+  // is anchored on "email" or the "no draft on docket" idiom — never on the
+  // bare word "report"/"invoice".
   if (/email\s*draft/.test(fact)) return true;
   if (/no\s+draft\s+on\s+(?:\w+\s+)?docket/.test(fact)) return true;
   if (/\bemail\b/.test(fact) && /\b(no|not|missing|pending|awaiting)\b[^.]*\bdraft(?:ed)?\b/.test(fact)) return true;
@@ -1734,20 +1760,15 @@ function _msSesBlockerIsSoftDraft(b) {
 }
 
 /**
- * Classify a cockpit's hold. `hard` blockers lock the pack; `soft` blockers are
- * email-draft walls that do not. A hold that carries ANY hard blocker is a
- * `hardHold` (the alarm state); a hold whose caveats are all email-draft walls
- * is a soft hold that leaves arming to the backend control flags alone. This is
- * the ONE place the soft/hard split is derived — the banner, the next action,
- * the stamp arming and the send guard all read it, so they can never disagree.
+ * Classify a cockpit's hold for presentation. Captain ruling 2026-08-24 makes
+ * every backend blocker a review caveat on this surface: missing artifacts,
+ * route drafts and pricing warnings remain visible, but none becomes a second
+ * client-side authority that can wall an otherwise backend-armed press.
  */
 function _msSesClassifyHold(cockpit) {
   var onHold = !!(cockpit && cockpit.status === 'HOLD');
   var blockers = onHold ? _msSesHoldBlockers(cockpit) : [];
-  var soft = [];
-  var hard = [];
-  blockers.forEach(function(b) { (_msSesBlockerIsSoftDraft(b) ? soft : hard).push(b); });
-  return { onHold: onHold, blockers: blockers, soft: soft, hard: hard, hardHold: onHold && hard.length > 0 };
+  return { onHold: onHold, blockers: blockers, soft: blockers.slice(), hard: [], hardHold: false };
 }
 
 // Fallback only — used when the backend does NOT supply recovery_action.
@@ -1801,15 +1822,11 @@ function _msSesRenderHoldBanner(cockpit) {
     return '<div class="msr-hold soft"><div class="msr-hold-h">On hold</div>'
       + '<div class="msr-hold-oneline">The system paused this pack. If that looks wrong, say so in Feedback below.</div></div>';
   }
-  // A hold that is only email-draft walls is calm (blue), not an alarm (amber):
-  // the captain can still review and approve; sending waits on the backend.
-  var soft = !cls.hardHold;
-  var html = '<div class="msr-hold' + (soft ? ' soft' : '') + '">';
-  html += '<div class="msr-hold-h">'
-    + (soft ? 'Still drafting &mdash; ' : 'On hold &mdash; ')
-    + n + ' caveat' + (n === 1 ? '' : 's')
-    + (soft ? ' to review' : '')
-    + '</div>';
+  // Every hold is a calm review warning. The exact backend facts stay verbatim;
+  // only the rejected client-side hard-stop interpretation is gone.
+  var html = '<div class="msr-hold soft">';
+  html += '<div class="msr-hold-h">Review &mdash; '
+    + n + ' caveat' + (n === 1 ? '' : 's') + '</div>';
   // Each caveat is ONE compact line: route tag + the backend fact, verbatim.
   // No per-blocker essay, no "what clears it" wall, no "no override" copy.
   html += '<ul class="msr-blockers">';
@@ -2094,6 +2111,18 @@ function _msSesRenderDoneStrip(row, ctx) {
   });
   html += '</div></div>';
   return html;
+}
+
+// The payload-level document caveat sits beside the per-document checklist. It
+// never claims an absent requirement is required, and never disables Captain
+// review/send. The tabs, route attachment chips and missing line below remain
+// the concrete truth the Captain weighs before pressing.
+function _msSesPackTruthNotice(ctx) {
+  var verdict = ctx && ctx.packCompleteness;
+  if (!verdict || verdict.complete || !verdict.reviewable || !verdict.reason) return '';
+  return '<div class="msr-missing"><b>'
+    + escapeHtml(verdict.warning_label || 'CHECK DOCUMENTS')
+    + ':</b> ' + escapeHtml(verdict.reason) + '</div>';
 }
 // </ses-done-checklist>
 
@@ -3625,12 +3654,12 @@ function _msReportingFormatTimestamp(iso) {
  * sign-off is still bound to the displayed pack hash, and a pack that changed
  * still voids the press.
  *
- * The stamp needs both the shared exact-document completeness verdict and the
- * backend control flags — approve_invoice when the invoice still needs
- * authorising, send_it when it does not. A disabled stamp carries no id and no
- * onclick (nothing for a click or a script to reach), with the owning refusal
- * underneath. A HOLD points back at the amber block above. The retired 410
- * combined path is never called.
+ * The backend control flags own whether the stamp is armed — approve_invoice
+ * when the invoice still needs authorising, send_it when it does not. Document
+ * and hold caveats remain visible above for Captain review but do not become a
+ * second client-side veto. A disabled stamp carries no id and no onclick, with
+ * the owning backend refusal underneath. The retired 410 combined path is never
+ * called.
  */
 function _msSesActionBlock(jobId, ctx, dismissAction) {
   var cockpit = ctx.cockpit || {};
@@ -3638,14 +3667,6 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   var controls = cockpit.controls || {};
   var approveInvoice = controls.approve_invoice || {};
   var sendIt = controls.send_it || {};
-  // Only a HARD hold locks the stamp. An email-draft-only hold leaves arming to
-  // the backend flags — sending is never walled by a draft the pipeline still
-  // has to write (Captain ruling 2026-08-13). The backend still guards every
-  // real write/send inside sesApproveAndSend, so this is presentation + gate
-  // relaxation, not a bypass of any server check.
-  var hold = _msSesClassifyHold(cockpit);
-  var hardHold = hold.hardHold;
-  var blockerCount = hold.blockers.length;
   var xero = (sections.money && sections.money.xero) ||
     (ctx.pack && ctx.pack.docket && ctx.pack.docket.xero_binding) || null;
   var safeId = _msJsAttr(jobId);
@@ -3653,18 +3674,9 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // the screen shows the edited preview, so a send of the unedited pack would
   // send something other than what is shown.
   var previewLock = _msSesPreviewOf(jobId, ctx);
-  var completeness = ctx.packCompleteness || _msSesPackCompleteness(
-    jobId,
-    ctx,
-    _msReportingCache[jobId]
-  );
-  var armed = completeness.ready && !previewLock && !hardHold && !!(approveInvoice.enabled || sendIt.enabled);
+  var armed = !previewLock && !!(approveInvoice.enabled || sendIt.enabled);
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
-
-  var holdReason = blockerCount
-    ? ('The caveat' + (blockerCount === 1 ? '' : 's') + ' above ' + (blockerCount === 1 ? 'is' : 'are') + ' still open on this pack.')
-    : 'The system has not unlocked this pack yet.';
   var captainNote = controls.captain_only ? ' Captain authority is required for this pack.' : '';
 
   // disabled_reason is the backend's honest closed-door text (PR 563). Prefer
@@ -3692,10 +3704,6 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     fullNote = approveInvoice.enabled
       ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
       : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
-  } else if (!completeness.ready) {
-    note = escapeHtml(completeness.reason || 'Required pack documents are incomplete.');
-  } else if (hardHold) {
-    note = holdReason;
   } else if (previewLock) {
     note = 'Your hours/wording edits are recorded on this docket, but this pack does not carry them yet. The press unlocks on the revised pack that does.';
   } else {
@@ -3755,18 +3763,16 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // The Docs Ready tick state, bound to the exact displayed pack hash. This is
   // the captain's per-job approval record (blueprint: "the approve control is
   // your decision" / RV-10): a tick that dies the moment the pack's bytes
-  // change, never a running approve-all. A hard hold has nothing to record; an
-  // email-draft-only hold still shows the tick because it can still be approved.
-  if (!hardHold) {
-    var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
-    html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
-    if (tickPending) {
-      html += '<span>Your Docs Ready approval is <b>not yet recorded</b>. One press records it against exactly this version of the pack (<code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code>). If the pack changes afterwards, that approval is void and the pack comes back here.</span>';
-    } else {
-      html += '<span>Your Docs Ready approval is <b>already recorded</b> for exactly this version of the pack.</span>';
-    }
-    html += '</div>';
+  // change, never a running approve-all. Caveats never hide the Captain's
+  // manual-review record.
+  var tickPending = (ctx.reviewState === 'needs_review' && ctx.docketRevisionId && ctx.outputHash);
+  html += '<div class="msr-tick' + (tickPending ? ' pending' : '') + '">';
+  if (tickPending) {
+    html += '<span>Your Docs Ready approval is <b>not yet recorded</b>. One press records it against exactly this version of the pack (<code>' + escapeHtml(String(ctx.outputHash).slice(0, 27)) + '&#8230;</code>). If the pack changes afterwards, that approval is void and the pack comes back here.</span>';
+  } else {
+    html += '<span>Your Docs Ready approval is <b>already recorded</b> for exactly this version of the pack.</span>';
   }
+  html += '</div>';
   return html;
 }
 
@@ -3922,26 +3928,15 @@ function _msSesEchoedReviewCoordinates(ctx) {
 async function sesApproveAndSend(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
-  var completeness = ctx.packCompleteness || _msSesPackCompleteness(
-    jobId,
-    ctx,
-    _msReportingCache[jobId]
-  );
-  if (!completeness.ready) {
-    showToast(completeness.reason || 'This pack is incomplete and cannot be approved or sent.', 'error');
-    return;
-  }
   // Fail closed: only the backend control flags can arm a press, whatever
   // invoked this function. A disabled stamp has no id and no onclick, and even
   // a programmatic call stops here.
   var controls = (ctx.cockpit && ctx.cockpit.controls) || {};
   var approveCtl = controls.approve_invoice || {};
   var sendCtl = controls.send_it || {};
-  // Fail closed on a HARD hold only; an email-draft-only hold is not a lock.
-  // Either way the backend still guards every step of the chain below, so a
-  // relaxed client gate can never force a send the server refuses.
-  var hardHold = _msSesClassifyHold(ctx.cockpit).hardHold;
-  if (hardHold || !(approveCtl.enabled || sendCtl.enabled)) {
+  // Captain-reviewed caveats are not a client-side veto. The backend flags and
+  // every exact-revision guard in the chain below still own real execution.
+  if (!(approveCtl.enabled || sendCtl.enabled)) {
     showToast('This pack is not armed to approve or send.', 'error');
     return;
   }

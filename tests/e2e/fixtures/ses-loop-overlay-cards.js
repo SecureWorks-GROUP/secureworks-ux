@@ -2,7 +2,7 @@
  * Three live-shaped sample cards for the SES loop overlay ship.
  * Identity only: job numbers + suburb. No client name / street / phone.
  *
- *   SWMS-261237  Docs Ready, complete drafted pack, NOT in the SES queue
+ *   SWMS-261237  Docs Ready, live closeout-only pack shape, NOT in the SES queue
  *   SWMS-261241  Docs Ready, complete drafted pack with WO + report + SWMS + invoice
  *   SWMS-261243  assessment, no pack — do not invent one
  */
@@ -40,7 +40,6 @@ const pack237 = {
   docket_revision_id: DOCKET_237,
   presentation_kind: 'ready',
   report_doc_id: 'report-doc-261237',
-  required_documents: { report: true, invoice: true, swms: true },
   closeout_documents: { report: true, invoice: true, swms: true },
 };
 

@@ -427,7 +427,7 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  expect(result.cards.drafted).toContain('CHECK DOCUMENTS');
+  expect(result.cards.drafted).toContain('REQUIREMENTS UNKNOWN');
   expect(result.cards.drafted).not.toContain('Ready to send');
   expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });

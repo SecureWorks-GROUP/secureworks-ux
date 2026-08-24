@@ -405,12 +405,14 @@ const boardRawRow = {
     state: "drafted",
     presentation_kind: "ready",
     report_doc_id: "report-doc-1",
+    required_documents_resolved: true,
     required_documents: { report: true, invoice: true, swms: true },
+    required_documents_unresolved_reason: null,
     closeout_documents: { report: true, invoice: true, swms: true },
   },
 };
 const boardPayloadStub = {
-  contract_version: "makesafe-board.v1",
+  contract_version: "makesafe-board.v1.2",
   columns: { report_ready: [boardRawRow] },
 };
 
@@ -523,7 +525,9 @@ function reviewablePack() {
     drafted: true,
     report_doc_id: "report-doc-1",
     has_selected_current_cycle_trade_report: true,
+    required_documents_resolved: true,
     required_documents: { report: true, invoice: true, swms: true },
+    required_documents_unresolved_reason: null,
     closeout_documents: { report: true, invoice: true, swms: true },
     presentation: { kind: "ready", reason: null },
     review: {
@@ -770,18 +774,23 @@ check(
     detailHtml.includes("data-ses-edit=\"body\""),
 );
 
-// SWMS-261286 live payload shape: the board/review payload carries closeout
-// truth and real bound pointers, but no required_documents producer field. The
-// omission is shown as a document-review caveat and must never hide the
-// backend-armed Captain press. The pane still shows the concrete documents,
-// recipients and route attachments before that press.
+// PR 277 legacy-transition shape: until the merged engine is redeployed, the
+// board/review payload carries closeout truth and real bound pointers but no
+// required-document map. The omission is requirements-unknown, never a local
+// invitation to invent demands, and must not hide the backend-armed press.
 const liveShapeReviewPack = {
   ...reviewablePack(),
   closeout_documents: { report: true, invoice: true, swms: true },
 };
 delete liveShapeReviewPack.required_documents;
+delete liveShapeReviewPack.required_documents_resolved;
+delete liveShapeReviewPack.required_documents_unresolved_reason;
 const completeRequiredTruth = boardRawRow.pack.required_documents;
+const completeRequiredResolved = boardRawRow.pack.required_documents_resolved;
+const completeRequiredReason = boardRawRow.pack.required_documents_unresolved_reason;
 delete boardRawRow.pack.required_documents;
+delete boardRawRow.pack.required_documents_resolved;
+delete boardRawRow.pack.required_documents_unresolved_reason;
 behaviour.fetch.get_ses_reviewable_pack = liveShapeReviewPack;
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
@@ -791,10 +800,10 @@ await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
 const liveShapeDetailHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "live closeout-only detail keeps APPROVE AND SEND armed and names the truth gap",
+  "legacy closeout-only detail keeps APPROVE AND SEND armed and names requirements unknown",
   liveShapeDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
-    liveShapeDetailHtml.includes("CHECK DOCUMENTS") &&
-    liveShapeDetailHtml.includes("Required document truth was not supplied"),
+    liveShapeDetailHtml.includes("REQUIREMENTS UNKNOWN") &&
+    liveShapeDetailHtml.includes("Requirements unknown"),
 );
 check(
   "send preview shows per-document truth, recipients and attachments before the press",
@@ -809,12 +818,122 @@ check(
 behaviour.confirmReturns = false;
 await mod.sesApproveAndSend(JOB);
 check(
-  "closeout-only truth reaches the Captain confirmation without writing before consent",
+  "legacy closeout-only truth reaches the Captain confirmation without writing before consent",
   calls.confirms.length === 1 && calls.opsPost.length === 0 &&
     calls.opsPostJwt.length === 0,
 );
 behaviour.confirmReturns = true;
 boardRawRow.pack.required_documents = completeRequiredTruth;
+boardRawRow.pack.required_documents_resolved = completeRequiredResolved;
+boardRawRow.pack.required_documents_unresolved_reason = completeRequiredReason;
+
+// Merged backend #745 real requirement-map semantics: assessment owes no bound
+// report document and no-additional-charge owes no invoice. Neither exception
+// may be locally expanded back into an all-true document demand.
+for (const exceptionShape of [
+  {
+    name: "assessment",
+    required: { report: false, invoice: true, swms: false },
+    closeout: { report: false, invoice: true, swms: false },
+  },
+  {
+    name: "no-additional-charge",
+    required: { report: true, invoice: false, swms: true },
+    closeout: { report: true, invoice: false, swms: true },
+  },
+]) {
+  const exceptionArtifacts = reviewablePack().artifacts.filter((artifact) => {
+    if (exceptionShape.name === "assessment") {
+      return artifact.role !== "supporting_report_pdf" && artifact.role !== "swms_artifact";
+    }
+    if (exceptionShape.name === "no-additional-charge") {
+      return artifact.role !== "xero_invoice_pdf";
+    }
+    return true;
+  });
+  const exceptionPack = {
+    ...reviewablePack(),
+    required_documents_resolved: true,
+    required_documents: exceptionShape.required,
+    required_documents_unresolved_reason: null,
+    closeout_documents: exceptionShape.closeout,
+    artifacts: exceptionArtifacts,
+  };
+  Object.assign(boardRawRow.pack, {
+    required_documents_resolved: true,
+    required_documents: exceptionShape.required,
+    required_documents_unresolved_reason: null,
+    closeout_documents: exceptionShape.closeout,
+  });
+  behaviour.fetch.get_ses_reviewable_pack = exceptionPack;
+  await mod.loadMakesafeReportingCockpit();
+  await mod.showMsReportingDetail(JOB);
+  const exceptionHtml = elements["msReportingDetailPanel"]._html || "";
+  check(
+    `${exceptionShape.name} engine map keeps APPROVE AND SEND armed`,
+    exceptionHtml.includes('id="msSesApproveAndSendBtn"') &&
+      !exceptionHtml.includes("REQUIREMENTS UNKNOWN"),
+  );
+  if (exceptionShape.name === "assessment") {
+    check(
+      "assessment map does not invent a missing completion report",
+      !exceptionHtml.includes("the completion report"),
+    );
+  }
+  if (exceptionShape.name === "no-additional-charge") {
+    check(
+      "no-additional-charge map labels the draft invoice not required",
+      exceptionHtml.includes("Draft invoice") &&
+        exceptionHtml.includes("not required for this pack"),
+    );
+  }
+}
+
+// The engine refuses to resolve an unknown builder/family instead of publishing
+// invented requirements. Surface its reason as a caveat while preserving the
+// byte-exact preview and the backend-armed Captain control.
+const unresolvedReason = "family_unknown: No sealed family row resolved.";
+const unresolvedPack = {
+  ...reviewablePack(),
+  required_documents_resolved: false,
+  required_documents: null,
+  required_documents_unresolved_reason: unresolvedReason,
+  closeout_documents: { report: true, invoice: true, swms: true },
+  artifacts: reviewablePack().artifacts.filter((artifact) =>
+    artifact.role !== "supporting_report_pdf" && artifact.role !== "swms_artifact"
+  ),
+};
+Object.assign(boardRawRow.pack, {
+  required_documents_resolved: false,
+  required_documents: null,
+  required_documents_unresolved_reason: unresolvedReason,
+  closeout_documents: { report: true, invoice: true, swms: true },
+});
+behaviour.fetch.get_ses_reviewable_pack = unresolvedPack;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const unresolvedDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "unresolved family shows requirements unknown with APPROVE AND SEND intact",
+  unresolvedDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    unresolvedDetailHtml.includes("REQUIREMENTS UNKNOWN") &&
+    unresolvedDetailHtml.includes("Requirements unknown") &&
+    unresolvedDetailHtml.includes("family_unknown"),
+);
+check(
+  "unresolved family does not turn absent report or SWMS bytes into invented demands",
+  !unresolvedDetailHtml.includes("the completion report") &&
+    !/msr-done-item gap[^>]*>[\s\S]{0,200}?(?:Report|SWMS)/.test(unresolvedDetailHtml) &&
+    unresolvedDetailHtml.includes("requirement unknown"),
+);
+
+Object.assign(boardRawRow.pack, {
+  required_documents_resolved: completeRequiredResolved,
+  required_documents: completeRequiredTruth,
+  required_documents_unresolved_reason: completeRequiredReason,
+  closeout_documents: { report: true, invoice: true, swms: true },
+});
+behaviour.fetch.get_ses_reviewable_pack = reviewablePack();
 
 // Enabled backend controls without a successfully loaded byte-exact pack are
 // not a send preview. The action must stay closed until the Captain can inspect
@@ -875,6 +994,7 @@ const missingReportReviewPack = {
   artifacts: reviewablePack().artifacts.filter((a) => a.role !== "supporting_report_pdf"),
 };
 behaviour.fetch.get_ses_reviewable_pack = missingReportReviewPack;
+await mod.loadMakesafeReportingCockpit();
 await mod.showMsReportingDetail(JOB);
 const missingReportDetailHtml = elements["msReportingDetailPanel"]._html || "";
 check(
@@ -885,6 +1005,23 @@ check(
     missingReportDetailHtml.includes("the completion report") &&
     missingReportDetailHtml.includes("Missing in pack") &&
     missingReportDetailHtml.includes('id="msSesApproveAndSendBtn"'),
+);
+
+const missingSwmsReviewPack = {
+  ...reviewablePack(),
+  closeout_documents: { report: true, invoice: true, swms: false },
+  artifacts: reviewablePack().artifacts.filter((a) => a.role !== "swms_artifact"),
+};
+behaviour.fetch.get_ses_reviewable_pack = missingSwmsReviewPack;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const missingSwmsDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "a resolved required SWMS gap names the engine requirement instead of calling it unknown",
+  missingSwmsDetailHtml.includes("PACK INCOMPLETE") &&
+    missingSwmsDetailHtml.includes("No SWMS in the pack; required document truth says SWMS is owed.") &&
+    !missingSwmsDetailHtml.includes("cannot tell whether one is owed") &&
+    missingSwmsDetailHtml.includes('id="msSesApproveAndSendBtn"'),
 );
 
 // Restore the fully proved pack for the remaining guarded-chain assertions.
@@ -2630,8 +2767,8 @@ const emptyMapsCardHtml = mod.renderMsReportingCard({
   },
 });
 check(
-  "Approvals card labels empty document maps incomplete but keeps Captain review",
-  emptyMapsCardHtml.includes("PACK INCOMPLETE") &&
+  "Approvals card labels empty requirement maps unknown but keeps Captain review",
+  emptyMapsCardHtml.includes("REQUIREMENTS UNKNOWN") &&
     emptyMapsCardHtml.includes("Review job pack") &&
     emptyMapsCardHtml.includes("showMsReportingDetail('job-empty-maps')"),
 );
@@ -2782,7 +2919,9 @@ const COMPLETE_PACK = {
   presentation_kind: "ready",
   report_doc_id: "report-doc-1",
   has_selected_current_cycle_trade_report: true,
+  required_documents_resolved: true,
   required_documents: { report: true, invoice: true, swms: false },
+  required_documents_unresolved_reason: null,
   closeout_documents: { report: true, invoice: true, swms: false },
 };
 const INCOMPLETE_PACK = {
@@ -2791,7 +2930,7 @@ const INCOMPLETE_PACK = {
 };
 
 check(
-  "empty document maps stay incomplete without closing the Captain review door",
+  "empty requirement maps stay unknown without closing the Captain review door",
   (() => {
     const verdict = makesafePackCompletenessVerdict({
       drafted: true,
@@ -2802,7 +2941,8 @@ check(
       has_selected_current_cycle_trade_report: true,
     });
     return verdict.reviewable === true && verdict.complete === false &&
-      verdict.warning_label === "PACK INCOMPLETE";
+      verdict.requirements_resolved === false &&
+      verdict.warning_label === "REQUIREMENTS UNKNOWN";
   })(),
 );
 const nullMapsVerdict = makesafePackCompletenessVerdict({
@@ -2814,14 +2954,14 @@ const nullMapsVerdict = makesafePackCompletenessVerdict({
   has_selected_current_cycle_trade_report: true,
 });
 check(
-  "explicitly null document maps are malformed, never legacy pointer evidence",
+  "explicitly null requirement maps are unknown, never local pointer inference",
   nullMapsVerdict.reviewable === true &&
     nullMapsVerdict.complete === false &&
-    nullMapsVerdict.evidence === "incomplete" &&
-    nullMapsVerdict.reason.includes("empty or malformed"),
+    nullMapsVerdict.evidence === "requirements_unknown" &&
+    nullMapsVerdict.reason.includes("Requirements unknown"),
 );
 check(
-  "map-less drafted packs stay reviewable while incomplete truth remains visible",
+  "map-less transition packs stay reviewable with requirements unknown",
   makesafePackCompletenessVerdict({
     drafted: true,
     report_doc_id: "report-doc-1",
@@ -2832,6 +2972,11 @@ check(
       report_doc_id: "report-doc-1",
       has_selected_current_cycle_trade_report: true,
     }).complete === false &&
+    makesafePackCompletenessVerdict({
+      drafted: true,
+      report_doc_id: "report-doc-1",
+      has_selected_current_cycle_trade_report: true,
+    }).warning_label === "REQUIREMENTS UNKNOWN" &&
     makesafePackCompletenessVerdict({
       drafted: true,
       report_doc_id: "report-doc-1",

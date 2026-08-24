@@ -6106,7 +6106,7 @@
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=8"></script>
+<script src="modules/ops-makesafe-reporting-cockpit.js?v=9"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
 
@@ -13664,16 +13664,18 @@ function makesafePackChipFactsFor(j) {
 
 function renderMakesafeStatusIcons(j, status) {
   var missing = makesafeMissingDocsSet(j);
-  var slug = String(j.requesting_company_slug || '').toLowerCase();
   var builder = getMakesafeBuilder(j) || 'this builder';
   var packFacts = makesafePackChipFactsFor(j);
   var pack = (j.pack && typeof j.pack === 'object')
     ? j.pack
     : ((j.report_pack && typeof j.report_pack === 'object') ? j.report_pack : {});
-  var requiredDocs = pack.required_documents && typeof pack.required_documents === 'object'
-    ? pack.required_documents : null;
-  var closeoutDocs = pack.closeout_documents && typeof pack.closeout_documents === 'object'
-    ? pack.closeout_documents : null;
+  // Consume the same engine-owned requirement envelope as the cockpit. This
+  // renderer may display concrete present bytes, but it never guesses whether
+  // an absent report/invoice/SWMS is owed from builder, family or status.
+  var documentTruth = makesafePackCompletenessVerdict(pack);
+  var requirementsResolved = documentTruth.requirements_resolved;
+  var requiredDocs = documentTruth.required_documents;
+  var closeoutDocs = documentTruth.closeout_documents;
   var icons = [];
   var done = 0;     // count of "done" docs
   var applicable = 0; // docs that count toward the X / N (N/A excluded)
@@ -13691,37 +13693,25 @@ function renderMakesafeStatusIcons(j, status) {
   else add('wo', 'pending', 'WO', packFacts ? 'Work order: not in this pack' : 'Work order: not yet attached');
 
   // 2) Make-safe report
-  var reportStatus = String(j.report_status || '').toLowerCase();
-  if (requiredDocs && requiredDocs.report === false) add('report', 'na', 'Report', 'Local report: not required for this pack');
+  if (requirementsResolved && requiredDocs.report === false) add('report', 'na', 'Report', 'Local report: not required for this pack');
   else if (closeoutDocs && closeoutDocs.report === true) add('report', 'done', 'Report', 'Report: bound to this pack');
-  else if (requiredDocs && requiredDocs.report === true) add('report', 'missing', 'Report', 'Report: required pack pointer is missing or unresolved');
-  else if (packFacts && packFacts.report) add('report', 'done', 'Report', 'Report: attached');
-  else if (!packFacts && j.has_report_doc) add('report', 'done', 'Report', 'Report: attached');
-  else if (!packFacts && missing.report) add('report', 'missing', 'Report', 'Report: missing (expected)');
-  else if (!packFacts && (reportStatus === 'ready_for_reporting_skill' || reportStatus === 'submitted')) add('report', 'missing', 'Report', 'Report submitted: PDF missing');
-  else add('report', 'pending', 'Report', packFacts ? 'Report: not in this pack' : 'Report: awaiting trade report');
+  else if (requirementsResolved && requiredDocs.report === true) add('report', 'missing', 'Report', 'Report: required pack pointer is missing or unresolved');
+  else if (!requirementsResolved && packFacts && packFacts.report) add('report', 'done', 'Report', 'Report: on the pack; requirements unknown');
+  else add('report', 'pending', 'Report', 'Report: requirements unknown');
 
-  // 3) SWMS — only relevant for MLB; N/A (faint dashed) for everyone else.
-  if (requiredDocs && requiredDocs.swms === false) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
+  // 3) SWMS — applicability comes only from the engine map.
+  if (requirementsResolved && requiredDocs.swms === false) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
   else if (closeoutDocs && closeoutDocs.swms === true) add('swms', 'done', 'SWMS', 'SWMS: bound to this pack');
-  else if (requiredDocs && requiredDocs.swms === true) add('swms', 'missing', 'SWMS', 'SWMS: required pack pointer is missing or unresolved');
-  else if (slug !== 'mlb' && !(packFacts && packFacts.swms)) add('swms', 'na', 'SWMS', 'SWMS: not required for ' + builder);
-  else if (packFacts ? packFacts.swms : j.has_swms_doc) add('swms', 'done', 'SWMS', 'SWMS: attached');
-  else if (!packFacts && missing.swms) add('swms', 'missing', 'SWMS', 'SWMS: missing (required for MLB)');
-  else add('swms', 'pending', 'SWMS', 'SWMS: needed for MLB');
+  else if (requirementsResolved && requiredDocs.swms === true) add('swms', 'missing', 'SWMS', 'SWMS: required pack pointer is missing or unresolved');
+  else if (!requirementsResolved && packFacts && packFacts.swms) add('swms', 'done', 'SWMS', 'SWMS: on the pack; requirements unknown');
+  else add('swms', 'pending', 'SWMS', 'SWMS: requirements unknown');
 
-  // 4) Invoice — pack draft invoice wins over enrichment invoice_status.
-  var inv = String(j.invoice_status || '').toLowerCase();
-  if (requiredDocs && requiredDocs.invoice === false) add('invoice', 'na', 'Inv', 'Invoice: not required for this no-charge pack');
+  // 4) Invoice — applicability comes only from the engine map.
+  if (requirementsResolved && requiredDocs.invoice === false) add('invoice', 'na', 'Inv', 'Invoice: not required for this no-charge pack');
   else if (closeoutDocs && closeoutDocs.invoice === true) add('invoice', 'done', 'Inv', 'Invoice: bound to this pack');
-  else if (requiredDocs && requiredDocs.invoice === true) add('invoice', 'missing', 'Inv', 'Invoice: required pack pointer is missing or unresolved');
-  else if (packFacts && packFacts.invoice) add('invoice', 'done', 'Inv', 'Invoice: on the pack');
-  else if (inv === 'paid') add('invoice', 'done', 'Inv', 'Invoice: paid');
-  else if (inv === 'invoiced' || j.has_invoice_doc) add('invoice', 'done', 'Inv', 'Invoice: invoiced');
-  else if (!packFacts && missing.invoice) add('invoice', 'missing', 'Inv', 'Invoice: missing (expected)');
-  else if (inv === 'draft' || inv === 'report_ready') add('invoice', 'pending', 'Inv', 'Invoice: draft / not sent');
-  else if (!inv || inv === 'not_ready') add('invoice', 'na', 'Inv', 'Invoice: not ready yet');
-  else add('invoice', 'pending', 'Inv', 'Invoice: ' + inv);
+  else if (requirementsResolved && requiredDocs.invoice === true) add('invoice', 'missing', 'Inv', 'Invoice: required pack pointer is missing or unresolved');
+  else if (!requirementsResolved && packFacts && packFacts.invoice) add('invoice', 'done', 'Inv', 'Invoice: on the pack; requirements unknown');
+  else add('invoice', 'pending', 'Inv', 'Invoice: requirements unknown');
 
   // 5) Sent to builder. CHIP-TRUTH (audit F5): green ONLY on a real send record.
   // The backend now supplies `sent_to_builder` — TRUE only with a MAKESAFE_PACK_SENT
@@ -14115,7 +14105,7 @@ function renderMakesafeCard(j, status) {
     html += '<span title="' + escapeAttr(resumeChip.title) + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + resumeChip.bg + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(resumeChip.label) + '</span>';
   } else if (status === 'report_ready' && makesafeHasDraftedPack(j) && !packCompleteness.complete) {
     var packCaveatLabel = packCompleteness.warning_label || 'PACK INCOMPLETE';
-    var packCaveatColour = packCaveatLabel === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B';
+    var packCaveatColour = packCaveatLabel === 'PACK INCOMPLETE' ? '#991B1B' : '#B45309';
     html += '<span title="' + escapeAttr(packPresentationReason || 'Pack document truth needs review') + '" style="font-size:9px;font-weight:800;letter-spacing:0.03em;padding:2px 7px;border-radius:10px;background:' + packCaveatColour + ';color:#fff;text-transform:uppercase;white-space:nowrap;">' + escapeHtml(packCaveatLabel) + '</span>';
   } else if (status === 'trade_report_in' || backendStage === 'trade_report_in') {
     // Trade report is IN but no pack has been drafted yet (cockpit feed excludes it).

@@ -2,6 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 // Regression guards for the ops make-safe board's canonical data source
 // (ops-api?action=makesafe_board, contract makesafe-board.v1.2 / projection ops).
+// v1 remains accepted during the required-document-map deploy transition.
 // The board used to render makesafe_pipeline, which is keyed on the raw
 // board_stage and therefore never showed a captain display-ledger transition.
 // See the <makesafe-board-canonical> block in ops.html.

@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const fixture = require('./fixtures/ses-loop-overlay-cards.js');
 
-test('Docs Ready cards: live closeout-only pack opens review/send; chips match pack; no invented pack', async ({ page }) => {
+test('Docs Ready cards: legacy closeout-only pack opens review/send; chips match pack; no invented pack', async ({ page }) => {
   await page.goto('/ops.html');
   const result = await page.evaluate((fx) => {
     window._msSesReviewQueue = {};
@@ -18,11 +18,19 @@ test('Docs Ready cards: live closeout-only pack opens review/send; chips match p
           docket_revision_id: c.pack.docket_revision_id || null,
           presentation_kind: c.pack.presentation_kind,
           report_doc_id: c.pack.report_doc_id,
+          invoice_doc_id: c.pack.invoice_doc_id,
+          swms_doc_id: c.pack.swms_doc_id,
           has_selected_current_cycle_trade_report: true,
           closeout_documents: c.pack.closeout_documents,
         };
         if (Object.prototype.hasOwnProperty.call(c.pack, 'required_documents')) {
           packMeta.required_documents = c.pack.required_documents;
+        }
+        if (Object.prototype.hasOwnProperty.call(c.pack, 'required_documents_resolved')) {
+          packMeta.required_documents_resolved = c.pack.required_documents_resolved;
+        }
+        if (Object.prototype.hasOwnProperty.call(c.pack, 'required_documents_unresolved_reason')) {
+          packMeta.required_documents_unresolved_reason = c.pack.required_documents_unresolved_reason;
         }
         window._makesafeCanonicalPackMetaById[c.id] = packMeta;
       }
@@ -42,7 +50,7 @@ test('Docs Ready cards: live closeout-only pack opens review/send; chips match p
 
   expect(result.affordance['SWMS-261237']).toBe(true);
   expect(result.cards['SWMS-261237']).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
-  expect(result.cards['SWMS-261237']).toContain('CHECK DOCUMENTS');
+  expect(result.cards['SWMS-261237']).toContain('REQUIREMENTS UNKNOWN');
   expect(result.cards['SWMS-261237']).not.toContain('Ready to send');
 
   expect(result.affordance['SWMS-261241']).toBe(true);

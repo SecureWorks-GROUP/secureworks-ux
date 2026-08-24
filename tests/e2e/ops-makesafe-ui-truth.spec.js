@@ -427,7 +427,7 @@ test('pack existence is canonical-row truth, never stage plus substatus', async 
   expect(result.cards.inferred).toContain('No pack drafted');
   expect(result.cards.inferred).not.toMatch(/ms-btn-alloc[^>]*>Review job pack/);
   expect(result.cards.drafted).not.toContain('No pack drafted');
-  expect(result.cards.drafted).toContain('CHECK DOCUMENTS');
+  expect(result.cards.drafted).toContain('REQUIREMENTS UNKNOWN');
   expect(result.cards.drafted).not.toContain('Ready to send');
   expect(result.cards.drafted).toMatch(/ms-btn-alloc[^>]*>Review job pack/);
 });
@@ -522,6 +522,8 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
       drafted: true, state: 'drafted', sent: false,
       presentation_kind: 'ready',
       report_doc_id: 'report-doc-job-241',
+      invoice_doc_id: 'invoice-doc-job-241',
+      swms_doc_id: 'swms-doc-job-241',
       required_documents: { report: true, invoice: true, swms: true },
       closeout_documents: { report: true, invoice: true, swms: true },
       artifacts: [

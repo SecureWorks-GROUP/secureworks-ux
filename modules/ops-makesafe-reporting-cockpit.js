@@ -117,13 +117,22 @@ function makesafePackTruthFromCanonicalRow(row) {
     presentation_kind: pack.presentation_kind || null,
     presentation_reason: pack.presentation_reason || null,
     report_doc_id: pack.report_doc_id || row.report_doc_id || null,
+    invoice_doc_id: pack.invoice_doc_id || row.invoice_doc_id || null,
+    swms_doc_id: pack.swms_doc_id || row.swms_doc_id || null,
     report_doc_resolved: pack.report_doc_resolved,
     has_selected_current_cycle_trade_report: selected === true
   };
-  // Preserve the distinction between a genuinely legacy payload (key absent)
-  // and a current payload that supplied broken null/malformed document truth.
+  // Copy the engine's requirement resolution envelope verbatim. An explicit
+  // unresolved marker outranks any stray map value and may never be repaired in
+  // the browser by guessing from family, builder or document pointers.
+  if (_msSesHasOwn(pack, 'required_documents_resolved')) {
+    truth.required_documents_resolved = pack.required_documents_resolved;
+  }
   if (_msSesHasOwn(pack, 'required_documents')) {
     truth.required_documents = pack.required_documents;
+  }
+  if (_msSesHasOwn(pack, 'required_documents_unresolved_reason')) {
+    truth.required_documents_unresolved_reason = pack.required_documents_unresolved_reason;
   }
   if (_msSesHasOwn(pack, 'closeout_documents')) {
     truth.closeout_documents = pack.closeout_documents;
@@ -141,39 +150,43 @@ function makesafePackTruthFromCanonicalRow(row) {
 // required_documents (null when unresolved). A v1 payload, or unresolved v1.2
 // requirements, must remain visible without hiding the review door or the
 // backend-armed APPROVE AND SEND control.
+// The engine owns which document types the pack requires. This consumer only
+// compares that map with closeout/proof truth; it never derives requirements
+// from family, builder, presentation state or pointers.
 function makesafePackCompletenessVerdict(pack) {
   pack = (pack && typeof pack === 'object') ? pack : {};
   var presentationKind = String(pack.presentation_kind || '').trim().toLowerCase();
-  var requiredSupplied = _msSesHasOwn(pack, 'required_documents');
-  var closeoutSupplied = _msSesHasOwn(pack, 'closeout_documents');
-  var required = _msSesPlainObject(pack.required_documents) ? pack.required_documents : null;
+  var documentKeys = ['report', 'invoice', 'swms'];
+  var requiredCandidate = _msSesPlainObject(pack.required_documents)
+    ? pack.required_documents
+    : null;
+  var required = requiredCandidate && documentKeys.every(function(key) {
+    return typeof requiredCandidate[key] === 'boolean';
+  }) ? requiredCandidate : null;
   var closeout = _msSesPlainObject(pack.closeout_documents) ? pack.closeout_documents : null;
-  var requiredKeys = required ? Object.keys(required) : [];
-  var closeoutKeys = closeout ? Object.keys(closeout) : [];
-  var requiredWellFormed = !!required && requiredKeys.length > 0;
-  var closeoutWellFormed = !!closeout && closeoutKeys.length > 0;
-  var mapsAbsent = !requiredSupplied && !closeoutSupplied;
-  var mapsComplete = requiredWellFormed && closeoutWellFormed;
+  var requirementsResolved = pack.required_documents_resolved !== false && !!required;
+  var closeoutWellFormed = !!closeout && documentKeys.every(function(key) {
+    return typeof closeout[key] === 'boolean';
+  });
+  var proofPointers = {
+    report: String(pack.report_doc_id || '').trim(),
+    invoice: String(pack.invoice_doc_id || '').trim(),
+    swms: String(pack.swms_doc_id || '').trim()
+  };
+  var reportProofResolved = pack.report_doc_resolved !== false
+    && pack.has_selected_current_cycle_trade_report === true;
   var missingRequired = [];
-  if (mapsComplete) {
-    requiredKeys.forEach(function(key) {
-      if (required[key] === true && closeout[key] !== true) missingRequired.push(key);
+  if (requirementsResolved && closeoutWellFormed) {
+    documentKeys.forEach(function(key) {
+      if (required[key] !== true) return;
+      var proofResolved = key !== 'report' || reportProofResolved;
+      if (closeout[key] !== true || !proofPointers[key] || !proofResolved) {
+        missingRequired.push(key);
+      }
     });
   }
-
-  var reportDocId = String(pack.report_doc_id || '').trim();
-  var selectedTradeReport = pack.has_selected_current_cycle_trade_report === true;
-  var pointerResolved = pack.report_doc_resolved !== false;
-  if (mapsComplete && required.report === true && (
-    !reportDocId || !pointerResolved || !selectedTradeReport
-  ) && missingRequired.indexOf('report') < 0) {
-    missingRequired.push('report');
-  }
-  var legacyPointerEvidence = mapsAbsent
-    && !!reportDocId
-    && pointerResolved
-    && selectedTradeReport;
-  var complete = mapsComplete
+  var complete = requirementsResolved
+    && closeoutWellFormed
     && presentationKind === 'ready'
     && missingRequired.length === 0;
   var reviewable = pack.drafted === true;
@@ -183,18 +196,15 @@ function makesafePackCompletenessVerdict(pack) {
     reason = 'No drafted pack is available to review.';
     warningLabel = 'NO PACK DRAFTED';
   } else if (!complete) {
-    if (requiredSupplied && !requiredWellFormed) {
-      reason = 'Required document truth is empty or malformed. Review the documents and send preview below.';
-      warningLabel = 'PACK INCOMPLETE';
-    } else if (closeoutSupplied && !closeoutWellFormed) {
+    if (!requirementsResolved) {
+      var unresolvedReason = String(pack.required_documents_unresolved_reason || '').trim();
+      reason = 'Requirements unknown.'
+        + (unresolvedReason ? ' ' + unresolvedReason : '')
+        + ' Review the documents and send preview below before sending.';
+      warningLabel = 'REQUIREMENTS UNKNOWN';
+    } else if (!closeoutWellFormed) {
       reason = 'Closeout document truth is empty or malformed. Review the documents and send preview below.';
       warningLabel = 'PACK INCOMPLETE';
-    } else if (!requiredSupplied) {
-      reason = 'Required document truth was not supplied. Review each present or missing document below before sending.';
-      warningLabel = 'CHECK DOCUMENTS';
-    } else if (!closeoutSupplied) {
-      reason = 'Closeout document truth was not supplied. Review each present or missing document below before sending.';
-      warningLabel = 'CHECK DOCUMENTS';
     } else if (missingRequired.length) {
       reason = 'Required document truth reports missing or unresolved: ' + missingRequired.join(', ') + '. Review this caveat before sending.';
       warningLabel = 'PACK INCOMPLETE';
@@ -210,15 +220,16 @@ function makesafePackCompletenessVerdict(pack) {
     ready: reviewable,
     reviewable: reviewable,
     complete: complete,
+    requirements_resolved: requirementsResolved,
+    required_documents: requirementsResolved ? required : null,
+    closeout_documents: closeout,
     presentation_kind: presentationKind,
     missing_required: missingRequired,
     warning_label: warningLabel,
     reason: reason,
     evidence: complete
       ? 'document_maps'
-      : (!requiredSupplied && closeoutWellFormed
-        ? 'closeout_only'
-        : (legacyPointerEvidence ? 'legacy_report_pointer' : 'incomplete'))
+      : (!requirementsResolved ? 'requirements_unknown' : 'incomplete')
   };
 }
 
@@ -509,7 +520,7 @@ function _msSesUpdateCardBadge(jobId, status) {
   var chip = status !== 'NO_DOCKET' && verdict && !verdict.complete
     ? {
       label: verdict.warning_label || 'PACK INCOMPLETE',
-      bg: verdict.warning_label === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B',
+      bg: verdict.warning_label === 'PACK INCOMPLETE' ? '#991B1B' : '#B45309',
       fg: '#fff'
     }
     : _msSesStatusChip(status);
@@ -580,7 +591,7 @@ function renderMsReportingCard(d) {
   var completeness = makesafePackCompletenessVerdict(d.pack_truth);
   _msSesPackCompletenessById[d.job_id] = completeness;
   var openAttr = completeness.reviewable ? ' onclick="showMsReportingDetail(\'' + safeId + '\')"' : '';
-  var caveatColour = completeness.warning_label === 'CHECK DOCUMENTS' ? '#B45309' : '#991B1B';
+  var caveatColour = completeness.warning_label === 'PACK INCOMPLETE' ? '#991B1B' : '#B45309';
   var html = '<div data-ms-reporting-card="' + escapeAttr(cardKey) + '"' + openAttr + ' style="background:#fff;border:1px solid var(--sw-border);border-radius:8px;padding:12px;margin:10px;cursor:' + (completeness.reviewable ? 'pointer' : 'default') + ';box-shadow:0 1px 3px rgba(41,60,70,0.06);border-left:4px solid ' + (completeness.complete ? '#94A3B8' : caveatColour) + ';">';
 
   // Top row: the SES status chip (enriched async from query_ses_review_cockpit).
@@ -624,11 +635,19 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       ? _makesafeCanonicalPackMetaById[jobId]
       : null
   ) || {};
-  var reviewPack = (ctx && ctx.pack) || {};
+  var hasFreshReviewPack = !!(ctx && _msSesPlainObject(ctx.pack));
+  var reviewPack = hasFreshReviewPack ? ctx.pack : {};
   var presentation = _msSesPlainObject(reviewPack.presentation)
     ? reviewPack.presentation
     : {};
   var docket = _msSesPlainObject(reviewPack.docket) ? reviewPack.docket : {};
+  // A loaded review pack is the byte-exact presentation boundary. Its document
+  // truth may use the nested docket from that same response, but it must never
+  // fall through to an older canonical board row. The cache is fallback only
+  // while no fresh review pack exists.
+  var documentTruthSources = hasFreshReviewPack
+    ? [reviewPack, docket]
+    : [canonical];
 
   function firstDefined() {
     for (var i = 0; i < arguments.length; i++) {
@@ -637,8 +656,16 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
     return null;
   }
 
-  function firstOwned(key) {
-    var sources = [reviewPack, docket, canonical];
+  function firstDefinedFrom(sources, key) {
+    for (var i = 0; i < sources.length; i++) {
+      if (sources[i][key] !== undefined && sources[i][key] !== null) {
+        return sources[i][key];
+      }
+    }
+    return null;
+  }
+
+  function firstOwnedFrom(sources, key) {
     for (var i = 0; i < sources.length; i++) {
       if (_msSesHasOwn(sources[i], key)) {
         return { supplied: true, value: sources[i][key] };
@@ -647,8 +674,25 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
     return { supplied: false, value: undefined };
   }
 
-  var requiredTruth = firstOwned('required_documents');
-  var closeoutTruth = firstOwned('closeout_documents');
+  // Select the engine's resolution marker, map and refusal reason from one
+  // payload object. Once the byte-exact review pack is loaded, an omitted
+  // envelope stays omitted/unknown; a cached envelope cannot complete it.
+  function firstRequirementEnvelope() {
+    var keys = [
+      'required_documents_resolved',
+      'required_documents',
+      'required_documents_unresolved_reason'
+    ];
+    var requirementSources = hasFreshReviewPack ? [reviewPack] : [canonical];
+    for (var i = 0; i < requirementSources.length; i++) {
+      var source = requirementSources[i];
+      if (keys.some(function(key) { return _msSesHasOwn(source, key); })) return source;
+    }
+    return null;
+  }
+
+  var requirementEnvelope = firstRequirementEnvelope();
+  var closeoutTruth = firstOwnedFrom(documentTruthSources, 'closeout_documents');
   var input = {
     drafted: firstDefined(reviewPack.drafted, docket.drafted, canonical.drafted) === true,
     presentation_kind: firstDefined(
@@ -661,23 +705,24 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
       reviewPack.presentation_reason,
       canonical.presentation_reason
     ),
-    report_doc_id: firstDefined(
-      reviewPack.report_doc_id,
-      docket.report_doc_id,
-      canonical.report_doc_id
-    ),
-    report_doc_resolved: firstDefined(
-      reviewPack.report_doc_resolved,
-      docket.report_doc_resolved,
-      canonical.report_doc_resolved
-    ),
-    has_selected_current_cycle_trade_report: firstDefined(
-      reviewPack.has_selected_current_cycle_trade_report,
-      docket.has_selected_current_cycle_trade_report,
-      canonical.has_selected_current_cycle_trade_report
+    report_doc_id: firstDefinedFrom(documentTruthSources, 'report_doc_id'),
+    invoice_doc_id: firstDefinedFrom(documentTruthSources, 'invoice_doc_id'),
+    swms_doc_id: firstDefinedFrom(documentTruthSources, 'swms_doc_id'),
+    report_doc_resolved: firstDefinedFrom(documentTruthSources, 'report_doc_resolved'),
+    has_selected_current_cycle_trade_report: firstDefinedFrom(
+      documentTruthSources,
+      'has_selected_current_cycle_trade_report'
     ) === true
   };
-  if (requiredTruth.supplied) input.required_documents = requiredTruth.value;
+  if (requirementEnvelope) {
+    [
+      'required_documents_resolved',
+      'required_documents',
+      'required_documents_unresolved_reason'
+    ].forEach(function(key) {
+      if (_msSesHasOwn(requirementEnvelope, key)) input[key] = requirementEnvelope[key];
+    });
+  }
   if (closeoutTruth.supplied) input.closeout_documents = closeoutTruth.value;
   return input;
 }
@@ -1862,43 +1907,11 @@ function _msSesFamilyEvidence(ctx) {
   return (fe && typeof fe === 'object') ? fe : {};
 }
 
-/**
- * True when the BACKEND says this family carries no separate completion-report
- * PDF (the roof-report rule "report-only-portal-is-the-report"). Read only —
- * this screen never decides an obligation for itself.
- */
-function _msSesReportPdfNotApplicable(ctx) {
-  var entry = _msSesFamilyEvidence(ctx).supporting_report_pdf;
-  return !!(entry && String(entry.state || '').toLowerCase() === 'not_applicable');
-}
-
-/**
- * True when THIS family carries no SWMS obligation, so an absent SWMS is not a
- * gap and must show NO cross and NO "not in this pack" line (Captain ruling
- * 2026-08-13: a SWMS red X on an AJS temporary-fence job is a family lie).
- *
- * Prefer the backend's own family_evidence.swms state (the same not_applicable
- * signal that already governs the roof report PDF). When the read carries no
- * such entry, fall back to the one family the captain named: temporary fencing
- * (AJS builder), identified from the job's own family/type facts — never a guess
- * for anything else, so ordinary make-safes keep the deliberately-soft SWMS
- * clause ("not in this pack", never "not required").
- */
-function _msSesSwmsNotApplicable(ctx, row) {
-  var entry = _msSesFamilyEvidence(ctx).swms;
-  if (entry && typeof entry === 'object') {
-    var state = String(entry.state || '').toLowerCase();
-    if (state === 'not_applicable') return true;
-    if (state === 'required' || state === 'expected' || state === 'present' || state === 'missing') return false;
-  }
-  var hay = [
-    (row && row.makesafe_job_family), (row && row.makesafe_job_family_label),
-    (row && row.ses_family), (row && row.ses_family_label), (row && row.trade_notes)
-  ].map(function(s) { return String(s || '').toLowerCase(); }).join(' ');
-  // Temporary fencing make-safes carry no SWMS. Match the family label / job
-  // type, not the builder alone (AJS also runs physical make-safes that DO owe
-  // a SWMS), so the suppression is scoped to the fence work the captain named.
-  return /temp(?:orary)?\s*fenc|temp\s*fence|\bfencing\s*make-?safe\b/.test(hay);
+function _msSesRequiredDocumentOwed(ctx, key) {
+  var verdict = ctx && ctx.packCompleteness;
+  if (!verdict || verdict.requirements_resolved !== true) return null;
+  var required = verdict.required_documents;
+  return required && typeof required[key] === 'boolean' ? required[key] : null;
 }
 
 /**
@@ -2067,9 +2080,8 @@ function _msSesRenderPortalEvidence(row, ctx) {
 
 // <ses-done-checklist>
 // The strip at the top of the review: what is complete on this pack, in the
-// captain's reading order. Every state comes from the pack's own artifacts or
-// the backend's family_evidence — a fact this screen cannot read renders as
-// "not in this pack", never as done.
+// captain's reading order. Presence comes from the pack's artifacts; document
+// applicability comes only from the engine requirement map.
 function _msSesDoneItems(row, ctx) {
   var draft = Array.isArray(row.draft_docs) ? row.draft_docs : [];
   var source = Array.isArray(row.source_docs) ? row.source_docs : [];
@@ -2077,29 +2089,35 @@ function _msSesDoneItems(row, ctx) {
     return draft.some(function(d) { return d && !d.isCapture && re.test(String(d.label || '')); });
   }
   var items = [];
+  function addDocument(label, key, present) {
+    var owed = _msSesRequiredDocumentOwed(ctx, key);
+    if (owed === false) {
+      items.push({ label: label, na: true, note: 'not required for this pack' });
+    } else if (owed === true) {
+      items.push({ label: label, done: present });
+    } else {
+      items.push({
+        label: label,
+        done: present,
+        unknown: true,
+        note: present ? 'on pack; requirement unknown' : 'requirement unknown'
+      });
+    }
+  }
   items.push({
     label: 'Work order',
     done: source.some(function(s) {
       return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
     })
   });
-  if (_msSesReportPdfNotApplicable(ctx)) {
-    items.push({ label: 'Report', na: true, note: 'the portal form is the report' });
-  } else {
-    items.push({ label: 'Report', done: hasDraft(/make\s*safe|completion|report/i) });
-  }
+  addDocument('Report', 'report', hasDraft(/make\s*safe|completion|report/i));
   var capture = _msSesCaptureExpectation(ctx, row);
   if (capture.expected) {
     items.push({ label: 'Portal capture', done: draft.some(function(d) { return d && d.isCapture; }) });
   }
-  // SWMS only appears for families that owe one. On a temporary-fence make-safe
-  // it is not applicable, so it shows NO tile and NO cross (Captain ruling
-  // 2026-08-13) rather than a red X that reads as a missing document.
-  if (!_msSesSwmsNotApplicable(ctx, row)) {
-    items.push({ label: 'SWMS', done: hasDraft(/swms/i) });
-  }
+  addDocument('SWMS', 'swms', hasDraft(/swms/i));
   items.push({ label: 'Photos', done: !!(Array.isArray(row.photos) && row.photos.length) });
-  items.push({ label: 'Draft invoice', done: !!row.invoice });
+  addDocument('Draft invoice', 'invoice', !!row.invoice);
   return items;
 }
 
@@ -2108,14 +2126,14 @@ function _msSesRenderDoneStrip(row, ctx) {
   // a checklist here would be a list of false gaps.
   if (!ctx || !ctx.pack) return '';
   var items = _msSesDoneItems(row, ctx);
-  var doneCount = items.filter(function(i) { return i.done; }).length;
-  var checkable = items.filter(function(i) { return !i.na; }).length;
+  var doneCount = items.filter(function(i) { return i.done && !i.unknown; }).length;
+  var checkable = items.filter(function(i) { return !i.na && !i.unknown; }).length;
   var html = '<div class="msr-done">';
   html += '<div class="msr-done-h">' + doneCount + ' of ' + checkable + ' ready</div>';
   html += '<div class="msr-done-items">';
   items.forEach(function(i) {
-    var cls = i.na ? 'na' : (i.done ? 'ok' : 'gap');
-    var mark = i.na ? '&ndash;' : (i.done ? _MS_SES_ICONS.check : _MS_SES_ICONS.cross);
+    var cls = i.na ? 'na' : (i.unknown ? 'unknown' : (i.done ? 'ok' : 'gap'));
+    var mark = i.na ? '&ndash;' : (i.unknown ? (i.done ? _MS_SES_ICONS.check : '?') : (i.done ? _MS_SES_ICONS.check : _MS_SES_ICONS.cross));
     html += '<span class="msr-done-item ' + cls + '">' + mark + ' ' + escapeHtml(i.label)
       + (i.note ? ' <em>(' + escapeHtml(i.note) + ')</em>' : '') + '</span>';
   });
@@ -2138,9 +2156,9 @@ function _msSesPackTruthNotice(ctx) {
 
 /**
  * RV-1: a missing document is NAMED in one quiet sentence under the tabs,
- * never an empty frame. Facts come from the pack's own artifacts; SWMS is the
- * one deliberately soft clause — no feed on this surface states whether a job
- * OWES a SWMS, so an absent SWMS is "not in this pack", never "not required".
+ * never an empty frame. Facts come from the pack's own artifacts. Applicability
+ * comes only from the engine requirement map; unknown requirements are stated
+ * by _msSesPackTruthNotice and never locally reconstructed.
  */
 function _msSesMissingLine(row, ctx) {
   if (!ctx || !ctx.pack) return '';
@@ -2153,21 +2171,21 @@ function _msSesMissingLine(row, ctx) {
     return draft.some(function(d) { return d && !d.isCapture && re.test(String(d.label || '')); });
   }
   var missing = [];
-  // A family whose backend rule says the portal IS the report owes no separate
-  // completion-report PDF, so listing one as missing would be a false gap. The
-  // rule is the backend's own family_evidence state, never a guess from here.
-  if (!_msSesReportPdfNotApplicable(ctx) && !hasDraft(/make\s*safe|completion|report/i)) {
+  var reportOwed = _msSesRequiredDocumentOwed(ctx, 'report');
+  var invoiceOwed = _msSesRequiredDocumentOwed(ctx, 'invoice');
+  var swmsOwed = _msSesRequiredDocumentOwed(ctx, 'swms');
+  if (reportOwed === true && !hasDraft(/make\s*safe|completion|report/i)) {
     missing.push('the completion report');
   }
   if (!source.some(function(s) {
     return s && s.kind !== 'image' && /work[\s_-]*order|works[\s_-]*order|^wo\b/i.test(String(s.label || ''));
   })) missing.push('the builder work order');
   if (!(Array.isArray(row.photos) && row.photos.length)) missing.push('site photos');
-  if (!row.invoice) missing.push('a draft invoice');
-  var invoicePdfMissing = row.invoice && !hasDraft(/invoice/i);
-  // A family that owes no SWMS (temporary fencing) says nothing about SWMS —
-  // no "not in this pack" line, mirroring the suppressed tile.
-  var swmsAbsent = !_msSesSwmsNotApplicable(ctx, row) && !hasDraft(/swms/i);
+  if (invoiceOwed === true && !row.invoice) {
+    missing.push('a draft invoice');
+  }
+  var invoicePdfMissing = invoiceOwed === true && row.invoice && !hasDraft(/invoice/i);
+  var swmsAbsent = swmsOwed === true && !hasDraft(/swms/i);
   if (!missing.length && !invoicePdfMissing && !swmsAbsent) return '';
   var bits = [];
   if (missing.length) bits.push('<b>Not in this pack:</b> ' + escapeHtml(missing.join(', ')) + '.');
@@ -2183,7 +2201,7 @@ function _msSesMissingLine(row, ctx) {
       bits.push('No Xero invoice is bound yet &mdash; the Invoice tab shows the internal proposal until a DRAFT is minted.');
     }
   }
-  if (swmsAbsent) bits.push('No SWMS in the pack; this screen cannot tell whether one is owed.');
+  if (swmsAbsent) bits.push('No SWMS in the pack; required document truth says SWMS is owed.');
   return '<div class="msr-missing">' + bits.join(' ') + '</div>';
 }
 

@@ -109,7 +109,8 @@ make-safe board (it stays server-driven). Guard:
 ## Ops make-safe board (`ops.html`)
 
 The board's data source is `ops-api?action=makesafe_board` (`makesafe-board.v1.2`,
-projection `ops`; v1 still accepted) — the same canonical feed the Trade board uses, and the only one
+projection `ops`; v1 remains accepted during deploy skew) — the same canonical
+feed the Trade board uses, and the only one
 carrying `canonical_stage` (declared `board_stage` + the captain display ledger).
 Column placement comes from `canonical_stage` and nothing else; the client
 re-derives no stage. Search `// <makesafe-board-canonical>` in `ops.html`.
@@ -419,10 +420,14 @@ ruling 2026-08-24): `makesafePackCompletenessVerdict` marks a drafted pack
 `reviewable` even when required/closeout truth is missing, malformed or reports
 gaps, while `complete` alone may drive a Ready-to-send claim. The current live
 `makesafe-board.v1.2` producer supplies `pack.required_documents` (null when
-family/builder authority is unresolved) plus `pack.closeout_documents`. A v1
-payload, or a v1.2 row with unresolved requirements, still shows CHECK DOCUMENTS.
-Keep Review job pack and any backend-armed APPROVE AND SEND control visible, and
-never infer a requirement or document presence the payload did not state. PREVIEW AVAILABILITY IS THE ONLY
+family/builder authority is unresolved) plus `pack.closeout_documents`.
+`pack.required_documents` plus its resolution marker are the sole requirement
+authority; assessment and no-additional-charge exceptions pass through unchanged.
+A v1 payload with no map, or a v1.2 row with unresolved requirements, shows CHECK
+DOCUMENTS and a visible REQUIREMENTS UNKNOWN caveat. Keep Review job pack and any
+backend-armed APPROVE AND SEND control visible, show the engine's unresolved
+reason when present, and never infer a demand or document presence from family,
+builder, status or a pointer. PREVIEW AVAILABILITY IS THE ONLY
 ADDITIONAL CLIENT GATE: the byte-exact pack and at least one outgoing route must
 be visible before the control arms. If invoice authorisation creates a fresh
 docket revision, repaint it and stop for renewed Captain review; the next press

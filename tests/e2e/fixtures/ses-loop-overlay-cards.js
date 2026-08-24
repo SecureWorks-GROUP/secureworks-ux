@@ -2,7 +2,7 @@
  * Three live-shaped sample cards for the SES loop overlay ship.
  * Identity only: job numbers + suburb. No client name / street / phone.
  *
- *   SWMS-261237  Docs Ready, live closeout-only pack shape, NOT in the SES queue
+ *   SWMS-261237  Docs Ready, legacy-transition closeout-only shape, NOT in queue
  *   SWMS-261241  Docs Ready, complete drafted pack with WO + report + SWMS + invoice
  *   SWMS-261243  assessment, no pack — do not invent one
  */
@@ -50,7 +50,11 @@ const pack241 = {
   docket_revision_id: DOCKET_241,
   presentation_kind: 'ready',
   report_doc_id: 'report-doc-261241',
+  invoice_doc_id: 'invoice-doc-261241',
+  swms_doc_id: 'swms-doc-261241',
+  required_documents_resolved: true,
   required_documents: { report: true, invoice: true, swms: true },
+  required_documents_unresolved_reason: null,
   closeout_documents: { report: true, invoice: true, swms: true },
   artifacts: [
     { role: 'work_order', object_key: 'wo/work_order_MLB-26183.pdf', media_type: 'application/pdf' },
@@ -117,8 +121,12 @@ const overlay = {
       drafted: true,
       presentation_kind: 'ready',
       report_doc_id: 'report-doc-261241',
+      invoice_doc_id: 'invoice-doc-261241',
+      swms_doc_id: 'swms-doc-261241',
       has_selected_current_cycle_trade_report: true,
+      required_documents_resolved: pack241.required_documents_resolved,
       required_documents: pack241.required_documents,
+      required_documents_unresolved_reason: pack241.required_documents_unresolved_reason,
       closeout_documents: pack241.closeout_documents,
     },
   },
@@ -165,8 +173,12 @@ const overlay = {
       drafted: true,
       presentation: { kind: 'ready', reason: null },
       report_doc_id: 'report-doc-261241',
+      invoice_doc_id: 'invoice-doc-261241',
+      swms_doc_id: 'swms-doc-261241',
       has_selected_current_cycle_trade_report: true,
+      required_documents_resolved: pack241.required_documents_resolved,
       required_documents: pack241.required_documents,
+      required_documents_unresolved_reason: pack241.required_documents_unresolved_reason,
       closeout_documents: pack241.closeout_documents,
       docket: {
         id: DOCKET_241,

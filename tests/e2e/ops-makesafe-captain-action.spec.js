@@ -78,6 +78,7 @@ test('report-ready placement labels an incomplete pack without hiding Captain re
         presentation_kind: 'ready',
         presentation_reason:
           'The pack has no bound report_doc_id — <script>bad()</script>.',
+        invoice_doc_id: 'invoice-doc-missing-report-bind',
         required_documents_resolved: true,
         required_documents: { report: true, invoice: true, swms: false },
         required_documents_unresolved_reason: null,
@@ -111,6 +112,8 @@ test('resolved ready presentation still renders the review control', async ({ pa
         state: 'drafted',
         presentation_kind: 'ready',
         report_doc_id: 'report-doc-ready-pack',
+        invoice_doc_id: 'invoice-doc-ready-pack',
+        swms_doc_id: 'swms-doc-ready-pack',
         required_documents_resolved: true,
         required_documents: { report: true, invoice: true, swms: true },
         required_documents_unresolved_reason: null,
@@ -263,6 +266,8 @@ test('engine-owned assessment and no-charge maps preserve their exceptions', asy
           state: 'drafted',
           presentation_kind: 'ready',
           report_doc_id: required.report ? 'report-doc-' + id : null,
+          invoice_doc_id: required.invoice ? 'invoice-doc-' + id : null,
+          swms_doc_id: required.swms ? 'swms-doc-' + id : null,
           required_documents_resolved: true,
           required_documents: required,
           required_documents_unresolved_reason: null,
@@ -296,6 +301,77 @@ test('engine-owned assessment and no-charge maps preserve their exceptions', asy
   }
   expect(rendered.assessment).toContain('Local report: not required for this pack');
   expect(rendered.noCharge).toContain('Invoice: not required for this no-charge pack');
+});
+
+test('byte-exact review requirements outrank a stale canonical invoice demand', async ({ page }) => {
+  await page.goto('/ops.html');
+  const verdict = await page.evaluate(() => _msSesPackCompleteness(
+    'job-refreshed-no-charge',
+    {
+      pack: {
+        drafted: true,
+        presentation: { kind: 'ready', reason: null },
+        report_doc_id: 'report-doc-refreshed',
+        swms_doc_id: 'swms-doc-refreshed',
+        has_selected_current_cycle_trade_report: true,
+        required_documents_resolved: true,
+        required_documents: { report: true, invoice: false, swms: true },
+        required_documents_unresolved_reason: null,
+        closeout_documents: { report: true, invoice: false, swms: true },
+      },
+    },
+    {
+      pack_truth: {
+        drafted: true,
+        presentation_kind: 'ready',
+        report_doc_id: 'report-doc-stale',
+        invoice_doc_id: 'invoice-doc-stale',
+        swms_doc_id: 'swms-doc-stale',
+        has_selected_current_cycle_trade_report: true,
+        required_documents_resolved: true,
+        required_documents: { report: true, invoice: true, swms: true },
+        required_documents_unresolved_reason: null,
+        closeout_documents: { report: true, invoice: true, swms: true },
+      },
+    },
+  ));
+
+  expect(verdict.complete).toBe(true);
+  expect(verdict.required_documents).toEqual({ report: true, invoice: false, swms: true });
+  expect(verdict.missing_required).toEqual([]);
+});
+
+test('every required document needs its producer proof pointer', async ({ page }) => {
+  await page.goto('/ops.html');
+  const verdicts = await page.evaluate(() => {
+    const complete = {
+      drafted: true,
+      presentation_kind: 'ready',
+      report_doc_id: 'report-doc-complete',
+      invoice_doc_id: 'invoice-doc-complete',
+      swms_doc_id: 'swms-doc-complete',
+      has_selected_current_cycle_trade_report: true,
+      required_documents_resolved: true,
+      required_documents: { report: true, invoice: true, swms: true },
+      required_documents_unresolved_reason: null,
+      closeout_documents: { report: true, invoice: true, swms: true },
+    };
+    return Object.fromEntries([
+      ['report', 'report_doc_id'],
+      ['invoice', 'invoice_doc_id'],
+      ['swms', 'swms_doc_id'],
+    ].map(([documentKey, pointerKey]) => [
+      documentKey,
+      makesafePackCompletenessVerdict({ ...complete, [pointerKey]: null }),
+    ]));
+  });
+
+  for (const [documentKey, verdict] of Object.entries(verdicts)) {
+    expect(verdict.complete, documentKey).toBe(false);
+    expect(verdict.reviewable, documentKey).toBe(true);
+    expect(verdict.missing_required, documentKey).toContain(documentKey);
+    expect(verdict.warning_label, documentKey).toBe('PACK INCOMPLETE');
+  }
 });
 
 test('unresolved engine requirements stay unknown without hiding Captain review', async ({ page }) => {
@@ -362,6 +438,7 @@ test('whole-card open path sends complete and incomplete drafted packs to Captai
       state: 'drafted',
       presentation_kind: 'ready',
       report_doc_id: 'report-doc-open-path',
+      invoice_doc_id: 'invoice-doc-open-path',
       required_documents_resolved: true,
       required_documents: { report: true, invoice: true, swms: false },
       required_documents_unresolved_reason: null,

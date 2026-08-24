@@ -405,6 +405,8 @@ const boardRawRow = {
     state: "drafted",
     presentation_kind: "ready",
     report_doc_id: "report-doc-1",
+    invoice_doc_id: "invoice-doc-1",
+    swms_doc_id: "swms-doc-1",
     required_documents_resolved: true,
     required_documents: { report: true, invoice: true, swms: true },
     required_documents_unresolved_reason: null,
@@ -524,6 +526,8 @@ function reviewablePack() {
   return {
     drafted: true,
     report_doc_id: "report-doc-1",
+    invoice_doc_id: "invoice-doc-1",
+    swms_doc_id: "swms-doc-1",
     has_selected_current_cycle_trade_report: true,
     required_documents_resolved: true,
     required_documents: { report: true, invoice: true, swms: true },
@@ -888,6 +892,37 @@ for (const exceptionShape of [
     );
   }
 }
+
+// The byte-exact review pack is fresher than the board cache. A no-charge
+// repack must not inherit the canonical row's older invoice requirement.
+Object.assign(boardRawRow.pack, {
+  required_documents_resolved: true,
+  required_documents: { report: true, invoice: true, swms: true },
+  required_documents_unresolved_reason: null,
+  closeout_documents: { report: true, invoice: true, swms: true },
+});
+const refreshedNoChargePack = {
+  ...reviewablePack(),
+  invoice_doc_id: null,
+  required_documents_resolved: true,
+  required_documents: { report: true, invoice: false, swms: true },
+  required_documents_unresolved_reason: null,
+  closeout_documents: { report: true, invoice: false, swms: true },
+  artifacts: reviewablePack().artifacts.filter((artifact) =>
+    artifact.role !== "xero_invoice_pdf"
+  ),
+};
+behaviour.fetch.get_ses_reviewable_pack = refreshedNoChargePack;
+await mod.loadMakesafeReportingCockpit();
+await mod.showMsReportingDetail(JOB);
+const refreshedNoChargeHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "current byte-exact no-charge requirements outrank a stale canonical invoice demand",
+  refreshedNoChargeHtml.includes('id="msSesApproveAndSendBtn"') &&
+    refreshedNoChargeHtml.includes("Draft invoice") &&
+    refreshedNoChargeHtml.includes("not required for this pack") &&
+    !refreshedNoChargeHtml.includes("PACK INCOMPLETE"),
+);
 
 // The engine refuses to resolve an unknown builder/family instead of publishing
 // invented requirements. Surface its reason as a caveat while preserving the
@@ -2918,6 +2953,8 @@ const COMPLETE_PACK = {
   state: "drafted",
   presentation_kind: "ready",
   report_doc_id: "report-doc-1",
+  invoice_doc_id: "invoice-doc-1",
+  swms_doc_id: "swms-doc-1",
   has_selected_current_cycle_trade_report: true,
   required_documents_resolved: true,
   required_documents: { report: true, invoice: true, swms: false },
@@ -2928,6 +2965,32 @@ const INCOMPLETE_PACK = {
   ...COMPLETE_PACK,
   closeout_documents: { report: false, invoice: true, swms: false },
 };
+
+for (const [documentKey, pointerKey] of [
+  ["report", "report_doc_id"],
+  ["invoice", "invoice_doc_id"],
+  ["swms", "swms_doc_id"],
+]) {
+  const missingPointerVerdict = makesafePackCompletenessVerdict({
+    ...COMPLETE_PACK,
+    required_documents: {
+      ...COMPLETE_PACK.required_documents,
+      [documentKey]: true,
+    },
+    closeout_documents: {
+      ...COMPLETE_PACK.closeout_documents,
+      [documentKey]: true,
+    },
+    [pointerKey]: null,
+  });
+  check(
+    `a required ${documentKey} with no ${pointerKey} is incomplete but still reviewable`,
+    missingPointerVerdict.complete === false &&
+      missingPointerVerdict.reviewable === true &&
+      missingPointerVerdict.missing_required.includes(documentKey) &&
+      missingPointerVerdict.warning_label === "PACK INCOMPLETE",
+  );
+}
 
 check(
   "empty requirement maps stay unknown without closing the Captain review door",

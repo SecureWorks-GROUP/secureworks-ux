@@ -18,6 +18,8 @@ test('Docs Ready cards: legacy closeout-only pack opens review/send; chips match
           docket_revision_id: c.pack.docket_revision_id || null,
           presentation_kind: c.pack.presentation_kind,
           report_doc_id: c.pack.report_doc_id,
+          invoice_doc_id: c.pack.invoice_doc_id,
+          swms_doc_id: c.pack.swms_doc_id,
           has_selected_current_cycle_trade_report: true,
           closeout_documents: c.pack.closeout_documents,
         };

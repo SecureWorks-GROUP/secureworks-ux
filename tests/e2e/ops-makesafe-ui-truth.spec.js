@@ -522,6 +522,8 @@ test('card chips follow the pack, not a stale WO-missing enrichment join', async
       drafted: true, state: 'drafted', sent: false,
       presentation_kind: 'ready',
       report_doc_id: 'report-doc-job-241',
+      invoice_doc_id: 'invoice-doc-job-241',
+      swms_doc_id: 'swms-doc-job-241',
       required_documents: { report: true, invoice: true, swms: true },
       closeout_documents: { report: true, invoice: true, swms: true },
       artifacts: [

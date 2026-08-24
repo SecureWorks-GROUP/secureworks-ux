@@ -168,20 +168,22 @@ function makesafePackCompletenessVerdict(pack) {
   var closeoutWellFormed = !!closeout && documentKeys.every(function(key) {
     return typeof closeout[key] === 'boolean';
   });
+  var proofPointers = {
+    report: String(pack.report_doc_id || '').trim(),
+    invoice: String(pack.invoice_doc_id || '').trim(),
+    swms: String(pack.swms_doc_id || '').trim()
+  };
+  var reportProofResolved = pack.report_doc_resolved !== false
+    && pack.has_selected_current_cycle_trade_report === true;
   var missingRequired = [];
   if (requirementsResolved && closeoutWellFormed) {
     documentKeys.forEach(function(key) {
-      if (required[key] === true && closeout[key] !== true) missingRequired.push(key);
+      if (required[key] !== true) return;
+      var proofResolved = key !== 'report' || reportProofResolved;
+      if (closeout[key] !== true || !proofPointers[key] || !proofResolved) {
+        missingRequired.push(key);
+      }
     });
-  }
-
-  var reportDocId = String(pack.report_doc_id || '').trim();
-  var selectedTradeReport = pack.has_selected_current_cycle_trade_report === true;
-  var pointerResolved = pack.report_doc_resolved !== false;
-  if (requirementsResolved && closeoutWellFormed && required.report === true && (
-    !reportDocId || !pointerResolved || !selectedTradeReport
-  ) && missingRequired.indexOf('report') < 0) {
-    missingRequired.push('report');
   }
   var complete = requirementsResolved
     && closeoutWellFormed
@@ -657,15 +659,16 @@ function _msSesPackCompletenessInput(jobId, ctx, base) {
   }
 
   // Select the engine's resolution marker, map and refusal reason from one
-  // payload object. Mixing an unresolved marker from one producer with a map
-  // from another would manufacture a resolution the engine never published.
+  // payload object. The current byte-exact review pack outranks its docket and
+  // the cached canonical row; mixing producers or preferring the cache would
+  // manufacture requirements the reviewed revision never published.
   function firstRequirementEnvelope() {
     var keys = [
       'required_documents_resolved',
       'required_documents',
       'required_documents_unresolved_reason'
     ];
-    var requirementSources = [canonical, reviewPack, docket];
+    var requirementSources = [reviewPack, docket, canonical];
     for (var i = 0; i < requirementSources.length; i++) {
       var source = requirementSources[i];
       if (keys.some(function(key) { return _msSesHasOwn(source, key); })) return source;

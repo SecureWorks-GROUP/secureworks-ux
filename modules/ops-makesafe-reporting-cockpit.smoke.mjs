@@ -840,6 +840,35 @@ check(
     calls.toasts.some((t) => /byte-exact pack preview is not loaded/i.test(t.msg)),
 );
 
+// A byte-exact pack without outgoing route cards still cannot show the exact
+// recipients and attachments the Captain must review. Keep the control visible
+// but disabled, and refuse a programmatic call before confirmation or writes.
+const noRoutesCockpit = cockpitSendReady();
+noRoutesCockpit.sections.email_drafts = [];
+behaviour.fetch.query_ses_review_cockpit = noRoutesCockpit;
+behaviour.fetch.list_ses_docs_ready_reviews = { dockets: [queueRow] };
+behaviour.fetch.get_ses_reviewable_pack = liveShapeReviewPack;
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.showMsReportingDetail(JOB);
+const noRoutesDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "backend controls cannot arm SEND without an outgoing route preview",
+  noRoutesDetailHtml.includes("APPROVE AND SEND") &&
+    !noRoutesDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    noRoutesDetailHtml.includes("outgoing email preview is not loaded"),
+);
+await mod.sesApproveAndSend(JOB);
+check(
+  "programmatic send refuses before confirmation or writes when routes are absent",
+  calls.confirms.length === 0 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /outgoing email preview is not loaded/i.test(t.msg)),
+);
+behaviour.fetch.query_ses_review_cockpit = cockpitSendReady();
+
 const missingReportReviewPack = {
   ...reviewablePack(),
   closeout_documents: { report: false, invoice: true, swms: true },
@@ -1112,7 +1141,7 @@ check(
     detailHtml.includes("What one press does") &&
     /Docs Ready sign-off/.test(detailHtml) &&
     /send approval/.test(detailHtml) &&
-    /Both approvals are recorded separately/.test(detailHtml),
+    /Docs Ready and send approvals are recorded separately/.test(detailHtml),
 );
 check(
   "the DONE checklist strip leads the pack, naming what is complete",
@@ -1346,7 +1375,7 @@ check(
 check(
   "detail shows the Docs Ready tick as not yet recorded, bound to the pack hash",
   /not yet recorded/.test(detailHtml) && detailHtml.includes("sha256:aaa") &&
-    /One press records it against exactly this version/.test(detailHtml),
+    /This send pass records it against exactly this version/.test(detailHtml),
 );
 check(
   "detail never revives the legacy recipient/send copy",
@@ -1602,9 +1631,11 @@ check(
     !invoiceHtml.includes("msSesApproveInvoiceBtn"),
 );
 check(
-  "the press note says it records BOTH approvals and authorises the existing draft",
-  /Records your invoice approval and your send approval/.test(invoiceHtml) &&
-    /authorises the Xero draft invoice already prepared for it/.test(invoiceHtml),
+  "the invoice pass says it authorises then stops for review without sending",
+  /Records your invoice approval for this exact pack/.test(invoiceHtml) &&
+    /authorises the Xero draft invoice already prepared for it/.test(invoiceHtml) &&
+    /this pass sends no email/.test(invoiceHtml) &&
+    !/Records your send approval/.test(invoiceHtml),
 );
 check(
   "the disclosure quotes the backend's own plan text verbatim for each armed step",
@@ -1822,8 +1853,8 @@ calls.toasts.length = 0;
   };
 }
 
-// ── 9c. Both stages armed at once: still ONE button, and its note says the
-//        press records BOTH approvals.
+// ── 9c. Both stages armed at once: still ONE button, but the invoice pass
+//        wins and stops before any send approval.
 {
   const bothArmed = cockpitSendReady();
   bothArmed.controls.approve_invoice.enabled = true;
@@ -1835,23 +1866,22 @@ calls.toasts.length = 0;
     "both stages armed still render exactly ONE pressable stamp",
     (bothHtml.match(/class="msr-stamp /g) || []).length === 1 &&
       bothHtml.includes('id="msSesApproveAndSendBtn"') &&
-      /Records your invoice approval and your send approval/.test(bothHtml),
+      /Records your invoice approval for this exact pack/.test(bothHtml) &&
+      /this pass sends no email/.test(bothHtml) &&
+      !/Records your send approval/.test(bothHtml),
   );
   behaviour.fetch["query_ses_review_cockpit"] = cockpitSendReady();
 }
 
-// ── 10a. ONE PRESS on an invoice-ready pack: the invoice approval is recorded
-//         and executed, the invoice-bound pack is re-read, and the chain STOPS
-//         honestly when the backend has not armed the send on the new revision.
+// ── 10a. Invoice pass: approval is recorded and executed, the invoice-bound
+//         pack is re-read and repainted, and the chain ALWAYS stops for review.
 //         The recorded invoice approval stands; nothing is sent.
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.toasts.length = 0;
 calls.confirms.length = 0;
-behaviour.fetch["query_ses_review_cockpit"] = (() => {
+const invoiceBeforeRefresh = (() => {
   const c = cockpitInvoiceReady();
-  c.controls.send_it.disabled_reason =
-    "The invoice-bound revision has no photo attachments yet.";
   c.sections.money.bound_invoice = {
     invoice_number: "INV-1234",
     status: "DRAFT",
@@ -1859,6 +1889,18 @@ behaviour.fetch["query_ses_review_cockpit"] = (() => {
   };
   return c;
 })();
+const invoiceAfterRefresh = cockpitSendReady();
+invoiceAfterRefresh.controls.send_it.enabled = false;
+invoiceAfterRefresh.controls.send_it.disabled_reason =
+  "The invoice-bound revision has no photo attachments yet.";
+Object.defineProperty(behaviour.fetch, "query_ses_review_cockpit", {
+  configurable: true,
+  get() {
+    return calls.opsPost.some((c) => c.action === "execute_ses_invoice_revision")
+      ? invoiceAfterRefresh
+      : invoiceBeforeRefresh;
+  },
+});
 behaviour.postJwt["approve_ses_invoice_revision"] = {
   approval: { invoice_obligation_revision_id: "obr-1" },
 };
@@ -1891,20 +1933,18 @@ check(
     invExecCall.body.invoice_obligation_revision_id === "obr-1",
 );
 check(
-  "a send the backend has not armed on the NEW revision stops the chain there",
+  "the invoice pass sends nothing from the unseen refreshed revision",
   !calls.opsPost.some((c) => c.action === "prepare_ses_release_revision") &&
+    !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
     !calls.opsPostJwt.some((c) => c.action === "approve_ses_release_revision") &&
     !calls.opsPost.some((c) => c.action === "execute_ses_release_revision"),
 );
-const stopHtml = elements["msSesChainError-" + JOB]._html || "";
+const refreshedInvoiceHtml = elements["msReportingDetailPanel"]._html || "";
 check(
-  "the stop names the step and quotes the server's refusal verbatim",
-  /Stopped at: sending the invoice-bound pack/.test(stopHtml) &&
-    stopHtml.includes(
-      "The invoice-bound revision has no photo attachments yet.",
-    ) &&
-    /What was already recorded stands/.test(stopHtml) &&
-    /picks up from this step/.test(stopHtml),
+  "the refreshed invoice-bound pack is repainted with the backend send refusal",
+  refreshedInvoiceHtml.includes("The invoice-bound revision has no photo attachments yet.") &&
+    !refreshedInvoiceHtml.includes('id="msSesApproveAndSendBtn"') &&
+    calls.toasts.some((t) => /Review the refreshed invoice-bound pack/i.test(t.msg)),
 );
 // Option B: the LAST text before the live money write must not claim CREATE.
 check(
@@ -1918,10 +1958,8 @@ check(
     ),
 );
 
-// ── 10b. ONE PRESS end to end: invoice approval, then the send approval, in
-//         one chain, in order. The cockpit answers INVOICE_CREATE_READY until
-//         the invoice execute lands and SEND_READY afterwards — exactly what
-//         the live backend does when it binds the Xero PDF into a fresh docket.
+// ── 10b. TWO REVIEW-BOUND PASSES: invoice approval first, then a second press
+//         after the SEND_READY invoice-bound pack has been repainted.
 calls.opsPost.length = 0;
 calls.opsPostJwt.length = 0;
 calls.opsFetch.length = 0;
@@ -1959,8 +1997,19 @@ check(
 );
 check(
   "the invoice-bound pack is re-read before anything is signed off",
-  calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack"),
+  calls.opsFetch.some((c) => c.action === "get_ses_reviewable_pack") &&
+    !calls.opsPostJwt.some((c) => c.action === "sign_off_ses_docket") &&
+    !calls.opsPost.some((c) => c.action === "prepare_ses_release_revision"),
 );
+const refreshedSendHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "the first pass repaints the invoice-bound SEND preview for renewed review",
+  refreshedSendHtml.includes('id="msSesApproveAndSendBtn"') &&
+    refreshedSendHtml.includes("Report email") &&
+    refreshedSendHtml.includes("Invoice email") &&
+    calls.toasts.some((t) => /Review the refreshed invoice-bound pack/i.test(t.msg)),
+);
+await mod.sesApproveAndSend(JOB);
 {
   const order = [...calls.opsPostJwt, ...calls.opsPost]
     .filter((c) =>
@@ -1976,7 +2025,7 @@ check(
   const jwtOrder = calls.opsPostJwt.map((c) => c.action);
   const postOrder = calls.opsPost.map((c) => c.action);
   check(
-    "ONE press runs the full chain in order: approve invoice -> authorise -> sign off -> prepare -> approve send -> send",
+    "two reviewed passes run invoice approval before the separate guarded send chain",
     order.length === 6 &&
       jwtOrder.join(",") ===
         "approve_ses_invoice_revision,sign_off_ses_docket,approve_ses_release_revision" &&
@@ -1984,12 +2033,11 @@ check(
         "execute_ses_invoice_revision,prepare_ses_release_revision,execute_ses_release_revision",
   );
   check(
-    "BOTH approvals are recorded on JWT, each for this job's own revision",
-    calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision")
-        .body.job_id === JOB &&
-      calls.opsPostJwt.find((c) =>
-          c.action === "approve_ses_release_revision"
-        ).body.release_revision_id === "rel-3",
+    "invoice and send approvals are recorded separately across the two reviewed passes",
+    !!calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision") &&
+      calls.opsPostJwt.find((c) => c.action === "approve_ses_invoice_revision").body.job_id === JOB &&
+      !!calls.opsPostJwt.find((c) => c.action === "approve_ses_release_revision") &&
+      calls.opsPostJwt.find((c) => c.action === "approve_ses_release_revision").body.release_revision_id === "rel-3",
   );
   check(
     "the sign-off is still hash-bound to the pack the press was made on",
@@ -1997,10 +2045,13 @@ check(
         .expected_output_content_hash === HASH,
   );
   check(
-    "the success toast reports the send and the authorised invoice",
+    "the two passes report invoice authorisation and the eventual send separately",
     calls.toasts.some((t) =>
-      t.kind === "success" && /3 emails released/i.test(t.msg || "") &&
-      /invoice authorised/i.test(t.msg || "")
+      t.kind === "success" && /Invoice authorised/i.test(t.msg || "") &&
+      /Review the refreshed invoice-bound pack/i.test(t.msg || "")
+    ) &&
+    calls.toasts.some((t) =>
+      t.kind === "success" && /3 emails released/i.test(t.msg || "")
     ),
   );
 }
@@ -2455,10 +2506,10 @@ await mod.showMsReportingDetail(JOB);
 const approveHtml = elements["msReportingDetailPanel"]._html || "";
 check(
   "Option B: neither the next action nor the press note claims it CREATES the invoice",
-  !/creates the real Xero invoice/i.test(approveHtml) &&
+    !/creates the real Xero invoice/i.test(approveHtml) &&
     !/creates the invoice in Xero/i.test(approveHtml) &&
     approveHtml.includes(
-      "authorises the Xero draft invoice already prepared for this pack",
+      "authorises the Xero draft invoice already prepared for the pack",
     ) &&
     approveHtml.includes(
       "authorises the Xero draft invoice already prepared for it",

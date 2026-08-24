@@ -421,7 +421,12 @@ gaps, while `complete` alone may drive a Ready-to-send claim. The current live
 `makesafe-board.v1` producer supplies `pack.closeout_documents` but no
 `pack.required_documents`; show CHECK DOCUMENTS, keep Review job pack and any
 backend-armed APPROVE AND SEND control visible, and never infer a requirement or
-document presence the payload did not state.
+document presence the payload did not state. PREVIEW AVAILABILITY IS THE ONLY
+ADDITIONAL CLIENT GATE: the byte-exact pack and at least one outgoing route must
+be visible before the control arms. If invoice authorisation creates a fresh
+docket revision, repaint it and stop for renewed Captain review; the next press
+sends that displayed revision. Never carry a same-press send across an unseen
+invoice-bound repack.
 
 WHAT BECOMES A DOCUMENT TAB IS DECIDED BY BYTES, NEVER BY A ROLE ALLOWLIST.
 `_msSesDocsFromArtifacts` used to map six known artifact roles and silently drop

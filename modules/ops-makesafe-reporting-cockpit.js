@@ -738,9 +738,9 @@ async function showMsReportingDetail(jobId, targetPanelId) {
     return;
   }
   // A direct Approvals/detail entry computes the same document-honesty verdict
-  // as the board card and whole-card door. The detail renders every caveat, but
-  // only the backend control flags (plus exact preview/revision guards) arm the
-  // send stamp.
+  // as the board card and whole-card door. The detail renders every caveat. A
+  // successful byte-exact pack read must also exist before backend controls can
+  // arm the send stamp; required_documents completeness is not that read gate.
   ctx.packCompleteness = _msSesPackCompleteness(jobId, ctx, base);
   _msSesPackCompletenessById[jobId] = ctx.packCompleteness;
   ctx.panelId = targetPanelId || 'msReportingDetailPanel';
@@ -3643,6 +3643,20 @@ function _msReportingFormatTimestamp(iso) {
 // ── STATE-AWARE ACTION BLOCK (SES cockpit controls) ─────────────────────────
 
 /**
+ * Whether this context carries the byte-exact pack preview the Captain must
+ * inspect before sending. A queue-backed context proves that relationship with
+ * its docket id; a remembered signed-off pack proves it with a successful read
+ * timestamp. A client-recovered invoice PDF alone is not the release pack.
+ */
+function _msSesHasReviewPackPreview(ctx) {
+  if (!ctx || !ctx.pack || typeof ctx.pack !== 'object') return false;
+  return !!(
+    (ctx.queueEntry && ctx.docketRevisionId) ||
+    (Number(ctx.fetchedAt) > 0 && ctx.docketRevisionId)
+  );
+}
+
+/**
  * ONE BUTTON, rendered at the BOTTOM of the pane in the pinned
  * .msr-actions-foot — a flex sibling outside the scroll body, deliberately
  * NOT position:sticky (sticky overlays content on a full-page shot).
@@ -3654,12 +3668,12 @@ function _msReportingFormatTimestamp(iso) {
  * sign-off is still bound to the displayed pack hash, and a pack that changed
  * still voids the press.
  *
- * The backend control flags own whether the stamp is armed — approve_invoice
- * when the invoice still needs authorising, send_it when it does not. Document
- * and hold caveats remain visible above for Captain review but do not become a
- * second client-side veto. A disabled stamp carries no id and no onclick, with
- * the owning backend refusal underneath. The retired 410 combined path is never
- * called.
+ * The byte-exact pack preview must be loaded, then the backend control flags own
+ * whether the stamp is armed — approve_invoice when the invoice still needs
+ * authorising, send_it when it does not. Document and hold caveats remain
+ * visible above for Captain review but do not become a second client-side veto.
+ * A disabled stamp carries no id and no onclick, with the owning refusal
+ * underneath. The retired 410 combined path is never called.
  */
 function _msSesActionBlock(jobId, ctx, dismissAction) {
   var cockpit = ctx.cockpit || {};
@@ -3674,7 +3688,8 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
   // the screen shows the edited preview, so a send of the unedited pack would
   // send something other than what is shown.
   var previewLock = _msSesPreviewOf(jobId, ctx);
-  var armed = !previewLock && !!(approveInvoice.enabled || sendIt.enabled);
+  var packPreviewLoaded = _msSesHasReviewPackPreview(ctx);
+  var armed = packPreviewLoaded && !previewLock && !!(approveInvoice.enabled || sendIt.enabled);
   var routeCount = Array.isArray(sections.email_drafts) ? sections.email_drafts.length : null;
   var html = '';
   var captainNote = controls.captain_only ? ' Captain authority is required for this pack.' : '';
@@ -3704,6 +3719,8 @@ function _msSesActionBlock(jobId, ctx, dismissAction) {
     fullNote = approveInvoice.enabled
       ? ('Records your invoice approval and your send approval for this exact pack, authorises the Xero draft invoice already prepared for it, then sends ' + emailsPhrase + '.')
       : ('Records your send approval for this exact pack and sends ' + emailsPhrase + '.');
+  } else if (!packPreviewLoaded) {
+    note = 'The byte-exact pack preview is not loaded, so this screen cannot show exactly what would be sent. Reopen the review pack before pressing.';
   } else if (previewLock) {
     note = 'Your hours/wording edits are recorded on this docket, but this pack does not carry them yet. The press unlocks on the revised pack that does.';
   } else {
@@ -3928,6 +3945,13 @@ function _msSesEchoedReviewCoordinates(ctx) {
 async function sesApproveAndSend(jobId) {
   var ctx = _msSesPackCache[jobId];
   if (!ctx) { showToast('Pack not loaded; reopen the review panel.', 'error'); return; }
+  // A cockpit status and enabled controls are not a send preview. Refuse a
+  // programmatic call unless this screen loaded the byte-exact pack whose
+  // documents and route attachments the Captain is reviewing.
+  if (!_msSesHasReviewPackPreview(ctx)) {
+    showToast('The byte-exact pack preview is not loaded. Reopen the review pack before pressing.', 'error');
+    return;
+  }
   // Fail closed: only the backend control flags can arm a press, whatever
   // invoked this function. A disabled stamp has no id and no onclick, and even
   // a programmatic call stops here.

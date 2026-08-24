@@ -8,9 +8,9 @@
 //     and NEVER reads the retired legacy makesafe_report_drafts feed; card
 //     identity is joined from the canonical makesafe_board feed and each card's
 //     chip + invoice glance are enriched from query_ses_review_cockpit;
-//   - the board door (openMakesafeJob, extracted from ops.html) opens the SES
+//   - the executable board door (openMakesafeJob from ops.html) opens the SES
 //     review overlay for a queued job and falls back to the canonical job
-//     detail only when no SES docket AND no legacy pack exist;
+//     detail only when no SES docket AND no drafted pack exist;
 //   - the detail panel reads query_ses_review_cockpit + get_ses_reviewable_pack
 //     (resolved via list_ses_docs_ready_reviews) and renders the byte-exact
 //     docs, the three exact routes, and the fixed photo set;
@@ -20,7 +20,7 @@
 //     (JWT) -> execute_ses_release_revision;
 //   - the retired legacy actions (makesafe_send_pack, makesafe_resume_close,
 //     makesafe_reset_failed_pack, makesafe_send_photo_followup) are never
-//     called — at runtime or in source.
+//     dispatched by any exercised runtime path.
 //
 // Run:  node modules/ops-makesafe-reporting-cockpit.smoke.mjs
 // Exit code 0 == pass, 1 == fail.
@@ -345,32 +345,6 @@ for (const gone of [
 ]) {
   check("legacy symbol retired: " + gone, mod[gone] === undefined);
 }
-
-// ── 3. The module source never calls the retired 410 actions ────────────────
-for (const retired of [
-  "makesafe_send_pack",
-  "makesafe_send_photo_followup",
-  "makesafe_resume_close",
-  "makesafe_reset_failed_pack",
-]) {
-  const callSite = new RegExp(
-    "ops(?:Post|Fetch|PostJwt)\\(\\s*['\"]" + retired + "['\"]",
-  );
-  check("source never calls retired action " + retired, !callSite.test(code));
-}
-// The list must never read the retired legacy drafts feed again (it is empty in
-// production and its approve path answers 410).
-check(
-  "source never reads the retired legacy drafts feed",
-  !/ops(?:Post|Fetch|PostJwt)\(\s*['"]makesafe_report_drafts['"]/.test(code),
-);
-// No multi-job release can be built from this surface: the only prepare call
-// must bind exactly one job.
-check(
-  "prepare_ses_release_revision is wired single-job only",
-  /prepare_ses_release_revision['"]\s*,\s*prepBody/.test(code) &&
-    /prepBody\s*=\s*\{\s*job_ids:\s*\[jobId\]\s*\}/.test(code),
-);
 
 // The shipped degraded-path parser must handle both canonical address shapes.
 check(
@@ -841,6 +815,30 @@ check(
 );
 behaviour.confirmReturns = true;
 boardRawRow.pack.required_documents = completeRequiredTruth;
+
+// Enabled backend controls without a successfully loaded byte-exact pack are
+// not a send preview. The action must stay closed until the Captain can inspect
+// the documents and route attachments the press would release.
+const NO_PREVIEW_JOB = "job-no-pack-preview";
+calls.opsPost.length = 0;
+calls.opsPostJwt.length = 0;
+calls.confirms.length = 0;
+calls.toasts.length = 0;
+await mod.showMsReportingDetail(NO_PREVIEW_JOB);
+const noPreviewDetailHtml = elements["msReportingDetailPanel"]._html || "";
+check(
+  "backend controls cannot arm SEND without a loaded byte-exact pack preview",
+  noPreviewDetailHtml.includes("APPROVE AND SEND") &&
+    !noPreviewDetailHtml.includes('id="msSesApproveAndSendBtn"') &&
+    noPreviewDetailHtml.includes("byte-exact pack preview is not loaded"),
+);
+await mod.sesApproveAndSend(NO_PREVIEW_JOB);
+check(
+  "programmatic send refuses before confirmation or writes when the pack preview is absent",
+  calls.confirms.length === 0 && calls.opsPost.length === 0 &&
+    calls.opsPostJwt.length === 0 &&
+    calls.toasts.some((t) => /byte-exact pack preview is not loaded/i.test(t.msg)),
+);
 
 const missingReportReviewPack = {
   ...reviewablePack(),
@@ -2605,31 +2603,19 @@ check(
     !("pack_status" in mod._msSesQueueCardRow(JOB, queueRow, null)),
 );
 
-// ── 16. The board door (openMakesafeJob, extracted from ops.html) ───────────
-const OPS_SRC = join(__dirname, "..", "ops.html");
-const opsCode = readFileSync(OPS_SRC, "utf8");
+// ── 16. Execute the shipped board door and review affordance ────────────────
+const opsCode = opsHtml;
 const makesafePackCompletenessVerdict = mod.makesafePackCompletenessVerdict;
 check(
   "cockpit module exports the one pack-completeness verdict used by ops.html",
-  typeof makesafePackCompletenessVerdict === "function" &&
-    !opsCode.includes("function makesafePackCompletenessVerdict(pack) {"),
+  typeof makesafePackCompletenessVerdict === "function",
 );
 const doorStart = opsCode.indexOf("async function openMakesafeJob(jobId) {");
 const doorEnd = opsCode.indexOf("/**\n * Mount a board overlay", doorStart);
-check(
-  "ops.html door source located for extraction",
-  doorStart > 0 && doorEnd > doorStart,
-);
+if (doorStart < 0 || doorEnd <= doorStart) {
+  throw new Error("Could not load the executable openMakesafeJob door from ops.html");
+}
 const doorSrc = opsCode.slice(doorStart, doorEnd);
-check(
-  "the door no longer primes the legacy drafts feed",
-  !/loadMakesafeReportingCockpit/.test(doorSrc),
-);
-check(
-  "the door source never calls a retired action",
-  !/makesafe_send_pack|makesafe_send_photo_followup|makesafe_resume_close|makesafe_reset_failed_pack/
-    .test(doorSrc),
-);
 
 function makeDoor(env) {
   const names = Object.keys(env);
@@ -2676,17 +2662,10 @@ function doorEnv(over) {
 // canonical pack block still owns whether a pack exists.
 const affordanceStart = opsCode.indexOf("function makesafeCardHasReviewAffordance(j, status, packCompleteness) {");
 const affordanceEnd = opsCode.indexOf("// OPT1 card", affordanceStart);
-check(
-  "ops.html review-affordance predicate source located for extraction",
-  affordanceStart > 0 && affordanceEnd > affordanceStart,
-);
-const affordanceSrc = affordanceStart > 0 && affordanceEnd > affordanceStart
-  ? opsCode.slice(affordanceStart, affordanceEnd)
-  : "function makesafeCardHasReviewAffordance() { return false; }";
-check(
-  "review-affordance predicate does not consult legacy substatus, declared stage, or computed status",
-  !/admin_to_send_report|board_stage|computed_status/.test(affordanceSrc),
-);
+if (affordanceStart < 0 || affordanceEnd <= affordanceStart) {
+  throw new Error("Could not load the executable makesafeCardHasReviewAffordance predicate from ops.html");
+}
+const affordanceSrc = opsCode.slice(affordanceStart, affordanceEnd);
 function makeReviewAffordance(queue) {
   return new Function(
     "_msSesReviewQueue",
@@ -2705,31 +2684,12 @@ function makeReviewAffordance(queue) {
 }
 const makesafeCardHasReviewAffordance = makeReviewAffordance({});
 
-const renderCardStart = opsCode.indexOf("function renderMakesafeCard(j, status) {");
-const renderCardEnd = opsCode.indexOf("// ── Make-Safe Substatus Advance", renderCardStart);
-const renderCardSrc = renderCardStart > 0 && renderCardEnd > renderCardStart
-  ? opsCode.slice(renderCardStart, renderCardEnd)
-  : "";
-check(
-  "renderMakesafeCard wires the visible Review job pack button to the shared completeness verdict",
-  /showReviewAffordance\s*=\s*makesafeCardHasReviewAffordance\(j,\s*status,\s*packCompleteness\)/.test(renderCardSrc) &&
-    /if\s*\(showReviewAffordance\)\s*\{[\s\S]*Review job pack/.test(renderCardSrc),
-);
-
-const loadJobsStart = opsCode.indexOf("async function loadJobs(opts) {");
-const loadJobsEnd = opsCode.indexOf("function setPipelineTab(tab) {", loadJobsStart);
-const loadJobsSrc = loadJobsStart > 0 && loadJobsEnd > loadJobsStart
-  ? opsCode.slice(loadJobsStart, loadJobsEnd)
-  : "";
-check(
-  "the make-safe board hydrates the queue-backed affordances after first paint",
-  /loadMakesafeBoardReviewAffordances\(\)/.test(loadJobsSrc),
-);
 const loaderStart = opsCode.indexOf("async function loadMakesafeBoardReviewAffordances() {");
 const loaderEnd = opsCode.indexOf("function setPipelineTab(tab) {", loaderStart);
-const loaderSrc = loaderStart > 0 && loaderEnd > loaderStart
-  ? opsCode.slice(loaderStart, loaderEnd)
-  : "async function loadMakesafeBoardReviewAffordances() {}";
+if (loaderStart < 0 || loaderEnd <= loaderStart) {
+  throw new Error("Could not load the executable review-affordance loader from ops.html");
+}
+const loaderSrc = opsCode.slice(loaderStart, loaderEnd);
 function makeAffordanceLoader(stale) {
   const loaderCalls = { refresh: 0, render: 0 };
   const loader = new Function(

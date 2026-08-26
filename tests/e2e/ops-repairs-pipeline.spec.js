@@ -283,7 +283,14 @@ test('a repair card shows its SWR- number and its suburb', async ({ page }) => {
     .toHaveText('SWMS-261029');
 });
 
-test('dragging a repair card writes update_repair_stage and moves it', async ({ page }, testInfo) => {
+test('dragging a repair card writes update_repair_stage and moves it', async ({ page }) => {
+  // This test does more than its neighbours: a full ops.html boot, real trusted
+  // pointer input through Chromium's own drag controller, a network round trip, a
+  // repaint, and then a full-board screenshot with the horizontal scroller
+  // expanded to max-content. Under six parallel workers that legitimately runs
+  // past the 20s default — a slow test, not a broken one. Give it the headroom
+  // explicitly rather than letting the suite flake once in ten runs.
+  test.setTimeout(60_000);
   const { requestLog, stageWrites, guard, stubs } = await openRepairsBoard(page);
 
   await realDrag(
@@ -317,13 +324,11 @@ test('dragging a repair card writes update_repair_stage and moves it', async ({ 
     if (board) { board.style.overflow = 'visible'; board.style.width = 'max-content'; }
   });
   fs.mkdirSync(SHOT_DIR, { recursive: true });
+  // Written to a known path rather than attached to the report: attaching copies
+  // the PNG a second time and bought nothing that the file itself does not.
   await page.locator('#jobsBody .repair-kanban').screenshot({
     path: path.join(SHOT_DIR, 'ui-repairs-board.png'),
   });
-  testInfo.attach && (await testInfo.attach('repairs-board', {
-    path: path.join(SHOT_DIR, 'ui-repairs-board.png'),
-    contentType: 'image/png',
-  }));
 });
 
 test('a refused stage move puts the card back where the server says it lives', async ({ page }) => {

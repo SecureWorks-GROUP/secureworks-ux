@@ -1418,6 +1418,8 @@
     .kanban-client { font-size: 13px; font-weight: 600; color: #1a1a1a; }
     .kanban-value { font-size: 12px; font-weight: 600; color: #1a9a5a; font-family: var(--sw-font-num); }
     .kanban-suburb { font-size: 11px; color: #5a6068; }
+    /* SWR- number on a repair card: quiet, monospaced, sits under the suburb. */
+    .kanban-jobnum { font-size: 11px; color: #5a6068; font-family: var(--sw-font-num); letter-spacing: 0.02em; }
     .kanban-meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
     .kanban-meta-badge {
       font-size: 10px;
@@ -11438,7 +11440,15 @@ function repairStageOf(j) {
   return REPAIR_STATUS_TO_STAGE[status] || '';
 }
 function _renderRepairColumn(stage, jobs) {
-  var html = '<div class="kanban-col" data-status="repair_' + stage.key + '">';
+  // The Repairs columns are real drop zones now. Without ondragover the browser
+  // never gets its preventDefault, so it never fires a drop and kanbanDrop was
+  // unreachable from this board — which is why a repair drag wrote nothing.
+  // The Unmapped column is deliberately NOT a drop target: it is a diagnosis, not
+  // a stage, and there is no lawful repair_stage value to write for it.
+  var droppable = stage.key !== 'unmapped'
+    ? ' ondragover="kanbanDragOver(event)" ondragleave="kanbanDragLeave(event)" ondrop="kanbanDrop(event)"'
+    : '';
+  var html = '<div class="kanban-col" data-status="repair_' + stage.key + '"' + droppable + '>';
   html += '<div class="kanban-col-header" style="border-bottom-color:' + stage.accent + ';">'
     + stage.label + '<span class="count">' + jobs.length + '</span></div>';
   html += '<div class="kanban-body">';
@@ -15795,8 +15805,17 @@ function renderKanbanCard(j, status) {
     } catch (e) { /* fail-safe: never break the kanban */ }
   }
 
-  if ((j.type === 'patio' || j.type === 'decking' || j.type === 'makesafe') && j.site_suburb) {
+  // 'repair' joins this list with the job type itself. Repair cards were stored
+  // type='makesafe' until the SWR- pipeline landed, so they showed a suburb; the
+  // type flip would silently have taken the suburb off every repair card.
+  if ((j.type === 'patio' || j.type === 'decking' || j.type === 'makesafe' || j.type === 'repair') && j.site_suburb) {
     html += '<div class="kanban-suburb">' + j.site_suburb + '</div>';
+  }
+  // Repair cards carry their SWR- number on the face. Every other board keeps the
+  // number in the list view and the drawer, but a repair operator is reconciling
+  // against a builder work order and the job number is how they do it.
+  if (j.type === 'repair' && j.job_number) {
+    html += '<div class="kanban-jobnum">' + j.job_number + '</div>';
   }
   html += '<div class="kanban-meta">';
   // N-party shared fence badge
@@ -15903,8 +15922,29 @@ function toggleSubstage(headerEl) {
   }
 }
 
+// Strip the `repair_` prefix the Repairs columns carry in data-status. The cards
+// carry the BARE stage key (renderKanbanCard is handed stage.key), the columns
+// carry the prefixed one, so the two vocabularies only meet once this has run.
+// Returns '' for anything that is not a repair column key.
+function repairStageFromColumnKey(key) {
+  var raw = String(key || '');
+  if (raw.indexOf('repair_') !== 0) return '';
+  var stage = raw.slice('repair_'.length);
+  return REPAIR_STAGE_KEYS.indexOf(stage) >= 0 ? stage : '';
+}
+
 function kanbanDragAllowed(fromStatus, toStatus) {
   if (fromStatus === toStatus) return false;
+  if (_pipelineTab === 'repairs') {
+    // Free movement across the nine board stages, in both directions. These are
+    // presentation stages on a work order the builder already issued, not a money
+    // ladder: an operator who scoped a job before quoting it, or who has to walk a
+    // card back from Materials to Variation, is doing normal repair work. The
+    // money/lifecycle guards still live on jobs.status, which this never touches.
+    var toStage = repairStageFromColumnKey(toStatus);
+    return REPAIR_STAGE_KEYS.indexOf(fromStatus) !== -1 && toStage !== '' &&
+      toStage !== fromStatus;
+  }
   if (_pipelineTab === 'fencing') {
     // Free movement: any fencing stage → any other fencing stage (incl. archived). No cancelled.
     var allFencing = FENCING_STAGES.concat(['archived']);
@@ -15973,6 +16013,56 @@ async function kanbanDrop(e) {
   var fromStatus = _kanbanDragFromStatus;
   var jobId = _kanbanDragJobId;
   if (!jobId || !kanbanDragAllowed(fromStatus, toStatus)) return;
+
+  // ── Repairs board: persist the stage, not the status ──────────────────────
+  // update_job_status is deliberately NOT reused here. The nine repair columns
+  // are a board vocabulary; pushing them through jobs.status would force the
+  // canonical money/lifecycle spine to carry presentation state and would put
+  // 'quoted'/'variation' moves in front of every status-driven guard we have.
+  if (_pipelineTab === 'repairs') {
+    var toStage = repairStageFromColumnKey(toStatus);
+    if (!toStage) return;
+    var repairJob = null;
+    if (_pipelineData && _pipelineData.columns) {
+      Object.values(_pipelineData.columns).forEach(function (arr) {
+        (arr || []).forEach(function (j) { if (j.id === jobId) repairJob = j; });
+      });
+    }
+    var kcR = document.querySelector('#jobsBody .kanban-container');
+    _kanbanSavedScroll = kcR ? kcR.scrollLeft : 0;
+
+    // Optimistic move: repaint the card into its new column straight away so the
+    // board never shows the card sitting back where it was while the write flies.
+    var previousStage = repairJob ? repairJob.repair_stage : undefined;
+    if (repairJob) {
+      repairJob.repair_stage = toStage;
+      if (_pipelineData) renderJobs(_pipelineData);
+    }
+
+    var toLabelR = toStage;
+    for (var rs = 0; rs < REPAIR_STAGES.length; rs++) {
+      if (REPAIR_STAGES[rs].key === toStage) { toLabelR = REPAIR_STAGES[rs].label; break; }
+    }
+    try {
+      await opsPost('update_repair_stage', { jobId: jobId, stage: toStage });
+      showToast('Repair moved to ' + toLabelR, 'success');
+      var kcR2 = document.querySelector('#jobsBody .kanban-container');
+      _kanbanSavedScroll = kcR2 ? kcR2.scrollLeft : 0;
+      loadJobs();
+    } catch (err) {
+      // Revert: put the row back exactly as the server last described it and
+      // repaint, so a failed write can never leave the operator believing a card
+      // moved. Toast carries the server's reason.
+      if (repairJob) {
+        if (previousStage === undefined) delete repairJob.repair_stage;
+        else repairJob.repair_stage = previousStage;
+        if (_pipelineData) renderJobs(_pipelineData);
+      }
+      showToast('Failed to move repair: ' + err.message, 'error');
+    }
+    return;
+  }
+
   // Backwards-move confirmation (fencing pipeline only)
   if (_pipelineTab === 'fencing') {
     var order = FENCING_STAGES.concat(['archived']);
@@ -23303,6 +23393,14 @@ function closeQuickView() {
 }
 
 function getNextStatuses(current, jobType) {
+  // A repair job has ONE stage authority: the Repairs board, writing
+  // jobs.metadata.repair_stage through update_repair_stage. These buttons write
+  // jobs.status through update_job_status, and before this they offered a repair
+  // job the generic patio ladder — approvals, processing, deposit. Clicking one
+  // moved jobs.status while the card stayed put (the stamped repair_stage wins),
+  // which reads to the operator as a broken board and is a second, conflicting
+  // writer besides. Offer nothing here; the columns are the control.
+  if (jobType === 'repair') return [];
   if (jobType === 'fencing') {
     var ft = {
       'quoted': ['accepted', 'cancelled'],

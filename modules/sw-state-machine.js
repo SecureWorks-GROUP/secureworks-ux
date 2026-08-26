@@ -76,6 +76,18 @@
 
   var MAKESAFE_STAGES = ['accepted', 'scheduled', 'in_progress', 'complete', 'invoiced'];
 
+  // Insurance repair jobs. These are jobs.status values, NOT the nine Repairs
+  // board stages — the board stages live in jobs.metadata.repair_stage and are
+  // written only by update_repair_stage. Without this case a repair job fell
+  // through to PATIO_STAGES, which offered it approvals/deposit/get_review: a
+  // patio money ladder on an insurance work order. Repair travels the same spine
+  // as make-safe (both are minted at 'accepted' off an SES work order), plus
+  // 'processing', where every live repair card currently sits.
+  var REPAIR_STAGES = [
+    'accepted', 'processing', 'scheduled', 'in_progress',
+    'complete', 'invoiced', 'cancelled', 'archived'
+  ];
+
   function isLegalForType(status, type) {
     var arr = getStagesForType(type);
     return arr.indexOf(status) !== -1;
@@ -88,6 +100,7 @@
       case 'decking':     return DECKING_STAGES;
       case 'quick_quote': return QUICK_QUOTE_STAGES;
       case 'makesafe':    return MAKESAFE_STAGES;
+      case 'repair':      return REPAIR_STAGES;
       default:            return PATIO_STAGES;
     }
   }
@@ -154,6 +167,7 @@
     DECKING_STAGES: DECKING_STAGES,
     QUICK_QUOTE_STAGES: QUICK_QUOTE_STAGES,
     MAKESAFE_STAGES: MAKESAFE_STAGES,
+    REPAIR_STAGES: REPAIR_STAGES,
     ALL_CANONICAL_STATUSES: ALL_CANONICAL_STATUSES,
     ACTIVE_STATUSES: ACTIVE_STATUSES,
     isLegalForType: isLegalForType,

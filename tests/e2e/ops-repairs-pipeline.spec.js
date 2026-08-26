@@ -346,6 +346,31 @@ test('a refused stage move puts the card back where the server says it lives', a
   ).toContainText('not a repair-family job');
 });
 
+test('a card whose stage and status disagree says so on its face', async ({ page }) => {
+  // Once dragged, repair_stage beats jobs.status forever. A card moved to
+  // Scoping and then completed by any other path would sit in Scoping with
+  // nothing to say otherwise — drift nobody sees for six weeks. The column still
+  // belongs to the human who dragged it; the card just stops hiding it.
+  const drifting = repairFeed();
+  drifting.columns.processing[0].repair_stage = 'scoping'; // r3, status 'processing'
+  await openRepairsBoard(page, { feed: drifting });
+
+  await expect(
+    page.locator('.kanban-card[data-job-id="r3"] .kanban-stage-drift'),
+  ).toHaveText('status: On Site');
+  // The human's placement still wins.
+  expect((await columnOf(page, 'r3')).column).toBe('Scoping');
+
+  // CONTROL: agreement is silent, and no non-repair card ever grows the chip.
+  const agreeing = repairFeed();
+  agreeing.columns.accepted[0].status = 'scoping';
+  agreeing.columns.accepted[0].repair_stage = 'scoping';
+  await openRepairsBoard(page, { feed: agreeing });
+  await expect(
+    page.locator('.kanban-card[data-job-id="r1"] .kanban-stage-drift'),
+  ).toHaveCount(0);
+});
+
 test('the Unmapped lane is a diagnosis, not a stage: nothing can be dropped into it', async ({ page }) => {
   await openRepairsBoard(page);
   const unmapped = page.locator('.kanban-col[data-status="repair_unmapped"]');

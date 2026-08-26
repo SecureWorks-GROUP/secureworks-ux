@@ -1420,6 +1420,9 @@
     .kanban-suburb { font-size: 11px; color: #5a6068; }
     /* SWR- number on a repair card: quiet, monospaced, sits under the suburb. */
     .kanban-jobnum { font-size: 11px; color: #5a6068; font-family: var(--sw-font-num); letter-spacing: 0.02em; }
+    /* Persisted repair stage disagrees with the job's own status. Amber, not
+       red: the card is not wrong, the two facts have simply drifted. */
+    .kanban-stage-drift { margin-top: 3px; font-size: 10px; font-weight: 600; color: #B26A00; }
     .kanban-meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
     .kanban-meta-badge {
       font-size: 10px;
@@ -15905,8 +15908,38 @@ function renderKanbanCard(j, status) {
   }
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
+  // Repair cards only: say so when the persisted board stage and the job's own
+  // status have drifted apart. See repairStatusDriftChip.
+  html += repairStatusDriftChip(j);
   html += '</div>';
   return html;
+}
+
+// Once a repair card has been dragged, `repair_stage` wins over `jobs.status`
+// FOREVER — the backend's insuranceRepairStage gives the explicit stamp absolute
+// precedence. Before the stage was persisted a repair column was derived live
+// from status and therefore could not lie; afterwards it can. A card dragged to
+// Scoping and then completed and invoiced by any other path — the MCP,
+// complete_and_invoice, a direct status write — would keep showing Scoping with
+// nothing to say otherwise.
+//
+// That is the kind of drift nobody notices for six weeks and then nobody trusts
+// the board again. So it is made visible on the card instead of left silent:
+// when the two disagree, the card says what the STATUS thinks. The stage stays
+// authoritative for placement, because a drag is a deliberate human act and must
+// stick; this only refuses to hide the disagreement.
+function repairStatusDriftChip(j) {
+  if (!j || !isRepairJob(j)) return '';
+  var explicit = String((j.repair_stage || j.board_stage) || '').trim().toLowerCase();
+  if (REPAIR_STAGE_KEYS.indexOf(explicit) < 0) return '';
+  var fromStatus = REPAIR_STATUS_TO_STAGE[String(j.status || '').trim().toLowerCase()];
+  if (!fromStatus || fromStatus === explicit) return '';
+  var label = fromStatus;
+  for (var i = 0; i < REPAIR_STAGES.length; i++) {
+    if (REPAIR_STAGES[i].key === fromStatus) { label = REPAIR_STAGES[i].label; break; }
+  }
+  return '<div class="kanban-stage-drift" title="This card was placed by hand, so its column is a person&#39;s decision. The job status says ' +
+    label + '.">status: ' + label + '</div>';
 }
 
 /* ── Kanban drag-and-drop ── */

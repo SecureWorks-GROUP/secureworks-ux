@@ -214,6 +214,10 @@ function columnOf(page, jobId) {
 // precedent cal-drag-real-input.spec.js set after synthetic events passed 15/15
 // on a build no user could actually drag.
 async function realDrag(page, source, target) {
+  // Both endpoints must be settled before the press: a bounding box measured
+  // mid-repaint produces a drag that starts nowhere and silently does nothing.
+  await source.waitFor({ state: 'visible' });
+  await target.waitFor({ state: 'visible' });
   const src = await source.boundingBox();
   const dst = await target.boundingBox();
   if (!src || !dst) throw new Error('drag endpoints are not visible');
@@ -226,7 +230,7 @@ async function realDrag(page, source, target) {
   for (let step = 1; step <= 25; step++) {
     await page.mouse.move(sx + ((dx - sx) * step) / 25, sy + ((dy - sy) * step) / 25);
   }
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(200);
   await page.mouse.up();
 }
 
@@ -395,11 +399,25 @@ test('the drawer offers a repair job no conflicting jobs.status buttons', async 
   // ladder for anything it did not recognise. A repair job now gets none of
   // them, so the board columns are the only stage authority.
   const offered = await page.evaluate(() => ({
-    repair: getNextStatuses('accepted', 'repair'),
+    repairAccepted: getNextStatuses('accepted', 'repair'),
+    repairInProgress: getNextStatuses('in_progress', 'repair'),
+    repairComplete: getNextStatuses('complete', 'repair'),
     patio: getNextStatuses('accepted', 'patio'),
     makesafe: getNextStatuses('accepted', 'makesafe'),
   }));
-  expect(offered.repair).toEqual([]);
+  // Repair gets its own small lawful spine, NOT the patio money ladder: no
+  // approvals, no deposit, no get_review. Offering nothing at all would be its
+  // own hole — complete_and_invoice refuses anything still at 'accepted', so a
+  // repair with no status control could never be invoiced.
+  expect(offered.repairAccepted).toEqual(['processing']);
+  expect(offered.repairInProgress).toEqual(['complete']);
+  expect(offered.repairComplete).toEqual(['invoiced']);
+  const everyRepairOption = [
+    ...offered.repairAccepted, ...offered.repairInProgress, ...offered.repairComplete,
+  ];
+  for (const patioOnly of ['approvals', 'awaiting_deposit', 'deposit', 'get_review']) {
+    expect(everyRepairOption).not.toContain(patioOnly);
+  }
   // CONTROL: every other type is untouched.
   expect(offered.patio).toEqual(['approvals', 'processing']);
   expect(offered.makesafe).toEqual(['approvals', 'processing']);

@@ -23426,14 +23426,33 @@ function closeQuickView() {
 }
 
 function getNextStatuses(current, jobType) {
-  // A repair job has ONE stage authority: the Repairs board, writing
+  // A repair job's BOARD COLUMN has one authority: the Repairs kanban, writing
   // jobs.metadata.repair_stage through update_repair_stage. These buttons write
-  // jobs.status through update_job_status, and before this they offered a repair
-  // job the generic patio ladder — approvals, processing, deposit. Clicking one
-  // moved jobs.status while the card stayed put (the stamped repair_stage wins),
-  // which reads to the operator as a broken board and is a second, conflicting
-  // writer besides. Offer nothing here; the columns are the control.
-  if (jobType === 'repair') return [];
+  // jobs.status, which is a different thing — the money and lifecycle spine.
+  //
+  // Before this, an unrecognised type fell through to the generic ladder below,
+  // so a repair job was offered approvals / deposit / get_review: a patio money
+  // ladder on an insurance work order, and a second writer that moved status
+  // while the card stayed put. Gone.
+  //
+  // But offering NOTHING would be its own hole: complete_and_invoice refuses any
+  // job that is not in_progress / processing / scheduled / complete, so a repair
+  // stuck at 'accepted' with no status control could never be invoiced at all.
+  // So repair gets its own small, lawful ladder — the same spine make-safe
+  // travels. It cannot conflict with the board: the column comes from
+  // repair_stage, and any disagreement between the two now shows on the card
+  // (repairStatusDriftChip).
+  if (jobType === 'repair') {
+    var repairNext = {
+      'accepted': ['processing'],
+      'processing': ['scheduled', 'in_progress'],
+      'scheduled': ['in_progress'],
+      'in_progress': ['complete'],
+      'complete': ['invoiced'],
+      'invoiced': [],
+    };
+    return repairNext[current] || [];
+  }
   if (jobType === 'fencing') {
     var ft = {
       'quoted': ['accepted', 'cancelled'],

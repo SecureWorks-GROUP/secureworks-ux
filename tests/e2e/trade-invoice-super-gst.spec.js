@@ -154,3 +154,47 @@ test.describe('submitted response has complete money but no persisted lines', ()
     });
   }
 });
+
+test.describe('submitted response has incomplete persisted lines', () => {
+  test.use({ feedScenario: 'trade-invoice-super-gst-incomplete-lines' });
+
+  for (const legacy of [false, true]) {
+    test(`${legacy ? 'legacy' : 'job-centric'} success suppresses the PDF`, async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.installer);
+      if (legacy) await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+      await page.locator('[data-view="hours"]').click();
+      await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      await page.locator('#invSubmitBtn').click();
+      await page.locator('#confirmOk').click();
+
+      await expect(page.getByText('Invoice Submitted')).toBeVisible();
+      await expect(page.locator('[data-invoice-money-summary]')).toContainText('Net pay$352.00');
+      await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
+      expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
+    });
+  }
+});
+
+test.describe('unknown submit response', () => {
+  test.use({ feedScenario: 'trade-invoice-super-gst-empty-response' });
+
+  for (const legacy of [false, true]) {
+    test(`${legacy ? 'legacy' : 'job-centric'} invoice stays editable`, async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.installer);
+      if (legacy) await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+      await page.locator('[data-view="hours"]').click();
+      await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      await page.locator('#invSubmitBtn').click();
+      await page.locator('#confirmOk').click();
+
+      await expect(page.locator('#toast')).toContainText('Invoice submission failed');
+      await expect(page.getByText('Invoice Submitted')).toHaveCount(0);
+      await expect(page.locator('#invSubmitBtn')).toBeVisible();
+      expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
+    });
+  }
+});

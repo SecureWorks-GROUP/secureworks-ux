@@ -59,6 +59,7 @@ async function runDynamicHelperCheck() {
 
   const dynamicSource = [
     extractFunction('_invoiceHasPersistedNumber'),
+    extractFunction('_invoiceSubmitSucceeded'),
     extractFunction('_invoiceBool'),
     extractFunction('_invoiceSuperRate'),
     extractFunction('_invoicePersistedMoney'),
@@ -89,6 +90,37 @@ async function runDynamicHelperCheck() {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(rows.map((r) => r.amount))), [300, 175, 375, 180], 'PDF rows use persisted response line amounts')
   assert.strictEqual(context._invoicePersistedPdfRows({ lines: [] }), null, 'missing persisted response lines suppress the PDF')
   assert.strictEqual(context._invoicePersistedPdfRows({ lines: [{ description: 'No persisted amount' }] }), null, 'an incomplete persisted line suppresses the PDF')
+  ;[
+    ['line_date'],
+    ['job_number'],
+    ['description'],
+    ['line_type'],
+    ['total_hours', 'quantity'],
+    ['hourly_rate', 'unit_rate'],
+    ['line_total_ex'],
+  ].forEach((fields) => {
+    const incompleteLine = { ...persistedResult.lines[0] }
+    fields.forEach((field) => delete incompleteLine[field])
+    assert.strictEqual(
+      context._invoicePersistedPdfRows({ lines: [incompleteLine] }),
+      null,
+      `missing persisted ${fields.join('/')} suppresses the PDF`,
+    )
+  })
+  assert.strictEqual(context._invoiceSubmitSucceeded({}), false, 'an unknown response does not imply invoice success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ ok: true }), true, 'explicit ok confirms invoice success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ invoice_number: 'SW-INV-PERSISTED' }), true, 'durable invoice identity confirms persisted success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ ok: false, invoice_number: 'SW-INV-CONFLICT' }), false, 'an explicit failure overrides invoice identity')
+  assert.strictEqual(
+    context._invoiceSubmitSucceeded({ code: 'XERO_PUSH_FAILED', success: true, invoice_id: 'invoice-saved' }),
+    true,
+    'a failed Xero push is successful only when the saved invoice is identified',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitSucceeded({ code: 'XERO_PUSH_FAILED', success: true }),
+    false,
+    'a failed Xero push without durable invoice identity does not imply success',
+  )
   const gstOnLegacyTotal = context._invoicePersistedMoney({
     gross_earned: 100,
     super_rate: 0.12,

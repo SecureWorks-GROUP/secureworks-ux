@@ -273,10 +273,13 @@ const test = base.extend({
       'trade-invoice-super-gst': ['generate_trade_invoice', 'attach_invoice_pdf'],
       'trade-invoice-super-gst-incomplete': ['generate_trade_invoice'],
       'trade-invoice-super-gst-missing-lines': ['generate_trade_invoice'],
+      'trade-invoice-super-gst-incomplete-lines': ['generate_trade_invoice'],
+      'trade-invoice-super-gst-empty-response': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-error': ['submit_trade_invoice'],
+      'trade-invoice-per-metre-response-empty': ['submit_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -440,7 +443,8 @@ const test = base.extend({
           'trade-invoice-per-metre-gst',
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
-          'trade-invoice-per-metre-response-error'
+          'trade-invoice-per-metre-response-error',
+          'trade-invoice-per-metre-response-empty'
         ].includes(feedScenario)
           ? perMetreInvoiceHours
           : feedScenario === 'trade-invoice-per-metre-gst-off-no-total'
@@ -462,7 +466,7 @@ const test = base.extend({
               total_inc: undefined,
               total: 338.80
             }
-          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines'].includes(feedScenario)
+          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario)
             ? {
               ...labourExplainerHours,
               super_rate: 0.12,
@@ -587,14 +591,15 @@ const test = base.extend({
           };
         },
         generate_trade_invoice: ({ request }) => {
-          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines'].includes(feedScenario) || persona !== 'installer') {
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];
-          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
+          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
           }
+          if (feedScenario === 'trade-invoice-super-gst-empty-response') return {};
           if (feedScenario === 'trade-invoice-super-gst-incomplete') {
             return {
               ok: true,
@@ -621,6 +626,21 @@ const test = base.extend({
               pending_ops_review: true
             };
           }
+          if (feedScenario === 'trade-invoice-super-gst-incomplete-lines') {
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-INCOMPLETE-LINES',
+              xero_bill_id: 'xero-e2e-incomplete-lines',
+              gross_earned: 400,
+              super_rate: 0.12,
+              super_amount: 48,
+              net_pay: 352,
+              gst_on: false,
+              total_inc: 352,
+              lines: [{ line_total_ex: 400 }],
+              pending_ops_review: true
+            };
+          }
           if (feedScenario === 'trade-invoice-super-gst') {
             if (body.gst_on !== true) {
               return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
@@ -641,6 +661,7 @@ const test = base.extend({
               total_inc: 263.30,
               lines: [{
                 id: 'persisted-line-e2e',
+                line_date: addIsoDays(weekStart, 1),
                 job_number: 'SWF-26767',
                 description: 'Persisted reconciled work order',
                 line_type: 'labour',
@@ -664,7 +685,8 @@ const test = base.extend({
             'trade-invoice-per-metre-gst',
             'trade-invoice-per-metre-response-missing-rate',
             'trade-invoice-per-metre-response-lines',
-            'trade-invoice-per-metre-response-error'
+            'trade-invoice-per-metre-response-error',
+            'trade-invoice-per-metre-response-empty'
           ].includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Per-metre GST fixture is not enabled' } };
           }
@@ -672,6 +694,7 @@ const test = base.extend({
           if (feedScenario === 'trade-invoice-per-metre-response-error') {
             return { success: false, error: 'Backend refused this per-metre invoice' };
           }
+          if (feedScenario === 'trade-invoice-per-metre-response-empty') return {};
           if (body.gst_on !== true) {
             return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
           }

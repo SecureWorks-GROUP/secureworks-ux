@@ -16247,7 +16247,7 @@
         notes: 'Per-metre invoice',
         gst_on: _invGst
       }).then(function(res) {
-        if (!res || res.success === false || res.ok === false || res.error) {
+        if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         }
         toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
@@ -16294,6 +16294,9 @@
         notes: '',
         gst_on: _invGst
       }).then(function(res) {
+        if (!_invoiceSubmitSucceeded(res)) {
+          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
+        }
         toast('Invoice submitted to Xero as draft bill' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
         loadHoursView(); // reload to show submitted state
       }).catch(function(err) {
@@ -16593,6 +16596,24 @@
 
   function _invoiceHasPersistedNumber(value) {
     return value != null && value !== '' && Number.isFinite(Number(value));
+  }
+
+  function _invoiceSubmitSucceeded(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result) || result.error) return false;
+    var hasPersistedIdentity = [
+      result.invoice_id,
+      result.invoice_number,
+      result.xero_bill_id,
+      result.xero_bill_number
+    ].some(function(value) {
+      return value != null && String(value).trim() !== '';
+    });
+
+    // A failed Xero push is a saved-invoice success only when the response says
+    // so and names the durable invoice that the office can recover.
+    if (result.code === 'XERO_PUSH_FAILED') return result.success === true && hasPersistedIdentity;
+    if (result.success === false || result.ok === false) return false;
+    return result.success === true || result.ok === true || hasPersistedIdentity;
   }
 
   // Builder-only estimate. The browser never sends these calculated figures;
@@ -17341,18 +17362,28 @@
     var rows = [];
     for (var i = 0; i < rawLines.length; i++) {
       var line = rawLines[i] || {};
-      if (!_invoiceHasPersistedNumber(line.line_total_ex)) return null;
+      var date = line.line_date != null && String(line.line_date).trim() !== ''
+        ? String(line.line_date)
+        : (line.date != null && String(line.date).trim() !== '' ? String(line.date) : null);
+      var jobNumber = line.job_number != null && String(line.job_number).trim() !== '' ? String(line.job_number) : null;
+      var description = line.description != null && String(line.description).trim() !== '' ? String(line.description) : null;
+      var division = line.division != null && String(line.division).trim() !== ''
+        ? String(line.division)
+        : (line.line_type != null && String(line.line_type).trim() !== '' ? String(line.line_type) : null);
+      var hasHours = _invoiceHasPersistedNumber(line.total_hours) || _invoiceHasPersistedNumber(line.quantity);
+      var hasRate = _invoiceHasPersistedNumber(line.hourly_rate) || _invoiceHasPersistedNumber(line.unit_rate);
+      if (!date || !jobNumber || !description || !division || !hasHours || !hasRate || !_invoiceHasPersistedNumber(line.line_total_ex)) return null;
       rows.push({
-        date: line.line_date || line.date || '',
-        job_text: line.job_number || '',
-        description: line.description || line.job_number || 'Invoice line',
-        division: line.division || line.line_type || '',
+        date: date,
+        job_text: jobNumber,
+        description: description,
+        division: division,
         hours: _invoiceHasPersistedNumber(line.total_hours)
           ? Number(line.total_hours)
-          : (_invoiceHasPersistedNumber(line.quantity) ? Number(line.quantity) : 0),
+          : Number(line.quantity),
         rate: _invoiceHasPersistedNumber(line.hourly_rate)
           ? Number(line.hourly_rate)
-          : (_invoiceHasPersistedNumber(line.unit_rate) ? Number(line.unit_rate) : 0),
+          : Number(line.unit_rate),
         amount: Number(line.line_total_ex),
         client_name: line.client_name || '',
         site_address: line.site_address || ''
@@ -18058,13 +18089,14 @@
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
+        result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
         //   it just didn't reach Xero. Run the normal success path, show userMessage as a yellow banner.
         // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
         //   is a HARD block — invoice NOT created. Toast userMessage, keep them on the form, re-enable.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!xeroWarn && (result.ok === false || result.error)) {
+        if (!_invoiceSubmitSucceeded(result)) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
@@ -18443,13 +18475,14 @@
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
+        result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
         //   it just didn't reach Xero. Fall through to the success path; the yellow banner below
         //   surfaces userMessage. Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE /
         //   ALREADY_INVOICED) is a HARD block — invoice NOT created; toast, re-enable, keep on form.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!xeroWarn && (result.ok === false || result.error)) {
+        if (!_invoiceSubmitSucceeded(result)) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
@@ -18804,7 +18837,10 @@
       if (!ok) return;
 
       api('generate_trade_invoice', {}, { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) }).then(function(result) {
-        if (result.error) { toast(result.error, true); return; }
+        if (!_invoiceSubmitSucceeded(result)) {
+          toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
+          return;
+        }
         var msg = 'Invoice generated — ' + result.total_hours + 'h, $' + Number(result.total_inc).toLocaleString();
         if (result.xero_warning) msg += ' (Xero sync pending)';
         toast(msg);

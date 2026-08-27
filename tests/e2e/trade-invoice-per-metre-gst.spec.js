@@ -108,6 +108,23 @@ test.describe('unsuccessful per-metre response', () => {
   });
 });
 
+test.describe('unknown per-metre response', () => {
+  test.use({ feedScenario: 'trade-invoice-per-metre-response-empty' });
+
+  test('keeps the invoice editable and does not mark it submitted', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+
+    await expect(page.locator('#toast')).toContainText('Invoice submission failed');
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeVisible();
+    await expect(page.locator('#pmMetres_e2e-per-metre-job')).toBeEnabled();
+    await expect(page.locator('[data-invoice-money-summary]')).toContainText('Estimate');
+  });
+});
+
 [
   ['trade-invoice-per-metre-missing-rate', 'super rate'],
   ['trade-invoice-per-metre-missing-gst', 'GST amount'],

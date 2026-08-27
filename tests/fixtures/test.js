@@ -115,6 +115,28 @@ const test = base.extend({
       total_hours: 8,
       already_submitted: false
     };
+    const perMetreInvoiceHours = {
+      week_start: weekStart,
+      week_ending: addIsoDays(weekStart, 6),
+      assignments: [
+        {
+          id: 'e2e-per-metre-assignment',
+          job_id: 'e2e-per-metre-job',
+          scheduled_date: addIsoDays(weekStart, 2),
+          jobs: {
+            id: 'e2e-per-metre-job',
+            job_number: 'SWF-E2E-PM',
+            client_name: 'Per Metre Fixture',
+            site_suburb: 'Balcatta',
+            type: 'fencing',
+            scope_json: { runs: [{ lengthM: 10 }] }
+          }
+        }
+      ],
+      super_rate: 0.12,
+      gst_on: false,
+      already_submitted: false
+    };
     const workOrders = [
       {
         id: 'wo-fence-authorised',
@@ -237,6 +259,8 @@ const test = base.extend({
       'fencing-allocation': ['allocate_job'],
       'fencing-stage-lifecycle': ['update_my_assignment', 'clock_event'],
       'wo-labour-explainer': ['generate_trade_invoice'],
+      'trade-invoice-super-gst': ['generate_trade_invoice'],
+      'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -396,9 +420,18 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: feedScenario === 'wo-labour-explainer'
-          ? labourExplainerHours
-          : {
+        my_hours: feedScenario === 'trade-invoice-per-metre-gst'
+          ? perMetreInvoiceHours
+          : ['wo-labour-explainer', 'trade-invoice-super-gst'].includes(feedScenario)
+            ? {
+              ...labourExplainerHours,
+              super_rate: 0.12,
+              gross_earned: 400,
+              super_amount: 48,
+              net_pay: 352,
+              gst_on: false
+            }
+            : {
               week_start: weekStart,
               week_ending: addIsoDays(weekStart, 6),
               assignments: [],
@@ -466,7 +499,7 @@ const test = base.extend({
           };
         },
         generate_trade_invoice: ({ request }) => {
-          if (feedScenario !== 'wo-labour-explainer' || persona !== 'installer') {
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
           }
           const body = request.postDataJSON();
@@ -474,12 +507,55 @@ const test = base.extend({
           if (!line || line.job_number !== 'SWF-26767') {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
           }
+          if (feedScenario === 'trade-invoice-super-gst') {
+            if (body.gst_on !== true) {
+              return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
+            }
+            if (['super_rate', 'super_amount', 'gross_earned', 'net_pay'].some((field) => Object.hasOwn(body, field))) {
+              return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
+            }
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-SUPER-GST',
+              gross_earned: 272,
+              super_rate: 0.12,
+              super_amount: 32.64,
+              net_pay: 239.36,
+              gst_on: true,
+              gst_amount: 23.94,
+              total_inc: 263.30,
+              pending_ops_review: true
+            };
+          }
           return {
             ok: true,
             invoice_number: 'SW-INV-E2E-26767',
             total_inc: 272,
             pending_ops_review: true,
             wo_labour_payouts: [{ name: 'Tendo', total_ex: 287.5 }]
+          };
+        },
+        submit_trade_invoice: ({ request }) => {
+          if (feedScenario !== 'trade-invoice-per-metre-gst' || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Per-metre GST fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          if (body.gst_on !== true) {
+            return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
+          }
+          if (['super_rate', 'super_amount', 'gross_earned', 'net_pay'].some((field) => Object.hasOwn(body, field))) {
+            return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
+          }
+          return {
+            success: true,
+            xero_bill_number: 'DRAFT-E2E-PM',
+            gross_earned: 350,
+            super_rate: 0.12,
+            super_amount: 42,
+            net_pay: 308,
+            gst_on: true,
+            gst_amount: 30.80,
+            total_inc: 338.80
           };
         }
       },

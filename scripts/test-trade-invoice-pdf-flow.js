@@ -36,13 +36,14 @@ assert.strictEqual(attachCalls, 1, 'attach_invoice_pdf is implemented in one sha
 
 async function runDynamicHelperCheck() {
   const apiCalls = []
+  const pdfText = []
   class FakeJsPdf {
     setFillColor() {}
     rect() {}
     setTextColor() {}
     setFontSize() {}
     setFont() {}
-    text() {}
+    text(value) { pdfText.push(value) }
     setDrawColor() {}
     setLineWidth() {}
     line() {}
@@ -82,6 +83,8 @@ async function runDynamicHelperCheck() {
     extractFunction('_jobCentricPdfRows'),
     extractFunction('_invoicePdfTotals'),
     extractFunction('_attachInvoicePdfToXero'),
+    extractFunction('_invoiceSuperRate'),
+    extractFunction('_invoiceRateLabel'),
     extractFunction('_generateInvoicePDF'),
   ].join('\n')
   vm.runInNewContext(dynamicSource, context)
@@ -113,6 +116,29 @@ async function runDynamicHelperCheck() {
   assert.strictEqual(apiCalls[0].body.xero_bill_id, 'xero-bill-123', 'PDF helper uses returned Xero bill id')
   assert.strictEqual(apiCalls[0].body.pdf_base64, 'JVBERi1GQUtF', 'PDF helper strips data URI prefix')
   assert.strictEqual(apiCalls[0].body.filename, 'SW-INV-TT-260618-001.pdf', 'PDF helper names file from invoice number')
+
+  pdfText.length = 0
+  context._generateInvoicePDF({
+    invoiceNumber: 'SW-INV-TT-260618-002',
+    rows,
+    notes: '',
+    total: { subtotal: 1030, gst: 0, total: 997.92 },
+    money: {
+      complete: true,
+      gross_earned: 1030,
+      super_rate: 0.12,
+      super_amount: 123.60,
+      net_pay: 906.40,
+      gst_on: true,
+      gst_amount: 91.52,
+      total_inc: 997.92,
+    },
+  })
+  assert(pdfText.includes('Earned'), 'PDF labels the persisted gross amount as earned')
+  assert(pdfText.includes('Less super (12%)'), 'PDF shows super as its own deduction line')
+  assert(pdfText.includes('Net pay'), 'PDF shows persisted net pay')
+  assert(pdfText.includes('GST'), 'PDF shows the persisted GST line')
+  assert(pdfText.includes('$997.92'), 'PDF total uses the backend-persisted invoice total')
 }
 
 runDynamicHelperCheck().then(() => {

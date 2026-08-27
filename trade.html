@@ -699,6 +699,23 @@
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
     .inv-totals-row { display: flex; justify-content: space-between; font-size: 13px; line-height: 1.8; }
     .inv-totals-row.grand { font-size: 16px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.15); margin-top: 4px; padding-top: 6px; }
+    .inv-money-summary { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; font-variant-numeric: tabular-nums; }
+    .inv-money-row { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; line-height: 1.8; }
+    .inv-money-row > :last-child { flex: 0 0 auto; font-weight: 650; text-align: right; }
+    .inv-money-row.net { font-size: 16px; font-weight: 750; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 5px; padding-top: 7px; }
+    .inv-money-row.total { font-size: 16px; font-weight: 750; color: #fff; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 7px; padding-top: 7px; }
+    .inv-money-note { margin-top: 9px; font-size: 11px; line-height: 1.4; color: rgba(255,255,255,0.68); overflow-wrap: anywhere; }
+    .inv-gst-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 9px; padding-top: 11px; }
+    .inv-gst-copy { min-width: 0; }
+    .inv-gst-copy strong { display: block; font-size: 13px; color: #fff; }
+    .inv-gst-copy span { display: block; margin-top: 1px; font-size: 11px; line-height: 1.35; color: rgba(255,255,255,0.68); }
+    .inv-gst-switch { display: flex; align-items: center; gap: 8px; min-width: 82px; min-height: 44px; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.26); border-radius: 10px; background: rgba(255,255,255,0.08); color: #fff; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; touch-action: manipulation; }
+    .inv-gst-switch:focus-visible { outline: 3px solid rgba(241,90,41,0.45); outline-offset: 2px; }
+    .inv-gst-track { position: relative; width: 32px; height: 18px; flex: 0 0 auto; border-radius: 10px; background: rgba(255,255,255,0.3); transition: background-color 150ms ease-out; }
+    .inv-gst-thumb { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 150ms ease-out; }
+    .inv-gst-switch[aria-checked="true"] { background: rgba(241,90,41,0.18); border-color: rgba(241,90,41,0.7); }
+    .inv-gst-switch[aria-checked="true"] .inv-gst-track { background: var(--sw-orange); }
+    .inv-gst-switch[aria-checked="true"] .inv-gst-thumb { transform: translateX(14px); }
     .inv-history-item { background: var(--sw-card); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--sw-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .inv-history-item:active { background: var(--sw-light); }
     .inv-status { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
@@ -15686,7 +15703,7 @@
       var draft = JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null');
       if (draft && draft.rows && draft.rows.length > 0) {
         _invRows = draft.rows;
-        _invGst = false;
+        _invGst = _invoiceGstDefault(draft);
         _invNotes = draft.notes || '';
         _invoiceBuilderMode = draft.mode || 'weekly';
         _hoursWeekStart = draft.weekStart || _hoursWeekStart;
@@ -15711,6 +15728,7 @@
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       _hoursData = data;
       _tradeRate = data.rate;
+      _invGst = _invoiceGstDefault(data);
       renderHoursView(data);
     }).catch(function(err) {
       container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
@@ -16103,10 +16121,9 @@
       html += '</div>';
     });
 
-    // Grand total
-    html += '<div style="padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow);margin-top:8px">';
-    html += '<div style="display:flex;justify-content:space-between;font-size:18px;font-weight:800"><span>Total</span><span id="pmGrandTotal">$' + grandTotal.toFixed(2) + '</span></div>';
-    html += '</div>';
+    // Money summary (the backend persists the submitted figures).
+    html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(grandTotal), { id: 'invMoneySummary', gstSwitch: true });
+    html += '<span id="pmGrandTotal" hidden>$' + grandTotal.toFixed(2) + '</span>';
 
     // Submit button
     if (data.already_submitted) {
@@ -16156,6 +16173,7 @@
     });
     var grand = document.getElementById('pmGrandTotal');
     if (grand) grand.textContent = '$' + grandTotal.toFixed(2);
+    _updateInvoiceMoneySummary(grandTotal);
   };
 
   window.submitPerMetreInvoice = function() {
@@ -16188,13 +16206,14 @@
         invoice_type: 'per_metre',
         rate_per_metre: rate,
         items: items,
-        notes: 'Per-metre invoice'
+        notes: 'Per-metre invoice',
+        gst_on: _invGst
       }).then(function(res) {
         toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
         loadHoursView();
       }).catch(function(err) {
         if (!navigator.onLine) {
-          queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice' });
+          queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice', gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
           return;
         }
@@ -16229,7 +16248,8 @@
       api('submit_trade_invoice', null, {
         week_ending: _hoursData.week_ending,
         hourly_rate: editedRate,
-        notes: ''
+        notes: '',
+        gst_on: _invGst
       }).then(function(res) {
         toast('Invoice submitted to Xero as draft bill' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
         loadHoursView(); // reload to show submitted state
@@ -16277,7 +16297,7 @@
     _invNotes = '';
     _draftInvoiceId = null;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
-    _invGst = false;
+    _invGst = _invoiceGstDefault(_hoursData);
     _jobCards = [];
 
     // Job-centric prefill (cutover): build one card per whitelisted assignment
@@ -16313,7 +16333,7 @@
       _invRows = [];
       _invExtraLines = [];
       _invoiceBuilderMode = inv.week_start ? 'weekly' : 'expense';
-      _invGst = false;
+      _invGst = _invoiceGstDefault(inv);
       // Restore all lines into _invRows
       (inv.lines || []).forEach(function(l) {
         _invRows.push({
@@ -16413,10 +16433,16 @@
       });
     }
 
-    // Totals
-    html += '<div class="inv-totals">';
-    html += '<div class="inv-totals-row grand"><span>Total</span><span>$' + Number(inv.total_inc || inv.subtotal_ex || 0).toFixed(2) + '</span></div>';
-    html += '</div>';
+    // Persisted money truth. Older invoices without the new fields keep their
+    // legacy total instead of the browser inventing a historical super split.
+    var persistedMoney = _invoicePersistedMoney(inv);
+    if (persistedMoney.complete) {
+      html += _invoiceMoneySummaryHtml(persistedMoney);
+    } else {
+      html += '<div class="inv-totals">';
+      html += '<div class="inv-totals-row grand"><span>Total</span><span>$' + Number(inv.total_inc || inv.subtotal_ex || 0).toFixed(2) + '</span></div>';
+      html += '</div>';
+    }
 
     // Notes
     if (inv.notes) {
@@ -16484,15 +16510,126 @@
   var _knownJobNumbers = []; // populated from search_all_jobs
   var _knownJobByNumber = {};
   var _jobSearchTimer = null;
-  var _invGst = false; // GST removed — always false
+  var _invGst = false; // Per-invoice choice; backend persists and prices it.
   var _jobCentricActive = false; // updated by renderInvoiceBuilder; read by _refreshJobCardLine
+  var TRADE_INVOICE_SUPER_RATE = 0.12; // ATO SG rate from 1 July 2025; preview only.
+
+  function _invoiceBool(source, keys) {
+    source = source || {};
+    for (var i = 0; i < keys.length; i++) {
+      if (source[keys[i]] != null) return source[keys[i]] === true;
+    }
+    return null;
+  }
+
+  function _invoiceGstDefault(source) {
+    var direct = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
+    if (direct != null) return direct;
+    if (source && typeof source.gst === 'boolean') return source.gst;
+    if (source && source.gst != null && Number(source.gst) > 0) return true;
+    var tradeDetails = (source && source.trade_details) || (_user && _user.trade_details) || {};
+    var profile = _invoiceBool(tradeDetails, ['gst_on', 'gst_registered', 'gstRegistered']);
+    if (profile != null) return profile;
+    var saved = loadTradeDetails();
+    return saved.gstRegistered === true;
+  }
+
+  function _invoiceSuperRate(value) {
+    var rate = Number(value);
+    if (!(rate > 0)) rate = TRADE_INVOICE_SUPER_RATE;
+    if (rate > 1) rate = rate / 100;
+    return rate;
+  }
+
+  function _invoiceRateLabel(rate) {
+    var pct = Math.round(Number(rate || 0) * 10000) / 100;
+    return pct.toFixed(pct % 1 ? 2 : 0) + '%';
+  }
+
+  function _invoiceMoney(value) {
+    return '$' + Number(value || 0).toFixed(2);
+  }
+
+  // Builder-only estimate. The browser never sends these calculated figures;
+  // generate/submit requests send line inputs + gst_on and the backend persists
+  // the authoritative gross/super/net amounts used by summaries and PDFs.
+  function _invoicePreviewMoney(gross) {
+    gross = Math.round((Number(gross) || 0) * 100) / 100;
+    var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);
+    var superAmount = Math.round(gross * rate * 100) / 100;
+    return {
+      complete: true,
+      estimated: true,
+      gross_earned: gross,
+      super_rate: rate,
+      super_amount: superAmount,
+      net_pay: Math.round((gross - superAmount) * 100) / 100,
+      gst_on: _invGst
+    };
+  }
+
+  function _invoicePersistedMoney(source) {
+    source = source || {};
+    var gross = source.gross_earned;
+    var superAmount = source.super_amount;
+    var netPay = source.net_pay;
+    var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
+    var gstAmount = source.gst_amount != null ? source.gst_amount : source.gst;
+    var total = source.total_inc != null ? source.total_inc : source.total;
+    return {
+      complete: gross != null && superAmount != null && netPay != null,
+      estimated: false,
+      gross_earned: gross == null ? null : Number(gross),
+      super_rate: _invoiceSuperRate(source.super_rate),
+      super_amount: superAmount == null ? null : Number(superAmount),
+      net_pay: netPay == null ? null : Number(netPay),
+      gst_on: gstOn == null ? Number(gstAmount || 0) > 0 : gstOn,
+      gst_amount: gstAmount == null ? null : Number(gstAmount),
+      total_inc: total == null ? null : Number(total)
+    };
+  }
+
+  function _invoiceMoneySummaryHtml(money, opts) {
+    opts = opts || {};
+    var attrs = ' class="inv-money-summary" data-invoice-money-summary';
+    if (opts.id) attrs += ' id="' + opts.id + '"';
+    var html = '<div' + attrs + '>';
+    html += '<div class="inv-money-row"><span>Earned</span><span>' + _invoiceMoney(money.gross_earned) + '</span></div>';
+    html += '<div class="inv-money-row"><span>Less super (' + _invoiceRateLabel(money.super_rate) + ')</span><span>−' + _invoiceMoney(money.super_amount) + '</span></div>';
+    html += '<div class="inv-money-row net"><span>Net pay</span><span>' + _invoiceMoney(money.net_pay) + '</span></div>';
+    if (opts.gstSwitch) {
+      html += '<div class="inv-gst-control">';
+      html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
+      html += '<button type="button" class="inv-gst-switch" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="invGstChanged(!' + (_invGst ? 'true' : 'false') + ')">';
+      html += '<span class="inv-gst-track" aria-hidden="true"><span class="inv-gst-thumb"></span></span><span data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</span></button>';
+      html += '</div>';
+    } else {
+      html += '<div class="inv-money-row"><span>GST</span><span>' + (money.gst_on ? _invoiceMoney(money.gst_amount) : 'Off') + '</span></div>';
+      if (money.total_inc != null) html += '<div class="inv-money-row total"><span>Invoice total</span><span>' + _invoiceMoney(money.total_inc) + '</span></div>';
+    }
+    if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function _currentInvoiceGross() {
+    return _jobCentricActive ? _grandInvTotal() : _calcInvTotals().subtotal;
+  }
+
+  function _updateInvoiceMoneySummary(gross) {
+    var host = document.getElementById('invMoneySummary');
+    if (!host) return;
+    var replacement = document.createElement('div');
+    replacement.innerHTML = _invoiceMoneySummaryHtml(_invoicePreviewMoney(gross == null ? _currentInvoiceGross() : gross), { id: 'invMoneySummary', gstSwitch: true });
+    host.replaceWith(replacement.firstChild);
+  }
 
   // Persist invoice draft to sessionStorage (survives background kill)
   function _saveInvDraft() {
     try {
       _syncRowsFromDOM();
       sessionStorage.setItem('sw_inv_draft', JSON.stringify({
-        rows: _invRows, gst: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
+        rows: _invRows, gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
     } catch(e) {}
@@ -16575,6 +16712,7 @@
       if (te) te.textContent = '$' + t.total.toFixed(2);
       if (be) be.textContent = 'Submit Invoice — $' + t.total.toFixed(2);
     }
+    _updateInvoiceMoneySummary();
     _saveInvDraft();
   }
 
@@ -16592,7 +16730,8 @@
     _updateInvTotals();
   };
 
-  window.invGstChanged = function() {
+  window.invGstChanged = function(next) {
+    _invGst = next === true;
     _updateInvTotals();
   };
 
@@ -17558,6 +17697,7 @@
       var invSubBtn = document.getElementById('invSubmitBtn');
       if (invSubBtn) invSubBtn.textContent = 'Submit Invoice — $' + grand.toFixed(2);
     }
+    _updateInvoiceMoneySummary();
   }
 
   // [M4 U2] True when a job card is a make-safe job. Uses the flag stamped at
@@ -17841,7 +17981,8 @@
         week_start: _hoursWeekStart || getWeekStartMonday(0),
         manual_assignments: manualAssignments,
         extra_items: extraItems,
-        notes: _invNotes
+        notes: _invNotes,
+        gst_on: _invGst
       }).then(function(result) {
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
@@ -17865,8 +18006,9 @@
           invoiceNumber: result.invoice_number,
           rows: pdfRows,
           notes: _invNotes,
-          gst: false,
-          total: _invoicePdfTotals(pdfRows, result.total_inc)
+          gst: _invGst,
+          total: _invoicePdfTotals(pdfRows, result.total_inc),
+          money: _invoicePersistedMoney(result)
         };
         _lastInvoicePdfData = pdfData;
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
@@ -17892,8 +18034,13 @@
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
-        var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : (Math.round(sub * 100) / 100).toFixed(2);
-        successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+        var submittedMoney = _invoicePersistedMoney(result);
+        if (submittedMoney.complete) {
+          successHtml += _invoiceMoneySummaryHtml(submittedMoney);
+        } else {
+          var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : (Math.round(sub * 100) / 100).toFixed(2);
+          successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+        }
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
         successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
@@ -17904,7 +18051,7 @@
         });
       }).catch(function(err) {
         if (!navigator.onLine) {
-          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes });
+          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes, gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
         } else {
           toast('Failed: ' + friendlyError(err), true);
@@ -18046,11 +18193,11 @@
     html += '<textarea id="invNotes" rows="2" placeholder="Additional notes for bookkeeper" style="width:100%;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;font-family:var(--sw-font);color:var(--sw-dark);resize:vertical;box-sizing:border-box">' + esc(_invNotes) + '</textarea>';
     html += '</div>';
 
-    // ── Totals (dark card) ──
+    // ── Money summary ──
     var t = _calcInvTotals();
-    html += '<div class="inv-totals">';
-    html += '<div class="inv-totals-row grand"><span>Total</span><span id="invTotal">$' + t.total.toFixed(2) + '</span></div>';
-    html += '</div>';
+    var builderGross = _jobCentricActive ? _grandInvTotal() : t.subtotal;
+    html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(builderGross), { id: 'invMoneySummary', gstSwitch: true });
+    html += '<span id="invTotal" hidden>$' + builderGross.toFixed(2) + '</span>';
 
     // ── Action buttons ──
     if (_jobCentricActive) {
@@ -18175,7 +18322,8 @@
       week_start: isExpense ? null : (_hoursWeekStart || null),
       extra_items: _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; }).map(_rowToExtraItem),
       notes: _invNotes,
-      labour_lines: []
+      labour_lines: [],
+      gst_on: _invGst
     }).then(function(res) {
       _draftInvoiceId = res.draft_id;
       toast('Draft saved');
@@ -18227,7 +18375,8 @@
         week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
         draft_id: _draftInvoiceId || undefined,
         extra_items: extraItems,
-        notes: _invNotes
+        notes: _invNotes,
+        gst_on: _invGst
       }).then(function(result) {
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
@@ -18252,7 +18401,7 @@
         }
 
         // Generate PDF for the trade's records
-        var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: false, total: t };
+        var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: _invGst, total: _invoicePdfTotals(validRows, result.total_inc), money: _invoicePersistedMoney(result) };
         _lastInvoicePdfData = pdfData;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
@@ -18275,8 +18424,13 @@
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
-        var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : t.total.toFixed(2);
-        successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+        var submittedMoney = _invoicePersistedMoney(result);
+        if (submittedMoney.complete) {
+          successHtml += _invoiceMoneySummaryHtml(submittedMoney);
+        } else {
+          var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : t.total.toFixed(2);
+          successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+        }
         successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + '</div>';
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
         successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
@@ -18294,7 +18448,7 @@
           queueOfflineAction('generate_trade_invoice', {
             week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
             draft_id: _draftInvoiceId || undefined,
-            extra_items: extraItems, notes: _invNotes
+            extra_items: extraItems, notes: _invNotes, gst_on: _invGst
           });
           toast('Offline — invoice queued, will submit when back online');
         } else {
@@ -18506,10 +18660,28 @@
     y += 6;
     doc.setFontSize(9);
     doc.setTextColor(80, 90, 100);
-    doc.text('Subtotal', margin + 105, y);
+    var persistedMoney = data.money && data.money.complete ? data.money : null;
+    doc.text(persistedMoney ? 'Earned' : 'Subtotal', margin + 105, y);
     doc.setTextColor(41, 60, 70);
-    doc.text('$' + data.total.subtotal.toFixed(2), colAmt, y, { align: 'right' });
+    doc.text('$' + Number(persistedMoney ? persistedMoney.gross_earned : data.total.subtotal).toFixed(2), colAmt, y, { align: 'right' });
     y += 5;
+    if (persistedMoney) {
+      doc.setTextColor(80, 90, 100);
+      doc.text('Less super (' + _invoiceRateLabel(persistedMoney.super_rate) + ')', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text('-$' + Number(persistedMoney.super_amount).toFixed(2), colAmt, y, { align: 'right' });
+      y += 5;
+      doc.setTextColor(80, 90, 100);
+      doc.text('Net pay', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text('$' + Number(persistedMoney.net_pay).toFixed(2), colAmt, y, { align: 'right' });
+      y += 5;
+      doc.setTextColor(80, 90, 100);
+      doc.text('GST', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text(persistedMoney.gst_on ? '$' + Number(persistedMoney.gst_amount || 0).toFixed(2) : 'Off', colAmt, y, { align: 'right' });
+      y += 5;
+    }
     // Total with orange accent
     doc.setFillColor(41, 60, 70);
     doc.rect(margin + 105, y - 1, cw - 105, 8, 'F');
@@ -18517,7 +18689,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.text('TOTAL', margin + 108, y + 4.5);
-    doc.text('$' + data.total.total.toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
+    doc.text('$' + Number(persistedMoney && persistedMoney.total_inc != null ? persistedMoney.total_inc : data.total.total).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
     y += 14;
 
     // ── Notes ──
@@ -18559,7 +18731,7 @@
     showConfirm('Generate Invoice?', 'This will create an invoice for all completed hours this week. You can\'t edit it after submitting.', 'Generate').then(function(ok) {
       if (!ok) return;
 
-      api('generate_trade_invoice', {}, { week_start: weekStart }).then(function(result) {
+      api('generate_trade_invoice', {}, { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) }).then(function(result) {
         if (result.error) { toast(result.error, true); return; }
         var msg = 'Invoice generated — ' + result.total_hours + 'h, $' + Number(result.total_inc).toLocaleString();
         if (result.xero_warning) msg += ' (Xero sync pending)';
@@ -22214,7 +22386,9 @@
       accountNo:     (document.getElementById('tdAccountNo') || {}).value || '',
       accountName:   (document.getElementById('tdAccountName') || {}).value || '',
       licence:       (document.getElementById('tdLicence') || {}).value || '',
-      gstRegistered: false,
+      // Preserve the known backend/profile choice. The invoice builder owns
+      // per-invoice gst_on; editing bank details must not silently turn GST off.
+      gstRegistered: _invoiceGstDefault(_user),
     };
 
     // Save to localStorage immediately

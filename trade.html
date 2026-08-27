@@ -16159,7 +16159,7 @@
         html += _invoiceMoneyUnavailableHtml({ id: 'invMoneySummary' });
       }
     } else {
-      html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(grandTotal), { id: 'invMoneySummary', gstSwitch: true });
+      html += _invoicePreviewSummaryHtml(grandTotal, { id: 'invMoneySummary', gstSwitch: true });
     }
     html += '<span id="pmGrandTotal" hidden>$' + grandTotal.toFixed(2) + '</span>';
 
@@ -16223,7 +16223,7 @@
     inputs.forEach(function(input) {
       var jobId = input.id.replace('pmMetres_', '');
       var metres = parseFloat(input.value) || 0;
-      items.push({ job_id: jobId, metres: metres, rate_per_metre: rate, total: metres * rate });
+      items.push({ job_id: jobId, metres: metres, rate_per_metre: rate });
       grandTotal += metres * rate;
     });
 
@@ -16233,7 +16233,7 @@
         var jobLabel = document.getElementById('pmMetres_' + it.job_id);
         var card = jobLabel ? jobLabel.closest('[style*="background"]') : null;
         var jobName = card ? (card.querySelector('[style*="font-weight:700"]') || {}).textContent || it.job_id : it.job_id;
-        summary += jobName + ': ' + it.metres.toFixed(1) + 'm = $' + it.total.toFixed(2) + '\n';
+        summary += jobName + ': ' + it.metres.toFixed(1) + 'm = $' + (it.metres * rate).toFixed(2) + '\n';
       }
     });
     summary += '\nTotal: $' + grandTotal.toFixed(2);
@@ -16556,8 +16556,6 @@
   var _jobSearchTimer = null;
   var _invGst = false; // Per-invoice choice; backend persists and prices it.
   var _jobCentricActive = false; // updated by renderInvoiceBuilder; read by _refreshJobCardLine
-  var TRADE_INVOICE_SUPER_RATE = 0.12; // ATO SG rate from 1 July 2025; preview only.
-
   function _invoiceBool(source, keys) {
     source = source || {};
     for (var i = 0; i < keys.length; i++) {
@@ -16580,7 +16578,7 @@
 
   function _invoiceSuperRate(value) {
     var rate = Number(value);
-    if (!(rate > 0)) rate = TRADE_INVOICE_SUPER_RATE;
+    if (!(rate > 0)) return null;
     if (rate > 1) rate = rate / 100;
     return rate;
   }
@@ -16599,7 +16597,7 @@
   }
 
   function _invoiceSubmitSucceeded(result) {
-    if (!result || typeof result !== 'object' || Array.isArray(result) || result.error) return false;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
     var hasPersistedIdentity = [
       result.invoice_id,
       result.invoice_number,
@@ -16612,6 +16610,7 @@
     // A failed Xero push is a saved-invoice success only when the response says
     // so and names the durable invoice that the office can recover.
     if (result.code === 'XERO_PUSH_FAILED') return result.success === true && hasPersistedIdentity;
+    if (result.error) return false;
     if (result.success === false || result.ok === false) return false;
     return result.success === true || result.ok === true || hasPersistedIdentity;
   }
@@ -16622,6 +16621,7 @@
   function _invoicePreviewMoney(gross) {
     gross = Math.round((Number(gross) || 0) * 100) / 100;
     var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);
+    if (rate == null) return null;
     var superAmount = Math.round(gross * rate * 100) / 100;
     return {
       complete: true,
@@ -16689,7 +16689,25 @@
     opts = opts || {};
     var attrs = ' class="inv-money-summary" data-invoice-money-summary';
     if (opts.id) attrs += ' id="' + opts.id + '"';
-    return '<div' + attrs + '><div class="inv-money-note">Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.</div></div>';
+    var message = opts.preview
+      ? 'Invoice estimate unavailable until SecureWorks supplies the super rate.'
+      : 'Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.';
+    var html = '<div' + attrs + '><div class="inv-money-note">' + message + '</div>';
+    if (opts.gstSwitch) {
+      html += '<div class="inv-gst-control">';
+      html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
+      html += '<button type="button" class="inv-gst-switch' + (_invGst ? ' on' : '') + '" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="toggleInvoiceGst()"><span></span></button>';
+      html += '<strong class="inv-gst-state" data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</strong>';
+      html += '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function _invoicePreviewSummaryHtml(gross, opts) {
+    var money = _invoicePreviewMoney(gross);
+    return money
+      ? _invoiceMoneySummaryHtml(money, opts)
+      : _invoiceMoneyUnavailableHtml(Object.assign({}, opts || {}, { preview: true }));
   }
 
   function _invoiceMoneySummaryHtml(money, opts) {
@@ -16731,7 +16749,7 @@
     var host = document.getElementById('invMoneySummary');
     if (!host) return;
     var replacement = document.createElement('div');
-    replacement.innerHTML = _invoiceMoneySummaryHtml(_invoicePreviewMoney(gross == null ? _currentInvoiceGross() : gross), { id: 'invMoneySummary', gstSwitch: true });
+    replacement.innerHTML = _invoicePreviewSummaryHtml(gross == null ? _currentInvoiceGross() : gross, { id: 'invMoneySummary', gstSwitch: true });
     host.replaceWith(replacement.firstChild);
   }
 
@@ -17353,10 +17371,7 @@
   // use relational invoice lines returned by the successful response. Browser
   // rows are previews and can differ after server-side rate/reconciliation work.
   function _invoicePersistedPdfRows(result) {
-    result = result || {};
-    var rawLines = Array.isArray(result.lines)
-      ? result.lines
-      : (result.invoice && Array.isArray(result.invoice.lines) ? result.invoice.lines : null);
+    var rawLines = _invoiceResponseLines(result);
     if (!rawLines || rawLines.length === 0) return null;
 
     var rows = [];
@@ -17367,9 +17382,7 @@
         : (line.date != null && String(line.date).trim() !== '' ? String(line.date) : null);
       var jobNumber = line.job_number != null && String(line.job_number).trim() !== '' ? String(line.job_number) : null;
       var description = line.description != null && String(line.description).trim() !== '' ? String(line.description) : null;
-      var division = line.division != null && String(line.division).trim() !== ''
-        ? String(line.division)
-        : (line.line_type != null && String(line.line_type).trim() !== '' ? String(line.line_type) : null);
+      var division = line.division != null && String(line.division).trim() !== '' ? String(line.division) : null;
       var hasHours = _invoiceHasPersistedNumber(line.total_hours) || _invoiceHasPersistedNumber(line.quantity);
       var hasRate = _invoiceHasPersistedNumber(line.hourly_rate) || _invoiceHasPersistedNumber(line.unit_rate);
       if (!date || !jobNumber || !description || !division || !hasHours || !hasRate || !_invoiceHasPersistedNumber(line.line_total_ex)) return null;
@@ -17390,6 +17403,13 @@
       });
     }
     return rows;
+  }
+
+  function _invoiceResponseLines(result) {
+    result = result || {};
+    return Array.isArray(result.lines)
+      ? result.lines
+      : (result.invoice && Array.isArray(result.invoice.lines) ? result.invoice.lines : null);
   }
 
   function _invoicePdfDataFromResponse(result, notes) {
@@ -18293,7 +18313,7 @@
     // ── Money summary ──
     var t = _calcInvTotals();
     var builderGross = _jobCentricActive ? _grandInvTotal() : t.subtotal;
-    html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(builderGross), { id: 'invMoneySummary', gstSwitch: true });
+    html += _invoicePreviewSummaryHtml(builderGross, { id: 'invMoneySummary', gstSwitch: true });
     html += '<span id="invTotal" hidden>$' + builderGross.toFixed(2) + '</span>';
 
     // ── Action buttons ──
@@ -18528,7 +18548,12 @@
         } else {
           successHtml += _invoiceMoneyUnavailableHtml();
         }
-        successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + '</div>';
+        var persistedLines = _invoiceResponseLines(result);
+        if (persistedLines) {
+          successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + persistedLines.length + ' line item' + (persistedLines.length !== 1 ? 's' : '') + '</div>';
+        } else {
+          successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">Submitted line count unavailable</div>';
+        }
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
         if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';

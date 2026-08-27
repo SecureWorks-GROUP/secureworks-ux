@@ -275,6 +275,7 @@ const test = base.extend({
       'trade-invoice-super-gst-missing-lines': ['generate_trade_invoice'],
       'trade-invoice-super-gst-incomplete-lines': ['generate_trade_invoice'],
       'trade-invoice-super-gst-empty-response': ['generate_trade_invoice'],
+      'trade-invoice-super-gst-xero-failed': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
@@ -444,9 +445,12 @@ const test = base.extend({
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
           'trade-invoice-per-metre-response-error',
-          'trade-invoice-per-metre-response-empty'
+          'trade-invoice-per-metre-response-empty',
+          'trade-invoice-per-metre-preview-missing-rate'
         ].includes(feedScenario)
-          ? perMetreInvoiceHours
+          ? (feedScenario === 'trade-invoice-per-metre-preview-missing-rate'
+            ? { ...perMetreInvoiceHours, super_rate: undefined }
+            : perMetreInvoiceHours)
           : feedScenario === 'trade-invoice-per-metre-gst-off-no-total'
             ? {
               ...submittedPerMetreMoney,
@@ -466,7 +470,7 @@ const test = base.extend({
               total_inc: undefined,
               total: 338.80
             }
-          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario)
+          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario)
             ? {
               ...labourExplainerHours,
               super_rate: 0.12,
@@ -591,15 +595,23 @@ const test = base.extend({
           };
         },
         generate_trade_invoice: ({ request }) => {
-          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario) || persona !== 'installer') {
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];
-          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
+          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
           }
           if (feedScenario === 'trade-invoice-super-gst-empty-response') return {};
+          if (feedScenario === 'trade-invoice-super-gst-xero-failed') {
+            return {
+              code: 'XERO_PUSH_FAILED',
+              success: true,
+              invoice_id: 'saved-e2e-invoice',
+              error: 'Xero unavailable'
+            };
+          }
           if (feedScenario === 'trade-invoice-super-gst-incomplete') {
             return {
               ok: true,
@@ -637,7 +649,15 @@ const test = base.extend({
               net_pay: 352,
               gst_on: false,
               total_inc: 352,
-              lines: [{ line_total_ex: 400 }],
+              lines: [{
+                line_date: addIsoDays(weekStart, 1),
+                job_number: 'SWF-26767',
+                description: 'Persisted labour without division',
+                line_type: 'labour',
+                total_hours: 8,
+                hourly_rate: 50,
+                line_total_ex: 400
+              }],
               pending_ops_review: true
             };
           }
@@ -664,10 +684,21 @@ const test = base.extend({
                 line_date: addIsoDays(weekStart, 1),
                 job_number: 'SWF-26767',
                 description: 'Persisted reconciled work order',
+                division: 'Fencing',
                 line_type: 'labour',
                 total_hours: 0,
                 hourly_rate: 0,
-                line_total_ex: 272
+                line_total_ex: 200
+              }, {
+                id: 'persisted-line-e2e-2',
+                line_date: addIsoDays(weekStart, 2),
+                job_number: 'SWF-26767',
+                description: 'Persisted server adjustment',
+                division: 'Fencing',
+                line_type: 'labour',
+                total_hours: 0,
+                hourly_rate: 0,
+                line_total_ex: 72
               }],
               pending_ops_review: true
             };
@@ -701,8 +732,11 @@ const test = base.extend({
           if (['super_rate', 'super_amount', 'gross_earned', 'net_pay'].some((field) => Object.hasOwn(body, field))) {
             return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
           }
+          if ((body.items || []).some((item) => Object.hasOwn(item, 'total'))) {
+            return { status: 422, body: { error: 'Browser must not submit calculated line totals' } };
+          }
           const responseGross = feedScenario === 'trade-invoice-per-metre-response-lines'
-            ? (body.items || []).reduce((sum, item) => sum + Number(item.total || 0), 0)
+            ? (body.items || []).reduce((sum, item) => sum + Number(item.metres || 0) * Number(item.rate_per_metre || body.rate_per_metre || 0), 0)
             : 350;
           const responseSuper = Math.round(responseGross * 0.12 * 100) / 100;
           const responseNet = Math.round((responseGross - responseSuper) * 100) / 100;

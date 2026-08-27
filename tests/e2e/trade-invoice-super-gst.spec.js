@@ -81,6 +81,7 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   await expect(submitted).toContainText('GST$23.94');
   await expect(submitted).toContainText('Invoice total$263.30');
   await expect(submitted).not.toContainText('Estimate');
+  await expect(page.getByText('2 line items', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download PDF' })).toBeVisible();
 
   const pdfText = await page.evaluate(() => window.__invoicePdfText);
@@ -197,4 +198,22 @@ test.describe('unknown submit response', () => {
       expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
     });
   }
+});
+
+test.describe('durably saved invoice with failed Xero push', () => {
+  test.use({ feedScenario: 'trade-invoice-super-gst-xero-failed' });
+
+  test('accepts explicit saved identity despite the error message', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+
+    await expect(page.getByText('Invoice Submitted')).toBeVisible();
+    await expect(page.getByText(/Xero unavailable/)).toBeVisible();
+    await expect(page.locator('#invSubmitBtn')).toHaveCount(0);
+  });
 });

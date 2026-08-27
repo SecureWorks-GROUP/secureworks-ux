@@ -38,6 +38,24 @@ test('carries the visible GST choice through submit_trade_invoice without browse
   expect(submit.body).not.toHaveProperty('super_amount');
   expect(submit.body).not.toHaveProperty('gross_earned');
   expect(submit.body).not.toHaveProperty('net_pay');
+  expect(submit.body.items).toEqual([
+    expect.objectContaining({ job_id: 'e2e-per-metre-job', metres: 10, rate_per_metre: 35 })
+  ]);
+  expect(submit.body.items[0]).not.toHaveProperty('total');
+});
+
+test.describe('per-metre preview has no backend super rate', () => {
+  test.use({ feedScenario: 'trade-invoice-per-metre-preview-missing-rate' });
+
+  test('shows the estimate as unavailable without inventing a rate', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+
+    const money = page.locator('[data-invoice-money-summary]');
+    await expect(money).toContainText('Invoice estimate unavailable until SecureWorks supplies the super rate.');
+    await expect(money).not.toContainText('Less super');
+    await expect(page.getByRole('switch', { name: 'Add GST to this invoice' })).toBeVisible();
+  });
 });
 
 test.describe('per-metre submit response is missing persisted super rate', () => {

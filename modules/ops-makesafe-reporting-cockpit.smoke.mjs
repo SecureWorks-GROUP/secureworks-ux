@@ -2920,6 +2920,7 @@ function makeAffordanceLoader(stale) {
     "_pipelineTab",
     "_jobView",
     "_pipelineData",
+    "makesafeBoardCanRepaint",
     "renderJobs",
     '"use strict";\n' + loaderSrc + "\nreturn loadMakesafeBoardReviewAffordances;",
   )(
@@ -2929,6 +2930,7 @@ function makeAffordanceLoader(stale) {
     "makesafes",
     "kanban",
     { columns: {} },
+    () => true,
     () => { loaderCalls.render++; },
   );
   return { loader, calls: loaderCalls };

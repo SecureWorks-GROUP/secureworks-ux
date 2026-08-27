@@ -62,8 +62,10 @@ async function runDynamicHelperCheck() {
     extractFunction('_invoiceSubmitSucceeded'),
     extractFunction('_invoiceXeroPushPending'),
     extractFunction('_invoiceSubmitStatusMessage'),
+    extractFunction('_invoiceGeneratedStatusMessage'),
     extractFunction('_invoiceBool'),
     extractFunction('_invoiceSuperRate'),
+    extractFunction('_invoiceMoney'),
     extractFunction('_invoicePersistedMoney'),
     extractFunction('_invoiceResponseLines'),
     extractFunction('_invoicePersistedPdfRows'),
@@ -83,7 +85,7 @@ async function runDynamicHelperCheck() {
     gst_on: false,
     total_inc: 906.40,
     lines: [
-      { line_date: '2026-06-01', job_number: 'SWMS-26671', description: 'Persisted normal line', division: 'Make Safe', line_type: 'labour', total_hours: 3, hourly_rate: 100, line_total_ex: 300 },
+      { line_date: '2026-06-01', job_number: 'SWMS-26671', description: 'Persisted zero-value line', division: 'Make Safe', line_type: 'labour', total_hours: 0, hourly_rate: 0, line_total_ex: 300 },
       { line_date: '2026-06-02', job_number: 'SWMS-26672', description: 'Persisted commission', division: 'Fencing', line_type: 'commission', quantity: 1, unit_rate: 175, line_total_ex: 175 },
       { line_date: '2026-06-03', job_number: 'SWMS-26673', description: 'Persisted work order', division: 'Fencing', line_type: 'work_order', quantity: 1, unit_rate: 375, line_total_ex: 375 },
       { line_date: '2026-06-04', job_number: 'SWMS-26674', description: 'Persisted manual labour', division: 'General Labour', line_type: 'labour', total_hours: 2, hourly_rate: 90, line_total_ex: 180 },
@@ -126,8 +128,8 @@ async function runDynamicHelperCheck() {
   )
   assert.strictEqual(
     context._invoiceSubmitStatusMessage({ code: 'XERO_PUSH_FAILED', success: true, invoice_id: 'saved', error: 'Xero unavailable' }, 'Invoice submitted to Xero'),
-    'Xero unavailable',
-    'a saved invoice with failed Xero push never claims it was submitted to Xero',
+    'Invoice saved — Xero sync pending. The office will push it manually. Xero unavailable',
+    'a saved invoice with failed Xero push always states the durable pending status before backend detail',
   )
   assert.strictEqual(
     context._invoiceSubmitStatusMessage({ success: true, xero_bill_number: 'DRAFT-123' }, 'Invoice submitted to Xero'),
@@ -144,6 +146,26 @@ async function runDynamicHelperCheck() {
     total: 96.8,
   })
   assert.strictEqual(gstOnLegacyTotal.complete, false, 'GST-on money rejects legacy total without authoritative total_inc')
+  const gstOnLegacyAmount = context._invoicePersistedMoney({
+    gross_earned: 100,
+    super_rate: 0.12,
+    super_amount: 12,
+    net_pay: 88,
+    gst_on: true,
+    gst: 8.8,
+    total_inc: 96.8,
+  })
+  assert.strictEqual(gstOnLegacyAmount.complete, false, 'GST-on money rejects legacy gst without authoritative gst_amount')
+  const generatedPending = context._invoiceGeneratedStatusMessage({
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+    invoice_id: 'saved',
+    userMessage: 'Xero unavailable',
+  })
+  assert(generatedPending.includes('Invoice saved — Xero sync pending.'), 'quick generation always names the pending Xero state')
+  assert(generatedPending.includes('confirmed figures unavailable'), 'quick generation names missing persisted money')
+  assert(!generatedPending.includes('NaN'), 'quick generation never formats missing money as NaN')
+  assert(html.includes('toast(_invoiceGeneratedStatusMessage(result));'), 'generateTradeInvoice routes its toast through persisted money and submit status truth')
 
   const incompleteAttach = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-incomplete' }, null)
   assert.strictEqual(incompleteAttach.skipped, true, 'PDF helper refuses an incomplete persisted response')
@@ -182,6 +204,8 @@ async function runDynamicHelperCheck() {
   assert(pdfText.includes('Net pay'), 'PDF shows persisted net pay')
   assert(pdfText.includes('GST'), 'PDF shows the persisted GST line')
   assert(pdfText.includes('$997.92'), 'PDF total uses the backend-persisted invoice total')
+  assert(pdfText.includes('0.00'), 'PDF renders persisted zero hours instead of a blank')
+  assert(pdfText.includes('$0.00'), 'PDF renders persisted zero rates instead of a blank')
 }
 
 runDynamicHelperCheck().then(() => {

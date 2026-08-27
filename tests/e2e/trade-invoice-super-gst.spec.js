@@ -86,6 +86,8 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
 
   const pdfText = await page.evaluate(() => window.__invoicePdfText);
   expect(pdfText).toContain('Persisted reconciled work order');
+  expect(pdfText).toContain('0.00');
+  expect(pdfText).toContain('$0.00');
 
   const submittedScreenshot = testInfo.outputPath('trade-invoice-money-submitted.png');
   await page.locator('#hoursContent').screenshot({ path: submittedScreenshot });
@@ -203,17 +205,22 @@ test.describe('unknown submit response', () => {
 test.describe('durably saved invoice with failed Xero push', () => {
   test.use({ feedScenario: 'trade-invoice-super-gst-xero-failed' });
 
-  test('accepts explicit saved identity despite the error message', async ({ appPage: page }) => {
-    await signIn(page, PERSONAS.installer);
-    await page.locator('[data-view="hours"]').click();
-    await page.getByRole('button', { name: /Weekly Invoice/ }).click();
-    await page.getByRole('button', { name: 'Continue' }).click();
+  for (const legacy of [false, true]) {
+    test(`${legacy ? 'legacy' : 'job-centric'} path accepts saved identity and names pending sync`, async ({ appPage: page }) => {
+      await signIn(page, PERSONAS.installer);
+      if (legacy) await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+      await page.locator('[data-view="hours"]').click();
+      await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+      await page.getByRole('button', { name: 'Continue' }).click();
 
-    await page.locator('#invSubmitBtn').click();
-    await page.locator('#confirmOk').click();
+      await page.locator('#invSubmitBtn').click();
+      await page.locator('#confirmOk').click();
 
-    await expect(page.getByText('Invoice Submitted')).toBeVisible();
-    await expect(page.getByText(/Xero unavailable/)).toBeVisible();
-    await expect(page.locator('#invSubmitBtn')).toHaveCount(0);
-  });
+      await expect(page.getByText('Invoice Saved', { exact: true })).toBeVisible();
+      await expect(page.getByText(/Invoice saved — Xero sync pending/)).toBeVisible();
+      await expect(page.getByText(/Xero unavailable/)).toBeVisible();
+      await expect(page.getByText('Invoice Submitted')).toHaveCount(0);
+      await expect(page.locator('#invSubmitBtn')).toHaveCount(0);
+    });
+  }
 });

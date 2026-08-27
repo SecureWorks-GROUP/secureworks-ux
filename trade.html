@@ -16626,9 +16626,22 @@
   function _invoiceSubmitStatusMessage(result, successMessage) {
     result = result || {};
     if (_invoiceXeroPushPending(result)) {
-      return result.userMessage || result.error || 'Invoice saved — Xero sync pending. The office will push it manually.';
+      var pendingStatus = 'Invoice saved — Xero sync pending. The office will push it manually.';
+      var pendingDetail = result.userMessage || result.error;
+      return pendingDetail && pendingDetail !== pendingStatus
+        ? pendingStatus + ' ' + pendingDetail
+        : pendingStatus;
     }
     return successMessage + (result.xero_bill_number ? ' — ' + result.xero_bill_number : '');
+  }
+
+  function _invoiceGeneratedStatusMessage(result) {
+    result = result || {};
+    var facts = [];
+    if (_invoiceHasPersistedNumber(result.total_hours)) facts.push(Number(result.total_hours) + 'h');
+    var money = _invoicePersistedMoney(result);
+    facts.push(money.complete ? _invoiceMoney(money.total_inc) : 'confirmed figures unavailable');
+    return _invoiceSubmitStatusMessage(result, 'Invoice generated') + ' — ' + facts.join(', ');
   }
 
   // Builder-only estimate. The browser never sends these calculated figures;
@@ -16657,7 +16670,7 @@
     var superAmount = source.super_amount;
     var netPay = source.net_pay;
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
-    var gstAmount = source.gst_amount != null ? source.gst_amount : (typeof source.gst === 'boolean' ? null : source.gst);
+    var gstAmount = source.gst_amount;
     // GST-on invoices require the backend's authoritative inclusive total.
     // GST-off invoices are payable at the persisted net figure. Legacy `total`
     // can be a gross/line subtotal, so it is never money authority here.
@@ -18156,10 +18169,10 @@
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
-        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
+        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + esc(result.invoice_number) + '</div>';
         if (xeroWarn) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.') + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.pending_ops_review) {
           successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:8px">Sent to the office for verification. You will be paid once approved.</div>';
         } else if (result.xero_bill_number || result.xero_bill_id) {
@@ -18553,10 +18566,10 @@
         var successHtml = '';
         successHtml += '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
-        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
+        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + result.invoice_number + '</div>';
         if (xeroWarn) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. Admin will sync manually.') + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.xero_bill_number) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
@@ -18578,7 +18591,7 @@
         if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
         successHtml += '</div>';
-        successHtml += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:12px">Your invoice has been sent to the bookkeepers</div>';
+        successHtml += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:12px">' + (xeroWarn ? 'Your invoice is saved; Xero sync is pending' : 'Your invoice has been sent to the bookkeepers') + '</div>';
         successHtml += '</div>';
         container.innerHTML = successHtml;
         _invRows = [];
@@ -18795,8 +18808,8 @@
       doc.text((r.job_text || '—').slice(0, 16), colJob, y);
       doc.text((r.description || '').slice(0, 40), colDesc, y);
       doc.text(divShort[r.division] || (r.division || '').slice(0, 10), colDiv, y);
-      doc.text(r.hours ? r.hours.toFixed(2) : '—', colHrs, y);
-      doc.text(r.rate ? '$' + r.rate.toFixed(2) : '—', colRate, y);
+      doc.text(Number(r.hours).toFixed(2), colHrs, y);
+      doc.text('$' + Number(r.rate).toFixed(2), colRate, y);
       doc.setFont('helvetica', 'bold');
       doc.text(r.amount ? '$' + r.amount.toFixed(2) : '$0.00', colAmt, y, { align: 'right' });
       doc.setFont('helvetica', 'normal');
@@ -18886,9 +18899,7 @@
           toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
           return;
         }
-        var msg = 'Invoice generated — ' + result.total_hours + 'h, $' + Number(result.total_inc).toLocaleString();
-        if (result.xero_warning) msg += ' (Xero sync pending)';
-        toast(msg);
+        toast(_invoiceGeneratedStatusMessage(result));
         loadHoursView(); // Refresh to show submitted state
       }).catch(function(err) {
         toast('Failed: ' + (err.message || err), true);

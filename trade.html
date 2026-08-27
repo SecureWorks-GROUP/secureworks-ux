@@ -16621,10 +16621,10 @@
     var netPay = source.net_pay;
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
     var gstAmount = source.gst_amount != null ? source.gst_amount : (typeof source.gst === 'boolean' ? null : source.gst);
-    var total = source.total_inc != null ? source.total_inc : source.total;
-    // With GST off, persisted net pay is the payable invoice total. Never let
-    // a legacy gross/line subtotal replace the backend's persisted net figure.
-    if (gstOn === false && _invoiceHasPersistedNumber(netPay)) total = netPay;
+    // GST-on invoices require the backend's authoritative inclusive total.
+    // GST-off invoices are payable at the persisted net figure. Legacy `total`
+    // can be a gross/line subtotal, so it is never money authority here.
+    var total = gstOn === false ? netPay : source.total_inc;
     var hasCoreMoney = _invoiceHasPersistedNumber(gross)
       && _invoiceHasPersistedNumber(superRate)
       && Number(superRate) > 0
@@ -16632,7 +16632,7 @@
       && _invoiceHasPersistedNumber(netPay)
       && gstOn != null;
     var hasGstMoney = gstOn !== true
-      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(total));
+      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(source.total_inc));
     return {
       complete: hasCoreMoney && hasGstMoney,
       estimated: false,
@@ -17328,75 +17328,56 @@
     return Math.round((jcSub + extraSub) * 100) / 100;
   }
 
-  function _jobCardAmount(c) {
-    if (!c) return 0;
-    if (c.commission_mode) return Math.round((Number(c.commission_amount) || 0) * 100) / 100;
-    if (c.wo_mode) return Math.round(_woNet(c) * 100) / 100;
-    return Math.round((Number(c.hours || 0) * Number(c.rate || 0)) * 100) / 100;
-  }
+  // A submitted PDF is evidence of what the backend persisted, so it may only
+  // use relational invoice lines returned by the successful response. Browser
+  // rows are previews and can differ after server-side rate/reconciliation work.
+  function _invoicePersistedPdfRows(result) {
+    result = result || {};
+    var rawLines = Array.isArray(result.lines)
+      ? result.lines
+      : (result.invoice && Array.isArray(result.invoice.lines) ? result.invoice.lines : null);
+    if (!rawLines || rawLines.length === 0) return null;
 
-  function _jobCentricPdfRows(cards, manualRows) {
     var rows = [];
-    (cards || []).forEach(function(c) {
-      if (!c || !c.included) return;
-      var amount = _jobCardAmount(c);
-      var hours = 0;
-      var rate = 0;
-      var desc = c.description || '';
-      var division = c.job_type || c.division || 'Make Safe';
-      if (c.commission_mode) {
-        hours = 1;
-        rate = amount;
-        division = 'Commission';
-        desc = 'Commission — ' + (c.job_number || '') + ' — ' + (c.client_name || '');
-      } else if (c.wo_mode) {
-        hours = 1;
-        rate = amount;
-        division = 'Work Order';
-        desc = _woBreakdownText(c) + (desc ? ' — ' + desc : '');
-      } else {
-        hours = Number(c.hours || 0);
-        rate = Number(c.rate || 0);
-      }
+    for (var i = 0; i < rawLines.length; i++) {
+      var line = rawLines[i] || {};
+      if (!_invoiceHasPersistedNumber(line.line_total_ex)) return null;
       rows.push({
-        date: c.scheduled_date || '',
-        job_text: c.job_number || '',
-        description: desc,
-        division: division,
-        hours: hours,
-        rate: rate,
-        amount: amount,
-        client_name: c.client_name || '',
-        site_address: c.site_address || ''
+        date: line.line_date || line.date || '',
+        job_text: line.job_number || '',
+        description: line.description || line.job_number || 'Invoice line',
+        division: line.division || line.line_type || '',
+        hours: _invoiceHasPersistedNumber(line.total_hours)
+          ? Number(line.total_hours)
+          : (_invoiceHasPersistedNumber(line.quantity) ? Number(line.quantity) : 0),
+        rate: _invoiceHasPersistedNumber(line.hourly_rate)
+          ? Number(line.hourly_rate)
+          : (_invoiceHasPersistedNumber(line.unit_rate) ? Number(line.unit_rate) : 0),
+        amount: Number(line.line_total_ex),
+        client_name: line.client_name || '',
+        site_address: line.site_address || ''
       });
-    });
-    (manualRows || []).forEach(function(r) {
-      if (!r) return;
-      rows.push({
-        date: r.date || '',
-        job_text: r.job_text || '',
-        description: r.description || '',
-        division: r.division || 'General Labour',
-        hours: Number(r.hours || 0),
-        rate: Number(r.rate || 0),
-        amount: Math.round((Number(r.amount || 0)) * 100) / 100,
-        client_name: r.client_name || '',
-        site_address: r.site_address || ''
-      });
-    });
+    }
     return rows;
   }
 
-  function _invoicePdfTotals(rows, resultTotal) {
-    var subtotal = (rows || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-    subtotal = Math.round(subtotal * 100) / 100;
-    var total = resultTotal != null ? Math.round(Number(resultTotal) * 100) / 100 : subtotal;
-    return { subtotal: subtotal, gst: Math.round((total - subtotal) * 100) / 100, total: total };
+  function _invoicePdfDataFromResponse(result, notes) {
+    result = result || {};
+    var money = _invoicePersistedMoney(result);
+    var rows = _invoicePersistedPdfRows(result);
+    if (!money.complete || !rows) return null;
+    return {
+      invoiceNumber: result.invoice_number,
+      rows: rows,
+      notes: notes || '',
+      gst: money.gst_on,
+      money: money
+    };
   }
 
   function _attachInvoicePdfToXero(result, pdfData) {
-    if (!pdfData || !pdfData.money || !pdfData.money.complete) {
-      return Promise.resolve({ attached: false, skipped: true, reason: 'money_incomplete' });
+    if (!pdfData || !pdfData.money || !pdfData.money.complete || !Array.isArray(pdfData.rows) || pdfData.rows.length === 0) {
+      return Promise.resolve({ attached: false, skipped: true, reason: 'persisted_response_incomplete' });
     }
     if (!result || !result.xero_bill_id) return Promise.resolve({ attached: false, skipped: true });
     try {
@@ -17426,8 +17407,8 @@
   }
 
   window.__SW_TRADE_INVOICE_PDF_TESTS = {
-    _jobCentricPdfRows: _jobCentricPdfRows,
-    _invoicePdfTotals: _invoicePdfTotals,
+    _invoicePersistedPdfRows: _invoicePersistedPdfRows,
+    _invoicePdfDataFromResponse: _invoicePdfDataFromResponse,
     _attachInvoicePdfToXero: _attachInvoicePdfToXero
   };
 
@@ -18094,16 +18075,8 @@
           renderInvoiceBuilder();
           return;
         }
-        var pdfRows = _jobCentricPdfRows(_jobCards, legacyManualRows);
-        var pdfData = {
-          invoiceNumber: result.invoice_number,
-          rows: pdfRows,
-          notes: _invNotes,
-          gst: _invGst,
-          total: _invoicePdfTotals(pdfRows, result.total_inc),
-          money: _invoicePersistedMoney(result)
-        };
-        _lastInvoicePdfData = pdfData.money.complete ? pdfData : null;
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
+        _lastInvoicePdfData = pdfData;
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
@@ -18492,9 +18465,9 @@
           return;
         }
 
-        // Generate PDF for the trade's records
-        var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: _invGst, total: _invoicePdfTotals(validRows, result.total_inc), money: _invoicePersistedMoney(result) };
-        _lastInvoicePdfData = pdfData.money.complete ? pdfData : null;
+        // Generate a PDF only from the successful response's persisted lines.
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
+        _lastInvoicePdfData = pdfData;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
 
@@ -18636,6 +18609,10 @@
       toast('Confirmed invoice totals are not available yet', true);
       return null;
     }
+    if (!Array.isArray(data.rows) || data.rows.length === 0) {
+      toast('Confirmed invoice lines are not available yet', true);
+      return null;
+    }
 
     var doc = new jsPDF('p', 'mm', 'a4');
     var details = loadTradeDetails();
@@ -18755,10 +18732,10 @@
     y += 6;
     doc.setFontSize(9);
     doc.setTextColor(80, 90, 100);
-    var persistedMoney = data.money && data.money.complete ? data.money : null;
-    doc.text(persistedMoney ? 'Earned' : 'Subtotal', margin + 105, y);
+    var persistedMoney = data.money;
+    doc.text('Earned', margin + 105, y);
     doc.setTextColor(41, 60, 70);
-    doc.text('$' + Number(persistedMoney ? persistedMoney.gross_earned : data.total.subtotal).toFixed(2), colAmt, y, { align: 'right' });
+    doc.text('$' + Number(persistedMoney.gross_earned).toFixed(2), colAmt, y, { align: 'right' });
     y += 5;
     if (persistedMoney) {
       doc.setTextColor(80, 90, 100);
@@ -18784,7 +18761,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.text('TOTAL', margin + 108, y + 4.5);
-    doc.text('$' + Number(persistedMoney && persistedMoney.total_inc != null ? persistedMoney.total_inc : data.total.total).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
+    doc.text('$' + Number(persistedMoney.total_inc).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
     y += 14;
 
     // ── Notes ──

@@ -9,6 +9,28 @@ test.use({
   isMobile: true
 });
 
+async function installPdfRecorder(page) {
+  await page.evaluate(() => {
+    window.__invoicePdfText = [];
+    window.__invoicePdfSaved = null;
+    class FakeJsPdf {
+      setFillColor() {}
+      rect() {}
+      setTextColor() {}
+      setFontSize() {}
+      setFont() {}
+      text(value) { window.__invoicePdfText.push(String(value)); }
+      setDrawColor() {}
+      setLineWidth() {}
+      line() {}
+      addPage() {}
+      output() { return 'data:application/pdf;base64,JVBERi1QRVJTSVNURUQ='; }
+      save(name) { window.__invoicePdfSaved = name; }
+    }
+    window.jspdf = { jsPDF: FakeJsPdf };
+  });
+}
+
 test('shows earned less super and net pay, and submits the saved GST choice', async ({ appPage: page, feedRequests }, testInfo) => {
   await signIn(page, PERSONAS.installer);
   await page.locator('[data-view="hours"]').click();
@@ -47,6 +69,7 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   await page.locator('#hoursContent').screenshot({ path: builderScreenshot });
   await testInfo.attach('Trade invoice money builder', { path: builderScreenshot, contentType: 'image/png' });
 
+  await installPdfRecorder(page);
   await page.locator('#invSubmitBtn').click();
   await page.locator('#confirmOk').click();
 
@@ -58,6 +81,10 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   await expect(submitted).toContainText('GST$23.94');
   await expect(submitted).toContainText('Invoice total$263.30');
   await expect(submitted).not.toContainText('Estimate');
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeVisible();
+
+  const pdfText = await page.evaluate(() => window.__invoicePdfText);
+  expect(pdfText).toContain('Persisted reconciled work order');
 
   const submittedScreenshot = testInfo.outputPath('trade-invoice-money-submitted.png');
   await page.locator('#hoursContent').screenshot({ path: submittedScreenshot });
@@ -70,6 +97,9 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   expect(submit.body).not.toHaveProperty('super_amount');
   expect(submit.body).not.toHaveProperty('gross_earned');
   expect(submit.body).not.toHaveProperty('net_pay');
+  const attach = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'attach_invoice_pdf');
+  expect(attach).toBeTruthy();
+  expect(attach.body.xero_bill_id).toBe('xero-e2e-super-gst');
 });
 
 test.describe('submitted response has incomplete authoritative money', () => {
@@ -101,4 +131,26 @@ test.describe('submitted response has incomplete authoritative money', () => {
     await openBuilder(page, true);
     await expectUnavailableWithoutPdf(page, feedRequests);
   });
+});
+
+test.describe('submitted response has complete money but no persisted lines', () => {
+  test.use({ feedScenario: 'trade-invoice-super-gst-missing-lines' });
+
+  for (const legacy of [false, true]) {
+    test(`${legacy ? 'legacy' : 'job-centric'} success suppresses the PDF`, async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.installer);
+      if (legacy) await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+      await page.locator('[data-view="hours"]').click();
+      await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      await page.locator('#invSubmitBtn').click();
+      await page.locator('#confirmOk').click();
+
+      await expect(page.getByText('Invoice Submitted')).toBeVisible();
+      await expect(page.locator('[data-invoice-money-summary]')).toContainText('Net pay$352.00');
+      await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
+      expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
+    });
+  }
 });

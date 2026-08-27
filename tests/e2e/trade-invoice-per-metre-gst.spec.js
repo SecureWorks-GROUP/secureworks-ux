@@ -110,7 +110,8 @@ test.describe('unsuccessful per-metre response', () => {
 
 [
   ['trade-invoice-per-metre-missing-rate', 'super rate'],
-  ['trade-invoice-per-metre-missing-gst', 'GST amount']
+  ['trade-invoice-per-metre-missing-gst', 'GST amount'],
+  ['trade-invoice-per-metre-gst-on-legacy-total', 'authoritative GST-on total']
 ].forEach(([feedScenario, missingField]) => {
   test.describe(`submitted money missing ${missingField}`, () => {
     test.use({ feedScenario });

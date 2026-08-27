@@ -15826,7 +15826,7 @@
         ih += '<div class="inv-history-item" onclick="' + onclick + '">';
         ih += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
         ih += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-        ih += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total || 0).toFixed(2) + '</div>';
+        ih += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
         ih += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
         ih += '</div>';
       });
@@ -16065,6 +16065,13 @@
 
     var defaultRate = 35; // $35/m default
     var grandTotal = 0;
+    var submittedItemsByJob = {};
+    if (data.already_submitted) {
+      (Array.isArray(data.items) ? data.items : []).forEach(function(item) {
+        var itemJobId = String((item || {}).job_id || '');
+        if (itemJobId) submittedItemsByJob[itemJobId] = item;
+      });
+    }
 
     Object.keys(jobMap).forEach(function(jobId) {
       var entry = jobMap[jobId];
@@ -16089,7 +16096,24 @@
 
       var rate = defaultRate;
       var jobTotal = totalMetres * rate;
-      grandTotal += jobTotal;
+      var submittedLineAvailable = false;
+      if (data.already_submitted) {
+        var submittedItem = submittedItemsByJob[String(jobId)] || null;
+        submittedLineAvailable = !!submittedItem
+          && _invoiceHasPersistedNumber(submittedItem.metres)
+          && _invoiceHasPersistedNumber(submittedItem.rate_per_metre)
+          && _invoiceHasPersistedNumber(submittedItem.total);
+        if (submittedLineAvailable) {
+          totalMetres = Number(submittedItem.metres);
+          rate = Number(submittedItem.rate_per_metre);
+          jobTotal = Number(submittedItem.total);
+        } else {
+          totalMetres = null;
+          rate = null;
+          jobTotal = null;
+        }
+      }
+      if (jobTotal != null) grandTotal += jobTotal;
 
       html += '<div style="padding:14px;background:var(--sw-card);border-radius:12px;margin-bottom:10px;box-shadow:var(--sw-shadow)">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center">';
@@ -16102,21 +16126,26 @@
       html += '</div>';
       html += '</div>';
 
-      // Metres and rate
-      html += '<div style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px">';
-      html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-      html += '<span>Total metres</span>';
-      html += '<span style="display:flex;align-items:center;gap:6px">';
-      html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" ' + (data.already_submitted ? 'disabled ' : '') + 'style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
-      html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
-      html += '</span></div>';
+      // Submitted line money is response-only. When the response does not
+      // return an item, keep the job identity but hide scope-derived figures.
+      if (data.already_submitted && !submittedLineAvailable) {
+        html += '<div data-per-metre-line-unavailable style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px;font-size:12px;color:var(--sw-text-sec)">Submitted line figures are unavailable. Open the saved invoice for confirmed figures.</div>';
+      } else {
+        html += '<div style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
+        html += '<span>Total metres</span>';
+        html += '<span style="display:flex;align-items:center;gap:6px">';
+        html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" ' + (data.already_submitted ? 'disabled ' : '') + 'style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
+        html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
+        html += '</span></div>';
 
-      html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-      html += '<span>Rate</span><span style="font-weight:600">$' + rate.toFixed(2) + '/m</span></div>';
+        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
+        html += '<span>Rate</span><span style="font-weight:600">$' + rate.toFixed(2) + '/m</span></div>';
 
-      html += '<div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--sw-border);padding-top:8px">';
-      html += '<span>Total</span><span id="pmTotal_' + esc(jobId) + '">$' + jobTotal.toFixed(2) + '</span></div>';
-      html += '</div>';
+        html += '<div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--sw-border);padding-top:8px">';
+        html += '<span>Total</span><span id="pmTotal_' + esc(jobId) + '">$' + jobTotal.toFixed(2) + '</span></div>';
+        html += '</div>';
+      }
 
       html += '</div>';
     });
@@ -16218,6 +16247,9 @@
         notes: 'Per-metre invoice',
         gst_on: _invGst
       }).then(function(res) {
+        if (!res || res.success === false || res.ok === false || res.error) {
+          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
+        }
         toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
         _hoursData = _invoiceSubmittedDataFromResponse(_hoursData, res);
         _invGst = _invoiceGstDefault(_hoursData);
@@ -16444,15 +16476,13 @@
       });
     }
 
-    // Persisted money truth. Older invoices without the new fields keep their
-    // legacy total instead of the browser inventing a historical super split.
+    // Persisted money truth. Incomplete authoritative fields stay visibly
+    // unavailable rather than falling back to a legacy gross or subtotal.
     var persistedMoney = _invoicePersistedMoney(inv);
     if (persistedMoney.complete) {
       html += _invoiceMoneySummaryHtml(persistedMoney);
     } else {
-      html += '<div class="inv-totals">';
-      html += '<div class="inv-totals-row grand"><span>Total</span><span>$' + Number(inv.total_inc || inv.subtotal_ex || 0).toFixed(2) + '</span></div>';
-      html += '</div>';
+      html += _invoiceMoneyUnavailableHtml();
     }
 
     // Notes
@@ -16508,7 +16538,7 @@
       html += '<div class="inv-history-item" onclick="' + onclick + '">';
       html += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
       html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-      html += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total || 0).toFixed(2) + '</div>';
+      html += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
       html += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
       html += '</div>';
     });
@@ -16616,13 +16646,18 @@
     };
   }
 
+  function _invoiceSubmittedAmountText(source) {
+    var money = _invoicePersistedMoney(source);
+    return money.complete ? _invoiceMoney(money.total_inc) : 'Figures unavailable';
+  }
+
   function _invoiceSubmittedDataFromResponse(previous, response) {
     response = response || {};
     var submitted = Object.assign({}, previous || {}, response, { already_submitted: true });
     [
       'gross_earned', 'super_rate', 'super_amount', 'net_pay',
       'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
-      'total_inc', 'total'
+      'total_inc', 'total', 'items', 'invoice_items'
     ].forEach(function(field) {
       if (!Object.prototype.hasOwnProperty.call(response, field)) delete submitted[field];
     });
@@ -20438,7 +20473,7 @@
         html += '    <div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + label + '</div>';
         html += '    <div style="font-size:11px;color:var(--sw-text-sec)">' + esc(inv.xero_bill_number || inv.status || '') + '</div>';
         html += '  </div>';
-        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total).toFixed(2) + '</div>';
+        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
         html += '</div>';
       });
       container.innerHTML = html;

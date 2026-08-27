@@ -274,6 +274,8 @@ const test = base.extend({
       'trade-invoice-super-gst-incomplete': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
+      'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
+      'trade-invoice-per-metre-response-error': ['submit_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -433,7 +435,12 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: ['trade-invoice-per-metre-gst', 'trade-invoice-per-metre-response-missing-rate'].includes(feedScenario)
+        my_hours: [
+          'trade-invoice-per-metre-gst',
+          'trade-invoice-per-metre-response-missing-rate',
+          'trade-invoice-per-metre-response-lines',
+          'trade-invoice-per-metre-response-error'
+        ].includes(feedScenario)
           ? perMetreInvoiceHours
           : feedScenario === 'trade-invoice-per-metre-gst-off-no-total'
             ? {
@@ -463,7 +470,55 @@ const test = base.extend({
               total_hours: 0,
               already_submitted: false
             },
-        my_trade_invoices: { invoices: [] },
+        my_trade_invoices: feedScenario === 'trade-invoice-history-money-truth'
+          ? {
+            invoices: [
+              {
+                id: 'invoice-truth-complete',
+                invoice_number: 'INV-TRUTH-COMPLETE',
+                week_ending: addIsoDays(weekStart, 6),
+                status: 'submitted',
+                gross_earned: 400,
+                super_rate: 0.12,
+                super_amount: 48,
+                net_pay: 352,
+                gst_on: false,
+                total: 400
+              },
+              {
+                id: 'invoice-truth-incomplete',
+                invoice_number: 'INV-TRUTH-INCOMPLETE',
+                week_ending: addIsoDays(weekStart, -1),
+                status: 'submitted',
+                gross_earned: 300,
+                super_amount: 36,
+                net_pay: 264,
+                gst_on: false,
+                total: 300
+              }
+            ]
+          }
+          : { invoices: [] },
+        get_trade_invoice: ({ url }) => {
+          if (feedScenario !== 'trade-invoice-history-money-truth') {
+            return { status: 409, body: { error: 'Invoice detail fixture is not enabled' } };
+          }
+          const invoiceId = url.searchParams.get('invoice_id');
+          return {
+            invoice: {
+              id: invoiceId,
+              invoice_number: invoiceId === 'invoice-truth-complete' ? 'INV-TRUTH-COMPLETE' : 'INV-TRUTH-INCOMPLETE',
+              status: 'submitted',
+              gross_earned: invoiceId === 'invoice-truth-complete' ? 400 : 300,
+              super_rate: invoiceId === 'invoice-truth-complete' ? 0.12 : undefined,
+              super_amount: invoiceId === 'invoice-truth-complete' ? 48 : 36,
+              net_pay: invoiceId === 'invoice-truth-complete' ? 352 : 264,
+              gst_on: false,
+              total_inc: invoiceId === 'invoice-truth-complete' ? 400 : 300,
+              lines: []
+            }
+          };
+        },
         my_work_orders: {
           work_orders: persona === 'fencing_manager' ? workOrders : []
         },
@@ -573,26 +628,41 @@ const test = base.extend({
           };
         },
         submit_trade_invoice: ({ request }) => {
-          if (!['trade-invoice-per-metre-gst', 'trade-invoice-per-metre-response-missing-rate'].includes(feedScenario) || persona !== 'fencing_manager') {
+          if (![
+            'trade-invoice-per-metre-gst',
+            'trade-invoice-per-metre-response-missing-rate',
+            'trade-invoice-per-metre-response-lines',
+            'trade-invoice-per-metre-response-error'
+          ].includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Per-metre GST fixture is not enabled' } };
           }
           const body = request.postDataJSON();
+          if (feedScenario === 'trade-invoice-per-metre-response-error') {
+            return { success: false, error: 'Backend refused this per-metre invoice' };
+          }
           if (body.gst_on !== true) {
             return { status: 422, body: { error: 'Expected GST choice to be submitted' } };
           }
           if (['super_rate', 'super_amount', 'gross_earned', 'net_pay'].some((field) => Object.hasOwn(body, field))) {
             return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
           }
+          const responseGross = feedScenario === 'trade-invoice-per-metre-response-lines'
+            ? (body.items || []).reduce((sum, item) => sum + Number(item.total || 0), 0)
+            : 350;
+          const responseSuper = Math.round(responseGross * 0.12 * 100) / 100;
+          const responseNet = Math.round((responseGross - responseSuper) * 100) / 100;
+          const responseGst = Math.round(responseNet * 0.1 * 100) / 100;
           const response = {
             success: true,
             xero_bill_number: 'DRAFT-E2E-PM',
-            gross_earned: 350,
+            gross_earned: responseGross,
             super_rate: 0.12,
-            super_amount: 42,
-            net_pay: 308,
+            super_amount: responseSuper,
+            net_pay: responseNet,
             gst_on: true,
-            gst_amount: 30.80,
-            total_inc: 338.80
+            gst_amount: responseGst,
+            total_inc: Math.round((responseNet + responseGst) * 100) / 100,
+            items: body.items
           };
           if (feedScenario === 'trade-invoice-per-metre-response-missing-rate') delete response.super_rate;
           return response;

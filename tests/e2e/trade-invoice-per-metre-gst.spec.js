@@ -54,7 +54,11 @@ test.describe('per-metre preview has no backend super rate', () => {
     const money = page.locator('[data-invoice-money-summary]');
     await expect(money).toContainText('Invoice estimate unavailable until SecureWorks supplies the super rate.');
     await expect(money).not.toContainText('Less super');
-    await expect(page.getByRole('switch', { name: 'Add GST to this invoice' })).toBeVisible();
+    const gstSwitch = page.getByRole('switch', { name: 'Add GST to this invoice' });
+    await expect(gstSwitch).toBeVisible();
+    await expect(gstSwitch).toHaveAttribute('aria-checked', 'false');
+    await gstSwitch.click();
+    await expect(gstSwitch).toHaveAttribute('aria-checked', 'true');
   });
 });
 
@@ -140,6 +144,24 @@ test.describe('unknown per-metre response', () => {
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeVisible();
     await expect(page.locator('#pmMetres_e2e-per-metre-job')).toBeEnabled();
     await expect(page.locator('[data-invoice-money-summary]')).toContainText('Estimate');
+  });
+});
+
+test.describe('per-metre invoice is saved but Xero push fails', () => {
+  test.use({ feedScenario: 'trade-invoice-per-metre-xero-failed' });
+
+  test('shows saved and pending without claiming Xero submission', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('switch', { name: 'Add GST to this invoice' }).click();
+
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+
+    await expect(page.locator('#toast')).toContainText('Xero unavailable');
+    await expect(page.locator('.hours-submitted-pill')).toContainText('Invoice saved — Xero sync pending');
+    await expect(page.getByText(/Submitted to Xero/)).toHaveCount(0);
+    await expect(page.locator('#pmMetres_e2e-per-metre-job')).toBeDisabled();
   });
 });
 

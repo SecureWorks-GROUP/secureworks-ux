@@ -281,6 +281,7 @@ const test = base.extend({
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-error': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-empty': ['submit_trade_invoice'],
+      'trade-invoice-per-metre-xero-failed': ['submit_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -446,6 +447,7 @@ const test = base.extend({
           'trade-invoice-per-metre-response-lines',
           'trade-invoice-per-metre-response-error',
           'trade-invoice-per-metre-response-empty',
+          'trade-invoice-per-metre-xero-failed',
           'trade-invoice-per-metre-preview-missing-rate'
         ].includes(feedScenario)
           ? (feedScenario === 'trade-invoice-per-metre-preview-missing-rate'
@@ -609,7 +611,8 @@ const test = base.extend({
               code: 'XERO_PUSH_FAILED',
               success: true,
               invoice_id: 'saved-e2e-invoice',
-              error: 'Xero unavailable'
+              error: 'Xero unavailable',
+              userMessage: 'Xero unavailable'
             };
           }
           if (feedScenario === 'trade-invoice-super-gst-incomplete') {
@@ -717,7 +720,8 @@ const test = base.extend({
             'trade-invoice-per-metre-response-missing-rate',
             'trade-invoice-per-metre-response-lines',
             'trade-invoice-per-metre-response-error',
-            'trade-invoice-per-metre-response-empty'
+            'trade-invoice-per-metre-response-empty',
+            'trade-invoice-per-metre-xero-failed'
           ].includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Per-metre GST fixture is not enabled' } };
           }
@@ -741,6 +745,10 @@ const test = base.extend({
           const responseSuper = Math.round(responseGross * 0.12 * 100) / 100;
           const responseNet = Math.round((responseGross - responseSuper) * 100) / 100;
           const responseGst = Math.round(responseNet * 0.1 * 100) / 100;
+          const persistedItems = (body.items || []).map((item) => ({
+            ...item,
+            total: Math.round(Number(item.metres || 0) * Number(item.rate_per_metre || body.rate_per_metre || 0) * 100) / 100
+          }));
           const response = {
             success: true,
             xero_bill_number: 'DRAFT-E2E-PM',
@@ -751,9 +759,18 @@ const test = base.extend({
             gst_on: true,
             gst_amount: responseGst,
             total_inc: Math.round((responseNet + responseGst) * 100) / 100,
-            items: body.items
+            items: persistedItems
           };
           if (feedScenario === 'trade-invoice-per-metre-response-missing-rate') delete response.super_rate;
+          if (feedScenario === 'trade-invoice-per-metre-xero-failed') {
+            delete response.xero_bill_number;
+            Object.assign(response, {
+              code: 'XERO_PUSH_FAILED',
+              invoice_id: 'saved-per-metre-invoice',
+              error: 'Xero unavailable',
+              userMessage: 'Xero unavailable'
+            });
+          }
           return response;
         },
         attach_invoice_pdf: ({ request }) => {

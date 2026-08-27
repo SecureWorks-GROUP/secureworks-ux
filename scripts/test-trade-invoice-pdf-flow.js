@@ -60,9 +60,12 @@ async function runDynamicHelperCheck() {
   const dynamicSource = [
     extractFunction('_invoiceHasPersistedNumber'),
     extractFunction('_invoiceSubmitSucceeded'),
+    extractFunction('_invoiceXeroPushPending'),
+    extractFunction('_invoiceSubmitStatusMessage'),
     extractFunction('_invoiceBool'),
     extractFunction('_invoiceSuperRate'),
     extractFunction('_invoicePersistedMoney'),
+    extractFunction('_invoiceResponseLines'),
     extractFunction('_invoicePersistedPdfRows'),
     extractFunction('_invoicePdfDataFromResponse'),
     extractFunction('_attachInvoicePdfToXero'),
@@ -80,10 +83,10 @@ async function runDynamicHelperCheck() {
     gst_on: false,
     total_inc: 906.40,
     lines: [
-      { line_date: '2026-06-01', job_number: 'SWMS-26671', description: 'Persisted normal line', line_type: 'labour', total_hours: 3, hourly_rate: 100, line_total_ex: 300 },
-      { line_date: '2026-06-02', job_number: 'SWMS-26672', description: 'Persisted commission', line_type: 'commission', quantity: 1, unit_rate: 175, line_total_ex: 175 },
-      { line_date: '2026-06-03', job_number: 'SWMS-26673', description: 'Persisted work order', line_type: 'work_order', quantity: 1, unit_rate: 375, line_total_ex: 375 },
-      { line_date: '2026-06-04', job_number: 'SWMS-26674', description: 'Persisted manual labour', line_type: 'labour', total_hours: 2, hourly_rate: 90, line_total_ex: 180 },
+      { line_date: '2026-06-01', job_number: 'SWMS-26671', description: 'Persisted normal line', division: 'Make Safe', line_type: 'labour', total_hours: 3, hourly_rate: 100, line_total_ex: 300 },
+      { line_date: '2026-06-02', job_number: 'SWMS-26672', description: 'Persisted commission', division: 'Fencing', line_type: 'commission', quantity: 1, unit_rate: 175, line_total_ex: 175 },
+      { line_date: '2026-06-03', job_number: 'SWMS-26673', description: 'Persisted work order', division: 'Fencing', line_type: 'work_order', quantity: 1, unit_rate: 375, line_total_ex: 375 },
+      { line_date: '2026-06-04', job_number: 'SWMS-26674', description: 'Persisted manual labour', division: 'General Labour', line_type: 'labour', total_hours: 2, hourly_rate: 90, line_total_ex: 180 },
     ],
   }
   const rows = context._invoicePersistedPdfRows(persistedResult)
@@ -94,7 +97,7 @@ async function runDynamicHelperCheck() {
     ['line_date'],
     ['job_number'],
     ['description'],
-    ['line_type'],
+    ['division'],
     ['total_hours', 'quantity'],
     ['hourly_rate', 'unit_rate'],
     ['line_total_ex'],
@@ -120,6 +123,16 @@ async function runDynamicHelperCheck() {
     context._invoiceSubmitSucceeded({ code: 'XERO_PUSH_FAILED', success: true }),
     false,
     'a failed Xero push without durable invoice identity does not imply success',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitStatusMessage({ code: 'XERO_PUSH_FAILED', success: true, invoice_id: 'saved', error: 'Xero unavailable' }, 'Invoice submitted to Xero'),
+    'Xero unavailable',
+    'a saved invoice with failed Xero push never claims it was submitted to Xero',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitStatusMessage({ success: true, xero_bill_number: 'DRAFT-123' }, 'Invoice submitted to Xero'),
+    'Invoice submitted to Xero — DRAFT-123',
+    'a confirmed Xero success keeps the success label and persisted bill number',
   )
   const gstOnLegacyTotal = context._invoicePersistedMoney({
     gross_earned: 100,

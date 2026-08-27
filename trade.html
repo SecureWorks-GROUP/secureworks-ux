@@ -16165,7 +16165,11 @@
 
     // Submit button
     if (data.already_submitted) {
-      html += '<div class="hours-submitted-pill">&#10003; Submitted to Xero' + (data.xero_bill_number ? ' — ' + esc(data.xero_bill_number) : '') + '</div>';
+      if (_invoiceXeroPushPending(data)) {
+        html += '<div class="hours-submitted-pill">&#10003; Invoice saved — Xero sync pending</div>';
+      } else {
+        html += '<div class="hours-submitted-pill">&#10003; Submitted to Xero' + (data.xero_bill_number ? ' — ' + esc(data.xero_bill_number) : '') + '</div>';
+      }
     } else {
       html += '<button class="hours-submit-btn" onclick="submitPerMetreInvoice()" style="background:var(--sw-orange)">Submit Invoice</button>';
     }
@@ -16250,7 +16254,7 @@
         if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         }
-        toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
+        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted'));
         _hoursData = _invoiceSubmittedDataFromResponse(_hoursData, res);
         _invGst = _invoiceGstDefault(_hoursData);
         renderPerMetreView(_hoursData);
@@ -16297,7 +16301,7 @@
         if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         }
-        toast('Invoice submitted to Xero as draft bill' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
+        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as draft bill'));
         loadHoursView(); // reload to show submitted state
       }).catch(function(err) {
         toast(friendlyError(err), true);
@@ -16615,6 +16619,18 @@
     return result.success === true || result.ok === true || hasPersistedIdentity;
   }
 
+  function _invoiceXeroPushPending(result) {
+    return !!result && result.code === 'XERO_PUSH_FAILED';
+  }
+
+  function _invoiceSubmitStatusMessage(result, successMessage) {
+    result = result || {};
+    if (_invoiceXeroPushPending(result)) {
+      return result.userMessage || result.error || 'Invoice saved — Xero sync pending. The office will push it manually.';
+    }
+    return successMessage + (result.xero_bill_number ? ' — ' + result.xero_bill_number : '');
+  }
+
   // Builder-only estimate. The browser never sends these calculated figures;
   // generate/submit requests send line inputs + gst_on and the backend persists
   // the authoritative gross/super/net amounts used by summaries and PDFs.
@@ -16696,8 +16712,8 @@
     if (opts.gstSwitch) {
       html += '<div class="inv-gst-control">';
       html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
-      html += '<button type="button" class="inv-gst-switch' + (_invGst ? ' on' : '') + '" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="toggleInvoiceGst()"><span></span></button>';
-      html += '<strong class="inv-gst-state" data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</strong>';
+      html += '<button type="button" class="inv-gst-switch" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="invGstChanged(!' + (_invGst ? 'true' : 'false') + ')">';
+      html += '<span class="inv-gst-track" aria-hidden="true"><span class="inv-gst-thumb"></span></span><span data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</span></button>';
       html += '</div>';
     }
     return html + '</div>';
@@ -17410,6 +17426,14 @@
     return Array.isArray(result.lines)
       ? result.lines
       : (result.invoice && Array.isArray(result.invoice.lines) ? result.invoice.lines : null);
+  }
+
+  function _invoiceSubmittedLineCountHtml(result) {
+    var persistedLines = _invoiceResponseLines(result);
+    var text = persistedLines
+      ? persistedLines.length + ' line item' + (persistedLines.length !== 1 ? 's' : '')
+      : 'Submitted line count unavailable';
+    return '<div style="font-size:13px;color:var(--sw-text-sec)">' + text + '</div>';
   }
 
   function _invoicePdfDataFromResponse(result, notes) {
@@ -18158,6 +18182,7 @@
         } else {
           successHtml += _invoiceMoneyUnavailableHtml();
         }
+        successHtml += _invoiceSubmittedLineCountHtml(result);
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
         if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
@@ -18548,12 +18573,7 @@
         } else {
           successHtml += _invoiceMoneyUnavailableHtml();
         }
-        var persistedLines = _invoiceResponseLines(result);
-        if (persistedLines) {
-          successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + persistedLines.length + ' line item' + (persistedLines.length !== 1 ? 's' : '') + '</div>';
-        } else {
-          successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">Submitted line count unavailable</div>';
-        }
+        successHtml += _invoiceSubmittedLineCountHtml(result);
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
         if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';

@@ -7130,9 +7130,14 @@ function getCrewSelectId(selectId) {
 // VIEW SWITCHING
 // ════════════════════════════════════════════════════════════
 
+function jobDetailIsOpen() {
+  var detail = document.getElementById('jobDetailView');
+  return !!(detail && detail.classList.contains('active'));
+}
+
 function showView(view) {
   // Close full-page job detail if open
-  if (document.getElementById('jobDetailView').classList.contains('active')) {
+  if (jobDetailIsOpen()) {
     closeJobDetail(true);
   }
   document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
@@ -10723,30 +10728,38 @@ async function runMakesafeCleanIntakeSweep() {
   }
 }
 
-// A review overlay OWNS the screen while it is open. Repainting the board
-// underneath it is invisible work whose only visible effect is a toast when a
-// read blips — which is exactly the "Failed to load jobs" the captain kept
-// seeing bottom-right while reading a pack (the 5-minute auto-refresh fires
-// regardless of what is on screen). A background refresh therefore stands down
-// while an overlay is up; an explicit press still loads, always.
+// A review overlay or full-page job detail OWNS the screen while it is open.
+// Repainting the board underneath it is invisible work whose only visible
+// effects are stale-DOM races and a toast when a read blips. The 5-minute timer
+// keys off sw_ops_tab, which deliberately remains "jobs" while a detail is open,
+// so a background refresh must stand down for both owners. An explicit press
+// still loads, always.
 function makesafeReviewOverlayIsOpen() {
   return !!(document.getElementById('makesafeReportingOverlay') ||
     document.getElementById('makesafeIntakeOverlay'));
+}
+
+// Async MakeSafe enrichers finish after the first board paint. A captain can
+// open a card while those reads are in flight, so checking only the pipeline tab
+// is not enough: their late renderJobs() would repaint underneath the detail.
+function makesafeBoardCanRepaint() {
+  return _pipelineTab === 'makesafes' && _jobView === 'kanban'
+    && !!_pipelineData && !jobDetailIsOpen();
 }
 
 /**
  * Load the pipeline/board for the active tab.
  *
  * `opts.background` marks a load nobody pressed (the 5-minute auto-refresh). A
- * background load stands down while a review overlay is open, and a genuinely
- * transient failure is retried ONCE, silently, before anything is said — the
- * make-safe board read is two chained network calls and a single blip must not
- * interrupt a captain mid-review. A retry that also fails still toasts: a board
- * that is really down is never hidden.
+ * background load stands down while a review overlay or job detail is open, and
+ * a genuinely transient failure is retried ONCE, silently, before anything is
+ * said — the make-safe board read is two chained network calls and a single blip
+ * must not interrupt a captain mid-review. A retry that also fails still toasts:
+ * a board that is really down is never hidden.
  */
 async function loadJobs(opts) {
   opts = opts || {};
-  if (opts.background && makesafeReviewOverlayIsOpen()) return;
+  if (opts.background && (makesafeReviewOverlayIsOpen() || jobDetailIsOpen())) return;
   updateJobsDate();
   try {
     var data;
@@ -10767,6 +10780,10 @@ async function loadJobs(opts) {
       data = await opsFetch('pipeline', params);
     }
     _pipelineData = data;
+    // The detail may have opened while the background fetch was in flight.
+    // Keep the fresh data cached, but do not let the late response repaint the
+    // board now owned by that detail.
+    if (opts.background && (makesafeReviewOverlayIsOpen() || jobDetailIsOpen())) return;
     renderJobs(data);
     // Unified kanban: load the INTAKE column's drafts (separate endpoint) and
     // re-render once they arrive. Fire-and-forget so the board paints immediately.
@@ -10805,7 +10822,7 @@ async function loadMakesafeBoardReviewAffordances() {
   if (typeof _msSesReviewQueueStale === 'function' && !_msSesReviewQueueStale()) return;
   try {
     await _msSesRefreshReviewQueue();
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    if (makesafeBoardCanRepaint()) {
       renderJobs(_pipelineData);
     }
   } catch (e) {
@@ -10886,7 +10903,7 @@ async function loadMakesafeBoardPackChips() {
       }
     } catch (_e) { /* leave enrichment chips; do not invent */ }
   }
-  if (changed && _pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+  if (changed && makesafeBoardCanRepaint()) {
     renderJobs(_pipelineData);
   }
 }
@@ -11702,13 +11719,14 @@ async function loadMakesafeBoardIntakeDrafts() {
     if (typeof _msCockpitDraftCache !== 'undefined') {
       drafts.forEach(function(d) { _msCockpitDraftCache[d.id] = d; });
     }
-    // Re-render only if we are still on the make-safe board.
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    // Re-render only if we are still on the make-safe board and no job detail
+    // has taken ownership while this request was in flight.
+    if (makesafeBoardCanRepaint()) {
       renderJobs(_pipelineData);
     }
   } catch (e) {
     _makesafeIntakeDraftsLoaded = true;
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    if (makesafeBoardCanRepaint()) {
       renderJobs(_pipelineData);
     }
   }
@@ -11771,7 +11789,7 @@ async function loadMakesafeBoardStory() {
       oldest_computed_at: oldest != null ? new Date(oldest).toISOString() : null,
     } : { available: false };
     _makesafeStoryLoaded = true;
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    if (makesafeBoardCanRepaint()) {
       renderJobs(_pipelineData);
     }
   } catch (e) {
@@ -11779,7 +11797,7 @@ async function loadMakesafeBoardStory() {
     _makesafeStoryByJob = {};
     _makesafeStorySummary = { available: false };
     _makesafeStoryLoaded = true;
-    if (_pipelineTab === 'makesafes' && _jobView === 'kanban' && _pipelineData) {
+    if (makesafeBoardCanRepaint()) {
       renderJobs(_pipelineData);
     }
   }

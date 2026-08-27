@@ -16107,7 +16107,7 @@
       html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
       html += '<span>Total metres</span>';
       html += '<span style="display:flex;align-items:center;gap:6px">';
-      html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
+      html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" ' + (data.already_submitted ? 'disabled ' : '') + 'style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
       html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
       html += '</span></div>';
 
@@ -16122,7 +16122,18 @@
     });
 
     // Money summary (the backend persists the submitted figures).
-    html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(grandTotal), { id: 'invMoneySummary', gstSwitch: true });
+    if (data.already_submitted) {
+      var submittedMoney = _invoicePersistedMoney(data);
+      if (submittedMoney.complete) {
+        html += _invoiceMoneySummaryHtml(submittedMoney, { id: 'invMoneySummary' });
+      } else {
+        html += '<div class="inv-money-summary" id="invMoneySummary" data-invoice-money-summary>';
+        html += '<div class="inv-money-note">Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.</div>';
+        html += '</div>';
+      }
+    } else {
+      html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(grandTotal), { id: 'invMoneySummary', gstSwitch: true });
+    }
     html += '<span id="pmGrandTotal" hidden>$' + grandTotal.toFixed(2) + '</span>';
 
     // Submit button
@@ -16210,7 +16221,9 @@
         gst_on: _invGst
       }).then(function(res) {
         toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
-        loadHoursView();
+        _hoursData = Object.assign({}, _hoursData || {}, res, { already_submitted: true });
+        _invGst = _invoiceGstDefault(_hoursData);
+        renderPerMetreView(_hoursData);
       }).catch(function(err) {
         if (!navigator.onLine) {
           queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice', gst_on: _invGst });
@@ -16550,6 +16563,10 @@
     return '$' + Number(value || 0).toFixed(2);
   }
 
+  function _invoiceHasPersistedNumber(value) {
+    return value != null && value !== '' && Number.isFinite(Number(value));
+  }
+
   // Builder-only estimate. The browser never sends these calculated figures;
   // generate/submit requests send line inputs + gst_on and the backend persists
   // the authoritative gross/super/net amounts used by summaries and PDFs.
@@ -16571,16 +16588,25 @@
   function _invoicePersistedMoney(source) {
     source = source || {};
     var gross = source.gross_earned;
+    var superRate = source.super_rate;
     var superAmount = source.super_amount;
     var netPay = source.net_pay;
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
-    var gstAmount = source.gst_amount != null ? source.gst_amount : source.gst;
+    var gstAmount = source.gst_amount != null ? source.gst_amount : (typeof source.gst === 'boolean' ? null : source.gst);
     var total = source.total_inc != null ? source.total_inc : source.total;
+    var hasCoreMoney = _invoiceHasPersistedNumber(gross)
+      && _invoiceHasPersistedNumber(superRate)
+      && Number(superRate) > 0
+      && _invoiceHasPersistedNumber(superAmount)
+      && _invoiceHasPersistedNumber(netPay)
+      && gstOn != null;
+    var hasGstMoney = gstOn !== true
+      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(total));
     return {
-      complete: gross != null && superAmount != null && netPay != null,
+      complete: hasCoreMoney && hasGstMoney,
       estimated: false,
       gross_earned: gross == null ? null : Number(gross),
-      super_rate: _invoiceSuperRate(source.super_rate),
+      super_rate: superRate == null ? null : _invoiceSuperRate(superRate),
       super_amount: superAmount == null ? null : Number(superAmount),
       net_pay: netPay == null ? null : Number(netPay),
       gst_on: gstOn == null ? Number(gstAmount || 0) > 0 : gstOn,
@@ -16613,6 +16639,14 @@
   }
 
   function _currentInvoiceGross() {
+    var perMetreInputs = document.querySelectorAll('[id^="pmMetres_"]');
+    if (perMetreInputs.length > 0) {
+      var perMetreGross = 0;
+      perMetreInputs.forEach(function(input) {
+        perMetreGross += (parseFloat(input.value) || 0) * 35;
+      });
+      return Math.round(perMetreGross * 100) / 100;
+    }
     return _jobCentricActive ? _grandInvTotal() : _calcInvTotals().subtotal;
   }
 

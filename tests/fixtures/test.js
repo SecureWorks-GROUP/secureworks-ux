@@ -137,6 +137,17 @@ const test = base.extend({
       gst_on: false,
       already_submitted: false
     };
+    const submittedPerMetreMoney = {
+      ...perMetreInvoiceHours,
+      already_submitted: true,
+      gross_earned: 350,
+      super_rate: undefined,
+      super_amount: 42,
+      net_pay: 308,
+      gst_on: true,
+      gst_amount: 30.80,
+      total_inc: 338.80
+    };
     const workOrders = [
       {
         id: 'wo-fence-authorised',
@@ -422,6 +433,10 @@ const test = base.extend({
         crew_charges_on_my_jobs: { charges: [] },
         my_hours: feedScenario === 'trade-invoice-per-metre-gst'
           ? perMetreInvoiceHours
+          : feedScenario === 'trade-invoice-per-metre-missing-rate'
+            ? submittedPerMetreMoney
+            : feedScenario === 'trade-invoice-per-metre-missing-gst'
+              ? { ...submittedPerMetreMoney, super_rate: 0.12, gst_amount: undefined }
           : ['wo-labour-explainer', 'trade-invoice-super-gst'].includes(feedScenario)
             ? {
               ...labourExplainerHours,

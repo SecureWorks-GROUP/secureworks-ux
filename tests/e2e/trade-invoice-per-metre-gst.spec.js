@@ -40,6 +40,39 @@ test('carries the visible GST choice through submit_trade_invoice without browse
   expect(submit.body).not.toHaveProperty('net_pay');
 });
 
+test.describe('per-metre submit response is missing persisted super rate', () => {
+  test.use({ feedScenario: 'trade-invoice-per-metre-response-missing-rate' });
+
+  test('does not confirm the preview rate left in the pre-submit hours feed', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+
+    await page.getByRole('switch', { name: 'Add GST to this invoice' }).click();
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#toast')).toContainText('Invoice submitted');
+
+    const money = page.locator('[data-invoice-money-summary]');
+    await expect(money).toContainText('Submitted invoice totals are unavailable');
+    await expect(money).not.toContainText('Less super');
+    await expect(money).not.toContainText('Invoice total');
+  });
+});
+
+test.describe('submitted GST-off invoice has no separate persisted total', () => {
+  test.use({ feedScenario: 'trade-invoice-per-metre-gst-off-no-total' });
+
+  test('uses persisted net pay as the invoice total', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+
+    const money = page.locator('[data-invoice-money-summary]');
+    await expect(money).toContainText('Net pay$308.00');
+    await expect(money).toContainText('GSTOff');
+    await expect(money).toContainText('Invoice total$308.00');
+  });
+});
+
 [
   ['trade-invoice-per-metre-missing-rate', 'super rate'],
   ['trade-invoice-per-metre-missing-gst', 'GST amount']

@@ -16127,9 +16127,7 @@
       if (submittedMoney.complete) {
         html += _invoiceMoneySummaryHtml(submittedMoney, { id: 'invMoneySummary' });
       } else {
-        html += '<div class="inv-money-summary" id="invMoneySummary" data-invoice-money-summary>';
-        html += '<div class="inv-money-note">Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.</div>';
-        html += '</div>';
+        html += _invoiceMoneyUnavailableHtml({ id: 'invMoneySummary' });
       }
     } else {
       html += _invoiceMoneySummaryHtml(_invoicePreviewMoney(grandTotal), { id: 'invMoneySummary', gstSwitch: true });
@@ -16221,7 +16219,7 @@
         gst_on: _invGst
       }).then(function(res) {
         toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
-        _hoursData = Object.assign({}, _hoursData || {}, res, { already_submitted: true });
+        _hoursData = _invoiceSubmittedDataFromResponse(_hoursData, res);
         _invGst = _invoiceGstDefault(_hoursData);
         renderPerMetreView(_hoursData);
       }).catch(function(err) {
@@ -16594,6 +16592,9 @@
     var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
     var gstAmount = source.gst_amount != null ? source.gst_amount : (typeof source.gst === 'boolean' ? null : source.gst);
     var total = source.total_inc != null ? source.total_inc : source.total;
+    // With GST off, persisted net pay is the payable invoice total. Never let
+    // a legacy gross/line subtotal replace the backend's persisted net figure.
+    if (gstOn === false && _invoiceHasPersistedNumber(netPay)) total = netPay;
     var hasCoreMoney = _invoiceHasPersistedNumber(gross)
       && _invoiceHasPersistedNumber(superRate)
       && Number(superRate) > 0
@@ -16613,6 +16614,26 @@
       gst_amount: gstAmount == null ? null : Number(gstAmount),
       total_inc: total == null ? null : Number(total)
     };
+  }
+
+  function _invoiceSubmittedDataFromResponse(previous, response) {
+    response = response || {};
+    var submitted = Object.assign({}, previous || {}, response, { already_submitted: true });
+    [
+      'gross_earned', 'super_rate', 'super_amount', 'net_pay',
+      'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
+      'total_inc', 'total'
+    ].forEach(function(field) {
+      if (!Object.prototype.hasOwnProperty.call(response, field)) delete submitted[field];
+    });
+    return submitted;
+  }
+
+  function _invoiceMoneyUnavailableHtml(opts) {
+    opts = opts || {};
+    var attrs = ' class="inv-money-summary" data-invoice-money-summary';
+    if (opts.id) attrs += ' id="' + opts.id + '"';
+    return '<div' + attrs + '><div class="inv-money-note">Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.</div></div>';
   }
 
   function _invoiceMoneySummaryHtml(money, opts) {
@@ -17339,6 +17360,9 @@
   }
 
   function _attachInvoicePdfToXero(result, pdfData) {
+    if (!pdfData || !pdfData.money || !pdfData.money.complete) {
+      return Promise.resolve({ attached: false, skipped: true, reason: 'money_incomplete' });
+    }
     if (!result || !result.xero_bill_id) return Promise.resolve({ attached: false, skipped: true });
     try {
       var pdfDoc = _generateInvoicePDF(pdfData);
@@ -18044,7 +18068,7 @@
           total: _invoicePdfTotals(pdfRows, result.total_inc),
           money: _invoicePersistedMoney(result)
         };
-        _lastInvoicePdfData = pdfData;
+        _lastInvoicePdfData = pdfData.money.complete ? pdfData : null;
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
@@ -18065,18 +18089,17 @@
         if ((result.wo_labour_unresolved || []).length > 0) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Labour for ' + esc(result.wo_labour_unresolved.join(', ')) + ' was deducted from your invoice and shown to the office. Those crew must bill SecureWorks Group directly.</div>';
         }
-        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
         var submittedMoney = _invoicePersistedMoney(result);
         if (submittedMoney.complete) {
           successHtml += _invoiceMoneySummaryHtml(submittedMoney);
         } else {
-          var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : (Math.round(sub * 100) / 100).toFixed(2);
-          successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+          successHtml += _invoiceMoneyUnavailableHtml();
         }
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
-        successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
+        if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
         successHtml += '</div>';
         successHtml += '</div>';
@@ -18436,7 +18459,7 @@
 
         // Generate PDF for the trade's records
         var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: _invGst, total: _invoicePdfTotals(validRows, result.total_inc), money: _invoicePersistedMoney(result) };
-        _lastInvoicePdfData = pdfData;
+        _lastInvoicePdfData = pdfData.money.complete ? pdfData : null;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
 
@@ -18455,19 +18478,18 @@
         } else {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
         }
-        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
         var submittedMoney = _invoicePersistedMoney(result);
         if (submittedMoney.complete) {
           successHtml += _invoiceMoneySummaryHtml(submittedMoney);
         } else {
-          var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : t.total.toFixed(2);
-          successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+          successHtml += _invoiceMoneyUnavailableHtml();
         }
         successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + '</div>';
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
-        successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
+        if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
         successHtml += '</div>';
         successHtml += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:12px">Your invoice has been sent to the bookkeepers</div>';
@@ -18575,6 +18597,10 @@
   function _generateInvoicePDF(data) {
     var jsPDF = window.jspdf ? window.jspdf.jsPDF : null;
     if (!jsPDF) { toast('PDF library not loaded — try refreshing', true); return null; }
+    if (!data || !data.money || !data.money.complete) {
+      toast('Confirmed invoice totals are not available yet', true);
+      return null;
+    }
 
     var doc = new jsPDF('p', 'mm', 'a4');
     var details = loadTradeDetails();

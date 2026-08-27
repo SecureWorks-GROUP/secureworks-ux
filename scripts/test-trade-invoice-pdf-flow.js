@@ -103,11 +103,31 @@ async function runDynamicHelperCheck() {
   assert.strictEqual(totals.gst, 0, 'PDF GST delta is zero when backend total equals subtotal')
   assert.strictEqual(totals.total, 1030, 'PDF total matches backend total')
 
+  const incompleteAttach = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-incomplete' }, {
+    invoiceNumber: 'SW-INV-INCOMPLETE',
+    rows,
+    total: totals,
+    money: { complete: false },
+  })
+  assert.strictEqual(incompleteAttach.skipped, true, 'PDF helper refuses incomplete persisted money')
+  assert.strictEqual(incompleteAttach.reason, 'money_incomplete', 'PDF helper names the incomplete-money reason')
+  assert.strictEqual(apiCalls.length, 0, 'incomplete money never reaches the attachment API')
+
   const attachResult = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-123', invoice_number: 'SW-INV-TT-260618-001' }, {
     invoiceNumber: 'SW-INV-TT-260618-001',
     rows,
     notes: 'Test invoice',
     total: totals,
+    money: {
+      complete: true,
+      gross_earned: 1030,
+      super_rate: 0.12,
+      super_amount: 123.60,
+      net_pay: 906.40,
+      gst_on: false,
+      gst_amount: null,
+      total_inc: 906.40,
+    },
   })
 
   assert.strictEqual(attachResult.attached, true, 'PDF helper resolves with attached=true on success')

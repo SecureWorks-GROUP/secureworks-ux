@@ -271,7 +271,9 @@ const test = base.extend({
       'fencing-stage-lifecycle': ['update_my_assignment', 'clock_event'],
       'wo-labour-explainer': ['generate_trade_invoice'],
       'trade-invoice-super-gst': ['generate_trade_invoice'],
+      'trade-invoice-super-gst-incomplete': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
+      'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -431,13 +433,21 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: feedScenario === 'trade-invoice-per-metre-gst'
+        my_hours: ['trade-invoice-per-metre-gst', 'trade-invoice-per-metre-response-missing-rate'].includes(feedScenario)
           ? perMetreInvoiceHours
+          : feedScenario === 'trade-invoice-per-metre-gst-off-no-total'
+            ? {
+              ...submittedPerMetreMoney,
+              super_rate: 0.12,
+              gst_on: false,
+              gst_amount: undefined,
+              total_inc: undefined
+            }
           : feedScenario === 'trade-invoice-per-metre-missing-rate'
             ? submittedPerMetreMoney
             : feedScenario === 'trade-invoice-per-metre-missing-gst'
               ? { ...submittedPerMetreMoney, super_rate: 0.12, gst_amount: undefined }
-          : ['wo-labour-explainer', 'trade-invoice-super-gst'].includes(feedScenario)
+          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete'].includes(feedScenario)
             ? {
               ...labourExplainerHours,
               super_rate: 0.12,
@@ -514,13 +524,25 @@ const test = base.extend({
           };
         },
         generate_trade_invoice: ({ request }) => {
-          if (!['wo-labour-explainer', 'trade-invoice-super-gst'].includes(feedScenario) || persona !== 'installer') {
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];
-          if (!line || line.job_number !== 'SWF-26767') {
+          if (feedScenario !== 'trade-invoice-super-gst-incomplete' && (!line || line.job_number !== 'SWF-26767')) {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
+          }
+          if (feedScenario === 'trade-invoice-super-gst-incomplete') {
+            return {
+              ok: true,
+              invoice_number: 'SW-INV-E2E-INCOMPLETE',
+              xero_bill_id: 'xero-e2e-incomplete',
+              gross_earned: 400,
+              super_amount: 48,
+              net_pay: 352,
+              gst_on: false,
+              pending_ops_review: true
+            };
           }
           if (feedScenario === 'trade-invoice-super-gst') {
             if (body.gst_on !== true) {
@@ -551,7 +573,7 @@ const test = base.extend({
           };
         },
         submit_trade_invoice: ({ request }) => {
-          if (feedScenario !== 'trade-invoice-per-metre-gst' || persona !== 'fencing_manager') {
+          if (!['trade-invoice-per-metre-gst', 'trade-invoice-per-metre-response-missing-rate'].includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Per-metre GST fixture is not enabled' } };
           }
           const body = request.postDataJSON();
@@ -561,7 +583,7 @@ const test = base.extend({
           if (['super_rate', 'super_amount', 'gross_earned', 'net_pay'].some((field) => Object.hasOwn(body, field))) {
             return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
           }
-          return {
+          const response = {
             success: true,
             xero_bill_number: 'DRAFT-E2E-PM',
             gross_earned: 350,
@@ -572,6 +594,8 @@ const test = base.extend({
             gst_amount: 30.80,
             total_inc: 338.80
           };
+          if (feedScenario === 'trade-invoice-per-metre-response-missing-rate') delete response.super_rate;
+          return response;
         }
       },
       allowedWriteActions: WRITE_SCENARIOS[feedScenario] || []

@@ -71,3 +71,34 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   expect(submit.body).not.toHaveProperty('gross_earned');
   expect(submit.body).not.toHaveProperty('net_pay');
 });
+
+test.describe('submitted response has incomplete authoritative money', () => {
+  test.use({ feedScenario: 'trade-invoice-super-gst-incomplete' });
+
+  async function openBuilder(page, legacy) {
+    await signIn(page, PERSONAS.installer);
+    if (legacy) await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+  }
+
+  async function expectUnavailableWithoutPdf(page, feedRequests) {
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.getByText('Invoice Submitted')).toBeVisible();
+    await expect(page.getByText('Submitted invoice totals are unavailable')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
+    expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
+  }
+
+  test('job-centric success shows unavailable and does not expose or attach a PDF', async ({ appPage: page, feedRequests }) => {
+    await openBuilder(page, false);
+    await expectUnavailableWithoutPdf(page, feedRequests);
+  });
+
+  test('legacy success shows unavailable instead of its browser preview total', async ({ appPage: page, feedRequests }) => {
+    await openBuilder(page, true);
+    await expectUnavailableWithoutPdf(page, feedRequests);
+  });
+});

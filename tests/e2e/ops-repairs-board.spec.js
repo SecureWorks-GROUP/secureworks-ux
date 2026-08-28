@@ -20,7 +20,16 @@ const path = require('node:path');
 // .repair-kanban element (Playwright captures its full bounding box).
 test.use({ viewport: { width: 2200, height: 900 } });
 
-const EVIDENCE_DIR = path.resolve(__dirname, '../../docs/evidence/insurance-repairs-board-2026-08-13');
+// Screenshots go to test-results by default. They used to be written straight
+// into the committed docs/evidence/insurance-repairs-board-2026-08-13/ folder,
+// which meant every run of this suite — on any machine, with any font stack —
+// rewrote two tracked PNGs and left the working tree dirty for the next person.
+// That folder is DATED evidence of the board as it shipped on 2026-08-13, not a
+// build artifact, so refreshing it is now a deliberate act:
+//   REPAIRS_EVIDENCE_DIR=docs/evidence/insurance-repairs-board-<date> npx playwright test
+const EVIDENCE_DIR = process.env.REPAIRS_EVIDENCE_DIR
+  ? path.resolve(process.cwd(), process.env.REPAIRS_EVIDENCE_DIR)
+  : path.resolve(__dirname, '../../test-results/ops-repairs-board');
 const EXPECTED_LABELS = ['WO In', 'Scoping', 'Quoted', 'Variation', 'Approved', 'Materials', 'Scheduled', 'On Site', 'Complete'];
 
 function ensureEvidenceDir() {

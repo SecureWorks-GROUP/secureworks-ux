@@ -1418,6 +1418,11 @@
     .kanban-client { font-size: 13px; font-weight: 600; color: #1a1a1a; }
     .kanban-value { font-size: 12px; font-weight: 600; color: #1a9a5a; font-family: var(--sw-font-num); }
     .kanban-suburb { font-size: 11px; color: #5a6068; }
+    /* SWR- number on a repair card: quiet, monospaced, sits under the suburb. */
+    .kanban-jobnum { font-size: 11px; color: #5a6068; font-family: var(--sw-font-num); letter-spacing: 0.02em; }
+    /* Persisted repair stage disagrees with the job's own status. Amber, not
+       red: the card is not wrong, the two facts have simply drifted. */
+    .kanban-stage-drift { margin-top: 3px; font-size: 10px; font-weight: 600; color: #B26A00; }
     .kanban-meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
     .kanban-meta-badge {
       font-size: 10px;
@@ -1761,6 +1766,42 @@
     .ms-legend-row { display: flex; flex-direction: column; gap: 7px; }
     .ms-legend-item { display: flex; gap: 9px; align-items: center; font-size: 12px; color: var(--sw-text); }
     .ms-legend-item b { color: var(--sw-dark); }
+    /* <makesafe-intake-exceptions> — work orders that produced no job. */
+    .ms-exceptions {
+      margin: 0 0 8px; border: 1px solid #E2C9A0; border-radius: 8px;
+      background: #FFFBF4; overflow: hidden;
+    }
+    .ms-exceptions-clear {
+      padding: 6px 12px; font-size: 11px; color: #4A6B52;
+      background: #F4FAF5; border-color: #CBE3D2;
+    }
+    .ms-exceptions-head {
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
+      padding: 7px 12px; font-size: 12px; color: #7A4A12;
+    }
+    .ms-exceptions-head b { color: #6A3F0E; }
+    .ms-exceptions-counts { margin-left: auto; font-size: 11px; opacity: 0.85; }
+    .ms-exceptions-body { padding: 0 10px 10px; }
+    .ms-exceptions-grid {
+      display: grid; gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+    .ms-exception-card {
+      background: #fff; border: 1px solid #EADCC4; border-left: 3px solid #D98A2B;
+      border-radius: 6px; padding: 7px 9px; font-size: 11px; color: #3C3A36;
+    }
+    .ms-exception-card.ms-exception-alarm { border-left-color: #C0392B; }
+    .ms-exception-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .ms-exception-ref { font-weight: 700; color: #293C46; font-family: var(--sw-font-num); }
+    .ms-exception-builder { color: #6B7280; }
+    .ms-exception-action {
+      margin-left: auto; font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.03em; color: #A8621B;
+    }
+    .ms-exception-blocker { margin-top: 3px; line-height: 1.35; }
+    .ms-exception-sub { margin-top: 3px; color: #6B7280; }
+    .ms-exception-foot { margin-top: 4px; font-size: 10px; color: #8A8377; }
+    .ms-exceptions-note { margin-top: 8px; font-size: 10px; color: #8A6A3A; line-height: 1.4; }
     .ms-legend-toggle {
       background: none; border: none; color: var(--sw-mid); font-size: 11px; font-weight: 700;
       cursor: pointer; padding: 0; letter-spacing: 0.3px; float: right;
@@ -11438,7 +11479,15 @@ function repairStageOf(j) {
   return REPAIR_STATUS_TO_STAGE[status] || '';
 }
 function _renderRepairColumn(stage, jobs) {
-  var html = '<div class="kanban-col" data-status="repair_' + stage.key + '">';
+  // The Repairs columns are real drop zones now. Without ondragover the browser
+  // never gets its preventDefault, so it never fires a drop and kanbanDrop was
+  // unreachable from this board — which is why a repair drag wrote nothing.
+  // The Unmapped column is deliberately NOT a drop target: it is a diagnosis, not
+  // a stage, and there is no lawful repair_stage value to write for it.
+  var droppable = stage.key !== 'unmapped'
+    ? ' ondragover="kanbanDragOver(event)" ondragleave="kanbanDragLeave(event)" ondrop="kanbanDrop(event)"'
+    : '';
+  var html = '<div class="kanban-col" data-status="repair_' + stage.key + '"' + droppable + '>';
   html += '<div class="kanban-col-header" style="border-bottom-color:' + stage.accent + ';">'
     + stage.label + '<span class="count">' + jobs.length + '</span></div>';
   html += '<div class="kanban-body">';
@@ -11539,6 +11588,7 @@ function renderMakesafeKanban(container, columns) {
   var html = '<div class="ms-board" style="display:flex;flex-direction:column;height:100%;">';
   html += renderMakesafeLegend();
   html += renderMakesafeFeedNotices();
+  html += renderMakesafeIntakeExceptions();
   html += renderMakesafeTruthStrip();
 
   // Archive search bar — only shown when archive is visible
@@ -13279,6 +13329,10 @@ function buildMakesafeBoardColumns(payload, enrichById, opts) {
 // renderMakesafeFeedNotices.
 var _makesafeBoardPayload = null;
 var _makesafeBoardEnrichState = { status: 'covered', missing: 0, total: 0 };
+// Intake exception panel starts OPEN. Every row in it is a work order that
+// produced no job and is waiting on a person; collapsing it by default would
+// reproduce the invisibility the panel exists to end.
+var _makesafeExceptionsOpen = true;
 
 // True when the board payload already carries the close-out presentation the
 // card paints, so the makesafe_pipeline dual-fetch is not load-bearing.
@@ -13413,6 +13467,151 @@ function renderMakesafeFeedNotices() {
     + notices.map(function(n) { return '<span>&#9888; ' + n + '</span>'; }).join('')
     + '</div>';
 }
+
+// <makesafe-intake-exceptions>
+// Work orders that reached the pipeline and produced NO job.
+//
+// The backend has always computed these. `buildIntakeExceptionProjection` builds
+// a source-backed review card per actionable exception — the blocker sentence,
+// what information is missing, the originating emails and their attachments, and
+// the next action — and ships the whole projection in the `makesafe_board`
+// envelope as `intake_exceptions`. Until now the entire UX read exactly ONE key
+// off that object: `.degraded`, to paint the amber "panel failed" banner above.
+// `.cards`, `.source_alarms`, `.totals` and `.summary` were computed, shipped,
+// and thrown away every single load.
+//
+// That is the largest human-visibility gap in intake: a parse failure, an
+// identity-floor miss, an ambiguous scope or a quote-stage repair leaves NO card,
+// NO draft and NO job — the row exists only in `makesafe_intake_cases`, which
+// nothing renders. Nothing is lost from the database; everything was lost from
+// the screen.
+//
+// Note the backend's own recency window (`recent_window.days`): an exception
+// older than that drops out of `cards` and survives only as an integer in
+// `totals`, so the panel says so rather than implying the list is everything.
+function makesafeIntakeExceptionProjection() {
+  return (_makesafeBoardPayload || {}).intake_exceptions || null;
+}
+
+function _msExceptionRow(card) {
+  var ref = escapeHtml(String(card.external_ref || card.case_id || 'unknown ref'));
+  var builder = card.builder && (card.builder.name || card.builder.slug);
+  var received = card.received_at ? _makesafeTruthAgo(card.received_at) : '';
+  var blocker = escapeHtml(String(card.blocker_sentence || 'Needs review.'));
+  var subject = card.source_email_subject
+    ? escapeHtml(String(card.source_email_subject).slice(0, 110))
+    : '';
+  var verb = card.next_action && card.next_action.verb
+    ? escapeHtml(String(card.next_action.verb))
+    : 'review source';
+  var attachments = Array.isArray(card.attachment_pointers) ? card.attachment_pointers.length : 0;
+
+  var h = '<div class="ms-exception-card" data-exception-ref="' + ref + '">';
+  h += '<div class="ms-exception-head">';
+  h += '<span class="ms-exception-ref">' + ref + '</span>';
+  if (builder) h += '<span class="ms-exception-builder">' + escapeHtml(String(builder)) + '</span>';
+  h += '<span class="ms-exception-action">' + verb + '</span>';
+  h += '</div>';
+  h += '<div class="ms-exception-blocker">' + blocker + '</div>';
+  if (subject) h += '<div class="ms-exception-sub">' + subject + '</div>';
+  var foot = [];
+  if (received) foot.push(escapeHtml(received));
+  if (attachments) foot.push(attachments + ' attachment' + (attachments === 1 ? '' : 's'));
+  if (card.display_reason_code) foot.push(escapeHtml(String(card.display_reason_code)));
+  if (foot.length) h += '<div class="ms-exception-foot">' + foot.join(' &middot; ') + '</div>';
+  h += '</div>';
+  return h;
+}
+
+function _msSourceAlarmRow(alarm) {
+  var h = '<div class="ms-exception-card ms-exception-alarm">';
+  h += '<div class="ms-exception-head">';
+  h += '<span class="ms-exception-ref">Source ' +
+    escapeHtml(String(alarm.source_post_id || '').slice(0, 18)) + '</span>';
+  if (alarm.severity) {
+    h += '<span class="ms-exception-action">' + escapeHtml(String(alarm.severity)) + '</span>';
+  }
+  h += '</div>';
+  h += '<div class="ms-exception-blocker">' +
+    escapeHtml(String(alarm.blocker_sentence || 'Source could not be read.')) + '</div>';
+  if (alarm.next_action) {
+    h += '<div class="ms-exception-sub">' + escapeHtml(String(alarm.next_action)) + '</div>';
+  }
+  if (alarm.received_at) {
+    h += '<div class="ms-exception-foot">' + escapeHtml(_makesafeTruthAgo(alarm.received_at)) + '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function toggleMakesafeIntakeExceptions() {
+  _makesafeExceptionsOpen = !_makesafeExceptionsOpen;
+  var body = document.getElementById('msExceptionsBody');
+  var caret = document.getElementById('msExceptionsCaret');
+  if (body) body.style.display = _makesafeExceptionsOpen ? '' : 'none';
+  if (caret) caret.innerHTML = _makesafeExceptionsOpen ? '&#9662;' : '&#9656;';
+}
+
+function renderMakesafeIntakeExceptions() {
+  var projection = makesafeIntakeExceptionProjection();
+  // No projection at all, or a degraded one: say nothing here. The degraded case
+  // already has its own amber banner immediately above, and inventing an empty
+  // state for a panel that could not be read would be a lie.
+  if (!projection || projection.degraded) return '';
+
+  var cards = Array.isArray(projection.cards) ? projection.cards : [];
+  var alarms = Array.isArray(projection.source_alarms) ? projection.source_alarms : [];
+  var totals = projection.totals || {};
+  var summary = projection.summary || {};
+  var windowDays = (projection.recent_window || {}).days;
+
+  // Everything accounted for and nothing waiting on a person: one quiet line, so
+  // "no exceptions" is a stated fact rather than an absent panel.
+  if (!cards.length && !alarms.length) {
+    return '<div class="ms-exceptions ms-exceptions-clear" data-exceptions-empty="1">'
+      + '<span>&#10003; Intake clear &mdash; every work order in the last '
+      + escapeHtml(String(windowDays || '')) + ' days is accounted for, none waiting on a person.</span>'
+      + '</div>';
+  }
+
+  var counts = [];
+  if (cards.length) counts.push(cards.length + ' needing review');
+  if (alarms.length) counts.push(alarms.length + ' unreadable source' + (alarms.length === 1 ? '' : 's'));
+  var outOfWindow = Number(totals.out_of_window_exception_case_rows || 0);
+  var silent = Number(summary.accounted_silently || 0);
+
+  var h = '<div class="ms-exceptions" data-exceptions-count="' + (cards.length + alarms.length) + '">';
+  h += '<div class="ms-exceptions-head" onclick="toggleMakesafeIntakeExceptions()" role="button" tabindex="0">';
+  h += '<span id="msExceptionsCaret">' + (_makesafeExceptionsOpen ? '&#9662;' : '&#9656;') + '</span>';
+  h += '<b>Intake needs a person</b>';
+  h += '<span class="ms-exceptions-counts">'
+    + counts.map(function (c) { return escapeHtml(c); }).join(' &middot; ') + '</span>';
+  h += '</div>';
+  h += '<div id="msExceptionsBody" class="ms-exceptions-body"'
+    + (_makesafeExceptionsOpen ? '' : ' style="display:none;"') + '>';
+  h += '<div class="ms-exceptions-grid">';
+  cards.forEach(function (card) { h += _msExceptionRow(card); });
+  alarms.forEach(function (alarm) { h += _msSourceAlarmRow(alarm); });
+  h += '</div>';
+
+  // The honest footnote. These two numbers are the part of the lane the card
+  // list structurally cannot show.
+  var notes = [];
+  if (outOfWindow > 0) {
+    notes.push(outOfWindow + ' older exception' + (outOfWindow === 1 ? '' : 's')
+      + ' fell outside the ' + (windowDays || '') + '-day window and are counted, not listed.');
+  }
+  if (silent > 0) {
+    notes.push(silent + ' email' + (silent === 1 ? '' : 's')
+      + ' were accounted as non-work-order and never became a case.');
+  }
+  if (notes.length) {
+    h += '<div class="ms-exceptions-note">' + escapeHtml(notes.join(' ')) + '</div>';
+  }
+  h += '</div></div>';
+  return h;
+}
+// </makesafe-intake-exceptions>
 // </makesafe-board-canonical>
 function getMakesafeAssignmentRows(j) {
   var rows = [];
@@ -15795,8 +15994,17 @@ function renderKanbanCard(j, status) {
     } catch (e) { /* fail-safe: never break the kanban */ }
   }
 
-  if ((j.type === 'patio' || j.type === 'decking' || j.type === 'makesafe') && j.site_suburb) {
+  // 'repair' joins this list with the job type itself. Repair cards were stored
+  // type='makesafe' until the SWR- pipeline landed, so they showed a suburb; the
+  // type flip would silently have taken the suburb off every repair card.
+  if ((j.type === 'patio' || j.type === 'decking' || j.type === 'makesafe' || j.type === 'repair') && j.site_suburb) {
     html += '<div class="kanban-suburb">' + j.site_suburb + '</div>';
+  }
+  // Repair cards carry their SWR- number on the face. Every other board keeps the
+  // number in the list view and the drawer, but a repair operator is reconciling
+  // against a builder work order and the job number is how they do it.
+  if (j.type === 'repair' && j.job_number) {
+    html += '<div class="kanban-jobnum">' + j.job_number + '</div>';
   }
   html += '<div class="kanban-meta">';
   // N-party shared fence badge
@@ -15886,8 +16094,38 @@ function renderKanbanCard(j, status) {
   }
   var stale = j.days_in_stage > 14;
   html += '<div class="kanban-days' + (stale ? ' stale' : '') + '">' + j.days_in_stage + ' days in stage</div>';
+  // Repair cards only: say so when the persisted board stage and the job's own
+  // status have drifted apart. See repairStatusDriftChip.
+  html += repairStatusDriftChip(j);
   html += '</div>';
   return html;
+}
+
+// Once a repair card has been dragged, `repair_stage` wins over `jobs.status`
+// FOREVER — the backend's insuranceRepairStage gives the explicit stamp absolute
+// precedence. Before the stage was persisted a repair column was derived live
+// from status and therefore could not lie; afterwards it can. A card dragged to
+// Scoping and then completed and invoiced by any other path — the MCP,
+// complete_and_invoice, a direct status write — would keep showing Scoping with
+// nothing to say otherwise.
+//
+// That is the kind of drift nobody notices for six weeks and then nobody trusts
+// the board again. So it is made visible on the card instead of left silent:
+// when the two disagree, the card says what the STATUS thinks. The stage stays
+// authoritative for placement, because a drag is a deliberate human act and must
+// stick; this only refuses to hide the disagreement.
+function repairStatusDriftChip(j) {
+  if (!j || !isRepairJob(j)) return '';
+  var explicit = String((j.repair_stage || j.board_stage) || '').trim().toLowerCase();
+  if (REPAIR_STAGE_KEYS.indexOf(explicit) < 0) return '';
+  var fromStatus = REPAIR_STATUS_TO_STAGE[String(j.status || '').trim().toLowerCase()];
+  if (!fromStatus || fromStatus === explicit) return '';
+  var label = fromStatus;
+  for (var i = 0; i < REPAIR_STAGES.length; i++) {
+    if (REPAIR_STAGES[i].key === fromStatus) { label = REPAIR_STAGES[i].label; break; }
+  }
+  return '<div class="kanban-stage-drift" title="This card was placed by hand, so its column is a person&#39;s decision. The job status says ' +
+    label + '.">status: ' + label + '</div>';
 }
 
 /* ── Kanban drag-and-drop ── */
@@ -15903,8 +16141,29 @@ function toggleSubstage(headerEl) {
   }
 }
 
+// Strip the `repair_` prefix the Repairs columns carry in data-status. The cards
+// carry the BARE stage key (renderKanbanCard is handed stage.key), the columns
+// carry the prefixed one, so the two vocabularies only meet once this has run.
+// Returns '' for anything that is not a repair column key.
+function repairStageFromColumnKey(key) {
+  var raw = String(key || '');
+  if (raw.indexOf('repair_') !== 0) return '';
+  var stage = raw.slice('repair_'.length);
+  return REPAIR_STAGE_KEYS.indexOf(stage) >= 0 ? stage : '';
+}
+
 function kanbanDragAllowed(fromStatus, toStatus) {
   if (fromStatus === toStatus) return false;
+  if (_pipelineTab === 'repairs') {
+    // Free movement across the nine board stages, in both directions. These are
+    // presentation stages on a work order the builder already issued, not a money
+    // ladder: an operator who scoped a job before quoting it, or who has to walk a
+    // card back from Materials to Variation, is doing normal repair work. The
+    // money/lifecycle guards still live on jobs.status, which this never touches.
+    var toStage = repairStageFromColumnKey(toStatus);
+    return REPAIR_STAGE_KEYS.indexOf(fromStatus) !== -1 && toStage !== '' &&
+      toStage !== fromStatus;
+  }
   if (_pipelineTab === 'fencing') {
     // Free movement: any fencing stage → any other fencing stage (incl. archived). No cancelled.
     var allFencing = FENCING_STAGES.concat(['archived']);
@@ -15973,6 +16232,56 @@ async function kanbanDrop(e) {
   var fromStatus = _kanbanDragFromStatus;
   var jobId = _kanbanDragJobId;
   if (!jobId || !kanbanDragAllowed(fromStatus, toStatus)) return;
+
+  // ── Repairs board: persist the stage, not the status ──────────────────────
+  // update_job_status is deliberately NOT reused here. The nine repair columns
+  // are a board vocabulary; pushing them through jobs.status would force the
+  // canonical money/lifecycle spine to carry presentation state and would put
+  // 'quoted'/'variation' moves in front of every status-driven guard we have.
+  if (_pipelineTab === 'repairs') {
+    var toStage = repairStageFromColumnKey(toStatus);
+    if (!toStage) return;
+    var repairJob = null;
+    if (_pipelineData && _pipelineData.columns) {
+      Object.values(_pipelineData.columns).forEach(function (arr) {
+        (arr || []).forEach(function (j) { if (j.id === jobId) repairJob = j; });
+      });
+    }
+    var kcR = document.querySelector('#jobsBody .kanban-container');
+    _kanbanSavedScroll = kcR ? kcR.scrollLeft : 0;
+
+    // Optimistic move: repaint the card into its new column straight away so the
+    // board never shows the card sitting back where it was while the write flies.
+    var previousStage = repairJob ? repairJob.repair_stage : undefined;
+    if (repairJob) {
+      repairJob.repair_stage = toStage;
+      if (_pipelineData) renderJobs(_pipelineData);
+    }
+
+    var toLabelR = toStage;
+    for (var rs = 0; rs < REPAIR_STAGES.length; rs++) {
+      if (REPAIR_STAGES[rs].key === toStage) { toLabelR = REPAIR_STAGES[rs].label; break; }
+    }
+    try {
+      await opsPost('update_repair_stage', { jobId: jobId, stage: toStage });
+      showToast('Repair moved to ' + toLabelR, 'success');
+      var kcR2 = document.querySelector('#jobsBody .kanban-container');
+      _kanbanSavedScroll = kcR2 ? kcR2.scrollLeft : 0;
+      loadJobs();
+    } catch (err) {
+      // Revert: put the row back exactly as the server last described it and
+      // repaint, so a failed write can never leave the operator believing a card
+      // moved. Toast carries the server's reason.
+      if (repairJob) {
+        if (previousStage === undefined) delete repairJob.repair_stage;
+        else repairJob.repair_stage = previousStage;
+        if (_pipelineData) renderJobs(_pipelineData);
+      }
+      showToast('Failed to move repair: ' + err.message, 'error');
+    }
+    return;
+  }
+
   // Backwards-move confirmation (fencing pipeline only)
   if (_pipelineTab === 'fencing') {
     var order = FENCING_STAGES.concat(['archived']);
@@ -23303,6 +23612,33 @@ function closeQuickView() {
 }
 
 function getNextStatuses(current, jobType) {
+  // A repair job's BOARD COLUMN has one authority: the Repairs kanban, writing
+  // jobs.metadata.repair_stage through update_repair_stage. These buttons write
+  // jobs.status, which is a different thing — the money and lifecycle spine.
+  //
+  // Before this, an unrecognised type fell through to the generic ladder below,
+  // so a repair job was offered approvals / deposit / get_review: a patio money
+  // ladder on an insurance work order, and a second writer that moved status
+  // while the card stayed put. Gone.
+  //
+  // But offering NOTHING would be its own hole: complete_and_invoice refuses any
+  // job that is not in_progress / processing / scheduled / complete, so a repair
+  // stuck at 'accepted' with no status control could never be invoiced at all.
+  // So repair gets its own small, lawful ladder — the same spine make-safe
+  // travels. It cannot conflict with the board: the column comes from
+  // repair_stage, and any disagreement between the two now shows on the card
+  // (repairStatusDriftChip).
+  if (jobType === 'repair') {
+    var repairNext = {
+      'accepted': ['processing'],
+      'processing': ['scheduled', 'in_progress'],
+      'scheduled': ['in_progress'],
+      'in_progress': ['complete'],
+      'complete': ['invoiced'],
+      'invoiced': [],
+    };
+    return repairNext[current] || [];
+  }
   if (jobType === 'fencing') {
     var ft = {
       'quoted': ['accepted', 'cancelled'],

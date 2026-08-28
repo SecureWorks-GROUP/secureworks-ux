@@ -699,6 +699,23 @@
     .inv-totals { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; }
     .inv-totals-row { display: flex; justify-content: space-between; font-size: 13px; line-height: 1.8; }
     .inv-totals-row.grand { font-size: 16px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.15); margin-top: 4px; padding-top: 6px; }
+    .inv-money-summary { background: var(--sw-dark); color: #fff; border-radius: 12px; padding: 16px; margin-top: 16px; font-variant-numeric: tabular-nums; }
+    .inv-money-row { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; line-height: 1.8; }
+    .inv-money-row > :last-child { flex: 0 0 auto; font-weight: 650; text-align: right; }
+    .inv-money-row.net { font-size: 16px; font-weight: 750; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 5px; padding-top: 7px; }
+    .inv-money-row.total { font-size: 16px; font-weight: 750; color: #fff; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 7px; padding-top: 7px; }
+    .inv-money-note { margin-top: 9px; font-size: 11px; line-height: 1.4; color: rgba(255,255,255,0.68); overflow-wrap: anywhere; }
+    .inv-gst-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,0.16); margin-top: 9px; padding-top: 11px; }
+    .inv-gst-copy { min-width: 0; }
+    .inv-gst-copy strong { display: block; font-size: 13px; color: #fff; }
+    .inv-gst-copy span { display: block; margin-top: 1px; font-size: 11px; line-height: 1.35; color: rgba(255,255,255,0.68); }
+    .inv-gst-switch { display: flex; align-items: center; gap: 8px; min-width: 82px; min-height: 44px; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.26); border-radius: 10px; background: rgba(255,255,255,0.08); color: #fff; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; touch-action: manipulation; }
+    .inv-gst-switch:focus-visible { outline: 3px solid rgba(241,90,41,0.45); outline-offset: 2px; }
+    .inv-gst-track { position: relative; width: 32px; height: 18px; flex: 0 0 auto; border-radius: 10px; background: rgba(255,255,255,0.3); transition: background-color 150ms ease-out; }
+    .inv-gst-thumb { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 150ms ease-out; }
+    .inv-gst-switch[aria-checked="true"] { background: rgba(241,90,41,0.18); border-color: rgba(241,90,41,0.7); }
+    .inv-gst-switch[aria-checked="true"] .inv-gst-track { background: var(--sw-orange); }
+    .inv-gst-switch[aria-checked="true"] .inv-gst-thumb { transform: translateX(14px); }
     .inv-history-item { background: var(--sw-card); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; box-shadow: var(--sw-shadow); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
     .inv-history-item:active { background: var(--sw-light); }
     .inv-status { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; }
@@ -15686,7 +15703,7 @@
       var draft = JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null');
       if (draft && draft.rows && draft.rows.length > 0) {
         _invRows = draft.rows;
-        _invGst = false;
+        _invGst = _invoiceGstDefault(draft);
         _invNotes = draft.notes || '';
         _invoiceBuilderMode = draft.mode || 'weekly';
         _hoursWeekStart = draft.weekStart || _hoursWeekStart;
@@ -15711,6 +15728,7 @@
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
       _hoursData = data;
       _tradeRate = data.rate;
+      _invGst = _invoiceGstDefault(data);
       renderHoursView(data);
     }).catch(function(err) {
       container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
@@ -15808,7 +15826,7 @@
         ih += '<div class="inv-history-item" onclick="' + onclick + '">';
         ih += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
         ih += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-        ih += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total || 0).toFixed(2) + '</div>';
+        ih += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
         ih += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
         ih += '</div>';
       });
@@ -16047,6 +16065,13 @@
 
     var defaultRate = 35; // $35/m default
     var grandTotal = 0;
+    var submittedItemsByJob = {};
+    if (data.already_submitted) {
+      (Array.isArray(data.items) ? data.items : []).forEach(function(item) {
+        var itemJobId = String((item || {}).job_id || '');
+        if (itemJobId) submittedItemsByJob[itemJobId] = item;
+      });
+    }
 
     Object.keys(jobMap).forEach(function(jobId) {
       var entry = jobMap[jobId];
@@ -16071,7 +16096,24 @@
 
       var rate = defaultRate;
       var jobTotal = totalMetres * rate;
-      grandTotal += jobTotal;
+      var submittedLineAvailable = false;
+      if (data.already_submitted) {
+        var submittedItem = submittedItemsByJob[String(jobId)] || null;
+        submittedLineAvailable = !!submittedItem
+          && _invoiceHasPersistedNumber(submittedItem.metres)
+          && _invoiceHasPersistedNumber(submittedItem.rate_per_metre)
+          && _invoiceHasPersistedNumber(submittedItem.total);
+        if (submittedLineAvailable) {
+          totalMetres = Number(submittedItem.metres);
+          rate = Number(submittedItem.rate_per_metre);
+          jobTotal = Number(submittedItem.total);
+        } else {
+          totalMetres = null;
+          rate = null;
+          jobTotal = null;
+        }
+      }
+      if (jobTotal != null) grandTotal += jobTotal;
 
       html += '<div style="padding:14px;background:var(--sw-card);border-radius:12px;margin-bottom:10px;box-shadow:var(--sw-shadow)">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center">';
@@ -16084,33 +16126,50 @@
       html += '</div>';
       html += '</div>';
 
-      // Metres and rate
-      html += '<div style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px">';
-      html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-      html += '<span>Total metres</span>';
-      html += '<span style="display:flex;align-items:center;gap:6px">';
-      html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
-      html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
-      html += '</span></div>';
+      // Submitted line money is response-only. When the response does not
+      // return an item, keep the job identity but hide scope-derived figures.
+      if (data.already_submitted && !submittedLineAvailable) {
+        html += '<div data-per-metre-line-unavailable style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px;font-size:12px;color:var(--sw-text-sec)">Submitted line figures are unavailable. Open the saved invoice for confirmed figures.</div>';
+      } else {
+        html += '<div style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
+        html += '<span>Total metres</span>';
+        html += '<span style="display:flex;align-items:center;gap:6px">';
+        html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" ' + (data.already_submitted ? 'disabled ' : '') + 'style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
+        html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
+        html += '</span></div>';
 
-      html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-      html += '<span>Rate</span><span style="font-weight:600">$' + rate.toFixed(2) + '/m</span></div>';
+        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
+        html += '<span>Rate</span><span style="font-weight:600">$' + rate.toFixed(2) + '/m</span></div>';
 
-      html += '<div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--sw-border);padding-top:8px">';
-      html += '<span>Total</span><span id="pmTotal_' + esc(jobId) + '">$' + jobTotal.toFixed(2) + '</span></div>';
-      html += '</div>';
+        html += '<div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--sw-border);padding-top:8px">';
+        html += '<span>Total</span><span id="pmTotal_' + esc(jobId) + '">$' + jobTotal.toFixed(2) + '</span></div>';
+        html += '</div>';
+      }
 
       html += '</div>';
     });
 
-    // Grand total
-    html += '<div style="padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow);margin-top:8px">';
-    html += '<div style="display:flex;justify-content:space-between;font-size:18px;font-weight:800"><span>Total</span><span id="pmGrandTotal">$' + grandTotal.toFixed(2) + '</span></div>';
-    html += '</div>';
+    // Money summary (the backend persists the submitted figures).
+    if (data.already_submitted) {
+      var submittedMoney = _invoicePersistedMoney(data);
+      if (submittedMoney.complete) {
+        html += _invoiceMoneySummaryHtml(submittedMoney, { id: 'invMoneySummary' });
+      } else {
+        html += _invoiceMoneyUnavailableHtml({ id: 'invMoneySummary' });
+      }
+    } else {
+      html += _invoicePreviewSummaryHtml(grandTotal, { id: 'invMoneySummary', gstSwitch: true });
+    }
+    html += '<span id="pmGrandTotal" hidden>$' + grandTotal.toFixed(2) + '</span>';
 
     // Submit button
     if (data.already_submitted) {
-      html += '<div class="hours-submitted-pill">&#10003; Submitted to Xero' + (data.xero_bill_number ? ' — ' + esc(data.xero_bill_number) : '') + '</div>';
+      if (_invoiceXeroPushPending(data)) {
+        html += '<div class="hours-submitted-pill">&#10003; Invoice saved — Xero sync pending</div>';
+      } else {
+        html += '<div class="hours-submitted-pill">&#10003; Submitted to Xero' + (data.xero_bill_number ? ' — ' + esc(data.xero_bill_number) : '') + '</div>';
+      }
     } else {
       html += '<button class="hours-submit-btn" onclick="submitPerMetreInvoice()" style="background:var(--sw-orange)">Submit Invoice</button>';
     }
@@ -16156,6 +16215,7 @@
     });
     var grand = document.getElementById('pmGrandTotal');
     if (grand) grand.textContent = '$' + grandTotal.toFixed(2);
+    _updateInvoiceMoneySummary(grandTotal);
   };
 
   window.submitPerMetreInvoice = function() {
@@ -16167,7 +16227,7 @@
     inputs.forEach(function(input) {
       var jobId = input.id.replace('pmMetres_', '');
       var metres = parseFloat(input.value) || 0;
-      items.push({ job_id: jobId, metres: metres, rate_per_metre: rate, total: metres * rate });
+      items.push({ job_id: jobId, metres: metres, rate_per_metre: rate });
       grandTotal += metres * rate;
     });
 
@@ -16177,7 +16237,7 @@
         var jobLabel = document.getElementById('pmMetres_' + it.job_id);
         var card = jobLabel ? jobLabel.closest('[style*="background"]') : null;
         var jobName = card ? (card.querySelector('[style*="font-weight:700"]') || {}).textContent || it.job_id : it.job_id;
-        summary += jobName + ': ' + it.metres.toFixed(1) + 'm = $' + it.total.toFixed(2) + '\n';
+        summary += jobName + ': ' + it.metres.toFixed(1) + 'm = $' + (it.metres * rate).toFixed(2) + '\n';
       }
     });
     summary += '\nTotal: $' + grandTotal.toFixed(2);
@@ -16188,13 +16248,19 @@
         invoice_type: 'per_metre',
         rate_per_metre: rate,
         items: items,
-        notes: 'Per-metre invoice'
+        notes: 'Per-metre invoice',
+        gst_on: _invGst
       }).then(function(res) {
-        toast('Invoice submitted' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
-        loadHoursView();
+        if (!_invoiceSubmitSucceeded(res)) {
+          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
+        }
+        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted'));
+        _hoursData = _invoiceSubmittedDataFromResponse(_hoursData, res);
+        _invGst = _invoiceGstDefault(_hoursData);
+        renderPerMetreView(_hoursData);
       }).catch(function(err) {
         if (!navigator.onLine) {
-          queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice' });
+          queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice', gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
           return;
         }
@@ -16229,9 +16295,13 @@
       api('submit_trade_invoice', null, {
         week_ending: _hoursData.week_ending,
         hourly_rate: editedRate,
-        notes: ''
+        notes: '',
+        gst_on: _invGst
       }).then(function(res) {
-        toast('Invoice submitted to Xero as draft bill' + (res.xero_bill_number ? ' — ' + res.xero_bill_number : ''));
+        if (!_invoiceSubmitSucceeded(res)) {
+          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
+        }
+        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as draft bill'));
         loadHoursView(); // reload to show submitted state
       }).catch(function(err) {
         toast(friendlyError(err), true);
@@ -16277,7 +16347,7 @@
     _invNotes = '';
     _draftInvoiceId = null;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
-    _invGst = false;
+    _invGst = _invoiceGstDefault(_hoursData);
     _jobCards = [];
 
     // Job-centric prefill (cutover): build one card per whitelisted assignment
@@ -16313,7 +16383,7 @@
       _invRows = [];
       _invExtraLines = [];
       _invoiceBuilderMode = inv.week_start ? 'weekly' : 'expense';
-      _invGst = false;
+      _invGst = _invoiceGstDefault(inv);
       // Restore all lines into _invRows
       (inv.lines || []).forEach(function(l) {
         _invRows.push({
@@ -16413,10 +16483,14 @@
       });
     }
 
-    // Totals
-    html += '<div class="inv-totals">';
-    html += '<div class="inv-totals-row grand"><span>Total</span><span>$' + Number(inv.total_inc || inv.subtotal_ex || 0).toFixed(2) + '</span></div>';
-    html += '</div>';
+    // Persisted money truth. Incomplete authoritative fields stay visibly
+    // unavailable rather than falling back to a legacy gross or subtotal.
+    var persistedMoney = _invoicePersistedMoney(inv);
+    if (persistedMoney.complete) {
+      html += _invoiceMoneySummaryHtml(persistedMoney);
+    } else {
+      html += _invoiceMoneyUnavailableHtml();
+    }
 
     // Notes
     if (inv.notes) {
@@ -16471,7 +16545,7 @@
       html += '<div class="inv-history-item" onclick="' + onclick + '">';
       html += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
       html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-      html += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total || 0).toFixed(2) + '</div>';
+      html += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
       html += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
       html += '</div>';
     });
@@ -16484,15 +16558,236 @@
   var _knownJobNumbers = []; // populated from search_all_jobs
   var _knownJobByNumber = {};
   var _jobSearchTimer = null;
-  var _invGst = false; // GST removed — always false
+  var _invGst = false; // Per-invoice choice; backend persists and prices it.
   var _jobCentricActive = false; // updated by renderInvoiceBuilder; read by _refreshJobCardLine
+  function _invoiceBool(source, keys) {
+    source = source || {};
+    for (var i = 0; i < keys.length; i++) {
+      if (source[keys[i]] != null) return source[keys[i]] === true;
+    }
+    return null;
+  }
+
+  function _invoiceGstDefault(source) {
+    var direct = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
+    if (direct != null) return direct;
+    if (source && typeof source.gst === 'boolean') return source.gst;
+    if (source && source.gst != null && Number(source.gst) > 0) return true;
+    var tradeDetails = (source && source.trade_details) || (_user && _user.trade_details) || {};
+    var profile = _invoiceBool(tradeDetails, ['gst_on', 'gst_registered', 'gstRegistered']);
+    if (profile != null) return profile;
+    var saved = loadTradeDetails();
+    return saved.gstRegistered === true;
+  }
+
+  function _invoiceSuperRate(value) {
+    var rate = Number(value);
+    if (!(rate > 0)) return null;
+    if (rate > 1) rate = rate / 100;
+    return rate;
+  }
+
+  function _invoiceRateLabel(rate) {
+    var pct = Math.round(Number(rate || 0) * 10000) / 100;
+    return pct.toFixed(pct % 1 ? 2 : 0) + '%';
+  }
+
+  function _invoiceMoney(value) {
+    return '$' + Number(value || 0).toFixed(2);
+  }
+
+  function _invoiceHasPersistedNumber(value) {
+    return value != null && value !== '' && Number.isFinite(Number(value));
+  }
+
+  function _invoiceSubmitSucceeded(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    var hasPersistedIdentity = [
+      result.invoice_id,
+      result.invoice_number,
+      result.xero_bill_id,
+      result.xero_bill_number
+    ].some(function(value) {
+      return value != null && String(value).trim() !== '';
+    });
+
+    // A failed Xero push is a saved-invoice success only when the response says
+    // so and names the durable invoice that the office can recover.
+    if (result.code === 'XERO_PUSH_FAILED') return result.success === true && hasPersistedIdentity;
+    if (result.error) return false;
+    if (result.success === false || result.ok === false) return false;
+    return result.success === true || result.ok === true || hasPersistedIdentity;
+  }
+
+  function _invoiceXeroPushPending(result) {
+    return !!result && result.code === 'XERO_PUSH_FAILED';
+  }
+
+  function _invoiceSubmitStatusMessage(result, successMessage) {
+    result = result || {};
+    if (_invoiceXeroPushPending(result)) {
+      var pendingStatus = 'Invoice saved — Xero sync pending. The office will push it manually.';
+      var pendingDetail = result.userMessage || result.error;
+      return pendingDetail && pendingDetail !== pendingStatus
+        ? pendingStatus + ' ' + pendingDetail
+        : pendingStatus;
+    }
+    return successMessage + (result.xero_bill_number ? ' — ' + result.xero_bill_number : '');
+  }
+
+  function _invoiceGeneratedStatusMessage(result) {
+    result = result || {};
+    var facts = [];
+    if (_invoiceHasPersistedNumber(result.total_hours)) facts.push(Number(result.total_hours) + 'h');
+    var money = _invoicePersistedMoney(result);
+    facts.push(money.complete ? _invoiceMoney(money.total_inc) : 'confirmed figures unavailable');
+    return _invoiceSubmitStatusMessage(result, 'Invoice generated') + ' — ' + facts.join(', ');
+  }
+
+  // Builder-only estimate. The browser never sends these calculated figures;
+  // generate/submit requests send line inputs + gst_on and the backend persists
+  // the authoritative gross/super/net amounts used by summaries and PDFs.
+  function _invoicePreviewMoney(gross) {
+    gross = Math.round((Number(gross) || 0) * 100) / 100;
+    var rate = _invoiceSuperRate(_hoursData && _hoursData.super_rate);
+    if (rate == null) return null;
+    var superAmount = Math.round(gross * rate * 100) / 100;
+    return {
+      complete: true,
+      estimated: true,
+      gross_earned: gross,
+      super_rate: rate,
+      super_amount: superAmount,
+      net_pay: Math.round((gross - superAmount) * 100) / 100,
+      gst_on: _invGst
+    };
+  }
+
+  function _invoicePersistedMoney(source) {
+    source = source || {};
+    var gross = source.gross_earned;
+    var superRate = source.super_rate;
+    var superAmount = source.super_amount;
+    var netPay = source.net_pay;
+    var gstOn = _invoiceBool(source, ['gst_on', 'gst_registered', 'gstRegistered']);
+    var gstAmount = source.gst_amount;
+    // GST-on invoices require the backend's authoritative inclusive total.
+    // GST-off invoices are payable at the persisted net figure. Legacy `total`
+    // can be a gross/line subtotal, so it is never money authority here.
+    var total = gstOn === false ? netPay : source.total_inc;
+    var hasCoreMoney = _invoiceHasPersistedNumber(gross)
+      && _invoiceHasPersistedNumber(superRate)
+      && Number(superRate) > 0
+      && _invoiceHasPersistedNumber(superAmount)
+      && _invoiceHasPersistedNumber(netPay)
+      && gstOn != null;
+    var hasGstMoney = gstOn !== true
+      || (_invoiceHasPersistedNumber(gstAmount) && _invoiceHasPersistedNumber(source.total_inc));
+    return {
+      complete: hasCoreMoney && hasGstMoney,
+      estimated: false,
+      gross_earned: gross == null ? null : Number(gross),
+      super_rate: superRate == null ? null : _invoiceSuperRate(superRate),
+      super_amount: superAmount == null ? null : Number(superAmount),
+      net_pay: netPay == null ? null : Number(netPay),
+      gst_on: gstOn == null ? Number(gstAmount || 0) > 0 : gstOn,
+      gst_amount: gstAmount == null ? null : Number(gstAmount),
+      total_inc: total == null ? null : Number(total)
+    };
+  }
+
+  function _invoiceSubmittedAmountText(source) {
+    var money = _invoicePersistedMoney(source);
+    return money.complete ? _invoiceMoney(money.total_inc) : 'Figures unavailable';
+  }
+
+  function _invoiceSubmittedDataFromResponse(previous, response) {
+    response = response || {};
+    var submitted = Object.assign({}, previous || {}, response, { already_submitted: true });
+    [
+      'gross_earned', 'super_rate', 'super_amount', 'net_pay',
+      'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
+      'total_inc', 'total', 'items', 'invoice_items'
+    ].forEach(function(field) {
+      if (!Object.prototype.hasOwnProperty.call(response, field)) delete submitted[field];
+    });
+    return submitted;
+  }
+
+  function _invoiceMoneyUnavailableHtml(opts) {
+    opts = opts || {};
+    var attrs = ' class="inv-money-summary" data-invoice-money-summary';
+    if (opts.id) attrs += ' id="' + opts.id + '"';
+    var message = opts.preview
+      ? 'Invoice estimate unavailable until SecureWorks supplies the super rate.'
+      : 'Submitted invoice totals are unavailable. Open the saved invoice for the confirmed figures.';
+    var html = '<div' + attrs + '><div class="inv-money-note">' + message + '</div>';
+    if (opts.gstSwitch) {
+      html += '<div class="inv-gst-control">';
+      html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
+      html += '<button type="button" class="inv-gst-switch" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="invGstChanged(!' + (_invGst ? 'true' : 'false') + ')">';
+      html += '<span class="inv-gst-track" aria-hidden="true"><span class="inv-gst-thumb"></span></span><span data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</span></button>';
+      html += '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function _invoicePreviewSummaryHtml(gross, opts) {
+    var money = _invoicePreviewMoney(gross);
+    return money
+      ? _invoiceMoneySummaryHtml(money, opts)
+      : _invoiceMoneyUnavailableHtml(Object.assign({}, opts || {}, { preview: true }));
+  }
+
+  function _invoiceMoneySummaryHtml(money, opts) {
+    opts = opts || {};
+    var attrs = ' class="inv-money-summary" data-invoice-money-summary';
+    if (opts.id) attrs += ' id="' + opts.id + '"';
+    var html = '<div' + attrs + '>';
+    html += '<div class="inv-money-row"><span>Earned</span><span>' + _invoiceMoney(money.gross_earned) + '</span></div>';
+    html += '<div class="inv-money-row"><span>Less super (' + _invoiceRateLabel(money.super_rate) + ')</span><span>−' + _invoiceMoney(money.super_amount) + '</span></div>';
+    html += '<div class="inv-money-row net"><span>Net pay</span><span>' + _invoiceMoney(money.net_pay) + '</span></div>';
+    if (opts.gstSwitch) {
+      html += '<div class="inv-gst-control">';
+      html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
+      html += '<button type="button" class="inv-gst-switch" role="switch" aria-label="Add GST to this invoice" aria-checked="' + (_invGst ? 'true' : 'false') + '" onclick="invGstChanged(!' + (_invGst ? 'true' : 'false') + ')">';
+      html += '<span class="inv-gst-track" aria-hidden="true"><span class="inv-gst-thumb"></span></span><span data-invoice-gst-state>' + (_invGst ? 'On' : 'Off') + '</span></button>';
+      html += '</div>';
+    } else {
+      html += '<div class="inv-money-row"><span>GST</span><span>' + (money.gst_on ? _invoiceMoney(money.gst_amount) : 'Off') + '</span></div>';
+      if (money.total_inc != null) html += '<div class="inv-money-row total"><span>Invoice total</span><span>' + _invoiceMoney(money.total_inc) + '</span></div>';
+    }
+    if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function _currentInvoiceGross() {
+    var perMetreInputs = document.querySelectorAll('[id^="pmMetres_"]');
+    if (perMetreInputs.length > 0) {
+      var perMetreGross = 0;
+      perMetreInputs.forEach(function(input) {
+        perMetreGross += (parseFloat(input.value) || 0) * 35;
+      });
+      return Math.round(perMetreGross * 100) / 100;
+    }
+    return _jobCentricActive ? _grandInvTotal() : _calcInvTotals().subtotal;
+  }
+
+  function _updateInvoiceMoneySummary(gross) {
+    var host = document.getElementById('invMoneySummary');
+    if (!host) return;
+    var replacement = document.createElement('div');
+    replacement.innerHTML = _invoicePreviewSummaryHtml(gross == null ? _currentInvoiceGross() : gross, { id: 'invMoneySummary', gstSwitch: true });
+    host.replaceWith(replacement.firstChild);
+  }
 
   // Persist invoice draft to sessionStorage (survives background kill)
   function _saveInvDraft() {
     try {
       _syncRowsFromDOM();
       sessionStorage.setItem('sw_inv_draft', JSON.stringify({
-        rows: _invRows, gst: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
+        rows: _invRows, gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
     } catch(e) {}
@@ -16575,6 +16870,7 @@
       if (te) te.textContent = '$' + t.total.toFixed(2);
       if (be) be.textContent = 'Submit Invoice — $' + t.total.toFixed(2);
     }
+    _updateInvoiceMoneySummary();
     _saveInvDraft();
   }
 
@@ -16592,7 +16888,8 @@
     _updateInvTotals();
   };
 
-  window.invGstChanged = function() {
+  window.invGstChanged = function(next) {
+    _invGst = next === true;
     _updateInvTotals();
   };
 
@@ -17099,73 +17396,77 @@
     return Math.round((jcSub + extraSub) * 100) / 100;
   }
 
-  function _jobCardAmount(c) {
-    if (!c) return 0;
-    if (c.commission_mode) return Math.round((Number(c.commission_amount) || 0) * 100) / 100;
-    if (c.wo_mode) return Math.round(_woNet(c) * 100) / 100;
-    return Math.round((Number(c.hours || 0) * Number(c.rate || 0)) * 100) / 100;
-  }
+  // A submitted PDF is evidence of what the backend persisted, so it may only
+  // use relational invoice lines returned by the successful response. Browser
+  // rows are previews and can differ after server-side rate/reconciliation work.
+  function _invoicePersistedPdfRows(result) {
+    var rawLines = _invoiceResponseLines(result);
+    if (!rawLines || rawLines.length === 0) return null;
 
-  function _jobCentricPdfRows(cards, manualRows) {
     var rows = [];
-    (cards || []).forEach(function(c) {
-      if (!c || !c.included) return;
-      var amount = _jobCardAmount(c);
-      var hours = 0;
-      var rate = 0;
-      var desc = c.description || '';
-      var division = c.job_type || c.division || 'Make Safe';
-      if (c.commission_mode) {
-        hours = 1;
-        rate = amount;
-        division = 'Commission';
-        desc = 'Commission — ' + (c.job_number || '') + ' — ' + (c.client_name || '');
-      } else if (c.wo_mode) {
-        hours = 1;
-        rate = amount;
-        division = 'Work Order';
-        desc = _woBreakdownText(c) + (desc ? ' — ' + desc : '');
-      } else {
-        hours = Number(c.hours || 0);
-        rate = Number(c.rate || 0);
-      }
+    for (var i = 0; i < rawLines.length; i++) {
+      var line = rawLines[i] || {};
+      var date = line.line_date != null && String(line.line_date).trim() !== ''
+        ? String(line.line_date)
+        : (line.date != null && String(line.date).trim() !== '' ? String(line.date) : null);
+      var jobNumber = line.job_number != null && String(line.job_number).trim() !== '' ? String(line.job_number) : null;
+      var description = line.description != null && String(line.description).trim() !== '' ? String(line.description) : null;
+      var division = line.division != null && String(line.division).trim() !== '' ? String(line.division) : null;
+      var hasHours = _invoiceHasPersistedNumber(line.total_hours) || _invoiceHasPersistedNumber(line.quantity);
+      var hasRate = _invoiceHasPersistedNumber(line.hourly_rate) || _invoiceHasPersistedNumber(line.unit_rate);
+      if (!date || !jobNumber || !description || !division || !hasHours || !hasRate || !_invoiceHasPersistedNumber(line.line_total_ex)) return null;
       rows.push({
-        date: c.scheduled_date || '',
-        job_text: c.job_number || '',
-        description: desc,
+        date: date,
+        job_text: jobNumber,
+        description: description,
         division: division,
-        hours: hours,
-        rate: rate,
-        amount: amount,
-        client_name: c.client_name || '',
-        site_address: c.site_address || ''
+        hours: _invoiceHasPersistedNumber(line.total_hours)
+          ? Number(line.total_hours)
+          : Number(line.quantity),
+        rate: _invoiceHasPersistedNumber(line.hourly_rate)
+          ? Number(line.hourly_rate)
+          : Number(line.unit_rate),
+        amount: Number(line.line_total_ex),
+        client_name: line.client_name || '',
+        site_address: line.site_address || ''
       });
-    });
-    (manualRows || []).forEach(function(r) {
-      if (!r) return;
-      rows.push({
-        date: r.date || '',
-        job_text: r.job_text || '',
-        description: r.description || '',
-        division: r.division || 'General Labour',
-        hours: Number(r.hours || 0),
-        rate: Number(r.rate || 0),
-        amount: Math.round((Number(r.amount || 0)) * 100) / 100,
-        client_name: r.client_name || '',
-        site_address: r.site_address || ''
-      });
-    });
+    }
     return rows;
   }
 
-  function _invoicePdfTotals(rows, resultTotal) {
-    var subtotal = (rows || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-    subtotal = Math.round(subtotal * 100) / 100;
-    var total = resultTotal != null ? Math.round(Number(resultTotal) * 100) / 100 : subtotal;
-    return { subtotal: subtotal, gst: Math.round((total - subtotal) * 100) / 100, total: total };
+  function _invoiceResponseLines(result) {
+    result = result || {};
+    return Array.isArray(result.lines)
+      ? result.lines
+      : (result.invoice && Array.isArray(result.invoice.lines) ? result.invoice.lines : null);
+  }
+
+  function _invoiceSubmittedLineCountHtml(result) {
+    var persistedLines = _invoiceResponseLines(result);
+    var text = persistedLines
+      ? persistedLines.length + ' line item' + (persistedLines.length !== 1 ? 's' : '')
+      : 'Submitted line count unavailable';
+    return '<div style="font-size:13px;color:var(--sw-text-sec)">' + text + '</div>';
+  }
+
+  function _invoicePdfDataFromResponse(result, notes) {
+    result = result || {};
+    var money = _invoicePersistedMoney(result);
+    var rows = _invoicePersistedPdfRows(result);
+    if (!money.complete || !rows) return null;
+    return {
+      invoiceNumber: result.invoice_number,
+      rows: rows,
+      notes: notes || '',
+      gst: money.gst_on,
+      money: money
+    };
   }
 
   function _attachInvoicePdfToXero(result, pdfData) {
+    if (!pdfData || !pdfData.money || !pdfData.money.complete || !Array.isArray(pdfData.rows) || pdfData.rows.length === 0) {
+      return Promise.resolve({ attached: false, skipped: true, reason: 'persisted_response_incomplete' });
+    }
     if (!result || !result.xero_bill_id) return Promise.resolve({ attached: false, skipped: true });
     try {
       var pdfDoc = _generateInvoicePDF(pdfData);
@@ -17194,8 +17495,8 @@
   }
 
   window.__SW_TRADE_INVOICE_PDF_TESTS = {
-    _jobCentricPdfRows: _jobCentricPdfRows,
-    _invoicePdfTotals: _invoicePdfTotals,
+    _invoicePersistedPdfRows: _invoicePersistedPdfRows,
+    _invoicePdfDataFromResponse: _invoicePdfDataFromResponse,
     _attachInvoicePdfToXero: _attachInvoicePdfToXero
   };
 
@@ -17558,6 +17859,7 @@
       var invSubBtn = document.getElementById('invSubmitBtn');
       if (invSubBtn) invSubBtn.textContent = 'Submit Invoice — $' + grand.toFixed(2);
     }
+    _updateInvoiceMoneySummary();
   }
 
   // [M4 U2] True when a job card is a make-safe job. Uses the flag stamped at
@@ -17841,15 +18143,17 @@
         week_start: _hoursWeekStart || getWeekStartMonday(0),
         manual_assignments: manualAssignments,
         extra_items: extraItems,
-        notes: _invNotes
+        notes: _invNotes,
+        gst_on: _invGst
       }).then(function(result) {
+        result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
         //   it just didn't reach Xero. Run the normal success path, show userMessage as a yellow banner.
         // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
         //   is a HARD block — invoice NOT created. Toast userMessage, keep them on the form, re-enable.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!xeroWarn && (result.ok === false || result.error)) {
+        if (!_invoiceSubmitSucceeded(result)) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
@@ -17860,22 +18164,15 @@
           renderInvoiceBuilder();
           return;
         }
-        var pdfRows = _jobCentricPdfRows(_jobCards, legacyManualRows);
-        var pdfData = {
-          invoiceNumber: result.invoice_number,
-          rows: pdfRows,
-          notes: _invNotes,
-          gst: false,
-          total: _invoicePdfTotals(pdfRows, result.total_inc)
-        };
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
         _lastInvoicePdfData = pdfData;
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
-        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
+        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + esc(result.invoice_number) + '</div>';
         if (xeroWarn) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.') + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.pending_ops_review) {
           successHtml += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:8px">Sent to the office for verification. You will be paid once approved.</div>';
         } else if (result.xero_bill_number || result.xero_bill_id) {
@@ -17889,13 +18186,18 @@
         if ((result.wo_labour_unresolved || []).length > 0) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Labour for ' + esc(result.wo_labour_unresolved.join(', ')) + ' was deducted from your invoice and shown to the office. Those crew must bill SecureWorks Group directly.</div>';
         }
-        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
-        var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : (Math.round(sub * 100) / 100).toFixed(2);
-        successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
+        var submittedMoney = _invoicePersistedMoney(result);
+        if (submittedMoney.complete) {
+          successHtml += _invoiceMoneySummaryHtml(submittedMoney);
+        } else {
+          successHtml += _invoiceMoneyUnavailableHtml();
+        }
+        successHtml += _invoiceSubmittedLineCountHtml(result);
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
-        successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
+        if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
         successHtml += '</div>';
         successHtml += '</div>';
@@ -17904,7 +18206,7 @@
         });
       }).catch(function(err) {
         if (!navigator.onLine) {
-          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes });
+          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes, gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
         } else {
           toast('Failed: ' + friendlyError(err), true);
@@ -18046,11 +18348,11 @@
     html += '<textarea id="invNotes" rows="2" placeholder="Additional notes for bookkeeper" style="width:100%;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;font-family:var(--sw-font);color:var(--sw-dark);resize:vertical;box-sizing:border-box">' + esc(_invNotes) + '</textarea>';
     html += '</div>';
 
-    // ── Totals (dark card) ──
+    // ── Money summary ──
     var t = _calcInvTotals();
-    html += '<div class="inv-totals">';
-    html += '<div class="inv-totals-row grand"><span>Total</span><span id="invTotal">$' + t.total.toFixed(2) + '</span></div>';
-    html += '</div>';
+    var builderGross = _jobCentricActive ? _grandInvTotal() : t.subtotal;
+    html += _invoicePreviewSummaryHtml(builderGross, { id: 'invMoneySummary', gstSwitch: true });
+    html += '<span id="invTotal" hidden>$' + builderGross.toFixed(2) + '</span>';
 
     // ── Action buttons ──
     if (_jobCentricActive) {
@@ -18175,7 +18477,8 @@
       week_start: isExpense ? null : (_hoursWeekStart || null),
       extra_items: _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; }).map(_rowToExtraItem),
       notes: _invNotes,
-      labour_lines: []
+      labour_lines: [],
+      gst_on: _invGst
     }).then(function(res) {
       _draftInvoiceId = res.draft_id;
       toast('Draft saved');
@@ -18227,15 +18530,17 @@
         week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
         draft_id: _draftInvoiceId || undefined,
         extra_items: extraItems,
-        notes: _invNotes
+        notes: _invNotes,
+        gst_on: _invGst
       }).then(function(result) {
+        result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
         //   it just didn't reach Xero. Fall through to the success path; the yellow banner below
         //   surfaces userMessage. Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE /
         //   ALREADY_INVOICED) is a HARD block — invoice NOT created; toast, re-enable, keep on form.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!xeroWarn && (result.ok === false || result.error)) {
+        if (!_invoiceSubmitSucceeded(result)) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
@@ -18251,8 +18556,8 @@
           return;
         }
 
-        // Generate PDF for the trade's records
-        var pdfData = { invoiceNumber: result.invoice_number, rows: validRows, notes: _invNotes, gst: false, total: t };
+        // Generate a PDF only from the successful response's persisted lines.
+        var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
         _lastInvoicePdfData = pdfData;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
@@ -18261,10 +18566,10 @@
         var successHtml = '';
         successHtml += '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
-        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Invoice Submitted</div>';
+        successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + result.invoice_number + '</div>';
         if (xeroWarn) {
-          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(result.userMessage || 'Invoice saved — Xero sync pending. Admin will sync manually.') + '</div>';
+          successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.xero_bill_number) {
           successHtml += '<div style="font-size:12px;color:var(--sw-green);margin-bottom:8px">&#10003; Sent to Xero — ' + result.xero_bill_number + '</div>';
         } else if (result.xero_bill_id) {
@@ -18272,17 +18577,21 @@
         } else {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Saved locally — could not push to Xero. Admin will sync manually.</div>';
         }
-        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false) {
+        if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
-        var displayTotal = result.total_inc != null ? Number(result.total_inc).toFixed(2) : t.total.toFixed(2);
-        successHtml += '<div style="font-size:24px;font-weight:700;color:var(--sw-dark);margin:12px 0">$' + displayTotal + '</div>';
-        successHtml += '<div style="font-size:13px;color:var(--sw-text-sec)">' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '') + '</div>';
+        var submittedMoney = _invoicePersistedMoney(result);
+        if (submittedMoney.complete) {
+          successHtml += _invoiceMoneySummaryHtml(submittedMoney);
+        } else {
+          successHtml += _invoiceMoneyUnavailableHtml();
+        }
+        successHtml += _invoiceSubmittedLineCountHtml(result);
         successHtml += '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px;max-width:280px;margin-left:auto;margin-right:auto">';
-        successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
+        if (_lastInvoicePdfData) successHtml += '<button class="hours-submit-btn" onclick="downloadInvoicePDF()" style="margin:0;background:var(--sw-dark)">Download PDF</button>';
         successHtml += '<button class="hours-submit-btn" onclick="loadHoursView()" style="margin:0">Done</button>';
         successHtml += '</div>';
-        successHtml += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:12px">Your invoice has been sent to the bookkeepers</div>';
+        successHtml += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:12px">' + (xeroWarn ? 'Your invoice is saved; Xero sync is pending' : 'Your invoice has been sent to the bookkeepers') + '</div>';
         successHtml += '</div>';
         container.innerHTML = successHtml;
         _invRows = [];
@@ -18294,7 +18603,7 @@
           queueOfflineAction('generate_trade_invoice', {
             week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
             draft_id: _draftInvoiceId || undefined,
-            extra_items: extraItems, notes: _invNotes
+            extra_items: extraItems, notes: _invNotes, gst_on: _invGst
           });
           toast('Offline — invoice queued, will submit when back online');
         } else {
@@ -18387,6 +18696,14 @@
   function _generateInvoicePDF(data) {
     var jsPDF = window.jspdf ? window.jspdf.jsPDF : null;
     if (!jsPDF) { toast('PDF library not loaded — try refreshing', true); return null; }
+    if (!data || !data.money || !data.money.complete) {
+      toast('Confirmed invoice totals are not available yet', true);
+      return null;
+    }
+    if (!Array.isArray(data.rows) || data.rows.length === 0) {
+      toast('Confirmed invoice lines are not available yet', true);
+      return null;
+    }
 
     var doc = new jsPDF('p', 'mm', 'a4');
     var details = loadTradeDetails();
@@ -18491,8 +18808,8 @@
       doc.text((r.job_text || '—').slice(0, 16), colJob, y);
       doc.text((r.description || '').slice(0, 40), colDesc, y);
       doc.text(divShort[r.division] || (r.division || '').slice(0, 10), colDiv, y);
-      doc.text(r.hours ? r.hours.toFixed(2) : '—', colHrs, y);
-      doc.text(r.rate ? '$' + r.rate.toFixed(2) : '—', colRate, y);
+      doc.text(Number(r.hours).toFixed(2), colHrs, y);
+      doc.text('$' + Number(r.rate).toFixed(2), colRate, y);
       doc.setFont('helvetica', 'bold');
       doc.text(r.amount ? '$' + r.amount.toFixed(2) : '$0.00', colAmt, y, { align: 'right' });
       doc.setFont('helvetica', 'normal');
@@ -18506,10 +18823,28 @@
     y += 6;
     doc.setFontSize(9);
     doc.setTextColor(80, 90, 100);
-    doc.text('Subtotal', margin + 105, y);
+    var persistedMoney = data.money;
+    doc.text('Earned', margin + 105, y);
     doc.setTextColor(41, 60, 70);
-    doc.text('$' + data.total.subtotal.toFixed(2), colAmt, y, { align: 'right' });
+    doc.text('$' + Number(persistedMoney.gross_earned).toFixed(2), colAmt, y, { align: 'right' });
     y += 5;
+    if (persistedMoney) {
+      doc.setTextColor(80, 90, 100);
+      doc.text('Less super (' + _invoiceRateLabel(persistedMoney.super_rate) + ')', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text('-$' + Number(persistedMoney.super_amount).toFixed(2), colAmt, y, { align: 'right' });
+      y += 5;
+      doc.setTextColor(80, 90, 100);
+      doc.text('Net pay', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text('$' + Number(persistedMoney.net_pay).toFixed(2), colAmt, y, { align: 'right' });
+      y += 5;
+      doc.setTextColor(80, 90, 100);
+      doc.text('GST', margin + 105, y);
+      doc.setTextColor(41, 60, 70);
+      doc.text(persistedMoney.gst_on ? '$' + Number(persistedMoney.gst_amount || 0).toFixed(2) : 'Off', colAmt, y, { align: 'right' });
+      y += 5;
+    }
     // Total with orange accent
     doc.setFillColor(41, 60, 70);
     doc.rect(margin + 105, y - 1, cw - 105, 8, 'F');
@@ -18517,7 +18852,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.text('TOTAL', margin + 108, y + 4.5);
-    doc.text('$' + data.total.total.toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
+    doc.text('$' + Number(persistedMoney.total_inc).toFixed(2), colAmt - 2, y + 4.5, { align: 'right' });
     y += 14;
 
     // ── Notes ──
@@ -18559,11 +18894,12 @@
     showConfirm('Generate Invoice?', 'This will create an invoice for all completed hours this week. You can\'t edit it after submitting.', 'Generate').then(function(ok) {
       if (!ok) return;
 
-      api('generate_trade_invoice', {}, { week_start: weekStart }).then(function(result) {
-        if (result.error) { toast(result.error, true); return; }
-        var msg = 'Invoice generated — ' + result.total_hours + 'h, $' + Number(result.total_inc).toLocaleString();
-        if (result.xero_warning) msg += ' (Xero sync pending)';
-        toast(msg);
+      api('generate_trade_invoice', {}, { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) }).then(function(result) {
+        if (!_invoiceSubmitSucceeded(result)) {
+          toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
+          return;
+        }
+        toast(_invoiceGeneratedStatusMessage(result));
         loadHoursView(); // Refresh to show submitted state
       }).catch(function(err) {
         toast('Failed: ' + (err.message || err), true);
@@ -20206,7 +20542,7 @@
         html += '    <div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + label + '</div>';
         html += '    <div style="font-size:11px;color:var(--sw-text-sec)">' + esc(inv.xero_bill_number || inv.status || '') + '</div>';
         html += '  </div>';
-        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(inv.total).toFixed(2) + '</div>';
+        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
         html += '</div>';
       });
       container.innerHTML = html;
@@ -22214,7 +22550,9 @@
       accountNo:     (document.getElementById('tdAccountNo') || {}).value || '',
       accountName:   (document.getElementById('tdAccountName') || {}).value || '',
       licence:       (document.getElementById('tdLicence') || {}).value || '',
-      gstRegistered: false,
+      // Preserve the known backend/profile choice. The invoice builder owns
+      // per-invoice gst_on; editing bank details must not silently turn GST off.
+      gstRegistered: _invoiceGstDefault(_user),
     };
 
     // Save to localStorage immediately

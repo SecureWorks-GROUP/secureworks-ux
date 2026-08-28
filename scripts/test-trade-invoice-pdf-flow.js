@@ -13,36 +13,16 @@ function extractFunction(name) {
   return html.slice(start, next === -1 ? html.length : next)
 }
 
-const jobCentricSubmit = html.slice(
-  html.indexOf('window.submitJobCentricInvoice = function()'),
-  html.indexOf('function renderInvoiceBuilder()', html.indexOf('window.submitJobCentricInvoice = function()')),
-)
-assert(jobCentricSubmit.includes('legacyManualRows'), 'job-centric submit keeps legacy manual rows for PDF generation')
-assert(jobCentricSubmit.includes('_jobCentricPdfRows(_jobCards, legacyManualRows)'), 'job-centric submit builds PDF rows before clearing state')
-assert(jobCentricSubmit.includes('return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach)'), 'job-centric submit waits for PDF attach before clearing state')
-assert(jobCentricSubmit.includes('downloadInvoicePDF()'), 'job-centric success screen keeps a PDF download button')
-
-const attachHelper = extractFunction('_attachInvoicePdfToXero')
-assert(attachHelper.includes("return api('attach_invoice_pdf'"), 'shared helper returns the attach_invoice_pdf request')
-assert(attachHelper.includes('result.xero_bill_id'), 'shared helper uses the Xero bill id from submit result')
-assert(attachHelper.includes('non-blocking'), 'shared helper keeps PDF attachment non-blocking')
-
-const pdfRows = extractFunction('_jobCentricPdfRows')
-assert(pdfRows.includes('Commission') && pdfRows.includes('Work Order'), 'job-centric PDF rows cover commission and work-order modes')
-assert(pdfRows.includes('c.scheduled_date') && pdfRows.includes('c.job_number'), 'job-centric PDF rows include date and job number')
-
-const attachCalls = (html.match(/api\('attach_invoice_pdf'/g) || []).length
-assert.strictEqual(attachCalls, 1, 'attach_invoice_pdf is implemented in one shared helper')
-
 async function runDynamicHelperCheck() {
   const apiCalls = []
+  const pdfText = []
   class FakeJsPdf {
     setFillColor() {}
     rect() {}
     setTextColor() {}
     setFontSize() {}
     setFont() {}
-    text() {}
+    text(value) { pdfText.push(value) }
     setDrawColor() {}
     setLineWidth() {}
     line() {}
@@ -78,34 +58,123 @@ async function runDynamicHelperCheck() {
   context.global = context
 
   const dynamicSource = [
-    extractFunction('_jobCardAmount'),
-    extractFunction('_jobCentricPdfRows'),
-    extractFunction('_invoicePdfTotals'),
+    extractFunction('_invoiceHasPersistedNumber'),
+    extractFunction('_invoiceSubmitSucceeded'),
+    extractFunction('_invoiceXeroPushPending'),
+    extractFunction('_invoiceSubmitStatusMessage'),
+    extractFunction('_invoiceGeneratedStatusMessage'),
+    extractFunction('_invoiceBool'),
+    extractFunction('_invoiceSuperRate'),
+    extractFunction('_invoiceMoney'),
+    extractFunction('_invoicePersistedMoney'),
+    extractFunction('_invoiceResponseLines'),
+    extractFunction('_invoicePersistedPdfRows'),
+    extractFunction('_invoicePdfDataFromResponse'),
     extractFunction('_attachInvoicePdfToXero'),
+    extractFunction('_invoiceRateLabel'),
     extractFunction('_generateInvoicePDF'),
   ].join('\n')
   vm.runInNewContext(dynamicSource, context)
 
-  const rows = context._jobCentricPdfRows([
-    { included: true, job_number: 'SWMS-26671', scheduled_date: '2026-06-01', hours: 3, rate: 100, client_name: 'AJ Building', job_type: 'Make Safe' },
-    { included: true, job_number: 'SWMS-26672', scheduled_date: '2026-06-02', commission_mode: true, commission_amount: 175, client_name: 'AJ Building' },
-    { included: true, job_number: 'SWMS-26673', scheduled_date: '2026-06-03', wo_mode: true, wo_allocated: 500, wo_labour_deduction: 125, description: 'Temp fence' },
-  ], [
-    { date: '2026-06-04', job_text: 'SWMS-26674', description: 'Manual labour', division: 'General Labour', hours: 2, rate: 90, amount: 180 },
-  ])
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(rows.map((r) => r.amount))), [300, 175, 375, 180], 'job-centric PDF rows preserve normal, commission, work-order and manual amounts')
-
-  const totals = context._invoicePdfTotals(rows, 1030)
-  assert.strictEqual(totals.subtotal, 1030, 'PDF subtotal matches row amounts')
-  assert.strictEqual(totals.gst, 0, 'PDF GST delta is zero when backend total equals subtotal')
-  assert.strictEqual(totals.total, 1030, 'PDF total matches backend total')
-
-  const attachResult = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-123', invoice_number: 'SW-INV-TT-260618-001' }, {
-    invoiceNumber: 'SW-INV-TT-260618-001',
-    rows,
-    notes: 'Test invoice',
-    total: totals,
+  const persistedResult = {
+    invoice_number: 'SW-INV-TT-260618-001',
+    gross_earned: 1030,
+    super_rate: 0.12,
+    super_amount: 123.60,
+    net_pay: 906.40,
+    gst_on: false,
+    total_inc: 906.40,
+    lines: [
+      { line_date: '2026-06-01', job_number: 'SWMS-26671', description: 'Persisted zero-value line', division: 'Make Safe', line_type: 'labour', total_hours: 0, hourly_rate: 0, line_total_ex: 300 },
+      { line_date: '2026-06-02', job_number: 'SWMS-26672', description: 'Persisted commission', division: 'Fencing', line_type: 'commission', quantity: 1, unit_rate: 175, line_total_ex: 175 },
+      { line_date: '2026-06-03', job_number: 'SWMS-26673', description: 'Persisted work order', division: 'Fencing', line_type: 'work_order', quantity: 1, unit_rate: 375, line_total_ex: 375 },
+      { line_date: '2026-06-04', job_number: 'SWMS-26674', description: 'Persisted manual labour', division: 'General Labour', line_type: 'labour', total_hours: 2, hourly_rate: 90, line_total_ex: 180 },
+    ],
+  }
+  const rows = context._invoicePersistedPdfRows(persistedResult)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rows.map((r) => r.amount))), [300, 175, 375, 180], 'PDF rows use persisted response line amounts')
+  assert.strictEqual(context._invoicePersistedPdfRows({ lines: [] }), null, 'missing persisted response lines suppress the PDF')
+  assert.strictEqual(context._invoicePersistedPdfRows({ lines: [{ description: 'No persisted amount' }] }), null, 'an incomplete persisted line suppresses the PDF')
+  ;[
+    ['line_date'],
+    ['job_number'],
+    ['description'],
+    ['division'],
+    ['total_hours', 'quantity'],
+    ['hourly_rate', 'unit_rate'],
+    ['line_total_ex'],
+  ].forEach((fields) => {
+    const incompleteLine = { ...persistedResult.lines[0] }
+    fields.forEach((field) => delete incompleteLine[field])
+    assert.strictEqual(
+      context._invoicePersistedPdfRows({ lines: [incompleteLine] }),
+      null,
+      `missing persisted ${fields.join('/')} suppresses the PDF`,
+    )
   })
+  assert.strictEqual(context._invoiceSubmitSucceeded({}), false, 'an unknown response does not imply invoice success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ ok: true }), true, 'explicit ok confirms invoice success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ invoice_number: 'SW-INV-PERSISTED' }), true, 'durable invoice identity confirms persisted success')
+  assert.strictEqual(context._invoiceSubmitSucceeded({ ok: false, invoice_number: 'SW-INV-CONFLICT' }), false, 'an explicit failure overrides invoice identity')
+  assert.strictEqual(
+    context._invoiceSubmitSucceeded({ code: 'XERO_PUSH_FAILED', success: true, invoice_id: 'invoice-saved' }),
+    true,
+    'a failed Xero push is successful only when the saved invoice is identified',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitSucceeded({ code: 'XERO_PUSH_FAILED', success: true }),
+    false,
+    'a failed Xero push without durable invoice identity does not imply success',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitStatusMessage({ code: 'XERO_PUSH_FAILED', success: true, invoice_id: 'saved', error: 'Xero unavailable' }, 'Invoice submitted to Xero'),
+    'Invoice saved — Xero sync pending. The office will push it manually. Xero unavailable',
+    'a saved invoice with failed Xero push always states the durable pending status before backend detail',
+  )
+  assert.strictEqual(
+    context._invoiceSubmitStatusMessage({ success: true, xero_bill_number: 'DRAFT-123' }, 'Invoice submitted to Xero'),
+    'Invoice submitted to Xero — DRAFT-123',
+    'a confirmed Xero success keeps the success label and persisted bill number',
+  )
+  const gstOnLegacyTotal = context._invoicePersistedMoney({
+    gross_earned: 100,
+    super_rate: 0.12,
+    super_amount: 12,
+    net_pay: 88,
+    gst_on: true,
+    gst_amount: 8.8,
+    total: 96.8,
+  })
+  assert.strictEqual(gstOnLegacyTotal.complete, false, 'GST-on money rejects legacy total without authoritative total_inc')
+  const gstOnLegacyAmount = context._invoicePersistedMoney({
+    gross_earned: 100,
+    super_rate: 0.12,
+    super_amount: 12,
+    net_pay: 88,
+    gst_on: true,
+    gst: 8.8,
+    total_inc: 96.8,
+  })
+  assert.strictEqual(gstOnLegacyAmount.complete, false, 'GST-on money rejects legacy gst without authoritative gst_amount')
+  const generatedPending = context._invoiceGeneratedStatusMessage({
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+    invoice_id: 'saved',
+    userMessage: 'Xero unavailable',
+  })
+  assert(generatedPending.includes('Invoice saved — Xero sync pending.'), 'quick generation always names the pending Xero state')
+  assert(generatedPending.includes('confirmed figures unavailable'), 'quick generation names missing persisted money')
+  assert(!generatedPending.includes('NaN'), 'quick generation never formats missing money as NaN')
+  assert(html.includes('toast(_invoiceGeneratedStatusMessage(result));'), 'generateTradeInvoice routes its toast through persisted money and submit status truth')
+
+  const incompleteAttach = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-incomplete' }, null)
+  assert.strictEqual(incompleteAttach.skipped, true, 'PDF helper refuses an incomplete persisted response')
+  assert.strictEqual(incompleteAttach.reason, 'persisted_response_incomplete', 'PDF helper names the persisted-response reason')
+  assert.strictEqual(apiCalls.length, 0, 'an incomplete persisted response never reaches the attachment API')
+
+  const pdfData = context._invoicePdfDataFromResponse(persistedResult, 'Test invoice')
+  assert(pdfData, 'complete persisted money and lines enable the PDF')
+  const attachResult = await context._attachInvoicePdfToXero({ xero_bill_id: 'xero-bill-123', invoice_number: 'SW-INV-TT-260618-001' }, pdfData)
 
   assert.strictEqual(attachResult.attached, true, 'PDF helper resolves with attached=true on success')
   assert.strictEqual(apiCalls.length, 1, 'PDF helper attaches exactly once')
@@ -113,6 +182,30 @@ async function runDynamicHelperCheck() {
   assert.strictEqual(apiCalls[0].body.xero_bill_id, 'xero-bill-123', 'PDF helper uses returned Xero bill id')
   assert.strictEqual(apiCalls[0].body.pdf_base64, 'JVBERi1GQUtF', 'PDF helper strips data URI prefix')
   assert.strictEqual(apiCalls[0].body.filename, 'SW-INV-TT-260618-001.pdf', 'PDF helper names file from invoice number')
+
+  pdfText.length = 0
+  context._generateInvoicePDF({
+    invoiceNumber: 'SW-INV-TT-260618-002',
+    rows,
+    notes: '',
+    money: {
+      complete: true,
+      gross_earned: 1030,
+      super_rate: 0.12,
+      super_amount: 123.60,
+      net_pay: 906.40,
+      gst_on: true,
+      gst_amount: 91.52,
+      total_inc: 997.92,
+    },
+  })
+  assert(pdfText.includes('Earned'), 'PDF labels the persisted gross amount as earned')
+  assert(pdfText.includes('Less super (12%)'), 'PDF shows super as its own deduction line')
+  assert(pdfText.includes('Net pay'), 'PDF shows persisted net pay')
+  assert(pdfText.includes('GST'), 'PDF shows the persisted GST line')
+  assert(pdfText.includes('$997.92'), 'PDF total uses the backend-persisted invoice total')
+  assert(pdfText.includes('0.00'), 'PDF renders persisted zero hours instead of a blank')
+  assert(pdfText.includes('$0.00'), 'PDF renders persisted zero rates instead of a blank')
 }
 
 runDynamicHelperCheck().then(() => {

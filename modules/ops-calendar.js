@@ -101,11 +101,16 @@ async function loadCalendar() {
 
     // Parse crew availability → keyed by "CrewName_date"
     _calAvailability = {};
-    if (results[2] && Array.isArray(results[2])) {
+    // ops-api returns { availability: [...] }, never a bare array, so the old
+    // Array.isArray test never passed and availability never painted. Tolerate
+    // a bare array too, so this survives a future shape change.
+    var availRows = (results[2] && results[2].availability)
+      || (Array.isArray(results[2]) ? results[2] : []);
+    if (availRows.length) {
       // Build userId→name lookup from crew list
       var userIdToName = {};
       _crewList.forEach(function(u) { userIdToName[u.id] = u.name; });
-      results[2].forEach(function(a) {
+      availRows.forEach(function(a) {
         var name = userIdToName[a.user_id];
         if (name) {
           _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };

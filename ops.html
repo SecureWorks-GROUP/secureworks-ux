@@ -781,6 +781,12 @@
       color: #DC2626; background: rgba(239,68,68,0.10); padding: 1px 3px; border-radius: 3px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%;
     }
+    .cal-schedule-leave-badge {
+      position: absolute; bottom: 2px; left: 4px; font-size: 7px; font-weight: 700;
+      color: #B45309; background: rgba(245,158,11,0.16); padding: 1px 3px; border-radius: 3px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%;
+      pointer-events: none;
+    }
     .cal-recurrence-icon { display: inline-block; width: 12px; height: 12px; vertical-align: middle; margin-left: 2px; opacity: 0.6; }
     .cal-day-check { display:flex;align-items:center;gap:2px;font-size:11px;font-weight:600;color:var(--sw-text-sec);cursor:pointer;padding:4px 6px;border-radius:4px;border:1px solid var(--sw-border); }
     .cal-day-check input:checked + span, .cal-day-check:has(input:checked) { background:var(--sw-orange);color:#fff;border-color:var(--sw-orange); }
@@ -8060,6 +8066,7 @@ var _calDivFilters = (function() {
 var _calDivFilter = _calDivFilters.indexOf('all') !== -1 ? 'all' : _calDivFilters; // compat shim
 var _calUnschedOpen = false;
 var _calAvailability = {}; // { 'CrewName_date': { status, note } }
+var _calLeaveByDate = {}; // { date: ['CrewName', ...] } — Schedule view leave badges
 var _calReadiness = {};   // { jobId: { score, status, blockers, warnings, completeness } }
 var _calPopupAssignment = null; // currently open popup data
 var _calViewMode = (function() {
@@ -8428,12 +8435,25 @@ async function loadCalendar() {
     // Crew availability shading
     opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
       _calAvailability = {};
-      if (av && Array.isArray(av)) {
+      _calLeaveByDate = {};
+      // ops-api returns { availability: [...] }, never a bare array. The old
+      // Array.isArray(av) test therefore never passed, _calAvailability stayed
+      // empty, and NO crew availability has ever painted — not the swimlane
+      // shading, not the leave badge, and not the drag guard in crewDayClash.
+      // Tolerate a bare array too, so this survives a future shape change.
+      var rows = (av && av.availability) || (Array.isArray(av) ? av : []);
+      if (rows.length) {
         var userIdToName = {};
         _crewList.forEach(function(u) { userIdToName[u.id] = u.name; });
-        av.forEach(function(a) {
+        rows.forEach(function(a) {
           var name = userIdToName[a.user_id];
-          if (name) _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
+          if (!name) return;
+          _calAvailability[name + '_' + a.date] = { status: a.status, note: a.note || '' };
+          // Schedule view has no crew rows, so leave is keyed by date there and
+          // painted as a named badge on the day cell.
+          if (a.status === 'leave') {
+            (_calLeaveByDate[a.date] = _calLeaveByDate[a.date] || []).push(name);
+          }
         });
         renderCalendar(); // re-paint with availability backgrounds
       }
@@ -9474,6 +9494,13 @@ function renderScheduleView(container, range) {
       html += ' onclick="openAssignmentModal(null,\'' + ds + '\')">';
       html += '<span class="cal-schedule-day-num">' + dd.getDate() + '</span>';
       if (isHoliday) html += '<span class="cal-schedule-holiday-badge">' + escapeHtml(holidayMap[ds]) + '</span>';
+      // Crew on leave. Schedule view has no crew rows, so name them on the day.
+      var leaveNames = (_calEventFilters.leave && _calLeaveByDate[ds]) || [];
+      if (leaveNames.length) {
+        var leaveLabel = leaveNames.join(', ') + ' on leave';
+        html += '<span class="cal-schedule-leave-badge" title="' + escapeHtml(leaveLabel) + '">'
+             + escapeHtml(leaveNames.join(', ')) + ' away</span>';
+      }
       html += '</div>';
     });
     html += '</div>';

@@ -12766,6 +12766,10 @@ function getMakesafeFamilyLabel(family) {
   if (family === 'roof_report') return 'Roof Report';
   if (family === 'temp_fence_makesafe') return 'Temporary Fence MakeSafe';
   if (family === 'general_makesafe') return 'MakeSafe';
+  // Live since backend PR #771 (2026-08-28): repair mints a true SWR- job on
+  // the Repairs board; restoration is a typed emergency-service family.
+  if (family === 'repair') return 'Repair';
+  if (family === 'restoration') return 'Restoration';
   return '';
 }
 function inferMakesafeFamilyFromText(text) {
@@ -14999,6 +15003,16 @@ function msiReviewPdfJump(idx) {
   });
 }
 
+// The draft's stored family classification — the deterministic intake verdict
+// the approval seam honours (reviewed fields, then the stored deterministic
+// family, then the server fallback classifier). Read-only display helper.
+function intakeDraftStoredFamily(d) {
+  var ex = d && d.extraction_json;
+  if (typeof ex === 'string') { try { ex = JSON.parse(ex); } catch (e) { ex = null; } }
+  var fam = ex && typeof ex.makesafe_job_family === 'string' ? ex.makesafe_job_family.trim() : '';
+  return fam;
+}
+
 function renderMakesafeIntakeReview(draftId) {
   var d = _makesafeIntakeDraftCache[draftId];
   var container = document.getElementById('jobsBody');
@@ -15053,12 +15067,23 @@ function renderMakesafeIntakeReview(draftId) {
   html += renderIntakeReviewInput('site_suburb', 'Suburb', intakeFieldValue(d, 'site_suburb'), false, false);
   html += '</div>';
   html += renderIntakeReviewInput('site_address', 'Site address', intakeFieldValue(d, 'site_address'), true, false);
-  html += renderIntakeReviewInput('makesafe_type', 'Scope detail', intakeFieldValue(d, 'makesafe_type'), false, false, 'Describe the work if useful. Canonical family is limited to Assessment / Quote Report, Roof Report, Temporary Fence MakeSafe, or MakeSafe.');
+  html += renderIntakeReviewInput('makesafe_type', 'Scope detail', intakeFieldValue(d, 'makesafe_type'), false, false, 'Describe the work if useful. Canonical family is Assessment / Quote Report, Roof Report, Temporary Fence MakeSafe, MakeSafe, Restoration, or Repair (a Repair mints an SWR- job on the Repairs board).');
   html += renderIntakeReviewInput('description', 'Scope / work-order summary', intakeFieldValue(d, 'description'), false, true);
   html += renderIntakeReviewInput('safety_requirements', 'Safety / access notes', intakeFieldValue(d, 'safety_requirements'), false, true);
   html += renderIntakeReviewInput('special_instructions', 'Special instructions', intakeFieldValue(d, 'special_instructions'), false, true);
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid #EEF2F5;padding-top:12px;">';
-  html += '<button id="msiApproveBtn" onclick="approveIntakeDraft(\'' + d.id + '\', true)" style="background:#27AE60;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">&#10003; Tick + create MakeSafe</button>';
+  // The approve button must say what approval will actually create. Backend PR
+  // #771 (2026-08-28) made the repair family mint a true SWR- job on the
+  // Repairs board, so "create MakeSafe" on a repair draft misled the operator
+  // (it did, live, on Pingelly MLB-24645 / 2026-08-31). The family shown is the
+  // draft's stored classification — the same value the approval seam honours;
+  // a draft with no stored family keeps the historical MakeSafe wording
+  // because the server classifies it at approval time.
+  var mintFamily = intakeDraftStoredFamily(d);
+  var mintLabel = mintFamily === 'repair'
+    ? 'Repair (SWR-)'
+    : (getMakesafeFamilyLabel(mintFamily) || 'MakeSafe');
+  html += '<button id="msiApproveBtn" onclick="approveIntakeDraft(\'' + d.id + '\', true)" style="background:#27AE60;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">&#10003; Tick + create ' + escapeHtml(mintLabel) + '</button>';
   html += '<button onclick="rejectIntakeDraft(\'' + d.id + '\')" style="background:#E74C3C;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">&#10007; Cross / reject</button>';
   html += '<button onclick="loadMakesafeIntake()" style="background:#E5EEF3;color:#1F3A44;border:none;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">Hold for later</button>';
   html += '</div>';

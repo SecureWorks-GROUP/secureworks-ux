@@ -919,6 +919,31 @@ async function _msSesHydratePortalCaptureFacts(ctx) {
   if (factsList.length) ctx.portalCaptureFacts = factsList;
 }
 
+// Restoration / repair cards can carry a typed job_documents SWMS even when
+// the SES docket did not mint a swms_artifact (family recipe says not
+// required). The review tabs read docket artifacts only, so that file would
+// never appear. Pull the live job document so the SWMS tab still shows.
+async function _msSesLoadJobSwmsDoc(jobId) {
+  try {
+    var data = await opsFetch('job_detail', { jobId: jobId });
+    var docs = (data && data.documents) || [];
+    for (var i = 0; i < docs.length; i++) {
+      var d = docs[i];
+      if (!d) continue;
+      var type = String(d.type || '').toLowerCase();
+      var name = String(d.file_name || d.name || '').toLowerCase();
+      if (type !== 'swms' && !/\bswms\b/.test(name)) continue;
+      var url = d.pdf_url || d.url || d.storage_url || '';
+      if (url && /^https?:\/\//i.test(String(url))) {
+        return { url: String(url), file_name: d.file_name || 'SWMS' };
+      }
+    }
+  } catch (_e) {
+    /* leave the pane on docket artifacts only */
+  }
+  return null;
+}
+
 function _msSesCanonicalPackDocket(jobId) {
   var meta = (typeof _makesafeCanonicalPackMetaById !== 'undefined')
     ? _makesafeCanonicalPackMetaById[jobId] : null;
@@ -978,6 +1003,7 @@ async function _msSesLoadPackContext(jobId, retried) {
       }
       throw e;
     }
+    ctx.jobSwmsDoc = await _msSesLoadJobSwmsDoc(jobId);
     return ctx;
   }
   // Signed off: out of the needs_review queue, so nothing on this surface maps
@@ -1005,6 +1031,7 @@ async function _msSesLoadPackContext(jobId, retried) {
       ctx.packRecoveryFailed = true;
     }
   }
+  ctx.jobSwmsDoc = await _msSesLoadJobSwmsDoc(jobId);
   return ctx;
 }
 
@@ -2219,6 +2246,17 @@ function _msSesSynthRow(jobId, ctx) {
   var row = {};
   Object.keys(base).forEach(function(k) { row[k] = base[k]; });
   var docs = _msSesDocsFromArtifacts(ctx.pack && ctx.pack.artifacts, ctx.portalCaptureFacts);
+  var hasSwms = (docs.draft || []).some(function(d) {
+    return d && /swms/i.test(String(d.label || ''));
+  });
+  if (!hasSwms && ctx.jobSwmsDoc && ctx.jobSwmsDoc.url) {
+    docs.draft.push({
+      label: 'SWMS',
+      url: ctx.jobSwmsDoc.url,
+      kind: 'pdf',
+      isDraft: true
+    });
+  }
   row.draft_docs = docs.draft;
   row.source_docs = docs.source;
   row.photos = docs.photos;

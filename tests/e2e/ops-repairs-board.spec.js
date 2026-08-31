@@ -146,3 +146,39 @@ test('repair-family rows land in their repair stage; non-repair rows are ignored
   ensureEvidenceDir();
   await page.locator('#jobsBody .repair-kanban').screenshot({ path: path.join(EVIDENCE_DIR, '02-repairs-with-cards.png') });
 });
+
+test('repair card shows both builder instruction numbers, labelled by company', async ({ page }) => {
+  await page.goto('/ops.html');
+  // Pingelly-shaped card (captain worked example MLB-24645 / PO-59875): the
+  // backend repair projection serves both refs plus the issuing company.
+  const columns = {
+    accepted: [
+      {
+        id: 'ping', type: 'repair', status: 'accepted', client_name: 'Tahlia Maxwell',
+        site_suburb: 'Pingelly', job_number: 'SWR-26001', repair_stage: 'wo_in',
+        days_in_stage: 0,
+        builder_work_order_ref: 'MLB-24645', builder_po_number: 'PO-59875',
+        builder_company_name: 'ML Builders',
+      },
+      // A card the backend served no refs for draws no ref badges — nothing is
+      // fabricated on a reconciliation surface.
+      {
+        id: 'bare', type: 'repair', status: 'accepted', client_name: 'No Refs',
+        site_suburb: 'Falcon', job_number: 'SWR-26002', repair_stage: 'wo_in',
+        days_in_stage: 1,
+      },
+    ],
+  };
+  await renderRepairs(page, columns);
+  const ping = page.locator('.kanban-card[data-job-id="ping"]');
+  const refBadges = ping.locator('.kanban-repair-refs .kanban-meta-badge');
+  await expect(refBadges).toHaveCount(2);
+  await expect(refBadges.nth(0)).toHaveText('WO MLB-24645');
+  await expect(refBadges.nth(0)).toHaveAttribute('title', 'ML Builders work order');
+  await expect(refBadges.nth(1)).toHaveText('PO-59875');
+  await expect(refBadges.nth(1)).toHaveAttribute('title', 'ML Builders purchase order');
+  await expect(page.locator('.kanban-card[data-job-id="bare"] .kanban-repair-refs')).toHaveCount(0);
+
+  ensureEvidenceDir();
+  await page.locator('#jobsBody .repair-kanban').screenshot({ path: path.join(EVIDENCE_DIR, '03-repairs-builder-refs.png') });
+});

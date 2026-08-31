@@ -11675,10 +11675,12 @@ function renderMakesafeKanban(container, columns) {
   // and cached in _makesafeIntakeDrafts; this render uses whatever is cached.
   html += renderMakesafeIntakeColumn();
 
-  // Stages to render — exclude archive/cancelled columns when hidden (collapsed)
+  // Stages to render — exclude archive/cancelled columns when hidden (collapsed).
+  // An active board search overrides the collapse: search must cover EVERY job on
+  // the board, including archived/cancelled, or old refs silently return nothing.
   var stagesToRender = MAKESAFES_STAGES.filter(function(s) {
-    if (s === 'archive') return _makesafeArchiveVisible;
-    if (s === 'cancelled') return _makesafeCancelledVisible;
+    if (s === 'archive') return _makesafeArchiveVisible || !!_makesafeBoardSearch;
+    if (s === 'cancelled') return _makesafeCancelledVisible || !!_makesafeBoardSearch;
     return true;
   });
 

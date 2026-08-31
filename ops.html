@@ -1426,6 +1426,7 @@
     .kanban-suburb { font-size: 11px; color: #5a6068; }
     /* SWR- number on a repair card: quiet, monospaced, sits under the suburb. */
     .kanban-jobnum { font-size: 11px; color: #5a6068; font-family: var(--sw-font-num); letter-spacing: 0.02em; }
+    .kanban-repair-refs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
     /* Persisted repair stage disagrees with the job's own status. Amber, not
        red: the card is not wrong, the two facts have simply drifted. */
     .kanban-stage-drift { margin-top: 3px; font-size: 10px; font-weight: 600; color: #B26A00; }
@@ -16050,6 +16051,22 @@ function renderKanbanCard(j, status) {
   // against a builder work order and the job number is how they do it.
   if (j.type === 'repair' && j.job_number) {
     html += '<div class="kanban-jobnum">' + j.job_number + '</div>';
+  }
+  // Repair cards also carry BOTH builder instruction numbers (captain ruling
+  // 2026-08-31, worked example MLB-24645 / PO-59875): the builder's work-order
+  // reference and the purchase order, labelled by the issuing company. The
+  // backend repair projection lifts these off jobs.metadata; absent fields are
+  // simply not drawn — never fabricate a reference.
+  if (j.type === 'repair' && (j.builder_work_order_ref || j.builder_po_number)) {
+    var repairCompany = j.builder_company_name || 'Builder';
+    var repairRefs = [];
+    if (j.builder_work_order_ref) {
+      repairRefs.push('<span class="kanban-meta-badge" title="' + escapeHtml(repairCompany) + ' work order">WO ' + escapeHtml(j.builder_work_order_ref) + '</span>');
+    }
+    if (j.builder_po_number) {
+      repairRefs.push('<span class="kanban-meta-badge" title="' + escapeHtml(repairCompany) + ' purchase order">' + escapeHtml(j.builder_po_number) + '</span>');
+    }
+    html += '<div class="kanban-repair-refs">' + repairRefs.join('') + '</div>';
   }
   html += '<div class="kanban-meta">';
   // N-party shared fence badge

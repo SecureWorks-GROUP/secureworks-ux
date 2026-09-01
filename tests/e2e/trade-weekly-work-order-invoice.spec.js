@@ -139,6 +139,40 @@ test.describe('incomplete weekly draft save response', () => {
   });
 });
 
+[
+  ['trade-weekly-work-order-invoice-selection-crew-mismatch', 'crew charge IDs'],
+  ['trade-weekly-work-order-invoice-selection-labour-mismatch', 'direct labour hours'],
+  ['trade-weekly-work-order-invoice-selection-final-mismatch', 'final deductions']
+].forEach(([feedScenario, selection]) => {
+  test.describe(`weekly preview with mismatched ${selection}`, () => {
+    test.use({ feedScenario });
+
+    test('keeps submit locked', async ({ appPage: page }) => {
+      await openWeeklyInvoice(page);
+      await enterInvoice31Deductions(page);
+      await page.getByRole('button', { name: 'Save & calculate' }).click();
+
+      await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+      await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+    });
+  });
+});
+
+test.describe('incomplete persisted weekly invoice detail', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-incomplete-detail' });
+
+  test('shows totals unavailable without rendering partial money', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    await page.evaluate(() => window.viewInvoiceDetail('henry-weekly-invoice-incomplete'));
+
+    await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
+    await expect(page.locator('[data-weekly-invoice-unavailable]')).toContainText('Totals are unavailable');
+    await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
+    await expect(page.locator('[data-weekly-invoice-totals]')).toHaveCount(0);
+  });
+});
+
 test.describe('stale weekly draft save response', () => {
   test.use({ feedScenario: 'trade-weekly-work-order-invoice-stale-save' });
 
@@ -179,6 +213,70 @@ test.describe('stale weekly draft save response', () => {
     await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
     await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+  });
+});
+
+test.describe('stale weekly submit response', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-stale-submit' });
+
+  test('does not replace a newer invoice week', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeEnabled();
+
+    const submitResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'POST' && url.searchParams.get('action') === 'generate_trade_invoice';
+    });
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+    await page.getByRole('button', { name: 'Previous invoice week' }).click();
+    await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
+    await submitResponse;
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toHaveCount(0);
+    await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
+  });
+});
+
+test.describe('weekly crew loading after invoice edits', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-crew-load-race' });
+
+  test('finishes the state-bound crew read after the revision changes', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    const fourthJob = page.locator('[data-weekly-work-order="henry-wo-4"]');
+    const crewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.searchParams.get('action') === 'trade_job_detail';
+    });
+    await fourthJob.getByRole('button', { name: 'Add labour deduction' }).click();
+    await page.getByRole('textbox', { name: 'Notes' }).fill('Edited while crew loaded');
+    await page.getByRole('textbox', { name: 'Notes' }).press('Tab');
+    await crewResponse;
+
+    await expect(fourthJob.getByRole('spinbutton', { name: 'Labour hours for Isaac' })).toBeVisible();
+    await expect(fourthJob.getByText('Loading assigned crew...')).toHaveCount(0);
+  });
+});
+
+test.describe('weekly save response with invoice identity only', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-invoice-id-only' });
+
+  test('submits using the persisted invoice identity', async ({ appPage: page, feedRequests }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeEnabled();
+
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+    await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
+
+    const submit = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice');
+    expect(submit.body.draft_id).toBe('henry-weekly-draft-31');
   });
 });
 

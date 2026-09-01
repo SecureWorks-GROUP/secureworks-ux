@@ -197,7 +197,14 @@ const test = base.extend({
     const weeklyInvoiceScenarios = [
       'trade-weekly-work-order-invoice',
       'trade-weekly-work-order-invoice-incomplete-save',
-      'trade-weekly-work-order-invoice-stale-save'
+      'trade-weekly-work-order-invoice-stale-save',
+      'trade-weekly-work-order-invoice-selection-crew-mismatch',
+      'trade-weekly-work-order-invoice-selection-labour-mismatch',
+      'trade-weekly-work-order-invoice-selection-final-mismatch',
+      'trade-weekly-work-order-invoice-incomplete-detail',
+      'trade-weekly-work-order-invoice-stale-submit',
+      'trade-weekly-work-order-invoice-crew-load-race',
+      'trade-weekly-work-order-invoice-invoice-id-only'
     ];
     const weeklyInvoiceSubtotals = [164.60, 244.20, 48.60, 2510, 274, 35, 842, 640, 405];
     const weeklyInvoicePositiveAmounts = [651, 730.60, 535, 3550, 760.40, 521.40, 1328.40, 1126.40, 891.40];
@@ -364,6 +371,7 @@ const test = base.extend({
       total_inc: 4813.40,
       notes: 'Invoice 31 weekly fixture'
     });
+    const cloneWeeklyInvoiceResponse = () => JSON.parse(JSON.stringify(weeklyInvoiceResponse()));
     let weeklyInvoiceDraftSaved = false;
     // All-tab company feed (secureworks-backend docs/trade-all-means-all-v1.md).
     // Paged deliberately small so the scroll pager has to run more than once, and
@@ -459,6 +467,11 @@ const test = base.extend({
       'trade-weekly-work-order-invoice': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-incomplete-save': ['save_trade_invoice_draft'],
       'trade-weekly-work-order-invoice-stale-save': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-selection-crew-mismatch': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-selection-labour-mismatch': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-selection-final-mismatch': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-stale-submit': ['save_trade_invoice_draft', 'generate_trade_invoice'],
+      'trade-weekly-work-order-invoice-invoice-id-only': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -581,11 +594,14 @@ const test = base.extend({
             lead: { assignment_id: row.id, user_id: row.user_id, name: row.users.name }
           };
         },
-        trade_job_detail: ({ url }) => {
+        trade_job_detail: async ({ url }) => {
           const jobId = url.searchParams.get('jobId');
           if (weeklyInvoiceScenarios.includes(feedScenario)) {
             const workOrder = weeklyInvoiceWorkOrders.find((row) => row.job_id === jobId);
             if (!workOrder) return { status: 404, body: { error: 'Unknown weekly invoice job' } };
+            if (feedScenario === 'trade-weekly-work-order-invoice-crew-load-race') {
+              await new Promise((resolve) => setTimeout(resolve, 150));
+            }
             return {
               job: workOrder,
               crew: jobId === 'henry-job-4'
@@ -709,6 +725,14 @@ const test = base.extend({
           : { invoices: [] },
         get_trade_invoice: ({ url }) => {
           if (weeklyInvoiceScenarios.includes(feedScenario)) {
+            if (feedScenario === 'trade-weekly-work-order-invoice-incomplete-detail') {
+              const invoice = cloneWeeklyInvoiceResponse();
+              invoice.id = 'henry-weekly-invoice-incomplete';
+              invoice.invoice_number = 'SW-INV-INCOMPLETE';
+              invoice.status = 'submitted';
+              delete invoice.job_blocks[0].lines[0].line_total_ex;
+              return { invoice };
+            }
             return { invoice: weeklyInvoiceResponse() };
           }
           if (feedScenario !== 'trade-invoice-history-money-truth') {
@@ -837,9 +861,31 @@ const test = base.extend({
           if (feedScenario === 'trade-weekly-work-order-invoice-stale-save') {
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
+          if (feedScenario === 'trade-weekly-work-order-invoice-selection-crew-mismatch') {
+            const response = cloneWeeklyInvoiceResponse();
+            response.job_blocks[0].lines = response.job_blocks[0].lines.filter((line) => line.line_type !== 'crew_work_order_deduction');
+            return response;
+          }
+          if (feedScenario === 'trade-weekly-work-order-invoice-selection-labour-mismatch') {
+            const response = cloneWeeklyInvoiceResponse();
+            response.job_blocks[3].lines.find((line) => line.line_type === 'labour_deduction').quantity = 25;
+            return response;
+          }
+          if (feedScenario === 'trade-weekly-work-order-invoice-selection-final-mismatch') {
+            const response = cloneWeeklyInvoiceResponse();
+            response.final_deductions = [];
+            return response;
+          }
+          if (feedScenario === 'trade-weekly-work-order-invoice-invoice-id-only') {
+            const response = cloneWeeklyInvoiceResponse();
+            delete response.id;
+            delete response.draft_id;
+            response.invoice_id = 'henry-weekly-draft-31';
+            return response;
+          }
           return weeklyInvoiceResponse();
         },
-        generate_trade_invoice: ({ request }) => {
+        generate_trade_invoice: async ({ request }) => {
           if (weeklyInvoiceScenarios.includes(feedScenario) && persona === 'fencing_manager') {
             const body = request.postDataJSON();
             if (!weeklyInvoiceDraftSaved || body.draft_id !== 'henry-weekly-draft-31') {
@@ -847,6 +893,9 @@ const test = base.extend({
             }
             if (['grand_total', 'to_be_paid', 'gross_earned', 'subtotal', 'total'].some((key) => Object.hasOwn(body, key))) {
               return { status: 422, body: { error: 'Browser-supplied invoice totals are forbidden' } };
+            }
+            if (feedScenario === 'trade-weekly-work-order-invoice-stale-submit') {
+              await new Promise((resolve) => setTimeout(resolve, 150));
             }
             return {
               ...weeklyInvoiceResponse(),

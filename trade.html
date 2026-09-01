@@ -16171,7 +16171,16 @@
   }
 
   function _weeklyFiniteNumber(value) {
-    return value != null && value !== '' && Number.isFinite(Number(value));
+    if (value == null || (typeof value === 'string' && value.trim() === '')) return false;
+    return Number.isFinite(Number(value));
+  }
+
+  function _weeklyInvoiceIdentity(invoice) {
+    var values = invoice ? [invoice.draft_id, invoice.id, invoice.invoice_id] : [];
+    for (var i = 0; i < values.length; i++) {
+      if (values[i] != null && String(values[i]).trim() !== '') return String(values[i]).trim();
+    }
+    return null;
   }
 
   function _weeklySelectedWorkOrderIdsFromPayload(payload) {
@@ -16188,26 +16197,18 @@
     return available;
   }
 
-  function _weeklyInvoicePreviewComplete(invoice, expectedIds, state, weekStart) {
+  function _weeklyInvoiceMoneyComplete(invoice) {
     if (!invoice || typeof invoice !== 'object' || Array.isArray(invoice)) return false;
     if (String(invoice.invoice_source || '') !== 'weekly_work_order') return false;
-    if (![invoice.id, invoice.draft_id, invoice.invoice_id].some(function(value) { return value != null && String(value).trim() !== ''; })) return false;
-    if (weekStart && String(invoice.week_start || '') !== String(weekStart)) return false;
     if (!_weeklyFiniteNumber(invoice.grand_total) || !_weeklyFiniteNumber(invoice.final_deductions_total) || !_weeklyFiniteNumber(invoice.to_be_paid)) return false;
-    if (!Array.isArray(invoice.job_blocks)) return false;
+    if (!Array.isArray(invoice.job_blocks) || invoice.job_blocks.length === 0) return false;
     if (!Array.isArray(invoice.final_deductions)) return false;
 
-    var expected = {};
-    (expectedIds || []).forEach(function(id) { expected[String(id)] = true; });
-    var expectedCount = Object.keys(expected).length;
-    if (expectedCount === 0 || invoice.job_blocks.length !== expectedCount) return false;
-
-    var available = _weeklyAvailableWorkOrderMap(state);
     var seen = {};
     for (var i = 0; i < invoice.job_blocks.length; i++) {
       var block = invoice.job_blocks[i] || {};
       var id = String(block.source_work_order_id || '');
-      if (!id || !expected[id] || seen[id] || !available[id]) return false;
+      if (!id || seen[id]) return false;
       if (!_weeklyFiniteNumber(block.subtotal) || !Array.isArray(block.lines) || block.lines.length === 0) return false;
       seen[id] = true;
       for (var j = 0; j < block.lines.length; j++) {
@@ -16224,9 +16225,95 @@
     return true;
   }
 
+  function _weeklyInvoicePreviewComplete(invoice, expectedIds, state, weekStart) {
+    if (!_weeklyInvoiceMoneyComplete(invoice) || !_weeklyInvoiceIdentity(invoice)) return false;
+    if (weekStart && String(invoice.week_start || '') !== String(weekStart)) return false;
+
+    var expected = {};
+    (expectedIds || []).forEach(function(id) { expected[String(id)] = true; });
+    var expectedCount = Object.keys(expected).length;
+    if (expectedCount === 0 || invoice.job_blocks.length !== expectedCount) return false;
+
+    var available = _weeklyAvailableWorkOrderMap(state);
+    for (var i = 0; i < invoice.job_blocks.length; i++) {
+      var id = String((invoice.job_blocks[i] || {}).source_work_order_id || '');
+      if (!expected[id] || !available[id]) return false;
+    }
+    return true;
+  }
+
+  function _weeklySortedSelectionKeys(rows, keyForRow) {
+    var keys = [];
+    for (var i = 0; i < rows.length; i++) {
+      var key = keyForRow(rows[i] || {});
+      if (!key) return null;
+      keys.push(key);
+    }
+    return keys.sort();
+  }
+
+  function _weeklySelectionListsMatch(expected, actual) {
+    return expected != null && actual != null && JSON.stringify(expected) === JSON.stringify(actual);
+  }
+
+  function _weeklyInvoiceSelectionsMatch(invoice, payload) {
+    if (!payload || !Array.isArray(payload.work_order_blocks) || !Array.isArray(payload.final_deductions)) return false;
+    var responseByWorkOrder = {};
+    invoice.job_blocks.forEach(function(block) {
+      responseByWorkOrder[String((block || {}).source_work_order_id || '')] = block || {};
+    });
+
+    for (var i = 0; i < payload.work_order_blocks.length; i++) {
+      var requestBlock = payload.work_order_blocks[i] || {};
+      var responseBlock = responseByWorkOrder[String(requestBlock.work_order_id || '')];
+      if (!responseBlock || !Array.isArray(responseBlock.lines)) return false;
+
+      var expectedCrew = _weeklySortedSelectionKeys(requestBlock.crew_charge_line_ids || [], function(lineId) {
+        return String(lineId || '').trim();
+      });
+      var responseCrewLines = responseBlock.lines.filter(function(line) {
+        return line && (line.source_trade_invoice_line_id != null || line.line_type === 'crew_work_order_deduction');
+      });
+      var actualCrew = _weeklySortedSelectionKeys(responseCrewLines, function(line) {
+        return String(line.source_trade_invoice_line_id || '').trim();
+      });
+      if (!_weeklySelectionListsMatch(expectedCrew, actualCrew)) return false;
+
+      var expectedLabour = _weeklySortedSelectionKeys(requestBlock.labour_deductions || [], function(line) {
+        var userId = String(line.user_id || '').trim();
+        if (!userId || !_weeklyFiniteNumber(line.hours) || !(Number(line.hours) > 0)) return '';
+        return JSON.stringify([userId, Number(line.hours)]);
+      });
+      var responseLabourLines = responseBlock.lines.filter(function(line) {
+        return line && (line.deduction_user_id != null || line.line_type === 'labour_deduction');
+      });
+      var actualLabour = _weeklySortedSelectionKeys(responseLabourLines, function(line) {
+        var userId = String(line.deduction_user_id || '').trim();
+        if (!userId || !_weeklyFiniteNumber(line.quantity) || !(Number(line.quantity) > 0)) return '';
+        return JSON.stringify([userId, Number(line.quantity)]);
+      });
+      if (!_weeklySelectionListsMatch(expectedLabour, actualLabour)) return false;
+    }
+
+    var expectedFinal = _weeklySortedSelectionKeys(payload.final_deductions, function(line) {
+      var description = String(line.description || '').trim();
+      var unit = String(line.unit || '').trim();
+      if (!description || !unit || !_weeklyFiniteNumber(line.quantity) || !_weeklyFiniteNumber(line.unit_rate)) return '';
+      return JSON.stringify([description, unit, Number(line.quantity), Number(line.unit_rate)]);
+    });
+    var actualFinal = _weeklySortedSelectionKeys(invoice.final_deductions, function(line) {
+      var description = String(line.description || '').trim();
+      var unit = String(line.unit || '').trim();
+      if (!description || !unit || !_weeklyFiniteNumber(line.quantity) || !_weeklyFiniteNumber(line.unit_rate)) return '';
+      return JSON.stringify([description, unit, Number(line.quantity), Math.abs(Number(line.unit_rate))]);
+    });
+    return _weeklySelectionListsMatch(expectedFinal, actualFinal);
+  }
+
   function _weeklyInvoiceFromResponse(res, payload, defaults, state) {
     var invoice = Object.assign({ status: 'draft' }, defaults || {}, res || {});
-    if (!_weeklyInvoicePreviewComplete(invoice, _weeklySelectedWorkOrderIdsFromPayload(payload), state, payload && payload.week_start)) {
+    if (!_weeklyInvoicePreviewComplete(invoice, _weeklySelectedWorkOrderIdsFromPayload(payload), state, payload && payload.week_start) ||
+        !_weeklyInvoiceSelectionsMatch(invoice, payload)) {
       throw new Error('SecureWorks returned incomplete weekly invoice totals. Save again before submitting.');
     }
     return invoice;
@@ -16288,7 +16375,7 @@
       return { description: line.description || '', unit_rate: Math.abs(Number(line.unit_rate || line.line_total_ex || 0)) };
     });
     _weeklyWoInvoice.notes = invoice.notes || '';
-    _weeklyWoInvoice.draftId = invoice.id || invoice.draft_id || null;
+    _weeklyWoInvoice.draftId = _weeklyInvoiceIdentity(invoice);
     _weeklyWoInvoice.preview = invoice;
     _weeklyWoInvoice.dirty = false;
     _weeklyWoInvoice.revision++;
@@ -16400,11 +16487,10 @@
     var id = String(workOrderId);
     if (_weeklyWoInvoice.crew[id]) return;
     var state = _weeklyWoInvoice;
-    var revision = state.revision;
     state.crewLoading[id] = true;
     renderWeeklyWorkOrderInvoice();
     api('trade_job_detail', { jobId: jobId }).then(function(res) {
-      if (!_weeklyStateCurrent(state, revision)) return;
+      if (!_weeklyStateCurrent(state)) return;
       var seen = {};
       state.crew[id] = (res.crew || []).filter(function(member) {
         var userId = String(member.user_id || '');
@@ -16415,7 +16501,7 @@
       delete state.crewLoading[id];
       renderWeeklyWorkOrderInvoice();
     }).catch(function(err) {
-      if (!_weeklyStateCurrent(state, revision)) return;
+      if (!_weeklyStateCurrent(state)) return;
       delete state.crewLoading[id];
       toast('Could not load crew: ' + friendlyError(err), true);
       renderWeeklyWorkOrderInvoice();
@@ -16495,13 +16581,14 @@
   }
 
   function _weeklyInvoiceLineHtml(line) {
-    var amount = Number(line.line_total_ex || 0);
-    var detail = Number(line.quantity || 0) + ' ' + esc(line.unit || 'ea') + ' @ ' + _weeklyInvoiceMoney(line.unit_rate || 0);
+    var amount = Number(line.line_total_ex);
+    var detail = Number(line.quantity) + ' ' + esc(line.unit || 'ea') + ' @ ' + _weeklyInvoiceMoney(line.unit_rate);
     return '<div class="wwi-preview-line' + (amount < 0 ? ' negative' : '') + '"><span>' + esc(line.description || line.line_type || 'Item') + '<br><small>' + detail + '</small></span><strong>' + _weeklyInvoiceMoney(amount) + '</strong></div>';
   }
 
   function _weeklyInvoicePreviewHtml(invoice) {
     if (!invoice) return '<div class="wwi-warning">Save and calculate to see server-confirmed job subtotals and TO BE PAID.</div>';
+    if (!_weeklyInvoiceMoneyComplete(invoice)) return '<div class="wwi-warning" data-weekly-invoice-unavailable>SecureWorks did not return complete weekly invoice figures. Totals are unavailable.</div>';
     var html = '<div class="wwi-preview" data-weekly-invoice-preview>';
     (invoice.job_blocks || []).forEach(function(block) {
       html += '<div class="wwi-preview-job" data-weekly-job-block="' + esc(block.source_work_order_id || '') + '">';
@@ -16517,7 +16604,7 @@
     }
     html += '<div class="wwi-totals" data-weekly-invoice-totals>';
     html += '<div class="wwi-total-row"><span>Grand total</span><span>' + _weeklyInvoiceMoney(invoice.grand_total) + '</span></div>';
-    html += '<div class="wwi-total-row"><span>Final deductions</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(invoice.final_deductions_total || 0))) + '</span></div>';
+    html += '<div class="wwi-total-row"><span>Final deductions</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(invoice.final_deductions_total))) + '</span></div>';
     html += '<div class="wwi-total-row paid"><span>TO BE PAID</span><span>' + _weeklyInvoiceMoney(invoice.to_be_paid) + '</span></div>';
     html += '</div>';
     return html;
@@ -16617,7 +16704,7 @@
       if (!_weeklyStateCurrent(state, null, requestSeq)) return;
       if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
       var invoice = _weeklyInvoiceFromResponse(res, payload, { draft_id: state.draftId }, state);
-      state.draftId = invoice.draft_id || invoice.id || state.draftId;
+      state.draftId = _weeklyInvoiceIdentity(invoice) || state.draftId;
       if (state.revision !== revision) {
         _weeklyFinishStaleRequest(state, requestSeq, 'Weekly invoice changed while saving. Save again for current totals.');
         return;
@@ -16660,6 +16747,7 @@
       state.busy = true;
       renderWeeklyWorkOrderInvoice();
       api('generate_trade_invoice', null, payload).then(function(res) {
+        if (!_weeklyStateCurrent(state, null, requestSeq)) return;
         if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         var invoice = Object.assign({}, preview, res, {
           id: res.invoice_id || res.id || state.draftId,
@@ -16667,14 +16755,21 @@
           status: res.code === 'XERO_PUSH_FAILED' ? 'pending_ops_review' : (res.status || 'submitted')
         });
         invoice = _weeklyInvoiceFromResponse(invoice, payload, { draft_id: state.draftId }, state);
+        if (state.revision !== revision) {
+          state.busy = false;
+          toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill') + ' Current edits were not included; open Invoice history to review it.');
+          renderWeeklyWorkOrderInvoice();
+          return;
+        }
         state.busy = false;
         toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill'));
         if (_weeklyWoInvoice === state) _weeklyWoInvoice = null;
         renderWeeklyInvoiceDetail(invoice);
       }).catch(function(err) {
+        if (!_weeklyStateCurrent(state, null, requestSeq)) return;
         state.busy = false;
         toast(friendlyError(err), true);
-        if (_weeklyStateCurrent(state, null, requestSeq)) renderWeeklyWorkOrderInvoice();
+        renderWeeklyWorkOrderInvoice();
       });
     });
   };

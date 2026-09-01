@@ -108,6 +108,80 @@ test('reopens the server-owned weekly draft without flattening its work-order bl
   expect(workOrderReads.length).toBeGreaterThanOrEqual(2);
 });
 
+test.describe('weekly invoice response guards', () => {
+  test('opens the clicked work order Perth week from the work-order hub', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await page.getByRole('button', { name: 'My Work Orders' }).click();
+    const priorCard = page.locator('[data-work-order-card]').filter({ hasText: 'WO-HENRY-PRIOR' });
+    await priorCard.getByRole('button', { name: 'Add to Weekly Invoice' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
+    await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
+    await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]').getByRole('checkbox', { name: /Include/ })).toBeChecked();
+    await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
+  });
+});
+
+test.describe('incomplete weekly draft save response', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-incomplete-save' });
+
+  test('does not authorize submit from a generic success response', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+
+    await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+    await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+  });
+});
+
+test.describe('stale weekly draft save response', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-stale-save' });
+
+  test('keeps edited state dirty and reuses the saved draft identity', async ({ appPage: page, feedRequests }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await page.getByRole('textbox', { name: 'Notes' }).fill('Changed while saving');
+    await page.getByRole('textbox', { name: 'Notes' }).press('Tab');
+
+    await expect(page.locator('#toast')).toContainText('changed while saving');
+    await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('TO BE PAID$4,813.40');
+    const saves = feedRequests.filter((entry) => entry.method === 'POST' && entry.action === 'save_trade_invoice_draft');
+    expect(saves).toHaveLength(2);
+    expect(saves[1].body).toMatchObject({
+      draft_id: 'henry-weekly-draft-31',
+      notes: 'Changed while saving'
+    });
+  });
+
+  test('ignores a save response after opening another invoice week', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'POST' && url.searchParams.get('action') === 'save_trade_invoice_draft';
+    });
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await page.getByRole('button', { name: 'Previous invoice week' }).click();
+    await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
+    await saveResponse;
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+    await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
+    await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+  });
+});
+
 test.describe('mobile weekly invoice', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

@@ -194,6 +194,11 @@ const test = base.extend({
         can_invoice: true
       }
     ];
+    const weeklyInvoiceScenarios = [
+      'trade-weekly-work-order-invoice',
+      'trade-weekly-work-order-invoice-incomplete-save',
+      'trade-weekly-work-order-invoice-stale-save'
+    ];
     const weeklyInvoiceSubtotals = [164.60, 244.20, 48.60, 2510, 274, 35, 842, 640, 405];
     const weeklyInvoicePositiveAmounts = [651, 730.60, 535, 3550, 760.40, 521.40, 1328.40, 1126.40, 891.40];
     const weeklyInvoiceWorkOrders = weeklyInvoiceSubtotals.map((subtotal, index) => {
@@ -239,6 +244,37 @@ const test = base.extend({
         can_invoice: true
       };
     });
+    const weeklyInvoicePriorWorkOrder = {
+      id: 'henry-wo-prior',
+      wo_number: 'WO-HENRY-PRIOR',
+      job_id: 'henry-job-prior',
+      job_number: 'SWF-1879',
+      client_name: 'Prior Week Client',
+      job_type: 'fencing',
+      job_status: 'complete',
+      status: 'complete',
+      site_address: '9 Prior Week Road, Perth WA',
+      site_suburb: 'Perth',
+      completed_at: `${addIsoDays(weekStart, -8)}T16:30:00.000Z`,
+      scheduled_date: weekStart,
+      scope_items: [{
+        description: 'Prior week fence installation',
+        quantity: 1,
+        unit: 'job',
+        rate: 500,
+        total: 500
+      }],
+      subtotal: 500,
+      gst: 0,
+      total: 500,
+      negative_charges: [],
+      available_negative_charge_total_ex: 0,
+      already_invoiced: false,
+      invoice_block_reason: null,
+      weekly_draft_id: null,
+      can_add_to_weekly_invoice: true,
+      can_invoice: true
+    };
     const weeklyInvoiceJobBlocks = weeklyInvoiceWorkOrders.map((workOrder, index) => {
       const positive = weeklyInvoicePositiveAmounts[index];
       const lines = [{
@@ -421,6 +457,8 @@ const test = base.extend({
       'trade-invoice-per-metre-response-empty': ['submit_trade_invoice'],
       'trade-invoice-per-metre-xero-failed': ['submit_trade_invoice'],
       'trade-weekly-work-order-invoice': ['save_trade_invoice_draft', 'generate_trade_invoice'],
+      'trade-weekly-work-order-invoice-incomplete-save': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-stale-save': ['save_trade_invoice_draft'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -545,7 +583,7 @@ const test = base.extend({
         },
         trade_job_detail: ({ url }) => {
           const jobId = url.searchParams.get('jobId');
-          if (feedScenario === 'trade-weekly-work-order-invoice') {
+          if (weeklyInvoiceScenarios.includes(feedScenario)) {
             const workOrder = weeklyInvoiceWorkOrders.find((row) => row.job_id === jobId);
             if (!workOrder) return { status: 404, body: { error: 'Unknown weekly invoice job' } };
             return {
@@ -638,7 +676,7 @@ const test = base.extend({
               total_hours: 0,
               already_submitted: false
             },
-        my_trade_invoices: feedScenario === 'trade-weekly-work-order-invoice' && weeklyInvoiceDraftSaved
+        my_trade_invoices: weeklyInvoiceScenarios.includes(feedScenario) && weeklyInvoiceDraftSaved
           ? { invoices: [weeklyInvoiceResponse()] }
           : feedScenario === 'trade-invoice-history-money-truth'
           ? {
@@ -670,7 +708,7 @@ const test = base.extend({
           }
           : { invoices: [] },
         get_trade_invoice: ({ url }) => {
-          if (feedScenario === 'trade-weekly-work-order-invoice') {
+          if (weeklyInvoiceScenarios.includes(feedScenario)) {
             return { invoice: weeklyInvoiceResponse() };
           }
           if (feedScenario !== 'trade-invoice-history-money-truth') {
@@ -693,16 +731,20 @@ const test = base.extend({
           };
         },
         my_work_orders: ({ url }) => {
-          if (feedScenario === 'trade-weekly-work-order-invoice') {
+          if (weeklyInvoiceScenarios.includes(feedScenario)) {
+            const weeklyRows = weeklyInvoiceWorkOrders.concat([weeklyInvoicePriorWorkOrder]);
+            if (!url.searchParams.has('type') && !url.searchParams.has('status') && !url.searchParams.has('page_size')) {
+              return { schema: 'trade-work-orders.v1', mode: 'all', type: 'fencing', work_orders: weeklyRows };
+            }
             if (url.searchParams.get('mode') !== 'all' || url.searchParams.get('type') !== 'fencing' ||
                 url.searchParams.get('status') !== 'complete' || url.searchParams.get('page_size') !== '500') {
               return { status: 422, body: { error: 'Expected the bounded weekly work-order read' } };
             }
             return {
               schema: 'trade-work-orders.v1', mode: 'all', type: 'fencing',
-              work_orders: weeklyInvoiceWorkOrders.map((row) => ({
+              work_orders: weeklyRows.map((row) => ({
                 ...row,
-                weekly_draft_id: weeklyInvoiceDraftSaved ? 'henry-weekly-draft-31' : null
+                weekly_draft_id: weeklyInvoiceDraftSaved && row.id !== weeklyInvoicePriorWorkOrder.id ? 'henry-weekly-draft-31' : null
               }))
             };
           }
@@ -764,8 +806,8 @@ const test = base.extend({
             net_hours: body.event === 'clock_off' ? 1 : null
           };
         },
-        save_trade_invoice_draft: ({ request }) => {
-          if (feedScenario !== 'trade-weekly-work-order-invoice' || persona !== 'fencing_manager') {
+        save_trade_invoice_draft: async ({ request }) => {
+          if (!weeklyInvoiceScenarios.includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Weekly invoice fixture is not enabled' } };
           }
           const body = request.postDataJSON();
@@ -789,10 +831,16 @@ const test = base.extend({
             return { status: 422, body: { error: 'Expected the Car Loan payout deduction' } };
           }
           weeklyInvoiceDraftSaved = true;
+          if (feedScenario === 'trade-weekly-work-order-invoice-incomplete-save') {
+            return { success: true, draft_id: 'henry-weekly-draft-31' };
+          }
+          if (feedScenario === 'trade-weekly-work-order-invoice-stale-save') {
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
           return weeklyInvoiceResponse();
         },
         generate_trade_invoice: ({ request }) => {
-          if (feedScenario === 'trade-weekly-work-order-invoice' && persona === 'fencing_manager') {
+          if (weeklyInvoiceScenarios.includes(feedScenario) && persona === 'fencing_manager') {
             const body = request.postDataJSON();
             if (!weeklyInvoiceDraftSaved || body.draft_id !== 'henry-weekly-draft-31') {
               return { status: 409, body: { error: 'Expected the saved weekly draft identity' } };

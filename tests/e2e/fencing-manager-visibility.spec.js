@@ -358,16 +358,19 @@ test.describe('Fencing manager visibility', () => {
     });
   });
 
-  test('an empty invoice week opens the authorised fencing work-order flow without creating money', async ({ appPage: page, feedRequests }) => {
+  test('the weekly invoice surface and work-order hub stay scoped to authorised fencing work orders', async ({ appPage: page, feedRequests }) => {
     await signIn(page, PERSONAS.fencing_manager);
     await page.locator('[data-view="hours"]').click();
-    await expect(page.getByText('No completed jobs this week')).toBeVisible();
-    await page.getByRole('button', { name: 'Choose a Work Order' }).click();
+    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
+    await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+    await page.getByRole('button', { name: 'My Work Orders' }).click();
     await expect(page.getByRole('heading', { name: 'My Work Orders' })).toBeVisible();
     await expect(page.locator('[data-work-order-card]')).toHaveCount(1);
     await expect(page.locator('#hoursContent')).toContainText('WO-FENCE-001');
     await expect(page.locator('#hoursContent')).toContainText('Total: $110.00');
-    await expect(page.getByRole('button', { name: 'Invoice This Work Order' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add to Weekly Invoice' })).toBeVisible();
     await expect(page.locator('#hoursContent')).not.toContainText('WO-PATIO-002');
     await expect(page.locator('#hoursContent')).not.toContainText('WO-OTHER-TENANT');
 

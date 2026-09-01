@@ -726,6 +726,58 @@
     .inv-status.paid { background: rgba(39,174,96,0.15); color: #1B7A3D; }
     .inv-status.rejected { background: rgba(231,76,60,0.1); color: #E74C3C; }
 
+    /* Weekly work-order invoice */
+    .wwi-shell { display: grid; gap: 12px; }
+    .wwi-intro { padding: 14px; border: 1px solid rgba(241,90,41,0.22); border-radius: 12px; background: rgba(241,90,41,0.06); color: var(--sw-text-sec); font-size: 12px; line-height: 1.5; }
+    .wwi-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .wwi-toolbar h2 { margin: 0; color: var(--sw-dark); font-size: 18px; }
+    .wwi-count { color: var(--sw-text-sec); font-size: 12px; }
+    .wwi-card { overflow: hidden; border: 1px solid var(--sw-border); border-radius: 12px; background: var(--sw-card); box-shadow: var(--sw-shadow); }
+    .wwi-card.selected { border-color: rgba(241,90,41,0.52); }
+    .wwi-card-head { display: flex; align-items: flex-start; gap: 11px; padding: 14px; }
+    .wwi-check { width: 22px; height: 22px; flex: 0 0 auto; margin-top: 1px; accent-color: var(--sw-orange); }
+    .wwi-card-copy { min-width: 0; flex: 1; }
+    .wwi-job-number { color: var(--sw-dark); font-size: 15px; font-weight: 750; }
+    .wwi-job-meta { margin-top: 2px; color: var(--sw-text-sec); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .wwi-source { padding: 0 14px 14px 47px; }
+    .wwi-source-section + .wwi-source-section { margin-top: 12px; }
+    .wwi-source-title { margin-bottom: 5px; color: var(--sw-mid); font-family: var(--sw-mono); font-size: 10px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; }
+    .wwi-source-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(0,0,0,0.05); color: var(--sw-dark); font-size: 12px; }
+    .wwi-source-line:last-child { border-bottom: 0; }
+    .wwi-source-line.negative { color: var(--sw-red); }
+    .wwi-source-line label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+    .wwi-source-line input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; margin: 0; accent-color: var(--sw-orange); }
+    .wwi-line-money { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+    .wwi-labour { display: grid; grid-template-columns: minmax(0,1fr) 96px; gap: 8px; align-items: center; margin-top: 7px; }
+    .wwi-labour input, .wwi-final-grid input, .wwi-final-grid select, .wwi-notes { width: 100%; min-height: 42px; box-sizing: border-box; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: inherit; font-size: 13px; }
+    .wwi-labour input, .wwi-final-grid input, .wwi-notes { padding: 9px 10px; }
+    .wwi-labour-name { min-width: 0; color: var(--sw-dark); font-size: 12px; font-weight: 650; }
+    .wwi-panel { padding: 14px; border: 1px solid var(--sw-border); border-radius: 12px; background: var(--sw-card); box-shadow: var(--sw-shadow); }
+    .wwi-panel-title { margin-bottom: 9px; color: var(--sw-dark); font-size: 14px; font-weight: 750; }
+    .wwi-final-row { display: grid; grid-template-columns: minmax(0,1fr) 86px 40px; gap: 7px; margin-bottom: 8px; }
+    .wwi-final-grid { min-width: 0; }
+    .wwi-remove { width: 40px; min-height: 42px; border: 1px solid rgba(231,76,60,0.25); border-radius: 8px; background: rgba(231,76,60,0.07); color: var(--sw-red); font-size: 18px; cursor: pointer; }
+    .wwi-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .wwi-actions button { min-height: 48px; }
+    .wwi-preview { border: 1px solid var(--sw-border); border-radius: 12px; background: var(--sw-card); overflow: hidden; }
+    .wwi-preview-job { padding: 14px; border-bottom: 1px solid var(--sw-border); }
+    .wwi-preview-job:last-child { border-bottom: 0; }
+    .wwi-preview-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+    .wwi-preview-head strong { color: var(--sw-dark); font-size: 14px; }
+    .wwi-preview-head span { color: var(--sw-text-sec); font-size: 11px; text-align: right; }
+    .wwi-preview-line { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; color: var(--sw-text-sec); font-size: 12px; }
+    .wwi-preview-line.negative { color: var(--sw-red); }
+    .wwi-preview-subtotal { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--sw-border); color: var(--sw-dark); font-size: 13px; font-weight: 750; }
+    .wwi-totals { padding: 16px; border-radius: 12px; background: var(--sw-dark); color: #fff; font-variant-numeric: tabular-nums; }
+    .wwi-total-row { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; line-height: 1.9; }
+    .wwi-total-row.paid { margin-top: 5px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.18); font-size: 18px; font-weight: 800; }
+    .wwi-warning { padding: 11px 12px; border-radius: 9px; background: #fef3cd; color: #7a4b00; font-size: 12px; line-height: 1.45; }
+    @media (max-width: 420px) {
+      .wwi-source { padding-left: 14px; }
+      .wwi-actions { grid-template-columns: 1fr; }
+      .wwi-final-row { grid-template-columns: minmax(0,1fr) 78px 40px; }
+    }
+
     /* Status bar (assignment status buttons) */
     .status-bar {
       display: flex;
@@ -15662,6 +15714,7 @@
   var _hoursWeekStart = null; // Monday of the selected week
   var _hoursData = null;    // cached response
   var _tradeRate = null;    // cached rate for profile
+  var _weeklyWoInvoice = null; // Henry's server-owned weekly work-order invoice builder
 
   function getWeekEndSunday(offset) {
     var now = new Date();
@@ -16025,249 +16078,426 @@
     }
   };
 
-  // ── Per-Metre Invoice View (Henry) ──
+  // ── Weekly work-order invoice (Henry) ──
+  // This route never derives money in the browser. The selected work orders,
+  // crew charge IDs and labour hours are sent to ops-api; only its response is
+  // presented as an invoice subtotal or total.
   function renderPerMetreView(data) {
+    openWeeklyWorkOrderInvoice({ weekEnd: data && data.week_ending });
+  }
+
+  function _weeklyIsoDay(dateValue) {
+    if (!dateValue) return '';
+    var parsed = new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) return String(dateValue).slice(0, 10);
+    var parts = new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(parsed);
+    var byType = {};
+    parts.forEach(function(part) { byType[part.type] = part.value; });
+    return byType.year + '-' + byType.month + '-' + byType.day;
+  }
+
+  function _weeklyWorkOrderDate(workOrder) {
+    if (workOrder && workOrder.completed_at) return _weeklyIsoDay(workOrder.completed_at);
+    return String((workOrder && workOrder.scheduled_date) || '').slice(0, 10);
+  }
+
+  function _weeklyInvoiceMoney(value) {
+    var amount = Number(value || 0);
+    return (amount < 0 ? '-$' : '$') + Math.abs(amount).toLocaleString('en-AU', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+  }
+
+  function _weeklyNewState(workOrders) {
+    var state = {
+      workOrders: workOrders || [], selected: {}, charges: {}, labour: {},
+      crew: {}, crewLoading: {}, finalDeductions: [], notes: '',
+      draftId: null, preview: null, dirty: true, busy: false
+    };
+    state.workOrders.forEach(function(workOrder) {
+      state.selected[String(workOrder.id)] = true;
+      state.charges[String(workOrder.id)] = {};
+      state.labour[String(workOrder.id)] = {};
+      (workOrder.negative_charges || []).forEach(function(charge) {
+        if (charge.line_id) state.charges[String(workOrder.id)][String(charge.line_id)] = true;
+      });
+    });
+    return state;
+  }
+
+  function _hydrateWeeklyDraft(invoice) {
+    if (!_weeklyWoInvoice || !invoice) return;
+    Object.keys(_weeklyWoInvoice.selected).forEach(function(id) { _weeklyWoInvoice.selected[id] = false; });
+    Object.keys(_weeklyWoInvoice.charges).forEach(function(id) { _weeklyWoInvoice.charges[id] = {}; });
+    (invoice.job_blocks || []).forEach(function(block) {
+      var workOrderId = String(block.source_work_order_id || '');
+      if (!workOrderId) return;
+      _weeklyWoInvoice.selected[workOrderId] = true;
+      _weeklyWoInvoice.labour[workOrderId] = _weeklyWoInvoice.labour[workOrderId] || {};
+      _weeklyWoInvoice.charges[workOrderId] = _weeklyWoInvoice.charges[workOrderId] || {};
+      (block.lines || []).forEach(function(line) {
+        if (line.source_trade_invoice_line_id) {
+          _weeklyWoInvoice.charges[workOrderId][String(line.source_trade_invoice_line_id)] = true;
+        }
+        if (line.line_type === 'labour_deduction' && line.deduction_user_id) {
+          _weeklyWoInvoice.labour[workOrderId][String(line.deduction_user_id)] = Number(line.quantity || 0);
+        }
+      });
+    });
+    _weeklyWoInvoice.finalDeductions = (invoice.final_deductions || []).map(function(line) {
+      return { description: line.description || '', unit_rate: Math.abs(Number(line.unit_rate || line.line_total_ex || 0)) };
+    });
+    _weeklyWoInvoice.notes = invoice.notes || '';
+    _weeklyWoInvoice.draftId = invoice.id || invoice.draft_id || null;
+    _weeklyWoInvoice.preview = invoice;
+    _weeklyWoInvoice.dirty = false;
+  }
+
+  window.openWeeklyWorkOrderInvoice = function(opts) {
+    opts = opts || {};
+    if (opts.weekEnd) _hoursWeekEnd = String(opts.weekEnd);
+    if (!_hoursWeekEnd) _hoursWeekEnd = getWeekEndSunday(0);
+    var sunday = new Date(_hoursWeekEnd + 'T00:00:00');
+    var monday = new Date(sunday);
+    monday.setDate(monday.getDate() - 6);
+    _hoursWeekStart = awstDateStr(monday);
+
     var container = document.getElementById('hoursContent');
-    var html = '';
+    container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading weekly work orders...</div>';
+    api('my_work_orders', { mode: 'all', type: 'fencing', status: 'complete', page_size: 500 }).then(function(res) {
+      var workOrders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])).filter(function(workOrder) {
+        var date = _weeklyWorkOrderDate(workOrder);
+        return date >= _hoursWeekStart && date <= _hoursWeekEnd && workOrder.can_add_to_weekly_invoice === true;
+      });
+      _weeklyWoInvoice = _weeklyNewState(workOrders);
+      if (opts.invoice && String(opts.invoice.invoice_source || '') === 'weekly_work_order') {
+        _hydrateWeeklyDraft(opts.invoice);
+        renderWeeklyWorkOrderInvoice();
+        return;
+      }
+      var draftId = '';
+      workOrders.some(function(workOrder) {
+        if (!workOrder.weekly_draft_id) return false;
+        draftId = String(workOrder.weekly_draft_id);
+        return true;
+      });
+      if (!draftId) {
+        renderWeeklyWorkOrderInvoice();
+        return;
+      }
+      api('get_trade_invoice', { invoice_id: draftId }).then(function(detail) {
+        if (detail.invoice && String(detail.invoice.invoice_source || '') === 'weekly_work_order') {
+          _hydrateWeeklyDraft(detail.invoice);
+        }
+        renderWeeklyWorkOrderInvoice();
+      }).catch(function(err) {
+        toast('Could not reopen the weekly draft: ' + friendlyError(err), true);
+        renderWeeklyWorkOrderInvoice();
+      });
+    }).catch(function(err) {
+      container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
+    });
+  };
 
-    // Week navigator (same as hourly)
-    html += '<div class="hours-week-nav">';
-    html += '  <button onclick="shiftWeek(-1)">&larr;</button>';
-    html += '  <div class="hours-week-label">' + formatWeekRange(data.week_ending) + '</div>';
-    html += '  <button onclick="shiftWeek(1)">&rarr;</button>';
+  window.shiftWeeklyWorkOrderWeek = function(dir) {
+    var sunday = new Date((_hoursWeekEnd || getWeekEndSunday(0)) + 'T00:00:00');
+    sunday.setDate(sunday.getDate() + Number(dir || 0) * 7);
+    _hoursWeekEnd = awstDateStr(sunday);
+    openWeeklyWorkOrderInvoice();
+  };
+
+  function _markWeeklyInvoiceDirty() {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.preview = null;
+    _weeklyWoInvoice.dirty = true;
+  }
+
+  window.toggleWeeklyWorkOrder = function(workOrderId, checked) {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.selected[String(workOrderId)] = checked === true;
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
+  window.toggleWeeklyCharge = function(workOrderId, lineId, checked) {
+    if (!_weeklyWoInvoice) return;
+    var id = String(workOrderId);
+    _weeklyWoInvoice.charges[id] = _weeklyWoInvoice.charges[id] || {};
+    _weeklyWoInvoice.charges[id][String(lineId)] = checked === true;
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
+  window.loadWeeklyInvoiceCrew = function(workOrderId, jobId) {
+    if (!_weeklyWoInvoice) return;
+    var id = String(workOrderId);
+    if (_weeklyWoInvoice.crew[id]) return;
+    _weeklyWoInvoice.crewLoading[id] = true;
+    renderWeeklyWorkOrderInvoice();
+    api('trade_job_detail', { jobId: jobId }).then(function(res) {
+      var seen = {};
+      _weeklyWoInvoice.crew[id] = (res.crew || []).filter(function(member) {
+        var userId = String(member.user_id || '');
+        if (!userId || userId === String((_user || {}).id || '') || seen[userId]) return false;
+        seen[userId] = true;
+        return true;
+      });
+      delete _weeklyWoInvoice.crewLoading[id];
+      renderWeeklyWorkOrderInvoice();
+    }).catch(function(err) {
+      delete _weeklyWoInvoice.crewLoading[id];
+      toast('Could not load crew: ' + friendlyError(err), true);
+      renderWeeklyWorkOrderInvoice();
+    });
+  };
+
+  window.setWeeklyLabourHours = function(workOrderId, userId, value) {
+    if (!_weeklyWoInvoice) return;
+    var id = String(workOrderId);
+    _weeklyWoInvoice.labour[id] = _weeklyWoInvoice.labour[id] || {};
+    _weeklyWoInvoice.labour[id][String(userId)] = Math.max(0, Number(value || 0));
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
+  window.addWeeklyFinalDeduction = function() {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.finalDeductions.push({ description: '', unit_rate: '' });
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
+  window.updateWeeklyFinalDeduction = function(index, field, value) {
+    if (!_weeklyWoInvoice || !_weeklyWoInvoice.finalDeductions[index]) return;
+    _weeklyWoInvoice.finalDeductions[index][field] = field === 'unit_rate' ? value : String(value || '');
+    _markWeeklyInvoiceDirty();
+  };
+
+  window.removeWeeklyFinalDeduction = function(index) {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.finalDeductions.splice(index, 1);
+    _markWeeklyInvoiceDirty();
+    renderWeeklyWorkOrderInvoice();
+  };
+
+  window.updateWeeklyInvoiceNotes = function(value) {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.notes = String(value || '');
+    _markWeeklyInvoiceDirty();
+  };
+
+  function _weeklyInvoicePayload() {
+    if (!_weeklyWoInvoice) throw new Error('Weekly invoice is not loaded');
+    var blocks = _weeklyWoInvoice.workOrders.filter(function(workOrder) {
+      return _weeklyWoInvoice.selected[String(workOrder.id)] === true;
+    }).map(function(workOrder) {
+      var id = String(workOrder.id);
+      var selectedCharges = _weeklyWoInvoice.charges[id] || {};
+      var labour = _weeklyWoInvoice.labour[id] || {};
+      return {
+        work_order_id: id,
+        crew_charge_line_ids: Object.keys(selectedCharges).filter(function(lineId) { return selectedCharges[lineId] === true; }),
+        labour_deductions: Object.keys(labour).filter(function(userId) { return Number(labour[userId]) > 0; }).map(function(userId) {
+          return { user_id: userId, hours: Number(labour[userId]) };
+        })
+      };
+    });
+    if (blocks.length === 0) throw new Error('Select at least one completed work order');
+    var finalDeductions = [];
+    _weeklyWoInvoice.finalDeductions.forEach(function(line) {
+      var description = String(line.description || '').trim();
+      var rate = Number(line.unit_rate || 0);
+      if (!description && !rate) return;
+      if (!description || !(rate > 0)) throw new Error('Every final deduction needs a description and positive amount');
+      finalDeductions.push({ description: description, quantity: 1, unit: 'ea', unit_rate: rate });
+    });
+    return {
+      week_start: _hoursWeekStart,
+      gst_on: false,
+      work_order_blocks: blocks,
+      final_deductions: finalDeductions,
+      notes: _weeklyWoInvoice.notes
+    };
+  }
+
+  function _weeklyInvoiceLineHtml(line) {
+    var amount = Number(line.line_total_ex || 0);
+    var detail = Number(line.quantity || 0) + ' ' + esc(line.unit || 'ea') + ' @ ' + _weeklyInvoiceMoney(line.unit_rate || 0);
+    return '<div class="wwi-preview-line' + (amount < 0 ? ' negative' : '') + '"><span>' + esc(line.description || line.line_type || 'Item') + '<br><small>' + detail + '</small></span><strong>' + _weeklyInvoiceMoney(amount) + '</strong></div>';
+  }
+
+  function _weeklyInvoicePreviewHtml(invoice) {
+    if (!invoice) return '<div class="wwi-warning">Save and calculate to see server-confirmed job subtotals and TO BE PAID.</div>';
+    var html = '<div class="wwi-preview" data-weekly-invoice-preview>';
+    (invoice.job_blocks || []).forEach(function(block) {
+      html += '<div class="wwi-preview-job" data-weekly-job-block="' + esc(block.source_work_order_id || '') + '">';
+      html += '<div class="wwi-preview-head"><strong>' + esc(block.job_number || 'Job') + '</strong><span>' + esc(block.line_date ? formatDateShort(block.line_date) : '') + '<br>' + esc(block.site_address || '') + '</span></div>';
+      (block.lines || []).forEach(function(line) { html += _weeklyInvoiceLineHtml(line); });
+      html += '<div class="wwi-preview-subtotal"><span>Job subtotal</span><span>' + _weeklyInvoiceMoney(block.subtotal) + '</span></div></div>';
+    });
     html += '</div>';
+    if ((invoice.final_deductions || []).length > 0) {
+      html += '<div class="wwi-panel"><div class="wwi-panel-title">Final deductions</div>';
+      (invoice.final_deductions || []).forEach(function(line) { html += _weeklyInvoiceLineHtml(line); });
+      html += '</div>';
+    }
+    html += '<div class="wwi-totals" data-weekly-invoice-totals>';
+    html += '<div class="wwi-total-row"><span>Grand total</span><span>' + _weeklyInvoiceMoney(invoice.grand_total) + '</span></div>';
+    html += '<div class="wwi-total-row"><span>Final deductions</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(invoice.final_deductions_total || 0))) + '</span></div>';
+    html += '<div class="wwi-total-row paid"><span>TO BE PAID</span><span>' + _weeklyInvoiceMoney(invoice.to_be_paid) + '</span></div>';
+    html += '</div>';
+    return html;
+  }
 
-    html += '<div style="background:var(--sw-orange);color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;margin-bottom:12px">Per-Metre Invoicing</div>';
+  function renderWeeklyWorkOrderInvoice() {
+    if (!_weeklyWoInvoice) return;
+    var container = document.getElementById('hoursContent');
+    var state = _weeklyWoInvoice;
+    var selectedCount = state.workOrders.filter(function(workOrder) { return state.selected[String(workOrder.id)] === true; }).length;
+    var html = '<div class="wwi-shell">';
+    html += '<div class="wwi-toolbar"><h2>Weekly Invoice</h2><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div>';
+    html += '<div class="hours-week-nav"><button aria-label="Previous invoice week" onclick="shiftWeeklyWorkOrderWeek(-1)">&larr;</button><div class="hours-week-label">' + formatWeekRange(_hoursWeekEnd) + '</div><button aria-label="Next invoice week" onclick="shiftWeeklyWorkOrderWeek(1)">&rarr;</button></div>';
+    html += '<div class="wwi-intro"><strong>SecureWorks calculates this invoice.</strong> Select the completed work orders and deductions that belong to the week. Prices, deduction rates, job subtotals and TO BE PAID are confirmed by the server when you save.</div>';
 
-    // Group assignments by job and calculate metres from scope_json
-    if (!data.assignments || data.assignments.length === 0) {
-      html += '<div class="hours-no-data">No completed jobs this week</div>';
-      html += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text-sec);text-align:center;margin:-6px 0 12px">Choose an authorised fencing work order to start an invoice.</div>';
-      html += '<button class="btn btn-secondary" style="width:100%;font-size:13px" onclick="openWorkOrderHub()">&#128203; Choose a Work Order</button>';
+    if (state.workOrders.length === 0) {
+      html += '<div class="hours-no-data">No completed work orders available for this week</div>';
+      html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button><button class="btn btn-secondary" onclick="openInvoiceHistory()">Invoice history</button></div></div>';
       container.innerHTML = html;
       return;
     }
 
-    // Group by job
-    var jobMap = {};
-    data.assignments.forEach(function(a) {
-      var jobId = a.job_id || (a.jobs && a.jobs.id) || 'unknown';
-      if (!jobMap[jobId]) {
-        jobMap[jobId] = {
-          job: a.jobs || {},
-          assignments: [],
-          days: 0
-        };
-      }
-      jobMap[jobId].assignments.push(a);
-      jobMap[jobId].days++;
-    });
-
-    var defaultRate = 35; // $35/m default
-    var grandTotal = 0;
-    var submittedItemsByJob = {};
-    if (data.already_submitted) {
-      (Array.isArray(data.items) ? data.items : []).forEach(function(item) {
-        var itemJobId = String((item || {}).job_id || '');
-        if (itemJobId) submittedItemsByJob[itemJobId] = item;
-      });
-    }
-
-    Object.keys(jobMap).forEach(function(jobId) {
-      var entry = jobMap[jobId];
-      var job = entry.job;
-      var jobNum = job.job_number || '';
-      var scope = job.scope_json;
-
-      // Calculate total metres from fencing scope: sum of runs[].lengthM
-      var totalMetres = 0;
-      if (scope) {
-        var s = typeof scope === 'string' ? JSON.parse(scope) : scope;
-        var jobData = s.job || s.config || s;
-        var runs = jobData.runs || [];
-        if (runs.length > 0) {
-          totalMetres = runs.reduce(function(sum, r) { return sum + (Number(r.lengthM) || Number(r.totalLength) || Number(r.length) || 0); }, 0);
-        }
-        // Fallback to config.totalLength or config.totalMetres
-        if (totalMetres === 0) {
-          totalMetres = Number(jobData.totalLength) || Number(jobData.totalMetres) || Number(s.config && s.config.totalLength) || 0;
-        }
-      }
-
-      var rate = defaultRate;
-      var jobTotal = totalMetres * rate;
-      var submittedLineAvailable = false;
-      if (data.already_submitted) {
-        var submittedItem = submittedItemsByJob[String(jobId)] || null;
-        submittedLineAvailable = !!submittedItem
-          && _invoiceHasPersistedNumber(submittedItem.metres)
-          && _invoiceHasPersistedNumber(submittedItem.rate_per_metre)
-          && _invoiceHasPersistedNumber(submittedItem.total);
-        if (submittedLineAvailable) {
-          totalMetres = Number(submittedItem.metres);
-          rate = Number(submittedItem.rate_per_metre);
-          jobTotal = Number(submittedItem.total);
-        } else {
-          totalMetres = null;
-          rate = null;
-          jobTotal = null;
-        }
-      }
-      if (jobTotal != null) grandTotal += jobTotal;
-
-      html += '<div style="padding:14px;background:var(--sw-card);border-radius:12px;margin-bottom:10px;box-shadow:var(--sw-shadow)">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center">';
-      html += '<div>';
-      html += '<div style="font-weight:700;font-size:15px">' + esc(jobNum) + '</div>';
-      html += '<div style="font-size:13px;color:var(--sw-text-sec)">' + esc(job.client_name || '') + ' · ' + esc(job.site_suburb || '') + '</div>';
-      html += '</div>';
-      html += '<div style="text-align:right">';
-      html += '<div style="font-size:11px;color:var(--sw-text-sec)">' + entry.days + ' day' + (entry.days > 1 ? 's' : '') + '</div>';
-      html += '</div>';
-      html += '</div>';
-
-      // Submitted line money is response-only. When the response does not
-      // return an item, keep the job identity but hide scope-derived figures.
-      if (data.already_submitted && !submittedLineAvailable) {
-        html += '<div data-per-metre-line-unavailable style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px;font-size:12px;color:var(--sw-text-sec)">Submitted line figures are unavailable. Open the saved invoice for confirmed figures.</div>';
-      } else {
-        html += '<div style="margin-top:10px;background:var(--sw-light);border-radius:8px;padding:12px">';
-        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-        html += '<span>Total metres</span>';
-        html += '<span style="display:flex;align-items:center;gap:6px">';
-        html += '<input type="number" step="0.1" min="0" value="' + totalMetres.toFixed(1) + '" id="pmMetres_' + esc(jobId) + '" onchange="recalcPerMetre()" ' + (data.already_submitted ? 'disabled ' : '') + 'style="width:70px;padding:4px 6px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px;font-weight:600;text-align:right;font-family:var(--sw-font)">';
-        html += '<span style="font-size:12px;color:var(--sw-text-sec)">m</span>';
-        html += '</span></div>';
-
-        html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">';
-        html += '<span>Rate</span><span style="font-weight:600">$' + rate.toFixed(2) + '/m</span></div>';
-
-        html += '<div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--sw-border);padding-top:8px">';
-        html += '<span>Total</span><span id="pmTotal_' + esc(jobId) + '">$' + jobTotal.toFixed(2) + '</span></div>';
+    html += '<div class="wwi-count">' + selectedCount + ' of ' + state.workOrders.length + ' work orders selected</div>';
+    state.workOrders.forEach(function(workOrder) {
+      var id = String(workOrder.id);
+      var selected = state.selected[id] === true;
+      html += '<section class="wwi-card' + (selected ? ' selected' : '') + '" data-weekly-work-order="' + esc(id) + '">';
+      html += '<div class="wwi-card-head"><input class="wwi-check" type="checkbox" ' + (selected ? 'checked ' : '') + 'aria-label="Include ' + esc(workOrder.job_number || workOrder.wo_number || 'work order') + '" onchange="toggleWeeklyWorkOrder(\'' + id + '\',this.checked)">';
+      html += '<div class="wwi-card-copy"><div class="wwi-job-number">' + esc(workOrder.job_number || 'Job') + ' · ' + esc(workOrder.wo_number || 'WO') + '</div>';
+      html += '<div class="wwi-job-meta">' + esc(workOrder.client_name || '') + (workOrder.site_address ? '<br>' + esc(workOrder.site_address) : '') + '<br>' + esc(formatDateShort(_weeklyWorkOrderDate(workOrder))) + '</div></div></div>';
+      if (selected) {
+        html += '<div class="wwi-source"><div class="wwi-source-section"><div class="wwi-source-title">Work order billing</div>';
+        (workOrder.scope_items || []).forEach(function(item) {
+          var itemAmount = item.total != null ? item.total : item.amount;
+          html += '<div class="wwi-source-line"><span>' + esc(item.description || item.name || 'Scope item') + '<br><small>' + esc(item.quantity == null ? '' : item.quantity) + ' ' + esc(item.unit || '') + (item.rate != null ? ' @ ' + _weeklyInvoiceMoney(item.rate) : '') + '</small></span>';
+          html += '<span class="wwi-line-money">' + (itemAmount == null ? '' : _weeklyInvoiceMoney(itemAmount)) + '</span></div>';
+        });
         html += '</div>';
+        var charges = workOrder.negative_charges || [];
+        if (charges.length > 0) {
+          html += '<div class="wwi-source-section"><div class="wwi-source-title">Crew and work-order deductions</div>';
+          charges.forEach(function(charge) {
+            var lineId = String(charge.line_id || '');
+            var checked = !!(state.charges[id] || {})[lineId];
+            html += '<div class="wwi-source-line negative"><label><input type="checkbox" ' + (checked ? 'checked ' : '') + 'aria-label="Deduct ' + esc(charge.description || charge.trade_name || 'crew charge') + '" onchange="toggleWeeklyCharge(\'' + id + '\',\'' + lineId + '\',this.checked)"><span>' + esc(charge.description || ('Work Order - ' + (charge.trade_name || 'Crew'))) + '</span></label><span class="wwi-line-money">' + _weeklyInvoiceMoney(charge.amount_ex) + '</span></div>';
+          });
+          html += '</div>';
+        }
+        html += '<div class="wwi-source-section"><div class="wwi-source-title">Direct labour deductions</div>';
+        if (state.crewLoading[id]) {
+          html += '<div class="wwi-count"><span class="spinner" style="width:13px;height:13px;display:inline-block;vertical-align:middle"></span> Loading assigned crew...</div>';
+        } else if (!state.crew[id]) {
+          html += '<button class="btn btn-secondary btn-small" onclick="loadWeeklyInvoiceCrew(\'' + id + '\',\'' + esc(workOrder.job_id || '') + '\')">Add labour deduction</button>';
+        } else if (state.crew[id].length === 0) {
+          html += '<div class="wwi-count">No other assigned crew found for this job.</div>';
+        } else {
+          state.crew[id].forEach(function(member) {
+            var userId = String(member.user_id || '');
+            var hours = Number((state.labour[id] || {})[userId] || 0);
+            html += '<label class="wwi-labour"><span class="wwi-labour-name">' + esc(member.name || member.crew_name || 'Crew member') + '</span><input type="number" min="0" step="0.25" inputmode="decimal" aria-label="Labour hours for ' + esc(member.name || member.crew_name || 'crew member') + '" value="' + (hours || '') + '" placeholder="Hours" onchange="setWeeklyLabourHours(\'' + id + '\',\'' + userId + '\',this.value)"></label>';
+          });
+        }
+        html += '</div></div>';
       }
-
-      html += '</div>';
+      html += '</section>';
     });
 
-    // Money summary (the backend persists the submitted figures).
-    if (data.already_submitted) {
-      var submittedMoney = _invoicePersistedMoney(data);
-      if (submittedMoney.complete) {
-        html += _invoiceMoneySummaryHtml(submittedMoney, { id: 'invMoneySummary' });
-      } else {
-        html += _invoiceMoneyUnavailableHtml({ id: 'invMoneySummary' });
-      }
-    } else {
-      html += _invoicePreviewSummaryHtml(grandTotal, { id: 'invMoneySummary', gstSwitch: true });
-    }
-    html += '<span id="pmGrandTotal" hidden>$' + grandTotal.toFixed(2) + '</span>';
-
-    // Submit button
-    if (data.already_submitted) {
-      if (_invoiceXeroPushPending(data)) {
-        html += '<div class="hours-submitted-pill">&#10003; Invoice saved — Xero sync pending</div>';
-      } else {
-        html += '<div class="hours-submitted-pill">&#10003; Submitted to Xero' + (data.xero_bill_number ? ' — ' + esc(data.xero_bill_number) : '') + '</div>';
-      }
-    } else {
-      html += '<button class="hours-submit-btn" onclick="submitPerMetreInvoice()" style="background:var(--sw-orange)">Submit Invoice</button>';
-    }
-
-    // Lead can also verify crew hours
-    if (_user && (_user.role === 'lead_installer' || _userTier >= 2)) {
-      html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--sw-border)">';
-      html += '<button class="btn btn-secondary" style="width:100%;font-size:13px" onclick="openVerificationInbox()">Review Crew Hours</button>';
-      html += '</div>';
-    }
-
-    // Work Orders button (all users)
-    html += '<div style="margin-top:12px">';
-    html += '<button class="btn btn-secondary" style="width:100%;font-size:13px" onclick="openWorkOrderHub()">&#128203; My Work Orders</button>';
-    html += '</div>';
-
-    // Crew review section (Tier 2+ — inline charges, not same as verification inbox)
-    if (_userTier >= 2) {
-      html += '<div class="crew-review-section">';
-      html += '  <div class="crew-review-title">Crew on My Jobs</div>';
-      html += '  <div id="crewReviewSection"><div style="text-align:center;padding:20px;color:var(--sw-text-sec);font-size:13px"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading crew charges...</div></div>';
-      html += '</div>';
-    }
-
+    html += '<section class="wwi-panel"><div class="wwi-panel-title">Final payout deductions</div>';
+    if (state.finalDeductions.length === 0) html += '<div class="wwi-count" style="margin-bottom:9px">Examples: Car Loan or another approved payout deduction.</div>';
+    state.finalDeductions.forEach(function(line, index) {
+      html += '<div class="wwi-final-row"><div class="wwi-final-grid"><input aria-label="Final deduction description" placeholder="Description" value="' + esc(line.description || '') + '" onchange="updateWeeklyFinalDeduction(' + index + ',\'description\',this.value)"></div>';
+      html += '<div class="wwi-final-grid"><input aria-label="Final deduction amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$0.00" value="' + esc(line.unit_rate || '') + '" onchange="updateWeeklyFinalDeduction(' + index + ',\'unit_rate\',this.value)"></div>';
+      html += '<button class="wwi-remove" aria-label="Remove final deduction" onclick="removeWeeklyFinalDeduction(' + index + ')">&times;</button></div>';
+    });
+    html += '<button class="inv-add-btn" onclick="addWeeklyFinalDeduction()">+ Add final deduction</button></section>';
+    html += '<section class="wwi-panel"><label class="wwi-panel-title" for="weeklyInvoiceNotes">Notes</label><textarea class="wwi-notes" id="weeklyInvoiceNotes" rows="3" placeholder="Optional note for finance" onchange="updateWeeklyInvoiceNotes(this.value)">' + esc(state.notes || '') + '</textarea></section>';
+    html += _weeklyInvoicePreviewHtml(state.preview);
+    html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : 'Save & calculate') + '</button>';
+    html += '<button class="hours-submit-btn" ' + (state.busy || state.dirty || !state.preview ? 'disabled ' : '') + 'onclick="submitWeeklyWorkOrderInvoice()">Submit Invoice</button></div>';
+    html += '<div class="wwi-count">Submitting creates a draft bill in Xero. If a selection changes, save again before submitting.</div>';
+    html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openVerificationInbox()">Review Crew Hours</button><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button></div></div>';
     container.innerHTML = html;
-
-    // Load crew review after DOM ready
-    if (_userTier >= 2) loadCrewReview();
   }
 
-  window.recalcPerMetre = function() {
-    // Recalculate totals from all per-metre inputs
-    var inputs = document.querySelectorAll('[id^="pmMetres_"]');
-    var rate = 35;
-    var grandTotal = 0;
-    inputs.forEach(function(input) {
-      var jobId = input.id.replace('pmMetres_', '');
-      var metres = parseFloat(input.value) || 0;
-      var total = metres * rate;
-      grandTotal += total;
-      var totalEl = document.getElementById('pmTotal_' + jobId);
-      if (totalEl) totalEl.textContent = '$' + total.toFixed(2);
+  window.saveWeeklyWorkOrderInvoice = function() {
+    var payload;
+    try { payload = _weeklyInvoicePayload(); }
+    catch (err) { toast(err.message, true); return; }
+    _weeklyWoInvoice.busy = true;
+    renderWeeklyWorkOrderInvoice();
+    api('save_trade_invoice_draft', null, payload).then(function(res) {
+      if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
+      _weeklyWoInvoice.draftId = res.draft_id || res.id || _weeklyWoInvoice.draftId;
+      _weeklyWoInvoice.preview = Object.assign({ invoice_source: 'weekly_work_order', status: 'draft' }, res);
+      _weeklyWoInvoice.dirty = false;
+      _weeklyWoInvoice.busy = false;
+      toast('Draft saved — totals calculated by SecureWorks');
+      renderWeeklyWorkOrderInvoice();
+    }).catch(function(err) {
+      _weeklyWoInvoice.busy = false;
+      toast(friendlyError(err), true);
+      renderWeeklyWorkOrderInvoice();
     });
-    var grand = document.getElementById('pmGrandTotal');
-    if (grand) grand.textContent = '$' + grandTotal.toFixed(2);
-    _updateInvoiceMoneySummary(grandTotal);
   };
 
-  window.submitPerMetreInvoice = function() {
-    // Collect all metres from inputs
-    var inputs = document.querySelectorAll('[id^="pmMetres_"]');
-    var rate = 35;
-    var items = [];
-    var grandTotal = 0;
-    inputs.forEach(function(input) {
-      var jobId = input.id.replace('pmMetres_', '');
-      var metres = parseFloat(input.value) || 0;
-      items.push({ job_id: jobId, metres: metres, rate_per_metre: rate });
-      grandTotal += metres * rate;
-    });
-
-    var summary = '';
-    items.forEach(function(it) {
-      if (it.metres > 0) {
-        var jobLabel = document.getElementById('pmMetres_' + it.job_id);
-        var card = jobLabel ? jobLabel.closest('[style*="background"]') : null;
-        var jobName = card ? (card.querySelector('[style*="font-weight:700"]') || {}).textContent || it.job_id : it.job_id;
-        summary += jobName + ': ' + it.metres.toFixed(1) + 'm = $' + (it.metres * rate).toFixed(2) + '\n';
-      }
-    });
-    summary += '\nTotal: $' + grandTotal.toFixed(2);
-    showConfirm('Submit Invoice', summary, 'Submit').then(function(ok) {
+  window.submitWeeklyWorkOrderInvoice = function() {
+    if (!_weeklyWoInvoice || _weeklyWoInvoice.dirty || !_weeklyWoInvoice.preview) {
+      toast('Save and calculate before submitting', true);
+      return;
+    }
+    var payload;
+    try { payload = _weeklyInvoicePayload(); }
+    catch (err) { toast(err.message, true); return; }
+    payload.draft_id = _weeklyWoInvoice.draftId;
+    var payable = _weeklyInvoiceMoney(_weeklyWoInvoice.preview.to_be_paid);
+    showConfirm('Submit Weekly Invoice', 'Submit ' + payable + ' for ' + formatWeekRange(_hoursWeekEnd) + '? A DRAFT bill will be created in Xero.', 'Submit').then(function(ok) {
       if (!ok) return;
-      api('submit_trade_invoice', null, {
-        week_ending: _hoursWeekEnd,
-        invoice_type: 'per_metre',
-        rate_per_metre: rate,
-        items: items,
-        notes: 'Per-metre invoice',
-        gst_on: _invGst
-      }).then(function(res) {
-        if (!_invoiceSubmitSucceeded(res)) {
-          throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
-        }
-        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted'));
-        _hoursData = _invoiceSubmittedDataFromResponse(_hoursData, res);
-        _invGst = _invoiceGstDefault(_hoursData);
-        renderPerMetreView(_hoursData);
+      _weeklyWoInvoice.busy = true;
+      renderWeeklyWorkOrderInvoice();
+      api('generate_trade_invoice', null, payload).then(function(res) {
+        if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
+        var invoice = Object.assign({}, _weeklyWoInvoice.preview, res, {
+          id: res.invoice_id || res.id || _weeklyWoInvoice.draftId,
+          invoice_source: 'weekly_work_order',
+          status: res.code === 'XERO_PUSH_FAILED' ? 'pending_ops_review' : (res.status || 'submitted')
+        });
+        _weeklyWoInvoice.busy = false;
+        toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill'));
+        _weeklyWoInvoice = null;
+        renderWeeklyInvoiceDetail(invoice);
       }).catch(function(err) {
-        if (!navigator.onLine) {
-          queueOfflineAction('submit_trade_invoice', { week_ending: _hoursWeekEnd, invoice_type: 'per_metre', rate_per_metre: rate, items: items, notes: 'Per-metre invoice', gst_on: _invGst });
-          toast('Offline — invoice queued, will submit when back online');
-          return;
-        }
+        _weeklyWoInvoice.busy = false;
         toast(friendlyError(err), true);
+        renderWeeklyWorkOrderInvoice();
       });
     });
   };
+
+  function renderWeeklyInvoiceDetail(inv) {
+    var container = document.getElementById('hoursContent');
+    var html = '<div class="wwi-shell">';
+    html += '<div class="wwi-toolbar"><h2>Invoice Detail</h2><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">Back</button></div>';
+    html += '<div class="inv-header"><div class="inv-header-row title">' + esc(inv.invoice_number || 'Weekly Invoice') + '</div>';
+    if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end || _hoursWeekEnd) + '</span></div>';
+    html += '<div style="margin-top:8px"><span class="inv-status ' + esc(String(inv.status || 'draft').replace(/ /g, '_')) + '">' + esc(String(inv.status || 'draft').replace(/_/g, ' ')) + '</span></div></div>';
+    if (_invoiceXeroPushPending(inv)) html += '<div class="wwi-warning">Invoice saved with exact totals. Xero sync is pending; do not submit it again.</div>';
+    html += _weeklyInvoicePreviewHtml(inv);
+    if (inv.notes) html += '<div class="wwi-panel"><div class="wwi-panel-title">Notes</div><div class="wwi-count">' + esc(inv.notes) + '</div></div>';
+    if (inv.id && inv.status !== 'paid') html += '<button class="btn btn-danger" style="width:100%" onclick="deleteTradeInvoice(\'' + esc(inv.id) + '\')">Delete Invoice</button>';
+    html += '</div>';
+    container.innerHTML = html;
+  }
 
   window.submitTradeHours = function() {
     if (!_hoursData || _hoursData.already_submitted) return;
@@ -16378,6 +16608,13 @@
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading draft...</div>';
     api('get_trade_invoice', { invoice_id: draftId }).then(function(res) {
       var inv = res.invoice;
+      if (String((inv || {}).invoice_source || '') === 'weekly_work_order') {
+        _invoiceBuilderOpen = false;
+        _hoursWeekStart = inv.week_start || _hoursWeekStart;
+        _hoursWeekEnd = inv.week_end || _hoursWeekEnd;
+        openWeeklyWorkOrderInvoice({ weekEnd: _hoursWeekEnd, invoice: inv });
+        return;
+      }
       _draftInvoiceId = inv.id;
       _invNotes = inv.notes || '';
       _invRows = [];
@@ -16432,6 +16669,10 @@
   };
 
   function renderInvoiceDetail(inv) {
+    if (String((inv || {}).invoice_source || '') === 'weekly_work_order') {
+      renderWeeklyInvoiceDetail(inv);
+      return;
+    }
     var container = document.getElementById('hoursContent');
     var details = loadTradeDetails();
     var tradeName = details.fullName || (_user ? _user.name : '') || 'Subcontractor';
@@ -16697,6 +16938,9 @@
   }
 
   function _invoiceSubmittedAmountText(source) {
+    if (String((source || {}).invoice_source || '') === 'weekly_work_order' && _invoiceHasPersistedNumber(source.to_be_paid)) {
+      return _invoiceMoney(source.to_be_paid);
+    }
     var money = _invoicePersistedMoney(source);
     return money.complete ? _invoiceMoney(money.total_inc) : 'Figures unavailable';
   }
@@ -20674,6 +20918,8 @@
       // Action button or status indicator
       if (wo.already_invoiced) {
         html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);border-radius:8px;padding:10px;font-size:13px;font-weight:600;margin-top:10px">&#10003; Invoiced</div>';
+      } else if (isPerMetreUser() && wo.can_add_to_weekly_invoice) {
+        html += '<button onclick="openWeeklyWorkOrderInvoice()" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Add to Weekly Invoice</button>';
       } else if (wo.can_invoice) {
         html += '<button id="woBtn' + wo.id + '" onclick="invoiceWorkOrder(\'' + wo.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Invoice This Work Order</button>';
       } else {

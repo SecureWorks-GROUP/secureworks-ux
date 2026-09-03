@@ -202,6 +202,7 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-selection-labour-mismatch',
       'trade-weekly-work-order-invoice-selection-final-mismatch',
       'trade-weekly-work-order-invoice-incomplete-detail',
+      'trade-weekly-work-order-invoice-incomplete-generate',
       'trade-weekly-work-order-invoice-stale-submit',
       'trade-weekly-work-order-invoice-crew-load-race',
       'trade-weekly-work-order-invoice-invoice-id-only'
@@ -470,6 +471,7 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-selection-crew-mismatch': ['save_trade_invoice_draft'],
       'trade-weekly-work-order-invoice-selection-labour-mismatch': ['save_trade_invoice_draft'],
       'trade-weekly-work-order-invoice-selection-final-mismatch': ['save_trade_invoice_draft'],
+      'trade-weekly-work-order-invoice-incomplete-generate': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-stale-submit': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-invoice-id-only': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'crew-lead': ['set_job_lead'],
@@ -896,6 +898,15 @@ const test = base.extend({
             }
             if (feedScenario === 'trade-weekly-work-order-invoice-stale-submit') {
               await new Promise((resolve) => setTimeout(resolve, 150));
+            }
+            if (feedScenario === 'trade-weekly-work-order-invoice-incomplete-generate') {
+              return {
+                success: true,
+                invoice_id: 'henry-weekly-invoice-31',
+                invoice_number: 'SW-INV-31',
+                status: 'submitted',
+                xero_bill_id: 'stubbed-xero-bill-31'
+              };
             }
             return {
               ...weeklyInvoiceResponse(),

@@ -16466,6 +16466,13 @@
     _weeklyWoInvoice.revision++;
   }
 
+  function _renderWeeklyInvoiceDirtyState() {
+    var result = document.querySelector('[data-weekly-invoice-result]');
+    if (result) result.innerHTML = _weeklyInvoicePreviewHtml(null);
+    var submit = document.querySelector('[data-weekly-invoice-submit]');
+    if (submit) submit.disabled = true;
+  }
+
   window.toggleWeeklyWorkOrder = function(workOrderId, checked) {
     if (!_weeklyWoInvoice) return;
     _weeklyWoInvoice.selected[String(workOrderId)] = checked === true;
@@ -16528,6 +16535,7 @@
     if (!_weeklyWoInvoice || !_weeklyWoInvoice.finalDeductions[index]) return;
     _weeklyWoInvoice.finalDeductions[index][field] = field === 'unit_rate' ? value : String(value || '');
     _markWeeklyInvoiceDirty();
+    _renderWeeklyInvoiceDirtyState();
   };
 
   window.removeWeeklyFinalDeduction = function(index) {
@@ -16541,6 +16549,7 @@
     if (!_weeklyWoInvoice) return;
     _weeklyWoInvoice.notes = String(value || '');
     _markWeeklyInvoiceDirty();
+    _renderWeeklyInvoiceDirtyState();
   };
 
   function _weeklyInvoicePayload(state) {
@@ -16681,9 +16690,9 @@
     });
     html += '<button class="inv-add-btn" onclick="addWeeklyFinalDeduction()">+ Add final deduction</button></section>';
     html += '<section class="wwi-panel"><label class="wwi-panel-title" for="weeklyInvoiceNotes">Notes</label><textarea class="wwi-notes" id="weeklyInvoiceNotes" rows="3" placeholder="Optional note for finance" onchange="updateWeeklyInvoiceNotes(this.value)">' + esc(state.notes || '') + '</textarea></section>';
-    html += _weeklyInvoicePreviewHtml(state.preview);
+    html += '<div data-weekly-invoice-result>' + _weeklyInvoicePreviewHtml(state.preview) + '</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : 'Save & calculate') + '</button>';
-    html += '<button class="hours-submit-btn" ' + (state.busy || state.dirty || !state.preview ? 'disabled ' : '') + 'onclick="submitWeeklyWorkOrderInvoice()">Submit Invoice</button></div>';
+    html += '<button class="hours-submit-btn" data-weekly-invoice-submit ' + (state.busy || state.dirty || !state.preview ? 'disabled ' : '') + 'onclick="submitWeeklyWorkOrderInvoice()">Submit Invoice</button></div>';
     html += '<div class="wwi-count">Submitting creates a draft bill in Xero. If a selection changes, save again before submitting.</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openVerificationInbox()">Review Crew Hours</button><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button></div></div>';
     container.innerHTML = html;
@@ -16749,12 +16758,26 @@
       api('generate_trade_invoice', null, payload).then(function(res) {
         if (!_weeklyStateCurrent(state, null, requestSeq)) return;
         if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
-        var invoice = Object.assign({}, preview, res, {
+        var invoiceResponse = Object.assign({}, res, {
+          draft_id: state.draftId,
           id: res.invoice_id || res.id || state.draftId,
           invoice_source: 'weekly_work_order',
+          week_start: state.weekStart,
+          week_end: state.weekEnd,
           status: res.code === 'XERO_PUSH_FAILED' ? 'pending_ops_review' : (res.status || 'submitted')
         });
-        invoice = _weeklyInvoiceFromResponse(invoice, payload, { draft_id: state.draftId }, state);
+        var invoice;
+        try {
+          invoice = _weeklyInvoiceFromResponse(invoiceResponse, payload, null, state);
+        } catch (validationErr) {
+          state.busy = false;
+          state.preview = null;
+          state.dirty = true;
+          toast('Invoice submission was accepted but SecureWorks did not return complete figures. Do not submit again — check Invoice history or contact the office.', true);
+          if (_weeklyWoInvoice === state) _weeklyWoInvoice = null;
+          openInvoiceHistory();
+          return;
+        }
         if (state.revision !== revision) {
           state.busy = false;
           toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill') + ' Current edits were not included; open Invoice history to review it.');

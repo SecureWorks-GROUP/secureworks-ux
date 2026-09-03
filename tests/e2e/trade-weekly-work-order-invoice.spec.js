@@ -280,6 +280,40 @@ test.describe('weekly save response with invoice identity only', () => {
   });
 });
 
+test.describe('incomplete weekly generate response', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-incomplete-generate' });
+
+  test('does not inherit saved preview money or permit a duplicate submit', async ({ appPage: page }) => {
+    await openWeeklyInvoice(page);
+    await enterInvoice31Deductions(page);
+    await page.getByRole('button', { name: 'Save & calculate' }).click();
+    await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('TO BE PAID$4,813.40');
+
+    await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    await page.locator('#confirmOk').click();
+
+    await expect(page.locator('#toast')).toContainText('Do not submit again');
+    await expect(page.getByRole('heading', { name: 'My Invoices' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toHaveCount(0);
+    await expect(page.locator('[data-weekly-invoice-totals]')).toHaveCount(0);
+  });
+});
+
+test('clears stale server totals immediately when a final deduction changes', async ({ appPage: page }) => {
+  await openWeeklyInvoice(page);
+  await enterInvoice31Deductions(page);
+  await page.getByRole('button', { name: 'Save & calculate' }).click();
+  await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('TO BE PAID$4,813.40');
+
+  await page.getByRole('spinbutton', { name: 'Final deduction amount' }).fill('351');
+  await page.getByRole('spinbutton', { name: 'Final deduction amount' }).press('Tab');
+
+  await expect(page.locator('[data-weekly-invoice-totals]')).toHaveCount(0);
+  await expect(page.getByText('Save and calculate to see server-confirmed job subtotals and TO BE PAID.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+  await expect(page.getByRole('spinbutton', { name: 'Final deduction amount' })).toHaveValue('351');
+});
+
 test.describe('mobile weekly invoice', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

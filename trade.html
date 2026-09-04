@@ -8128,6 +8128,73 @@
     return /\.(mp4|mov|webm|avi|mkv|3gp)(\?|$)/i.test(url || '');
   }
 
+  function isScopeVideo(m) {
+    if (!m) return false;
+    if (String(m.type || '').toLowerCase() === 'video') return true;
+    if (/walkthrough/i.test(String(m.label || ''))) return true;
+    return isVideoUrl(m.storage_url);
+  }
+
+  function pickScopeVideo(data) {
+    var media = (data && data.media) || [];
+    var videos = media.filter(isScopeVideo);
+    if (videos.length === 0) return null;
+    var labelled = videos.filter(function(m) { return /walkthrough/i.test(String(m.label || '')); });
+    return labelled[0] || videos[0];
+  }
+
+  function renderScopeVideoCard(data) {
+    var video = pickScopeVideo(data);
+    var h = '<div class="detail-section">';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Scope video</div>';
+    if (!video || !video.storage_url) return '';
+    h += '<video controls playsinline preload="metadata" style="width:100%;max-height:240px;background:#111;border-radius:8px" src="' + esc(video.storage_url) + '"></video>';
+    if (video.label) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(video.label) + '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderQuotePacks(data) {
+    var packs = data.quote_packs || data.quotePacks || [];
+    if (!packs.length) return '';
+    var h = '<div class="detail-section">';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Quotes sent</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">Every quote that went to the client, without the price. Open the one you are building.</div>';
+    packs.forEach(function(pack, idx) {
+      var open = idx === 0;
+      var badge = pack.status === 'accepted' ? 'Accepted' : pack.status === 'superseded' ? 'Older' : 'Sent';
+      var badgeBg = pack.status === 'accepted' ? 'var(--sw-orange)' : 'var(--sw-border)';
+      var badgeColor = pack.status === 'accepted' ? '#fff' : 'var(--sw-dark)';
+      var qn = pack.quote_number || 'Quote';
+      var sent = pack.sent_at ? String(pack.sent_at).slice(0, 10) : '';
+      h += '<details ' + (open ? 'open' : '') + ' style="border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-card)">';
+      h += '<summary style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none">';
+      h += '<span style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(qn) + '</span>';
+      h += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;background:' + badgeBg + ';color:' + badgeColor + ';padding:2px 8px;border-radius:4px">' + badge + '</span>';
+      if (sent) h += '<span style="margin-left:auto;font-size:11px;color:var(--sw-text-sec)">' + esc(sent) + '</span>';
+      h += '</summary>';
+      if (pack.summary) h += '<div style="padding:0 12px 8px;font-size:12px;color:var(--sw-text-sec)">' + esc(pack.summary) + '</div>';
+      h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+      (pack.items || []).forEach(function(item) {
+        if (item.kind === 'note') {
+          h += '<tr><td colspan="3" style="padding:8px 12px;background:var(--sw-light);white-space:pre-wrap">' + esc(item.description || '') + '</td></tr>';
+          return;
+        }
+        var qty = item.quantity ? (item.quantity + (item.unit ? ' ' + item.unit : '')) : '';
+        var rate = item.unit_price != null ? '$' + Number(item.unit_price).toLocaleString('en-AU', { minimumFractionDigits: item.unit_price % 1 ? 2 : 0, maximumFractionDigits: 2 }) : '';
+        h += '<tr style="border-top:1px solid var(--sw-border)">';
+        h += '<td style="padding:8px 12px">' + esc(item.description || '') + '</td>';
+        h += '<td style="padding:8px 8px;text-align:right;white-space:nowrap;color:var(--sw-text-sec)">' + esc(qty) + '</td>';
+        h += '<td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:600">' + rate + '</td>';
+        h += '</tr>';
+      });
+      h += '</table>';
+      h += '</details>';
+    });
+    h += '</div>';
+    return h;
+  }
+
   function renderMediaThumb(src, fullUrl, alt, gallerySelector) {
     if (isVideoUrl(fullUrl)) {
       return '<div style="position:relative;width:80px;height:80px;flex-shrink:0;cursor:pointer;border-radius:6px;overflow:hidden" onclick="openLightbox(\'' + esc(fullUrl) + '\'' + (gallerySelector ? ', \'' + gallerySelector + '\'' : '') + ')">'
@@ -8140,7 +8207,7 @@
 
   function renderScopeGallery(data, phase) {
     var media = data.media || [];
-    var scopePhotos = media.filter(function(m) { return m.phase === 'scope'; });
+    var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     var docPhotos = (data.documents || []).filter(function(d) {
       return d.visible_to_trades && d.type === 'site_photo' && d.storage_url;
     });
@@ -8443,10 +8510,17 @@
 
     // Large dimensions — readable from 3 metres
     if (type === 'fencing') {
-      if (config.totalLength || config.length) {
+      var fenceJob = job.scope_json.job || config;
+      var fenceRuns = fenceJob.runs || [];
+      var fenceM = 0;
+      fenceRuns.forEach(function(r) { fenceM += Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0; });
+      if (fenceM > 0) {
+        h += '<div class="scope-dimensions">' + esc(String(Math.round(fenceM * 10) / 10)) + 'm <span style="font-size:16px;font-weight:400;color:var(--sw-text-sec)">total length</span></div>';
+      } else if (config.totalLength || config.length) {
         h += '<div class="scope-dimensions">' + esc(String(config.totalLength || config.length)) + 'm <span style="font-size:16px;font-weight:400;color:var(--sw-text-sec)">total length</span></div>';
-        if (config.height) h += '<div style="font-size:18px;font-weight:700;color:var(--sw-mid);margin-bottom:12px">' + esc(String(config.height)) + 'mm high</div>';
       }
+      var fenceH = fenceJob.sheetHeight || config.height;
+      if (fenceH) h += '<div style="font-size:18px;font-weight:700;color:var(--sw-mid);margin-bottom:12px">' + esc(String(fenceH)) + 'mm high</div>';
     } else {
       if (config.length && config.projection) {
         h += '<div class="scope-dimensions">' + esc(String(config.length)) + 'm × ' + esc(String(config.projection)) + 'm</div>';
@@ -8458,9 +8532,11 @@
     h += '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px;line-height:1.8;margin-bottom:12px">';
 
     if (type === 'fencing') {
-      if (config.material) { h += '<span style="color:var(--sw-text-sec)">Material</span><span style="font-weight:600">' + humanise('material', config.material) + '</span>'; }
-      if (config.colour || config.color) { h += '<span style="color:var(--sw-text-sec)">Colour</span><span style="font-weight:600;display:flex;align-items:center;gap:6px"><span style="width:14px;height:14px;border-radius:3px;background:' + (COLORBOND[config.colour || config.color] || '#ccc') + ';display:inline-block;border:1px solid rgba(0,0,0,0.1)"></span>' + esc(config.colour || config.color) + '</span>'; }
-      var gates = config.gates;
+      var fenceJob = job.scope_json.job || config;
+      if (fenceJob.profile || fenceJob.material || config.material) { h += '<span style="color:var(--sw-text-sec)">Material</span><span style="font-weight:600">' + humanise('material', fenceJob.profile || fenceJob.material || config.material) + '</span>'; }
+      var fenceColour = fenceJob.colour || fenceJob.color || config.colour || config.color;
+      if (fenceColour) { h += '<span style="color:var(--sw-text-sec)">Colour</span><span style="font-weight:600;display:flex;align-items:center;gap:6px"><span style="width:14px;height:14px;border-radius:3px;background:' + (COLORBOND[fenceColour] || '#ccc') + ';display:inline-block;border:1px solid rgba(0,0,0,0.1)"></span>' + esc(fenceColour) + '</span>'; }
+      var gates = fenceJob.gates || config.gates;
       if (gates && Array.isArray(gates) && gates.length > 0) {
         h += '<span style="color:var(--sw-text-sec)">Gates</span><span style="font-weight:600">';
         gates.forEach(function(g, gi) {
@@ -9188,7 +9264,7 @@
         if (tc.colour) tParts.push(tc.colour);
         html += '<div style="color:var(--sw-dark);margin-bottom:6px;">' + tParts.join(', ') + '</div>';
       } else if (tScope && tScope.job && tScope.job.runs) {
-        var tTotalM = tScope.job.runs.reduce(function(s, r) { return s + (r.totalLength || 0); }, 0);
+        var tTotalM = tScope.job.runs.reduce(function(s, r) { return s + (Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0); }, 0);
         html += '<div style="color:var(--sw-dark);margin-bottom:6px;">' + Math.round(tTotalM) + 'm fencing, ' + tScope.job.runs.length + ' run(s)</div>';
       }
 
@@ -9476,6 +9552,9 @@
     var addr = [job.site_address, job.site_suburb].filter(Boolean).join(', ');
     if (addr) h += '<div style="font-size:13px;opacity:0.7;margin-top:6px">' + esc(addr) + '</div>';
     h += '</div>';
+
+    h += renderQuotePacks(data);
+    h += renderScopeVideoCard(data);
 
     // ── 2. CREW WORK ORDER — scope_items table ──
     if (wo && wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
@@ -9807,7 +9886,7 @@
 
     // ── 6. SCOPE PHOTOS — grid of thumbnails ──
     var media = data.media || [];
-    var scopePhotos = media.filter(function(m) { return m.phase === 'scope'; });
+    var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     if (scopePhotos.length > 0) {
       h += '<div class="detail-section">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Scope Photos <span style="font-weight:400;color:var(--sw-text-sec)">' + scopePhotos.length + '</span></div>';
@@ -10054,6 +10133,9 @@
     // Trade documents (uploaded docs)
     h += renderTradeDocuments(data, phase);
 
+    h += renderQuotePacks(data);
+    h += renderScopeVideoCard(data);
+
     // Other documents (plans, drawings, council approvals) — trades-visible only
     // Work orders are already shown via renderTradeDocuments above
     var docs = data.documents || [];
@@ -10074,7 +10156,7 @@
 
     // Scope / site photos (from quoting stage)
     var media = data.media || [];
-    var scopePhotos = media.filter(function(m) { return m.phase === 'scope'; });
+    var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     var docPhotos = docs.filter(function(d) { return d.visible_to_trades && d.type === 'site_photo' && d.storage_url; });
     var totalSitePhotos = scopePhotos.length + docPhotos.length;
     if (totalSitePhotos > 0) {
@@ -10103,10 +10185,12 @@
     var viewOnly = isForeignCrewJob(data);
     var byPhase = { scope: [], in_progress: [], completion: [], issue: [] };
     media.forEach(function(m) {
+      if (isScopeVideo(m)) return;
       var p = m.phase || 'scope';
       if (byPhase[p]) byPhase[p].push(m);
     });
     var h = '';
+    h += renderScopeVideoCard(data);
 
     // Photo count badges
     var photoTargets = { scope: 3, in_progress: 2, completion: 5, issue: 0 };
@@ -15167,7 +15251,7 @@
         scopeDesc = parts.join(', ');
       } else if (scope && scope.job && scope.job.runs) {
         var runs = scope.job.runs;
-        var totalM = runs.reduce(function(s, r) { return s + (r.totalLength || r.lengthM || 0); }, 0);
+        var totalM = runs.reduce(function(s, r) { return s + (Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0); }, 0);
         scopeDesc = Math.round(totalM) + 'm total, ' + runs.length + ' run(s)';
       }
 
@@ -24192,12 +24276,21 @@
       var parts = [];
 
       if (type === 'fencing') {
-        if (config.totalLength || config.length) parts.push((config.totalLength || config.length) + 'm');
-        if (config.material) parts.push(config.material);
-        if (config.height) parts.push(config.height + 'mm');
-        if (config.colour || config.color) parts.push(config.colour || config.color);
-        // Count gates
-        var gates = config.gates || config.gateCount || 0;
+        var jobData = scopeJson.job || config;
+        var runs = jobData.runs || [];
+        var totalM = 0;
+        if (runs.length) {
+          runs.forEach(function(r) { totalM += Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0; });
+        }
+        if (totalM > 0) parts.push(Math.round(totalM) + 'm');
+        else if (config.totalLength || config.length) parts.push((config.totalLength || config.length) + 'm');
+        var profile = jobData.profile || jobData.material || config.material;
+        if (profile) parts.push(profile);
+        var height = jobData.sheetHeight || jobData.height || config.height;
+        if (height) parts.push(height + 'mm');
+        var colour = jobData.colour || jobData.color || config.colour || config.color;
+        if (colour) parts.push(colour);
+        var gates = jobData.gates || config.gates || config.gateCount || 0;
         if (typeof gates === 'object' && Array.isArray(gates)) gates = gates.length;
         if (gates > 0) parts.push(gates + ' gate' + (gates > 1 ? 's' : ''));
       } else {
@@ -24223,12 +24316,19 @@
       var html = '<div style="font-size:14px;line-height:1.8">';
 
       if (type === 'fencing') {
-        if (config.totalLength || config.length) html += '<div><strong>Length:</strong> ' + esc(String(config.totalLength || config.length)) + 'm</div>';
-        if (config.material) html += '<div><strong>Material:</strong> ' + esc(config.material) + '</div>';
-        if (config.height) html += '<div><strong>Height:</strong> ' + esc(String(config.height)) + 'mm</div>';
-        if (config.colour || config.color) html += '<div><strong>Colour:</strong> ' + esc(config.colour || config.color) + '</div>';
-        // Gates
-        var gates = config.gates;
+        var fenceJob = scopeJson.job || config;
+        var fenceRuns = fenceJob.runs || [];
+        var fenceM = 0;
+        fenceRuns.forEach(function(r) { fenceM += Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0; });
+        if (fenceM > 0) html += '<div><strong>Length:</strong> ' + esc(String(Math.round(fenceM * 10) / 10)) + 'm</div>';
+        else if (config.totalLength || config.length) html += '<div><strong>Length:</strong> ' + esc(String(config.totalLength || config.length)) + 'm</div>';
+        var fenceMat = fenceJob.profile || fenceJob.material || config.material;
+        if (fenceMat) html += '<div><strong>Material:</strong> ' + esc(fenceMat) + '</div>';
+        var fenceH = fenceJob.sheetHeight || fenceJob.height || config.height;
+        if (fenceH) html += '<div><strong>Height:</strong> ' + esc(String(fenceH)) + 'mm</div>';
+        var fenceColour = fenceJob.colour || fenceJob.color || config.colour || config.color;
+        if (fenceColour) html += '<div><strong>Colour:</strong> ' + esc(fenceColour) + '</div>';
+        var gates = fenceJob.gates || config.gates;
         if (gates && Array.isArray(gates) && gates.length > 0) {
           html += '<div><strong>Gates:</strong></div>';
           gates.forEach(function(g) {
@@ -24239,7 +24339,6 @@
         }
         if (config.plinths) html += '<div><strong>Plinths:</strong> ' + esc(String(config.plinths)) + '</div>';
         if (config.retaining) html += '<div><strong>Retaining:</strong> ' + esc(String(config.retaining)) + '</div>';
-        // Boundaries
         if (config.boundaries && Array.isArray(config.boundaries)) {
           html += '<div><strong>Boundaries:</strong></div>';
           config.boundaries.forEach(function(b) {

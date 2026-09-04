@@ -24979,6 +24979,7 @@ async function submitWO() {
       scheduled_date: document.getElementById('woScheduledDate').value || null,
       price: priceVal ? parseFloat(priceVal) : null,
       special_instructions: document.getElementById('woInstructions').value || null,
+      scope_items: (typeof _woScopeItems !== 'undefined' && _woScopeItems.length) ? _woScopeItems : [],
     });
     closeModal('woModal');
     loadWOs();

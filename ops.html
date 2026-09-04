@@ -757,6 +757,9 @@
       position: relative;
     }
     .cal-schedule-week + .cal-schedule-week { border-top: 1px solid var(--sw-border); }
+    /* Only the header row is an adjacent sibling of a week — every later pair
+       has the bar-overlay div between them, so the horizontal day-cell rule is
+       drawn by the cell itself (border-bottom below), not by that selector. */
     .cal-schedule-header {
       background: var(--sw-dark); color: #fff; font-size: 11px; font-weight: 600;
       text-align: center; padding: 6px 4px; text-transform: uppercase; letter-spacing: 0.5px;
@@ -768,7 +771,8 @@
     .cal-schedule-header .sh-num { font-size: 16px; font-weight: 700; font-family: var(--sw-font-num); }
     .cal-schedule-cell {
       background: var(--sw-card); min-height: 90px; padding: 22px 3px 3px 3px;
-      position: relative; cursor: pointer; border-right: 1px solid var(--sw-border);
+      position: relative; cursor: pointer;
+      border-right: 1px solid var(--sw-border); border-bottom: 1px solid var(--sw-border);
     }
     .cal-schedule-cell:last-child { border-right: 0; }
     .cal-schedule-cell.outside { background: var(--sw-warm-200); opacity: 0.5; }

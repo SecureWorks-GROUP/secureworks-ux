@@ -749,6 +749,9 @@
     .wwi-source-line input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; margin: 0; accent-color: var(--sw-orange); }
     .wwi-line-money { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
     .wwi-labour { display: grid; grid-template-columns: minmax(0,1fr) 96px; gap: 8px; align-items: center; margin-top: 7px; }
+    .wwi-candidate { padding: 12px 14px; border: 1px dashed rgba(241,90,41,0.45); border-radius: 12px; background: var(--sw-card); margin-top: 10px; }
+    .wwi-candidate .wwi-labour { grid-template-columns: minmax(0,1fr) 110px; }
+    .wwi-candidate .btn { width: 100%; margin-top: 10px; }
     .wwi-labour input, .wwi-final-grid input, .wwi-final-grid select, .wwi-notes { width: 100%; min-height: 42px; box-sizing: border-box; border: 1px solid var(--sw-border); border-radius: 8px; background: #fff; color: var(--sw-dark); font: inherit; font-size: 13px; }
     .wwi-labour input, .wwi-final-grid input, .wwi-notes { padding: 9px 10px; }
     .wwi-labour-name { min-width: 0; color: var(--sw-dark); font-size: 12px; font-weight: 650; }
@@ -16241,7 +16244,9 @@
       workOrders: workOrders || [], selected: {}, charges: {}, labour: {},
       crew: {}, crewLoading: {}, finalDeductions: [], notes: '',
       draftId: null, preview: null, dirty: true, busy: false,
-      revision: 0, requestSeq: 0, weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd
+      revision: 0, requestSeq: 0, weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd,
+      // Per-metre managers: completed jobs this week that have no work order yet.
+      candidates: [], candidatesLoading: false, candidatesError: '', candidateMetres: {}, candidateRate: null
     };
     state.workOrders.forEach(function(workOrder) {
       state.selected[String(workOrder.id)] = true;
@@ -16485,7 +16490,8 @@
     var loadSeq = ++_weeklyWoInvoiceLoadSeq;
     var loadWeekStart = _hoursWeekStart;
     var loadWeekEnd = _hoursWeekEnd;
-    var entryWorkOrderId = String(opts.workOrderId || '');
+    var entryWorkOrderId = String(opts.workOrderId || opts.addWorkOrderId || '');
+    var entryOnly = !opts.addWorkOrderId;
 
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading weekly work orders...</div>';
@@ -16496,7 +16502,8 @@
         return date >= loadWeekStart && date <= loadWeekEnd && workOrder.can_add_to_weekly_invoice === true;
       });
       _weeklyWoInvoice = _weeklyNewState(workOrders);
-      if (entryWorkOrderId && !_weeklyApplyEntryWorkOrder(_weeklyWoInvoice, entryWorkOrderId, true)) {
+      _loadWeeklyJobCandidates(_weeklyWoInvoice);
+      if (entryWorkOrderId && !_weeklyApplyEntryWorkOrder(_weeklyWoInvoice, entryWorkOrderId, entryOnly)) {
         toast('This work order is no longer available for that invoice week', true);
       }
       if (opts.invoice && String(opts.invoice.invoice_source || '') === 'weekly_work_order') {
@@ -16534,6 +16541,125 @@
     }).catch(function(err) {
       if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
       container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
+    });
+  };
+
+  // ── Per-metre jobs without a work order (Henry) ──
+  // The weekly builder prices work orders only. A fencing manager paid per metre
+  // whose completed jobs never received a work order enters the metres installed;
+  // SecureWorks creates the work order at the server-owned rate and it joins the
+  // week like any other. The browser never sends a price.
+  function _loadWeeklyJobCandidates(state) {
+    if (!state || !isPerMetreUser()) return;
+    state.candidatesLoading = true;
+    state.candidatesError = '';
+    api('weekly_invoice_job_candidates', { week_start: state.weekStart, week_end: state.weekEnd }).then(function(res) {
+      if (!_weeklyStateCurrent(state)) return;
+      state.candidatesLoading = false;
+      state.candidates = (res && Array.isArray(res.jobs)) ? res.jobs : [];
+      state.candidateRate = res && _weeklyFiniteNumber(res.rate) ? Number(res.rate) : null;
+      state.candidates.forEach(function(job) {
+        var key = String(job.job_id || '');
+        if (!key || state.candidateMetres[key] != null) return;
+        var known = job.metres != null ? job.metres : job.suggested_metres;
+        state.candidateMetres[key] = _weeklyFiniteNumber(known) && Number(known) > 0 ? Number(known) : '';
+      });
+      _renderWeeklyJobCandidates(state);
+    }).catch(function(err) {
+      if (!_weeklyStateCurrent(state)) return;
+      state.candidatesLoading = false;
+      state.candidatesError = friendlyError(err);
+      _renderWeeklyJobCandidates(state);
+    });
+  }
+
+  // Swap only the candidates section so an in-progress edit elsewhere on the
+  // builder (notes, hours, deductions) is never wiped by this async arrival.
+  function _renderWeeklyJobCandidates(state) {
+    var current = document.querySelector('[data-weekly-job-candidates]');
+    if (!current) { renderWeeklyWorkOrderInvoice(); return; }
+    var holder = document.createElement('div');
+    holder.innerHTML = _weeklyJobCandidatesHtml(state);
+    var next = holder.firstElementChild;
+    if (next) current.replaceWith(next); else current.remove();
+  }
+
+  function _weeklyVisibleCandidates(state) {
+    return ((state && state.candidates) || []).filter(function(job) {
+      return job && job.job_id && (job.can_create === true || job.can_update === true);
+    });
+  }
+
+  function _weeklyJobCandidatesHtml(state) {
+    if (!isPerMetreUser()) return '';
+    var jobs = _weeklyVisibleCandidates(state);
+    var rate = _weeklyFiniteNumber(state.candidateRate) ? _weeklyInvoiceMoney(state.candidateRate) + '/m' : 'the SecureWorks per-metre rate';
+    var html = '<section class="wwi-panel" data-weekly-job-candidates><div class="wwi-panel-title">Completed jobs without a work order</div>';
+    if (state.candidatesLoading) {
+      html += '<div class="wwi-count"><span class="spinner" style="width:13px;height:13px;display:inline-block;vertical-align:middle"></span> Checking your completed jobs...</div></section>';
+      return html;
+    }
+    if (state.candidatesError) {
+      html += '<div class="wwi-warning">Could not load your completed jobs: ' + esc(state.candidatesError) + '</div></section>';
+      return html;
+    }
+    if (jobs.length === 0) {
+      html += '<div class="wwi-count">Every completed fencing job you worked this week already has a work order.</div></section>';
+      return html;
+    }
+    html += '<div class="wwi-count">Enter the metres installed. SecureWorks prices them at ' + esc(rate) + ', creates the work order and adds it to this week.</div>';
+    jobs.forEach(function(job) {
+      var jobId = String(job.job_id);
+      var label = esc(job.job_number || 'Job');
+      var metres = state.candidateMetres[jobId];
+      var hint = _weeklyFiniteNumber(job.suggested_metres) && Number(job.suggested_metres) > 0
+        ? 'Scoped at ' + Number(job.suggested_metres) + 'm. Change it if you installed a different length.'
+        : 'No scoped length on file. Enter what you installed.';
+      html += '<div class="wwi-candidate" data-weekly-job-candidate="' + esc(jobId) + '">';
+      html += '<div class="wwi-job-number">' + label + (job.wo_number ? ' · ' + esc(job.wo_number) : '') + '</div>';
+      html += '<div class="wwi-job-meta">' + esc(job.client_name || '') + (job.site_address ? '<br>' + esc(job.site_address) : '') + (job.work_date ? '<br>' + esc(formatDateShort(job.work_date)) : '') + '</div>';
+      html += '<label class="wwi-labour"><span class="wwi-labour-name">Metres installed</span><input type="number" min="0" step="0.1" inputmode="decimal" aria-label="Metres installed for ' + label + '" value="' + esc(metres === '' || metres == null ? '' : metres) + '" placeholder="Metres" ' + (state.busy ? 'disabled ' : '') + 'onchange="setWeeklyCandidateMetres(\'' + _weeklyJsString(jobId) + '\',this.value)"></label>';
+      html += '<div class="wwi-count">' + esc(hint) + '</div>';
+      html += '<button class="btn btn-secondary btn-small" ' + (state.busy ? 'disabled ' : '') + 'onclick="addWeeklyJobWorkOrder(\'' + _weeklyJsString(jobId) + '\')">' + (job.can_update ? 'Update metres' : 'Add to weekly invoice') + '</button>';
+      html += '</div>';
+    });
+    html += '</section>';
+    return html;
+  }
+
+  window.setWeeklyCandidateMetres = function(jobId, value) {
+    if (!_weeklyWoInvoice) return;
+    _weeklyWoInvoice.candidateMetres[String(jobId)] = value;
+  };
+
+  window.addWeeklyJobWorkOrder = function(jobId) {
+    var state = _weeklyWoInvoice;
+    if (!state || state.busy) return;
+    var key = String(jobId || '');
+    var job = _weeklyVisibleCandidates(state).filter(function(row) { return String(row.job_id) === key; })[0];
+    if (!job) return;
+    var metres = Number(state.candidateMetres[key]);
+    if (!_weeklyFiniteNumber(state.candidateMetres[key]) || !(metres > 0)) {
+      toast('Enter the metres installed on ' + (job.job_number || 'this job') + ' first', true);
+      return;
+    }
+    state.busy = true;
+    renderWeeklyWorkOrderInvoice();
+    var payload = { job_id: key, metres: metres };
+    if (job.work_date) payload.work_date = job.work_date;
+    api('create_weekly_job_work_order', null, payload).then(function(res) {
+      if (!_weeklyStateCurrent(state)) return;
+      if (!res || res.success !== true || !res.work_order_id) {
+        throw new Error((res && (res.userMessage || res.error)) || 'SecureWorks could not create the work order');
+      }
+      var priced = _weeklyFiniteNumber(res.amount_ex) ? ' = ' + _weeklyInvoiceMoney(res.amount_ex) : '';
+      toast((res.mode === 'update' ? 'Work order updated' : 'Work order added') + ' — ' + metres + 'm' + priced);
+      openWeeklyWorkOrderInvoice({ weekEnd: state.weekEnd, addWorkOrderId: String(res.work_order_id) });
+    }).catch(function(err) {
+      if (!_weeklyStateCurrent(state)) return;
+      state.busy = false;
+      toast(friendlyError(err), true);
+      renderWeeklyWorkOrderInvoice();
     });
   };
 
@@ -16699,7 +16825,27 @@
     html += '<div class="wwi-total-row"><span>Grand total</span><span>' + _weeklyInvoiceMoney(invoice.grand_total) + '</span></div>';
     html += '<div class="wwi-total-row"><span>Final deductions</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(invoice.final_deductions_total))) + '</span></div>';
     html += '<div class="wwi-total-row paid"><span>TO BE PAID</span><span>' + _weeklyInvoiceMoney(invoice.to_be_paid) + '</span></div>';
+    html += _weeklyInvoiceSuperHtml(invoice);
     html += '</div>';
+    return html;
+  }
+
+  // Super is withheld from TO BE PAID and paid to the fund separately. The
+  // figures come only from the server response (draft save, submit, or the
+  // saved invoice); the browser never calculates them. Same numbers appear on
+  // the audit PDF attached to the Xero draft.
+  function _weeklyInvoiceSuperHtml(invoice) {
+    var superAmount = invoice.super_amount;
+    var payable = invoice.net_pay != null ? invoice.net_pay : invoice.amount_payable;
+    if (!_weeklyFiniteNumber(superAmount) || !_weeklyFiniteNumber(payable)) return '';
+    var rate = _invoiceSuperRate(invoice.super_rate);
+    var html = '<div class="wwi-total-row" data-weekly-invoice-super><span>Less super' + (rate ? ' (' + _invoiceRateLabel(rate) + ')' : '') + '</span><span>-' + _weeklyInvoiceMoney(Math.abs(Number(superAmount))) + '</span></div>';
+    if (invoice.gst_on === true && _weeklyFiniteNumber(invoice.gst)) {
+      html += '<div class="wwi-total-row"><span>GST</span><span>' + _weeklyInvoiceMoney(invoice.gst) + '</span></div>';
+    }
+    var cash = invoice.gst_on === true && _weeklyFiniteNumber(invoice.trade_payable) ? invoice.trade_payable : payable;
+    html += '<div class="wwi-total-row paid" data-weekly-invoice-payable><span>AMOUNT PAYABLE</span><span>' + _weeklyInvoiceMoney(cash) + '</span></div>';
+    html += '<div class="wwi-count">Super is withheld and paid to your fund separately. The PDF on the Xero draft shows these same figures.</div>';
     return html;
   }
 
@@ -16715,6 +16861,7 @@
 
     if (state.workOrders.length === 0) {
       html += '<div class="hours-no-data">No completed work orders available for this week</div>';
+      html += _weeklyJobCandidatesHtml(state);
       html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button><button class="btn btn-secondary" onclick="openInvoiceHistory()">Invoice history</button></div></div>';
       container.innerHTML = html;
       return;
@@ -16765,6 +16912,7 @@
       html += '</section>';
     });
 
+    html += _weeklyJobCandidatesHtml(state);
     html += '<section class="wwi-panel"><div class="wwi-panel-title">Final payout deductions</div>';
     if (state.finalDeductions.length === 0) html += '<div class="wwi-count" style="margin-bottom:9px">Examples: Car Loan or another approved payout deduction.</div>';
     state.finalDeductions.forEach(function(line, index) {

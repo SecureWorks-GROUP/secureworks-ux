@@ -49,6 +49,9 @@ test('builds invoice #31 from source selections and renders only server-calculat
   await expect(totals).toContainText('Grand total$5,163.40');
   await expect(totals).toContainText('Final deductions-$350.00');
   await expect(totals).toContainText('TO BE PAID$4,813.40');
+  // Super is withheld from TO BE PAID; both figures are server-owned and match the PDF.
+  await expect(totals.locator('[data-weekly-invoice-super]')).toContainText('Less super (12%)-$577.61');
+  await expect(totals.locator('[data-weekly-invoice-payable]')).toContainText('AMOUNT PAYABLE$4,235.79');
   await expect(page.getByText('Car Loan')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeEnabled();
 
@@ -325,5 +328,64 @@ test.describe('mobile weekly invoice', () => {
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeVisible();
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(horizontalOverflow).toBe(false);
+  });
+});
+
+test.describe('per-metre manager with completed jobs but no work orders', () => {
+  test.use({ feedScenario: 'trade-weekly-work-order-invoice-per-metre-jobs' });
+
+  test('enters metres, the server creates the work order, and the week becomes saveable', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+
+    // Before: nothing to invoice from, so no Save button, but no dead end either.
+    await expect(page.getByText('No completed work orders available for this week')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save & calculate' })).toHaveCount(0);
+    const candidates = page.locator('[data-weekly-job-candidates]');
+    await expect(candidates).toContainText('Completed jobs without a work order');
+    await expect(candidates.locator('[data-weekly-job-candidate]')).toHaveCount(2);
+    await expect(candidates).toContainText('$35.00/m');
+
+    // Scoped length prefills; the trade confirms what was actually installed.
+    const firstJob = candidates.locator('[data-weekly-job-candidate="henry-pm-job-1"]');
+    const metres = firstJob.getByRole('spinbutton', { name: 'Metres installed for SWF-26869' });
+    await expect(metres).toHaveValue('12');
+    await expect(firstJob).toContainText('Scoped at 12m');
+
+    // Zero metres is refused in the browser before any write.
+    const secondJob = candidates.locator('[data-weekly-job-candidate="henry-pm-job-2"]');
+    await expect(secondJob.getByRole('spinbutton', { name: 'Metres installed for SWF-261060' })).toHaveValue('');
+    await secondJob.getByRole('button', { name: 'Add to weekly invoice' }).click();
+    await expect(page.locator('#toast')).toContainText('Enter the metres installed on SWF-261060 first');
+    expect(feedRequests.some((entry) => entry.action === 'create_weekly_job_work_order')).toBe(false);
+
+    await metres.fill('12.5');
+    await metres.press('Tab');
+    await firstJob.getByRole('button', { name: 'Add to weekly invoice' }).click();
+    await expect(page.locator('#toast')).toContainText('Work order added — 12.5m = $437.50');
+
+    const create = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'create_weekly_job_work_order');
+    expect(create).toBeTruthy();
+    expect(create.body).toMatchObject({ job_id: 'henry-pm-job-1', metres: 12.5 });
+    expect(create.body).not.toHaveProperty('rate');
+    expect(create.body).not.toHaveProperty('amount_ex');
+
+    // After: the created work order is a normal weekly card with the crew charge,
+    // and the server-calculated Save path is back.
+    await expect(page.locator('[data-weekly-work-order="henry-wo-pm-1"]')).toBeVisible();
+    await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();
+    await expect(page.locator('#hoursContent')).toContainText('Fencing installation');
+    await expect(page.locator('#hoursContent')).toContainText('12.5 m @ $35.00');
+    await expect(page.locator('#hoursContent')).toContainText('Work order $1477.00');
+    await expect(page.locator('#hoursContent')).toContainText('-$120.00');
+    await expect(page.getByRole('button', { name: 'Save & calculate' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save & calculate' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
+
+    // The job now offers a re-measure; the other job still offers creation.
+    await expect(candidates.getByRole('button', { name: 'Update metres' })).toHaveCount(1);
+    await expect(candidates.getByRole('button', { name: 'Add to weekly invoice' })).toHaveCount(1);
+    expect(feedRequests.some((entry) => entry.action === 'submit_trade_invoice')).toBe(false);
   });
 });

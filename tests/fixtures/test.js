@@ -367,6 +367,11 @@ const test = base.extend({
       final_deductions_total: 350,
       to_be_paid: 4813.40,
       gross_earned: 4813.40,
+      super_rate: 0.12,
+      super_amount: 577.61,
+      net_pay: 4235.79,
+      amount_payable: 4235.79,
+      trade_payable: 4235.79,
       gst: 0,
       gst_on: false,
       total_inc: 4813.40,
@@ -374,6 +379,27 @@ const test = base.extend({
     });
     const cloneWeeklyInvoiceResponse = () => JSON.parse(JSON.stringify(weeklyInvoiceResponse()));
     let weeklyInvoiceDraftSaved = false;
+    // Per-metre manager with completed fencing jobs but no work orders yet.
+    // The builder must not dead-end: the trade enters metres, the server
+    // creates the work order at its own rate, and the week fills in.
+    const PER_METRE_JOBS_SCENARIO = 'trade-weekly-work-order-invoice-per-metre-jobs';
+    const perMetreCreatedWorkOrders = [];
+    const perMetreCandidateJobs = [
+      {
+        job_id: 'henry-pm-job-1', job_number: 'SWF-26869', client_name: 'Andrew Summers',
+        site_address: '76 Chesterton Rd, Bassendean', job_status: 'get_review',
+        work_date: addIsoDays(weekStart, 2), suggested_metres: 12,
+        work_order_id: null, wo_number: null, metres: null,
+        can_create: true, can_update: false, blocked_reason: null
+      },
+      {
+        job_id: 'henry-pm-job-2', job_number: 'SWF-261060', client_name: 'Sunita Popp',
+        site_address: '1 Sandover Dr, Karrinyup', job_status: 'get_review',
+        work_date: addIsoDays(weekStart, 1), suggested_metres: 0,
+        work_order_id: null, wo_number: null, metres: null,
+        can_create: true, can_update: false, blocked_reason: null
+      }
+    ];
     // All-tab company feed (secureworks-backend docs/trade-all-means-all-v1.md).
     // Paged deliberately small so the scroll pager has to run more than once, and
     // only served under the all-jobs-feed scenarios — every other scenario keeps
@@ -474,6 +500,7 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-incomplete-generate': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-stale-submit': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-invoice-id-only': ['save_trade_invoice_draft', 'generate_trade_invoice'],
+      [PER_METRE_JOBS_SCENARIO]: ['create_weekly_job_work_order'],
       'crew-lead': ['set_job_lead'],
       'crew-lead-refused': ['set_job_lead']
     };
@@ -757,6 +784,13 @@ const test = base.extend({
           };
         },
         my_work_orders: ({ url }) => {
+          if (feedScenario === PER_METRE_JOBS_SCENARIO) {
+            if (url.searchParams.get('mode') !== 'all' || url.searchParams.get('type') !== 'fencing' ||
+                url.searchParams.get('status') !== 'complete' || url.searchParams.get('page_size') !== '500') {
+              return { status: 422, body: { error: 'Expected the bounded weekly work-order read' } };
+            }
+            return { schema: 'trade-work-orders.v1', mode: 'all', type: 'fencing', work_orders: perMetreCreatedWorkOrders.slice() };
+          }
           if (weeklyInvoiceScenarios.includes(feedScenario)) {
             const weeklyRows = weeklyInvoiceWorkOrders.concat([weeklyInvoicePriorWorkOrder]);
             if (!url.searchParams.has('type') && !url.searchParams.has('status') && !url.searchParams.has('page_size')) {
@@ -830,6 +864,80 @@ const test = base.extend({
               clocked_off_at: body.event === 'clock_off' ? new Date().toISOString() : null
             },
             net_hours: body.event === 'clock_off' ? 1 : null
+          };
+        },
+        weekly_invoice_job_candidates: ({ url }) => {
+          if (feedScenario !== PER_METRE_JOBS_SCENARIO || persona !== 'fencing_manager') {
+            return { status: 404, body: { error: 'No E2E fixture registered for weekly_invoice_job_candidates' } };
+          }
+          if (url.searchParams.get('week_start') !== weekStart || url.searchParams.get('week_end') !== addIsoDays(weekStart, 6)) {
+            return { status: 422, body: { error: 'Expected the selected Perth week' } };
+          }
+          return {
+            schema: 'trade-weekly-job-candidates.v1',
+            per_metre: true,
+            week_start: weekStart,
+            week_end: addIsoDays(weekStart, 6),
+            rate: 35,
+            unit: 'm',
+            jobs: perMetreCandidateJobs.map((job) => ({ ...job }))
+          };
+        },
+        create_weekly_job_work_order: async ({ request }) => {
+          if (feedScenario !== PER_METRE_JOBS_SCENARIO || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Per-metre work order fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const job = perMetreCandidateJobs.find((row) => row.job_id === body.job_id);
+          if (!job) return { status: 422, body: { error: 'Job not found in your business' } };
+          if (['rate', 'amount_ex', 'total', 'scope_items'].some((key) => Object.hasOwn(body, key))) {
+            return { status: 422, body: { error: 'Browser-supplied prices are forbidden' } };
+          }
+          if (!(Number(body.metres) > 0)) return { status: 422, body: { error: 'Enter the metres installed (more than zero)' } };
+          const metres = Number(body.metres);
+          const amount = Math.round(metres * 35 * 100) / 100;
+          const existing = perMetreCreatedWorkOrders.find((row) => row.job_id === job.job_id);
+          const workOrderId = existing ? existing.id : `henry-wo-pm-${perMetreCreatedWorkOrders.length + 1}`;
+          const row = {
+            id: workOrderId,
+            wo_number: existing ? existing.wo_number : `WO-PM000${perMetreCreatedWorkOrders.length + 1}`,
+            job_id: job.job_id,
+            job_number: job.job_number,
+            client_name: job.client_name,
+            job_type: 'fencing',
+            job_status: job.job_status,
+            status: 'complete',
+            site_address: job.site_address,
+            site_suburb: '',
+            scheduled_date: body.work_date || job.work_date,
+            completed_at: `${body.work_date || job.work_date}T04:00:00.000Z`,
+            scope_items: [{ description: 'Fencing installation', quantity: metres, unit: 'm', rate: 35, total: amount }],
+            subtotal: amount,
+            gst: 0,
+            total: amount,
+            negative_charges: [{
+              line_id: 'henry-pm-charge-1', trade_name: 'Anthony',
+              description: 'Work order $1477.00. Less labour: Sonny 14.5h x $35 = $507.50.',
+              quantity: 1, unit: 'ea', source_unit_rate: 120, amount_ex: -120
+            }],
+            available_negative_charge_total_ex: -120,
+            already_invoiced: false,
+            invoice_block_reason: null,
+            weekly_draft_id: null,
+            can_add_to_weekly_invoice: true,
+            can_invoice: true
+          };
+          if (existing) Object.assign(existing, row);
+          else perMetreCreatedWorkOrders.push(row);
+          Object.assign(job, { work_order_id: workOrderId, wo_number: row.wo_number, metres, can_create: false, can_update: true });
+          return {
+            success: true,
+            mode: existing ? 'update' : 'create',
+            work_order_id: workOrderId,
+            wo_number: row.wo_number,
+            metres,
+            rate: 35,
+            amount_ex: amount
           };
         },
         save_trade_invoice_draft: async ({ request }) => {

@@ -260,7 +260,7 @@ function hoursCard(overrides) {
   assert.strictEqual(built.subtotal, 85, '2h×$50 − Fuel $15')
 }
 
-// ── WO pass-through: amount Henry paid another trade, not hours×rate ─────
+// ── WO pass-through: UI amount reshapes to hours×rate for fanout ─────────
 {
   const built = context._buildJobCentricPayload([woCard({
     wo_allocated: 100,
@@ -272,8 +272,10 @@ function hoursCard(overrides) {
   const row = built.cardExtraItems[0]
   assert.strictEqual(row.rate, 60, 'net is WO 100 − Israel 40')
   assert.strictEqual(row.wo_labour_deduction, 40)
-  assert.strictEqual(row.wo_labour_lines[0].line_kind, 'wo_pass_through')
-  assert.strictEqual(row.wo_labour_lines[0].amount, 40)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40 },
+  ], 'pass-through posts as hours×rate, not amount-only wo_pass_through')
+  assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
   assert(row.description.indexOf('Israel $40') !== -1, 'breakdown names the WO trade: ' + row.description)
 }
 
@@ -291,7 +293,7 @@ function hoursCard(overrides) {
   assert(built.cardExtraItems[0].description.indexOf('Israel $40') !== -1)
 }
 
-// ── Lump-sum deduct: description + amount, not hours×rate ────────────────
+// ── Lump-sum deduct: UI amount reshapes to hours×rate labour ─────────────
 {
   const built = context._buildJobCentricPayload([woCard({
     wo_allocated: 100,
@@ -305,11 +307,13 @@ function hoursCard(overrides) {
   assert(!built.error, 'lump-sum builds: ' + built.error)
   const row = built.cardExtraItems[0]
   assert.strictEqual(row.rate, 50, 'net is WO 100 − Israel 40 − Materials 10')
-  assert.strictEqual(row.wo_labour_deduction, 40)
-  assert.strictEqual(row.wo_lump_deduction, 10)
-  assert.strictEqual(row.wo_lump_lines[0].line_kind, 'lump_sum')
-  assert.strictEqual(row.wo_lump_lines[0].description, 'Materials')
-  assert.strictEqual(row.wo_lump_lines[0].amount, 10)
+  assert.strictEqual(row.wo_labour_deduction, 50)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40 },
+    { trade_name: 'Materials', hours: 1, rate: 10, amount: 10 },
+  ], 'WO lumps post as hours×rate labour, not wo_lump_lines')
+  assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
+  assert.strictEqual(row.wo_lump_deduction, undefined)
   assert(row.description.indexOf('other [Materials $10]') !== -1, 'breakdown names the lump: ' + row.description)
   assert.strictEqual(built.cardExtraItems.filter((item) => item.source === 'invoice_final_deduction').length, 0,
     'WO deducts stay nested on the WO extra and are not also emitted as extra_items')
@@ -340,10 +344,10 @@ function hoursCard(overrides) {
   const descs = finals.map((row) => row.description + ':' + row.unit_rate)
   assert.ok(descs.indexOf('Car loan:20') !== -1, 'invoice-level lumps stay on final_deductions')
   assert.ok(descs.indexOf('Fuel:15') !== -1, 'hours-card lumps stay on final_deductions')
-  assert.ok(descs.indexOf('Israel:40') !== -1, 'hydrated WO pass-throughs ride top-level final_deductions')
-  assert.ok(descs.indexOf('Materials:10') !== -1, 'WO-card lumps ride top-level final_deductions')
+  assert.ok(descs.indexOf('Israel:40') === -1, 'WO pass-throughs reshape to fanout labour, not final_deductions')
+  assert.ok(descs.indexOf('Materials:10') === -1, 'WO-card lumps reshape to fanout labour, not final_deductions')
   assert.ok(descs.indexOf('Tendo:50') === -1, 'named WO labour hours are not copied onto final_deductions')
-  assert.strictEqual(finals.length, 4, 'each distinct deduct appears once on the common list')
+  assert.strictEqual(finals.length, 2, 'only invoice-level and hours-card lumps stay on the common list')
 }
 
 {

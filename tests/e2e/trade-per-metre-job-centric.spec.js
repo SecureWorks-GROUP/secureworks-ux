@@ -510,11 +510,60 @@ test.describe('Henry job-centric submit', () => {
     expect(lump.job_id == null).toBeTruthy();
     expect(lump.description).toBe('Fuel / materials');
     expect(body.final_deductions).toEqual([
-      { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 },
-      { description: 'Israel', quantity: 1, unit: 'ea', unit_rate: 40 }
+      { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 }
     ]);
+    const woExtra = (body.extra_items || []).find((item) => item.row_type === 'work_order');
+    expect(woExtra).toBeTruthy();
+    expect(woExtra.wo_labour_lines).toEqual([
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40 }
+    ]);
+    expect(woExtra).not.toHaveProperty('wo_lump_lines');
+    expect(woExtra).not.toHaveProperty('wo_lump_deduction');
     expect(body).not.toHaveProperty('grand_total');
     expect(body).not.toHaveProperty('super_amount');
+  });
+
+  test('job-centric generate fails closed when the exclusive re-read loses can_invoice', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+    await expect(card).toBeVisible();
+    await expect(page.locator('#invSubmitBtn')).toBeEnabled();
+
+    let exclusive = true;
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_work_orders' && !exclusive) {
+        const response = await route.fetch();
+        const body = await response.json();
+        const orders = (body.work_orders || []).map((wo) => {
+          if (String(wo.id) !== 'wo-fence-authorised') return wo;
+          return Object.assign({}, wo, {
+            already_invoiced: true,
+            can_invoice: false,
+            can_add_to_weekly_invoice: false
+          });
+        });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(Object.assign({}, body, { work_orders: orders }))
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    exclusive = false;
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#toast')).toContainText('already been invoiced');
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(card.locator('[data-wo-block]')).toContainText('already been invoiced');
+    expect(feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST').length).toBe(0);
   });
 });
 

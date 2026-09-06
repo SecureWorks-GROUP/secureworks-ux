@@ -347,9 +347,12 @@ assert((html.match(/_renderCardLumpLinesHtml\(c/g) || []).length >= 2,
 assert(!html.includes('Lump-sum amounts'),
   'amount lines are not framed as a separate product heading');
 assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions') &&
-  html.includes('_woCardFinalDeductions') &&
-  /function _invFinalDeductions[\s\S]*?_hoursCardLumpFinalDeductions\(\)[\s\S]*?_woCardFinalDeductions\(\)/.test(html),
-  'Hours-card and WO-card deducts ride top-level final_deductions like invoice-level deducts');
+  /function _invFinalDeductions[\s\S]*?_hoursCardLumpFinalDeductions\(\)/.test(html) &&
+  !html.includes('_woCardFinalDeductions') &&
+  html.includes('_woLabourLinesForFanout') &&
+  html.includes('_woAmountAsHoursRate') &&
+  !/wo_lump_lines: lumpLinesOut/.test(html),
+  'invoice-level and hours-card lumps stay on final_deductions; WO deducts reshape to hours×rate fanout lines');
 assert(html.includes('or add an amount'),
   'hours-card validation treats an amount as a peer to hours');
 assert(html.includes('addWoLumpLine'),
@@ -532,6 +535,14 @@ assert(html.includes('_blockJobCardWorkOrder') && html.includes('_jobCardWorkOrd
   /function _reconcileJobCardWorkOrderAuth[\s\S]*?_blockJobCardWorkOrder\(card/.test(html) &&
   !/function _reconcileJobCardWorkOrderAuth[\s\S]*?card\.work_order_id = ''/.test(html),
   'non-exclusive job-centric WOs stay blocked with a reason instead of converting to Hours');
+assert(html.includes('_jobCentricWorkOrdersStillExclusive') &&
+  html.includes('_confirmJobCentricWorkOrdersExclusive') &&
+  /function _jobCentricWorkOrdersStillExclusive[\s\S]*?_workOrderDirectInvoiceAllowed/.test(html) &&
+  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?api\('my_work_orders', \{ mode: 'all' \}\)[\s\S]*?_jobCentricWorkOrdersStillExclusive/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)[\s\S]*?_withFinancialWebLock\('generate_trade_invoice'[\s\S]*?_confirmJobCentricWorkOrdersExclusive\(\)[\s\S]*?_postJobCentricGenerate\(\)/.test(html) &&
+  !html.includes('claim_work_order') &&
+  !html.includes('exclusive_claim'),
+  'job-centric generate re-reads WO can_invoice under the financial fence and does not add a claim API');
 assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
   'hydrate overwrites server-owned money and clears it when a WO id is stripped');
 assert(html.includes('_stripServerOwnedPassThroughs'),

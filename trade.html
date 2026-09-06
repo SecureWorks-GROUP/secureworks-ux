@@ -19762,30 +19762,9 @@
     return rows;
   }
 
-  // Captain-B common deduction list: hydrated WO pass-throughs and WO-card
-  // lumps belong on top-level final_deductions like hours-card lumps. They
-  // stay nested on the WO extra for identity/net and are not also emitted as
-  // standalone extra_items (that would deduct twice against the already-netted
-  // WO row).
-  function _woCardFinalDeductions() {
-    var rows = [];
-    (_jobCards || []).forEach(function(c) {
-      if (!c || !c.included || !c.wo_mode || (c.wo_blocked && !c.wo_hours_ack)) return;
-      _woCleanLabourLines(c).forEach(function(ln) {
-        if (!ln || ln.line_kind !== 'wo_pass_through') return;
-        var name = String(ln.trade_name || '').trim();
-        var amt = Math.abs(Number(ln.amount) || 0);
-        if (!name || !(amt > 0)) return;
-        rows.push({ description: name, quantity: 1, unit: 'ea', unit_rate: amt });
-      });
-      _woCleanLumpLines(c).forEach(function(lp) {
-        if (!lp.description || !(lp.amount > 0)) return;
-        rows.push({ description: lp.description, quantity: 1, unit: 'ea', unit_rate: lp.amount });
-      });
-    });
-    return rows;
-  }
-
+  // Captain-B common deduction list: invoice-level and hours-card lumps only.
+  // WO pass-throughs and WO-card amounts reshape to hours×rate labour lines
+  // for wo_labour_fanout — putting them here would deduct twice.
   function _invFinalDeductions() {
     var rows = [];
     (_invLumpLines || []).forEach(function(line) {
@@ -19794,7 +19773,7 @@
       if (!desc || !amt) return;
       rows.push({ description: desc, quantity: 1, unit: 'ea', unit_rate: amt });
     });
-    return rows.concat(_hoursCardLumpFinalDeductions()).concat(_woCardFinalDeductions());
+    return rows.concat(_hoursCardLumpFinalDeductions());
   }
 
   function _syncInvLumpLinesFromDOM() {
@@ -21910,6 +21889,41 @@
     }
     return out;
   }
+  // Posted WO extras must be hours×rate — wo_labour_fanout rejects
+  // amount-only wo_pass_through and invented wo_lump_lines. UI state still
+  // keeps those shapes; this is the submit reshape only.
+  function _woAmountAsHoursRate(name, amount) {
+    var amt = Math.round(Number(amount || 0) * 100) / 100;
+    if (!(amt > 0)) return null;
+    return { trade_name: name, hours: 1, rate: amt, amount: amt };
+  }
+  function _woLabourLinesForFanout(c) {
+    var out = [];
+    _woCleanLabourLines(c).forEach(function(ln) {
+      if (!ln) return;
+      var name = String(ln.trade_name || '').replace(/\s+/g, ' ').trim();
+      if (ln.line_kind === 'wo_pass_through') {
+        var pass = _woAmountAsHoursRate(name, ln.amount);
+        if (pass) out.push(pass);
+        return;
+      }
+      var hours = Number(ln.hours);
+      var rate = Number(ln.rate);
+      if (!(hours > 0) || !(rate > 0)) return;
+      out.push({
+        trade_name: name,
+        hours: hours,
+        rate: rate,
+        amount: Math.round(hours * rate * 100) / 100
+      });
+    });
+    _woCleanLumpLines(c).forEach(function(lp) {
+      var desc = String((lp && lp.description) || '').replace(/\s+/g, ' ').trim();
+      var lump = _woAmountAsHoursRate(desc, lp && lp.amount);
+      if (lump) out.push(lump);
+    });
+    return out;
+  }
   // _woLabourSum: sum all labour lines from the array (Q17).
   function _woLabourSum(c) {
     var lines = _woCleanLabourLines(c);
@@ -22130,13 +22144,10 @@
       } else if (_jobCardEmitsWorkOrder(c)) {
         var net = _woNet(c);
         subtotal += net;
-        // Build structured labour lines with computed amounts [Q17]. Cleaned
-        // (trimmed names, recomputed amounts, empty rows dropped) — the backend
-        // stores these on the holder invoice for office reconciliation.
-        var labourLinesOut = _woCleanLabourLines(c);
-        var labourDeduction = _woLabourSum(c);
-        var lumpLinesOut = _woCleanLumpLines(c);
-        var lumpDeduction = _woLumpSum(c);
+        // Hours×rate labour only — pass-throughs and WO-card amounts reshape
+        // here. Do not post wo_lump_lines or amount-only wo_pass_through.
+        var labourLinesOut = _woLabourLinesForFanout(c);
+        var labourDeduction = _woLabourSum(c) + _woLumpSum(c);
         cardExtraItems.push({
           type: 'Work Order',
           row_type: 'work_order',
@@ -22148,8 +22159,6 @@
           work_order_id: c.work_order_id || null,
           wo_labour_deduction: labourDeduction,
           wo_labour_lines: labourLinesOut,
-          wo_lump_deduction: lumpDeduction,
-          wo_lump_lines: lumpLinesOut,
           date: c.scheduled_date || null,
           job_id: c.job_id || null,
           job_number: c.job_number || '',
@@ -22219,6 +22228,57 @@
     };
   }
   // [JC-PAYLOAD-BUILD-END]
+
+  function _jobCentricPostedWorkOrderIds(items) {
+    var ids = [];
+    var seen = {};
+    (items || []).forEach(function(item) {
+      var id = String((item && item.work_order_id) || '').trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  function _jobCentricWorkOrdersStillExclusive(res, woIds) {
+    if (!_workOrdersHydratePayloadComplete(res)) {
+      return {
+        ok: false,
+        incomplete: true,
+        message: 'Could not confirm this work order is still exclusive. Invoice was not sent.'
+      };
+    }
+    var visible = (typeof workOrdersForViewer === 'function')
+      ? workOrdersForViewer(res.work_orders)
+      : (res.work_orders || []);
+    var byId = _workOrderByIdMap(visible);
+    for (var i = 0; i < (woIds || []).length; i++) {
+      var wo = byId[woIds[i]];
+      if (!_workOrderDirectInvoiceAllowed(wo)) {
+        return {
+          ok: false,
+          incomplete: false,
+          byId: byId,
+          wo: wo,
+          message: wo && wo.already_invoiced
+            ? 'This work order has already been invoiced.'
+            : _workOrderJobCentricBlockReason(wo)
+        };
+      }
+    }
+    return { ok: true, byId: byId };
+  }
+
+  function _applyJobCentricExclusiveReread(byId) {
+    var exclusiveIds = {};
+    Object.keys(byId || {}).forEach(function(id) {
+      if (_workOrderDirectInvoiceAllowed(byId[id])) exclusiveIds[id] = true;
+    });
+    _pmKnownWorkOrdersById = byId || {};
+    _pmHydratedWorkOrderIds = exclusiveIds;
+    _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds, _pmKnownWorkOrdersById);
+  }
 
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
@@ -22305,8 +22365,33 @@
       }
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
-      _financialInvoiceApi('generate_trade_invoice', {}, jobCentricBody, ctx).then(function(result) {
+      var postedWoIds = _jobCentricPostedWorkOrderIds(extraItems);
+      var generatePosted = false;
+      function _postJobCentricGenerate() {
+        generatePosted = true;
+        return _financialInvoiceApi('generate_trade_invoice', {}, jobCentricBody, ctx);
+      }
+      function _confirmJobCentricWorkOrdersExclusive() {
+        if (!postedWoIds.length) return Promise.resolve();
+        return api('my_work_orders', { mode: 'all' }).then(function(res) {
+          if (!_invoiceApiCurrent(ctx)) return;
+          var check = _jobCentricWorkOrdersStillExclusive(res, postedWoIds);
+          if (check.ok) return;
+          if (!check.incomplete && check.byId) _applyJobCentricExclusiveReread(check.byId);
+          var blocked = new Error(check.message || 'This work order is not available for a job invoice.');
+          blocked.code = check.incomplete ? 'wo_exclusive_reread_incomplete' : 'wo_exclusive_reread_blocked';
+          throw blocked;
+        });
+      }
+      // Hold the financial fence through the best-effort exclusive re-read
+      // and POST. No new claim API — residual cross-device race accepted.
+      return _withFinancialWebLock('generate_trade_invoice', function() {
+      return _confirmJobCentricWorkOrdersExclusive().then(function() {
         if (!_invoiceApiCurrent(ctx)) return;
+        return _postJobCentricGenerate();
+      }).then(function(result) {
+        if (!_invoiceApiCurrent(ctx)) return;
+        if (!generatePosted) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
@@ -22368,6 +22453,18 @@
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
+        if (!generatePosted) {
+          if (err && err.code === 'invoice_write_locked') {
+            toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
+            renderInvoiceBuilder();
+            return;
+          }
+          toast((err && (err.code === 'wo_exclusive_reread_blocked' || err.code === 'wo_exclusive_reread_incomplete') && err.message)
+            ? err.message
+            : 'Could not confirm this work order is still exclusive. Invoice was not sent.', true);
+          renderInvoiceBuilder();
+          return;
+        }
         return _handleFinancialWriteFailure('generate_trade_invoice', jobCentricBody, err, ctx).then(function(result) {
           if (_financialWriteAborted(result)) {
             renderInvoiceBuilder();
@@ -22382,6 +22479,18 @@
           // follow the sessionStorage path and lose in-memory job cards.
           renderInvoiceBuilder();
         });
+      });
+      }, { acquire: false }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
+        if (err && err.code === 'invoice_write_locked') {
+          toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
+          renderInvoiceBuilder();
+          return;
+        }
+        if (!generatePosted) {
+          toast((err && err.message) || 'Could not confirm this work order is still exclusive. Invoice was not sent.', true);
+          renderInvoiceBuilder();
+        }
       }).then(function() { _endFinancialWrite('generate_trade_invoice'); }, function() { _endFinancialWrite('generate_trade_invoice'); });
     });
   };

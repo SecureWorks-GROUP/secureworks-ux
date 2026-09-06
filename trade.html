@@ -8166,8 +8166,9 @@
   function isJobVideo(m) {
     if (!m) return false;
     // Captain lock: a priced WO/PDF document must never become a <video src>,
-    // even when type/kind/is_video claims it is a video.
-    if (isPricedWorkOrderDocument(m)) return false;
+    // even when type/kind/is_video claims it is a video. Check every typed
+    // metadata field before any video heuristic.
+    if (isTypedPricedWorkOrder(m) || isPricedWorkOrderDocument(m)) return false;
     var type = String(m.type || m.kind || m.media_type || '').toLowerCase();
     if (type === 'video' || type === 'walkthrough') return true;
     if (m.is_video === true) return true;
@@ -8252,6 +8253,47 @@
   function filterTradeSowLinks(links) {
     if (tradeCanSeeSowPricing()) return links || [];
     return (links || []).filter(function(link) { return !isPricedWorkOrderLink(link); });
+  }
+
+  function isPricedWorkOrderHref(href, raw) {
+    href = String(href || '').trim();
+    if (!href || /^(mailto:|tel:)/i.test(href)) return false;
+    var file = '';
+    try {
+      var path = href.replace(/^[a-z]+:\/\//i, '').split('?')[0].split('#')[0];
+      file = decodeURIComponent(path.split('/').pop() || '');
+    } catch (e) {}
+    var link = { url: href, label: raw || file || 'Open link', file_name: file };
+    return isPricedWorkOrderLink(link) || isPricedWorkOrderDocument(link);
+  }
+
+  function tradeLinkifyBody(text) {
+    text = redactTradePriceText(String(text || ''));
+    if (!text) return '';
+    var re = /((?:https?:\/\/|www\.)[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/ig;
+    var out = '';
+    var last = 0;
+    var match;
+    while ((match = re.exec(text))) {
+      out += esc(text.slice(last, match.index));
+      var raw = match[0];
+      var trailing = '';
+      while (/[),.;!?]$/.test(raw)) {
+        trailing = raw.slice(-1) + trailing;
+        raw = raw.slice(0, -1);
+      }
+      var href = raw.indexOf('@') !== -1 && !/^https?:\/\//i.test(raw) && !/^www\./i.test(raw) ? ('mailto:' + raw) : raw;
+      if (/^www\./i.test(href)) href = 'https://' + href;
+      if (!tradeCanSeeSowPricing() && isPricedWorkOrderHref(href, raw)) {
+        last = re.lastIndex;
+        out += esc(trailing);
+        continue;
+      }
+      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px;word-break:break-all">' + esc(raw) + '</a>' + esc(trailing);
+      last = re.lastIndex;
+    }
+    out += esc(text.slice(last));
+    return out;
   }
 
   function collectJobMedia(data) {
@@ -8461,13 +8503,13 @@
 
   function isPricedWorkOrderDocument(d) {
     if (!d) return false;
-    var type = String(d.type || d.kind || d.document_type || d.role || '').toLowerCase();
-    if (type === 'work_order' || type === 'supplier_work_order') return true;
+    // Every typed field must be checked. `type: 'video'` must not hide
+    // kind/document_type/role work_order before the video-file exemption.
+    if (isTypedPricedWorkOrder(d)) return true;
     // A real video file is not a priced WO PDF, even if the name mentions WO.
-    // Rows typed work_order / supplier_work_order already returned true above.
     if (isVideoUrl(d.file_name) || isVideoUrl(d.storage_url) || isVideoUrl(mediaPlayableUrl(d))) return false;
     return /work[\s_-]*order|\bwo\b/i.test([
-      d.type, d.file_name, d.name, d.title, d.label,
+      d.type, d.kind, d.document_type, d.role, d.file_name, d.name, d.title, d.label,
       d.url, d.pdf_url, d.storage_url, d.playable_url, d.signed_url,
       d.public_url, d.file_url, d.download_url
     ].filter(Boolean).join(' '));
@@ -8578,6 +8620,8 @@
     tradeSowLinkFromItem: tradeSowLinkFromItem,
     isPricedWorkOrderLink: isPricedWorkOrderLink,
     filterTradeSowLinks: filterTradeSowLinks,
+    isPricedWorkOrderHref: isPricedWorkOrderHref,
+    tradeLinkifyBody: tradeLinkifyBody,
     collectJobMedia: collectJobMedia,
     mediaIdentityAliases: mediaIdentityAliases,
     mediaStableKey: mediaStableKey,
@@ -9472,27 +9516,7 @@
   }
 
   function linkifyTradeBodyText(text) {
-    text = redactTradePriceText(String(text || ''));
-    if (!text) return '';
-    var re = /((?:https?:\/\/|www\.)[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/ig;
-    var out = '';
-    var last = 0;
-    var match;
-    while ((match = re.exec(text))) {
-      out += esc(text.slice(last, match.index));
-      var raw = match[0];
-      var trailing = '';
-      while (/[),.;!?]$/.test(raw)) {
-        trailing = raw.slice(-1) + trailing;
-        raw = raw.slice(0, -1);
-      }
-      var href = raw.indexOf('@') !== -1 && !/^https?:\/\//i.test(raw) && !/^www\./i.test(raw) ? ('mailto:' + raw) : raw;
-      if (/^www\./i.test(href)) href = 'https://' + href;
-      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px;word-break:break-all">' + esc(raw) + '</a>' + esc(trailing);
-      last = re.lastIndex;
-    }
-    out += esc(text.slice(last));
-    return out;
+    return tradeLinkifyBody(text);
   }
 
   function getMakesafeBuilderEmailText(ms) {

@@ -107,6 +107,14 @@ function patioDetail(overrides) {
         visible_to_trades: true,
       },
       {
+        id: 'e2e-wo-typed-video',
+        type: 'video',
+        kind: 'work_order',
+        document_type: 'supplier_work_order',
+        playable_url: OPAQUE_WO,
+        visible_to_trades: true,
+      },
+      {
         id: 'e2e-wo-as-photo',
         type: 'photo',
         phase: 'scope',
@@ -195,6 +203,7 @@ function makesafeDetail() {
         { label: 'Source WO', url: WO_PDF },
         { label: 'Document', type: 'supplier_work_order', pdf_url: OPAQUE_WO },
       ],
+      builder_email_text_for_trade: 'Use the portal https://prime.example.test/share/e2e-portal and the pack ' + WO_PDF + ' plus https://storage.example.test/work_order_MLB-26183.pdf thanks.',
     },
     serviceReport: {
       status: 'draft',
@@ -254,6 +263,7 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(scope).not.toContainText('8800');
     await expect(scope).not.toContainText('960');
     await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(scope.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
 
     await page.locator('.jd-tab[data-tab="files"]').click();
     const files = page.locator('#jdTab_files');
@@ -266,11 +276,13 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(files).not.toContainText('Site-WO.pdf');
     await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
     await expect(files.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
 
     await page.locator('.jd-tab[data-tab="photos"]').click();
     const photos = page.locator('#jdTab_photos');
     await expect(photos.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
     await expect(photos.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(photos.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
     await expect(photos.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
     await expect(photos.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
     await expect(files.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
@@ -327,6 +339,9 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(0);
     await expect(header).not.toContainText(OPAQUE_WO);
     await expect(header.getByRole('link', { name: /Builder portal/i })).toHaveCount(1);
+    await expect(header).toContainText('Use the portal');
+    await expect(header).not.toContainText('work_order_MLB-26183.pdf');
+    await expect(header.locator('a[href="https://storage.example.test/work_order_MLB-26183.pdf"]')).toHaveCount(0);
     await expect(header).toContainText('Tarp roof sheets');
     await expect(header).not.toContainText('$');
     await expect(header).not.toContainText('340');
@@ -375,5 +390,6 @@ test.describe('TRD-5 office may see SOW rates', () => {
     await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveAttribute('src', WO_PDF);
     await expect(header.getByRole('link', { name: /Open full WO/i })).toBeVisible();
     await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(1);
+    await expect(header.locator('a[href="https://storage.example.test/work_order_MLB-26183.pdf"]')).toHaveCount(1);
   });
 });

@@ -327,7 +327,7 @@ check(
 );
 check(
   'shipped isJobVideo refuses priced WO documents unconditionally',
-  /if \(isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
+  /if \(isTypedPricedWorkOrder\(m\) \|\| isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
 );
 check(
   'shipped collectJobMedia filters every media source',
@@ -389,6 +389,16 @@ check(
 check(
   'shipped external-link normalise preserves WO kind/type/file metadata (TRD5-R11-002)',
   /function add\(item, fallbackLabel\) \{\s*var link = tradeSowLinkFromItem\(item, fallbackLabel\);/.test(html)
+);
+check(
+  'shipped priced-WO document checks every typed field before video heuristics (TRD5-R12-001)',
+  /if \(isTypedPricedWorkOrder\(d\)\) return true;/.test(html) &&
+    /if \(isTypedPricedWorkOrder\(m\) \|\| isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
+);
+check(
+  'shipped email linkify applies office-only WO href filter (TRD5-R12-002)',
+  /if \(!tradeCanSeeSowPricing\(\) && isPricedWorkOrderHref\(href, raw\)\)/.test(html) &&
+    /function linkifyTradeBodyText\(text\) \{\s*return tradeLinkifyBody\(text\);/.test(html)
 );
 
 const woPdfData = {
@@ -464,6 +474,22 @@ check('priced WO PDF is not a job video', M.isJobVideo(woPdfData.documents[0]) =
 check('walkthrough-named WO PDF is not a job video', M.isJobVideo(walkthroughNamedWoPdf) === false);
 check('work_order row claiming to be video is still a priced WO', M.isPricedWorkOrderDocument(woClaimingVideo) === true);
 check('work_order row claiming to be video is not a job video', M.isJobVideo(woClaimingVideo) === false);
+const conflictingTypedVideo = {
+  type: 'video',
+  kind: 'work_order',
+  document_type: 'supplier_work_order',
+  role: 'work_order',
+  is_video: true,
+  file_name: 'pack.pdf',
+  playable_url: 'https://storage.example.test/storage/v1/object/sign/docs/abc123?token=xyz',
+  visible_to_trades: true,
+};
+check('type:video does not hide kind/document_type/role WO (TRD5-R12-001)', M.isPricedWorkOrderDocument(conflictingTypedVideo) === true);
+check('conflicting typed WO is not a job video', M.isJobVideo(conflictingTypedVideo) === false);
+check('conflicting typed WO never enters the player', !M.renderScopeVideoCard({
+  job: { scope_json: {} },
+  media: [conflictingTypedVideo],
+}).includes('storage.example.test/storage/v1/object/sign/docs/abc123'));
 check('real video named WO-site.mp4 is still a job video', M.isJobVideo(realWoNamedVideo) === true);
 check('explicit office-internal media is hidden', M.isTradeVisibleMedia(hiddenOfficeVideo) === false);
 check('untagged job media stays visible', M.isTradeVisibleMedia(walkthrough) === true);
@@ -559,6 +585,18 @@ const tradeLinks = M.filterTradeSowLinks([woPortalLink, woPdfLink, woUrlOnlyLink
 check('trades keep portal links and drop typed/opaque WO PDFs', tradeLinks.length === 1 && tradeLinks[0].url === woPortalLink.url);
 fullPricingOn = true;
 check('office keeps WO PDF links', M.filterTradeSowLinks([woPortalLink, woPdfLink, stampedOpaque]).length === 3);
+fullPricingOn = false;
+
+const emailWo = 'https://storage.example.test/work_order_MLB-26183.pdf';
+const emailPortal = 'https://prime.example.test/share/abc123';
+const emailBody = 'Use the portal ' + emailPortal + ' and the pack ' + emailWo + ' thanks.';
+check('email WO filename href is priced (TRD5-R12-002)', M.isPricedWorkOrderHref(emailWo) === true);
+check('email portal href is not priced', M.isPricedWorkOrderHref(emailPortal) === false);
+const tradeEmail = M.tradeLinkifyBody(emailBody);
+check('trade email linkify keeps portal and drops WO URL', tradeEmail.includes(emailPortal) && tradeEmail.includes('href="' + emailPortal + '"') && !tradeEmail.includes(emailWo));
+fullPricingOn = true;
+const officeEmail = M.tradeLinkifyBody(emailBody);
+check('office email linkify keeps WO URL', officeEmail.includes('href="' + emailWo + '"'));
 fullPricingOn = false;
 
 console.log('PASS trade scope media + pricing redaction checks');

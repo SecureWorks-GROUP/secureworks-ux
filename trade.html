@@ -4407,18 +4407,30 @@
     return false;
   }
 
+  function _financialWritePayloadIdentity(body) {
+    body = body || {};
+    var exact = String(body.draft_id || body.invoice_id || body.id || body.work_order_id || body.workOrderId || '');
+    if (exact) return 'id:' + exact;
+    try {
+      return 'payload:' + JSON.stringify({
+        extra_items: body.extra_items || null,
+        final_deductions: body.final_deductions || null,
+        manual_assignments: body.manual_assignments || null,
+        work_order_blocks: body.work_order_blocks || null,
+        labour_lines: body.labour_lines || null,
+        notes: body.notes || '',
+        gst_on: body.gst_on == null ? null : body.gst_on,
+        hourly_rate: body.hourly_rate == null ? null : body.hourly_rate
+      });
+    } catch (e) {
+      return '';
+    }
+  }
+
   function _sameFinancialWriteIntent(a, b) {
-    a = a || {};
-    b = b || {};
-    var aId = String(a.draft_id || a.invoice_id || '');
-    var bId = String(b.draft_id || b.invoice_id || '');
-    if (aId && bId && aId === bId) return true;
-    var aWo = String(a.work_order_id || a.workOrderId || '');
-    var bWo = String(b.work_order_id || b.workOrderId || '');
-    if (aWo && bWo && aWo === bWo) return true;
-    var aWeek = a.week_start || a.week_ending;
-    var bWeek = b.week_start || b.week_ending;
-    return !!(aWeek && bWeek && aWeek === bWeek && aId === bId);
+    var aKey = _financialWritePayloadIdentity(a);
+    var bKey = _financialWritePayloadIdentity(b);
+    return !!(aKey && bKey && aKey === bKey);
   }
 
   function _financialWriteAlreadyPending(action, body) {
@@ -4486,24 +4498,41 @@
     return item;
   }
 
+  var _saveTradeInvoiceDraftInFlight = false;
+
+  function _beginSaveTradeInvoiceDraft() {
+    if (_saveTradeInvoiceDraftInFlight) return false;
+    _saveTradeInvoiceDraftInFlight = true;
+    return true;
+  }
+
+  function _endSaveTradeInvoiceDraft() {
+    _saveTradeInvoiceDraftInFlight = false;
+  }
+
   function _handleFinancialWriteFailure(action, body, err, ctx) {
     if (err && err.code === 'invoice_replay_cancelled') return Promise.resolve({ outcome: 'cancelled' });
     if (!_invoiceApiCurrent(ctx)) return Promise.resolve({ outcome: 'cancelled' });
+    // Timeout / Failed to fetch can land after the server committed, even when
+    // the browser already reports offline. Mark those ambiguous so replay
+    // reconciles before a second send.
+    if (_isOfflineInvoiceTimeoutError(err)) {
+      var item = _persistAmbiguousFinancialWrite(action, body);
+      if (!item) return Promise.resolve({ outcome: 'failed', error: err });
+      return _reconcileAmbiguousInvoiceAction(item).then(function(alreadyLanded) {
+        if (!_invoiceApiCurrent(ctx)) return { outcome: 'cancelled' };
+        if (alreadyLanded === true) {
+          _removeOfflineQueueItem(item.id);
+          return { outcome: 'landed' };
+        }
+        return { outcome: alreadyLanded === false ? 'queued_retry' : 'queued_unresolved' };
+      });
+    }
     if (_isBrowserOffline()) {
       queueOfflineAction(action, body);
       return Promise.resolve({ outcome: 'queued_offline' });
     }
-    if (!_isOfflineInvoiceTimeoutError(err)) return Promise.resolve({ outcome: 'failed', error: err });
-    var item = _persistAmbiguousFinancialWrite(action, body);
-    if (!item) return Promise.resolve({ outcome: 'failed', error: err });
-    return _reconcileAmbiguousInvoiceAction(item).then(function(alreadyLanded) {
-      if (!_invoiceApiCurrent(ctx)) return { outcome: 'cancelled' };
-      if (alreadyLanded === true) {
-        _removeOfflineQueueItem(item.id);
-        return { outcome: 'landed' };
-      }
-      return { outcome: alreadyLanded === false ? 'queued_retry' : 'queued_unresolved' };
-    });
+    return Promise.resolve({ outcome: 'failed', error: err });
   }
 
   function _financialWriteFailureToast(outcome, err) {
@@ -17743,6 +17772,10 @@
     var requestSeq = state.requestSeq;
     var ctx = _invoiceApiContext();
     if (_guardFinancialWrite('save_trade_invoice_draft', payload)) return;
+    if (!_beginSaveTradeInvoiceDraft()) {
+      toast('Draft save is already in progress.');
+      return;
+    }
     state.busy = true;
     renderWeeklyWorkOrderInvoice();
     api('save_trade_invoice_draft', null, payload, _invoiceApiOptions(ctx)).then(function(res) {
@@ -17767,7 +17800,7 @@
         _financialWriteFailureToast(result.outcome, err);
         renderWeeklyWorkOrderInvoice();
       });
-    });
+    }).then(function() { _endSaveTradeInvoiceDraft(); }, function() { _endSaveTradeInvoiceDraft(); });
   };
 
   window.submitWeeklyWorkOrderInvoice = function() {
@@ -21141,6 +21174,10 @@
       gst_on: _invGst
     };
     if (_guardFinancialWrite('save_trade_invoice_draft', draftBody)) return;
+    if (!_beginSaveTradeInvoiceDraft()) {
+      toast('Draft save is already in progress.');
+      return;
+    }
 
     api('save_trade_invoice_draft', null, draftBody, _invoiceApiOptions(ctx)).then(function(res) {
       if (!_invoiceApiCurrent(ctx)) return;
@@ -21152,7 +21189,7 @@
         if (result.outcome === 'cancelled') return;
         _financialWriteFailureToast(result.outcome, err);
       });
-    });
+    }).then(function() { _endSaveTradeInvoiceDraft(); }, function() { _endSaveTradeInvoiceDraft(); });
   };
 
   window.submitInvoiceFromBuilder = function() {

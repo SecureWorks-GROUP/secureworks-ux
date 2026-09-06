@@ -346,6 +346,13 @@ assert(html.includes('_handleFinancialWriteFailure') && html.includes('_offlineI
   'online financial timeouts persist through the same reconcile-or-queue path');
 assert(html.includes('_guardFinancialWrite') && html.includes('Do not submit again'),
   'a pending ambiguous invoice write blocks a second send');
+assert(html.includes('_financialWritePayloadIdentity') && !/aWeek === bWeek && aId === bId/.test(html),
+  'pending invoice intents match exact identity or payload, not week-only');
+assert(html.includes('_beginSaveTradeInvoiceDraft') && /saveDraftInvoice = function\(\) \{[\s\S]*?_beginSaveTradeInvoiceDraft\(\)/.test(html),
+  'Save Draft is single-flight so concurrent taps cannot create parallel drafts');
+assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
+  html.includes('_persistAmbiguousFinancialWrite(action, body)'),
+  'timeout/Failed-to-fetch is marked ambiguous before any offline-only queue path');
 assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.test(html),
   'saving an existing invoice draft sends its draft_id');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),

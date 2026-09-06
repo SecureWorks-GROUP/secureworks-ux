@@ -674,8 +674,40 @@ function hoursCard(overrides) {
         'an online timeout without exact identity stays unresolved')
       assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.ambiguous && i.body && i.body.week_start === '2026-09-07'), true,
         'online timeouts persist through the same queue path')
-      assert.strictEqual(ctx._guardFinancialWrite('generate_trade_invoice', { week_start: '2026-09-07' }), true,
-        'a pending ambiguous write blocks a second send for the same week')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { week_start: '2026-09-07' },
+        { week_start: '2026-09-07', extra_items: [{ description: 'Other job' }] }
+      ), false, 'week-only is not an exact intent match')
+      assert.strictEqual(ctx._guardFinancialWrite('generate_trade_invoice', {
+        week_start: '2026-09-07',
+        extra_items: [{ description: 'Other job' }],
+      }), false, 'a distinct same-week payload is not suppressed after an unresolved timeout')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { draft_id: 'draft-1', week_start: '2026-09-07' },
+        { draft_id: 'draft-1', week_start: '2026-09-21' }
+      ), true, 'exact draft identity still matches')
+      assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), true)
+      assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), false,
+        'direct draft save is single-flight')
+      ctx._endSaveTradeInvoiceDraft()
+
+      ctx.navigator.onLine = false
+      store.sw_action_queue = '[]'
+      const offlineAbort = new Error('Failed to fetch')
+      return ctx._handleFinancialWriteFailure(
+        'generate_trade_invoice',
+        { week_start: '2026-09-07', extra_items: [{ description: 'Offline A' }] },
+        offlineAbort,
+        ctx._invoiceApiContext()
+      )
+    }).then(function(offlineResult) {
+      assert.strictEqual(offlineResult.outcome, 'queued_unresolved',
+        'an offline Failed-to-fetch still goes through the ambiguous path')
+      const offlineQueued = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(offlineQueued.length, 1)
+      assert.strictEqual(offlineQueued[0].ambiguous, true,
+        'offline timeout/Failed-to-fetch is marked ambiguous so replay reconciles first')
+      ctx.navigator.onLine = true
 
       ctx._user = null
       ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })

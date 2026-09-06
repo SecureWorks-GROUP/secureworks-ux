@@ -4311,6 +4311,49 @@
   }
 
   var _STORAGE_LOCK_RENEW_MS = 15000;
+  var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write';
+
+  function _storageLockRaw(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw == null ? null : String(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function _storageLockFenceKey(key) {
+    return String(key || '') + '__cas';
+  }
+
+  // Lease claim: announce a fence ticket for the expected version, write only
+  // if those bytes are unchanged, and accept ownership only when both the lock
+  // and the fence still match. A stolen fence or replaced version rejects.
+  function _compareAndSwapStorageLock(key, expectedRaw, claim, fenceKind) {
+    var expectedVersion = claim && claim.prev != null ? Number(claim.prev) : 0;
+    var fenceKey = _storageLockFenceKey(key);
+    var ticket = _crossTabId + ':' + fenceKind + ':' + String(claim.nonce || '') + ':' + expectedVersion;
+    try { localStorage.setItem(fenceKey, ticket); } catch (e) { return false; }
+    if (_storageLockRaw(fenceKey) !== ticket) return false;
+    if (_storageLockRaw(key) !== expectedRaw) {
+      if (_storageLockRaw(fenceKey) === ticket) _storageRemove(fenceKey);
+      return false;
+    }
+    try { localStorage.setItem(key, JSON.stringify(claim)); } catch (e) {
+      if (_storageLockRaw(fenceKey) === ticket) _storageRemove(fenceKey);
+      return false;
+    }
+    var confirm = _storageGetJson(key, null);
+    var fenceHeld = _storageLockRaw(fenceKey) === ticket;
+    var ours = !!(confirm && confirm.owner === _crossTabId && confirm.nonce === claim.nonce && Number(confirm.v) === Number(claim.v));
+    if (!ours) return false;
+    if (!fenceHeld) {
+      _releaseStorageLock(key);
+      return false;
+    }
+    _storageRemove(fenceKey);
+    return true;
+  }
 
   function _claimStorageLock(key, ttl) {
     var now = Date.now();
@@ -4318,17 +4361,16 @@
     if (held && held.owner && held.owner !== _crossTabId && (now - Number(held.ts || 0)) < ttl) {
       return false;
     }
-    var expectedNonce = held && held.nonce != null ? String(held.nonce) : '';
+    var expectedRaw = _storageLockRaw(key);
+    var expectedVersion = held && held.v != null ? Number(held.v) : 0;
     var claim = {
       owner: _crossTabId,
       ts: now,
       nonce: Math.random().toString(36).slice(2, 12),
-      v: (held && Number(held.v) ? Number(held.v) : 0) + 1,
-      prev: expectedNonce
+      v: expectedVersion + 1,
+      prev: expectedVersion
     };
-    try { localStorage.setItem(key, JSON.stringify(claim)); } catch (e) { return false; }
-    var confirm = _storageGetJson(key, null);
-    return !!(confirm && confirm.owner === _crossTabId && confirm.nonce === claim.nonce);
+    return _compareAndSwapStorageLock(key, expectedRaw, claim, 'claim');
   }
 
   function _storageLockStillOurs(key) {
@@ -4339,16 +4381,16 @@
   function _renewStorageLock(key) {
     var held = _storageGetJson(key, null);
     if (!held || held.owner !== _crossTabId) return false;
+    var expectedRaw = _storageLockRaw(key);
+    var expectedVersion = Number(held.v) || 0;
     var next = {
       owner: _crossTabId,
       ts: Date.now(),
       nonce: held.nonce,
-      v: (Number(held.v) || 0) + 1,
-      prev: held.nonce
+      v: expectedVersion + 1,
+      prev: expectedVersion
     };
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch (e) { return false; }
-    var confirm = _storageGetJson(key, null);
-    return !!(confirm && confirm.owner === _crossTabId && confirm.nonce === next.nonce);
+    return _compareAndSwapStorageLock(key, expectedRaw, next, 'renew');
   }
 
   function _startStorageLockRenew(key) {
@@ -4362,8 +4404,8 @@
     if (held && held.owner === _crossTabId) _storageRemove(key);
   }
 
-  function _financialWriteLockKey(action) {
-    return 'sw_fin_write_' + String(action || '');
+  function _financialWriteLockKey(_action) {
+    return _FINANCIAL_WRITE_LOCK_KEY;
   }
 
   function _sharedFinancialWriteHeld(action) {
@@ -4459,8 +4501,41 @@
     localStorage.setItem('sw_action_queue', JSON.stringify(queue || []));
   }
 
+  function _persistUnconfirmedKey(id) {
+    return 'sw_action_queue_unconfirmed_' + String(id || '');
+  }
+
+  function _markQueueItemPersistUnconfirmed(id) {
+    if (!id) return;
+    try { localStorage.setItem(_persistUnconfirmedKey(id), '1'); } catch (e) {}
+    var item = _storageGetJson(_inboxItemKey(id), null);
+    if (item && item.id) {
+      item.ambiguous = true;
+      item.persist_unconfirmed = true;
+      _writeInboxItem(item);
+    }
+  }
+
+  function _clearPersistUnconfirmedMarker(id) {
+    if (!id) return;
+    _storageRemove(_persistUnconfirmedKey(id));
+  }
+
+  function _applyPersistUnconfirmedFlags(queue) {
+    (queue || []).forEach(function(item) {
+      if (!item || !item.id) return;
+      try {
+        if (localStorage.getItem(_persistUnconfirmedKey(item.id))) {
+          item.ambiguous = true;
+          item.persist_unconfirmed = true;
+        }
+      } catch (e) {}
+    });
+    return queue || [];
+  }
+
   function _readOfflineQueue() {
-    return _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(_listInboxIds()));
+    return _applyPersistUnconfirmedFlags(_mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(_listInboxIds())));
   }
 
   function _writeOfflineQueue(queue) {
@@ -4470,7 +4545,7 @@
   function _mutateOfflineQueue(mutator) {
     var apply = function() {
       var absorbed = _listInboxIds();
-      var start = _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed));
+      var start = _applyPersistUnconfirmedFlags(_mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed)));
       var next = typeof mutator === 'function' ? mutator(start.slice()) : start;
       if (!Array.isArray(next)) next = start;
       _writeOfflineQueueRaw(next);
@@ -4480,11 +4555,11 @@
     var deadline = Date.now() + 400;
     while (Date.now() <= deadline) {
       if (_claimStorageLock(_QUEUE_LOCK_KEY, _QUEUE_LOCK_TTL_MS)) {
-        try { return apply(); }
+        try { return { ok: true, queue: apply() }; }
         finally { _releaseStorageLock(_QUEUE_LOCK_KEY); }
       }
     }
-    return _readOfflineQueue();
+    return { ok: false, queue: _readOfflineQueue() };
   }
 
   function _withStorageLockAsync(name, ttl, fn) {
@@ -4514,7 +4589,7 @@
   function _withFinancialWebLock(action, fn) {
     var locks = (typeof navigator !== 'undefined' && navigator.locks) || null;
     if (locks && typeof locks.request === 'function') {
-      return locks.request('sw_fin_write_' + String(action || ''), { mode: 'exclusive', ifAvailable: true }, function(lock) {
+      return locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
         if (!lock) {
           var err = new Error('Invoice send is already in progress.');
           err.code = 'invoice_write_locked';
@@ -4523,7 +4598,7 @@
         return Promise.resolve().then(fn);
       });
     }
-    if (action && _sharedFinancialWriteHeld(action)) {
+    if (_sharedFinancialWriteHeld(action)) {
       var locked = new Error('Invoice send is already in progress.');
       locked.code = 'invoice_write_locked';
       return Promise.reject(locked);
@@ -4592,7 +4667,7 @@
         kept.push(item);
       }
       return kept;
-    });
+    }).queue;
   }
 
   function _newOfflineQueueItemId() {
@@ -4670,6 +4745,87 @@
     return false;
   }
 
+  function _invoiceIdentitySlots(source) {
+    var slots = [];
+    function addSlot(ids) {
+      if (!ids || !ids.length) return;
+      slots.push(ids);
+    }
+    function idsFromRow(row) {
+      if (!row || typeof row !== 'object') return [];
+      var values = [];
+      function add(value) {
+        if (value == null || String(value).trim() === '') return;
+        var text = String(value);
+        if (values.indexOf(text) === -1) values.push(text);
+      }
+      add(row.job_id);
+      add(row.job_number);
+      add(row.assignment_id);
+      add(row.work_order_id);
+      add(row.workOrderId);
+      return values;
+    }
+    source = source || {};
+    addSlot(idsFromRow({
+      job_id: source.job_id,
+      job_number: source.job_number,
+      assignment_id: source.assignment_id,
+      work_order_id: source.work_order_id,
+      workOrderId: source.workOrderId
+    }));
+    (source.extra_items || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+    (source.manual_assignments || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+    (source.work_order_blocks || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+    (source.labour_lines || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+    (source.lines || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+    return slots;
+  }
+
+  function _invoicePeriodKey(source) {
+    return String((source && (source.week_start || source.week_ending)) || '');
+  }
+
+  function _invoiceDeductionFingerprint(source) {
+    try {
+      return JSON.stringify((source && source.final_deductions) || null);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function _invoiceSlotsCovered(payloadSlots, inv) {
+    var invIds = _nestedInvoiceIdentityValues(inv);
+    if (!payloadSlots.length) return false;
+    for (var i = 0; i < payloadSlots.length; i++) {
+      var slot = payloadSlots[i];
+      var hit = false;
+      for (var j = 0; j < slot.length; j++) {
+        if (invIds.indexOf(slot[j]) !== -1) { hit = true; break; }
+      }
+      if (!hit) return false;
+    }
+    return true;
+  }
+
+  function _invoicePayloadHasCompleteFingerprint(body) {
+    body = body || {};
+    if (_invoiceIdentitySlots(body).length) return true;
+    if (Array.isArray(body.final_deductions) && body.final_deductions.length) return true;
+    if (Array.isArray(body.extra_items) && body.extra_items.length) return true;
+    if (Array.isArray(body.manual_assignments) && body.manual_assignments.length) return true;
+    if (Array.isArray(body.work_order_blocks) && body.work_order_blocks.length) return true;
+    if (Array.isArray(body.labour_lines) && body.labour_lines.length) return true;
+    if (Array.isArray(body.lines) && body.lines.length) return true;
+    return false;
+  }
+
+  function _invoicePayloadNeedsFullFingerprint(item) {
+    var body = (item && item.body) || {};
+    if (_invoiceIdentitySlots(body).length > 1) return true;
+    return !!(Array.isArray(body.final_deductions) && body.final_deductions.length);
+  }
+
   function _invoiceMatchesQueueIntent(inv, item) {
     if (!inv || !item) return false;
     var body = item.body || {};
@@ -4682,17 +4838,18 @@
     }
     var woId = body.work_order_id || body.workOrderId;
     if (woId && _invoiceHasWorkOrder(inv, woId)) return true;
-    var nested = _nestedInvoiceIdentityValues(body);
-    if (!nested.length) return false;
-    var invNested = _nestedInvoiceIdentityValues(inv);
-    var hit = false;
-    for (var n = 0; n < nested.length; n++) {
-      if (invNested.indexOf(nested[n]) !== -1) { hit = true; break; }
+    var bodyFp = _financialWritePayloadIdentity(body);
+    var invFp = _financialWritePayloadIdentity(inv);
+    if (bodyFp && invFp && bodyFp === invFp && bodyFp.indexOf('payload:') === 0 && _invoicePayloadHasCompleteFingerprint(body)) return true;
+    var slots = _invoiceIdentitySlots(body);
+    if (!slots.length) return false;
+    if (!_invoiceSlotsCovered(slots, inv)) return false;
+    var bodyWeek = _invoicePeriodKey(body);
+    var invWeek = _invoicePeriodKey(inv);
+    if (!bodyWeek || !invWeek || bodyWeek !== invWeek) return false;
+    if (Array.isArray(body.final_deductions) && body.final_deductions.length) {
+      if (_invoiceDeductionFingerprint(body) !== _invoiceDeductionFingerprint(inv)) return false;
     }
-    if (!hit) return false;
-    var bodyWeek = String(body.week_start || body.week_ending || '');
-    var invWeek = String(inv.week_start || inv.week_ending || '');
-    if (bodyWeek && invWeek && bodyWeek !== invWeek) return false;
     return true;
   }
 
@@ -4776,9 +4933,14 @@
         return !invoices.some(function(inv) { return String(inv.id) === String(targetId); });
       }
       var match = invoices.filter(function(inv) { return _invoiceMatchesQueueIntent(inv, item); });
-      // An exact draft/invoice/work-order/job identity means this write already
+      // An exact draft/invoice/work-order identity, a complete payload
+      // fingerprint, or every job slot plus period means this write already
       // committed — including draft and pending_ops_review (failed Xero push).
-      return match.length > 0;
+      if (match.length > 0) return true;
+      // Multi-job / deduction writes must not retry on a partial or empty
+      // listing — that is how an A+B timeout can mint a second invoice.
+      if (_invoicePayloadNeedsFullFingerprint(item)) return null;
+      return false;
     });
   }
 
@@ -4787,12 +4949,18 @@
   }
 
   function _removeOfflineQueueItem(id) {
-    if (!id) return;
-    _mutateOfflineQueue(function(queue) {
+    if (!id) return true;
+    var result = _mutateOfflineQueue(function(queue) {
       return queue.filter(function(item) {
         return !item || item.id !== id;
       });
     });
+    if (result.ok) {
+      _clearPersistUnconfirmedMarker(id);
+      return true;
+    }
+    _markQueueItemPersistUnconfirmed(id);
+    return false;
   }
 
   function _persistAmbiguousFinancialWrite(action, body) {
@@ -4832,9 +5000,18 @@
 
   var _financialWriteInFlight = {};
 
+  function _financialWriteHeldLocally() {
+    return Object.keys(_financialWriteInFlight).length > 0;
+  }
+
   function _beginFinancialWrite(action) {
     var key = String(action || '');
     if (!key || _financialWriteInFlight[key]) return false;
+    if (_financialWriteHeldLocally()) {
+      if (key !== 'attach_invoice_pdf' || !_storageLockStillOurs(_financialWriteLockKey(key))) return false;
+      _financialWriteInFlight[key] = { timer: null, nested: true };
+      return true;
+    }
     if (!_claimStorageLock(_financialWriteLockKey(key), _FINANCIAL_WRITE_LOCK_TTL_MS)) return false;
     _financialWriteInFlight[key] = { timer: _startStorageLockRenew(_financialWriteLockKey(key)) };
     return true;
@@ -4845,7 +5022,7 @@
     var state = _financialWriteInFlight[key];
     if (state && state.timer) clearInterval(state.timer);
     delete _financialWriteInFlight[key];
-    _releaseStorageLock(_financialWriteLockKey(key));
+    if (!_financialWriteHeldLocally()) _releaseStorageLock(_financialWriteLockKey(key));
   }
 
   function _beginSaveTradeInvoiceDraft() {
@@ -4872,7 +5049,11 @@
       return _reconcileAmbiguousInvoiceAction(item).then(function(alreadyLanded) {
         if (!_invoiceApiCurrent(ctx)) return { outcome: 'cancelled' };
         if (alreadyLanded === true) {
-          _removeOfflineQueueItem(item.id);
+          if (!_removeOfflineQueueItem(item.id) && item) {
+            item.ambiguous = true;
+            item.persist_unconfirmed = true;
+            _writeInboxItem(item);
+          }
           return { outcome: 'landed' };
         }
         return { outcome: alreadyLanded === false ? 'queued_retry' : 'queued_unresolved' };
@@ -4910,7 +5091,7 @@
     (remaining || []).forEach(function(item) {
       if (item && item.id) remainingById[item.id] = item;
     });
-    _mutateOfflineQueue(function(latest) {
+    var result = _mutateOfflineQueue(function(latest) {
       var merged = [];
       var seen = {};
       latest.forEach(function(item) {
@@ -4933,6 +5114,12 @@
       });
       return merged;
     });
+    if (result.ok) {
+      (snapshot || []).forEach(function(item) {
+        if (item && item.id && !remainingById[item.id]) _clearPersistUnconfirmedMarker(item.id);
+      });
+    }
+    return !!(result && result.ok);
   }
 
   function queueOfflineAction(action, postBody) {
@@ -5031,7 +5218,7 @@
       return _reconcileAmbiguousInvoiceAction(item).then(function(alreadyLanded) {
         if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
         if (alreadyLanded === true) return;
-        if (alreadyLanded === null || item.action === 'attach_invoice_pdf') {
+        if (alreadyLanded === null || item.action === 'attach_invoice_pdf' || item.persist_unconfirmed) {
           remaining.push(item);
           return;
         }
@@ -5042,7 +5229,7 @@
   }
 
   function _syncOfflineQueueOnce() {
-    var queue = _mutateOfflineQueue(function(items) {
+    var mutated = _mutateOfflineQueue(function(items) {
       var kept = [];
       for (var i = 0; i < items.length; i++) {
         var row = items[i];
@@ -5051,6 +5238,8 @@
       }
       return kept;
     });
+    if (!mutated.ok) return Promise.resolve();
+    var queue = mutated.queue;
     if (queue.length === 0) return Promise.resolve();
     var snapshot = queue.slice();
     var remaining = [];
@@ -5075,8 +5264,30 @@
       var persist = remaining.filter(function(item) {
         return !_isOfflineInvoiceAction(item && item.action) || _offlineInvoiceOwnedByCurrentAccount(item);
       });
-      _persistOfflineQueueAfterSync(snapshot, persist);
-      if (persist.length === 0 && snapshot.length > 0 && _readOfflineQueue().length === 0) {
+      var persistIds = {};
+      persist.forEach(function(item) {
+        if (item && item.id) persistIds[item.id] = true;
+      });
+      var committed = _persistOfflineQueueAfterSync(snapshot, persist);
+      if (!committed) {
+        snapshot.forEach(function(item) {
+          if (!item || !item.id || persistIds[item.id]) return;
+          item.ambiguous = true;
+          item.persist_unconfirmed = true;
+          _writeInboxItem(item);
+          _markQueueItemPersistUnconfirmed(item.id);
+        });
+        _mutateOfflineQueue(function(latest) {
+          latest.forEach(function(item) {
+            if (item && item.id && !persistIds[item.id] && snapshot.some(function(row) { return row && row.id === item.id; })) {
+              item.ambiguous = true;
+              item.persist_unconfirmed = true;
+            }
+          });
+          return latest;
+        });
+      }
+      if (committed && persist.length === 0 && snapshot.length > 0 && _readOfflineQueue().length === 0) {
         toast('Synced ' + snapshot.length + ' queued action' + (snapshot.length > 1 ? 's' : ''));
       }
     });
@@ -5845,7 +6056,7 @@
     return {
       beforeSend: function() {
         if (!_invoiceApiCurrent(ctx)) return false;
-        if (action && _financialWriteInFlight[action] && !_storageLockStillOurs(_financialWriteLockKey(action))) return false;
+        if (_financialWriteHeldLocally() && !_storageLockStillOurs(_financialWriteLockKey(action))) return false;
         return true;
       }
     };
@@ -18594,6 +18805,10 @@
       if (!_invoiceApiCurrent(ctx)) return;
       var deleteBody = { invoice_id: invoiceId };
       if (_guardFinancialWrite('delete_trade_invoice', deleteBody)) return;
+      if (!_beginFinancialWrite('delete_trade_invoice')) {
+        toast('Invoice send is already in progress.');
+        return;
+      }
       _financialInvoiceApi('delete_trade_invoice', null, deleteBody, ctx).then(function() {
         if (!_invoiceApiCurrent(ctx)) return;
         toast('Invoice deleted');
@@ -18609,7 +18824,7 @@
           }
           _financialWriteFailureToast(result.outcome, err);
         });
-      });
+      }).then(function() { _endFinancialWrite('delete_trade_invoice'); }, function() { _endFinancialWrite('delete_trade_invoice'); });
     });
   };
 
@@ -20292,11 +20507,14 @@
       var pdfDoc = _generateInvoicePDF(pdfData);
       if (!pdfDoc) return Promise.resolve({ attached: false, error: 'PDF generation failed' });
       var pdfBase64 = pdfDoc.output('datauristring').split(',')[1]; // strip data:application/pdf;base64,
-      return api('attach_invoice_pdf', null, {
+      if (!_beginFinancialWrite('attach_invoice_pdf')) {
+        return Promise.resolve({ attached: false, skipped: true, reason: 'invoice_write_locked' });
+      }
+      return _financialInvoiceApi('attach_invoice_pdf', null, {
         xero_bill_id: result.xero_bill_id,
         pdf_base64: pdfBase64,
         filename: (result.invoice_number || 'invoice') + '.pdf'
-      }, _invoiceApiOptions(ctx)).then(function(resp) {
+      }, ctx).then(function(resp) {
         if (resp && resp.success === false) {
           console.warn('[trade] PDF attachment failed (non-blocking):', resp.error || resp.message || resp);
           return { attached: false, error: resp.error || resp.message || 'PDF attachment failed' };
@@ -20307,6 +20525,12 @@
       }).catch(function(e) {
         console.warn('[trade] PDF attachment failed (non-blocking):', e.message);
         return { attached: false, error: e.message };
+      }).then(function(out) {
+        _endFinancialWrite('attach_invoice_pdf');
+        return out;
+      }, function(err) {
+        _endFinancialWrite('attach_invoice_pdf');
+        throw err;
       });
     } catch (e) {
       console.warn('[trade] PDF gen for Xero failed:', e);

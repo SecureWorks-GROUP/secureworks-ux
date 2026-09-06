@@ -785,6 +785,26 @@ function hoursCard(overrides) {
         { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }], status: 'draft' },
         { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }] } }
       ), true, 'job-centric reconcile matches a nested job identity in the same week')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), false, 'a multi-job write does not match an older same-week invoice that only has one job')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), false, 'a multi-job write without a matching period stays unresolved')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), true, 'a multi-job write matches only when every job and the period land')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          final_deductions: [{ description: 'Fuel', unit_rate: 10 }],
+        } }
+      ), false, 'a write with invoice-level deductions does not match a job-only invoice')
       ctx.api = function(action) {
         if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
         return Promise.resolve({ ok: true })
@@ -838,14 +858,75 @@ function hoursCard(overrides) {
         store.sw_action_queue_lock = JSON.stringify({
           owner: 'other-tab',
           ts: Date.now(),
-          nonce: 'held'
+          nonce: 'held',
+          v: 1
         })
         const before = store.sw_action_queue
-        ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] })
+        const lockedMutate = ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] })
+        assert.strictEqual(lockedMutate.ok, false, 'a held queue lock reports mutation failure')
         assert.strictEqual(store.sw_action_queue, before,
           'a held queue lock fails closed instead of mutating unlocked')
         delete store.sw_action_queue_lock
-        console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'generate_trade_invoice',
+          body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+        }).then(function(multiJobEmpty) {
+          assert.strictEqual(multiJobEmpty, null,
+            'a multi-job write on a complete empty listing stays unresolved instead of retrying')
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              return Promise.resolve({
+                invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+              })
+            }
+            return Promise.resolve({ ok: true })
+          }
+          return ctx._reconcileAmbiguousInvoiceAction({
+            action: 'generate_trade_invoice',
+            body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+          })
+        }).then(function(partialLanded) {
+          assert.strictEqual(partialLanded, null,
+            'a same-week invoice that only shares one job does not land a multi-job write')
+
+          let persistSends = 0
+          ctx.api = function(action) {
+            if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+              return Promise.resolve({ work_orders: [], invoices: [] })
+            }
+            persistSends += 1
+            store.sw_action_queue_lock = JSON.stringify({
+              owner: 'other-tab',
+              ts: Date.now(),
+              nonce: 'held',
+              v: 4
+            })
+            return Promise.resolve({ ok: true })
+          }
+          store.sw_action_queue = JSON.stringify([{
+            id: 'iq_persist',
+            client_request_id: 'iq_persist',
+            action: 'generate_trade_invoice',
+            user_id: 'bob',
+            body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+          }])
+          return ctx.syncOfflineQueue().then(function() {
+            assert.strictEqual(persistSends, 1, 'the invoice POST happens once before persist fails closed')
+            const afterPersistFail = JSON.parse(store.sw_action_queue)
+            assert.strictEqual(afterPersistFail.some((i) => i.id === 'iq_persist'), true,
+              'a successful replay stays queued when removal cannot be committed')
+            assert.strictEqual(store.sw_action_queue_unconfirmed_iq_persist, '1',
+              'failed removal records a persist-unconfirmed marker')
+            delete store.sw_action_queue_lock
+            persistSends = 0
+            return ctx.syncOfflineQueue()
+          }).then(function() {
+            assert.strictEqual(persistSends, 0,
+              'an unconfirmed successful replay reconciles and does not POST again')
+            console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+          })
+        })
       })
     })
   }).catch(function(err) {
@@ -925,14 +1006,24 @@ function hoursCard(overrides) {
     'the financial lock is released for the other tab')
   tabB._endFinancialWrite('generate_trade_invoice')
 
-  store['sw_fin_write_submit_trade_invoice'] = JSON.stringify({
+  store.sw_fin_write = JSON.stringify({
     owner: 'dead-tab',
     ts: Date.now() - 200000,
     nonce: 'stale',
+    v: 3,
   })
   assert.strictEqual(tabA._beginFinancialWrite('submit_trade_invoice'), true,
     'a stale other-tab financial lock does not block a new send')
   tabA._endFinancialWrite('submit_trade_invoice')
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+  assert.strictEqual(tabA._beginFinancialWrite('delete_trade_invoice'), false,
+    'delete cannot start while another invoice write is in flight in this tab')
+  assert.strictEqual(tabB._beginFinancialWrite('delete_trade_invoice'), false,
+    'another tab cannot delete while a generate lock is held')
+  tabA._endFinancialWrite('generate_trade_invoice')
+  assert.strictEqual(tabB._beginFinancialWrite('delete_trade_invoice'), true,
+    'delete can start after the shared financial lock is released')
+  tabB._endFinancialWrite('delete_trade_invoice')
 
   tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] })
   tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] })

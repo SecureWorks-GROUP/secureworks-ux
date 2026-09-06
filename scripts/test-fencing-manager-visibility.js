@@ -346,11 +346,13 @@ assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_finan
   'direct invoice writes pass a context-bound beforeSend guard and take a financial Web Lock when available');
 assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
   'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
-assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded'),
-  'job-centric nested identities can reconcile and replay drops only business success');
+assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded') &&
+  html.includes('_invoiceIdentitySlots') && html.includes('persist_unconfirmed'),
+  'job-centric nested identities can reconcile and replay drops only after durable queue removal');
 assert((function() {
   const block = html.slice(html.indexOf('function _mutateOfflineQueue'), html.indexOf('function _withStorageLockAsync'));
-  return block.includes('return _readOfflineQueue();') && (block.match(/return apply\(\)/g) || []).length === 1;
+  return block.includes('ok: false') && block.includes('_readOfflineQueue()') &&
+    (block.match(/ok:\s*true,\s*queue:\s*apply\(\)/g) || []).length === 1;
 })(), 'queue mutations wait for the lock and never apply unlocked');
 assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
@@ -358,7 +360,9 @@ assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock'
   html.includes('navigator.locks') && html.includes('_claimStorageLock'),
   'financial single-flight and queue mutations are cross-tab locked (Web Locks or storage claim plus inbox merge)');
 assert(/function _beginFinancialWrite\(action\) \{[\s\S]*?_claimStorageLock\(_financialWriteLockKey\(key\)/.test(html) &&
-  /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html),
+  /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
+  html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
+  html.includes('_compareAndSwapStorageLock'),
   'invoice begin/guard honor another tab\'s in-flight financial write claim');
 assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
   'financial queue items carry a local request id and reconcile before retrying a timeout');
@@ -378,9 +382,12 @@ assert(html.includes('_beginFinancialWrite') && html.includes('_financialWriteIn
   /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
   /submitInvoiceFromBuilder = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
   /generateTradeInvoice = function\(weekStart\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
-  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_beginFinancialWrite\('submit_work_order_invoice'\)/.test(html),
-  'every financial invoice submit/generate path is process-wide single-flight');
-assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQueueIntent\(inv, item\); \}\);[\s\S]{0,280}return match\.length > 0;/.test(html),
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_beginFinancialWrite\('submit_work_order_invoice'\)/.test(html) &&
+  /deleteTradeInvoice = function\(invoiceId\) \{[\s\S]*?_beginFinancialWrite\('delete_trade_invoice'\)/.test(html) &&
+  html.includes("_financialInvoiceApi('attach_invoice_pdf'"),
+  'every financial invoice submit/generate/delete/attach path is process-wide single-flight');
+assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQueueIntent\(inv, item\); \}\);[\s\S]{0,280}if \(match\.length > 0\) return true;/.test(html) &&
+  html.includes('if (_invoicePayloadNeedsFullFingerprint(item)) return null;'),
   'an exact draft/invoice/work-order identity is treated as landed without a status filter');
 assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
   html.includes('_persistAmbiguousFinancialWrite(action, body)'),

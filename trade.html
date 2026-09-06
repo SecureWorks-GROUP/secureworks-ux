@@ -8190,14 +8190,20 @@
     return out;
   }
 
-  function mediaStableKey(m) {
-    if (!m) return '';
+  function mediaIdentityAliases(m) {
+    var aliases = [];
+    if (!m) return aliases;
     var id = m.id || m.media_id || m.document_id;
-    if (id) return 'id:' + String(id);
+    if (id) aliases.push('id:' + String(id));
     var path = m.storage_path || m.storage_key || m.path;
-    if (path) return 'path:' + String(path);
-    if (m.content_hash) return 'hash:' + String(m.content_hash);
-    return '';
+    if (path) aliases.push('path:' + String(path));
+    if (m.content_hash) aliases.push('hash:' + String(m.content_hash));
+    return aliases;
+  }
+
+  function mediaStableKey(m) {
+    var aliases = mediaIdentityAliases(m);
+    return aliases.length ? aliases[0] : '';
   }
 
   function mediaUrlRank(m) {
@@ -8222,24 +8228,53 @@
   }
 
   function listJobVideos(data) {
-    var byKey = {};
-    var order = [];
+    var byAlias = {};
+    var clusters = [];
+
+    function aliasesFor(obj, extra) {
+      var list = mediaIdentityAliases(obj);
+      (extra || []).forEach(function(a) {
+        if (a && list.indexOf(a) < 0) list.push(a);
+      });
+      if (!list.length) {
+        var url = mediaPlayableUrl(obj);
+        if (url) list.push('url:' + url);
+      }
+      return list;
+    }
+
+    function pointAliases(idx, extra) {
+      aliasesFor(clusters[idx], extra).forEach(function(a) { byAlias[a] = idx; });
+    }
+
     collectJobMedia(data).forEach(function(m) {
       if (!isJobVideo(m)) return;
-      var key = mediaStableKey(m);
-      if (!key) {
-        var url = mediaPlayableUrl(m);
-        if (!url) return;
-        key = 'url:' + url;
+      var aliases = aliasesFor(m);
+      if (!aliases.length) return;
+      var hits = [];
+      aliases.forEach(function(a) {
+        if (byAlias[a] != null && hits.indexOf(byAlias[a]) < 0) hits.push(byAlias[a]);
+      });
+      var primary;
+      if (!hits.length) {
+        primary = clusters.length;
+        clusters.push(m);
+      } else {
+        primary = hits[0];
+        clusters[primary] = preferEnrichedVideo(clusters[primary], m);
+        for (var h = 1; h < hits.length; h++) {
+          var other = hits[h];
+          clusters[primary] = preferEnrichedVideo(clusters[primary], clusters[other]);
+          Object.keys(byAlias).forEach(function(a) {
+            if (byAlias[a] === other) byAlias[a] = primary;
+          });
+          clusters[other] = null;
+        }
       }
-      if (byKey[key]) {
-        byKey[key] = preferEnrichedVideo(byKey[key], m);
-        return;
-      }
-      byKey[key] = m;
-      order.push(key);
+      pointAliases(primary, aliases);
     });
-    var videos = order.map(function(k) { return byKey[k]; });
+
+    var videos = clusters.filter(function(v) { return v; });
     videos.sort(function(a, b) {
       var aw = isWalkthroughMedia(a) ? 0 : 1;
       var bw = isWalkthroughMedia(b) ? 0 : 1;
@@ -8409,6 +8444,7 @@
     isScopeVideo: isScopeVideo,
     isTradeVisibleDocument: isTradeVisibleDocument,
     collectJobMedia: collectJobMedia,
+    mediaIdentityAliases: mediaIdentityAliases,
     mediaStableKey: mediaStableKey,
     mediaUrlRank: mediaUrlRank,
     preferEnrichedVideo: preferEnrichedVideo,

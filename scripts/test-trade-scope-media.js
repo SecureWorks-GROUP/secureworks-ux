@@ -183,6 +183,52 @@ const mergedByPath = M.listJobVideos({ job: { scope_json: {} }, media: [legacyBy
 check('same storage_path with different URLs is one video', mergedByPath.length === 1);
 check('merged path keeps the signed URL', M.mediaPlayableUrl(mergedByPath[0]) === enrichedByPath.signed_url);
 
+const differentIdsSamePath = M.listJobVideos({
+  job: { scope_json: {} },
+  media: [{
+    id: 'legacy-row',
+    type: 'video',
+    storage_path: 'jobs/x/walk.mp4',
+    storage_url: 'https://storage.example.test/legacy/walk.mp4',
+  }],
+  videos: [{
+    id: 'enriched-row',
+    type: 'video',
+    storage_path: 'jobs/x/walk.mp4',
+    playable_url: 'https://storage.example.test/signed/walk.mp4?token=abc',
+  }],
+});
+check('different ids sharing storage_path collapse to one video', differentIdsSamePath.length === 1);
+check('path-aliased merge keeps the enriched URL', M.mediaPlayableUrl(differentIdsSamePath[0]) === 'https://storage.example.test/signed/walk.mp4?token=abc');
+
+const missingIdSameHash = M.listJobVideos({
+  job: { scope_json: {} },
+  media: [{
+    id: 'hashed-legacy',
+    type: 'video',
+    content_hash: 'sha-walk',
+    storage_url: 'https://storage.example.test/legacy/hash-walk.mp4',
+  }],
+  videos: [{
+    type: 'video',
+    content_hash: 'sha-walk',
+    playable_url: 'https://storage.example.test/signed/hash-walk.mp4?token=def',
+  }],
+});
+check('missing id sharing content_hash collapses to one video', missingIdSameHash.length === 1);
+check('hash-aliased merge keeps the enriched URL', M.mediaPlayableUrl(missingIdSameHash[0]) === 'https://storage.example.test/signed/hash-walk.mp4?token=def');
+
+const bridgeAliases = M.listJobVideos({
+  job: { scope_json: {} },
+  media: [
+    { id: 'only-id', type: 'video', storage_path: 'jobs/x/bridge.mp4', storage_url: 'https://storage.example.test/a.mp4' },
+    { id: 'only-hash', type: 'video', content_hash: 'sha-bridge', storage_url: 'https://storage.example.test/b.mp4' },
+    { id: 'both', type: 'video', storage_path: 'jobs/x/bridge.mp4', content_hash: 'sha-bridge', playable_url: 'https://storage.example.test/signed/bridge.mp4' },
+  ],
+});
+check('id/path and hash rows merge when a later row shares both aliases', bridgeAliases.length === 1);
+check('bridged merge keeps the enriched URL', M.mediaPlayableUrl(bridgeAliases[0]) === 'https://storage.example.test/signed/bridge.mp4');
+
 const twoDistinct = M.listJobVideos({
   job: { scope_json: {} },
   media: [walkthrough, otherVideo],

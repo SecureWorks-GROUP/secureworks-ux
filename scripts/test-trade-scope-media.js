@@ -17,8 +17,10 @@ assert(start !== -1 && end !== -1 && end > start, 'trade-scope-media sentinels e
 const block = html.slice(start, end + endMark.length);
 
 let pricingOn = false;
+let fullPricingOn = false;
 const context = {
   canSeePricing: function () { return pricingOn; },
+  canSeeFullPricing: function () { return fullPricingOn; },
   esc: function (s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -188,6 +190,7 @@ const twoDistinct = M.listJobVideos({
 check('distinct videos still list separately', twoDistinct.length === 2);
 
 pricingOn = false;
+fullPricingOn = false;
 const quoteHtml = M.renderQuotePacks(data);
 check('quote number visible to trades', quoteHtml.includes('Q-4412'));
 check('quote writing visible to trades', quoteHtml.includes('Install 6m x 4m insulated patio'));
@@ -200,6 +203,15 @@ check('compact WO qty without price', woHtml.includes('× 8') && woHtml.includes
 check('compact WO hides unit_price and totals', !woHtml.includes('$') && !woHtml.includes('120') && !woHtml.includes('960'));
 
 pricingOn = true;
+fullPricingOn = false;
+check('senior installer canSeePricing is not the SOW office gate', M.tradeCanSeeSowPricing() === false);
+const quoteSenior = M.renderQuotePacks(data);
+check('senior installer quote pack hides rates', !quoteSenior.includes('$') && !quoteSenior.includes('8800'));
+const woSenior = M.renderCompactWorkOrderItems(data);
+check('senior installer compact WO hides rates', !woSenior.includes('$') && !woSenior.includes('120'));
+
+fullPricingOn = true;
+check('office canSeeFullPricing unlocks SOW rates', M.tradeCanSeeSowPricing() === true);
 const quoteOffice = M.renderQuotePacks(data);
 check('office quote pack may show rates', quoteOffice.includes('$8,800') || quoteOffice.includes('$8800'));
 const woOffice = M.renderCompactWorkOrderItems(data);

@@ -223,7 +223,7 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
 test.describe('TRD-5 office may see SOW rates', () => {
   test.use({ persona: 'allocator' });
 
-  test('office quote pack still shows rates when canSeePricing', async ({ appPage: page }) => {
+  test('office quote pack still shows rates when canSeeFullPricing', async ({ appPage: page }) => {
     await stubJobDetail(page, patioDetail());
     await signIn(page, PERSONAS.allocator);
     await page.locator('[data-view="myJobs"]').click();

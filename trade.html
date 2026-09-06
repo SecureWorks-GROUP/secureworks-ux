@@ -8126,9 +8126,11 @@
 
   // <trade-scope-media>
   // TRD-5: trades see quote/job writing + every job video. Pricing ($ / rates /
-  // totals) stays off SOW/quote surfaces unless canSeePricing() (office).
-  // Prefers TRD-4 enriched trade_job_detail media (playable_url / signed_url)
-  // and still plays whatever data.media already carries.
+  // totals) on quote-pack and compact WO surfaces is office-only
+  // (canSeeFullPricing / tier >= 3). canSeePricing() (tier >= 2) is left
+  // unchanged for older surfaces. Prefers TRD-4 enriched trade_job_detail
+  // media (playable_url / signed_url) and still plays whatever data.media
+  // already carries.
   function isVideoUrl(url) {
     return /\.(mp4|mov|webm|avi|mkv|3gp)(\?|$)/i.test(url || '');
   }
@@ -8310,7 +8312,7 @@
 
   function redactTradePriceText(text) {
     var raw = String(text == null ? '' : text);
-    if (typeof canSeePricing === 'function' && canSeePricing()) return raw;
+    if (tradeCanSeeSowPricing()) return raw;
     return raw
       .replace(/\$\s*[\d,]+(?:\.\d+)?/g, '')
       .replace(/\b(?:AUD|A\$)\s*[\d,]+(?:\.\d+)?/gi, '')
@@ -8318,14 +8320,14 @@
       .trim();
   }
 
-  function tradeCanSeePricing() {
-    return typeof canSeePricing === 'function' && canSeePricing();
+  function tradeCanSeeSowPricing() {
+    return typeof canSeeFullPricing === 'function' && canSeeFullPricing();
   }
 
   function renderQuotePacks(data) {
     var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     if (!packs.length) return '';
-    var showPrices = tradeCanSeePricing();
+    var showPrices = tradeCanSeeSowPricing();
     var h = '<div class="detail-section" data-quote-packs>';
     h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Quotes sent</div>';
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">Every quote that went to the client, without the price. Open the one you are building.</div>';
@@ -8372,7 +8374,7 @@
     var wo = (data && (data.workOrder || data.work_order)) || {};
     var items = wo.scope_items;
     if (!items || !Array.isArray(items) || items.length === 0) return '';
-    var showPrices = opts.showPrices != null ? !!opts.showPrices : tradeCanSeePricing();
+    var showPrices = opts.showPrices != null ? !!opts.showPrices : tradeCanSeeSowPricing();
     var title = opts.title || 'Work order items';
     var h = '<div class="detail-section" data-scope-wo-items>';
     h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">' + esc(title) + '</div>';
@@ -8414,6 +8416,7 @@
     walkthroughMissingCopy: walkthroughMissingCopy,
     renderScopeVideoCard: renderScopeVideoCard,
     redactTradePriceText: redactTradePriceText,
+    tradeCanSeeSowPricing: tradeCanSeeSowPricing,
     renderQuotePacks: renderQuotePacks,
     renderCompactWorkOrderItems: renderCompactWorkOrderItems
   };
@@ -10253,7 +10256,7 @@
     var h = '';
 
     // Walkthrough + every other job video, then quote writing + WO lines
-    // (Tier 1 default tab). Prices stay off unless canSeePricing().
+    // (Tier 1 default tab). Quote-pack / compact WO rates stay office-only.
     h += renderScopeVideoCard(data);
     h += renderQuotePacks(data);
     h += renderCompactWorkOrderItems(data);

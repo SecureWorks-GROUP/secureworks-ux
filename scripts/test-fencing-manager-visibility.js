@@ -423,6 +423,9 @@ assert(/function authorizeWorkOrders\(orders\) \{[\s\S]*?var next = \{\};[\s\S]*
   'authorizeWorkOrders replaces the authorized set from the latest authenticated result');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),
   'direct work-order invoice submit drops late toast/refresh/queue after account switch');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?if \(!_invoiceSubmitSucceeded\(result\)\) \{[\s\S]*?openWorkOrderHub\(\)/.test(html) &&
+  !/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var succeeded = result\.ok === true \|\| result\.success === true/.test(html),
+  'direct work-order invoice uses the shared committed-success predicate and refreshes the hub on durable success');
 assert(html.includes('No-ID lines are a multiset'),
   'no-ID pass-through merge keeps distinct same-amount deducts');
 assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++'),

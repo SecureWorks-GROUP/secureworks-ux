@@ -24330,33 +24330,25 @@
 
       _financialInvoiceApi('submit_work_order_invoice', null, woBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
-        // Backend contract (PR #196): branch on code FIRST.
-        // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach
-        //   Xero. Show userMessage as a warning toast and refresh as a success (invoice is fine).
-        // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
-        //   is a HARD block — invoice NOT created; toast userMessage, re-enable the button.
-        if (result.code === 'XERO_PUSH_FAILED') {
-          toast(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.', false);
-          openWorkOrderHub(); // Invoice exists; refresh to show invoiced state
-          return;
-        }
-        var succeeded = result.ok === true || result.success === true;
-        var failed = result.ok === false || result.success === false || !!result.error;
-        if (failed && !succeeded) {
+        result = result || {};
+        // Same committed-success predicate as job-centric / hours / weekly submit.
+        // A persisted invoice_id / invoice_number / Xero identity is durable
+        // success even without ok/success booleans — do not invite a retry.
+        if (!_invoiceSubmitSucceeded(result)) {
           var msg = result.userMessage || result.error || 'Invoice failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
             showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then try again.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
           }
           _reEnableBtn();
-        } else if (succeeded) {
-          toast('Invoice created: ' + (result.xero_bill_number || '') + ' — $' + Number(result.total || 0).toFixed(2));
-          openWorkOrderHub(); // Refresh to show invoiced state
-        } else {
-          // Unexpected shape — re-enable so the trade can retry; never leave a dead button.
-          toast('Could not confirm invoice status — please check and retry if needed', true);
-          _reEnableBtn();
+          return;
         }
+        if (_invoiceXeroPushPending(result)) {
+          toast(result.userMessage || 'Invoice saved — Xero sync pending. The office will push it manually.', false);
+        } else {
+          toast('Invoice created: ' + (result.xero_bill_number || result.invoice_number || '') + ' — $' + Number(result.total || 0).toFixed(2));
+        }
+        openWorkOrderHub();
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('submit_work_order_invoice', woBody, err, ctx).then(function(result) {

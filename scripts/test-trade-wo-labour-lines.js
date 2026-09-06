@@ -142,14 +142,83 @@ function woCard(overrides) {
   assert(noAlloc.error && noAlloc.error.indexOf('WO allocated') !== -1, 'missing WO amount still blocks')
 }
 
+function hoursCard(overrides) {
+  return Object.assign({
+    _idx: 0,
+    included: true,
+    assignment_id: 'a1',
+    hours: 8,
+    rate: 40,
+    job_id: 'j-hours',
+    job_number: 'SWF-HOURS',
+    job_type: 'fencing',
+    client_name: 'Test Client',
+    scheduled_date: '2026-07-14',
+    description: '',
+    manually_added: false,
+    wo_lump_lines: [],
+  }, overrides || {})
+}
+
 // ── Hourly cards untouched by the labour-line validation ─────────────────
 {
-  const built = context._buildJobCentricPayload([{
-    _idx: 0, included: true, assignment_id: 'a1', hours: 8, rate: 40,
-    job_number: 'SWF-1', description: '', manually_added: false,
-  }])
+  const built = context._buildJobCentricPayload([hoursCard()])
   assert(!built.error, 'plain hourly card builds: ' + built.error)
   assert.strictEqual(built.manualAssignments.length, 1)
+}
+
+// ── Hours-card lump: peer option to hours, same extra_items deduct ───────
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    wo_lump_lines: [{ description: 'Materials', amount: 10, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'hours + lump builds: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 1)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  const extra = built.cardExtraItems[0]
+  assert.strictEqual(extra.source, 'invoice_final_deduction')
+  assert.strictEqual(extra.line_kind, 'lump_sum')
+  assert.strictEqual(extra.rate, -10)
+  assert.strictEqual(extra.job_number, 'SWF-HOURS')
+  assert.strictEqual(extra.description, 'Materials')
+  assert.strictEqual(built.subtotal, 310, '8h×$40 − Materials $10')
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    hours: null,
+    wo_lump_lines: [{ description: 'Site allowance', amount: 50, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'lumps-only hours card builds without hours: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 0)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].rate, -50)
+  assert.strictEqual(built.subtotal, -50)
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    wo_lump_lines: [{ description: '', amount: 10 }],
+  })])
+  assert(built.error, 'hours-card lump amount without description must block')
+  assert(built.error.indexOf('describe') !== -1, 'error asks for a description: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    assignment_id: null,
+    hours: 2,
+    rate: 50,
+    description: 'Extra visit',
+    manually_added: true,
+    wo_lump_lines: [{ description: 'Fuel', amount: 15, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'searched hours + lump builds: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 0)
+  assert.strictEqual(built.cardExtraItems.length, 2)
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.strictEqual(built.cardExtraItems[1].source, 'invoice_final_deduction')
+  assert.strictEqual(built.subtotal, 85, '2h×$50 − Fuel $15')
 }
 
 // ── WO pass-through: amount Henry paid another trade, not hours×rate ─────
@@ -363,4 +432,4 @@ function woCard(overrides) {
     'hourly labour survives unauthorized strip')
 }
 
-console.log('OK — WO labour-line payload contract holds (21 scenarios)')
+console.log('OK — WO labour-line payload contract holds (25 scenarios)')

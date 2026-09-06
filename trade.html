@@ -17011,8 +17011,9 @@
   // Job-centric card state: { assignment_id, job_id, job_number, client_name,
   //   site_suburb, job_type, scheduled_date, hours, hours_prefilled, included }
   var _jobCards = [];
-  // Invoice-level freeform deducts (description + amount, no job). Henry's
-  // weekly submit keeps these as final_deductions / negative extra_items.
+  // Invoice-level freeform deducts (description + amount, no job). Every
+  // job-centric trade can add these as a peer to hours; submit keeps them as
+  // final_deductions / negative extra_items.
   var _invLumpLines = [];
 
   function formatDateShort(dateStr) {
@@ -17537,32 +17538,52 @@
     }, 0) * 100) / 100;
   }
 
+  function _invLumpExtraFromLine(desc, amt, opts) {
+    opts = opts || {};
+    return {
+      type: 'Deduction',
+      row_type: 'lump_sum',
+      line_kind: 'lump_sum',
+      description: desc,
+      quantity: 1,
+      unit: 'ea',
+      hours: 1,
+      rate: -amt,
+      job_id: opts.job_id || null,
+      job_number: opts.job_number || '',
+      assignment_id: opts.assignment_id || null,
+      scheduled_date: opts.scheduled_date || null,
+      date: opts.scheduled_date || opts.date || null,
+      division: opts.division || '',
+      client_name: opts.client_name || '',
+      manually_added: opts.manually_added != null ? !!opts.manually_added : true,
+      source: 'invoice_final_deduction',
+      rate_source: 'client_entered',
+      client_rate_entered: true
+    };
+  }
+
   function _invLumpExtraItems() {
     var extras = [];
     (_invLumpLines || []).forEach(function(line) {
       var desc = String((line && line.description) || '').trim();
       var amt = Math.abs(Number(line && line.amount) || 0);
       if (!desc || !amt) return;
-      extras.push({
-        type: 'Deduction',
-        row_type: 'lump_sum',
-        line_kind: 'lump_sum',
-        description: desc,
-        quantity: 1,
-        unit: 'ea',
-        hours: 1,
-        rate: -amt,
-        job_id: null,
-        assignment_id: null,
-        scheduled_date: null,
-        date: null,
-        manually_added: true,
-        source: 'invoice_final_deduction',
-        rate_source: 'client_entered',
-        client_rate_entered: true
-      });
+      extras.push(_invLumpExtraFromLine(desc, amt, {}));
     });
     return extras;
+  }
+
+  function _hoursCardLumpFinalDeductions() {
+    var rows = [];
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.included || c.wo_mode || c.commission_mode) return;
+      _woCleanLumpLines(c).forEach(function(lp) {
+        if (!lp.description || !(lp.amount > 0)) return;
+        rows.push({ description: lp.description, quantity: 1, unit: 'ea', unit_rate: lp.amount });
+      });
+    });
+    return rows;
   }
 
   function _invFinalDeductions() {
@@ -17573,7 +17594,7 @@
       if (!desc || !amt) return;
       rows.push({ description: desc, quantity: 1, unit: 'ea', unit_rate: amt });
     });
-    return rows;
+    return rows.concat(_hoursCardLumpFinalDeductions());
   }
 
   function _syncInvLumpLinesFromDOM() {
@@ -17613,8 +17634,8 @@
 
   function _renderInvLumpLinesHtml() {
     var html = '';
-    html += '<div class="inv-section-label" style="margin-top:16px">Final deductions</div>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Lump-sum amounts that are not tied to a job — description and amount only. They come off the weekly total.</div>';
+    html += '<div class="inv-section-label" style="margin-top:16px">Lump-sum amounts</div>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Same as hours — add a description and a dollar amount. As many lines as you need. They come off this week\'s total and do not need a job.</div>';
     html += '<div id="invLumpLines">';
     _invLumpLines.forEach(function(line, i) {
       html += '<div class="inv-lump-row" data-invlump="' + esc(line.id) + '" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">';
@@ -17624,11 +17645,38 @@
       html += '<input type="number" class="inv-lump-amt" data-invlumpamt="' + i + '" min="0" step="0.01" inputmode="decimal" value="' + (line.amount ? line.amount : '') + '" placeholder="$0.00" '
         + 'onchange="updateInvLumpLine(' + i + ',\'amount\',this.value)" '
         + 'style="width:110px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px">';
-      html += '<button type="button" onclick="removeInvLumpLine(' + i + ')" style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:18px;padding:0 2px;line-height:1" aria-label="Remove deduction">&times;</button>';
+      html += '<button type="button" onclick="removeInvLumpLine(' + i + ')" style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:18px;padding:0 2px;line-height:1" aria-label="Remove amount">&times;</button>';
       html += '</div>';
     });
     html += '</div>';
-    html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Add deduction</button>';
+    html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Add amount</button>';
+    return html;
+  }
+
+  function _renderCardLumpLinesHtml(c) {
+    var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+    var html = '<div data-cardlumps="' + c._idx + '" style="margin-top:10px">';
+    html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:4px">Lump-sum amounts</div>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:6px">Same as hours — description and amount. Deducts from this job.</div>';
+    for (var lpi = 0; lpi < lumpLines.length; lpi++) {
+      var lp = lumpLines[lpi];
+      var lpAmt = Math.round(Number(lp.amount || 0) * 100) / 100;
+      html += '<div data-wolump="' + c._idx + '_' + lpi + '" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;background:rgba(0,0,0,0.02);border-radius:8px;padding:6px 8px">';
+      html += '<input type="text" data-cardlumpdesc="' + c._idx + '_' + lpi + '" value="' + esc(lp.description || '') + '" placeholder="What this amount is" '
+        + 'onchange="setWoLumpDescription(' + c._idx + ',' + lpi + ',this.value)" '
+        + 'style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-family:var(--sw-font)">';
+      html += '<input type="number" data-cardlumpamt="' + c._idx + '_' + lpi + '" min="0" step="0.01" inputmode="decimal" value="' + (lp.amount != null ? lp.amount : '') + '" placeholder="$" '
+        + 'aria-label="Deduction amount" '
+        + 'onchange="setWoLumpAmount(' + c._idx + ',' + lpi + ',this.value)" '
+        + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px">';
+      html += '<span style="font-size:13px;font-weight:700;color:var(--sw-dark);min-width:60px;text-align:right">− $' + lpAmt.toFixed(2) + '</span>';
+      html += '<button type="button" onclick="removeWoLumpLine(' + c._idx + ',' + lpi + ')" '
+        + 'style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:15px;padding:0 2px;line-height:1" title="Remove amount">&#x2715;</button>';
+      html += '</div>';
+    }
+    html += '<button type="button" onclick="addWoLumpLine(' + c._idx + ')" '
+      + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
+    html += '</div>';
     return html;
   }
 
@@ -18541,7 +18589,7 @@
     var html = '';
     html += '<div class="inv-section-label" style="margin-top:16px">Your jobs this week</div>';
     if (isPerMetreUser()) {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Jobs scheduled this week are listed by day. Add any other job on the day it belongs, enter hours, or keep a hydrated work-order money block. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it. Final deductions at the bottom do not need a job.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Jobs scheduled this week are listed by day. Add any other job on the day it belongs, enter hours, add a lump-sum amount, or keep a hydrated work-order money block. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it. Invoice-level amounts below do not need a job.</div>';
       if (_pmWoHydrateState === 'pending') {
         html += '<div data-pm-wo-hydrate="pending" style="background:rgba(76,106,124,0.08);border:1px solid var(--sw-border);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px">Loading work-order amounts and paid-to-other-trade deductions…</div>';
       } else if (_pmWoHydrateState === 'error') {
@@ -18558,7 +18606,7 @@
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
     } else {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter the hours you worked on each job. Your rate is set by the office and shown for reference.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter hours on each job, or add a lump-sum amount the same way. Your rate is set by the office and shown for reference.</div>';
     }
 
     // Group cards by scheduled_date
@@ -18703,28 +18751,7 @@
             + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add labour line</button>';
           html += '</div>';
           html += '</div>';
-          var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
-          html += '<div style="margin-top:10px">';
-          html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:4px">Other amounts</div>';
-          for (var lpi = 0; lpi < lumpLines.length; lpi++) {
-            var lp = lumpLines[lpi];
-            var lpAmt = Math.round(Number(lp.amount || 0) * 100) / 100;
-            html += '<div data-wolump="' + c._idx + '_' + lpi + '" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;background:rgba(0,0,0,0.02);border-radius:8px;padding:6px 8px">';
-            html += '<input type="text" data-cardlumpdesc="' + c._idx + '_' + lpi + '" value="' + esc(lp.description || '') + '" placeholder="What this amount is" '
-              + 'onchange="setWoLumpDescription(' + c._idx + ',' + lpi + ',this.value)" '
-              + 'style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-family:var(--sw-font)">';
-            html += '<input type="number" data-cardlumpamt="' + c._idx + '_' + lpi + '" min="0" step="0.01" inputmode="decimal" value="' + (lp.amount != null ? lp.amount : '') + '" placeholder="$" '
-              + 'aria-label="Deduction amount" '
-              + 'onchange="setWoLumpAmount(' + c._idx + ',' + lpi + ',this.value)" '
-              + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px">';
-            html += '<span style="font-size:13px;font-weight:700;color:var(--sw-dark);min-width:60px;text-align:right">− $' + lpAmt.toFixed(2) + '</span>';
-            html += '<button type="button" onclick="removeWoLumpLine(' + c._idx + ',' + lpi + ')" '
-              + 'style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:15px;padding:0 2px;line-height:1" title="Remove amount">&#x2715;</button>';
-            html += '</div>';
-          }
-          html += '<button type="button" onclick="addWoLumpLine(' + c._idx + ')" '
-            + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
-          html += '</div>';
+          html += _renderCardLumpLinesHtml(c);
           // Net payable display
           html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px">';
           html += '<span style="font-size:12px;color:var(--sw-text-sec)">Net payable</span>';
@@ -18748,8 +18775,9 @@
             + 'oninput="setJobCardRate(' + c._idx + ',this.value)" '
             + 'onchange="setJobCardRate(' + c._idx + ',this.value)" '
             + 'style="width:78px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
-          html += '<span data-cardamt="' + c._idx + '" style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-left:auto">$' + lineAmt.toFixed(2) + '</span>';
+          html += '<span data-cardamt="' + c._idx + '" style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-left:auto">$' + (_hoursCardNet(c, rowRate)).toFixed(2) + '</span>';
           html += '</div>';
+          html += _renderCardLumpLinesHtml(c);
         }
         // Description: auto-filled for commission; optional annotation for WO; required for hours.
         var commAutoDesc = cardMode === 'commission' ? ('Commission — ' + esc(c.job_number || '') + ' — ' + esc(c.client_name || '')) : '';
@@ -18786,8 +18814,8 @@
       } else if (c.wo_mode) {
         var n = _woNet(c);
         if (n > 0) sub += n;
-      } else if (c.hours != null) {
-        sub += c.hours * Number(c.rate || rate || 0);
+      } else if (c.hours != null || _woLumpSum(c) > 0) {
+        sub += _hoursCardNet(c, Number(c.rate || rate || 0));
       }
     });
     return 'Subtotal: $' + (Math.round(sub * 100) / 100).toFixed(2);
@@ -18954,18 +18982,6 @@
             }
           }
         }
-        var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
-        for (var lpi = 0; lpi < lumpLines.length; lpi++) {
-          var lump = lumpLines[lpi];
-          var lumpKey = idx + '_' + lpi;
-          var lumpDescEl = document.querySelector('[data-cardlumpdesc="' + lumpKey + '"]');
-          if (lumpDescEl) lump.description = lumpDescEl.value || '';
-          var lumpAmtEl = document.querySelector('[data-cardlumpamt="' + lumpKey + '"]');
-          if (lumpAmtEl) {
-            var lumpAmt = parseFloat(lumpAmtEl.value);
-            lump.amount = (isNaN(lumpAmt) || lumpAmt < 0) ? null : lumpAmt;
-          }
-        }
       } else {
         var hrsEl = document.querySelector('[data-cardhours="' + idx + '"]');
         if (hrsEl) {
@@ -18984,6 +19000,20 @@
               c.rate_source = 'client_entered';
             }
             c.rate = n;
+          }
+        }
+      }
+      if (!c.commission_mode) {
+        var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+        for (var lpi = 0; lpi < lumpLines.length; lpi++) {
+          var lump = lumpLines[lpi];
+          var lumpKey = idx + '_' + lpi;
+          var lumpDescEl = document.querySelector('[data-cardlumpdesc="' + lumpKey + '"]');
+          if (lumpDescEl) lump.description = lumpDescEl.value || '';
+          var lumpAmtEl = document.querySelector('[data-cardlumpamt="' + lumpKey + '"]');
+          if (lumpAmtEl) {
+            var lumpAmt = parseFloat(lumpAmtEl.value);
+            lump.amount = (isNaN(lumpAmt) || lumpAmt < 0) ? null : lumpAmt;
           }
         }
       }
@@ -19330,7 +19360,7 @@
         + (_woCleanLabourLines(c).length > 0 ? ' Labour is deducted from your invoice and shown to the office; crew bill SecureWorks Group directly.' : '');
     } else {
       var rowRate = c ? Number(c.rate || rate || 0) : rate;
-      if (amtEl) amtEl.textContent = '$' + ((c && c.included && c.hours != null) ? (Math.round(c.hours * rowRate * 100) / 100).toFixed(2) : '0.00');
+      if (amtEl) amtEl.textContent = '$' + ((c && c.included) ? _hoursCardNet(c, rowRate).toFixed(2) : '0.00');
       // [M4 U2] Show/hide the over-allowance make-safe variation prompt as the trade types hours.
       if (c && _isMakesafeCard(c)) {
         var jWrap = document.querySelector('[data-cardjustwrap="' + idx + '"]');
@@ -19454,6 +19484,40 @@
     }
     return Math.round(sum * 100) / 100;
   }
+  function _hoursCardNet(c, rate) {
+    var hoursAmt = (c && c.hours != null && Number(c.hours) > 0)
+      ? Math.round(Number(c.hours) * Number(c.rate != null ? c.rate : rate || 0) * 100) / 100
+      : 0;
+    return Math.round((hoursAmt - _woLumpSum(c)) * 100) / 100;
+  }
+  function _hoursCardLumpExtras(c) {
+    var extras = [];
+    _woCleanLumpLines(c).forEach(function(lp) {
+      if (!lp.description || !(lp.amount > 0)) return;
+      extras.push({
+        type: 'Deduction',
+        row_type: 'lump_sum',
+        line_kind: 'lump_sum',
+        description: lp.description,
+        quantity: 1,
+        unit: 'ea',
+        hours: 1,
+        rate: -lp.amount,
+        job_id: c.job_id || null,
+        job_number: c.job_number || '',
+        assignment_id: c.assignment_id || null,
+        scheduled_date: c.scheduled_date || null,
+        date: c.scheduled_date || null,
+        division: c.job_type || '',
+        client_name: c.client_name || '',
+        manually_added: !!c.manually_added,
+        source: 'invoice_final_deduction',
+        rate_source: 'client_entered',
+        client_rate_entered: true
+      });
+    });
+    return extras;
+  }
   function _woNet(c) {
     var a = Number(c.wo_allocated);
     if (isNaN(a)) a = 0;
@@ -19537,21 +19601,45 @@
     }
     // Description is required for manually-added (searched) hourly rows so ops know
     // what was done, but optional for auto-assigned cards (job/client already identifies
-    // the work). Hours and rate are required for all hourly cards.
+    // the work). Hours and rate are required unless the card has complete lump-sum
+    // amounts — those are a peer option to hours for every job-centric trade.
+    var hourLumpBad = [];
+    included.forEach(function(c) {
+      if (c.wo_mode || c.commission_mode) return;
+      var lumps = _woCleanLumpLines(c);
+      var jobLbl = c.job_number || c.site_suburb || 'a job';
+      for (var hi = 0; hi < lumps.length; hi++) {
+        if (!lumps[hi].description) {
+          hourLumpBad.push({ idx: c._idx, msg: jobLbl + ': describe every amount you are deducting.' });
+        } else if (!(lumps[hi].amount > 0)) {
+          hourLumpBad.push({ idx: c._idx, msg: jobLbl + ': enter the amount for ' + lumps[hi].description + '.' });
+        }
+      }
+    });
+    if (hourLumpBad.length > 0) {
+      var _lumpShown = hourLumpBad.slice(0, 3).map(function(b) { return b.msg; });
+      if (hourLumpBad.length > 3) _lumpShown.push('...and ' + (hourLumpBad.length - 3) + ' more');
+      return { error: _lumpShown.join(' · '), missingIndices: hourLumpBad.map(function(b){ return b.idx; }) };
+    }
     var missing = included.filter(function(c) {
       if (c.wo_mode || c.commission_mode) return false;
-      if (c.hours == null || c.hours <= 0 || !(Number(c.rate) > 0)) return true;
-      if (c.manually_added && !c.description) return true;
-      return false;
+      var completeLumps = _woCleanLumpLines(c).filter(function(lp) { return lp.description && lp.amount > 0; });
+      var hasHours = c.hours != null && c.hours > 0 && Number(c.rate) > 0;
+      if (hasHours) {
+        if (c.manually_added && !c.description) return true;
+        return false;
+      }
+      if (completeLumps.length > 0) return false;
+      return true;
     });
     if (missing.length > 0) {
       var _msgs = missing.map(function(c) {
         var _lbl = c.job_number || c.site_suburb || c.client_name || 'Job';
         var _noHours = (c.hours == null || c.hours <= 0 || !(Number(c.rate) > 0));
         var _noDesc = c.manually_added && !c.description;
-        if (_noDesc && _noHours) return _lbl + ': add a description and enter hours and your rate.';
+        if (_noDesc && _noHours) return _lbl + ': add a description and enter hours and your rate, or add a lump-sum amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
-        return _lbl + ': enter hours and your rate.';
+        return _lbl + ': enter hours and your rate, or add a lump-sum amount.';
       });
       var _shown = _msgs.slice(0, 3);
       if (_msgs.length > 3) _shown.push('...and ' + (_msgs.length - 3) + ' more');
@@ -19620,37 +19708,51 @@
       } else if (!c.assignment_id) {
         // Searched-in job: no assignment row exists, so it cannot ride
         // manual_assignments (ops-api 422s without assignment_id).
-        subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
-        cardExtraItems.push({
-          type: 'Labour',
-          row_type: 'labour',
-          description: c.description || '',
-          quantity: c.hours,
-          unit: 'hr',
-          rate: Number(c.rate || 0),
-          date: c.scheduled_date || null,
-          job_id: c.job_id || null,
-          job_number: c.job_number || '',
-          division: c.job_type || '',
-          client_name: c.client_name || '',
-          manually_added: true,
-          source: 'manual_job_search',
-          rate_source: 'client_entered',
-          client_rate_entered: true,
-          // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
-          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
+        var searchedHours = c.hours != null && c.hours > 0 && Number(c.rate) > 0;
+        if (searchedHours) {
+          subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
+          cardExtraItems.push({
+            type: 'Labour',
+            row_type: 'labour',
+            description: c.description || '',
+            quantity: c.hours,
+            unit: 'hr',
+            rate: Number(c.rate || 0),
+            date: c.scheduled_date || null,
+            job_id: c.job_id || null,
+            job_number: c.job_number || '',
+            division: c.job_type || '',
+            client_name: c.client_name || '',
+            manually_added: true,
+            source: 'manual_job_search',
+            rate_source: 'client_entered',
+            client_rate_entered: true,
+            // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
+            justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
+          });
+        }
+        _hoursCardLumpExtras(c).forEach(function(extra) {
+          subtotal += extra.rate;
+          cardExtraItems.push(extra);
         });
       } else {
-        subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
-        manualAssignments.push({
-          assignment_id: c.assignment_id,
-          hours: c.hours,
-          rate: Number(c.rate || 0),
-          rate_source: c.rate_source || 'server_resolved',
-          description: c.description || '',
-          manually_added: false,
-          // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
-          justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
+        var assignedHours = c.hours != null && c.hours > 0 && Number(c.rate) > 0;
+        if (assignedHours) {
+          subtotal += Math.round(c.hours * Number(c.rate || 0) * 100) / 100;
+          manualAssignments.push({
+            assignment_id: c.assignment_id,
+            hours: c.hours,
+            rate: Number(c.rate || 0),
+            rate_source: c.rate_source || 'server_resolved',
+            description: c.description || '',
+            manually_added: false,
+            // [M4 U2] make-safe over-allowance justification (empty = unjustified; backend flags). Never blocks.
+            justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
+          });
+        }
+        _hoursCardLumpExtras(c).forEach(function(extra) {
+          subtotal += extra.rate;
+          cardExtraItems.push(extra);
         });
       }
     });
@@ -19894,6 +19996,7 @@
     _jobCentricActive = !isExpense && jobCentricEnabled();
     if (_jobCentricActive) {
       html += renderJobCardsHtml();
+      html += _renderInvLumpLinesHtml();
     } else if (!isExpense) {
       html += '<div class="inv-section-label" style="margin-top:16px">SecureWorks hours</div>';
       html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Review the hours SecureWorks already has. Add extras separately below — do not re-enter normal hours.</div>';
@@ -19931,8 +20034,6 @@
     }
     html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Only add items not already covered by the clocked hours above.</div>';
     html += '<button class="inv-add-btn" onclick="addInvRow()">+ Add extra / adjustment</button>';
-
-    if (_jobCentricActive) html += _renderInvLumpLinesHtml();
 
     // ── Notes ──
     html += '<div style="margin-top:8px">';

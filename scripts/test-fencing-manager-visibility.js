@@ -302,8 +302,16 @@ assert(html.includes('btnAddInvLump') && html.includes('final_deductions: finalD
   'weekly job-centric submit keeps invoice-level final_deductions');
 assert(html.includes('invoice_final_deduction'),
   'invoice-level lumps also ride extra_items as negative client-priced deducts');
+assert(html.includes('_renderInvLumpLinesHtml()') && !/if \(isPerMetreUser\(\)[\s\S]{0,120}_renderInvLumpLinesHtml/.test(html),
+  'invoice-level lump amounts are not gated to Henry / per-metre');
+assert(html.includes('_renderCardLumpLinesHtml') && (html.match(/_renderCardLumpLinesHtml\(c\)/g) || []).length >= 2,
+  'Hours and Work Order cards share the same lump-sum amount UI');
+assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions'),
+  'Hours-card lumps ride extra_items and final_deductions like invoice-level deducts');
+assert(html.includes('or add a lump-sum amount'),
+  'hours-card validation treats lump-sum amounts as a peer to hours');
 assert(html.includes('addWoLumpLine'),
-  'job-centric WO cards can deduct a freeform description + amount');
+  'job-centric cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),
   'hydrate merges server pass-throughs by source line id');
 assert(html.includes('Same-ID lines take current server amount/name'),

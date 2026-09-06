@@ -1,0 +1,425 @@
+const { test, expect, PERSONAS } = require('../fixtures/test');
+const { signIn } = require('../helpers/auth');
+
+const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
+const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
+const VIDEO_WALK = 'data:video/mp4,walkthrough';
+const VIDEO_OTHER = 'data:video/mp4,other-job-video';
+const WO_PDF = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-wo.pdf?token=e2e`;
+const OPAQUE_WO = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-opaque-pack?token=e2e`;
+const EMAIL_OPAQUE_WO = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-email-opaque?token=e2e`;
+const SIGNED_VIDEO = `${SUPABASE_ORIGIN}/storage/v1/object/sign/videos/e2e-wo-walk?token=e2e`;
+
+function patioDetail(overrides) {
+  return Object.assign({
+    job: {
+      id: 'e2e-job-1',
+      job_number: 'E2E-JOB-001',
+      type: 'patio',
+      status: 'scheduled',
+      client_name: 'Fixture Homeowner',
+      client_phone: '0400333444',
+      site_address: '30 Fixture Road',
+      site_suburb: 'Joondalup',
+      scope_summary: 'Install fixture patio',
+      scope_json: {
+        length: 6,
+        projection: 4,
+        walkthrough: true,
+        client: { notes: 'Match existing fascia colour. Quote total $8,800.' },
+      },
+    },
+    crew: [],
+    purchaseOrders: [],
+    documents: [
+      {
+        type: 'work_order',
+        file_name: 'Builder-WO.pdf',
+        pdf_url: WO_PDF,
+        storage_url: WO_PDF,
+        visible_to_trades: true,
+        version: 1,
+      },
+      {
+        type: 'builder_pack',
+        file_name: 'Site-WO.pdf',
+        pdf_url: WO_PDF,
+        storage_url: WO_PDF,
+        visible_to_trades: true,
+        version: 1,
+      },
+    ],
+    notes: [
+      {
+        id: 'e2e-note-price',
+        event_type: 'note',
+        created_at: '2026-09-06T01:00:00.000Z',
+        users: { name: 'Office' },
+        detail_json: { text: 'Match existing fascia. Quote total $8,800.', from_ops: true },
+      },
+      {
+        id: 'e2e-note-json-string',
+        event_type: 'note',
+        created_at: '2026-09-06T01:05:00.000Z',
+        users: { name: 'Office' },
+        detail_json: JSON.stringify({ note: 'Labour 120/day on site', from_ops: true }),
+      },
+    ],
+    media: [
+      {
+        id: 'e2e-walkthrough',
+        type: 'video',
+        label: 'Site walkthrough quote total $8,800',
+        phase: 'scope',
+        playable_url: VIDEO_WALK,
+      },
+      {
+        id: 'e2e-other-video',
+        type: 'video',
+        label: 'Install recap',
+        phase: 'in_progress',
+        signed_url: VIDEO_OTHER,
+      },
+      {
+        id: 'e2e-scope-photo',
+        type: 'photo',
+        phase: 'scope',
+        storage_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+      },
+      {
+        id: 'e2e-office-video',
+        type: 'video',
+        label: 'Office only recap',
+        playable_url: 'data:video/mp4,office-only',
+        visible_to_trades: false,
+      },
+      {
+        id: 'e2e-office-photo',
+        type: 'photo',
+        phase: 'scope',
+        storage_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+        visible_to_trades: false,
+      },
+      {
+        id: 'e2e-wo-as-video',
+        type: 'work_order',
+        is_video: true,
+        file_name: 'Builder-WO.pdf',
+        playable_url: WO_PDF,
+        visible_to_trades: true,
+      },
+      {
+        id: 'e2e-wo-typed-video',
+        type: 'video',
+        kind: 'work_order',
+        document_type: 'supplier_work_order',
+        playable_url: OPAQUE_WO,
+        visible_to_trades: true,
+      },
+      {
+        id: 'e2e-wo-signed-video',
+        type: 'video',
+        mime_type: 'video/mp4',
+        label: 'Work order walkthrough',
+        playable_url: SIGNED_VIDEO,
+        visible_to_trades: true,
+      },
+      {
+        id: 'e2e-wo-as-photo',
+        type: 'photo',
+        phase: 'scope',
+        file_name: 'Builder-WO.pdf',
+        storage_url: WO_PDF,
+        url: WO_PDF,
+        visible_to_trades: true,
+      },
+    ],
+    quote_packs: [
+      {
+        quote_number: 'Q-4412',
+        status: 'accepted',
+        sent_at: '2026-09-01',
+        summary: 'Build the patio as drawn',
+        items: [
+          { description: 'Install insulated patio', quantity: 1, unit: 'job', unit_price: 8800 },
+        ],
+      },
+    ],
+    workOrder: {
+      id: 'e2e-wo-99',
+      wo_number: 'WO-99',
+      special_instructions: 'Match existing fascia. Quote total $8,800.',
+      scope_items: [
+        { description: 'Posts and beams', quantity: 8, unit: 'ea', unit_price: 120, total: 960 },
+      ],
+    },
+  }, overrides || {});
+}
+
+function makesafeDetail() {
+  return {
+    job: {
+      id: 'e2e-makesafe-allocated',
+      job_number: 'E2E-MS-002',
+      type: 'makesafe',
+      status: 'scheduled',
+      client_name: 'Allocated Client',
+      site_address: '20 Fixture Avenue',
+      site_suburb: 'Fremantle',
+      scope_json: { walkthrough_recorded: true },
+    },
+    crew: [],
+    purchaseOrders: [],
+    documents: [
+      {
+        type: 'work_order',
+        file_name: 'Builder-WO.pdf',
+        pdf_url: WO_PDF,
+        storage_url: WO_PDF,
+        visible_to_trades: true,
+        version: 1,
+      },
+    ],
+    notes: [],
+    media: [
+      {
+        id: 'ms-walk',
+        type: 'video',
+        label: 'Site walkthrough',
+        playable_url: VIDEO_WALK,
+      },
+      {
+        id: 'ms-other',
+        type: 'video',
+        label: 'Roof recap',
+        signed_url: VIDEO_OTHER,
+      },
+    ],
+    workOrder: {
+      wo_number: 'MS-WO-1',
+      scope_items: [
+        { description: 'Tarp roof sheets', quantity: 1, unit_price: 340, total: 340 },
+      ],
+    },
+    makesafe_details: {
+      makesafe_type: 'Roof / tarp',
+      substatus: 'waiting_on_trade_report',
+      external_links: [
+        { label: 'Open work order', url: WO_PDF },
+        { label: 'Builder portal', url: 'https://prime.example.test/share/e2e-portal' },
+        { label: 'Open link', kind: 'work_order', url: OPAQUE_WO, file_name: 'pack.pdf', mime_type: 'application/pdf' },
+      ],
+      source_links: [
+        { label: 'Source WO', url: WO_PDF },
+        { label: 'Document', type: 'supplier_work_order', pdf_url: OPAQUE_WO },
+      ],
+      builder_email_text_for_trade: 'Use the portal https://prime.example.test/share/e2e-portal and the pack ' + WO_PDF + ' plus https://storage.example.test/work_order_MLB-26183.pdf. Please see the work order ' + EMAIL_OPAQUE_WO + ' thanks.',
+    },
+    serviceReport: {
+      status: 'draft',
+      checklist_json: {
+        arrival_time: '2026-09-06 09:00',
+        damage_description: 'Roof sheets lifted',
+        work_done: 'Installed tarp',
+      },
+    },
+  };
+}
+
+async function stubJobDetail(page, payload) {
+  await page.route(WO_PDF, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF',
+    });
+  });
+  await page.route(SIGNED_VIDEO, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'video/mp4',
+      body: 'stub-video',
+    });
+  });
+  await page.route(EMAIL_OPAQUE_WO, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF',
+    });
+  });
+  await page.route(`${OPS_API}**`, async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action === 'trade_job_detail') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(payload),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+test.describe('TRD-5 trade videos and SOW pricing', () => {
+  test.use({ persona: 'installer' });
+
+  test('Scope tab shows all videos, quote writing, WO items, and no prices', async ({ appPage: page }) => {
+    await stubJobDetail(page, patioDetail());
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="myJobs"]').click();
+    await page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' }).click();
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('.jd-tab[data-tab="scope"]')).toHaveClass(/active/);
+
+    const scope = page.locator('#jdTab_scope');
+    await expect(scope.locator('[data-job-videos]')).toBeVisible();
+    await expect(scope.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
+    await expect(scope.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(scope.locator('video[src="' + SIGNED_VIDEO + '"]')).toHaveCount(1);
+    await expect(scope.locator('video[src="data:video/mp4,office-only"]')).toHaveCount(0);
+    await expect(scope).toContainText('Match existing fascia');
+    await expect(scope).toContainText('Site walkthrough quote total');
+    await expect(scope).toContainText('Q-4412');
+    await expect(scope).toContainText('Install insulated patio');
+    await expect(scope).toContainText('Posts and beams');
+    await expect(scope).not.toContainText('$');
+    await expect(scope).not.toContainText('8800');
+    await expect(scope).not.toContainText('960');
+    await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(scope.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="files"]').click();
+    const files = page.locator('#jdTab_files');
+    await expect(files.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
+    await expect(files.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(files.locator('video[src="' + SIGNED_VIDEO + '"]')).toHaveCount(1);
+    await expect(files).toContainText('Q-4412');
+    await expect(files).not.toContainText('$');
+    await expect(files.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files).not.toContainText('Builder-WO.pdf');
+    await expect(files).not.toContainText('Site-WO.pdf');
+    await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="photos"]').click();
+    const photos = page.locator('#jdTab_photos');
+    await expect(photos.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
+    await expect(photos.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(photos.locator('video[src="' + SIGNED_VIDEO + '"]')).toHaveCount(1);
+    await expect(photos.locator('video[src="' + OPAQUE_WO + '"]')).toHaveCount(0);
+    await expect(photos.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(photos.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="log"]').click();
+    const log = page.locator('#jdTab_log');
+    await expect(log).toContainText('Match existing fascia');
+    await expect(log).not.toContainText('$');
+    await expect(log).not.toContainText('8,800');
+    await expect(log.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+
+    const notes = page.locator('#bottomNotesList');
+    await expect(notes).toContainText('Match existing fascia');
+    await expect(notes).not.toContainText('$');
+    await expect(notes).not.toContainText('8,800');
+
+    await page.evaluate(() => window.switchJobTab('workorder'));
+    const woTab = page.locator('#jdTab_workorder');
+    await expect(woTab).toBeVisible();
+    await expect(woTab).not.toContainText('Cost Breakdown');
+    await expect(woTab).not.toContainText('Crew Charges');
+    await expect(woTab).not.toContainText('$');
+  });
+
+  test('walkthrough flagged with no file is an honest empty, not omitted', async ({ appPage: page }) => {
+    await stubJobDetail(page, patioDetail({
+      media: [{
+        id: 'e2e-scope-photo',
+        type: 'photo',
+        phase: 'scope',
+        storage_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+      }],
+    }));
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="myJobs"]').click();
+    await page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' }).click();
+    const scope = page.locator('#jdTab_scope');
+    await expect(scope.locator('[data-walkthrough-missing]')).toContainText('Walkthrough recorded. File not available.');
+    await expect(scope.locator('video')).toHaveCount(0);
+  });
+
+  test('make-safe report header plays job videos and hides priced WO PDF from trades', async ({ appPage: page }) => {
+    await stubJobDetail(page, makesafeDetail());
+    await signIn(page, PERSONAS.installer);
+    await page.evaluate(() => window.openJobReport('e2e-makesafe-allocated', 'e2e-ms-assignment'));
+    const header = page.locator('#makesafeWorkOrderDirect');
+    await expect(header.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
+    await expect(header.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveCount(0);
+    await expect(header.getByRole('link', { name: /Open full WO/i })).toHaveCount(0);
+    await expect(header.getByRole('link', { name: /Full screen/i })).toHaveCount(0);
+    await expect(header).not.toContainText(WO_PDF);
+    await expect(header.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(0);
+    await expect(header).not.toContainText(OPAQUE_WO);
+    await expect(header.getByRole('link', { name: /Builder portal/i })).toHaveCount(1);
+    await expect(header).toContainText('Use the portal');
+    await expect(header).not.toContainText('work_order_MLB-26183.pdf');
+    await expect(header.locator('a[href="https://storage.example.test/work_order_MLB-26183.pdf"]')).toHaveCount(0);
+    await expect(header.locator('a[href="' + EMAIL_OPAQUE_WO + '"]')).toHaveCount(0);
+    await expect(header).not.toContainText(EMAIL_OPAQUE_WO);
+    await expect(header).toContainText('Tarp roof sheets');
+    await expect(header).not.toContainText('$');
+    await expect(header).not.toContainText('340');
+  });
+
+  test('Quick Notes sheet redacts SOW prices for trades', async ({ appPage: page }) => {
+    await stubJobDetail(page, patioDetail());
+    await signIn(page, PERSONAS.installer);
+    await page.evaluate(() => window.openJobNotes('e2e-job-1', 'E2E-JOB-001'));
+    const sheet = page.locator('#quickNotesBody');
+    await expect(sheet).toContainText('Match existing fascia');
+    await expect(sheet).toContainText('Labour');
+    await expect(sheet).toContainText('on site');
+    await expect(sheet).not.toContainText('$');
+    await expect(sheet).not.toContainText('8,800');
+    await expect(sheet).not.toContainText('120');
+    await expect(sheet).not.toContainText('/day');
+  });
+});
+
+test.describe('TRD-5 office may see SOW rates', () => {
+  test.use({ persona: 'allocator' });
+
+  test('office quote pack still shows rates when canSeeFullPricing', async ({ appPage: page }) => {
+    await stubJobDetail(page, patioDetail());
+    await signIn(page, PERSONAS.allocator);
+    await page.locator('[data-view="myJobs"]').click();
+    await page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' }).click();
+    await page.locator('.jd-tab[data-tab="scope"]').click();
+    const scope = page.locator('#jdTab_scope');
+    await expect(scope).toContainText('Q-4412');
+    await expect(scope).toContainText('$');
+    await page.locator('.jd-tab[data-tab="workorder"]').click();
+    const woTab = page.locator('#jdTab_workorder');
+    await expect(woTab).toContainText('Cost Breakdown');
+    await expect(woTab).toContainText('Crew Charges');
+    const notes = page.locator('#bottomNotesList');
+    await expect(notes).toContainText('$8,800');
+  });
+
+  test('office make-safe header still shows the full WO PDF', async ({ appPage: page }) => {
+    await stubJobDetail(page, makesafeDetail());
+    await signIn(page, PERSONAS.allocator);
+    await page.evaluate(() => window.openJobReport('e2e-makesafe-allocated', 'e2e-ms-assignment'));
+    const header = page.locator('#makesafeWorkOrderDirect');
+    await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveAttribute('src', WO_PDF);
+    await expect(header.getByRole('link', { name: /Open full WO/i })).toBeVisible();
+    await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(1);
+    await expect(header.locator('a[href="https://storage.example.test/work_order_MLB-26183.pdf"]')).toHaveCount(1);
+    await expect(header.locator('a[href="' + EMAIL_OPAQUE_WO + '"]')).toHaveCount(1);
+  });
+});

@@ -429,7 +429,8 @@ function hoursCard(overrides) {
     work_order_id: 'wo-fence-authorised',
     wo_mode: true,
   }
-  const changed = context._applyHydratedWorkOrderMoney(card, { subtotal: 100 }, [israel])
+  const woComplete = { subtotal: 100, negative_charges: [{ amount: 40, source_line_id: 'wo-fence-charge-israel' }] }
+  const changed = context._applyHydratedWorkOrderMoney(card, woComplete, [israel])
   assert.strictEqual(changed, true)
   assert.strictEqual(card.wo_allocated, 100, 'hydrate overwrites stale allocated')
   assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.source_line_id === 'wo-stale-old-line').length, 0,
@@ -448,7 +449,7 @@ function hoursCard(overrides) {
       kim,
     ],
   }
-  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleSameIdCard, { subtotal: 100 }, [israel]), true)
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleSameIdCard, woComplete, [israel]), true)
   assert.strictEqual(staleSameIdCard.wo_labour_lines[0].amount, 40, 'hydrate overwrites same-ID stale amount')
   assert.strictEqual(staleSameIdCard.wo_labour_lines[0].trade_name, 'Israel', 'hydrate overwrites same-ID stale name')
   assert.strictEqual(staleSameIdCard.wo_labour_lines[1].trade_name, 'Kim', 'same-ID replace keeps hourly labour in place')
@@ -476,6 +477,14 @@ function hoursCard(overrides) {
     'a hydrate body without work_orders is incomplete')
   assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [] }), true,
     'an explicit empty work_orders array is a complete listing')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [], truncated: true }), false,
+    'a truncated listing is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], has_more: true }), false,
+    'has_more is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], incomplete: true }), false,
+    'an incomplete listing is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], next_offset: 20 }), false,
+    'a paged listing with next_offset is not a complete hydrate')
   assert.strictEqual(context._workOrdersHydrateMoneyComplete([
     { id: 'wo-1', subtotal: 100 }
   ]), false, 'an authorized work order missing negative_charges is incomplete money')
@@ -483,6 +492,20 @@ function hoursCard(overrides) {
     { id: 'wo-1', subtotal: 100, negative_charges: [] }
   ]), true, 'an explicit empty negative_charges array is complete money')
   assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), true)
+
+  const keptRestored = {
+    wo_allocated: 999,
+    wo_labour_lines: [stalePt],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(keptRestored, { subtotal: 100 }, [israel]), false,
+    'missing negative_charges does not apply or strip restored money')
+  assert.strictEqual(keptRestored.wo_allocated, 999, 'incomplete apply keeps allocated')
+  assert.strictEqual(keptRestored.wo_labour_lines[0].source_line_id, 'wo-stale-old-line',
+    'incomplete apply keeps restored source_line_id rows')
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(keptRestored, { subtotal: 100, negative_charges: [] }, null), false,
+    'a missing pass-through array is not an authoritative empty deduction set')
+  assert.strictEqual(keptRestored.wo_labour_lines[0].source_line_id, 'wo-stale-old-line',
+    'null pass-throughs keep restored deductions')
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -790,6 +813,12 @@ function hoursCard(overrides) {
       assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), false,
         'direct draft save is single-flight')
       ctx._endSaveTradeInvoiceDraft()
+      assert.strictEqual(ctx._invoiceDraftSaveSucceeded({ ok: true }), false,
+        'a generic ok draft save is not durable without a draft identity')
+      assert.strictEqual(ctx._invoiceDraftSaveSucceeded({ ok: true, draft_id: 'draft-1' }), true)
+      assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({ ok: true }, { action: 'save_trade_invoice_draft' }), false,
+        'offline draft replay requires a durable draft identity')
+      assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({ ok: true, draft_id: 'draft-1' }, { action: 'save_trade_invoice_draft' }), true)
       assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), true)
       assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), false,
         'invoice generate/submit is single-flight')
@@ -1431,6 +1460,10 @@ function hoursCard(overrides) {
     return postA.then(function() {
       assert.strictEqual(tabA._financialWriteHeldLocally(), true,
         'the fetch result is delivered before the local financial write ends')
+      assert.strictEqual(tabB._sharedFinancialWriteHeld('generate_trade_invoice'), true,
+        'the shared sw_fin_write fence stays held through response handling')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-09-21' }), true,
+        'another tab sees the shared financial fence, not just a local in-flight flag')
       assert.strictEqual(tabB._beginFinancialWrite('generate_trade_invoice'), true)
       return tabB._withFinancialWebLock('generate_trade_invoice', function() {
         return Promise.resolve({ ok: true })
@@ -1444,6 +1477,20 @@ function hoursCard(overrides) {
       })
     })
   }).then(function() {
+    assert.strictEqual(tabB._sharedFinancialWriteHeld('generate_trade_invoice'), false,
+      'the shared sw_fin_write fence is released after the first tab ends the write')
+    assert.strictEqual(tabA._beginFinancialWrite('save_trade_invoice_draft'), true)
+    const pending = tabA._beginFinancialWriteSend('save_trade_invoice_draft', { week_start: '2026-09-28' })
+    assert.ok(pending && pending.id, 'persist-before-send parks the draft write before fetch')
+    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), true,
+      'another tab sees the parked draft write before the POST returns')
+    tabA._settleFinancialWriteSend('save_trade_invoice_draft', pending, { ok: true }, null)
+    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), true,
+      'a generic ok draft response stays unresolved without a draft identity')
+    tabA._settleFinancialWriteSend('save_trade_invoice_draft', pending, { ok: true, draft_id: 'draft-xtab' }, null)
+    tabA._endFinancialWrite('save_trade_invoice_draft')
+    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
+      'a durable draft identity clears the parked write after the local write ends')
     console.log('OK — cross-tab invoice single-flight and queue merge')
   }).catch(function(err) {
     console.error(err)

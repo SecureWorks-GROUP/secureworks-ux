@@ -321,9 +321,11 @@ assert((function() {
 })(),
   'a failed or incomplete WO hydrate keeps restored deductions and does not reconcile against an empty set');
 assert(html.includes('_workOrdersHydratePayloadComplete') && html.includes('_workOrdersHydrateMoneyComplete') &&
+  html.includes('_workOrdersHydrateListingTruncated') &&
   html.includes('_workOrderHasCompleteMoney') &&
-  html.includes('Array.isArray(wo.negative_charges)'),
-  'hydrate treats missing work_orders or negative_charges as unresolved money, not an empty success');
+  html.includes('Array.isArray(wo.negative_charges)') &&
+  /function _applyHydratedWorkOrderMoney[\s\S]*?_workOrderHasCompleteMoney\(wo\)[\s\S]*?Array\.isArray\(passThroughs\)/.test(html),
+  'hydrate treats missing work_orders, truncated listings, or negative_charges as unresolved money, not an empty success');
 assert(html.includes('woHydrateBlocked'),
   'the job-centric footer still names the hydrate submit block');
 assert(html.includes('Undated assignments never prefill a card'),
@@ -405,6 +407,10 @@ assert((function() {
     extras.includes('labour_deductions') &&
     /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
     html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
+    webLock.includes('_claimStorageLock(_FINANCIAL_WRITE_LOCK_KEY') &&
+    html.includes('_beginFinancialWriteSend') &&
+    html.includes('_settleFinancialWriteSend') &&
+    /function _financialInvoiceApi[\s\S]*?_beginFinancialWriteSend[\s\S]*?api\(action/.test(html) &&
     html.includes('_compareAndSwapStorageLock') &&
     html.includes("{ acquire: true }") &&
     html.includes('_allStorageLeasesOwned');
@@ -422,6 +428,11 @@ assert(/return 'payload:' \+ JSON\.stringify\(\{[\s\S]*?week_start: body\.week_s
   'payload fingerprint includes week_start/week_ending so distinct weeks do not suppress each other');
 assert(html.includes('_beginSaveTradeInvoiceDraft') && /saveDraftInvoice = function\(\) \{[\s\S]*?_beginSaveTradeInvoiceDraft\(\)/.test(html),
   'Save Draft is single-flight so concurrent taps cannot create parallel drafts');
+assert(/saveDraftInvoice = function\(\) \{[\s\S]*?_invoiceDraftSaveSucceeded\(res\)[\s\S]*?invoice_response_ambiguous/.test(html) &&
+  /saveWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_invoiceDraftSaveSucceeded\(res\)[\s\S]*?_weeklyInvoiceFromResponse[\s\S]*?invoice_response_ambiguous/.test(html) &&
+  html.includes('_invoiceDraftIdentity') &&
+  html.includes('Do not save again yet'),
+  'draft saves require a durable identity and treat accepted-but-invalid responses as unresolved');
 assert(html.includes('_beginFinancialWrite') && html.includes('_financialWriteInFlight') &&
   /submitWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
   /submitTradeHours = function\(\) \{[\s\S]*?_beginFinancialWrite\('submit_trade_invoice'\)/.test(html) &&

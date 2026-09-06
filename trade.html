@@ -4805,15 +4805,30 @@
         return Promise.reject(lost);
       }
       _financialWebLockDepth += 1;
+      // Visible cross-tab fence for _sharedFinancialWriteHeld. Web Lock is
+      // still the exclusive primitive; this marker only publishes that a
+      // money write is in flight through response handling.
+      var fenceTimer = null;
+      if (_claimStorageLock(_FINANCIAL_WRITE_LOCK_KEY, _FINANCIAL_WRITE_LOCK_TTL_MS)) {
+        _pushStorageLease(_FINANCIAL_WRITE_LOCK_KEY);
+        fenceTimer = _startStorageLockRenew(_FINANCIAL_WRITE_LOCK_KEY, function() {});
+      }
+      var dropFence = function() {
+        if (fenceTimer) clearInterval(fenceTimer);
+        fenceTimer = null;
+        _popStorageLease(_FINANCIAL_WRITE_LOCK_KEY);
+        _releaseStorageLock(_FINANCIAL_WRITE_LOCK_KEY);
+        _financialWebLockDepth -= 1;
+      };
       return run().then(function(result) {
         deliver.resolve(result);
         return _holdFinancialWebLockUntilLocalWriteEnds().then(function() {
-          _financialWebLockDepth -= 1;
+          dropFence();
         });
       }, function(err) {
         deliver.reject(err);
         return _holdFinancialWebLockUntilLocalWriteEnds().then(function() {
-          _financialWebLockDepth -= 1;
+          dropFence();
         });
       });
     });
@@ -5288,9 +5303,22 @@
     return true;
   }
 
+  function _noteFinancialWritePending(action, item) {
+    var key = String(action || '');
+    if (!_financialWriteInFlight[key] || !item || !item.id) return;
+    _financialWriteInFlight[key].pendingId = item.id;
+  }
+
+  function _markFinancialWriteCommitted(action) {
+    var key = String(action || '');
+    if (_financialWriteInFlight[key]) _financialWriteInFlight[key].clearOnEnd = true;
+  }
+
   function _endFinancialWrite(action) {
     var key = String(action || '');
+    var held = _financialWriteInFlight[key];
     delete _financialWriteInFlight[key];
+    if (held && held.clearOnEnd && held.pendingId) _removeOfflineQueueItem(held.pendingId);
     _releaseFinancialWebLockHolders();
   }
 
@@ -5311,6 +5339,23 @@
     if (err && err.code === 'invoice_write_locked') {
       toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
       return Promise.resolve({ outcome: 'locked', reason: 'invoice_write_locked' });
+    }
+    if (err && err.code === 'invoice_response_ambiguous') {
+      if (err.draft_id && body && !body.draft_id) body.draft_id = err.draft_id;
+      var ambiguousItem = _persistAmbiguousFinancialWrite(action, body);
+      if (!ambiguousItem) return Promise.resolve({ outcome: 'queued_unresolved', draft_id: err.draft_id || '' });
+      return _reconcileAmbiguousInvoiceAction(ambiguousItem).then(function(alreadyLanded) {
+        if (!_invoiceApiCurrent(ctx)) return { outcome: 'cancelled', draft_id: err.draft_id || '' };
+        if (alreadyLanded === true) {
+          if (!_removeOfflineQueueItem(ambiguousItem.id) && ambiguousItem) {
+            ambiguousItem.ambiguous = true;
+            ambiguousItem.persist_unconfirmed = true;
+            _writeInboxItem(ambiguousItem);
+          }
+          return { outcome: 'landed', draft_id: err.draft_id || '' };
+        }
+        return { outcome: alreadyLanded === false ? 'queued_retry' : 'queued_unresolved', draft_id: err.draft_id || '' };
+      });
     }
     if (!_invoiceApiCurrent(ctx)) return Promise.resolve({ outcome: 'cancelled' });
     // Timeout / Failed to fetch can land after the server committed, even when
@@ -5446,7 +5491,70 @@
     });
   }
 
-  function _offlineInvoiceReplaySucceeded(result) {
+  function _invoiceDraftIdentity(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+    var values = [result.draft_id, result.invoice_id, result.id];
+    for (var i = 0; i < values.length; i++) {
+      if (values[i] != null && String(values[i]).trim() !== '') return String(values[i]).trim();
+    }
+    return '';
+  }
+
+  function _invoiceDraftSaveSucceeded(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    if (result.error) return false;
+    if (result.success === false || result.ok === false) return false;
+    return !!_invoiceDraftIdentity(result);
+  }
+
+  function _ambiguousInvoiceResponseError(message, extras) {
+    var err = new Error(message || 'Invoice response is incomplete');
+    err.code = 'invoice_response_ambiguous';
+    if (extras && extras.draft_id) err.draft_id = extras.draft_id;
+    return err;
+  }
+
+  function _financialWriteResponseDurable(action, result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    if (result.ok === false || result.success === false || result.error) return false;
+    if (action === 'save_trade_invoice_draft') return _invoiceDraftSaveSucceeded(result);
+    if (typeof _invoiceSubmitSucceeded === 'function') return _invoiceSubmitSucceeded(result);
+    return result.ok === true || result.success === true;
+  }
+
+  function _beginFinancialWriteSend(action, body) {
+    if (action === 'attach_invoice_pdf') return null;
+    var pending = null;
+    try { pending = _persistAmbiguousFinancialWrite(action, body || {}); }
+    catch (e) { if (e && e.offline_invoice_queue === 'locked') throw e; }
+    if (pending) _noteFinancialWritePending(action, pending);
+    return pending;
+  }
+
+  function _settleFinancialWriteSend(action, pending, result, err) {
+    if (action === 'attach_invoice_pdf') return;
+    var flight = _financialWriteInFlight[String(action || '')];
+    if (err) {
+      if (err.ok === false && !_isOfflineInvoiceTimeoutError(err)) {
+        if (pending && pending.id) _removeOfflineQueueItem(pending.id);
+        if (flight) flight.pendingId = '';
+      }
+      return;
+    }
+    if (_financialWriteResponseDurable(action, result)) {
+      _markFinancialWriteCommitted(action);
+      return;
+    }
+    if (result && result.ok === false) {
+      if (pending && pending.id) _removeOfflineQueueItem(pending.id);
+      if (flight) flight.pendingId = '';
+    }
+  }
+
+  function _offlineInvoiceReplaySucceeded(result, item) {
+    if (item && item.action === 'save_trade_invoice_draft') {
+      return _invoiceDraftSaveSucceeded(result);
+    }
     if (typeof _invoiceSubmitSucceeded === 'function') return _invoiceSubmitSucceeded(result);
     if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
     if (result.error) return false;
@@ -5483,7 +5591,7 @@
               return true;
             }
           }).then(function(result) {
-            if (!_offlineInvoiceReplaySucceeded(result)) remaining.push(item);
+            if (!_offlineInvoiceReplaySucceeded(result, item)) remaining.push(item);
           }).catch(function(e) {
             if (e && e.code === 'invoice_replay_cancelled') return;
             if (e && e.code === 'invoice_write_locked') {
@@ -6351,7 +6459,14 @@
   function _financialInvoiceApi(action, params, body, ctx) {
     if (!_webLocksAvailable()) return Promise.reject(_invoiceWriteLeaseLostError());
     return _withFinancialWebLock(action, function() {
-      return api(action, params, body, _invoiceApiOptions(ctx, action));
+      var pending = _beginFinancialWriteSend(action, body);
+      return api(action, params, body, _invoiceApiOptions(ctx, action)).then(function(result) {
+        _settleFinancialWriteSend(action, pending, result, null);
+        return result;
+      }, function(err) {
+        _settleFinancialWriteSend(action, pending, null, err);
+        throw err;
+      });
     }, { acquire: false });
   }
 
@@ -18099,7 +18214,7 @@
     var state = {
       workOrders: workOrders || [], selected: {}, charges: {}, labour: {},
       crew: {}, crewLoading: {}, finalDeductions: [], notes: '',
-      draftId: null, preview: null, dirty: true, busy: false,
+      draftId: null, preview: null, dirty: true, busy: false, saveUnresolved: false,
       revision: 0, requestSeq: 0, weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd
     };
     state.workOrders.forEach(function(workOrder) {
@@ -18641,7 +18756,7 @@
     html += '<button class="inv-add-btn" onclick="addWeeklyFinalDeduction()">+ Add final deduction</button></section>';
     html += '<section class="wwi-panel"><label class="wwi-panel-title" for="weeklyInvoiceNotes">Notes</label><textarea class="wwi-notes" id="weeklyInvoiceNotes" rows="3" placeholder="Optional note for finance" onchange="updateWeeklyInvoiceNotes(this.value)">' + esc(state.notes || '') + '</textarea></section>';
     html += '<div data-weekly-invoice-result>' + _weeklyInvoicePreviewHtml(state.preview) + '</div>';
-    html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : 'Save & calculate') + '</button>';
+    html += '<div class="wwi-actions"><button class="btn btn-secondary" ' + (state.busy || (state.saveUnresolved && !state.draftId) ? 'disabled ' : '') + 'onclick="saveWeeklyWorkOrderInvoice()">' + (state.busy ? 'Working...' : (state.saveUnresolved && !state.draftId ? 'Confirming...' : 'Save & calculate')) + '</button>';
     html += '<button class="hours-submit-btn" data-weekly-invoice-submit ' + (state.busy || state.dirty || !state.preview ? 'disabled ' : '') + 'onclick="submitWeeklyWorkOrderInvoice()">Submit Invoice</button></div>';
     html += '<div class="wwi-count">Submitting creates a draft bill in Xero. If a selection changes, save again before submitting.</div>';
     html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openVerificationInbox()">Review Crew Hours</button><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button></div></div>';
@@ -18651,6 +18766,10 @@
   window.saveWeeklyWorkOrderInvoice = function() {
     var state = _weeklyWoInvoice;
     if (!state || state.busy) return;
+    if (state.saveUnresolved && !state.draftId) {
+      toast('Last draft save is still being confirmed. Do not save again — check Invoice history.');
+      return;
+    }
     var payload;
     try { payload = _weeklyInvoicePayload(state); }
     catch (err) { toast(err.message, true); return; }
@@ -18667,8 +18786,23 @@
     renderWeeklyWorkOrderInvoice();
     _financialInvoiceApi('save_trade_invoice_draft', null, payload, ctx).then(function(res) {
       if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
-      if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
-      var invoice = _weeklyInvoiceFromResponse(res, payload, { draft_id: state.draftId }, state);
+      var capturedId = _weeklyInvoiceIdentity(res) || _invoiceDraftIdentity(res) || '';
+      if (capturedId) {
+        state.draftId = capturedId;
+        payload.draft_id = capturedId;
+      }
+      if (res && (res.ok === false || res.success === false || res.error) && !capturedId) {
+        throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
+      }
+      if (!_invoiceDraftSaveSucceeded(res)) {
+        throw _ambiguousInvoiceResponseError('Draft save did not return a confirmed draft id', { draft_id: capturedId });
+      }
+      var invoice;
+      try {
+        invoice = _weeklyInvoiceFromResponse(res, payload, { draft_id: state.draftId }, state);
+      } catch (validationErr) {
+        throw _ambiguousInvoiceResponseError((validationErr && validationErr.message) || 'SecureWorks returned incomplete weekly invoice totals', { draft_id: capturedId });
+      }
       state.draftId = _weeklyInvoiceIdentity(invoice) || state.draftId;
       if (state.revision !== revision) {
         _weeklyFinishStaleRequest(state, requestSeq, 'Weekly invoice changed while saving. Save again for current totals.');
@@ -18677,6 +18811,7 @@
       state.preview = invoice;
       state.dirty = false;
       state.busy = false;
+      state.saveUnresolved = false;
       toast('Draft saved — totals calculated by SecureWorks');
       renderWeeklyWorkOrderInvoice();
     }).catch(function(err) {
@@ -18684,6 +18819,19 @@
       return _handleFinancialWriteFailure('save_trade_invoice_draft', payload, err, ctx).then(function(result) {
         if (_financialWriteAborted(result)) {
           state.busy = false;
+          renderWeeklyWorkOrderInvoice();
+          return;
+        }
+        var capturedId = (err && err.draft_id) || (result && result.draft_id) || state.draftId || '';
+        if (capturedId) {
+          state.draftId = capturedId;
+          payload.draft_id = capturedId;
+        }
+        if (err && err.code === 'invoice_response_ambiguous') {
+          state.dirty = true;
+          state.busy = false;
+          if (!state.draftId) state.saveUnresolved = true;
+          toast('Draft save was accepted but SecureWorks did not return complete figures. Do not save again yet — check Invoice history.', true);
           renderWeeklyWorkOrderInvoice();
           return;
         }
@@ -18869,6 +19017,7 @@
   var _invExtraLines = []; // extra line items (travel, materials, etc.)
   var _invNotes = ''; // preserved across re-renders
   var _draftInvoiceId = null; // existing draft being edited
+  var _draftSaveUnresolved = false;
   var _invoiceBuilderMode = 'weekly'; // 'weekly' or 'expense'
 
   // ── Job-centric prefill cutover toggle ──────────────────────────────────────
@@ -19696,6 +19845,7 @@
     _jobCards = [];
     _invLumpLines = [];
     _invRows = [];
+    _draftSaveUnresolved = false;
     try {
       var key = _invDraftStorageKey();
       if (key) sessionStorage.removeItem(key);
@@ -20185,8 +20335,17 @@
     return !!(wo && Array.isArray(wo.negative_charges));
   }
 
+  function _workOrdersHydrateListingTruncated(res) {
+    if (!res || typeof res !== 'object' || Array.isArray(res)) return true;
+    if (res.truncated === true || res.has_more === true || res.incomplete === true) return true;
+    if (res.next_offset != null && String(res.next_offset).trim() !== '') return true;
+    return false;
+  }
+
   function _workOrdersHydratePayloadComplete(res) {
-    return !!(res && Array.isArray(res.work_orders));
+    if (!res || !Array.isArray(res.work_orders)) return false;
+    if (_workOrdersHydrateListingTruncated(res)) return false;
+    return true;
   }
 
   function _workOrdersHydrateMoneyComplete(orders) {
@@ -20199,6 +20358,7 @@
 
   function _applyHydratedWorkOrderMoney(card, wo, passThroughs) {
     if (!card) return false;
+    if (!_workOrderHasCompleteMoney(wo) || !Array.isArray(passThroughs)) return false;
     var nextAllocated = (wo && wo.subtotal != null) ? Number(wo.subtotal) : null;
     if (nextAllocated != null && !Number.isFinite(nextAllocated)) nextAllocated = null;
     var changed = card.wo_allocated !== nextAllocated;
@@ -22135,6 +22295,10 @@
 
   window.saveDraftInvoice = function() {
     _syncRowsFromDOM();
+    if (_draftSaveUnresolved && !_draftInvoiceId) {
+      toast('Last draft save is still being confirmed. Do not save again — check Invoice history.');
+      return;
+    }
     var isExpense = _invoiceBuilderMode === 'expense';
     var ctx = _invoiceApiContext();
     var draftBody = {
@@ -22153,12 +22317,27 @@
 
     _financialInvoiceApi('save_trade_invoice_draft', null, draftBody, ctx).then(function(res) {
       if (!_invoiceApiCurrent(ctx)) return;
-      _draftInvoiceId = (res && res.draft_id) || _draftInvoiceId;
+      var capturedId = _invoiceDraftIdentity(res);
+      if (capturedId) _draftInvoiceId = capturedId;
+      if (res && (res.ok === false || res.success === false || res.error) && !capturedId) {
+        throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
+      }
+      if (!_invoiceDraftSaveSucceeded(res)) {
+        throw _ambiguousInvoiceResponseError('Draft save did not return a draft id', { draft_id: capturedId });
+      }
+      _draftSaveUnresolved = false;
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;
       return _handleFinancialWriteFailure('save_trade_invoice_draft', draftBody, err, ctx).then(function(result) {
         if (_financialWriteAborted(result)) return;
+        var capturedId = (err && err.draft_id) || (result && result.draft_id) || _draftInvoiceId || '';
+        if (capturedId) _draftInvoiceId = capturedId;
+        if (err && err.code === 'invoice_response_ambiguous') {
+          if (!_draftInvoiceId) _draftSaveUnresolved = true;
+          toast('Draft save was accepted but did not return a draft id. Do not save again yet — check Invoice history.', true);
+          return;
+        }
         _financialWriteFailureToast(result.outcome, err);
       });
     }).then(function() { _endSaveTradeInvoiceDraft(); }, function() { _endSaveTradeInvoiceDraft(); });

@@ -8188,16 +8188,56 @@
     return out;
   }
 
+  function mediaStableKey(m) {
+    if (!m) return '';
+    var id = m.id || m.media_id || m.document_id;
+    if (id) return 'id:' + String(id);
+    var path = m.storage_path || m.storage_key || m.path;
+    if (path) return 'path:' + String(path);
+    if (m.content_hash) return 'hash:' + String(m.content_hash);
+    return '';
+  }
+
+  function mediaUrlRank(m) {
+    if (!m) return 0;
+    if (m.playable_url) return 6;
+    if (m.signed_url) return 5;
+    if (m.public_url) return 4;
+    if (m.url) return 3;
+    if (m.file_url || m.download_url) return 2;
+    if (m.storage_url) return 1;
+    return 0;
+  }
+
+  function preferEnrichedVideo(kept, incoming) {
+    if (!kept) return incoming;
+    if (mediaUrlRank(incoming) <= mediaUrlRank(kept)) return kept;
+    var merged = {};
+    var k;
+    for (k in kept) if (Object.prototype.hasOwnProperty.call(kept, k)) merged[k] = kept[k];
+    for (k in incoming) if (Object.prototype.hasOwnProperty.call(incoming, k)) merged[k] = incoming[k];
+    return merged;
+  }
+
   function listJobVideos(data) {
-    var seen = {};
-    var videos = [];
+    var byKey = {};
+    var order = [];
     collectJobMedia(data).forEach(function(m) {
       if (!isJobVideo(m)) return;
-      var key = mediaPlayableUrl(m) || m.id || m.storage_path || [m.label, m.file_name, m.name].filter(Boolean).join('|');
-      if (!key || seen[key]) return;
-      seen[key] = true;
-      videos.push(m);
+      var key = mediaStableKey(m);
+      if (!key) {
+        var url = mediaPlayableUrl(m);
+        if (!url) return;
+        key = 'url:' + url;
+      }
+      if (byKey[key]) {
+        byKey[key] = preferEnrichedVideo(byKey[key], m);
+        return;
+      }
+      byKey[key] = m;
+      order.push(key);
     });
+    var videos = order.map(function(k) { return byKey[k]; });
     videos.sort(function(a, b) {
       var aw = isWalkthroughMedia(a) ? 0 : 1;
       var bw = isWalkthroughMedia(b) ? 0 : 1;
@@ -8365,6 +8405,9 @@
     isScopeVideo: isScopeVideo,
     isTradeVisibleDocument: isTradeVisibleDocument,
     collectJobMedia: collectJobMedia,
+    mediaStableKey: mediaStableKey,
+    mediaUrlRank: mediaUrlRank,
+    preferEnrichedVideo: preferEnrichedVideo,
     listJobVideos: listJobVideos,
     scopeJsonFlagsWalkthrough: scopeJsonFlagsWalkthrough,
     pickScopeVideo: pickScopeVideo,

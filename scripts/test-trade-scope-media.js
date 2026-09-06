@@ -145,6 +145,48 @@ const docHtml = M.renderScopeVideoCard(docsOnly);
 check('player shows the trade-visible document video', docHtml.includes(tradeDocVideo.storage_url));
 check('player hides internal document videos', !docHtml.includes('office-only.mp4') && !docHtml.includes('untagged.mp4'));
 
+const legacySameId = {
+  id: 'vid-1',
+  type: 'video',
+  label: 'Site walkthrough',
+  storage_url: 'https://storage.example.test/legacy/walk.mp4',
+};
+const enrichedSameId = {
+  id: 'vid-1',
+  type: 'video',
+  label: 'Site walkthrough',
+  playable_url: 'https://storage.example.test/signed/walk.mp4?token=abc',
+};
+const sameIdDupes = {
+  job: { scope_json: {} },
+  media: [legacySameId],
+  videos: [enrichedSameId],
+};
+const mergedById = M.listJobVideos(sameIdDupes);
+check('same id with different URLs is one video', mergedById.length === 1);
+check('merged id keeps the enriched playable URL', M.mediaPlayableUrl(mergedById[0]) === enrichedSameId.playable_url);
+check('stable key prefers id over URL', M.mediaStableKey(legacySameId) === 'id:vid-1' && M.mediaStableKey(enrichedSameId) === 'id:vid-1');
+
+const legacyByPath = {
+  type: 'video',
+  storage_path: 'jobs/x/recap.mp4',
+  storage_url: 'https://storage.example.test/legacy/recap.mp4',
+};
+const enrichedByPath = {
+  type: 'video',
+  storage_path: 'jobs/x/recap.mp4',
+  signed_url: 'https://storage.example.test/signed/recap.mp4?token=xyz',
+};
+const mergedByPath = M.listJobVideos({ job: { scope_json: {} }, media: [legacyByPath], videos: [enrichedByPath] });
+check('same storage_path with different URLs is one video', mergedByPath.length === 1);
+check('merged path keeps the signed URL', M.mediaPlayableUrl(mergedByPath[0]) === enrichedByPath.signed_url);
+
+const twoDistinct = M.listJobVideos({
+  job: { scope_json: {} },
+  media: [walkthrough, otherVideo],
+});
+check('distinct videos still list separately', twoDistinct.length === 2);
+
 pricingOn = false;
 const quoteHtml = M.renderQuotePacks(data);
 check('quote number visible to trades', quoteHtml.includes('Q-4412'));

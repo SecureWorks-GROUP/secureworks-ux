@@ -8164,6 +8164,12 @@
     return isJobVideo(m);
   }
 
+  function isTradeVisibleDocument(d) {
+    // Same door as renderJobTab_files: a document without visible_to_trades
+    // is office-internal and must not become a trade video player.
+    return !!(d && d.visible_to_trades);
+  }
+
   function collectJobMedia(data) {
     var out = [];
     function pushAll(arr) {
@@ -8173,7 +8179,7 @@
     pushAll(data && data.media);
     pushAll(data && data.videos);
     pushAll(data && data.job && data.job.media);
-    pushAll(data && data.documents);
+    pushAll((data && data.documents || []).filter(isTradeVisibleDocument));
     var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     packs.forEach(function(p) {
       pushAll(p && p.media);
@@ -8357,6 +8363,7 @@
     isWalkthroughMedia: isWalkthroughMedia,
     isJobVideo: isJobVideo,
     isScopeVideo: isScopeVideo,
+    isTradeVisibleDocument: isTradeVisibleDocument,
     collectJobMedia: collectJobMedia,
     listJobVideos: listJobVideos,
     scopeJsonFlagsWalkthrough: scopeJsonFlagsWalkthrough,

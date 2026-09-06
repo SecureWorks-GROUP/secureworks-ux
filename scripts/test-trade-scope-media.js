@@ -111,6 +111,40 @@ const flaggedPlusOther = M.renderScopeVideoCard({
 check('other videos still play when walkthrough file is missing', flaggedPlusOther.includes(otherVideo.signed_url));
 check('missing walkthrough named beside other videos', flaggedPlusOther.includes(M.walkthroughMissingCopy()));
 
+const tradeDocVideo = {
+  id: 'doc-trade-vid',
+  type: 'video',
+  file_name: 'crew-walkthrough.mp4',
+  storage_url: 'https://storage.example.test/crew-walkthrough.mp4',
+  visible_to_trades: true,
+};
+const internalDocVideo = {
+  id: 'doc-internal-vid',
+  type: 'video',
+  file_name: 'office-only.mp4',
+  storage_url: 'https://storage.example.test/office-only.mp4',
+  visible_to_trades: false,
+};
+const untaggedDocVideo = {
+  id: 'doc-untagged-vid',
+  type: 'video',
+  file_name: 'untagged.mp4',
+  storage_url: 'https://storage.example.test/untagged.mp4',
+};
+const docsOnly = {
+  job: { scope_json: {} },
+  media: [],
+  documents: [tradeDocVideo, internalDocVideo, untaggedDocVideo],
+};
+check('trade-visible document video is collected', M.isTradeVisibleDocument(tradeDocVideo));
+check('internal document video is not trade-visible', !M.isTradeVisibleDocument(internalDocVideo));
+check('untagged document is not trade-visible', !M.isTradeVisibleDocument(untaggedDocVideo));
+const listedDocs = M.listJobVideos(docsOnly);
+check('only trade-visible document videos are listed', listedDocs.length === 1 && listedDocs[0].id === 'doc-trade-vid');
+const docHtml = M.renderScopeVideoCard(docsOnly);
+check('player shows the trade-visible document video', docHtml.includes(tradeDocVideo.storage_url));
+check('player hides internal document videos', !docHtml.includes('office-only.mp4') && !docHtml.includes('untagged.mp4'));
+
 pricingOn = false;
 const quoteHtml = M.renderQuotePacks(data);
 check('quote number visible to trades', quoteHtml.includes('Q-4412'));

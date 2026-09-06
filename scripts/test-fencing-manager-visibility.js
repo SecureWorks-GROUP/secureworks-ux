@@ -278,12 +278,18 @@ assert(html.includes('_hydratePerMetreWorkOrderCards'),
   'per-metre job-centric builder hydrates his jobs from my_work_orders mode=all');
 assert(!/if \(_mergeWorkOrdersIntoJobCards\(orders\)\) renderInvoiceBuilder/.test(html),
   'hydrate always re-renders — existing assignment cards can change without a new card');
+assert(!html.includes('jobId && c.job_id === jobId && (!date || c.scheduled_date === date)'),
+  'WO hydrate never folds same-job same-day work orders into one card');
+assert(html.includes('never writes onto a card that already belongs to another WO'),
+  'each work order keeps its own card identity');
 assert(html.includes('data-pm-wo-hydrate'),
   'a failed or pending my_work_orders hydrate is visible, not swallowed');
 assert(html.includes('retryPerMetreWorkOrderHydrate'),
   'Henry can retry a failed work-order hydrate');
 assert(html.includes('woHydrateBlocked'),
   'Submit stays locked until the work-order hydrate succeeds');
+assert(html.includes('addWoLumpLine'),
+  'job-centric WO cards can deduct a freeform description + amount');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

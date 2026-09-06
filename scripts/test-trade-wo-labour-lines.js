@@ -183,4 +183,36 @@ function woCard(overrides) {
   assert(built.cardExtraItems[0].description.indexOf('Israel $40') !== -1)
 }
 
-console.log('OK — WO labour-line payload contract holds (10 scenarios)')
+// ── Lump-sum deduct: description + amount, not hours×rate ────────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+    wo_lump_lines: [
+      { description: 'Materials', amount: 10, line_kind: 'lump_sum' }
+    ],
+  })])
+  assert(!built.error, 'lump-sum builds: ' + built.error)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.rate, 50, 'net is WO 100 − Israel 40 − Materials 10')
+  assert.strictEqual(row.wo_labour_deduction, 40)
+  assert.strictEqual(row.wo_lump_deduction, 10)
+  assert.strictEqual(row.wo_lump_lines[0].line_kind, 'lump_sum')
+  assert.strictEqual(row.wo_lump_lines[0].description, 'Materials')
+  assert.strictEqual(row.wo_lump_lines[0].amount, 10)
+  assert(row.description.indexOf('other [Materials $10]') !== -1, 'breakdown names the lump: ' + row.description)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    wo_lump_lines: [{ description: '', amount: 10 }],
+  })])
+  assert(built.error, 'lump amount without description must block')
+  assert(built.error.indexOf('describe') !== -1, 'error asks for a description: ' + built.error)
+}
+
+console.log('OK — WO labour-line payload contract holds (12 scenarios)')

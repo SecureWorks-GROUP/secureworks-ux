@@ -17836,6 +17836,8 @@
       wo_mode: _defaultJobCardWoMode(),
       wo_allocated: null,
       wo_labour_lines: [],
+      wo_lump_lines: [],
+      wo_number: '',
       commission_mode: false
     }, fields || {});
   }
@@ -17868,28 +17870,31 @@
       if (weekStart && weekEnd && date && (date < weekStart || date > weekEnd)) return;
       var jobId = wo.job_id || '';
       var woId = String(wo.id || '');
-      var exists = _jobCards.some(function(c) {
-        if (woId && String(c.work_order_id || '') === woId) return true;
-        return jobId && c.job_id === jobId && (!date || c.scheduled_date === date);
-      });
+      if (!woId) return;
       var passThroughs = (wo.negative_charges || []).map(_woPassThroughFromCharge)
         .filter(function(line) { return Number(line.amount) > 0; });
-      if (exists) {
-        _jobCards.forEach(function(c) {
-          if (!(woId && String(c.work_order_id || '') === woId) && !(jobId && c.job_id === jobId)) return;
-          // Same-job same-day multi-WO identity is unchanged (one card).
-          // Matching an assignment card must still count as a change so the
-          // builder re-renders; otherwise blank WO inputs stay in the DOM and
-          // the next _syncJobCardsFromDOM() wipes the hydrated deducts.
-          if (c.wo_allocated == null && wo.subtotal != null) {
-            c.wo_allocated = Number(wo.subtotal);
-            changed = true;
-          }
-          if ((!c.wo_labour_lines || c.wo_labour_lines.length === 0) && passThroughs.length) {
-            c.wo_labour_lines = passThroughs;
-            changed = true;
-          }
-        });
+      var existing = null;
+      var unbound = null;
+      _jobCards.forEach(function(c) {
+        if (String(c.work_order_id || '') === woId) existing = c;
+        else if (!unbound && jobId && c.job_id === jobId && !c.work_order_id) unbound = c;
+      });
+      var target = existing || unbound;
+      if (target) {
+        // Identity is the work-order id. A second WO on the same job/day
+        // never writes onto a card that already belongs to another WO.
+        if (!target.work_order_id) target.work_order_id = woId;
+        if (!target.wo_number && wo.wo_number) target.wo_number = wo.wo_number;
+        target.wo_mode = true;
+        if (target.wo_allocated == null && wo.subtotal != null) {
+          target.wo_allocated = Number(wo.subtotal);
+          changed = true;
+        }
+        if ((!target.wo_labour_lines || target.wo_labour_lines.length === 0) && passThroughs.length) {
+          target.wo_labour_lines = passThroughs;
+          changed = true;
+        }
+        if (!existing) changed = true;
         return;
       }
       var suburb = '';
@@ -17899,6 +17904,7 @@
       }
       _jobCards.push(_newJobCard({
         work_order_id: woId,
+        wo_number: wo.wo_number || '',
         job_id: jobId || null,
         job_number: wo.job_number || '',
         client_name: wo.client_name || '',
@@ -18069,6 +18075,7 @@
         var badge = c.job_type ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:rgba(241,90,41,0.1);color:var(--sw-orange);padding:1px 6px;border-radius:4px;margin-left:6px">' + esc(c.job_type) + '</span>' : '';
         // FIX4: blank-job cards show a clear warning label instead of silent 'Job'.
         var jobLabel = c._blank_job ? 'Unknown job' : esc(c.job_number || 'Job');
+        if (c.wo_number) jobLabel += ' · ' + esc(c.wo_number);
         html += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + jobLabel + badge + '</div>';
         if (c._blank_job) {
           html += '<div style="font-size:12px;font-weight:600;color:var(--sw-orange);margin-top:2px">Contact the office — this job has no number or client name.</div>';
@@ -18149,6 +18156,28 @@
           html += '<button type="button" onclick="addWoLabourLine(' + c._idx + ')" '
             + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add labour line</button>';
           html += '</div>';
+          html += '</div>';
+          var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+          html += '<div style="margin-top:10px">';
+          html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:4px">Other amounts</div>';
+          for (var lpi = 0; lpi < lumpLines.length; lpi++) {
+            var lp = lumpLines[lpi];
+            var lpAmt = Math.round(Number(lp.amount || 0) * 100) / 100;
+            html += '<div data-wolump="' + c._idx + '_' + lpi + '" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;background:rgba(0,0,0,0.02);border-radius:8px;padding:6px 8px">';
+            html += '<input type="text" data-cardlumpdesc="' + c._idx + '_' + lpi + '" value="' + esc(lp.description || '') + '" placeholder="What this amount is" '
+              + 'onchange="setWoLumpDescription(' + c._idx + ',' + lpi + ',this.value)" '
+              + 'style="flex:1;min-width:120px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px;font-family:var(--sw-font)">';
+            html += '<input type="number" data-cardlumpamt="' + c._idx + '_' + lpi + '" min="0" step="0.01" inputmode="decimal" value="' + (lp.amount != null ? lp.amount : '') + '" placeholder="$" '
+              + 'aria-label="Deduction amount" '
+              + 'onchange="setWoLumpAmount(' + c._idx + ',' + lpi + ',this.value)" '
+              + 'style="width:110px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:13px">';
+            html += '<span style="font-size:13px;font-weight:700;color:var(--sw-dark);min-width:60px;text-align:right">− $' + lpAmt.toFixed(2) + '</span>';
+            html += '<button type="button" onclick="removeWoLumpLine(' + c._idx + ',' + lpi + ')" '
+              + 'style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:15px;padding:0 2px;line-height:1" title="Remove amount">&#x2715;</button>';
+            html += '</div>';
+          }
+          html += '<button type="button" onclick="addWoLumpLine(' + c._idx + ')" '
+            + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
           html += '</div>';
           // Net payable display
           html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px">';
@@ -18378,6 +18407,18 @@
             }
           }
         }
+        var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+        for (var lpi = 0; lpi < lumpLines.length; lpi++) {
+          var lump = lumpLines[lpi];
+          var lumpKey = idx + '_' + lpi;
+          var lumpDescEl = document.querySelector('[data-cardlumpdesc="' + lumpKey + '"]');
+          if (lumpDescEl) lump.description = lumpDescEl.value || '';
+          var lumpAmtEl = document.querySelector('[data-cardlumpamt="' + lumpKey + '"]');
+          if (lumpAmtEl) {
+            var lumpAmt = parseFloat(lumpAmtEl.value);
+            lump.amount = (isNaN(lumpAmt) || lumpAmt < 0) ? null : lumpAmt;
+          }
+        }
       } else {
         var hrsEl = document.querySelector('[data-cardhours="' + idx + '"]');
         if (hrsEl) {
@@ -18600,6 +18641,34 @@
     c.wo_labour_lines[li].amount = Math.round((Number(c.wo_labour_lines[li].hours || 0) * Number(c.wo_labour_lines[li].rate || 0)) * 100) / 100;
     _refreshWoCard(idx);
   };
+  window.addWoLumpLine = function(idx) {
+    var c = _jobCards[idx]; if (!c) return;
+    _syncJobCardsFromDOM();
+    if (!Array.isArray(c.wo_lump_lines)) c.wo_lump_lines = [];
+    c.wo_lump_lines.push({ description: '', amount: null, line_kind: 'lump_sum' });
+    renderInvoiceBuilder();
+  };
+  window.removeWoLumpLine = function(idx, li) {
+    var c = _jobCards[idx]; if (!c) return;
+    _syncJobCardsFromDOM();
+    if (!Array.isArray(c.wo_lump_lines)) return;
+    c.wo_lump_lines.splice(li, 1);
+    renderInvoiceBuilder();
+  };
+  window.setWoLumpDescription = function(idx, li, val) {
+    var c = _jobCards[idx]; if (!c || !Array.isArray(c.wo_lump_lines)) return;
+    if (!c.wo_lump_lines[li]) return;
+    c.wo_lump_lines[li].description = val || '';
+    _refreshWoCard(idx);
+  };
+  window.setWoLumpAmount = function(idx, li, val) {
+    var c = _jobCards[idx]; if (!c || !Array.isArray(c.wo_lump_lines)) return;
+    if (!c.wo_lump_lines[li]) return;
+    var n = parseFloat(val);
+    c.wo_lump_lines[li].line_kind = 'lump_sum';
+    c.wo_lump_lines[li].amount = (isNaN(n) || n < 0) ? null : n;
+    _refreshWoCard(idx);
+  };
   // Lightweight DOM refresh for a WO card (net + breakdown) without full re-render.
   function _refreshWoCard(idx) {
     var c = _jobCards[idx]; if (!c) return;
@@ -18612,6 +18681,12 @@
         : Math.round((Number(ll.hours || 0) * Number(ll.rate || 0)) * 100) / 100;
       var llEl = document.querySelector('[data-woll="' + idx + '_' + li + '"] span[style*="min-width:60px"]');
       if (llEl) llEl.textContent = (ll.line_kind === 'wo_pass_through' ? '− $' : '= $') + llAmt.toFixed(2);
+    }
+    var lumps = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+    for (var lpi = 0; lpi < lumps.length; lpi++) {
+      var lpAmt = Math.round(Number(lumps[lpi].amount || 0) * 100) / 100;
+      var lpEl = document.querySelector('[data-wolump="' + idx + '_' + lpi + '"] span[style*="min-width:60px"]');
+      if (lpEl) lpEl.textContent = '− $' + lpAmt.toFixed(2);
     }
     _refreshJobCardLine(idx);
   }
@@ -18782,6 +18857,17 @@
     }
     return out;
   }
+  function _woCleanLumpLines(c) {
+    var lines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var desc = String(lines[i].description || '').replace(/\s+/g, ' ').trim();
+      var amount = Math.round(Number(lines[i].amount || 0) * 100) / 100;
+      if (!desc && amount <= 0) continue;
+      out.push({ description: desc, amount: amount, line_kind: 'lump_sum' });
+    }
+    return out;
+  }
   // _woLabourSum: sum all labour lines from the array (Q17).
   function _woLabourSum(c) {
     var lines = _woCleanLabourLines(c);
@@ -18791,18 +18877,27 @@
     }
     return Math.round(sum * 100) / 100;
   }
+  function _woLumpSum(c) {
+    var lines = _woCleanLumpLines(c);
+    var sum = 0;
+    for (var i = 0; i < lines.length; i++) {
+      sum += lines[i].amount;
+    }
+    return Math.round(sum * 100) / 100;
+  }
   function _woNet(c) {
     var a = Number(c.wo_allocated);
     if (isNaN(a)) a = 0;
-    var l = _woLabourSum(c);
+    var l = _woLabourSum(c) + _woLumpSum(c);
     return Math.round((a - l) * 100) / 100;
   }
   // Build audit-trail description string: "WO $2000 − labour [Henry 4h×$50=$200; Jose 6h×$45=$270]=net $1530"
   function _woBreakdownText(c) {
     var a = Number(c.wo_allocated) || 0;
     var lines = _woCleanLabourLines(c);
+    var lumps = _woCleanLumpLines(c);
     var net = _woNet(c);
-    if (lines.length === 0) {
+    if (lines.length === 0 && lumps.length === 0) {
       return 'WO $' + a + ' = net $' + net;
     }
     var labour = [];
@@ -18814,12 +18909,13 @@
         labour.push((ll.trade_name || 'Trade') + ' ' + ll.hours + 'h×$' + ll.rate + '=$' + ll.amount);
       }
     });
-    if (paid.length === 0) {
-      return 'WO $' + a + ' − labour [' + labour.join('; ') + ']=net $' + net;
-    }
+    var other = lumps.map(function(lp) {
+      return (lp.description || 'Amount') + ' $' + lp.amount;
+    });
     var parts = [];
     if (labour.length) parts.push('labour [' + labour.join('; ') + ']');
-    parts.push('WO trades [' + paid.join('; ') + ']');
+    if (paid.length) parts.push('WO trades [' + paid.join('; ') + ']');
+    if (other.length) parts.push('other [' + other.join('; ') + ']');
     return 'WO $' + a + ' − ' + parts.join(' − ') + '=net $' + net;
   }
   function _buildJobCentricPayload(cards) {
@@ -18850,6 +18946,14 @@
           }
         } else if (!(lines[i].hours > 0) || !(lines[i].rate > 0)) {
           woBadLine.push({ idx: c._idx, msg: jobLbl + ': enter hours and rate for ' + lines[i].trade_name + '’s labour line.' });
+        }
+      }
+      var lumps = _woCleanLumpLines(c);
+      for (var li = 0; li < lumps.length; li++) {
+        if (!lumps[li].description) {
+          woBadLine.push({ idx: c._idx, msg: jobLbl + ': describe every amount you are deducting.' });
+        } else if (!(lumps[li].amount > 0)) {
+          woBadLine.push({ idx: c._idx, msg: jobLbl + ': enter the amount for ' + lumps[li].description + '.' });
         }
       }
     });
@@ -18915,6 +19019,8 @@
         // stores these on the holder invoice for office reconciliation.
         var labourLinesOut = _woCleanLabourLines(c);
         var labourDeduction = _woLabourSum(c);
+        var lumpLinesOut = _woCleanLumpLines(c);
+        var lumpDeduction = _woLumpSum(c);
         cardExtraItems.push({
           type: 'Work Order',
           row_type: 'work_order',
@@ -18923,8 +19029,11 @@
           unit: 'ea',
           rate: net,
           wo_allocated: Number(c.wo_allocated) || 0,
+          work_order_id: c.work_order_id || null,
           wo_labour_deduction: labourDeduction,
           wo_labour_lines: labourLinesOut,
+          wo_lump_deduction: lumpDeduction,
+          wo_lump_lines: lumpLinesOut,
           date: c.scheduled_date || null,
           job_id: c.job_id || null,
           job_number: c.job_number || '',

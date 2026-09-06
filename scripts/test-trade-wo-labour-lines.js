@@ -798,7 +798,7 @@ function hoursCard(overrides) {
   const rebuiltExtras = context._buildJobCentricPayload(context._jobCards)
   assert(!rebuiltExtras.error, 'refreshed cards still build: ' + rebuiltExtras.error)
   assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltExtras.cardExtraItems[0].wo_labour_lines)), [
-    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
+    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
     { trade_name: 'Kim', hours: 1, rate: 20, amount: 20 },
   ], 'generate extras rebuild pass-through deduction money from the exclusive listing')
   assert.strictEqual(rebuiltExtras.cardExtraItems[0].wo_labour_deduction, 75)
@@ -806,8 +806,16 @@ function hoursCard(overrides) {
     'exclusive re-read fails closed when posted WO money is incomplete')
 
   const rebuildStart = html.indexOf('function _woLabourLineIsReshapedPassThrough')
-  const rebuildEnd = html.indexOf('function _rebuildOfflineJobCentricWorkOrderMoney')
+  const rebuildEnd = html.indexOf('// Submit the job-centric invoice:')
   assert(rebuildStart !== -1 && rebuildEnd > rebuildStart, 'offline extra rebuild helpers exist')
+  context._jobCentricPostedWorkOrderIds = function(items) {
+    const ids = []
+    ;(items || []).forEach(function(row) {
+      const id = String((row && (row.work_order_id || row.workOrderId)) || '').trim()
+      if (id && ids.indexOf(id) === -1) ids.push(id)
+    })
+    return ids
+  }
   vm.runInContext(html.slice(rebuildStart, rebuildEnd), context)
   const listingWo = {
     id: 'wo-1',
@@ -825,9 +833,57 @@ function hoursCard(overrides) {
   assert.ok(rebuiltSameName, 'listing rebuild succeeds when a 1h labour line shares a charge name')
   assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltSameName.wo_labour_lines)), [
     { trade_name: 'Israel', hours: 1, rate: 20, amount: 20 },
-    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
   ], 'user-added 1h labour for the same trade is kept beside the reshaped pass-through')
   assert.strictEqual(rebuiltSameName.wo_labour_deduction, 60)
+
+  const rebuiltLocalPass = context._rebuildJobCentricWorkOrderExtraFromListing({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+      { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    ],
+  }, listingWo)
+  assert.ok(rebuiltLocalPass, 'listing rebuild keeps a local paid-to-trade deduction')
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltLocalPass.wo_labour_lines)), [
+    { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+  ], 'user-added pass-throughs survive replay and only server-owned rows are replaced from the listing')
+  assert.strictEqual(rebuiltLocalPass.wo_labour_deduction, 55)
+
+  context._jobCards = [woCard({
+    work_order_id: 'wo-OTHER',
+    wo_allocated: 999,
+    wo_labour_lines: [{ trade_name: 'Stranger', hours: 8, rate: 50 }],
+  })]
+  const queued = {
+    action: 'generate_trade_invoice',
+    body: {
+      extra_items: [{
+        work_order_id: 'wo-1',
+        wo_allocated: 100,
+        wo_labour_lines: [
+          { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+          { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+        ],
+      }],
+      manual_assignments: [{ assignment_id: 'queued-a', hours: 2 }],
+    },
+  }
+  assert.strictEqual(context._rebuildOfflineJobCentricWorkOrderMoney(queued, { 'wo-1': listingWo }), true,
+    'offline replay rebuilds from the queued extra, not live job cards')
+  assert.strictEqual(queued.body.extra_items.length, 1)
+  assert.strictEqual(queued.body.extra_items[0].work_order_id, 'wo-1',
+    'a live card for another WO does not replace the queued work order')
+  assert.strictEqual(queued.body.manual_assignments[0].assignment_id, 'queued-a',
+    'queued manual assignments are not replaced from live cards')
+  assert.strictEqual(JSON.stringify(queued.body.extra_items).indexOf('wo-OTHER'), -1)
+  assert.strictEqual(JSON.stringify(queued.body.extra_items).indexOf('Stranger'), -1)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(queued.body.extra_items[0].wo_labour_lines)), [
+    { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+  ])
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -1419,8 +1475,8 @@ function hoursCard(overrides) {
         ), false, 'same extras in a different week are a different money fingerprint')
         assert.strictEqual(ctx._invoiceMoneyFingerprintMatches(
           { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40 }] }] },
-          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' }] }] }
-        ), true, 'the pass-through reshape marker is not part of the money fingerprint')
+          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', server_owned: true }] }] }
+        ), true, 'pass-through reshape and ownership markers are not part of the money fingerprint')
         assert.strictEqual(ctx._invoiceMatchesQueueIntent(
           { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
           { body: { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney } }

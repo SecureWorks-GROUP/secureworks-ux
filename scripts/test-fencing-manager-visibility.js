@@ -362,6 +362,9 @@ assert(!html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFi
   html.includes('_woAmountAsHoursRate') &&
   html.includes("pass.line_source = 'wo_pass_through'") &&
   html.includes('_woLabourLineIsReshapedPassThrough') &&
+  html.includes('_woQueuedLineAsLocalPassThrough') &&
+  /ln\.server_owned === false\) pass\.server_owned = false/.test(html) &&
+  /function _woCleanLabourLines[\s\S]*?server_owned === false/.test(html) &&
   !/hours === 1 && chargeNames/.test(html) &&
   !/wo_lump_lines: lumpLinesOut/.test(html),
   'invoice-level and hours-card lumps stay on final_deductions; WO deducts reshape to hours×rate fanout lines');
@@ -568,6 +571,16 @@ assert(html.includes('_jobCentricWorkOrdersStillExclusive') &&
   !html.includes('claim_work_order') &&
   !html.includes('exclusive_claim'),
   'job-centric generate re-reads WO can_invoice under the financial fence, rebuilds deduction money from that listing, and does not add a claim API');
+assert((function() {
+  var start = html.indexOf('function _rebuildOfflineJobCentricWorkOrderMoney');
+  var end = html.indexOf('// Submit the job-centric invoice:');
+  if (start === -1 || end <= start) return false;
+  var body = html.slice(start, end);
+  return body.includes('_rebuildJobCentricWorkOrderExtraFromListing') &&
+    !body.includes('_buildJobCentricPayload(_jobCards)') &&
+    !body.includes('_refreshJobCentricPostedWorkOrderMoney');
+})(),
+  'offline job-centric replay rebuilds each queued WO extra from the queued body plus listing data, not live job cards');
 assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
   'hydrate overwrites server-owned money and clears it when a WO id is stripped');
 assert(html.includes('_stripServerOwnedPassThroughs'),

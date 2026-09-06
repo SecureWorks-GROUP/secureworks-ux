@@ -512,7 +512,7 @@ test.describe('Henry job-centric submit', () => {
     const woExtra = (body.extra_items || []).find((item) => item.row_type === 'work_order');
     expect(woExtra).toBeTruthy();
     expect(woExtra.wo_labour_lines).toEqual([
-      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'wo-fence-charge-israel' }
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'wo-fence-charge-israel', server_owned: true }
     ]);
     expect(woExtra).not.toHaveProperty('wo_lump_lines');
     expect(woExtra).not.toHaveProperty('wo_lump_deduction');
@@ -631,7 +631,7 @@ test.describe('Henry job-centric submit', () => {
     const woExtra = (writes[0].body.extra_items || []).find((item) => item.row_type === 'work_order');
     expect(woExtra).toBeTruthy();
     expect(woExtra.wo_labour_lines).toEqual([
-      { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'wo-fence-charge-israel' }
+      { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'wo-fence-charge-israel', server_owned: true }
     ]);
     expect(woExtra.wo_labour_deduction).toBe(55);
   });

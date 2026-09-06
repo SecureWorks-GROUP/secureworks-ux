@@ -5330,8 +5330,8 @@
         week_start: _normalizeInvoicePeriod(body.week_start || body.weekStart),
         week_ending: _normalizeInvoicePeriod(body.week_ending || body.weekEnding)
       }, function(key, value) {
-        // Client-only reshape marker — listing extras will not echo it.
-        if (key === 'line_source') return undefined;
+        // Client-only reshape / ownership markers — listing extras will not echo them.
+        if (key === 'line_source' || key === 'server_owned') return undefined;
         return value;
       });
     } catch (e) {
@@ -22132,6 +22132,8 @@
         if (!name && passAmount <= 0) continue;
         var pass = { trade_name: name, hours: 0, rate: 0, amount: passAmount, line_kind: 'wo_pass_through' };
         if (lines[i].source_line_id) pass.source_line_id = String(lines[i].source_line_id);
+        if (lines[i].server_owned === false) pass.server_owned = false;
+        else if (lines[i].server_owned === true) pass.server_owned = true;
         out.push(pass);
         continue;
       }
@@ -22164,16 +22166,19 @@
   }
   function _woLabourLinesForFanout(c) {
     var out = [];
-    _woCleanLabourLines(c).forEach(function(ln) {
+    // Walk raw card lines so pass-through ownership stays on the posted extra
+    // and named labour keeps its place beside those rows.
+    (Array.isArray(c && c.wo_labour_lines) ? c.wo_labour_lines : []).forEach(function(ln) {
       if (!ln) return;
       var name = String(ln.trade_name || '').replace(/\s+/g, ' ').trim();
       if (ln.line_kind === 'wo_pass_through') {
         var pass = _woAmountAsHoursRate(name, ln.amount);
-        if (pass) {
-          pass.line_source = 'wo_pass_through';
-          if (ln.source_line_id) pass.source_line_id = String(ln.source_line_id);
-          out.push(pass);
-        }
+        if (!pass) return;
+        pass.line_source = 'wo_pass_through';
+        if (ln.source_line_id) pass.source_line_id = String(ln.source_line_id);
+        if (ln.server_owned === false) pass.server_owned = false;
+        else if (ln.server_owned === true || ln.source_line_id) pass.server_owned = true;
+        out.push(pass);
         return;
       }
       var hours = Number(ln.hours);
@@ -22507,8 +22512,26 @@
 
   function _woLabourLineIsReshapedPassThrough(ln) {
     if (!ln) return false;
-    if (ln.line_kind === 'wo_pass_through') return true;
-    return String(ln.line_source || '') === 'wo_pass_through';
+    var isPass = ln.line_kind === 'wo_pass_through' || String(ln.line_source || '') === 'wo_pass_through';
+    if (!isPass) return false;
+    if (ln.server_owned === false) return false;
+    return !!(ln.source_line_id || ln.server_owned === true);
+  }
+
+  function _woQueuedLineAsLocalPassThrough(ln) {
+    if (!ln || ln.server_owned !== false) return null;
+    var isPass = ln.line_kind === 'wo_pass_through' || String(ln.line_source || '') === 'wo_pass_through';
+    if (!isPass) return null;
+    var amount = Number(ln.amount != null ? ln.amount : ln.rate);
+    if (!(amount > 0)) return null;
+    return {
+      trade_name: ln.trade_name,
+      line_kind: 'wo_pass_through',
+      amount: amount,
+      hours: null,
+      rate: null,
+      server_owned: false
+    };
   }
 
   function _rebuildJobCentricWorkOrderExtraFromListing(item, wo) {
@@ -22520,6 +22543,11 @@
     var named = [];
     (item.wo_labour_lines || []).forEach(function(ln) {
       if (!ln || _woLabourLineIsReshapedPassThrough(ln)) return;
+      var localPass = _woQueuedLineAsLocalPassThrough(ln);
+      if (localPass) {
+        named.push(localPass);
+        return;
+      }
       var hours = Number(ln.hours);
       var rate = Number(ln.rate);
       if (!(hours > 0) || !(rate > 0)) return;
@@ -22557,25 +22585,22 @@
   function _rebuildOfflineJobCentricWorkOrderMoney(item, byId) {
     if (!item || item.action !== 'generate_trade_invoice') return true;
     var extras = ((item.body || {}).extra_items) || [];
-    var posted = _jobCentricPostedWorkOrderIds(extras);
+    var posted = typeof _jobCentricPostedWorkOrderIds === 'function'
+      ? _jobCentricPostedWorkOrderIds(extras)
+      : [];
     if (!posted.length) return true;
-    if (typeof _refreshJobCentricPostedWorkOrderMoney !== 'function') return true;
-    var money = _refreshJobCentricPostedWorkOrderMoney(byId, posted);
-    if (!money.ok) return false;
-    if (typeof _buildJobCentricPayload === 'function' && typeof _jobCards !== 'undefined' && _jobCards && _jobCards.length) {
-      var rebuilt = _buildJobCentricPayload(_jobCards);
-      if (rebuilt.error) return false;
-      var kept = extras.filter(function(row) {
-        return !String((row && (row.work_order_id || row.workOrderId)) || '').trim();
-      });
-      item.body = Object.assign({}, item.body || {}, {
-        extra_items: rebuilt.cardExtraItems.concat(kept),
-        manual_assignments: rebuilt.manualAssignments || (item.body && item.body.manual_assignments)
-      });
-      return true;
+    var i;
+    for (i = 0; i < posted.length; i++) {
+      var wo = byId && byId[posted[i]];
+      if (!wo || typeof _workOrderHasCompleteMoney !== 'function' || !_workOrderHasCompleteMoney(wo)) {
+        return false;
+      }
     }
+    // Rebuild each queued WO extra from the queued body + fresh listing.
+    // Never substitute live `_jobCards` — a reload, other tab, or other week
+    // can omit queued work orders or overwrite them with current form values.
     var next = [];
-    for (var i = 0; i < extras.length; i++) {
+    for (i = 0; i < extras.length; i++) {
       var extra = extras[i];
       var woId = String((extra && (extra.work_order_id || extra.workOrderId)) || '');
       if (!woId) {

@@ -1489,9 +1489,13 @@ function hoursCard(overrides) {
       'a generic ok draft response stays unresolved without a draft identity')
     tabA._settleFinancialWriteSend('save_trade_invoice_draft', pending, { ok: true, draft_id: 'draft-xtab' }, null)
     tabA._endFinancialWrite('save_trade_invoice_draft')
-    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
-      'a durable draft identity clears the parked write after the local write ends')
-    console.log('OK — cross-tab invoice single-flight and queue merge')
+    assert.strictEqual(tabA._financialWriteHeldLocally(), false,
+      'the local draft write ends after a durable identity')
+    return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
+      assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
+        'a durable draft identity clears the parked write after the local write ends')
+      console.log('OK — cross-tab invoice single-flight and queue merge')
+    })
   }).catch(function(err) {
     console.error(err)
     process.exitCode = 1

@@ -8124,40 +8124,163 @@
     }
   };
 
+  // <trade-scope-media>
+  // TRD-5: trades see quote/job writing + every job video. Pricing ($ / rates /
+  // totals) stays off SOW/quote surfaces unless canSeePricing() (office).
+  // Prefers TRD-4 enriched trade_job_detail media (playable_url / signed_url)
+  // and still plays whatever data.media already carries.
   function isVideoUrl(url) {
     return /\.(mp4|mov|webm|avi|mkv|3gp)(\?|$)/i.test(url || '');
   }
 
-  function isScopeVideo(m) {
+  function mediaPlayableUrl(m) {
+    if (!m) return '';
+    var candidates = [m.playable_url, m.signed_url, m.public_url, m.url, m.file_url, m.download_url, m.storage_url];
+    for (var i = 0; i < candidates.length; i++) {
+      var url = candidates[i];
+      if (!url) continue;
+      var s = String(url);
+      if (/^(https?:\/\/|data:|blob:|\/)/i.test(s)) return s;
+    }
+    return '';
+  }
+
+  function isWalkthroughMedia(m) {
     if (!m) return false;
-    if (String(m.type || '').toLowerCase() === 'video') return true;
-    if (/walkthrough/i.test(String(m.label || ''))) return true;
-    return isVideoUrl(m.storage_url);
+    return /walkthrough/i.test([m.label, m.role, m.phase, m.kind, m.type, m.file_name, m.name, m.title].filter(Boolean).join(' '));
+  }
+
+  function isJobVideo(m) {
+    if (!m) return false;
+    var type = String(m.type || m.kind || m.media_type || '').toLowerCase();
+    if (type === 'video' || type === 'walkthrough') return true;
+    if (m.is_video === true) return true;
+    if (/video\//i.test(String(m.mime_type || m.content_type || ''))) return true;
+    if (isWalkthroughMedia(m) && type !== 'photo' && type !== 'image' && type !== 'pdf') return true;
+    return isVideoUrl(mediaPlayableUrl(m)) || isVideoUrl(m.storage_url) || isVideoUrl(m.file_name);
+  }
+
+  function isScopeVideo(m) {
+    return isJobVideo(m);
+  }
+
+  function collectJobMedia(data) {
+    var out = [];
+    function pushAll(arr) {
+      if (!arr || !arr.length) return;
+      for (var i = 0; i < arr.length; i++) if (arr[i]) out.push(arr[i]);
+    }
+    pushAll(data && data.media);
+    pushAll(data && data.videos);
+    pushAll(data && data.job && data.job.media);
+    pushAll(data && data.documents);
+    var packs = (data && (data.quote_packs || data.quotePacks)) || [];
+    packs.forEach(function(p) {
+      pushAll(p && p.media);
+      pushAll(p && p.videos);
+    });
+    return out;
+  }
+
+  function listJobVideos(data) {
+    var seen = {};
+    var videos = [];
+    collectJobMedia(data).forEach(function(m) {
+      if (!isJobVideo(m)) return;
+      var key = mediaPlayableUrl(m) || m.id || m.storage_path || [m.label, m.file_name, m.name].filter(Boolean).join('|');
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      videos.push(m);
+    });
+    videos.sort(function(a, b) {
+      var aw = isWalkthroughMedia(a) ? 0 : 1;
+      var bw = isWalkthroughMedia(b) ? 0 : 1;
+      return aw - bw;
+    });
+    return videos;
+  }
+
+  function scopeJsonFlagsWalkthrough(scope, depth) {
+    depth = depth || 0;
+    if (!scope || depth > 3) return false;
+    if (typeof scope === 'string') {
+      try { scope = JSON.parse(scope); } catch (e) { return false; }
+    }
+    if (typeof scope !== 'object') return false;
+    var keys = [
+      'walkthrough', 'has_walkthrough', 'walkthrough_recorded', 'walkthroughRecorded',
+      'hasWalkthrough', 'scope_walkthrough', 'video_walkthrough', 'walkthrough_url',
+      'walkthroughUrl', 'walkthrough_video', 'walkthroughVideo', 'recorded_walkthrough'
+    ];
+    for (var i = 0; i < keys.length; i++) {
+      if (!Object.prototype.hasOwnProperty.call(scope, keys[i])) continue;
+      var v = scope[keys[i]];
+      if (v === true) return true;
+      if (typeof v === 'number' && v > 0) return true;
+      if (typeof v === 'string' && v.trim() && v !== '0' && String(v).toLowerCase() !== 'false') return true;
+      if (v && typeof v === 'object') return true;
+    }
+    var video = scope.video;
+    if (video && (video.walkthrough || video.has_walkthrough || video.url || video.src || video.playable_url)) return true;
+    return scopeJsonFlagsWalkthrough(scope.job, depth + 1)
+      || scopeJsonFlagsWalkthrough(scope.media, depth + 1)
+      || scopeJsonFlagsWalkthrough(scope.config, depth + 1)
+      || scopeJsonFlagsWalkthrough(scope.notes, depth + 1);
   }
 
   function pickScopeVideo(data) {
-    var media = (data && data.media) || [];
-    var videos = media.filter(isScopeVideo);
+    var videos = listJobVideos(data);
     if (videos.length === 0) return null;
-    var labelled = videos.filter(function(m) { return /walkthrough/i.test(String(m.label || '')); });
+    var labelled = videos.filter(isWalkthroughMedia);
     return labelled[0] || videos[0];
   }
 
+  function walkthroughMissingCopy() {
+    return 'Walkthrough recorded. File not available.';
+  }
+
   function renderScopeVideoCard(data) {
-    var video = pickScopeVideo(data);
-    var h = '<div class="detail-section">';
-    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Scope video</div>';
-    if (!video || !video.storage_url) return '';
-    h += '<video controls playsinline preload="metadata" style="width:100%;max-height:240px;background:#111;border-radius:8px" src="' + esc(video.storage_url) + '"></video>';
-    if (video.label) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(video.label) + '</div>';
+    var videos = listJobVideos(data);
+    var playable = videos.filter(function(v) { return mediaPlayableUrl(v); });
+    var flagged = scopeJsonFlagsWalkthrough(data && data.job && data.job.scope_json);
+    var hasWalkthroughUrl = playable.some(isWalkthroughMedia);
+    if (playable.length === 0 && !flagged) return '';
+    var h = '<div class="detail-section" data-job-videos>';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Job videos</div>';
+    playable.forEach(function(video) {
+      var url = mediaPlayableUrl(video);
+      var label = video.label || video.file_name || video.name || (isWalkthroughMedia(video) ? 'Walkthrough' : 'Job video');
+      h += '<div data-job-video="' + esc(label) + '" style="margin-bottom:10px">';
+      h += '<video controls playsinline preload="metadata" style="width:100%;max-height:240px;background:#111;border-radius:8px" src="' + esc(url) + '"></video>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(label) + '</div>';
+      h += '</div>';
+    });
+    if (flagged && !hasWalkthroughUrl) {
+      h += '<div data-walkthrough-missing style="padding:12px;background:var(--sw-light);border-radius:8px;font-size:13px;color:var(--sw-text)">' + walkthroughMissingCopy() + '</div>';
+    }
     h += '</div>';
     return h;
   }
 
+  function redactTradePriceText(text) {
+    var raw = String(text == null ? '' : text);
+    if (typeof canSeePricing === 'function' && canSeePricing()) return raw;
+    return raw
+      .replace(/\$\s*[\d,]+(?:\.\d+)?/g, '')
+      .replace(/\b(?:AUD|A\$)\s*[\d,]+(?:\.\d+)?/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function tradeCanSeePricing() {
+    return typeof canSeePricing === 'function' && canSeePricing();
+  }
+
   function renderQuotePacks(data) {
-    var packs = data.quote_packs || data.quotePacks || [];
+    var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     if (!packs.length) return '';
-    var h = '<div class="detail-section">';
+    var showPrices = tradeCanSeePricing();
+    var h = '<div class="detail-section" data-quote-packs>';
     h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Quotes sent</div>';
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">Every quote that went to the client, without the price. Open the one you are building.</div>';
     packs.forEach(function(pack, idx) {
@@ -8169,23 +8292,26 @@
       var sent = pack.sent_at ? String(pack.sent_at).slice(0, 10) : '';
       h += '<details ' + (open ? 'open' : '') + ' style="border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-card)">';
       h += '<summary style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none">';
-      h += '<span style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(qn) + '</span>';
+      h += '<span data-quote-number style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(qn) + '</span>';
       h += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;background:' + badgeBg + ';color:' + badgeColor + ';padding:2px 8px;border-radius:4px">' + badge + '</span>';
       if (sent) h += '<span style="margin-left:auto;font-size:11px;color:var(--sw-text-sec)">' + esc(sent) + '</span>';
       h += '</summary>';
-      if (pack.summary) h += '<div style="padding:0 12px 8px;font-size:12px;color:var(--sw-text-sec)">' + esc(pack.summary) + '</div>';
+      if (pack.summary) h += '<div style="padding:0 12px 8px;font-size:12px;color:var(--sw-text-sec)">' + esc(redactTradePriceText(pack.summary)) + '</div>';
       h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
       (pack.items || []).forEach(function(item) {
+        var cols = showPrices ? '3' : '2';
         if (item.kind === 'note') {
-          h += '<tr><td colspan="3" style="padding:8px 12px;background:var(--sw-light);white-space:pre-wrap">' + esc(item.description || '') + '</td></tr>';
+          h += '<tr><td colspan="' + cols + '" style="padding:8px 12px;background:var(--sw-light);white-space:pre-wrap">' + esc(redactTradePriceText(item.description || '')) + '</td></tr>';
           return;
         }
         var qty = item.quantity ? (item.quantity + (item.unit ? ' ' + item.unit : '')) : '';
-        var rate = item.unit_price != null ? '$' + Number(item.unit_price).toLocaleString('en-AU', { minimumFractionDigits: item.unit_price % 1 ? 2 : 0, maximumFractionDigits: 2 }) : '';
         h += '<tr style="border-top:1px solid var(--sw-border)">';
-        h += '<td style="padding:8px 12px">' + esc(item.description || '') + '</td>';
+        h += '<td style="padding:8px 12px">' + esc(redactTradePriceText(item.description || '')) + '</td>';
         h += '<td style="padding:8px 8px;text-align:right;white-space:nowrap;color:var(--sw-text-sec)">' + esc(qty) + '</td>';
-        h += '<td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:600">' + rate + '</td>';
+        if (showPrices) {
+          var rate = item.unit_price != null ? '$' + Number(item.unit_price).toLocaleString('en-AU', { minimumFractionDigits: item.unit_price % 1 ? 2 : 0, maximumFractionDigits: 2 }) : '';
+          h += '<td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:600">' + rate + '</td>';
+        }
         h += '</tr>';
       });
       h += '</table>';
@@ -8194,6 +8320,54 @@
     h += '</div>';
     return h;
   }
+
+  function renderCompactWorkOrderItems(data, opts) {
+    opts = opts || {};
+    var wo = (data && (data.workOrder || data.work_order)) || {};
+    var items = wo.scope_items;
+    if (!items || !Array.isArray(items) || items.length === 0) return '';
+    var showPrices = opts.showPrices != null ? !!opts.showPrices : tradeCanSeePricing();
+    var title = opts.title || 'Work order items';
+    var h = '<div class="detail-section" data-scope-wo-items>';
+    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">' + esc(title) + '</div>';
+    if (wo.wo_number) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px">' + esc(wo.wo_number) + '</div>';
+    items.forEach(function(item) {
+      if (typeof item === 'string') {
+        h += '<div class="scope-item">' + esc(redactTradePriceText(item)) + '</div>';
+        return;
+      }
+      var label = item.item || item.description || item.name || 'Work item';
+      var qty = item.qty || item.quantity;
+      var unit = item.unit ? ' ' + item.unit : '';
+      h += '<div class="scope-item"><strong>' + esc(redactTradePriceText(label)) + '</strong>';
+      if (qty) h += ' <span style="color:var(--sw-text-sec)">× ' + esc(String(qty) + unit) + '</span>';
+      if (showPrices) {
+        var rate = item.unit_price || item.rate;
+        if (rate) h += ' <span style="color:var(--sw-text-sec)">@ $' + Number(rate).toLocaleString() + '</span>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  var TradeScopeMedia = {
+    isVideoUrl: isVideoUrl,
+    mediaPlayableUrl: mediaPlayableUrl,
+    isWalkthroughMedia: isWalkthroughMedia,
+    isJobVideo: isJobVideo,
+    isScopeVideo: isScopeVideo,
+    collectJobMedia: collectJobMedia,
+    listJobVideos: listJobVideos,
+    scopeJsonFlagsWalkthrough: scopeJsonFlagsWalkthrough,
+    pickScopeVideo: pickScopeVideo,
+    walkthroughMissingCopy: walkthroughMissingCopy,
+    renderScopeVideoCard: renderScopeVideoCard,
+    redactTradePriceText: redactTradePriceText,
+    renderQuotePacks: renderQuotePacks,
+    renderCompactWorkOrderItems: renderCompactWorkOrderItems
+  };
+  // </trade-scope-media>
 
   function renderMediaThumb(src, fullUrl, alt, gallerySelector) {
     if (isVideoUrl(fullUrl)) {
@@ -8576,8 +8750,8 @@
       h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px"><strong>Notes:</strong> ' + esc(client.notes) + '</div>';
     }
 
-    // Labour budget — show installer their own days/rate only; customer quote price removed
-    if (job.scope_json.pricing && job.scope_json.pricing.labour) {
+    // Labour budget — office only. Allocated trades never see $/rates on SOW.
+    if (canSeePricing() && job.scope_json.pricing && job.scope_json.pricing.labour) {
       var p = job.scope_json.pricing;
       var lab = p.labour;
       if (lab.days && lab.dayRate) {
@@ -9557,6 +9731,7 @@
     h += renderScopeVideoCard(data);
 
     // ── 2. CREW WORK ORDER — scope_items table ──
+    var showWoPrices = canSeePricing();
     if (wo && wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
       h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
@@ -9567,27 +9742,31 @@
       h += '<tr style="border-bottom:2px solid var(--sw-dark);text-align:left">';
       h += '<th style="padding:8px 4px;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Item</th>';
       h += '<th style="padding:8px 4px;text-align:right;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Qty</th>';
-      h += '<th style="padding:8px 4px;text-align:right;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Rate</th>';
-      h += '<th style="padding:8px 4px;text-align:right;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Total</th>';
+      if (showWoPrices) {
+        h += '<th style="padding:8px 4px;text-align:right;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Rate</th>';
+        h += '<th style="padding:8px 4px;text-align:right;color:var(--sw-text-sec);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Total</th>';
+      }
       h += '</tr>';
       var woTotal = 0;
       wo.scope_items.forEach(function(item) {
         if (typeof item === 'string') {
-          h += '<tr style="border-bottom:1px solid var(--sw-border)"><td colspan="4" style="padding:8px 4px">' + esc(item) + '</td></tr>';
+          h += '<tr style="border-bottom:1px solid var(--sw-border)"><td colspan="' + (showWoPrices ? '4' : '2') + '" style="padding:8px 4px">' + esc(redactTradePriceText(item)) + '</td></tr>';
         } else {
           var effectiveRate = item.unit_price || item.rate || 0;
           var effectiveQty = item.quantity || item.qty || 1;
           var lineTotal = item.total || (effectiveQty * effectiveRate) || 0;
           woTotal += lineTotal;
           h += '<tr style="border-bottom:1px solid var(--sw-border)">';
-          h += '<td style="padding:8px 4px;color:var(--sw-text)">' + esc(item.item || item.description || item.name || '') + '</td>';
+          h += '<td style="padding:8px 4px;color:var(--sw-text)">' + esc(redactTradePriceText(item.item || item.description || item.name || '')) + '</td>';
           h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (item.qty || item.quantity || '') + (item.unit ? ' ' + esc(item.unit) : '') + '</td>';
-          h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (effectiveRate ? '$' + Number(effectiveRate).toLocaleString() : '') + '</td>';
-          h += '<td style="padding:8px 4px;text-align:right;font-weight:700;color:var(--sw-text)">' + (lineTotal ? '$' + Number(lineTotal).toLocaleString() : '') + '</td>';
+          if (showWoPrices) {
+            h += '<td style="padding:8px 4px;text-align:right;color:var(--sw-text)">' + (effectiveRate ? '$' + Number(effectiveRate).toLocaleString() : '') + '</td>';
+            h += '<td style="padding:8px 4px;text-align:right;font-weight:700;color:var(--sw-text)">' + (lineTotal ? '$' + Number(lineTotal).toLocaleString() : '') + '</td>';
+          }
           h += '</tr>';
         }
       });
-      if (woTotal > 0) {
+      if (showWoPrices && woTotal > 0) {
         h += '<tr style="border-top:2px solid var(--sw-dark)">';
         h += '<td colspan="3" style="padding:12px 4px;font-weight:700;font-size:14px;color:var(--sw-dark)">CREW PAYMENT</td>';
         h += '<td style="padding:12px 4px;text-align:right;font-weight:800;font-size:18px;color:var(--sw-orange)">$' + Number(woTotal).toLocaleString() + '</td>';
@@ -10022,6 +10201,12 @@
   function renderJobTab_scope(data, phase, container) {
     var job = data.job;
     var h = '';
+
+    // Walkthrough + every other job video, then quote writing + WO lines
+    // (Tier 1 default tab). Prices stay off unless canSeePricing().
+    h += renderScopeVideoCard(data);
+    h += renderQuotePacks(data);
+    h += renderCompactWorkOrderItems(data);
 
     // 1. Scope of Work (primary content — includes dimensions)
     h += renderEnhancedScope(data, phase);
@@ -11909,6 +12094,7 @@
     h += '<div style="font-size:17px;font-weight:800;color:var(--sw-dark)">' + esc(job.job_number || wo.wo_number || 'MakeSafe') + '</div></div>';
     if (woUrl) h += '<a href="' + esc(woUrl) + '" target="_blank" rel="noopener" style="flex:0 0 auto;background:var(--sw-dark);color:#fff;border-radius:8px;padding:9px 12px;text-decoration:none;font-size:12px;font-weight:800;min-height:44px;display:flex;align-items:center">Open full WO ↗</a>';
     h += '</div>';
+    h += renderScopeVideoCard(data);
     if (woUrl) {
       h += '<div style="background:#fff;border:1px solid #FDBA74;border-radius:10px;overflow:hidden;margin:8px 0 12px;box-shadow:0 1px 3px rgba(0,0,0,.08)">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:#FFEDD5;border-bottom:1px solid #FDBA74;font-size:12px;color:#9A3412;font-weight:800">';
@@ -11943,11 +12129,11 @@
       h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px">' + esc(wo.special_instructions || ms.special_instructions || job.notes) + '</div>';
     }
     if (wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
-      h += '<div style="margin-top:10px;border-top:1px solid #FDBA74;padding-top:8px">';
+      h += '<div style="margin-top:10px;border-top:1px solid #FDBA74;padding-top:8px" data-scope-wo-items>';
       wo.scope_items.slice(0, 8).forEach(function(item) {
         var label = typeof item === 'string' ? item : (item.item || item.description || item.name || 'Work item');
         var qty = (typeof item === 'object' && (item.qty || item.quantity)) ? ' × ' + (item.qty || item.quantity) + (item.unit ? ' ' + item.unit : '') : '';
-        h += '<div style="font-size:13px;padding:4px 0;color:var(--sw-text)">• ' + esc(label + qty) + '</div>';
+        h += '<div style="font-size:13px;padding:4px 0;color:var(--sw-text)">• ' + esc(redactTradePriceText(label) + qty) + '</div>';
       });
       if (wo.scope_items.length > 8) h += '<div style="font-size:12px;color:var(--sw-text-sec);padding-top:4px">+' + (wo.scope_items.length - 8) + ' more item(s) — open full WO above.</div>';
       h += '</div>';

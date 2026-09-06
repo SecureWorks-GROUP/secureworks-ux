@@ -6,10 +6,11 @@
     "test:trade-today": "node scripts/test-trade-today-run-list.js",
     "test:alyx-visibility": "node scripts/test-alyx-trade-visibility.js",
     "test:crew-lead-core": "node scripts/test-trade-crew-lead-core.js",
+    "test:trade-scope-media": "node scripts/test-trade-scope-media.js",
     "test:makesafe-intake-sweep": "node scripts/test-makesafe-intake-sweep-explicit.js",
     "test:ops-job-detail-refresh": "node scripts/test-ops-job-detail-autorefresh.js",
     "test:makesafe-reporting-cockpit": "node modules/ops-makesafe-reporting-cockpit.smoke.mjs",
-    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:alyx-visibility && npm run test:crew-lead-core && npm run test:makesafe-intake-sweep && npm run test:ops-job-detail-refresh && npm run test:makesafe-reporting-cockpit && playwright test",
+    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:alyx-visibility && npm run test:crew-lead-core && npm run test:trade-scope-media && npm run test:makesafe-intake-sweep && npm run test:ops-job-detail-refresh && npm run test:makesafe-reporting-cockpit && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {

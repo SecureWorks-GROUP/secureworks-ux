@@ -15,6 +15,45 @@ const vm = require('vm')
 
 const html = fs.readFileSync('trade.html', 'utf8')
 
+function createWebLockBroker() {
+  const state = Object.create(null)
+  function slot(name) {
+    if (!state[name]) state[name] = { held: false, waiters: [] }
+    return state[name]
+  }
+  function release(name) {
+    const s = slot(name)
+    s.held = false
+    const next = s.waiters.shift()
+    if (next) next()
+  }
+  function acquire(name, cb, resolve, reject) {
+    const s = slot(name)
+    if (s.held) {
+      s.waiters.push(function() { acquire(name, cb, resolve, reject) })
+      return
+    }
+    s.held = true
+    Promise.resolve().then(function() { return cb({ name: name }) }).then(function(value) {
+      release(name)
+      resolve(value)
+    }, function(err) {
+      release(name)
+      reject(err)
+    })
+  }
+  return {
+    request: function(name, opts, cb) {
+      if (typeof opts === 'function') { cb = opts; opts = {} }
+      opts = opts || {}
+      if (opts.ifAvailable && slot(name).held) return Promise.resolve(cb(null))
+      return new Promise(function(resolve, reject) {
+        acquire(name, cb, resolve, reject)
+      })
+    }
+  }
+}
+
 const startMark = '// [JC-PAYLOAD-BUILD-START]'
 const endMark = '// [JC-PAYLOAD-BUILD-END]'
 const start = html.indexOf(startMark)
@@ -441,6 +480,7 @@ function hoursCard(overrides) {
   assert(qStart !== -1 && qEnd > qStart, 'offline invoice queue markers exist')
   const store = { sw_action_queue: '[]' }
   const sent = []
+  const webLocks = createWebLockBroker()
   const ctx = {
     localStorage: {
       getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
@@ -482,7 +522,7 @@ function hoursCard(overrides) {
     },
     toast: function() {},
     friendlyError: function(err) { return String((err && err.message) || err || '') },
-    navigator: { onLine: true },
+    navigator: { onLine: true, locks: webLocks },
     setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
     _invalidateAssignmentLifecycleCaches: function() {},
   }
@@ -815,6 +855,31 @@ function hoursCard(overrides) {
           ],
         } }
       ), false, 'job+week is not landed when the queued write has a deduction extra')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }]
+      }), false, 'job identity extras without labour/lump stay slot-matchable')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{
+            job_number: 'SWF-A',
+            wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+            wo_labour_deduction: 287.5
+          }]
+        } }
+      ), false, 'job+week is not landed when the queued write has WO labour lines')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          work_order_blocks: [{ labour_deductions: [{ user_id: 'u1', hours: 2 }] }]
+        } }
+      ), false, 'job+week is not landed when nested WO labour deductions differ')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-A', wo_labour_deduction: 40 }]
+      }), true, 'a positive WO labour deduction is money-affecting')
       ctx.api = function(action) {
         if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
         return Promise.resolve({ ok: true })
@@ -919,7 +984,72 @@ function hoursCard(overrides) {
           }).then(function(deductLanded) {
             assert.strictEqual(deductLanded, null,
               'a one-job invoice does not land a queued write that still carries a deduction extra')
-            return Promise.resolve()
+            ctx.api = function(action) {
+              if (action === 'my_trade_invoices') {
+                return Promise.resolve({
+                  invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+                })
+              }
+              return Promise.resolve({ ok: true })
+            }
+            return ctx._reconcileAmbiguousInvoiceAction({
+              action: 'generate_trade_invoice',
+              body: {
+                week_start: '2026-09-07',
+                extra_items: [{
+                  job_number: 'SWF-A',
+                  wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+                  wo_labour_deduction: 287.5
+                }]
+              }
+            })
+          }).then(function(labourLanded) {
+            assert.strictEqual(labourLanded, null,
+              'a one-job invoice does not land a queued write that still carries WO labour deductions')
+            ctx.api = function(action) {
+              if (action === 'my_trade_invoices') {
+                return Promise.resolve({
+                  invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+                })
+              }
+              return Promise.resolve({ ok: true })
+            }
+            return ctx._reconcileAmbiguousInvoiceAction({
+              action: 'generate_trade_invoice',
+              body: {
+                week_start: '2026-09-07',
+                extra_items: [{ job_number: 'SWF-A' }],
+                work_order_blocks: [{ labour_deductions: [{ user_id: 'u1', hours: 2 }] }]
+              }
+            })
+          }).then(function(blockLabourLanded) {
+            assert.strictEqual(blockLabourLanded, null,
+              'a one-job invoice does not land a queued write with nested WO-block labour deductions')
+            const savedLocks = ctx.navigator.locks
+            delete ctx.navigator.locks
+            assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), false,
+              'financial writes fail closed when Web Locks are unavailable')
+            let noLockSends = 0
+            ctx.api = function(action) {
+              if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+                return Promise.resolve({ work_orders: [], invoices: [] })
+              }
+              noLockSends += 1
+              return Promise.resolve({ ok: true })
+            }
+            store.sw_action_queue = JSON.stringify([{
+              id: 'iq_nolock',
+              client_request_id: 'iq_nolock',
+              action: 'generate_trade_invoice',
+              user_id: 'bob',
+              body: { week_start: '2026-09-07' }
+            }])
+            return ctx.syncOfflineQueue().then(function() {
+              assert.strictEqual(noLockSends, 0,
+                'offline invoice replay does not POST money without Web Locks')
+              ctx.navigator.locks = savedLocks
+              return Promise.resolve()
+            })
           }).then(function() {
 
           let persistSends = 0
@@ -984,7 +1114,8 @@ function hoursCard(overrides) {
       get length() { return Object.keys(store).length },
     }
   }
-  function makeQueueCtx(userId) {
+  const sharedLocks = createWebLockBroker()
+  function makeQueueCtx(userId, locks) {
     const sent = []
     const ctx = {
       localStorage: sharedLocalStorage(),
@@ -1014,7 +1145,7 @@ function hoursCard(overrides) {
       },
       toast: function() {},
       friendlyError: function(err) { return String((err && err.message) || err || '') },
-      navigator: { onLine: true },
+      navigator: locks ? { onLine: true, locks: locks } : { onLine: true },
       setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
       setInterval: function(fn, ms) { return setInterval(fn, ms) },
       clearInterval: function(id) { return clearInterval(id) },
@@ -1026,52 +1157,44 @@ function hoursCard(overrides) {
     return ctx
   }
 
-  const tabA = makeQueueCtx('bob')
-  const tabB = makeQueueCtx('bob')
+  const tabA = makeQueueCtx('bob', sharedLocks)
+  const tabB = makeQueueCtx('bob', sharedLocks)
+  const noLockTab = makeQueueCtx('bob')
   assert.notStrictEqual(tabA._crossTabId, tabB._crossTabId, 'each tab has its own cross-tab id')
+  assert.strictEqual(noLockTab._beginFinancialWrite('generate_trade_invoice'), false,
+    'begin fails closed when Web Locks are unavailable')
   assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
-  assert.strictEqual(tabB._beginFinancialWrite('generate_trade_invoice'), false,
-    'another tab cannot begin the same invoice action while the lock is held')
-  assert.strictEqual(tabB._guardFinancialWrite('generate_trade_invoice', { week_start: '2026-09-07' }), true,
-    'another tab treats a live financial lock as already pending')
-  tabA._endFinancialWrite('generate_trade_invoice')
-  assert.strictEqual(tabB._beginFinancialWrite('generate_trade_invoice'), true,
-    'the financial lock is released for the other tab')
-  tabB._endFinancialWrite('generate_trade_invoice')
-
-  store.sw_fin_write = JSON.stringify({
-    owner: 'dead-tab',
-    ts: Date.now() - 200000,
-    nonce: 'stale',
-    v: 3,
-  })
-  assert.strictEqual(tabA._beginFinancialWrite('submit_trade_invoice'), true,
-    'a stale other-tab financial lock does not block a new send')
-  tabA._endFinancialWrite('submit_trade_invoice')
-  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), false,
+    'same-tab invoice generate/submit is still single-flight')
   assert.strictEqual(tabA._beginFinancialWrite('delete_trade_invoice'), false,
     'delete cannot start while another invoice write is in flight in this tab')
-  assert.strictEqual(tabB._beginFinancialWrite('delete_trade_invoice'), false,
-    'another tab cannot delete while a generate lock is held')
-  tabA._endFinancialWrite('generate_trade_invoice')
   assert.strictEqual(tabB._beginFinancialWrite('delete_trade_invoice'), true,
-    'delete can start after the shared financial lock is released')
+    'begin is local; cross-tab exclusivity is the Web Lock around the POST')
   tabB._endFinancialWrite('delete_trade_invoice')
+  tabA._endFinancialWrite('generate_trade_invoice')
 
-  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
-  const heldRaw = store.sw_fin_write
-  assert.strictEqual(tabB._compareAndSwapStorageLock('sw_fin_write', null, {
+  store.sw_action_queue_lock = JSON.stringify({
+    owner: tabA._crossTabId,
+    ts: Date.now(),
+    nonce: 'held',
+    v: 2,
+    fence: tabA._crossTabId + ':claim:held:1'
+  })
+  store['sw_action_queue_lock__cas'] = tabA._crossTabId + ':claim:held:1'
+  const heldRaw = store.sw_action_queue_lock
+  assert.strictEqual(tabB._compareAndSwapStorageLock('sw_action_queue_lock', null, {
     owner: tabB._crossTabId,
     ts: Date.now(),
     nonce: 'stale-writer',
     v: 1,
     prev: 0,
-  }, 'claim'), false, 'a stale empty-expected claim cannot overwrite an active lease')
-  assert.strictEqual(store.sw_fin_write, heldRaw, 'active lease bytes stay intact after a stale claim')
-  store['sw_fin_write__cas'] = 'other-tab:claim:x:0'
-  assert.strictEqual(tabA._storageLockStillOurs('sw_fin_write'), false,
-    'a stolen fence means the lease is no longer ours')
-  tabA._endFinancialWrite('generate_trade_invoice')
+  }, 'claim'), false, 'a stale empty-expected claim cannot overwrite an active queue lease')
+  assert.strictEqual(store.sw_action_queue_lock, heldRaw, 'active queue lease bytes stay intact after a stale claim')
+  store['sw_action_queue_lock__cas'] = 'other-tab:claim:x:0'
+  assert.strictEqual(tabA._storageLockStillOurs('sw_action_queue_lock'), false,
+    'a stolen fence means the queue lease is no longer ours')
+  delete store.sw_action_queue_lock
+  delete store['sw_action_queue_lock__cas']
 
   tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] })
   tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] })
@@ -1138,11 +1261,21 @@ function hoursCard(overrides) {
     body: { week_start: '2026-09-07' },
   }])
   store.sw_action_queue_inbox_ids = '[]'
-  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
-  Promise.resolve(tabB.syncOfflineQueue()).then(function() {
-    assert.strictEqual(blockedSends, 0, 'replay does not POST while another tab holds sw_fin_write')
-    tabA._endFinancialWrite('generate_trade_invoice')
-
+  let releaseHold
+  const holdLock = new Promise(function(resolve) { releaseHold = resolve })
+  let enteredHold
+  const holding = new Promise(function(resolve) { enteredHold = resolve })
+  const held = tabA._withFinancialWebLock('generate_trade_invoice', function() {
+    enteredHold()
+    return holdLock
+  }, { acquire: true })
+  holding.then(function() {
+    return tabB.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(blockedSends, 0, 'replay does not POST while another tab holds the financial Web Lock')
+    releaseHold()
+    return held
+  }).then(function() {
     tabA.api = gatedApi
     tabB.api = gatedApi
     store.sw_action_queue = JSON.stringify([{

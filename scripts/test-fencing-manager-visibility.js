@@ -342,8 +342,9 @@ assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwned
   'logout clears invoice actions once the account is gone');
 assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
   'offline invoice replay re-checks ownership and auth generation immediately before send');
-assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_financialInvoiceApi') && html.includes('_withFinancialWebLock'),
-  'direct invoice writes pass a context-bound beforeSend guard and take a financial Web Lock when available');
+assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_financialInvoiceApi') && html.includes('_withFinancialWebLock') &&
+  html.includes('_webLocksAvailable'),
+  'direct invoice writes pass a context-bound beforeSend guard and require a financial Web Lock');
 assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
   'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
 assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded') &&
@@ -360,14 +361,26 @@ assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQu
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
 assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock') && html.includes('_writeInboxItem') &&
   html.includes('navigator.locks') && html.includes('_claimStorageLock'),
-  'financial single-flight and queue mutations are cross-tab locked (Web Locks or storage claim plus inbox merge)');
-assert(/function _beginFinancialWrite\(action\) \{[\s\S]*?_claimStorageLock\(_financialWriteLockKey\(key\)/.test(html) &&
-  /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
-  html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
-  html.includes('_compareAndSwapStorageLock') &&
-  html.includes("{ acquire: true }") &&
-  html.includes('_allStorageLeasesOwned'),
-  'invoice begin/guard honor another tab\'s in-flight financial write claim');
+  'queue mutations stay cross-tab locked (Web Locks or storage claim plus inbox merge)');
+assert((function() {
+  const begin = html.slice(html.indexOf('function _beginFinancialWrite(action)'), html.indexOf('function _endFinancialWrite'));
+  const webLock = html.slice(html.indexOf('function _withFinancialWebLock'), html.indexOf('function _withCrossTabLock'));
+  const extras = html.slice(html.indexOf('function _invoicePayloadHasMoneyAffectingExtras'), html.indexOf('function _invoicePayloadNeedsFullFingerprint'));
+  return begin.includes('_webLocksAvailable()') &&
+    !begin.includes('_claimStorageLock(_financialWriteLockKey') &&
+    webLock.includes('if (!_webLocksAvailable())') &&
+    webLock.includes('_invoiceWriteLeaseLostError()') &&
+    !webLock.includes('    return run();\n  }') &&
+    extras.includes('wo_labour_lines') &&
+    extras.includes('wo_labour_deduction') &&
+    extras.includes('labour_deductions') &&
+    /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
+    html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
+    html.includes('_compareAndSwapStorageLock') &&
+    html.includes("{ acquire: true }") &&
+    html.includes('_allStorageLeasesOwned');
+})(),
+  'money writes fail closed without Web Locks; WO labour deductions require a full fingerprint');
 assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
   'financial queue items carry a local request id and reconcile before retrying a timeout');
 assert(html.includes('_handleFinancialWriteFailure') && html.includes('_offlineInvoiceHasExactTarget'),

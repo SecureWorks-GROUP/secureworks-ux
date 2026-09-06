@@ -4431,6 +4431,10 @@
     return _FINANCIAL_WRITE_LOCK_KEY;
   }
 
+  function _webLocksAvailable() {
+    return !!(typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function');
+  }
+
   function _sharedFinancialWriteHeld(action) {
     var held = _storageGetJson(_financialWriteLockKey(action), null);
     if (!held || !held.owner || held.owner === _crossTabId) return false;
@@ -4603,8 +4607,8 @@
     return true;
   }
 
-  function _financialLeaseOwned(action) {
-    return _storageLockStillOurs(_financialWriteLockKey(action));
+  function _financialLeaseOwned(_action) {
+    return _webLocksAvailable() && _financialWriteHeldLocally();
   }
 
   function _invoiceWriteLeaseLostError() {
@@ -4656,25 +4660,24 @@
       } else if (!_financialWriteHeldLocally() || !_financialLeaseOwned(action)) {
         return Promise.reject(_invoiceWriteLeaseLostError());
       }
-      _pushStorageLease(_financialWriteLockKey(action));
       return Promise.resolve().then(fn).then(function(result) {
-        _popStorageLease(_financialWriteLockKey(action));
         if (claimed) _endFinancialWrite(action);
         return result;
       }, function(err) {
-        _popStorageLease(_financialWriteLockKey(action));
         if (claimed) _endFinancialWrite(action);
         throw err;
       });
     };
-    var locks = (typeof navigator !== 'undefined' && navigator.locks) || null;
-    if (locks && typeof locks.request === 'function') {
-      return locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
-        if (!lock) return Promise.reject(_invoiceWriteLeaseLostError());
-        return run();
-      });
+    // Money-mutating invoice writes and offline replay require Web Locks.
+    // A localStorage read/check/write/rollback is not CAS and can erase
+    // another tab's live lease mid-POST. Fail closed when locks are missing.
+    if (!_webLocksAvailable()) {
+      return Promise.reject(_invoiceWriteLeaseLostError());
     }
-    return run();
+    return navigator.locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
+      if (!lock) return Promise.reject(_invoiceWriteLeaseLostError());
+      return run();
+    });
   }
 
   function _withCrossTabLock(name, fn) {
@@ -4894,16 +4897,34 @@
   function _invoicePayloadHasMoneyAffectingExtras(body) {
     body = body || {};
     if (Array.isArray(body.final_deductions) && body.final_deductions.length) return true;
-    var extras = body.extra_items || [];
-    for (var i = 0; i < extras.length; i++) {
-      var row = extras[i] || {};
+    if (Array.isArray(body.wo_labour_lines) && body.wo_labour_lines.length) return true;
+    if (Number(body.wo_labour_deduction) > 0) return true;
+    function collectionHasMoney(rows) {
+      if (Array.isArray(rows)) return rows.length > 0;
+      if (rows && typeof rows === 'object') return Object.keys(rows).length > 0;
+      return false;
+    }
+    function rowHasMoney(row) {
+      if (!row || typeof row !== 'object') return false;
       if (row.source === 'invoice_final_deduction') return true;
+      if (row.kind === 'final_deduction') return true;
       if (Array.isArray(row.wo_lump_lines) && row.wo_lump_lines.length) return true;
+      if (Array.isArray(row.wo_labour_lines) && row.wo_labour_lines.length) return true;
+      if (Number(row.wo_lump_deduction) > 0) return true;
+      if (Number(row.wo_labour_deduction) > 0) return true;
+      if (collectionHasMoney(row.labour_deductions)) return true;
+      if (Array.isArray(row.labour_lines) && row.labour_lines.length) return true;
       var rate = Number(row.unit_rate != null ? row.unit_rate : row.rate);
       var amount = Number(row.amount);
       if ((row.unit_rate != null || row.rate != null) && rate < 0) return true;
       if (row.amount != null && amount < 0) return true;
+      if (Array.isArray(row.extra_items) && row.extra_items.some(rowHasMoney)) return true;
+      if (Array.isArray(row.work_order_blocks) && row.work_order_blocks.some(rowHasMoney)) return true;
+      return false;
     }
+    if ((body.extra_items || []).some(rowHasMoney)) return true;
+    if ((body.work_order_blocks || []).some(rowHasMoney)) return true;
+    if (collectionHasMoney(body.labour_deductions)) return true;
     return false;
   }
 
@@ -5092,22 +5113,19 @@
   function _beginFinancialWrite(action) {
     var key = String(action || '');
     if (!key || _financialWriteInFlight[key]) return false;
+    if (!_webLocksAvailable()) return false;
     if (_financialWriteHeldLocally()) {
-      if (key !== 'attach_invoice_pdf' || !_storageLockStillOurs(_financialWriteLockKey(key))) return false;
-      _financialWriteInFlight[key] = { timer: null, nested: true };
+      if (key !== 'attach_invoice_pdf') return false;
+      _financialWriteInFlight[key] = { nested: true };
       return true;
     }
-    if (!_claimStorageLock(_financialWriteLockKey(key), _FINANCIAL_WRITE_LOCK_TTL_MS)) return false;
-    _financialWriteInFlight[key] = { timer: _startStorageLockRenew(_financialWriteLockKey(key)) };
+    _financialWriteInFlight[key] = { nested: false };
     return true;
   }
 
   function _endFinancialWrite(action) {
     var key = String(action || '');
-    var state = _financialWriteInFlight[key];
-    if (state && state.timer) clearInterval(state.timer);
     delete _financialWriteInFlight[key];
-    if (!_financialWriteHeldLocally()) _releaseStorageLock(_financialWriteLockKey(key));
   }
 
   function _beginSaveTradeInvoiceDraft() {
@@ -5282,7 +5300,7 @@
           return api(item.action, null, item.body, {
             beforeSend: function() {
               if (!_offlineInvoiceReplayAllowed(item, replayCtx)) return false;
-              if (!_allStorageLeasesOwned() || !_financialLeaseOwned(item.action)) {
+              if (!_webLocksAvailable() || !_financialLeaseOwned(item.action)) {
                 throw _invoiceWriteLeaseLostError();
               }
               return true;
@@ -6145,7 +6163,7 @@
     return {
       beforeSend: function() {
         if (!_invoiceApiCurrent(ctx)) return false;
-        if (!_allStorageLeasesOwned() || (_financialWriteHeldLocally() && !_financialLeaseOwned(action))) {
+        if (!_webLocksAvailable() || (_financialWriteHeldLocally() && !_financialLeaseOwned(action))) {
           throw _invoiceWriteLeaseLostError();
         }
         return true;
@@ -6154,6 +6172,7 @@
   }
 
   function _financialInvoiceApi(action, params, body, ctx) {
+    if (!_webLocksAvailable()) return Promise.reject(_invoiceWriteLeaseLostError());
     return _withFinancialWebLock(action, function() {
       return api(action, params, body, _invoiceApiOptions(ctx, action));
     }, { acquire: false });

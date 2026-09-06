@@ -4282,12 +4282,186 @@
     return _invDraftOwnerId();
   }
 
+  // Cross-tab fencing: in-memory locks cannot stop a second Trade tab from
+  // POSTing the same invoice, and unlocked read/append/write can drop a
+  // queued financial action. Web Locks serialise sync when available; a
+  // localStorage claim plus an inbox merge covers browsers without it.
+  var _crossTabId = 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  var _FINANCIAL_WRITE_LOCK_TTL_MS = 120000;
+  var _QUEUE_LOCK_TTL_MS = 2000;
+  var _SYNC_LOCK_TTL_MS = 120000;
+  var _INBOX_INDEX_KEY = 'sw_action_queue_inbox_ids';
+  var _QUEUE_LOCK_KEY = 'sw_action_queue_lock';
+
+  function _storageGetJson(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (raw == null || raw === '') return fallback;
+      return JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function _storageRemove(key) {
+    try {
+      if (typeof localStorage.removeItem === 'function') localStorage.removeItem(key);
+      else localStorage.setItem(key, '');
+    } catch (e) {}
+  }
+
+  function _claimStorageLock(key, ttl) {
+    var now = Date.now();
+    var held = _storageGetJson(key, null);
+    if (held && held.owner && held.owner !== _crossTabId && (now - Number(held.ts || 0)) < ttl) {
+      return false;
+    }
+    var claim = { owner: _crossTabId, ts: now, nonce: Math.random().toString(36).slice(2, 10) };
+    try { localStorage.setItem(key, JSON.stringify(claim)); } catch (e) { return false; }
+    var confirm = _storageGetJson(key, null);
+    return !!(confirm && confirm.owner === _crossTabId && confirm.nonce === claim.nonce);
+  }
+
+  function _releaseStorageLock(key) {
+    var held = _storageGetJson(key, null);
+    if (held && held.owner === _crossTabId) _storageRemove(key);
+  }
+
+  function _financialWriteLockKey(action) {
+    return 'sw_fin_write_' + String(action || '');
+  }
+
+  function _sharedFinancialWriteHeld(action) {
+    var held = _storageGetJson(_financialWriteLockKey(action), null);
+    if (!held || !held.owner || held.owner === _crossTabId) return false;
+    return (Date.now() - Number(held.ts || 0)) < _FINANCIAL_WRITE_LOCK_TTL_MS;
+  }
+
+  function _inboxItemKey(id) {
+    return 'sw_action_queue_inbox_' + String(id || '');
+  }
+
+  function _readInboxIndex() {
+    var ids = _storageGetJson(_INBOX_INDEX_KEY, []);
+    if (!Array.isArray(ids)) return [];
+    return ids.map(String).filter(Boolean);
+  }
+
+  function _writeInboxIndex(ids) {
+    try { localStorage.setItem(_INBOX_INDEX_KEY, JSON.stringify(ids || [])); } catch (e) {}
+  }
+
+  function _writeInboxItem(item) {
+    if (!item || !item.id) return;
+    try { localStorage.setItem(_inboxItemKey(item.id), JSON.stringify(item)); } catch (e) { return; }
+    var ids = _readInboxIndex();
+    if (ids.indexOf(item.id) === -1) {
+      ids.push(item.id);
+      _writeInboxIndex(ids);
+    }
+  }
+
+  function _listInboxItemsFromIds(ids) {
+    var items = [];
+    for (var i = 0; i < (ids || []).length; i++) {
+      var item = _storageGetJson(_inboxItemKey(ids[i]), null);
+      if (item && item.id) items.push(item);
+    }
+    return items;
+  }
+
+  function _clearInboxIds(ids) {
+    var drop = {};
+    (ids || []).forEach(function(id) { drop[String(id)] = true; });
+    for (var i = 0; i < (ids || []).length; i++) _storageRemove(_inboxItemKey(ids[i]));
+    _writeInboxIndex(_readInboxIndex().filter(function(id) { return !drop[id]; }));
+  }
+
+  function _mergeQueueById(queue, extras) {
+    var seen = {};
+    var merged = [];
+    function add(item) {
+      if (!item) return;
+      if (!item.id) {
+        merged.push(item);
+        return;
+      }
+      if (seen[item.id]) return;
+      seen[item.id] = true;
+      merged.push(item);
+    }
+    (queue || []).forEach(add);
+    (extras || []).forEach(add);
+    return merged;
+  }
+
+  function _readOfflineQueueRaw() {
+    try {
+      var queue = JSON.parse(localStorage.getItem('sw_action_queue') || '[]');
+      return Array.isArray(queue) ? queue : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _writeOfflineQueueRaw(queue) {
+    localStorage.setItem('sw_action_queue', JSON.stringify(queue || []));
+  }
+
   function _readOfflineQueue() {
-    try { return JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch (e) { return []; }
+    return _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(_readInboxIndex()));
   }
 
   function _writeOfflineQueue(queue) {
-    localStorage.setItem('sw_action_queue', JSON.stringify(queue || []));
+    _writeOfflineQueueRaw(queue);
+  }
+
+  function _mutateOfflineQueue(mutator) {
+    var apply = function() {
+      var absorbed = _readInboxIndex().slice();
+      var start = _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed));
+      var next = typeof mutator === 'function' ? mutator(start.slice()) : start;
+      if (!Array.isArray(next)) next = start;
+      _writeOfflineQueueRaw(next);
+      _clearInboxIds(absorbed);
+      return next;
+    };
+    if (_claimStorageLock(_QUEUE_LOCK_KEY, _QUEUE_LOCK_TTL_MS)) {
+      try { return apply(); }
+      finally { _releaseStorageLock(_QUEUE_LOCK_KEY); }
+    }
+    return apply();
+  }
+
+  function _withStorageLockAsync(name, ttl, fn) {
+    var key = String(name || '') + '_lock';
+    var start = Date.now();
+    var attempt = function() {
+      if (_claimStorageLock(key, ttl)) {
+        return Promise.resolve().then(fn).then(function(result) {
+          _releaseStorageLock(key);
+          return result;
+        }, function(err) {
+          _releaseStorageLock(key);
+          throw err;
+        });
+      }
+      if (Date.now() - start > ttl) return Promise.resolve();
+      return new Promise(function(resolve) {
+        setTimeout(function() { resolve(attempt()); }, 50);
+      });
+    };
+    return attempt();
+  }
+
+  function _withCrossTabLock(name, fn) {
+    var locks = (typeof navigator !== 'undefined' && navigator.locks) || null;
+    if (locks && typeof locks.request === 'function') {
+      return locks.request(name, { mode: 'exclusive' }, function() {
+        return Promise.resolve().then(fn);
+      });
+    }
+    return _withStorageLockAsync(name, _SYNC_LOCK_TTL_MS, fn);
   }
 
   function _offlineInvoiceOwnedByCurrentAccount(item) {
@@ -4333,15 +4507,15 @@
   }
 
   function _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount() {
-    var queue = _readOfflineQueue();
-    var kept = [];
-    for (var i = 0; i < queue.length; i++) {
-      var item = queue[i];
-      if (_isOfflineInvoiceAction(item && item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) continue;
-      kept.push(item);
-    }
-    if (kept.length !== queue.length) _writeOfflineQueue(kept);
-    return kept;
+    return _mutateOfflineQueue(function(queue) {
+      var kept = [];
+      for (var i = 0; i < queue.length; i++) {
+        var item = queue[i];
+        if (_isOfflineInvoiceAction(item && item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) continue;
+        kept.push(item);
+      }
+      return kept;
+    });
   }
 
   function _newOfflineQueueItemId() {
@@ -4435,6 +4609,7 @@
   }
 
   function _financialWriteAlreadyPending(action, body) {
+    if (_sharedFinancialWriteHeld(action)) return true;
     var queue = _readOfflineQueue();
     for (var i = 0; i < queue.length; i++) {
       var item = queue[i];
@@ -4477,20 +4652,46 @@
 
   function _removeOfflineQueueItem(id) {
     if (!id) return;
-    _writeOfflineQueue(_readOfflineQueue().filter(function(item) {
-      return !item || item.id !== id;
-    }));
+    _mutateOfflineQueue(function(queue) {
+      return queue.filter(function(item) {
+        return !item || item.id !== id;
+      });
+    });
   }
 
   function _persistAmbiguousFinancialWrite(action, body) {
-    var before = _readOfflineQueue().length;
-    queueOfflineAction(action, body);
-    var after = _readOfflineQueue();
-    if (after.length <= before) return null;
-    var item = after[after.length - 1];
-    item.ambiguous = true;
-    _writeOfflineQueue(after);
-    return item;
+    if (blockedForeignJobWrite(action, null, body)) return null;
+    if (_isOfflineInvoiceAction(action) && !_offlineInvoiceOwnerId()) return null;
+    var item = _ensureOfflineQueueItemMeta({
+      action: action,
+      body: body,
+      ts: new Date().toISOString(),
+      ambiguous: true
+    });
+    if (_isOfflineInvoiceAction(action)) item.user_id = _offlineInvoiceOwnerId();
+    var created = null;
+    _writeInboxItem(item);
+    _mutateOfflineQueue(function(queue) {
+      for (var i = 0; i < queue.length; i++) {
+        var existing = queue[i];
+        if (!existing || existing.action !== action) continue;
+        if (_isOfflineInvoiceAction(action) && !_offlineInvoiceOwnedByCurrentAccount(existing)) continue;
+        if (existing.id !== item.id && _sameFinancialWriteIntent(existing.body, body)) {
+          existing.ambiguous = true;
+          created = existing;
+          return queue.filter(function(row) { return !row || row.id !== item.id; });
+        }
+        if (existing.id === item.id) {
+          existing.ambiguous = true;
+          created = existing;
+          return queue;
+        }
+      }
+      queue.push(item);
+      created = item;
+      return queue;
+    });
+    return created;
   }
 
   var _financialWriteInFlight = {};
@@ -4498,12 +4699,15 @@
   function _beginFinancialWrite(action) {
     var key = String(action || '');
     if (!key || _financialWriteInFlight[key]) return false;
+    if (!_claimStorageLock(_financialWriteLockKey(key), _FINANCIAL_WRITE_LOCK_TTL_MS)) return false;
     _financialWriteInFlight[key] = true;
     return true;
   }
 
   function _endFinancialWrite(action) {
-    delete _financialWriteInFlight[String(action || '')];
+    var key = String(action || '');
+    delete _financialWriteInFlight[key];
+    _releaseStorageLock(_financialWriteLockKey(key));
   }
 
   function _beginSaveTradeInvoiceDraft() {
@@ -4564,28 +4768,29 @@
     (remaining || []).forEach(function(item) {
       if (item && item.id) remainingById[item.id] = item;
     });
-    var latest = _readOfflineQueue();
-    var merged = [];
-    var seen = {};
-    latest.forEach(function(item) {
-      if (!item || !item.id) return;
-      if (snapshotIds[item.id]) {
-        if (remainingById[item.id] && !seen[item.id]) {
-          merged.push(remainingById[item.id]);
+    _mutateOfflineQueue(function(latest) {
+      var merged = [];
+      var seen = {};
+      latest.forEach(function(item) {
+        if (!item || !item.id) return;
+        if (snapshotIds[item.id]) {
+          if (remainingById[item.id] && !seen[item.id]) {
+            merged.push(remainingById[item.id]);
+            seen[item.id] = true;
+          }
+        } else if (!seen[item.id]) {
+          merged.push(item);
           seen[item.id] = true;
         }
-      } else if (!seen[item.id]) {
-        merged.push(item);
-        seen[item.id] = true;
-      }
+      });
+      (remaining || []).forEach(function(item) {
+        if (item && item.id && !seen[item.id]) {
+          merged.push(item);
+          seen[item.id] = true;
+        }
+      });
+      return merged;
     });
-    (remaining || []).forEach(function(item) {
-      if (item && item.id && !seen[item.id]) {
-        merged.push(item);
-        seen[item.id] = true;
-      }
-    });
-    _writeOfflineQueue(merged);
   }
 
   function queueOfflineAction(action, postBody) {
@@ -4595,15 +4800,20 @@
       var owner = _offlineInvoiceOwnerId();
       if (!owner) return;
     }
-    var queue = _readOfflineQueue();
     var item = _ensureOfflineQueueItemMeta({
       action: action,
       body: postBody,
       ts: new Date().toISOString()
     });
     if (_isOfflineInvoiceAction(action)) item.user_id = _offlineInvoiceOwnerId();
-    queue.push(item);
-    _writeOfflineQueue(queue);
+    _writeInboxItem(item);
+    _mutateOfflineQueue(function(queue) {
+      for (var i = 0; i < queue.length; i++) {
+        if (queue[i] && queue[i].id === item.id) return queue;
+      }
+      queue.push(item);
+      return queue;
+    });
   }
 
   var _offlineQueueSyncing = false;
@@ -4617,7 +4827,9 @@
     _offlineQueueSyncing = true;
     var run = function() {
       _offlineQueueSyncAgain = false;
-      return _syncOfflineQueueOnce().then(function() {
+      return _withCrossTabLock('sw_offline_queue_sync', function() {
+        return _syncOfflineQueueOnce();
+      }).then(function() {
         if (_offlineQueueSyncAgain) return run();
       });
     };
@@ -4671,10 +4883,16 @@
   }
 
   function _syncOfflineQueueOnce() {
-    var queue = _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
+    var queue = _mutateOfflineQueue(function(items) {
+      var kept = [];
+      for (var i = 0; i < items.length; i++) {
+        var row = items[i];
+        if (_isOfflineInvoiceAction(row && row.action) && !_offlineInvoiceOwnedByCurrentAccount(row)) continue;
+        kept.push(_ensureOfflineQueueItemMeta(row));
+      }
+      return kept;
+    });
     if (queue.length === 0) return Promise.resolve();
-    queue.forEach(_ensureOfflineQueueItemMeta);
-    _writeOfflineQueue(queue);
     var snapshot = queue.slice();
     var remaining = [];
     var chain = Promise.resolve();

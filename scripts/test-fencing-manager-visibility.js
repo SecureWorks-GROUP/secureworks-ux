@@ -346,6 +346,12 @@ assert(html.includes('function _invoiceApiOptions(ctx)') && (html.match(/_invoic
   'direct invoice writes pass a context-bound beforeSend guard');
 assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
+assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock') && html.includes('_writeInboxItem') &&
+  html.includes('navigator.locks') && html.includes('_claimStorageLock'),
+  'financial single-flight and queue mutations are cross-tab locked (Web Locks or storage claim plus inbox merge)');
+assert(/function _beginFinancialWrite\(action\) \{[\s\S]*?_claimStorageLock\(_financialWriteLockKey\(key\)/.test(html) &&
+  /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html),
+  'invoice begin/guard honor another tab\'s in-flight financial write claim');
 assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
   'financial queue items carry a local request id and reconcile before retrying a timeout');
 assert(html.includes('_handleFinancialWriteFailure') && html.includes('_offlineInvoiceHasExactTarget'),

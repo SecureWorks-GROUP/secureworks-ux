@@ -1,7 +1,13 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 
-test.use({ persona: 'fencing_manager', feedScenario: 'trade-weekly-work-order-invoice' });
+// Same Perth-week pin as the job-centric specs: weekly source rows are dated
+// from perthWeekMonday() and vanish on a UTC Sunday evening after AWST Monday.
+test.use({
+  persona: 'fencing_manager',
+  feedScenario: 'trade-weekly-work-order-invoice',
+  timezoneId: 'Australia/Perth'
+});
 
 const EXPECTED_SUBTOTALS = [
   '$164.60', '$244.20', '$48.60', '$2,510.00', '$274.00',

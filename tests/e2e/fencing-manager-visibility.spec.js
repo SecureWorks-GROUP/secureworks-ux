@@ -2,7 +2,7 @@ const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
-test.use({ persona: 'fencing_manager' });
+test.use({ persona: 'fencing_manager', timezoneId: 'Australia/Perth' });
 
 function requestsFor(feedRequests, action) {
   return feedRequests

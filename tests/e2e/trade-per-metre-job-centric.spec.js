@@ -2,7 +2,9 @@ const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
-test.use({ persona: 'fencing_manager' });
+// Fixtures date work orders from perthWeekMonday(). A UTC browser after Perth
+// Monday midnight filters that week out and the job-centric hydrate paints Hours.
+test.use({ persona: 'fencing_manager', timezoneId: 'Australia/Perth' });
 
 test('Henry Financial invoices jobs with WO-trade deducts and a 12% super preview', async ({ appPage: page, feedRequests }) => {
   await signIn(page, PERSONAS.fencing_manager);

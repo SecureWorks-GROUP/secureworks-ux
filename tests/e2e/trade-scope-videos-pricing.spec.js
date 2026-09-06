@@ -49,6 +49,7 @@ function patioDetail(overrides) {
     notes: [
       {
         id: 'e2e-note-price',
+        event_type: 'note',
         created_at: '2026-09-06T01:00:00.000Z',
         users: { name: 'Office' },
         detail_json: { text: 'Match existing fascia. Quote total $8,800.', from_ops: true },

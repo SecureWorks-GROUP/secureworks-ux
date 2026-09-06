@@ -537,11 +537,99 @@ function hoursCard(overrides) {
     assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
       'an unauthorized work-order invoice stays queued for a later authorized session')
 
-    ctx._user = null
-    ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
-    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,
-      'unsigned-in invoice writes are not parked')
-    console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+    ctx._user = { id: 'bob' }
+    ctx._invoiceAuthGen += 1
+    let sendCount = 0
+    let releaseFirst
+    const firstHold = new Promise(function(resolve) { releaseFirst = resolve })
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+        return Promise.resolve({ work_orders: [], invoices: [] })
+      }
+      sendCount += 1
+      return firstHold.then(function() { return {} })
+    }
+    store.sw_action_queue = JSON.stringify([
+      { id: 'iq_lock', client_request_id: 'iq_lock', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+    ])
+    const firstSync = ctx.syncOfflineQueue()
+    const overlapSync = ctx.syncOfflineQueue()
+    assert.strictEqual(ctx._offlineQueueSyncing, true, 'overlapping syncs share one in-flight lock')
+    assert.strictEqual(ctx._offlineQueueSyncAgain, true, 'a second caller asks for one follow-up pass')
+    releaseFirst()
+    return Promise.all([firstSync, overlapSync]).then(function() {
+      assert.strictEqual(sendCount, 1, 'single-flight lock sends a financial item once')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+          return Promise.resolve({ work_orders: [], invoices: [] })
+        }
+        sendCount += 1
+        ctx.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14' })
+        return Promise.resolve({})
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_old', client_request_id: 'iq_old', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      const afterMerge = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(sendCount, 1, 'the in-flight snapshot item is sent once')
+      assert.strictEqual(afterMerge.some((i) => i.id === 'iq_old'), false,
+        'a completed snapshot item is dropped')
+      assert.strictEqual(afterMerge.filter((i) => i.action === 'generate_trade_invoice' && i.body && i.body.week_start === '2026-09-14').length, 1,
+        'an invoice queued during replay survives persist merge')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{ week_start: '2026-09-07', status: 'submitted', xero_bill_id: 'xb1' }],
+          })
+        }
+        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+        sendCount += 1
+        const err = new Error('Aborted')
+        err.name = 'AbortError'
+        return Promise.reject(err)
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_to', client_request_id: 'iq_to', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      const timedOut = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(timedOut.length, 1, 'a timed-out invoice write stays queued')
+      assert.strictEqual(timedOut[0].ambiguous, true, 'timeout marks the financial item ambiguous')
+      assert.strictEqual(sendCount, 1, 'the first timeout is the only generate attempt')
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(sendCount, 1, 'ambiguous timeout does not resend after reconcile finds the invoice')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).length, 0,
+        'a reconciled invoice is dropped from the queue')
+
+      ctx._user = null
+      ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
+      assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,
+        'unsigned-in invoice writes are not parked')
+      console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+    })
   }).catch(function(err) {
     console.error(err)
     process.exitCode = 1

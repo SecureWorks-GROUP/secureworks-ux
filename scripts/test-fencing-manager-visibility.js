@@ -336,6 +336,12 @@ assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwned
   'logout clears invoice actions once the account is gone');
 assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
   'offline invoice replay re-checks ownership and auth generation immediately before send');
+assert(html.includes('function _invoiceApiOptions(ctx)') && (html.match(/_invoiceApiOptions\(ctx\)/g) || []).length >= 10,
+  'direct invoice writes pass a context-bound beforeSend guard');
+assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
+  'offline queue sync is single-flight and merges remaining items with the latest stored queue');
+assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
+  'financial queue items carry a local request id and reconcile before retrying a timeout');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
   'offline work-order invoice replay revalidates current WO authorization');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?queueOfflineAction\('submit_work_order_invoice'/.test(html),

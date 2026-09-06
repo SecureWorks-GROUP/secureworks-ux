@@ -508,7 +508,8 @@ test.describe('Henry job-centric submit', () => {
     expect(lump.job_id == null).toBeTruthy();
     expect(lump.description).toBe('Fuel / materials');
     expect(body.final_deductions).toEqual([
-      { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 }
+      { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 },
+      { description: 'Israel', quantity: 1, unit: 'ea', unit_rate: 40 }
     ]);
     expect(body).not.toHaveProperty('grand_total');
     expect(body).not.toHaveProperty('super_amount');

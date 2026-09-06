@@ -4857,9 +4857,14 @@
 
   function _isOfflineInvoiceTimeoutError(e) {
     if (!e) return false;
-    if (e.name === 'AbortError') return true;
+    var name = String(e.name || '');
     var msg = String((e && e.message) || e || '');
-    return /aborted|timeout|timed out|failed to fetch/i.test(msg);
+    if (name === 'AbortError' || name === 'TimeoutError' || name === 'NetworkError') return true;
+    // fetch() transport failures: Chrome "Failed to fetch", Safari "Load failed",
+    // Firefox "NetworkError when attempting to fetch resource". Treat as ambiguous
+    // so a committed-but-unacked POST is reconciled before any retry/enqueue.
+    if (name === 'TypeError' && /fetch|load failed|networkerror|network error|networkrequest/i.test(msg)) return true;
+    return /aborted|timeout|timed out|failed to fetch|load failed|networkerror|network error when attempting to fetch|network request failed|err_internet_disconnected|err_network_changed|err_connection_|ns_error_net|the internet connection appears to be offline/i.test(msg);
   }
 
   function _offlineInvoiceTargetId(item) {
@@ -5146,7 +5151,11 @@
       // Multi-job / deduction writes must not retry on a partial or empty
       // listing — that is how an A+B timeout can mint a second invoice.
       if (_invoicePayloadNeedsFullFingerprint(item)) return null;
-      return false;
+      // Exact-target write (draft/invoice/WO/job identity) with no listing match:
+      // fail closed. A just-committed invoice can be missing from an eventually
+      // consistent, paginated, or incomplete listing — treating that as "safe to
+      // resend" would POST a second invoice.
+      return null;
     });
   }
 
@@ -5244,11 +5253,15 @@
     _endFinancialWrite('save_trade_invoice_draft');
   }
 
+  function _financialWriteAborted(result) {
+    return !!(result && (result.outcome === 'cancelled' || result.outcome === 'locked'));
+  }
+
   function _handleFinancialWriteFailure(action, body, err, ctx) {
     if (err && err.code === 'invoice_replay_cancelled') return Promise.resolve({ outcome: 'cancelled' });
     if (err && err.code === 'invoice_write_locked') {
-      toast('Invoice send is already in progress.');
-      return Promise.resolve({ outcome: 'cancelled' });
+      toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
+      return Promise.resolve({ outcome: 'locked', reason: 'invoice_write_locked' });
     }
     if (!_invoiceApiCurrent(ctx)) return Promise.resolve({ outcome: 'cancelled' });
     // Timeout / Failed to fetch can land after the server committed, even when
@@ -5290,6 +5303,7 @@
       toast('Connection dropped while sending. Do not submit again — we will confirm it before retrying.');
       return;
     }
+    if (outcome === 'locked') return;
     if (outcome === 'failed') toast(friendlyError(err), true);
   }
 
@@ -18619,7 +18633,11 @@
     }).catch(function(err) {
       if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
       return _handleFinancialWriteFailure('save_trade_invoice_draft', payload, err, ctx).then(function(result) {
-        if (result.outcome === 'cancelled') return;
+        if (_financialWriteAborted(result)) {
+          state.busy = false;
+          renderWeeklyWorkOrderInvoice();
+          return;
+        }
         state.busy = false;
         _financialWriteFailureToast(result.outcome, err);
         renderWeeklyWorkOrderInvoice();
@@ -18696,7 +18714,11 @@
       }).catch(function(err) {
         if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('generate_trade_invoice', payload, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) {
+            state.busy = false;
+            renderWeeklyWorkOrderInvoice();
+            return;
+          }
           state.busy = false;
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') {
@@ -18776,7 +18798,10 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('submit_trade_invoice', hoursBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
+            return;
+          }
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') {
             loadHoursView();
@@ -19040,7 +19065,7 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('delete_trade_invoice', deleteBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) return;
           if (result.outcome === 'landed') {
             toast('Invoice already deleted');
             openInvoiceHistory();
@@ -21737,7 +21762,10 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('generate_trade_invoice', jobCentricBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) {
+            renderInvoiceBuilder();
+            return;
+          }
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') {
             openInvoiceHistory();
@@ -22040,7 +22068,7 @@
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;
       return _handleFinancialWriteFailure('save_trade_invoice_draft', draftBody, err, ctx).then(function(result) {
-        if (result.outcome === 'cancelled') return;
+        if (_financialWriteAborted(result)) return;
         _financialWriteFailureToast(result.outcome, err);
       });
     }).then(function() { _endSaveTradeInvoiceDraft(); }, function() { _endSaveTradeInvoiceDraft(); });
@@ -22174,7 +22202,10 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('generate_trade_invoice', builderBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) {
+            renderInvoiceBuilder();
+            return;
+          }
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') {
             openInvoiceHistory();
@@ -22485,7 +22516,7 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('generate_trade_invoice', legacyBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) return;
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') loadHoursView();
         });
@@ -24356,7 +24387,10 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('submit_work_order_invoice', woBody, err, ctx).then(function(result) {
-          if (result.outcome === 'cancelled') return;
+          if (_financialWriteAborted(result)) {
+            _reEnableBtn();
+            return;
+          }
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'queued_offline') {
             if (btn) { btn.disabled = true; btn.textContent = 'Queued (offline)'; }

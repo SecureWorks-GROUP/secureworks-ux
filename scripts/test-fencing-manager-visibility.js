@@ -418,8 +418,19 @@ assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQ
   html.includes('if (_invoicePayloadNeedsFullFingerprint(item)) return null;'),
   'an exact draft/invoice/work-order identity is treated as landed without a status filter');
 assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
-  html.includes('_persistAmbiguousFinancialWrite(action, body)'),
-  'timeout/Failed-to-fetch is marked ambiguous before any offline-only queue path');
+  html.includes('_persistAmbiguousFinancialWrite(action, body)') &&
+  /function _isOfflineInvoiceTimeoutError[\s\S]*?Load failed[\s\S]*?NetworkError when attempting to fetch/.test(html),
+  'timeout/Failed-to-fetch/Load failed/NetworkError is marked ambiguous before any offline-only queue path');
+assert(/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;[\s\S]{0,450}return null;/.test(html) &&
+  !/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;\s*return false;/.test(html),
+  'an exact-target write with no listing match fails closed instead of resending');
+assert(html.includes('_financialWriteAborted') &&
+  html.includes("outcome: 'locked'") &&
+  html.includes('Check Invoice history before trying again') &&
+  /submitWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?state\.busy = false/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?renderInvoiceBuilder\(\)/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?_reEnableBtn\(\)/.test(html),
+  'cross-tab invoice lock restores submit chrome and points the trade at Invoice history');
 assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.test(html),
   'saving an existing invoice draft sends its draft_id');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),

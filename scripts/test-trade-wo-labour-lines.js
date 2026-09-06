@@ -917,19 +917,85 @@ function hoursCard(overrides) {
         body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }] }
       })
     }).then(function(jobCentricUncommitted) {
-      assert.strictEqual(jobCentricUncommitted, false,
-        'a complete empty listing means the job-centric write is not landed and may retry')
-      let invoiceReads = 0
-      let resendCount = 0
-      ctx.api = function(action) {
-        if (action === 'my_trade_invoices') {
-          invoiceReads += 1
-          return Promise.resolve({})
+      assert.strictEqual(jobCentricUncommitted, null,
+        'an exact-target job-centric write stays unresolved when the listing cannot prove it landed')
+      const safariLoad = new Error('Load failed')
+      safariLoad.name = 'TypeError'
+      const firefoxNet = new Error('NetworkError when attempting to fetch resource')
+      firefoxNet.name = 'TypeError'
+      const chromeFetch = new Error('Failed to fetch')
+      chromeFetch.name = 'TypeError'
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(safariLoad), true,
+        'Safari Load failed is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(firefoxNet), true,
+        'Firefox NetworkError is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(chromeFetch), true,
+        'Chrome Failed to fetch is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(new Error('RATE_NOT_CONFIGURED')), false,
+        'a business error is not a transport failure')
+      const lockedErr = new Error('Invoice send is already in progress.')
+      lockedErr.code = 'invoice_write_locked'
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(lockedErr), false,
+        'lock contention is not a transport failure')
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'submit_work_order_invoice',
+        body: { work_order_id: 'wo-missing' }
+      }).then(function(woEmpty) {
+        assert.strictEqual(woEmpty, null,
+          'an exact WO target with no listing match fails closed instead of resending')
+        let woResends = 0
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+          if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-missing' }] })
+          woResends += 1
+          return Promise.resolve({ ok: true })
         }
-        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
-        resendCount += 1
-        return Promise.resolve({ ok: true })
-      }
+        store.sw_action_queue = JSON.stringify([{
+          id: 'iq_wo_empty',
+          client_request_id: 'iq_wo_empty',
+          action: 'submit_work_order_invoice',
+          user_id: 'bob',
+          ambiguous: true,
+          body: { work_order_id: 'wo-missing' }
+        }])
+        return ctx.syncOfflineQueue().then(function() {
+          assert.strictEqual(woResends, 0,
+            'ambiguous exact-target WO replay does not POST after a negative listing')
+          assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_wo_empty'), true,
+            'the unresolved WO write is retained for later reconciliation')
+          store.sw_action_queue = '[]'
+          return ctx._handleFinancialWriteFailure(
+            'generate_trade_invoice',
+            { week_start: '2026-09-07', extra_items: [{ description: 'Safari drop' }] },
+            safariLoad,
+            ctx._invoiceApiContext()
+          )
+        }).then(function(loadFailedResult) {
+          assert.strictEqual(loadFailedResult.outcome, 'queued_unresolved',
+            'Safari Load failed takes the ambiguous persist-and-reconcile path')
+          assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.ambiguous && i.body && i.body.extra_items), true,
+            'Load failed persists as an ambiguous write before any retry')
+          return ctx._handleFinancialWriteFailure(
+            'generate_trade_invoice',
+            { week_start: '2026-09-14' },
+            lockedErr,
+            ctx._invoiceApiContext()
+          )
+        }).then(function(lockedResult) {
+          assert.strictEqual(lockedResult.outcome, 'locked',
+            'cross-tab Web Lock contention is locked, not a retryable failure')
+          assert.strictEqual(ctx._financialWriteAborted(lockedResult), true)
+          let invoiceReads = 0
+          let resendCount = 0
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              invoiceReads += 1
+              return Promise.resolve({})
+            }
+            if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+            resendCount += 1
+            return Promise.resolve({ ok: true })
+          }
       store.sw_action_queue = JSON.stringify([{
         id: 'iq_incomplete',
         client_request_id: 'iq_incomplete',
@@ -1135,6 +1201,8 @@ function hoursCard(overrides) {
           })
         })
       })
+    })
+    })
     })
   }).catch(function(err) {
     console.error(err)

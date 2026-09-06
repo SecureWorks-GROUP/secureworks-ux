@@ -4060,6 +4060,7 @@
 
     setTimeout(function() {
       _user = null;
+      _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
       _currentJobLoaded = null;
@@ -4248,18 +4249,69 @@
   // OFFLINE ACTION QUEUE
   // ══════════════════════════════════════════════════
 
+  // [OFFLINE-INVOICE-QUEUE-START]
+  // Financial invoice writes are account-bound. A global queue can otherwise
+  // replay generate_trade_invoice / submit_work_order_invoice under the next
+  // signed-in user and bypass the invoice callback auth fences.
+  var _OFFLINE_INVOICE_ACTIONS = {
+    generate_trade_invoice: true,
+    submit_work_order_invoice: true,
+    submit_trade_invoice: true,
+    save_trade_invoice_draft: true,
+    delete_trade_invoice: true,
+    attach_invoice_pdf: true
+  };
+
+  function _isOfflineInvoiceAction(action) {
+    return !!_OFFLINE_INVOICE_ACTIONS[String(action || '')];
+  }
+
+  function _offlineInvoiceOwnerId() {
+    return _invDraftOwnerId();
+  }
+
+  function _readOfflineQueue() {
+    try { return JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch (e) { return []; }
+  }
+
+  function _writeOfflineQueue(queue) {
+    localStorage.setItem('sw_action_queue', JSON.stringify(queue || []));
+  }
+
+  function _offlineInvoiceOwnedByCurrentAccount(item) {
+    var owner = _offlineInvoiceOwnerId();
+    var queued = item && item.user_id != null ? String(item.user_id) : '';
+    return !!(owner && queued && owner === queued);
+  }
+
+  function _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount() {
+    var queue = _readOfflineQueue();
+    var kept = [];
+    for (var i = 0; i < queue.length; i++) {
+      var item = queue[i];
+      if (_isOfflineInvoiceAction(item && item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) continue;
+      kept.push(item);
+    }
+    if (kept.length !== queue.length) _writeOfflineQueue(kept);
+    return kept;
+  }
+
   function queueOfflineAction(action, postBody) {
     // A blocked view-only write must not be parked for later retry either.
     if (blockedForeignJobWrite(action, null, postBody)) return;
-    var queue = [];
-    try { queue = JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch(e) {}
-    queue.push({ action: action, body: postBody, ts: new Date().toISOString() });
-    localStorage.setItem('sw_action_queue', JSON.stringify(queue));
+    if (_isOfflineInvoiceAction(action)) {
+      var owner = _offlineInvoiceOwnerId();
+      if (!owner) return;
+    }
+    var queue = _readOfflineQueue();
+    var item = { action: action, body: postBody, ts: new Date().toISOString() };
+    if (_isOfflineInvoiceAction(action)) item.user_id = _offlineInvoiceOwnerId();
+    queue.push(item);
+    _writeOfflineQueue(queue);
   }
 
   function syncOfflineQueue() {
-    var queue = [];
-    try { queue = JSON.parse(localStorage.getItem('sw_action_queue') || '[]'); } catch(e) {}
+    var queue = _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
     if (queue.length === 0) return;
 
     var remaining = [];
@@ -4267,6 +4319,9 @@
 
     queue.forEach(function(item) {
       chain = chain.then(function() {
+        if (_isOfflineInvoiceAction(item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) {
+          return;
+        }
         return api(item.action, null, item.body).then(function() {
           // A queued lifecycle write has now become server truth. Drop the same
           // planning caches as an online write before the next Board entry.
@@ -4275,19 +4330,23 @@
           }
           // Success: don't add to remaining.
         }).catch(function() {
-          // Still failing — keep in queue
+          if (_isOfflineInvoiceAction(item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) return;
           remaining.push(item);
         });
       });
     });
 
-    chain.then(function() {
-      localStorage.setItem('sw_action_queue', JSON.stringify(remaining));
-      if (remaining.length === 0 && queue.length > 0) {
+    return chain.then(function() {
+      var persist = remaining.filter(function(item) {
+        return !_isOfflineInvoiceAction(item && item.action) || _offlineInvoiceOwnedByCurrentAccount(item);
+      });
+      _writeOfflineQueue(persist);
+      if (persist.length === 0 && queue.length > 0) {
         toast('Synced ' + queue.length + ' queued action' + (queue.length > 1 ? 's' : ''));
       }
     });
   }
+  // [OFFLINE-INVOICE-QUEUE-END]
 
   // Retry queue on connectivity restore + page load
   window.addEventListener('online', function() {
@@ -4539,6 +4598,7 @@
   function onLogin(profile) {
     _user = profile;
     if (!_user) { console.error('[trade] onLogin: profile is null!'); return; }
+    _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
     _userTier = _user.trade_tier || determineTier(_user.email);
     // Dispatcher = ops manager / admin. They get the see-all toggle and, for the
@@ -5023,12 +5083,14 @@
     _myJobsRequestToken++;
     resetCalendarSession();
     resetBoardSession();
+    _queueSyncScheduled = false;
     resetInvoiceSession();
   }
 
   function resetInvoiceSession() {
     _invoiceAuthGen++;
     _clearInvDraft();
+    _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
   }
 
   function _invoiceApiContext() {
@@ -26515,6 +26577,7 @@
     cloud.on('auth:logout', function() {
       resetJobListSession();
       _user = null;
+      _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
       _currentJobId = null;
       _currentJob = null;
       _currentJobLoaded = null;

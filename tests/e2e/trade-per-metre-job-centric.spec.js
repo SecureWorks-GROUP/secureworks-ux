@@ -409,6 +409,49 @@ test('a late invoice history response does not paint after logout', async ({ app
   await expect(page.locator('#viewLogin')).toBeVisible();
 });
 
+test('a queued invoice from another account is not replayed after sign-in', async ({ appPage: page, feedRequests }) => {
+  await page.evaluate(() => {
+    localStorage.setItem('sw_action_queue', JSON.stringify([
+      {
+        action: 'generate_trade_invoice',
+        user_id: 'other-trade',
+        ts: new Date().toISOString(),
+        body: {
+          week_start: '2026-01-05',
+          extra_items: [],
+          final_deductions: [{ description: 'CROSS-ACCOUNT-LEAK', quantity: 1, unit: 'ea', unit_rate: 99 }],
+          gst_on: false
+        }
+      },
+      {
+        action: 'generate_trade_invoice',
+        ts: new Date().toISOString(),
+        body: {
+          week_start: '2026-01-05',
+          extra_items: [],
+          final_deductions: [{ description: 'UNSTAMPED-LEAK', quantity: 1, unit: 'ea', unit_rate: 50 }],
+          gst_on: false
+        }
+      },
+      {
+        action: 'update_job_phase',
+        ts: new Date().toISOString(),
+        body: { assignmentId: 'keep-phase', phase: 'on_site' }
+      }
+    ]));
+  });
+
+  await signIn(page, PERSONAS.fencing_manager);
+
+  const queue = await page.evaluate(() => JSON.parse(localStorage.getItem('sw_action_queue') || '[]'));
+  expect(queue.some((item) => item.action === 'generate_trade_invoice')).toBe(false);
+  expect(queue.some((item) => item.action === 'update_job_phase')).toBe(true);
+
+  const invoiceWrites = feedRequests.filter((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice');
+  expect(invoiceWrites.some((entry) => JSON.stringify(entry.body || {}).includes('CROSS-ACCOUNT-LEAK'))).toBe(false);
+  expect(invoiceWrites.some((entry) => JSON.stringify(entry.body || {}).includes('UNSTAMPED-LEAK'))).toBe(false);
+});
+
 test.describe('stale restored work-order id', () => {
   test.use({ feedScenario: 'henry-job-centric-submit' });
 

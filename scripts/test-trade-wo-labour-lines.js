@@ -432,4 +432,67 @@ function hoursCard(overrides) {
     'hourly labour survives unauthorized strip')
 }
 
-console.log('OK — WO labour-line payload contract holds (25 scenarios)')
+// ── Offline invoice queue is account-bound ──
+{
+  const startMark = '// [OFFLINE-INVOICE-QUEUE-START]'
+  const endMark = '// [OFFLINE-INVOICE-QUEUE-END]'
+  const qStart = html.indexOf(startMark)
+  const qEnd = html.indexOf(endMark)
+  assert(qStart !== -1 && qEnd > qStart, 'offline invoice queue markers exist')
+  const store = { sw_action_queue: '[]' }
+  const sent = []
+  const ctx = {
+    localStorage: {
+      getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
+      setItem: function(k, v) { store[k] = String(v) },
+    },
+    _user: { id: 'alice' },
+    _invDraftOwnerId: function() { return String((ctx._user && (ctx._user.id || ctx._user.email)) || '') },
+    blockedForeignJobWrite: function() { return false },
+    api: function(action, _q, body) {
+      sent.push({ action: action, body: body })
+      return Promise.resolve({})
+    },
+    toast: function() {},
+    _invalidateAssignmentLifecycleCaches: function() {},
+  }
+  vm.createContext(ctx)
+  vm.runInContext(html.slice(qStart, qEnd), ctx)
+
+  ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [{ description: 'Alice fuel', unit_rate: 10 }] })
+  ctx.queueOfflineAction('update_job_phase', { assignmentId: 'a1', phase: 'on_site' })
+  let queued = JSON.parse(store.sw_action_queue)
+  assert.strictEqual(queued.length, 2)
+  assert.strictEqual(queued[0].user_id, 'alice')
+  assert.strictEqual(queued[0].action, 'generate_trade_invoice')
+  assert.strictEqual(queued[1].user_id, undefined, 'non-invoice actions stay unstamped')
+
+  ctx._user = { id: 'bob' }
+  queued = ctx._purgeOfflineInvoiceActionsNotOwnedByCurrentAccount()
+  assert.strictEqual(queued.filter((i) => i.action === 'generate_trade_invoice').length, 0,
+    'account switch drops the other account\'s invoice write')
+  assert.strictEqual(queued.filter((i) => i.action === 'update_job_phase').length, 1,
+    'non-invoice queued work survives an account switch')
+
+  store.sw_action_queue = JSON.stringify([
+    { action: 'generate_trade_invoice', user_id: 'alice', body: { leak: true } },
+    { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
+    { action: 'generate_trade_invoice', body: { unstamped: true } },
+  ])
+  ctx._user = { id: 'bob' }
+  sent.length = 0
+  const synced = ctx.syncOfflineQueue()
+  Promise.resolve(synced).then(function() {
+    assert.strictEqual(sent.length, 1, 'only the current account\'s invoice write is replayed')
+    assert.strictEqual(sent[0].action, 'submit_work_order_invoice')
+    assert.strictEqual(sent[0].body.work_order_id, 'wo-b')
+    ctx._user = null
+    ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,
+      'unsigned-in invoice writes are not parked')
+    console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+  }).catch(function(err) {
+    console.error(err)
+    process.exitCode = 1
+  })
+}

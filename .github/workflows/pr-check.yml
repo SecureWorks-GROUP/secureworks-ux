@@ -72,3 +72,6 @@ jobs:
 
       - name: Test WO labour-line payload contract
         run: node scripts/test-trade-wo-labour-lines.js
+
+      - name: Test trade scope videos and SOW price redaction
+        run: node scripts/test-trade-scope-media.js

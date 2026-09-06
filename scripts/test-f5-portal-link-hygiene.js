@@ -195,7 +195,29 @@ if (tradeNormStart < 0 || tradeNormEnd < 0) {
   // Complete mergeTradeExternalLinks body from source so we can call it.
   const mergeEnd = trade.indexOf('function linkifyTradeBodyText', tradeNormEnd);
   const full = trade.slice(tradeNormStart, mergeEnd);
-  const tctx = { URL };
+  const tctx = {
+    URL,
+    tradeSowLinkFromItem: function (item, fallbackLabel) {
+      if (item == null || item === '') return null;
+      if (typeof item === 'string') {
+        var s = String(item).trim();
+        return s ? { label: String(fallbackLabel || 'Open link').trim() || 'Open link', url: s } : null;
+      }
+      if (typeof item !== 'object') return null;
+      var url = item.url || item.href || item.link || item.pdf_url || item.signed_url || item.file_url || item.download_url || item.storage_url || '';
+      url = String(url || '').trim();
+      if (!url) return null;
+      var link = {
+        label: String(item.label || item.name || item.title || item.file_name || fallbackLabel || 'Open link').trim() || 'Open link',
+        url: url
+      };
+      ['kind', 'type', 'name', 'title', 'file_name', 'fileName', 'mime_type', 'content_type', 'role', 'document_type'].forEach(function (k) {
+        if (item[k] != null && item[k] !== '') link[k] = item[k];
+      });
+      return link;
+    },
+    filterTradeSowLinks: function (links) { return links || []; },
+  };
   vm.createContext(tctx);
   vm.runInContext(full, tctx);
   const links = tctx.mergeTradeExternalLinks([

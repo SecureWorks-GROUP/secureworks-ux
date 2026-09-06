@@ -7924,7 +7924,7 @@
 
     var crew = data.crew || [];
     var notes = data.notes || [];
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
 
     // Get unique scheduled dates sorted ascending
     var dateSet = {};
@@ -8195,6 +8195,26 @@
     return true;
   }
 
+  function isTradeGalleryMedia(m) {
+    return !!(m && isTradeVisibleMedia(m) && !isPricedWorkOrderDocument(m));
+  }
+
+  function filterTradeGalleryMedia(arr) {
+    return (arr || []).filter(isTradeGalleryMedia);
+  }
+
+  function isPricedWorkOrderLink(link) {
+    if (!link) return false;
+    if (typeof link === 'string') return /work[\s_-]*order|\bwo\b/i.test(link);
+    var blob = [link.label, link.url, link.href, link.link, link.kind, link.type, link.name, link.title].filter(Boolean).join(' ');
+    return /work[\s_-]*order|\bwo\b/i.test(blob);
+  }
+
+  function filterTradeSowLinks(links) {
+    if (tradeCanSeeSowPricing()) return links || [];
+    return (links || []).filter(function(link) { return !isPricedWorkOrderLink(link); });
+  }
+
   function collectJobMedia(data) {
     var out = [];
     function pushVisibleMedia(arr) {
@@ -8407,7 +8427,11 @@
     // A real video file is not a priced WO PDF, even if the name mentions WO.
     // Rows typed work_order / supplier_work_order already returned true above.
     if (isVideoUrl(d.file_name) || isVideoUrl(d.storage_url) || isVideoUrl(mediaPlayableUrl(d))) return false;
-    return /work[\s_-]*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' '));
+    return /work[\s_-]*order|\bwo\b/i.test([
+      d.type, d.file_name, d.name, d.title, d.label,
+      d.url, d.pdf_url, d.storage_url, d.playable_url, d.signed_url,
+      d.public_url, d.file_url, d.download_url
+    ].filter(Boolean).join(' '));
   }
 
   function findMakesafeWorkOrderDocument(data) {
@@ -8508,6 +8532,10 @@
     isScopeVideo: isScopeVideo,
     isTradeVisibleDocument: isTradeVisibleDocument,
     isTradeVisibleMedia: isTradeVisibleMedia,
+    isTradeGalleryMedia: isTradeGalleryMedia,
+    filterTradeGalleryMedia: filterTradeGalleryMedia,
+    isPricedWorkOrderLink: isPricedWorkOrderLink,
+    filterTradeSowLinks: filterTradeSowLinks,
     collectJobMedia: collectJobMedia,
     mediaIdentityAliases: mediaIdentityAliases,
     mediaStableKey: mediaStableKey,
@@ -8540,10 +8568,10 @@
   }
 
   function renderScopeGallery(data, phase) {
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     var docPhotos = (data.documents || []).filter(function(d) {
-      return d.visible_to_trades && d.type === 'site_photo' && d.storage_url;
+      return d.visible_to_trades && d.type === 'site_photo' && d.storage_url && !isPricedWorkOrderDocument(d);
     });
     var totalPhotos = scopePhotos.length + docPhotos.length;
     if (totalPhotos === 0) return '';
@@ -8931,7 +8959,7 @@
   function renderEnhancedPOs(data, phase) {
     if (phase === 'travelling' || phase === 'end_of_day') return '';
     var pos = data.purchaseOrders || [];
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var receiptPhotos = media.filter(function(m) { return m.phase === 'receipt'; });
     var job = data.job;
 
@@ -9091,7 +9119,7 @@
   function renderExistingSections(data, phase) {
     var job = data.job;
     var docs = data.documents || [];
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var notes = data.notes || [];
     var wo = data.workOrder;
     var crew = data.crew || [];
@@ -9283,7 +9311,7 @@
     if (jobPending.length > 0) {
       jobPending.forEach(function(pn) {
         h += '<div class="note-item" style="opacity:0.6;border-left:2px solid var(--sw-yellow);padding-left:8px">';
-        h += '  <div class="note-text">' + esc(pn.text) + '</div>';
+        h += '  <div class="note-text">' + escSowText(pn.text) + '</div>';
         h += '  <div class="note-meta">Pending sync</div>';
         h += '</div>';
       });
@@ -9397,7 +9425,7 @@
         out.push(link);
       });
     }
-    return out;
+    return filterTradeSowLinks(out);
   }
 
   function linkifyTradeBodyText(text) {
@@ -9503,7 +9531,7 @@
     var receivedAt = getMakesafeSourceReceivedAt(ms, job);
     var familyLabel = getTradeMakesafeTypeLabel(makesafeJob);
     var emailLabel = source.from_email ? 'Original email' : 'Builder email';
-    var links = mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, source.links, source.source_email_links, source.portal_links, ms.portal_links);
+    var links = filterTradeSowLinks(mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, source.links, source.source_email_links, source.portal_links, ms.portal_links));
     var subLabels = { pending_allocation: 'Needs Allocation', waiting_on_trade_report: 'Waiting Report', admin_to_send_report: 'Admin Sending', ready_to_invoice: 'Ready to Invoice', complete: 'Complete' };
     var h = '<div class="detail-section" style="margin:0 16px 12px;padding:14px;background:var(--sw-light);border-radius:12px;border-left:4px solid var(--sw-red);">';
     h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">Make-Safe Details</div>';
@@ -9640,7 +9668,7 @@
     html += renderCrewRosterPanel(data);
 
     // ── Tab Bar ──
-    var mediaCount = (data.media || []).length;
+    var mediaCount = filterTradeGalleryMedia(data.media).length;
     var noteCount = tradeCommsNotes(data.notes).length;
     html += '<div class="jd-tabs">';
     if (canMessage()) {
@@ -9692,7 +9720,7 @@
         html += '<span style="font-size:11px;color:var(--sw-text-sec)">' + timeAgo(n.created_at) + '</span>';
         if (!viewOnly) html += '<button onclick="deleteNote(\'' + n.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
         html += '</div>';
-        html += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + esc((n.detail_json && n.detail_json.text) || '') + '</div>';
+        html += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + escSowText((n.detail_json && n.detail_json.text) || '') + '</div>';
         html += '</div>';
       });
       html += '</div>';
@@ -10226,7 +10254,7 @@
     }
 
     // ── 6. SCOPE PHOTOS — grid of thumbnails ──
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     if (scopePhotos.length > 0) {
       h += '<div class="detail-section">';
@@ -10245,16 +10273,16 @@
       h += '</div>';
     }
 
-    // ── 7. COST BREAKDOWN — async ──
-    if (wo && wo.id) {
+    // ── 7. COST BREAKDOWN — async, office SOW gate ──
+    if (wo && wo.id && tradeCanSeeSowPricing()) {
       h += '<div class="detail-section" id="woJobCostBreakdown">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div>';
       h += '<div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading...</div>';
       h += '</div>';
     }
 
-    // ── 8. CREW CHARGES — async, Tier 2+ ──
-    if (_userTier >= 2) {
+    // ── 8. CREW CHARGES — async, office SOW gate ──
+    if (tradeCanSeeSowPricing()) {
       h += '<div class="detail-section" id="woJobCrewCharges">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Crew Charges</div>';
       h += '<div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading...</div>';
@@ -10263,8 +10291,8 @@
 
     container.innerHTML = h;
 
-    // Async: load work order invoice status
-    if (wo && wo.id) {
+    // Async: load work order invoice status (office SOW gate)
+    if (wo && wo.id && tradeCanSeeSowPricing()) {
       api('my_work_orders').then(function(res) {
         var el = document.getElementById('woJobCostBreakdown');
         if (!el) return;
@@ -10315,8 +10343,8 @@
       });
     }
 
-    // Async: load crew charges for this job
-    if (_userTier >= 2) {
+    // Async: load crew charges for this job (office SOW gate)
+    if (tradeCanSeeSowPricing()) {
       api('crew_charges_on_my_jobs', { week_start: getWeekStartMonday(-4) }).then(function(res) {
         var el = document.getElementById('woJobCrewCharges');
         if (!el) return;
@@ -10505,9 +10533,9 @@
     }
 
     // Scope / site photos (from quoting stage)
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
-    var docPhotos = docs.filter(function(d) { return d.visible_to_trades && d.type === 'site_photo' && d.storage_url; });
+    var docPhotos = docs.filter(function(d) { return d.visible_to_trades && d.type === 'site_photo' && d.storage_url && !isPricedWorkOrderDocument(d); });
     var totalSitePhotos = scopePhotos.length + docPhotos.length;
     if (totalSitePhotos > 0) {
       h += '<div class="detail-section">';
@@ -10531,7 +10559,7 @@
   }
 
   function renderJobTab_photos(data, phase, container) {
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var viewOnly = isForeignCrewJob(data);
     var byPhase = { scope: [], in_progress: [], completion: [], issue: [] };
     media.forEach(function(m) {
@@ -10919,7 +10947,7 @@
   function renderJobTab_log(data, phase, container) {
     var h = '';
     var notes = data.notes || [];
-    var media = data.media || [];
+    var media = filterTradeGalleryMedia(data.media);
     var crew = data.crew || [];
     var viewOnly = isForeignCrewJob(data);
 
@@ -10977,7 +11005,7 @@
     if (jobPending.length > 0) {
       jobPending.forEach(function(pn) {
         h += '<div style="padding:10px;margin-bottom:6px;background:#FEF3C7;border-radius:8px;border-left:3px solid var(--sw-yellow)">';
-        h += '<div style="font-size:13px;color:var(--sw-text)">' + esc(pn.text) + '</div>';
+        h += '<div style="font-size:13px;color:var(--sw-text)">' + escSowText(pn.text) + '</div>';
         h += '<div style="font-size:11px;color:var(--sw-yellow);margin-top:4px">&#9888; Pending sync</div>';
         h += '</div>';
       });
@@ -10999,7 +11027,7 @@
         h += '<span style="font-size:11px;color:var(--sw-text-sec)">' + timeAgo(entry.time) + '</span>';
         if (!viewOnly && entry.id && entry.type !== 'photo') h += '<button onclick="deleteNote(\'' + entry.id + '\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec);font-size:16px;padding:2px 6px;line-height:1;min-height:44px;min-width:44px;" ontouchstart="this.style.color=\'var(--sw-red)\'" ontouchend="this.style.color=\'var(--sw-text-sec)\'">&times;</button>';
         h += '</div>';
-        if (entry.text) h += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + esc(entry.text) + '</div>';
+        if (entry.text) h += '<div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + escSowText(entry.text) + '</div>';
         if (entry.thumb) {
           h += '<img src="' + esc(entry.thumb) + '" onclick="openLightbox(\'' + esc(entry.fullUrl) + '\')" style="margin-top:6px;width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer">';
         }
@@ -11024,7 +11052,7 @@
     if (list) {
       var tmp = document.createElement('div');
       tmp.style.cssText = 'padding:10px;margin-bottom:6px;border-radius:8px;background:var(--sw-light)';
-      tmp.innerHTML = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:14px">&#128221;</span><span style="font-size:12px;font-weight:600;color:var(--sw-dark)">' + esc(_user ? _user.name : 'You') + '</span><span style="flex:1"></span><span style="font-size:11px;color:var(--sw-text-sec)">Just now</span></div><div style="font-size:13px;color:var(--sw-text)">' + esc(text) + '</div>';
+      tmp.innerHTML = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:14px">&#128221;</span><span style="font-size:12px;font-weight:600;color:var(--sw-dark)">' + esc(_user ? _user.name : 'You') + '</span><span style="flex:1"></span><span style="font-size:11px;color:var(--sw-text-sec)">Just now</span></div><div style="font-size:13px;color:var(--sw-text)">' + escSowText(text) + '</div>';
       var emptyMsg = list.querySelector('div[style*="text-align:center"]');
       if (emptyMsg) emptyMsg.remove();
       list.insertBefore(tmp, list.firstChild);
@@ -11482,7 +11510,7 @@
 
     // ── Photo Upload Section (single control, internally categorised) ──
     h += msrKick('Photos');
-    var allMedia = data.media || [];
+    var allMedia = filterTradeGalleryMedia(data.media);
     var attendanceCycleId = getActiveMakesafeAttendanceCycleId(data);
     // Match the backend gate exactly: it counts persisted job_media rows whose
     // type is photo for this job. Untyped media must not create a false pass.
@@ -11630,7 +11658,7 @@
       if (emptyMsg) emptyMsg.remove();
       var tmp = document.createElement('div');
       tmp.style.cssText = 'padding:10px;margin-bottom:6px;border-radius:8px;background:var(--sw-light)';
-      tmp.innerHTML = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:14px">&#128221;</span><span style="font-size:12px;font-weight:600;color:var(--sw-dark)">' + esc(_user ? _user.name : 'You') + '</span><span style="flex:1"></span><span style="font-size:11px;color:var(--sw-text-sec)">Just now</span></div><div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + esc(text) + '</div>';
+      tmp.innerHTML = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:14px">&#128221;</span><span style="font-size:12px;font-weight:600;color:var(--sw-dark)">' + esc(_user ? _user.name : 'You') + '</span><span style="flex:1"></span><span style="font-size:11px;color:var(--sw-text-sec)">Just now</span></div><div style="font-size:13px;color:var(--sw-text);white-space:pre-wrap">' + escSowText(text) + '</div>';
       list.insertBefore(tmp, list.firstChild);
     }
 
@@ -11886,7 +11914,7 @@
     return '<div class="note-item">' +
            '  <span class="note-author">' + esc(author) + '</span>' +
            '  <span class="note-time">' + time + '</span>' +
-           '  <div class="note-text">' + esc(text) + '</div>' +
+           '  <div class="note-text">' + escSowText(text) + '</div>' +
            '</div>';
   }
 
@@ -12281,7 +12309,7 @@
     if (builderEmailText) {
       h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px;padding:8px;background:#fff;border:1px solid #FDBA74;border-radius:8px"><strong>Source builder email (untrusted):</strong><br>' + linkifyTradeBodyText(builderEmailText) + '</div>';
     }
-    var sourceLinks = mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, ms.portal_links, ms.source_email && ms.source_email.links, ms.source_email && ms.source_email.portal_links);
+    var sourceLinks = filterTradeSowLinks(mergeTradeExternalLinks(ms.external_links, ms.links, ms.source_links, ms.source_email_links, ms.portal_links, ms.source_email && ms.source_email.links, ms.source_email && ms.source_email.portal_links));
     if (sourceLinks.length) {
       h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
       sourceLinks.forEach(function(link) {

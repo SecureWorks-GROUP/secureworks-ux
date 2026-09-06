@@ -345,6 +345,39 @@ check(
   'shipped leftover Work Order PDF card is office-gated',
   /var workOrderUrl = tradeCanSeeSowPricing\(\) \? getTradeDocOpenUrl\(workOrderDoc\) : '';/.test(html)
 );
+check(
+  'shipped photo/gallery renderers filter priced WO + visibility (TRD5-R10-001/004)',
+  /var media = filterTradeGalleryMedia\(data\.media\);/.test(html) &&
+    /function renderJobTab_photos\(data, phase, container\) \{\s*var media = filterTradeGalleryMedia\(data\.media\);/.test(html)
+);
+check(
+  'shipped mergeTradeExternalLinks applies office-only WO gate (TRD5-R10-002)',
+  /function mergeTradeExternalLinks\(\) \{[\s\S]*return filterTradeSowLinks\(out\);/.test(html)
+);
+check(
+  'shipped Work Order tab Cost Breakdown uses office SOW gate (TRD5-R10-003)',
+  /if \(wo && wo.id && tradeCanSeeSowPricing\(\)\) \{\s*h \+= '<div class="detail-section" id="woJobCostBreakdown">/.test(html)
+);
+check(
+  'shipped Work Order tab Crew Charges uses office SOW gate (TRD5-R10-003)',
+  /if \(tradeCanSeeSowPricing\(\)\) \{\s*h \+= '<div class="detail-section" id="woJobCrewCharges">/.test(html)
+);
+check(
+  'Work Order tab cost sections no longer use _userTier >= 2',
+  !/if \(_userTier >= 2\) \{\s*h \+= '<div class="detail-section" id="woJob(CostBreakdown|CrewCharges)">/.test(html)
+);
+check(
+  'shipped bottom Notes use sow redaction (TRD5-R10-005)',
+  /escSowText\(\(n\.detail_json && n\.detail_json\.text\) \|\| ''\)/.test(html)
+);
+check(
+  'shipped Log note bodies use sow redaction (TRD5-R10-005)',
+  /if \(entry\.text\) h \+= '<div style="font-size:13px;color:var\(--sw-text\);white-space:pre-wrap">' \+ escSowText\(entry\.text\)/.test(html)
+);
+check(
+  'shipped renderNote uses sow redaction',
+  /<div class="note-text">' \+ escSowText\(text\) \+ '<\/div>/.test(html)
+);
 
 const woPdfData = {
   documents: [{
@@ -457,5 +490,39 @@ check('WO PDF url never enters the video player', !M.renderScopeVideoCard({
 fullPricingOn = true;
 check('office can open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === 'https://storage.example.test/wo.pdf');
 check('office can open supplier WO PDF', M.tradeWorkOrderPdfUrl(supplierPdfData) === 'https://storage.example.test/supplier-wo.pdf');
+
+fullPricingOn = false;
+const woAsPhoto = {
+  type: 'photo',
+  file_name: 'Builder-WO.pdf',
+  storage_url: 'https://storage.example.test/wo-as-photo.pdf',
+  visible_to_trades: true,
+};
+const woPhotoUrlOnly = {
+  type: 'photo',
+  storage_url: 'https://storage.example.test/work_order_MLB-26183.pdf',
+};
+const hiddenOfficePhoto = {
+  type: 'photo',
+  storage_url: 'https://storage.example.test/office-receipt.jpg',
+  visible_to_trades: false,
+};
+check('photo-typed WO PDF is a priced WO document', M.isPricedWorkOrderDocument(woAsPhoto) === true);
+check('photo whose URL is a WO PDF is a priced WO document', M.isPricedWorkOrderDocument(woPhotoUrlOnly) === true);
+check('gallery filter drops priced WO photos', M.filterTradeGalleryMedia([woAsPhoto, woPhotoUrlOnly, scopePhoto]).length === 1);
+check('gallery filter drops explicit office-internal media', M.filterTradeGalleryMedia([hiddenOfficePhoto, scopePhoto]).every(function (m) { return m.id === 'pic-1'; }));
+check('untagged scope photo stays in the gallery', M.isTradeGalleryMedia(scopePhoto) === true);
+
+const woPortalLink = { label: 'Builder portal', url: 'https://prime.example.test/share/abc123' };
+const woPdfLink = { label: 'Open work order', url: 'https://storage.example.test/signed-wo.pdf?token=abc' };
+const woUrlOnlyLink = { label: 'Open link', url: 'https://storage.example.test/work_order_MLB-26183.pdf' };
+check('portal share is not a priced WO link', M.isPricedWorkOrderLink(woPortalLink) === false);
+check('labelled work-order link is priced', M.isPricedWorkOrderLink(woPdfLink) === true);
+check('URL-only work_order PDF is priced', M.isPricedWorkOrderLink(woUrlOnlyLink) === true);
+const tradeLinks = M.filterTradeSowLinks([woPortalLink, woPdfLink, woUrlOnlyLink]);
+check('trades keep portal links and drop WO PDFs', tradeLinks.length === 1 && tradeLinks[0].url === woPortalLink.url);
+fullPricingOn = true;
+check('office keeps WO PDF links', M.filterTradeSowLinks([woPortalLink, woPdfLink]).length === 2);
+fullPricingOn = false;
 
 console.log('PASS trade scope media + pricing redaction checks');

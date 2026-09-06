@@ -46,7 +46,14 @@ function patioDetail(overrides) {
         version: 1,
       },
     ],
-    notes: [],
+    notes: [
+      {
+        id: 'e2e-note-price',
+        created_at: '2026-09-06T01:00:00.000Z',
+        users: { name: 'Office' },
+        detail_json: { text: 'Match existing fascia. Quote total $8,800.', from_ops: true },
+      },
+    ],
     media: [
       {
         id: 'e2e-walkthrough',
@@ -76,11 +83,27 @@ function patioDetail(overrides) {
         visible_to_trades: false,
       },
       {
+        id: 'e2e-office-photo',
+        type: 'photo',
+        phase: 'scope',
+        storage_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+        visible_to_trades: false,
+      },
+      {
         id: 'e2e-wo-as-video',
         type: 'work_order',
         is_video: true,
         file_name: 'Builder-WO.pdf',
         playable_url: WO_PDF,
+        visible_to_trades: true,
+      },
+      {
+        id: 'e2e-wo-as-photo',
+        type: 'photo',
+        phase: 'scope',
+        file_name: 'Builder-WO.pdf',
+        storage_url: WO_PDF,
+        url: WO_PDF,
         visible_to_trades: true,
       },
     ],
@@ -96,6 +119,7 @@ function patioDetail(overrides) {
       },
     ],
     workOrder: {
+      id: 'e2e-wo-99',
       wo_number: 'WO-99',
       special_instructions: 'Match existing fascia. Quote total $8,800.',
       scope_items: [
@@ -153,6 +177,13 @@ function makesafeDetail() {
     makesafe_details: {
       makesafe_type: 'Roof / tarp',
       substatus: 'waiting_on_trade_report',
+      external_links: [
+        { label: 'Open work order', url: WO_PDF },
+        { label: 'Builder portal', url: 'https://prime.example.test/share/e2e-portal' },
+      ],
+      source_links: [
+        { label: 'Source WO', url: WO_PDF },
+      ],
     },
     serviceReport: {
       status: 'draft',
@@ -229,6 +260,28 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     const photos = page.locator('#jdTab_photos');
     await expect(photos.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
     await expect(photos.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(photos.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(photos.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+
+    await page.locator('.jd-tab[data-tab="log"]').click();
+    const log = page.locator('#jdTab_log');
+    await expect(log).toContainText('Match existing fascia');
+    await expect(log).not.toContainText('$');
+    await expect(log).not.toContainText('8,800');
+    await expect(log.locator('img[src="' + WO_PDF + '"]')).toHaveCount(0);
+
+    const notes = page.locator('#bottomNotesList');
+    await expect(notes).toContainText('Match existing fascia');
+    await expect(notes).not.toContainText('$');
+    await expect(notes).not.toContainText('8,800');
+
+    await page.evaluate(() => window.switchJobTab('workorder'));
+    const woTab = page.locator('#jdTab_workorder');
+    await expect(woTab).toBeVisible();
+    await expect(woTab).not.toContainText('Cost Breakdown');
+    await expect(woTab).not.toContainText('Crew Charges');
+    await expect(woTab).not.toContainText('$');
   });
 
   test('walkthrough flagged with no file is an honest empty, not omitted', async ({ appPage: page }) => {
@@ -259,6 +312,8 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(header.getByRole('link', { name: /Open full WO/i })).toHaveCount(0);
     await expect(header.getByRole('link', { name: /Full screen/i })).toHaveCount(0);
     await expect(header).not.toContainText(WO_PDF);
+    await expect(header.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(header.getByRole('link', { name: /Builder portal/i })).toHaveCount(1);
     await expect(header).toContainText('Tarp roof sheets');
     await expect(header).not.toContainText('$');
     await expect(header).not.toContainText('340');
@@ -277,6 +332,12 @@ test.describe('TRD-5 office may see SOW rates', () => {
     const scope = page.locator('#jdTab_scope');
     await expect(scope).toContainText('Q-4412');
     await expect(scope).toContainText('$');
+    await page.locator('.jd-tab[data-tab="workorder"]').click();
+    const woTab = page.locator('#jdTab_workorder');
+    await expect(woTab).toContainText('Cost Breakdown');
+    await expect(woTab).toContainText('Crew Charges');
+    const notes = page.locator('#bottomNotesList');
+    await expect(notes).toContainText('$8,800');
   });
 
   test('office make-safe header still shows the full WO PDF', async ({ appPage: page }) => {

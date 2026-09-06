@@ -135,7 +135,7 @@ test.describe('incomplete weekly draft save response', () => {
     await enterInvoice31Deductions(page);
     await page.getByRole('button', { name: 'Save & calculate' }).click();
 
-    await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+    await expect(page.locator('#toast')).toContainText('Do not save again yet');
     await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
   });
@@ -154,7 +154,7 @@ test.describe('incomplete weekly draft save response', () => {
       await enterInvoice31Deductions(page);
       await page.getByRole('button', { name: 'Save & calculate' }).click();
 
-      await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+      await expect(page.locator('#toast')).toContainText('Do not save again yet');
       await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
     });

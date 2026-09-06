@@ -256,6 +256,22 @@ assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
   'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
 assert(/var orders = \(res\.work_orders \|\| \[\]\)\.filter\(workOrderTenantOk\);/.test(html),
   'the job-detail read applies the same tenant guard as the hub');
+assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length >= 2,
+  'hub and Cost Breakdown request my_work_orders with mode=all');
+assert(!/api\('my_work_orders'\)/.test(html),
+  'no bare my_work_orders read remains — managed WOs need mode=all');
+assert(/api\('submit_work_order_invoice', null, \{\s*work_order_id: workOrderId,\s*gst_on:/.test(html),
+  'Invoice This Work Order always sends gst_on so the backend cannot 422 GST_CHOICE_REQUIRED');
+assert(!/\(\/emeka\|henry\/i\.test\(_user\.email\)\)/.test(html),
+  'per-metre extras never key on a henry/emeka email heuristic');
+assert(!html.includes('!(_hoursData && _hoursData.is_per_metre)'),
+  'job-centric invoice is not blocked for per-metre users');
+assert(!/if \(isPerMetreUser\(\)\) \{\s*renderPerMetreView\(data\);/.test(html),
+  'Financial hub is the primary Pay door for per-metre users too');
+assert(html.includes('data-work-order-weekly-invoice'),
+  'per-metre users still get the weekly work-order invoice as an extra door');
+assert(html.includes('data-invoice-jobs-instead'),
+  'an empty work-order week still offers the job-centric invoice path');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

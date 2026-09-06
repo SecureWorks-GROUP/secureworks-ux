@@ -11,6 +11,8 @@ const EXPECTED_SUBTOTALS = [
 async function openWeeklyInvoice(page) {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+  await page.locator('[data-work-order-weekly-invoice]').click();
   await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
   await expect(page.locator('[data-weekly-work-order]')).toHaveCount(9);
 }
@@ -112,7 +114,7 @@ test.describe('weekly invoice response guards', () => {
   test('opens the clicked work order Perth week from the work-order hub', async ({ appPage: page }) => {
     await signIn(page, PERSONAS.fencing_manager);
     await page.locator('[data-view="hours"]').click();
-    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.locator('[data-financial-hub]')).toBeVisible();
     await page.getByRole('button', { name: 'My Work Orders' }).click();
     const priorCard = page.locator('[data-work-order-card]').filter({ hasText: 'WO-HENRY-PRIOR' });
     await priorCard.getByRole('button', { name: 'Add to Weekly Invoice' }).click();

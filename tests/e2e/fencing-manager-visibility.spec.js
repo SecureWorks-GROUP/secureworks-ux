@@ -361,6 +361,8 @@ test.describe('Fencing manager visibility', () => {
   test('the weekly invoice surface and work-order hub stay scoped to authorised fencing work orders', async ({ appPage: page, feedRequests }) => {
     await signIn(page, PERSONAS.fencing_manager);
     await page.locator('[data-view="hours"]').click();
+    await expect(page.locator('[data-financial-hub]')).toBeVisible();
+    await page.locator('[data-work-order-weekly-invoice]').click();
     await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
     await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
     await expect(page.getByText('1 of 1 work orders selected')).toBeVisible();

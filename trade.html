@@ -9924,7 +9924,7 @@
 
     // Async: load work order invoice status
     if (wo && wo.id) {
-      api('my_work_orders').then(function(res) {
+      api('my_work_orders', { mode: 'all' }).then(function(res) {
         var el = document.getElementById('woJobCostBreakdown');
         if (!el) return;
         var orders = (res.work_orders || []).filter(workOrderTenantOk);
@@ -9960,6 +9960,9 @@
           ch += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);padding:10px;font-size:13px;font-weight:600;margin-top:12px">&#10003; Invoiced</div>';
         } else if (viewOnly) {
           ch += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">View only -- another crew is allocated</div>';
+        } else if (isPerMetreUser() && match.can_add_to_weekly_invoice) {
+          authorizeWorkOrders([match]);
+          ch += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(match.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(match)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Add to Weekly Invoice</button>';
         } else if (match.can_invoice) {
           authorizeWorkOrders([match]);
           ch += '<button id="woBtn' + match.id + '" onclick="invoiceWorkOrder(\'' + match.id + '\')" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:12px;min-height:44px">Invoice This Work Order</button>';
@@ -15879,38 +15882,42 @@
     });
   }
 
-  // Detect per-metre user (Henry) — check profile field or email fallback
+  // Per-metre extras (Henry's work-order weekly builder) key on invoice_type,
+  // never an email heuristic. Job-centric Financial stays available either way.
   function isPerMetreUser() {
-    if (_user && _user.invoice_type === 'per_metre') return true;
-    if (_user && _user.email && (/emeka|henry/i.test(_user.email))) return true;
+    if (_user && String(_user.invoice_type || '') === 'per_metre') return true;
+    if (_hoursData && String(_hoursData.invoice_type || '') === 'per_metre') return true;
+    if (_hoursData && _hoursData.is_per_metre === true) return true;
     return false;
   }
 
   function renderHoursView(data) {
     var container = document.getElementById('hoursContent');
 
-    // Branch: per-metre users get a different view
-    if (isPerMetreUser()) {
-      renderPerMetreView(data);
-      return;
-    }
-
-    // ── Financial Hub — 3 big action buttons ──
+    // ── Financial Hub — same doors for every trade, including per_metre ──
     var btnStyle = 'display:flex;align-items:center;gap:14px;width:100%;padding:18px 16px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:12px;cursor:pointer;text-align:left;font-family:var(--sw-font);box-shadow:var(--sw-shadow);margin-bottom:10px';
     var iconStyle = 'flex:0 0 44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px';
     var html = '';
 
-    html += '<div style="padding:8px 0 16px;text-align:center">';
+    html += '<div data-financial-hub style="padding:8px 0 16px;text-align:center">';
     html += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark)">Financial</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec)">Invoices, expenses & reimbursements</div>';
     html += '</div>';
 
-    // 1. Weekly Invoice
+    // 1. Weekly Invoice — job-centric generate_trade_invoice for everyone
     html += '<button onclick="openWeeklyInvoice()" style="' + btnStyle + '">';
     html += '<div style="' + iconStyle + ';background:rgba(241,90,41,0.1)"><span style="font-size:22px">&#128203;</span></div>';
     html += '<div><div style="font-size:15px;font-weight:700;color:var(--sw-dark)">Weekly Invoice</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec)">Process your hours & pay</div></div>';
     html += '</button>';
+
+    if (isPerMetreUser()) {
+      html += '<button data-work-order-weekly-invoice onclick="openWeeklyWorkOrderInvoice()" style="' + btnStyle + '">';
+      html += '<div style="' + iconStyle + ';background:rgba(76,106,124,0.1)"><span style="font-size:22px">&#128203;</span></div>';
+      html += '<div><div style="font-size:15px;font-weight:700;color:var(--sw-dark)">Work Order Invoice</div>';
+      html += '<div style="font-size:12px;color:var(--sw-text-sec)">Completed fencing work orders</div></div>';
+      html += '</button>';
+    }
 
     // 2. Company Expense
     html += '<button onclick="openExpenseCapture(\'company_expense\')" style="' + btnStyle + '">';
@@ -16715,7 +16722,8 @@
 
     if (state.workOrders.length === 0) {
       html += '<div class="hours-no-data">No completed work orders available for this week</div>';
-      html += '<div class="wwi-actions"><button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button><button class="btn btn-secondary" onclick="openInvoiceHistory()">Invoice history</button></div></div>';
+      html += '<div class="wwi-actions"><button class="hours-submit-btn" data-invoice-jobs-instead onclick="loadAndOpenInvoice()">Invoice jobs</button>';
+      html += '<button class="btn btn-secondary" onclick="openWorkOrderHub()">My Work Orders</button><button class="btn btn-secondary" onclick="openInvoiceHistory()">Invoice history</button></div></div>';
       container.innerHTML = html;
       return;
     }
@@ -16978,9 +16986,10 @@
     _jobCards = [];
 
     // Job-centric prefill (cutover): build one card per whitelisted assignment
-    // (make-safes, multiple per day) instead of clock-dependent rows. Per-metre
-    // users (Henry) and expense mode keep the legacy path untouched.
-    if (!opts.expenseOnly && jobCentricEnabled() && !(_hoursData && _hoursData.is_per_metre)) {
+    // (make-safes, multiple per day) instead of clock-dependent rows. Expense
+    // mode keeps the legacy path. Per-metre users use this same job-centric
+    // submit path; the weekly work-order builder is an extra door only.
+    if (!opts.expenseOnly && jobCentricEnabled()) {
       buildJobCards();
       _invoiceBuilderOpen = true;
       renderInvoiceBuilder();
@@ -18943,7 +18952,7 @@
     });
 
     // ── Job-centric cards (cutover path) vs legacy 7-day clock-row timesheet ──
-    _jobCentricActive = !isExpense && jobCentricEnabled() && !(_hoursData && _hoursData.is_per_metre);
+    _jobCentricActive = !isExpense && jobCentricEnabled();
     if (_jobCentricActive) {
       html += renderJobCardsHtml();
     } else if (!isExpense) {
@@ -21254,7 +21263,7 @@
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading work orders...</div>';
 
-    api('my_work_orders').then(function(res) {
+    api('my_work_orders', { mode: 'all' }).then(function(res) {
       renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
     }).catch(function(err) {
       container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
@@ -21361,7 +21370,10 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
       }
 
-      api('submit_work_order_invoice', null, { work_order_id: workOrderId }).then(function(result) {
+      api('submit_work_order_invoice', null, {
+        work_order_id: workOrderId,
+        gst_on: _invoiceGstDefault(_hoursData || _user)
+      }).then(function(result) {
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach
         //   Xero. Show userMessage as a warning toast and refresh as a success (invoice is fine).
@@ -21391,7 +21403,10 @@
         }
       }).catch(function(err) {
         if (!navigator.onLine) {
-          queueOfflineAction('submit_work_order_invoice', { work_order_id: workOrderId });
+          queueOfflineAction('submit_work_order_invoice', {
+            work_order_id: workOrderId,
+            gst_on: _invoiceGstDefault(_hoursData || _user)
+          });
           toast('Offline — invoice queued, will submit when back online');
           if (btn) { btn.disabled = true; btn.textContent = 'Queued (offline)'; }
         } else {

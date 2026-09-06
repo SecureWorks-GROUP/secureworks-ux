@@ -48,6 +48,7 @@ const PERSONAS = {
       name: 'Henry Fence',
       role: 'lead_installer',
       trade_tier: 2,
+      invoice_type: 'per_metre',
       managed_verticals: ['fencing'],
       org_id: '00000000-0000-0000-0000-000000000001'
     }

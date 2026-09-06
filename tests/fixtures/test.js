@@ -166,7 +166,12 @@ const test = base.extend({
         total: 110,
         already_invoiced: false,
         can_add_to_weekly_invoice: true,
-        negative_charges: [],
+        negative_charges: [{
+          line_id: 'wo-fence-charge-israel',
+          trade_name: 'Israel',
+          description: 'Work Order - Israel',
+          amount_ex: -40
+        }],
         can_invoice: true
       },
       {

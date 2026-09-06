@@ -152,4 +152,35 @@ function woCard(overrides) {
   assert.strictEqual(built.manualAssignments.length, 1)
 }
 
-console.log('OK — WO labour-line payload contract holds (8 scenarios)')
+// ── WO pass-through: amount Henry paid another trade, not hours×rate ─────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+  })])
+  assert(!built.error, 'pass-through builds: ' + built.error)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.rate, 60, 'net is WO 100 − Israel 40')
+  assert.strictEqual(row.wo_labour_deduction, 40)
+  assert.strictEqual(row.wo_labour_lines[0].line_kind, 'wo_pass_through')
+  assert.strictEqual(row.wo_labour_lines[0].amount, 40)
+  assert(row.description.indexOf('Israel $40') !== -1, 'breakdown names the WO trade: ' + row.description)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 559.5,
+    wo_labour_lines: [
+      { trade_name: 'Tendo', hours: 11.5, rate: 25 },
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+  })])
+  assert(!built.error, 'mixed labour + pass-through builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems[0].rate, 232)
+  assert(built.cardExtraItems[0].description.indexOf('Tendo 11.5h×$25=$287.5') !== -1)
+  assert(built.cardExtraItems[0].description.indexOf('Israel $40') !== -1)
+}
+
+console.log('OK — WO labour-line payload contract holds (10 scenarios)')

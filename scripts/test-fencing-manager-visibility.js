@@ -272,6 +272,10 @@ assert(html.includes('data-work-order-weekly-invoice'),
   'per-metre users still get the weekly work-order invoice as an extra door');
 assert(html.includes('data-invoice-jobs-instead'),
   'an empty work-order week still offers the job-centric invoice path');
+assert(html.includes('addWoPassThroughLine'),
+  'job-centric WO cards can deduct a work-order amount paid to another trade');
+assert(html.includes('_hydratePerMetreWorkOrderCards'),
+  'per-metre job-centric builder hydrates his jobs from my_work_orders mode=all');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

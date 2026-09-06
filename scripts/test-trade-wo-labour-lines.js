@@ -252,6 +252,14 @@ function woCard(overrides) {
   assert.strictEqual(retry.changed, false)
   const oneLocal = context._mergeServerPassThroughs([Object.assign({}, israel)], [israel, Object.assign({}, israel)])
   assert.strictEqual(oneLocal.lines.length, 2, 'one local no-ID line plus two server lines keeps both deducts')
+  const staleSameId = { trade_name: 'Old Israel', line_kind: 'wo_pass_through', amount: 99, source_line_id: 'wo-fence-charge-israel' }
+  const freshSameId = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'wo-fence-charge-israel' }
+  const replaced = context._mergeServerPassThroughs([staleSameId, { trade_name: 'Kim', hours: 1, rate: 20 }], [freshSameId])
+  assert.strictEqual(replaced.changed, true, 'same-ID stale amount/name is replaced')
+  assert.strictEqual(replaced.lines.length, 2, 'same-ID replace does not drop neighbouring labour')
+  assert.strictEqual(replaced.lines[0].amount, 40, 'same-ID amount is current server truth')
+  assert.strictEqual(replaced.lines[0].trade_name, 'Israel', 'same-ID name is current server truth')
+  assert.strictEqual(replaced.lines[1].trade_name, 'Kim', 'hourly labour stays in place after same-ID replace')
 }
 
 // ── Hydrate authorizes only invoiceable in-week WOs ──
@@ -325,6 +333,18 @@ function woCard(overrides) {
     'user-added no-id pass-through is kept')
   assert.strictEqual(card.wo_lump_lines[0].description, 'Materials', 'user lump lines are kept')
 
+  const staleSameIdCard = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Old Israel', line_kind: 'wo_pass_through', amount: 99, source_line_id: 'wo-fence-charge-israel' },
+      kim,
+    ],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleSameIdCard, { subtotal: 100 }, [israel]), true)
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[0].amount, 40, 'hydrate overwrites same-ID stale amount')
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[0].trade_name, 'Israel', 'hydrate overwrites same-ID stale name')
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[1].trade_name, 'Kim', 'same-ID replace keeps hourly labour in place')
+
   const stripped = {
     work_order_id: 'wo-stale-not-authorized',
     wo_number: 'WO-STALE',
@@ -343,4 +363,4 @@ function woCard(overrides) {
     'hourly labour survives unauthorized strip')
 }
 
-console.log('OK — WO labour-line payload contract holds (20 scenarios)')
+console.log('OK — WO labour-line payload contract holds (21 scenarios)')

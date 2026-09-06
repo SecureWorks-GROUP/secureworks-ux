@@ -488,6 +488,11 @@ test('hydrate overwrites stale allocated money and rematches server pass-through
         wo_number: 'WO-FENCE-001',
         wo_allocated: 999,
         wo_labour_lines: [{
+          trade_name: 'Old Israel',
+          line_kind: 'wo_pass_through',
+          amount: 99,
+          source_line_id: 'wo-fence-charge-israel'
+        }, {
           trade_name: 'Stale',
           line_kind: 'wo_pass_through',
           amount: 77,

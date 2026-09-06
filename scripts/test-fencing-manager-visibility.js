@@ -298,14 +298,20 @@ assert(html.includes('Undated assignments never prefill a card'),
   'undated my_hours assignments do not prefill a job card');
 assert(html.includes('search_all_jobs'),
   'any-job add uses typed search_all_jobs on the same builder');
-assert(html.includes('btnAddInvLump') && html.includes('final_deductions: _invFinalDeductions()'),
+assert(html.includes('btnAddInvLump') && html.includes('final_deductions: finalDeductions'),
   'weekly job-centric submit keeps invoice-level final_deductions');
 assert(html.includes('invoice_final_deduction'),
   'invoice-level lumps also ride extra_items as negative client-priced deducts');
 assert(html.includes('addWoLumpLine'),
   'job-centric WO cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),
-  'hydrate merges server pass-throughs by source line id instead of replacing local lines');
+  'hydrate merges server pass-throughs by source line id');
+assert(html.includes('Same-ID lines take current server amount/name'),
+  'same-ID pass-throughs are overwritten from current server truth');
+assert((html.match(/final_deductions: finalDeductions/g) || []).length >= 2,
+  'offline job-centric replay queues the same final_deductions as the online payload');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?queueOfflineAction\('submit_work_order_invoice'/.test(html),
+  'direct work-order invoice submit drops late toast/refresh/queue after account switch');
 assert(html.includes('No-ID lines are a multiset'),
   'no-ID pass-through merge keeps distinct same-amount deducts');
 assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++'),

@@ -18198,7 +18198,24 @@
       if (!server) return;
       var id = String(server.source_line_id || '');
       if (id) {
-        if (have[id]) return;
+        // Same-ID lines take current server amount/name — a restored or
+        // edited stale line must not keep last week's money.
+        var replaced = false;
+        for (var i = 0; i < lines.length; i++) {
+          if (String((lines[i] && lines[i].source_line_id) || '') !== id) continue;
+          var prev = lines[i] || {};
+          if (String(prev.trade_name || '') !== String(server.trade_name || '')
+            || Number(prev.amount || 0) !== Number(server.amount || 0)
+            || String(prev.line_kind || '') !== String(server.line_kind || '')) {
+            lines[i] = server;
+            changed = true;
+          }
+          replaced = true;
+        }
+        if (replaced) {
+          have[id] = true;
+          return;
+        }
         lines.push(server);
         have[id] = true;
         changed = true;
@@ -18237,6 +18254,8 @@
       var id = String((ln && ln.source_line_id) || '');
       if (id) serverIds[id] = true;
     });
+    // Keep same-ID rows in place so merge can overwrite amount/name from
+    // current server truth; drop source_line_ids the WO no longer owns.
     var kept = (prevLines || []).filter(function(ln) {
       if (!ln || ln.line_kind !== 'wo_pass_through' || !ln.source_line_id) return true;
       return !!serverIds[String(ln.source_line_id)];
@@ -19703,11 +19722,12 @@
       if (!_invoiceApiCurrent(ctx)) return;
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
+      var finalDeductions = _invFinalDeductions();
       api('generate_trade_invoice', {}, {
         week_start: _hoursWeekStart || getWeekStartMonday(0),
         manual_assignments: manualAssignments,
         extra_items: extraItems,
-        final_deductions: _invFinalDeductions(),
+        final_deductions: finalDeductions,
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
@@ -19774,7 +19794,7 @@
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!navigator.onLine) {
-          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes, gst_on: _invGst });
+          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, final_deductions: finalDeductions, notes: _invNotes, gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
         } else {
           toast('Failed: ' + friendlyError(err), true);
@@ -22316,8 +22336,10 @@
       toast('This work order is not available to invoice', true);
       return;
     }
+    var ctx = _invoiceApiContext();
     showConfirm('Submit Invoice', 'Submit invoice for this work order? It will be created as a DRAFT in Xero.', 'Submit').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
 
       var btn = document.getElementById('woBtn' + workOrderId);
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
@@ -22330,6 +22352,7 @@
         work_order_id: workOrderId,
         gst_on: _invoiceGstDefault(_hoursData || _user)
       }).then(function(result) {
+        if (!_invoiceApiCurrent(ctx)) return;
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach
         //   Xero. Show userMessage as a warning toast and refresh as a success (invoice is fine).
@@ -22358,6 +22381,7 @@
           _reEnableBtn();
         }
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         if (!navigator.onLine) {
           queueOfflineAction('submit_work_order_invoice', {
             work_order_id: workOrderId,

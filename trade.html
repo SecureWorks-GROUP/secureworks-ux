@@ -4284,14 +4284,17 @@
 
   // Cross-tab fencing: in-memory locks cannot stop a second Trade tab from
   // POSTing the same invoice, and unlocked read/append/write can drop a
-  // queued financial action. Web Locks serialise sync when available; a
-  // localStorage claim plus an inbox merge covers browsers without it.
+  // queued financial action. Money POSTs and money queue mutations require
+  // Web Locks; a localStorage claim is not CAS and is not used as the
+  // exclusive primitive for invoice queue writes.
   var _crossTabId = 'tab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
   var _FINANCIAL_WRITE_LOCK_TTL_MS = 120000;
   var _QUEUE_LOCK_TTL_MS = 2000;
   var _SYNC_LOCK_TTL_MS = 120000;
   var _INBOX_INDEX_KEY = 'sw_action_queue_inbox_ids';
   var _QUEUE_LOCK_KEY = 'sw_action_queue_lock';
+  var _QUEUE_WEB_LOCK_NAME = 'sw_action_queue';
+  var _queueWebLockDepth = 0;
 
   function _storageGetJson(key, fallback) {
     try {
@@ -4479,6 +4482,11 @@
   function _writeInboxItem(item) {
     if (!item || !item.id) return;
     try { localStorage.setItem(_inboxItemKey(item.id), JSON.stringify(item)); } catch (e) {}
+    var ids = _readInboxIndex();
+    if (ids.indexOf(String(item.id)) === -1) {
+      ids.push(String(item.id));
+      _writeInboxIndex(ids);
+    }
   }
 
   function _listInboxItemsFromIds(ids) {
@@ -4569,24 +4577,109 @@
     _writeOfflineQueueRaw(queue);
   }
 
-  function _mutateOfflineQueue(mutator) {
-    var apply = function() {
-      var absorbed = _listInboxIds();
-      var start = _applyPersistUnconfirmedFlags(_mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed)));
-      var next = typeof mutator === 'function' ? mutator(start.slice()) : start;
-      if (!Array.isArray(next)) next = start;
+  function _queueItemIds(queue) {
+    return (queue || []).map(function(item) {
+      return item && item.id != null ? String(item.id) : '';
+    });
+  }
+
+  function _queueIdsMatch(a, b) {
+    var left = _queueItemIds(a);
+    var right = _queueItemIds(b);
+    if (left.length !== right.length) return false;
+    for (var i = 0; i < left.length; i++) {
+      if (left[i] !== right[i]) return false;
+    }
+    return true;
+  }
+
+  function _queueHasMoneyItems(queue) {
+    return (queue || []).some(function(item) {
+      return item && _isOfflineInvoiceAction(item.action);
+    });
+  }
+
+  function _applyOfflineQueueMutation(mutator) {
+    var absorbed = _listInboxIds();
+    var start = _applyPersistUnconfirmedFlags(_mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed)));
+    var next = typeof mutator === 'function' ? mutator(start.slice()) : start;
+    if (!Array.isArray(next)) next = start;
+    try {
       _writeOfflineQueueRaw(next);
-      _clearInboxIds(absorbed);
-      return next;
-    };
+    } catch (e) {
+      return { ok: false, queue: start };
+    }
+    if (!_queueIdsMatch(_readOfflineQueueRaw(), next)) {
+      return { ok: false, queue: _readOfflineQueue() };
+    }
+    var nextIds = {};
+    (next || []).forEach(function(item) {
+      if (item && item.id) nextIds[String(item.id)] = true;
+    });
+    var startIds = {};
+    (start || []).forEach(function(item) {
+      if (item && item.id) startIds[String(item.id)] = true;
+    });
+    var clearable = (absorbed || []).filter(function(id) {
+      var key = String(id || '');
+      return !!(nextIds[key] || startIds[key]);
+    });
+    _clearInboxIds(clearable);
+    return { ok: true, queue: next };
+  }
+
+  function _mutateOfflineQueueStorage(mutator) {
     var deadline = Date.now() + 400;
     while (Date.now() <= deadline) {
       if (_claimStorageLock(_QUEUE_LOCK_KEY, _QUEUE_LOCK_TTL_MS)) {
-        try { return { ok: true, queue: apply() }; }
+        try { return _applyOfflineQueueMutation(mutator); }
         finally { _releaseStorageLock(_QUEUE_LOCK_KEY); }
       }
     }
     return { ok: false, queue: _readOfflineQueue() };
+  }
+
+  function _mutateOfflineQueue(mutator, opts) {
+    opts = opts || {};
+    var money = opts.money === true || _queueHasMoneyItems(_readOfflineQueue());
+    if (_queueWebLockDepth > 0) return _applyOfflineQueueMutation(mutator);
+    if (_webLocksAvailable() || money) {
+      return { ok: false, queue: _readOfflineQueue() };
+    }
+    return _mutateOfflineQueueStorage(mutator);
+  }
+
+  function _withQueueWebLock(fn) {
+    var run = function() {
+      _queueWebLockDepth += 1;
+      return Promise.resolve().then(fn).then(function(result) {
+        _queueWebLockDepth -= 1;
+        return result;
+      }, function(err) {
+        _queueWebLockDepth -= 1;
+        throw err;
+      });
+    };
+    if (_queueWebLockDepth > 0) return run();
+    if (!_webLocksAvailable()) return Promise.reject(_invoiceWriteLeaseLostError());
+    return navigator.locks.request(_QUEUE_WEB_LOCK_NAME, { mode: 'exclusive' }, function(lock) {
+      if (!lock) return Promise.reject(_invoiceWriteLeaseLostError());
+      return run();
+    });
+  }
+
+  function _enqueueOfflineQueueMutation(mutator, opts) {
+    opts = opts || {};
+    if (_queueWebLockDepth > 0) return Promise.resolve(_mutateOfflineQueue(mutator, opts));
+    if (!_webLocksAvailable()) {
+      if (opts.money === true || _queueHasMoneyItems(_readOfflineQueue())) {
+        return Promise.resolve({ ok: false, queue: _readOfflineQueue() });
+      }
+      return Promise.resolve(_mutateOfflineQueue(mutator, opts));
+    }
+    return _withQueueWebLock(function() {
+      return _mutateOfflineQueue(mutator, opts);
+    });
   }
 
   var _activeStorageLeaseKeys = [];
@@ -4714,26 +4807,30 @@
 
   function _ensureOfflineInvoiceWorkOrderAuth(item, ctx) {
     if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) {
-      return Promise.resolve(false);
+      return Promise.resolve({ read: false, allowed: false });
     }
-    if (item.action !== 'submit_work_order_invoice') return Promise.resolve(_offlineInvoiceReplayAllowed(item, ctx));
+    if (item.action !== 'submit_work_order_invoice') {
+      return Promise.resolve({ read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) });
+    }
     var woId = _offlineInvoiceWorkOrderId(item);
-    if (!woId) return Promise.resolve(false);
+    if (!woId) return Promise.resolve({ read: true, allowed: false });
     return api('my_work_orders', { mode: 'all' }, null, {
       beforeSend: function() {
         return _invoiceApiCurrent(ctx) && _offlineInvoiceOwnedByCurrentAccount(item);
       }
     }).then(function(res) {
-      if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) return false;
+      if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) {
+        return { read: false, allowed: false };
+      }
       authorizeWorkOrders(workOrdersForViewer((res && res.work_orders) || []));
-      return _offlineInvoiceReplayAllowed(item, ctx);
+      return { read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) };
     }).catch(function() {
-      return false;
+      return { read: false, allowed: false };
     });
   }
 
   function _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount() {
-    return _mutateOfflineQueue(function(queue) {
+    var mutator = function(queue) {
       var kept = [];
       for (var i = 0; i < queue.length; i++) {
         var item = queue[i];
@@ -4741,7 +4838,10 @@
         kept.push(item);
       }
       return kept;
-    }).queue;
+    };
+    return _enqueueOfflineQueueMutation(mutator, { money: true }).then(function(result) {
+      return (result && result.ok && result.queue) ? result.queue : _readOfflineQueue();
+    });
   }
 
   function _newOfflineQueueItemId() {
@@ -5056,16 +5156,22 @@
 
   function _removeOfflineQueueItem(id) {
     if (!id) return true;
-    var result = _mutateOfflineQueue(function(queue) {
+    var mutator = function(queue) {
       return queue.filter(function(item) {
         return !item || item.id !== id;
       });
-    });
+    };
+    var result = _mutateOfflineQueue(mutator, { money: true });
     if (result.ok) {
       _clearPersistUnconfirmedMarker(id);
       return true;
     }
     _markQueueItemPersistUnconfirmed(id);
+    if (_queueWebLockDepth === 0 && _webLocksAvailable()) {
+      _enqueueOfflineQueueMutation(mutator, { money: true }).then(function(next) {
+        if (next && next.ok) _clearPersistUnconfirmedMarker(id);
+      });
+    }
     return false;
   }
 
@@ -5080,8 +5186,7 @@
     });
     if (_isOfflineInvoiceAction(action)) item.user_id = _offlineInvoiceOwnerId();
     var created = null;
-    _writeInboxItem(item);
-    _mutateOfflineQueue(function(queue) {
+    var mutator = function(queue) {
       for (var i = 0; i < queue.length; i++) {
         var existing = queue[i];
         if (!existing || existing.action !== action) continue;
@@ -5100,8 +5205,11 @@
       queue.push(item);
       created = item;
       return queue;
-    });
-    return created;
+    };
+    _writeInboxItem(item);
+    var result = _mutateOfflineQueue(mutator, { money: true });
+    if (!result.ok) _enqueueOfflineQueueMutation(mutator, { money: true });
+    return created || item;
   }
 
   var _financialWriteInFlight = {};
@@ -5216,7 +5324,7 @@
         }
       });
       return merged;
-    });
+    }, { money: true });
     if (result.ok) {
       (snapshot || []).forEach(function(item) {
         if (item && item.id && !remainingById[item.id]) _clearPersistUnconfirmedMarker(item.id);
@@ -5239,13 +5347,14 @@
     });
     if (_isOfflineInvoiceAction(action)) item.user_id = _offlineInvoiceOwnerId();
     _writeInboxItem(item);
-    _mutateOfflineQueue(function(queue) {
+    var money = _isOfflineInvoiceAction(action);
+    return _enqueueOfflineQueueMutation(function(queue) {
       for (var i = 0; i < queue.length; i++) {
         if (queue[i] && queue[i].id === item.id) return queue;
       }
       queue.push(item);
       return queue;
-    });
+    }, { money: money });
   }
 
   var _offlineQueueSyncing = false;
@@ -5259,7 +5368,7 @@
     _offlineQueueSyncing = true;
     var run = function() {
       _offlineQueueSyncAgain = false;
-      return _withCrossTabLock('sw_offline_queue_sync', function() {
+      return _withQueueWebLock(function() {
         return _syncOfflineQueueOnce();
       }).then(function() {
         if (_offlineQueueSyncAgain) return run();
@@ -5269,6 +5378,7 @@
       _offlineQueueSyncing = false;
     }, function(err) {
       _offlineQueueSyncing = false;
+      if (err && err.code === 'invoice_write_locked') return;
       throw err;
     });
   }
@@ -5288,14 +5398,18 @@
     if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return Promise.resolve();
 
     var sendItem = function() {
-      return _ensureOfflineInvoiceWorkOrderAuth(item, replayCtx).then(function(authorized) {
-        if (!_offlineInvoiceReplayAllowed(item, replayCtx)) {
-          if (_offlineInvoiceOwnedByCurrentAccount(item) && _invoiceApiCurrent(replayCtx) && item.action === 'submit_work_order_invoice') {
+      return _ensureOfflineInvoiceWorkOrderAuth(item, replayCtx).then(function(auth) {
+        auth = auth || {};
+        if (!auth.read) {
+          remaining.push(item);
+          return;
+        }
+        if (!auth.allowed || !_offlineInvoiceReplayAllowed(item, replayCtx)) {
+          if (_offlineInvoiceOwnedByCurrentAccount(item) && _invoiceApiCurrent(replayCtx)) {
             remaining.push(item);
           }
           return;
         }
-        if (!authorized) return;
         return _withFinancialWebLock(item.action, function() {
           return api(item.action, null, item.body, {
             beforeSend: function() {
@@ -5344,7 +5458,7 @@
         kept.push(_ensureOfflineQueueItemMeta(row));
       }
       return kept;
-    });
+    }, { money: true });
     if (!mutated.ok) return Promise.resolve();
     var queue = mutated.queue;
     if (queue.length === 0) return Promise.resolve();
@@ -5392,7 +5506,7 @@
             }
           });
           return latest;
-        });
+        }, { money: true });
       }
       if (committed && persist.length === 0 && snapshot.length > 0 && _readOfflineQueue().length === 0) {
         toast('Synced ' + snapshot.length + ' queued action' + (snapshot.length > 1 ? 's' : ''));

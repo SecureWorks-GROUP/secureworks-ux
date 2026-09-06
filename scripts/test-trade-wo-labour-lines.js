@@ -529,29 +529,32 @@ function hoursCard(overrides) {
   vm.createContext(ctx)
   vm.runInContext(html.slice(qStart, qEnd), ctx)
 
-  ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [{ description: 'Alice fuel', unit_rate: 10 }] })
-  ctx.queueOfflineAction('update_job_phase', { assignmentId: 'a1', phase: 'on_site' })
-  let queued = JSON.parse(store.sw_action_queue)
-  assert.strictEqual(queued.length, 2)
-  assert.strictEqual(queued[0].user_id, 'alice')
-  assert.strictEqual(queued[0].action, 'generate_trade_invoice')
-  assert.strictEqual(queued[1].user_id, undefined, 'non-invoice actions stay unstamped')
+  Promise.resolve(ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [{ description: 'Alice fuel', unit_rate: 10 }] })).then(function() {
+    return ctx.queueOfflineAction('update_job_phase', { assignmentId: 'a1', phase: 'on_site' })
+  }).then(function() {
+    let queued = JSON.parse(store.sw_action_queue)
+    assert.strictEqual(queued.length, 2)
+    assert.strictEqual(queued[0].user_id, 'alice')
+    assert.strictEqual(queued[0].action, 'generate_trade_invoice')
+    assert.strictEqual(queued[1].user_id, undefined, 'non-invoice actions stay unstamped')
 
-  ctx._user = { id: 'bob' }
-  queued = ctx._purgeOfflineInvoiceActionsNotOwnedByCurrentAccount()
-  assert.strictEqual(queued.filter((i) => i.action === 'generate_trade_invoice').length, 0,
-    'account switch drops the other account\'s invoice write')
-  assert.strictEqual(queued.filter((i) => i.action === 'update_job_phase').length, 1,
-    'non-invoice queued work survives an account switch')
+    ctx._user = { id: 'bob' }
+    return ctx._purgeOfflineInvoiceActionsNotOwnedByCurrentAccount()
+  }).then(function(queued) {
+    assert.strictEqual(queued.filter((i) => i.action === 'generate_trade_invoice').length, 0,
+      'account switch drops the other account\'s invoice write')
+    assert.strictEqual(queued.filter((i) => i.action === 'update_job_phase').length, 1,
+      'non-invoice queued work survives an account switch')
 
-  store.sw_action_queue = JSON.stringify([
-    { action: 'generate_trade_invoice', user_id: 'alice', body: { leak: true } },
-    { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
-    { action: 'generate_trade_invoice', body: { unstamped: true } },
-  ])
-  ctx._user = { id: 'bob' }
-  sent.length = 0
-  Promise.resolve(ctx.syncOfflineQueue()).then(function() {
+    store.sw_action_queue = JSON.stringify([
+      { action: 'generate_trade_invoice', user_id: 'alice', body: { leak: true } },
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
+      { action: 'generate_trade_invoice', body: { unstamped: true } },
+    ])
+    ctx._user = { id: 'bob' }
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
     assert.strictEqual(sent.filter((s) => s.action !== 'my_work_orders').length, 1,
       'only the current account\'s invoice write is replayed')
     assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice')[0].body.work_order_id, 'wo-b')
@@ -596,6 +599,31 @@ function hoursCard(overrides) {
       'an unauthorized work-order invoice stays queued for a later authorized session')
     assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), false,
       'a later my_work_orders result replaces the authorized set and drops stale ids')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-unauth': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.reject(new Error('Failed to fetch'))
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      { id: 'iq_wo_authfail', client_request_id: 'iq_wo_authfail', action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-unauth' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a failed work-order auth refresh does not POST the queued invoice')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_wo_authfail'), true,
+      'a failed work-order auth refresh keeps the queued invoice for retry')
+    assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), true,
+      'a failed my_work_orders read must not replace the authorized set')
 
     ctx._user = { id: 'bob' }
     ctx._invoiceAuthGen += 1
@@ -937,10 +965,10 @@ function hoursCard(overrides) {
           v: 1
         })
         const before = store.sw_action_queue
-        const lockedMutate = ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] })
-        assert.strictEqual(lockedMutate.ok, false, 'a held queue lock reports mutation failure')
+        const lockedMutate = ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] }, { money: true })
+        assert.strictEqual(lockedMutate.ok, false, 'an unlocked money queue mutation fails closed')
         assert.strictEqual(store.sw_action_queue, before,
-          'a held queue lock fails closed instead of mutating unlocked')
+          'an unlocked money queue mutation does not overwrite the queue')
         delete store.sw_action_queue_lock
 
         return ctx._reconcileAmbiguousInvoiceAction({
@@ -1047,25 +1075,40 @@ function hoursCard(overrides) {
             return ctx.syncOfflineQueue().then(function() {
               assert.strictEqual(noLockSends, 0,
                 'offline invoice replay does not POST money without Web Locks')
+              store.sw_action_queue_inbox_ids = '[]'
+              return ctx.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-28' })
+            }).then(function(queuedNoLock) {
+              assert.strictEqual(queuedNoLock.ok, false,
+                'money queue mutations fail closed when Web Locks are unavailable')
+              assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.week_start === '2026-09-28' || (i.body && i.body.week_start === '2026-09-28')), false,
+                'a failed money queue mutation does not write the main queue')
+              const inboxIds = JSON.parse(store.sw_action_queue_inbox_ids || '[]')
+              assert.ok(inboxIds.length >= 1, 'the inbox item is preserved when the money merge cannot commit')
               ctx.navigator.locks = savedLocks
               return Promise.resolve()
             })
           }).then(function() {
 
           let persistSends = 0
+          const origSetItem = ctx.localStorage.setItem
+          ctx.localStorage.setItem = function(k, v) {
+            if (k === 'sw_action_queue' && persistSends >= 1 && String(v).indexOf('iq_persist') === -1) {
+              throw new Error('persist blocked')
+            }
+            return origSetItem.call(ctx.localStorage, k, v)
+          }
           ctx.api = function(action) {
             if (action === 'my_work_orders' || action === 'my_trade_invoices') {
               return Promise.resolve({ work_orders: [], invoices: [] })
             }
             persistSends += 1
-            store.sw_action_queue_lock = JSON.stringify({
-              owner: 'other-tab',
-              ts: Date.now(),
-              nonce: 'held',
-              v: 4
-            })
             return Promise.resolve({ ok: true })
           }
+          Object.keys(store).forEach(function(key) {
+            if (key.indexOf('sw_action_queue_inbox') === 0 || key.indexOf('sw_action_queue_unconfirmed_') === 0) {
+              delete store[key]
+            }
+          })
           store.sw_action_queue = JSON.stringify([{
             id: 'iq_persist',
             client_request_id: 'iq_persist',
@@ -1073,14 +1116,15 @@ function hoursCard(overrides) {
             user_id: 'bob',
             body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
           }])
+          store.sw_action_queue_inbox_ids = '[]'
           return ctx.syncOfflineQueue().then(function() {
             assert.strictEqual(persistSends, 1, 'the invoice POST happens once before persist fails closed')
-            const afterPersistFail = JSON.parse(store.sw_action_queue)
+            const afterPersistFail = ctx._readOfflineQueue()
             assert.strictEqual(afterPersistFail.some((i) => i.id === 'iq_persist'), true,
               'a successful replay stays queued when removal cannot be committed')
             assert.strictEqual(store.sw_action_queue_unconfirmed_iq_persist, '1',
               'failed removal records a persist-unconfirmed marker')
-            delete store.sw_action_queue_lock
+            ctx.localStorage.setItem = origSetItem
             persistSends = 0
             return ctx.syncOfflineQueue()
           }).then(function() {
@@ -1196,23 +1240,28 @@ function hoursCard(overrides) {
   delete store.sw_action_queue_lock
   delete store['sw_action_queue_lock__cas']
 
-  tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] })
-  tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] })
-  assert.strictEqual(tabA._readOfflineQueue().filter((i) => i.action === 'generate_trade_invoice').length, 2,
-    'concurrent tabs keep both week-distinct invoice actions')
+  Promise.all([
+    tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] }),
+    tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] }),
+  ]).then(function() {
+    assert.strictEqual(tabA._readOfflineQueue().filter((i) => i.action === 'generate_trade_invoice').length, 2,
+      'concurrent tabs keep both week-distinct invoice actions')
 
-  const first = tabA._readOfflineQueue().find((i) => i.body && i.body.week_start === '2026-09-07')
-  store.sw_action_queue = '[]'
-  store.sw_action_queue_inbox_ids = JSON.stringify([first.id])
-  store['sw_action_queue_inbox_' + first.id] = JSON.stringify(first)
-  tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-21', extra_items: [{ description: 'C' }] })
-  const recovered = tabA._readOfflineQueue()
-  assert.strictEqual(recovered.some((i) => i.id === first.id), true,
-    'an inbox item survives a stale overwrite of the main queue')
-  assert.strictEqual(recovered.some((i) => i.body && i.body.week_start === '2026-09-21'), true,
-    'the later tab still appends after recovering the inbox item')
+    const first = tabA._readOfflineQueue().find((i) => i.body && i.body.week_start === '2026-09-07')
+    store.sw_action_queue = '[]'
+    store.sw_action_queue_inbox_ids = JSON.stringify([first.id])
+    store['sw_action_queue_inbox_' + first.id] = JSON.stringify(first)
+    return tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-21', extra_items: [{ description: 'C' }] }).then(function() {
+      return first
+    })
+  }).then(function(first) {
+    const recovered = tabA._readOfflineQueue()
+    assert.strictEqual(recovered.some((i) => i.id === first.id), true,
+      'an inbox item survives a stale overwrite of the main queue')
+    assert.strictEqual(recovered.some((i) => i.body && i.body.week_start === '2026-09-21'), true,
+      'the later tab still appends after recovering the inbox item')
 
-  let sendCount = 0
+    let sendCount = 0
   let releaseFirst
   const firstHold = new Promise(function(resolve) { releaseFirst = resolve })
   function gatedApi(action, _q, body, options) {
@@ -1269,7 +1318,7 @@ function hoursCard(overrides) {
     enteredHold()
     return holdLock
   }, { acquire: true })
-  holding.then(function() {
+  return holding.then(function() {
     return tabB.syncOfflineQueue()
   }).then(function() {
     assert.strictEqual(blockedSends, 0, 'replay does not POST while another tab holds the financial Web Lock')
@@ -1296,5 +1345,6 @@ function hoursCard(overrides) {
   }).catch(function(err) {
     console.error(err)
     process.exitCode = 1
+  })
   })
 }

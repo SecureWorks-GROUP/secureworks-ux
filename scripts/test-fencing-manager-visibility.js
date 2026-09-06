@@ -353,15 +353,17 @@ assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineI
   html.includes('_financialLeaseOwned'),
   'job-centric nested identities can reconcile and replay drops only after durable queue removal');
 assert((function() {
-  const block = html.slice(html.indexOf('function _mutateOfflineQueue'), html.indexOf('function _withStorageLockAsync'));
+  const block = html.slice(html.indexOf('function _applyOfflineQueueMutation'), html.indexOf('function _withStorageLockAsync'));
   return block.includes('ok: false') && block.includes('_readOfflineQueue()') &&
-    (block.match(/ok:\s*true,\s*queue:\s*apply\(\)/g) || []).length === 1;
-})(), 'queue mutations wait for the lock and never apply unlocked');
+    block.includes('_queueWebLockDepth') && block.includes('_applyOfflineQueueMutation') &&
+    block.includes('_queueIdsMatch(_readOfflineQueueRaw(), next)') &&
+    block.includes('_clearInboxIds(clearable)');
+})(), 'queue mutations apply only under the Web Lock and never clear inbox before a verified write');
 assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
-assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock') && html.includes('_writeInboxItem') &&
-  html.includes('navigator.locks') && html.includes('_claimStorageLock'),
-  'queue mutations stay cross-tab locked (Web Locks or storage claim plus inbox merge)');
+assert(html.includes('_mutateOfflineQueue') && html.includes('_withQueueWebLock') && html.includes('_writeInboxItem') &&
+  html.includes('navigator.locks') && html.includes("var _QUEUE_WEB_LOCK_NAME = 'sw_action_queue'"),
+  'money queue mutations serialize on a dedicated Web Lock and keep inbox items until merge commits');
 assert((function() {
   const begin = html.slice(html.indexOf('function _beginFinancialWrite(action)'), html.indexOf('function _endFinancialWrite'));
   const webLock = html.slice(html.indexOf('function _withFinancialWebLock'), html.indexOf('function _withCrossTabLock'));
@@ -413,8 +415,10 @@ assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.tes
   'saving an existing invoice draft sends its draft_id');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
   'offline work-order invoice replay revalidates current WO authorization');
-assert(/function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?if \(item\.action !== 'submit_work_order_invoice'\) return Promise\.resolve\(_offlineInvoiceReplayAllowed\(item, ctx\)\);[\s\S]*?return api\('my_work_orders'/.test(html),
-  'WO invoice replay always re-reads my_work_orders instead of trusting a cached authorized id');
+assert(/function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?if \(item\.action !== 'submit_work_order_invoice'\) \{[\s\S]*?_offlineInvoiceReplayAllowed\(item, ctx\)[\s\S]*?return api\('my_work_orders'/.test(html) &&
+  /function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?\.catch\(function\(\) \{[\s\S]*?read:\s*false/.test(html) &&
+  /if \(!auth\.read\) \{[\s\S]*?remaining\.push\(item\)/.test(html),
+  'WO invoice replay re-reads my_work_orders and keeps the item when that read fails');
 assert(/function authorizeWorkOrders\(orders\) \{[\s\S]*?var next = \{\};[\s\S]*?_authorizedWorkOrderIds = next;/.test(html),
   'authorizeWorkOrders replaces the authorized set from the latest authenticated result');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),

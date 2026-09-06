@@ -312,7 +312,7 @@ assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++')
   'invoice API responses are dropped after an account switch or superseded request');
 assert(html.includes('_reconcileJobCardWorkOrderAuth'),
   'restored work-order ids are reconciled against the current hydrate authorization');
-assert(html.includes('_workOrderInvoiceableForHydrate') && html.includes('.filter(_workOrderInvoiceableForHydrate)'),
+assert(html.includes('_workOrderInvoiceableForHydrate') && html.includes('return _workOrderInvoiceableForHydrate(wo)'),
   'job-centric hydrate authorizes only invoiceable in-week work orders');
 assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
   'hydrate overwrites server-owned money and clears it when a WO id is stripped');

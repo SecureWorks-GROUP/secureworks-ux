@@ -18232,7 +18232,15 @@
     var changed = card.wo_allocated !== nextAllocated;
     card.wo_allocated = nextAllocated;
     var prevLines = card.wo_labour_lines || [];
-    var kept = _stripServerOwnedPassThroughs(prevLines);
+    var serverIds = {};
+    (passThroughs || []).forEach(function(ln) {
+      var id = String((ln && ln.source_line_id) || '');
+      if (id) serverIds[id] = true;
+    });
+    var kept = (prevLines || []).filter(function(ln) {
+      if (!ln || ln.line_kind !== 'wo_pass_through' || !ln.source_line_id) return true;
+      return !!serverIds[String(ln.source_line_id)];
+    });
     var merged = _mergeServerPassThroughs(kept, passThroughs || []);
     if (merged.changed || kept.length !== prevLines.length) {
       card.wo_labour_lines = merged.lines;
@@ -18285,15 +18293,16 @@
   // [WO-RECONCILE-AUTH-END]
 
   // [WO-HYDRATE-FILTER-START]
-  function _workOrderInvoiceableForHydrate(wo, weekStart, weekEnd) {
+  function _workOrderInvoiceableForHydrate(wo, week) {
     if (!wo) return false;
     if (wo.already_invoiced) return false;
     if (wo.can_invoice !== true && wo.can_add_to_weekly_invoice !== true) return false;
     var date = (typeof _weeklyWorkOrderDate === 'function')
       ? _weeklyWorkOrderDate(wo)
       : String((wo.scheduled_date || wo.date || '')).slice(0, 10);
-    var start = weekStart != null ? weekStart : (_hoursWeekStart || '');
-    var end = weekEnd != null ? weekEnd : (_hoursWeekEnd || '');
+    var bounds = week && typeof week === 'object' ? week : null;
+    var start = bounds && bounds.start != null ? bounds.start : (_hoursWeekStart || '');
+    var end = bounds && bounds.end != null ? bounds.end : (_hoursWeekEnd || '');
     // Undated WOs still pass — Firstmate pending on the date && week leak.
     if (start && end && date && (date < start || date > end)) return false;
     return true;
@@ -18423,7 +18432,9 @@
     var hydrateCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
-      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []).filter(_workOrderInvoiceableForHydrate));
+      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []).filter(function(wo) {
+        return _workOrderInvoiceableForHydrate(wo);
+      }));
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);

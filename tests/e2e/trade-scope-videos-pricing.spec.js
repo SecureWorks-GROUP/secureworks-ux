@@ -5,7 +5,7 @@ const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
 const VIDEO_WALK = 'data:video/mp4,walkthrough';
 const VIDEO_OTHER = 'data:video/mp4,other-job-video';
-const WO_PDF = '/tests/fixtures/work-order.pdf';
+const WO_PDF = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-wo.pdf?token=e2e`;
 
 function patioDetail(overrides) {
   return Object.assign({
@@ -90,6 +90,7 @@ function makesafeDetail() {
       {
         type: 'work_order',
         file_name: 'Builder-WO.pdf',
+        pdf_url: WO_PDF,
         storage_url: WO_PDF,
         visible_to_trades: true,
         version: 1,
@@ -132,6 +133,13 @@ function makesafeDetail() {
 }
 
 async function stubJobDetail(page, payload) {
+  await page.route(WO_PDF, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF',
+    });
+  });
   await page.route(`${OPS_API}**`, async (route) => {
     const action = new URL(route.request().url()).searchParams.get('action');
     if (action === 'trade_job_detail') {

@@ -410,7 +410,10 @@ assert((function() {
     webLock.includes('_claimStorageLock(_FINANCIAL_WRITE_LOCK_KEY') &&
     html.includes('_beginFinancialWriteSend') &&
     html.includes('_settleFinancialWriteSend') &&
+    html.includes('_financialWriteItemDurable') &&
+    html.includes('invoice_storage_unavailable') &&
     /function _financialInvoiceApi[\s\S]*?_beginFinancialWriteSend[\s\S]*?api\(action/.test(html) &&
+    /function _invoiceSlotsCovered[\s\S]*?_invoiceResponseIdentityRows[\s\S]*?used\[pick\] = true/.test(html) &&
     html.includes('_compareAndSwapStorageLock') &&
     html.includes("{ acquire: true }") &&
     html.includes('_allStorageLeasesOwned');
@@ -453,6 +456,13 @@ assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('i
 assert(/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;[\s\S]{0,450}return null;/.test(html) &&
   !/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;\s*return false;/.test(html),
   'an exact-target write with no listing match fails closed instead of resending');
+assert(html.includes('_tradeInvoicesListingComplete') &&
+  /if \(!invoices\.length\) return null;/.test(html) &&
+  (html.match(/if \(!_workOrdersHydratePayloadComplete\(res\)\) throw new Error\('Could not load work orders\.'\);/g) || []).length >= 2,
+  'weekly/hub WO reads and delete reconcile reject incomplete listings');
+assert(html.includes('server_owned: false') && html.includes('server_owned: true') &&
+  /function _mergeServerPassThroughs[\s\S]*?isUntaggedNoId[\s\S]*?unresolved: true/.test(html),
+  'no-ID pass-through merge tags local lines and fail-closes untagged collisions');
 assert(html.includes('_financialWriteAborted') &&
   html.includes("outcome: 'locked'") &&
   html.includes('Check Invoice history before trying again') &&

@@ -4482,13 +4482,36 @@
   }
 
   function _writeInboxItem(item) {
-    if (!item || !item.id) return;
-    try { localStorage.setItem(_inboxItemKey(item.id), JSON.stringify(item)); } catch (e) {}
+    if (!item || !item.id) return false;
+    var key = _inboxItemKey(item.id);
+    var raw;
+    try { raw = JSON.stringify(item); } catch (e) { return false; }
+    try { localStorage.setItem(key, raw); } catch (e) { return false; }
+    var stored = _storageGetJson(key, null);
+    if (!stored || String(stored.id) !== String(item.id)) return false;
     var ids = _readInboxIndex();
     if (ids.indexOf(String(item.id)) === -1) {
       ids.push(String(item.id));
       _writeInboxIndex(ids);
     }
+    return true;
+  }
+
+  function _financialWriteItemDurable(item) {
+    if (!item || !item.id) return false;
+    var inbox = _storageGetJson(_inboxItemKey(item.id), null);
+    if (inbox && String(inbox.id) === String(item.id)) return true;
+    var queue = _readOfflineQueueRaw();
+    for (var i = 0; i < (queue || []).length; i++) {
+      if (queue[i] && String(queue[i].id) === String(item.id)) return true;
+    }
+    return false;
+  }
+
+  function _invoiceStorageUnavailableError() {
+    var err = new Error('Could not park this invoice safely. It was not sent — try again.');
+    err.code = 'invoice_storage_unavailable';
+    return err;
   }
 
   function _listInboxItemsFromIds(ids) {
@@ -4987,41 +5010,69 @@
     return false;
   }
 
+  function _invoiceRowIdentity(row) {
+    if (!row || typeof row !== 'object') return null;
+    var ids = [];
+    function add(value) {
+      if (value == null || String(value).trim() === '') return;
+      var text = String(value);
+      if (ids.indexOf(text) === -1) ids.push(text);
+    }
+    add(row.job_id);
+    add(row.job_number);
+    add(row.work_order_id);
+    add(row.workOrderId);
+    var assignment = row.assignment_id != null ? String(row.assignment_id).trim() : '';
+    var date = String(row.scheduled_date || row.line_date || row.date || '').slice(0, 10);
+    if (!ids.length && !assignment) return null;
+    return { ids: ids, assignment: assignment, date: date };
+  }
+
   function _invoiceIdentitySlots(source) {
     var slots = [];
-    function addSlot(ids) {
-      if (!ids || !ids.length) return;
-      slots.push(ids);
-    }
-    function idsFromRow(row) {
-      if (!row || typeof row !== 'object') return [];
-      var values = [];
-      function add(value) {
-        if (value == null || String(value).trim() === '') return;
-        var text = String(value);
-        if (values.indexOf(text) === -1) values.push(text);
-      }
-      add(row.job_id);
-      add(row.job_number);
-      add(row.assignment_id);
-      add(row.work_order_id);
-      add(row.workOrderId);
-      return values;
+    function addSlot(row) {
+      var slot = _invoiceRowIdentity(row);
+      if (slot) slots.push(slot);
     }
     source = source || {};
-    addSlot(idsFromRow({
+    addSlot({
       job_id: source.job_id,
       job_number: source.job_number,
       assignment_id: source.assignment_id,
       work_order_id: source.work_order_id,
-      workOrderId: source.workOrderId
-    }));
-    (source.extra_items || []).forEach(function(row) { addSlot(idsFromRow(row)); });
-    (source.manual_assignments || []).forEach(function(row) { addSlot(idsFromRow(row)); });
-    (source.work_order_blocks || []).forEach(function(row) { addSlot(idsFromRow(row)); });
-    (source.labour_lines || []).forEach(function(row) { addSlot(idsFromRow(row)); });
-    (source.lines || []).forEach(function(row) { addSlot(idsFromRow(row)); });
+      workOrderId: source.workOrderId,
+      scheduled_date: source.scheduled_date || source.line_date || source.date
+    });
+    (source.extra_items || []).forEach(addSlot);
+    (source.manual_assignments || []).forEach(addSlot);
+    (source.work_order_blocks || []).forEach(addSlot);
+    (source.labour_lines || []).forEach(addSlot);
+    (source.lines || []).forEach(addSlot);
     return slots;
+  }
+
+  function _invoiceResponseIdentityRows(inv) {
+    var rows = [];
+    function add(row) {
+      var ident = _invoiceRowIdentity(row);
+      if (ident) rows.push(ident);
+    }
+    var collections = [inv && inv.extra_items, inv && inv.manual_assignments, inv && inv.work_order_blocks, inv && inv.labour_lines, inv && inv.lines];
+    var hasLines = collections.some(function(col) { return Array.isArray(col) && col.length > 0; });
+    if (hasLines) collections.forEach(function(col) { (col || []).forEach(add); });
+    else add(inv);
+    return rows;
+  }
+
+  function _invoiceSlotMatchesRow(slot, row) {
+    if (!slot || !row) return false;
+    if (slot.assignment && row.assignment && slot.assignment !== row.assignment) return false;
+    if (slot.date && row.date && slot.date !== row.date) return false;
+    if (slot.assignment && row.assignment && slot.assignment === row.assignment) return true;
+    for (var i = 0; i < (slot.ids || []).length; i++) {
+      if ((row.ids || []).indexOf(slot.ids[i]) !== -1) return true;
+    }
+    return false;
   }
 
   function _invoicePeriodKey(source) {
@@ -5037,15 +5088,26 @@
   }
 
   function _invoiceSlotsCovered(payloadSlots, inv) {
-    var invIds = _nestedInvoiceIdentityValues(inv);
-    if (!payloadSlots.length) return false;
+    if (!payloadSlots || !payloadSlots.length) return false;
+    var rows = _invoiceResponseIdentityRows(inv);
+    var used = {};
     for (var i = 0; i < payloadSlots.length; i++) {
       var slot = payloadSlots[i];
-      var hit = false;
-      for (var j = 0; j < slot.length; j++) {
-        if (invIds.indexOf(slot[j]) !== -1) { hit = true; break; }
+      var pick = -1;
+      var pickScore = -1;
+      for (var j = 0; j < rows.length; j++) {
+        if (used[j]) continue;
+        if (!_invoiceSlotMatchesRow(slot, rows[j])) continue;
+        var score = 0;
+        if (slot.assignment && rows[j].assignment && slot.assignment === rows[j].assignment) score += 2;
+        if (slot.date && rows[j].date && slot.date === rows[j].date) score += 1;
+        if (score > pickScore) {
+          pickScore = score;
+          pick = j;
+        }
       }
-      if (!hit) return false;
+      if (pick === -1) return false;
+      used[pick] = true;
     }
     return true;
   }
@@ -5173,10 +5235,17 @@
     return true;
   }
 
+  function _tradeInvoicesListingComplete(res) {
+    if (!res || !Array.isArray(res.invoices)) return false;
+    if (res.truncated === true || res.has_more === true || res.incomplete === true) return false;
+    if (res.next_offset != null && String(res.next_offset).trim() !== '') return false;
+    return true;
+  }
+
   function _listTradeInvoicesForReconcile(attempt) {
     attempt = attempt || 1;
     return api('my_trade_invoices').then(function(res) {
-      if (!res || !Array.isArray(res.invoices)) {
+      if (!_tradeInvoicesListingComplete(res)) {
         if (attempt < 3) {
           return new Promise(function(resolve) {
             setTimeout(function() { resolve(_listTradeInvoicesForReconcile(attempt + 1)); }, 80);
@@ -5204,7 +5273,10 @@
       if (item.action === 'delete_trade_invoice') {
         var targetId = item.body && item.body.invoice_id;
         if (!targetId) return null;
-        return !invoices.some(function(inv) { return String(inv.id) === String(targetId); });
+        if (invoices.some(function(inv) { return String(inv.id) === String(targetId); })) return false;
+        // An empty or unknown page is not proof the invoice is gone.
+        if (!invoices.length) return null;
+        return true;
       }
       var match = invoices.filter(function(inv) { return _invoiceMatchesQueueIntent(inv, item); });
       // An exact draft/invoice/work-order identity, a complete payload
@@ -5281,7 +5353,9 @@
     _writeInboxItem(item);
     var result = _mutateOfflineQueue(mutator, { money: true });
     if (!result.ok) _enqueueOfflineQueueMutation(mutator, { money: true });
-    return created || item;
+    var persisted = created || item;
+    if (!_financialWriteItemDurable(persisted)) return null;
+    return persisted;
   }
 
   var _financialWriteInFlight = {};
@@ -5339,6 +5413,10 @@
     if (err && err.code === 'invoice_write_locked') {
       toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
       return Promise.resolve({ outcome: 'locked', reason: 'invoice_write_locked' });
+    }
+    if (err && err.code === 'invoice_storage_unavailable') {
+      toast(err.message || 'Could not park this invoice safely. It was not sent — try again.', true);
+      return Promise.resolve({ outcome: 'failed', error: err });
     }
     if (err && err.code === 'invoice_response_ambiguous') {
       if (err.draft_id && body && !body.draft_id) body.draft_id = err.draft_id;
@@ -5526,8 +5604,12 @@
     if (action === 'attach_invoice_pdf') return null;
     var pending = null;
     try { pending = _persistAmbiguousFinancialWrite(action, body || {}); }
-    catch (e) { if (e && e.offline_invoice_queue === 'locked') throw e; }
-    if (pending) _noteFinancialWritePending(action, pending);
+    catch (e) {
+      if (e && e.offline_invoice_queue === 'locked') throw e;
+      throw _invoiceStorageUnavailableError();
+    }
+    if (!pending || !_financialWriteItemDurable(pending)) throw _invoiceStorageUnavailableError();
+    _noteFinancialWritePending(action, pending);
     return pending;
   }
 
@@ -18466,7 +18548,8 @@
     var loadCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all', type: 'fencing', status: 'complete', page_size: 500 }).then(function(res) {
       if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
-      var workOrders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])).filter(function(workOrder) {
+      if (!_workOrdersHydratePayloadComplete(res)) throw new Error('Could not load work orders.');
+      var workOrders = authorizeWorkOrders(workOrdersForViewer(res.work_orders)).filter(function(workOrder) {
         var date = _weeklyWorkOrderDate(workOrder);
         return date >= loadWeekStart && date <= loadWeekEnd && workOrder.can_add_to_weekly_invoice === true;
       });
@@ -20255,7 +20338,8 @@
       line_kind: 'wo_pass_through',
       amount: amount > 0 ? amount : null,
       hours: null,
-      rate: null
+      rate: null,
+      server_owned: true
     };
     var sourceId = _woChargeSourceLineId(charge);
     if (sourceId) line.source_line_id = sourceId;
@@ -20270,20 +20354,41 @@
     function noIdKey(line) {
       return String((line && line.trade_name) || '') + '\0' + String(Number((line && line.amount) || 0));
     }
+    function isServerOwnedNoId(line) {
+      return !!(line && line.line_kind === 'wo_pass_through' && !line.source_line_id && line.server_owned === true);
+    }
+    function isUntaggedNoId(line) {
+      return !!(line && line.line_kind === 'wo_pass_through' && !line.source_line_id && line.server_owned !== true && line.server_owned !== false);
+    }
+    var taggedServerLines = (serverLines || []).map(function(line) {
+      if (!line) return line;
+      if (line.source_line_id || line.server_owned === true) return line;
+      return Object.assign({}, line, { server_owned: true });
+    });
+    var incomingNoIdKeys = {};
+    taggedServerLines.forEach(function(line) {
+      if (!line || line.source_line_id || line.line_kind !== 'wo_pass_through') return;
+      incomingNoIdKeys[noIdKey(line)] = true;
+    });
+    for (var u = 0; u < lines.length; u++) {
+      if (isUntaggedNoId(lines[u]) && incomingNoIdKeys[noIdKey(lines[u])]) {
+        return { lines: existing && Array.isArray(existing) ? existing.slice() : [], changed: false, unresolved: true };
+      }
+    }
     lines.forEach(function(line) {
       var id = String((line && line.source_line_id) || '');
       if (id) {
         have[id] = true;
         return;
       }
-      if (line && line.line_kind === 'wo_pass_through') {
+      if (isServerOwnedNoId(line)) {
         var existingKey = noIdKey(line);
         existingNoIdCounts[existingKey] = (existingNoIdCounts[existingKey] || 0) + 1;
       }
     });
     var serverNoIdSeen = {};
     var changed = false;
-    (serverLines || []).forEach(function(server) {
+    taggedServerLines.forEach(function(server) {
       if (!server) return;
       var id = String(server.source_line_id || '');
       if (id) {
@@ -20319,7 +20424,7 @@
       lines.push(server);
       changed = true;
     });
-    return { lines: lines, changed: changed };
+    return { lines: lines, changed: changed, unresolved: false };
   }
   // [WO-PASSTHROUGH-MERGE-END]
 
@@ -20327,7 +20432,8 @@
   function _stripServerOwnedPassThroughs(lines) {
     return (lines || []).filter(function(ln) {
       if (!ln || ln.line_kind !== 'wo_pass_through') return true;
-      return !ln.source_line_id;
+      if (ln.source_line_id) return false;
+      return ln.server_owned !== true;
     });
   }
 
@@ -20359,10 +20465,6 @@
   function _applyHydratedWorkOrderMoney(card, wo, passThroughs) {
     if (!card) return false;
     if (!_workOrderHasCompleteMoney(wo) || !Array.isArray(passThroughs)) return false;
-    var nextAllocated = (wo && wo.subtotal != null) ? Number(wo.subtotal) : null;
-    if (nextAllocated != null && !Number.isFinite(nextAllocated)) nextAllocated = null;
-    var changed = card.wo_allocated !== nextAllocated;
-    card.wo_allocated = nextAllocated;
     var prevLines = card.wo_labour_lines || [];
     var serverIds = {};
     (passThroughs || []).forEach(function(ln) {
@@ -20376,6 +20478,15 @@
       return !!serverIds[String(ln.source_line_id)];
     });
     var merged = _mergeServerPassThroughs(kept, passThroughs || []);
+    if (merged.unresolved) {
+      card._woPassThroughUnresolved = true;
+      return false;
+    }
+    card._woPassThroughUnresolved = false;
+    var nextAllocated = (wo && wo.subtotal != null) ? Number(wo.subtotal) : null;
+    if (nextAllocated != null && !Number.isFinite(nextAllocated)) nextAllocated = null;
+    var changed = card.wo_allocated !== nextAllocated;
+    card.wo_allocated = nextAllocated;
     if (merged.changed || kept.length !== prevLines.length) {
       card.wo_labour_lines = merged.lines;
       changed = true;
@@ -20597,6 +20708,12 @@
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);
+      if ((_jobCards || []).some(function(card) { return card && card._woPassThroughUnresolved; })) {
+        _pmWoHydrateState = 'error';
+        _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
+        renderInvoiceBuilder();
+        return;
+      }
       _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
       _pmWoHydrateState = 'ok';
       _pmWoHydrateError = '';
@@ -21300,7 +21417,7 @@
     var c = _jobCards[idx]; if (!c) return;
     _syncJobCardsFromDOM();
     if (!Array.isArray(c.wo_labour_lines)) c.wo_labour_lines = [];
-    c.wo_labour_lines.push({ trade_name: '', line_kind: 'wo_pass_through', amount: null, hours: null, rate: null });
+    c.wo_labour_lines.push({ trade_name: '', line_kind: 'wo_pass_through', amount: null, hours: null, rate: null, server_owned: false });
     renderInvoiceBuilder();
   };
   window.setWoPassThroughAmount = function(idx, li, val) {
@@ -21308,6 +21425,7 @@
     if (!c.wo_labour_lines[li]) return;
     var n = parseFloat(val);
     c.wo_labour_lines[li].line_kind = 'wo_pass_through';
+    if (c.wo_labour_lines[li].server_owned !== true) c.wo_labour_lines[li].server_owned = false;
     c.wo_labour_lines[li].amount = (isNaN(n) || n < 0) ? null : n;
     _refreshJobCardLine(idx);
   };
@@ -24508,7 +24626,8 @@
     var hubCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (!_invoiceApiCurrent(hubCtx)) return;
-      renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
+      if (!_workOrdersHydratePayloadComplete(res)) throw new Error('Could not load work orders.');
+      renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders)));
     }).catch(function(err) {
       if (!_invoiceApiCurrent(hubCtx)) return;
       container.innerHTML = '<div data-work-order-hub-error class="hours-no-data">Error: '

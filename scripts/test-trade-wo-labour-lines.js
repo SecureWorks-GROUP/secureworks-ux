@@ -358,8 +358,17 @@ function hoursCard(overrides) {
   const retry = context._mergeServerPassThroughs(two.lines, [israel, Object.assign({}, israel)])
   assert.strictEqual(retry.lines.length, 2, 'a second hydrate does not double no-ID lines')
   assert.strictEqual(retry.changed, false)
-  const oneLocal = context._mergeServerPassThroughs([Object.assign({}, israel)], [israel, Object.assign({}, israel)])
-  assert.strictEqual(oneLocal.lines.length, 2, 'one local no-ID line plus two server lines keeps both deducts')
+  const untaggedCollision = context._mergeServerPassThroughs([Object.assign({}, israel)], [israel, Object.assign({}, israel)])
+  assert.strictEqual(untaggedCollision.unresolved, true,
+    'an untagged local no-ID line colliding with server no-ID money stays unresolved')
+  assert.strictEqual(untaggedCollision.lines.length, 1, 'unresolved merge does not rewrite restored lines')
+  const localOwned = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: false }
+  const oneLocal = context._mergeServerPassThroughs([localOwned], [
+    Object.assign({}, israel, { server_owned: true }),
+    Object.assign({}, israel, { server_owned: true }),
+  ])
+  assert.strictEqual(oneLocal.unresolved, false)
+  assert.strictEqual(oneLocal.lines.length, 3, 'a tagged local no-ID line plus two server lines keeps all three deducts')
   const staleSameId = { trade_name: 'Old Israel', line_kind: 'wo_pass_through', amount: 99, source_line_id: 'wo-fence-charge-israel' }
   const freshSameId = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'wo-fence-charge-israel' }
   const replaced = context._mergeServerPassThroughs([staleSameId, { trade_name: 'Kim', hours: 1, rate: 20 }], [freshSameId])
@@ -830,15 +839,64 @@ function hoursCard(overrides) {
 
       ctx.api = function(action) {
         if (action === 'my_trade_invoices') {
-          return Promise.resolve({
-            invoices: [{ work_order_id: 'wo-b', status: 'draft' }],
-          })
+          return Promise.resolve({ invoices: [] })
         }
         return Promise.resolve({})
       }
       return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'delete_trade_invoice',
+        body: { invoice_id: 'inv-gone' },
+      }).then(function(emptyDelete) {
+        assert.strictEqual(emptyDelete, null,
+          'an empty invoice listing does not prove a delete committed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-other' }], truncated: true })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(truncatedDelete) {
+        assert.strictEqual(truncatedDelete, null,
+          'a truncated invoice listing does not prove a delete committed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-other' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(absentDelete) {
+        assert.strictEqual(absentDelete, true,
+          'absence from a complete non-empty listing means the delete landed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-gone' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(stillThere) {
+        assert.strictEqual(stillThere, false, 'a still-listed invoice is not a landed delete')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ work_order_id: 'wo-b', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
         action: 'submit_work_order_invoice',
         body: { work_order_id: 'wo-b' },
+      })
       }).then(function(draftLanded) {
         assert.strictEqual(draftLanded, true,
           'an exact WO identity in draft is already landed and must not resend')
@@ -908,6 +966,31 @@ function hoursCard(overrides) {
         { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }], status: 'draft' },
         { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
       ), true, 'a multi-job write matches only when every job and the period land')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] } }
+      ), false, 'two same-job slots are not covered by one repeated-job invoice row')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A', scheduled_date: '2026-09-07' },
+            { job_number: 'SWF-A', scheduled_date: '2026-09-08' },
+          ],
+          status: 'draft',
+        },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A', scheduled_date: '2026-09-07' },
+            { job_number: 'SWF-A', scheduled_date: '2026-09-08' },
+          ],
+        } }
+      ), true, 'same-job slots with distinct dates match one-to-one')
+      assert.strictEqual(ctx._invoiceSlotsCovered(
+        ctx._invoiceIdentitySlots({ extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] }),
+        { extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] }
+      ), true, 'two indistinguishable same-job rows can cover two same-job slots')
       assert.strictEqual(ctx._invoiceMatchesQueueIntent(
         { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
         { body: {
@@ -1494,6 +1577,21 @@ function hoursCard(overrides) {
     return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
       assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
         'a durable draft identity clears the parked write after the local write ends')
+      const origSetItem = tabA.localStorage.setItem
+      tabA.localStorage.setItem = function(k, v) {
+        if (String(k || '').indexOf('sw_action_queue_inbox_') === 0) throw new Error('quota')
+        return origSetItem.call(tabA.localStorage, k, v)
+      }
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      try {
+        tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-05' })
+        throw new Error('persist-before-send should fail closed when inbox write cannot be read back')
+      } catch (err) {
+        assert.strictEqual(err && err.code, 'invoice_storage_unavailable',
+          'a failed durable persist blocks the POST')
+      }
+      tabA.localStorage.setItem = origSetItem
+      tabA._endFinancialWrite('generate_trade_invoice')
       console.log('OK — cross-tab invoice single-flight and queue merge')
     })
   }).catch(function(err) {

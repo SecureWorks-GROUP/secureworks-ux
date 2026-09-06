@@ -20,7 +20,7 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
 
   const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
   await expect(card).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Work Order' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Work Order', exact: true })).toBeVisible();
   await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
   await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
   await expect(card.locator('[data-cardamt]')).toHaveText('$60.00');

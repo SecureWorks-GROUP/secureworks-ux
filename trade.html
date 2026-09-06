@@ -15881,6 +15881,7 @@
       container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
     });
   }
+  window.loadHoursView = loadHoursView;
 
   // Per-metre extras (Henry's work-order weekly builder) key on invoice_type,
   // never an email heuristic. Job-centric Financial stays available either way.
@@ -17440,6 +17441,7 @@
 
   // Persist invoice draft to sessionStorage (survives background kill)
   function _saveInvDraft() {
+    if (!_invoiceBuilderOpen) return;
     try {
       _syncRowsFromDOM();
       sessionStorage.setItem('sw_inv_draft', JSON.stringify({
@@ -17450,7 +17452,14 @@
   }
   window._clearInvDraft = function() {
     _invoiceBuilderOpen = false;
+    _jobCentricActive = false;
+    _pmWoHydrateSeq++;
+    _invoiceRenderSeq++;
     try { sessionStorage.removeItem('sw_inv_draft'); } catch(e) {}
+  };
+  window.leaveInvoiceBuilder = function() {
+    _clearInvDraft();
+    loadHoursView();
   };
 
   function _syncRowsFromDOM() {
@@ -17826,6 +17835,7 @@
   }
 
   var _pmWoHydrateSeq = 0;
+  var _invoiceRenderSeq = 0;
 
   function _woPassThroughFromCharge(charge) {
     charge = charge || {};
@@ -17891,10 +17901,10 @@
   }
 
   function _hydratePerMetreWorkOrderCards() {
-    if (!isPerMetreUser() || !_jobCentricActive) return;
+    if (!isPerMetreUser() || !_jobCentricActive || !_invoiceBuilderOpen) return;
     var seq = ++_pmWoHydrateSeq;
     api('my_work_orders', { mode: 'all' }).then(function(res) {
-      if (seq !== _pmWoHydrateSeq || !_jobCentricActive) return;
+      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen) return;
       var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []));
       if (_mergeWorkOrdersIntoJobCards(orders)) renderInvoiceBuilder();
     }).catch(function() {});
@@ -19046,6 +19056,8 @@
   };
 
   function renderInvoiceBuilder() {
+    if (!_invoiceBuilderOpen) return;
+    var renderSeq = ++_invoiceRenderSeq;
     var container = document.getElementById('hoursContent');
     var details = loadTradeDetails();
     var isExpense = _invoiceBuilderMode === 'expense';
@@ -19054,7 +19066,7 @@
     // Back button
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
     html += '<h2 style="font-size:18px;font-weight:700;color:var(--sw-dark);margin:0">' + (isExpense ? 'Expense Invoice' : 'Invoice') + '</h2>';
-    html += '<button class="btn btn-secondary btn-small" onclick="_clearInvDraft();loadHoursView()">Back</button>';
+    html += '<button class="btn btn-secondary btn-small" onclick="leaveInvoiceBuilder()">Back</button>';
     html += '</div>';
 
     if (_draftInvoiceId) {
@@ -19204,6 +19216,7 @@
 
     html += '<div style="height:96px"></div>';
 
+    if (!_invoiceBuilderOpen || renderSeq !== _invoiceRenderSeq) return;
     container.innerHTML = html;
     // In job-centric mode _calcInvTotals() only covers extras/misc rows, not
     // job-card hours — _updateInvTotals() applies the correct _grandInvTotal()

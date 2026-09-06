@@ -455,7 +455,14 @@ function hoursCard(overrides) {
       return !!(c && c.gen === ctx._invoiceAuthGen && c.userId && c.userId === ctx._invDraftOwnerId())
     },
     isAuthorizedWorkOrder: function(id) { return ctx._authorizedWorkOrderIds[String(id || '')] === true },
-    authorizeWorkOrders: function(orders) { return orders || [] },
+    authorizeWorkOrders: function(orders) {
+      const next = {}
+      ;(orders || []).forEach(function(order) {
+        if (order && order.id) next[String(order.id)] = true
+      })
+      ctx._authorizedWorkOrderIds = next
+      return orders || []
+    },
     workOrdersForViewer: function(orders) { return orders || [] },
     blockedForeignJobWrite: function() { return false },
     api: function(action, _q, body, options) {
@@ -465,7 +472,7 @@ function hoursCard(overrides) {
         return Promise.reject(err)
       }
       sent.push({ action: action, body: body })
-      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-b' }] })
       return Promise.resolve({})
     },
     toast: function() {},
@@ -528,6 +535,7 @@ function hoursCard(overrides) {
       return Promise.resolve({})
     }
     ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-unauth': true, 'wo-stale': true }
     store.sw_action_queue = JSON.stringify([
       { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-unauth' } },
     ])
@@ -536,8 +544,12 @@ function hoursCard(overrides) {
   }).then(function() {
     assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
       'a work-order invoice is not replayed without current WO authorization')
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'replay always re-reads my_work_orders instead of trusting a cached WO id')
     assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
       'an unauthorized work-order invoice stays queued for a later authorized session')
+    assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), false,
+      'a later my_work_orders result replaces the authorized set and drops stale ids')
 
     ctx._user = { id: 'bob' }
     ctx._invoiceAuthGen += 1
@@ -690,16 +702,59 @@ function hoursCard(overrides) {
       assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), false,
         'direct draft save is single-flight')
       ctx._endSaveTradeInvoiceDraft()
+      assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), true)
+      assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), false,
+        'invoice generate/submit is single-flight')
+      ctx._endFinancialWrite('generate_trade_invoice')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { week_start: '2026-09-07', extra_items: [{ description: 'A' }], gst_on: true },
+        { week_start: '2026-09-14', extra_items: [{ description: 'A' }], gst_on: true }
+      ), false, 'the same payload in a different week is a distinct intent')
 
-      ctx.navigator.onLine = false
-      store.sw_action_queue = '[]'
-      const offlineAbort = new Error('Failed to fetch')
-      return ctx._handleFinancialWriteFailure(
-        'generate_trade_invoice',
-        { week_start: '2026-09-07', extra_items: [{ description: 'Offline A' }] },
-        offlineAbort,
-        ctx._invoiceApiContext()
-      )
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{ work_order_id: 'wo-b', status: 'draft' }],
+          })
+        }
+        return Promise.resolve({})
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'submit_work_order_invoice',
+        body: { work_order_id: 'wo-b' },
+      }).then(function(draftLanded) {
+        assert.strictEqual(draftLanded, true,
+          'an exact WO identity in draft is already landed and must not resend')
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: { work_order_id: 'wo-b' },
+        })
+      }).then(function() {
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{ work_order_id: 'wo-b', status: 'pending_ops_review' }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: { work_order_id: 'wo-b' },
+        })
+      }).then(function(pendingLanded) {
+        assert.strictEqual(pendingLanded, true,
+          'an exact WO identity in pending_ops_review is already landed')
+        ctx.navigator.onLine = false
+        store.sw_action_queue = '[]'
+        const offlineAbort = new Error('Failed to fetch')
+        return ctx._handleFinancialWriteFailure(
+          'generate_trade_invoice',
+          { week_start: '2026-09-07', extra_items: [{ description: 'Offline A' }] },
+          offlineAbort,
+          ctx._invoiceApiContext()
+        )
+      })
     }).then(function(offlineResult) {
       assert.strictEqual(offlineResult.outcome, 'queued_unresolved',
         'an offline Failed-to-fetch still goes through the ambiguous path')

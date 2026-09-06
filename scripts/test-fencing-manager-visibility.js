@@ -252,6 +252,12 @@ assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), false);
 context.authorizeWorkOrders([workOrders.find((order) => order.id === 'wo-patio')]);
 assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), true,
   'the job-detail entry point authorises the order it renders, hub or no hub');
+context.authorizeWorkOrders(context.workOrdersForViewer(workOrders));
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), true);
+context.authorizeWorkOrders([{ id: 'wo-fencing', job_type: 'fencing' }]);
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-fencing'), true);
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), false,
+  'a later my_work_orders result replaces the authorized set and drops ids no longer present');
 assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
   'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
 assert(/var orders = workOrdersForViewer\(res\.work_orders \|\| \[\]\);/.test(html),
@@ -348,8 +354,20 @@ assert(html.includes('_guardFinancialWrite') && html.includes('Do not submit aga
   'a pending ambiguous invoice write blocks a second send');
 assert(html.includes('_financialWritePayloadIdentity') && !/aWeek === bWeek && aId === bId/.test(html),
   'pending invoice intents match exact identity or payload, not week-only');
+assert(/return 'payload:' \+ JSON\.stringify\(\{[\s\S]*?week_start: body\.week_start \|\| null,[\s\S]*?week_ending: body\.week_ending \|\| null,/.test(html),
+  'payload fingerprint includes week_start/week_ending so distinct weeks do not suppress each other');
 assert(html.includes('_beginSaveTradeInvoiceDraft') && /saveDraftInvoice = function\(\) \{[\s\S]*?_beginSaveTradeInvoiceDraft\(\)/.test(html),
   'Save Draft is single-flight so concurrent taps cannot create parallel drafts');
+assert(html.includes('_beginFinancialWrite') && html.includes('_financialWriteInFlight') &&
+  /submitWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /submitTradeHours = function\(\) \{[\s\S]*?_beginFinancialWrite\('submit_trade_invoice'\)/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /submitInvoiceFromBuilder = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /generateTradeInvoice = function\(weekStart\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_beginFinancialWrite\('submit_work_order_invoice'\)/.test(html),
+  'every financial invoice submit/generate path is process-wide single-flight');
+assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQueueIntent\(inv, item\); \}\);[\s\S]{0,280}return match\.length > 0;/.test(html),
+  'an exact draft/invoice/work-order identity is treated as landed without a status filter');
 assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
   html.includes('_persistAmbiguousFinancialWrite(action, body)'),
   'timeout/Failed-to-fetch is marked ambiguous before any offline-only queue path');
@@ -357,6 +375,10 @@ assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.tes
   'saving an existing invoice draft sends its draft_id');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
   'offline work-order invoice replay revalidates current WO authorization');
+assert(/function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?if \(item\.action !== 'submit_work_order_invoice'\) return Promise\.resolve\(_offlineInvoiceReplayAllowed\(item, ctx\)\);[\s\S]*?return api\('my_work_orders'/.test(html),
+  'WO invoice replay always re-reads my_work_orders instead of trusting a cached authorized id');
+assert(/function authorizeWorkOrders\(orders\) \{[\s\S]*?var next = \{\};[\s\S]*?_authorizedWorkOrderIds = next;/.test(html),
+  'authorizeWorkOrders replaces the authorized set from the latest authenticated result');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),
   'direct work-order invoice submit drops late toast/refresh/queue after account switch');
 assert(html.includes('No-ID lines are a multiset'),

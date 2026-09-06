@@ -4319,7 +4319,6 @@
     if (item.action !== 'submit_work_order_invoice') return Promise.resolve(_offlineInvoiceReplayAllowed(item, ctx));
     var woId = _offlineInvoiceWorkOrderId(item);
     if (!woId) return Promise.resolve(false);
-    if (isAuthorizedWorkOrder(woId)) return Promise.resolve(_offlineInvoiceReplayAllowed(item, ctx));
     return api('my_work_orders', { mode: 'all' }, null, {
       beforeSend: function() {
         return _invoiceApiCurrent(ctx) && _offlineInvoiceOwnedByCurrentAccount(item);
@@ -4413,6 +4412,8 @@
     if (exact) return 'id:' + exact;
     try {
       return 'payload:' + JSON.stringify({
+        week_start: body.week_start || null,
+        week_ending: body.week_ending || null,
         extra_items: body.extra_items || null,
         final_deductions: body.final_deductions || null,
         manual_assignments: body.manual_assignments || null,
@@ -4462,15 +4463,9 @@
         return !invoices.some(function(inv) { return String(inv.id) === String(targetId); });
       }
       var match = invoices.filter(function(inv) { return _invoiceMatchesQueueIntent(inv, item); });
-      if (!match.length) return false;
-      if (item.action === 'save_trade_invoice_draft') {
-        return match.some(function(inv) {
-          return inv.status === 'draft' || inv.status === 'submitted' || inv.status === 'paid';
-        });
-      }
-      return match.some(function(inv) {
-        return inv.status === 'submitted' || inv.status === 'paid' || !!inv.xero_invoice_id || !!inv.xero_bill_id;
-      });
+      // An exact draft/invoice/work-order identity means this write already
+      // committed — including draft and pending_ops_review (failed Xero push).
+      return match.length > 0;
     }).catch(function() {
       return null;
     });
@@ -4498,16 +4493,25 @@
     return item;
   }
 
-  var _saveTradeInvoiceDraftInFlight = false;
+  var _financialWriteInFlight = {};
 
-  function _beginSaveTradeInvoiceDraft() {
-    if (_saveTradeInvoiceDraftInFlight) return false;
-    _saveTradeInvoiceDraftInFlight = true;
+  function _beginFinancialWrite(action) {
+    var key = String(action || '');
+    if (!key || _financialWriteInFlight[key]) return false;
+    _financialWriteInFlight[key] = true;
     return true;
   }
 
+  function _endFinancialWrite(action) {
+    delete _financialWriteInFlight[String(action || '')];
+  }
+
+  function _beginSaveTradeInvoiceDraft() {
+    return _beginFinancialWrite('save_trade_invoice_draft');
+  }
+
   function _endSaveTradeInvoiceDraft() {
-    _saveTradeInvoiceDraftInFlight = false;
+    _endFinancialWrite('save_trade_invoice_draft');
   }
 
   function _handleFinancialWriteFailure(action, body, err, ctx) {
@@ -17826,6 +17830,10 @@
         renderWeeklyWorkOrderInvoice();
         return;
       }
+      if (!_beginFinancialWrite('generate_trade_invoice')) {
+        toast('Invoice send is already in progress.');
+        return;
+      }
       state.requestSeq++;
       var requestSeq = state.requestSeq;
       state.busy = true;
@@ -17878,7 +17886,7 @@
           }
           renderWeeklyWorkOrderInvoice();
         });
-      });
+      }).then(function() { _endFinancialWrite('generate_trade_invoice'); }, function() { _endFinancialWrite('generate_trade_invoice'); });
     });
   };
 
@@ -17932,6 +17940,11 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
         return;
       }
+      if (!_beginFinancialWrite('submit_trade_invoice')) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
+        toast('Invoice send is already in progress.');
+        return;
+      }
 
       api('submit_trade_invoice', null, hoursBody, _invoiceApiOptions(ctx)).then(function(res) {
         if (!_invoiceApiCurrent(ctx)) return;
@@ -17951,7 +17964,7 @@
           }
           if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
         });
-      });
+      }).then(function() { _endFinancialWrite('submit_trade_invoice'); }, function() { _endFinancialWrite('submit_trade_invoice'); });
     });
   };
 
@@ -20817,6 +20830,10 @@
         gst_on: _invGst
       };
       if (_guardFinancialWrite('generate_trade_invoice', jobCentricBody)) return;
+      if (!_beginFinancialWrite('generate_trade_invoice')) {
+        toast('Invoice send is already in progress.');
+        return;
+      }
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
       api('generate_trade_invoice', {}, jobCentricBody, _invoiceApiOptions(ctx)).then(function(result) {
@@ -20893,7 +20910,7 @@
           // follow the sessionStorage path and lose in-memory job cards.
           renderInvoiceBuilder();
         });
-      });
+      }).then(function() { _endFinancialWrite('generate_trade_invoice'); }, function() { _endFinancialWrite('generate_trade_invoice'); });
     });
   };
 
@@ -21243,6 +21260,11 @@
         renderInvoiceBuilder();
         return;
       }
+      if (!_beginFinancialWrite('generate_trade_invoice')) {
+        toast('Invoice send is already in progress.');
+        renderInvoiceBuilder();
+        return;
+      }
 
       api('generate_trade_invoice', {}, builderBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
@@ -21324,7 +21346,7 @@
           // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
           renderInvoiceBuilder();
         });
-      });
+      }).then(function() { _endFinancialWrite('generate_trade_invoice'); }, function() { _endFinancialWrite('generate_trade_invoice'); });
     });
   };
 
@@ -21610,6 +21632,10 @@
       if (!_invoiceApiCurrent(ctx)) return;
       var legacyBody = { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) };
       if (_guardFinancialWrite('generate_trade_invoice', legacyBody)) return;
+      if (!_beginFinancialWrite('generate_trade_invoice')) {
+        toast('Invoice send is already in progress.');
+        return;
+      }
 
       api('generate_trade_invoice', {}, legacyBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
@@ -21626,7 +21652,7 @@
           _financialWriteFailureToast(result.outcome, err);
           if (result.outcome === 'landed') loadHoursView();
         });
-      });
+      }).then(function() { _endFinancialWrite('generate_trade_invoice'); }, function() { _endFinancialWrite('generate_trade_invoice'); });
     });
   };
 
@@ -23324,9 +23350,11 @@
   // never a precondition for the job-detail Cost Breakdown invoice.
   function authorizeWorkOrders(orders) {
     var allowed = (orders || []).filter(function (order) { return order && workOrderTenantOk(order); });
+    var next = {};
     allowed.forEach(function (order) {
-      if (order.id) _authorizedWorkOrderIds[String(order.id)] = true;
+      if (order.id) next[String(order.id)] = true;
     });
+    _authorizedWorkOrderIds = next;
     return allowed;
   }
 
@@ -23455,6 +23483,10 @@
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       if (_guardFinancialWrite('submit_work_order_invoice', woBody)) return;
+      if (!_beginFinancialWrite('submit_work_order_invoice')) {
+        toast('Invoice send is already in progress.');
+        return;
+      }
 
       var btn = document.getElementById('woBtn' + workOrderId);
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
@@ -23511,7 +23543,7 @@
           }
           _reEnableBtn();
         });
-      });
+      }).then(function() { _endFinancialWrite('submit_work_order_invoice'); }, function() { _endFinancialWrite('submit_work_order_invoice'); });
     });
   };
 

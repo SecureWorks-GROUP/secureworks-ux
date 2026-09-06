@@ -450,6 +450,8 @@ assert(html.includes('_financialWritePayloadIdentity') && !/aWeek === bWeek && a
   'pending invoice intents match exact identity or payload, not week-only');
 assert(/return 'payload:' \+ JSON\.stringify\(\{[\s\S]*?week_start: body\.week_start \|\| null,[\s\S]*?week_ending: body\.week_ending \|\| null,/.test(html),
   'payload fingerprint includes week_start/week_ending so distinct weeks do not suppress each other');
+assert(/function _invoiceMoneyFingerprint[\s\S]*?week_start: _normalizeInvoicePeriod\(body\.week_start \|\| body\.weekStart\)[\s\S]*?week_ending: _normalizeInvoicePeriod\(body\.week_ending \|\| body\.weekEnding\)/.test(html),
+  'mutable money fingerprint includes normalized week_start/week_ending so a moved period cannot land on the old draft');
 assert(html.includes('_beginSaveTradeInvoiceDraft') && /saveDraftInvoice = function\(\) \{[\s\S]*?_beginSaveTradeInvoiceDraft\(\)/.test(html),
   'Save Draft is single-flight so concurrent taps cannot create parallel drafts');
 assert(/saveDraftInvoice = function\(\) \{[\s\S]*?_invoiceDraftSaveSucceeded\(res\)[\s\S]*?invoice_response_ambiguous/.test(html) &&
@@ -555,12 +557,13 @@ assert(html.includes('_blockJobCardWorkOrder') && html.includes('_jobCardWorkOrd
   'non-exclusive job-centric WOs stay blocked with a reason instead of converting to Hours');
 assert(html.includes('_jobCentricWorkOrdersStillExclusive') &&
   html.includes('_confirmJobCentricWorkOrdersExclusive') &&
+  html.includes('_refreshJobCentricPostedWorkOrderMoney') &&
   /function _jobCentricWorkOrdersStillExclusive[\s\S]*?_workOrderDirectInvoiceAllowed/.test(html) &&
-  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?api\('my_work_orders', \{ mode: 'all' \}\)[\s\S]*?_jobCentricWorkOrdersStillExclusive/.test(html) &&
-  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)[\s\S]*?_withFinancialWebLock\('generate_trade_invoice'[\s\S]*?_confirmJobCentricWorkOrdersExclusive\(\)[\s\S]*?_postJobCentricGenerate\(\)/.test(html) &&
+  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?api\('my_work_orders', \{ mode: 'all' \}\)[\s\S]*?_jobCentricWorkOrdersStillExclusive[\s\S]*?_refreshJobCentricPostedWorkOrderMoney/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)[\s\S]*?_withFinancialWebLock\('generate_trade_invoice'[\s\S]*?_confirmJobCentricWorkOrdersExclusive\(\)[\s\S]*?_buildJobCentricPayload\(_jobCards\)[\s\S]*?_postJobCentricGenerate\(\)/.test(html) &&
   !html.includes('claim_work_order') &&
   !html.includes('exclusive_claim'),
-  'job-centric generate re-reads WO can_invoice under the financial fence and does not add a claim API');
+  'job-centric generate re-reads WO can_invoice under the financial fence, rebuilds deduction money from that listing, and does not add a claim API');
 assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
   'hydrate overwrites server-owned money and clears it when a WO id is stripped');
 assert(html.includes('_stripServerOwnedPassThroughs'),

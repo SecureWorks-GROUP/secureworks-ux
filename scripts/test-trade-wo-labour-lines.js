@@ -772,6 +772,38 @@ function hoursCard(overrides) {
   }, twoIsrael), true)
   assert.strictEqual(twoServerNoId.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through').length, 2,
     'complete replace of two same-amount server no-ID rows stays two, not four')
+
+  const staleChargeCard = woCard({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'cl-israel', server_owned: true },
+      { trade_name: 'Kim', hours: 1, rate: 20 },
+    ],
+  })
+  context._jobCards = [staleChargeCard]
+  const refreshedListing = {
+    'wo-1': {
+      id: 'wo-1',
+      subtotal: 100,
+      negative_charges: [{ trade_name: 'Israel', amount: 55, source_line_id: 'cl-israel' }],
+    },
+  }
+  const moneyRefresh = context._refreshJobCentricPostedWorkOrderMoney(refreshedListing, ['wo-1'])
+  assert.strictEqual(moneyRefresh.ok, true, 'exclusive re-read money refresh succeeds on complete charges')
+  const israelLine = staleChargeCard.wo_labour_lines.find((ln) => ln.source_line_id === 'cl-israel')
+  assert.strictEqual(israelLine && israelLine.amount, 55, 'fresh listing overwrites stale pass-through amount')
+  assert.strictEqual(staleChargeCard.wo_labour_lines.find((ln) => ln.trade_name === 'Kim').rate, 20,
+    'named labour stays on the card while pass-through money refreshes')
+  const rebuiltExtras = context._buildJobCentricPayload(context._jobCards)
+  assert(!rebuiltExtras.error, 'refreshed cards still build: ' + rebuiltExtras.error)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltExtras.cardExtraItems[0].wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55 },
+    { trade_name: 'Kim', hours: 1, rate: 20, amount: 20 },
+  ], 'generate extras rebuild pass-through deduction money from the exclusive listing')
+  assert.strictEqual(rebuiltExtras.cardExtraItems[0].wo_labour_deduction, 75)
+  assert.strictEqual(context._refreshJobCentricPostedWorkOrderMoney({ 'wo-1': { id: 'wo-1' } }, ['wo-1']).ok, false,
+    'exclusive re-read fails closed when posted WO money is incomplete')
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -1294,6 +1326,47 @@ function hoursCard(overrides) {
             extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
           } }
         ), false, 'a draft identity is not landed when queued extras never appear on the listing')
+        const draftMoney = {
+          extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+        }
+        assert.ok(String(ctx._invoiceMoneyFingerprint({
+          draft_id: 'draft-1',
+          week_start: '2026-09-07',
+          ...draftMoney,
+        })).indexOf('"week_start":"2026-09-07"') !== -1,
+          'money fingerprint includes normalized week_start')
+        assert.ok(String(ctx._invoiceMoneyFingerprint({
+          draft_id: 'draft-1',
+          week_ending: '2026-09-13',
+          ...draftMoney,
+        })).indexOf('"week_ending":"2026-09-13"') !== -1,
+          'money fingerprint includes normalized week_ending')
+        assert.strictEqual(ctx._invoiceMoneyFingerprintMatches(
+          { draft_id: 'draft-1', week_start: '2026-09-07', ...draftMoney },
+          { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney }
+        ), false, 'same extras in a different week are a different money fingerprint')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
+          { body: { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney } }
+        ), false, 'a timed-out draft update that moved period does not match the old same-money draft')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
+          { body: { draft_id: 'draft-1', week_start: '2026-09-07', ...draftMoney } }
+        ), true, 'same draft, same extras, and same week still land')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          {
+            id: 'draft-1',
+            draft_id: 'draft-1',
+            week_start: '2026-09-07',
+            work_order_blocks: [{ work_order_id: 'wo-1', labour_deductions: [{ user_id: 'u1', hours: 2 }] }],
+            status: 'draft',
+          },
+          { body: {
+            draft_id: 'draft-1',
+            week_start: '2026-09-21',
+            work_order_blocks: [{ work_order_id: 'wo-1', labour_deductions: [{ user_id: 'u1', hours: 2 }] }],
+          } }
+        ), false, 'a weekly draft that moved week_start does not match the old-week listing')
         ctx.api = function(action) {
           if (action === 'my_trade_invoices') {
             return Promise.resolve({ invoices: [{ id: 'draft-1', draft_id: 'draft-1', status: 'draft' }] })
@@ -1310,6 +1383,31 @@ function hoursCard(overrides) {
       }).then(function(draftMoneyUnresolved) {
         assert.strictEqual(draftMoneyUnresolved, null,
           'a timed-out draft update stays unresolved until the listing shows the new money')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{
+                id: 'draft-1',
+                draft_id: 'draft-1',
+                week_start: '2026-09-07',
+                extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+                status: 'draft',
+              }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'save_trade_invoice_draft',
+          body: {
+            draft_id: 'draft-1',
+            week_start: '2026-09-21',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          },
+        })
+      }).then(function(draftPeriodUnresolved) {
+        assert.strictEqual(draftPeriodUnresolved, null,
+          'a timed-out draft that moved period stays unresolved against the old-week listing')
         assert.strictEqual(ctx._invoiceMatchesQueueIntent(
           { work_order_id: 'wo-b', status: 'draft' },
           { body: {

@@ -575,6 +575,66 @@ test.describe('Henry job-centric submit', () => {
     await expect(card.locator('[data-wo-block]')).toContainText('already been invoiced');
     expect(feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST').length).toBe(0);
   });
+
+  test('job-centric generate posts refreshed WO deduction money after the exclusive re-read', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+    await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+    await expect(page.locator('#invSubmitBtn')).toBeEnabled();
+
+    let exclusive = true;
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_work_orders' && !exclusive) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ok: true,
+            work_orders: [{
+              id: 'wo-fence-authorised',
+              wo_number: 'WO-FENCE-001',
+              job_id: 'fence-job-henry',
+              job_number: 'FENCE-HENRY-001',
+              client_name: 'Henry Client',
+              job_type: 'fencing',
+              status: 'complete',
+              scheduled_date: perthWeekMonday(),
+              subtotal: 100,
+              already_invoiced: false,
+              can_invoice: true,
+              can_add_to_weekly_invoice: true,
+              negative_charges: [{
+                line_id: 'wo-fence-charge-israel',
+                trade_name: 'Israel',
+                amount_ex: -55
+              }]
+            }]
+          })
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    exclusive = false;
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const woExtra = (writes[0].body.extra_items || []).find((item) => item.row_type === 'work_order');
+    expect(woExtra).toBeTruthy();
+    expect(woExtra.wo_labour_lines).toEqual([
+      { trade_name: 'Israel', hours: 1, rate: 55, amount: 55 }
+    ]);
+    expect(woExtra.wo_labour_deduction).toBe(55);
+  });
 });
 
 test.describe('Henry Hours submit after hydrate fail', () => {

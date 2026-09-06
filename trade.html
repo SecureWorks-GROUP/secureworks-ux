@@ -5011,6 +5011,11 @@
           return { read: true, allowed: false };
         }
       }
+      if (typeof _rebuildOfflineJobCentricWorkOrderMoney === 'function') {
+        if (!_rebuildOfflineJobCentricWorkOrderMoney(item, byId)) {
+          return { read: true, allowed: false };
+        }
+      }
       return { read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) };
     }).catch(function() {
       return { read: false, allowed: false };
@@ -5177,8 +5182,15 @@
     return false;
   }
 
+  function _normalizeInvoicePeriod(value) {
+    if (value == null) return null;
+    var text = String(value).trim();
+    if (!text) return null;
+    return text.slice(0, 10);
+  }
+
   function _invoicePeriodKey(source) {
-    return String((source && (source.week_start || source.week_ending)) || '');
+    return _normalizeInvoicePeriod(source && (source.week_start || source.week_ending)) || '';
   }
 
   function _invoiceDeductionFingerprint(source) {
@@ -5314,7 +5326,9 @@
         hourly_rate: body.hourly_rate == null ? null : body.hourly_rate,
         charge_line_ids: body.charge_line_ids || null,
         negative_charge_line_ids: body.negative_charge_line_ids || null,
-        crew_charge_line_ids: body.crew_charge_line_ids || null
+        crew_charge_line_ids: body.crew_charge_line_ids || null,
+        week_start: _normalizeInvoicePeriod(body.week_start || body.weekStart),
+        week_ending: _normalizeInvoicePeriod(body.week_ending || body.weekEnding)
       });
     } catch (e) {
       return '';
@@ -5351,8 +5365,11 @@
     var body = item.body || {};
     var needsMoney = _invoiceWriteHasMutableMoney(body);
     if (_invoiceIdentityMatches(inv, item)) {
-      if (!needsMoney) return true;
-      return _invoiceMoneyFingerprintMatches(inv, body);
+      if (needsMoney && !_invoiceMoneyFingerprintMatches(inv, body)) return false;
+      var identityWeek = _invoicePeriodKey(body);
+      var listingWeek = _invoicePeriodKey(inv);
+      if (identityWeek && listingWeek && identityWeek !== listingWeek) return false;
+      return true;
     }
     if (needsMoney) {
       if (!_invoicePayloadHasCompleteFingerprint(body)) return false;
@@ -20791,6 +20808,64 @@
     }
     return changed;
   }
+
+  function _workOrderPassThroughsFromListing(wo) {
+    if (!_workOrderHasCompleteMoney(wo)) return null;
+    var mapper = typeof _woPassThroughFromCharge === 'function'
+      ? _woPassThroughFromCharge
+      : function(charge) {
+          var amount = _workOrderChargeAmount(charge);
+          if (!(amount > 0)) return null;
+          var line = {
+            trade_name: (charge && charge.trade_name) || '',
+            line_kind: 'wo_pass_through',
+            amount: amount,
+            hours: null,
+            rate: null,
+            server_owned: true
+          };
+          var sourceId = _workOrderChargeSubmitIdentity(charge);
+          if (sourceId) line.source_line_id = sourceId;
+          return line;
+        };
+    var lines = [];
+    for (var i = 0; i < wo.negative_charges.length; i++) {
+      var line = mapper(wo.negative_charges[i]);
+      if (line && Number(line.amount) > 0) lines.push(line);
+    }
+    return lines;
+  }
+
+  function _refreshJobCentricPostedWorkOrderMoney(byId, postedIds) {
+    postedIds = postedIds || [];
+    if (!postedIds.length) return { ok: true };
+    if (!byId) {
+      return { ok: false, message: 'Could not refresh work-order charges. Invoice not sent.' };
+    }
+    var i;
+    for (i = 0; i < postedIds.length; i++) {
+      var wo = byId[postedIds[i]];
+      if (!wo || !_workOrderHasCompleteMoney(wo)) {
+        return { ok: false, message: 'Could not refresh work-order charges. Invoice not sent.' };
+      }
+    }
+    var cards = (typeof _jobCards !== 'undefined' && Array.isArray(_jobCards)) ? _jobCards : [];
+    for (i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var woId = String((card && card.work_order_id) || '');
+      if (!woId || postedIds.indexOf(woId) === -1) continue;
+      var latest = byId[woId];
+      var passThroughs = _workOrderPassThroughsFromListing(latest);
+      if (!passThroughs) {
+        return { ok: false, message: 'Could not refresh work-order charges. Invoice not sent.' };
+      }
+      _applyHydratedWorkOrderMoney(card, latest, passThroughs);
+      if (card._woPassThroughUnresolved) {
+        return { ok: false, message: 'Could not refresh work-order charges. Invoice not sent.' };
+      }
+    }
+    return { ok: true };
+  }
   // [WO-SERVER-MONEY-END]
 
   function _workOrderIdSet(orders) {
@@ -22415,6 +22490,90 @@
     _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds, _pmKnownWorkOrdersById);
   }
 
+  function _rebuildJobCentricWorkOrderExtraFromListing(item, wo) {
+    if (!item || !wo || typeof _applyHydratedWorkOrderMoney !== 'function') return null;
+    var passThroughs = typeof _workOrderPassThroughsFromListing === 'function'
+      ? _workOrderPassThroughsFromListing(wo)
+      : null;
+    if (!passThroughs) return null;
+    var chargeNames = {};
+    (wo.negative_charges || []).forEach(function(ch) {
+      chargeNames[String((ch && ch.trade_name) || '')] = true;
+    });
+    var named = [];
+    (item.wo_labour_lines || []).forEach(function(ln) {
+      if (!ln || ln.line_kind === 'wo_pass_through') return;
+      var hours = Number(ln.hours);
+      var rate = Number(ln.rate);
+      if (!(hours > 0) || !(rate > 0)) return;
+      if (hours === 1 && chargeNames[String(ln.trade_name || '')]) return;
+      named.push({
+        trade_name: ln.trade_name,
+        hours: hours,
+        rate: rate,
+        amount: Math.round(hours * rate * 100) / 100
+      });
+    });
+    var card = {
+      included: true,
+      wo_mode: true,
+      wo_blocked: false,
+      wo_allocated: null,
+      wo_labour_lines: named,
+      wo_lump_lines: [],
+      work_order_id: wo.id,
+      job_id: item.job_id,
+      job_number: item.job_number,
+      description: item.description
+    };
+    if (!_applyHydratedWorkOrderMoney(card, wo, passThroughs) && card._woPassThroughUnresolved) return null;
+    var labourLinesOut = _woLabourLinesForFanout(card);
+    var labourDeduction = _woLabourSum(card) + _woLumpSum(card);
+    return Object.assign({}, item, {
+      rate: _woNet(card),
+      wo_allocated: Number(card.wo_allocated) || 0,
+      wo_labour_deduction: labourDeduction,
+      wo_labour_lines: labourLinesOut,
+      work_order_id: String(wo.id || item.work_order_id || '')
+    });
+  }
+
+  function _rebuildOfflineJobCentricWorkOrderMoney(item, byId) {
+    if (!item || item.action !== 'generate_trade_invoice') return true;
+    var extras = ((item.body || {}).extra_items) || [];
+    var posted = _jobCentricPostedWorkOrderIds(extras);
+    if (!posted.length) return true;
+    if (typeof _refreshJobCentricPostedWorkOrderMoney !== 'function') return true;
+    var money = _refreshJobCentricPostedWorkOrderMoney(byId, posted);
+    if (!money.ok) return false;
+    if (typeof _buildJobCentricPayload === 'function' && typeof _jobCards !== 'undefined' && _jobCards && _jobCards.length) {
+      var rebuilt = _buildJobCentricPayload(_jobCards);
+      if (rebuilt.error) return false;
+      var kept = extras.filter(function(row) {
+        return !String((row && (row.work_order_id || row.workOrderId)) || '').trim();
+      });
+      item.body = Object.assign({}, item.body || {}, {
+        extra_items: rebuilt.cardExtraItems.concat(kept),
+        manual_assignments: rebuilt.manualAssignments || (item.body && item.body.manual_assignments)
+      });
+      return true;
+    }
+    var next = [];
+    for (var i = 0; i < extras.length; i++) {
+      var extra = extras[i];
+      var woId = String((extra && (extra.work_order_id || extra.workOrderId)) || '');
+      if (!woId) {
+        next.push(extra);
+        continue;
+      }
+      var updated = _rebuildJobCentricWorkOrderExtraFromListing(extra, byId && byId[woId]);
+      if (!updated) return false;
+      next.push(updated);
+    }
+    item.body = Object.assign({}, item.body || {}, { extra_items: next });
+    return true;
+  }
+
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
     var ctx = _invoiceApiContext();
@@ -22508,22 +22667,42 @@
         return _financialInvoiceApi('generate_trade_invoice', {}, jobCentricBody, ctx);
       }
       function _confirmJobCentricWorkOrdersExclusive() {
-        if (!postedWoIds.length) return Promise.resolve();
+        if (!postedWoIds.length) return Promise.resolve({ ok: true, byId: {} });
         return api('my_work_orders', { mode: 'all' }).then(function(res) {
-          if (!_invoiceApiCurrent(ctx)) return;
+          if (!_invoiceApiCurrent(ctx)) return { cancelled: true };
           var check = _jobCentricWorkOrdersStillExclusive(res, postedWoIds);
-          if (check.ok) return;
-          if (!check.incomplete && check.byId) _applyJobCentricExclusiveReread(check.byId);
-          var blocked = new Error(check.message || 'This work order is not available for a job invoice.');
-          blocked.code = check.incomplete ? 'wo_exclusive_reread_incomplete' : 'wo_exclusive_reread_blocked';
-          throw blocked;
+          if (!check.ok) {
+            if (!check.incomplete && check.byId) _applyJobCentricExclusiveReread(check.byId);
+            var blocked = new Error(check.message || 'This work order is not available for a job invoice.');
+            blocked.code = check.incomplete ? 'wo_exclusive_reread_incomplete' : 'wo_exclusive_reread_blocked';
+            throw blocked;
+          }
+          _applyJobCentricExclusiveReread(check.byId);
+          var money = _refreshJobCentricPostedWorkOrderMoney(check.byId, postedWoIds);
+          if (!money.ok) {
+            var failed = new Error(money.message || 'Could not refresh work-order charges. Invoice not sent.');
+            failed.code = 'wo_exclusive_reread_incomplete';
+            throw failed;
+          }
+          return check;
         });
       }
       // Hold the financial fence through the best-effort exclusive re-read
       // and POST. No new claim API — residual cross-device race accepted.
       return _withFinancialWebLock('generate_trade_invoice', function() {
-      return _confirmJobCentricWorkOrdersExclusive().then(function() {
+      return _confirmJobCentricWorkOrdersExclusive().then(function(check) {
         if (!_invoiceApiCurrent(ctx)) return;
+        if (check && check.cancelled) return;
+        if (postedWoIds.length) {
+          var rebuilt = _buildJobCentricPayload(_jobCards);
+          if (rebuilt.error) {
+            var rebuildErr = new Error(rebuilt.error);
+            rebuildErr.code = 'wo_exclusive_reread_incomplete';
+            throw rebuildErr;
+          }
+          jobCentricBody.extra_items = rebuilt.cardExtraItems.concat(legacyExtras);
+          jobCentricBody.manual_assignments = rebuilt.manualAssignments;
+        }
         return _postJobCentricGenerate();
       }).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;

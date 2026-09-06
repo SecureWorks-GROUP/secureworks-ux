@@ -280,4 +280,21 @@ check('office quote pack may show rates', quoteOffice.includes('$8,800') || quot
 const woOffice = M.renderCompactWorkOrderItems(data);
 check('office compact WO may show rates', woOffice.includes('$120') || woOffice.includes('$'));
 
+check(
+  'shipped Scope labour budget uses office SOW gate (sync)',
+  /if \(tradeCanSeeSowPricing\(\) && job\.scope_json\.pricing && job\.scope_json\.pricing\.labour\)/.test(html)
+);
+check(
+  'shipped Scope labour budget uses office SOW gate (async)',
+  /if \(isJobDone\(phase\) && tradeCanSeeSowPricing\(\)\)/.test(html)
+);
+check(
+  'shipped Work Order tab rates use office SOW gate',
+  /var showWoPrices = tradeCanSeeSowPricing\(\);/.test(html)
+);
+check(
+  'Work Order tab no longer uses canSeePricing for rates',
+  !/var showWoPrices = canSeePricing\(\);/.test(html)
+);
+
 console.log('PASS trade scope media + pricing redaction checks');

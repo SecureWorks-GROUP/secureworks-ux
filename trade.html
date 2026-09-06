@@ -8842,7 +8842,7 @@
     }
 
     // Labour budget — office only. Allocated trades never see $/rates on SOW.
-    if (canSeePricing() && job.scope_json.pricing && job.scope_json.pricing.labour) {
+    if (tradeCanSeeSowPricing() && job.scope_json.pricing && job.scope_json.pricing.labour) {
       var p = job.scope_json.pricing;
       var lab = p.labour;
       if (lab.days && lab.dayRate) {
@@ -9822,7 +9822,7 @@
     h += renderScopeVideoCard(data);
 
     // ── 2. CREW WORK ORDER — scope_items table ──
-    var showWoPrices = canSeePricing();
+    var showWoPrices = tradeCanSeeSowPricing();
     if (wo && wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
       h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
       h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
@@ -10346,8 +10346,8 @@
     // 7. Special instructions (compact — no card if empty)
     h += renderSpecialInstructions(data, phase);
 
-    // Labour budget (complete phase, Tier 2+)
-    if (isJobDone(phase) && canSeePricing()) {
+    // Labour budget (complete phase, office only)
+    if (isJobDone(phase) && tradeCanSeeSowPricing()) {
       h += '<div class="detail-section" id="tabLabourBudget">';
       h += '  <h3>Labour Budget</h3>';
       h += '  <div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Loading...</div>';

@@ -324,16 +324,20 @@ assert((html.match(/final_deductions: finalDeductions/g) || []).length >= 2,
   'offline job-centric replay queues the same final_deductions as the online payload');
 assert(html.includes('_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount') && html.includes('item.user_id'),
   'offline invoice actions are stamped with account identity');
-assert(/_user = profile;[\s\S]{0,180}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/.test(html),
+assert(/_user = profile;[\s\S]{0,280}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/.test(html),
   'sign-in drops invoice actions that do not belong to the new account');
+assert(html.includes('if (prevOwner && prevOwner !== _invDraftOwnerId()) _invoiceAuthGen++'),
+  'an in-page account switch bumps invoice auth generation so in-flight replay aborts');
 assert(html.includes('_isOfflineInvoiceAction(action)') && html.includes('if (!owner) return'),
   'invoice writes are not queued without a signed-in account');
 assert(html.includes('resetInvoiceSession()') && /function resetInvoiceSession\(\) \{[\s\S]*?_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\);/.test(html),
   'account switch / invoice session reset drops invoice actions the new account does not own');
 assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/g) || []).length >= 1,
   'logout clears invoice actions once the account is gone');
-assert(/if \(_isOfflineInvoiceAction\(item\.action\) && !_offlineInvoiceOwnedByCurrentAccount\(item\)\) \{\s*return;/.test(html),
-  'offline replay revalidates invoice ownership before the write');
+assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
+  'offline invoice replay re-checks ownership and auth generation immediately before send');
+assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
+  'offline work-order invoice replay revalidates current WO authorization');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?queueOfflineAction\('submit_work_order_invoice'/.test(html),
   'direct work-order invoice submit drops late toast/refresh/queue after account switch');
 assert(html.includes('No-ID lines are a multiset'),

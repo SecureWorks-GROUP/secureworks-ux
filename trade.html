@@ -4165,6 +4165,13 @@
     }
     return getAuthToken().then(function(token) {
       if (!token) throw _apiError(401, 'Sign in required');
+      // Invoice replay captures auth generation before getAuthToken(). An
+      // account switch in that window must abort before the network send.
+      if (typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        var cancelled = _apiError(409, 'Invoice replay cancelled');
+        cancelled.code = 'invoice_replay_cancelled';
+        throw cancelled;
+      }
       var url = _opsApiBase + '?action=' + action;
       if (params) {
         Object.keys(params).forEach(function(k) {
@@ -4206,6 +4213,11 @@
                   throw _apiError(401, 'Session expired. Please sign in again.');
                 }
                 _cachedAccessToken = newToken;
+                if (typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+                  var retryCancelled = _apiError(409, 'Invoice replay cancelled');
+                  retryCancelled.code = 'invoice_replay_cancelled';
+                  throw retryCancelled;
+                }
                 var retryHeaders = Object.assign({}, headers, { 'Authorization': 'Bearer ' + newToken });
                 // The first attempt's timeout has already been cleared, so the
                 // retry needs its own. Without one a refreshed request could
@@ -4284,6 +4296,43 @@
     return !!(owner && queued && owner === queued);
   }
 
+  function _offlineInvoiceWorkOrderId(item) {
+    if (!item || item.action !== 'submit_work_order_invoice') return '';
+    var body = item.body || {};
+    return String(body.work_order_id || body.workOrderId || '');
+  }
+
+  function _offlineInvoiceReplayAllowed(item, ctx) {
+    if (!_invoiceApiCurrent(ctx)) return false;
+    if (!_offlineInvoiceOwnedByCurrentAccount(item)) return false;
+    if (item.action === 'submit_work_order_invoice') {
+      var woId = _offlineInvoiceWorkOrderId(item);
+      if (!woId || !isAuthorizedWorkOrder(woId)) return false;
+    }
+    return true;
+  }
+
+  function _ensureOfflineInvoiceWorkOrderAuth(item, ctx) {
+    if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) {
+      return Promise.resolve(false);
+    }
+    if (item.action !== 'submit_work_order_invoice') return Promise.resolve(_offlineInvoiceReplayAllowed(item, ctx));
+    var woId = _offlineInvoiceWorkOrderId(item);
+    if (!woId) return Promise.resolve(false);
+    if (isAuthorizedWorkOrder(woId)) return Promise.resolve(_offlineInvoiceReplayAllowed(item, ctx));
+    return api('my_work_orders', { mode: 'all' }, null, {
+      beforeSend: function() {
+        return _invoiceApiCurrent(ctx) && _offlineInvoiceOwnedByCurrentAccount(item);
+      }
+    }).then(function(res) {
+      if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) return false;
+      authorizeWorkOrders(workOrdersForViewer((res && res.work_orders) || []));
+      return _offlineInvoiceReplayAllowed(item, ctx);
+    }).catch(function() {
+      return false;
+    });
+  }
+
   function _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount() {
     var queue = _readOfflineQueue();
     var kept = [];
@@ -4319,19 +4368,35 @@
 
     queue.forEach(function(item) {
       chain = chain.then(function() {
-        if (_isOfflineInvoiceAction(item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) {
-          return;
+        if (!_isOfflineInvoiceAction(item.action)) {
+          return api(item.action, null, item.body).then(function() {
+            if (['update_job_phase', 'update_my_assignment', 'clock_event', 'complete_job'].indexOf(item.action) !== -1) {
+              _invalidateAssignmentLifecycleCaches();
+            }
+          }).catch(function() {
+            remaining.push(item);
+          });
         }
-        return api(item.action, null, item.body).then(function() {
-          // A queued lifecycle write has now become server truth. Drop the same
-          // planning caches as an online write before the next Board entry.
-          if (['update_job_phase', 'update_my_assignment', 'clock_event', 'complete_job'].indexOf(item.action) !== -1) {
-            _invalidateAssignmentLifecycleCaches();
+        var replayCtx = _invoiceApiContext();
+        if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
+        return _ensureOfflineInvoiceWorkOrderAuth(item, replayCtx).then(function(authorized) {
+          if (!_offlineInvoiceReplayAllowed(item, replayCtx)) {
+            if (_offlineInvoiceOwnedByCurrentAccount(item) && _invoiceApiCurrent(replayCtx) && item.action === 'submit_work_order_invoice') {
+              remaining.push(item);
+            }
+            return;
           }
-          // Success: don't add to remaining.
-        }).catch(function() {
-          if (_isOfflineInvoiceAction(item.action) && !_offlineInvoiceOwnedByCurrentAccount(item)) return;
-          remaining.push(item);
+          if (!authorized) return;
+          return api(item.action, null, item.body, {
+            beforeSend: function() {
+              return _offlineInvoiceReplayAllowed(item, replayCtx);
+            }
+          }).then(function() {
+            // Success: don't add to remaining.
+          }).catch(function() {
+            if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
+            remaining.push(item);
+          });
         });
       });
     });
@@ -4596,8 +4661,10 @@
   });
 
   function onLogin(profile) {
+    var prevOwner = _invDraftOwnerId();
     _user = profile;
     if (!_user) { console.error('[trade] onLogin: profile is null!'); return; }
+    if (prevOwner && prevOwner !== _invDraftOwnerId()) _invoiceAuthGen++;
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
     _userTier = _user.trade_tier || determineTier(_user.email);

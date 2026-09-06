@@ -447,10 +447,25 @@ function hoursCard(overrides) {
       setItem: function(k, v) { store[k] = String(v) },
     },
     _user: { id: 'alice' },
+    _invoiceAuthGen: 1,
+    _authorizedWorkOrderIds: { 'wo-b': true },
     _invDraftOwnerId: function() { return String((ctx._user && (ctx._user.id || ctx._user.email)) || '') },
+    _invoiceApiContext: function() { return { gen: ctx._invoiceAuthGen, userId: ctx._invDraftOwnerId() } },
+    _invoiceApiCurrent: function(c) {
+      return !!(c && c.gen === ctx._invoiceAuthGen && c.userId && c.userId === ctx._invDraftOwnerId())
+    },
+    isAuthorizedWorkOrder: function(id) { return ctx._authorizedWorkOrderIds[String(id || '')] === true },
+    authorizeWorkOrders: function(orders) { return orders || [] },
+    workOrdersForViewer: function(orders) { return orders || [] },
     blockedForeignJobWrite: function() { return false },
-    api: function(action, _q, body) {
+    api: function(action, _q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
       sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
       return Promise.resolve({})
     },
     toast: function() {},
@@ -481,11 +496,47 @@ function hoursCard(overrides) {
   ])
   ctx._user = { id: 'bob' }
   sent.length = 0
-  const synced = ctx.syncOfflineQueue()
-  Promise.resolve(synced).then(function() {
-    assert.strictEqual(sent.length, 1, 'only the current account\'s invoice write is replayed')
-    assert.strictEqual(sent[0].action, 'submit_work_order_invoice')
-    assert.strictEqual(sent[0].body.work_order_id, 'wo-b')
+  Promise.resolve(ctx.syncOfflineQueue()).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action !== 'my_work_orders').length, 1,
+      'only the current account\'s invoice write is replayed')
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice')[0].body.work_order_id, 'wo-b')
+
+    store.sw_action_queue = JSON.stringify([
+      { action: 'generate_trade_invoice', user_id: 'bob', body: { raced: true } },
+    ])
+    sent.length = 0
+    const origApi = ctx.api
+    ctx.api = function(action, q, body, options) {
+      ctx._invoiceAuthGen += 1
+      return origApi(action, q, body, options)
+    }
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 0,
+      'a generation bump between check and send aborts the invoice replay')
+
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+      return Promise.resolve({})
+    }
+    ctx._invoiceAuthGen += 1
+    store.sw_action_queue = JSON.stringify([
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-unauth' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a work-order invoice is not replayed without current WO authorization')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
+      'an unauthorized work-order invoice stays queued for a later authorized session')
+
     ctx._user = null
     ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
     assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,

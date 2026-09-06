@@ -272,6 +272,8 @@ assert(!/api\('my_work_orders'\)/.test(html),
   'no bare my_work_orders read remains — managed WOs need mode=all');
 assert(/gst_on: _invoiceGstDefault\(_hoursData \|\| _user\)/.test(html) && /_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
   'Invoice This Work Order always sends gst_on so the backend cannot 422 GST_CHOICE_REQUIRED');
+assert(html.includes('_workOrderNegativeChargeLineIds') && html.includes('_confirmDirectWorkOrderInvoiceLanded'),
+  'direct work-order invoice collects complete charge ids and confirms an unidentified Xero save');
 assert(!/\(\/emeka\|henry\/i\.test\(_user\.email\)\)/.test(html),
   'per-metre extras never key on a henry/emeka email heuristic');
 assert(!html.includes('!(_hoursData && _hoursData.is_per_metre)'),
@@ -485,6 +487,14 @@ assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceA
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?if \(!_invoiceSubmitSucceeded\(result\)\) \{[\s\S]*?openWorkOrderHub\(\)/.test(html) &&
   !/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var succeeded = result\.ok === true \|\| result\.success === true/.test(html),
   'direct work-order invoice uses the shared committed-success predicate and refreshes the hub on durable success');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_workOrdersHydratePayloadComplete\(res\)[\s\S]*?negative_charge_line_ids: chargeIds[\s\S]*?charge_line_ids: chargeIds[\s\S]*?_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
+  'direct work-order invoice re-reads a complete WO listing and posts selected charge ids');
+assert(html.includes('_invoiceXeroPushSavedUnconfirmed') &&
+  /function _settleFinancialWriteSend[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)\) return/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)[\s\S]*?Confirming\.\.\.[\s\S]*?_reEnableBtn\(\)/.test(html),
+  'a saved-but-unidentified Xero push keeps the pending fence and does not re-arm Submit');
+assert(/function _applyHydratedWorkOrderMoney[\s\S]*?return ln\.server_owned !== true/.test(html),
+  'complete hydrate replaces server-owned no-ID deductions from current server truth');
 assert(html.includes('No-ID lines are a multiset'),
   'no-ID pass-through merge keeps distinct same-amount deducts');
 assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++'),

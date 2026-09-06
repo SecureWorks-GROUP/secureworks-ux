@@ -515,6 +515,82 @@ function hoursCard(overrides) {
     'a missing pass-through array is not an authoritative empty deduction set')
   assert.strictEqual(keptRestored.wo_labour_lines[0].source_line_id, 'wo-stale-old-line',
     'null pass-throughs keep restored deductions')
+
+  context._woChargeSourceLineId = function(charge) {
+    charge = charge || {}
+    var id = charge.line_id || charge.source_line_id || charge.id || ''
+    return id ? String(id) : ''
+  }
+  const collectedIds = context._workOrderNegativeChargeLineIds({
+    negative_charges: [
+      { id: 'cl-israel', amount: 40 },
+      { source_line_id: 'cl-kim', amount: 20 },
+    ],
+  })
+  assert.ok(collectedIds, 'complete charges yield their source ids')
+  assert.strictEqual(Array.prototype.join.call(collectedIds, ','), 'cl-israel,cl-kim',
+    'complete charges yield their source ids')
+  const emptyIds = context._workOrderNegativeChargeLineIds({ negative_charges: [] })
+  assert.ok(emptyIds, 'an explicit empty charge list is a complete no-deduct set')
+  assert.strictEqual(emptyIds.length, 0, 'an explicit empty charge list is a complete no-deduct set')
+  assert.strictEqual(context._workOrderNegativeChargeLineIds({
+    negative_charges: [{ trade_name: 'Israel', amount: 40 }],
+  }), null, 'charges without ids cannot be posted')
+  assert.strictEqual(context._workOrderNegativeChargeLineIds({ subtotal: 100 }), null,
+    'missing negative_charges cannot yield a charge-id list')
+
+  const staleNoIdServer = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 100, server_owned: true },
+      kim,
+    ],
+  }
+  const israel120 = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 120, server_owned: true }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleNoIdServer, {
+    subtotal: 80,
+    negative_charges: [{ trade_name: 'Israel', amount: 120 }],
+  }, [israel120]), true)
+  const israelNoId = staleNoIdServer.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through' && !ln.source_line_id)
+  assert.strictEqual(israelNoId.length, 1, 'complete hydrate replaces stale no-ID server money instead of appending')
+  assert.strictEqual(israelNoId[0].amount, 120, 'replaced no-ID server deduct is current server truth')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
+    'hourly labour survives no-ID server replace')
+
+  const removedServerPlusLocal = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 100, server_owned: true },
+      { trade_name: 'Local extra', line_kind: 'wo_pass_through', amount: 15, server_owned: false },
+      kim,
+    ],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(removedServerPlusLocal, {
+    subtotal: 100,
+    negative_charges: [],
+  }, []), true)
+  assert.strictEqual(removedServerPlusLocal.wo_labour_lines.filter((ln) => ln.server_owned === true).length, 0,
+    'a complete listing that removes a no-ID charge drops the stale server row')
+  assert.strictEqual(removedServerPlusLocal.wo_labour_lines.filter((ln) => ln.server_owned === false).length, 1,
+    'local no-ID deducts survive a complete server replace')
+
+  const twoServerNoId = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+    ],
+  }
+  const twoIsrael = [
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+  ]
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(twoServerNoId, {
+    subtotal: 100,
+    negative_charges: [{ amount: 40 }, { amount: 40 }],
+  }, twoIsrael), true)
+  assert.strictEqual(twoServerNoId.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through').length, 2,
+    'complete replace of two same-amount server no-ID rows stays two, not four')
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -574,6 +650,28 @@ function hoursCard(overrides) {
   }
   vm.createContext(ctx)
   vm.runInContext(html.slice(qStart, qEnd), ctx)
+
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+  }), true, 'Xero-saved without identity is the unconfirmed save-with-retry shape')
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+    invoice_id: 'invoice-saved',
+  }), false, 'Xero-saved with a durable invoice id is not unconfirmed')
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    error: 'RATE_NOT_CONFIGURED',
+  }), false, 'a hard business reject is not the unconfirmed Xero-saved shape')
+  assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+  }, { action: 'submit_work_order_invoice' }), false,
+    'replay does not treat an unidentified Xero-saved response as committed')
 
   Promise.resolve(ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [{ description: 'Alice fuel', unit_rate: 10 }] })).then(function() {
     return ctx.queueOfflineAction('update_job_phase', { assignmentId: 'a1', phase: 'on_site' })
@@ -1577,6 +1675,19 @@ function hoursCard(overrides) {
     return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
       assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
         'a durable draft identity clears the parked write after the local write ends')
+      assert.strictEqual(tabA._beginFinancialWrite('submit_work_order_invoice'), true)
+      const pendingXero = tabA._beginFinancialWriteSend('submit_work_order_invoice', { work_order_id: 'wo-xero' })
+      assert.ok(pendingXero && pendingXero.id, 'persist-before-send parks the direct WO write')
+      tabA._settleFinancialWriteSend('submit_work_order_invoice', pendingXero, {
+        ok: false,
+        code: 'XERO_PUSH_FAILED',
+        success: true,
+      }, null)
+      assert.strictEqual(tabA._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
+        'an unidentified Xero-saved response keeps the durable pending fence')
+      tabA._endFinancialWrite('submit_work_order_invoice')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
+        'retry stays blocked after the local write ends without a confirmed identity')
       const origSetItem = tabA.localStorage.setItem
       tabA.localStorage.setItem = function(k, v) {
         if (String(k || '').indexOf('sw_action_queue_inbox_') === 0) throw new Error('quota')

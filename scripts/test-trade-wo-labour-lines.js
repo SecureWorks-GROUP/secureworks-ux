@@ -1287,6 +1287,101 @@ function hoursCard(overrides) {
       }).then(function(pendingLanded) {
         assert.strictEqual(pendingLanded, true,
           'an exact WO identity in pending_ops_review is already landed')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', status: 'draft' },
+          { body: {
+            draft_id: 'draft-1',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          } }
+        ), false, 'a draft identity is not landed when queued extras never appear on the listing')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'draft-1', draft_id: 'draft-1', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'save_trade_invoice_draft',
+          body: {
+            draft_id: 'draft-1',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          },
+        })
+      }).then(function(draftMoneyUnresolved) {
+        assert.strictEqual(draftMoneyUnresolved, null,
+          'a timed-out draft update stays unresolved until the listing shows the new money')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { work_order_id: 'wo-b', status: 'draft' },
+          { body: {
+            work_order_id: 'wo-b',
+            charge_line_ids: ['chg-new'],
+            negative_charge_line_ids: ['chg-new'],
+          } }
+        ), false, 'a WO identity is not landed when queued charge ids are missing from the listing')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ work_order_id: 'wo-b', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: {
+            work_order_id: 'wo-b',
+            charge_line_ids: ['chg-new'],
+            negative_charge_line_ids: ['chg-new'],
+          },
+        })
+      }).then(function(woChargesUnresolved) {
+        assert.strictEqual(woChargesUnresolved, null,
+          'a timed-out direct WO write stays unresolved when charge selection cannot be proven')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 50, notes: '', gst_on: false },
+        })
+      }).then(function(legacyEmptyRetry) {
+        assert.strictEqual(legacyEmptyRetry, false,
+          'an unlanded legacy hourly write retries when the period is empty')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{ week_ending: '2026-09-13', status: 'submitted' }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 55, notes: '', gst_on: false },
+        })
+      }).then(function(legacyWeekOccupied) {
+        assert.strictEqual(legacyWeekOccupied, null,
+          'a same-week listing without the hourly fingerprint is not treated as landed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{
+                week_ending: '2026-09-13',
+                hourly_rate: 50,
+                notes: '',
+                gst_on: false,
+                status: 'submitted',
+              }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 50, notes: '', gst_on: false },
+        })
+      }).then(function(legacyFingerprinted) {
+        assert.strictEqual(legacyFingerprinted, true,
+          'a legacy hourly write lands only when week and hourly fingerprint match')
         ctx.navigator.onLine = false
         store.sw_action_queue = '[]'
         const offlineAbort = new Error('Failed to fetch')

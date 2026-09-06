@@ -5223,6 +5223,7 @@
     if (Array.isArray(body.work_order_blocks) && body.work_order_blocks.length) return true;
     if (Array.isArray(body.labour_lines) && body.labour_lines.length) return true;
     if (Array.isArray(body.lines) && body.lines.length) return true;
+    if (body.hourly_rate != null && String(body.hourly_rate) !== '' && _invoicePeriodKey(body)) return true;
     return false;
   }
 
@@ -5231,6 +5232,7 @@
     if (Array.isArray(body.final_deductions) && body.final_deductions.length) return true;
     if (Array.isArray(body.wo_labour_lines) && body.wo_labour_lines.length) return true;
     if (Number(body.wo_labour_deduction) > 0) return true;
+    if (body.hourly_rate != null && String(body.hourly_rate) !== '') return true;
     if (Array.isArray(body.crew_charge_line_ids) || Array.isArray(body.charge_line_ids) ||
         Array.isArray(body.negative_charge_line_ids)) return true;
     function collectionHasMoney(rows) {
@@ -5284,9 +5286,49 @@
     return _invoicePayloadHasMoneyAffectingExtras(body);
   }
 
-  function _invoiceMatchesQueueIntent(inv, item) {
-    if (!inv || !item) return false;
-    var body = item.body || {};
+  function _invoiceWriteHasMutableMoney(body) {
+    body = body || {};
+    if (_invoicePayloadHasMoneyAffectingExtras(body)) return true;
+    if (body.hourly_rate != null && String(body.hourly_rate) !== '') return true;
+    if ((body.draft_id || body.invoice_id) && (body.extra_items || []).length) return true;
+    return false;
+  }
+
+  function _invoiceLegacyHoursWrite(item) {
+    var body = (item && item.body) || {};
+    return !!(item && item.action === 'submit_trade_invoice' &&
+      _invoicePeriodKey(body) && body.hourly_rate != null && String(body.hourly_rate) !== '');
+  }
+
+  function _invoiceMoneyFingerprint(body) {
+    body = body || {};
+    try {
+      return JSON.stringify({
+        extra_items: body.extra_items || null,
+        final_deductions: body.final_deductions || null,
+        manual_assignments: body.manual_assignments || null,
+        work_order_blocks: body.work_order_blocks || null,
+        labour_lines: body.labour_lines || null,
+        notes: body.notes || '',
+        gst_on: body.gst_on == null ? null : body.gst_on,
+        hourly_rate: body.hourly_rate == null ? null : body.hourly_rate,
+        charge_line_ids: body.charge_line_ids || null,
+        negative_charge_line_ids: body.negative_charge_line_ids || null,
+        crew_charge_line_ids: body.crew_charge_line_ids || null
+      });
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function _invoiceMoneyFingerprintMatches(inv, body) {
+    var bodyFp = _invoiceMoneyFingerprint(body);
+    var invFp = _invoiceMoneyFingerprint(inv);
+    return !!(bodyFp && invFp && bodyFp === invFp);
+  }
+
+  function _invoiceIdentityMatches(inv, item) {
+    var body = (item && item.body) || {};
     var target = _offlineInvoiceTargetId(item);
     if (target) {
       var ids = _invoiceIdentityValues(inv);
@@ -5295,7 +5337,31 @@
       }
     }
     var woId = body.work_order_id || body.workOrderId;
-    if (woId && _invoiceHasWorkOrder(inv, woId)) return true;
+    return !!(woId && _invoiceHasWorkOrder(inv, woId));
+  }
+
+  function _invoiceListingSharesPeriod(invoices, body) {
+    var week = _invoicePeriodKey(body);
+    if (!week || !Array.isArray(invoices)) return false;
+    return invoices.some(function(inv) { return _invoicePeriodKey(inv) === week; });
+  }
+
+  function _invoiceMatchesQueueIntent(inv, item) {
+    if (!inv || !item) return false;
+    var body = item.body || {};
+    var needsMoney = _invoiceWriteHasMutableMoney(body);
+    if (_invoiceIdentityMatches(inv, item)) {
+      if (!needsMoney) return true;
+      return _invoiceMoneyFingerprintMatches(inv, body);
+    }
+    if (needsMoney) {
+      if (!_invoicePayloadHasCompleteFingerprint(body)) return false;
+      if (!_invoiceMoneyFingerprintMatches(inv, body)) return false;
+      var moneyWeek = _invoicePeriodKey(body);
+      var invWeek = _invoicePeriodKey(inv);
+      if (moneyWeek && invWeek && moneyWeek !== invWeek) return false;
+      return true;
+    }
     var bodyFp = _financialWritePayloadIdentity(body);
     var invFp = _financialWritePayloadIdentity(inv);
     if (bodyFp && invFp && bodyFp === invFp && bodyFp.indexOf('payload:') === 0 && _invoicePayloadHasCompleteFingerprint(body)) return true;
@@ -5303,8 +5369,8 @@
     if (!slots.length) return false;
     if (!_invoiceSlotsCovered(slots, inv)) return false;
     var bodyWeek = _invoicePeriodKey(body);
-    var invWeek = _invoicePeriodKey(inv);
-    if (!bodyWeek || !invWeek || bodyWeek !== invWeek) return false;
+    var slotWeek = _invoicePeriodKey(inv);
+    if (!bodyWeek || !slotWeek || bodyWeek !== slotWeek) return false;
     if (_invoicePayloadHasMoneyAffectingExtras(body)) return false;
     return true;
   }
@@ -5389,7 +5455,7 @@
   function _reconcileAmbiguousInvoiceAction(item) {
     if (!_isOfflineInvoiceAction(item && item.action)) return Promise.resolve(false);
     if (item.action === 'attach_invoice_pdf') return Promise.resolve(null);
-    if (!_offlineInvoiceHasExactTarget(item)) return Promise.resolve(null);
+    if (!_offlineInvoiceHasExactTarget(item) && !_invoiceLegacyHoursWrite(item)) return Promise.resolve(null);
     return _listTradeInvoicesForReconcile().then(function(invoices) {
       if (!invoices) return null;
       if (item.action === 'delete_trade_invoice') {
@@ -5405,6 +5471,13 @@
       // fingerprint, or every job slot plus period means this write already
       // committed — including draft and pending_ops_review (failed Xero push).
       if (match.length > 0) return true;
+      // Legacy hourly writes have no draft/WO/job identity. A week-only hit
+      // is not landed; an empty period is safe to retry; an occupied period
+      // without a money fingerprint stays unresolved.
+      if (_invoiceLegacyHoursWrite(item)) {
+        if (_invoiceListingSharesPeriod(invoices, item.body)) return null;
+        return false;
+      }
       // Multi-job / earning / deduction / WO-selection writes must not retry
       // on a partial or empty listing — that is how an A+B timeout can mint
       // a second invoice, and how a slot-only match can drop a different one.

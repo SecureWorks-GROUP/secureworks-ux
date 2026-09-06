@@ -424,6 +424,7 @@ assert((function() {
     extras.includes('crew_charge_line_ids') &&
     extras.includes('manual_assignments') &&
     extras.includes('rowHasEarning') &&
+    extras.includes('hourly_rate') &&
     /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
     /function _financialWriteAlreadyPending[\s\S]*?_invoiceBodyWorkOrderIdsOverlap\(item\.body, body\)/.test(html) &&
     html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
@@ -467,8 +468,11 @@ assert(html.includes('_beginFinancialWrite') && html.includes('_financialWriteIn
   html.includes("_financialInvoiceApi('attach_invoice_pdf'"),
   'every financial invoice submit/generate/delete/attach path is process-wide single-flight');
 assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQueueIntent\(inv, item\); \}\);[\s\S]{0,280}if \(match\.length > 0\) return true;/.test(html) &&
-  html.includes('if (_invoicePayloadNeedsFullFingerprint(item)) return null;'),
-  'an exact draft/invoice/work-order identity is treated as landed without a status filter');
+  html.includes('if (_invoicePayloadNeedsFullFingerprint(item)) return null;') &&
+  html.includes('_invoiceWriteHasMutableMoney') &&
+  html.includes('_invoiceMoneyFingerprintMatches') &&
+  html.includes('_invoiceLegacyHoursWrite'),
+  'identity matches still land without a status filter unless mutable money requires a fingerprint');
 assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
   html.includes('_persistAmbiguousFinancialWrite(action, body)') &&
   /function _isOfflineInvoiceTimeoutError[\s\S]*?Load failed[\s\S]*?NetworkError when attempting to fetch/.test(html),

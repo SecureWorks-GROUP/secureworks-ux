@@ -8314,9 +8314,11 @@
     var raw = String(text == null ? '' : text);
     if (tradeCanSeeSowPricing()) return raw;
     return raw
+      .replace(/\b(?:AUD\$|A\$|AUD)\s*[\d,]+(?:\.\d+)?/gi, '')
+      .replace(/[\d,]+(?:\.\d+)?\s*(?:AUD\$|A\$|AUD|dollars?)(?=\s|[.,;:!?]|$)/gi, '')
       .replace(/\$\s*[\d,]+(?:\.\d+)?/g, '')
-      .replace(/\b(?:AUD|A\$)\s*[\d,]+(?:\.\d+)?/gi, '')
       .replace(/\s{2,}/g, ' ')
+      .replace(/\s+([.,;:])/g, '$1')
       .trim();
   }
 

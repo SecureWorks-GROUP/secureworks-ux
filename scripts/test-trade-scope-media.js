@@ -191,6 +191,23 @@ check('distinct videos still list separately', twoDistinct.length === 2);
 
 pricingOn = false;
 fullPricingOn = false;
+check('suffix AUD is stripped', M.redactTradePriceText('Quote total 8,800 AUD.') === 'Quote total.');
+check('suffix dollars is stripped', M.redactTradePriceText('Price is 8,800 dollars today') === 'Price is today');
+check('suffix AUD$ is stripped', M.redactTradePriceText('Allow 8800 AUD$ extra') === 'Allow extra');
+check('prefix AUD$ amount is stripped', M.redactTradePriceText('Allow AUD$8,800 extra') === 'Allow extra');
+check('qty without currency is kept', M.redactTradePriceText('Install 8 posts') === 'Install 8 posts');
+
+const suffixNotePack = {
+  job: data.job,
+  quote_packs: [{
+    quote_number: 'Q-4413',
+    status: 'sent',
+    items: [{ kind: 'note', description: 'Match existing fascia. Quote total 8,800 AUD.' }],
+  }],
+};
+const suffixHtml = M.renderQuotePacks(suffixNotePack);
+check('quote prose hides trailing AUD amount', suffixHtml.includes('Match existing fascia') && !suffixHtml.includes('8,800') && !suffixHtml.includes('AUD'));
+
 const quoteHtml = M.renderQuotePacks(data);
 check('quote number visible to trades', quoteHtml.includes('Q-4412'));
 check('quote writing visible to trades', quoteHtml.includes('Install 6m x 4m insulated patio'));

@@ -250,6 +250,11 @@ check('suffix dollars is stripped', M.redactTradePriceText('Price is 8,800 dolla
 check('suffix AUD$ is stripped', M.redactTradePriceText('Allow 8800 AUD$ extra') === 'Allow extra');
 check('prefix AUD$ amount is stripped', M.redactTradePriceText('Allow AUD$8,800 extra') === 'Allow extra');
 check('qty without currency is kept', M.redactTradePriceText('Install 8 posts') === 'Install 8 posts');
+check('bare total after cue is stripped', M.redactTradePriceText('Quote total 8,800.') === 'Quote total.');
+check('compact 8.8k total is stripped', M.redactTradePriceText('Quote total 8.8k') === 'Quote total');
+check('standalone 8.8k is stripped', M.redactTradePriceText('Allow 8.8k extra') === 'Allow extra');
+check('day rate shorthand is stripped', M.redactTradePriceText('Labour 120/day on site') === 'Labour on site');
+check('measurements stay when not a price', M.redactTradePriceText('Install 6m x 4m insulated patio') === 'Install 6m x 4m insulated patio');
 
 const suffixNotePack = {
   job: data.job,
@@ -313,6 +318,18 @@ check(
   /tradeCanSeeSowPricing\(\) \|\| !isPricedWorkOrderDocument\(d\)/.test(html)
 );
 check(
+  'shipped Files otherDocs uses priced-WO predicate',
+  /otherDocs = docs\.filter\(function\(d\) \{\s*return d\.visible_to_trades && d\.type !== 'site_photo' && !isPricedWorkOrderDocument\(d\);/.test(html)
+);
+check(
+  'shipped video collection drops priced WO documents',
+  /isTradeVisibleDocument\(d\) && !isPricedWorkOrderDocument\(d\)/.test(html)
+);
+check(
+  'shipped isJobVideo refuses priced WO documents',
+  /if \(isPricedWorkOrderDocument\(m\) && !isDeclaredJobVideo\(m\)\) return false;/.test(html)
+);
+check(
   'shipped leftover Work Order PDF card is office-gated',
   /var workOrderUrl = tradeCanSeeSowPricing\(\) \? getTradeDocOpenUrl\(workOrderDoc\) : '';/.test(html)
 );
@@ -335,12 +352,41 @@ const supplierPdfData = {
   }],
 };
 
+const aliasWoDoc = {
+  type: 'builder_pack',
+  file_name: 'Site-WO.pdf',
+  pdf_url: 'https://storage.example.test/site-wo.pdf',
+  storage_url: 'https://storage.example.test/site-wo.pdf',
+  visible_to_trades: true,
+};
+const walkthroughNamedWoPdf = {
+  type: 'document',
+  file_name: 'work-order-walkthrough.pdf',
+  title: 'Work order walkthrough',
+  pdf_url: 'https://storage.example.test/wo-walkthrough.pdf',
+  storage_url: 'https://storage.example.test/wo-walkthrough.pdf',
+  visible_to_trades: true,
+};
+
 pricingOn = true;
 fullPricingOn = false;
 check('priced WO document is recognised', M.isPricedWorkOrderDocument(woPdfData.documents[0]) === true);
 check('supplier WO document is recognised', M.isPricedWorkOrderDocument(supplierPdfData.documents[0]) === true);
+check('filename WO alias is a priced WO document', M.isPricedWorkOrderDocument(aliasWoDoc) === true);
 check('senior installer cannot open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === '');
 check('senior installer cannot open supplier WO PDF', M.tradeWorkOrderPdfUrl(supplierPdfData) === '');
+check('priced WO PDF is not a job video', M.isJobVideo(woPdfData.documents[0]) === false);
+check('walkthrough-named WO PDF is not a job video', M.isJobVideo(walkthroughNamedWoPdf) === false);
+const woAsMedia = M.listJobVideos({
+  job: { scope_json: {} },
+  media: [],
+  documents: [woPdfData.documents[0], aliasWoDoc, walkthroughNamedWoPdf, tradeDocVideo],
+});
+check('listJobVideos keeps real videos and drops WO PDFs', woAsMedia.length === 1 && woAsMedia[0].id === 'doc-trade-vid');
+check('WO PDF url never enters the video player', !M.renderScopeVideoCard({
+  job: { scope_json: {} },
+  documents: [woPdfData.documents[0], aliasWoDoc, walkthroughNamedWoPdf],
+}).includes('storage.example.test/wo'));
 
 fullPricingOn = true;
 check('office can open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === 'https://storage.example.test/wo.pdf');

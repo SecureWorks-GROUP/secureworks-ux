@@ -37,6 +37,14 @@ function patioDetail(overrides) {
         visible_to_trades: true,
         version: 1,
       },
+      {
+        type: 'builder_pack',
+        file_name: 'Site-WO.pdf',
+        pdf_url: WO_PDF,
+        storage_url: WO_PDF,
+        visible_to_trades: true,
+        version: 1,
+      },
     ],
     notes: [],
     media: [
@@ -184,6 +192,7 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(scope).not.toContainText('$');
     await expect(scope).not.toContainText('8800');
     await expect(scope).not.toContainText('960');
+    await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
 
     await page.locator('.jd-tab[data-tab="files"]').click();
     const files = page.locator('#jdTab_files');
@@ -193,6 +202,9 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(files).not.toContainText('$');
     await expect(files.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
     await expect(files).not.toContainText('Builder-WO.pdf');
+    await expect(files).not.toContainText('Site-WO.pdf');
+    await expect(scope.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files.locator('video[src="' + WO_PDF + '"]')).toHaveCount(0);
 
     await page.locator('.jd-tab[data-tab="photos"]').click();
     const photos = page.locator('#jdTab_photos');

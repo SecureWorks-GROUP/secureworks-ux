@@ -8154,8 +8154,21 @@
     return /walkthrough/i.test([m.label, m.role, m.phase, m.kind, m.type, m.file_name, m.name, m.title].filter(Boolean).join(' '));
   }
 
+  function isDeclaredJobVideo(m) {
+    if (!m) return false;
+    var type = String(m.type || m.kind || '').toLowerCase();
+    if (type === 'video' || type === 'walkthrough') return true;
+    if (m.is_video === true) return true;
+    if (/video\//i.test(String(m.mime_type || m.content_type || ''))) return true;
+    return isVideoUrl(m.file_name) || isVideoUrl(m.storage_url) || isVideoUrl(mediaPlayableUrl(m));
+  }
+
   function isJobVideo(m) {
     if (!m) return false;
+    // Captain lock: a priced WO/PDF document must never become a <video src>.
+    // Real job videos (type/mime/extension) still play even if the file name
+    // happens to mention WO.
+    if (isPricedWorkOrderDocument(m) && !isDeclaredJobVideo(m)) return false;
     var type = String(m.type || m.kind || m.media_type || '').toLowerCase();
     if (type === 'video' || type === 'walkthrough') return true;
     if (m.is_video === true) return true;
@@ -8183,7 +8196,9 @@
     pushAll(data && data.media);
     pushAll(data && data.videos);
     pushAll(data && data.job && data.job.media);
-    pushAll((data && data.documents || []).filter(isTradeVisibleDocument));
+    pushAll((data && data.documents || []).filter(function(d) {
+      return isTradeVisibleDocument(d) && !isPricedWorkOrderDocument(d);
+    }));
     var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     packs.forEach(function(p) {
       pushAll(p && p.media);
@@ -8350,10 +8365,18 @@
   function redactTradePriceText(text) {
     var raw = String(text == null ? '' : text);
     if (tradeCanSeeSowPricing()) return raw;
+    var moneyCue = '(?:totals?|priced?|costs?|rates?|quotes?|budgets?|payments?|amounts?|fees?|sum)';
     return raw
-      .replace(/\b(?:AUD\$|A\$|AUD)\s*[\d,]+(?:\.\d+)?/gi, '')
-      .replace(/[\d,]+(?:\.\d+)?\s*(?:AUD\$|A\$|AUD|dollars?)(?=\s|[.,;:!?]|$)/gi, '')
-      .replace(/\$\s*[\d,]+(?:\.\d+)?/g, '')
+      .replace(/\b(?:AUD\$|A\$|AUD)\s*[\d,]+(?:\.\d+)?k?\b/gi, '')
+      .replace(/[\d,]+(?:\.\d+)?k?\s*(?:AUD\$|A\$|AUD|dollars?)(?=\s|[.,;:!?]|$)/gi, '')
+      .replace(/\$\s*[\d,]+(?:\.\d+)?k?\b/g, '')
+      .replace(new RegExp('\\b' + moneyCue + '\\b(?:\\s*(?:is|of|at|=|:))?\\s*[\\d,]+(?:\\.\\d+)?k?\\b', 'gi'), function (m) {
+        return m.replace(/[\d,]+(?:\.\d+)?k?\b/i, '').replace(/\s*(?:is|of|at|=|:)\s*$/i, '').trim();
+      })
+      .replace(/\b[\d,]+(?:\.\d+)?k?\s+(?:totals?|ex\s*gst|inc(?:lusive)?\s*gst|plus\s*gst)\b/gi, '')
+      .replace(/\b[\d,]+(?:\.\d+)?\s*\/\s*(?:day|hr|hour|week)\b/gi, '')
+      .replace(/\b[\d,]+(?:\.\d+)?\s+per\s+(?:day|hour|hr|week)\b/gi, '')
+      .replace(/\b\d+(?:\.\d+)?k\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .replace(/\s+([.,;:])/g, '$1')
       .trim();
@@ -8367,7 +8390,7 @@
     if (!d) return false;
     var type = String(d.type || '').toLowerCase();
     if (type === 'work_order' || type === 'supplier_work_order') return true;
-    return /work\s*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' '));
+    return /work[\s_-]*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' '));
   }
 
   function findMakesafeWorkOrderDocument(data) {
@@ -8464,6 +8487,7 @@
     mediaPlayableUrl: mediaPlayableUrl,
     isWalkthroughMedia: isWalkthroughMedia,
     isJobVideo: isJobVideo,
+    isDeclaredJobVideo: isDeclaredJobVideo,
     isScopeVideo: isScopeVideo,
     isTradeVisibleDocument: isTradeVisibleDocument,
     collectJobMedia: collectJobMedia,
@@ -10440,10 +10464,13 @@
     h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
-    // Other documents (plans, drawings, council approvals) — trades-visible only
-    // Work orders are already shown via renderTradeDocuments above
+    // Other documents (plans, drawings, council approvals) — trades-visible only.
+    // Priced WO PDFs (canonical or filename/type aliases) stay on the office
+    // renderTradeDocuments path — never as a second unguarded link.
     var docs = data.documents || [];
-    var otherDocs = docs.filter(function(d) { return d.type !== 'work_order' && d.type !== 'supplier_work_order' && d.type !== 'site_photo' && d.visible_to_trades; });
+    var otherDocs = docs.filter(function(d) {
+      return d.visible_to_trades && d.type !== 'site_photo' && !isPricedWorkOrderDocument(d);
+    });
     if (otherDocs.length > 0) {
       h += '<div class="detail-section">';
       h += '  <h3>Documents</h3>';

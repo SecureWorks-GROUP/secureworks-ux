@@ -1038,7 +1038,10 @@ const test = base.extend({
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];
-          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
+          const assignment = body.manual_assignments && body.manual_assignments[0];
+          const hasJobLine = (line && line.job_number === 'SWF-26767') ||
+            (assignment && assignment.assignment_id === 'e2e-wo-holder-assignment');
+          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) && !hasJobLine) {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
           }
           if (feedScenario === 'trade-invoice-super-gst-empty-response') return {};

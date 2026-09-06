@@ -301,12 +301,22 @@ assert(html.includes('_jobCentricSubmitBlockedByHydrate'),
 assert((function() {
   const hydrate = html.slice(html.indexOf('function _hydratePerMetreWorkOrderCards'), html.indexOf('window.retryPerMetreWorkOrderHydrate'));
   const fail = hydrate.slice(hydrate.indexOf('.catch(function'));
+  const incomplete = hydrate.slice(
+    hydrate.indexOf('if (!_workOrdersHydratePayloadComplete'),
+    hydrate.indexOf('var orders = authorizeWorkOrders')
+  );
   return !fail.includes('_reconcileJobCardWorkOrderAuth') &&
     !fail.includes('_pmHydratedWorkOrderIds = {}') &&
     fail.includes("_pmWoHydrateState = 'error'") &&
+    incomplete.includes("_pmWoHydrateState = 'error'") &&
+    !incomplete.includes('_reconcileJobCardWorkOrderAuth') &&
+    !incomplete.includes('_mergeWorkOrdersIntoJobCards') &&
     /if \(_pmWoHydrateState === 'ok'\) \{\s*_reconcileJobCardWorkOrderAuth\(_pmHydratedWorkOrderIds\)/.test(html);
 })(),
-  'a failed WO hydrate keeps restored deductions and does not reconcile against an empty set');
+  'a failed or incomplete WO hydrate keeps restored deductions and does not reconcile against an empty set');
+assert(html.includes('_workOrdersHydratePayloadComplete') && html.includes('_workOrderHasCompleteMoney') &&
+  html.includes('Array.isArray(wo.negative_charges)'),
+  'hydrate treats missing work_orders or negative_charges as unresolved money, not an empty success');
 assert(html.includes('woHydrateBlocked'),
   'the job-centric footer still names the hydrate submit block');
 assert(html.includes('Undated assignments never prefill a card'),
@@ -352,8 +362,9 @@ assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwned
 assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
   'offline invoice replay re-checks ownership and auth generation immediately before send');
 assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_financialInvoiceApi') && html.includes('_withFinancialWebLock') &&
-  html.includes('_webLocksAvailable'),
-  'direct invoice writes pass a context-bound beforeSend guard and require a financial Web Lock');
+  html.includes('_webLocksAvailable') && html.includes('_holdFinancialWebLockUntilLocalWriteEnds') &&
+  html.includes('_financialWebLockDepth'),
+  'direct invoice writes pass a context-bound beforeSend guard and keep the financial Web Lock through response handling');
 assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
   'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
 assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded') &&

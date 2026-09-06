@@ -106,6 +106,81 @@ test('a failed work-order hydrate shows retry and still lets Hours submit', asyn
   await expect(page.locator('#invSubmitBtn')).toBeEnabled();
 });
 
+test('a partial work-order money payload keeps restored deductions and blocks WO submit', async ({ appPage: page }) => {
+  const weekStart = perthWeekMonday();
+  await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('action') === 'my_work_orders') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          work_orders: [{
+            id: 'wo-fence-authorised',
+            wo_number: 'WO-FENCE-001',
+            job_id: 'fence-job-henry',
+            job_number: 'FENCE-HENRY-001',
+            client_name: 'Henry Client',
+            job_type: 'fencing',
+            status: 'complete',
+            scheduled_date: addIsoDays(weekStart, 1),
+            subtotal: 100,
+            already_invoiced: false,
+            can_invoice: true,
+            can_add_to_weekly_invoice: true
+          }]
+        })
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.evaluate(([start, end, jobDate]) => {
+    sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-henry'), JSON.stringify({
+      user_id: 'e2e-henry',
+      is_per_metre: true,
+      invoice_type: 'per_metre',
+      jobCentric: true,
+      jobCards: [{
+        assignment_id: 'e2e-henry-assignment',
+        job_id: 'fence-job-henry',
+        job_number: 'FENCE-HENRY-001',
+        client_name: 'Henry Client',
+        scheduled_date: jobDate,
+        included: true,
+        wo_mode: true,
+        work_order_id: 'wo-fence-authorised',
+        wo_number: 'WO-FENCE-001',
+        wo_allocated: 999,
+        wo_labour_lines: [{
+          trade_name: 'Old Israel',
+          line_kind: 'wo_pass_through',
+          amount: 99,
+          source_line_id: 'wo-fence-charge-israel'
+        }],
+        hours: 8,
+        rate: 55
+      }],
+      weekStart: start,
+      weekEnd: end
+    }));
+  }, [weekStart, addIsoDays(weekStart, 6), addIsoDays(weekStart, 1)]);
+
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+  await expect(page.locator('[data-pm-wo-hydrate="error"]')).toBeVisible();
+  await expect(page.locator('[data-pm-wo-hydrate="error"]')).toContainText('Could not load work-order amounts');
+
+  const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(card.locator('[data-cardwoalloc]')).toHaveValue('999');
+  await expect(card.getByLabel('Work order amount paid to Old Israel')).toHaveValue('99');
+  await expect(page.locator('#invSubmitBtn')).toBeDisabled();
+  await expect(page.locator('[data-pm-wo-hydrate-submit-block]')).toBeVisible();
+});
+
 test('My Work Orders and Work Order Invoice recover from a failed read', async ({ appPage: page }) => {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();

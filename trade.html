@@ -4295,6 +4295,8 @@
   var _QUEUE_LOCK_KEY = 'sw_action_queue_lock';
   var _QUEUE_WEB_LOCK_NAME = 'sw_action_queue';
   var _queueWebLockDepth = 0;
+  var _financialWebLockDepth = 0;
+  var _financialWebLockHoldResolvers = [];
 
   function _storageGetJson(key, fallback) {
     try {
@@ -4742,6 +4744,20 @@
     return attempt();
   }
 
+  function _holdFinancialWebLockUntilLocalWriteEnds() {
+    if (!_financialWriteHeldLocally()) return Promise.resolve();
+    return new Promise(function(resolve) {
+      _financialWebLockHoldResolvers.push(resolve);
+    });
+  }
+
+  function _releaseFinancialWebLockHolders() {
+    if (_financialWriteHeldLocally()) return;
+    var resolvers = _financialWebLockHoldResolvers;
+    _financialWebLockHoldResolvers = [];
+    for (var i = 0; i < resolvers.length; i++) resolvers[i]();
+  }
+
   function _withFinancialWebLock(action, fn, opts) {
     opts = opts || {};
     var acquire = opts.acquire !== false;
@@ -4767,10 +4783,42 @@
     if (!_webLocksAvailable()) {
       return Promise.reject(_invoiceWriteLeaseLostError());
     }
-    return navigator.locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
-      if (!lock) return Promise.reject(_invoiceWriteLeaseLostError());
+    // Same-tab reentry (PDF attach during generate success) reuses the
+    // held exclusive lock. A second request({ ifAvailable: true }) would
+    // fail and look like another tab.
+    if (_financialWebLockDepth > 0) {
       return run();
+    }
+    var deliver = { resolve: null, reject: null };
+    var delivered = new Promise(function(resolve, reject) {
+      deliver.resolve = resolve;
+      deliver.reject = reject;
     });
+    // Hold the exclusive lock until _endFinancialWrite so another tab cannot
+    // POST after this fetch commits but before response handling / reconcile /
+    // queue persist finishes. The caller still receives the API result as
+    // soon as the fetch settles — blocking that would deadlock on end.
+    var lockHeld = navigator.locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
+      if (!lock) {
+        var lost = _invoiceWriteLeaseLostError();
+        deliver.reject(lost);
+        return Promise.reject(lost);
+      }
+      _financialWebLockDepth += 1;
+      return run().then(function(result) {
+        deliver.resolve(result);
+        return _holdFinancialWebLockUntilLocalWriteEnds().then(function() {
+          _financialWebLockDepth -= 1;
+        });
+      }, function(err) {
+        deliver.reject(err);
+        return _holdFinancialWebLockUntilLocalWriteEnds().then(function() {
+          _financialWebLockDepth -= 1;
+        });
+      });
+    });
+    lockHeld.catch(function() {});
+    return delivered;
   }
 
   function _withCrossTabLock(name, fn) {
@@ -5243,6 +5291,7 @@
   function _endFinancialWrite(action) {
     var key = String(action || '');
     delete _financialWriteInFlight[key];
+    _releaseFinancialWebLockHolders();
   }
 
   function _beginSaveTradeInvoiceDraft() {
@@ -5433,19 +5482,19 @@
               }
               return true;
             }
-          });
-        }, { acquire: true }).then(function(result) {
-          if (!_offlineInvoiceReplaySucceeded(result)) remaining.push(item);
-        }).catch(function(e) {
-          if (e && e.code === 'invoice_replay_cancelled') return;
-          if (e && e.code === 'invoice_write_locked') {
+          }).then(function(result) {
+            if (!_offlineInvoiceReplaySucceeded(result)) remaining.push(item);
+          }).catch(function(e) {
+            if (e && e.code === 'invoice_replay_cancelled') return;
+            if (e && e.code === 'invoice_write_locked') {
+              remaining.push(item);
+              return;
+            }
+            if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
+            if (_isOfflineInvoiceTimeoutError(e)) item.ambiguous = true;
             remaining.push(item);
-            return;
-          }
-          if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
-          if (_isOfflineInvoiceTimeoutError(e)) item.ambiguous = true;
-          remaining.push(item);
-        });
+          });
+        }, { acquire: true });
       });
     };
 
@@ -20132,6 +20181,18 @@
     });
   }
 
+  function _workOrderHasCompleteMoney(wo) {
+    return !!(wo && Array.isArray(wo.negative_charges));
+  }
+
+  function _workOrdersHydratePayloadComplete(res) {
+    if (!res || !Array.isArray(res.work_orders)) return false;
+    for (var i = 0; i < res.work_orders.length; i++) {
+      if (res.work_orders[i] && !_workOrderHasCompleteMoney(res.work_orders[i])) return false;
+    }
+    return true;
+  }
+
   function _applyHydratedWorkOrderMoney(card, wo, passThroughs) {
     if (!card) return false;
     var nextAllocated = (wo && wo.subtotal != null) ? Number(wo.subtotal) : null;
@@ -20277,8 +20338,11 @@
       var jobId = wo.job_id || '';
       var woId = String(wo.id || '');
       if (!woId) return;
-      var passThroughs = (wo.negative_charges || []).map(_woPassThroughFromCharge)
-        .filter(function(line) { return Number(line.amount) > 0; });
+      var moneyComplete = _workOrderHasCompleteMoney(wo);
+      var passThroughs = moneyComplete
+        ? (wo.negative_charges || []).map(_woPassThroughFromCharge)
+          .filter(function(line) { return Number(line.amount) > 0; })
+        : null;
       var existing = null;
       _jobCards.forEach(function(c) {
         if (String(c.work_order_id || '') === woId) existing = c;
@@ -20300,10 +20364,11 @@
           target.wo_mode = true;
           changed = true;
         }
-        if (_applyHydratedWorkOrderMoney(target, wo, passThroughs)) changed = true;
+        if (moneyComplete && _applyHydratedWorkOrderMoney(target, wo, passThroughs)) changed = true;
         if (!existing) changed = true;
         return;
       }
+      if (!moneyComplete) return;
       var suburb = '';
       if (wo.site_address) {
         var parts = String(wo.site_address).split(',');
@@ -20319,8 +20384,8 @@
         job_type: workOrderVertical(wo) || wo.job_type || '',
         scheduled_date: date || weekStart || '',
         wo_mode: true,
-        wo_allocated: wo.subtotal != null ? Number(wo.subtotal) : null,
-        wo_labour_lines: passThroughs,
+        wo_allocated: moneyComplete && wo.subtotal != null ? Number(wo.subtotal) : null,
+        wo_labour_lines: moneyComplete ? passThroughs : [],
         included: !!(wo.job_number || wo.client_name),
         _blank_job: !(wo.job_number || wo.client_name)
       }));
@@ -20341,7 +20406,16 @@
     var hydrateCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
-      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []).filter(function(wo) {
+      if (!_workOrdersHydratePayloadComplete(res)) {
+        // Missing work_orders or negative_charges is not an empty success.
+        // Do not merge/reconcile — that would clear restored server deductions.
+        _syncJobCardsFromDOM();
+        _pmWoHydrateState = 'error';
+        _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
+        renderInvoiceBuilder();
+        return;
+      }
+      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders).filter(function(wo) {
         return _workOrderInvoiceableForHydrate(wo);
       }));
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);

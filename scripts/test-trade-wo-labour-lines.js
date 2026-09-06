@@ -469,6 +469,20 @@ function hoursCard(overrides) {
     'unauthorized WO clears server pass-throughs')
   assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
     'hourly labour survives unauthorized strip')
+
+  assert.strictEqual(context._workOrdersHydratePayloadComplete(null), false,
+    'a missing hydrate body is incomplete')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({}), false,
+    'a hydrate body without work_orders is incomplete')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [] }), true,
+    'an explicit empty work_orders array is a complete money payload')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({
+    work_orders: [{ id: 'wo-1', subtotal: 100 }]
+  }), false, 'a work order missing negative_charges is incomplete')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({
+    work_orders: [{ id: 'wo-1', subtotal: 100, negative_charges: [] }]
+  }), true, 'an explicit empty negative_charges array is complete')
+  assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), true)
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -1409,6 +1423,27 @@ function hoursCard(overrides) {
     return Promise.all([syncA, syncB])
   }).then(function() {
     assert.strictEqual(sendCount, 1, 'overlapping tabs send a queued invoice once')
+
+    assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+    const postA = tabA._withFinancialWebLock('generate_trade_invoice', function() {
+      return Promise.resolve({ ok: true, invoice_id: 'inv-post-commit' })
+    }, { acquire: false })
+    return postA.then(function() {
+      assert.strictEqual(tabA._financialWriteHeldLocally(), true,
+        'the fetch result is delivered before the local financial write ends')
+      assert.strictEqual(tabB._beginFinancialWrite('generate_trade_invoice'), true)
+      return tabB._withFinancialWebLock('generate_trade_invoice', function() {
+        return Promise.resolve({ ok: true })
+      }, { acquire: false }).then(function() {
+        throw new Error('second tab acquired the financial lock during response handling')
+      }, function(err) {
+        assert.strictEqual(err && err.code, 'invoice_write_locked',
+          'another tab cannot POST after commit while the first tab still handles the response')
+        tabB._endFinancialWrite('generate_trade_invoice')
+        tabA._endFinancialWrite('generate_trade_invoice')
+      })
+    })
+  }).then(function() {
     console.log('OK — cross-tab invoice single-flight and queue merge')
   }).catch(function(err) {
     console.error(err)

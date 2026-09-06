@@ -15,6 +15,45 @@ const vm = require('vm')
 
 const html = fs.readFileSync('trade.html', 'utf8')
 
+function createWebLockBroker() {
+  const state = Object.create(null)
+  function slot(name) {
+    if (!state[name]) state[name] = { held: false, waiters: [] }
+    return state[name]
+  }
+  function release(name) {
+    const s = slot(name)
+    s.held = false
+    const next = s.waiters.shift()
+    if (next) next()
+  }
+  function acquire(name, cb, resolve, reject) {
+    const s = slot(name)
+    if (s.held) {
+      s.waiters.push(function() { acquire(name, cb, resolve, reject) })
+      return
+    }
+    s.held = true
+    Promise.resolve().then(function() { return cb({ name: name }) }).then(function(value) {
+      release(name)
+      resolve(value)
+    }, function(err) {
+      release(name)
+      reject(err)
+    })
+  }
+  return {
+    request: function(name, opts, cb) {
+      if (typeof opts === 'function') { cb = opts; opts = {} }
+      opts = opts || {}
+      if (opts.ifAvailable && slot(name).held) return Promise.resolve(cb(null))
+      return new Promise(function(resolve, reject) {
+        acquire(name, cb, resolve, reject)
+      })
+    }
+  }
+}
+
 const startMark = '// [JC-PAYLOAD-BUILD-START]'
 const endMark = '// [JC-PAYLOAD-BUILD-END]'
 const start = html.indexOf(startMark)
@@ -142,14 +181,2264 @@ function woCard(overrides) {
   assert(noAlloc.error && noAlloc.error.indexOf('WO allocated') !== -1, 'missing WO amount still blocks')
 }
 
+function hoursCard(overrides) {
+  return Object.assign({
+    _idx: 0,
+    included: true,
+    assignment_id: 'a1',
+    hours: 8,
+    rate: 40,
+    job_id: 'j-hours',
+    job_number: 'SWF-HOURS',
+    job_type: 'fencing',
+    client_name: 'Test Client',
+    scheduled_date: '2026-07-14',
+    description: '',
+    manually_added: false,
+    wo_lump_lines: [],
+  }, overrides || {})
+}
+
 // ── Hourly cards untouched by the labour-line validation ─────────────────
 {
-  const built = context._buildJobCentricPayload([{
-    _idx: 0, included: true, assignment_id: 'a1', hours: 8, rate: 40,
-    job_number: 'SWF-1', description: '', manually_added: false,
-  }])
+  const built = context._buildJobCentricPayload([hoursCard()])
   assert(!built.error, 'plain hourly card builds: ' + built.error)
   assert.strictEqual(built.manualAssignments.length, 1)
 }
 
-console.log('OK — WO labour-line payload contract holds (8 scenarios)')
+// ── Hours-card lump: peer option to hours; captain-B final_deductions only ─
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    wo_lump_lines: [{ description: 'Materials', amount: 10, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'hours + lump builds: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 1)
+  assert.strictEqual(built.cardExtraItems.length, 0,
+    'hours-card Materials lump is captain-B final_deductions only, not extra_items')
+  assert.strictEqual(built.subtotal, 320, 'job-centric extras stay hours/WO/commission only')
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    hours: null,
+    wo_lump_lines: [{ description: 'Site allowance', amount: 50, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'lumps-only hours card builds without hours: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 0)
+  assert.strictEqual(built.cardExtraItems.length, 0, 'lump-only hours card does not ride extra_items')
+  assert.strictEqual(built.subtotal, 0, 'job-centric extras stay hours/WO/commission only')
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    wo_lump_lines: [{ description: '', amount: 10 }],
+  })])
+  assert(built.error, 'hours-card lump amount without description must block')
+  assert(built.error.indexOf('describe') !== -1, 'error asks for a description: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([hoursCard({
+    assignment_id: null,
+    hours: 2,
+    rate: 50,
+    description: 'Extra visit',
+    manually_added: true,
+    wo_lump_lines: [{ description: 'Fuel', amount: 15, line_kind: 'lump_sum' }],
+  })])
+  assert(!built.error, 'searched hours + lump builds: ' + built.error)
+  assert.strictEqual(built.manualAssignments.length, 0)
+  assert.strictEqual(built.cardExtraItems.length, 1, 'searched hours card posts labour extra only')
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.ok(!built.cardExtraItems.some((item) => item.source === 'invoice_final_deduction'),
+    'Fuel lump stays off extra_items')
+  assert.strictEqual(built.subtotal, 100, 'job-centric extras stay hours/WO/commission only')
+}
+
+// ── WO pass-through: UI amount reshapes to hours×rate for fanout ─────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+  })])
+  assert(!built.error, 'pass-through builds: ' + built.error)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.rate, 60, 'net is WO 100 − Israel 40')
+  assert.strictEqual(row.wo_labour_deduction, 40)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' },
+  ], 'pass-through posts as hours×rate with an explicit reshape marker')
+  assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
+  assert(row.description.indexOf('Israel $40') !== -1, 'breakdown names the WO trade: ' + row.description)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 559.5,
+    wo_labour_lines: [
+      { trade_name: 'Tendo', hours: 11.5, rate: 25 },
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+  })])
+  assert(!built.error, 'mixed labour + pass-through builds: ' + built.error)
+  assert.strictEqual(built.cardExtraItems[0].rate, 232)
+  assert(built.cardExtraItems[0].description.indexOf('Tendo 11.5h×$25=$287.5') !== -1)
+  assert(built.cardExtraItems[0].description.indexOf('Israel $40') !== -1)
+}
+
+// ── Lump-sum deduct: UI amount reshapes to hours×rate labour ─────────────
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+    ],
+    wo_lump_lines: [
+      { description: 'Materials', amount: 10, line_kind: 'lump_sum' }
+    ],
+  })])
+  assert(!built.error, 'lump-sum builds: ' + built.error)
+  const row = built.cardExtraItems[0]
+  assert.strictEqual(row.rate, 50, 'net is WO 100 − Israel 40 − Materials 10')
+  assert.strictEqual(row.wo_labour_deduction, 50)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' },
+    { trade_name: 'Materials', hours: 1, rate: 10, amount: 10 },
+  ], 'WO lumps post as hours×rate labour, not wo_lump_lines')
+  assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
+  assert.strictEqual(row.wo_lump_deduction, undefined)
+  assert(row.description.indexOf('other [Materials $10]') !== -1, 'breakdown names the lump: ' + row.description)
+  assert.strictEqual(built.cardExtraItems.filter((item) => item.source === 'invoice_final_deduction').length, 0,
+    'WO deducts stay nested on the WO extra and are not also emitted as extra_items')
+}
+
+{
+  const deductStart = html.indexOf('function _hoursCardLumpFinalDeductions')
+  const deductEnd = html.indexOf('function _syncInvLumpLinesFromDOM')
+  assert(deductStart !== -1 && deductEnd > deductStart, 'final-deduction helpers exist')
+  context._invLumpLines = [{ description: 'Car loan', amount: 20 }]
+  context._jobCards = [
+    woCard({
+      included: true,
+      wo_allocated: 100,
+      wo_labour_lines: [
+        { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 },
+        { trade_name: 'Tendo', hours: 2, rate: 25 },
+      ],
+      wo_lump_lines: [{ description: 'Materials', amount: 10, line_kind: 'lump_sum' }],
+    }),
+    hoursCard({
+      included: true,
+      wo_lump_lines: [{ description: 'Fuel', amount: 15, line_kind: 'lump_sum' }],
+    }),
+  ]
+  vm.runInContext(html.slice(deductStart, deductEnd), context)
+  const finals = context._invFinalDeductions()
+  const descs = finals.map((row) => row.description + ':' + row.unit_rate)
+  assert.ok(descs.indexOf('Car loan:20') !== -1, 'invoice-level lumps stay on final_deductions')
+  assert.ok(descs.indexOf('Fuel:15') !== -1, 'hours-card lumps stay on final_deductions')
+  assert.ok(descs.indexOf('Israel:40') === -1, 'WO pass-throughs reshape to fanout labour, not final_deductions')
+  assert.ok(descs.indexOf('Materials:10') === -1, 'WO-card lumps reshape to fanout labour, not final_deductions')
+  assert.ok(descs.indexOf('Tendo:50') === -1, 'named WO labour hours are not copied onto final_deductions')
+  assert.strictEqual(finals.length, 2, 'only invoice-level and hours-card lumps stay on the common list')
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    wo_lump_lines: [{ description: '', amount: 10 }],
+  })])
+  assert(built.error, 'lump amount without description must block')
+  assert(built.error.indexOf('describe') !== -1, 'error asks for a description: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    requires_work_order_id: true,
+    work_order_id: '',
+  })])
+  assert(built.error, 'per-metre WO card without work_order_id must block')
+  assert(built.error.indexOf('no work order yet') !== -1, 'error names the missing WO: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    work_order_id: '',
+  })])
+  assert(!built.error, 'other trades can still submit a WO-mode card without work_order_id: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: false,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(built.error, 'blocked WO card must fail closed')
+  assert(built.error.indexOf('already been invoiced') !== -1, 'payload repeats the block reason: ' + built.error)
+  assert(!built.cardExtraItems, 'blocked WO does not serialize extras')
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: true,
+    wo_mode: false,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(!built.error, 'explicit hours ack can submit as hours: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.strictEqual(built.cardExtraItems[0].work_order_id, undefined)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: true,
+    wo_mode: true,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(!built.error, 'acked WO still in wo_mode emits hours, not a WO extra: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.strictEqual(built.cardExtraItems[0].work_order_id, undefined)
+}
+
+// ── No-ID pass-through merge is a multiset, not a name+amount collapse ──
+{
+  const startMark = '// [WO-PASSTHROUGH-MERGE-START]'
+  const endMark = '// [WO-PASSTHROUGH-MERGE-END]'
+  const mergeStart = html.indexOf(startMark)
+  const mergeEnd = html.indexOf(endMark)
+  assert(mergeStart !== -1 && mergeEnd > mergeStart, 'pass-through merge markers exist')
+  vm.runInContext(html.slice(mergeStart, mergeEnd), context)
+  const israel = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+  const two = context._mergeServerPassThroughs([], [israel, Object.assign({}, israel)])
+  assert.strictEqual(two.lines.length, 2, 'two no-ID Israel $40 charges both land')
+  assert.strictEqual(two.changed, true)
+  const retry = context._mergeServerPassThroughs(two.lines, [israel, Object.assign({}, israel)])
+  assert.strictEqual(retry.lines.length, 2, 'a second hydrate does not double no-ID lines')
+  assert.strictEqual(retry.changed, false)
+  const untaggedCollision = context._mergeServerPassThroughs([Object.assign({}, israel)], [israel, Object.assign({}, israel)])
+  assert.strictEqual(untaggedCollision.unresolved, true,
+    'an untagged local no-ID line colliding with server no-ID money stays unresolved')
+  assert.strictEqual(untaggedCollision.lines.length, 1, 'unresolved merge does not rewrite restored lines')
+  const localOwned = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: false }
+  const oneLocal = context._mergeServerPassThroughs([localOwned], [
+    Object.assign({}, israel, { server_owned: true }),
+    Object.assign({}, israel, { server_owned: true }),
+  ])
+  assert.strictEqual(oneLocal.unresolved, false)
+  assert.strictEqual(oneLocal.lines.length, 3, 'a tagged local no-ID line plus two server lines keeps all three deducts')
+  const staleSameId = { trade_name: 'Old Israel', line_kind: 'wo_pass_through', amount: 99, source_line_id: 'wo-fence-charge-israel' }
+  const freshSameId = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'wo-fence-charge-israel' }
+  const replaced = context._mergeServerPassThroughs([staleSameId, { trade_name: 'Kim', hours: 1, rate: 20 }], [freshSameId])
+  assert.strictEqual(replaced.changed, true, 'same-ID stale amount/name is replaced')
+  assert.strictEqual(replaced.lines.length, 2, 'same-ID replace does not drop neighbouring labour')
+  assert.strictEqual(replaced.lines[0].amount, 40, 'same-ID amount is current server truth')
+  assert.strictEqual(replaced.lines[0].trade_name, 'Israel', 'same-ID name is current server truth')
+  assert.strictEqual(replaced.lines[1].trade_name, 'Kim', 'hourly labour stays in place after same-ID replace')
+}
+
+// ── Hydrate authorizes only invoiceable in-week WOs ──
+{
+  const startMark = '// [WO-HYDRATE-FILTER-START]'
+  const endMark = '// [WO-HYDRATE-FILTER-END]'
+  const filterStart = html.indexOf(startMark)
+  const filterEnd = html.indexOf(endMark)
+  assert(filterStart !== -1 && filterEnd > filterStart, 'hydrate filter markers exist')
+  context._weeklyWorkOrderDate = function (wo) {
+    return String((wo && (wo.scheduled_date || wo.date)) || '').slice(0, 10)
+  }
+  context._hoursWeekStart = '2026-09-07'
+  context._hoursWeekEnd = '2026-09-13'
+  vm.runInContext(html.slice(filterStart, filterEnd), context)
+  const inWeek = {
+    id: 'wo-in',
+    scheduled_date: '2026-09-08',
+    can_invoice: true,
+    already_invoiced: false,
+  }
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(inWeek), true, 'in-week invoiceable WO hydrates')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    already_invoiced: true,
+  })), false, 'already invoiced WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    can_invoice: false,
+    can_add_to_weekly_invoice: false,
+  })), false, 'skipped WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    can_invoice: false,
+    can_add_to_weekly_invoice: true,
+  })), false, 'weekly-reserved WO is not job-centric hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    scheduled_date: '2026-08-31',
+  })), false, 'out-of-week WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate({
+    id: 'wo-undated',
+    can_invoice: true,
+    already_invoiced: false,
+  }), true, 'undated invoiceable WO still hydrates (Firstmate pending)')
+}
+
+// ── Hydrate overwrites stale server-owned money; reconcile clears it ──
+{
+  const moneyStart = html.indexOf('// [WO-SERVER-MONEY-START]')
+  const moneyEnd = html.indexOf('// [WO-SERVER-MONEY-END]')
+  const reconStart = html.indexOf('// [WO-RECONCILE-AUTH-START]')
+  const reconEnd = html.indexOf('// [WO-RECONCILE-AUTH-END]')
+  assert(moneyStart !== -1 && moneyEnd > moneyStart, 'server-money markers exist')
+  assert(reconStart !== -1 && reconEnd > reconStart, 'reconcile markers exist')
+  vm.runInContext(html.slice(moneyStart, moneyEnd), context)
+  vm.runInContext(html.slice(reconStart, reconEnd), context)
+
+  const israel = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'wo-fence-charge-israel' }
+  const stalePt = { trade_name: 'Stale', line_kind: 'wo_pass_through', amount: 77, source_line_id: 'wo-stale-old-line' }
+  const kim = { trade_name: 'Kim', hours: 1, rate: 20 }
+  const userPt = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+  const card = {
+    wo_allocated: 999,
+    wo_labour_lines: [stalePt, kim, userPt],
+    wo_lump_lines: [{ description: 'Materials', amount: 10 }],
+    work_order_id: 'wo-fence-authorised',
+    wo_mode: true,
+  }
+  const woComplete = { subtotal: 100, negative_charges: [{ amount: 40, source_line_id: 'wo-fence-charge-israel' }] }
+  const changed = context._applyHydratedWorkOrderMoney(card, woComplete, [israel])
+  assert.strictEqual(changed, true)
+  assert.strictEqual(card.wo_allocated, 100, 'hydrate overwrites stale allocated')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.source_line_id === 'wo-stale-old-line').length, 0,
+    'stale server pass-through is dropped')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.source_line_id === 'wo-fence-charge-israel').length, 1,
+    'current server Israel rematches once')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1, 'hourly labour is kept')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through' && !ln.source_line_id).length, 1,
+    'user-added no-id pass-through is kept')
+  assert.strictEqual(card.wo_lump_lines[0].description, 'Materials', 'user lump lines are kept')
+
+  const staleSameIdCard = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Old Israel', line_kind: 'wo_pass_through', amount: 99, source_line_id: 'wo-fence-charge-israel' },
+      kim,
+    ],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleSameIdCard, woComplete, [israel]), true)
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[0].amount, 40, 'hydrate overwrites same-ID stale amount')
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[0].trade_name, 'Israel', 'hydrate overwrites same-ID stale name')
+  assert.strictEqual(staleSameIdCard.wo_labour_lines[1].trade_name, 'Kim', 'same-ID replace keeps hourly labour in place')
+
+  const stripped = {
+    work_order_id: 'wo-stale-not-authorized',
+    wo_number: 'WO-STALE',
+    wo_mode: true,
+    wo_allocated: 99,
+    wo_labour_lines: [stalePt, kim],
+  }
+  context._jobCards = [stripped]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}), true)
+  assert.strictEqual(stripped.work_order_id, 'wo-stale-not-authorized',
+    'unauthorized WO keeps its work_order_id')
+  assert.strictEqual(stripped.wo_mode, true, 'unauthorized WO stays a work-order card')
+  assert.strictEqual(stripped.wo_blocked, true, 'unauthorized WO is blocked, not Hours')
+  assert.strictEqual(stripped.wo_allocated, 99, 'blocked WO keeps allocated money')
+  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.source_line_id).length, 1,
+    'blocked WO keeps server pass-throughs')
+  assert.ok(String(stripped.wo_block_reason || '').indexOf('not available') !== -1,
+    'missing WO names a block reason: ' + stripped.wo_block_reason)
+
+  const already = {
+    work_order_id: 'wo-already',
+    wo_number: 'WO-ALREADY',
+    wo_mode: true,
+    wo_allocated: 80,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'cl-israel' }],
+  }
+  context._jobCards = [already]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}, {
+    'wo-already': { id: 'wo-already', already_invoiced: true, can_invoice: false },
+  }), true)
+  assert.strictEqual(already.work_order_id, 'wo-already')
+  assert.strictEqual(already.wo_mode, true)
+  assert.strictEqual(already.wo_blocked, true)
+  assert.strictEqual(already.wo_hours_ack, false)
+  assert.strictEqual(already.wo_allocated, 80)
+  assert.ok(String(already.wo_block_reason).indexOf('already been invoiced') !== -1,
+    'already-invoiced reason: ' + already.wo_block_reason)
+
+  const weeklyHeld = {
+    work_order_id: 'wo-weekly',
+    wo_mode: true,
+    wo_allocated: 70,
+    wo_labour_lines: [],
+  }
+  context._jobCards = [weeklyHeld]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}, {
+    'wo-weekly': { id: 'wo-weekly', already_invoiced: false, can_invoice: false, can_add_to_weekly_invoice: true },
+  }), true)
+  assert.strictEqual(weeklyHeld.wo_blocked, true)
+  assert.strictEqual(weeklyHeld.wo_mode, true)
+  assert.ok(String(weeklyHeld.wo_block_reason).indexOf('weekly invoice') !== -1,
+    'weekly-reserved reason: ' + weeklyHeld.wo_block_reason)
+
+  const exclusive = {
+    work_order_id: 'wo-ok',
+    wo_mode: true,
+    wo_blocked: true,
+    wo_block_reason: 'stale',
+    wo_hours_ack: true,
+  }
+  context._jobCards = [exclusive]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({ 'wo-ok': true }, {
+    'wo-ok': { id: 'wo-ok', can_invoice: true, already_invoiced: false },
+  }), true)
+  assert.strictEqual(exclusive.wo_blocked, false, 'exclusive hydrate clears the block')
+  assert.strictEqual(exclusive.wo_hours_ack, false)
+  assert.strictEqual(exclusive.wo_mode, true)
+
+  assert.strictEqual(context._workOrdersHydratePayloadComplete(null), false,
+    'a missing hydrate body is incomplete')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({}), false,
+    'a hydrate body without work_orders is incomplete')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [] }), true,
+    'an explicit empty work_orders array is a complete listing')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [], truncated: true }), false,
+    'a truncated listing is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], has_more: true }), false,
+    'has_more is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], incomplete: true }), false,
+    'an incomplete listing is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [{}], next_offset: 20 }), false,
+    'a paged listing with next_offset is not a complete hydrate')
+  assert.strictEqual(context._workOrdersHydrateMoneyComplete([
+    { id: 'wo-1', subtotal: 100 }
+  ]), false, 'an authorized work order missing negative_charges is incomplete money')
+  assert.strictEqual(context._workOrdersHydrateMoneyComplete([
+    { id: 'wo-1', subtotal: 100, negative_charges: [] }
+  ]), true, 'an explicit empty negative_charges array is complete money')
+  assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), false,
+    'a charge without submit identity is incomplete money')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ amount: 40, source_line_id: 'cl-israel' }],
+  }), true, 'a charge with amount and source id is complete money')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount_ex: -40 }],
+  }), true, 'a signed amount_ex is a usable positive deduction')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount: 0 }],
+  }), false, 'a zero-amount charge is not treated as no deduction')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel' }],
+  }), false, 'a charge missing its amount is unresolved')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount: 40 }, { amount: 20 }],
+  }), false, 'one malformed charge keeps the whole WO unresolved')
+
+  const keptRestored = {
+    wo_allocated: 999,
+    wo_labour_lines: [stalePt],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(keptRestored, { subtotal: 100 }, [israel]), false,
+    'missing negative_charges does not apply or strip restored money')
+  assert.strictEqual(keptRestored.wo_allocated, 999, 'incomplete apply keeps allocated')
+  assert.strictEqual(keptRestored.wo_labour_lines[0].source_line_id, 'wo-stale-old-line',
+    'incomplete apply keeps restored source_line_id rows')
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(keptRestored, { subtotal: 100, negative_charges: [] }, null), false,
+    'a missing pass-through array is not an authoritative empty deduction set')
+  assert.strictEqual(keptRestored.wo_labour_lines[0].source_line_id, 'wo-stale-old-line',
+    'null pass-throughs keep restored deductions')
+
+  context._woChargeSourceLineId = function(charge) {
+    charge = charge || {}
+    var id = charge.line_id || charge.source_line_id || charge.id || ''
+    return id ? String(id) : ''
+  }
+  const collectedIds = context._workOrderNegativeChargeLineIds({
+    negative_charges: [
+      { id: 'cl-israel', amount: 40 },
+      { source_line_id: 'cl-kim', amount: 20 },
+    ],
+  })
+  assert.ok(collectedIds, 'complete charges yield their source ids')
+  assert.strictEqual(Array.prototype.join.call(collectedIds, ','), 'cl-israel,cl-kim',
+    'complete charges yield their source ids')
+  const emptyIds = context._workOrderNegativeChargeLineIds({ negative_charges: [] })
+  assert.ok(emptyIds, 'an explicit empty charge list is a complete no-deduct set')
+  assert.strictEqual(emptyIds.length, 0, 'an explicit empty charge list is a complete no-deduct set')
+  assert.strictEqual(context._workOrderNegativeChargeLineIds({
+    negative_charges: [{ trade_name: 'Israel', amount: 40 }],
+  }), null, 'charges without ids cannot be posted')
+  assert.strictEqual(context._workOrderNegativeChargeLineIds({ subtotal: 100 }), null,
+    'missing negative_charges cannot yield a charge-id list')
+
+  const staleNoIdServer = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 100, server_owned: true },
+      kim,
+    ],
+  }
+  const israel120 = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 120, server_owned: true, source_line_id: 'cl-israel-120' }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleNoIdServer, {
+    subtotal: 80,
+    negative_charges: [{ trade_name: 'Israel', amount: 120 }],
+  }, [israel120]), false,
+    'charges without submit identity do not apply or drop restored deductions')
+  assert.strictEqual(staleNoIdServer.wo_allocated, 100, 'malformed charges keep restored allocated')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.amount === 100 && ln.server_owned === true).length, 1,
+    'malformed charges keep restored server money')
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleNoIdServer, {
+    subtotal: 80,
+    negative_charges: [{ trade_name: 'Israel', amount: 120, source_line_id: 'cl-israel-120' }],
+  }, [israel120]), true)
+  const israelNoId = staleNoIdServer.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through' && !ln.source_line_id)
+  assert.strictEqual(israelNoId.length, 0, 'complete identified hydrate replaces stale no-ID server money')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.source_line_id === 'cl-israel-120').length, 1,
+    'replaced deduct is current identified server truth')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
+    'hourly labour survives identified server replace')
+
+  const removedServerPlusLocal = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 100, server_owned: true },
+      { trade_name: 'Local extra', line_kind: 'wo_pass_through', amount: 15, server_owned: false },
+      kim,
+    ],
+  }
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(removedServerPlusLocal, {
+    subtotal: 100,
+    negative_charges: [],
+  }, []), true)
+  assert.strictEqual(removedServerPlusLocal.wo_labour_lines.filter((ln) => ln.server_owned === true).length, 0,
+    'a complete listing that removes a no-ID charge drops the stale server row')
+  assert.strictEqual(removedServerPlusLocal.wo_labour_lines.filter((ln) => ln.server_owned === false).length, 1,
+    'local no-ID deducts survive a complete server replace')
+
+  const twoServerNoId = {
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+    ],
+  }
+  const twoIsrael = [
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true, source_line_id: 'cl-israel-a' },
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true, source_line_id: 'cl-israel-b' },
+  ]
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(twoServerNoId, {
+    subtotal: 100,
+    negative_charges: [
+      { amount: 40, source_line_id: 'cl-israel-a' },
+      { amount: 40, source_line_id: 'cl-israel-b' },
+    ],
+  }, twoIsrael), true)
+  assert.strictEqual(twoServerNoId.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through').length, 2,
+    'complete replace of two same-amount server no-ID rows stays two, not four')
+
+  const staleChargeCard = woCard({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'cl-israel', server_owned: true },
+      { trade_name: 'Kim', hours: 1, rate: 20 },
+    ],
+  })
+  context._jobCards = [staleChargeCard]
+  const refreshedListing = {
+    'wo-1': {
+      id: 'wo-1',
+      subtotal: 100,
+      negative_charges: [{ trade_name: 'Israel', amount: 55, source_line_id: 'cl-israel' }],
+    },
+  }
+  const moneyRefresh = context._refreshJobCentricPostedWorkOrderMoney(refreshedListing, ['wo-1'])
+  assert.strictEqual(moneyRefresh.ok, true, 'exclusive re-read money refresh succeeds on complete charges')
+  const israelLine = staleChargeCard.wo_labour_lines.find((ln) => ln.source_line_id === 'cl-israel')
+  assert.strictEqual(israelLine && israelLine.amount, 55, 'fresh listing overwrites stale pass-through amount')
+  assert.strictEqual(staleChargeCard.wo_labour_lines.find((ln) => ln.trade_name === 'Kim').rate, 20,
+    'named labour stays on the card while pass-through money refreshes')
+  const rebuiltExtras = context._buildJobCentricPayload(context._jobCards)
+  assert(!rebuiltExtras.error, 'refreshed cards still build: ' + rebuiltExtras.error)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltExtras.cardExtraItems[0].wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+    { trade_name: 'Kim', hours: 1, rate: 20, amount: 20 },
+  ], 'generate extras rebuild pass-through deduction money from the exclusive listing')
+  assert.strictEqual(rebuiltExtras.cardExtraItems[0].wo_labour_deduction, 75)
+  assert.strictEqual(context._refreshJobCentricPostedWorkOrderMoney({ 'wo-1': { id: 'wo-1' } }, ['wo-1']).ok, false,
+    'exclusive re-read fails closed when posted WO money is incomplete')
+
+  const rebuildStart = html.indexOf('function _woLabourLineIsReshapedPassThrough')
+  const rebuildEnd = html.indexOf('// Submit the job-centric invoice:')
+  assert(rebuildStart !== -1 && rebuildEnd > rebuildStart, 'offline extra rebuild helpers exist')
+  context._jobCentricPostedWorkOrderIds = function(items) {
+    const ids = []
+    ;(items || []).forEach(function(row) {
+      const id = String((row && (row.work_order_id || row.workOrderId)) || '').trim()
+      if (id && ids.indexOf(id) === -1) ids.push(id)
+    })
+    return ids
+  }
+  vm.runInContext(html.slice(rebuildStart, rebuildEnd), context)
+  const listingWo = {
+    id: 'wo-1',
+    subtotal: 100,
+    negative_charges: [{ trade_name: 'Israel', amount: 40, source_line_id: 'cl-israel' }],
+  }
+  const rebuiltSameName = context._rebuildJobCentricWorkOrderExtraFromListing({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
+      { trade_name: 'Israel', hours: 1, rate: 20, amount: 20 },
+    ],
+  }, listingWo)
+  assert.ok(rebuiltSameName, 'listing rebuild succeeds when a 1h labour line shares a charge name')
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltSameName.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 20, amount: 20 },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+  ], 'user-added 1h labour for the same trade is kept beside the reshaped pass-through')
+  assert.strictEqual(rebuiltSameName.wo_labour_deduction, 60)
+
+  const rebuiltLocalPass = context._rebuildJobCentricWorkOrderExtraFromListing({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+      { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    ],
+  }, listingWo)
+  assert.ok(rebuiltLocalPass, 'listing rebuild keeps a local paid-to-trade deduction')
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltLocalPass.wo_labour_lines)), [
+    { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+  ], 'user-added pass-throughs survive replay and only server-owned rows are replaced from the listing')
+  assert.strictEqual(rebuiltLocalPass.wo_labour_deduction, 55)
+
+  context._jobCards = [woCard({
+    work_order_id: 'wo-OTHER',
+    wo_allocated: 999,
+    wo_labour_lines: [{ trade_name: 'Stranger', hours: 8, rate: 50 }],
+  })]
+  const queued = {
+    action: 'generate_trade_invoice',
+    body: {
+      extra_items: [{
+        work_order_id: 'wo-1',
+        wo_allocated: 100,
+        wo_labour_lines: [
+          { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+          { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+        ],
+      }],
+      manual_assignments: [{ assignment_id: 'queued-a', hours: 2 }],
+    },
+  }
+  assert.strictEqual(context._rebuildOfflineJobCentricWorkOrderMoney(queued, { 'wo-1': listingWo }), true,
+    'offline replay rebuilds from the queued extra, not live job cards')
+  assert.strictEqual(queued.body.extra_items.length, 1)
+  assert.strictEqual(queued.body.extra_items[0].work_order_id, 'wo-1',
+    'a live card for another WO does not replace the queued work order')
+  assert.strictEqual(queued.body.manual_assignments[0].assignment_id, 'queued-a',
+    'queued manual assignments are not replaced from live cards')
+  assert.strictEqual(JSON.stringify(queued.body.extra_items).indexOf('wo-OTHER'), -1)
+  assert.strictEqual(JSON.stringify(queued.body.extra_items).indexOf('Stranger'), -1)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(queued.body.extra_items[0].wo_labour_lines)), [
+    { trade_name: 'Jose', hours: 1, rate: 15, amount: 15, line_source: 'wo_pass_through', server_owned: false },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel', server_owned: true },
+  ])
+}
+
+// ── Offline invoice queue is account-bound ──
+{
+  const startMark = '// [OFFLINE-INVOICE-QUEUE-START]'
+  const endMark = '// [OFFLINE-INVOICE-QUEUE-END]'
+  const qStart = html.indexOf(startMark)
+  const qEnd = html.indexOf(endMark)
+  assert(qStart !== -1 && qEnd > qStart, 'offline invoice queue markers exist')
+  const store = { sw_action_queue: '[]' }
+  const sent = []
+  const webLocks = createWebLockBroker()
+  const ctx = {
+    localStorage: {
+      getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
+      setItem: function(k, v) { store[k] = String(v) },
+      removeItem: function(k) { delete store[k] },
+      key: function(i) { return Object.keys(store)[i] || null },
+      get length() { return Object.keys(store).length },
+    },
+    setInterval: function(fn, ms) { return setInterval(fn, ms) },
+    clearInterval: function(id) { return clearInterval(id) },
+    _user: { id: 'alice' },
+    _invoiceAuthGen: 1,
+    _authorizedWorkOrderIds: { 'wo-b': true },
+    _invDraftOwnerId: function() { return String((ctx._user && (ctx._user.id || ctx._user.email)) || '') },
+    _invoiceApiContext: function() { return { gen: ctx._invoiceAuthGen, userId: ctx._invDraftOwnerId() } },
+    _invoiceApiCurrent: function(c) {
+      return !!(c && c.gen === ctx._invoiceAuthGen && c.userId && c.userId === ctx._invDraftOwnerId())
+    },
+    isAuthorizedWorkOrder: function(id) { return ctx._authorizedWorkOrderIds[String(id || '')] === true },
+    authorizeWorkOrders: function(orders) {
+      const next = {}
+      ;(orders || []).forEach(function(order) {
+        if (order && order.id) next[String(order.id)] = true
+      })
+      ctx._authorizedWorkOrderIds = next
+      return orders || []
+    },
+    workOrdersForViewer: function(orders) { return orders || [] },
+    blockedForeignJobWrite: function() { return false },
+    api: function(action, _q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false }] })
+      return Promise.resolve({ ok: true })
+    },
+    toast: function() {},
+    friendlyError: function(err) { return String((err && err.message) || err || '') },
+    navigator: { onLine: true, locks: webLocks },
+    setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
+    _invalidateAssignmentLifecycleCaches: function() {},
+  }
+  vm.createContext(ctx)
+  vm.runInContext(html.slice(qStart, qEnd), ctx)
+
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+  }), true, 'Xero-saved without identity is the unconfirmed save-with-retry shape')
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+    invoice_id: 'invoice-saved',
+  }), false, 'Xero-saved with a durable invoice id is not unconfirmed')
+  assert.strictEqual(ctx._invoiceXeroPushSavedUnconfirmed({
+    ok: false,
+    error: 'RATE_NOT_CONFIGURED',
+  }), false, 'a hard business reject is not the unconfirmed Xero-saved shape')
+  assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({
+    ok: false,
+    code: 'XERO_PUSH_FAILED',
+    success: true,
+  }, { action: 'submit_work_order_invoice' }), false,
+    'replay does not treat an unidentified Xero-saved response as committed')
+
+  Promise.resolve(ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [{ description: 'Alice fuel', unit_rate: 10 }] })).then(function() {
+    return ctx.queueOfflineAction('update_job_phase', { assignmentId: 'a1', phase: 'on_site' })
+  }).then(function() {
+    let queued = JSON.parse(store.sw_action_queue)
+    assert.strictEqual(queued.length, 2)
+    assert.strictEqual(queued[0].user_id, 'alice')
+    assert.strictEqual(queued[0].action, 'generate_trade_invoice')
+    assert.strictEqual(queued[1].user_id, undefined, 'non-invoice actions stay unstamped')
+
+    ctx._user = { id: 'bob' }
+    return ctx._purgeOfflineInvoiceActionsNotOwnedByCurrentAccount()
+  }).then(function(queued) {
+    assert.strictEqual(queued.filter((i) => i.action === 'generate_trade_invoice').length, 0,
+      'account switch drops the other account\'s invoice write')
+    assert.strictEqual(queued.filter((i) => i.action === 'update_job_phase').length, 1,
+      'non-invoice queued work survives an account switch')
+
+    store.sw_action_queue = JSON.stringify([
+      { action: 'generate_trade_invoice', user_id: 'alice', body: { leak: true } },
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
+      { action: 'generate_trade_invoice', body: { unstamped: true } },
+    ])
+    ctx._user = { id: 'bob' }
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action !== 'my_work_orders').length, 1,
+      'only the current account\'s invoice write is replayed')
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice')[0].body.work_order_id, 'wo-b')
+
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: false, already_invoiced: true }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    store.sw_action_queue = JSON.stringify([
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'an already-invoiced work order is not replayed')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
+      'an already-invoiced work-order write stays queued instead of posting again')
+
+    store.sw_action_queue = JSON.stringify([
+      { action: 'generate_trade_invoice', user_id: 'bob', body: { raced: true } },
+    ])
+    sent.length = 0
+    const origApi = ctx.api
+    ctx.api = function(action, q, body, options) {
+      ctx._invoiceAuthGen += 1
+      return origApi(action, q, body, options)
+    }
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 0,
+      'a generation bump between check and send aborts the invoice replay')
+
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+      return Promise.resolve({})
+    }
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-unauth': true, 'wo-stale': true }
+    store.sw_action_queue = JSON.stringify([
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-unauth' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a work-order invoice is not replayed without current WO authorization')
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'replay always re-reads my_work_orders instead of trusting a cached WO id')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
+      'an unauthorized work-order invoice stays queued for a later authorized session')
+    assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), false,
+      'a later my_work_orders result replaces the authorized set and drops stale ids')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-unauth': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') return Promise.reject(new Error('Failed to fetch'))
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      { id: 'iq_wo_authfail', client_request_id: 'iq_wo_authfail', action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-unauth' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a failed work-order auth refresh does not POST the queued invoice')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_wo_authfail'), true,
+      'a failed work-order auth refresh keeps the queued invoice for retry')
+    assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), true,
+      'a failed my_work_orders read must not replace the authorized set')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_jc_wo',
+        client_request_id: 'iq_jc_wo',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        body: { extra_items: [{ work_order_id: 'wo-b', row_type: 'work_order', rate: 60 }] },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'job-centric generate replay re-reads my_work_orders under the financial fence')
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 1,
+      'exclusive job-centric WO extras may POST after the under-fence re-read')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false, negative_charges: [] }] })
+      }
+      if (action === 'submit_work_order_invoice') {
+        return Promise.resolve({ ok: false, code: 'XERO_PUSH_FAILED', success: true })
+      }
+      if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_xero_unid',
+        client_request_id: 'iq_xero_unid',
+        action: 'submit_work_order_invoice',
+        user_id: 'bob',
+        body: { work_order_id: 'wo-b' },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    const queuedXero = JSON.parse(store.sw_action_queue).find((i) => i.id === 'iq_xero_unid')
+    assert.ok(queuedXero, 'an unidentified Xero-saved replay stays queued')
+    assert.strictEqual(queuedXero.ambiguous, true,
+      'an unidentified Xero-saved replay is marked ambiguous before it is retained')
+    assert.strictEqual(queuedXero.persist_unconfirmed, true,
+      'an unidentified Xero-saved replay is preserved durably')
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 1,
+      'the first unidentified Xero-saved replay POSTs once')
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a later sync reconciles the ambiguous Xero-saved item instead of POSTing again')
+    assert.ok(sent.filter((s) => s.action === 'my_trade_invoices').length >= 1,
+      'the second sync reconciles against the invoice listing')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_xero_unid'), true,
+      'the unidentified Xero-saved item stays queued after reconcile finds no identity')
+
+    ctx._invoiceAuthGen += 1
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: false, already_invoiced: true }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_jc_wo_used',
+        client_request_id: 'iq_jc_wo_used',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        body: { extra_items: [{ work_order_id: 'wo-b', row_type: 'work_order', rate: 60 }] },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 0,
+      'already-invoiced job-centric WO extras are not replayed')
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'a non-exclusive job-centric generate still re-reads my_work_orders')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_jc_wo_used'), true,
+      'a non-exclusive job-centric generate stays queued instead of posting again')
+
+    ctx._user = { id: 'bob' }
+    ctx._invoiceAuthGen += 1
+    let sendCount = 0
+    let releaseFirst
+    const firstHold = new Promise(function(resolve) { releaseFirst = resolve })
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+        return Promise.resolve({ work_orders: [], invoices: [] })
+      }
+      sendCount += 1
+      return firstHold.then(function() { return { ok: true } })
+    }
+    store.sw_action_queue = JSON.stringify([
+      { id: 'iq_lock', client_request_id: 'iq_lock', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+    ])
+    const firstSync = ctx.syncOfflineQueue()
+    const overlapSync = ctx.syncOfflineQueue()
+    assert.strictEqual(ctx._offlineQueueSyncing, true, 'overlapping syncs share one in-flight lock')
+    assert.strictEqual(ctx._offlineQueueSyncAgain, true, 'a second caller asks for one follow-up pass')
+    releaseFirst()
+    return Promise.all([firstSync, overlapSync]).then(function() {
+      assert.strictEqual(sendCount, 1, 'single-flight lock sends a financial item once')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+          return Promise.resolve({ work_orders: [], invoices: [] })
+        }
+        sendCount += 1
+        ctx.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14' })
+        return Promise.resolve({ ok: true })
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_old', client_request_id: 'iq_old', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      const afterMerge = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(sendCount, 1, 'the in-flight snapshot item is sent once')
+      assert.strictEqual(afterMerge.some((i) => i.id === 'iq_old'), false,
+        'a completed snapshot item is dropped')
+      assert.strictEqual(afterMerge.filter((i) => i.action === 'generate_trade_invoice' && i.body && i.body.week_start === '2026-09-14').length, 1,
+        'an invoice queued during replay survives persist merge')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{ week_start: '2026-09-07', status: 'submitted', xero_bill_id: 'xb1' }],
+          })
+        }
+        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+        sendCount += 1
+        const err = new Error('Aborted')
+        err.name = 'AbortError'
+        return Promise.reject(err)
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_to', client_request_id: 'iq_to', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      const timedOut = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(timedOut.length, 1, 'a timed-out invoice write stays queued')
+      assert.strictEqual(timedOut[0].ambiguous, true, 'timeout marks the financial item ambiguous')
+      assert.strictEqual(sendCount, 1, 'the first timeout is the only generate attempt')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', status: 'submitted', xero_bill_id: 'xb1' },
+        { body: { week_start: '2026-09-07' } }
+      ), false, 'week-only reconcile is not an exact match')
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(sendCount, 1, 'week-only ambiguous timeout does not resend')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).length, 1,
+        'a week-only match stays unresolved instead of dropping a different invoice')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{ id: 'draft-1', draft_id: 'draft-1', status: 'submitted', xero_bill_id: 'xb1' }],
+          })
+        }
+        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+        sendCount += 1
+        const err = new Error('Aborted')
+        err.name = 'AbortError'
+        return Promise.reject(err)
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_exact', client_request_id: 'iq_exact', action: 'generate_trade_invoice', user_id: 'bob', body: { draft_id: 'draft-1', week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(JSON.parse(store.sw_action_queue)[0].ambiguous, true)
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(sendCount, 1, 'exact draft identity does not resend after it has landed')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).length, 0,
+        'an exact draft/invoice identity can be dropped as already landed')
+
+      store.sw_action_queue = '[]'
+      const abort = new Error('Aborted')
+      abort.name = 'AbortError'
+      return ctx._handleFinancialWriteFailure(
+        'generate_trade_invoice',
+        { week_start: '2026-09-07' },
+        abort,
+        ctx._invoiceApiContext()
+      )
+    }).then(function(result) {
+      assert.strictEqual(result.outcome, 'queued_unresolved',
+        'an online timeout without exact identity stays unresolved')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.ambiguous && i.body && i.body.week_start === '2026-09-07'), true,
+        'online timeouts persist through the same queue path')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { week_start: '2026-09-07' },
+        { week_start: '2026-09-07', extra_items: [{ description: 'Other job' }] }
+      ), false, 'week-only is not an exact intent match')
+      assert.strictEqual(ctx._guardFinancialWrite('generate_trade_invoice', {
+        week_start: '2026-09-07',
+        extra_items: [{ description: 'Other job' }],
+      }), false, 'a distinct same-week payload is not suppressed after an unresolved timeout')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { draft_id: 'draft-1', week_start: '2026-09-07' },
+        { draft_id: 'draft-1', week_start: '2026-09-21' }
+      ), true, 'exact draft identity still matches')
+      assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), true)
+      assert.strictEqual(ctx._beginSaveTradeInvoiceDraft(), false,
+        'direct draft save is single-flight')
+      ctx._endSaveTradeInvoiceDraft()
+      assert.strictEqual(ctx._invoiceDraftSaveSucceeded({ ok: true }), false,
+        'a generic ok draft save is not durable without a draft identity')
+      assert.strictEqual(ctx._invoiceDraftSaveSucceeded({ ok: true, draft_id: 'draft-1' }), true)
+      assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({ ok: true }, { action: 'save_trade_invoice_draft' }), false,
+        'offline draft replay requires a durable draft identity')
+      assert.strictEqual(ctx._offlineInvoiceReplaySucceeded({ ok: true, draft_id: 'draft-1' }, { action: 'save_trade_invoice_draft' }), true)
+      assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), true)
+      assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), false,
+        'invoice generate/submit is single-flight')
+      ctx._endFinancialWrite('generate_trade_invoice')
+      assert.strictEqual(ctx._sameFinancialWriteIntent(
+        { week_start: '2026-09-07', extra_items: [{ description: 'A' }], gst_on: true },
+        { week_start: '2026-09-14', extra_items: [{ description: 'A' }], gst_on: true }
+      ), false, 'the same payload in a different week is a distinct intent')
+
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({ invoices: [] })
+        }
+        return Promise.resolve({})
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'delete_trade_invoice',
+        body: { invoice_id: 'inv-gone' },
+      }).then(function(emptyDelete) {
+        assert.strictEqual(emptyDelete, null,
+          'an empty invoice listing does not prove a delete committed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-other' }], truncated: true })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(truncatedDelete) {
+        assert.strictEqual(truncatedDelete, null,
+          'a truncated invoice listing does not prove a delete committed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-other' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(absentDelete) {
+        assert.strictEqual(absentDelete, true,
+          'absence from a complete non-empty listing means the delete landed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'inv-gone' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'delete_trade_invoice',
+          body: { invoice_id: 'inv-gone' },
+        })
+      }).then(function(stillThere) {
+        assert.strictEqual(stillThere, false, 'a still-listed invoice is not a landed delete')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ work_order_id: 'wo-b', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'submit_work_order_invoice',
+        body: { work_order_id: 'wo-b' },
+      })
+      }).then(function(draftLanded) {
+        assert.strictEqual(draftLanded, true,
+          'an exact WO identity in draft is already landed and must not resend')
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: { work_order_id: 'wo-b' },
+        })
+      }).then(function() {
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{ work_order_id: 'wo-b', status: 'pending_ops_review' }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: { work_order_id: 'wo-b' },
+        })
+      }).then(function(pendingLanded) {
+        assert.strictEqual(pendingLanded, true,
+          'an exact WO identity in pending_ops_review is already landed')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', status: 'draft' },
+          { body: {
+            draft_id: 'draft-1',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          } }
+        ), false, 'a draft identity is not landed when queued extras never appear on the listing')
+        const draftMoney = {
+          extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+        }
+        assert.ok(String(ctx._invoiceMoneyFingerprint({
+          draft_id: 'draft-1',
+          week_start: '2026-09-07',
+          ...draftMoney,
+        })).indexOf('"week_start":"2026-09-07"') !== -1,
+          'money fingerprint includes normalized week_start')
+        assert.ok(String(ctx._invoiceMoneyFingerprint({
+          draft_id: 'draft-1',
+          week_ending: '2026-09-13',
+          ...draftMoney,
+        })).indexOf('"week_ending":"2026-09-13"') !== -1,
+          'money fingerprint includes normalized week_ending')
+        assert.strictEqual(ctx._invoiceMoneyFingerprintMatches(
+          { draft_id: 'draft-1', week_start: '2026-09-07', ...draftMoney },
+          { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney }
+        ), false, 'same extras in a different week are a different money fingerprint')
+        assert.strictEqual(ctx._invoiceMoneyFingerprintMatches(
+          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40 }] }] },
+          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', server_owned: true }] }] }
+        ), true, 'pass-through reshape and ownership markers are not part of the money fingerprint')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
+          { body: { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney } }
+        ), false, 'a timed-out draft update that moved period does not match the old same-money draft')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
+          { body: { draft_id: 'draft-1', week_start: '2026-09-07', ...draftMoney } }
+        ), true, 'same draft, same extras, and same week still land')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          {
+            id: 'draft-1',
+            draft_id: 'draft-1',
+            week_start: '2026-09-07',
+            work_order_blocks: [{ work_order_id: 'wo-1', labour_deductions: [{ user_id: 'u1', hours: 2 }] }],
+            status: 'draft',
+          },
+          { body: {
+            draft_id: 'draft-1',
+            week_start: '2026-09-21',
+            work_order_blocks: [{ work_order_id: 'wo-1', labour_deductions: [{ user_id: 'u1', hours: 2 }] }],
+          } }
+        ), false, 'a weekly draft that moved week_start does not match the old-week listing')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ id: 'draft-1', draft_id: 'draft-1', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'save_trade_invoice_draft',
+          body: {
+            draft_id: 'draft-1',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          },
+        })
+      }).then(function(draftMoneyUnresolved) {
+        assert.strictEqual(draftMoneyUnresolved, null,
+          'a timed-out draft update stays unresolved until the listing shows the new money')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{
+                id: 'draft-1',
+                draft_id: 'draft-1',
+                week_start: '2026-09-07',
+                extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+                status: 'draft',
+              }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'save_trade_invoice_draft',
+          body: {
+            draft_id: 'draft-1',
+            week_start: '2026-09-21',
+            extra_items: [{ description: 'Hours', hours: 8, rate: 50, quantity: 8 }],
+          },
+        })
+      }).then(function(draftPeriodUnresolved) {
+        assert.strictEqual(draftPeriodUnresolved, null,
+          'a timed-out draft that moved period stays unresolved against the old-week listing')
+        assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+          { work_order_id: 'wo-b', status: 'draft' },
+          { body: {
+            work_order_id: 'wo-b',
+            charge_line_ids: ['chg-new'],
+            negative_charge_line_ids: ['chg-new'],
+          } }
+        ), false, 'a WO identity is not landed when queued charge ids are missing from the listing')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({ invoices: [{ work_order_id: 'wo-b', status: 'draft' }] })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_work_order_invoice',
+          body: {
+            work_order_id: 'wo-b',
+            charge_line_ids: ['chg-new'],
+            negative_charge_line_ids: ['chg-new'],
+          },
+        })
+      }).then(function(woChargesUnresolved) {
+        assert.strictEqual(woChargesUnresolved, null,
+          'a timed-out direct WO write stays unresolved when charge selection cannot be proven')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 50, notes: '', gst_on: false },
+        })
+      }).then(function(legacyEmptyRetry) {
+        assert.strictEqual(legacyEmptyRetry, false,
+          'an unlanded legacy hourly write retries when the period is empty')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{ week_ending: '2026-09-13', status: 'submitted' }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 55, notes: '', gst_on: false },
+        })
+      }).then(function(legacyWeekOccupied) {
+        assert.strictEqual(legacyWeekOccupied, null,
+          'a same-week listing without the hourly fingerprint is not treated as landed')
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') {
+            return Promise.resolve({
+              invoices: [{
+                week_ending: '2026-09-13',
+                hourly_rate: 50,
+                notes: '',
+                gst_on: false,
+                status: 'submitted',
+              }],
+            })
+          }
+          return Promise.resolve({})
+        }
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'submit_trade_invoice',
+          body: { week_ending: '2026-09-13', hourly_rate: 50, notes: '', gst_on: false },
+        })
+      }).then(function(legacyFingerprinted) {
+        assert.strictEqual(legacyFingerprinted, true,
+          'a legacy hourly write lands only when week and hourly fingerprint match')
+        ctx.navigator.onLine = false
+        store.sw_action_queue = '[]'
+        const offlineAbort = new Error('Failed to fetch')
+        return ctx._handleFinancialWriteFailure(
+          'generate_trade_invoice',
+          { week_start: '2026-09-07', extra_items: [{ description: 'Offline A' }] },
+          offlineAbort,
+          ctx._invoiceApiContext()
+        )
+      })
+    }).then(function(offlineResult) {
+      assert.strictEqual(offlineResult.outcome, 'queued_unresolved',
+        'an offline Failed-to-fetch still goes through the ambiguous path')
+      const offlineQueued = JSON.parse(store.sw_action_queue)
+      assert.strictEqual(offlineQueued.length, 1)
+      assert.strictEqual(offlineQueued[0].ambiguous, true,
+        'offline timeout/Failed-to-fetch is marked ambiguous so replay reconciles first')
+      ctx.navigator.onLine = true
+
+      ctx._user = null
+      ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
+      assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,
+        'unsigned-in invoice writes are not parked')
+
+      ctx._user = { id: 'bob' }
+      ctx._invoiceAuthGen += 1
+      assert.strictEqual(ctx._offlineInvoiceHasExactTarget({
+        action: 'generate_trade_invoice',
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }] }
+      }), true, 'nested job identities count as an exact target')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }] } }
+      ), true, 'job-centric reconcile matches a nested job identity in the same week')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), false, 'a multi-job write does not match an older same-week invoice that only has one job')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), false, 'a multi-job write without a matching period stays unresolved')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] } }
+      ), true, 'a multi-job write matches only when every job and the period land')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] } }
+      ), false, 'two same-job slots are not covered by one repeated-job invoice row')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A', scheduled_date: '2026-09-07' },
+            { job_number: 'SWF-A', scheduled_date: '2026-09-08' },
+          ],
+          status: 'draft',
+        },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A', scheduled_date: '2026-09-07' },
+            { job_number: 'SWF-A', scheduled_date: '2026-09-08' },
+          ],
+        } }
+      ), true, 'same-job slots with distinct dates match one-to-one')
+      assert.strictEqual(ctx._invoiceSlotsCovered(
+        ctx._invoiceIdentitySlots({ extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] }),
+        { extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-A' }] }
+      ), true, 'two indistinguishable same-job rows can cover two same-job slots')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          final_deductions: [{ description: 'Fuel', unit_rate: 10 }],
+        } }
+      ), false, 'a write with invoice-level deductions does not match a job-only invoice')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A' },
+            { description: 'Fuel', unit_rate: -10, source: 'invoice_final_deduction' },
+          ],
+        } }
+      ), false, 'job+week is not landed when the queued write has a deduction extra')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }]
+      }), false, 'job identity extras without labour/lump stay slot-matchable')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{
+            job_number: 'SWF-A',
+            wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+            wo_labour_deduction: 287.5
+          }]
+        } }
+      ), false, 'job+week is not landed when the queued write has WO labour lines')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          work_order_blocks: [{ labour_deductions: [{ user_id: 'u1', hours: 2 }] }]
+        } }
+      ), false, 'job+week is not landed when nested WO labour deductions differ')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-A', wo_labour_deduction: 40 }]
+      }), true, 'a positive WO labour deduction is money-affecting')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-A', hours: 8, rate: 50 }]
+      }), true, 'positive hours×rate extras require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A', hours: 4, rate: 40 }],
+        } }
+      ), false, 'job+week is not landed when the queued write has different hours/rate')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        manual_assignments: [{ assignment_id: 'a1', hours: 8, rate: 50 }]
+      }), true, 'manual_assignments hours×rate require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          manual_assignments: [{ assignment_id: 'a1', hours: 8, rate: 50 }],
+        } }
+      ), false, 'job+week is not landed when queued hours live on manual_assignments')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        labour_lines: [{ trade_name: 'Tendo', hours: 2, rate: 25 }]
+      }), true, 'top-level labour_lines require a full fingerprint')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-b'] }]
+      }), true, 'weekly crew charge selections require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        {
+          week_start: '2026-09-07',
+          extra_items: [{ work_order_id: 'wo-1' }],
+          status: 'submitted',
+        },
+        { body: {
+          week_start: '2026-09-07',
+          work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-b'] }],
+        } }
+      ), false, 'one-WO week is not landed when crew charge selection is not on the listing')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{
+              week_start: '2026-09-07',
+              extra_items: [{ job_number: 'SWF-26767' }],
+              status: 'submitted',
+            }],
+          })
+        }
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-26767', hours: 8, rate: 50 }],
+        }
+      })
+    }).then(function(hoursNotLanded) {
+      assert.strictEqual(hoursNotLanded, null,
+        'a same-job listing without the hours fingerprint does not drop the queued write')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{
+              week_start: '2026-09-07',
+              extra_items: [{ work_order_id: 'wo-1' }],
+              status: 'submitted',
+            }],
+          })
+        }
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: {
+          week_start: '2026-09-07',
+          work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-a'] }],
+        }
+      })
+    }).then(function(weeklySelectionNotLanded) {
+      assert.strictEqual(weeklySelectionNotLanded, null,
+        'a same-WO listing without the charge-selection fingerprint does not drop the queued write')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }] }
+      })
+    }).then(function(jobCentricUncommitted) {
+      assert.strictEqual(jobCentricUncommitted, null,
+        'an exact-target job-centric write stays unresolved when the listing cannot prove it landed')
+      const safariLoad = new Error('Load failed')
+      safariLoad.name = 'TypeError'
+      const firefoxNet = new Error('NetworkError when attempting to fetch resource')
+      firefoxNet.name = 'TypeError'
+      const chromeFetch = new Error('Failed to fetch')
+      chromeFetch.name = 'TypeError'
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(safariLoad), true,
+        'Safari Load failed is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(firefoxNet), true,
+        'Firefox NetworkError is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(chromeFetch), true,
+        'Chrome Failed to fetch is an ambiguous transport failure')
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(new Error('RATE_NOT_CONFIGURED')), false,
+        'a business error is not a transport failure')
+      const lockedErr = new Error('Invoice send is already in progress.')
+      lockedErr.code = 'invoice_write_locked'
+      assert.strictEqual(ctx._isOfflineInvoiceTimeoutError(lockedErr), false,
+        'lock contention is not a transport failure')
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'submit_work_order_invoice',
+        body: { work_order_id: 'wo-missing' }
+      }).then(function(woEmpty) {
+        assert.strictEqual(woEmpty, null,
+          'an exact WO target with no listing match fails closed instead of resending')
+        let woResends = 0
+        ctx.api = function(action) {
+          if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+          if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-missing' }] })
+          woResends += 1
+          return Promise.resolve({ ok: true })
+        }
+        store.sw_action_queue = JSON.stringify([{
+          id: 'iq_wo_empty',
+          client_request_id: 'iq_wo_empty',
+          action: 'submit_work_order_invoice',
+          user_id: 'bob',
+          ambiguous: true,
+          body: { work_order_id: 'wo-missing' }
+        }])
+        return ctx.syncOfflineQueue().then(function() {
+          assert.strictEqual(woResends, 0,
+            'ambiguous exact-target WO replay does not POST after a negative listing')
+          assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_wo_empty'), true,
+            'the unresolved WO write is retained for later reconciliation')
+          store.sw_action_queue = '[]'
+          return ctx._handleFinancialWriteFailure(
+            'generate_trade_invoice',
+            { week_start: '2026-09-07', extra_items: [{ description: 'Safari drop' }] },
+            safariLoad,
+            ctx._invoiceApiContext()
+          )
+        }).then(function(loadFailedResult) {
+          assert.strictEqual(loadFailedResult.outcome, 'queued_unresolved',
+            'Safari Load failed takes the ambiguous persist-and-reconcile path')
+          assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.ambiguous && i.body && i.body.extra_items), true,
+            'Load failed persists as an ambiguous write before any retry')
+          return ctx._handleFinancialWriteFailure(
+            'generate_trade_invoice',
+            { week_start: '2026-09-14' },
+            lockedErr,
+            ctx._invoiceApiContext()
+          )
+        }).then(function(lockedResult) {
+          assert.strictEqual(lockedResult.outcome, 'locked',
+            'cross-tab Web Lock contention is locked, not a retryable failure')
+          assert.strictEqual(ctx._financialWriteAborted(lockedResult), true)
+          let invoiceReads = 0
+          let resendCount = 0
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              invoiceReads += 1
+              return Promise.resolve({})
+            }
+            if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+            resendCount += 1
+            return Promise.resolve({ ok: true })
+          }
+      store.sw_action_queue = JSON.stringify([{
+        id: 'iq_incomplete',
+        client_request_id: 'iq_incomplete',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        ambiguous: true,
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }] }
+      }])
+      return ctx.syncOfflineQueue().then(function() {
+        assert.ok(invoiceReads >= 3, 'ambiguous replay retries the invoice listing before deciding')
+        assert.strictEqual(resendCount, 0, 'an incomplete listing does not resend an ambiguous invoice')
+        ctx.api = function(action) {
+          if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+            return Promise.resolve({ work_orders: [], invoices: [] })
+          }
+          return Promise.resolve({ ok: false, error: 'RATE_NOT_CONFIGURED' })
+        }
+        store.sw_action_queue = JSON.stringify([{
+          id: 'iq_bizfail',
+          client_request_id: 'iq_bizfail',
+          action: 'generate_trade_invoice',
+          user_id: 'bob',
+          body: { week_start: '2026-09-07' }
+        }])
+        return ctx.syncOfflineQueue()
+      }).then(function() {
+        assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_bizfail'), true,
+          'HTTP-success business failures stay queued')
+        store.sw_action_queue_lock = JSON.stringify({
+          owner: 'other-tab',
+          ts: Date.now(),
+          nonce: 'held',
+          v: 1
+        })
+        const before = store.sw_action_queue
+        const lockedMutate = ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] }, { money: true })
+        assert.strictEqual(lockedMutate.ok, false, 'an unlocked money queue mutation fails closed')
+        assert.strictEqual(store.sw_action_queue, before,
+          'an unlocked money queue mutation does not overwrite the queue')
+        delete store.sw_action_queue_lock
+
+        return ctx._reconcileAmbiguousInvoiceAction({
+          action: 'generate_trade_invoice',
+          body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+        }).then(function(multiJobEmpty) {
+          assert.strictEqual(multiJobEmpty, null,
+            'a multi-job write on a complete empty listing stays unresolved instead of retrying')
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              return Promise.resolve({
+                invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+              })
+            }
+            return Promise.resolve({ ok: true })
+          }
+          return ctx._reconcileAmbiguousInvoiceAction({
+            action: 'generate_trade_invoice',
+            body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+          })
+        }).then(function(partialLanded) {
+          assert.strictEqual(partialLanded, null,
+            'a same-week invoice that only shares one job does not land a multi-job write')
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              return Promise.resolve({
+                invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+              })
+            }
+            return Promise.resolve({ ok: true })
+          }
+          return ctx._reconcileAmbiguousInvoiceAction({
+            action: 'generate_trade_invoice',
+            body: {
+              week_start: '2026-09-07',
+              extra_items: [
+                { job_number: 'SWF-A' },
+                { description: 'Fuel', unit_rate: -10, source: 'invoice_final_deduction' },
+              ],
+            }
+          }).then(function(deductLanded) {
+            assert.strictEqual(deductLanded, null,
+              'a one-job invoice does not land a queued write that still carries a deduction extra')
+            ctx.api = function(action) {
+              if (action === 'my_trade_invoices') {
+                return Promise.resolve({
+                  invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+                })
+              }
+              return Promise.resolve({ ok: true })
+            }
+            return ctx._reconcileAmbiguousInvoiceAction({
+              action: 'generate_trade_invoice',
+              body: {
+                week_start: '2026-09-07',
+                extra_items: [{
+                  job_number: 'SWF-A',
+                  wo_labour_lines: [{ trade_name: 'Tendo', hours: 11.5, rate: 25 }],
+                  wo_labour_deduction: 287.5
+                }]
+              }
+            })
+          }).then(function(labourLanded) {
+            assert.strictEqual(labourLanded, null,
+              'a one-job invoice does not land a queued write that still carries WO labour deductions')
+            ctx.api = function(action) {
+              if (action === 'my_trade_invoices') {
+                return Promise.resolve({
+                  invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+                })
+              }
+              return Promise.resolve({ ok: true })
+            }
+            return ctx._reconcileAmbiguousInvoiceAction({
+              action: 'generate_trade_invoice',
+              body: {
+                week_start: '2026-09-07',
+                extra_items: [{ job_number: 'SWF-A' }],
+                work_order_blocks: [{ labour_deductions: [{ user_id: 'u1', hours: 2 }] }]
+              }
+            })
+          }).then(function(blockLabourLanded) {
+            assert.strictEqual(blockLabourLanded, null,
+              'a one-job invoice does not land a queued write with nested WO-block labour deductions')
+            const savedLocks = ctx.navigator.locks
+            delete ctx.navigator.locks
+            assert.strictEqual(ctx._beginFinancialWrite('generate_trade_invoice'), false,
+              'financial writes fail closed when Web Locks are unavailable')
+            let noLockSends = 0
+            ctx.api = function(action) {
+              if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+                return Promise.resolve({ work_orders: [], invoices: [] })
+              }
+              noLockSends += 1
+              return Promise.resolve({ ok: true })
+            }
+            store.sw_action_queue = JSON.stringify([{
+              id: 'iq_nolock',
+              client_request_id: 'iq_nolock',
+              action: 'generate_trade_invoice',
+              user_id: 'bob',
+              body: { week_start: '2026-09-07' }
+            }])
+            return ctx.syncOfflineQueue().then(function() {
+              assert.strictEqual(noLockSends, 0,
+                'offline invoice replay does not POST money without Web Locks')
+              store.sw_action_queue_inbox_ids = '[]'
+              return ctx.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-28' })
+            }).then(function(queuedNoLock) {
+              assert.strictEqual(queuedNoLock.ok, false,
+                'money queue mutations fail closed when Web Locks are unavailable')
+              assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.week_start === '2026-09-28' || (i.body && i.body.week_start === '2026-09-28')), false,
+                'a failed money queue mutation does not write the main queue')
+              const inboxIds = JSON.parse(store.sw_action_queue_inbox_ids || '[]')
+              assert.ok(inboxIds.length >= 1, 'the inbox item is preserved when the money merge cannot commit')
+              ctx.navigator.locks = savedLocks
+              return Promise.resolve()
+            })
+          }).then(function() {
+
+          let persistSends = 0
+          const origSetItem = ctx.localStorage.setItem
+          ctx.localStorage.setItem = function(k, v) {
+            if (k === 'sw_action_queue' && persistSends >= 1 && String(v).indexOf('iq_persist') === -1) {
+              throw new Error('persist blocked')
+            }
+            return origSetItem.call(ctx.localStorage, k, v)
+          }
+          ctx.api = function(action) {
+            if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+              return Promise.resolve({ work_orders: [], invoices: [] })
+            }
+            persistSends += 1
+            return Promise.resolve({ ok: true })
+          }
+          Object.keys(store).forEach(function(key) {
+            if (key.indexOf('sw_action_queue_inbox') === 0 || key.indexOf('sw_action_queue_unconfirmed_') === 0) {
+              delete store[key]
+            }
+          })
+          store.sw_action_queue = JSON.stringify([{
+            id: 'iq_persist',
+            client_request_id: 'iq_persist',
+            action: 'generate_trade_invoice',
+            user_id: 'bob',
+            body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }, { job_number: 'SWF-B' }] }
+          }])
+          store.sw_action_queue_inbox_ids = '[]'
+          return ctx.syncOfflineQueue().then(function() {
+            assert.strictEqual(persistSends, 1, 'the invoice POST happens once before persist fails closed')
+            const afterPersistFail = ctx._readOfflineQueue()
+            assert.strictEqual(afterPersistFail.some((i) => i.id === 'iq_persist'), true,
+              'a successful replay stays queued when removal cannot be committed')
+            assert.strictEqual(store.sw_action_queue_unconfirmed_iq_persist, '1',
+              'failed removal records a persist-unconfirmed marker')
+            ctx.localStorage.setItem = origSetItem
+            persistSends = 0
+            return ctx.syncOfflineQueue()
+          }).then(function() {
+            assert.strictEqual(persistSends, 0,
+              'an unconfirmed successful replay reconciles and does not POST again')
+            console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+          })
+          })
+        })
+      })
+    })
+    })
+    })
+  }).catch(function(err) {
+    console.error(err)
+    process.exitCode = 1
+  })
+}
+
+// ── Cross-tab invoice locks and queue merge ──
+{
+  const startMark = '// [OFFLINE-INVOICE-QUEUE-START]'
+  const endMark = '// [OFFLINE-INVOICE-QUEUE-END]'
+  const qStart = html.indexOf(startMark)
+  const qEnd = html.indexOf(endMark)
+  const store = { sw_action_queue: '[]' }
+  function sharedLocalStorage() {
+    return {
+      getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
+      setItem: function(k, v) { store[k] = String(v) },
+      removeItem: function(k) { delete store[k] },
+      key: function(i) { return Object.keys(store)[i] || null },
+      get length() { return Object.keys(store).length },
+    }
+  }
+  const sharedLocks = createWebLockBroker()
+  function makeQueueCtx(userId, locks) {
+    const sent = []
+    const ctx = {
+      localStorage: sharedLocalStorage(),
+      _user: { id: userId },
+      _invoiceAuthGen: 1,
+      _authorizedWorkOrderIds: {},
+      _invDraftOwnerId: function() { return String((ctx._user && (ctx._user.id || ctx._user.email)) || '') },
+      _invoiceApiContext: function() { return { gen: ctx._invoiceAuthGen, userId: ctx._invDraftOwnerId() } },
+      _invoiceApiCurrent: function(c) {
+        return !!(c && c.gen === ctx._invoiceAuthGen && c.userId && c.userId === ctx._invDraftOwnerId())
+      },
+      isAuthorizedWorkOrder: function() { return false },
+      authorizeWorkOrders: function(orders) { return orders || [] },
+      workOrdersForViewer: function(orders) { return orders || [] },
+      blockedForeignJobWrite: function() { return false },
+      api: function(action, _q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        sent.push({ action: action, body: body })
+        if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+          return Promise.resolve({ work_orders: [], invoices: [] })
+        }
+        return Promise.resolve({ ok: true })
+      },
+      toast: function() {},
+      friendlyError: function(err) { return String((err && err.message) || err || '') },
+      navigator: locks ? { onLine: true, locks: locks } : { onLine: true },
+      setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
+      setInterval: function(fn, ms) { return setInterval(fn, ms) },
+      clearInterval: function(id) { return clearInterval(id) },
+      _invalidateAssignmentLifecycleCaches: function() {},
+    }
+    ctx._sent = sent
+    vm.createContext(ctx)
+    vm.runInContext(html.slice(qStart, qEnd), ctx)
+    return ctx
+  }
+
+  const tabA = makeQueueCtx('bob', sharedLocks)
+  const tabB = makeQueueCtx('bob', sharedLocks)
+  const noLockTab = makeQueueCtx('bob')
+  assert.notStrictEqual(tabA._crossTabId, tabB._crossTabId, 'each tab has its own cross-tab id')
+  assert.strictEqual(noLockTab._beginFinancialWrite('generate_trade_invoice'), false,
+    'begin fails closed when Web Locks are unavailable')
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), false,
+    'same-tab invoice generate/submit is still single-flight')
+  assert.strictEqual(tabA._beginFinancialWrite('delete_trade_invoice'), false,
+    'delete cannot start while another invoice write is in flight in this tab')
+  assert.strictEqual(tabB._beginFinancialWrite('delete_trade_invoice'), true,
+    'begin is local; cross-tab exclusivity is the Web Lock around the POST')
+  tabB._endFinancialWrite('delete_trade_invoice')
+  tabA._endFinancialWrite('generate_trade_invoice')
+
+  store.sw_action_queue_lock = JSON.stringify({
+    owner: tabA._crossTabId,
+    ts: Date.now(),
+    nonce: 'held',
+    v: 2,
+    fence: tabA._crossTabId + ':claim:held:1'
+  })
+  store['sw_action_queue_lock__cas'] = tabA._crossTabId + ':claim:held:1'
+  const heldRaw = store.sw_action_queue_lock
+  assert.strictEqual(tabB._compareAndSwapStorageLock('sw_action_queue_lock', null, {
+    owner: tabB._crossTabId,
+    ts: Date.now(),
+    nonce: 'stale-writer',
+    v: 1,
+    prev: 0,
+  }, 'claim'), false, 'a stale empty-expected claim cannot overwrite an active queue lease')
+  assert.strictEqual(store.sw_action_queue_lock, heldRaw, 'active queue lease bytes stay intact after a stale claim')
+  store['sw_action_queue_lock__cas'] = 'other-tab:claim:x:0'
+  assert.strictEqual(tabA._storageLockStillOurs('sw_action_queue_lock'), false,
+    'a stolen fence means the queue lease is no longer ours')
+  delete store.sw_action_queue_lock
+  delete store['sw_action_queue_lock__cas']
+
+  Promise.all([
+    tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] }),
+    tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] }),
+  ]).then(function() {
+    assert.strictEqual(tabA._readOfflineQueue().filter((i) => i.action === 'generate_trade_invoice').length, 2,
+      'concurrent tabs keep both week-distinct invoice actions')
+
+    const first = tabA._readOfflineQueue().find((i) => i.body && i.body.week_start === '2026-09-07')
+    store.sw_action_queue = '[]'
+    store.sw_action_queue_inbox_ids = JSON.stringify([first.id])
+    store['sw_action_queue_inbox_' + first.id] = JSON.stringify(first)
+    return tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-21', extra_items: [{ description: 'C' }] }).then(function() {
+      return first
+    })
+  }).then(function(first) {
+    const recovered = tabA._readOfflineQueue()
+    assert.strictEqual(recovered.some((i) => i.id === first.id), true,
+      'an inbox item survives a stale overwrite of the main queue')
+    assert.strictEqual(recovered.some((i) => i.body && i.body.week_start === '2026-09-21'), true,
+      'the later tab still appends after recovering the inbox item')
+
+    let sendCount = 0
+  let releaseFirst
+  const firstHold = new Promise(function(resolve) { releaseFirst = resolve })
+  function gatedApi(action, _q, body, options) {
+    if (options && typeof options.beforeSend === 'function') {
+      try {
+        if (options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+      } catch (e) {
+        return Promise.reject(e)
+      }
+    }
+    if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+      return Promise.resolve({ work_orders: [], invoices: [] })
+    }
+    sendCount += 1
+    return firstHold.then(function() { return { ok: true } })
+  }
+
+  let blockedSends = 0
+  tabB.api = function(action, _q, body, options) {
+    if (options && typeof options.beforeSend === 'function') {
+      try {
+        if (options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+      } catch (e) {
+        return Promise.reject(e)
+      }
+    }
+    if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+      return Promise.resolve({ work_orders: [], invoices: [] })
+    }
+    blockedSends += 1
+    return Promise.resolve({ ok: true })
+  }
+  store.sw_action_queue = JSON.stringify([{
+    id: 'iq_blocked',
+    client_request_id: 'iq_blocked',
+    action: 'generate_trade_invoice',
+    user_id: 'bob',
+    body: { week_start: '2026-09-07' },
+  }])
+  store.sw_action_queue_inbox_ids = '[]'
+  let releaseHold
+  const holdLock = new Promise(function(resolve) { releaseHold = resolve })
+  let enteredHold
+  const holding = new Promise(function(resolve) { enteredHold = resolve })
+  const held = tabA._withFinancialWebLock('generate_trade_invoice', function() {
+    enteredHold()
+    return holdLock
+  }, { acquire: true })
+  return holding.then(function() {
+    return tabB.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(blockedSends, 0, 'replay does not POST while another tab holds the financial Web Lock')
+    releaseHold()
+    return held
+  }).then(function() {
+    tabA.api = gatedApi
+    tabB.api = gatedApi
+    store.sw_action_queue = JSON.stringify([{
+      id: 'iq_xtab',
+      client_request_id: 'iq_xtab',
+      action: 'generate_trade_invoice',
+      user_id: 'bob',
+      body: { week_start: '2026-09-07' },
+    }])
+    store.sw_action_queue_inbox_ids = '[]'
+    const syncA = tabA.syncOfflineQueue()
+    const syncB = tabB.syncOfflineQueue()
+    releaseFirst()
+    return Promise.all([syncA, syncB])
+  }).then(function() {
+    assert.strictEqual(sendCount, 1, 'overlapping tabs send a queued invoice once')
+
+    assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+    const postA = tabA._withFinancialWebLock('generate_trade_invoice', function() {
+      return Promise.resolve({ ok: true, invoice_id: 'inv-post-commit' })
+    }, { acquire: false })
+    return postA.then(function() {
+      assert.strictEqual(tabA._financialWriteHeldLocally(), true,
+        'the fetch result is delivered before the local financial write ends')
+      assert.strictEqual(tabB._sharedFinancialWriteHeld('generate_trade_invoice'), true,
+        'the shared sw_fin_write fence stays held through response handling')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-09-21' }), true,
+        'another tab sees the shared financial fence, not just a local in-flight flag')
+      assert.strictEqual(tabB._beginFinancialWrite('generate_trade_invoice'), true)
+      return tabB._withFinancialWebLock('generate_trade_invoice', function() {
+        return Promise.resolve({ ok: true })
+      }, { acquire: false }).then(function() {
+        throw new Error('second tab acquired the financial lock during response handling')
+      }, function(err) {
+        assert.strictEqual(err && err.code, 'invoice_write_locked',
+          'another tab cannot POST after commit while the first tab still handles the response')
+        tabB._endFinancialWrite('generate_trade_invoice')
+        tabA._endFinancialWrite('generate_trade_invoice')
+      })
+    })
+  }).then(function() {
+    assert.strictEqual(tabB._sharedFinancialWriteHeld('generate_trade_invoice'), false,
+      'the shared sw_fin_write fence is released after the first tab ends the write')
+    assert.strictEqual(tabA._beginFinancialWrite('save_trade_invoice_draft'), true)
+    const pending = tabA._beginFinancialWriteSend('save_trade_invoice_draft', { week_start: '2026-09-28' })
+    assert.ok(pending && pending.id, 'persist-before-send parks the draft write before fetch')
+    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), true,
+      'another tab sees the parked draft write before the POST returns')
+    tabA._settleFinancialWriteSend('save_trade_invoice_draft', pending, { ok: true }, null)
+    assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), true,
+      'a generic ok draft response stays unresolved without a draft identity')
+    tabA._settleFinancialWriteSend('save_trade_invoice_draft', pending, { ok: true, draft_id: 'draft-xtab' }, null)
+    tabA._endFinancialWrite('save_trade_invoice_draft')
+    assert.strictEqual(tabA._financialWriteHeldLocally(), false,
+      'the local draft write ends after a durable identity')
+    return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
+      assert.strictEqual(tabB._financialWriteAlreadyPending('save_trade_invoice_draft', { week_start: '2026-09-28' }), false,
+        'a durable draft identity clears the parked write after the local write ends')
+      assert.strictEqual(tabA._beginFinancialWrite('submit_work_order_invoice'), true)
+      const pendingXero = tabA._beginFinancialWriteSend('submit_work_order_invoice', { work_order_id: 'wo-xero' })
+      assert.ok(pendingXero && pendingXero.id, 'persist-before-send parks the direct WO write')
+      tabA._settleFinancialWriteSend('submit_work_order_invoice', pendingXero, {
+        ok: false,
+        code: 'XERO_PUSH_FAILED',
+        success: true,
+      }, null)
+      assert.strictEqual(tabA._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
+        'an unidentified Xero-saved response keeps the durable pending fence')
+      tabA._endFinancialWrite('submit_work_order_invoice')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
+        'retry stays blocked after the local write ends without a confirmed identity')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        extra_items: [{ work_order_id: 'wo-xero' }],
+      }), true, 'pending direct WO invoice blocks job-centric generate that posts the same WO')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        work_order_blocks: [{ work_order_id: 'wo-xero' }],
+      }), true, 'pending direct WO invoice blocks weekly generate that posts the same WO')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        week_start: '2026-11-02',
+        extra_items: [{ description: 'Hours only', hours: 2, rate: 40 }],
+      }), false, 'hours-only generate does not share a work-order target with the pending WO')
+      const httpErr = new Error('Work order already invoiced')
+      httpErr.status = 409
+      httpErr.code = 'request_failed'
+      const timeoutErr = new Error('Failed to fetch')
+      timeoutErr.name = 'TypeError'
+      const ambiguousErr = new Error('Invoice response is incomplete')
+      ambiguousErr.code = 'invoice_response_ambiguous'
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(httpErr, null), true,
+        'a 409 _apiError is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, { success: false, error: 'RATE_NOT_CONFIGURED' }), true,
+        'a 200 success:false body is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, { ok: false, error: 'ALREADY_INVOICED' }), true,
+        'a 200 ok:false body is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(timeoutErr, null), false,
+        'a transport drop is not a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(ambiguousErr, null), false,
+        'an ambiguous invoice response keeps the fence')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, {
+        ok: false, code: 'XERO_PUSH_FAILED', success: true,
+      }), false, 'an unidentified Xero-saved body does not clear pending')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingHttp = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-12' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingHttp, null, httpErr)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-12' }), false,
+        'a 409 _apiError clears the durable pending fence')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingJson = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-19' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingJson, {
+        success: false,
+        error: 'RATE_NOT_CONFIGURED',
+      }, null)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      return new Promise(function(resolve) { setTimeout(resolve, 80); })
+      }).then(function() {
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-19' }), false,
+        'a 200 success:false JSON rejection clears the durable pending fence')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingTimeout = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-26' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingTimeout, null, timeoutErr)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-26' }), true,
+        'a transport drop keeps the durable pending fence')
+      const origSetItem = tabA.localStorage.setItem
+      tabA.localStorage.setItem = function(k, v) {
+        if (String(k || '').indexOf('sw_action_queue_inbox_') === 0) throw new Error('quota')
+        return origSetItem.call(tabA.localStorage, k, v)
+      }
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      try {
+        tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-05' })
+        throw new Error('persist-before-send should fail closed when inbox write cannot be read back')
+      } catch (err) {
+        assert.strictEqual(err && err.code, 'invoice_storage_unavailable',
+          'a failed durable persist blocks the POST')
+      }
+      tabA.localStorage.setItem = origSetItem
+      tabA._endFinancialWrite('generate_trade_invoice')
+      console.log('OK — cross-tab invoice single-flight and queue merge')
+    })
+    })
+  }).catch(function(err) {
+    console.error(err)
+    process.exitCode = 1
+  })
+  })
+}

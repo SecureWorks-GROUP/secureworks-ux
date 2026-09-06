@@ -252,10 +252,363 @@ assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), false);
 context.authorizeWorkOrders([workOrders.find((order) => order.id === 'wo-patio')]);
 assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), true,
   'the job-detail entry point authorises the order it renders, hub or no hub');
+context.authorizeWorkOrders(context.workOrdersForViewer(workOrders));
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), true);
+context.authorizeWorkOrders([{ id: 'wo-fencing', job_type: 'fencing' }]);
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-fencing'), true);
+assert.strictEqual(context.isAuthorizedWorkOrder('wo-untyped'), false,
+  'a later my_work_orders result replaces the authorized set and drops ids no longer present');
 assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
   'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
-assert(/var orders = \(res\.work_orders \|\| \[\]\)\.filter\(workOrderTenantOk\);/.test(html),
-  'the job-detail read applies the same tenant guard as the hub');
+assert(/var orders = workOrdersForViewer\(res\.work_orders \|\| \[\]\);/.test(html),
+  'Cost Breakdown applies the same managed-vertical lens before render/authorize');
+assert(!/orders\[i\]\.id === wo\.id \|\| orders\[i\]\.job_id === job\.id/.test(html),
+  'Cost Breakdown never authorizes a different WO via job_id fallback');
+assert(/if \(String\(orders\[i\]\.id\) === String\(wo\.id\)\)/.test(html),
+  'Cost Breakdown matches only the work order being viewed');
+assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length >= 2,
+  'hub and Cost Breakdown request my_work_orders with mode=all');
+assert(!/api\('my_work_orders'\)/.test(html),
+  'no bare my_work_orders read remains — managed WOs need mode=all');
+assert(/gst_on: _invoiceGstDefault\(_hoursData \|\| _user\)/.test(html) && /_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
+  'Invoice This Work Order always sends gst_on so the backend cannot 422 GST_CHOICE_REQUIRED');
+assert(html.includes('_workOrderNegativeChargeLineIds') && html.includes('_confirmDirectWorkOrderInvoiceLanded'),
+  'direct work-order invoice collects complete charge ids and confirms an unidentified Xero save');
+assert(!/\(\/emeka\|henry\/i\.test\(_user\.email\)\)/.test(html),
+  'per-metre extras never key on a henry/emeka email heuristic');
+assert(!html.includes('!(_hoursData && _hoursData.is_per_metre)'),
+  'job-centric invoice is not blocked for per-metre users');
+assert(!/if \(isPerMetreUser\(\)\) \{\s*renderPerMetreView\(data\);/.test(html),
+  'Financial hub is the primary Pay door for per-metre users too');
+assert(html.includes('data-work-order-weekly-invoice'),
+  'per-metre users still get the weekly work-order invoice as an extra door');
+assert(html.includes('data-invoice-jobs-instead'),
+  'an empty work-order week still offers the job-centric invoice path');
+assert(html.includes('addWoPassThroughLine'),
+  'job-centric WO cards can deduct a work-order amount paid to another trade');
+assert(html.includes('_hydratePerMetreWorkOrderCards'),
+  'per-metre job-centric builder hydrates his jobs from my_work_orders mode=all');
+assert(!/if \(_mergeWorkOrdersIntoJobCards\(orders\)\) renderInvoiceBuilder/.test(html),
+  'hydrate always re-renders — existing assignment cards can change without a new card');
+assert(!html.includes('jobId && c.job_id === jobId && (!date || c.scheduled_date === date)'),
+  'WO hydrate never folds same-job same-day work orders into one card');
+assert(html.includes('never writes onto a card that already belongs to another WO'),
+  'each work order keeps its own card identity');
+assert(html.includes('data-pm-wo-hydrate'),
+  'a failed or pending my_work_orders hydrate is visible, not swallowed');
+assert(html.includes('retryPerMetreWorkOrderHydrate'),
+  'Henry can retry a failed work-order hydrate');
+assert(html.includes('_jobCentricSubmitBlockedByHydrate'),
+  'hydrate submit block is scoped to pending or WO-mode cards, not a Pay-tab gate');
+assert((function() {
+  const hydrate = html.slice(html.indexOf('function _hydratePerMetreWorkOrderCards'), html.indexOf('window.retryPerMetreWorkOrderHydrate'));
+  const fail = hydrate.slice(hydrate.indexOf('.catch(function'));
+  const incomplete = hydrate.slice(
+    hydrate.indexOf('if (!_workOrdersHydratePayloadComplete'),
+    hydrate.indexOf('var orders = authorizeWorkOrders')
+  );
+  const incompleteMoney = hydrate.slice(
+    hydrate.indexOf('if (!_workOrdersHydrateMoneyComplete'),
+    hydrate.indexOf('_pmHydratedWorkOrderIds = _workOrderIdSet')
+  );
+  return !fail.includes('_reconcileJobCardWorkOrderAuth') &&
+    !fail.includes('_pmHydratedWorkOrderIds = {}') &&
+    fail.includes("_pmWoHydrateState = 'error'") &&
+    incomplete.includes("_pmWoHydrateState = 'error'") &&
+    !incomplete.includes('_reconcileJobCardWorkOrderAuth') &&
+    !incomplete.includes('_mergeWorkOrdersIntoJobCards') &&
+    incompleteMoney.includes("_pmWoHydrateState = 'error'") &&
+    !incompleteMoney.includes('_reconcileJobCardWorkOrderAuth') &&
+    /if \(_pmWoHydrateState === 'ok'\) \{\s*_reconcileJobCardWorkOrderAuth\(_pmHydratedWorkOrderIds\)/.test(html);
+})(),
+  'a failed or incomplete WO hydrate keeps restored deductions and does not reconcile against an empty set');
+assert(html.includes('_workOrdersHydratePayloadComplete') && html.includes('_workOrdersHydrateMoneyComplete') &&
+  html.includes('_workOrdersHydrateListingTruncated') &&
+  html.includes('_workOrderHasCompleteMoney') &&
+  html.includes('Array.isArray(wo.negative_charges)') &&
+  /function _applyHydratedWorkOrderMoney[\s\S]*?_workOrderHasCompleteMoney\(wo\)[\s\S]*?Array\.isArray\(passThroughs\)/.test(html),
+  'hydrate treats missing work_orders, truncated listings, or negative_charges as unresolved money, not an empty success');
+assert(html.includes('woHydrateBlocked'),
+  'the job-centric footer still names the hydrate submit block');
+assert(html.includes('Undated assignments never prefill a card'),
+  'undated my_hours assignments do not prefill a job card');
+assert(html.includes('search_all_jobs'),
+  'any-job add uses typed search_all_jobs on the same builder');
+assert(html.includes('btnAddInvLump') && html.includes('final_deductions: finalDeductions'),
+  'weekly job-centric submit keeps invoice-level final_deductions');
+assert((function() {
+  const jc = html.slice(html.indexOf('// [JC-PAYLOAD-BUILD-START]'), html.indexOf('// [JC-PAYLOAD-BUILD-END]'));
+  const submit = html.slice(html.indexOf('window.submitJobCentricInvoice'), html.indexOf('function renderInvoiceBuilder'));
+  return html.includes('invoice_final_deduction') &&
+    html.includes('final_deductions: finalDeductions') &&
+    !jc.includes('_hoursCardLumpExtras') &&
+    !submit.includes('_invLumpExtraItems') &&
+    submit.includes('var extraItems = built.cardExtraItems.concat(legacyExtras);') &&
+    submit.includes('_invFinalDeductions()');
+})(),
+  'invoice-level and hours-card lumps stay on captain-B final_deductions, not extra_items');
+assert(html.includes('_renderInvLumpLinesHtml()') && !/if \(isPerMetreUser\(\)[\s\S]{0,120}_renderInvLumpLinesHtml/.test(html),
+  'invoice-level lump amounts are not gated to Henry / per-metre');
+assert(html.includes('_renderCardLumpLinesHtml') && html.includes('_cardAddAmountBtnHtml'),
+  'Hours and Work Order cards share the same amount-line UI');
+assert((html.match(/_renderCardLumpLinesHtml\(c/g) || []).length >= 2,
+  'amount lines render on both Hours and Work Order cards');
+assert(!html.includes('Lump-sum amounts'),
+  'amount lines are not framed as a separate product heading');
+assert(!html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions') &&
+  /function _invFinalDeductions[\s\S]*?_hoursCardLumpFinalDeductions\(\)/.test(html) &&
+  !html.includes('_woCardFinalDeductions') &&
+  html.includes('_woLabourLinesForFanout') &&
+  html.includes('_woAmountAsHoursRate') &&
+  html.includes("pass.line_source = 'wo_pass_through'") &&
+  html.includes('_woLabourLineIsReshapedPassThrough') &&
+  html.includes('_woQueuedLineAsLocalPassThrough') &&
+  /ln\.server_owned === false\) pass\.server_owned = false/.test(html) &&
+  /function _woCleanLabourLines[\s\S]*?server_owned === false/.test(html) &&
+  !/hours === 1 && chargeNames/.test(html) &&
+  !/wo_lump_lines: lumpLinesOut/.test(html),
+  'invoice-level and hours-card lumps stay on final_deductions; WO deducts reshape to hours×rate fanout lines');
+assert(html.includes('or add an amount'),
+  'hours-card validation treats an amount as a peer to hours');
+assert(html.includes('addWoLumpLine'),
+  'job-centric cards can deduct a freeform description + amount');
+assert(html.includes('_mergeServerPassThroughs'),
+  'hydrate merges server pass-throughs by source line id');
+assert(html.includes('Same-ID lines take current server amount/name'),
+  'same-ID pass-throughs are overwritten from current server truth');
+assert((html.match(/final_deductions: finalDeductions/g) || []).length >= 2,
+  'offline job-centric replay queues the same final_deductions as the online payload');
+assert(html.includes('_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount') && html.includes('item.user_id'),
+  'offline invoice actions are stamped with account identity');
+assert(/_user = profile;[\s\S]{0,280}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/.test(html),
+  'sign-in drops invoice actions that do not belong to the new account');
+assert(html.includes('if (prevOwner && prevOwner !== _invDraftOwnerId()) _invoiceAuthGen++'),
+  'an in-page account switch bumps invoice auth generation so in-flight replay aborts');
+assert(html.includes('_isOfflineInvoiceAction(action)') && html.includes('if (!owner) return'),
+  'invoice writes are not queued without a signed-in account');
+assert(html.includes('resetInvoiceSession()') && /function resetInvoiceSession\(\) \{[\s\S]*?_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\);/.test(html),
+  'account switch / invoice session reset drops invoice actions the new account does not own');
+assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/g) || []).length >= 1,
+  'logout clears invoice actions once the account is gone');
+assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
+  'offline invoice replay re-checks ownership and auth generation immediately before send');
+assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_financialInvoiceApi') && html.includes('_withFinancialWebLock') &&
+  html.includes('_webLocksAvailable') && html.includes('_holdFinancialWebLockUntilLocalWriteEnds') &&
+  html.includes('_financialWebLockDepth'),
+  'direct invoice writes pass a context-bound beforeSend guard and keep the financial Web Lock through response handling');
+assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
+  'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
+assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded') &&
+  html.includes('_invoiceIdentitySlots') && html.includes('persist_unconfirmed') &&
+  html.includes('_invoicePayloadHasMoneyAffectingExtras') && html.includes('_rollbackStorageLockWrite') &&
+  html.includes('_financialLeaseOwned'),
+  'job-centric nested identities can reconcile and replay drops only after durable queue removal');
+assert((function() {
+  const block = html.slice(html.indexOf('function _applyOfflineQueueMutation'), html.indexOf('function _withStorageLockAsync'));
+  return block.includes('ok: false') && block.includes('_readOfflineQueue()') &&
+    block.includes('_queueWebLockDepth') && block.includes('_applyOfflineQueueMutation') &&
+    block.includes('_queueIdsMatch(_readOfflineQueueRaw(), next)') &&
+    block.includes('_clearInboxIds(clearable)');
+})(), 'queue mutations apply only under the Web Lock and never clear inbox before a verified write');
+assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
+  'offline queue sync is single-flight and merges remaining items with the latest stored queue');
+assert(html.includes('_mutateOfflineQueue') && html.includes('_withQueueWebLock') && html.includes('_writeInboxItem') &&
+  html.includes('navigator.locks') && html.includes("var _QUEUE_WEB_LOCK_NAME = 'sw_action_queue'"),
+  'money queue mutations serialize on a dedicated Web Lock and keep inbox items until merge commits');
+assert((function() {
+  const begin = html.slice(html.indexOf('function _beginFinancialWrite(action)'), html.indexOf('function _endFinancialWrite'));
+  const webLock = html.slice(html.indexOf('function _withFinancialWebLock'), html.indexOf('function _withCrossTabLock'));
+  const extras = html.slice(html.indexOf('function _invoicePayloadHasMoneyAffectingExtras'), html.indexOf('function _invoicePayloadNeedsFullFingerprint'));
+  return begin.includes('_webLocksAvailable()') &&
+    !begin.includes('_claimStorageLock(_financialWriteLockKey') &&
+    webLock.includes('if (!_webLocksAvailable())') &&
+    webLock.includes('_invoiceWriteLeaseLostError()') &&
+    !webLock.includes('    return run();\n  }') &&
+    extras.includes('wo_labour_lines') &&
+    extras.includes('wo_labour_deduction') &&
+    extras.includes('labour_deductions') &&
+    extras.includes('crew_charge_line_ids') &&
+    extras.includes('manual_assignments') &&
+    extras.includes('rowHasEarning') &&
+    extras.includes('hourly_rate') &&
+    /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
+    /function _financialWriteAlreadyPending[\s\S]*?_invoiceBodyWorkOrderIdsOverlap\(item\.body, body\)/.test(html) &&
+    html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
+    webLock.includes('_claimStorageLock(_FINANCIAL_WRITE_LOCK_KEY') &&
+    html.includes('_beginFinancialWriteSend') &&
+    html.includes('_settleFinancialWriteSend') &&
+    html.includes('_financialWriteItemDurable') &&
+    html.includes('invoice_storage_unavailable') &&
+    /function _financialInvoiceApi[\s\S]*?_beginFinancialWriteSend[\s\S]*?api\(action/.test(html) &&
+    /function _invoiceSlotsCovered[\s\S]*?_invoiceResponseIdentityRows[\s\S]*?used\[pick\] = true/.test(html) &&
+    html.includes('_compareAndSwapStorageLock') &&
+    html.includes("{ acquire: true }") &&
+    html.includes('_allStorageLeasesOwned');
+})(),
+  'money writes fail closed without Web Locks; WO labour deductions require a full fingerprint');
+assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
+  'financial queue items carry a local request id and reconcile before retrying a timeout');
+assert(html.includes('_handleFinancialWriteFailure') && html.includes('_offlineInvoiceHasExactTarget'),
+  'online financial timeouts persist through the same reconcile-or-queue path');
+assert(html.includes('_guardFinancialWrite') && html.includes('Do not submit again'),
+  'a pending ambiguous invoice write blocks a second send');
+assert(html.includes('_financialWritePayloadIdentity') && !/aWeek === bWeek && aId === bId/.test(html),
+  'pending invoice intents match exact identity or payload, not week-only');
+assert(/return 'payload:' \+ JSON\.stringify\(\{[\s\S]*?week_start: body\.week_start \|\| null,[\s\S]*?week_ending: body\.week_ending \|\| null,/.test(html),
+  'payload fingerprint includes week_start/week_ending so distinct weeks do not suppress each other');
+assert(/function _invoiceMoneyFingerprint[\s\S]*?week_start: _normalizeInvoicePeriod\(body\.week_start \|\| body\.weekStart\)[\s\S]*?week_ending: _normalizeInvoicePeriod\(body\.week_ending \|\| body\.weekEnding\)/.test(html),
+  'mutable money fingerprint includes normalized week_start/week_ending so a moved period cannot land on the old draft');
+assert(html.includes('_beginSaveTradeInvoiceDraft') && /saveDraftInvoice = function\(\) \{[\s\S]*?_beginSaveTradeInvoiceDraft\(\)/.test(html),
+  'Save Draft is single-flight so concurrent taps cannot create parallel drafts');
+assert(/saveDraftInvoice = function\(\) \{[\s\S]*?_invoiceDraftSaveSucceeded\(res\)[\s\S]*?invoice_response_ambiguous/.test(html) &&
+  /saveWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_invoiceDraftSaveSucceeded\(res\)[\s\S]*?_weeklyInvoiceFromResponse[\s\S]*?invoice_response_ambiguous/.test(html) &&
+  html.includes('_invoiceDraftIdentity') &&
+  html.includes('Do not save again yet'),
+  'draft saves require a durable identity and treat accepted-but-invalid responses as unresolved');
+assert(html.includes('_beginFinancialWrite') && html.includes('_financialWriteInFlight') &&
+  /submitWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /submitTradeHours = function\(\) \{[\s\S]*?_beginFinancialWrite\('submit_trade_invoice'\)/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /submitInvoiceFromBuilder = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /generateTradeInvoice = function\(weekStart\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_beginFinancialWrite\('submit_work_order_invoice'\)/.test(html) &&
+  /deleteTradeInvoice = function\(invoiceId\) \{[\s\S]*?_beginFinancialWrite\('delete_trade_invoice'\)/.test(html) &&
+  html.includes("_financialInvoiceApi('attach_invoice_pdf'"),
+  'every financial invoice submit/generate/delete/attach path is process-wide single-flight');
+assert(/var match = invoices\.filter\(function\(inv\) \{ return _invoiceMatchesQueueIntent\(inv, item\); \}\);[\s\S]{0,280}if \(match\.length > 0\) return true;/.test(html) &&
+  html.includes('if (_invoicePayloadNeedsFullFingerprint(item)) return null;') &&
+  html.includes('_invoiceWriteHasMutableMoney') &&
+  html.includes('_invoiceMoneyFingerprintMatches') &&
+  html.includes('_invoiceLegacyHoursWrite'),
+  'identity matches still land without a status filter unless mutable money requires a fingerprint');
+assert(html.indexOf('if (_isOfflineInvoiceTimeoutError(err))') < html.indexOf('if (_isBrowserOffline())') &&
+  html.includes('_persistAmbiguousFinancialWrite(action, body)') &&
+  /function _isOfflineInvoiceTimeoutError[\s\S]*?Load failed[\s\S]*?NetworkError when attempting to fetch/.test(html),
+  'timeout/Failed-to-fetch/Load failed/NetworkError is marked ambiguous before any offline-only queue path');
+assert(/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;[\s\S]{0,450}return null;/.test(html) &&
+  !/if \(_invoicePayloadNeedsFullFingerprint\(item\)\) return null;\s*return false;/.test(html),
+  'an exact-target write with no listing match fails closed instead of resending');
+assert(html.includes('_tradeInvoicesListingComplete') &&
+  /if \(!invoices\.length\) return null;/.test(html) &&
+  (html.match(/if \(!_workOrdersHydratePayloadComplete\(res\)\) throw new Error\('Could not load work orders\.'\);/g) || []).length >= 2,
+  'weekly/hub WO reads and delete reconcile reject incomplete listings');
+assert(html.includes('server_owned: false') && html.includes('server_owned: true') &&
+  /function _mergeServerPassThroughs[\s\S]*?isUntaggedNoId[\s\S]*?unresolved: true/.test(html),
+  'no-ID pass-through merge tags local lines and fail-closes untagged collisions');
+assert(html.includes('_financialWriteAborted') &&
+  html.includes("outcome: 'locked'") &&
+  html.includes('Check Invoice history before trying again') &&
+  /submitWeeklyWorkOrderInvoice = function\(\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?state\.busy = false/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?renderInvoiceBuilder\(\)/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_financialWriteAborted\(result\)[\s\S]*?_reEnableBtn\(\)/.test(html),
+  'cross-tab invoice lock restores submit chrome and points the trade at Invoice history');
+assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.test(html),
+  'saving an existing invoice draft sends its draft_id');
+assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\((woId|id)\)/.test(html),
+  'offline work-order invoice replay revalidates current WO authorization');
+assert(/function _replayOfflineInvoiceItem[\s\S]*?_withFinancialWebLock\(item\.action[\s\S]*?_ensureOfflineInvoiceWorkOrderAuth/.test(html) &&
+  /function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?_invoiceBodyWorkOrderIds[\s\S]*?if \(!woIds\.length\) \{[\s\S]*?return api\('my_work_orders'/.test(html) &&
+  /function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?\.catch\(function\(\) \{[\s\S]*?read:\s*false/.test(html) &&
+  /if \(!auth\.read\) \{[\s\S]*?remaining\.push\(item\)/.test(html),
+  'invoice replay re-reads posted WOs inside the financial fence and keeps the item when that read fails');
+assert(/function authorizeWorkOrders\(orders\) \{[\s\S]*?var next = \{\};[\s\S]*?_authorizedWorkOrderIds = next;/.test(html),
+  'authorizeWorkOrders replaces the authorized set from the latest authenticated result');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),
+  'direct work-order invoice submit drops late toast/refresh/queue after account switch');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?if \(!_invoiceSubmitSucceeded\(result\)\) \{[\s\S]*?openWorkOrderHub\(\)/.test(html) &&
+  !/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var succeeded = result\.ok === true \|\| result\.success === true/.test(html),
+  'direct work-order invoice uses the shared committed-success predicate and refreshes the hub on durable success');
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_workOrdersHydratePayloadComplete\(res\)[\s\S]*?negative_charge_line_ids: chargeIds[\s\S]*?charge_line_ids: chargeIds[\s\S]*?_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
+  'direct work-order invoice re-reads a complete WO listing and posts selected charge ids');
+assert(html.includes('_workOrderDirectInvoiceAllowed') &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_workOrderDirectInvoiceAllowed\(wo\)[\s\S]*?_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_withFinancialWebLock\('submit_work_order_invoice'[\s\S]*?api\('my_work_orders'/.test(html) &&
+  /function _offlineInvoiceReplayAllowed[\s\S]*?_workOrderDirectInvoiceAllowed\(/.test(html),
+  'direct WO invoice and offline replay fail closed when already invoiced and hold the financial fence through the re-read');
+assert(html.includes('_invoiceXeroPushSavedUnconfirmed') &&
+  /function _settleFinancialWriteSend[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)\) return/.test(html) &&
+  /if \(_invoiceXeroPushSavedUnconfirmed\(result\)\) \{[\s\S]*?item\.ambiguous = true;[\s\S]*?item\.persist_unconfirmed = true;/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)[\s\S]*?Confirming\.\.\.[\s\S]*?_reEnableBtn\(\)/.test(html),
+  'a saved-but-unidentified Xero push keeps the pending fence, marks replay ambiguous, and does not re-arm Submit');
+assert(html.includes('_financialWriteRejectionClearsPending') &&
+  /function _financialWriteRejectionClearsPending[\s\S]*?err\.status[\s\S]*?success === false/.test(html) &&
+  /function _settleFinancialWriteSend[\s\S]*?_financialWriteRejectionClearsPending\(err, null\)/.test(html) &&
+  /function _settleFinancialWriteSend[\s\S]*?_financialWriteRejectionClearsPending\(null, result\)/.test(html),
+  'definitive HTTP/JSON invoice rejections clear the durable pending fence; transport stays parked');
+assert(/function _workOrderHasCompleteMoney[\s\S]*?_workOrderChargeAmount\(charge\)[\s\S]*?_workOrderChargeSubmitIdentity\(charge\)/.test(html),
+  'hydrate money is complete only when every charge has a usable amount and submit identity');
+assert(/function _applyHydratedWorkOrderMoney[\s\S]*?return ln\.server_owned !== true/.test(html),
+  'complete hydrate replaces server-owned no-ID deductions from current server truth');
+assert(html.includes('No-ID lines are a multiset'),
+  'no-ID pass-through merge keeps distinct same-amount deducts');
+assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++'),
+  'invoice API responses are dropped after an account switch or superseded request');
+assert(html.includes('_reconcileJobCardWorkOrderAuth'),
+  'restored work-order ids are reconciled against the current hydrate authorization');
+assert(html.includes('_workOrderInvoiceableForHydrate') && html.includes('return _workOrderInvoiceableForHydrate(wo)'),
+  'job-centric hydrate authorizes only invoiceable in-week work orders');
+assert((function() {
+  const filter = html.slice(html.indexOf('// [WO-HYDRATE-FILTER-START]'), html.indexOf('// [WO-HYDRATE-FILTER-END]'));
+  const merge = html.slice(html.indexOf('function _mergeWorkOrdersIntoJobCards'), html.indexOf('function _hydratePerMetreWorkOrderCards'));
+  return filter.includes('if (wo.can_invoice !== true) return false') &&
+    !filter.includes('can_add_to_weekly_invoice') &&
+    merge.includes('if (wo.can_invoice !== true) return') &&
+    !/function _mergeWorkOrdersIntoJobCards[\s\S]*?can_add_to_weekly_invoice !== true/.test(merge);
+})(),
+  'job-centric hydrate and merge require exclusive can_invoice, not weekly-door addability');
+assert(html.includes('_blockJobCardWorkOrder') && html.includes('_jobCardWorkOrderBlocked') &&
+  html.includes('ackJobCardWorkOrderAsHours') && html.includes('data-wo-block') &&
+  html.includes('data-wo-hours-ack') &&
+  /function _reconcileJobCardWorkOrderAuth[\s\S]*?_blockJobCardWorkOrder\(card/.test(html) &&
+  !/function _reconcileJobCardWorkOrderAuth[\s\S]*?card\.work_order_id = ''/.test(html),
+  'non-exclusive job-centric WOs stay blocked with a reason instead of converting to Hours');
+assert(html.includes('_jobCentricWorkOrdersStillExclusive') &&
+  html.includes('_confirmJobCentricWorkOrdersExclusive') &&
+  html.includes('_refreshJobCentricPostedWorkOrderMoney') &&
+  /function _jobCentricWorkOrdersStillExclusive[\s\S]*?_workOrderDirectInvoiceAllowed/.test(html) &&
+  /function _confirmJobCentricWorkOrdersExclusive[\s\S]*?api\('my_work_orders', \{ mode: 'all' \}\)[\s\S]*?_jobCentricWorkOrdersStillExclusive[\s\S]*?_refreshJobCentricPostedWorkOrderMoney/.test(html) &&
+  /submitJobCentricInvoice = function\(\) \{[\s\S]*?_beginFinancialWrite\('generate_trade_invoice'\)[\s\S]*?_withFinancialWebLock\('generate_trade_invoice'[\s\S]*?_confirmJobCentricWorkOrdersExclusive\(\)[\s\S]*?_buildJobCentricPayload\(_jobCards\)[\s\S]*?_postJobCentricGenerate\(\)/.test(html) &&
+  !html.includes('claim_work_order') &&
+  !html.includes('exclusive_claim'),
+  'job-centric generate re-reads WO can_invoice under the financial fence, rebuilds deduction money from that listing, and does not add a claim API');
+assert((function() {
+  var start = html.indexOf('function _rebuildOfflineJobCentricWorkOrderMoney');
+  var end = html.indexOf('// Submit the job-centric invoice:');
+  if (start === -1 || end <= start) return false;
+  var body = html.slice(start, end);
+  return body.includes('_rebuildJobCentricWorkOrderExtraFromListing') &&
+    !body.includes('_buildJobCentricPayload(_jobCards)') &&
+    !body.includes('_refreshJobCentricPostedWorkOrderMoney');
+})(),
+  'offline job-centric replay rebuilds each queued WO extra from the queued body plus listing data, not live job cards');
+assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
+  'hydrate overwrites server-owned money and clears it when a WO id is stripped');
+assert(html.includes('_stripServerOwnedPassThroughs'),
+  'stale source_line_id pass-throughs are dropped before rematching the current WO');
+assert(html.includes('requires_work_order_id'),
+  'per-metre WO submit requires a real work_order_id');
+assert(html.includes('data-weekly-wo-retry'),
+  'the weekly work-order loader has Retry after a my_work_orders failure');
+assert(html.includes('data-work-order-hub-retry'),
+  'the My Work Orders hub has Retry after a my_work_orders failure');
+assert(html.includes('jobCards: _serializeJobCardsDraft(_jobCards)'),
+  'the invoice draft persists job-centric cards, not only legacy _invRows');
+assert(html.includes('_applyInvDraft(draft)'),
+  'loadHoursView restores persisted job cards after a reload');
+assert(html.includes('_invDraftStorageKey') && html.includes('resetInvoiceSession'),
+  'invoice drafts are keyed by authenticated user and cleared on auth change');
+assert(html.includes('_jobCardAcceptsWorkOrder'),
+  'hydrate applies the date/job bind guard even when a card already has a work_order_id');
+assert(html.includes('_unboundCardForWorkOrder'),
+  'WO hydrate binds an unbound card only on the matching work-order date');
+assert(html.includes('_jobCardKeepHoursMode'),
+  'hydrate does not silently flip a card the user already edited in Hours');
+assert(html.includes('hoursFocused') && html.includes('_markJobCardHoursEdited(c)'),
+  'DOM sync treats an in-focus Hours input as an edit so hydrate cannot flip it');
+assert(html.includes('_refreshHoursDataForOpenInvoice'),
+  'draft restore still fetches my_hours so per-metre hydrate/submit gate can arm');
+assert(html.includes('is_per_metre: isPerMetreUser()'),
+  'the invoice draft remembers per-metre so restore does not wait on my_hours');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

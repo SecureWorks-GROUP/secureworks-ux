@@ -48,6 +48,7 @@ const PERSONAS = {
       name: 'Henry Fence',
       role: 'lead_installer',
       trade_tier: 2,
+      invoice_type: 'per_metre',
       managed_verticals: ['fencing'],
       org_id: '00000000-0000-0000-0000-000000000001'
     }
@@ -165,7 +166,12 @@ const test = base.extend({
         total: 110,
         already_invoiced: false,
         can_add_to_weekly_invoice: true,
-        negative_charges: [],
+        negative_charges: [{
+          line_id: 'wo-fence-charge-israel',
+          trade_name: 'Israel',
+          description: 'Work Order - Israel',
+          amount_ex: -40
+        }],
         can_invoice: true
       },
       {
@@ -475,7 +481,9 @@ const test = base.extend({
       'trade-weekly-work-order-invoice-stale-submit': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'trade-weekly-work-order-invoice-invoice-id-only': ['save_trade_invoice_draft', 'generate_trade_invoice'],
       'crew-lead': ['set_job_lead'],
-      'crew-lead-refused': ['set_job_lead']
+      'crew-lead-refused': ['set_job_lead'],
+      'henry-job-centric-submit': ['generate_trade_invoice'],
+      'henry-wo-hydrate-fail': ['generate_trade_invoice']
     };
 
     const feed = await installFeedStubs(page, {
@@ -485,6 +493,36 @@ const test = base.extend({
         makesafe_board: makesafeResponse,
         search_all_jobs: ({ url }) => {
           if (!['all-jobs-feed', 'all-jobs-feed-denied', 'trade-makesafe-search'].includes(feedScenario)) {
+            if (persona === 'fencing_manager') {
+              const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+              const searchable = [
+                {
+                  id: 'e2e-fence-any-job',
+                  job_number: 'FENCE-ANY-002',
+                  type: 'fencing',
+                  status: 'scheduled',
+                  client_name: 'Search Client',
+                  site_suburb: 'Midland',
+                  site_address: '12 Search St, Midland'
+                },
+                {
+                  id: 'fence-job-henry',
+                  job_number: 'FENCE-HENRY-001',
+                  type: 'fencing',
+                  status: 'in_progress',
+                  client_name: 'Henry Client',
+                  site_suburb: 'Balcatta'
+                }
+              ];
+              const jobs = q.length >= 2
+                ? searchable.filter((job) =>
+                  [job.job_number, job.client_name, job.site_suburb, job.site_address]
+                    .join(' ')
+                    .toLowerCase()
+                    .includes(q))
+                : [];
+              return { jobs, lens: q ? 'search' : 'assigned', total: jobs.length };
+            }
             return { status: 404, body: { error: 'No E2E fixture registered for search_all_jobs' } };
           }
           const q = (url.searchParams.get('q') || '').trim().toLowerCase();
@@ -687,6 +725,69 @@ const test = base.extend({
               net_pay: 352,
               gst_on: false
             }
+            : persona === 'fencing_manager'
+              ? {
+                week_start: weekStart,
+                week_ending: addIsoDays(weekStart, 6),
+                invoice_type: 'per_metre',
+                is_per_metre: true,
+                rate: 55,
+                assignments: feedScenario === 'henry-same-job-two-days'
+                  ? [
+                    {
+                      id: 'e2e-henry-assignment',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: addIsoDays(weekStart, 1),
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    },
+                    {
+                      id: 'e2e-henry-assignment-later',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: addIsoDays(weekStart, 3),
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    }
+                  ]
+                  : [
+                    {
+                      id: 'e2e-henry-assignment',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: addIsoDays(weekStart, 1),
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    },
+                    {
+                      id: 'e2e-henry-undated',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: null,
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    }
+                  ],
+                total_hours: 0,
+                already_submitted: false
+              }
             : {
               week_start: weekStart,
               week_ending: addIsoDays(weekStart, 6),
@@ -757,6 +858,9 @@ const test = base.extend({
           };
         },
         my_work_orders: ({ url }) => {
+          if (feedScenario === 'henry-wo-hydrate-fail') {
+            return { status: 500, body: { error: 'hydrate down' } };
+          }
           if (weeklyInvoiceScenarios.includes(feedScenario)) {
             const weeklyRows = weeklyInvoiceWorkOrders.concat([weeklyInvoicePriorWorkOrder]);
             if (!url.searchParams.has('type') && !url.searchParams.has('status') && !url.searchParams.has('page_size')) {
@@ -888,6 +992,18 @@ const test = base.extend({
           return weeklyInvoiceResponse();
         },
         generate_trade_invoice: async ({ request }) => {
+          if (['henry-job-centric-submit', 'henry-wo-hydrate-fail'].includes(feedScenario) && persona === 'fencing_manager') {
+            const body = request.postDataJSON();
+            if (['super_rate', 'super_amount', 'gross_earned', 'net_pay', 'grand_total', 'to_be_paid', 'subtotal', 'total'].some((field) => Object.hasOwn(body, field))) {
+              return { status: 422, body: { error: 'Browser must not submit calculated super figures' } };
+            }
+            return {
+              ok: true,
+              success: true,
+              invoice_number: 'SW-INV-HENRY-JC',
+              pending_ops_review: true
+            };
+          }
           if (weeklyInvoiceScenarios.includes(feedScenario) && persona === 'fencing_manager') {
             const body = request.postDataJSON();
             if (!weeklyInvoiceDraftSaved || body.draft_id !== 'henry-weekly-draft-31') {
@@ -922,7 +1038,10 @@ const test = base.extend({
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];
-          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) && (!line || line.job_number !== 'SWF-26767')) {
+          const assignment = body.manual_assignments && body.manual_assignments[0];
+          const hasJobLine = (line && line.job_number === 'SWF-26767') ||
+            (assignment && assignment.assignment_id === 'e2e-wo-holder-assignment');
+          if (!['trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) && !hasJobLine) {
             return { status: 422, body: { error: 'Expected the reconciled work-order line' } };
           }
           if (feedScenario === 'trade-invoice-super-gst-empty-response') return {};

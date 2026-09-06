@@ -105,6 +105,50 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   expect(attach.body.xero_bill_id).toBe('xero-e2e-super-gst');
 });
 
+test('installer Hours cards can add lump-sum amounts as a peer to hours', async ({ appPage: page, feedRequests }) => {
+  await signIn(page, PERSONAS.installer);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: /Weekly Invoice/ }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+  await expect(card.locator('[data-cardhours]')).toBeVisible();
+  await expect(card.getByRole('button', { name: '+ Add amount' })).toBeVisible();
+  await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
+  await expect(page.locator('#btnAddInvLump')).toBeVisible();
+  await expect(page.locator('#btnAddInvLump')).toHaveText('+ Add amount');
+
+  await card.getByRole('button', { name: '+ Add amount' }).click();
+  await card.locator('[data-cardlumpdesc]').fill('Materials');
+  await card.locator('[data-cardlumpamt]').fill('25');
+  await card.locator('[data-cardlumpamt]').press('Tab');
+  await expect(card.locator('[data-cardamt]')).toHaveText('$375.00');
+
+  const money = page.locator('[data-invoice-money-summary]');
+  await expect(money).toContainText('Earned$375.00');
+
+  const gstSwitch = page.getByRole('switch', { name: 'Add GST to this invoice' });
+  await gstSwitch.click();
+  await page.locator('#invSubmitBtn').click();
+  await page.locator('#confirmOk').click();
+  await expect(page.getByText('Invoice Submitted')).toBeVisible();
+
+  const submit = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice');
+  expect(submit).toBeTruthy();
+  const lump = (submit.body.extra_items || []).find((item) => item.source === 'invoice_final_deduction');
+  expect(lump).toBeFalsy();
+  expect(submit.body.final_deductions).toEqual([
+    { description: 'Materials', quantity: 1, unit: 'ea', unit_rate: 25 }
+  ]);
+  expect(submit.body.manual_assignments).toEqual([
+    expect.objectContaining({
+      assignment_id: 'e2e-wo-holder-assignment',
+      hours: 8,
+      rate: 50
+    })
+  ]);
+});
+
 test.describe('submitted response has incomplete authoritative money', () => {
   test.use({ feedScenario: 'trade-invoice-super-gst-incomplete' });
 

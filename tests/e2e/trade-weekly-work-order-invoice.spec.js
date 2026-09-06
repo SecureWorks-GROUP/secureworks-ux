@@ -1,7 +1,13 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
 
-test.use({ persona: 'fencing_manager', feedScenario: 'trade-weekly-work-order-invoice' });
+// Same Perth-week pin as the job-centric specs: weekly source rows are dated
+// from perthWeekMonday() and vanish on a UTC Sunday evening after AWST Monday.
+test.use({
+  persona: 'fencing_manager',
+  feedScenario: 'trade-weekly-work-order-invoice',
+  timezoneId: 'Australia/Perth'
+});
 
 const EXPECTED_SUBTOTALS = [
   '$164.60', '$244.20', '$48.60', '$2,510.00', '$274.00',
@@ -11,6 +17,8 @@ const EXPECTED_SUBTOTALS = [
 async function openWeeklyInvoice(page) {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+  await page.locator('[data-work-order-weekly-invoice]').click();
   await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
   await expect(page.locator('[data-weekly-work-order]')).toHaveCount(9);
 }
@@ -112,7 +120,7 @@ test.describe('weekly invoice response guards', () => {
   test('opens the clicked work order Perth week from the work-order hub', async ({ appPage: page }) => {
     await signIn(page, PERSONAS.fencing_manager);
     await page.locator('[data-view="hours"]').click();
-    await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+    await expect(page.locator('[data-financial-hub]')).toBeVisible();
     await page.getByRole('button', { name: 'My Work Orders' }).click();
     const priorCard = page.locator('[data-work-order-card]').filter({ hasText: 'WO-HENRY-PRIOR' });
     await priorCard.getByRole('button', { name: 'Add to Weekly Invoice' }).click();
@@ -133,7 +141,7 @@ test.describe('incomplete weekly draft save response', () => {
     await enterInvoice31Deductions(page);
     await page.getByRole('button', { name: 'Save & calculate' }).click();
 
-    await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+    await expect(page.locator('#toast')).toContainText('Do not save again yet');
     await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
   });
@@ -152,7 +160,7 @@ test.describe('incomplete weekly draft save response', () => {
       await enterInvoice31Deductions(page);
       await page.getByRole('button', { name: 'Save & calculate' }).click();
 
-      await expect(page.locator('#toast')).toContainText('incomplete weekly invoice totals');
+      await expect(page.locator('#toast')).toContainText('Do not save again yet');
       await expect(page.locator('[data-weekly-invoice-preview]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeDisabled();
     });

@@ -469,6 +469,8 @@ function hoursCard(overrides) {
       return Promise.resolve({})
     },
     toast: function() {},
+    friendlyError: function(err) { return String((err && err.message) || err || '') },
+    navigator: { onLine: true },
     _invalidateAssignmentLifecycleCaches: function() {},
   }
   vm.createContext(ctx)
@@ -618,11 +620,62 @@ function hoursCard(overrides) {
       assert.strictEqual(timedOut.length, 1, 'a timed-out invoice write stays queued')
       assert.strictEqual(timedOut[0].ambiguous, true, 'timeout marks the financial item ambiguous')
       assert.strictEqual(sendCount, 1, 'the first timeout is the only generate attempt')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', status: 'submitted', xero_bill_id: 'xb1' },
+        { body: { week_start: '2026-09-07' } }
+      ), false, 'week-only reconcile is not an exact match')
       return ctx.syncOfflineQueue()
     }).then(function() {
-      assert.strictEqual(sendCount, 1, 'ambiguous timeout does not resend after reconcile finds the invoice')
+      assert.strictEqual(sendCount, 1, 'week-only ambiguous timeout does not resend')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).length, 1,
+        'a week-only match stays unresolved instead of dropping a different invoice')
+
+      sendCount = 0
+      ctx.api = function(action, q, body, options) {
+        if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{ id: 'draft-1', draft_id: 'draft-1', status: 'submitted', xero_bill_id: 'xb1' }],
+          })
+        }
+        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+        sendCount += 1
+        const err = new Error('Aborted')
+        err.name = 'AbortError'
+        return Promise.reject(err)
+      }
+      store.sw_action_queue = JSON.stringify([
+        { id: 'iq_exact', client_request_id: 'iq_exact', action: 'generate_trade_invoice', user_id: 'bob', body: { draft_id: 'draft-1', week_start: '2026-09-07' } },
+      ])
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(JSON.parse(store.sw_action_queue)[0].ambiguous, true)
+      return ctx.syncOfflineQueue()
+    }).then(function() {
+      assert.strictEqual(sendCount, 1, 'exact draft identity does not resend after it has landed')
       assert.strictEqual(JSON.parse(store.sw_action_queue).length, 0,
-        'a reconciled invoice is dropped from the queue')
+        'an exact draft/invoice identity can be dropped as already landed')
+
+      store.sw_action_queue = '[]'
+      const abort = new Error('Aborted')
+      abort.name = 'AbortError'
+      return ctx._handleFinancialWriteFailure(
+        'generate_trade_invoice',
+        { week_start: '2026-09-07' },
+        abort,
+        ctx._invoiceApiContext()
+      )
+    }).then(function(result) {
+      assert.strictEqual(result.outcome, 'queued_unresolved',
+        'an online timeout without exact identity stays unresolved')
+      assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.ambiguous && i.body && i.body.week_start === '2026-09-07'), true,
+        'online timeouts persist through the same queue path')
+      assert.strictEqual(ctx._guardFinancialWrite('generate_trade_invoice', { week_start: '2026-09-07' }), true,
+        'a pending ambiguous write blocks a second send for the same week')
 
       ctx._user = null
       ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })

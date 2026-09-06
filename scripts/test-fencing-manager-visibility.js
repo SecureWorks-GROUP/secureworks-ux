@@ -342,9 +342,15 @@ assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQu
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
 assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
   'financial queue items carry a local request id and reconcile before retrying a timeout');
+assert(html.includes('_handleFinancialWriteFailure') && html.includes('_offlineInvoiceHasExactTarget'),
+  'online financial timeouts persist through the same reconcile-or-queue path');
+assert(html.includes('_guardFinancialWrite') && html.includes('Do not submit again'),
+  'a pending ambiguous invoice write blocks a second send');
+assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.test(html),
+  'saving an existing invoice draft sends its draft_id');
 assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
   'offline work-order invoice replay revalidates current WO authorization');
-assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?queueOfflineAction\('submit_work_order_invoice'/.test(html),
+assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),
   'direct work-order invoice submit drops late toast/refresh/queue after account switch');
 assert(html.includes('No-ID lines are a multiset'),
   'no-ID pass-through merge keeps distinct same-amount deducts');

@@ -4363,46 +4363,163 @@
     return /aborted|timeout|timed out|failed to fetch/i.test(msg);
   }
 
+  function _offlineInvoiceTargetId(item) {
+    var body = (item && item.body) || {};
+    return String(body.draft_id || body.invoice_id || body.id || '');
+  }
+
+  function _offlineInvoiceHasExactTarget(item) {
+    if (!item) return false;
+    if (item.action === 'delete_trade_invoice') return !!((item.body || {}).invoice_id);
+    var body = item.body || {};
+    return !!(body.draft_id || body.invoice_id || body.id || body.work_order_id || body.workOrderId);
+  }
+
+  function _invoiceIdentityValues(inv) {
+    if (!inv) return [];
+    return [inv.id, inv.draft_id, inv.invoice_id].filter(function(value) {
+      return value != null && String(value).trim() !== '';
+    }).map(String);
+  }
+
+  function _invoiceHasWorkOrder(inv, woId) {
+    if (!inv || !woId) return false;
+    if (String(inv.work_order_id || '') === String(woId)) return true;
+    var ids = inv.work_order_ids || [];
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i]) === String(woId)) return true;
+    }
+    return false;
+  }
+
   function _invoiceMatchesQueueIntent(inv, item) {
     if (!inv || !item) return false;
     var body = item.body || {};
-    var woId = body.work_order_id || body.workOrderId;
-    if (woId) {
-      if (String(inv.work_order_id || '') === String(woId)) return true;
-      var ids = inv.work_order_ids || [];
+    var target = _offlineInvoiceTargetId(item);
+    if (target) {
+      var ids = _invoiceIdentityValues(inv);
       for (var i = 0; i < ids.length; i++) {
-        if (String(ids[i]) === String(woId)) return true;
+        if (ids[i] === target) return true;
       }
     }
-    var week = body.week_start || body.week_ending;
-    if (week && (inv.week_start === week || inv.week_ending === week || inv.week_end === week)) {
-      if (!body.job_id || String(inv.job_id || '') === String(body.job_id)) return true;
+    var woId = body.work_order_id || body.workOrderId;
+    if (woId && _invoiceHasWorkOrder(inv, woId)) return true;
+    return false;
+  }
+
+  function _sameFinancialWriteIntent(a, b) {
+    a = a || {};
+    b = b || {};
+    var aId = String(a.draft_id || a.invoice_id || '');
+    var bId = String(b.draft_id || b.invoice_id || '');
+    if (aId && bId && aId === bId) return true;
+    var aWo = String(a.work_order_id || a.workOrderId || '');
+    var bWo = String(b.work_order_id || b.workOrderId || '');
+    if (aWo && bWo && aWo === bWo) return true;
+    var aWeek = a.week_start || a.week_ending;
+    var bWeek = b.week_start || b.week_ending;
+    return !!(aWeek && bWeek && aWeek === bWeek && aId === bId);
+  }
+
+  function _financialWriteAlreadyPending(action, body) {
+    var queue = _readOfflineQueue();
+    for (var i = 0; i < queue.length; i++) {
+      var item = queue[i];
+      if (!item || item.action !== action) continue;
+      if (_isOfflineInvoiceAction(action) && !_offlineInvoiceOwnedByCurrentAccount(item)) continue;
+      if (_sameFinancialWriteIntent(item.body, body)) return true;
     }
     return false;
+  }
+
+  function _guardFinancialWrite(action, body) {
+    if (!_financialWriteAlreadyPending(action, body)) return false;
+    toast('That invoice is still being confirmed. Do not submit again — check Invoice history.');
+    return true;
   }
 
   function _reconcileAmbiguousInvoiceAction(item) {
     if (!_isOfflineInvoiceAction(item && item.action)) return Promise.resolve(false);
     if (item.action === 'attach_invoice_pdf') return Promise.resolve(null);
+    if (!_offlineInvoiceHasExactTarget(item)) return Promise.resolve(null);
     return api('my_trade_invoices').then(function(res) {
       var invoices = (res && res.invoices) || [];
       if (item.action === 'delete_trade_invoice') {
         var targetId = item.body && item.body.invoice_id;
-        if (!targetId) return false;
+        if (!targetId) return null;
         return !invoices.some(function(inv) { return String(inv.id) === String(targetId); });
       }
+      var match = invoices.filter(function(inv) { return _invoiceMatchesQueueIntent(inv, item); });
+      if (!match.length) return false;
       if (item.action === 'save_trade_invoice_draft') {
-        return invoices.some(function(inv) {
-          return inv.status === 'draft' && _invoiceMatchesQueueIntent(inv, item);
+        return match.some(function(inv) {
+          return inv.status === 'draft' || inv.status === 'submitted' || inv.status === 'paid';
         });
       }
-      return invoices.some(function(inv) {
-        var landed = inv.status === 'submitted' || inv.status === 'paid' || !!inv.xero_invoice_id || !!inv.xero_bill_id;
-        return landed && _invoiceMatchesQueueIntent(inv, item);
+      return match.some(function(inv) {
+        return inv.status === 'submitted' || inv.status === 'paid' || !!inv.xero_invoice_id || !!inv.xero_bill_id;
       });
     }).catch(function() {
       return null;
     });
+  }
+
+  function _isBrowserOffline() {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+  }
+
+  function _removeOfflineQueueItem(id) {
+    if (!id) return;
+    _writeOfflineQueue(_readOfflineQueue().filter(function(item) {
+      return !item || item.id !== id;
+    }));
+  }
+
+  function _persistAmbiguousFinancialWrite(action, body) {
+    var before = _readOfflineQueue().length;
+    queueOfflineAction(action, body);
+    var after = _readOfflineQueue();
+    if (after.length <= before) return null;
+    var item = after[after.length - 1];
+    item.ambiguous = true;
+    _writeOfflineQueue(after);
+    return item;
+  }
+
+  function _handleFinancialWriteFailure(action, body, err, ctx) {
+    if (err && err.code === 'invoice_replay_cancelled') return Promise.resolve({ outcome: 'cancelled' });
+    if (!_invoiceApiCurrent(ctx)) return Promise.resolve({ outcome: 'cancelled' });
+    if (_isBrowserOffline()) {
+      queueOfflineAction(action, body);
+      return Promise.resolve({ outcome: 'queued_offline' });
+    }
+    if (!_isOfflineInvoiceTimeoutError(err)) return Promise.resolve({ outcome: 'failed', error: err });
+    var item = _persistAmbiguousFinancialWrite(action, body);
+    if (!item) return Promise.resolve({ outcome: 'failed', error: err });
+    return _reconcileAmbiguousInvoiceAction(item).then(function(alreadyLanded) {
+      if (!_invoiceApiCurrent(ctx)) return { outcome: 'cancelled' };
+      if (alreadyLanded === true) {
+        _removeOfflineQueueItem(item.id);
+        return { outcome: 'landed' };
+      }
+      return { outcome: alreadyLanded === false ? 'queued_retry' : 'queued_unresolved' };
+    });
+  }
+
+  function _financialWriteFailureToast(outcome, err) {
+    if (outcome === 'queued_offline') {
+      toast('Offline — invoice queued, will submit when back online');
+      return;
+    }
+    if (outcome === 'landed') {
+      toast('This invoice is already saved. Check Invoice history — do not submit again.');
+      return;
+    }
+    if (outcome === 'queued_retry' || outcome === 'queued_unresolved') {
+      toast('Connection dropped while sending. Do not submit again — we will confirm it before retrying.');
+      return;
+    }
+    if (outcome === 'failed') toast(friendlyError(err), true);
   }
 
   function _persistOfflineQueueAfterSync(snapshot, remaining) {
@@ -17625,6 +17742,7 @@
     state.requestSeq++;
     var requestSeq = state.requestSeq;
     var ctx = _invoiceApiContext();
+    if (_guardFinancialWrite('save_trade_invoice_draft', payload)) return;
     state.busy = true;
     renderWeeklyWorkOrderInvoice();
     api('save_trade_invoice_draft', null, payload, _invoiceApiOptions(ctx)).then(function(res) {
@@ -17643,9 +17761,12 @@
       renderWeeklyWorkOrderInvoice();
     }).catch(function(err) {
       if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
-      state.busy = false;
-      toast(friendlyError(err), true);
-      renderWeeklyWorkOrderInvoice();
+      return _handleFinancialWriteFailure('save_trade_invoice_draft', payload, err, ctx).then(function(result) {
+        if (result.outcome === 'cancelled') return;
+        state.busy = false;
+        _financialWriteFailureToast(result.outcome, err);
+        renderWeeklyWorkOrderInvoice();
+      });
     });
   };
 
@@ -17659,6 +17780,7 @@
     try { payload = _weeklyInvoicePayload(state); }
     catch (err) { toast(err.message, true); return; }
     payload.draft_id = state.draftId;
+    if (_guardFinancialWrite('generate_trade_invoice', payload)) return;
     var revision = state.revision;
     var preview = state.preview;
     var payable = _weeklyInvoiceMoney(preview.to_be_paid);
@@ -17712,9 +17834,17 @@
         renderWeeklyInvoiceDetail(invoice);
       }).catch(function(err) {
         if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
-        state.busy = false;
-        toast(friendlyError(err), true);
-        renderWeeklyWorkOrderInvoice();
+        return _handleFinancialWriteFailure('generate_trade_invoice', payload, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          state.busy = false;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'landed') {
+            if (_weeklyWoInvoice === state) _weeklyWoInvoice = null;
+            openInvoiceHistory();
+            return;
+          }
+          renderWeeklyWorkOrderInvoice();
+        });
       });
     });
   };
@@ -17759,12 +17889,18 @@
       var btn = document.getElementById('btnSubmitHours');
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
 
-      api('submit_trade_invoice', null, {
+      var hoursBody = {
         week_ending: _hoursData.week_ending,
         hourly_rate: editedRate,
         notes: '',
         gst_on: _invGst
-      }, _invoiceApiOptions(ctx)).then(function(res) {
+      };
+      if (_guardFinancialWrite('submit_trade_invoice', hoursBody)) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
+        return;
+      }
+
+      api('submit_trade_invoice', null, hoursBody, _invoiceApiOptions(ctx)).then(function(res) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
@@ -17773,8 +17909,15 @@
         loadHoursView(); // reload to show submitted state
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        toast(friendlyError(err), true);
-        if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
+        return _handleFinancialWriteFailure('submit_trade_invoice', hoursBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'landed') {
+            loadHoursView();
+            return;
+          }
+          if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
+        });
       });
     });
   };
@@ -18018,13 +18161,23 @@
     showConfirm('Delete Invoice', 'This will permanently delete this invoice. If it was synced to Xero, the bookkeeper will need to delete the Xero bill separately.', 'Delete').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
-      api('delete_trade_invoice', null, { invoice_id: invoiceId }, _invoiceApiOptions(ctx)).then(function() {
+      var deleteBody = { invoice_id: invoiceId };
+      if (_guardFinancialWrite('delete_trade_invoice', deleteBody)) return;
+      api('delete_trade_invoice', null, deleteBody, _invoiceApiOptions(ctx)).then(function() {
         if (!_invoiceApiCurrent(ctx)) return;
         toast('Invoice deleted');
         openInvoiceHistory();
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        toast('Failed: ' + friendlyError(err), true);
+        return _handleFinancialWriteFailure('delete_trade_invoice', deleteBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          if (result.outcome === 'landed') {
+            toast('Invoice already deleted');
+            openInvoiceHistory();
+            return;
+          }
+          _financialWriteFailureToast(result.outcome, err);
+        });
       });
     });
   };
@@ -20621,17 +20774,19 @@
     showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
-      var container = document.getElementById('hoursContent');
-      container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
       var finalDeductions = _invFinalDeductions();
-      api('generate_trade_invoice', {}, {
+      var jobCentricBody = {
         week_start: _hoursWeekStart || getWeekStartMonday(0),
         manual_assignments: manualAssignments,
         extra_items: extraItems,
         final_deductions: finalDeductions,
         notes: _invNotes,
         gst_on: _invGst
-      }, _invoiceApiOptions(ctx)).then(function(result) {
+      };
+      if (_guardFinancialWrite('generate_trade_invoice', jobCentricBody)) return;
+      var container = document.getElementById('hoursContent');
+      container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
+      api('generate_trade_invoice', {}, jobCentricBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
@@ -20694,15 +20849,17 @@
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        if (!navigator.onLine) {
-          queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, final_deductions: finalDeductions, notes: _invNotes, gst_on: _invGst });
-          toast('Offline — invoice queued, will submit when back online');
-        } else {
-          toast('Failed: ' + friendlyError(err), true);
-        }
-        // Re-paint from intact _jobCards — do NOT call loadHoursView() which would
-        // follow the sessionStorage path and lose in-memory job cards.
-        renderInvoiceBuilder();
+        return _handleFinancialWriteFailure('generate_trade_invoice', jobCentricBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'landed') {
+            openInvoiceHistory();
+            return;
+          }
+          // Re-paint from intact _jobCards — do NOT call loadHoursView() which would
+          // follow the sessionStorage path and lose in-memory job cards.
+          renderInvoiceBuilder();
+        });
       });
     });
   };
@@ -20975,20 +21132,26 @@
     _syncRowsFromDOM();
     var isExpense = _invoiceBuilderMode === 'expense';
     var ctx = _invoiceApiContext();
-
-    api('save_trade_invoice_draft', null, {
+    var draftBody = {
       week_start: isExpense ? null : (_hoursWeekStart || null),
+      draft_id: _draftInvoiceId || undefined,
       extra_items: _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; }).map(_rowToExtraItem),
       notes: _invNotes,
       labour_lines: [],
       gst_on: _invGst
-    }, _invoiceApiOptions(ctx)).then(function(res) {
+    };
+    if (_guardFinancialWrite('save_trade_invoice_draft', draftBody)) return;
+
+    api('save_trade_invoice_draft', null, draftBody, _invoiceApiOptions(ctx)).then(function(res) {
       if (!_invoiceApiCurrent(ctx)) return;
-      _draftInvoiceId = res.draft_id;
+      _draftInvoiceId = (res && res.draft_id) || _draftInvoiceId;
       toast('Draft saved');
     }).catch(function(err) {
       if (!_invoiceApiCurrent(ctx)) return;
-      toast('Failed to save draft: ' + friendlyError(err), true);
+      return _handleFinancialWriteFailure('save_trade_invoice_draft', draftBody, err, ctx).then(function(result) {
+        if (result.outcome === 'cancelled') return;
+        _financialWriteFailureToast(result.outcome, err);
+      });
     });
   };
 
@@ -21032,14 +21195,19 @@
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
 
       var extraItems = manualRows.map(_rowToExtraItem);
-
-      api('generate_trade_invoice', {}, {
+      var builderBody = {
         week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
         draft_id: _draftInvoiceId || undefined,
         extra_items: extraItems,
         notes: _invNotes,
         gst_on: _invGst
-      }, _invoiceApiOptions(ctx)).then(function(result) {
+      };
+      if (_guardFinancialWrite('generate_trade_invoice', builderBody)) {
+        renderInvoiceBuilder();
+        return;
+      }
+
+      api('generate_trade_invoice', {}, builderBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
@@ -21109,18 +21277,16 @@
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        if (!navigator.onLine) {
-          queueOfflineAction('generate_trade_invoice', {
-            week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
-            draft_id: _draftInvoiceId || undefined,
-            extra_items: extraItems, notes: _invNotes, gst_on: _invGst
-          });
-          toast('Offline — invoice queued, will submit when back online');
-        } else {
-          toast('Failed: ' + friendlyError(err), true);
-        }
-        // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
-        renderInvoiceBuilder();
+        return _handleFinancialWriteFailure('generate_trade_invoice', builderBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'landed') {
+            openInvoiceHistory();
+            return;
+          }
+          // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
+          renderInvoiceBuilder();
+        });
       });
     });
   };
@@ -21405,8 +21571,10 @@
     showConfirm('Generate Invoice?', 'This will create an invoice for all completed hours this week. You can\'t edit it after submitting.', 'Generate').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
+      var legacyBody = { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) };
+      if (_guardFinancialWrite('generate_trade_invoice', legacyBody)) return;
 
-      api('generate_trade_invoice', {}, { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) }, _invoiceApiOptions(ctx)).then(function(result) {
+      api('generate_trade_invoice', {}, legacyBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(result)) {
           toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
@@ -21416,7 +21584,11 @@
         loadHoursView(); // Refresh to show submitted state
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        toast('Failed: ' + (err.message || err), true);
+        return _handleFinancialWriteFailure('generate_trade_invoice', legacyBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'landed') loadHoursView();
+        });
       });
     });
   };
@@ -23237,9 +23409,15 @@
       return;
     }
     var ctx = _invoiceApiContext();
+    var woBody = {
+      work_order_id: workOrderId,
+      gst_on: _invoiceGstDefault(_hoursData || _user)
+    };
+    if (_guardFinancialWrite('submit_work_order_invoice', woBody)) return;
     showConfirm('Submit Invoice', 'Submit invoice for this work order? It will be created as a DRAFT in Xero.', 'Submit').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
+      if (_guardFinancialWrite('submit_work_order_invoice', woBody)) return;
 
       var btn = document.getElementById('woBtn' + workOrderId);
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
@@ -23248,10 +23426,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
       }
 
-      api('submit_work_order_invoice', null, {
-        work_order_id: workOrderId,
-        gst_on: _invoiceGstDefault(_hoursData || _user)
-      }, _invoiceApiOptions(ctx)).then(function(result) {
+      api('submit_work_order_invoice', null, woBody, _invoiceApiOptions(ctx)).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach
@@ -23282,17 +23457,23 @@
         }
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
-        if (!navigator.onLine) {
-          queueOfflineAction('submit_work_order_invoice', {
-            work_order_id: workOrderId,
-            gst_on: _invoiceGstDefault(_hoursData || _user)
-          });
-          toast('Offline — invoice queued, will submit when back online');
-          if (btn) { btn.disabled = true; btn.textContent = 'Queued (offline)'; }
-        } else {
-          toast(friendlyError(err), true);
+        return _handleFinancialWriteFailure('submit_work_order_invoice', woBody, err, ctx).then(function(result) {
+          if (result.outcome === 'cancelled') return;
+          _financialWriteFailureToast(result.outcome, err);
+          if (result.outcome === 'queued_offline') {
+            if (btn) { btn.disabled = true; btn.textContent = 'Queued (offline)'; }
+            return;
+          }
+          if (result.outcome === 'landed') {
+            openWorkOrderHub();
+            return;
+          }
+          if (result.outcome === 'queued_retry' || result.outcome === 'queued_unresolved') {
+            if (btn) { btn.disabled = true; btn.textContent = 'Confirming...'; }
+            return;
+          }
           _reEnableBtn();
-        }
+        });
       });
     });
   };

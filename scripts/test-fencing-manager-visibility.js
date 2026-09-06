@@ -421,6 +421,9 @@ assert((function() {
     extras.includes('wo_labour_lines') &&
     extras.includes('wo_labour_deduction') &&
     extras.includes('labour_deductions') &&
+    extras.includes('crew_charge_line_ids') &&
+    extras.includes('manual_assignments') &&
+    extras.includes('rowHasEarning') &&
     /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
     /function _financialWriteAlreadyPending[\s\S]*?_invoiceBodyWorkOrderIdsOverlap\(item\.body, body\)/.test(html) &&
     html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&

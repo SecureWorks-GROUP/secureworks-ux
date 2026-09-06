@@ -1401,6 +1401,88 @@ function hoursCard(overrides) {
       assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
         extra_items: [{ job_number: 'SWF-A', wo_labour_deduction: 40 }]
       }), true, 'a positive WO labour deduction is money-affecting')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        extra_items: [{ job_number: 'SWF-A', hours: 8, rate: 50 }]
+      }), true, 'positive hours×rate extras require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A', hours: 4, rate: 40 }],
+        } }
+      ), false, 'job+week is not landed when the queued write has different hours/rate')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        manual_assignments: [{ assignment_id: 'a1', hours: 8, rate: 50 }]
+      }), true, 'manual_assignments hours×rate require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-A' }],
+          manual_assignments: [{ assignment_id: 'a1', hours: 8, rate: 50 }],
+        } }
+      ), false, 'job+week is not landed when queued hours live on manual_assignments')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        labour_lines: [{ trade_name: 'Tendo', hours: 2, rate: 25 }]
+      }), true, 'top-level labour_lines require a full fingerprint')
+      assert.strictEqual(ctx._invoicePayloadHasMoneyAffectingExtras({
+        work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-b'] }]
+      }), true, 'weekly crew charge selections require a full fingerprint')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        {
+          week_start: '2026-09-07',
+          extra_items: [{ work_order_id: 'wo-1' }],
+          status: 'submitted',
+        },
+        { body: {
+          week_start: '2026-09-07',
+          work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-b'] }],
+        } }
+      ), false, 'one-WO week is not landed when crew charge selection is not on the listing')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{
+              week_start: '2026-09-07',
+              extra_items: [{ job_number: 'SWF-26767' }],
+              status: 'submitted',
+            }],
+          })
+        }
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: {
+          week_start: '2026-09-07',
+          extra_items: [{ job_number: 'SWF-26767', hours: 8, rate: 50 }],
+        }
+      })
+    }).then(function(hoursNotLanded) {
+      assert.strictEqual(hoursNotLanded, null,
+        'a same-job listing without the hours fingerprint does not drop the queued write')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          return Promise.resolve({
+            invoices: [{
+              week_start: '2026-09-07',
+              extra_items: [{ work_order_id: 'wo-1' }],
+              status: 'submitted',
+            }],
+          })
+        }
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: {
+          week_start: '2026-09-07',
+          work_order_blocks: [{ work_order_id: 'wo-1', crew_charge_line_ids: ['chg-a'] }],
+        }
+      })
+    }).then(function(weeklySelectionNotLanded) {
+      assert.strictEqual(weeklySelectionNotLanded, null,
+        'a same-WO listing without the charge-selection fingerprint does not drop the queued write')
       ctx.api = function(action) {
         if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
         return Promise.resolve({ ok: true })

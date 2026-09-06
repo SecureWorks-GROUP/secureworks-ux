@@ -5231,13 +5231,31 @@
     if (Array.isArray(body.final_deductions) && body.final_deductions.length) return true;
     if (Array.isArray(body.wo_labour_lines) && body.wo_labour_lines.length) return true;
     if (Number(body.wo_labour_deduction) > 0) return true;
+    if (Array.isArray(body.crew_charge_line_ids) || Array.isArray(body.charge_line_ids) ||
+        Array.isArray(body.negative_charge_line_ids)) return true;
     function collectionHasMoney(rows) {
       if (Array.isArray(rows)) return rows.length > 0;
       if (rows && typeof rows === 'object') return Object.keys(rows).length > 0;
       return false;
     }
+    function rowHasEarning(row) {
+      if (!row || typeof row !== 'object') return false;
+      if (Number(row.hours) > 0) return true;
+      if (Number(row.quantity) > 0) return true;
+      if (Number(row.wo_allocated) > 0) return true;
+      var rate = Number(row.unit_rate != null ? row.unit_rate : row.rate);
+      if ((row.unit_rate != null || row.rate != null) && isFinite(rate) && rate !== 0) return true;
+      if (row.amount != null && isFinite(Number(row.amount)) && Number(row.amount) !== 0) return true;
+      return false;
+    }
+    function rowHasSelection(row) {
+      if (!row || typeof row !== 'object') return false;
+      return Array.isArray(row.crew_charge_line_ids) || Array.isArray(row.charge_line_ids) ||
+        Array.isArray(row.negative_charge_line_ids);
+    }
     function rowHasMoney(row) {
       if (!row || typeof row !== 'object') return false;
+      if (rowHasEarning(row) || rowHasSelection(row)) return true;
       if (row.source === 'invoice_final_deduction') return true;
       if (row.kind === 'final_deduction') return true;
       if (Array.isArray(row.wo_lump_lines) && row.wo_lump_lines.length) return true;
@@ -5246,16 +5264,16 @@
       if (Number(row.wo_labour_deduction) > 0) return true;
       if (collectionHasMoney(row.labour_deductions)) return true;
       if (Array.isArray(row.labour_lines) && row.labour_lines.length) return true;
-      var rate = Number(row.unit_rate != null ? row.unit_rate : row.rate);
-      var amount = Number(row.amount);
-      if ((row.unit_rate != null || row.rate != null) && rate < 0) return true;
-      if (row.amount != null && amount < 0) return true;
       if (Array.isArray(row.extra_items) && row.extra_items.some(rowHasMoney)) return true;
       if (Array.isArray(row.work_order_blocks) && row.work_order_blocks.some(rowHasMoney)) return true;
+      if (Array.isArray(row.manual_assignments) && row.manual_assignments.some(rowHasMoney)) return true;
       return false;
     }
     if ((body.extra_items || []).some(rowHasMoney)) return true;
     if ((body.work_order_blocks || []).some(rowHasMoney)) return true;
+    if ((body.manual_assignments || []).some(rowHasMoney)) return true;
+    if ((body.labour_lines || []).some(rowHasMoney)) return true;
+    if ((body.lines || []).some(rowHasMoney)) return true;
     if (collectionHasMoney(body.labour_deductions)) return true;
     return false;
   }
@@ -5387,8 +5405,9 @@
       // fingerprint, or every job slot plus period means this write already
       // committed — including draft and pending_ops_review (failed Xero push).
       if (match.length > 0) return true;
-      // Multi-job / deduction writes must not retry on a partial or empty
-      // listing — that is how an A+B timeout can mint a second invoice.
+      // Multi-job / earning / deduction / WO-selection writes must not retry
+      // on a partial or empty listing — that is how an A+B timeout can mint
+      // a second invoice, and how a slot-only match can drop a different one.
       if (_invoicePayloadNeedsFullFingerprint(item)) return null;
       // Exact-target write (draft/invoice/WO/job identity) with no listing match:
       // fail closed. A just-committed invoice can be missing from an eventually

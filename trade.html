@@ -5650,11 +5650,26 @@
     return pending;
   }
 
+  function _financialWriteRejectionClearsPending(err, result) {
+    if (err) {
+      if (_isOfflineInvoiceTimeoutError(err)) return false;
+      if (err.code === 'invoice_response_ambiguous') return false;
+      if (typeof err.status === 'number' && err.status >= 400) return true;
+      if (err.ok === false) return true;
+      return false;
+    }
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    if (typeof _invoiceXeroPushSavedUnconfirmed === 'function' && _invoiceXeroPushSavedUnconfirmed(result)) {
+      return false;
+    }
+    return result.ok === false || result.success === false;
+  }
+
   function _settleFinancialWriteSend(action, pending, result, err) {
     if (action === 'attach_invoice_pdf') return;
     var flight = _financialWriteInFlight[String(action || '')];
     if (err) {
-      if (err.ok === false && !_isOfflineInvoiceTimeoutError(err)) {
+      if (_financialWriteRejectionClearsPending(err, null)) {
         if (pending && pending.id) _removeOfflineQueueItem(pending.id);
         if (flight) flight.pendingId = '';
       }
@@ -5668,7 +5683,7 @@
     // and no invoice identity. The local invoice landed; dropping the
     // durable pending here would re-arm Submit and risk a duplicate POST.
     if (_invoiceXeroPushSavedUnconfirmed(result)) return;
-    if (result && result.ok === false) {
+    if (_financialWriteRejectionClearsPending(null, result)) {
       if (pending && pending.id) _removeOfflineQueueItem(pending.id);
       if (flight) flight.pendingId = '';
     }
@@ -20403,11 +20418,11 @@
 
   function _woPassThroughFromCharge(charge) {
     charge = charge || {};
-    var amount = Math.abs(Number(charge.amount_ex != null ? charge.amount_ex : charge.amount || 0));
+    var amount = _workOrderChargeAmount(charge);
     var line = {
       trade_name: charge.trade_name || '',
       line_kind: 'wo_pass_through',
-      amount: amount > 0 ? amount : null,
+      amount: amount,
       hours: null,
       rate: null,
       server_owned: true
@@ -20508,8 +20523,31 @@
     });
   }
 
+  function _workOrderChargeAmount(charge) {
+    charge = charge || {};
+    var raw = charge.amount_ex != null ? charge.amount_ex : charge.amount;
+    if (raw == null || raw === '') return null;
+    var amount = Math.abs(Number(raw));
+    if (!Number.isFinite(amount) || !(amount > 0)) return null;
+    return amount;
+  }
+
+  function _workOrderChargeSubmitIdentity(charge) {
+    if (typeof _woChargeSourceLineId === 'function') return _woChargeSourceLineId(charge);
+    charge = charge || {};
+    var id = charge.line_id || charge.source_line_id || charge.id || '';
+    return id ? String(id) : '';
+  }
+
   function _workOrderHasCompleteMoney(wo) {
-    return !!(wo && Array.isArray(wo.negative_charges));
+    if (!wo || !Array.isArray(wo.negative_charges)) return false;
+    for (var i = 0; i < wo.negative_charges.length; i++) {
+      var charge = wo.negative_charges[i];
+      if (!charge || typeof charge !== 'object') return false;
+      if (!_workOrderChargeAmount(charge)) return false;
+      if (!_workOrderChargeSubmitIdentity(charge)) return false;
+    }
+    return true;
   }
 
   function _workOrderNegativeChargeLineIds(wo) {

@@ -500,6 +500,13 @@ assert(html.includes('_invoiceXeroPushSavedUnconfirmed') &&
   /function _settleFinancialWriteSend[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)\) return/.test(html) &&
   /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)[\s\S]*?Confirming\.\.\.[\s\S]*?_reEnableBtn\(\)/.test(html),
   'a saved-but-unidentified Xero push keeps the pending fence and does not re-arm Submit');
+assert(html.includes('_financialWriteRejectionClearsPending') &&
+  /function _financialWriteRejectionClearsPending[\s\S]*?err\.status[\s\S]*?success === false/.test(html) &&
+  /function _settleFinancialWriteSend[\s\S]*?_financialWriteRejectionClearsPending\(err, null\)/.test(html) &&
+  /function _settleFinancialWriteSend[\s\S]*?_financialWriteRejectionClearsPending\(null, result\)/.test(html),
+  'definitive HTTP/JSON invoice rejections clear the durable pending fence; transport stays parked');
+assert(/function _workOrderHasCompleteMoney[\s\S]*?_workOrderChargeAmount\(charge\)[\s\S]*?_workOrderChargeSubmitIdentity\(charge\)/.test(html),
+  'hydrate money is complete only when every charge has a usable amount and submit identity');
 assert(/function _applyHydratedWorkOrderMoney[\s\S]*?return ln\.server_owned !== true/.test(html),
   'complete hydrate replaces server-owned no-ID deductions from current server truth');
 assert(html.includes('No-ID lines are a multiset'),

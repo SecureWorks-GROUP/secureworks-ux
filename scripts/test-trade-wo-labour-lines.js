@@ -649,7 +649,28 @@ function hoursCard(overrides) {
   assert.strictEqual(context._workOrdersHydrateMoneyComplete([
     { id: 'wo-1', subtotal: 100, negative_charges: [] }
   ]), true, 'an explicit empty negative_charges array is complete money')
-  assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), true)
+  assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), false,
+    'a charge without submit identity is incomplete money')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ amount: 40, source_line_id: 'cl-israel' }],
+  }), true, 'a charge with amount and source id is complete money')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount_ex: -40 }],
+  }), true, 'a signed amount_ex is a usable positive deduction')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount: 0 }],
+  }), false, 'a zero-amount charge is not treated as no deduction')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel' }],
+  }), false, 'a charge missing its amount is unresolved')
+  assert.strictEqual(context._workOrderHasCompleteMoney({
+    id: 'wo-1',
+    negative_charges: [{ source_line_id: 'cl-israel', amount: 40 }, { amount: 20 }],
+  }), false, 'one malformed charge keeps the whole WO unresolved')
 
   const keptRestored = {
     wo_allocated: 999,
@@ -695,16 +716,25 @@ function hoursCard(overrides) {
       kim,
     ],
   }
-  const israel120 = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 120, server_owned: true }
+  const israel120 = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 120, server_owned: true, source_line_id: 'cl-israel-120' }
   assert.strictEqual(context._applyHydratedWorkOrderMoney(staleNoIdServer, {
     subtotal: 80,
     negative_charges: [{ trade_name: 'Israel', amount: 120 }],
+  }, [israel120]), false,
+    'charges without submit identity do not apply or drop restored deductions')
+  assert.strictEqual(staleNoIdServer.wo_allocated, 100, 'malformed charges keep restored allocated')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.amount === 100 && ln.server_owned === true).length, 1,
+    'malformed charges keep restored server money')
+  assert.strictEqual(context._applyHydratedWorkOrderMoney(staleNoIdServer, {
+    subtotal: 80,
+    negative_charges: [{ trade_name: 'Israel', amount: 120, source_line_id: 'cl-israel-120' }],
   }, [israel120]), true)
   const israelNoId = staleNoIdServer.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through' && !ln.source_line_id)
-  assert.strictEqual(israelNoId.length, 1, 'complete hydrate replaces stale no-ID server money instead of appending')
-  assert.strictEqual(israelNoId[0].amount, 120, 'replaced no-ID server deduct is current server truth')
+  assert.strictEqual(israelNoId.length, 0, 'complete identified hydrate replaces stale no-ID server money')
+  assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.source_line_id === 'cl-israel-120').length, 1,
+    'replaced deduct is current identified server truth')
   assert.strictEqual(staleNoIdServer.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
-    'hourly labour survives no-ID server replace')
+    'hourly labour survives identified server replace')
 
   const removedServerPlusLocal = {
     wo_allocated: 100,
@@ -731,12 +761,15 @@ function hoursCard(overrides) {
     ],
   }
   const twoIsrael = [
-    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
-    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true },
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true, source_line_id: 'cl-israel-a' },
+    { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, server_owned: true, source_line_id: 'cl-israel-b' },
   ]
   assert.strictEqual(context._applyHydratedWorkOrderMoney(twoServerNoId, {
     subtotal: 100,
-    negative_charges: [{ amount: 40 }, { amount: 40 }],
+    negative_charges: [
+      { amount: 40, source_line_id: 'cl-israel-a' },
+      { amount: 40, source_line_id: 'cl-israel-b' },
+    ],
   }, twoIsrael), true)
   assert.strictEqual(twoServerNoId.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through').length, 2,
     'complete replace of two same-amount server no-ID rows stays two, not four')
@@ -1862,6 +1895,50 @@ function hoursCard(overrides) {
       tabA._endFinancialWrite('submit_work_order_invoice')
       assert.strictEqual(tabB._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
         'retry stays blocked after the local write ends without a confirmed identity')
+      const httpErr = new Error('Work order already invoiced')
+      httpErr.status = 409
+      httpErr.code = 'request_failed'
+      const timeoutErr = new Error('Failed to fetch')
+      timeoutErr.name = 'TypeError'
+      const ambiguousErr = new Error('Invoice response is incomplete')
+      ambiguousErr.code = 'invoice_response_ambiguous'
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(httpErr, null), true,
+        'a 409 _apiError is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, { success: false, error: 'RATE_NOT_CONFIGURED' }), true,
+        'a 200 success:false body is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, { ok: false, error: 'ALREADY_INVOICED' }), true,
+        'a 200 ok:false body is a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(timeoutErr, null), false,
+        'a transport drop is not a definitive rejection')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(ambiguousErr, null), false,
+        'an ambiguous invoice response keeps the fence')
+      assert.strictEqual(tabA._financialWriteRejectionClearsPending(null, {
+        ok: false, code: 'XERO_PUSH_FAILED', success: true,
+      }), false, 'an unidentified Xero-saved body does not clear pending')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingHttp = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-12' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingHttp, null, httpErr)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      return new Promise(function(resolve) { setTimeout(resolve, 80); }).then(function() {
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-12' }), false,
+        'a 409 _apiError clears the durable pending fence')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingJson = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-19' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingJson, {
+        success: false,
+        error: 'RATE_NOT_CONFIGURED',
+      }, null)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      return new Promise(function(resolve) { setTimeout(resolve, 80); })
+      }).then(function() {
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-19' }), false,
+        'a 200 success:false JSON rejection clears the durable pending fence')
+      assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+      const pendingTimeout = tabA._beginFinancialWriteSend('generate_trade_invoice', { week_start: '2026-10-26' })
+      tabA._settleFinancialWriteSend('generate_trade_invoice', pendingTimeout, null, timeoutErr)
+      tabA._endFinancialWrite('generate_trade_invoice')
+      assert.strictEqual(tabA._financialWriteAlreadyPending('generate_trade_invoice', { week_start: '2026-10-26' }), true,
+        'a transport drop keeps the durable pending fence')
       const origSetItem = tabA.localStorage.setItem
       tabA.localStorage.setItem = function(k, v) {
         if (String(k || '').indexOf('sw_action_queue_inbox_') === 0) throw new Error('quota')
@@ -1878,6 +1955,7 @@ function hoursCard(overrides) {
       tabA.localStorage.setItem = origSetItem
       tabA._endFinancialWrite('generate_trade_invoice')
       console.log('OK — cross-tab invoice single-flight and queue merge')
+    })
     })
   }).catch(function(err) {
     console.error(err)

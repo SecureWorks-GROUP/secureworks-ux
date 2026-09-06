@@ -234,6 +234,20 @@ async function stubJobDetail(page, payload) {
       body: '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF',
     });
   });
+  await page.route(SIGNED_VIDEO, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'video/mp4',
+      body: 'stub-video',
+    });
+  });
+  await page.route(EMAIL_OPAQUE_WO, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF',
+    });
+  });
   await page.route(`${OPS_API}**`, async (route) => {
     const action = new URL(route.request().url()).searchParams.get('action');
     if (action === 'trade_job_detail') {

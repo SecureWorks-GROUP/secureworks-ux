@@ -20330,9 +20330,10 @@
       renderInvoiceBuilder();
     }).catch(function() {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
-      _pmHydratedWorkOrderIds = {};
+      // A failed read is not an empty authorized set. Keep restored WO money
+      // (work_order_id, wo_mode, allocation, pass-throughs) and leave the last
+      // successful id set untouched so submit cannot strip deductions.
       _syncJobCardsFromDOM();
-      _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
       _pmWoHydrateState = 'error';
       _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
       renderInvoiceBuilder();
@@ -20343,8 +20344,9 @@
   };
 
   // Hydrate is a WO-money prefill, not a Pay-tab gate. Pending still waits so
-  // a complete WO's server block can land. A failed hydrate only blocks when
-  // an included card is already in WO mode and needs that money.
+  // a complete WO's server block can land. A failed hydrate keeps restored WO
+  // money and only blocks when an included card is still in WO mode — Hours
+  // cards can submit. Do not reconcile against {} until a successful read.
   function _jobCentricSubmitBlockedByHydrate() {
     if (!isPerMetreUser()) return false;
     if (_pmWoHydrateState === 'pending') return true;
@@ -21612,7 +21614,9 @@
     // FIX2: flush DOM→state before building payload so mobile taps without blur
     // don't leave hours/rate as null even though the field visually shows a value.
     _syncJobCardsFromDOM();
-    _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
+    if (_pmWoHydrateState === 'ok') {
+      _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
+    }
     _syncInvLumpLinesFromDOM();
     var incompleteLump = (_invLumpLines || []).some(function(line) {
       var desc = String((line && line.description) || '').trim();

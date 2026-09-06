@@ -298,6 +298,15 @@ assert(html.includes('retryPerMetreWorkOrderHydrate'),
   'Henry can retry a failed work-order hydrate');
 assert(html.includes('_jobCentricSubmitBlockedByHydrate'),
   'hydrate submit block is scoped to pending or WO-mode cards, not a Pay-tab gate');
+assert((function() {
+  const hydrate = html.slice(html.indexOf('function _hydratePerMetreWorkOrderCards'), html.indexOf('window.retryPerMetreWorkOrderHydrate'));
+  const fail = hydrate.slice(hydrate.indexOf('.catch(function'));
+  return !fail.includes('_reconcileJobCardWorkOrderAuth') &&
+    !fail.includes('_pmHydratedWorkOrderIds = {}') &&
+    fail.includes("_pmWoHydrateState = 'error'") &&
+    /if \(_pmWoHydrateState === 'ok'\) \{\s*_reconcileJobCardWorkOrderAuth\(_pmHydratedWorkOrderIds\)/.test(html);
+})(),
+  'a failed WO hydrate keeps restored deductions and does not reconcile against an empty set');
 assert(html.includes('woHydrateBlocked'),
   'the job-centric footer still names the hydrate submit block');
 assert(html.includes('Undated assignments never prefill a card'),

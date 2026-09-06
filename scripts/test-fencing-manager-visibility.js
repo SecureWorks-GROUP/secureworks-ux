@@ -360,6 +360,9 @@ assert(!html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFi
   !html.includes('_woCardFinalDeductions') &&
   html.includes('_woLabourLinesForFanout') &&
   html.includes('_woAmountAsHoursRate') &&
+  html.includes("pass.line_source = 'wo_pass_through'") &&
+  html.includes('_woLabourLineIsReshapedPassThrough') &&
+  !/hours === 1 && chargeNames/.test(html) &&
   !/wo_lump_lines: lumpLinesOut/.test(html),
   'invoice-level and hours-card lumps stay on final_deductions; WO deducts reshape to hours×rate fanout lines');
 assert(html.includes('or add an amount'),
@@ -521,8 +524,9 @@ assert(html.includes('_workOrderDirectInvoiceAllowed') &&
   'direct WO invoice and offline replay fail closed when already invoiced and hold the financial fence through the re-read');
 assert(html.includes('_invoiceXeroPushSavedUnconfirmed') &&
   /function _settleFinancialWriteSend[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)\) return/.test(html) &&
+  /if \(_invoiceXeroPushSavedUnconfirmed\(result\)\) \{[\s\S]*?item\.ambiguous = true;[\s\S]*?item\.persist_unconfirmed = true;/.test(html) &&
   /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)[\s\S]*?Confirming\.\.\.[\s\S]*?_reEnableBtn\(\)/.test(html),
-  'a saved-but-unidentified Xero push keeps the pending fence and does not re-arm Submit');
+  'a saved-but-unidentified Xero push keeps the pending fence, marks replay ambiguous, and does not re-arm Submit');
 assert(html.includes('_financialWriteRejectionClearsPending') &&
   /function _financialWriteRejectionClearsPending[\s\S]*?err\.status[\s\S]*?success === false/.test(html) &&
   /function _settleFinancialWriteSend[\s\S]*?_financialWriteRejectionClearsPending\(err, null\)/.test(html) &&

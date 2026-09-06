@@ -268,8 +268,8 @@ function hoursCard(overrides) {
   assert.strictEqual(row.rate, 60, 'net is WO 100 − Israel 40')
   assert.strictEqual(row.wo_labour_deduction, 40)
   assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
-    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40 },
-  ], 'pass-through posts as hours×rate, not amount-only wo_pass_through')
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' },
+  ], 'pass-through posts as hours×rate with an explicit reshape marker')
   assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
   assert(row.description.indexOf('Israel $40') !== -1, 'breakdown names the WO trade: ' + row.description)
 }
@@ -304,7 +304,7 @@ function hoursCard(overrides) {
   assert.strictEqual(row.rate, 50, 'net is WO 100 − Israel 40 − Materials 10')
   assert.strictEqual(row.wo_labour_deduction, 50)
   assert.deepStrictEqual(JSON.parse(JSON.stringify(row.wo_labour_lines)), [
-    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40 },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' },
     { trade_name: 'Materials', hours: 1, rate: 10, amount: 10 },
   ], 'WO lumps post as hours×rate labour, not wo_lump_lines')
   assert.strictEqual(row.wo_lump_lines, undefined, 'do not invent wo_lump_lines on the posted extra')
@@ -798,12 +798,36 @@ function hoursCard(overrides) {
   const rebuiltExtras = context._buildJobCentricPayload(context._jobCards)
   assert(!rebuiltExtras.error, 'refreshed cards still build: ' + rebuiltExtras.error)
   assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltExtras.cardExtraItems[0].wo_labour_lines)), [
-    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55 },
+    { trade_name: 'Israel', hours: 1, rate: 55, amount: 55, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
     { trade_name: 'Kim', hours: 1, rate: 20, amount: 20 },
   ], 'generate extras rebuild pass-through deduction money from the exclusive listing')
   assert.strictEqual(rebuiltExtras.cardExtraItems[0].wo_labour_deduction, 75)
   assert.strictEqual(context._refreshJobCentricPostedWorkOrderMoney({ 'wo-1': { id: 'wo-1' } }, ['wo-1']).ok, false,
     'exclusive re-read fails closed when posted WO money is incomplete')
+
+  const rebuildStart = html.indexOf('function _woLabourLineIsReshapedPassThrough')
+  const rebuildEnd = html.indexOf('function _rebuildOfflineJobCentricWorkOrderMoney')
+  assert(rebuildStart !== -1 && rebuildEnd > rebuildStart, 'offline extra rebuild helpers exist')
+  vm.runInContext(html.slice(rebuildStart, rebuildEnd), context)
+  const listingWo = {
+    id: 'wo-1',
+    subtotal: 100,
+    negative_charges: [{ trade_name: 'Israel', amount: 40, source_line_id: 'cl-israel' }],
+  }
+  const rebuiltSameName = context._rebuildJobCentricWorkOrderExtraFromListing({
+    work_order_id: 'wo-1',
+    wo_allocated: 100,
+    wo_labour_lines: [
+      { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
+      { trade_name: 'Israel', hours: 1, rate: 20, amount: 20 },
+    ],
+  }, listingWo)
+  assert.ok(rebuiltSameName, 'listing rebuild succeeds when a 1h labour line shares a charge name')
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rebuiltSameName.wo_labour_lines)), [
+    { trade_name: 'Israel', hours: 1, rate: 20, amount: 20 },
+    { trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through', source_line_id: 'cl-israel' },
+  ], 'user-added 1h labour for the same trade is kept beside the reshaped pass-through')
+  assert.strictEqual(rebuiltSameName.wo_labour_deduction, 60)
 }
 
 // ── Offline invoice queue is account-bound ──
@@ -1037,6 +1061,54 @@ function hoursCard(overrides) {
       'job-centric generate replay re-reads my_work_orders under the financial fence')
     assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 1,
       'exclusive job-centric WO extras may POST after the under-fence re-read')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false, negative_charges: [] }] })
+      }
+      if (action === 'submit_work_order_invoice') {
+        return Promise.resolve({ ok: false, code: 'XERO_PUSH_FAILED', success: true })
+      }
+      if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_xero_unid',
+        client_request_id: 'iq_xero_unid',
+        action: 'submit_work_order_invoice',
+        user_id: 'bob',
+        body: { work_order_id: 'wo-b' },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    const queuedXero = JSON.parse(store.sw_action_queue).find((i) => i.id === 'iq_xero_unid')
+    assert.ok(queuedXero, 'an unidentified Xero-saved replay stays queued')
+    assert.strictEqual(queuedXero.ambiguous, true,
+      'an unidentified Xero-saved replay is marked ambiguous before it is retained')
+    assert.strictEqual(queuedXero.persist_unconfirmed, true,
+      'an unidentified Xero-saved replay is preserved durably')
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 1,
+      'the first unidentified Xero-saved replay POSTs once')
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'a later sync reconciles the ambiguous Xero-saved item instead of POSTing again')
+    assert.ok(sent.filter((s) => s.action === 'my_trade_invoices').length >= 1,
+      'the second sync reconciles against the invoice listing')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_xero_unid'), true,
+      'the unidentified Xero-saved item stays queued after reconcile finds no identity')
 
     ctx._invoiceAuthGen += 1
     ctx.api = function(action, q, body, options) {
@@ -1345,6 +1417,10 @@ function hoursCard(overrides) {
           { draft_id: 'draft-1', week_start: '2026-09-07', ...draftMoney },
           { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney }
         ), false, 'same extras in a different week are a different money fingerprint')
+        assert.strictEqual(ctx._invoiceMoneyFingerprintMatches(
+          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40 }] }] },
+          { extra_items: [{ wo_labour_lines: [{ trade_name: 'Israel', hours: 1, rate: 40, amount: 40, line_source: 'wo_pass_through' }] }] }
+        ), true, 'the pass-through reshape marker is not part of the money fingerprint')
         assert.strictEqual(ctx._invoiceMatchesQueueIntent(
           { id: 'draft-1', draft_id: 'draft-1', week_start: '2026-09-07', status: 'draft', ...draftMoney },
           { body: { draft_id: 'draft-1', week_start: '2026-09-21', ...draftMoney } }

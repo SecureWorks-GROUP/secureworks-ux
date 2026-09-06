@@ -5329,6 +5329,10 @@
         crew_charge_line_ids: body.crew_charge_line_ids || null,
         week_start: _normalizeInvoicePeriod(body.week_start || body.weekStart),
         week_ending: _normalizeInvoicePeriod(body.week_ending || body.weekEnding)
+      }, function(key, value) {
+        // Client-only reshape marker — listing extras will not echo it.
+        if (key === 'line_source') return undefined;
+        return value;
       });
     } catch (e) {
       return '';
@@ -5920,7 +5924,14 @@
               return true;
             }
           }).then(function(result) {
-            if (!_offlineInvoiceReplaySucceeded(result, item)) remaining.push(item);
+            if (_offlineInvoiceReplaySucceeded(result, item)) return;
+            // Saved locally but Xero push failed without an invoice id.
+            // Mark ambiguous so the next sync reconciles instead of POSTing again.
+            if (_invoiceXeroPushSavedUnconfirmed(result)) {
+              item.ambiguous = true;
+              item.persist_unconfirmed = true;
+            }
+            remaining.push(item);
           }).catch(function(e) {
             if (e && e.code === 'invoice_replay_cancelled') return;
             if (e && e.code === 'invoice_write_locked') {
@@ -22158,7 +22169,11 @@
       var name = String(ln.trade_name || '').replace(/\s+/g, ' ').trim();
       if (ln.line_kind === 'wo_pass_through') {
         var pass = _woAmountAsHoursRate(name, ln.amount);
-        if (pass) out.push(pass);
+        if (pass) {
+          pass.line_source = 'wo_pass_through';
+          if (ln.source_line_id) pass.source_line_id = String(ln.source_line_id);
+          out.push(pass);
+        }
         return;
       }
       var hours = Number(ln.hours);
@@ -22490,23 +22505,24 @@
     _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds, _pmKnownWorkOrdersById);
   }
 
+  function _woLabourLineIsReshapedPassThrough(ln) {
+    if (!ln) return false;
+    if (ln.line_kind === 'wo_pass_through') return true;
+    return String(ln.line_source || '') === 'wo_pass_through';
+  }
+
   function _rebuildJobCentricWorkOrderExtraFromListing(item, wo) {
     if (!item || !wo || typeof _applyHydratedWorkOrderMoney !== 'function') return null;
     var passThroughs = typeof _workOrderPassThroughsFromListing === 'function'
       ? _workOrderPassThroughsFromListing(wo)
       : null;
     if (!passThroughs) return null;
-    var chargeNames = {};
-    (wo.negative_charges || []).forEach(function(ch) {
-      chargeNames[String((ch && ch.trade_name) || '')] = true;
-    });
     var named = [];
     (item.wo_labour_lines || []).forEach(function(ln) {
-      if (!ln || ln.line_kind === 'wo_pass_through') return;
+      if (!ln || _woLabourLineIsReshapedPassThrough(ln)) return;
       var hours = Number(ln.hours);
       var rate = Number(ln.rate);
       if (!(hours > 0) || !(rate > 0)) return;
-      if (hours === 1 && chargeNames[String(ln.trade_name || '')]) return;
       named.push({
         trade_name: ln.trade_name,
         hours: hours,

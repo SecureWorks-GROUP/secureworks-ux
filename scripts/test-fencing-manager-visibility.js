@@ -298,6 +298,14 @@ assert(html.includes('data-weekly-wo-retry'),
   'the weekly work-order loader has Retry after a my_work_orders failure');
 assert(html.includes('data-work-order-hub-retry'),
   'the My Work Orders hub has Retry after a my_work_orders failure');
+assert(html.includes('jobCards: _serializeJobCardsDraft(_jobCards)'),
+  'the invoice draft persists job-centric cards, not only legacy _invRows');
+assert(html.includes('_applyInvDraft(draft)'),
+  'loadHoursView restores persisted job cards after a reload');
+assert(html.includes('_unboundCardForWorkOrder'),
+  'WO hydrate binds an unbound card only on the matching work-order date');
+assert(html.includes('_jobCardKeepHoursMode'),
+  'hydrate does not silently flip a card the user already edited in Hours');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

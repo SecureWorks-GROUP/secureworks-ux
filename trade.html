@@ -15848,16 +15848,8 @@
     if (_invoiceBuilderOpen) { renderInvoiceBuilder(); return; }
     try {
       var draft = JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null');
-      if (draft && draft.rows && draft.rows.length > 0) {
-        _invRows = draft.rows;
-        _invGst = _invoiceGstDefault(draft);
-        _invNotes = draft.notes || '';
-        _invoiceBuilderMode = draft.mode || 'weekly';
-        _hoursWeekStart = draft.weekStart || _hoursWeekStart;
-        _hoursWeekEnd = draft.weekEnd || _hoursWeekEnd;
-        _draftInvoiceId = draft.draftId || null;
-        _invoiceBuilderOpen = true;
-        renderInvoiceBuilder();
+      if (_invDraftHasWork(draft)) {
+        _applyInvDraft(draft);
         return;
       }
     } catch(e) {}
@@ -17448,13 +17440,57 @@
     host.replaceWith(replacement.firstChild);
   }
 
+  function _serializeJobCardsDraft(cards) {
+    try {
+      return JSON.parse(JSON.stringify(cards || [])).map(function(card) {
+        if (card) delete card._idx;
+        return card;
+      });
+    } catch (e) {
+      return (cards || []).slice();
+    }
+  }
+
+  function _restoreJobCardsDraft(cards) {
+    return (cards || []).map(function(raw) {
+      var fields = Object.assign({}, raw || {});
+      delete fields._idx;
+      return _newJobCard(fields);
+    });
+  }
+
+  function _invDraftHasWork(draft) {
+    if (!draft) return false;
+    if (draft.rows && draft.rows.length > 0) return true;
+    if (draft.jobCards && draft.jobCards.length > 0) return true;
+    return false;
+  }
+
+  function _applyInvDraft(draft) {
+    _invRows = draft.rows || [];
+    _jobCards = _restoreJobCardsDraft(draft.jobCards);
+    _invGst = _invoiceGstDefault(draft);
+    _invNotes = draft.notes || '';
+    _invoiceBuilderMode = draft.mode || 'weekly';
+    _hoursWeekStart = draft.weekStart || _hoursWeekStart;
+    _hoursWeekEnd = draft.weekEnd || _hoursWeekEnd;
+    _draftInvoiceId = draft.draftId || null;
+    _invoiceBuilderOpen = true;
+    renderInvoiceBuilder();
+    _hydratePerMetreWorkOrderCards();
+  }
+
   // Persist invoice draft to sessionStorage (survives background kill)
   function _saveInvDraft() {
     if (!_invoiceBuilderOpen) return;
     try {
       _syncRowsFromDOM();
+      if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
       sessionStorage.setItem('sw_inv_draft', JSON.stringify({
-        rows: _invRows, gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
+        rows: _invRows,
+        jobCards: _serializeJobCardsDraft(_jobCards),
+        jobCentric: !!_jobCentricActive,
+        gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
     } catch(e) {}
@@ -17844,7 +17880,9 @@
       wo_labour_lines: [],
       wo_lump_lines: [],
       wo_number: '',
-      commission_mode: false
+      commission_mode: false,
+      hours_user_edited: false,
+      hours_mode_locked: false
     }, fields || {});
   }
 
@@ -17905,6 +17943,41 @@
     return { lines: lines, changed: changed };
   }
 
+  function _jobCardDate(card) {
+    return String((card && card.scheduled_date) || '').slice(0, 10);
+  }
+
+  function _jobCardKeepHoursMode(card) {
+    return !!(card && (card.hours_mode_locked || card.hours_user_edited));
+  }
+
+  function _markJobCardHoursEdited(card) {
+    if (!card || card.wo_mode || card.commission_mode) return;
+    card.hours_user_edited = true;
+  }
+
+  // Date-aware bind: a WO completion/schedule date never attaches to a
+  // different assignment day. An undated WO binds only when the job has
+  // exactly one unbound card.
+  function _unboundCardForWorkOrder(jobId, woDate) {
+    if (!jobId) return null;
+    var candidates = [];
+    _jobCards.forEach(function(c) {
+      if (!c || c.work_order_id) return;
+      if (c.job_id !== jobId) return;
+      candidates.push(c);
+    });
+    if (!candidates.length) return null;
+    if (woDate) {
+      var dated = null;
+      candidates.forEach(function(c) {
+        if (!dated && _jobCardDate(c) === woDate) dated = c;
+      });
+      return dated;
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   function _mergeWorkOrdersIntoJobCards(workOrders) {
     var weekStart = _hoursWeekStart || '';
     var weekEnd = _hoursWeekEnd || '';
@@ -17920,18 +17993,19 @@
       var passThroughs = (wo.negative_charges || []).map(_woPassThroughFromCharge)
         .filter(function(line) { return Number(line.amount) > 0; });
       var existing = null;
-      var unbound = null;
       _jobCards.forEach(function(c) {
         if (String(c.work_order_id || '') === woId) existing = c;
-        else if (!unbound && jobId && c.job_id === jobId && !c.work_order_id) unbound = c;
       });
-      var target = existing || unbound;
+      var target = existing || _unboundCardForWorkOrder(jobId, date);
       if (target) {
         // Identity is the work-order id. A second WO on the same job/day
         // never writes onto a card that already belongs to another WO.
         if (!target.work_order_id) target.work_order_id = woId;
         if (!target.wo_number && wo.wo_number) target.wo_number = wo.wo_number;
-        target.wo_mode = true;
+        if (!_jobCardKeepHoursMode(target) && !target.wo_mode) {
+          target.wo_mode = true;
+          changed = true;
+        }
         if (target.wo_allocated == null && wo.subtotal != null) {
           target.wo_allocated = Number(wo.subtotal);
           changed = true;
@@ -18622,6 +18696,7 @@
     _syncJobCardsFromDOM();
     c.wo_mode = (mode === 'work_order');
     c.commission_mode = (mode === 'commission');
+    c.hours_mode_locked = (mode === 'hours');
     renderInvoiceBuilder();
   };
   // Legacy toggle preserved for any code still referencing it.
@@ -18750,6 +18825,7 @@
     var c = _jobCards[idx]; if (!c) return;
     var n = parseFloat(val);
     c.hours = (isNaN(n) || n < 0) ? null : n;
+    _markJobCardHoursEdited(c);
     _refreshJobCardLine(idx);
   };
   window.setJobCardRate = function(idx, val) {
@@ -18757,11 +18833,14 @@
     var n = parseFloat(val);
     c.rate = (isNaN(n) || n < 0) ? 0 : n;
     c.rate_source = 'client_entered';
+    _markJobCardHoursEdited(c);
     _refreshJobCardLine(idx);
   };
   window.setJobCardDescription = function(idx, val) {
     var c = _jobCards[idx]; if (!c) return;
     c.description = val || '';
+    _markJobCardHoursEdited(c);
+    _saveInvDraft();
   };
   // [M4 U2] Over-allowance make-safe variation justification — captured, never blocks submit.
   window.setJobCardJustification = function(idx, val) {
@@ -18785,6 +18864,7 @@
       // entries; WO-mode and commission-mode cards have no hours input). [U1]
       if (c.scheduled_date === dk && (c.hours == null) && !c.wo_mode && !c.commission_mode) {
         c.hours = n;
+        _markJobCardHoursEdited(c);
         var f = document.querySelector('input[data-cardhours="' + i + '"]');
         if (f) f.value = n;
         _refreshJobCardLine(i);
@@ -18848,6 +18928,7 @@
       if (invSubBtn) invSubBtn.textContent = 'Submit Invoice — $' + grand.toFixed(2);
     }
     _updateInvoiceMoneySummary();
+    _saveInvDraft();
   }
 
   // [M4 U2] True when a job card is a make-safe job. Uses the flag stamped at

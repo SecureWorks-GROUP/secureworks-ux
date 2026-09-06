@@ -699,18 +699,45 @@ const test = base.extend({
                 week_ending: addIsoDays(weekStart, 6),
                 invoice_type: 'per_metre',
                 is_per_metre: true,
-                assignments: [{
-                  id: 'e2e-henry-assignment',
-                  job_id: 'fence-job-henry',
-                  scheduled_date: addIsoDays(weekStart, 1),
-                  jobs: {
-                    id: 'fence-job-henry',
-                    job_number: 'FENCE-HENRY-001',
-                    client_name: 'Henry Client',
-                    site_suburb: 'Balcatta',
-                    type: 'fencing'
-                  }
-                }],
+                assignments: feedScenario === 'henry-same-job-two-days'
+                  ? [
+                    {
+                      id: 'e2e-henry-assignment',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: addIsoDays(weekStart, 1),
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    },
+                    {
+                      id: 'e2e-henry-assignment-later',
+                      job_id: 'fence-job-henry',
+                      scheduled_date: addIsoDays(weekStart, 3),
+                      jobs: {
+                        id: 'fence-job-henry',
+                        job_number: 'FENCE-HENRY-001',
+                        client_name: 'Henry Client',
+                        site_suburb: 'Balcatta',
+                        type: 'fencing'
+                      }
+                    }
+                  ]
+                  : [{
+                    id: 'e2e-henry-assignment',
+                    job_id: 'fence-job-henry',
+                    scheduled_date: addIsoDays(weekStart, 1),
+                    jobs: {
+                      id: 'fence-job-henry',
+                      job_number: 'FENCE-HENRY-001',
+                      client_name: 'Henry Client',
+                      site_suburb: 'Balcatta',
+                      type: 'fencing'
+                    }
+                  }],
                 total_hours: 0,
                 already_submitted: false
               }

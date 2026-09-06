@@ -139,6 +139,81 @@ test('My Work Orders and Work Order Invoice recover from a failed read', async (
   await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
 });
 
+test('job-centric WO allocations survive a Financial reload', async ({ appPage: page }) => {
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
+  await page.getByRole('button', { name: '+ Add amount' }).click();
+  await card.locator('[data-cardlumpdesc]').fill('Materials');
+  await card.locator('[data-cardlumpamt]').fill('10');
+  await card.locator('[data-cardlumpamt]').press('Tab');
+  await expect(card.locator('[data-cardamt]')).toHaveText('$50.00');
+
+  await page.reload();
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+  const restored = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(restored.locator('[data-cardwoalloc]')).toHaveValue('100');
+  await expect(restored.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+  await expect(restored.locator('[data-cardlumpdesc]')).toHaveValue('Materials');
+  await expect(restored.locator('[data-cardlumpamt]')).toHaveValue('10');
+  await expect(restored.locator('[data-cardamt]')).toHaveText('$50.00');
+});
+
+test('Hours typed while hydrate is pending stay Hours after the WO arrives', async ({ appPage: page }) => {
+  let releaseHydrate;
+  const holdHydrate = new Promise((resolve) => { releaseHydrate = resolve; });
+  await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('action') === 'my_work_orders') {
+      await holdHydrate;
+    }
+    await route.fallback();
+  });
+
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toBeVisible();
+  await expect(card.locator('[data-cardhours]')).toBeVisible();
+  await card.locator('[data-cardhours]').fill('3');
+  await card.locator('[data-cardhours]').press('Tab');
+  releaseHydrate();
+
+  await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+  await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+  await expect(card.locator('[data-cardwoalloc]')).toHaveCount(0);
+  await card.getByRole('button', { name: 'Work Order', exact: true }).click();
+  await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
+  await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+});
+
+test.describe('same job on two days', () => {
+  test.use({ feedScenario: 'henry-same-job-two-days' });
+
+  test('a work order does not bind to a later day of the same job', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    const woCard = page.locator('.jc-card').filter({ hasText: 'WO-FENCE-001' });
+    const hoursCard = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' }).filter({ hasNotText: 'WO-FENCE-001' });
+    await expect(page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(2);
+    await expect(woCard.locator('[data-cardwoalloc]')).toHaveValue('100');
+    await expect(hoursCard.locator('[data-cardhours]')).toBeVisible();
+    await expect(hoursCard.locator('[data-cardwoalloc]')).toHaveCount(0);
+  });
+});
+
 test('an empty work-order week offers the job-centric invoice builder', async ({ appPage: page }) => {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();

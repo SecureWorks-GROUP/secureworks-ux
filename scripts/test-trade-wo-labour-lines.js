@@ -805,6 +805,16 @@ function hoursCard(overrides) {
           final_deductions: [{ description: 'Fuel', unit_rate: 10 }],
         } }
       ), false, 'a write with invoice-level deductions does not match a job-only invoice')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' },
+        { body: {
+          week_start: '2026-09-07',
+          extra_items: [
+            { job_number: 'SWF-A' },
+            { description: 'Fuel', unit_rate: -10, source: 'invoice_final_deduction' },
+          ],
+        } }
+      ), false, 'job+week is not landed when the queued write has a deduction extra')
       ctx.api = function(action) {
         if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
         return Promise.resolve({ ok: true })
@@ -889,6 +899,28 @@ function hoursCard(overrides) {
         }).then(function(partialLanded) {
           assert.strictEqual(partialLanded, null,
             'a same-week invoice that only shares one job does not land a multi-job write')
+          ctx.api = function(action) {
+            if (action === 'my_trade_invoices') {
+              return Promise.resolve({
+                invoices: [{ week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-A' }], status: 'draft' }],
+              })
+            }
+            return Promise.resolve({ ok: true })
+          }
+          return ctx._reconcileAmbiguousInvoiceAction({
+            action: 'generate_trade_invoice',
+            body: {
+              week_start: '2026-09-07',
+              extra_items: [
+                { job_number: 'SWF-A' },
+                { description: 'Fuel', unit_rate: -10, source: 'invoice_final_deduction' },
+              ],
+            }
+          }).then(function(deductLanded) {
+            assert.strictEqual(deductLanded, null,
+              'a one-job invoice does not land a queued write that still carries a deduction extra')
+            return Promise.resolve()
+          }).then(function() {
 
           let persistSends = 0
           ctx.api = function(action) {
@@ -925,6 +957,7 @@ function hoursCard(overrides) {
             assert.strictEqual(persistSends, 0,
               'an unconfirmed successful replay reconciles and does not POST again')
             console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+          })
           })
         })
       })
@@ -1025,6 +1058,21 @@ function hoursCard(overrides) {
     'delete can start after the shared financial lock is released')
   tabB._endFinancialWrite('delete_trade_invoice')
 
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+  const heldRaw = store.sw_fin_write
+  assert.strictEqual(tabB._compareAndSwapStorageLock('sw_fin_write', null, {
+    owner: tabB._crossTabId,
+    ts: Date.now(),
+    nonce: 'stale-writer',
+    v: 1,
+    prev: 0,
+  }, 'claim'), false, 'a stale empty-expected claim cannot overwrite an active lease')
+  assert.strictEqual(store.sw_fin_write, heldRaw, 'active lease bytes stay intact after a stale claim')
+  store['sw_fin_write__cas'] = 'other-tab:claim:x:0'
+  assert.strictEqual(tabA._storageLockStillOurs('sw_fin_write'), false,
+    'a stolen fence means the lease is no longer ours')
+  tabA._endFinancialWrite('generate_trade_invoice')
+
   tabA.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-07', extra_items: [{ description: 'A' }] })
   tabB.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14', extra_items: [{ description: 'B' }] })
   assert.strictEqual(tabA._readOfflineQueue().filter((i) => i.action === 'generate_trade_invoice').length, 2,
@@ -1045,10 +1093,16 @@ function hoursCard(overrides) {
   let releaseFirst
   const firstHold = new Promise(function(resolve) { releaseFirst = resolve })
   function gatedApi(action, _q, body, options) {
-    if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
-      const err = new Error('Invoice replay cancelled')
-      err.code = 'invoice_replay_cancelled'
-      return Promise.reject(err)
+    if (options && typeof options.beforeSend === 'function') {
+      try {
+        if (options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+      } catch (e) {
+        return Promise.reject(e)
+      }
     }
     if (action === 'my_work_orders' || action === 'my_trade_invoices') {
       return Promise.resolve({ work_orders: [], invoices: [] })
@@ -1056,20 +1110,54 @@ function hoursCard(overrides) {
     sendCount += 1
     return firstHold.then(function() { return { ok: true } })
   }
-  tabA.api = gatedApi
-  tabB.api = gatedApi
+
+  let blockedSends = 0
+  tabB.api = function(action, _q, body, options) {
+    if (options && typeof options.beforeSend === 'function') {
+      try {
+        if (options.beforeSend() === false) {
+          const err = new Error('Invoice replay cancelled')
+          err.code = 'invoice_replay_cancelled'
+          return Promise.reject(err)
+        }
+      } catch (e) {
+        return Promise.reject(e)
+      }
+    }
+    if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+      return Promise.resolve({ work_orders: [], invoices: [] })
+    }
+    blockedSends += 1
+    return Promise.resolve({ ok: true })
+  }
   store.sw_action_queue = JSON.stringify([{
-    id: 'iq_xtab',
-    client_request_id: 'iq_xtab',
+    id: 'iq_blocked',
+    client_request_id: 'iq_blocked',
     action: 'generate_trade_invoice',
     user_id: 'bob',
     body: { week_start: '2026-09-07' },
   }])
   store.sw_action_queue_inbox_ids = '[]'
-  const syncA = tabA.syncOfflineQueue()
-  const syncB = tabB.syncOfflineQueue()
-  releaseFirst()
-  Promise.all([syncA, syncB]).then(function() {
+  assert.strictEqual(tabA._beginFinancialWrite('generate_trade_invoice'), true)
+  Promise.resolve(tabB.syncOfflineQueue()).then(function() {
+    assert.strictEqual(blockedSends, 0, 'replay does not POST while another tab holds sw_fin_write')
+    tabA._endFinancialWrite('generate_trade_invoice')
+
+    tabA.api = gatedApi
+    tabB.api = gatedApi
+    store.sw_action_queue = JSON.stringify([{
+      id: 'iq_xtab',
+      client_request_id: 'iq_xtab',
+      action: 'generate_trade_invoice',
+      user_id: 'bob',
+      body: { week_start: '2026-09-07' },
+    }])
+    store.sw_action_queue_inbox_ids = '[]'
+    const syncA = tabA.syncOfflineQueue()
+    const syncB = tabB.syncOfflineQueue()
+    releaseFirst()
+    return Promise.all([syncA, syncB])
+  }).then(function() {
     assert.strictEqual(sendCount, 1, 'overlapping tabs send a queued invoice once')
     console.log('OK — cross-tab invoice single-flight and queue merge')
   }).catch(function(err) {

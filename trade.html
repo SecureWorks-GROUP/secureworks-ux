@@ -4326,32 +4326,44 @@
     return String(key || '') + '__cas';
   }
 
-  // Lease claim: announce a fence ticket for the expected version, write only
-  // if those bytes are unchanged, and accept ownership only when both the lock
-  // and the fence still match. A stolen fence or replaced version rejects.
+  function _rollbackStorageLockWrite(key, expectedRaw, claim) {
+    var current = _storageGetJson(key, null);
+    if (!current || current.owner !== _crossTabId || current.nonce !== (claim && claim.nonce)) return;
+    try {
+      if (expectedRaw == null) {
+        if (typeof localStorage.removeItem === 'function') localStorage.removeItem(key);
+        else localStorage.setItem(key, '');
+      } else {
+        localStorage.setItem(key, expectedRaw);
+      }
+    } catch (e) {}
+  }
+
+  // Lease claim: the lock bytes must still be exactly expectedRaw immediately
+  // before the write and after it. Any intervening change to lock or fence
+  // rolls our write back and rejects. The fence stays up for the life of the
+  // lease so a stale tab cannot hide a clobber.
   function _compareAndSwapStorageLock(key, expectedRaw, claim, fenceKind) {
     var expectedVersion = claim && claim.prev != null ? Number(claim.prev) : 0;
     var fenceKey = _storageLockFenceKey(key);
     var ticket = _crossTabId + ':' + fenceKind + ':' + String(claim.nonce || '') + ':' + expectedVersion;
+    claim.fence = ticket;
     try { localStorage.setItem(fenceKey, ticket); } catch (e) { return false; }
     if (_storageLockRaw(fenceKey) !== ticket) return false;
     if (_storageLockRaw(key) !== expectedRaw) {
       if (_storageLockRaw(fenceKey) === ticket) _storageRemove(fenceKey);
       return false;
     }
-    try { localStorage.setItem(key, JSON.stringify(claim)); } catch (e) {
+    var written = JSON.stringify(claim);
+    try { localStorage.setItem(key, written); } catch (e) {
       if (_storageLockRaw(fenceKey) === ticket) _storageRemove(fenceKey);
       return false;
     }
-    var confirm = _storageGetJson(key, null);
-    var fenceHeld = _storageLockRaw(fenceKey) === ticket;
-    var ours = !!(confirm && confirm.owner === _crossTabId && confirm.nonce === claim.nonce && Number(confirm.v) === Number(claim.v));
-    if (!ours) return false;
-    if (!fenceHeld) {
-      _releaseStorageLock(key);
+    if (_storageLockRaw(key) !== written || _storageLockRaw(fenceKey) !== ticket) {
+      _rollbackStorageLockWrite(key, expectedRaw, claim);
+      if (_storageLockRaw(fenceKey) === ticket) _storageRemove(fenceKey);
       return false;
     }
-    _storageRemove(fenceKey);
     return true;
   }
 
@@ -4375,7 +4387,8 @@
 
   function _storageLockStillOurs(key) {
     var held = _storageGetJson(key, null);
-    return !!(held && held.owner === _crossTabId);
+    if (!held || held.owner !== _crossTabId || !held.fence) return false;
+    return _storageLockRaw(_storageLockFenceKey(key)) === held.fence;
   }
 
   function _renewStorageLock(key) {
@@ -4393,15 +4406,25 @@
     return _compareAndSwapStorageLock(key, expectedRaw, next, 'renew');
   }
 
-  function _startStorageLockRenew(key) {
+  function _startStorageLockRenew(key, onLost) {
     return setInterval(function() {
-      _renewStorageLock(key);
+      var ours = _storageLockStillOurs(key);
+      if (ours) {
+        if (_renewStorageLock(key)) return;
+        ours = _storageLockStillOurs(key);
+      }
+      if (!ours && typeof onLost === 'function') onLost();
     }, _STORAGE_LOCK_RENEW_MS);
   }
 
   function _releaseStorageLock(key) {
     var held = _storageGetJson(key, null);
-    if (held && held.owner === _crossTabId) _storageRemove(key);
+    if (!held || held.owner !== _crossTabId) return;
+    var fence = held.fence;
+    _storageRemove(key);
+    if (fence && _storageLockRaw(_storageLockFenceKey(key)) === fence) {
+      _storageRemove(_storageLockFenceKey(key));
+    }
   }
 
   function _financialWriteLockKey(_action) {
@@ -4562,18 +4585,54 @@
     return { ok: false, queue: _readOfflineQueue() };
   }
 
+  var _activeStorageLeaseKeys = [];
+
+  function _pushStorageLease(key) {
+    if (!key) return;
+    if (_activeStorageLeaseKeys.indexOf(key) === -1) _activeStorageLeaseKeys.push(key);
+  }
+
+  function _popStorageLease(key) {
+    _activeStorageLeaseKeys = _activeStorageLeaseKeys.filter(function(k) { return k !== key; });
+  }
+
+  function _allStorageLeasesOwned() {
+    for (var i = 0; i < _activeStorageLeaseKeys.length; i++) {
+      if (!_storageLockStillOurs(_activeStorageLeaseKeys[i])) return false;
+    }
+    return true;
+  }
+
+  function _financialLeaseOwned(action) {
+    return _storageLockStillOurs(_financialWriteLockKey(action));
+  }
+
+  function _invoiceWriteLeaseLostError() {
+    var err = new Error('Invoice send is already in progress.');
+    err.code = 'invoice_write_locked';
+    return err;
+  }
+
   function _withStorageLockAsync(name, ttl, fn) {
     var key = String(name || '') + '_lock';
     var start = Date.now();
     var attempt = function() {
       if (_claimStorageLock(key, ttl)) {
-        var timer = _startStorageLockRenew(key);
-        return Promise.resolve().then(fn).then(function(result) {
+        var lost = false;
+        _pushStorageLease(key);
+        var timer = _startStorageLockRenew(key, function() { lost = true; });
+        var run = function() {
+          if (lost || !_storageLockStillOurs(key)) return Promise.reject(_invoiceWriteLeaseLostError());
+          return Promise.resolve().then(fn);
+        };
+        return run().then(function(result) {
           clearInterval(timer);
+          _popStorageLease(key);
           _releaseStorageLock(key);
           return result;
         }, function(err) {
           clearInterval(timer);
+          _popStorageLease(key);
           _releaseStorageLock(key);
           throw err;
         });
@@ -4586,24 +4645,36 @@
     return attempt();
   }
 
-  function _withFinancialWebLock(action, fn) {
+  function _withFinancialWebLock(action, fn, opts) {
+    opts = opts || {};
+    var acquire = opts.acquire !== false;
+    var run = function() {
+      var claimed = false;
+      if (acquire) {
+        if (!_beginFinancialWrite(action)) return Promise.reject(_invoiceWriteLeaseLostError());
+        claimed = true;
+      } else if (!_financialWriteHeldLocally() || !_financialLeaseOwned(action)) {
+        return Promise.reject(_invoiceWriteLeaseLostError());
+      }
+      _pushStorageLease(_financialWriteLockKey(action));
+      return Promise.resolve().then(fn).then(function(result) {
+        _popStorageLease(_financialWriteLockKey(action));
+        if (claimed) _endFinancialWrite(action);
+        return result;
+      }, function(err) {
+        _popStorageLease(_financialWriteLockKey(action));
+        if (claimed) _endFinancialWrite(action);
+        throw err;
+      });
+    };
     var locks = (typeof navigator !== 'undefined' && navigator.locks) || null;
     if (locks && typeof locks.request === 'function') {
       return locks.request(_financialWriteLockKey(action), { mode: 'exclusive', ifAvailable: true }, function(lock) {
-        if (!lock) {
-          var err = new Error('Invoice send is already in progress.');
-          err.code = 'invoice_write_locked';
-          return Promise.reject(err);
-        }
-        return Promise.resolve().then(fn);
+        if (!lock) return Promise.reject(_invoiceWriteLeaseLostError());
+        return run();
       });
     }
-    if (_sharedFinancialWriteHeld(action)) {
-      var locked = new Error('Invoice send is already in progress.');
-      locked.code = 'invoice_write_locked';
-      return Promise.reject(locked);
-    }
-    return Promise.resolve().then(fn);
+    return run();
   }
 
   function _withCrossTabLock(name, fn) {
@@ -4820,10 +4891,26 @@
     return false;
   }
 
+  function _invoicePayloadHasMoneyAffectingExtras(body) {
+    body = body || {};
+    if (Array.isArray(body.final_deductions) && body.final_deductions.length) return true;
+    var extras = body.extra_items || [];
+    for (var i = 0; i < extras.length; i++) {
+      var row = extras[i] || {};
+      if (row.source === 'invoice_final_deduction') return true;
+      if (Array.isArray(row.wo_lump_lines) && row.wo_lump_lines.length) return true;
+      var rate = Number(row.unit_rate != null ? row.unit_rate : row.rate);
+      var amount = Number(row.amount);
+      if ((row.unit_rate != null || row.rate != null) && rate < 0) return true;
+      if (row.amount != null && amount < 0) return true;
+    }
+    return false;
+  }
+
   function _invoicePayloadNeedsFullFingerprint(item) {
     var body = (item && item.body) || {};
     if (_invoiceIdentitySlots(body).length > 1) return true;
-    return !!(Array.isArray(body.final_deductions) && body.final_deductions.length);
+    return _invoicePayloadHasMoneyAffectingExtras(body);
   }
 
   function _invoiceMatchesQueueIntent(inv, item) {
@@ -4847,9 +4934,7 @@
     var bodyWeek = _invoicePeriodKey(body);
     var invWeek = _invoicePeriodKey(inv);
     if (!bodyWeek || !invWeek || bodyWeek !== invWeek) return false;
-    if (Array.isArray(body.final_deductions) && body.final_deductions.length) {
-      if (_invoiceDeductionFingerprint(body) !== _invoiceDeductionFingerprint(inv)) return false;
-    }
+    if (_invoicePayloadHasMoneyAffectingExtras(body)) return false;
     return true;
   }
 
@@ -5196,10 +5281,14 @@
         return _withFinancialWebLock(item.action, function() {
           return api(item.action, null, item.body, {
             beforeSend: function() {
-              return _offlineInvoiceReplayAllowed(item, replayCtx);
+              if (!_offlineInvoiceReplayAllowed(item, replayCtx)) return false;
+              if (!_allStorageLeasesOwned() || !_financialLeaseOwned(item.action)) {
+                throw _invoiceWriteLeaseLostError();
+              }
+              return true;
             }
           });
-        }).then(function(result) {
+        }, { acquire: true }).then(function(result) {
           if (!_offlineInvoiceReplaySucceeded(result)) remaining.push(item);
         }).catch(function(e) {
           if (e && e.code === 'invoice_replay_cancelled') return;
@@ -6056,7 +6145,9 @@
     return {
       beforeSend: function() {
         if (!_invoiceApiCurrent(ctx)) return false;
-        if (_financialWriteHeldLocally() && !_storageLockStillOurs(_financialWriteLockKey(action))) return false;
+        if (!_allStorageLeasesOwned() || (_financialWriteHeldLocally() && !_financialLeaseOwned(action))) {
+          throw _invoiceWriteLeaseLostError();
+        }
         return true;
       }
     };
@@ -6065,7 +6156,7 @@
   function _financialInvoiceApi(action, params, body, ctx) {
     return _withFinancialWebLock(action, function() {
       return api(action, params, body, _invoiceApiOptions(ctx, action));
-    });
+    }, { acquire: false });
   }
 
   // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),

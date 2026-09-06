@@ -347,7 +347,9 @@ assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_finan
 assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
   'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
 assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded') &&
-  html.includes('_invoiceIdentitySlots') && html.includes('persist_unconfirmed'),
+  html.includes('_invoiceIdentitySlots') && html.includes('persist_unconfirmed') &&
+  html.includes('_invoicePayloadHasMoneyAffectingExtras') && html.includes('_rollbackStorageLockWrite') &&
+  html.includes('_financialLeaseOwned'),
   'job-centric nested identities can reconcile and replay drops only after durable queue removal');
 assert((function() {
   const block = html.slice(html.indexOf('function _mutateOfflineQueue'), html.indexOf('function _withStorageLockAsync'));
@@ -362,7 +364,9 @@ assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock'
 assert(/function _beginFinancialWrite\(action\) \{[\s\S]*?_claimStorageLock\(_financialWriteLockKey\(key\)/.test(html) &&
   /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
   html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
-  html.includes('_compareAndSwapStorageLock'),
+  html.includes('_compareAndSwapStorageLock') &&
+  html.includes("{ acquire: true }") &&
+  html.includes('_allStorageLeasesOwned'),
   'invoice begin/guard honor another tab\'s in-flight financial write claim');
 assert(html.includes('client_request_id') && html.includes('_reconcileAmbiguousInvoiceAction'),
   'financial queue items carry a local request id and reconcile before retrying a timeout');

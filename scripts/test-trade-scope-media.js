@@ -322,12 +322,24 @@ check(
   /otherDocs = docs\.filter\(function\(d\) \{\s*return d\.visible_to_trades && d\.type !== 'site_photo' && !isPricedWorkOrderDocument\(d\);/.test(html)
 );
 check(
-  'shipped video collection drops priced WO documents',
-  /isTradeVisibleDocument\(d\) && !isPricedWorkOrderDocument\(d\)/.test(html)
+  'shipped video collection drops priced WO documents from every source',
+  /if \(!item \|\| !isTradeVisibleMedia\(item\) \|\| isPricedWorkOrderDocument\(item\)\) continue;/.test(html)
 );
 check(
-  'shipped isJobVideo refuses priced WO documents',
-  /if \(isPricedWorkOrderDocument\(m\) && !isDeclaredJobVideo\(m\)\) return false;/.test(html)
+  'shipped isJobVideo refuses priced WO documents unconditionally',
+  /if \(isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
+);
+check(
+  'shipped collectJobMedia filters every media source',
+  /function pushVisibleMedia\(arr\)/.test(html) && /pushVisibleMedia\(data && data\.media\)/.test(html) && /pushVisibleMedia\(data && data\.videos\)/.test(html)
+);
+check(
+  'shipped video labels are price-redacted',
+  /var label = redactTradePriceText\(video\.label \|\| video\.file_name \|\| video\.name/.test(html)
+);
+check(
+  'shipped WO instructions use sow redaction',
+  /escSowText\(wo\.special_instructions\)/.test(html)
 );
 check(
   'shipped leftover Work Order PDF card is office-gated',
@@ -375,8 +387,62 @@ check('supplier WO document is recognised', M.isPricedWorkOrderDocument(supplier
 check('filename WO alias is a priced WO document', M.isPricedWorkOrderDocument(aliasWoDoc) === true);
 check('senior installer cannot open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === '');
 check('senior installer cannot open supplier WO PDF', M.tradeWorkOrderPdfUrl(supplierPdfData) === '');
+const woClaimingVideo = {
+  type: 'work_order',
+  is_video: true,
+  kind: 'video',
+  file_name: 'Builder-WO.pdf',
+  playable_url: 'https://storage.example.test/signed-wo.pdf?token=abc',
+  visible_to_trades: true,
+};
+const realWoNamedVideo = {
+  id: 'vid-wo-name',
+  type: 'video',
+  file_name: 'WO-site.mp4',
+  storage_url: 'https://storage.example.test/wo-site.mp4',
+};
+const hiddenOfficeVideo = {
+  id: 'vid-office',
+  type: 'video',
+  label: 'Office recap $8,800',
+  playable_url: 'https://storage.example.test/office-recap.mp4',
+  visible_to_trades: false,
+};
+const pricedLabelVideo = {
+  id: 'vid-priced-label',
+  type: 'video',
+  label: 'Walkthrough quote total $8,800',
+  playable_url: 'https://storage.example.test/walk-price.mp4',
+};
+
 check('priced WO PDF is not a job video', M.isJobVideo(woPdfData.documents[0]) === false);
 check('walkthrough-named WO PDF is not a job video', M.isJobVideo(walkthroughNamedWoPdf) === false);
+check('work_order row claiming to be video is still a priced WO', M.isPricedWorkOrderDocument(woClaimingVideo) === true);
+check('work_order row claiming to be video is not a job video', M.isJobVideo(woClaimingVideo) === false);
+check('real video named WO-site.mp4 is still a job video', M.isJobVideo(realWoNamedVideo) === true);
+check('explicit office-internal media is hidden', M.isTradeVisibleMedia(hiddenOfficeVideo) === false);
+check('untagged job media stays visible', M.isTradeVisibleMedia(walkthrough) === true);
+check('explicit false document stays hidden', M.isTradeVisibleMedia(internalDocVideo) === false);
+
+const mixedMedia = M.listJobVideos({
+  job: { scope_json: {}, media: [hiddenOfficeVideo] },
+  media: [walkthrough, woClaimingVideo, hiddenOfficeVideo],
+  videos: [realWoNamedVideo],
+  documents: [woPdfData.documents[0]],
+});
+check('hidden and priced WO media never list as videos', mixedMedia.every(function (v) {
+  return v.id === 'vid-walk' || v.id === 'vid-wo-name';
+}) && mixedMedia.length === 2);
+
+fullPricingOn = false;
+const pricedLabelHtml = M.renderScopeVideoCard({ job: { scope_json: {} }, media: [pricedLabelVideo] });
+check('video still plays when label has a price', pricedLabelHtml.includes(pricedLabelVideo.playable_url));
+check('video label price is redacted for trades', pricedLabelHtml.includes('Walkthrough quote total') && !pricedLabelHtml.includes('8,800') && !pricedLabelHtml.includes('$'));
+
+check('escSowText redacts WO instructions for trades', M.escSowText('Match fascia. Quote total $8,800.') === 'Match fascia. Quote total.');
+fullPricingOn = true;
+check('escSowText keeps prices for office', M.escSowText('Quote total $8,800.') === 'Quote total $8,800.');
+fullPricingOn = false;
 const woAsMedia = M.listJobVideos({
   job: { scope_json: {} },
   media: [],

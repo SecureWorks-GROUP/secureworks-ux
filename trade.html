@@ -7598,7 +7598,7 @@
 
     // Make-safe work-order note (kept), light strip below the band.
     if (isMs && !compact && job.notes) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;white-space:pre-wrap;line-height:1.45">' + esc(job.notes.substring(0, 150)) + '</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:8px;white-space:pre-wrap;line-height:1.45">' + escSowText(job.notes.substring(0, 150)) + '</div>';
     }
     // Meta strip: materials + date + day info (standard, non-compact).
     if (!isMs && !compact) {
@@ -7898,7 +7898,7 @@
     h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-text-sec);margin-bottom:6px">Site Notes</div>';
 
     if (jobNotes && !/^Synced from/i.test(jobNotes)) {
-      h += '<div style="font-size:13px;color:var(--sw-text);padding:2px 0">' + esc(jobNotes) + '</div>';
+      h += '<div style="font-size:13px;color:var(--sw-text);padding:2px 0">' + escSowText(jobNotes) + '</div>';
     }
 
     for (var i = 0; i < Math.min(adminNotes.length, 5); i++) {
@@ -7909,7 +7909,7 @@
       var date = n.created_at ? new Date(n.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
       h += '<div style="font-size:13px;color:var(--sw-text);padding:2px 0">';
       h += '<span style="font-weight:600;color:var(--sw-text-sec)">' + esc(n.users.name || '') + (date ? ' (' + date + ')' : '') + ':</span> ';
-      h += esc(text);
+      h += escSowText(text);
       h += '</div>';
     }
 
@@ -7977,7 +7977,7 @@
       }
       if (eodNote) {
         var cleanNote = eodNote.replace(/^EOD\s*—?\s*/, '').replace(/\|\s*Progress:\s*\d+%$/, '').trim();
-        if (cleanNote) innerHtml += '<div style="font-size:13px;color:var(--sw-text);margin-top:4px">"' + esc(cleanNote) + '"</div>';
+        if (cleanNote) innerHtml += '<div style="font-size:13px;color:var(--sw-text);margin-top:4px">"' + escSowText(cleanNote) + '"</div>';
       }
       if (dayPhotos.length > 0) {
         innerHtml += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:4px">' + dayPhotos.length + ' photo' + (dayPhotos.length > 1 ? 's' : '') + '</div>';
@@ -8165,10 +8165,9 @@
 
   function isJobVideo(m) {
     if (!m) return false;
-    // Captain lock: a priced WO/PDF document must never become a <video src>.
-    // Real job videos (type/mime/extension) still play even if the file name
-    // happens to mention WO.
-    if (isPricedWorkOrderDocument(m) && !isDeclaredJobVideo(m)) return false;
+    // Captain lock: a priced WO/PDF document must never become a <video src>,
+    // even when type/kind/is_video claims it is a video.
+    if (isPricedWorkOrderDocument(m)) return false;
     var type = String(m.type || m.kind || m.media_type || '').toLowerCase();
     if (type === 'video' || type === 'walkthrough') return true;
     if (m.is_video === true) return true;
@@ -8187,22 +8186,33 @@
     return !!(d && d.visible_to_trades);
   }
 
+  function isTradeVisibleMedia(m) {
+    if (!m) return false;
+    // Allocated job/quote media without the flag stays playable. An explicit
+    // office-internal mark hides it. Documents stay opt-in via
+    // isTradeVisibleDocument.
+    if (Object.prototype.hasOwnProperty.call(m, 'visible_to_trades')) return !!m.visible_to_trades;
+    return true;
+  }
+
   function collectJobMedia(data) {
     var out = [];
-    function pushAll(arr) {
+    function pushVisibleMedia(arr) {
       if (!arr || !arr.length) return;
-      for (var i = 0; i < arr.length; i++) if (arr[i]) out.push(arr[i]);
+      for (var i = 0; i < arr.length; i++) {
+        var item = arr[i];
+        if (!item || !isTradeVisibleMedia(item) || isPricedWorkOrderDocument(item)) continue;
+        out.push(item);
+      }
     }
-    pushAll(data && data.media);
-    pushAll(data && data.videos);
-    pushAll(data && data.job && data.job.media);
-    pushAll((data && data.documents || []).filter(function(d) {
-      return isTradeVisibleDocument(d) && !isPricedWorkOrderDocument(d);
-    }));
+    pushVisibleMedia(data && data.media);
+    pushVisibleMedia(data && data.videos);
+    pushVisibleMedia(data && data.job && data.job.media);
+    pushVisibleMedia((data && data.documents || []).filter(isTradeVisibleDocument));
     var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     packs.forEach(function(p) {
-      pushAll(p && p.media);
-      pushAll(p && p.videos);
+      pushVisibleMedia(p && p.media);
+      pushVisibleMedia(p && p.videos);
     });
     return out;
   }
@@ -8349,7 +8359,7 @@
     h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Job videos</div>';
     playable.forEach(function(video) {
       var url = mediaPlayableUrl(video);
-      var label = video.label || video.file_name || video.name || (isWalkthroughMedia(video) ? 'Walkthrough' : 'Job video');
+      var label = redactTradePriceText(video.label || video.file_name || video.name || (isWalkthroughMedia(video) ? 'Walkthrough' : 'Job video'));
       h += '<div data-job-video="' + esc(label) + '" style="margin-bottom:10px">';
       h += '<video controls playsinline preload="metadata" style="width:100%;max-height:240px;background:#111;border-radius:8px" src="' + esc(url) + '"></video>';
       h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(label) + '</div>';
@@ -8386,10 +8396,17 @@
     return typeof canSeeFullPricing === 'function' && canSeeFullPricing();
   }
 
+  function escSowText(text) {
+    return esc(redactTradePriceText(text));
+  }
+
   function isPricedWorkOrderDocument(d) {
     if (!d) return false;
     var type = String(d.type || '').toLowerCase();
     if (type === 'work_order' || type === 'supplier_work_order') return true;
+    // A real video file is not a priced WO PDF, even if the name mentions WO.
+    // Rows typed work_order / supplier_work_order already returned true above.
+    if (isVideoUrl(d.file_name) || isVideoUrl(d.storage_url) || isVideoUrl(mediaPlayableUrl(d))) return false;
     return /work[\s_-]*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' '));
   }
 
@@ -8490,6 +8507,7 @@
     isDeclaredJobVideo: isDeclaredJobVideo,
     isScopeVideo: isScopeVideo,
     isTradeVisibleDocument: isTradeVisibleDocument,
+    isTradeVisibleMedia: isTradeVisibleMedia,
     collectJobMedia: collectJobMedia,
     mediaIdentityAliases: mediaIdentityAliases,
     mediaStableKey: mediaStableKey,
@@ -8502,6 +8520,7 @@
     renderScopeVideoCard: renderScopeVideoCard,
     redactTradePriceText: redactTradePriceText,
     tradeCanSeeSowPricing: tradeCanSeeSowPricing,
+    escSowText: escSowText,
     isPricedWorkOrderDocument: isPricedWorkOrderDocument,
     findMakesafeWorkOrderDocument: findMakesafeWorkOrderDocument,
     tradeWorkOrderPdfUrl: tradeWorkOrderPdfUrl,
@@ -8888,7 +8907,7 @@
     // Client notes from scope
     var client = job.scope_json.client || {};
     if (client.notes) {
-      h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px"><strong>Notes:</strong> ' + esc(client.notes) + '</div>';
+      h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px"><strong>Notes:</strong> ' + escSowText(client.notes) + '</div>';
     }
 
     // Labour budget — office only. Allocated trades never see $/rates on SOW.
@@ -9154,9 +9173,9 @@
       if (wo.scope_items && wo.scope_items.length > 0) {
         wo.scope_items.forEach(function(item) {
           if (typeof item === 'string') {
-            h += '<div class="scope-item">' + esc(item) + '</div>';
+            h += '<div class="scope-item">' + escSowText(item) + '</div>';
           } else if (item.description) {
-            h += '<div class="scope-item"><strong>' + esc(item.description) + '</strong>';
+            h += '<div class="scope-item"><strong>' + escSowText(item.description) + '</strong>';
             if (item.quantity) h += ' <span style="color:var(--sw-text-sec)">x' + item.quantity + '</span>';
             h += '</div>';
           }
@@ -9174,7 +9193,7 @@
         }
       }
       if (wo.special_instructions) {
-        h += '<div style="margin-top:10px;padding:10px;background:var(--sw-light);border-radius:8px;font-size:13px"><strong>Special Instructions:</strong><br>' + esc(wo.special_instructions) + '</div>';
+        h += '<div style="margin-top:10px;padding:10px;background:var(--sw-light);border-radius:8px;font-size:13px"><strong>Special Instructions:</strong><br>' + escSowText(wo.special_instructions) + '</div>';
       }
       h += '</div>';
     }
@@ -9382,7 +9401,7 @@
   }
 
   function linkifyTradeBodyText(text) {
-    text = String(text || '');
+    text = redactTradePriceText(String(text || ''));
     if (!text) return '';
     var re = /((?:https?:\/\/|www\.)[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/ig;
     var out = '';
@@ -9491,12 +9510,12 @@
     if (familyLabel) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Family:</strong> ' + esc(familyLabel) + '</div>';
     if (companyName) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>From:</strong> ' + esc(companyName) + '</div>';
     if (email) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>' + emailLabel + ':</strong> <a href="mailto:' + esc(email) + '" style="color:var(--sw-mid);text-decoration:underline;text-underline-offset:2px">' + esc(email) + '</a></div>';
-    if (source.subject) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Source subject:</strong> ' + esc(source.subject) + '</div>';
+    if (source.subject) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Source subject:</strong> ' + escSowText(source.subject) + '</div>';
     if (receivedAt) h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px;"><strong>Received:</strong> ' + esc(formatDateTime(receivedAt)) + '</div>';
     if (ms.external_ref || job.external_ref || job.ref) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Ref:</strong> ' + esc(ms.external_ref || job.external_ref || job.ref) + '</div>';
     if (emailText) h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin:8px 0;padding:8px;background:#fff;border:1px solid var(--sw-border);border-radius:8px;"><strong>Source builder email (untrusted):</strong><br>' + linkifyTradeBodyText(emailText) + '</div>';
-    if (ms.special_instructions) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + esc(ms.special_instructions) + '</div>';
-    if (ms.safety_requirements) h += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + esc(ms.safety_requirements) + '</div>';
+    if (ms.special_instructions) h += '<div style="font-size:13px;margin-bottom:4px;"><strong>Instructions:</strong> ' + escSowText(ms.special_instructions) + '</div>';
+    if (ms.safety_requirements) h += '<div style="font-size:13px;margin-bottom:4px;color:var(--sw-red);"><strong>Safety:</strong> ' + escSowText(ms.safety_requirements) + '</div>';
     if (ms.substatus && subLabels[ms.substatus]) {
       h += '<div style="font-size:12px;margin-top:6px;"><span style="padding:2px 8px;border-radius:10px;background:var(--sw-orange);color:#fff;font-weight:600;">' + subLabels[ms.substatus] + '</span></div>';
     }
@@ -9594,7 +9613,7 @@
       }
 
       if (tScope && tScope.notes && tScope.notes.noteWorkOrder) {
-        html += '<div style="color:var(--sw-text-sec);">&#128221; ' + tScope.notes.noteWorkOrder.replace(/</g, '&lt;').slice(0, 200) + '</div>';
+        html += '<div style="color:var(--sw-text-sec);">&#128221; ' + escSowText(tScope.notes.noteWorkOrder.slice(0, 200)) + '</div>';
       }
 
       html += '</div></div>';
@@ -9928,7 +9947,7 @@
     if (wo && wo.special_instructions) {
       h += '<div class="detail-section" style="background:var(--sw-light);border-left:4px solid var(--sw-orange);padding:14px 16px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-orange);margin-bottom:8px">Instructions</div>';
-      h += '<div style="font-size:14px;line-height:1.6;color:var(--sw-text);white-space:pre-wrap">' + esc(wo.special_instructions) + '</div>';
+      h += '<div style="font-size:14px;line-height:1.6;color:var(--sw-text);white-space:pre-wrap">' + escSowText(wo.special_instructions) + '</div>';
       if (wo.estimated_hours) {
         h += '<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">';
         h += '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--sw-text-sec)">Estimated Hours</span>';
@@ -9943,7 +9962,7 @@
     if (installerNotes && !(wo && wo.special_instructions)) {
       h += '<div class="detail-section" style="background:var(--sw-light);border-left:4px solid var(--sw-orange);padding:14px 16px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-orange);margin-bottom:8px">Installer Notes</div>';
-      h += '<div style="font-size:14px;line-height:1.6;color:var(--sw-text);white-space:pre-wrap">' + esc(installerNotes) + '</div>';
+      h += '<div style="font-size:14px;line-height:1.6;color:var(--sw-text);white-space:pre-wrap">' + escSowText(installerNotes) + '</div>';
       h += '</div>';
     }
 
@@ -12271,7 +12290,7 @@
       h += '</div>';
     }
     if (wo.special_instructions || ms.special_instructions || job.notes) {
-      h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px">' + esc(wo.special_instructions || ms.special_instructions || job.notes) + '</div>';
+      h += '<div style="font-size:13px;line-height:1.45;color:var(--sw-text);white-space:pre-wrap;margin-top:8px">' + escSowText(wo.special_instructions || ms.special_instructions || job.notes) + '</div>';
     }
     if (wo.scope_items && Array.isArray(wo.scope_items) && wo.scope_items.length > 0) {
       h += '<div style="margin-top:10px;border-top:1px solid #FDBA74;padding-top:8px" data-scope-wo-items>';
@@ -24692,7 +24711,7 @@
 
       // Notes from scope
       var client = scopeJson.client || {};
-      if (client.notes) html += '<div style="margin-top:8px;padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px"><strong>Notes:</strong> ' + esc(client.notes) + '</div>';
+      if (client.notes) html += '<div style="margin-top:8px;padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px"><strong>Notes:</strong> ' + escSowText(client.notes) + '</div>';
 
       // Customer quote price removed — labour budget only (no sell price shown to installers)
       if (showPricing && scopeJson.pricing && scopeJson.pricing.labour) {

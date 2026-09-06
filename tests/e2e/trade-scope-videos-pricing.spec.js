@@ -23,7 +23,7 @@ function patioDetail(overrides) {
         length: 6,
         projection: 4,
         walkthrough: true,
-        client: { notes: 'Match existing fascia colour' },
+        client: { notes: 'Match existing fascia colour. Quote total $8,800.' },
       },
     },
     crew: [],
@@ -51,7 +51,7 @@ function patioDetail(overrides) {
       {
         id: 'e2e-walkthrough',
         type: 'video',
-        label: 'Site walkthrough',
+        label: 'Site walkthrough quote total $8,800',
         phase: 'scope',
         playable_url: VIDEO_WALK,
       },
@@ -68,6 +68,21 @@ function patioDetail(overrides) {
         phase: 'scope',
         storage_url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
       },
+      {
+        id: 'e2e-office-video',
+        type: 'video',
+        label: 'Office only recap',
+        playable_url: 'data:video/mp4,office-only',
+        visible_to_trades: false,
+      },
+      {
+        id: 'e2e-wo-as-video',
+        type: 'work_order',
+        is_video: true,
+        file_name: 'Builder-WO.pdf',
+        playable_url: WO_PDF,
+        visible_to_trades: true,
+      },
     ],
     quote_packs: [
       {
@@ -82,6 +97,7 @@ function patioDetail(overrides) {
     ],
     workOrder: {
       wo_number: 'WO-99',
+      special_instructions: 'Match existing fascia. Quote total $8,800.',
       scope_items: [
         { description: 'Posts and beams', quantity: 8, unit: 'ea', unit_price: 120, total: 960 },
       ],
@@ -186,6 +202,9 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(scope.locator('[data-job-videos]')).toBeVisible();
     await expect(scope.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
     await expect(scope.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
+    await expect(scope.locator('video[src="data:video/mp4,office-only"]')).toHaveCount(0);
+    await expect(scope).toContainText('Match existing fascia');
+    await expect(scope).toContainText('Site walkthrough quote total');
     await expect(scope).toContainText('Q-4412');
     await expect(scope).toContainText('Install insulated patio');
     await expect(scope).toContainText('Posts and beams');

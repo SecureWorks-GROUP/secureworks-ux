@@ -256,6 +256,10 @@ assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
   'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
 assert(/var orders = workOrdersForViewer\(res\.work_orders \|\| \[\]\);/.test(html),
   'Cost Breakdown applies the same managed-vertical lens before render/authorize');
+assert(!/orders\[i\]\.id === wo\.id \|\| orders\[i\]\.job_id === job\.id/.test(html),
+  'Cost Breakdown never authorizes a different WO via job_id fallback');
+assert(/if \(String\(orders\[i\]\.id\) === String\(wo\.id\)\)/.test(html),
+  'Cost Breakdown matches only the work order being viewed');
 assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length >= 2,
   'hub and Cost Breakdown request my_work_orders with mode=all');
 assert(!/api\('my_work_orders'\)/.test(html),
@@ -302,6 +306,10 @@ assert(html.includes('jobCards: _serializeJobCardsDraft(_jobCards)'),
   'the invoice draft persists job-centric cards, not only legacy _invRows');
 assert(html.includes('_applyInvDraft(draft)'),
   'loadHoursView restores persisted job cards after a reload');
+assert(html.includes('_invDraftStorageKey') && html.includes('resetInvoiceSession'),
+  'invoice drafts are keyed by authenticated user and cleared on auth change');
+assert(html.includes('_jobCardAcceptsWorkOrder'),
+  'hydrate applies the date/job bind guard even when a card already has a work_order_id');
 assert(html.includes('_unboundCardForWorkOrder'),
   'WO hydrate binds an unbound card only on the matching work-order date');
 assert(html.includes('_jobCardKeepHoursMode'),

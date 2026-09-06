@@ -5023,6 +5023,11 @@
     _myJobsRequestToken++;
     resetCalendarSession();
     resetBoardSession();
+    resetInvoiceSession();
+  }
+
+  function resetInvoiceSession() {
+    _clearInvDraft();
   }
 
   // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
@@ -9930,7 +9935,7 @@
         var orders = workOrdersForViewer(res.work_orders || []);
         var match = null;
         for (var i = 0; i < orders.length; i++) {
-          if (orders[i].id === wo.id || orders[i].job_id === job.id) { match = orders[i]; break; }
+          if (String(orders[i].id) === String(wo.id)) { match = orders[i]; break; }
         }
         if (!match) {
           el.innerHTML = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div><div style="font-size:13px;color:var(--sw-text-sec)">No invoiceable work order found</div>';
@@ -15847,7 +15852,7 @@
     // If invoice builder was open (or saved in sessionStorage), restore it instead of reloading hours
     if (_invoiceBuilderOpen) { renderInvoiceBuilder(); return; }
     try {
-      var draft = JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null');
+      var draft = _readInvDraft();
       if (_invDraftHasWork(draft)) {
         _applyInvDraft(draft);
         return;
@@ -17470,6 +17475,30 @@
     return false;
   }
 
+  function _invDraftOwnerId() {
+    return String((_user && (_user.id || _user.email)) || '');
+  }
+
+  function _invDraftStorageKey(ownerId) {
+    var id = ownerId != null && String(ownerId) ? String(ownerId) : _invDraftOwnerId();
+    return id ? 'sw_inv_draft_' + encodeURIComponent(id) : '';
+  }
+
+  function _readInvDraft() {
+    try {
+      var owner = _invDraftOwnerId();
+      if (!owner) return null;
+      var key = _invDraftStorageKey(owner);
+      var raw = key ? sessionStorage.getItem(key) : null;
+      if (!raw) return null;
+      var draft = JSON.parse(raw);
+      if (draft && draft.user_id && String(draft.user_id) !== owner) return null;
+      return draft;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function _refreshHoursDataForOpenInvoice() {
     var weekEnd = _hoursWeekEnd || getWeekEndSunday(0);
     if (!weekEnd) return;
@@ -17512,13 +17541,18 @@
     _refreshHoursDataForOpenInvoice();
   }
 
-  // Persist invoice draft to sessionStorage (survives background kill)
+  // Persist invoice draft to sessionStorage (survives background kill).
+  // Keyed by authenticated user so a shared-device account switch cannot
+  // restore another trade's WO allocations or deductions.
   function _saveInvDraft() {
     if (!_invoiceBuilderOpen) return;
+    var key = _invDraftStorageKey();
+    if (!key) return;
     try {
       _syncRowsFromDOM();
       if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
-      sessionStorage.setItem('sw_inv_draft', JSON.stringify({
+      sessionStorage.setItem(key, JSON.stringify({
+        user_id: _invDraftOwnerId(),
         rows: _invRows,
         jobCards: _serializeJobCardsDraft(_jobCards),
         jobCentric: !!_jobCentricActive,
@@ -17527,9 +17561,10 @@
         gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
+      sessionStorage.removeItem('sw_inv_draft');
     } catch(e) {}
   }
-  window._clearInvDraft = function() {
+  function _clearInvDraft() {
     _invoiceBuilderOpen = false;
     _jobCentricActive = false;
     _pmDraftIsPerMetre = false;
@@ -17537,8 +17572,15 @@
     _pmWoHydrateError = '';
     _pmWoHydrateSeq++;
     _invoiceRenderSeq++;
-    try { sessionStorage.removeItem('sw_inv_draft'); } catch(e) {}
-  };
+    _jobCards = [];
+    _invRows = [];
+    try {
+      var key = _invDraftStorageKey();
+      if (key) sessionStorage.removeItem(key);
+      sessionStorage.removeItem('sw_inv_draft');
+    } catch(e) {}
+  }
+  window._clearInvDraft = _clearInvDraft;
   window.leaveInvoiceBuilder = function() {
     _clearInvDraft();
     loadHoursView();
@@ -17991,6 +18033,18 @@
     card.hours_user_edited = true;
   }
 
+  // Same date/job guard for bound and unbound cards. A stored work_order_id
+  // does not let a WO write onto a different job or assignment day.
+  function _jobCardAcceptsWorkOrder(card, jobId, woDate) {
+    if (!card) return false;
+    if (jobId && card.job_id && String(card.job_id) !== String(jobId)) return false;
+    if (woDate) {
+      var cardDate = _jobCardDate(card);
+      if (cardDate && cardDate !== woDate) return false;
+    }
+    return true;
+  }
+
   // Date-aware bind: a WO completion/schedule date never attaches to a
   // different assignment day. An undated WO binds only when the job has
   // exactly one unbound card.
@@ -18031,6 +18085,11 @@
       _jobCards.forEach(function(c) {
         if (String(c.work_order_id || '') === woId) existing = c;
       });
+      if (existing && !_jobCardAcceptsWorkOrder(existing, jobId, date)) {
+        existing.work_order_id = '';
+        existing.wo_number = '';
+        existing = null;
+      }
       var target = existing || _unboundCardForWorkOrder(jobId, date);
       if (target) {
         // Identity is the work-order id. A second WO on the same job/day

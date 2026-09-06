@@ -152,9 +152,14 @@ test('job-centric WO allocations survive a Financial reload', async ({ appPage: 
   await card.locator('[data-cardlumpamt]').fill('10');
   await card.locator('[data-cardlumpamt]').press('Tab');
   await expect(card.locator('[data-cardamt]')).toHaveText('$50.00');
-  const draft = await page.evaluate(() => JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null'));
+  const draft = await page.evaluate(() => {
+    const key = 'sw_inv_draft_' + encodeURIComponent('e2e-henry');
+    return JSON.parse(sessionStorage.getItem(key) || sessionStorage.getItem('sw_inv_draft') || 'null');
+  });
   expect(draft && draft.is_per_metre).toBe(true);
+  expect(draft.user_id).toBe('e2e-henry');
   expect(Array.isArray(draft.jobCards) && draft.jobCards.length).toBeGreaterThan(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('sw_inv_draft'))).toBeNull();
 
   await page.reload();
   await signIn(page, PERSONAS.fencing_manager);
@@ -166,6 +171,23 @@ test('job-centric WO allocations survive a Financial reload', async ({ appPage: 
   await expect(restored.locator('[data-cardlumpdesc]')).toHaveValue('Materials');
   await expect(restored.locator('[data-cardlumpamt]')).toHaveValue('10');
   await expect(restored.locator('[data-cardamt]')).toHaveText('$50.00');
+});
+
+test('an invoice draft from another account is not restored', async ({ appPage: page }) => {
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.evaluate(() => {
+    const leak = {
+      user_id: 'other-user',
+      jobCards: [{ job_number: 'LEAK-JOB', included: true, wo_mode: true, wo_allocated: 99 }],
+      is_per_metre: true
+    };
+    sessionStorage.setItem('sw_inv_draft', JSON.stringify(leak));
+    sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('other-user'), JSON.stringify(leak));
+  });
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Invoice' })).toHaveCount(0);
+  await expect(page.locator('#hoursContent')).not.toContainText('LEAK-JOB');
 });
 
 test('Hours typed while hydrate is pending stay Hours after the WO arrives', async ({ appPage: page }) => {

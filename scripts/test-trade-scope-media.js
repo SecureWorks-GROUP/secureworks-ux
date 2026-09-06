@@ -378,6 +378,18 @@ check(
   'shipped renderNote uses sow redaction',
   /<div class="note-text">' \+ escSowText\(text\) \+ '<\/div>/.test(html)
 );
+check(
+  'shipped Quick Notes body uses sow redaction (TRD5-R11-001)',
+  /<div class="note-text">' \+ escSowText\(dj\.text \|\| dj\.note \|\| dj\.note_text \|\| ''\) \+ '<\/div>/.test(html)
+);
+check(
+  'Quick Notes no longer uses bare esc() for note bodies',
+  !/<div class="note-text">' \+ esc\(dj\.text \|\| dj\.note \|\| ''\) \+ '<\/div>/.test(html)
+);
+check(
+  'shipped external-link normalise preserves WO kind/type/file metadata (TRD5-R11-002)',
+  /function add\(item, fallbackLabel\) \{\s*var link = tradeSowLinkFromItem\(item, fallbackLabel\);/.test(html)
+);
 
 const woPdfData = {
   documents: [{
@@ -516,13 +528,37 @@ check('untagged scope photo stays in the gallery', M.isTradeGalleryMedia(scopePh
 const woPortalLink = { label: 'Builder portal', url: 'https://prime.example.test/share/abc123' };
 const woPdfLink = { label: 'Open work order', url: 'https://storage.example.test/signed-wo.pdf?token=abc' };
 const woUrlOnlyLink = { label: 'Open link', url: 'https://storage.example.test/work_order_MLB-26183.pdf' };
+const opaqueTypedWo = {
+  label: 'Open link',
+  kind: 'work_order',
+  url: 'https://storage.example.test/storage/v1/object/sign/docs/abc123?token=xyz',
+};
+const opaqueSupplierWo = {
+  label: 'Document',
+  type: 'supplier_work_order',
+  file_name: 'pack.pdf',
+  pdf_url: 'https://storage.example.test/storage/v1/object/sign/docs/supplier-pack?token=xyz',
+};
 check('portal share is not a priced WO link', M.isPricedWorkOrderLink(woPortalLink) === false);
 check('labelled work-order link is priced', M.isPricedWorkOrderLink(woPdfLink) === true);
 check('URL-only work_order PDF is priced', M.isPricedWorkOrderLink(woUrlOnlyLink) === true);
-const tradeLinks = M.filterTradeSowLinks([woPortalLink, woPdfLink, woUrlOnlyLink]);
-check('trades keep portal links and drop WO PDFs', tradeLinks.length === 1 && tradeLinks[0].url === woPortalLink.url);
+check('typed opaque signed WO link is priced', M.isPricedWorkOrderLink(opaqueTypedWo) === true);
+const stampedOpaque = M.tradeSowLinkFromItem({
+  kind: 'work_order',
+  label: 'Open link',
+  url: opaqueTypedWo.url,
+  file_name: 'pack.pdf',
+  mime_type: 'application/pdf',
+});
+check('normalise helper keeps kind/type/file on opaque WO', stampedOpaque.kind === 'work_order' && stampedOpaque.file_name === 'pack.pdf' && stampedOpaque.mime_type === 'application/pdf');
+check('stamped opaque WO still classifies as priced', M.isPricedWorkOrderLink(stampedOpaque) === true);
+const stampedSupplier = M.tradeSowLinkFromItem(opaqueSupplierWo);
+check('pdf_url-only supplier WO keeps type and signed URL', stampedSupplier.type === 'supplier_work_order' && stampedSupplier.url === opaqueSupplierWo.pdf_url);
+check('pdf_url-only supplier WO is priced', M.isPricedWorkOrderLink(stampedSupplier) === true);
+const tradeLinks = M.filterTradeSowLinks([woPortalLink, woPdfLink, woUrlOnlyLink, stampedOpaque, stampedSupplier]);
+check('trades keep portal links and drop typed/opaque WO PDFs', tradeLinks.length === 1 && tradeLinks[0].url === woPortalLink.url);
 fullPricingOn = true;
-check('office keeps WO PDF links', M.filterTradeSowLinks([woPortalLink, woPdfLink]).length === 2);
+check('office keeps WO PDF links', M.filterTradeSowLinks([woPortalLink, woPdfLink, stampedOpaque]).length === 3);
 fullPricingOn = false;
 
 console.log('PASS trade scope media + pricing redaction checks');

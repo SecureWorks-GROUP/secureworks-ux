@@ -8203,10 +8203,49 @@
     return (arr || []).filter(isTradeGalleryMedia);
   }
 
+  function isTypedPricedWorkOrder(item) {
+    if (!item) return false;
+    var typed = [item.kind, item.type, item.document_type, item.role];
+    for (var i = 0; i < typed.length; i++) {
+      var t = String(typed[i] || '').toLowerCase();
+      if (t === 'work_order' || t === 'supplier_work_order') return true;
+    }
+    return false;
+  }
+
+  function stampTradeSowLinkMeta(link, item) {
+    if (!link || !item || typeof item !== 'object') return link;
+    var keys = ['kind', 'type', 'name', 'title', 'file_name', 'fileName', 'mime_type', 'content_type', 'role', 'document_type'];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (item[k] != null && item[k] !== '') link[k] = item[k];
+    }
+    return link;
+  }
+
+  function tradeSowLinkFromItem(item, fallbackLabel) {
+    if (item == null || item === '') return null;
+    if (typeof item === 'string') {
+      var s = String(item).trim();
+      return s ? { label: String(fallbackLabel || 'Open link').trim() || 'Open link', url: s } : null;
+    }
+    if (typeof item !== 'object') return null;
+    var url = item.url || item.href || item.link || item.pdf_url || item.signed_url || item.file_url || item.download_url || item.storage_url || '';
+    url = String(url || '').trim();
+    if (!url) return null;
+    var label = item.label || item.name || item.title || item.file_name || item.fileName || fallbackLabel || 'Open link';
+    return stampTradeSowLinkMeta({
+      label: String(label || 'Open link').trim() || 'Open link',
+      url: url
+    }, item);
+  }
+
   function isPricedWorkOrderLink(link) {
     if (!link) return false;
-    if (typeof link === 'string') return /work[\s_-]*order|\bwo\b/i.test(link);
-    var blob = [link.label, link.url, link.href, link.link, link.kind, link.type, link.name, link.title].filter(Boolean).join(' ');
+    if (typeof link === 'string') return isTypedPricedWorkOrder({ type: link }) || /work[\s_-]*order|\bwo\b/i.test(link);
+    if (isTypedPricedWorkOrder(link)) return true;
+    if (isPricedWorkOrderDocument(link)) return true;
+    var blob = [link.label, link.url, link.href, link.link, link.kind, link.type, link.name, link.title, link.file_name, link.fileName, link.role, link.document_type].filter(Boolean).join(' ');
     return /work[\s_-]*order|\bwo\b/i.test(blob);
   }
 
@@ -8422,7 +8461,7 @@
 
   function isPricedWorkOrderDocument(d) {
     if (!d) return false;
-    var type = String(d.type || '').toLowerCase();
+    var type = String(d.type || d.kind || d.document_type || d.role || '').toLowerCase();
     if (type === 'work_order' || type === 'supplier_work_order') return true;
     // A real video file is not a priced WO PDF, even if the name mentions WO.
     // Rows typed work_order / supplier_work_order already returned true above.
@@ -8534,6 +8573,9 @@
     isTradeVisibleMedia: isTradeVisibleMedia,
     isTradeGalleryMedia: isTradeGalleryMedia,
     filterTradeGalleryMedia: filterTradeGalleryMedia,
+    isTypedPricedWorkOrder: isTypedPricedWorkOrder,
+    stampTradeSowLinkMeta: stampTradeSowLinkMeta,
+    tradeSowLinkFromItem: tradeSowLinkFromItem,
     isPricedWorkOrderLink: isPricedWorkOrderLink,
     filterTradeSowLinks: filterTradeSowLinks,
     collectJobMedia: collectJobMedia,
@@ -9387,29 +9429,30 @@
 
   function normaliseTradeExternalLinks(raw) {
     var out = [];
-    function add(label, url) {
-      url = String(url || '').trim();
-      if (!url) return;
+    function add(item, fallbackLabel) {
+      var link = tradeSowLinkFromItem(item, fallbackLabel);
+      if (!link || !link.url) return;
+      var url = String(link.url || '').trim();
       if (/^www\./i.test(url)) url = 'https://' + url;
       if (!/^(https?:|mailto:|tel:)/i.test(url)) return;
       // F5: never list branding images / SES trackers as trade links.
       if (/^https?:/i.test(url) && urlLooksLikeAssetOrTracking(url)) return;
-      out.push({ label: String(label || 'Open link').trim() || 'Open link', url: url });
+      link.url = url;
+      out.push(link);
     }
     if (Array.isArray(raw)) {
       raw.forEach(function(item, idx) {
         if (!item) return;
-        if (typeof item === 'string') add('Link ' + (idx + 1), item);
-        else add(item.label || item.name || item.title || ('Link ' + (idx + 1)), item.url || item.href || item.link);
+        add(item, 'Link ' + (idx + 1));
       });
     } else if (raw && typeof raw === 'object') {
       Object.keys(raw).forEach(function(label) {
         var item = raw[label];
-        if (item && typeof item === 'object') add(item.label || item.name || label, item.url || item.href || item.link);
-        else add(label, item);
+        if (item && typeof item === 'object') add(item, label);
+        else add(item, label);
       });
     } else if (typeof raw === 'string') {
-      add('Open link', raw);
+      add(raw, 'Open link');
     }
     return out;
   }
@@ -11722,13 +11765,15 @@
     }
     var h = '';
     list.forEach(function(n) {
-      var dj = n.detail_json || {};
+      var dj = n.detail_json;
+      if (typeof dj === 'string') { try { dj = JSON.parse(dj); } catch (e) { dj = { text: dj }; } }
+      dj = dj || {};
       var fromOps = dj.from_ops === true;
       var author = fromOps ? 'Office' : (((n.users && n.users.name) || '').trim() || 'Trade');
       var offBadge = fromOps ? '<span style="font-size:10px;background:var(--sw-blue);color:#fff;padding:1px 5px;border-radius:4px;margin-left:4px">Office</span>' : '';
       h += '<div class="note-item">';
       h += '  <div style="display:flex;align-items:center;gap:4px"><span class="note-author">' + esc(author) + '</span>' + offBadge + '<span style="flex:1"></span><span class="note-time">' + esc(timeAgo(n.created_at)) + '</span></div>';
-      h += '  <div class="note-text">' + esc(dj.text || dj.note || '') + '</div>';
+      h += '  <div class="note-text">' + escSowText(dj.text || dj.note || dj.note_text || '') + '</div>';
       h += '</div>';
     });
     body.innerHTML = h;

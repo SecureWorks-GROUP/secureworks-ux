@@ -6,6 +6,7 @@ const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
 const VIDEO_WALK = 'data:video/mp4,walkthrough';
 const VIDEO_OTHER = 'data:video/mp4,other-job-video';
 const WO_PDF = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-wo.pdf?token=e2e`;
+const OPAQUE_WO = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-opaque-pack?token=e2e`;
 
 function patioDetail(overrides) {
   return Object.assign({
@@ -53,6 +54,13 @@ function patioDetail(overrides) {
         created_at: '2026-09-06T01:00:00.000Z',
         users: { name: 'Office' },
         detail_json: { text: 'Match existing fascia. Quote total $8,800.', from_ops: true },
+      },
+      {
+        id: 'e2e-note-json-string',
+        event_type: 'note',
+        created_at: '2026-09-06T01:05:00.000Z',
+        users: { name: 'Office' },
+        detail_json: JSON.stringify({ note: 'Labour 120/day on site', from_ops: true }),
       },
     ],
     media: [
@@ -181,9 +189,11 @@ function makesafeDetail() {
       external_links: [
         { label: 'Open work order', url: WO_PDF },
         { label: 'Builder portal', url: 'https://prime.example.test/share/e2e-portal' },
+        { label: 'Open link', kind: 'work_order', url: OPAQUE_WO, file_name: 'pack.pdf', mime_type: 'application/pdf' },
       ],
       source_links: [
         { label: 'Source WO', url: WO_PDF },
+        { label: 'Document', type: 'supplier_work_order', pdf_url: OPAQUE_WO },
       ],
     },
     serviceReport: {
@@ -314,10 +324,26 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(header.getByRole('link', { name: /Full screen/i })).toHaveCount(0);
     await expect(header).not.toContainText(WO_PDF);
     await expect(header.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(0);
+    await expect(header).not.toContainText(OPAQUE_WO);
     await expect(header.getByRole('link', { name: /Builder portal/i })).toHaveCount(1);
     await expect(header).toContainText('Tarp roof sheets');
     await expect(header).not.toContainText('$');
     await expect(header).not.toContainText('340');
+  });
+
+  test('Quick Notes sheet redacts SOW prices for trades', async ({ appPage: page }) => {
+    await stubJobDetail(page, patioDetail());
+    await signIn(page, PERSONAS.installer);
+    await page.evaluate(() => window.openJobNotes('e2e-job-1', 'E2E-JOB-001'));
+    const sheet = page.locator('#quickNotesBody');
+    await expect(sheet).toContainText('Match existing fascia');
+    await expect(sheet).toContainText('Labour');
+    await expect(sheet).toContainText('on site');
+    await expect(sheet).not.toContainText('$');
+    await expect(sheet).not.toContainText('8,800');
+    await expect(sheet).not.toContainText('120');
+    await expect(sheet).not.toContainText('/day');
   });
 });
 
@@ -348,5 +374,6 @@ test.describe('TRD-5 office may see SOW rates', () => {
     const header = page.locator('#makesafeWorkOrderDirect');
     await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveAttribute('src', WO_PDF);
     await expect(header.getByRole('link', { name: /Open full WO/i })).toBeVisible();
+    await expect(header.locator('a[href="' + OPAQUE_WO + '"]')).toHaveCount(1);
   });
 });

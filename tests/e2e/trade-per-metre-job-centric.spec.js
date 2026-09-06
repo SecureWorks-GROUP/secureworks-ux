@@ -537,20 +537,33 @@ test.describe('Henry job-centric submit', () => {
     await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
       const url = new URL(route.request().url());
       if (url.searchParams.get('action') === 'my_work_orders' && !exclusive) {
-        const response = await route.fetch();
-        const body = await response.json();
-        const orders = (body.work_orders || []).map((wo) => {
-          if (String(wo.id) !== 'wo-fence-authorised') return wo;
-          return Object.assign({}, wo, {
-            already_invoiced: true,
-            can_invoice: false,
-            can_add_to_weekly_invoice: false
-          });
-        });
+        // Fulfill the listing here — route.fetch() bypasses the feed stub and
+        // would drop wo-fence-authorised, which reads as a missing-WO week miss.
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(Object.assign({}, body, { work_orders: orders }))
+          body: JSON.stringify({
+            ok: true,
+            work_orders: [{
+              id: 'wo-fence-authorised',
+              wo_number: 'WO-FENCE-001',
+              job_id: 'fence-job-henry',
+              job_number: 'FENCE-HENRY-001',
+              client_name: 'Henry Client',
+              job_type: 'fencing',
+              status: 'complete',
+              scheduled_date: perthWeekMonday(),
+              subtotal: 100,
+              already_invoiced: true,
+              can_invoice: false,
+              can_add_to_weekly_invoice: false,
+              negative_charges: [{
+                line_id: 'wo-fence-charge-israel',
+                trade_name: 'Israel',
+                amount_ex: -40
+              }]
+            }]
+          })
         });
         return;
       }

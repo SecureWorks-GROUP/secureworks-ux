@@ -4881,6 +4881,43 @@
     return String(body.work_order_id || body.workOrderId || '');
   }
 
+  function _invoiceBodyWorkOrderIds(body) {
+    var ids = [];
+    var seen = {};
+    function add(value) {
+      var id = String(value || '').trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    }
+    function walk(row) {
+      if (!row || typeof row !== 'object') return;
+      add(row.work_order_id);
+      add(row.workOrderId);
+      add(row.source_work_order_id);
+    }
+    body = body || {};
+    add(body.work_order_id);
+    add(body.workOrderId);
+    add(body.source_work_order_id);
+    (body.extra_items || []).forEach(walk);
+    (body.work_order_blocks || []).forEach(walk);
+    (body.manual_assignments || []).forEach(walk);
+    return ids;
+  }
+
+  function _invoiceBodyWorkOrderIdsOverlap(a, b) {
+    var left = _invoiceBodyWorkOrderIds(a);
+    if (!left.length) return false;
+    var seen = {};
+    left.forEach(function(id) { seen[id] = true; });
+    var right = _invoiceBodyWorkOrderIds(b);
+    for (var i = 0; i < right.length; i++) {
+      if (seen[right[i]]) return true;
+    }
+    return false;
+  }
+
   var _offlineInvoiceWorkOrderById = {};
 
   function _workOrderDirectInvoiceAllowed(wo) {
@@ -4894,14 +4931,48 @@
     return !!(res && Array.isArray(res.work_orders));
   }
 
+  function _offlineInvoiceWorkOrderStillAllowed(item, woId, wo) {
+    var body = (item && item.body) || {};
+    var id = String(woId || '');
+    if (!id) return false;
+    var topLevel = String(body.work_order_id || body.workOrderId || '') === id;
+    if (item.action === 'submit_work_order_invoice' || topLevel) {
+      return _workOrderDirectInvoiceAllowed(wo) && isAuthorizedWorkOrder(id);
+    }
+    var inExtras = (body.extra_items || []).some(function(row) {
+      return String((row && (row.work_order_id || row.workOrderId)) || '') === id;
+    });
+    if (inExtras) return _workOrderDirectInvoiceAllowed(wo);
+    var inWeekly = (body.work_order_blocks || []).some(function(row) {
+      return String((row && (row.work_order_id || row.workOrderId || row.source_work_order_id)) || '') === id;
+    });
+    if (inWeekly) {
+      return !!(wo && wo.already_invoiced !== true && wo.can_add_to_weekly_invoice === true);
+    }
+    return _workOrderDirectInvoiceAllowed(wo);
+  }
+
   function _offlineInvoiceReplayAllowed(item, ctx) {
     if (!_invoiceApiCurrent(ctx)) return false;
     if (!_offlineInvoiceOwnedByCurrentAccount(item)) return false;
-    if (item.action === 'submit_work_order_invoice') {
-      var woId = _offlineInvoiceWorkOrderId(item);
-      if (!woId || !isAuthorizedWorkOrder(woId)) return false;
-      if (!_workOrderDirectInvoiceAllowed(_offlineInvoiceWorkOrderById[String(woId)])) return false;
+    var woIds = _invoiceBodyWorkOrderIds((item && item.body) || {});
+    for (var i = 0; i < woIds.length; i++) {
+      var wo = _offlineInvoiceWorkOrderById[woIds[i]];
+      if (!_offlineInvoiceWorkOrderStillAllowed(item, woIds[i], wo)) return false;
     }
+    return true;
+  }
+
+  function _rebuildOfflineDirectWorkOrderCharges(item, wo) {
+    if (!item || item.action !== 'submit_work_order_invoice') return true;
+    if (typeof _workOrderNegativeChargeLineIds !== 'function') return true;
+    var chargeIds = _workOrderNegativeChargeLineIds(wo);
+    if (!chargeIds) return false;
+    item.body = Object.assign({}, item.body || {}, {
+      work_order_id: String((wo && wo.id) || item.body.work_order_id || item.body.workOrderId || ''),
+      negative_charge_line_ids: chargeIds,
+      charge_line_ids: chargeIds
+    });
     return true;
   }
 
@@ -4909,11 +4980,10 @@
     if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) {
       return Promise.resolve({ read: false, allowed: false });
     }
-    if (item.action !== 'submit_work_order_invoice') {
+    var woIds = _invoiceBodyWorkOrderIds((item && item.body) || {});
+    if (!woIds.length) {
       return Promise.resolve({ read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) });
     }
-    var woId = _offlineInvoiceWorkOrderId(item);
-    if (!woId) return Promise.resolve({ read: true, allowed: false });
     return api('my_work_orders', { mode: 'all' }, null, {
       beforeSend: function() {
         return _invoiceApiCurrent(ctx) && _offlineInvoiceOwnedByCurrentAccount(item);
@@ -4932,6 +5002,15 @@
         if (wo && wo.id) byId[String(wo.id)] = wo;
       });
       _offlineInvoiceWorkOrderById = byId;
+      for (var i = 0; i < woIds.length; i++) {
+        var wo = byId[woIds[i]];
+        if (!_offlineInvoiceWorkOrderStillAllowed(item, woIds[i], wo)) {
+          return { read: true, allowed: false };
+        }
+        if (!_rebuildOfflineDirectWorkOrderCharges(item, wo)) {
+          return { read: true, allowed: false };
+        }
+      }
       return { read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) };
     }).catch(function() {
       return { read: false, allowed: false };
@@ -5242,12 +5321,14 @@
 
   function _financialWriteAlreadyPending(action, body) {
     if (_sharedFinancialWriteHeld(action)) return true;
+    var incomingIds = _invoiceBodyWorkOrderIds(body);
     var queue = _readOfflineQueue();
     for (var i = 0; i < queue.length; i++) {
       var item = queue[i];
-      if (!item || item.action !== action) continue;
-      if (_isOfflineInvoiceAction(action) && !_offlineInvoiceOwnedByCurrentAccount(item)) continue;
-      if (_sameFinancialWriteIntent(item.body, body)) return true;
+      if (!item || !_isOfflineInvoiceAction(item.action)) continue;
+      if (!_offlineInvoiceOwnedByCurrentAccount(item)) continue;
+      if (item.action === action && _sameFinancialWriteIntent(item.body, body)) return true;
+      if (incomingIds.length && _invoiceBodyWorkOrderIdsOverlap(item.body, body)) return true;
     }
     return false;
   }
@@ -5708,19 +5789,19 @@
     if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return Promise.resolve();
 
     var sendItem = function() {
-      return _ensureOfflineInvoiceWorkOrderAuth(item, replayCtx).then(function(auth) {
-        auth = auth || {};
-        if (!auth.read) {
-          remaining.push(item);
-          return;
-        }
-        if (!auth.allowed || !_offlineInvoiceReplayAllowed(item, replayCtx)) {
-          if (_offlineInvoiceOwnedByCurrentAccount(item) && _invoiceApiCurrent(replayCtx)) {
+      return _withFinancialWebLock(item.action, function() {
+        return _ensureOfflineInvoiceWorkOrderAuth(item, replayCtx).then(function(auth) {
+          auth = auth || {};
+          if (!auth.read) {
             remaining.push(item);
+            return;
           }
-          return;
-        }
-        return _withFinancialWebLock(item.action, function() {
+          if (!auth.allowed || !_offlineInvoiceReplayAllowed(item, replayCtx)) {
+            if (_offlineInvoiceOwnedByCurrentAccount(item) && _invoiceApiCurrent(replayCtx)) {
+              remaining.push(item);
+            }
+            return;
+          }
           return api(item.action, null, item.body, {
             beforeSend: function() {
               if (!_offlineInvoiceReplayAllowed(item, replayCtx)) return false;
@@ -5741,7 +5822,13 @@
             if (_isOfflineInvoiceTimeoutError(e)) item.ambiguous = true;
             remaining.push(item);
           });
-        }, { acquire: true });
+        });
+      }, { acquire: true }).catch(function(e) {
+        if (e && e.code === 'invoice_write_locked') {
+          remaining.push(item);
+          return;
+        }
+        throw e;
       });
     };
 
@@ -21947,34 +22034,6 @@
       : 0;
     return Math.round((hoursAmt - _woLumpSum(c)) * 100) / 100;
   }
-  function _hoursCardLumpExtras(c) {
-    var extras = [];
-    _woCleanLumpLines(c).forEach(function(lp) {
-      if (!lp.description || !(lp.amount > 0)) return;
-      extras.push({
-        type: 'Deduction',
-        row_type: 'lump_sum',
-        line_kind: 'lump_sum',
-        description: lp.description,
-        quantity: 1,
-        unit: 'ea',
-        hours: 1,
-        rate: -lp.amount,
-        job_id: c.job_id || null,
-        job_number: c.job_number || '',
-        assignment_id: c.assignment_id || null,
-        scheduled_date: c.scheduled_date || null,
-        date: c.scheduled_date || null,
-        division: c.job_type || '',
-        client_name: c.client_name || '',
-        manually_added: !!c.manually_added,
-        source: 'invoice_final_deduction',
-        rate_source: 'client_entered',
-        client_rate_entered: true
-      });
-    });
-    return extras;
-  }
   function _woNet(c) {
     var a = Number(c.wo_allocated);
     if (isNaN(a)) a = 0;
@@ -22195,10 +22254,6 @@
             justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
           });
         }
-        _hoursCardLumpExtras(c).forEach(function(extra) {
-          subtotal += extra.rate;
-          cardExtraItems.push(extra);
-        });
       } else {
         var assignedHours = c.hours != null && c.hours > 0 && Number(c.rate) > 0;
         if (assignedHours) {
@@ -22214,10 +22269,6 @@
             justification: (_isMakesafeCard(c) && Number(c.hours) > 2) ? (c.justification || '') : undefined
           });
         }
-        _hoursCardLumpExtras(c).forEach(function(extra) {
-          subtotal += extra.rate;
-          cardExtraItems.push(extra);
-        });
       }
     });
     return {
@@ -22230,15 +22281,7 @@
   // [JC-PAYLOAD-BUILD-END]
 
   function _jobCentricPostedWorkOrderIds(items) {
-    var ids = [];
-    var seen = {};
-    (items || []).forEach(function(item) {
-      var id = String((item && item.work_order_id) || '').trim();
-      if (!id || seen[id]) return;
-      seen[id] = true;
-      ids.push(id);
-    });
-    return ids;
+    return _invoiceBodyWorkOrderIds({ extra_items: items || [] });
   }
 
   function _jobCentricWorkOrdersStillExclusive(res, woIds) {
@@ -22328,8 +22371,7 @@
     _syncRowsFromDOM();
     var legacyManualRows = _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; });
     var legacyExtras = legacyManualRows.map(_rowToExtraItem);
-    var lumpExtras = _invLumpExtraItems();
-    var extraItems = built.cardExtraItems.concat(legacyExtras).concat(lumpExtras);
+    var extraItems = built.cardExtraItems.concat(legacyExtras);
     if (_pmWoHydrateState === 'ok') {
       var nonExclusiveWo = extraItems.filter(function(item) {
         var id = String((item && item.work_order_id) || '').trim();
@@ -22340,11 +22382,13 @@
         return;
       }
     }
-    if (built.includedCount === 0 && extraItems.length === 0) { toast('Select a job or add an extra', true); return; }
+    if (built.includedCount === 0 && extraItems.length === 0 && !_invFinalDeductions().length) {
+      toast('Select a job or add an extra', true);
+      return;
+    }
 
     var sub = built.subtotal;
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
-    lumpExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
 
     showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
@@ -22641,7 +22685,7 @@
       var jcHasCards = _jobCards.some(function(c) { return c.included; });
       var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
       var woAuthBlocked = _jobCentricHasBlockedWorkOrder();
-      var jcHasLumps = _invLumpExtraItems().length > 0;
+      var jcHasLumps = _invFinalDeductions().length > 0;
       if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
         html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'

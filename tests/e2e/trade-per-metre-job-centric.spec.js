@@ -505,10 +505,7 @@ test.describe('Henry job-centric submit', () => {
     expect(writes.length).toBe(1);
     const body = writes[0].body;
     const lump = (body.extra_items || []).find((item) => item.source === 'invoice_final_deduction' || item.line_kind === 'lump_sum');
-    expect(lump).toBeTruthy();
-    expect(lump.rate).toBe(-25);
-    expect(lump.job_id == null).toBeTruthy();
-    expect(lump.description).toBe('Fuel / materials');
+    expect(lump).toBeFalsy();
     expect(body.final_deductions).toEqual([
       { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 }
     ]);

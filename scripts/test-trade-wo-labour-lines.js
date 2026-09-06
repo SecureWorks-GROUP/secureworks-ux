@@ -206,21 +206,16 @@ function hoursCard(overrides) {
   assert.strictEqual(built.manualAssignments.length, 1)
 }
 
-// ── Hours-card lump: peer option to hours, same extra_items deduct ───────
+// ── Hours-card lump: peer option to hours; captain-B final_deductions only ─
 {
   const built = context._buildJobCentricPayload([hoursCard({
     wo_lump_lines: [{ description: 'Materials', amount: 10, line_kind: 'lump_sum' }],
   })])
   assert(!built.error, 'hours + lump builds: ' + built.error)
   assert.strictEqual(built.manualAssignments.length, 1)
-  assert.strictEqual(built.cardExtraItems.length, 1)
-  const extra = built.cardExtraItems[0]
-  assert.strictEqual(extra.source, 'invoice_final_deduction')
-  assert.strictEqual(extra.line_kind, 'lump_sum')
-  assert.strictEqual(extra.rate, -10)
-  assert.strictEqual(extra.job_number, 'SWF-HOURS')
-  assert.strictEqual(extra.description, 'Materials')
-  assert.strictEqual(built.subtotal, 310, '8h×$40 − Materials $10')
+  assert.strictEqual(built.cardExtraItems.length, 0,
+    'hours-card Materials lump is captain-B final_deductions only, not extra_items')
+  assert.strictEqual(built.subtotal, 320, 'job-centric extras stay hours/WO/commission only')
 }
 
 {
@@ -230,9 +225,8 @@ function hoursCard(overrides) {
   })])
   assert(!built.error, 'lumps-only hours card builds without hours: ' + built.error)
   assert.strictEqual(built.manualAssignments.length, 0)
-  assert.strictEqual(built.cardExtraItems.length, 1)
-  assert.strictEqual(built.cardExtraItems[0].rate, -50)
-  assert.strictEqual(built.subtotal, -50)
+  assert.strictEqual(built.cardExtraItems.length, 0, 'lump-only hours card does not ride extra_items')
+  assert.strictEqual(built.subtotal, 0, 'job-centric extras stay hours/WO/commission only')
 }
 
 {
@@ -254,10 +248,11 @@ function hoursCard(overrides) {
   })])
   assert(!built.error, 'searched hours + lump builds: ' + built.error)
   assert.strictEqual(built.manualAssignments.length, 0)
-  assert.strictEqual(built.cardExtraItems.length, 2)
+  assert.strictEqual(built.cardExtraItems.length, 1, 'searched hours card posts labour extra only')
   assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
-  assert.strictEqual(built.cardExtraItems[1].source, 'invoice_final_deduction')
-  assert.strictEqual(built.subtotal, 85, '2h×$50 − Fuel $15')
+  assert.ok(!built.cardExtraItems.some((item) => item.source === 'invoice_final_deduction'),
+    'Fuel lump stays off extra_items')
+  assert.strictEqual(built.subtotal, 100, 'job-centric extras stay hours/WO/commission only')
 }
 
 // ── WO pass-through: UI amount reshapes to hours×rate for fanout ─────────
@@ -979,6 +974,69 @@ function hoursCard(overrides) {
       'a failed work-order auth refresh keeps the queued invoice for retry')
     assert.strictEqual(ctx.isAuthorizedWorkOrder('wo-unauth'), true,
       'a failed my_work_orders read must not replace the authorized set')
+
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_jc_wo',
+        client_request_id: 'iq_jc_wo',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        body: { extra_items: [{ work_order_id: 'wo-b', row_type: 'work_order', rate: 60 }] },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'job-centric generate replay re-reads my_work_orders under the financial fence')
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 1,
+      'exclusive job-centric WO extras may POST after the under-fence re-read')
+
+    ctx._invoiceAuthGen += 1
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: false, already_invoiced: true }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    store.sw_action_queue = JSON.stringify([
+      {
+        id: 'iq_jc_wo_used',
+        client_request_id: 'iq_jc_wo_used',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        body: { extra_items: [{ work_order_id: 'wo-b', row_type: 'work_order', rate: 60 }] },
+      },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'generate_trade_invoice').length, 0,
+      'already-invoiced job-centric WO extras are not replayed')
+    assert.ok(sent.filter((s) => s.action === 'my_work_orders').length >= 1,
+      'a non-exclusive job-centric generate still re-reads my_work_orders')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_jc_wo_used'), true,
+      'a non-exclusive job-centric generate stays queued instead of posting again')
 
     ctx._user = { id: 'bob' }
     ctx._invoiceAuthGen += 1
@@ -1899,6 +1957,16 @@ function hoursCard(overrides) {
       tabA._endFinancialWrite('submit_work_order_invoice')
       assert.strictEqual(tabB._financialWriteAlreadyPending('submit_work_order_invoice', { work_order_id: 'wo-xero' }), true,
         'retry stays blocked after the local write ends without a confirmed identity')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        extra_items: [{ work_order_id: 'wo-xero' }],
+      }), true, 'pending direct WO invoice blocks job-centric generate that posts the same WO')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        work_order_blocks: [{ work_order_id: 'wo-xero' }],
+      }), true, 'pending direct WO invoice blocks weekly generate that posts the same WO')
+      assert.strictEqual(tabB._financialWriteAlreadyPending('generate_trade_invoice', {
+        week_start: '2026-11-02',
+        extra_items: [{ description: 'Hours only', hours: 2, rate: 40 }],
+      }), false, 'hours-only generate does not share a work-order target with the pending WO')
       const httpErr = new Error('Work order already invoiced')
       httpErr.status = 409
       httpErr.code = 'request_failed'

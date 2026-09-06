@@ -336,8 +336,17 @@ assert(html.includes('search_all_jobs'),
   'any-job add uses typed search_all_jobs on the same builder');
 assert(html.includes('btnAddInvLump') && html.includes('final_deductions: finalDeductions'),
   'weekly job-centric submit keeps invoice-level final_deductions');
-assert(html.includes('invoice_final_deduction'),
-  'invoice-level lumps also ride extra_items as negative client-priced deducts');
+assert((function() {
+  const jc = html.slice(html.indexOf('// [JC-PAYLOAD-BUILD-START]'), html.indexOf('// [JC-PAYLOAD-BUILD-END]'));
+  const submit = html.slice(html.indexOf('window.submitJobCentricInvoice'), html.indexOf('function renderInvoiceBuilder'));
+  return html.includes('invoice_final_deduction') &&
+    html.includes('final_deductions: finalDeductions') &&
+    !jc.includes('_hoursCardLumpExtras') &&
+    !submit.includes('_invLumpExtraItems') &&
+    submit.includes('var extraItems = built.cardExtraItems.concat(legacyExtras);') &&
+    submit.includes('_invFinalDeductions()');
+})(),
+  'invoice-level and hours-card lumps stay on captain-B final_deductions, not extra_items');
 assert(html.includes('_renderInvLumpLinesHtml()') && !/if \(isPerMetreUser\(\)[\s\S]{0,120}_renderInvLumpLinesHtml/.test(html),
   'invoice-level lump amounts are not gated to Henry / per-metre');
 assert(html.includes('_renderCardLumpLinesHtml') && html.includes('_cardAddAmountBtnHtml'),
@@ -346,7 +355,7 @@ assert((html.match(/_renderCardLumpLinesHtml\(c/g) || []).length >= 2,
   'amount lines render on both Hours and Work Order cards');
 assert(!html.includes('Lump-sum amounts'),
   'amount lines are not framed as a separate product heading');
-assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions') &&
+assert(!html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions') &&
   /function _invFinalDeductions[\s\S]*?_hoursCardLumpFinalDeductions\(\)/.test(html) &&
   !html.includes('_woCardFinalDeductions') &&
   html.includes('_woLabourLinesForFanout') &&
@@ -413,6 +422,7 @@ assert((function() {
     extras.includes('wo_labour_deduction') &&
     extras.includes('labour_deductions') &&
     /function _financialWriteAlreadyPending[\s\S]*?_sharedFinancialWriteHeld\(action\)/.test(html) &&
+    /function _financialWriteAlreadyPending[\s\S]*?_invoiceBodyWorkOrderIdsOverlap\(item\.body, body\)/.test(html) &&
     html.includes("var _FINANCIAL_WRITE_LOCK_KEY = 'sw_fin_write'") &&
     webLock.includes('_claimStorageLock(_FINANCIAL_WRITE_LOCK_KEY') &&
     html.includes('_beginFinancialWriteSend') &&
@@ -479,12 +489,13 @@ assert(html.includes('_financialWriteAborted') &&
   'cross-tab invoice lock restores submit chrome and points the trade at Invoice history');
 assert(/saveDraftInvoice = function\(\) \{[\s\S]*?draft_id: _draftInvoiceId/.test(html),
   'saving an existing invoice draft sends its draft_id');
-assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\(woId\)/.test(html),
+assert(html.includes('_ensureOfflineInvoiceWorkOrderAuth') && /isAuthorizedWorkOrder\((woId|id)\)/.test(html),
   'offline work-order invoice replay revalidates current WO authorization');
-assert(/function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?if \(item\.action !== 'submit_work_order_invoice'\) \{[\s\S]*?_offlineInvoiceReplayAllowed\(item, ctx\)[\s\S]*?return api\('my_work_orders'/.test(html) &&
+assert(/function _replayOfflineInvoiceItem[\s\S]*?_withFinancialWebLock\(item\.action[\s\S]*?_ensureOfflineInvoiceWorkOrderAuth/.test(html) &&
+  /function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?_invoiceBodyWorkOrderIds[\s\S]*?if \(!woIds\.length\) \{[\s\S]*?return api\('my_work_orders'/.test(html) &&
   /function _ensureOfflineInvoiceWorkOrderAuth[\s\S]*?\.catch\(function\(\) \{[\s\S]*?read:\s*false/.test(html) &&
   /if \(!auth\.read\) \{[\s\S]*?remaining\.push\(item\)/.test(html),
-  'WO invoice replay re-reads my_work_orders and keeps the item when that read fails');
+  'invoice replay re-reads posted WOs inside the financial fence and keeps the item when that read fails');
 assert(/function authorizeWorkOrders\(orders\) \{[\s\S]*?var next = \{\};[\s\S]*?_authorizedWorkOrderIds = next;/.test(html),
   'authorizeWorkOrders replaces the authorized set from the latest authenticated result');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?var ctx = _invoiceApiContext\(\);[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?submit_work_order_invoice[\s\S]*?if \(!_invoiceApiCurrent\(ctx\)\) return;[\s\S]*?_handleFinancialWriteFailure\('submit_work_order_invoice'/.test(html),

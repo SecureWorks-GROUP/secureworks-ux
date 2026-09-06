@@ -136,10 +136,7 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   const submit = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice');
   expect(submit).toBeTruthy();
   const lump = (submit.body.extra_items || []).find((item) => item.source === 'invoice_final_deduction');
-  expect(lump).toBeTruthy();
-  expect(lump.job_number).toBe('SWF-26767');
-  expect(lump.rate).toBe(-25);
-  expect(lump.description).toBe('Materials');
+  expect(lump).toBeFalsy();
   expect(submit.body.final_deductions).toEqual([
     { description: 'Materials', quantity: 1, unit: 'ea', unit_rate: 25 }
   ]);

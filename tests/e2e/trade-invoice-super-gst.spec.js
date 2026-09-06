@@ -112,8 +112,9 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   await page.getByRole('button', { name: 'Continue' }).click();
 
   const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
-  await expect(card.getByText('Lump-sum amounts')).toBeVisible();
+  await expect(card.locator('[data-cardhours]')).toBeVisible();
   await expect(card.getByRole('button', { name: '+ Add amount' })).toBeVisible();
+  await expect(page.getByText('Lump-sum amounts')).toHaveCount(0);
   await expect(page.locator('#btnAddInvLump')).toBeVisible();
   await expect(page.locator('#btnAddInvLump')).toHaveText('+ Add amount');
 

@@ -304,12 +304,16 @@ assert(html.includes('invoice_final_deduction'),
   'invoice-level lumps also ride extra_items as negative client-priced deducts');
 assert(html.includes('_renderInvLumpLinesHtml()') && !/if \(isPerMetreUser\(\)[\s\S]{0,120}_renderInvLumpLinesHtml/.test(html),
   'invoice-level lump amounts are not gated to Henry / per-metre');
-assert(html.includes('_renderCardLumpLinesHtml') && (html.match(/_renderCardLumpLinesHtml\(c\)/g) || []).length >= 2,
-  'Hours and Work Order cards share the same lump-sum amount UI');
+assert(html.includes('_renderCardLumpLinesHtml') && html.includes('_cardAddAmountBtnHtml'),
+  'Hours and Work Order cards share the same amount-line UI');
+assert((html.match(/_renderCardLumpLinesHtml\(c/g) || []).length >= 2,
+  'amount lines render on both Hours and Work Order cards');
+assert(!html.includes('Lump-sum amounts'),
+  'amount lines are not framed as a separate product heading');
 assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions'),
   'Hours-card lumps ride extra_items and final_deductions like invoice-level deducts');
-assert(html.includes('or add a lump-sum amount'),
-  'hours-card validation treats lump-sum amounts as a peer to hours');
+assert(html.includes('or add an amount'),
+  'hours-card validation treats an amount as a peer to hours');
 assert(html.includes('addWoLumpLine'),
   'job-centric cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),

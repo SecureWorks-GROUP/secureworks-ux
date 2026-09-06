@@ -17634,8 +17634,7 @@
 
   function _renderInvLumpLinesHtml() {
     var html = '';
-    html += '<div class="inv-section-label" style="margin-top:16px">Lump-sum amounts</div>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Same as hours — add a description and a dollar amount. As many lines as you need. They come off this week\'s total and do not need a job.</div>';
+    html += '<div style="margin-top:12px">';
     html += '<div id="invLumpLines">';
     _invLumpLines.forEach(function(line, i) {
       html += '<div class="inv-lump-row" data-invlump="' + esc(line.id) + '" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">';
@@ -17650,14 +17649,20 @@
     });
     html += '</div>';
     html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Add amount</button>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">Same option as hours — description and amount. No job needed.</div>';
+    html += '</div>';
     return html;
   }
 
-  function _renderCardLumpLinesHtml(c) {
+  function _cardAddAmountBtnHtml(idx) {
+    return '<button type="button" onclick="addWoLumpLine(' + idx + ')" '
+      + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
+  }
+
+  function _renderCardLumpLinesHtml(c, opts) {
+    opts = opts || {};
     var lumpLines = Array.isArray(c.wo_lump_lines) ? c.wo_lump_lines : [];
-    var html = '<div data-cardlumps="' + c._idx + '" style="margin-top:10px">';
-    html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--sw-text-sec);margin-bottom:4px">Lump-sum amounts</div>';
-    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:6px">Same as hours — description and amount. Deducts from this job.</div>';
+    var html = '<div data-cardlumps="' + c._idx + '" style="margin-top:8px">';
     for (var lpi = 0; lpi < lumpLines.length; lpi++) {
       var lp = lumpLines[lpi];
       var lpAmt = Math.round(Number(lp.amount || 0) * 100) / 100;
@@ -17674,8 +17679,7 @@
         + 'style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:15px;padding:0 2px;line-height:1" title="Remove amount">&#x2715;</button>';
       html += '</div>';
     }
-    html += '<button type="button" onclick="addWoLumpLine(' + c._idx + ')" '
-      + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add amount</button>';
+    if (opts.includeAddButton !== false) html += _cardAddAmountBtnHtml(c._idx);
     html += '</div>';
     return html;
   }
@@ -18589,7 +18593,7 @@
     var html = '';
     html += '<div class="inv-section-label" style="margin-top:16px">Your jobs this week</div>';
     if (isPerMetreUser()) {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Jobs scheduled this week are listed by day. Add any other job on the day it belongs, enter hours, add a lump-sum amount, or keep a hydrated work-order money block. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it. Invoice-level amounts below do not need a job.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">A work-order allocation on the job is another option here. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it.</div>';
       if (_pmWoHydrateState === 'pending') {
         html += '<div data-pm-wo-hydrate="pending" style="background:rgba(76,106,124,0.08);border:1px solid var(--sw-border);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px">Loading work-order amounts and paid-to-other-trade deductions…</div>';
       } else if (_pmWoHydrateState === 'error') {
@@ -18606,7 +18610,7 @@
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
     } else {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter hours on each job, or add a lump-sum amount the same way. Your rate is set by the office and shown for reference.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter hours on a job, or add a description and amount. Your rate is set by the office and shown for reference.</div>';
     }
 
     // Group cards by scheduled_date
@@ -18744,14 +18748,15 @@
               + 'style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:15px;padding:0 2px;line-height:1" title="Remove line">&#x2715;</button>';
             html += '</div>';
           }
+          html += '</div>';
+          html += _renderCardLumpLinesHtml(c, { includeAddButton: false });
           html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">';
           html += '<button type="button" onclick="addWoPassThroughLine(' + c._idx + ')" '
             + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Deduct work order paid to a trade</button>';
           html += '<button type="button" onclick="addWoLabourLine(' + c._idx + ')" '
             + 'style="font-size:12px;font-weight:600;color:var(--sw-orange);background:none;border:1px dashed var(--sw-orange);border-radius:6px;padding:4px 12px;cursor:pointer">+ Add labour line</button>';
+          html += _cardAddAmountBtnHtml(c._idx);
           html += '</div>';
-          html += '</div>';
-          html += _renderCardLumpLinesHtml(c);
           // Net payable display
           html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px">';
           html += '<span style="font-size:12px;color:var(--sw-text-sec)">Net payable</span>';
@@ -19637,9 +19642,9 @@
         var _lbl = c.job_number || c.site_suburb || c.client_name || 'Job';
         var _noHours = (c.hours == null || c.hours <= 0 || !(Number(c.rate) > 0));
         var _noDesc = c.manually_added && !c.description;
-        if (_noDesc && _noHours) return _lbl + ': add a description and enter hours and your rate, or add a lump-sum amount.';
+        if (_noDesc && _noHours) return _lbl + ': add a description and enter hours and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
-        return _lbl + ': enter hours and your rate, or add a lump-sum amount.';
+        return _lbl + ': enter hours and your rate, or add an amount.';
       });
       var _shown = _msgs.slice(0, 3);
       if (_msgs.length > 3) _shown.push('...and ' + (_msgs.length - 3) + ' more');

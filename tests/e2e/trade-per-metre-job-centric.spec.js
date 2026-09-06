@@ -1,6 +1,6 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
-const { perthWeekMonday } = require('../helpers/feed-stub');
+const { perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 test.use({ persona: 'fencing_manager' });
 
@@ -367,5 +367,102 @@ test.describe('Henry Hours submit after hydrate fail', () => {
     ]);
     const woExtra = (body.extra_items || []).find((item) => item.row_type === 'work_order');
     expect(woExtra).toBeFalsy();
+  });
+});
+
+test('a late invoice history response does not paint after logout', async ({ appPage: page }) => {
+  let releaseHistory;
+  const holdHistory = new Promise((resolve) => { releaseHistory = resolve; });
+  let fulfilled = 0;
+  await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('action') === 'my_trade_invoices') {
+      await holdHistory;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          invoices: [{
+            id: 'henry-leak-invoice',
+            invoice_number: 'HENRY-LEAK-INV',
+            week_ending: addIsoDays(perthWeekMonday(), 6),
+            status: 'submitted',
+            total: 99
+          }]
+        })
+      });
+      fulfilled += 1;
+      return;
+    }
+    await route.fallback();
+  });
+
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+  await page.getByRole('button', { name: 'View All' }).click();
+  await page.evaluate(() => window.doLogout());
+  await expect(page.locator('#viewLogin')).toBeVisible();
+  releaseHistory();
+  await expect.poll(() => fulfilled).toBeGreaterThan(0);
+  await expect(page.locator('#hoursContent')).not.toContainText('HENRY-LEAK-INV');
+  await expect(page.locator('#viewLogin')).toBeVisible();
+});
+
+test.describe('stale restored work-order id', () => {
+  test.use({ feedScenario: 'henry-job-centric-submit' });
+
+  test('a restored work-order id is stripped unless the current hydrate authorizes it', async ({ appPage: page, feedRequests }) => {
+    const weekStart = perthWeekMonday();
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.evaluate(([start, end]) => {
+      sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-henry'), JSON.stringify({
+        user_id: 'e2e-henry',
+        is_per_metre: true,
+        invoice_type: 'per_metre',
+        jobCentric: true,
+        jobCards: [{
+          job_id: 'stale-job',
+          job_number: 'FENCE-STALE-009',
+          client_name: 'Stale Client',
+          scheduled_date: start,
+          included: true,
+          wo_mode: true,
+          work_order_id: 'wo-stale-not-authorized',
+          wo_number: 'WO-STALE',
+          wo_allocated: 99,
+          wo_labour_lines: [],
+          hours: 2,
+          rate: 55,
+          description: 'stale wo hours',
+          manually_added: true
+        }],
+        weekStart: start,
+        weekEnd: end
+      }));
+    }, [weekStart, addIsoDays(weekStart, 6)]);
+
+    await page.locator('[data-view="hours"]').click();
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+    const stale = page.locator('.jc-card').filter({ hasText: 'FENCE-STALE-009' });
+    await expect(stale).toBeVisible();
+    await expect(stale.locator('[data-cardwoalloc]')).toHaveCount(0);
+    await expect(stale.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const extras = writes[0].body.extra_items || [];
+    expect(extras.some((item) => item.work_order_id === 'wo-stale-not-authorized')).toBe(false);
+    const added = extras.find((item) => item.job_number === 'FENCE-STALE-009');
+    expect(added).toBeTruthy();
+    expect(added.row_type).toBe('labour');
+    expect(added.manually_added).toBe(true);
   });
 });

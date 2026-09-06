@@ -235,4 +235,23 @@ function woCard(overrides) {
   assert(!built.error, 'other trades can still submit a WO-mode card without work_order_id: ' + built.error)
 }
 
-console.log('OK — WO labour-line payload contract holds (14 scenarios)')
+// ── No-ID pass-through merge is a multiset, not a name+amount collapse ──
+{
+  const startMark = '// [WO-PASSTHROUGH-MERGE-START]'
+  const endMark = '// [WO-PASSTHROUGH-MERGE-END]'
+  const mergeStart = html.indexOf(startMark)
+  const mergeEnd = html.indexOf(endMark)
+  assert(mergeStart !== -1 && mergeEnd > mergeStart, 'pass-through merge markers exist')
+  vm.runInContext(html.slice(mergeStart, mergeEnd), context)
+  const israel = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+  const two = context._mergeServerPassThroughs([], [israel, Object.assign({}, israel)])
+  assert.strictEqual(two.lines.length, 2, 'two no-ID Israel $40 charges both land')
+  assert.strictEqual(two.changed, true)
+  const retry = context._mergeServerPassThroughs(two.lines, [israel, Object.assign({}, israel)])
+  assert.strictEqual(retry.lines.length, 2, 'a second hydrate does not double no-ID lines')
+  assert.strictEqual(retry.changed, false)
+  const oneLocal = context._mergeServerPassThroughs([Object.assign({}, israel)], [israel, Object.assign({}, israel)])
+  assert.strictEqual(oneLocal.lines.length, 2, 'one local no-ID line plus two server lines keeps both deducts')
+}
+
+console.log('OK — WO labour-line payload contract holds (17 scenarios)')

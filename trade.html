@@ -5027,7 +5027,19 @@
   }
 
   function resetInvoiceSession() {
+    _invoiceAuthGen++;
     _clearInvDraft();
+  }
+
+  function _invoiceApiContext() {
+    return { gen: _invoiceAuthGen, userId: _invDraftOwnerId() };
+  }
+
+  function _invoiceApiCurrent(ctx) {
+    if (!ctx) return false;
+    if (ctx.gen !== _invoiceAuthGen) return false;
+    var owner = _invDraftOwnerId();
+    return !!(ctx.userId && owner && ctx.userId === owner);
   }
 
   // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
@@ -15808,6 +15820,9 @@
   var _tradeRate = null;    // cached rate for profile
   var _weeklyWoInvoice = null; // Henry's server-owned weekly work-order invoice builder
   var _weeklyWoInvoiceLoadSeq = 0;
+  var _invoiceAuthGen = 0; // bumped on account switch so late invoice reads cannot paint
+  var _invoiceViewSeq = 0; // history / draft / detail supersede each other
+  var _invoiceHoursSeq = 0;
 
   function _leaveWeeklyWorkOrderInvoice() {
     _weeklyWoInvoice = null;
@@ -15964,7 +15979,9 @@
     if (_userTier >= 2) loadCrewReview();
 
     // Load recent invoices async
+    var recentCtx = _invoiceApiContext();
     api('my_trade_invoices').then(function(res) {
+      if (!_invoiceApiCurrent(recentCtx)) return;
       var el = document.getElementById('hoursRecentActivity');
       if (!el) return;
       var invoices = (res.invoices || []).slice(0, 3);
@@ -15984,6 +16001,7 @@
       });
       el.innerHTML = ih;
     }).catch(function() {
+      if (!_invoiceApiCurrent(recentCtx)) return;
       var el = document.getElementById('hoursRecentActivity');
       if (el) el.innerHTML = '<div style="font-size:12px;color:var(--sw-text-sec)">Could not load activity</div>';
     });
@@ -16036,11 +16054,14 @@
     monDate.setDate(monDate.getDate() - 6);
     _hoursWeekStart = awstDateStr(monDate);
 
+    var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
       _tradeRate = data.rate;
       openInvoiceBuilder();
     }).catch(function(err) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       toast('Failed to load hours: ' + friendlyError(err), true);
       loadHoursView();
     });
@@ -16497,8 +16518,9 @@
 
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading weekly work orders...</div>';
+    var loadCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all', type: 'fencing', status: 'complete', page_size: 500 }).then(function(res) {
-      if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
+      if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
       var workOrders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])).filter(function(workOrder) {
         var date = _weeklyWorkOrderDate(workOrder);
         return date >= loadWeekStart && date <= loadWeekEnd && workOrder.can_add_to_weekly_invoice === true;
@@ -16526,7 +16548,7 @@
         return;
       }
       api('get_trade_invoice', { invoice_id: draftId }).then(function(detail) {
-        if (!_weeklyStateCurrent(_weeklyWoInvoice) || loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
+        if (!_weeklyStateCurrent(_weeklyWoInvoice) || loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
         if (detail.invoice && String(detail.invoice.invoice_source || '') === 'weekly_work_order') {
           if (!_hydrateWeeklyDraft(detail.invoice)) toast('Saved weekly draft is missing server totals. Save again before submitting.', true);
           if (entryWorkOrderId && !_weeklyApplyEntryWorkOrder(_weeklyWoInvoice, entryWorkOrderId, false)) {
@@ -16535,12 +16557,12 @@
         }
         renderWeeklyWorkOrderInvoice();
       }).catch(function(err) {
-        if (!_weeklyStateCurrent(_weeklyWoInvoice) || loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
+        if (!_weeklyStateCurrent(_weeklyWoInvoice) || loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
         toast('Could not reopen the weekly draft: ' + friendlyError(err), true);
         renderWeeklyWorkOrderInvoice();
       });
     }).catch(function(err) {
-      if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
+      if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
       container.innerHTML = '<div data-weekly-wo-load-error class="hours-no-data">'
         + esc(friendlyError(err) || 'Could not load work orders.')
         + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'
@@ -17026,9 +17048,11 @@
 
   // Load a draft invoice for editing
   window.openInvoiceDraft = function(draftId) {
+    var req = { ctx: _invoiceApiContext(), seq: ++_invoiceViewSeq };
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading draft...</div>';
     api('get_trade_invoice', { invoice_id: draftId }).then(function(res) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       var inv = res.invoice;
       if (String((inv || {}).invoice_source || '') === 'weekly_work_order') {
         _invoiceBuilderOpen = false;
@@ -17065,6 +17089,7 @@
       _invoiceBuilderOpen = true;
       renderInvoiceBuilder();
     }).catch(function(err) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       toast('Failed to load draft: ' + friendlyError(err), true);
       loadHoursView();
     });
@@ -17072,21 +17097,27 @@
 
   window.openInvoiceHistory = function() {
     _leaveWeeklyWorkOrderInvoice();
+    var req = { ctx: _invoiceApiContext(), seq: ++_invoiceViewSeq };
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading invoices...</div>';
     api('my_trade_invoices').then(function(res) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       renderInvoiceHistory(res.invoices || []);
     }).catch(function(err) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
     });
   };
 
   window.viewInvoiceDetail = function(invoiceId) {
+    var req = { ctx: _invoiceApiContext(), seq: ++_invoiceViewSeq };
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading invoice...</div>';
     api('get_trade_invoice', { invoice_id: invoiceId }).then(function(res) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       renderInvoiceDetail(res.invoice);
     }).catch(function(err) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
       container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
     });
   };
@@ -17624,7 +17655,9 @@
   function _refreshHoursDataForOpenInvoice() {
     var weekEnd = _hoursWeekEnd || getWeekEndSunday(0);
     if (!weekEnd) return;
+    var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: weekEnd }).then(function(data) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
       _tradeRate = data.rate;
       if (data && (String(data.invoice_type || '') === 'per_metre' || data.is_per_metre === true)) {
@@ -17637,6 +17670,7 @@
       }
       if (isPerMetreUser()) renderInvoiceBuilder();
     }).catch(function() {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       if (_invoiceBuilderOpen && isPerMetreUser() && _pmWoHydrateState === 'idle') {
         _hydratePerMetreWorkOrderCards();
       }
@@ -17697,6 +17731,9 @@
     _pmWoHydrateError = '';
     _pmWoHydrateSeq++;
     _invoiceRenderSeq++;
+    _invoiceViewSeq++;
+    _invoiceHoursSeq++;
+    _pmHydratedWorkOrderIds = {};
     _jobCards = [];
     _invLumpLines = [];
     _invRows = [];
@@ -18093,6 +18130,7 @@
   var _invoiceRenderSeq = 0;
   var _pmWoHydrateState = 'idle'; // idle | pending | ok | error
   var _pmWoHydrateError = '';
+  var _pmHydratedWorkOrderIds = {}; // WO ids from the last successful job-centric hydrate
 
   function _woChargeSourceLineId(charge) {
     charge = charge || {};
@@ -18115,13 +18153,26 @@
     return line;
   }
 
+  // [WO-PASSTHROUGH-MERGE-START]
   function _mergeServerPassThroughs(existing, serverLines) {
     var lines = Array.isArray(existing) ? existing.slice() : [];
     var have = {};
+    var existingNoIdCounts = {};
+    function noIdKey(line) {
+      return String((line && line.trade_name) || '') + '\0' + String(Number((line && line.amount) || 0));
+    }
     lines.forEach(function(line) {
       var id = String((line && line.source_line_id) || '');
-      if (id) have[id] = true;
+      if (id) {
+        have[id] = true;
+        return;
+      }
+      if (line && line.line_kind === 'wo_pass_through') {
+        var existingKey = noIdKey(line);
+        existingNoIdCounts[existingKey] = (existingNoIdCounts[existingKey] || 0) + 1;
+      }
     });
+    var serverNoIdSeen = {};
     var changed = false;
     (serverLines || []).forEach(function(server) {
       if (!server) return;
@@ -18133,17 +18184,40 @@
         changed = true;
         return;
       }
-      var dup = lines.some(function(line) {
-        return line && line.line_kind === 'wo_pass_through'
-          && String(line.trade_name || '') === String(server.trade_name || '')
-          && Number(line.amount || 0) === Number(server.amount || 0);
-      });
-      if (!dup) {
-        lines.push(server);
-        changed = true;
-      }
+      // No-ID lines are a multiset: two Israel $40 charges are two deducts.
+      // Pair each server occurrence against one existing no-ID line so a retry
+      // does not double-count, and so distinct same-amount lines are kept.
+      var key = noIdKey(server);
+      serverNoIdSeen[key] = (serverNoIdSeen[key] || 0) + 1;
+      if (serverNoIdSeen[key] <= (existingNoIdCounts[key] || 0)) return;
+      lines.push(server);
+      changed = true;
     });
     return { lines: lines, changed: changed };
+  }
+  // [WO-PASSTHROUGH-MERGE-END]
+
+  function _workOrderIdSet(orders) {
+    var ids = {};
+    (orders || []).forEach(function(order) {
+      if (order && order.id) ids[String(order.id)] = true;
+    });
+    return ids;
+  }
+
+  function _reconcileJobCardWorkOrderAuth(authorizedIds) {
+    authorizedIds = authorizedIds || {};
+    var changed = false;
+    (_jobCards || []).forEach(function(card) {
+      var woId = String((card && card.work_order_id) || '');
+      if (!woId) return;
+      if (authorizedIds[woId]) return;
+      card.work_order_id = '';
+      card.wo_number = '';
+      if (card.wo_mode) card.wo_mode = false;
+      changed = true;
+    });
+    return changed;
   }
 
   function _jobCardDate(card) {
@@ -18272,18 +18346,24 @@
       _pmWoHydrateError = '';
       renderInvoiceBuilder();
     }
+    var hydrateCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
-      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen) return;
+      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
       var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []));
+      _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);
+      _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
       _pmWoHydrateState = 'ok';
       _pmWoHydrateError = '';
       // Always re-render: existing assignment cards can change without a new
       // card being pushed, and the pending/error banner must clear.
       renderInvoiceBuilder();
     }).catch(function() {
-      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen) return;
+      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
+      _pmHydratedWorkOrderIds = {};
+      _syncJobCardsFromDOM();
+      _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
       _pmWoHydrateState = 'error';
       _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
       renderInvoiceBuilder();
@@ -19494,6 +19574,7 @@
     // FIX2: flush DOM→state before building payload so mobile taps without blur
     // don't leave hours/rate as null even though the field visually shows a value.
     _syncJobCardsFromDOM();
+    _reconcileJobCardWorkOrderAuth(_pmHydratedWorkOrderIds);
     _syncInvLumpLinesFromDOM();
     var incompleteLump = (_invLumpLines || []).some(function(line) {
       var desc = String((line && line.description) || '').trim();
@@ -21938,7 +22019,9 @@
   function loadProfileInvoices() {
     var container = document.getElementById('profileInvoiceList');
     if (!container) return;
+    var profileCtx = _invoiceApiContext();
     api('my_trade_invoices').then(function(data) {
+      if (!_invoiceApiCurrent(profileCtx)) return;
       var invoices = data.invoices || [];
       if (invoices.length === 0) {
         container.innerHTML = '<div style="font-size:13px;color:var(--sw-text-sec)">No invoices submitted yet</div>';
@@ -21959,6 +22042,7 @@
       });
       container.innerHTML = html;
     }).catch(function() {
+      if (!_invoiceApiCurrent(profileCtx)) return;
       container.innerHTML = '<div style="font-size:13px;color:var(--sw-text-sec)">Could not load invoices</div>';
     });
   }
@@ -22023,9 +22107,12 @@
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading work orders...</div>';
 
+    var hubCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
+      if (!_invoiceApiCurrent(hubCtx)) return;
       renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
     }).catch(function(err) {
+      if (!_invoiceApiCurrent(hubCtx)) return;
       container.innerHTML = '<div data-work-order-hub-error class="hours-no-data">Error: '
         + esc(friendlyError(err) || 'Could not load work orders.')
         + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'

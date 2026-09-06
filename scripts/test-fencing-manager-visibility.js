@@ -306,6 +306,12 @@ assert(html.includes('addWoLumpLine'),
   'job-centric WO cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),
   'hydrate merges server pass-throughs by source line id instead of replacing local lines');
+assert(html.includes('No-ID lines are a multiset'),
+  'no-ID pass-through merge keeps distinct same-amount deducts');
+assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++'),
+  'invoice API responses are dropped after an account switch or superseded request');
+assert(html.includes('_reconcileJobCardWorkOrderAuth'),
+  'restored work-order ids are reconciled against the current hydrate authorization');
 assert(html.includes('requires_work_order_id'),
   'per-metre WO submit requires a real work_order_id');
 assert(html.includes('data-weekly-wo-retry'),

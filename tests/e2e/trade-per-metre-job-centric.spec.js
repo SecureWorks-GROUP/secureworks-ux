@@ -636,7 +636,7 @@ test('a queued invoice from another account is not replayed after sign-in', asyn
 test.describe('stale restored work-order id', () => {
   test.use({ feedScenario: 'henry-job-centric-submit' });
 
-  test('a restored work-order id is stripped unless the current hydrate authorizes it', async ({ appPage: page, feedRequests }) => {
+  test('a restored work-order id stays blocked unless the current hydrate authorizes it', async ({ appPage: page, feedRequests }) => {
     const weekStart = perthWeekMonday();
     await signIn(page, PERSONAS.fencing_manager);
     await page.evaluate(([start, end]) => {
@@ -672,8 +672,19 @@ test.describe('stale restored work-order id', () => {
 
     const stale = page.locator('.jc-card').filter({ hasText: 'FENCE-STALE-009' });
     await expect(stale).toBeVisible();
-    await expect(stale.locator('[data-cardwoalloc]')).toHaveCount(0);
-    await expect(stale.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    await expect(stale.locator('[data-wo-block]')).toBeVisible();
+    await expect(stale.locator('[data-wo-block]')).toContainText('not available to invoice this week');
+    await expect(stale.locator('[data-cardwoalloc]')).toHaveValue('99');
+    await expect(stale.getByRole('button', { name: 'Hours', exact: true })).toBeDisabled();
+    await expect(stale.locator('[data-cardhours]')).toHaveCount(0);
+    await expect(page.locator('#invSubmitBtn')).toBeDisabled();
+    await expect(page.locator('[data-wo-submit-block]')).toBeVisible();
+
+    const beforeAck = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(beforeAck.length).toBe(0);
+
+    await stale.locator('[data-wo-hours-ack]').click();
+    await expect(stale.locator('[data-wo-block]')).toHaveCount(0);
     await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
 
     await page.locator('#invSubmitBtn').click();
@@ -745,10 +756,95 @@ test('hydrate overwrites stale allocated money and rematches server pass-through
   await expect(card).not.toContainText('$999');
 });
 
+test.describe('already-invoiced work order stays blocked', () => {
+  test.use({ feedScenario: 'henry-job-centric-submit' });
+
+  test('a restored already-invoiced work order does not convert to Hours', async ({ appPage: page, feedRequests }) => {
+    const weekStart = perthWeekMonday();
+    const jobDate = addIsoDays(weekStart, 1);
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_work_orders') {
+        const response = await route.fetch();
+        const body = await response.json();
+        const extra = {
+          id: 'wo-already-invoiced',
+          wo_number: 'WO-ALREADY',
+          job_id: 'fence-job-already',
+          job_number: 'FENCE-ALREADY-009',
+          client_name: 'Already Client',
+          job_type: 'fencing',
+          status: 'complete',
+          scheduled_date: jobDate,
+          subtotal: 80,
+          already_invoiced: true,
+          can_invoice: false,
+          can_add_to_weekly_invoice: false,
+          negative_charges: [{ amount: 40, trade_name: 'Israel', source_line_id: 'wo-already-israel' }]
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(Object.assign({}, body, {
+            work_orders: (body.work_orders || []).concat([extra])
+          }))
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.evaluate(([start, end, date]) => {
+      sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-henry'), JSON.stringify({
+        user_id: 'e2e-henry',
+        is_per_metre: true,
+        invoice_type: 'per_metre',
+        jobCentric: true,
+        jobCards: [{
+          job_id: 'fence-job-already',
+          job_number: 'FENCE-ALREADY-009',
+          client_name: 'Already Client',
+          scheduled_date: date,
+          included: true,
+          wo_mode: true,
+          work_order_id: 'wo-already-invoiced',
+          wo_number: 'WO-ALREADY',
+          wo_allocated: 80,
+          wo_labour_lines: [{
+            trade_name: 'Israel',
+            line_kind: 'wo_pass_through',
+            amount: 40,
+            source_line_id: 'wo-already-israel'
+          }],
+          hours: 3,
+          rate: 55,
+          description: 'already invoiced hours',
+          manually_added: true
+        }],
+        weekStart: start,
+        weekEnd: end
+      }));
+    }, [weekStart, addIsoDays(weekStart, 6), jobDate]);
+
+    await page.locator('[data-view="hours"]').click();
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-ALREADY-009' });
+    await expect(card.locator('[data-wo-block]')).toContainText('already been invoiced');
+    await expect(card.locator('[data-cardwoalloc]')).toHaveValue('80');
+    await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+    await expect(card.locator('[data-cardhours]')).toHaveCount(0);
+    await expect(page.locator('#invSubmitBtn')).toBeDisabled();
+    expect(feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST').length).toBe(0);
+  });
+});
+
 test.describe('hydrate ignores out-of-week work orders', () => {
   test.use({ feedScenario: 'henry-job-centric-submit' });
 
-  test('a restored out-of-week work-order id is stripped and cannot submit', async ({ appPage: page, feedRequests }) => {
+  test('a restored out-of-week work-order id stays blocked until hours are confirmed', async ({ appPage: page, feedRequests }) => {
     const weekStart = perthWeekMonday();
     const lastWeek = addIsoDays(weekStart, -7);
     await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
@@ -817,8 +913,13 @@ test.describe('hydrate ignores out-of-week work orders', () => {
 
     const stale = page.locator('.jc-card').filter({ hasText: 'FENCE-LAST-009' });
     await expect(stale).toBeVisible();
-    await expect(stale.locator('[data-cardwoalloc]')).toHaveCount(0);
-    await expect(stale.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    await expect(stale.locator('[data-wo-block]')).toBeVisible();
+    await expect(stale.locator('[data-wo-block]')).toContainText('not available to invoice this week');
+    await expect(stale.locator('[data-cardwoalloc]')).toHaveValue('250');
+    await expect(stale.locator('[data-cardhours]')).toHaveCount(0);
+    await expect(page.locator('#invSubmitBtn')).toBeDisabled();
+
+    await stale.locator('[data-wo-hours-ack]').click();
     await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
 
     await page.locator('#invSubmitBtn').click();

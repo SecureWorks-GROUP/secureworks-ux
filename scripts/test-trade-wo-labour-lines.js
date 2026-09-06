@@ -376,6 +376,67 @@ function hoursCard(overrides) {
   assert(!built.error, 'other trades can still submit a WO-mode card without work_order_id: ' + built.error)
 }
 
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: false,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(built.error, 'blocked WO card must fail closed')
+  assert(built.error.indexOf('already been invoiced') !== -1, 'payload repeats the block reason: ' + built.error)
+  assert(!built.cardExtraItems, 'blocked WO does not serialize extras')
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: true,
+    wo_mode: false,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(!built.error, 'explicit hours ack can submit as hours: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.strictEqual(built.cardExtraItems[0].work_order_id, undefined)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    work_order_id: 'wo-already',
+    wo_blocked: true,
+    wo_block_reason: 'This work order has already been invoiced.',
+    wo_hours_ack: true,
+    wo_mode: true,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }],
+    hours: 2,
+    rate: 55,
+    assignment_id: null,
+    manually_added: true,
+    description: 'already invoiced hours',
+  })])
+  assert(!built.error, 'acked WO still in wo_mode emits hours, not a WO extra: ' + built.error)
+  assert.strictEqual(built.cardExtraItems.length, 1)
+  assert.strictEqual(built.cardExtraItems[0].row_type, 'labour')
+  assert.strictEqual(built.cardExtraItems[0].work_order_id, undefined)
+}
+
 // ── No-ID pass-through merge is a multiset, not a name+amount collapse ──
 {
   const startMark = '// [WO-PASSTHROUGH-MERGE-START]'
@@ -439,6 +500,10 @@ function hoursCard(overrides) {
     can_invoice: false,
     can_add_to_weekly_invoice: false,
   })), false, 'skipped WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    can_invoice: false,
+    can_add_to_weekly_invoice: true,
+  })), false, 'weekly-reserved WO is not job-centric hydrated')
   assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
     scheduled_date: '2026-08-31',
   })), false, 'out-of-week WO is not hydrated')
@@ -505,13 +570,64 @@ function hoursCard(overrides) {
   }
   context._jobCards = [stripped]
   assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}), true)
-  assert.strictEqual(stripped.work_order_id, '')
-  assert.strictEqual(stripped.wo_mode, false)
-  assert.strictEqual(stripped.wo_allocated, null, 'unauthorized WO clears allocated')
-  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.source_line_id).length, 0,
-    'unauthorized WO clears server pass-throughs')
-  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
-    'hourly labour survives unauthorized strip')
+  assert.strictEqual(stripped.work_order_id, 'wo-stale-not-authorized',
+    'unauthorized WO keeps its work_order_id')
+  assert.strictEqual(stripped.wo_mode, true, 'unauthorized WO stays a work-order card')
+  assert.strictEqual(stripped.wo_blocked, true, 'unauthorized WO is blocked, not Hours')
+  assert.strictEqual(stripped.wo_allocated, 99, 'blocked WO keeps allocated money')
+  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.source_line_id).length, 1,
+    'blocked WO keeps server pass-throughs')
+  assert.ok(String(stripped.wo_block_reason || '').indexOf('not available') !== -1,
+    'missing WO names a block reason: ' + stripped.wo_block_reason)
+
+  const already = {
+    work_order_id: 'wo-already',
+    wo_number: 'WO-ALREADY',
+    wo_mode: true,
+    wo_allocated: 80,
+    wo_labour_lines: [{ trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'cl-israel' }],
+  }
+  context._jobCards = [already]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}, {
+    'wo-already': { id: 'wo-already', already_invoiced: true, can_invoice: false },
+  }), true)
+  assert.strictEqual(already.work_order_id, 'wo-already')
+  assert.strictEqual(already.wo_mode, true)
+  assert.strictEqual(already.wo_blocked, true)
+  assert.strictEqual(already.wo_hours_ack, false)
+  assert.strictEqual(already.wo_allocated, 80)
+  assert.ok(String(already.wo_block_reason).indexOf('already been invoiced') !== -1,
+    'already-invoiced reason: ' + already.wo_block_reason)
+
+  const weeklyHeld = {
+    work_order_id: 'wo-weekly',
+    wo_mode: true,
+    wo_allocated: 70,
+    wo_labour_lines: [],
+  }
+  context._jobCards = [weeklyHeld]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}, {
+    'wo-weekly': { id: 'wo-weekly', already_invoiced: false, can_invoice: false, can_add_to_weekly_invoice: true },
+  }), true)
+  assert.strictEqual(weeklyHeld.wo_blocked, true)
+  assert.strictEqual(weeklyHeld.wo_mode, true)
+  assert.ok(String(weeklyHeld.wo_block_reason).indexOf('weekly invoice') !== -1,
+    'weekly-reserved reason: ' + weeklyHeld.wo_block_reason)
+
+  const exclusive = {
+    work_order_id: 'wo-ok',
+    wo_mode: true,
+    wo_blocked: true,
+    wo_block_reason: 'stale',
+    wo_hours_ack: true,
+  }
+  context._jobCards = [exclusive]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({ 'wo-ok': true }, {
+    'wo-ok': { id: 'wo-ok', can_invoice: true, already_invoiced: false },
+  }), true)
+  assert.strictEqual(exclusive.wo_blocked, false, 'exclusive hydrate clears the block')
+  assert.strictEqual(exclusive.wo_hours_ack, false)
+  assert.strictEqual(exclusive.wo_mode, true)
 
   assert.strictEqual(context._workOrdersHydratePayloadComplete(null), false,
     'a missing hydrate body is incomplete')

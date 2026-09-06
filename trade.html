@@ -19755,7 +19755,7 @@
   function _woCardFinalDeductions() {
     var rows = [];
     (_jobCards || []).forEach(function(c) {
-      if (!c || !c.included || !c.wo_mode) return;
+      if (!c || !c.included || !c.wo_mode || (c.wo_blocked && !c.wo_hours_ack)) return;
       _woCleanLabourLines(c).forEach(function(ln) {
         if (!ln || ln.line_kind !== 'wo_pass_through') return;
         var name = String(ln.trade_name || '').trim();
@@ -19991,6 +19991,7 @@
     _invoiceViewSeq++;
     _invoiceHoursSeq++;
     _pmHydratedWorkOrderIds = {};
+    _pmKnownWorkOrdersById = {};
     _jobCards = [];
     _invLumpLines = [];
     _invRows = [];
@@ -20378,6 +20379,9 @@
       wo_labour_lines: [],
       wo_lump_lines: [],
       wo_number: '',
+      wo_blocked: false,
+      wo_block_reason: '',
+      wo_hours_ack: false,
       commission_mode: false,
       hours_user_edited: false,
       hours_mode_locked: false
@@ -20388,7 +20392,8 @@
   var _invoiceRenderSeq = 0;
   var _pmWoHydrateState = 'idle'; // idle | pending | ok | error
   var _pmWoHydrateError = '';
-  var _pmHydratedWorkOrderIds = {}; // WO ids from the last successful job-centric hydrate
+  var _pmHydratedWorkOrderIds = {}; // exclusive can_invoice WO ids from the last successful job-centric hydrate
+  var _pmKnownWorkOrdersById = {}; // full viewer listing from that same complete hydrate
 
   function _woChargeSourceLineId(charge) {
     charge = charge || {};
@@ -20600,19 +20605,64 @@
     return ids;
   }
 
+  function _workOrderByIdMap(orders) {
+    var map = {};
+    (orders || []).forEach(function(order) {
+      if (order && order.id) map[String(order.id)] = order;
+    });
+    return map;
+  }
+
   // [WO-RECONCILE-AUTH-START]
-  function _reconcileJobCardWorkOrderAuth(authorizedIds) {
+  function _workOrderJobCentricBlockReason(wo) {
+    if (!wo) return 'This work order is not available to invoice this week.';
+    if (wo.already_invoiced === true) return 'This work order has already been invoiced.';
+    if (wo.can_add_to_weekly_invoice === true && wo.can_invoice !== true) {
+      return 'This work order is already on a weekly invoice.';
+    }
+    if (wo.can_invoice !== true) {
+      return String(wo.invoice_block_reason || '').trim()
+        || 'This work order is not available for a job invoice.';
+    }
+    return 'This work order is not available to invoice this week.';
+  }
+  function _blockJobCardWorkOrder(card, wo) {
+    if (!card) return;
+    card.wo_blocked = true;
+    card.wo_block_reason = _workOrderJobCentricBlockReason(wo);
+    if (card.wo_hours_ack !== true) card.wo_hours_ack = false;
+  }
+  function _clearJobCardWorkOrderBlock(card) {
+    if (!card) return;
+    card.wo_blocked = false;
+    card.wo_block_reason = '';
+    card.wo_hours_ack = false;
+  }
+  function _jobCardWorkOrderBlocked(card) {
+    return !!(card && card.wo_blocked && !card.wo_hours_ack && String(card.work_order_id || '').trim());
+  }
+  function _reconcileJobCardWorkOrderAuth(authorizedIds, knownById) {
     authorizedIds = authorizedIds || {};
+    if (knownById == null) {
+      knownById = (typeof _pmKnownWorkOrdersById === 'object' && _pmKnownWorkOrdersById)
+        ? _pmKnownWorkOrdersById
+        : {};
+    }
     var changed = false;
     (_jobCards || []).forEach(function(card) {
       var woId = String((card && card.work_order_id) || '');
       if (!woId) return;
-      if (authorizedIds[woId]) return;
-      card.work_order_id = '';
-      card.wo_number = '';
-      if (card.wo_mode) card.wo_mode = false;
-      _clearJobCardServerOwnedWorkOrderMoney(card);
-      changed = true;
+      if (authorizedIds[woId]) {
+        if (card.wo_blocked || card.wo_block_reason || card.wo_hours_ack) {
+          _clearJobCardWorkOrderBlock(card);
+          changed = true;
+        }
+        return;
+      }
+      var beforeReason = card.wo_block_reason || '';
+      var beforeBlocked = !!card.wo_blocked;
+      _blockJobCardWorkOrder(card, knownById[woId] || null);
+      if (!beforeBlocked || beforeReason !== card.wo_block_reason) changed = true;
     });
     return changed;
   }
@@ -20621,8 +20671,8 @@
   // [WO-HYDRATE-FILTER-START]
   function _workOrderInvoiceableForHydrate(wo, week) {
     if (!wo) return false;
-    if (wo.already_invoiced) return false;
-    if (wo.can_invoice !== true && wo.can_add_to_weekly_invoice !== true) return false;
+    if (wo.already_invoiced === true) return false;
+    if (wo.can_invoice !== true) return false;
     var date = (typeof _weeklyWorkOrderDate === 'function')
       ? _weeklyWorkOrderDate(wo)
       : String((wo.scheduled_date || wo.date || '')).slice(0, 10);
@@ -20687,8 +20737,8 @@
     var weekEnd = _hoursWeekEnd || '';
     var changed = false;
     (workOrders || []).forEach(function(wo) {
-      if (!wo || wo.already_invoiced) return;
-      if (wo.can_invoice !== true && wo.can_add_to_weekly_invoice !== true) return;
+      if (!wo || wo.already_invoiced === true) return;
+      if (wo.can_invoice !== true) return;
       var date = _weeklyWorkOrderDate(wo);
       if (weekStart && weekEnd && date && (date < weekStart || date > weekEnd)) return;
       var jobId = wo.job_id || '';
@@ -20716,6 +20766,7 @@
         // never writes onto a card that already belongs to another WO.
         if (!target.work_order_id) target.work_order_id = woId;
         if (!target.wo_number && wo.wo_number) target.wo_number = wo.wo_number;
+        _clearJobCardWorkOrderBlock(target);
         if (!_jobCardKeepHoursMode(target) && !target.wo_mode) {
           target.wo_mode = true;
           changed = true;
@@ -20771,7 +20822,8 @@
         renderInvoiceBuilder();
         return;
       }
-      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders).filter(function(wo) {
+      var listed = workOrdersForViewer(res.work_orders);
+      var orders = authorizeWorkOrders(listed.filter(function(wo) {
         return _workOrderInvoiceableForHydrate(wo);
       }));
       if (!_workOrdersHydrateMoneyComplete(orders)) {
@@ -20787,6 +20839,7 @@
         return;
       }
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
+      _pmKnownWorkOrdersById = _workOrderByIdMap(listed);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);
       if ((_jobCards || []).some(function(card) { return card && card._woPassThroughUnresolved; })) {
@@ -20820,6 +20873,11 @@
   // a complete WO's server block can land. A failed hydrate keeps restored WO
   // money and only blocks when an included card is still in WO mode — Hours
   // cards can submit. Do not reconcile against {} until a successful read.
+  function _jobCentricHasBlockedWorkOrder() {
+    return (_jobCards || []).some(function(c) {
+      return !!(c && c.included && _jobCardWorkOrderBlocked(c));
+    });
+  }
   function _jobCentricSubmitBlockedByHydrate() {
     if (!isPerMetreUser()) return false;
     if (_pmWoHydrateState === 'pending') return true;
@@ -20973,13 +21031,27 @@
         var modeStyles = 'font-size:11px;font-weight:600;padding:5px 11px;cursor:pointer;border:none;outline:none;transition:background 0.15s,color 0.15s;';
         var modeActive = 'background:var(--sw-dark);color:#fff;';
         var modeInactive = 'background:var(--sw-card);color:var(--sw-text-sec);';
-        html += '<button type="button" style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
+        var hoursLocked = _jobCardWorkOrderBlocked(c);
+        html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
+          + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
+          + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
         var woLocked = !c.work_order_id && (c.requires_work_order_id || isPerMetreUser());
         html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="No work order on this job yet" ' : '')
           + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
           + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
         html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'commission' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'commission\')">Commission</button>';
         html += '</div>';
+        if (_jobCardWorkOrderBlocked(c)) {
+          html += '<div data-wo-block="' + c._idx + '" style="margin-top:8px;padding:8px 10px;border:1px solid var(--sw-orange);border-radius:8px;background:rgba(241,90,41,0.08)">';
+          html += '<div style="font-size:12px;font-weight:700;color:var(--sw-mid)">' + esc(c.wo_block_reason || 'This work order is not available to invoice this week.') + '</div>';
+          html += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">It stays on this card until you remove it or confirm hours. Hours will not submit until you do.</div>';
+          html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">';
+          html += '<button type="button" data-wo-hours-ack="' + c._idx + '" onclick="ackJobCardWorkOrderAsHours(' + c._idx + ')" '
+            + 'style="font-size:12px;font-weight:600;color:#fff;background:var(--sw-dark);border:none;border-radius:6px;padding:5px 10px;cursor:pointer">Use hours instead</button>';
+          html += '<button type="button" data-wo-block-remove="' + c._idx + '" onclick="excludeBlockedJobCard(' + c._idx + ')" '
+            + 'style="font-size:12px;font-weight:600;color:var(--sw-red);background:none;border:1px solid var(--sw-red);border-radius:6px;padding:5px 10px;cursor:pointer">Remove from this invoice</button>';
+          html += '</div></div>';
+        }
         if (cardMode === 'commission') {
           // Commission mode [Q16]: single amount input, description auto-fills.
           var commAmt = c.commission_amount != null ? c.commission_amount : '';
@@ -21460,10 +21532,36 @@
       toast('This job has no work order yet. Invoice hours, or wait for the work order to load.', true);
       return;
     }
+    if (mode === 'hours' && _jobCardWorkOrderBlocked(c)) {
+      toast((c.wo_block_reason || 'This work order is not available to invoice this week.') + ' Confirm hours instead, or remove this job.', true);
+      return;
+    }
+    if (mode === 'work_order' && c.wo_blocked) {
+      toast(c.wo_block_reason || 'This work order is not available for a job invoice.', true);
+      return;
+    }
     _syncJobCardsFromDOM();
     c.wo_mode = (mode === 'work_order');
     c.commission_mode = (mode === 'commission');
     c.hours_mode_locked = (mode === 'hours');
+    renderInvoiceBuilder();
+  };
+  window.ackJobCardWorkOrderAsHours = function(idx) {
+    var c = _jobCards[idx];
+    if (!c || !_jobCardWorkOrderBlocked(c)) return;
+    _syncJobCardsFromDOM();
+    c.wo_hours_ack = true;
+    c.wo_mode = false;
+    c.commission_mode = false;
+    c.hours_mode_locked = true;
+    c.hours_user_edited = true;
+    renderInvoiceBuilder();
+  };
+  window.excludeBlockedJobCard = function(idx) {
+    var c = _jobCards[idx];
+    if (!c) return;
+    _syncJobCardsFromDOM();
+    c.included = false;
     renderInvoiceBuilder();
   };
   // Legacy toggle preserved for any code still referencing it.
@@ -21860,25 +21958,37 @@
   }
   function _buildJobCentricPayload(cards) {
     var included = (cards || []).filter(function(c) { return c.included; });
+    function _jobCardEmitsWorkOrder(c) {
+      return !!(c && c.wo_mode && !(c.wo_blocked && c.wo_hours_ack));
+    }
+    var woBlocked = included.filter(function(c) {
+      return !!(c.wo_blocked && !c.wo_hours_ack && String(c.work_order_id || '').trim());
+    });
+    if (woBlocked.length > 0) {
+      return {
+        error: woBlocked[0].wo_block_reason || 'This work order is not available to invoice this week.',
+        missingIndices: woBlocked.map(function(c) { return c._idx; })
+      };
+    }
 
     var commMissing = included.filter(function(c) { return c.commission_mode && !(Number(c.commission_amount) > 0); });
     if (commMissing.length > 0) return { error: 'Enter a commission amount on every commission row before submitting (' + commMissing.length + ' missing)', missingIndices: commMissing.map(function(c){return c._idx;}) };
     var woMissingId = included.filter(function(c) {
-      return c.wo_mode && c.requires_work_order_id && !String(c.work_order_id || '');
+      return _jobCardEmitsWorkOrder(c) && c.requires_work_order_id && !String(c.work_order_id || '');
     });
     if (woMissingId.length > 0) return { error: 'This job has no work order yet — invoice hours or wait for the work order to load.', missingIndices: woMissingId.map(function(c){return c._idx;}) };
-    var woMissing = included.filter(function(c) { return c.wo_mode && !(Number(c.wo_allocated) > 0); });
+    var woMissing = included.filter(function(c) { return _jobCardEmitsWorkOrder(c) && !(Number(c.wo_allocated) > 0); });
     if (woMissing.length > 0) return { error: 'Enter the WO allocated amount on every work-order row (' + woMissing.length + ' missing)', missingIndices: woMissing.map(function(c){return c._idx;}) };
-    var woNeg = included.filter(function(c) { return c.wo_mode && _woNet(c) < 0; });
+    var woNeg = included.filter(function(c) { return _jobCardEmitsWorkOrder(c) && _woNet(c) < 0; });
     if (woNeg.length > 0) return { error: 'Net payable cannot be negative on ' + (woNeg[0].job_number || 'a job') + ' — the labour deduction is more than the WO allocation. Fix the amounts before submitting.', missingIndices: woNeg.map(function(c){return c._idx;}) };
-    var woZero = included.filter(function(c) { return c.wo_mode && _woNet(c) === 0; });
+    var woZero = included.filter(function(c) { return _jobCardEmitsWorkOrder(c) && _woNet(c) === 0; });
     if (woZero.length > 0) return { error: 'Net payable is $0.00 on ' + (woZero[0].job_number || 'a job') + ' — untick the job or fix the amounts', missingIndices: woZero.map(function(c){return c._idx;}) };
     // Every labour deduction must identify the crew member who bills
     // SecureWorks Group directly, so a line that carries money must name a
     // person and a named line must carry real hours × rate.
     var woBadLine = [];
     included.forEach(function(c) {
-      if (!c.wo_mode) return;
+      if (!_jobCardEmitsWorkOrder(c)) return;
       var lines = _woCleanLabourLines(c);
       for (var i = 0; i < lines.length; i++) {
         var jobLbl = c.job_number || c.site_suburb || 'a job';
@@ -21912,7 +22022,7 @@
     // amounts — those are a peer option to hours for every job-centric trade.
     var hourLumpBad = [];
     included.forEach(function(c) {
-      if (c.wo_mode || c.commission_mode) return;
+      if (_jobCardEmitsWorkOrder(c) || c.commission_mode) return;
       var lumps = _woCleanLumpLines(c);
       var jobLbl = c.job_number || c.site_suburb || 'a job';
       for (var hi = 0; hi < lumps.length; hi++) {
@@ -21929,7 +22039,7 @@
       return { error: _lumpShown.join(' · '), missingIndices: hourLumpBad.map(function(b){ return b.idx; }) };
     }
     var missing = included.filter(function(c) {
-      if (c.wo_mode || c.commission_mode) return false;
+      if (_jobCardEmitsWorkOrder(c) || c.commission_mode) return false;
       var completeLumps = _woCleanLumpLines(c).filter(function(lp) { return lp.description && lp.amount > 0; });
       var hasHours = c.hours != null && c.hours > 0 && Number(c.rate) > 0;
       if (hasHours) {
@@ -21979,7 +22089,7 @@
           rate_source: 'client_entered',
           client_rate_entered: true
         });
-      } else if (c.wo_mode) {
+      } else if (_jobCardEmitsWorkOrder(c)) {
         var net = _woNet(c);
         subtotal += net;
         // Build structured labour lines with computed amounts [Q17]. Cleaned
@@ -22122,6 +22232,16 @@
     var legacyExtras = legacyManualRows.map(_rowToExtraItem);
     var lumpExtras = _invLumpExtraItems();
     var extraItems = built.cardExtraItems.concat(legacyExtras).concat(lumpExtras);
+    if (_pmWoHydrateState === 'ok') {
+      var nonExclusiveWo = extraItems.filter(function(item) {
+        var id = String((item && item.work_order_id) || '').trim();
+        return !!id && !_pmHydratedWorkOrderIds[id];
+      });
+      if (nonExclusiveWo.length) {
+        toast('This work order is not available for a job invoice.', true);
+        return;
+      }
+    }
     if (built.includedCount === 0 && extraItems.length === 0) { toast('Select a job or add an extra', true); return; }
 
     var sub = built.subtotal;
@@ -22373,6 +22493,7 @@
       // Extras still ride along through submitJobCentricInvoice.
       var jcHasCards = _jobCards.some(function(c) { return c.included; });
       var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
+      var woAuthBlocked = _jobCentricHasBlockedWorkOrder();
       var jcHasLumps = _invLumpExtraItems().length > 0;
       if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
@@ -22381,6 +22502,16 @@
             ? 'Work-order amounts did not load. Retry before submitting a work-order card, or invoice hours and added jobs now.'
             : 'Work-order amounts are still loading. Submit unlocks when they arrive.')
           + '</div>';
+      } else if (woAuthBlocked) {
+        var woBlockReason = '';
+        _jobCards.forEach(function(c) {
+          if (!woBlockReason && c && c.included && _jobCardWorkOrderBlocked(c)) {
+            woBlockReason = c.wo_block_reason || 'This work order is not available to invoice this week.';
+          }
+        });
+        html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
+        html += '<div data-wo-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
+          + esc(woBlockReason) + ' Remove it or confirm hours before submitting.</div>';
       } else if (jcHasCards || jcHasLumps || _invRows.some(function(r){ return r._misc || r.description; })) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" onclick="submitJobCentricInvoice()" style="margin-top:16px">Submit Invoice</button>';
         html += '<div style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">Manual hours are verified by the office before payment.</div>';

@@ -510,6 +510,21 @@ assert(html.includes('_reconcileJobCardWorkOrderAuth'),
   'restored work-order ids are reconciled against the current hydrate authorization');
 assert(html.includes('_workOrderInvoiceableForHydrate') && html.includes('return _workOrderInvoiceableForHydrate(wo)'),
   'job-centric hydrate authorizes only invoiceable in-week work orders');
+assert((function() {
+  const filter = html.slice(html.indexOf('// [WO-HYDRATE-FILTER-START]'), html.indexOf('// [WO-HYDRATE-FILTER-END]'));
+  const merge = html.slice(html.indexOf('function _mergeWorkOrdersIntoJobCards'), html.indexOf('function _hydratePerMetreWorkOrderCards'));
+  return filter.includes('if (wo.can_invoice !== true) return false') &&
+    !filter.includes('can_add_to_weekly_invoice') &&
+    merge.includes('if (wo.can_invoice !== true) return') &&
+    !/function _mergeWorkOrdersIntoJobCards[\s\S]*?can_add_to_weekly_invoice !== true/.test(merge);
+})(),
+  'job-centric hydrate and merge require exclusive can_invoice, not weekly-door addability');
+assert(html.includes('_blockJobCardWorkOrder') && html.includes('_jobCardWorkOrderBlocked') &&
+  html.includes('ackJobCardWorkOrderAsHours') && html.includes('data-wo-block') &&
+  html.includes('data-wo-hours-ack') &&
+  /function _reconcileJobCardWorkOrderAuth[\s\S]*?_blockJobCardWorkOrder\(card/.test(html) &&
+  !/function _reconcileJobCardWorkOrderAuth[\s\S]*?card\.work_order_id = ''/.test(html),
+  'non-exclusive job-centric WOs stay blocked with a reason instead of converting to Hours');
 assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
   'hydrate overwrites server-owned money and clears it when a WO id is stripped');
 assert(html.includes('_stripServerOwnedPassThroughs'),

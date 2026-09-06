@@ -475,13 +475,13 @@ function hoursCard(overrides) {
   assert.strictEqual(context._workOrdersHydratePayloadComplete({}), false,
     'a hydrate body without work_orders is incomplete')
   assert.strictEqual(context._workOrdersHydratePayloadComplete({ work_orders: [] }), true,
-    'an explicit empty work_orders array is a complete money payload')
-  assert.strictEqual(context._workOrdersHydratePayloadComplete({
-    work_orders: [{ id: 'wo-1', subtotal: 100 }]
-  }), false, 'a work order missing negative_charges is incomplete')
-  assert.strictEqual(context._workOrdersHydratePayloadComplete({
-    work_orders: [{ id: 'wo-1', subtotal: 100, negative_charges: [] }]
-  }), true, 'an explicit empty negative_charges array is complete')
+    'an explicit empty work_orders array is a complete listing')
+  assert.strictEqual(context._workOrdersHydrateMoneyComplete([
+    { id: 'wo-1', subtotal: 100 }
+  ]), false, 'an authorized work order missing negative_charges is incomplete money')
+  assert.strictEqual(context._workOrdersHydrateMoneyComplete([
+    { id: 'wo-1', subtotal: 100, negative_charges: [] }
+  ]), true, 'an explicit empty negative_charges array is complete money')
   assert.strictEqual(context._workOrderHasCompleteMoney({ id: 'wo-1', negative_charges: [{ amount: 40 }] }), true)
 }
 

@@ -20186,9 +20186,13 @@
   }
 
   function _workOrdersHydratePayloadComplete(res) {
-    if (!res || !Array.isArray(res.work_orders)) return false;
-    for (var i = 0; i < res.work_orders.length; i++) {
-      if (res.work_orders[i] && !_workOrderHasCompleteMoney(res.work_orders[i])) return false;
+    return !!(res && Array.isArray(res.work_orders));
+  }
+
+  function _workOrdersHydrateMoneyComplete(orders) {
+    orders = orders || [];
+    for (var i = 0; i < orders.length; i++) {
+      if (orders[i] && !_workOrderHasCompleteMoney(orders[i])) return false;
     }
     return true;
   }
@@ -20407,8 +20411,8 @@
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
       if (!_workOrdersHydratePayloadComplete(res)) {
-        // Missing work_orders or negative_charges is not an empty success.
-        // Do not merge/reconcile — that would clear restored server deductions.
+        // Missing work_orders is not an empty success. Do not merge/reconcile
+        // — that would clear restored server deductions.
         _syncJobCardsFromDOM();
         _pmWoHydrateState = 'error';
         _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
@@ -20418,6 +20422,18 @@
       var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders).filter(function(wo) {
         return _workOrderInvoiceableForHydrate(wo);
       }));
+      if (!_workOrdersHydrateMoneyComplete(orders)) {
+        // An authorized WO without negative_charges is unresolved money, not
+        // "no deductions". Keep restored lines and do not reconcile.
+        _syncJobCardsFromDOM();
+        _mergeWorkOrdersIntoJobCards(orders.filter(function(wo) {
+          return _workOrderHasCompleteMoney(wo);
+        }));
+        _pmWoHydrateState = 'error';
+        _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
+        renderInvoiceBuilder();
+        return;
+      }
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);

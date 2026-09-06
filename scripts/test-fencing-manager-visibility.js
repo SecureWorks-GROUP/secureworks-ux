@@ -305,16 +305,23 @@ assert((function() {
     hydrate.indexOf('if (!_workOrdersHydratePayloadComplete'),
     hydrate.indexOf('var orders = authorizeWorkOrders')
   );
+  const incompleteMoney = hydrate.slice(
+    hydrate.indexOf('if (!_workOrdersHydrateMoneyComplete'),
+    hydrate.indexOf('_pmHydratedWorkOrderIds = _workOrderIdSet')
+  );
   return !fail.includes('_reconcileJobCardWorkOrderAuth') &&
     !fail.includes('_pmHydratedWorkOrderIds = {}') &&
     fail.includes("_pmWoHydrateState = 'error'") &&
     incomplete.includes("_pmWoHydrateState = 'error'") &&
     !incomplete.includes('_reconcileJobCardWorkOrderAuth') &&
     !incomplete.includes('_mergeWorkOrdersIntoJobCards') &&
+    incompleteMoney.includes("_pmWoHydrateState = 'error'") &&
+    !incompleteMoney.includes('_reconcileJobCardWorkOrderAuth') &&
     /if \(_pmWoHydrateState === 'ok'\) \{\s*_reconcileJobCardWorkOrderAuth\(_pmHydratedWorkOrderIds\)/.test(html);
 })(),
   'a failed or incomplete WO hydrate keeps restored deductions and does not reconcile against an empty set');
-assert(html.includes('_workOrdersHydratePayloadComplete') && html.includes('_workOrderHasCompleteMoney') &&
+assert(html.includes('_workOrdersHydratePayloadComplete') && html.includes('_workOrdersHydrateMoneyComplete') &&
+  html.includes('_workOrderHasCompleteMoney') &&
   html.includes('Array.isArray(wo.negative_charges)'),
   'hydrate treats missing work_orders or negative_charges as unresolved money, not an empty success');
 assert(html.includes('woHydrateBlocked'),

@@ -26,6 +26,16 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
   await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
   await expect(card.locator('[data-cardamt]')).toHaveText('$60.00');
   await expect(card).toContainText('WO trades [Israel $40]');
+  await page.getByRole('button', { name: '+ Add labour line' }).click();
+  await card.locator('[data-cardwollname]').nth(1).fill('Kim');
+  await card.locator('[data-cardwollhours]').fill('1');
+  await card.locator('[data-cardwollrate]').fill('20');
+  await card.locator('[data-cardwollrate]').press('Tab');
+  await page.evaluate(() => window.retryPerMetreWorkOrderHydrate());
+  await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+  await expect(card.locator('[data-cardwollname]').nth(1)).toHaveValue('Kim');
+  await card.locator('[data-woll]').nth(1).getByRole('button').click();
+  await expect(card.locator('[data-cardamt]')).toHaveText('$60.00');
   await expect(page.getByRole('button', { name: '+ Deduct work order paid to a trade' })).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Add job' }).first()).toBeVisible();
   await expect(page.locator('#invSubmitBtn')).toBeEnabled();
@@ -91,6 +101,42 @@ test('a failed work-order hydrate shows retry and keeps submit locked', async ({
   await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
   await expect(page.locator('[data-pm-wo-hydrate="error"]')).toHaveCount(0);
   await expect(page.locator('#invSubmitBtn')).toBeEnabled();
+});
+
+test('My Work Orders and Work Order Invoice recover from a failed read', async ({ appPage: page }) => {
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+
+  let failReads = true;
+  await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('action') === 'my_work_orders' && failReads) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'work orders unavailable' })
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.getByRole('button', { name: 'My Work Orders' }).click();
+  await expect(page.locator('[data-work-order-hub-error]')).toBeVisible();
+  failReads = false;
+  await page.locator('[data-work-order-hub-retry]').click();
+  await expect(page.locator('[data-work-order-card]')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.locator('[data-financial-hub]')).toBeVisible();
+  failReads = true;
+  await page.locator('[data-work-order-weekly-invoice]').click();
+  await expect(page.locator('[data-weekly-wo-load-error]')).toBeVisible();
+  failReads = false;
+  await page.locator('[data-weekly-wo-retry]').click();
+  await expect(page.getByRole('heading', { name: 'Weekly Invoice' })).toBeVisible();
+  await expect(page.locator('[data-weekly-work-order]')).toHaveCount(1);
 });
 
 test('an empty work-order week offers the job-centric invoice builder', async ({ appPage: page }) => {

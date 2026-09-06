@@ -16541,7 +16541,12 @@
       });
     }).catch(function(err) {
       if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd) return;
-      container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
+      container.innerHTML = '<div data-weekly-wo-load-error class="hours-no-data">'
+        + esc(friendlyError(err) || 'Could not load work orders.')
+        + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'
+        + '<button class="btn btn-secondary" onclick="loadHoursView()">Back</button>'
+        + '<button class="btn btn-secondary" data-weekly-wo-retry onclick="openWeeklyWorkOrderInvoice()">Retry</button>'
+        + '</div></div>';
     });
   };
 
@@ -17810,7 +17815,7 @@
   }
 
   function _defaultJobCardWoMode() {
-    return isPerMetreUser();
+    return false;
   }
 
   function _newJobCard(fields) {
@@ -17834,6 +17839,7 @@
       included: true,
       _blank_job: false,
       wo_mode: _defaultJobCardWoMode(),
+      requires_work_order_id: isPerMetreUser(),
       wo_allocated: null,
       wo_labour_lines: [],
       wo_lump_lines: [],
@@ -17847,16 +17853,56 @@
   var _pmWoHydrateState = 'idle'; // idle | pending | ok | error
   var _pmWoHydrateError = '';
 
+  function _woChargeSourceLineId(charge) {
+    charge = charge || {};
+    var id = charge.line_id || charge.source_line_id || charge.id || '';
+    return id ? String(id) : '';
+  }
+
   function _woPassThroughFromCharge(charge) {
     charge = charge || {};
     var amount = Math.abs(Number(charge.amount_ex != null ? charge.amount_ex : charge.amount || 0));
-    return {
+    var line = {
       trade_name: charge.trade_name || '',
       line_kind: 'wo_pass_through',
       amount: amount > 0 ? amount : null,
       hours: null,
       rate: null
     };
+    var sourceId = _woChargeSourceLineId(charge);
+    if (sourceId) line.source_line_id = sourceId;
+    return line;
+  }
+
+  function _mergeServerPassThroughs(existing, serverLines) {
+    var lines = Array.isArray(existing) ? existing.slice() : [];
+    var have = {};
+    lines.forEach(function(line) {
+      var id = String((line && line.source_line_id) || '');
+      if (id) have[id] = true;
+    });
+    var changed = false;
+    (serverLines || []).forEach(function(server) {
+      if (!server) return;
+      var id = String(server.source_line_id || '');
+      if (id) {
+        if (have[id]) return;
+        lines.push(server);
+        have[id] = true;
+        changed = true;
+        return;
+      }
+      var dup = lines.some(function(line) {
+        return line && line.line_kind === 'wo_pass_through'
+          && String(line.trade_name || '') === String(server.trade_name || '')
+          && Number(line.amount || 0) === Number(server.amount || 0);
+      });
+      if (!dup) {
+        lines.push(server);
+        changed = true;
+      }
+    });
+    return { lines: lines, changed: changed };
   }
 
   function _mergeWorkOrdersIntoJobCards(workOrders) {
@@ -17890,8 +17936,9 @@
           target.wo_allocated = Number(wo.subtotal);
           changed = true;
         }
-        if ((!target.wo_labour_lines || target.wo_labour_lines.length === 0) && passThroughs.length) {
-          target.wo_labour_lines = passThroughs;
+        var mergedLines = _mergeServerPassThroughs(target.wo_labour_lines, passThroughs);
+        if (mergedLines.changed) {
+          target.wo_labour_lines = mergedLines.lines;
           changed = true;
         }
         if (!existing) changed = true;
@@ -17926,6 +17973,7 @@
     if (!isPerMetreUser() || !_jobCentricActive || !_invoiceBuilderOpen) return;
     var seq = ++_pmWoHydrateSeq;
     if (_pmWoHydrateState !== 'pending') {
+      _syncJobCardsFromDOM();
       _pmWoHydrateState = 'pending';
       _pmWoHydrateError = '';
       renderInvoiceBuilder();
@@ -18091,7 +18139,10 @@
         var modeActive = 'background:var(--sw-dark);color:#fff;';
         var modeInactive = 'background:var(--sw-card);color:var(--sw-text-sec);';
         html += '<button type="button" style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
-        html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
+        var woLocked = !c.work_order_id && (c.requires_work_order_id || isPerMetreUser());
+        html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="No work order on this job yet" ' : '')
+          + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
+          + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
         html += '<button type="button" style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'commission' ? modeActive : modeInactive) + '" onclick="setJobCardMode(' + c._idx + ',\'commission\')">Commission</button>';
         html += '</div>';
         if (cardMode === 'commission') {
@@ -18564,6 +18615,10 @@
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
   window.setJobCardMode = function(idx, mode) {
     var c = _jobCards[idx]; if (!c) return;
+    if (mode === 'work_order' && !c.work_order_id && (c.requires_work_order_id || isPerMetreUser())) {
+      toast('This job has no work order yet. Invoice hours, or wait for the work order to load.', true);
+      return;
+    }
     _syncJobCardsFromDOM();
     c.wo_mode = (mode === 'work_order');
     c.commission_mode = (mode === 'commission');
@@ -18846,7 +18901,9 @@
       if (lines[i].line_kind === 'wo_pass_through') {
         var passAmount = Math.round(Number(lines[i].amount || 0) * 100) / 100;
         if (!name && passAmount <= 0) continue;
-        out.push({ trade_name: name, hours: 0, rate: 0, amount: passAmount, line_kind: 'wo_pass_through' });
+        var pass = { trade_name: name, hours: 0, rate: 0, amount: passAmount, line_kind: 'wo_pass_through' };
+        if (lines[i].source_line_id) pass.source_line_id = String(lines[i].source_line_id);
+        out.push(pass);
         continue;
       }
       var hours = Number(lines[i].hours || 0);
@@ -18923,6 +18980,10 @@
 
     var commMissing = included.filter(function(c) { return c.commission_mode && !(Number(c.commission_amount) > 0); });
     if (commMissing.length > 0) return { error: 'Enter a commission amount on every commission row before submitting (' + commMissing.length + ' missing)', missingIndices: commMissing.map(function(c){return c._idx;}) };
+    var woMissingId = included.filter(function(c) {
+      return c.wo_mode && c.requires_work_order_id && !String(c.work_order_id || '');
+    });
+    if (woMissingId.length > 0) return { error: 'This job has no work order yet — invoice hours or wait for the work order to load.', missingIndices: woMissingId.map(function(c){return c._idx;}) };
     var woMissing = included.filter(function(c) { return c.wo_mode && !(Number(c.wo_allocated) > 0); });
     if (woMissing.length > 0) return { error: 'Enter the WO allocated amount on every work-order row (' + woMissing.length + ' missing)', missingIndices: woMissing.map(function(c){return c._idx;}) };
     var woNeg = included.filter(function(c) { return c.wo_mode && _woNet(c) < 0; });
@@ -21621,7 +21682,12 @@
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       renderWorkOrderHub(authorizeWorkOrders(workOrdersForViewer(res.work_orders || [])));
     }).catch(function(err) {
-      container.innerHTML = '<div class="hours-no-data">Error: ' + friendlyError(err) + '</div>';
+      container.innerHTML = '<div data-work-order-hub-error class="hours-no-data">Error: '
+        + esc(friendlyError(err) || 'Could not load work orders.')
+        + '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'
+        + '<button class="btn btn-secondary" onclick="loadHoursView()">Back</button>'
+        + '<button class="btn btn-secondary" data-work-order-hub-retry onclick="openWorkOrderHub()">Retry</button>'
+        + '</div></div>';
     });
   };
 

@@ -290,6 +290,14 @@ assert(html.includes('woHydrateBlocked'),
   'Submit stays locked until the work-order hydrate succeeds');
 assert(html.includes('addWoLumpLine'),
   'job-centric WO cards can deduct a freeform description + amount');
+assert(html.includes('_mergeServerPassThroughs'),
+  'hydrate merges server pass-throughs by source line id instead of replacing local lines');
+assert(html.includes('requires_work_order_id'),
+  'per-metre WO submit requires a real work_order_id');
+assert(html.includes('data-weekly-wo-retry'),
+  'the weekly work-order loader has Retry after a my_work_orders failure');
+assert(html.includes('data-work-order-hub-retry'),
+  'the My Work Orders hub has Retry after a my_work_orders failure');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

@@ -215,4 +215,24 @@ function woCard(overrides) {
   assert(built.error.indexOf('describe') !== -1, 'error asks for a description: ' + built.error)
 }
 
-console.log('OK — WO labour-line payload contract holds (12 scenarios)')
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    requires_work_order_id: true,
+    work_order_id: '',
+  })])
+  assert(built.error, 'per-metre WO card without work_order_id must block')
+  assert(built.error.indexOf('no work order yet') !== -1, 'error names the missing WO: ' + built.error)
+}
+
+{
+  const built = context._buildJobCentricPayload([woCard({
+    wo_allocated: 100,
+    wo_labour_lines: [],
+    work_order_id: '',
+  })])
+  assert(!built.error, 'other trades can still submit a WO-mode card without work_order_id: ' + built.error)
+}
+
+console.log('OK — WO labour-line payload contract holds (14 scenarios)')

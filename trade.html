@@ -16993,6 +16993,10 @@
     if (!opts.expenseOnly && jobCentricEnabled()) {
       buildJobCards();
       _invoiceBuilderOpen = true;
+      if (isPerMetreUser()) {
+        _pmWoHydrateState = 'pending';
+        _pmWoHydrateError = '';
+      }
       renderInvoiceBuilder();
       _hydratePerMetreWorkOrderCards();
       return;
@@ -17453,6 +17457,8 @@
   window._clearInvDraft = function() {
     _invoiceBuilderOpen = false;
     _jobCentricActive = false;
+    _pmWoHydrateState = 'idle';
+    _pmWoHydrateError = '';
     _pmWoHydrateSeq++;
     _invoiceRenderSeq++;
     try { sessionStorage.removeItem('sw_inv_draft'); } catch(e) {}
@@ -17836,6 +17842,8 @@
 
   var _pmWoHydrateSeq = 0;
   var _invoiceRenderSeq = 0;
+  var _pmWoHydrateState = 'idle'; // idle | pending | ok | error
+  var _pmWoHydrateError = '';
 
   function _woPassThroughFromCharge(charge) {
     charge = charge || {};
@@ -17852,7 +17860,7 @@
   function _mergeWorkOrdersIntoJobCards(workOrders) {
     var weekStart = _hoursWeekStart || '';
     var weekEnd = _hoursWeekEnd || '';
-    var added = false;
+    var changed = false;
     (workOrders || []).forEach(function(wo) {
       if (!wo || wo.already_invoiced) return;
       if (wo.can_invoice !== true && wo.can_add_to_weekly_invoice !== true) return;
@@ -17869,9 +17877,17 @@
       if (exists) {
         _jobCards.forEach(function(c) {
           if (!(woId && String(c.work_order_id || '') === woId) && !(jobId && c.job_id === jobId)) return;
-          if (c.wo_allocated == null && wo.subtotal != null) c.wo_allocated = Number(wo.subtotal);
+          // Same-job same-day multi-WO identity is unchanged (one card).
+          // Matching an assignment card must still count as a change so the
+          // builder re-renders; otherwise blank WO inputs stay in the DOM and
+          // the next _syncJobCardsFromDOM() wipes the hydrated deducts.
+          if (c.wo_allocated == null && wo.subtotal != null) {
+            c.wo_allocated = Number(wo.subtotal);
+            changed = true;
+          }
           if ((!c.wo_labour_lines || c.wo_labour_lines.length === 0) && passThroughs.length) {
             c.wo_labour_lines = passThroughs;
+            changed = true;
           }
         });
         return;
@@ -17895,20 +17911,39 @@
         included: !!(wo.job_number || wo.client_name),
         _blank_job: !(wo.job_number || wo.client_name)
       }));
-      added = true;
+      changed = true;
     });
-    return added;
+    return changed;
   }
 
   function _hydratePerMetreWorkOrderCards() {
     if (!isPerMetreUser() || !_jobCentricActive || !_invoiceBuilderOpen) return;
     var seq = ++_pmWoHydrateSeq;
+    if (_pmWoHydrateState !== 'pending') {
+      _pmWoHydrateState = 'pending';
+      _pmWoHydrateError = '';
+      renderInvoiceBuilder();
+    }
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen) return;
       var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []));
-      if (_mergeWorkOrdersIntoJobCards(orders)) renderInvoiceBuilder();
-    }).catch(function() {});
+      _syncJobCardsFromDOM();
+      _mergeWorkOrdersIntoJobCards(orders);
+      _pmWoHydrateState = 'ok';
+      _pmWoHydrateError = '';
+      // Always re-render: existing assignment cards can change without a new
+      // card being pushed, and the pending/error banner must clear.
+      renderInvoiceBuilder();
+    }).catch(function() {
+      if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen) return;
+      _pmWoHydrateState = 'error';
+      _pmWoHydrateError = 'Could not load work-order amounts or amounts you paid other trades.';
+      renderInvoiceBuilder();
+    });
   }
+  window.retryPerMetreWorkOrderHydrate = function() {
+    _hydratePerMetreWorkOrderCards();
+  };
 
   function buildJobCards() {
     _jobCards = [];
@@ -17958,6 +17993,14 @@
     html += '<div class="inv-section-label" style="margin-top:16px">Your jobs this week</div>';
     if (isPerMetreUser()) {
       html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter what each job paid you, then deduct work-order amounts you paid other trades. Net is what SecureWorks owes you.</div>';
+      if (_pmWoHydrateState === 'pending') {
+        html += '<div data-pm-wo-hydrate="pending" style="background:rgba(76,106,124,0.08);border:1px solid var(--sw-border);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px">Loading work-order amounts and paid-to-other-trade deductions…</div>';
+      } else if (_pmWoHydrateState === 'error') {
+        html += '<div data-pm-wo-hydrate="error" style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px">';
+        html += esc(_pmWoHydrateError || 'Could not load work-order amounts or amounts you paid other trades.');
+        html += ' <button type="button" class="btn btn-secondary btn-small" onclick="retryPerMetreWorkOrderHydrate()" style="margin-left:8px">Retry</button>';
+        html += '</div>';
+      }
     }
 
     if (!rateResolved) {
@@ -18940,6 +18983,12 @@
 
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
+    if (isPerMetreUser() && _pmWoHydrateState !== 'ok') {
+      toast(_pmWoHydrateState === 'error'
+        ? 'Work-order amounts did not load. Retry before submitting.'
+        : 'Work-order amounts are still loading.', true);
+      return;
+    }
     // FIX3: clear any previous validation outlines before a fresh attempt.
     document.querySelectorAll('.jc-card[data-card]').forEach(function(el) {
       el.style.border = '1px solid var(--sw-border)';
@@ -19198,7 +19247,15 @@
       // Job-centric: submit via manual_assignments (server resolves the rate).
       // Extras still ride along through submitJobCentricInvoice.
       var jcHasCards = _jobCards.some(function(c) { return c.included; });
-      if (jcHasCards || _invRows.some(function(r){ return r._misc || r.description; })) {
+      var woHydrateBlocked = isPerMetreUser() && _pmWoHydrateState !== 'ok';
+      if (woHydrateBlocked) {
+        html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
+        html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
+          + (_pmWoHydrateState === 'error'
+            ? 'Work-order amounts did not load. Retry before submitting so deductions are not missed.'
+            : 'Work-order amounts are still loading. Submit unlocks when they arrive.')
+          + '</div>';
+      } else if (jcHasCards || _invRows.some(function(r){ return r._misc || r.description; })) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" onclick="submitJobCentricInvoice()" style="margin-top:16px">Submit Invoice</button>';
         html += '<div style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">Manual hours are verified by the office before payment.</div>';
       } else {

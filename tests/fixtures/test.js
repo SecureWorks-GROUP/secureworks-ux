@@ -693,6 +693,27 @@ const test = base.extend({
               net_pay: 352,
               gst_on: false
             }
+            : persona === 'fencing_manager'
+              ? {
+                week_start: weekStart,
+                week_ending: addIsoDays(weekStart, 6),
+                invoice_type: 'per_metre',
+                is_per_metre: true,
+                assignments: [{
+                  id: 'e2e-henry-assignment',
+                  job_id: 'fence-job-henry',
+                  scheduled_date: addIsoDays(weekStart, 1),
+                  jobs: {
+                    id: 'fence-job-henry',
+                    job_number: 'FENCE-HENRY-001',
+                    client_name: 'Henry Client',
+                    site_suburb: 'Balcatta',
+                    type: 'fencing'
+                  }
+                }],
+                total_hours: 0,
+                already_submitted: false
+              }
             : {
               week_start: weekStart,
               week_ending: addIsoDays(weekStart, 6),

@@ -270,7 +270,7 @@ assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length 
   'hub and Cost Breakdown request my_work_orders with mode=all');
 assert(!/api\('my_work_orders'\)/.test(html),
   'no bare my_work_orders read remains — managed WOs need mode=all');
-assert(/gst_on: _invoiceGstDefault\(_hoursData \|\| _user\)/.test(html) && /api\('submit_work_order_invoice', null, woBody/.test(html),
+assert(/gst_on: _invoiceGstDefault\(_hoursData \|\| _user\)/.test(html) && /_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
   'Invoice This Work Order always sends gst_on so the backend cannot 422 GST_CHOICE_REQUIRED');
 assert(!/\(\/emeka\|henry\/i\.test\(_user\.email\)\)/.test(html),
   'per-metre extras never key on a henry/emeka email heuristic');
@@ -342,8 +342,16 @@ assert((html.match(/_user = null;[\s\S]{0,80}_purgeOfflineInvoiceActionsNotOwned
   'logout clears invoice actions once the account is gone');
 assert(html.includes('_offlineInvoiceReplayAllowed') && html.includes('beforeSend'),
   'offline invoice replay re-checks ownership and auth generation immediately before send');
-assert(html.includes('function _invoiceApiOptions(ctx)') && (html.match(/_invoiceApiOptions\(ctx\)/g) || []).length >= 10,
-  'direct invoice writes pass a context-bound beforeSend guard');
+assert(html.includes('function _invoiceApiOptions(ctx') && html.includes('_financialInvoiceApi') && html.includes('_withFinancialWebLock'),
+  'direct invoice writes pass a context-bound beforeSend guard and take a financial Web Lock when available');
+assert(html.includes('_startStorageLockRenew') && html.includes('_renewStorageLock') && html.includes('_listTradeInvoicesForReconcile'),
+  'storage locks renew for the in-flight request and ambiguous replay re-reads invoices before resend');
+assert(html.includes('_nestedInvoiceIdentityValues') && html.includes('_offlineInvoiceReplaySucceeded'),
+  'job-centric nested identities can reconcile and replay drops only business success');
+assert((function() {
+  const block = html.slice(html.indexOf('function _mutateOfflineQueue'), html.indexOf('function _withStorageLockAsync'));
+  return block.includes('return _readOfflineQueue();') && (block.match(/return apply\(\)/g) || []).length === 1;
+})(), 'queue mutations wait for the lock and never apply unlocked');
 assert(html.includes('_offlineQueueSyncing') && html.includes('_persistOfflineQueueAfterSync'),
   'offline queue sync is single-flight and merges remaining items with the latest stored queue');
 assert(html.includes('_mutateOfflineQueue') && html.includes('_withCrossTabLock') && html.includes('_writeInboxItem') &&

@@ -4310,16 +4310,51 @@
     } catch (e) {}
   }
 
+  var _STORAGE_LOCK_RENEW_MS = 15000;
+
   function _claimStorageLock(key, ttl) {
     var now = Date.now();
     var held = _storageGetJson(key, null);
     if (held && held.owner && held.owner !== _crossTabId && (now - Number(held.ts || 0)) < ttl) {
       return false;
     }
-    var claim = { owner: _crossTabId, ts: now, nonce: Math.random().toString(36).slice(2, 10) };
+    var expectedNonce = held && held.nonce != null ? String(held.nonce) : '';
+    var claim = {
+      owner: _crossTabId,
+      ts: now,
+      nonce: Math.random().toString(36).slice(2, 12),
+      v: (held && Number(held.v) ? Number(held.v) : 0) + 1,
+      prev: expectedNonce
+    };
     try { localStorage.setItem(key, JSON.stringify(claim)); } catch (e) { return false; }
     var confirm = _storageGetJson(key, null);
     return !!(confirm && confirm.owner === _crossTabId && confirm.nonce === claim.nonce);
+  }
+
+  function _storageLockStillOurs(key) {
+    var held = _storageGetJson(key, null);
+    return !!(held && held.owner === _crossTabId);
+  }
+
+  function _renewStorageLock(key) {
+    var held = _storageGetJson(key, null);
+    if (!held || held.owner !== _crossTabId) return false;
+    var next = {
+      owner: _crossTabId,
+      ts: Date.now(),
+      nonce: held.nonce,
+      v: (Number(held.v) || 0) + 1,
+      prev: held.nonce
+    };
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch (e) { return false; }
+    var confirm = _storageGetJson(key, null);
+    return !!(confirm && confirm.owner === _crossTabId && confirm.nonce === next.nonce);
+  }
+
+  function _startStorageLockRenew(key) {
+    return setInterval(function() {
+      _renewStorageLock(key);
+    }, _STORAGE_LOCK_RENEW_MS);
   }
 
   function _releaseStorageLock(key) {
@@ -4351,14 +4386,30 @@
     try { localStorage.setItem(_INBOX_INDEX_KEY, JSON.stringify(ids || [])); } catch (e) {}
   }
 
+  function _listInboxIds() {
+    var ids = [];
+    var seen = {};
+    function addId(id) {
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    }
+    try {
+      if (typeof localStorage.length === 'number' && typeof localStorage.key === 'function') {
+        for (var i = 0; i < localStorage.length; i++) {
+          var key = localStorage.key(i);
+          if (!key || key.indexOf('sw_action_queue_inbox_') !== 0) continue;
+          addId(key.slice('sw_action_queue_inbox_'.length));
+        }
+      }
+    } catch (e) {}
+    if (!ids.length) _readInboxIndex().forEach(addId);
+    return ids;
+  }
+
   function _writeInboxItem(item) {
     if (!item || !item.id) return;
-    try { localStorage.setItem(_inboxItemKey(item.id), JSON.stringify(item)); } catch (e) { return; }
-    var ids = _readInboxIndex();
-    if (ids.indexOf(item.id) === -1) {
-      ids.push(item.id);
-      _writeInboxIndex(ids);
-    }
+    try { localStorage.setItem(_inboxItemKey(item.id), JSON.stringify(item)); } catch (e) {}
   }
 
   function _listInboxItemsFromIds(ids) {
@@ -4409,7 +4460,7 @@
   }
 
   function _readOfflineQueue() {
-    return _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(_readInboxIndex()));
+    return _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(_listInboxIds()));
   }
 
   function _writeOfflineQueue(queue) {
@@ -4418,7 +4469,7 @@
 
   function _mutateOfflineQueue(mutator) {
     var apply = function() {
-      var absorbed = _readInboxIndex().slice();
+      var absorbed = _listInboxIds();
       var start = _mergeQueueById(_readOfflineQueueRaw(), _listInboxItemsFromIds(absorbed));
       var next = typeof mutator === 'function' ? mutator(start.slice()) : start;
       if (!Array.isArray(next)) next = start;
@@ -4426,11 +4477,14 @@
       _clearInboxIds(absorbed);
       return next;
     };
-    if (_claimStorageLock(_QUEUE_LOCK_KEY, _QUEUE_LOCK_TTL_MS)) {
-      try { return apply(); }
-      finally { _releaseStorageLock(_QUEUE_LOCK_KEY); }
+    var deadline = Date.now() + 400;
+    while (Date.now() <= deadline) {
+      if (_claimStorageLock(_QUEUE_LOCK_KEY, _QUEUE_LOCK_TTL_MS)) {
+        try { return apply(); }
+        finally { _releaseStorageLock(_QUEUE_LOCK_KEY); }
+      }
     }
-    return apply();
+    return _readOfflineQueue();
   }
 
   function _withStorageLockAsync(name, ttl, fn) {
@@ -4438,10 +4492,13 @@
     var start = Date.now();
     var attempt = function() {
       if (_claimStorageLock(key, ttl)) {
+        var timer = _startStorageLockRenew(key);
         return Promise.resolve().then(fn).then(function(result) {
+          clearInterval(timer);
           _releaseStorageLock(key);
           return result;
         }, function(err) {
+          clearInterval(timer);
           _releaseStorageLock(key);
           throw err;
         });
@@ -4452,6 +4509,26 @@
       });
     };
     return attempt();
+  }
+
+  function _withFinancialWebLock(action, fn) {
+    var locks = (typeof navigator !== 'undefined' && navigator.locks) || null;
+    if (locks && typeof locks.request === 'function') {
+      return locks.request('sw_fin_write_' + String(action || ''), { mode: 'exclusive', ifAvailable: true }, function(lock) {
+        if (!lock) {
+          var err = new Error('Invoice send is already in progress.');
+          err.code = 'invoice_write_locked';
+          return Promise.reject(err);
+        }
+        return Promise.resolve().then(fn);
+      });
+    }
+    if (action && _sharedFinancialWriteHeld(action)) {
+      var locked = new Error('Invoice send is already in progress.');
+      locked.code = 'invoice_write_locked';
+      return Promise.reject(locked);
+    }
+    return Promise.resolve().then(fn);
   }
 
   function _withCrossTabLock(name, fn) {
@@ -4541,11 +4618,39 @@
     return String(body.draft_id || body.invoice_id || body.id || '');
   }
 
+  function _nestedInvoiceIdentityValues(source) {
+    var values = [];
+    function add(value) {
+      if (value == null || String(value).trim() === '') return;
+      var text = String(value);
+      if (values.indexOf(text) === -1) values.push(text);
+    }
+    function walk(row) {
+      if (!row || typeof row !== 'object') return;
+      add(row.job_id);
+      add(row.job_number);
+      add(row.assignment_id);
+      add(row.work_order_id);
+      add(row.workOrderId);
+    }
+    source = source || {};
+    add(source.job_id);
+    add(source.job_number);
+    add(source.assignment_id);
+    (source.extra_items || []).forEach(walk);
+    (source.manual_assignments || []).forEach(walk);
+    (source.work_order_blocks || []).forEach(walk);
+    (source.labour_lines || []).forEach(walk);
+    (source.lines || []).forEach(walk);
+    return values;
+  }
+
   function _offlineInvoiceHasExactTarget(item) {
     if (!item) return false;
     if (item.action === 'delete_trade_invoice') return !!((item.body || {}).invoice_id);
     var body = item.body || {};
-    return !!(body.draft_id || body.invoice_id || body.id || body.work_order_id || body.workOrderId);
+    if (body.draft_id || body.invoice_id || body.id || body.work_order_id || body.workOrderId) return true;
+    return _nestedInvoiceIdentityValues(body).length > 0;
   }
 
   function _invoiceIdentityValues(inv) {
@@ -4577,7 +4682,18 @@
     }
     var woId = body.work_order_id || body.workOrderId;
     if (woId && _invoiceHasWorkOrder(inv, woId)) return true;
-    return false;
+    var nested = _nestedInvoiceIdentityValues(body);
+    if (!nested.length) return false;
+    var invNested = _nestedInvoiceIdentityValues(inv);
+    var hit = false;
+    for (var n = 0; n < nested.length; n++) {
+      if (invNested.indexOf(nested[n]) !== -1) { hit = true; break; }
+    }
+    if (!hit) return false;
+    var bodyWeek = String(body.week_start || body.week_ending || '');
+    var invWeek = String(inv.week_start || inv.week_ending || '');
+    if (bodyWeek && invWeek && bodyWeek !== invWeek) return false;
+    return true;
   }
 
   function _financialWritePayloadIdentity(body) {
@@ -4626,23 +4742,43 @@
     return true;
   }
 
+  function _listTradeInvoicesForReconcile(attempt) {
+    attempt = attempt || 1;
+    return api('my_trade_invoices').then(function(res) {
+      if (!res || !Array.isArray(res.invoices)) {
+        if (attempt < 3) {
+          return new Promise(function(resolve) {
+            setTimeout(function() { resolve(_listTradeInvoicesForReconcile(attempt + 1)); }, 80);
+          });
+        }
+        return null;
+      }
+      return res.invoices;
+    }).catch(function() {
+      if (attempt < 3) {
+        return new Promise(function(resolve) {
+          setTimeout(function() { resolve(_listTradeInvoicesForReconcile(attempt + 1)); }, 80);
+        });
+      }
+      return null;
+    });
+  }
+
   function _reconcileAmbiguousInvoiceAction(item) {
     if (!_isOfflineInvoiceAction(item && item.action)) return Promise.resolve(false);
     if (item.action === 'attach_invoice_pdf') return Promise.resolve(null);
     if (!_offlineInvoiceHasExactTarget(item)) return Promise.resolve(null);
-    return api('my_trade_invoices').then(function(res) {
-      var invoices = (res && res.invoices) || [];
+    return _listTradeInvoicesForReconcile().then(function(invoices) {
+      if (!invoices) return null;
       if (item.action === 'delete_trade_invoice') {
         var targetId = item.body && item.body.invoice_id;
         if (!targetId) return null;
         return !invoices.some(function(inv) { return String(inv.id) === String(targetId); });
       }
       var match = invoices.filter(function(inv) { return _invoiceMatchesQueueIntent(inv, item); });
-      // An exact draft/invoice/work-order identity means this write already
+      // An exact draft/invoice/work-order/job identity means this write already
       // committed — including draft and pending_ops_review (failed Xero push).
       return match.length > 0;
-    }).catch(function() {
-      return null;
     });
   }
 
@@ -4700,12 +4836,14 @@
     var key = String(action || '');
     if (!key || _financialWriteInFlight[key]) return false;
     if (!_claimStorageLock(_financialWriteLockKey(key), _FINANCIAL_WRITE_LOCK_TTL_MS)) return false;
-    _financialWriteInFlight[key] = true;
+    _financialWriteInFlight[key] = { timer: _startStorageLockRenew(_financialWriteLockKey(key)) };
     return true;
   }
 
   function _endFinancialWrite(action) {
     var key = String(action || '');
+    var state = _financialWriteInFlight[key];
+    if (state && state.timer) clearInterval(state.timer);
     delete _financialWriteInFlight[key];
     _releaseStorageLock(_financialWriteLockKey(key));
   }
@@ -4720,6 +4858,10 @@
 
   function _handleFinancialWriteFailure(action, body, err, ctx) {
     if (err && err.code === 'invoice_replay_cancelled') return Promise.resolve({ outcome: 'cancelled' });
+    if (err && err.code === 'invoice_write_locked') {
+      toast('Invoice send is already in progress.');
+      return Promise.resolve({ outcome: 'cancelled' });
+    }
     if (!_invoiceApiCurrent(ctx)) return Promise.resolve({ outcome: 'cancelled' });
     // Timeout / Failed to fetch can land after the server committed, even when
     // the browser already reports offline. Mark those ambiguous so replay
@@ -4841,6 +4983,17 @@
     });
   }
 
+  function _offlineInvoiceReplaySucceeded(result) {
+    if (typeof _invoiceSubmitSucceeded === 'function') return _invoiceSubmitSucceeded(result);
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    if (result.error) return false;
+    if (result.success === false || result.ok === false) return false;
+    return result.success === true || result.ok === true ||
+      [result.invoice_id, result.invoice_number, result.xero_bill_id, result.xero_bill_number].some(function(value) {
+        return value != null && String(value).trim() !== '';
+      });
+  }
+
   function _replayOfflineInvoiceItem(item, replayCtx, remaining) {
     if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return Promise.resolve();
 
@@ -4853,14 +5006,20 @@
           return;
         }
         if (!authorized) return;
-        return api(item.action, null, item.body, {
-          beforeSend: function() {
-            return _offlineInvoiceReplayAllowed(item, replayCtx);
-          }
-        }).then(function() {
-          // Success: don't add to remaining.
+        return _withFinancialWebLock(item.action, function() {
+          return api(item.action, null, item.body, {
+            beforeSend: function() {
+              return _offlineInvoiceReplayAllowed(item, replayCtx);
+            }
+          });
+        }).then(function(result) {
+          if (!_offlineInvoiceReplaySucceeded(result)) remaining.push(item);
         }).catch(function(e) {
           if (e && e.code === 'invoice_replay_cancelled') return;
+          if (e && e.code === 'invoice_write_locked') {
+            remaining.push(item);
+            return;
+          }
           if (!_offlineInvoiceOwnedByCurrentAccount(item) || !_invoiceApiCurrent(replayCtx)) return;
           if (_isOfflineInvoiceTimeoutError(e)) item.ambiguous = true;
           remaining.push(item);
@@ -5682,12 +5841,20 @@
     return !!(ctx.userId && owner && ctx.userId === owner);
   }
 
-  function _invoiceApiOptions(ctx) {
+  function _invoiceApiOptions(ctx, action) {
     return {
       beforeSend: function() {
-        return _invoiceApiCurrent(ctx);
+        if (!_invoiceApiCurrent(ctx)) return false;
+        if (action && _financialWriteInFlight[action] && !_storageLockStillOurs(_financialWriteLockKey(action))) return false;
+        return true;
       }
     };
+  }
+
+  function _financialInvoiceApi(action, params, body, ctx) {
+    return _withFinancialWebLock(action, function() {
+      return api(action, params, body, _invoiceApiOptions(ctx, action));
+    });
   }
 
   // The .ncal state object is identity-scoped: NC.me is sticky (only set when empty),
@@ -18000,7 +18167,7 @@
     }
     state.busy = true;
     renderWeeklyWorkOrderInvoice();
-    api('save_trade_invoice_draft', null, payload, _invoiceApiOptions(ctx)).then(function(res) {
+    _financialInvoiceApi('save_trade_invoice_draft', null, payload, ctx).then(function(res) {
       if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
       if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
       var invoice = _weeklyInvoiceFromResponse(res, payload, { draft_id: state.draftId }, state);
@@ -18056,7 +18223,7 @@
       var requestSeq = state.requestSeq;
       state.busy = true;
       renderWeeklyWorkOrderInvoice();
-      api('generate_trade_invoice', null, payload, _invoiceApiOptions(ctx)).then(function(res) {
+      _financialInvoiceApi('generate_trade_invoice', null, payload, ctx).then(function(res) {
         if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         var invoiceResponse = Object.assign({}, res, {
@@ -18164,7 +18331,7 @@
         return;
       }
 
-      api('submit_trade_invoice', null, hoursBody, _invoiceApiOptions(ctx)).then(function(res) {
+      _financialInvoiceApi('submit_trade_invoice', null, hoursBody, ctx).then(function(res) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
@@ -18427,7 +18594,7 @@
       if (!_invoiceApiCurrent(ctx)) return;
       var deleteBody = { invoice_id: invoiceId };
       if (_guardFinancialWrite('delete_trade_invoice', deleteBody)) return;
-      api('delete_trade_invoice', null, deleteBody, _invoiceApiOptions(ctx)).then(function() {
+      _financialInvoiceApi('delete_trade_invoice', null, deleteBody, ctx).then(function() {
         if (!_invoiceApiCurrent(ctx)) return;
         toast('Invoice deleted');
         openInvoiceHistory();
@@ -21054,7 +21221,7 @@
       }
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
-      api('generate_trade_invoice', {}, jobCentricBody, _invoiceApiOptions(ctx)).then(function(result) {
+      _financialInvoiceApi('generate_trade_invoice', {}, jobCentricBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
@@ -21414,7 +21581,7 @@
       return;
     }
 
-    api('save_trade_invoice_draft', null, draftBody, _invoiceApiOptions(ctx)).then(function(res) {
+    _financialInvoiceApi('save_trade_invoice_draft', null, draftBody, ctx).then(function(res) {
       if (!_invoiceApiCurrent(ctx)) return;
       _draftInvoiceId = (res && res.draft_id) || _draftInvoiceId;
       toast('Draft saved');
@@ -21484,7 +21651,7 @@
         return;
       }
 
-      api('generate_trade_invoice', {}, builderBody, _invoiceApiOptions(ctx)).then(function(result) {
+      _financialInvoiceApi('generate_trade_invoice', {}, builderBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
@@ -21855,7 +22022,7 @@
         return;
       }
 
-      api('generate_trade_invoice', {}, legacyBody, _invoiceApiOptions(ctx)).then(function(result) {
+      _financialInvoiceApi('generate_trade_invoice', {}, legacyBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(result)) {
           toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
@@ -23713,7 +23880,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
       }
 
-      api('submit_work_order_invoice', null, woBody, _invoiceApiOptions(ctx)).then(function(result) {
+      _financialInvoiceApi('submit_work_order_invoice', null, woBody, ctx).then(function(result) {
         if (!_invoiceApiCurrent(ctx)) return;
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true), just didn't reach

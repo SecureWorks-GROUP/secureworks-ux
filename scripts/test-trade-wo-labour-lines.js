@@ -446,7 +446,11 @@ function hoursCard(overrides) {
       getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
       setItem: function(k, v) { store[k] = String(v) },
       removeItem: function(k) { delete store[k] },
+      key: function(i) { return Object.keys(store)[i] || null },
+      get length() { return Object.keys(store).length },
     },
+    setInterval: function(fn, ms) { return setInterval(fn, ms) },
+    clearInterval: function(id) { return clearInterval(id) },
     _user: { id: 'alice' },
     _invoiceAuthGen: 1,
     _authorizedWorkOrderIds: { 'wo-b': true },
@@ -474,7 +478,7 @@ function hoursCard(overrides) {
       }
       sent.push({ action: action, body: body })
       if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-b' }] })
-      return Promise.resolve({})
+      return Promise.resolve({ ok: true })
     },
     toast: function() {},
     friendlyError: function(err) { return String((err && err.message) || err || '') },
@@ -568,7 +572,7 @@ function hoursCard(overrides) {
         return Promise.resolve({ work_orders: [], invoices: [] })
       }
       sendCount += 1
-      return firstHold.then(function() { return {} })
+      return firstHold.then(function() { return { ok: true } })
     }
     store.sw_action_queue = JSON.stringify([
       { id: 'iq_lock', client_request_id: 'iq_lock', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
@@ -593,7 +597,7 @@ function hoursCard(overrides) {
         }
         sendCount += 1
         ctx.queueOfflineAction('generate_trade_invoice', { week_start: '2026-09-14' })
-        return Promise.resolve({})
+        return Promise.resolve({ ok: true })
       }
       store.sw_action_queue = JSON.stringify([
         { id: 'iq_old', client_request_id: 'iq_old', action: 'generate_trade_invoice', user_id: 'bob', body: { week_start: '2026-09-07' } },
@@ -770,7 +774,79 @@ function hoursCard(overrides) {
       ctx.queueOfflineAction('generate_trade_invoice', { final_deductions: [] })
       assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'generate_trade_invoice' && !i.user_id), false,
         'unsigned-in invoice writes are not parked')
-      console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+
+      ctx._user = { id: 'bob' }
+      ctx._invoiceAuthGen += 1
+      assert.strictEqual(ctx._offlineInvoiceHasExactTarget({
+        action: 'generate_trade_invoice',
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }] }
+      }), true, 'nested job identities count as an exact target')
+      assert.strictEqual(ctx._invoiceMatchesQueueIntent(
+        { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }], status: 'draft' },
+        { body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767', job_id: 'j-26767' }] } }
+      ), true, 'job-centric reconcile matches a nested job identity in the same week')
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') return Promise.resolve({ invoices: [] })
+        return Promise.resolve({ ok: true })
+      }
+      return ctx._reconcileAmbiguousInvoiceAction({
+        action: 'generate_trade_invoice',
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }] }
+      })
+    }).then(function(jobCentricUncommitted) {
+      assert.strictEqual(jobCentricUncommitted, false,
+        'a complete empty listing means the job-centric write is not landed and may retry')
+      let invoiceReads = 0
+      let resendCount = 0
+      ctx.api = function(action) {
+        if (action === 'my_trade_invoices') {
+          invoiceReads += 1
+          return Promise.resolve({})
+        }
+        if (action === 'my_work_orders') return Promise.resolve({ work_orders: [] })
+        resendCount += 1
+        return Promise.resolve({ ok: true })
+      }
+      store.sw_action_queue = JSON.stringify([{
+        id: 'iq_incomplete',
+        client_request_id: 'iq_incomplete',
+        action: 'generate_trade_invoice',
+        user_id: 'bob',
+        ambiguous: true,
+        body: { week_start: '2026-09-07', extra_items: [{ job_number: 'SWF-26767' }] }
+      }])
+      return ctx.syncOfflineQueue().then(function() {
+        assert.ok(invoiceReads >= 3, 'ambiguous replay retries the invoice listing before deciding')
+        assert.strictEqual(resendCount, 0, 'an incomplete listing does not resend an ambiguous invoice')
+        ctx.api = function(action) {
+          if (action === 'my_work_orders' || action === 'my_trade_invoices') {
+            return Promise.resolve({ work_orders: [], invoices: [] })
+          }
+          return Promise.resolve({ ok: false, error: 'RATE_NOT_CONFIGURED' })
+        }
+        store.sw_action_queue = JSON.stringify([{
+          id: 'iq_bizfail',
+          client_request_id: 'iq_bizfail',
+          action: 'generate_trade_invoice',
+          user_id: 'bob',
+          body: { week_start: '2026-09-07' }
+        }])
+        return ctx.syncOfflineQueue()
+      }).then(function() {
+        assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.id === 'iq_bizfail'), true,
+          'HTTP-success business failures stay queued')
+        store.sw_action_queue_lock = JSON.stringify({
+          owner: 'other-tab',
+          ts: Date.now(),
+          nonce: 'held'
+        })
+        const before = store.sw_action_queue
+        ctx._mutateOfflineQueue(function() { return [{ id: 'should-not-write' }] })
+        assert.strictEqual(store.sw_action_queue, before,
+          'a held queue lock fails closed instead of mutating unlocked')
+        delete store.sw_action_queue_lock
+        console.log('OK — WO labour-line payload contract holds (25 scenarios + offline invoice ownership)')
+      })
     })
   }).catch(function(err) {
     console.error(err)
@@ -790,6 +866,8 @@ function hoursCard(overrides) {
       getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null },
       setItem: function(k, v) { store[k] = String(v) },
       removeItem: function(k) { delete store[k] },
+      key: function(i) { return Object.keys(store)[i] || null },
+      get length() { return Object.keys(store).length },
     }
   }
   function makeQueueCtx(userId) {
@@ -818,12 +896,14 @@ function hoursCard(overrides) {
         if (action === 'my_work_orders' || action === 'my_trade_invoices') {
           return Promise.resolve({ work_orders: [], invoices: [] })
         }
-        return Promise.resolve({})
+        return Promise.resolve({ ok: true })
       },
       toast: function() {},
       friendlyError: function(err) { return String((err && err.message) || err || '') },
       navigator: { onLine: true },
       setTimeout: function(fn, ms) { return setTimeout(fn, ms) },
+      setInterval: function(fn, ms) { return setInterval(fn, ms) },
+      clearInterval: function(id) { return clearInterval(id) },
       _invalidateAssignmentLifecycleCaches: function() {},
     }
     ctx._sent = sent
@@ -883,7 +963,7 @@ function hoursCard(overrides) {
       return Promise.resolve({ work_orders: [], invoices: [] })
     }
     sendCount += 1
-    return firstHold.then(function() { return {} })
+    return firstHold.then(function() { return { ok: true } })
   }
   tabA.api = gatedApi
   tabB.api = gatedApi

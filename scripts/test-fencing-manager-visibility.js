@@ -254,8 +254,8 @@ assert.strictEqual(context.isAuthorizedWorkOrder('wo-patio'), true,
   'the job-detail entry point authorises the order it renders, hub or no hub');
 assert(/authorizeWorkOrders\(\[match\]\);/.test(html),
   'the job-detail Cost Breakdown registers its matched work order before rendering Invoice');
-assert(/var orders = \(res\.work_orders \|\| \[\]\)\.filter\(workOrderTenantOk\);/.test(html),
-  'the job-detail read applies the same tenant guard as the hub');
+assert(/var orders = workOrdersForViewer\(res\.work_orders \|\| \[\]\);/.test(html),
+  'Cost Breakdown applies the same managed-vertical lens before render/authorize');
 assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length >= 2,
   'hub and Cost Breakdown request my_work_orders with mode=all');
 assert(!/api\('my_work_orders'\)/.test(html),
@@ -306,6 +306,12 @@ assert(html.includes('_unboundCardForWorkOrder'),
   'WO hydrate binds an unbound card only on the matching work-order date');
 assert(html.includes('_jobCardKeepHoursMode'),
   'hydrate does not silently flip a card the user already edited in Hours');
+assert(html.includes('hoursFocused') && html.includes('_markJobCardHoursEdited(c)'),
+  'DOM sync treats an in-focus Hours input as an edit so hydrate cannot flip it');
+assert(html.includes('_refreshHoursDataForOpenInvoice'),
+  'draft restore still fetches my_hours so per-metre hydrate/submit gate can arm');
+assert(html.includes('is_per_metre: isPerMetreUser()'),
+  'the invoice draft remembers per-metre so restore does not wait on my_hours');
 
 // Tenant guard: fail closed for a widened viewer with no org_id, keep the
 // ordinary server-scoped own-only response usable.

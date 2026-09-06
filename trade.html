@@ -9927,7 +9927,7 @@
       api('my_work_orders', { mode: 'all' }).then(function(res) {
         var el = document.getElementById('woJobCostBreakdown');
         if (!el) return;
-        var orders = (res.work_orders || []).filter(workOrderTenantOk);
+        var orders = workOrdersForViewer(res.work_orders || []);
         var match = null;
         for (var i = 0; i < orders.length; i++) {
           if (orders[i].id === wo.id || orders[i].job_id === job.id) { match = orders[i]; break; }
@@ -15877,7 +15877,10 @@
 
   // Per-metre extras (Henry's work-order weekly builder) key on invoice_type,
   // never an email heuristic. Job-centric Financial stays available either way.
+  // A restored draft may know this before my_hours has been fetched.
+  var _pmDraftIsPerMetre = false;
   function isPerMetreUser() {
+    if (_pmDraftIsPerMetre) return true;
     if (_user && String(_user.invoice_type || '') === 'per_metre') return true;
     if (_hoursData && String(_hoursData.invoice_type || '') === 'per_metre') return true;
     if (_hoursData && _hoursData.is_per_metre === true) return true;
@@ -16979,6 +16982,7 @@
     _invExtraLines = []; // legacy compat
     _invNotes = '';
     _draftInvoiceId = null;
+    _pmDraftIsPerMetre = false;
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
     _invGst = _invoiceGstDefault(_hoursData);
     _jobCards = [];
@@ -17466,6 +17470,28 @@
     return false;
   }
 
+  function _refreshHoursDataForOpenInvoice() {
+    var weekEnd = _hoursWeekEnd || getWeekEndSunday(0);
+    if (!weekEnd) return;
+    api('my_hours', { week_ending: weekEnd }).then(function(data) {
+      _hoursData = data;
+      _tradeRate = data.rate;
+      if (data && (String(data.invoice_type || '') === 'per_metre' || data.is_per_metre === true)) {
+        _pmDraftIsPerMetre = true;
+      }
+      if (!_invoiceBuilderOpen || !_jobCentricActive) return;
+      if (isPerMetreUser() && _pmWoHydrateState !== 'ok' && _pmWoHydrateState !== 'pending') {
+        _hydratePerMetreWorkOrderCards();
+        return;
+      }
+      if (isPerMetreUser()) renderInvoiceBuilder();
+    }).catch(function() {
+      if (_invoiceBuilderOpen && isPerMetreUser() && _pmWoHydrateState === 'idle') {
+        _hydratePerMetreWorkOrderCards();
+      }
+    });
+  }
+
   function _applyInvDraft(draft) {
     _invRows = draft.rows || [];
     _jobCards = _restoreJobCardsDraft(draft.jobCards);
@@ -17475,9 +17501,15 @@
     _hoursWeekStart = draft.weekStart || _hoursWeekStart;
     _hoursWeekEnd = draft.weekEnd || _hoursWeekEnd;
     _draftInvoiceId = draft.draftId || null;
+    _pmDraftIsPerMetre = !!(draft.is_per_metre || String(draft.invoice_type || '') === 'per_metre');
     _invoiceBuilderOpen = true;
+    if (_pmDraftIsPerMetre && _pmWoHydrateState === 'idle') {
+      _pmWoHydrateState = 'pending';
+      _pmWoHydrateError = '';
+    }
     renderInvoiceBuilder();
     _hydratePerMetreWorkOrderCards();
+    _refreshHoursDataForOpenInvoice();
   }
 
   // Persist invoice draft to sessionStorage (survives background kill)
@@ -17490,6 +17522,8 @@
         rows: _invRows,
         jobCards: _serializeJobCardsDraft(_jobCards),
         jobCentric: !!_jobCentricActive,
+        is_per_metre: isPerMetreUser(),
+        invoice_type: (_hoursData && _hoursData.invoice_type) || (_user && _user.invoice_type) || '',
         gst_on: _invGst, notes: _invNotes, mode: _invoiceBuilderMode,
         weekStart: _hoursWeekStart, weekEnd: _hoursWeekEnd, draftId: _draftInvoiceId
       }));
@@ -17498,6 +17532,7 @@
   window._clearInvDraft = function() {
     _invoiceBuilderOpen = false;
     _jobCentricActive = false;
+    _pmDraftIsPerMetre = false;
     _pmWoHydrateState = 'idle';
     _pmWoHydrateError = '';
     _pmWoHydrateSeq++;
@@ -18548,12 +18583,21 @@
         var hrsEl = document.querySelector('[data-cardhours="' + idx + '"]');
         if (hrsEl) {
           var n = parseFloat(hrsEl.value);
-          c.hours = (isNaN(n) || n < 0) ? null : n;
+          var nextHours = (isNaN(n) || n < 0) ? null : n;
+          var hoursFocused = document.activeElement === hrsEl;
+          if (hoursFocused || nextHours !== c.hours) _markJobCardHoursEdited(c);
+          c.hours = nextHours;
         }
         var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
         if (rateEl) {
           var n = parseFloat(rateEl.value);
-          if (!isNaN(n) && n >= 0) { c.rate = n; c.rate_source = 'client_entered'; }
+          if (!isNaN(n) && n >= 0) {
+            if (document.activeElement === rateEl || n !== Number(c.rate)) {
+              _markJobCardHoursEdited(c);
+              c.rate_source = 'client_entered';
+            }
+            c.rate = n;
+          }
         }
       }
       // Always sync description (applies to all modes)

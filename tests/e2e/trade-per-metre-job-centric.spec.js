@@ -152,6 +152,9 @@ test('job-centric WO allocations survive a Financial reload', async ({ appPage: 
   await card.locator('[data-cardlumpamt]').fill('10');
   await card.locator('[data-cardlumpamt]').press('Tab');
   await expect(card.locator('[data-cardamt]')).toHaveText('$50.00');
+  const draft = await page.evaluate(() => JSON.parse(sessionStorage.getItem('sw_inv_draft') || 'null'));
+  expect(draft && draft.is_per_metre).toBe(true);
+  expect(Array.isArray(draft.jobCards) && draft.jobCards.length).toBeGreaterThan(0);
 
   await page.reload();
   await signIn(page, PERSONAS.fencing_manager);
@@ -184,8 +187,10 @@ test('Hours typed while hydrate is pending stay Hours after the WO arrives', asy
   const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toBeVisible();
   await expect(card.locator('[data-cardhours]')).toBeVisible();
-  await card.locator('[data-cardhours]').fill('3');
-  await card.locator('[data-cardhours]').press('Tab');
+  await card.locator('[data-cardhours]').evaluate((el) => {
+    el.focus();
+    el.value = '3';
+  });
   releaseHydrate();
 
   await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);

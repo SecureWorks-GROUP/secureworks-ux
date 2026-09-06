@@ -21,6 +21,14 @@ let fullPricingOn = false;
 const context = {
   canSeePricing: function () { return pricingOn; },
   canSeeFullPricing: function () { return fullPricingOn; },
+  getTradeDocOpenUrl: function (doc) {
+    if (!doc) return '';
+    var candidates = [doc.pdf_url, doc.public_url, doc.signed_url, doc.download_url, doc.url, doc.file_url, doc.storage_url];
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i] && /^https?:\/\//i.test(String(candidates[i]))) return String(candidates[i]);
+    }
+    return '';
+  },
   esc: function (s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -296,5 +304,46 @@ check(
   'Work Order tab no longer uses canSeePricing for rates',
   !/var showWoPrices = canSeePricing\(\);/.test(html)
 );
+check(
+  'shipped MakeSafe WO PDF helper is office-gated',
+  /function getMakesafeWorkOrderUrl\(data\) \{\s*return tradeWorkOrderPdfUrl\(data\);/.test(html)
+);
+check(
+  'shipped Files list hides priced WO PDFs from trades',
+  /tradeCanSeeSowPricing\(\) \|\| !isPricedWorkOrderDocument\(d\)/.test(html)
+);
+check(
+  'shipped leftover Work Order PDF card is office-gated',
+  /var workOrderUrl = tradeCanSeeSowPricing\(\) \? getTradeDocOpenUrl\(workOrderDoc\) : '';/.test(html)
+);
+
+const woPdfData = {
+  documents: [{
+    type: 'work_order',
+    file_name: 'Builder-WO.pdf',
+    pdf_url: 'https://storage.example.test/wo.pdf',
+    visible_to_trades: true,
+  }],
+  workOrder: { wo_number: 'MS-WO-1' },
+};
+const supplierPdfData = {
+  documents: [{
+    type: 'supplier_work_order',
+    file_name: 'Supplier-WO.pdf',
+    pdf_url: 'https://storage.example.test/supplier-wo.pdf',
+    visible_to_trades: true,
+  }],
+};
+
+pricingOn = true;
+fullPricingOn = false;
+check('priced WO document is recognised', M.isPricedWorkOrderDocument(woPdfData.documents[0]) === true);
+check('supplier WO document is recognised', M.isPricedWorkOrderDocument(supplierPdfData.documents[0]) === true);
+check('senior installer cannot open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === '');
+check('senior installer cannot open supplier WO PDF', M.tradeWorkOrderPdfUrl(supplierPdfData) === '');
+
+fullPricingOn = true;
+check('office can open MakeSafe WO PDF', M.tradeWorkOrderPdfUrl(woPdfData) === 'https://storage.example.test/wo.pdf');
+check('office can open supplier WO PDF', M.tradeWorkOrderPdfUrl(supplierPdfData) === 'https://storage.example.test/supplier-wo.pdf');
 
 console.log('PASS trade scope media + pricing redaction checks');

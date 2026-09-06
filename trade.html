@@ -8128,9 +8128,11 @@
   // TRD-5: trades see quote/job writing + every job video. Pricing ($ / rates /
   // totals) on quote-pack and compact WO surfaces is office-only
   // (canSeeFullPricing / tier >= 3). canSeePricing() (tier >= 2) is left
-  // unchanged for older surfaces. Prefers TRD-4 enriched trade_job_detail
-  // media (playable_url / signed_url) and still plays whatever data.media
-  // already carries.
+  // unchanged for older surfaces. Captain lock: the full priced MakeSafe /
+  // supplier work-order PDF is never linked, embedded, or listed for
+  // installer/trade tiers — office keeps the PDF. Prefers TRD-4 enriched
+  // trade_job_detail media (playable_url / signed_url) and still plays
+  // whatever data.media already carries.
   function isVideoUrl(url) {
     return /\.(mp4|mov|webm|avi|mkv|3gp)(\?|$)/i.test(url || '');
   }
@@ -8361,6 +8363,27 @@
     return typeof canSeeFullPricing === 'function' && canSeeFullPricing();
   }
 
+  function isPricedWorkOrderDocument(d) {
+    if (!d) return false;
+    var type = String(d.type || '').toLowerCase();
+    if (type === 'work_order' || type === 'supplier_work_order') return true;
+    return /work\s*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' '));
+  }
+
+  function findMakesafeWorkOrderDocument(data) {
+    var docs = (data && data.documents) || [];
+    return docs.find(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; }) ||
+      docs.find(isPricedWorkOrderDocument) ||
+      (data && data.workOrder) || null;
+  }
+
+  function tradeWorkOrderPdfUrl(data) {
+    if (!tradeCanSeeSowPricing()) return '';
+    var open = typeof getTradeDocOpenUrl === 'function' ? getTradeDocOpenUrl : function() { return ''; };
+    var doc = findMakesafeWorkOrderDocument(data);
+    return open(doc) || open(data && data.workOrder) || '';
+  }
+
   function renderQuotePacks(data) {
     var packs = (data && (data.quote_packs || data.quotePacks)) || [];
     if (!packs.length) return '';
@@ -8455,6 +8478,9 @@
     renderScopeVideoCard: renderScopeVideoCard,
     redactTradePriceText: redactTradePriceText,
     tradeCanSeeSowPricing: tradeCanSeeSowPricing,
+    isPricedWorkOrderDocument: isPricedWorkOrderDocument,
+    findMakesafeWorkOrderDocument: findMakesafeWorkOrderDocument,
+    tradeWorkOrderPdfUrl: tradeWorkOrderPdfUrl,
     renderQuotePacks: renderQuotePacks,
     renderCompactWorkOrderItems: renderCompactWorkOrderItems
   };
@@ -8976,8 +9002,10 @@
   function renderTradeDocuments(data, phase) {
     if (phase === 'travelling' || phase === 'end_of_day') return '';
     var docs = (data.documents || []).filter(function(d) {
-      // Only show visible docs that aren't site_photo (those go in gallery) and have a browser-safe URL
-      return d.visible_to_trades && d.type !== 'site_photo' && getTradeDocOpenUrl(d);
+      // Only show visible docs that aren't site_photo (those go in gallery) and have a browser-safe URL.
+      // Captain lock: priced work-order PDFs stay office-only even if visible_to_trades is still set.
+      return d.visible_to_trades && d.type !== 'site_photo' && getTradeDocOpenUrl(d)
+        && (tradeCanSeeSowPricing() || !isPricedWorkOrderDocument(d));
     });
     if (docs.length === 0) return '';
 
@@ -9127,9 +9155,9 @@
       h += '</div>';
     }
 
-    // ── Work Order PDF (pre_confirm, confirmed, complete) ──
-    var workOrderDoc = docs.find(function(d) { return d.type === 'work_order'; });
-    var workOrderUrl = getTradeDocOpenUrl(workOrderDoc);
+    // ── Work Order PDF (pre_confirm, confirmed, complete) — office only ──
+    var workOrderDoc = docs.find(isPricedWorkOrderDocument);
+    var workOrderUrl = tradeCanSeeSowPricing() ? getTradeDocOpenUrl(workOrderDoc) : '';
     if (workOrderDoc && workOrderUrl && (phase === 'pre_confirm' || phase === 'confirmed' || isJobDone(phase))) {
       h += '<div class="detail-section">';
       h += '  <h3>Work Order PDF</h3>';
@@ -12167,10 +12195,7 @@
   // ══════════════════════════════════════════════════
 
   function getMakesafeWorkOrderUrl(data) {
-    var docs = (data && data.documents) || [];
-    var doc = docs.find(function(d) { return d.type === 'work_order' || d.type === 'supplier_work_order'; }) ||
-      docs.find(function(d) { return /work\s*order|\bwo\b/i.test([d.type, d.file_name, d.name, d.title].filter(Boolean).join(' ')); });
-    return getTradeDocOpenUrl(doc) || getTradeDocOpenUrl(data && data.workOrder) || '';
+    return tradeWorkOrderPdfUrl(data);
   }
 
   function renderMakesafeWorkOrderInline(data) {
@@ -12178,7 +12203,9 @@
     var job = data.job || {};
     var wo = data.workOrder || {};
     var ms = data.makesafe_details || job.makesafe_details || job.metadata || {};
-    var woUrl = getMakesafeWorkOrderUrl(data);
+    var woDoc = findMakesafeWorkOrderDocument(data);
+    var woHasPdf = !!(getTradeDocOpenUrl(woDoc) || getTradeDocOpenUrl(data.workOrder));
+    var woUrl = tradeWorkOrderPdfUrl(data);
     var h = '<div class="detail-section" style="border-left:4px solid var(--sw-red);background:#FFF7ED;margin-bottom:14px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">';
     h += '<div><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--sw-red);margin-bottom:3px">Builder Work Order</div>';
@@ -12226,12 +12253,14 @@
         var qty = (typeof item === 'object' && (item.qty || item.quantity)) ? ' × ' + (item.qty || item.quantity) + (item.unit ? ' ' + item.unit : '') : '';
         h += '<div style="font-size:13px;padding:4px 0;color:var(--sw-text)">• ' + esc(redactTradePriceText(label) + qty) + '</div>';
       });
-      if (wo.scope_items.length > 8) h += '<div style="font-size:12px;color:var(--sw-text-sec);padding-top:4px">+' + (wo.scope_items.length - 8) + ' more item(s) — open full WO above.</div>';
+      if (wo.scope_items.length > 8) {
+        h += '<div style="font-size:12px;color:var(--sw-text-sec);padding-top:4px">+' + (wo.scope_items.length - 8) + ' more item(s)' + (woUrl ? ' — open full WO above.' : '.') + '</div>';
+      }
       h += '</div>';
-    } else if (!woUrl) {
+    } else if (tradeCanSeeSowPricing() && !woHasPdf) {
       h += '<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:8px;margin-top:8px">No builder work order PDF was returned yet. Use the original email instructions above when available, then complete the MakeSafe report below.</div>';
     }
-    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">Report form is below — scroll after reading the work order.</div>';
+    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:10px">' + (woUrl ? 'Report form is below — scroll after reading the work order.' : 'Report form is below — complete the MakeSafe report after reading the instructions.') + '</div>';
     h += '</div>';
     return h;
   }

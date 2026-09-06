@@ -28,7 +28,16 @@ function patioDetail(overrides) {
     },
     crew: [],
     purchaseOrders: [],
-    documents: [],
+    documents: [
+      {
+        type: 'work_order',
+        file_name: 'Builder-WO.pdf',
+        pdf_url: WO_PDF,
+        storage_url: WO_PDF,
+        visible_to_trades: true,
+        version: 1,
+      },
+    ],
     notes: [],
     media: [
       {
@@ -182,6 +191,8 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(files.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
     await expect(files).toContainText('Q-4412');
     await expect(files).not.toContainText('$');
+    await expect(files.locator('a[href="' + WO_PDF + '"]')).toHaveCount(0);
+    await expect(files).not.toContainText('Builder-WO.pdf');
 
     await page.locator('.jd-tab[data-tab="photos"]').click();
     const photos = page.locator('#jdTab_photos');
@@ -206,14 +217,17 @@ test.describe('TRD-5 trade videos and SOW pricing', () => {
     await expect(scope.locator('video')).toHaveCount(0);
   });
 
-  test('make-safe report header plays job videos, keeps WO PDF, and hides sell prices', async ({ appPage: page }) => {
+  test('make-safe report header plays job videos and hides priced WO PDF from trades', async ({ appPage: page }) => {
     await stubJobDetail(page, makesafeDetail());
     await signIn(page, PERSONAS.installer);
     await page.evaluate(() => window.openJobReport('e2e-makesafe-allocated', 'e2e-ms-assignment'));
     const header = page.locator('#makesafeWorkOrderDirect');
     await expect(header.locator('video[src="' + VIDEO_WALK + '"]')).toHaveCount(1);
     await expect(header.locator('video[src="' + VIDEO_OTHER + '"]')).toHaveCount(1);
-    await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveAttribute('src', WO_PDF);
+    await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveCount(0);
+    await expect(header.getByRole('link', { name: /Open full WO/i })).toHaveCount(0);
+    await expect(header.getByRole('link', { name: /Full screen/i })).toHaveCount(0);
+    await expect(header).not.toContainText(WO_PDF);
     await expect(header).toContainText('Tarp roof sheets');
     await expect(header).not.toContainText('$');
     await expect(header).not.toContainText('340');
@@ -232,5 +246,14 @@ test.describe('TRD-5 office may see SOW rates', () => {
     const scope = page.locator('#jdTab_scope');
     await expect(scope).toContainText('Q-4412');
     await expect(scope).toContainText('$');
+  });
+
+  test('office make-safe header still shows the full WO PDF', async ({ appPage: page }) => {
+    await stubJobDetail(page, makesafeDetail());
+    await signIn(page, PERSONAS.allocator);
+    await page.evaluate(() => window.openJobReport('e2e-makesafe-allocated', 'e2e-ms-assignment'));
+    const header = page.locator('#makesafeWorkOrderDirect');
+    await expect(header.locator('iframe[title="Builder work order PDF"]')).toHaveAttribute('src', WO_PDF);
+    await expect(header.getByRole('link', { name: /Open full WO/i })).toBeVisible();
   });
 });

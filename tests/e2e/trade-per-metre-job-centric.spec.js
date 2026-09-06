@@ -466,3 +466,142 @@ test.describe('stale restored work-order id', () => {
     expect(added.manually_added).toBe(true);
   });
 });
+
+test('hydrate overwrites stale allocated money and rematches server pass-throughs', async ({ appPage: page }) => {
+  const weekStart = perthWeekMonday();
+  await signIn(page, PERSONAS.fencing_manager);
+  await page.evaluate(([start, end, jobDate]) => {
+    sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-henry'), JSON.stringify({
+      user_id: 'e2e-henry',
+      is_per_metre: true,
+      invoice_type: 'per_metre',
+      jobCentric: true,
+      jobCards: [{
+        assignment_id: 'e2e-henry-assignment',
+        job_id: 'fence-job-henry',
+        job_number: 'FENCE-HENRY-001',
+        client_name: 'Henry Client',
+        scheduled_date: jobDate,
+        included: true,
+        wo_mode: true,
+        work_order_id: 'wo-fence-authorised',
+        wo_number: 'WO-FENCE-001',
+        wo_allocated: 999,
+        wo_labour_lines: [{
+          trade_name: 'Stale',
+          line_kind: 'wo_pass_through',
+          amount: 77,
+          source_line_id: 'wo-stale-old-line'
+        }],
+        wo_lump_lines: [{ description: 'Materials', amount: 10 }],
+        hours: 8,
+        rate: 55
+      }],
+      weekStart: start,
+      weekEnd: end
+    }));
+  }, [weekStart, addIsoDays(weekStart, 6), addIsoDays(weekStart, 1)]);
+
+  await page.locator('[data-view="hours"]').click();
+  await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+  await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+  const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(card.locator('[data-cardwoalloc]')).toHaveValue('100');
+  await expect(card.getByLabel('Work order amount paid to Israel')).toHaveValue('40');
+  await expect(card.locator('[data-cardlumpdesc]')).toHaveValue('Materials');
+  await expect(card.locator('[data-cardlumpamt]')).toHaveValue('10');
+  await expect(card.locator('[data-cardamt]')).toHaveText('$50.00');
+  await expect(card).not.toContainText('Stale');
+  await expect(card).not.toContainText('$999');
+});
+
+test.describe('hydrate ignores out-of-week work orders', () => {
+  test.use({ feedScenario: 'henry-job-centric-submit' });
+
+  test('a restored out-of-week work-order id is stripped and cannot submit', async ({ appPage: page, feedRequests }) => {
+    const weekStart = perthWeekMonday();
+    const lastWeek = addIsoDays(weekStart, -7);
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_work_orders') {
+        const response = await route.fetch();
+        const body = await response.json();
+        const extra = {
+          id: 'wo-fence-last-week',
+          wo_number: 'WO-FENCE-LAST',
+          job_id: 'fence-job-last',
+          job_number: 'FENCE-LAST-009',
+          client_name: 'Last Week Client',
+          job_type: 'fencing',
+          status: 'complete',
+          scheduled_date: lastWeek,
+          subtotal: 250,
+          already_invoiced: false,
+          can_invoice: true,
+          can_add_to_weekly_invoice: true,
+          negative_charges: []
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(Object.assign({}, body, {
+            work_orders: (body.work_orders || []).concat([extra])
+          }))
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.evaluate(([start, end, last]) => {
+      sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-henry'), JSON.stringify({
+        user_id: 'e2e-henry',
+        is_per_metre: true,
+        invoice_type: 'per_metre',
+        jobCentric: true,
+        jobCards: [{
+          job_id: 'fence-job-last',
+          job_number: 'FENCE-LAST-009',
+          client_name: 'Last Week Client',
+          scheduled_date: last,
+          included: true,
+          wo_mode: true,
+          work_order_id: 'wo-fence-last-week',
+          wo_number: 'WO-FENCE-LAST',
+          wo_allocated: 250,
+          wo_labour_lines: [],
+          hours: 2,
+          rate: 55,
+          description: 'last week wo',
+          manually_added: true
+        }],
+        weekStart: start,
+        weekEnd: end
+      }));
+    }, [weekStart, addIsoDays(weekStart, 6), lastWeek]);
+
+    await page.locator('[data-view="hours"]').click();
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+    const stale = page.locator('.jc-card').filter({ hasText: 'FENCE-LAST-009' });
+    await expect(stale).toBeVisible();
+    await expect(stale.locator('[data-cardwoalloc]')).toHaveCount(0);
+    await expect(stale.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const extras = writes[0].body.extra_items || [];
+    expect(extras.some((item) => item.work_order_id === 'wo-fence-last-week')).toBe(false);
+    const added = extras.find((item) => item.job_number === 'FENCE-LAST-009');
+    expect(added).toBeTruthy();
+    expect(added.row_type).toBe('labour');
+  });
+});

@@ -312,6 +312,12 @@ assert(html.includes('_invoiceApiCurrent') && html.includes('_invoiceAuthGen++')
   'invoice API responses are dropped after an account switch or superseded request');
 assert(html.includes('_reconcileJobCardWorkOrderAuth'),
   'restored work-order ids are reconciled against the current hydrate authorization');
+assert(html.includes('_workOrderInvoiceableForHydrate') && html.includes('.filter(_workOrderInvoiceableForHydrate)'),
+  'job-centric hydrate authorizes only invoiceable in-week work orders');
+assert(html.includes('_applyHydratedWorkOrderMoney') && html.includes('_clearJobCardServerOwnedWorkOrderMoney'),
+  'hydrate overwrites server-owned money and clears it when a WO id is stripped');
+assert(html.includes('_stripServerOwnedPassThroughs'),
+  'stale source_line_id pass-throughs are dropped before rematching the current WO');
 assert(html.includes('requires_work_order_id'),
   'per-metre WO submit requires a real work_order_id');
 assert(html.includes('data-weekly-wo-retry'),

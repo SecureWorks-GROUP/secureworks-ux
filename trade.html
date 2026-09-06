@@ -9941,9 +9941,11 @@
 
     // Async: load work order invoice status
     if (wo && wo.id) {
+      var costCtx = _invoiceApiContext();
       api('my_work_orders', { mode: 'all' }).then(function(res) {
+        if (!_invoiceApiCurrent(costCtx)) return;
         var el = document.getElementById('woJobCostBreakdown');
-        if (!el) return;
+        if (!el || !el.isConnected) return;
         var orders = workOrdersForViewer(res.work_orders || []);
         var match = null;
         for (var i = 0; i < orders.length; i++) {
@@ -9989,8 +9991,10 @@
 
         el.innerHTML = ch;
       }).catch(function() {
+        if (!_invoiceApiCurrent(costCtx)) return;
         var el = document.getElementById('woJobCostBreakdown');
-        if (el) el.innerHTML = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div><div style="font-size:13px;color:var(--sw-text-sec)">Could not load cost data</div>';
+        if (!el || !el.isConnected) return;
+        el.innerHTML = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div><div style="font-size:13px;color:var(--sw-text-sec)">Could not load cost data</div>';
       });
     }
 
@@ -15884,12 +15888,15 @@
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading hours...</div>';
 
+    var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
     api('my_hours', { week_ending: _hoursWeekEnd }).then(function(data) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       _hoursData = data;
       _tradeRate = data.rate;
       _invGst = _invoiceGstDefault(data);
       renderHoursView(data);
     }).catch(function(err) {
+      if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       container.innerHTML = '<div class="hours-no-data">' + friendlyError(err) + '</div>';
     });
   }
@@ -16827,10 +16834,11 @@
     var revision = state.revision;
     state.requestSeq++;
     var requestSeq = state.requestSeq;
+    var ctx = _invoiceApiContext();
     state.busy = true;
     renderWeeklyWorkOrderInvoice();
     api('save_trade_invoice_draft', null, payload).then(function(res) {
-      if (!_weeklyStateCurrent(state, null, requestSeq)) return;
+      if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
       if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Draft could not be saved');
       var invoice = _weeklyInvoiceFromResponse(res, payload, { draft_id: state.draftId }, state);
       state.draftId = _weeklyInvoiceIdentity(invoice) || state.draftId;
@@ -16844,7 +16852,7 @@
       toast('Draft saved — totals calculated by SecureWorks');
       renderWeeklyWorkOrderInvoice();
     }).catch(function(err) {
-      if (!_weeklyStateCurrent(state, null, requestSeq)) return;
+      if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
       state.busy = false;
       toast(friendlyError(err), true);
       renderWeeklyWorkOrderInvoice();
@@ -16864,8 +16872,10 @@
     var revision = state.revision;
     var preview = state.preview;
     var payable = _weeklyInvoiceMoney(preview.to_be_paid);
+    var ctx = _invoiceApiContext();
     showConfirm('Submit Weekly Invoice', 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '? A DRAFT bill will be created in Xero.', 'Submit').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
       if (!_weeklyStateCurrent(state, revision)) {
         toast('Save and calculate before submitting', true);
         renderWeeklyWorkOrderInvoice();
@@ -16876,7 +16886,7 @@
       state.busy = true;
       renderWeeklyWorkOrderInvoice();
       api('generate_trade_invoice', null, payload).then(function(res) {
-        if (!_weeklyStateCurrent(state, null, requestSeq)) return;
+        if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         var invoiceResponse = Object.assign({}, res, {
           draft_id: state.draftId,
@@ -16890,6 +16900,7 @@
         try {
           invoice = _weeklyInvoiceFromResponse(invoiceResponse, payload, null, state);
         } catch (validationErr) {
+          if (!_invoiceApiCurrent(ctx)) return;
           state.busy = false;
           state.preview = null;
           state.dirty = true;
@@ -16898,6 +16909,7 @@
           openInvoiceHistory();
           return;
         }
+        if (!_invoiceApiCurrent(ctx)) return;
         if (state.revision !== revision) {
           state.busy = false;
           toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill') + ' Current edits were not included; open Invoice history to review it.');
@@ -16909,7 +16921,7 @@
         if (_weeklyWoInvoice === state) _weeklyWoInvoice = null;
         renderWeeklyInvoiceDetail(invoice);
       }).catch(function(err) {
-        if (!_weeklyStateCurrent(state, null, requestSeq)) return;
+        if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
         state.busy = false;
         toast(friendlyError(err), true);
         renderWeeklyWorkOrderInvoice();
@@ -16949,8 +16961,10 @@
     _hoursData.total = _hoursData.subtotal;
 
     var totalStr = '$' + _hoursData.total.toFixed(2);
+    var ctx = _invoiceApiContext();
     showConfirm('Submit Invoice', 'Submit ' + totalStr + ' for week ending ' + _hoursData.week_ending + ' to Xero?', 'Submit').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
 
       var btn = document.getElementById('btnSubmitHours');
       if (btn) { btn.disabled = true; btn.textContent = 'Submitting...'; }
@@ -16961,12 +16975,14 @@
         notes: '',
         gst_on: _invGst
       }).then(function(res) {
+        if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(res)) {
           throw new Error((res && (res.userMessage || res.error)) || 'Invoice submission failed');
         }
         toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as draft bill'));
         loadHoursView(); // reload to show submitted state
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         toast(friendlyError(err), true);
         if (btn) { btn.disabled = false; btn.textContent = 'Submit Invoice for This Week'; }
       });
@@ -17207,12 +17223,16 @@
   }
 
   window.deleteTradeInvoice = function(invoiceId) {
+    var ctx = _invoiceApiContext();
     showConfirm('Delete Invoice', 'This will permanently delete this invoice. If it was synced to Xero, the bookkeeper will need to delete the Xero bill separately.', 'Delete').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
       api('delete_trade_invoice', null, { invoice_id: invoiceId }).then(function() {
+        if (!_invoiceApiCurrent(ctx)) return;
         toast('Invoice deleted');
         openInvoiceHistory();
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         toast('Failed: ' + friendlyError(err), true);
       });
     });
@@ -18197,6 +18217,47 @@
   }
   // [WO-PASSTHROUGH-MERGE-END]
 
+  // [WO-SERVER-MONEY-START]
+  function _stripServerOwnedPassThroughs(lines) {
+    return (lines || []).filter(function(ln) {
+      if (!ln || ln.line_kind !== 'wo_pass_through') return true;
+      return !ln.source_line_id;
+    });
+  }
+
+  function _applyHydratedWorkOrderMoney(card, wo, passThroughs) {
+    if (!card) return false;
+    var nextAllocated = (wo && wo.subtotal != null) ? Number(wo.subtotal) : null;
+    if (nextAllocated != null && !Number.isFinite(nextAllocated)) nextAllocated = null;
+    var changed = card.wo_allocated !== nextAllocated;
+    card.wo_allocated = nextAllocated;
+    var prevLines = card.wo_labour_lines || [];
+    var kept = _stripServerOwnedPassThroughs(prevLines);
+    var merged = _mergeServerPassThroughs(kept, passThroughs || []);
+    if (merged.changed || kept.length !== prevLines.length) {
+      card.wo_labour_lines = merged.lines;
+      changed = true;
+    }
+    return changed;
+  }
+
+  function _clearJobCardServerOwnedWorkOrderMoney(card) {
+    if (!card) return false;
+    var changed = false;
+    if (card.wo_allocated != null) {
+      card.wo_allocated = null;
+      changed = true;
+    }
+    var prevLines = card.wo_labour_lines || [];
+    var kept = _stripServerOwnedPassThroughs(prevLines);
+    if (kept.length !== prevLines.length) {
+      card.wo_labour_lines = kept;
+      changed = true;
+    }
+    return changed;
+  }
+  // [WO-SERVER-MONEY-END]
+
   function _workOrderIdSet(orders) {
     var ids = {};
     (orders || []).forEach(function(order) {
@@ -18205,6 +18266,7 @@
     return ids;
   }
 
+  // [WO-RECONCILE-AUTH-START]
   function _reconcileJobCardWorkOrderAuth(authorizedIds) {
     authorizedIds = authorizedIds || {};
     var changed = false;
@@ -18215,10 +18277,28 @@
       card.work_order_id = '';
       card.wo_number = '';
       if (card.wo_mode) card.wo_mode = false;
+      _clearJobCardServerOwnedWorkOrderMoney(card);
       changed = true;
     });
     return changed;
   }
+  // [WO-RECONCILE-AUTH-END]
+
+  // [WO-HYDRATE-FILTER-START]
+  function _workOrderInvoiceableForHydrate(wo, weekStart, weekEnd) {
+    if (!wo) return false;
+    if (wo.already_invoiced) return false;
+    if (wo.can_invoice !== true && wo.can_add_to_weekly_invoice !== true) return false;
+    var date = (typeof _weeklyWorkOrderDate === 'function')
+      ? _weeklyWorkOrderDate(wo)
+      : String((wo.scheduled_date || wo.date || '')).slice(0, 10);
+    var start = weekStart != null ? weekStart : (_hoursWeekStart || '');
+    var end = weekEnd != null ? weekEnd : (_hoursWeekEnd || '');
+    // Undated WOs still pass — Firstmate pending on the date && week leak.
+    if (start && end && date && (date < start || date > end)) return false;
+    return true;
+  }
+  // [WO-HYDRATE-FILTER-END]
 
   function _jobCardDate(card) {
     return String((card && card.scheduled_date) || '').slice(0, 10);
@@ -18288,6 +18368,8 @@
       if (existing && !_jobCardAcceptsWorkOrder(existing, jobId, date)) {
         existing.work_order_id = '';
         existing.wo_number = '';
+        if (existing.wo_mode) existing.wo_mode = false;
+        _clearJobCardServerOwnedWorkOrderMoney(existing);
         existing = null;
       }
       var target = existing || _unboundCardForWorkOrder(jobId, date);
@@ -18300,15 +18382,7 @@
           target.wo_mode = true;
           changed = true;
         }
-        if (target.wo_allocated == null && wo.subtotal != null) {
-          target.wo_allocated = Number(wo.subtotal);
-          changed = true;
-        }
-        var mergedLines = _mergeServerPassThroughs(target.wo_labour_lines, passThroughs);
-        if (mergedLines.changed) {
-          target.wo_labour_lines = mergedLines.lines;
-          changed = true;
-        }
+        if (_applyHydratedWorkOrderMoney(target, wo, passThroughs)) changed = true;
         if (!existing) changed = true;
         return;
       }
@@ -18349,7 +18423,7 @@
     var hydrateCtx = _invoiceApiContext();
     api('my_work_orders', { mode: 'all' }).then(function(res) {
       if (seq !== _pmWoHydrateSeq || !_jobCentricActive || !_invoiceBuilderOpen || !_invoiceApiCurrent(hydrateCtx)) return;
-      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []));
+      var orders = authorizeWorkOrders(workOrdersForViewer(res.work_orders || []).filter(_workOrderInvoiceableForHydrate));
       _pmHydratedWorkOrderIds = _workOrderIdSet(orders);
       _syncJobCardsFromDOM();
       _mergeWorkOrdersIntoJobCards(orders);
@@ -19561,6 +19635,7 @@
 
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
+    var ctx = _invoiceApiContext();
     if (_jobCentricSubmitBlockedByHydrate()) {
       toast(_pmWoHydrateState === 'error'
         ? 'Work-order amounts did not load. Retry before submitting a work-order card.'
@@ -19614,6 +19689,7 @@
 
     showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
       api('generate_trade_invoice', {}, {
@@ -19624,6 +19700,7 @@
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
+        if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
@@ -19645,6 +19722,7 @@
         var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
         _lastInvoicePdfData = pdfData;
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
+        if (!_invoiceApiCurrent(ctx)) return;
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
@@ -19683,6 +19761,7 @@
         _jobCards = []; _invRows = []; _clearInvDraft();
         });
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         if (!navigator.onLine) {
           queueOfflineAction('generate_trade_invoice', { week_start: _hoursWeekStart || getWeekStartMonday(0), manual_assignments: manualAssignments, extra_items: extraItems, notes: _invNotes, gst_on: _invGst });
           toast('Offline — invoice queued, will submit when back online');
@@ -19964,6 +20043,7 @@
   window.saveDraftInvoice = function() {
     _syncRowsFromDOM();
     var isExpense = _invoiceBuilderMode === 'expense';
+    var ctx = _invoiceApiContext();
 
     api('save_trade_invoice_draft', null, {
       week_start: isExpense ? null : (_hoursWeekStart || null),
@@ -19972,15 +20052,18 @@
       labour_lines: [],
       gst_on: _invGst
     }).then(function(res) {
+      if (!_invoiceApiCurrent(ctx)) return;
       _draftInvoiceId = res.draft_id;
       toast('Draft saved');
     }).catch(function(err) {
+      if (!_invoiceApiCurrent(ctx)) return;
       toast('Failed to save draft: ' + friendlyError(err), true);
     });
   };
 
   window.submitInvoiceFromBuilder = function() {
     // Guard: if any pre-confirm prep throws, the button stays enabled (no spinner shown yet).
+    var ctx = _invoiceApiContext();
     var isExpense, validRows, manualRows, errors, t;
     try {
       _syncRowsFromDOM();
@@ -20012,6 +20095,7 @@
       'Submit'
     ).then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
 
       var container = document.getElementById('hoursContent');
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Submitting invoice...</div>';
@@ -20025,6 +20109,7 @@
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
+        if (!_invoiceApiCurrent(ctx)) return;
         result = result || {};
         // Backend contract (PR #196): branch on code FIRST.
         // XERO_PUSH_FAILED is a SOFT warning — invoice WAS saved (success:true + invoice fields),
@@ -20053,6 +20138,7 @@
         _lastInvoicePdfData = pdfData;
 
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
+        if (!_invoiceApiCurrent(ctx)) return;
 
         // Show success
         var successHtml = '';
@@ -20091,6 +20177,7 @@
         _clearInvDraft();
         });
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         if (!navigator.onLine) {
           queueOfflineAction('generate_trade_invoice', {
             week_start: isExpense ? undefined : (_hoursWeekStart || undefined),
@@ -20383,10 +20470,13 @@
   // ══════════════════════════════════════════════════
 
   window.generateTradeInvoice = function(weekStart) {
+    var ctx = _invoiceApiContext();
     showConfirm('Generate Invoice?', 'This will create an invoice for all completed hours this week. You can\'t edit it after submitting.', 'Generate').then(function(ok) {
       if (!ok) return;
+      if (!_invoiceApiCurrent(ctx)) return;
 
       api('generate_trade_invoice', {}, { week_start: weekStart, gst_on: _invoiceGstDefault(_hoursData) }).then(function(result) {
+        if (!_invoiceApiCurrent(ctx)) return;
         if (!_invoiceSubmitSucceeded(result)) {
           toast((result && (result.userMessage || result.error)) || 'Invoice submission failed — please try again', true);
           return;
@@ -20394,6 +20484,7 @@
         toast(_invoiceGeneratedStatusMessage(result));
         loadHoursView(); // Refresh to show submitted state
       }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
         toast('Failed: ' + (err.message || err), true);
       });
     });
@@ -22002,7 +22093,9 @@
 
   function loadProfileRate() {
     // Use cached rate from hours view, or fetch via my_hours for current week
+    var ctx = _invoiceApiContext();
     api('my_hours', { week_ending: getWeekEndSunday(0) }).then(function(data) {
+      if (!_invoiceApiCurrent(ctx)) return;
       _tradeRate = data.rate;
       var input = document.getElementById('inputTradeRate');
       var status = document.getElementById('rateStatus');

@@ -254,4 +254,93 @@ function woCard(overrides) {
   assert.strictEqual(oneLocal.lines.length, 2, 'one local no-ID line plus two server lines keeps both deducts')
 }
 
-console.log('OK — WO labour-line payload contract holds (17 scenarios)')
+// ── Hydrate authorizes only invoiceable in-week WOs ──
+{
+  const startMark = '// [WO-HYDRATE-FILTER-START]'
+  const endMark = '// [WO-HYDRATE-FILTER-END]'
+  const filterStart = html.indexOf(startMark)
+  const filterEnd = html.indexOf(endMark)
+  assert(filterStart !== -1 && filterEnd > filterStart, 'hydrate filter markers exist')
+  context._weeklyWorkOrderDate = function (wo) {
+    return String((wo && (wo.scheduled_date || wo.date)) || '').slice(0, 10)
+  }
+  context._hoursWeekStart = '2026-09-07'
+  context._hoursWeekEnd = '2026-09-13'
+  vm.runInContext(html.slice(filterStart, filterEnd), context)
+  const inWeek = {
+    id: 'wo-in',
+    scheduled_date: '2026-09-08',
+    can_invoice: true,
+    already_invoiced: false,
+  }
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(inWeek), true, 'in-week invoiceable WO hydrates')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    already_invoiced: true,
+  })), false, 'already invoiced WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    can_invoice: false,
+    can_add_to_weekly_invoice: false,
+  })), false, 'skipped WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate(Object.assign({}, inWeek, {
+    scheduled_date: '2026-08-31',
+  })), false, 'out-of-week WO is not hydrated')
+  assert.strictEqual(context._workOrderInvoiceableForHydrate({
+    id: 'wo-undated',
+    can_invoice: true,
+    already_invoiced: false,
+  }), true, 'undated invoiceable WO still hydrates (Firstmate pending)')
+}
+
+// ── Hydrate overwrites stale server-owned money; reconcile clears it ──
+{
+  const moneyStart = html.indexOf('// [WO-SERVER-MONEY-START]')
+  const moneyEnd = html.indexOf('// [WO-SERVER-MONEY-END]')
+  const reconStart = html.indexOf('// [WO-RECONCILE-AUTH-START]')
+  const reconEnd = html.indexOf('// [WO-RECONCILE-AUTH-END]')
+  assert(moneyStart !== -1 && moneyEnd > moneyStart, 'server-money markers exist')
+  assert(reconStart !== -1 && reconEnd > reconStart, 'reconcile markers exist')
+  vm.runInContext(html.slice(moneyStart, moneyEnd), context)
+  vm.runInContext(html.slice(reconStart, reconEnd), context)
+
+  const israel = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40, source_line_id: 'wo-fence-charge-israel' }
+  const stalePt = { trade_name: 'Stale', line_kind: 'wo_pass_through', amount: 77, source_line_id: 'wo-stale-old-line' }
+  const kim = { trade_name: 'Kim', hours: 1, rate: 20 }
+  const userPt = { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 }
+  const card = {
+    wo_allocated: 999,
+    wo_labour_lines: [stalePt, kim, userPt],
+    wo_lump_lines: [{ description: 'Materials', amount: 10 }],
+    work_order_id: 'wo-fence-authorised',
+    wo_mode: true,
+  }
+  const changed = context._applyHydratedWorkOrderMoney(card, { subtotal: 100 }, [israel])
+  assert.strictEqual(changed, true)
+  assert.strictEqual(card.wo_allocated, 100, 'hydrate overwrites stale allocated')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.source_line_id === 'wo-stale-old-line').length, 0,
+    'stale server pass-through is dropped')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.source_line_id === 'wo-fence-charge-israel').length, 1,
+    'current server Israel rematches once')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1, 'hourly labour is kept')
+  assert.strictEqual(card.wo_labour_lines.filter((ln) => ln.line_kind === 'wo_pass_through' && !ln.source_line_id).length, 1,
+    'user-added no-id pass-through is kept')
+  assert.strictEqual(card.wo_lump_lines[0].description, 'Materials', 'user lump lines are kept')
+
+  const stripped = {
+    work_order_id: 'wo-stale-not-authorized',
+    wo_number: 'WO-STALE',
+    wo_mode: true,
+    wo_allocated: 99,
+    wo_labour_lines: [stalePt, kim],
+  }
+  context._jobCards = [stripped]
+  assert.strictEqual(context._reconcileJobCardWorkOrderAuth({}), true)
+  assert.strictEqual(stripped.work_order_id, '')
+  assert.strictEqual(stripped.wo_mode, false)
+  assert.strictEqual(stripped.wo_allocated, null, 'unauthorized WO clears allocated')
+  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.source_line_id).length, 0,
+    'unauthorized WO clears server pass-throughs')
+  assert.strictEqual(stripped.wo_labour_lines.filter((ln) => ln.trade_name === 'Kim').length, 1,
+    'hourly labour survives unauthorized strip')
+}
+
+console.log('OK — WO labour-line payload contract holds (20 scenarios)')

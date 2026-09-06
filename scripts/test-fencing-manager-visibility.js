@@ -346,8 +346,10 @@ assert((html.match(/_renderCardLumpLinesHtml\(c/g) || []).length >= 2,
   'amount lines render on both Hours and Work Order cards');
 assert(!html.includes('Lump-sum amounts'),
   'amount lines are not framed as a separate product heading');
-assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions'),
-  'Hours-card lumps ride extra_items and final_deductions like invoice-level deducts');
+assert(html.includes('_hoursCardLumpExtras') && html.includes('_hoursCardLumpFinalDeductions') &&
+  html.includes('_woCardFinalDeductions') &&
+  /function _invFinalDeductions[\s\S]*?_hoursCardLumpFinalDeductions\(\)[\s\S]*?_woCardFinalDeductions\(\)/.test(html),
+  'Hours-card and WO-card deducts ride top-level final_deductions like invoice-level deducts');
 assert(html.includes('or add an amount'),
   'hours-card validation treats an amount as a peer to hours');
 assert(html.includes('addWoLumpLine'),
@@ -489,6 +491,11 @@ assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?if \(!_invoiceSubmi
   'direct work-order invoice uses the shared committed-success predicate and refreshes the hub on durable success');
 assert(/invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_workOrdersHydratePayloadComplete\(res\)[\s\S]*?negative_charge_line_ids: chargeIds[\s\S]*?charge_line_ids: chargeIds[\s\S]*?_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html),
   'direct work-order invoice re-reads a complete WO listing and posts selected charge ids');
+assert(html.includes('_workOrderDirectInvoiceAllowed') &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_workOrderDirectInvoiceAllowed\(wo\)[\s\S]*?_financialInvoiceApi\('submit_work_order_invoice', null, woBody/.test(html) &&
+  /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_withFinancialWebLock\('submit_work_order_invoice'[\s\S]*?api\('my_work_orders'/.test(html) &&
+  /function _offlineInvoiceReplayAllowed[\s\S]*?_workOrderDirectInvoiceAllowed\(/.test(html),
+  'direct WO invoice and offline replay fail closed when already invoiced and hold the financial fence through the re-read');
 assert(html.includes('_invoiceXeroPushSavedUnconfirmed') &&
   /function _settleFinancialWriteSend[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)\) return/.test(html) &&
   /invoiceWorkOrder = function\(workOrderId\) \{[\s\S]*?_invoiceXeroPushSavedUnconfirmed\(result\)[\s\S]*?Confirming\.\.\.[\s\S]*?_reEnableBtn\(\)/.test(html),

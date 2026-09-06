@@ -311,6 +311,39 @@ function hoursCard(overrides) {
   assert.strictEqual(row.wo_lump_lines[0].description, 'Materials')
   assert.strictEqual(row.wo_lump_lines[0].amount, 10)
   assert(row.description.indexOf('other [Materials $10]') !== -1, 'breakdown names the lump: ' + row.description)
+  assert.strictEqual(built.cardExtraItems.filter((item) => item.source === 'invoice_final_deduction').length, 0,
+    'WO deducts stay nested on the WO extra and are not also emitted as extra_items')
+}
+
+{
+  const deductStart = html.indexOf('function _hoursCardLumpFinalDeductions')
+  const deductEnd = html.indexOf('function _syncInvLumpLinesFromDOM')
+  assert(deductStart !== -1 && deductEnd > deductStart, 'final-deduction helpers exist')
+  context._invLumpLines = [{ description: 'Car loan', amount: 20 }]
+  context._jobCards = [
+    woCard({
+      included: true,
+      wo_allocated: 100,
+      wo_labour_lines: [
+        { trade_name: 'Israel', line_kind: 'wo_pass_through', amount: 40 },
+        { trade_name: 'Tendo', hours: 2, rate: 25 },
+      ],
+      wo_lump_lines: [{ description: 'Materials', amount: 10, line_kind: 'lump_sum' }],
+    }),
+    hoursCard({
+      included: true,
+      wo_lump_lines: [{ description: 'Fuel', amount: 15, line_kind: 'lump_sum' }],
+    }),
+  ]
+  vm.runInContext(html.slice(deductStart, deductEnd), context)
+  const finals = context._invFinalDeductions()
+  const descs = finals.map((row) => row.description + ':' + row.unit_rate)
+  assert.ok(descs.indexOf('Car loan:20') !== -1, 'invoice-level lumps stay on final_deductions')
+  assert.ok(descs.indexOf('Fuel:15') !== -1, 'hours-card lumps stay on final_deductions')
+  assert.ok(descs.indexOf('Israel:40') !== -1, 'hydrated WO pass-throughs ride top-level final_deductions')
+  assert.ok(descs.indexOf('Materials:10') !== -1, 'WO-card lumps ride top-level final_deductions')
+  assert.ok(descs.indexOf('Tendo:50') === -1, 'named WO labour hours are not copied onto final_deductions')
+  assert.strictEqual(finals.length, 4, 'each distinct deduct appears once on the common list')
 }
 
 {
@@ -639,7 +672,7 @@ function hoursCard(overrides) {
         return Promise.reject(err)
       }
       sent.push({ action: action, body: body })
-      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-b' }] })
+      if (action === 'my_work_orders') return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: true, already_invoiced: false }] })
       return Promise.resolve({ ok: true })
     },
     toast: function() {},
@@ -702,6 +735,31 @@ function hoursCard(overrides) {
     assert.strictEqual(sent.filter((s) => s.action !== 'my_work_orders').length, 1,
       'only the current account\'s invoice write is replayed')
     assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice')[0].body.work_order_id, 'wo-b')
+
+    ctx.api = function(action, q, body, options) {
+      if (options && typeof options.beforeSend === 'function' && options.beforeSend() === false) {
+        const err = new Error('Invoice replay cancelled')
+        err.code = 'invoice_replay_cancelled'
+        return Promise.reject(err)
+      }
+      sent.push({ action: action, body: body })
+      if (action === 'my_work_orders') {
+        return Promise.resolve({ work_orders: [{ id: 'wo-b', can_invoice: false, already_invoiced: true }] })
+      }
+      return Promise.resolve({ ok: true })
+    }
+    ctx._invoiceAuthGen += 1
+    ctx._authorizedWorkOrderIds = { 'wo-b': true }
+    store.sw_action_queue = JSON.stringify([
+      { action: 'submit_work_order_invoice', user_id: 'bob', body: { work_order_id: 'wo-b' } },
+    ])
+    sent.length = 0
+    return ctx.syncOfflineQueue()
+  }).then(function() {
+    assert.strictEqual(sent.filter((s) => s.action === 'submit_work_order_invoice').length, 0,
+      'an already-invoiced work order is not replayed')
+    assert.strictEqual(JSON.parse(store.sw_action_queue).some((i) => i.action === 'submit_work_order_invoice'), true,
+      'an already-invoiced work-order write stays queued instead of posting again')
 
     store.sw_action_queue = JSON.stringify([
       { action: 'generate_trade_invoice', user_id: 'bob', body: { raced: true } },

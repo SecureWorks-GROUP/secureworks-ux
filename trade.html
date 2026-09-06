@@ -4881,12 +4881,26 @@
     return String(body.work_order_id || body.workOrderId || '');
   }
 
+  var _offlineInvoiceWorkOrderById = {};
+
+  function _workOrderDirectInvoiceAllowed(wo) {
+    return !!(wo && wo.already_invoiced !== true && wo.can_invoice === true);
+  }
+
+  function _offlineInvoiceWorkOrdersReadComplete(res) {
+    if (typeof _workOrdersHydratePayloadComplete === 'function') {
+      return _workOrdersHydratePayloadComplete(res);
+    }
+    return !!(res && Array.isArray(res.work_orders));
+  }
+
   function _offlineInvoiceReplayAllowed(item, ctx) {
     if (!_invoiceApiCurrent(ctx)) return false;
     if (!_offlineInvoiceOwnedByCurrentAccount(item)) return false;
     if (item.action === 'submit_work_order_invoice') {
       var woId = _offlineInvoiceWorkOrderId(item);
       if (!woId || !isAuthorizedWorkOrder(woId)) return false;
+      if (!_workOrderDirectInvoiceAllowed(_offlineInvoiceWorkOrderById[String(woId)])) return false;
     }
     return true;
   }
@@ -4908,7 +4922,16 @@
       if (!_invoiceApiCurrent(ctx) || !_offlineInvoiceOwnedByCurrentAccount(item)) {
         return { read: false, allowed: false };
       }
-      authorizeWorkOrders(workOrdersForViewer((res && res.work_orders) || []));
+      if (!_offlineInvoiceWorkOrdersReadComplete(res)) {
+        return { read: false, allowed: false };
+      }
+      var visible = workOrdersForViewer((res && res.work_orders) || []);
+      authorizeWorkOrders(visible);
+      var byId = {};
+      visible.forEach(function(wo) {
+        if (wo && wo.id) byId[String(wo.id)] = wo;
+      });
+      _offlineInvoiceWorkOrderById = byId;
       return { read: true, allowed: _offlineInvoiceReplayAllowed(item, ctx) };
     }).catch(function() {
       return { read: false, allowed: false };
@@ -19724,6 +19747,30 @@
     return rows;
   }
 
+  // Captain-B common deduction list: hydrated WO pass-throughs and WO-card
+  // lumps belong on top-level final_deductions like hours-card lumps. They
+  // stay nested on the WO extra for identity/net and are not also emitted as
+  // standalone extra_items (that would deduct twice against the already-netted
+  // WO row).
+  function _woCardFinalDeductions() {
+    var rows = [];
+    (_jobCards || []).forEach(function(c) {
+      if (!c || !c.included || !c.wo_mode) return;
+      _woCleanLabourLines(c).forEach(function(ln) {
+        if (!ln || ln.line_kind !== 'wo_pass_through') return;
+        var name = String(ln.trade_name || '').trim();
+        var amt = Math.abs(Number(ln.amount) || 0);
+        if (!name || !(amt > 0)) return;
+        rows.push({ description: name, quantity: 1, unit: 'ea', unit_rate: amt });
+      });
+      _woCleanLumpLines(c).forEach(function(lp) {
+        if (!lp.description || !(lp.amount > 0)) return;
+        rows.push({ description: lp.description, quantity: 1, unit: 'ea', unit_rate: lp.amount });
+      });
+    });
+    return rows;
+  }
+
   function _invFinalDeductions() {
     var rows = [];
     (_invLumpLines || []).forEach(function(line) {
@@ -19732,7 +19779,7 @@
       if (!desc || !amt) return;
       rows.push({ description: desc, quantity: 1, unit: 'ea', unit_rate: amt });
     });
-    return rows.concat(_hoursCardLumpFinalDeductions());
+    return rows.concat(_hoursCardLumpFinalDeductions()).concat(_woCardFinalDeductions());
   }
 
   function _syncInvLumpLinesFromDOM() {
@@ -24795,7 +24842,10 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Invoice This Work Order'; }
       }
 
-      api('my_work_orders', { mode: 'all' }).then(function(res) {
+      // Hold the shared financial fence through the complete re-read and POST
+      // so a second tab gets invoice_write_locked instead of a duplicate send.
+      return _withFinancialWebLock('submit_work_order_invoice', function() {
+      return api('my_work_orders', { mode: 'all' }).then(function(res) {
         if (!_invoiceApiCurrent(ctx)) return;
         if (!_workOrdersHydratePayloadComplete(res)) {
           toast('Could not refresh this work order. Invoice was not sent.', true);
@@ -24812,6 +24862,13 @@
         }
         if (!wo || !isAuthorizedWorkOrder(workOrderId)) {
           toast('This work order is not available to invoice', true);
+          _reEnableBtn();
+          return;
+        }
+        if (!_workOrderDirectInvoiceAllowed(wo)) {
+          toast(wo.already_invoiced
+            ? 'This work order is already invoiced. Check Invoice history — do not submit again.'
+            : 'This work order is not ready to invoice.', true);
           _reEnableBtn();
           return;
         }
@@ -24896,6 +24953,16 @@
         });
       }).catch(function() {
         if (!_invoiceApiCurrent(ctx)) return;
+        toast('Could not refresh this work order. Invoice was not sent.', true);
+        _reEnableBtn();
+      });
+      }, { acquire: false }).catch(function(err) {
+        if (!_invoiceApiCurrent(ctx)) return;
+        if (err && err.code === 'invoice_write_locked') {
+          toast('Invoice send is already in progress in another tab. Check Invoice history before trying again.');
+          _reEnableBtn();
+          return;
+        }
         toast('Could not refresh this work order. Invoice was not sent.', true);
         _reEnableBtn();
       }).then(function() { _endFinancialWrite('submit_work_order_invoice'); }, function() { _endFinancialWrite('submit_work_order_invoice'); });

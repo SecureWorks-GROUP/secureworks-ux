@@ -326,8 +326,9 @@ check(
   /if \(!item \|\| !isTradeVisibleMedia\(item\) \|\| isPricedWorkOrderDocument\(item\)\) continue;/.test(html)
 );
 check(
-  'shipped isJobVideo refuses priced WO documents unconditionally',
-  /if \(isTypedPricedWorkOrder\(m\) \|\| isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
+  'shipped isJobVideo refuses typed WO then honors explicit video (TRD5-R13-002)',
+  /if \(isTypedPricedWorkOrder\(m\)\) return false;/.test(html) &&
+    /if \(isExplicitDeclaredVideo\(m\) && !isPdfOrDocumentBytes\(m\)\) return true;/.test(html)
 );
 check(
   'shipped collectJobMedia filters every media source',
@@ -392,12 +393,15 @@ check(
 );
 check(
   'shipped priced-WO document checks every typed field before video heuristics (TRD5-R12-001)',
-  /if \(isTypedPricedWorkOrder\(d\)\) return true;/.test(html) &&
-    /if \(isTypedPricedWorkOrder\(m\) \|\| isPricedWorkOrderDocument\(m\)\) return false;/.test(html)
+  /if \(isTypedPricedWorkOrder\(d\)\) return true;/.test(html)
+);
+check(
+  'shipped priced-WO document honors explicit video before fuzzy WO names (TRD5-R13-002)',
+  /if \(isExplicitDeclaredVideo\(d\) && !isPdfOrDocumentBytes\(d\)\) return false;/.test(html)
 );
 check(
   'shipped email linkify applies office-only WO href filter (TRD5-R12-002)',
-  /if \(!tradeCanSeeSowPricing\(\) && isPricedWorkOrderHref\(href, raw\)\)/.test(html) &&
+  /if \(!tradeCanSeeSowPricing\(\) && isPricedWorkOrderHref\(href, raw, context\)\)/.test(html) &&
     /function linkifyTradeBodyText\(text\) \{\s*return tradeLinkifyBody\(text\);/.test(html)
 );
 
@@ -491,6 +495,19 @@ check('conflicting typed WO never enters the player', !M.renderScopeVideoCard({
   media: [conflictingTypedVideo],
 }).includes('storage.example.test/storage/v1/object/sign/docs/abc123'));
 check('real video named WO-site.mp4 is still a job video', M.isJobVideo(realWoNamedVideo) === true);
+const extensionlessSignedVideo = {
+  id: 'vid-wo-signed',
+  type: 'video',
+  mime_type: 'video/mp4',
+  label: 'Work order walkthrough',
+  playable_url: 'https://storage.example.test/storage/v1/object/sign/videos/abc123?token=xyz',
+};
+check('extensionless signed video is not a priced WO (TRD5-R13-002)', M.isPricedWorkOrderDocument(extensionlessSignedVideo) === false);
+check('extensionless signed video with WO label is a job video', M.isJobVideo(extensionlessSignedVideo) === true);
+check('extensionless signed video still plays', M.renderScopeVideoCard({
+  job: { scope_json: {} },
+  media: [extensionlessSignedVideo],
+}).includes(extensionlessSignedVideo.playable_url));
 check('explicit office-internal media is hidden', M.isTradeVisibleMedia(hiddenOfficeVideo) === false);
 check('untagged job media stays visible', M.isTradeVisibleMedia(walkthrough) === true);
 check('explicit false document stays hidden', M.isTradeVisibleMedia(internalDocVideo) === false);
@@ -589,14 +606,22 @@ fullPricingOn = false;
 
 const emailWo = 'https://storage.example.test/work_order_MLB-26183.pdf';
 const emailPortal = 'https://prime.example.test/share/abc123';
+const emailOpaque = 'https://storage.example.test/storage/v1/object/sign/docs/abc123?token=xyz';
 const emailBody = 'Use the portal ' + emailPortal + ' and the pack ' + emailWo + ' thanks.';
+const emailOpaqueProse = 'Please see the work order ' + emailOpaque + ' and then the portal ' + emailPortal + '.';
 check('email WO filename href is priced (TRD5-R12-002)', M.isPricedWorkOrderHref(emailWo) === true);
 check('email portal href is not priced', M.isPricedWorkOrderHref(emailPortal) === false);
+check('opaque signed document href is fail-closed (TRD5-R13-001)', M.isOpaqueSignedDocumentHref(emailOpaque) === true);
+check('opaque URL with nearby work-order prose is priced', M.isPricedWorkOrderHref(emailOpaque, 'Open link', 'Please see the work order') === true);
 const tradeEmail = M.tradeLinkifyBody(emailBody);
 check('trade email linkify keeps portal and drops WO URL', tradeEmail.includes(emailPortal) && tradeEmail.includes('href="' + emailPortal + '"') && !tradeEmail.includes(emailWo));
+const tradeOpaqueEmail = M.tradeLinkifyBody(emailOpaqueProse);
+check('trade email drops opaque URL after work-order prose', !tradeOpaqueEmail.includes(emailOpaque) && tradeOpaqueEmail.includes('href="' + emailPortal + '"'));
 fullPricingOn = true;
 const officeEmail = M.tradeLinkifyBody(emailBody);
 check('office email linkify keeps WO URL', officeEmail.includes('href="' + emailWo + '"'));
+const officeOpaqueEmail = M.tradeLinkifyBody(emailOpaqueProse);
+check('office email keeps opaque URL after work-order prose', officeOpaqueEmail.includes('href="' + emailOpaque + '"'));
 fullPricingOn = false;
 
 console.log('PASS trade scope media + pricing redaction checks');

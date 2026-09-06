@@ -8165,10 +8165,11 @@
 
   function isJobVideo(m) {
     if (!m) return false;
-    // Captain lock: a priced WO/PDF document must never become a <video src>,
-    // even when type/kind/is_video claims it is a video. Check every typed
-    // metadata field before any video heuristic.
-    if (isTypedPricedWorkOrder(m) || isPricedWorkOrderDocument(m)) return false;
+    // Captain lock: typed work-order / supplier-WO rows never become a player.
+    // After that, honor explicit video type / video MIME before fuzzy WO names.
+    if (isTypedPricedWorkOrder(m)) return false;
+    if (isExplicitDeclaredVideo(m) && !isPdfOrDocumentBytes(m)) return true;
+    if (isPricedWorkOrderDocument(m)) return false;
     var type = String(m.type || m.kind || m.media_type || '').toLowerCase();
     if (type === 'video' || type === 'walkthrough') return true;
     if (m.is_video === true) return true;
@@ -8214,6 +8215,27 @@
     return false;
   }
 
+  function isExplicitDeclaredVideo(m) {
+    if (!m) return false;
+    var type = String(m.type || m.media_type || '').toLowerCase();
+    if (type === 'video' || type === 'walkthrough') return true;
+    if (m.is_video === true) return true;
+    return /^video\//i.test(String(m.mime_type || m.content_type || ''));
+  }
+
+  function isPdfOrDocumentBytes(m) {
+    if (!m) return false;
+    var mime = String(m.mime_type || m.content_type || '').toLowerCase();
+    if (mime.indexOf('pdf') !== -1) return true;
+    var type = String(m.type || '').toLowerCase();
+    if (type === 'pdf' || type === 'document') return true;
+    var names = [m.file_name, m.name, m.url, m.pdf_url, m.storage_url, m.playable_url, m.signed_url, mediaPlayableUrl(m)];
+    for (var i = 0; i < names.length; i++) {
+      if (/\.pdf(\?|#|$)/i.test(String(names[i] || ''))) return true;
+    }
+    return false;
+  }
+
   function stampTradeSowLinkMeta(link, item) {
     if (!link || !item || typeof item !== 'object') return link;
     var keys = ['kind', 'type', 'name', 'title', 'file_name', 'fileName', 'mime_type', 'content_type', 'role', 'document_type'];
@@ -8255,16 +8277,47 @@
     return (links || []).filter(function(link) { return !isPricedWorkOrderLink(link); });
   }
 
-  function isPricedWorkOrderHref(href, raw) {
+  function isTradeEmailSafeHref(href) {
     href = String(href || '').trim();
-    if (!href || /^(mailto:|tel:)/i.test(href)) return false;
+    if (!href || /^(mailto:|tel:)/i.test(href)) return true;
+    if (typeof urlIsBuilderPortalLink === 'function') {
+      try { if (urlIsBuilderPortalLink(href)) return true; } catch (e) {}
+    }
+    return /\/(share|report|reports|portal)(\/|$)/i.test(href);
+  }
+
+  function isOpaqueSignedDocumentHref(href) {
+    href = String(href || '').trim();
+    if (!href || /^(mailto:|tel:)/i.test(href) || isVideoUrl(href) || isTradeEmailSafeHref(href)) return false;
+    if (/\.pdf(\?|#|$)/i.test(href)) return true;
+    return /\/(?:storage\/v1\/)?object\/sign\//i.test(href);
+  }
+
+  function tradeEmailHrefContext(text, start, end) {
+    text = String(text || '');
+    var before = text.slice(Math.max(0, start - 180), start);
+    var after = text.slice(end, Math.min(text.length, end + 60));
+    var cut = -1;
+    ['.', '!', '?', '\n'].forEach(function(mark) {
+      var idx = before.lastIndexOf(mark);
+      if (idx > cut) cut = idx;
+    });
+    if (cut >= 0) before = before.slice(cut + 1);
+    return (before + ' ' + after).replace(/\s+/g, ' ').trim();
+  }
+
+  function isPricedWorkOrderHref(href, raw, context) {
+    href = String(href || '').trim();
+    if (!href || isTradeEmailSafeHref(href)) return false;
     var file = '';
     try {
       var path = href.replace(/^[a-z]+:\/\//i, '').split('?')[0].split('#')[0];
       file = decodeURIComponent(path.split('/').pop() || '');
     } catch (e) {}
     var link = { url: href, label: raw || file || 'Open link', file_name: file };
-    return isPricedWorkOrderLink(link) || isPricedWorkOrderDocument(link);
+    if (isPricedWorkOrderLink(link) || isPricedWorkOrderDocument(link)) return true;
+    if (/work[\s_-]*order|\bwo\b/i.test(String(context || ''))) return true;
+    return isOpaqueSignedDocumentHref(href);
   }
 
   function tradeLinkifyBody(text) {
@@ -8284,7 +8337,8 @@
       }
       var href = raw.indexOf('@') !== -1 && !/^https?:\/\//i.test(raw) && !/^www\./i.test(raw) ? ('mailto:' + raw) : raw;
       if (/^www\./i.test(href)) href = 'https://' + href;
-      if (!tradeCanSeeSowPricing() && isPricedWorkOrderHref(href, raw)) {
+      var context = tradeEmailHrefContext(text, match.index, match.index + match[0].length);
+      if (!tradeCanSeeSowPricing() && isPricedWorkOrderHref(href, raw, context)) {
         last = re.lastIndex;
         out += esc(trailing);
         continue;
@@ -8506,7 +8560,10 @@
     // Every typed field must be checked. `type: 'video'` must not hide
     // kind/document_type/role work_order before the video-file exemption.
     if (isTypedPricedWorkOrder(d)) return true;
-    // A real video file is not a priced WO PDF, even if the name mentions WO.
+    // After typed-WO checks, honor explicit video type / video MIME.
+    // Fuzzy WO words in a label must not drop a real video (including an
+    // extensionless signed URL). PDF/document bytes still go through fuzzy match.
+    if (isExplicitDeclaredVideo(d) && !isPdfOrDocumentBytes(d)) return false;
     if (isVideoUrl(d.file_name) || isVideoUrl(d.storage_url) || isVideoUrl(mediaPlayableUrl(d))) return false;
     return /work[\s_-]*order|\bwo\b/i.test([
       d.type, d.kind, d.document_type, d.role, d.file_name, d.name, d.title, d.label,
@@ -8620,6 +8677,10 @@
     tradeSowLinkFromItem: tradeSowLinkFromItem,
     isPricedWorkOrderLink: isPricedWorkOrderLink,
     filterTradeSowLinks: filterTradeSowLinks,
+    isExplicitDeclaredVideo: isExplicitDeclaredVideo,
+    isPdfOrDocumentBytes: isPdfOrDocumentBytes,
+    isOpaqueSignedDocumentHref: isOpaqueSignedDocumentHref,
+    tradeEmailHrefContext: tradeEmailHrefContext,
     isPricedWorkOrderHref: isPricedWorkOrderHref,
     tradeLinkifyBody: tradeLinkifyBody,
     collectJobMedia: collectJobMedia,

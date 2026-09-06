@@ -16973,6 +16973,9 @@
   // Job-centric card state: { assignment_id, job_id, job_number, client_name,
   //   site_suburb, job_type, scheduled_date, hours, hours_prefilled, included }
   var _jobCards = [];
+  // Invoice-level freeform deducts (description + amount, no job). Henry's
+  // weekly submit keeps these as final_deductions / negative extra_items.
+  var _invLumpLines = [];
 
   function formatDateShort(dateStr) {
     if (!dateStr) return '';
@@ -16991,6 +16994,7 @@
     _invoiceBuilderMode = opts.expenseOnly ? 'expense' : 'weekly';
     _invGst = _invoiceGstDefault(_hoursData);
     _jobCards = [];
+    _invLumpLines = [];
 
     // Job-centric prefill (cutover): build one card per whitelisted assignment
     // (make-safes, multiple per day) instead of clock-dependent rows. Expense
@@ -17460,6 +17464,123 @@
     }
   }
 
+  function _serializeInvLumpLinesDraft(lines) {
+    try {
+      return JSON.parse(JSON.stringify(lines || []));
+    } catch (e) {
+      return (lines || []).slice();
+    }
+  }
+
+  function _newInvLumpLine() {
+    return {
+      id: 'il-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      description: '',
+      amount: 0
+    };
+  }
+
+  function _invLumpTotal() {
+    return Math.round((_invLumpLines || []).reduce(function(sum, line) {
+      return sum + (Number(line && line.amount) || 0);
+    }, 0) * 100) / 100;
+  }
+
+  function _invLumpExtraItems() {
+    var extras = [];
+    (_invLumpLines || []).forEach(function(line) {
+      var desc = String((line && line.description) || '').trim();
+      var amt = Math.abs(Number(line && line.amount) || 0);
+      if (!desc || !amt) return;
+      extras.push({
+        type: 'Deduction',
+        row_type: 'lump_sum',
+        line_kind: 'lump_sum',
+        description: desc,
+        quantity: 1,
+        unit: 'ea',
+        hours: 1,
+        rate: -amt,
+        job_id: null,
+        assignment_id: null,
+        scheduled_date: null,
+        date: null,
+        manually_added: true,
+        source: 'invoice_final_deduction',
+        rate_source: 'client_entered',
+        client_rate_entered: true
+      });
+    });
+    return extras;
+  }
+
+  function _invFinalDeductions() {
+    var rows = [];
+    (_invLumpLines || []).forEach(function(line) {
+      var desc = String((line && line.description) || '').trim();
+      var amt = Math.abs(Number(line && line.amount) || 0);
+      if (!desc || !amt) return;
+      rows.push({ description: desc, quantity: 1, unit: 'ea', unit_rate: amt });
+    });
+    return rows;
+  }
+
+  function _syncInvLumpLinesFromDOM() {
+    (_invLumpLines || []).forEach(function(line, i) {
+      var descEl = document.querySelector('[data-invlumpdesc="' + i + '"]');
+      var amtEl = document.querySelector('[data-invlumpamt="' + i + '"]');
+      if (descEl) line.description = descEl.value || '';
+      if (amtEl) {
+        var n = parseFloat(amtEl.value);
+        line.amount = (!isNaN(n) && n > 0) ? Math.round(n * 100) / 100 : 0;
+      }
+    });
+  }
+
+  window.addInvLumpLine = function() {
+    _syncInvLumpLinesFromDOM();
+    _invLumpLines.push(_newInvLumpLine());
+    renderInvoiceBuilder();
+  };
+
+  window.updateInvLumpLine = function(idx, field, raw) {
+    var line = _invLumpLines[idx];
+    if (!line) return;
+    if (field === 'description') line.description = String(raw || '');
+    if (field === 'amount') {
+      var n = parseFloat(raw);
+      line.amount = (!isNaN(n) && n > 0) ? Math.round(n * 100) / 100 : 0;
+    }
+    _updateInvTotals();
+  };
+
+  window.removeInvLumpLine = function(idx) {
+    _syncInvLumpLinesFromDOM();
+    _invLumpLines.splice(idx, 1);
+    renderInvoiceBuilder();
+  };
+
+  function _renderInvLumpLinesHtml() {
+    var html = '';
+    html += '<div class="inv-section-label" style="margin-top:16px">Final deductions</div>';
+    html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Lump-sum amounts that are not tied to a job — description and amount only. They come off the weekly total.</div>';
+    html += '<div id="invLumpLines">';
+    _invLumpLines.forEach(function(line, i) {
+      html += '<div class="inv-lump-row" data-invlump="' + esc(line.id) + '" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">';
+      html += '<input type="text" class="inv-lump-desc" data-invlumpdesc="' + i + '" value="' + esc(line.description || '') + '" placeholder="Description" '
+        + 'onchange="updateInvLumpLine(' + i + ',\'description\',this.value)" '
+        + 'style="flex:1;min-width:140px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px;font-family:var(--sw-font);color:var(--sw-dark)">';
+      html += '<input type="number" class="inv-lump-amt" data-invlumpamt="' + i + '" min="0" step="0.01" inputmode="decimal" value="' + (line.amount ? line.amount : '') + '" placeholder="$0.00" '
+        + 'onchange="updateInvLumpLine(' + i + ',\'amount\',this.value)" '
+        + 'style="width:110px;padding:8px 10px;border:1px solid var(--sw-border);border-radius:8px;font-size:13px">';
+      html += '<button type="button" onclick="removeInvLumpLine(' + i + ')" style="background:none;border:none;cursor:pointer;color:var(--sw-red);font-size:18px;padding:0 2px;line-height:1" aria-label="Remove deduction">&times;</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<button type="button" class="inv-add-btn" id="btnAddInvLump" onclick="addInvLumpLine()">+ Add deduction</button>';
+    return html;
+  }
+
   function _restoreJobCardsDraft(cards) {
     return (cards || []).map(function(raw) {
       var fields = Object.assign({}, raw || {});
@@ -17472,6 +17593,7 @@
     if (!draft) return false;
     if (draft.rows && draft.rows.length > 0) return true;
     if (draft.jobCards && draft.jobCards.length > 0) return true;
+    if (draft.invLumpLines && draft.invLumpLines.length > 0) return true;
     return false;
   }
 
@@ -17524,6 +17646,7 @@
   function _applyInvDraft(draft) {
     _invRows = draft.rows || [];
     _jobCards = _restoreJobCardsDraft(draft.jobCards);
+    _invLumpLines = Array.isArray(draft.invLumpLines) ? draft.invLumpLines.slice() : [];
     _invGst = _invoiceGstDefault(draft);
     _invNotes = draft.notes || '';
     _invoiceBuilderMode = draft.mode || 'weekly';
@@ -17550,11 +17673,13 @@
     if (!key) return;
     try {
       _syncRowsFromDOM();
+      _syncInvLumpLinesFromDOM();
       if (_jobCentricActive || (_jobCards && _jobCards.length)) _syncJobCardsFromDOM();
       sessionStorage.setItem(key, JSON.stringify({
         user_id: _invDraftOwnerId(),
         rows: _invRows,
         jobCards: _serializeJobCardsDraft(_jobCards),
+        invLumpLines: _serializeInvLumpLinesDraft(_invLumpLines),
         jobCentric: !!_jobCentricActive,
         is_per_metre: isPerMetreUser(),
         invoice_type: (_hoursData && _hoursData.invoice_type) || (_user && _user.invoice_type) || '',
@@ -17573,6 +17698,7 @@
     _pmWoHydrateSeq++;
     _invoiceRenderSeq++;
     _jobCards = [];
+    _invLumpLines = [];
     _invRows = [];
     try {
       var key = _invDraftStorageKey();
@@ -18167,11 +18293,28 @@
     _hydratePerMetreWorkOrderCards();
   };
 
+  // Hydrate is a WO-money prefill, not a Pay-tab gate. Pending still waits so
+  // a complete WO's server block can land. A failed hydrate only blocks when
+  // an included card is already in WO mode and needs that money.
+  function _jobCentricSubmitBlockedByHydrate() {
+    if (!isPerMetreUser()) return false;
+    if (_pmWoHydrateState === 'pending') return true;
+    if (_pmWoHydrateState === 'error') {
+      return _jobCards.some(function(c) {
+        return c && c.included && c.wo_mode && c.work_order_id;
+      });
+    }
+    return false;
+  }
+
   function buildJobCards() {
     _jobCards = [];
     var data = _hoursData || {};
     if (!data.assignments) return;
     data.assignments.forEach(function(a) {
+      // Undated assignments never prefill a card — my_hours will not show a
+      // null scheduled_date. Put that job on a chosen Mon–Sun day via + Add job.
+      if (!(a.scheduled_date || '')) return;
       var job = a.jobs || {};
       // hours_worked != null means clocked — prefill it; else blank + required.
       var prefilled = a.hours_worked != null;
@@ -18214,7 +18357,7 @@
     var html = '';
     html += '<div class="inv-section-label" style="margin-top:16px">Your jobs this week</div>';
     if (isPerMetreUser()) {
-      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Enter what each job paid you, then deduct work-order amounts you paid other trades. Net is what SecureWorks owes you.</div>';
+      html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Jobs scheduled this week are listed by day. Add any other job on the day it belongs, enter hours, or keep a hydrated work-order money block. Net is what SecureWorks owes you. Mark complete from the job itself — this invoice does not require it. Final deductions at the bottom do not need a job.</div>';
       if (_pmWoHydrateState === 'pending') {
         html += '<div data-pm-wo-hydrate="pending" style="background:rgba(76,106,124,0.08);border:1px solid var(--sw-border);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px">Loading work-order amounts and paid-to-other-trade deductions…</div>';
       } else if (_pmWoHydrateState === 'error') {
@@ -18474,7 +18617,8 @@
       return (r._misc || r._source === 'manual') ? s + (r.amount || 0) : s;
     }, 0);
     extraSub = Math.round(extraSub * 100) / 100;
-    return Math.round((jcSub + extraSub) * 100) / 100;
+    var lumpSub = _invLumpTotal();
+    return Math.round((jcSub + extraSub - lumpSub) * 100) / 100;
   }
 
   // A submitted PDF is evidence of what the backend persisted, so it may only
@@ -18737,7 +18881,7 @@
     var h = '';
     _jcSearch.results.forEach(function(j, ri) {
       var badge = j.type ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:rgba(241,90,41,0.1);color:var(--sw-orange);padding:1px 6px;border-radius:4px;margin-left:6px">' + esc(j.type) + '</span>' : '';
-      h += '<div onclick="jcSelectSearchJob(' + di + ',' + ri + ')" style="padding:9px 8px;border-bottom:1px solid var(--sw-border);cursor:pointer">';
+      h += '<div class="jc-job-search-hit" onclick="jcSelectSearchJob(' + di + ',' + ri + ')" style="padding:9px 8px;border-bottom:1px solid var(--sw-border);cursor:pointer">';
       h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark)">' + esc(j.job_number || '') + badge + '</div>';
       h += '<div style="font-size:11px;color:var(--sw-text-sec)">' + esc(j.client_name || '') + (j.site_suburb ? ' — ' + esc(j.site_suburb) : '') + '</div>';
       // FIX5: show external_ref in search results when backend returns it.
@@ -19337,9 +19481,9 @@
 
   // Submit the job-centric invoice: manual_assignments + card extras + any extras.
   window.submitJobCentricInvoice = function() {
-    if (isPerMetreUser() && _pmWoHydrateState !== 'ok') {
+    if (_jobCentricSubmitBlockedByHydrate()) {
       toast(_pmWoHydrateState === 'error'
-        ? 'Work-order amounts did not load. Retry before submitting.'
+        ? 'Work-order amounts did not load. Retry before submitting a work-order card.'
         : 'Work-order amounts are still loading.', true);
       return;
     }
@@ -19350,6 +19494,16 @@
     // FIX2: flush DOM→state before building payload so mobile taps without blur
     // don't leave hours/rate as null even though the field visually shows a value.
     _syncJobCardsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    var incompleteLump = (_invLumpLines || []).some(function(line) {
+      var desc = String((line && line.description) || '').trim();
+      var amt = Math.abs(Number(line && line.amount) || 0);
+      return (!!desc && !amt) || (!desc && !!amt);
+    });
+    if (incompleteLump) {
+      toast('Every final deduction needs a description and positive amount', true);
+      return;
+    }
     var built = _buildJobCentricPayload(_jobCards);
     if (built.error) {
       toast(built.error, true);
@@ -19369,11 +19523,13 @@
     _syncRowsFromDOM();
     var legacyManualRows = _manualInvoiceRows(_invRows).filter(function(r) { return r.hours > 0 || r.description; });
     var legacyExtras = legacyManualRows.map(_rowToExtraItem);
-    var extraItems = built.cardExtraItems.concat(legacyExtras);
+    var lumpExtras = _invLumpExtraItems();
+    var extraItems = built.cardExtraItems.concat(legacyExtras).concat(lumpExtras);
     if (built.includedCount === 0 && extraItems.length === 0) { toast('Select a job or add an extra', true); return; }
 
     var sub = built.subtotal;
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
+    lumpExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
 
     showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
@@ -19383,6 +19539,7 @@
         week_start: _hoursWeekStart || getWeekStartMonday(0),
         manual_assignments: manualAssignments,
         extra_items: extraItems,
+        final_deductions: _invFinalDeductions(),
         notes: _invNotes,
         gst_on: _invGst
       }).then(function(result) {
@@ -19584,6 +19741,8 @@
     html += '<div style="font-size:11px;color:var(--sw-text-sec);margin:-2px 0 8px">Only add items not already covered by the clocked hours above.</div>';
     html += '<button class="inv-add-btn" onclick="addInvRow()">+ Add extra / adjustment</button>';
 
+    if (_jobCentricActive) html += _renderInvLumpLinesHtml();
+
     // ── Notes ──
     html += '<div style="margin-top:8px">';
     html += '<label style="font-size:12px;font-weight:600;color:var(--sw-mid);display:block;margin-bottom:4px">Notes (optional)</label>';
@@ -19601,15 +19760,16 @@
       // Job-centric: submit via manual_assignments (server resolves the rate).
       // Extras still ride along through submitJobCentricInvoice.
       var jcHasCards = _jobCards.some(function(c) { return c.included; });
-      var woHydrateBlocked = isPerMetreUser() && _pmWoHydrateState !== 'ok';
+      var woHydrateBlocked = _jobCentricSubmitBlockedByHydrate();
+      var jcHasLumps = _invLumpExtraItems().length > 0;
       if (woHydrateBlocked) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" disabled style="margin-top:16px;opacity:0.55;cursor:not-allowed">Submit Invoice</button>';
         html += '<div data-pm-wo-hydrate-submit-block style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">'
           + (_pmWoHydrateState === 'error'
-            ? 'Work-order amounts did not load. Retry before submitting so deductions are not missed.'
+            ? 'Work-order amounts did not load. Retry before submitting a work-order card, or invoice hours and added jobs now.'
             : 'Work-order amounts are still loading. Submit unlocks when they arrive.')
           + '</div>';
-      } else if (jcHasCards || _invRows.some(function(r){ return r._misc || r.description; })) {
+      } else if (jcHasCards || jcHasLumps || _invRows.some(function(r){ return r._misc || r.description; })) {
         html += '<button class="hours-submit-btn" id="invSubmitBtn" onclick="submitJobCentricInvoice()" style="margin-top:16px">Submit Invoice</button>';
         html += '<div style="text-align:center;font-size:11px;color:var(--sw-text-sec);margin-top:6px">Manual hours are verified by the office before payment.</div>';
       } else {

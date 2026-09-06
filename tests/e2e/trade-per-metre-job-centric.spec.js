@@ -1,5 +1,6 @@
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { perthWeekMonday } = require('../helpers/feed-stub');
 
 test.use({ persona: 'fencing_manager' });
 
@@ -68,7 +69,7 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
   expect(hubReads.every((entry) => new URL(entry.url).searchParams.get('mode') === 'all')).toBe(true);
 });
 
-test('a failed work-order hydrate shows retry and keeps submit locked', async ({ appPage: page }) => {
+test('a failed work-order hydrate shows retry and still lets Hours submit', async ({ appPage: page }) => {
   await signIn(page, PERSONAS.fencing_manager);
   await page.locator('[data-view="hours"]').click();
   await expect(page.locator('[data-financial-hub]')).toBeVisible();
@@ -91,8 +92,10 @@ test('a failed work-order hydrate shows retry and keeps submit locked', async ({
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.locator('[data-pm-wo-hydrate="error"]')).toBeVisible();
   await expect(page.locator('[data-pm-wo-hydrate="error"]')).toContainText('Could not load work-order amounts');
-  await expect(page.locator('#invSubmitBtn')).toBeDisabled();
-  await expect(page.locator('[data-pm-wo-hydrate-submit-block]')).toContainText('Retry before submitting');
+  const hoursCard = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+  await expect(hoursCard.locator('[data-cardhours]')).toBeVisible();
+  await expect(page.locator('#invSubmitBtn')).toBeEnabled();
+  await expect(page.locator('[data-pm-wo-hydrate-submit-block]')).toHaveCount(0);
 
   failHydrate = false;
   await page.getByRole('button', { name: 'Retry' }).click();
@@ -254,4 +257,115 @@ test('an empty work-order week offers the job-centric invoice builder', async ({
   await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
   await expect(page.locator('#hoursContent')).toContainText('Your jobs this week');
   await expect(page.getByRole('button', { name: '+ Add job' }).first()).toBeVisible();
+});
+
+test.describe('Henry job-centric submit', () => {
+  test.use({ feedScenario: 'henry-job-centric-submit' });
+
+  test('Henry can add any searchable job on a chosen day without completing it', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+    await page.getByRole('button', { name: '+ Add job' }).first().click();
+    await page.locator('#jcSearchInput_0').fill('FENCE-ANY');
+    await expect(page.locator('.jc-job-search-hit')).toContainText('FENCE-ANY-002');
+    await page.locator('.jc-job-search-hit').first().click();
+
+    const anyCard = page.locator('.jc-card').filter({ hasText: 'FENCE-ANY-002' });
+    await expect(anyCard).toBeVisible();
+    await expect(anyCard.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    await anyCard.locator('[data-cardhours]').fill('2');
+    await anyCard.locator('[data-cardrate]').fill('55');
+    await anyCard.locator('input[placeholder="Description of work"]').fill('Install extra panels');
+    await anyCard.locator('input[placeholder="Description of work"]').press('Tab');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const extras = writes[0].body.extra_items || [];
+    const added = extras.find((item) => /FENCE-ANY-002/.test(item.job_number || item.description || ''));
+    expect(added).toBeTruthy();
+    expect(added.job_id).toBe('e2e-fence-any-job');
+    expect(added.assignment_id == null).toBeTruthy();
+    expect(added.manually_added).toBe(true);
+    expect(added.date || added.scheduled_date).toBe(perthWeekMonday());
+    expect(Number(added.quantity || added.hours)).toBe(2);
+    expect(Number(added.rate)).toBe(55);
+  });
+
+  test('Henry weekly submit keeps invoice-level lump-sum deducts without a job', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+    await expect(page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' })).toBeVisible();
+
+    await page.locator('#btnAddInvLump').click();
+    await page.locator('.inv-lump-desc').fill('Fuel / materials');
+    await page.locator('.inv-lump-amt').fill('25');
+    await page.locator('.inv-lump-amt').press('Tab');
+    const money = page.locator('[data-invoice-money-summary]');
+    await expect(money).toContainText('Earned$35.00');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const body = writes[0].body;
+    const lump = (body.extra_items || []).find((item) => item.source === 'invoice_final_deduction' || item.line_kind === 'lump_sum');
+    expect(lump).toBeTruthy();
+    expect(lump.rate).toBe(-25);
+    expect(lump.job_id == null).toBeTruthy();
+    expect(lump.description).toBe('Fuel / materials');
+    expect(body.final_deductions).toEqual([
+      { description: 'Fuel / materials', quantity: 1, unit: 'ea', unit_rate: 25 }
+    ]);
+    expect(body).not.toHaveProperty('grand_total');
+    expect(body).not.toHaveProperty('super_amount');
+  });
+});
+
+test.describe('Henry Hours submit after hydrate fail', () => {
+  test.use({ feedScenario: 'henry-wo-hydrate-fail' });
+
+  test('Hours path still submits when work-order hydrate fails', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('[data-pm-wo-hydrate="error"]')).toBeVisible();
+
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
+    await expect(card.locator('[data-cardhours]')).toBeVisible();
+    await card.locator('[data-cardhours]').fill('3');
+    await card.locator('[data-cardrate]').fill('55');
+    await expect(page.locator('#invSubmitBtn')).toBeEnabled();
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const body = writes[0].body;
+    expect(body.manual_assignments).toEqual([
+      expect.objectContaining({
+        assignment_id: 'e2e-henry-assignment',
+        hours: 3,
+        rate: 55
+      })
+    ]);
+    const woExtra = (body.extra_items || []).find((item) => item.row_type === 'work_order');
+    expect(woExtra).toBeFalsy();
+  });
 });

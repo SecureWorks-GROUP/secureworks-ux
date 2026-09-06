@@ -290,8 +290,18 @@ assert(html.includes('data-pm-wo-hydrate'),
   'a failed or pending my_work_orders hydrate is visible, not swallowed');
 assert(html.includes('retryPerMetreWorkOrderHydrate'),
   'Henry can retry a failed work-order hydrate');
+assert(html.includes('_jobCentricSubmitBlockedByHydrate'),
+  'hydrate submit block is scoped to pending or WO-mode cards, not a Pay-tab gate');
 assert(html.includes('woHydrateBlocked'),
-  'Submit stays locked until the work-order hydrate succeeds');
+  'the job-centric footer still names the hydrate submit block');
+assert(html.includes('Undated assignments never prefill a card'),
+  'undated my_hours assignments do not prefill a job card');
+assert(html.includes('search_all_jobs'),
+  'any-job add uses typed search_all_jobs on the same builder');
+assert(html.includes('btnAddInvLump') && html.includes('final_deductions: _invFinalDeductions()'),
+  'weekly job-centric submit keeps invoice-level final_deductions');
+assert(html.includes('invoice_final_deduction'),
+  'invoice-level lumps also ride extra_items as negative client-priced deducts');
 assert(html.includes('addWoLumpLine'),
   'job-centric WO cards can deduct a freeform description + amount');
 assert(html.includes('_mergeServerPassThroughs'),

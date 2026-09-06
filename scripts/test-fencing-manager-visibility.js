@@ -264,7 +264,7 @@ assert((html.match(/api\('my_work_orders', \{ mode: 'all' \}\)/g) || []).length 
   'hub and Cost Breakdown request my_work_orders with mode=all');
 assert(!/api\('my_work_orders'\)/.test(html),
   'no bare my_work_orders read remains — managed WOs need mode=all');
-assert(/api\('submit_work_order_invoice', null, \{\s*work_order_id: workOrderId,\s*gst_on:/.test(html),
+assert(/gst_on: _invoiceGstDefault\(_hoursData \|\| _user\)/.test(html) && /api\('submit_work_order_invoice', null, woBody/.test(html),
   'Invoice This Work Order always sends gst_on so the backend cannot 422 GST_CHOICE_REQUIRED');
 assert(!/\(\/emeka\|henry\/i\.test\(_user\.email\)\)/.test(html),
   'per-metre extras never key on a henry/emeka email heuristic');

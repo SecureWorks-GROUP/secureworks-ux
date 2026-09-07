@@ -2370,6 +2370,14 @@
       margin-bottom: 8px;
     }
 
+    .sow-how > summary {
+      cursor: pointer;
+      list-style: none;
+    }
+    .sow-how > summary::-webkit-details-marker {
+      display: none;
+    }
+
     /* Variation Quick Presets */
     .variation-presets {
       display: flex;
@@ -3849,22 +3857,7 @@
 
   // Check if clocked on from a previous day (stale clock)
   function checkStaleClock() {
-    if (_clockState !== 'on' || !_clockedOnAt) return;
-    var clockedHours = (Date.now() - new Date(_clockedOnAt).getTime()) / 3600000;
-    // 14+ hours — prompt "Still working?"
-    if (clockedHours > 14) {
-      showStaleClockPrompt({ id: _currentAssignment }, clockedHours);
-      return;
-    }
-    // Different day — prompt to clock off for that day
-    var clockDate = awstDateStr(new Date(_clockedOnAt));
-    var today = awstDateStr();
-    if (clockDate < today) {
-      var dayStr = new Date(_clockedOnAt).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
-      showConfirm('Still Clocked On', 'You\'re still clocked on from ' + dayStr + '. Clock off for that day?', 'Clock Off for ' + dayStr).then(function(ok) {
-        if (ok) openEOD();
-      });
-    }
+    return;
   }
 
   // Stale clock prompt — shown when clocked on for 14+ hours
@@ -8974,14 +8967,6 @@
     // Assignment complete but job still ongoing = shift done (multi-day)
     if (myAssignment.status === 'complete') return 'shift_done';
 
-    // Check clock state (new simplified model)
-    loadTimerState();
-    if (_clockState === 'on') {
-      if (!_arrivedAt && _travelStartTime) return 'travelling';
-      return 'on_site';
-    }
-
-    // Check assignment status
     if (myAssignment.status === 'confirmed' || myAssignment.status === 'in_progress') return 'confirmed';
 
     return 'pre_confirm';
@@ -9507,187 +9492,43 @@
   function renderSmartStatusFlow(data, phase) {
     var myAssignment = getMyAssignment(data);
     if (!myAssignment) return '';
+    if (isForeignCrewJob(data)) return '';
     var job = data.job;
-    var type = getTradeJobType(job);
-    var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
+    var h = '';
 
-    // Load clock state for this job
-    loadTimerState();
-
-    // Simplified steps: Clock On → Working → Clock Off → Complete
-    var steps = [
-      { key: 'clock_on', icon: '🟢', label: 'Clock On' },
-      { key: 'working', icon: '🔨', label: 'Working' },
-      { key: 'clock_off', icon: '🏁', label: 'Clock Off' },
-      { key: 'complete', icon: '✅', label: 'Complete' },
-    ];
-
-    // Determine current step
-    var currentIdx = 0;
-    var allDone = false;
-    var noActive = false; // shift_done: steps 1-3 done, step 4 grey, no active highlight
-    if (_clockState === 'off' && phase === 'complete') { currentIdx = 4; allDone = true; }
-    else if (_clockState === 'off' && phase === 'shift_done') { currentIdx = 3; noActive = true; }
-    else if (_clockState === 'off') currentIdx = 0;
-    else if (_clockState === 'on' && !_arrivedAt && _travelStartTime) currentIdx = 0; // travelling
-    else if (_clockState === 'on') currentIdx = 1; // working
-
-    var needsAck = myAssignment && !myAssignment.acknowledged_at && job.scope_json;
-
-    var h = '<div style="--job-color:' + color + '">';
-
-    // Pill strip
-    h += '<div class="status-flow">';
-    for (var i = 0; i < steps.length; i++) {
-      var cls = 'sf-step';
-      if (i < currentIdx) cls += ' done';
-      else if (i === currentIdx && !noActive) cls += ' active';
-      else cls += ' future';
-      h += '<div class="' + cls + '">';
-      h += '<span class="sf-step-icon">' + (i < currentIdx ? '✓' : steps[i].icon) + '</span>';
-      h += steps[i].label;
-      h += '</div>';
-    }
-    h += '</div>';
-
-    // Expanded action area
-    h += '<div class="sf-expanded">';
-
-    if (_clockState === 'off' && !isJobDone(phase) && myAssignment.status === 'scheduled') {
-      // ── NEEDS ACCEPTANCE: Accept or Decline ──
+    if (!isJobDone(phase) && myAssignment.status === 'scheduled') {
+      h += '<div style="margin-bottom:12px">';
       h += '<div style="font-size:13px;color:var(--sw-text-sec);text-align:center;margin-bottom:10px;">You\'ve been scheduled for this job</div>';
       h += '<div style="display:flex;gap:8px;margin-bottom:8px;">';
       h += '<button class="sf-action-btn" style="flex:1;background:#E74C3C;font-size:15px;padding:14px 12px" onclick="declineAssignment(\'' + myAssignment.id + '\')">';
-      h += '✕ Decline</button>';
+      h += 'Decline</button>';
       h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-green);font-size:15px;padding:14px 12px" onclick="acceptAssignment(\'' + myAssignment.id + '\')">';
-      h += '✓ Accept</button>';
-      h += '</div>';
-
-    } else if (_clockState === 'off' && phase === 'shift_done') {
-      // ── SHIFT DONE: Clock On Again or Complete Job ──
-      var hoursVal = myAssignment.hours_worked ? (Math.round(myAssignment.hours_worked * 100) / 100) : null;
-      var clockOnTime = myAssignment.clocked_on_at ? new Date(myAssignment.clocked_on_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' }) : null;
-      var clockOffTime = myAssignment.clocked_off_at ? new Date(myAssignment.clocked_off_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' }) : null;
-
-      h += '<div style="text-align:center">';
-      h += '<div style="font-size:14px;font-weight:700;color:var(--sw-orange);margin-bottom:8px">Shift Complete</div>';
-      if (hoursVal !== null) {
-        h += '<div style="font-size:28px;font-weight:800;color:var(--sw-dark);font-variant-numeric:tabular-nums">' + hoursVal + 'h</div>';
-        h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px;margin-bottom:8px">Hours logged this shift</div>';
-      }
-      if (clockOnTime && clockOffTime) {
-        h += '<div style="display:flex;justify-content:center;gap:16px;margin-bottom:12px;font-size:13px;color:var(--sw-text-sec)">';
-        h += '<span>On: <strong style="color:var(--sw-dark)">' + clockOnTime + '</strong></span>';
-        h += '<span>Off: <strong style="color:var(--sw-dark)">' + clockOffTime + '</strong></span>';
-        if (myAssignment.break_minutes > 0) h += '<span>Break: <strong style="color:var(--sw-dark)">' + myAssignment.break_minutes + 'm</strong></span>';
-        h += '</div>';
-      }
-      h += '</div>';
-      h += '<div style="display:flex;gap:8px;margin-top:8px;">';
-      h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-green);font-size:15px;padding:14px" onclick="resumeJobNextDay()">&#9654; Clock On Again</button>';
-      h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-dark);font-size:15px;padding:14px" onclick="confirmThenComplete()">&#9989; Complete Job</button>';
-      h += '</div>';
-
-    } else if (_clockState === 'off' && !isJobDone(phase)) {
-      // ── CLOCKED OFF: Two equal buttons — Travel or Clock On ──
-      var jobLabel = job.job_number ? esc(job.job_number) : 'this job';
-      h += '<div style="display:flex;gap:8px;margin-bottom:8px;">';
-      h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-mid);font-size:15px;padding:14px 12px" onclick="confirmThenTravel(\'' + myAssignment.id + '\')">';
-      h += '\uD83D\uDE97 Start Travel</button>';
-      h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-green);font-size:15px;padding:14px 12px" onclick="confirmClockOn(\'' + myAssignment.id + '\')">';
-      h += '\uD83D\uDFE2 Clock On (on site)</button>';
-      h += '</div>';
-      if (canMessage()) {
-        h += '<div style="font-size:12px;color:var(--sw-text-sec);text-align:center;">';
-        h += '<span id="notifyToggleLabel">' + (_autoNotifyClient ? '\u2705 Client will be notified' : '\uD83D\uDD15 Client notifications off') + '</span>';
-        h += ' <a href="#" onclick="event.preventDefault();_autoNotifyClient=!_autoNotifyClient;var el=document.getElementById(\'notifyToggleLabel\');if(el)el.textContent=_autoNotifyClient?\'\u2705 Client will be notified\':\'\uD83D\uDD15 Client notifications off\';" style="color:var(--sw-mid);font-size:11px;">[change]</a>';
-        h += '</div>';
-      }
-
-    } else if (_clockState === 'on' && !_arrivedAt && _travelStartTime) {
-      // ── TRAVELLING ──
-      h += '<div style="font-size:14px;color:var(--sw-text-sec)">Travelling</div>';
-      h += '<div class="timer-elapsed" id="timerElapsed" style="font-size:32px;font-weight:800;font-variant-numeric:tabular-nums;margin:8px 0">' + formatElapsed(_travelStartTime) + '</div>';
-      h += '<button class="sf-action-btn" style="background:' + color + '" onclick="timerAction(\'arrived\', \'' + myAssignment.id + '\')">';
-      h += '📍 Arrived On Site</button>';
-      // Undo link
-      var travelStartedAt = parseInt(localStorage.getItem('sw_travel_started') || '0');
-      if (travelStartedAt && (Date.now() - travelStartedAt) < 300000) {
-        h += '<div style="margin-top:10px"><a href="#" onclick="event.preventDefault();undoTravel()" style="font-size:13px;color:var(--sw-text-sec);text-decoration:underline">Undo — I haven\'t left yet</a></div>';
-      }
-
-    } else if (_clockState === 'on') {
-      // ── CLOCKED ON & WORKING ──
-      if (_isPaused) {
-        h += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--sw-yellow);letter-spacing:0.5px">\u23F8 PAUSED</div>';
-        h += '<div style="font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;margin:8px 0;color:var(--sw-text-sec);">' + formatElapsed(_clockedOnAt) + '</div>';
-      } else {
-        h += '<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--sw-green);letter-spacing:0.5px">Clocked On \u2713</div>';
-        h += '<div class="timer-elapsed" id="timerElapsed" style="font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;margin:8px 0">' + formatElapsed(_clockedOnAt) + '</div>';
-      }
-      if (_stoppedTravelMins > 0) {
-        h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:4px">Travel: ' + formatMins(_stoppedTravelMins) + (_totalBreakMins > 0 ? ' \u00B7 Breaks: ' + formatMins(_totalBreakMins) : '') + '</div>';
-      }
-      h += '<div style="display:flex;gap:8px;">';
-      if (_isPaused) {
-        h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-green);font-size:15px;padding:14px" onclick="timerAction(\'resume\', \'' + myAssignment.id + '\')">\u25B6 Resume</button>';
-      } else {
-        h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-text-sec);font-size:15px;padding:14px" onclick="timerAction(\'pause\', \'' + myAssignment.id + '\')">\u23F8 Pause</button>';
-      }
-      h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-red);font-size:15px;padding:14px" onclick="confirmClockOff(\'' + myAssignment.id + '\')">\uD83D\uDD34 Clock Off</button>';
-      h += '</div>';
-      // Manual override link
-      h += '<div style="margin-top:10px">';
-      h += '<a href="#" onclick="event.preventDefault();showManualTimeOverride()" style="font-size:12px;color:var(--sw-text-sec);text-decoration:underline">Adjust time manually</a>';
-      h += '</div>';
-
+      h += 'Accept</button>';
+      h += '</div></div>';
     } else if (phase === 'complete') {
-      // ── Completed summary card ──
-      var hoursVal = myAssignment.hours_worked ? (Math.round(myAssignment.hours_worked * 100) / 100) : null;
-      var clockOnTime = myAssignment.clocked_on_at ? new Date(myAssignment.clocked_on_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' }) : null;
-      var clockOffTime = myAssignment.clocked_off_at ? new Date(myAssignment.clocked_off_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' }) : null;
-
-      h += '<div style="text-align:center">';
-      h += '<div style="font-size:18px;font-weight:800;color:var(--sw-green);margin-bottom:8px">\u2705 Completed</div>';
-      if (hoursVal !== null) {
-        h += '<div style="font-size:32px;font-weight:800;color:var(--sw-dark);font-variant-numeric:tabular-nums">' + hoursVal + 'h</div>';
-        h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:2px">Hours logged</div>';
-      }
-      if (clockOnTime && clockOffTime) {
-        h += '<div style="display:flex;justify-content:center;gap:16px;margin-top:12px;font-size:13px;color:var(--sw-text-sec)">';
-        h += '<span>On: <strong style="color:var(--sw-dark)">' + clockOnTime + '</strong></span>';
-        h += '<span>Off: <strong style="color:var(--sw-dark)">' + clockOffTime + '</strong></span>';
-        if (myAssignment.break_minutes > 0) h += '<span>Break: <strong style="color:var(--sw-dark)">' + myAssignment.break_minutes + 'm</strong></span>';
-        h += '</div>';
-      }
-      h += '<button onclick="showView(\'hours\')" style="margin-top:14px;padding:10px 20px;background:var(--sw-light);color:var(--sw-dark);border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px">View Hours</button>';
-      h += '</div>';
-
-      // Next job preview
+      h += '<div style="text-align:center;margin-bottom:12px;padding:12px;background:var(--sw-light);border-radius:10px">';
+      h += '<div style="font-size:15px;font-weight:800;color:var(--sw-green)">Completed</div>';
       if (typeof _lastJobData !== 'undefined' && _lastJobData) {
         var allAssignments = [].concat(_lastJobData.today || [], _lastJobData.thisWeek || [], _lastJobData.upcoming || []);
         var nextJob = allAssignments.find(function(a) { return a.jobs && a.jobs.id !== job.id && a.scheduled_date >= awstDateStr(); });
         if (nextJob && nextJob.jobs) {
           var nj = nextJob.jobs;
-          h += '<div style="margin-top:12px;padding:12px;background:var(--sw-light);border-radius:8px;text-align:left;">';
+          h += '<div style="margin-top:12px;padding:12px;background:#fff;border-radius:8px;text-align:left;">';
           h += '<div style="font-size:11px;color:var(--sw-text-sec);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Next Up</div>';
-          h += '<div style="font-size:14px;font-weight:600;color:var(--sw-dark);">' + esc(nj.job_number || '') + ' \u2014 ' + esc(nj.client_name || '') + '</div>';
+          h += '<div style="font-size:14px;font-weight:600;color:var(--sw-dark);">' + esc(nj.job_number || '') + ' - ' + esc(nj.client_name || '') + '</div>';
           h += '<div style="font-size:12px;color:var(--sw-text-sec);">' + formatDate(nextJob.scheduled_date) + (nextJob.start_time ? ' \u00B7 ' + nextJob.start_time.slice(0, 5) : '') + ' \u00B7 ' + esc(nj.site_suburb || '') + '</div>';
           h += '<button onclick="openJob(\'' + nj.id + '\', \'' + nextJob.id + '\')" style="margin-top:8px;padding:8px 16px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px;">View Job \u2192</button>';
           h += '</div>';
         }
       }
+      h += '</div>';
     }
 
-    h += '</div>'; // sf-expanded
-
-    // Pending materials issue banner
     var matBannerState = deriveMaterialsState(data);
     if (matBannerState.state === 'issue' && !isJobDone(phase)) {
-      h += '<div class="persistent-banner amber">⚠️ Materials issue reported — waiting on response</div>';
+      h += '<div class="persistent-banner amber">Materials issue reported. Waiting on a response.</div>';
     }
 
-    h += '</div>'; // wrapper
     return h;
   }
 
@@ -10471,18 +10312,47 @@
     return open(doc) || open(data && data.workOrder) || '';
   }
 
+  function tradeQuotePacks(data) {
+    return (data && (data.quote_packs || data.quotePacks)) || [];
+  }
+
+  function quotePacksHaveNote(data) {
+    return tradeQuotePacks(data).some(function(pack) {
+      if (pack && String(pack.notes || '').trim()) return true;
+      return ((pack && pack.items) || []).some(function(i) {
+        return i.kind === 'note' && String(i.description || '').trim();
+      });
+    });
+  }
+
+  function fencingHasPanelDetail(scopeJob) {
+    var runs = (scopeJob && scopeJob.runs) || [];
+    return runs.some(function(r) { return Array.isArray(r.panels) && r.panels.length > 0; });
+  }
+
   function renderQuotePacks(data) {
-    var packs = (data && (data.quote_packs || data.quotePacks)) || [];
+    var packs = tradeQuotePacks(data);
     if (!packs.length) return '';
     var showPrices = tradeCanSeeSowPricing();
+    var acceptedIdx = -1;
+    packs.forEach(function(p, i) {
+      if (acceptedIdx < 0 && (p.status === 'accepted' || p.accepted === true)) acceptedIdx = i;
+    });
+    var openIdx = acceptedIdx >= 0 ? acceptedIdx : 0;
     var h = '<div class="detail-section" data-quote-packs>';
-    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Quotes sent</div>';
-    h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">Every quote that went to the client, without the price. Open the one you are building.</div>';
+    h += '<div style="font-size:15px;font-weight:800;color:var(--sw-dark);margin-bottom:8px">Scope of works</div>';
+    if (packs.length > 1) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">';
+      h += acceptedIdx >= 0
+        ? 'Building the accepted quote. Other sent quotes stay listed below.'
+        : 'Every sent quote, labelled by quote number.';
+      h += '</div>';
+    }
     packs.forEach(function(pack, idx) {
-      var open = idx === 0;
-      var badge = pack.status === 'accepted' ? 'Accepted' : pack.status === 'superseded' ? 'Older' : 'Sent';
-      var badgeBg = pack.status === 'accepted' ? 'var(--sw-orange)' : 'var(--sw-border)';
-      var badgeColor = pack.status === 'accepted' ? '#fff' : 'var(--sw-dark)';
+      var open = idx === openIdx;
+      var badge = pack.status === 'accepted' || pack.accepted === true ? 'Accepted' : pack.status === 'superseded' ? 'Older' : 'Sent';
+      var badgeBg = badge === 'Accepted' ? 'var(--sw-orange)' : 'var(--sw-border)';
+      var badgeColor = badge === 'Accepted' ? '#fff' : 'var(--sw-dark)';
       var qn = pack.quote_number || 'Quote';
       var sent = pack.sent_at ? String(pack.sent_at).slice(0, 10) : '';
       h += '<details ' + (open ? 'open' : '') + ' style="border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-card)">';
@@ -10726,16 +10596,7 @@
   };
 
   function renderAcknowledgeBanner(data, phase) {
-    if (phase !== 'pre_confirm' && phase !== 'confirmed') return '';
-    var myAssignment = getMyAssignment(data);
-    if (!myAssignment) return '';
-    if (myAssignment.acknowledged_at || !data.job.scope_json) return '';
-
-    var h = '<div id="ackBanner" style="padding:14px 16px;background:#E8F4FD;border:1px solid #B3D9F2;border-radius:10px;margin-bottom:12px;text-align:center">';
-    h += '  <div style="font-size:13px;color:#2980B9;margin-bottom:10px">📋 Review the scope below, then confirm you\'ve read it</div>';
-    h += '  <button onclick="acknowledgeScope(\'' + myAssignment.id + '\')" style="background:#2980B9;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--sw-font)">✓ I\'ve Read &amp; Understood</button>';
-    h += '</div>';
-    return h;
+    return '';
   }
 
   function renderEnhancedClientCard(data, phase) {
@@ -11685,7 +11546,7 @@
     var noteCount = tradeCommsNotes(data.notes).length;
     html += '<div class="jd-tabs">';
     if (canMessage()) {
-      html += '<button class="jd-tab" data-tab="workorder" onclick="switchJobTab(\'workorder\')">&#128203; Work Order</button>';
+      html += '<button class="jd-tab" data-tab="workorder" onclick="switchJobTab(\'workorder\')">Work</button>';
     }
     html += '<button class="jd-tab" data-tab="scope" onclick="switchJobTab(\'scope\')">Scope</button>';
     html += '<button class="jd-tab" data-tab="files" onclick="switchJobTab(\'files\')">Files</button>';
@@ -11916,20 +11777,6 @@
     var viewOnly = isForeignCrewJob(data);
     var h = '';
 
-    // ── 1. HEADER — job type badge + address ──
-    var typeLabel = type === 'fencing' ? 'Fencing' : type === 'decking' ? 'Decking' : 'Patio';
-    h += '<div style="background:var(--sw-dark);color:#fff;padding:16px;margin-bottom:12px">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start">';
-    h += '<div>';
-    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;opacity:0.6;margin-bottom:4px">Work Order</div>';
-    h += '<div style="font-size:20px;font-weight:800">' + typeLabel + ' Install</div>';
-    h += '</div>';
-    if (job.job_number) h += '<div style="font-size:14px;font-weight:700;background:rgba(255,255,255,0.15);padding:4px 10px">' + esc(job.job_number) + '</div>';
-    h += '</div>';
-    var addr = [job.site_address, job.site_suburb].filter(Boolean).join(', ');
-    if (addr) h += '<div style="font-size:13px;opacity:0.7;margin-top:6px">' + esc(addr) + '</div>';
-    h += '</div>';
-
     h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
@@ -11977,11 +11824,6 @@
       }
       h += '</table>';
       h += '</div>';
-    } else {
-      h += '<div class="detail-section" style="background:var(--sw-frame);padding:14px 16px">';
-      h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:8px">Crew Work Order</div>';
-      h += '<div style="padding:16px;text-align:center;color:var(--sw-text-sec);font-size:13px">No work order assigned yet</div>';
-      h += '</div>';
     }
 
     // ── 3. INSTRUCTIONS callout ──
@@ -12000,16 +11842,23 @@
 
     // Installer notes from scope (fallback if no WO instructions)
     var installerNotes = (scope.notes && scope.notes.noteWorkOrder) ? scope.notes.noteWorkOrder.trim() : '';
-    if (installerNotes && !(wo && wo.special_instructions)) {
+    if (installerNotes && !(wo && wo.special_instructions) && !quotePacksHaveNote(data)) {
       h += '<div class="detail-section" style="background:var(--sw-light);border-left:4px solid var(--sw-orange);padding:14px 16px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-orange);margin-bottom:8px">Installer Notes</div>';
       h += '<div style="font-size:14px;line-height:1.6;color:var(--sw-text);white-space:pre-wrap">' + escSowText(installerNotes) + '</div>';
       h += '</div>';
     }
 
-    // ── 4. WHAT YOU'RE BUILDING ──
-    h += '<div class="detail-section">';
-    h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">What You\'re Building</div>';
+    var packsExist = tradeQuotePacks(data).length > 0;
+    var showBuild = !packsExist || (type === 'fencing' && fencingHasPanelDetail(scopeJob));
+    if (showBuild) {
+    if (packsExist) {
+      h += '<details class="sow-how" style="margin:4px 0 12px">';
+      h += '<summary style="font-size:13px;font-weight:700;color:var(--sw-dark);padding:10px 0">How to build</summary>';
+    } else {
+      h += '<div class="detail-section">';
+      h += '<div style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-bottom:10px">What you\'re building</div>';
+    }
 
     if (type === 'fencing' && scopeJob.runs && scopeJob.runs.length > 0) {
       // Rich fencing work order — ported from fence designer
@@ -12124,7 +11973,8 @@
       woConcrete = Math.ceil(woAllPosts * 2 * 1.1 / 2) * 2;
       woTekBoxes = woTotalPanels > 0 ? Math.max(1, Math.ceil(woTotalPanels / 4)) : 0;
 
-      // Summary grid
+      // Summary grid (only when this block is the only SOW)
+      if (!packsExist) {
       h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--sw-border);overflow:hidden;margin-bottom:8px">';
       var summaryItems = [
         ['Total Length', woTotalMetres.toFixed(1) + 'm'], ['Panels', woTotalPanels],
@@ -12139,6 +11989,7 @@
         h += '</div>';
       });
       h += '</div>';
+      }
 
       // Removal info
       var removal = scopeJob.removal || {};
@@ -12150,6 +12001,7 @@
         h += '</div>';
       }
 
+      if (!packsExist) {
       // Scope of work checklist
       h += '<div style="margin-bottom:8px">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--sw-dark);margin-bottom:6px">Scope of Work</div>';
@@ -12187,6 +12039,7 @@
         h += '<div style="font-size:12px;padding:3px 0;padding-left:16px;position:relative;color:var(--sw-text)"><span style="position:absolute;left:0">\u25A1</span>' + item + '</div>';
       });
       h += '</div>';
+      }
 
     } else if (type === 'fencing') {
       // Fencing without rich scope — fallback to simple display
@@ -12234,7 +12087,8 @@
         h += '<div style="padding:16px;text-align:center;color:var(--sw-text-sec);font-size:13px">No scope data available for this job</div>';
       }
     }
-    h += '</div>';
+    h += packsExist ? '</details>' : '</div>';
+    }
 
     // ── 5. MATERIALS PICKUP — from purchaseOrders ──
     var pos = data.purchaseOrders || [];
@@ -12278,11 +12132,6 @@
         h += '<img src="' + esc(src) + '" alt="' + esc(p.label || 'Scope') + '" onclick="openLightbox(\'' + esc(p.storage_url) + '\')" style="width:100%;aspect-ratio:1;object-fit:cover;cursor:pointer">';
       });
       h += '</div>';
-      h += '</div>';
-    } else {
-      h += '<div class="detail-section">';
-      h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Scope Photos</div>';
-      h += '<div style="padding:16px;text-align:center;color:var(--sw-text-sec);font-size:13px">No scope photos available</div>';
       h += '</div>';
     }
 
@@ -12613,9 +12462,8 @@
     if (!viewOnly) {
       h += '<button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="';
       h += '_cameraJobId=\'' + esc(data.job.id) + '\';';
-      // Auto-detect phase from clock state
-      h += 'if(_clockState===\'on\' && _arrivedAt){_cameraPhase=\'in_progress\';}';
-      h += 'else if(phase===\'complete\'){_cameraPhase=\'completion\';}';
+      h += 'if(phase===\'complete\'){_cameraPhase=\'completion\';}';
+      h += 'else if(phase===\'confirmed\'){_cameraPhase=\'in_progress\';}';
       h += 'else{_cameraPhase=\'scope\';}';
       h += 'showView(\'camera\');';
       h += '">';
@@ -12674,6 +12522,10 @@
       h += '    <div class="upload-progress-bar"><div class="upload-progress-fill" id="tabUploadProgressFill"></div></div>';
       h += '  </div>';
       h += '</div>';
+    }
+
+    if (!viewOnly && !isJobDone(phase)) {
+      h += '<button class="btn btn-primary" style="width:100%;margin-top:8px;margin-bottom:8px" onclick="confirmThenComplete()">Mark job complete</button>';
     }
 
     container.innerHTML = h;

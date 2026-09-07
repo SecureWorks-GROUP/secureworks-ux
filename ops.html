@@ -22430,7 +22430,9 @@ function renderFilesView(data) {
   }
 
   // Photos
-  var jobPhotos = (data.media || []).filter(function(m) { return m.phase !== 'receipt'; });
+  var jobPhotos = (data.media || []).filter(function(m) {
+    return m.phase !== 'receipt' && String(m.type || '').toLowerCase() !== 'video' && !isOpsVideoFile(m.label, '', m.storage_url);
+  });
   var receiptPhotos = (data.media || []).filter(function(m) { return m.phase === 'receipt'; });
 
   if (jobPhotos.length > 0) {
@@ -22465,20 +22467,48 @@ function renderFilesView(data) {
     html += '</div>';
   }
 
+  // ── Scope videos (shown to trades as walkthroughs) ──
+  var videoDocs = (data.documents || []).filter(function(d) { return isOpsVideoFile(d.file_name, '', d.storage_url); });
+  var videoMedia = (data.media || []).filter(function(m) { return String(m.type || '').toLowerCase() === 'video' || isOpsVideoFile(m.label, '', m.storage_url); });
+  html += '<div style="margin-top:16px;margin-bottom:16px">';
+  html += '<div style="font-size:14px;font-weight:700;margin-bottom:4px">Scope videos</div>';
+  html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:8px">Shown to the installer on the job. Add as many as the job needs. Auto visible to trades.</div>';
+  html += '<div id="jdScopeVideoArea" style="border:2px dashed var(--sw-border);border-radius:10px;padding:20px;text-align:center;cursor:pointer;background:var(--sw-light)" onclick="document.getElementById(\'jdScopeVideoInput\').click()" ondragover="event.preventDefault();this.style.borderColor=\'var(--sw-orange)\'" ondragleave="this.style.borderColor=\'var(--sw-border)\'" ondrop="event.preventDefault();this.style.borderColor=\'var(--sw-border)\';handleScopeVideoDrop(event)">';
+  html += '  <div style="font-size:13px;color:var(--sw-text-sec)">Drop videos here or tap to add</div>';
+  html += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px">mp4, mov</div>';
+  html += '</div>';
+  html += '<input type="file" id="jdScopeVideoInput" multiple accept="video/*" style="display:none" onchange="handleScopeVideoFiles(this.files)">';
+  html += '<div id="jdScopeVideoQueue" style="margin-top:8px"></div>';
+  videoDocs.forEach(function(doc) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--sw-border);font-size:13px">';
+    html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(doc.file_name || 'Video') + '</span>';
+    html += '<span style="font-size:11px;color:var(--sw-green);white-space:nowrap">Visible to trades</span>';
+    html += '<button onclick="deleteDocument(\'' + doc.id + '\',\'' + escapeHtml(doc.file_name || 'video').replace(/'/g, "\\'") + '\')" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec)">Remove</button>';
+    html += '</div>';
+  });
+  videoMedia.forEach(function(m) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--sw-border);font-size:13px">';
+    html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(m.label || 'Walkthrough') + '</span>';
+    html += '<span style="font-size:11px;color:var(--sw-green);white-space:nowrap">Visible to trades</span>';
+    html += '<button onclick="deleteMedia(\'' + m.id + '\')" style="background:none;border:none;cursor:pointer;color:var(--sw-text-sec)">Remove</button>';
+    html += '</div>';
+  });
+  html += '</div>';
+
   // ── Upload Documents ──
   html += '<div style="margin-top:16px;margin-bottom:16px">';
   html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px">Upload Files</div>';
   html += '<div id="jdUploadArea" style="border:2px dashed var(--sw-border);border-radius:10px;padding:20px;text-align:center;cursor:pointer;background:var(--sw-light);transition:border-color 0.2s" onclick="document.getElementById(\'jdFileInput\').click()" ondragover="event.preventDefault();this.style.borderColor=\'var(--sw-orange)\'" ondragleave="this.style.borderColor=\'var(--sw-border)\'" ondrop="event.preventDefault();this.style.borderColor=\'var(--sw-border)\';handleDocDrop(event)">';
   html += '  <div style="font-size:24px;margin-bottom:4px">&#128206;</div>';
   html += '  <div style="font-size:13px;color:var(--sw-text-sec)">Drag files here or tap to upload</div>';
-  html += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px">Photos, PDFs, videos</div>';
+  html += '  <div style="font-size:11px;color:var(--sw-text-sec);margin-top:2px">Photos, PDFs</div>';
   html += '</div>';
-  html += '<input type="file" id="jdFileInput" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleDocFiles(this.files)">';
+  html += '<input type="file" id="jdFileInput" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleGenericDocFiles(this.files)">';
   html += '<div id="jdUploadQueue" style="margin-top:8px"></div>';
   html += '</div>';
 
   // Documents — with visibility controls, thumbnails, delete
-  var allDocs = data.documents || [];
+  var allDocs = (data.documents || []).filter(function(doc) { return !isOpsVideoFile(doc.file_name, '', doc.storage_url); });
   if (allDocs.length > 0) {
     html += '<div style="font-size:14px;font-weight:700;margin-top:16px;margin-bottom:8px;">Documents (' + allDocs.length + ')</div>';
     allDocs.forEach(function(doc) {
@@ -22670,16 +22700,41 @@ function renderFilesView(data) {
   }
 }
 
+window.handleGenericDocFiles = function(files) {
+  var list = Array.from(files || []);
+  if (!list.length) return;
+  var videos = list.filter(function(f) { return isOpsVideoFile(f.name, f.type); });
+  var rest = list.filter(function(f) { return !isOpsVideoFile(f.name, f.type); });
+  if (videos.length) handleScopeVideoFiles(videos);
+  if (rest.length) handleDocFiles(rest);
+};
+
 window.handleDocDrop = function(e) {
+  handleGenericDocFiles(e.dataTransfer.files);
+};
+
+function isOpsVideoFile(name, mime, url) {
+  var s = String(name || url || '');
+  var m = String(mime || '');
+  return /\.(mp4|mov|webm|avi|mkv|3gp)(\?|$)/i.test(s) || m.indexOf('video/') === 0;
+}
+
+window.handleScopeVideoDrop = function(e) {
   var files = e.dataTransfer.files;
-  if (files.length > 0) handleDocFiles(files);
+  if (files.length > 0) handleScopeVideoFiles(files);
+};
+
+window.handleScopeVideoFiles = function(files) {
+  handleDocFiles(files, { scopeVideo: true });
 };
 
 var _pendingUploads = {};
 
-window.handleDocFiles = function(files) {
+window.handleDocFiles = function(files, opts) {
   if (!_currentJobData || !_currentJobData.job) return;
-  var queue = document.getElementById('jdUploadQueue');
+  opts = opts || {};
+  var queue = document.getElementById(opts.scopeVideo ? 'jdScopeVideoQueue' : 'jdUploadQueue');
+  if (!queue) queue = document.getElementById('jdUploadQueue');
 
   Array.from(files).forEach(function(file) {
     // Auto-detect type from file name + MIME
@@ -22696,21 +22751,30 @@ window.handleDocFiles = function(files) {
     else if (/asbestos|hazmat/i.test(fname)) docType = 'asbestos';
     else if (/reference|client.?ref/i.test(fname)) docType = 'client_reference';
 
+    if (opts.scopeVideo) docType = 'site_photo';
+
     // Show upload row with type selector
     var rowId = 'upload_' + Date.now() + '_' + Math.random().toString(36).substr(2,4);
     _pendingUploads[rowId] = file;
+    var visOn = opts.scopeVideo || ['site_photo','council_plans','engineering','work_order','supplier_work_order','supplier_quote','approval'].includes(docType);
     var rowHtml = '<div id="' + rowId + '" style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px">';
     rowHtml += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(file.name) + '</span>';
-    rowHtml += '<select id="' + rowId + '_type" style="font-size:11px;padding:2px 4px;border:1px solid var(--sw-border);border-radius:4px">';
-    ['site_photo','council_plans','engineering','supplier_quote','supplier_work_order','work_order','approval','client_reference','asbestos','material_order','quote_reference','general','other'].forEach(function(t) {
-      rowHtml += '<option value="' + t + '"' + (t === docType ? ' selected' : '') + '>' + t.replace(/_/g, ' ') + '</option>';
-    });
-    rowHtml += '</select>';
-    rowHtml += '<label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px"><input type="checkbox" id="' + rowId + '_vis" ' + (['site_photo','council_plans','engineering','work_order','supplier_work_order','supplier_quote','approval'].includes(docType) ? 'checked' : '') + '> Trades</label>';
-    rowHtml += '<button id="' + rowId + '_btn" onclick="triggerPendingUpload(\'' + rowId + '\')" style="font-size:11px;padding:2px 10px;border:1px solid var(--sw-border);border-radius:4px;background:var(--sw-green,#22C55E);color:#fff;cursor:pointer;white-space:nowrap">Upload</button>';
+    if (opts.scopeVideo) {
+      rowHtml += '<input type="hidden" id="' + rowId + '_type" value="site_photo">';
+      rowHtml += '<input type="hidden" id="' + rowId + '_vis" value="1">';
+    } else {
+      rowHtml += '<select id="' + rowId + '_type" style="font-size:11px;padding:2px 4px;border:1px solid var(--sw-border);border-radius:4px">';
+      ['site_photo','council_plans','engineering','supplier_quote','supplier_work_order','work_order','approval','client_reference','asbestos','material_order','quote_reference','general','other'].forEach(function(t) {
+        rowHtml += '<option value="' + t + '"' + (t === docType ? ' selected' : '') + '>' + t.replace(/_/g, ' ') + '</option>';
+      });
+      rowHtml += '</select>';
+      rowHtml += '<label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:3px"><input type="checkbox" id="' + rowId + '_vis" ' + (visOn ? 'checked' : '') + '> Trades</label>';
+      rowHtml += '<button id="' + rowId + '_btn" onclick="triggerPendingUpload(\'' + rowId + '\')" style="font-size:11px;padding:2px 10px;border:1px solid var(--sw-border);border-radius:4px;background:var(--sw-green,#22C55E);color:#fff;cursor:pointer;white-space:nowrap">Upload</button>';
+    }
     rowHtml += '<span id="' + rowId + '_status" style="font-size:11px;color:var(--sw-text-sec)">Ready</span>';
     rowHtml += '</div>';
     queue.insertAdjacentHTML('beforeend', rowHtml);
+    if (opts.scopeVideo) triggerPendingUpload(rowId);
   });
 };
 
@@ -22732,7 +22796,9 @@ window.uploadOneDocument = async function(file, jobId, rowId) {
     statusEl.style.color = 'var(--sw-orange)';
 
     var docType = typeEl ? typeEl.value : 'general';
-    var visible = visEl ? visEl.checked : false;
+    var visible = visEl
+      ? (visEl.type === 'checkbox' ? visEl.checked : visEl.value !== '' && visEl.value !== 'false')
+      : false;
 
     // 1. Get signed upload URL
     var urlData = await opsPost('upload_document', {

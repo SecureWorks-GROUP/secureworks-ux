@@ -397,7 +397,7 @@ test.describe('Fencing manager visibility', () => {
   test.describe('fencing assignment lifecycle refresh', () => {
     test.use({ feedScenario: 'fencing-stage-lifecycle' });
 
-    test('refetches Board and Calendar after Accept, Clock On, and Clock Off', async ({ appPage: page, feedRequests }) => {
+    test('refetches Board after Accept', async ({ appPage: page, feedRequests }) => {
       await signIn(page, PERSONAS.fencing_manager);
       await page.locator('#navBoard').click();
       const allJobReads = () => requestsFor(feedRequests, 'my_jobs')
@@ -411,36 +411,9 @@ test.describe('Fencing manager visibility', () => {
       await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
       await expect(page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
 
-      readsBefore = allJobReads().length;
-      await page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
-      await page.getByRole('button', { name: /Clock On \(on site\)/ }).click();
-      await page.getByRole('button', { name: 'Yes, Clock On' }).click();
-      await expect(page.locator('#toast')).toContainText('Clocked On');
-      const calendarReadsBefore = requestsFor(feedRequests, 'trade_calendar').length;
-
-      await page.locator('#navBoard').click();
-      await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
-      await expect(page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
-      await expect(page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(0);
-
-      await page.locator('[data-view="schedule"]').click();
-      await expect.poll(() => requestsFor(feedRequests, 'trade_calendar').length).toBeGreaterThan(calendarReadsBefore);
-      await page.locator('#navBoard').click();
-      readsBefore = allJobReads().length;
-      await page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
-      await page.evaluate(() => window.timerAction('clock_off', 'fence-assignment-henry'));
-      await expect(page.locator('#toast')).toContainText('Clocked off');
-
-      await page.locator('#navBoard').click();
-      await expect.poll(() => allJobReads().length).toBeGreaterThan(readsBefore);
-      await expect(page.locator('#board-col-done .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(1);
-      await expect(page.locator('#board-col-onsite .jc').filter({ hasText: 'FENCE-HENRY-001' })).toHaveCount(0);
-
       const stageWrites = feedRequests.filter((entry) => entry.method === 'POST');
       expect(stageWrites.map((entry) => [entry.action, entry.body.status || entry.body.event])).toEqual([
-        ['update_my_assignment', 'confirmed'],
-        ['clock_event', 'clock_on'],
-        ['clock_event', 'clock_off']
+        ['update_my_assignment', 'confirmed']
       ]);
     });
   });

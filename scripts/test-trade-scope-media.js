@@ -293,6 +293,33 @@ check('office quote pack may show rates', quoteOffice.includes('$8,800') || quot
 const woOffice = M.renderCompactWorkOrderItems(data);
 check('office compact WO may show rates', woOffice.includes('$120') || woOffice.includes('$'));
 
+// Price-free quote extract (trade_quote_extract): button only when a frozen,
+// sent extract pointer matches the pack; rows always carry the quote number.
+pricingOn = false;
+fullPricingOn = false;
+const extractPack = Object.assign({}, quotePack, { job_document_id: 'doc-q-4412' });
+const noExtract = { job: { id: 'job-1' }, quote_packs: [extractPack], quote_extracts: [] };
+const withExtract = {
+  job: { id: 'job-1' },
+  quote_packs: [extractPack],
+  quote_extracts: [{
+    type: 'trade_quote_extract', label: 'Quote extract', action: 'trade_quote_extract',
+    job_document_id: 'doc-q-4412', quote_number: 'Q-4412', status: 'accepted', sent_at: '2026-09-01T00:00:00Z',
+    filename: 'JOB-Q-4412-trade-extract.html',
+  }],
+};
+const wrongAction = { job: { id: 'job-1' }, quote_packs: [extractPack], quote_extracts: [{ action: 'get_quote_pdf', quote_number: 'Q-4412', url: 'https://x/quote.pdf' }] };
+check('no extract pointer → no Open quote button', !M.renderQuotePacks(noExtract).includes('data-quote-extract'));
+check('extract pointer → Open quote button wired to the extract action', /openTradeQuoteExtract\('job-1', 'doc-q-4412'/.test(M.renderQuotePacks(withExtract)));
+check('a non-extract pointer never mints an Open button', !M.renderQuotePacks(wrongAction).includes('data-quote-extract') && !M.renderQuotePacks(wrongAction).includes('quote.pdf'));
+check('extract matches by document id, then quote number', M.tradeQuoteExtractForPack(withExtract, { quote_number: 'Q-4412' }) !== null && M.tradeQuoteExtractForPack(withExtract, { quote_number: 'Q-9999', job_document_id: 'other' }) === null);
+const docRows = M.renderTradeQuoteDocumentRows(withExtract);
+check('Files quote row shows number + Open, no prices', docRows.includes('Q-4412') && docRows.includes('data-quote-extract') && !docRows.includes('$') && !docRows.includes('8800'));
+const docRowsNone = M.renderTradeQuoteDocumentRows(noExtract);
+check('Files quote row without extract is honest', docRowsNone.includes('Q-4412') && docRowsNone.includes('No file yet') && !docRowsNone.includes('data-quote-extract'));
+fullPricingOn = true;
+check('office still gets the price-free extract button (not a priced PDF)', /openTradeQuoteExtract\(/.test(M.renderQuotePacks(withExtract)));
+
 check(
   'shipped Scope labour budget uses office SOW gate (sync)',
   /if \(tradeCanSeeSowPricing\(\) && job\.scope_json\.pricing && job\.scope_json\.pricing\.labour\)/.test(html)
@@ -318,8 +345,13 @@ check(
   /tradeCanSeeSowPricing\(\) \|\| !isPricedWorkOrderDocument\(d\)/.test(html)
 );
 check(
-  'shipped Files otherDocs uses priced-WO predicate',
-  /otherDocs = docs\.filter\(function\(d\) \{\s*return d\.visible_to_trades && d\.type !== 'site_photo' && !isPricedWorkOrderDocument\(d\);/.test(html)
+  'shipped Files tab has no second unguarded document list (quotes/orders + renderTradeDocuments only)',
+  /h \+= renderTradeQuoteAndOrderDocs\(data\);\s*h \+= renderTradeDocuments\(data, phase\);/.test(html) &&
+    !/otherDocs = docs\.filter/.test(html)
+);
+check(
+  'shipped Files quote rows never link a quote PDF (extract action only)',
+  /openTradeQuoteExtract\(/.test(html) && !/quote\.pdf/.test(html)
 );
 check(
   'shipped video collection drops priced WO documents from every source',

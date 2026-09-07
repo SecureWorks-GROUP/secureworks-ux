@@ -2471,6 +2471,53 @@
     }
 
     /* Large Dimension Display */
+    /* ── Job detail: scope of works / instructions / documents (2026-09-08) ── */
+    .jd-instr { background: var(--sw-orange-tint); border: 1px solid var(--sw-orange-line); }
+    .jd-instr-k { font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; margin-bottom: 8px; }
+    .jd-instr-body { font-size: 15px; line-height: 1.55; color: var(--sw-text); white-space: pre-wrap; }
+    .jd-instr-hours { display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--sw-orange-line); font-size: 12px; color: var(--sw-text-sec); }
+    .jd-instr-hours b { font-size: 18px; color: var(--sw-dark); }
+    .sow-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+    .sow-qn { font-family: var(--sw-mono); font-size: 16px; font-weight: 700; color: var(--sw-dark); letter-spacing: 0.02em; }
+    .sow-qn.sm { font-size: 13px; }
+    .sow-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: var(--sw-r-chip); background: var(--sw-light); color: var(--sw-dark); }
+    .sow-badge.accepted { background: var(--sw-green); color: #fff; }
+    .sow-badge.older { background: var(--sw-light); color: var(--sw-text-sec); }
+    .sow-date { margin-left: auto; font-size: 12px; color: var(--sw-text-sec); }
+    .sow-summary { font-size: 14px; line-height: 1.5; color: var(--sw-text); margin-bottom: 8px; }
+    .sow-items { border-top: 1px solid var(--sw-border); }
+    .sow-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--sw-border); }
+    .sow-item-desc { flex: 1; font-size: 15px; line-height: 1.45; color: var(--sw-text); font-weight: 500; }
+    .sow-qty { white-space: nowrap; font-family: var(--sw-mono); font-size: 13px; color: var(--sw-mid); padding-top: 2px; }
+    .sow-rate { white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--sw-dark); padding-top: 2px; }
+    .sow-note { margin-top: 8px; padding: 10px 12px; background: var(--sw-light); border-radius: 8px; font-size: 13px; line-height: 1.5; color: var(--sw-text); white-space: pre-wrap; }
+    .sow-note-k { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sw-text-sec); margin-bottom: 3px; }
+    .sow-open { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 12px; min-height: 46px; border-radius: var(--sw-r-ctl); border: 1px solid var(--sw-dark); background: var(--sw-dark); color: #fff; font-family: var(--sw-font); font-size: 14px; font-weight: 700; cursor: pointer; }
+    .sow-open:active { opacity: 0.85; }
+    .sow-open-sub { font-weight: 500; opacity: 0.7; font-size: 12px; }
+    .sow-others-k { margin-top: 14px; margin-bottom: 6px; font-family: var(--sw-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sw-text-sec); }
+    .sow-other { border: 1px solid var(--sw-border); border-radius: 10px; padding: 0 12px; margin-bottom: 6px; }
+    .sow-other > summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; list-style: none; }
+    .sow-other > summary::-webkit-details-marker { display: none; }
+    .sow-other[open] > summary { border-bottom: 1px solid var(--sw-border); }
+    .sow-other .sow-items { border-top: none; }
+    .sow-other .sow-open { margin-bottom: 12px; }
+    .doc-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--sw-border); }
+    .doc-row:last-child { border-bottom: none; }
+    .doc-ico { font-size: 22px; width: 28px; text-align: center; flex-shrink: 0; }
+    .doc-main { flex: 1; min-width: 0; }
+    .doc-name { font-size: 14px; font-weight: 600; color: var(--sw-dark); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .doc-sub { font-size: 12px; color: var(--sw-text-sec); margin-top: 2px; }
+    .doc-open { flex-shrink: 0; min-height: 40px; padding: 0 14px; border-radius: var(--sw-r-ctl); border: 1px solid var(--sw-dark); background: var(--sw-dark); color: #fff; font-family: var(--sw-font); font-size: 13px; font-weight: 700; cursor: pointer; }
+    .doc-muted { flex-shrink: 0; font-size: 12px; color: var(--sw-text-sec); }
+    .qx-overlay { z-index: 900; background: var(--sw-bg); }
+    .qx-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top)); background: var(--sw-dark); color: #fff; }
+    .qx-title { flex: 1; text-align: center; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qx-btn { min-height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #fff; font-family: var(--sw-font); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .qx-btn.qx-print { background: var(--sw-orange); border-color: var(--sw-orange); }
+    .qx-status { padding: 24px 16px; text-align: center; font-size: 14px; color: var(--sw-text-sec); }
+    .qx-frame { flex: 1; width: 100%; border: none; background: #fff; }
+
     .scope-dimensions {
       font-size: 28px;
       font-weight: 800;
@@ -3765,7 +3812,9 @@
   }
 
   function canMessage() { return _userTier >= 2; }
-  function canCall() { return _userTier >= 2; }
+  // Every allocated trade may call the client (Captain ask 2026-09-08: trades
+  // need client numbers on the job). View-only (another crew's job) hides it.
+  function canCall() { return _userTier >= 1; }
   function canSeePricing() { return _userTier >= 2; }
   function canSeeFullPricing() { return _userTier >= 3; }
   function canSeeConversation() { return _userTier >= 3; }
@@ -9462,6 +9511,10 @@
     } else {
       var cli = String(job.client_name || '').trim();
       h += '<span><span class="k">Client</span>' + (cli ? '<b>' + esc(cli) + '</b>' : '<span class="jc-miss">Not on file</span>') + '</span>';
+      var cliPhone = String(job.client_phone || '').trim();
+      if (cliPhone && canCall() && !isForeignCrewJob(data)) {
+        h += '<span data-client-phone><span class="k">Phone</span><b><a href="tel:' + esc(cliPhone) + '" style="color:inherit;text-decoration:none">' + esc(cliPhone) + '</a></b></span>';
+      }
       if (scopeParts.length) h += '<span><span class="k">Scope</span><b style="font-weight:500">' + esc(scopeParts.join(' · ')) + '</b></span>';
     }
     h += '</div></div>';
@@ -10330,6 +10383,70 @@
     return runs.some(function(r) { return Array.isArray(r.panels) && r.panels.length > 0; });
   }
 
+  function tradeQuoteExtracts(data) {
+    var rows = (data && (data.quote_extracts || data.quoteExtracts)) || [];
+    return rows.filter(function(x) { return x && x.action === 'trade_quote_extract' && x.quote_number; });
+  }
+
+  function tradeQuoteExtractForPack(data, pack) {
+    if (!pack) return null;
+    var rows = tradeQuoteExtracts(data);
+    for (var i = 0; i < rows.length; i++) {
+      var x = rows[i];
+      if (pack.job_document_id && x.job_document_id && x.job_document_id === pack.job_document_id) return x;
+      if (pack.quote_number && x.quote_number === pack.quote_number) return x;
+    }
+    return null;
+  }
+
+  function tradeQuoteStatus(pack) {
+    if (!pack) return { label: 'Sent', cls: 'sent' };
+    if (pack.status === 'accepted' || pack.accepted === true) return { label: 'Accepted', cls: 'accepted' };
+    if (pack.status === 'superseded') return { label: 'Older', cls: 'older' };
+    return { label: 'Sent', cls: 'sent' };
+  }
+
+  function tradeQuoteDate(value) {
+    return value ? String(value).slice(0, 10) : '';
+  }
+
+  // "Open quote" — the office-frozen, price-free extract (trade_quote_extract).
+  // Only exists once the quote was sent to the client AND frozen; otherwise the
+  // writing above is all there is and no button is offered.
+  function renderTradeQuoteOpenButton(data, pack) {
+    var x = tradeQuoteExtractForPack(data, pack);
+    if (!x) return '';
+    var jobId = (data && data.job && data.job.id) || '';
+    var label = 'Quote ' + (x.quote_number || '');
+    return '<button type="button" class="sow-open" data-quote-extract="' + esc(x.quote_number) + '" onclick="openTradeQuoteExtract(\'' + esc(jobId) + '\', \'' + esc(x.job_document_id || '') + '\', \'' + esc(label) + '\')">'
+      + '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></svg>'
+      + ' Open quote <span class="sow-open-sub">no prices</span></button>';
+  }
+
+  function renderQuotePackItems(pack, showPrices) {
+    var h = '<div class="sow-items">';
+    (pack.items || []).forEach(function(item) {
+      if (!item) return;
+      if (item.kind === 'note') {
+        var noteText = String(item.description || '').trim();
+        if (noteText) h += '<div class="sow-note">' + esc(redactTradePriceText(noteText)) + '</div>';
+        return;
+      }
+      var qty = item.quantity ? (item.quantity + (item.unit ? ' ' + item.unit : '')) : '';
+      h += '<div class="sow-item">';
+      h += '<div class="sow-item-desc">' + esc(redactTradePriceText(item.description || '')) + '</div>';
+      if (qty) h += '<div class="sow-qty">' + esc(qty) + '</div>';
+      if (showPrices && item.unit_price != null) {
+        h += '<div class="sow-rate">$' + Number(item.unit_price).toLocaleString('en-AU', { minimumFractionDigits: item.unit_price % 1 ? 2 : 0, maximumFractionDigits: 2 }) + '</div>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    var notes = String((pack && pack.notes) || '').trim();
+    if (notes) h += '<div class="sow-note"><span class="sow-note-k">Quote notes</span>' + esc(redactTradePriceText(notes)) + '</div>';
+    return h;
+  }
+
   function renderQuotePacks(data) {
     var packs = tradeQuotePacks(data);
     if (!packs.length) return '';
@@ -10339,50 +10456,73 @@
       if (acceptedIdx < 0 && (p.status === 'accepted' || p.accepted === true)) acceptedIdx = i;
     });
     var openIdx = acceptedIdx >= 0 ? acceptedIdx : 0;
-    var h = '<div class="detail-section" data-quote-packs>';
-    h += '<div style="font-size:15px;font-weight:800;color:var(--sw-dark);margin-bottom:8px">Scope of works</div>';
-    if (packs.length > 1) {
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px">';
-      h += acceptedIdx >= 0
-        ? 'Building the accepted quote. Other sent quotes stay listed below.'
-        : 'Every sent quote, labelled by quote number.';
-      h += '</div>';
-    }
-    packs.forEach(function(pack, idx) {
-      var open = idx === openIdx;
-      var badge = pack.status === 'accepted' || pack.accepted === true ? 'Accepted' : pack.status === 'superseded' ? 'Older' : 'Sent';
-      var badgeBg = badge === 'Accepted' ? 'var(--sw-orange)' : 'var(--sw-border)';
-      var badgeColor = badge === 'Accepted' ? '#fff' : 'var(--sw-dark)';
-      var qn = pack.quote_number || 'Quote';
-      var sent = pack.sent_at ? String(pack.sent_at).slice(0, 10) : '';
-      h += '<details ' + (open ? 'open' : '') + ' style="border:1px solid var(--sw-border);border-radius:8px;margin-bottom:8px;background:var(--sw-card)">';
-      h += '<summary style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none">';
-      h += '<span data-quote-number style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(qn) + '</span>';
-      h += '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;background:' + badgeBg + ';color:' + badgeColor + ';padding:2px 8px;border-radius:4px">' + badge + '</span>';
-      if (sent) h += '<span style="margin-left:auto;font-size:11px;color:var(--sw-text-sec)">' + esc(sent) + '</span>';
-      h += '</summary>';
-      if (pack.summary) h += '<div style="padding:0 12px 8px;font-size:12px;color:var(--sw-text-sec)">' + esc(redactTradePriceText(pack.summary)) + '</div>';
-      h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
-      (pack.items || []).forEach(function(item) {
-        var cols = showPrices ? '3' : '2';
-        if (item.kind === 'note') {
-          h += '<tr><td colspan="' + cols + '" style="padding:8px 12px;background:var(--sw-light);white-space:pre-wrap">' + esc(redactTradePriceText(item.description || '')) + '</td></tr>';
-          return;
-        }
-        var qty = item.quantity ? (item.quantity + (item.unit ? ' ' + item.unit : '')) : '';
-        h += '<tr style="border-top:1px solid var(--sw-border)">';
-        h += '<td style="padding:8px 12px">' + esc(redactTradePriceText(item.description || '')) + '</td>';
-        h += '<td style="padding:8px 8px;text-align:right;white-space:nowrap;color:var(--sw-text-sec)">' + esc(qty) + '</td>';
-        if (showPrices) {
-          var rate = item.unit_price != null ? '$' + Number(item.unit_price).toLocaleString('en-AU', { minimumFractionDigits: item.unit_price % 1 ? 2 : 0, maximumFractionDigits: 2 }) : '';
-          h += '<td style="padding:8px 12px;text-align:right;white-space:nowrap;font-weight:600">' + rate + '</td>';
-        }
-        h += '</tr>';
-      });
-      h += '</table>';
-      h += '</details>';
-    });
+    var main = packs[openIdx];
+    var st = tradeQuoteStatus(main);
+    var sent = tradeQuoteDate(main.sent_at);
+
+    var h = '<div class="detail-section sow-card" data-quote-packs>';
+    h += '<h3>Scope of works</h3>';
+    h += '<div class="sow-head">';
+    h += '<span class="sow-qn" data-quote-number>' + esc(main.quote_number || 'Quote') + '</span>';
+    h += '<span class="sow-badge ' + st.cls + '">' + st.label + '</span>';
+    if (sent) h += '<span class="sow-date">Sent ' + esc(sent) + '</span>';
     h += '</div>';
+    if (main.summary) h += '<div class="sow-summary">' + esc(redactTradePriceText(main.summary)) + '</div>';
+    h += renderQuotePackItems(main, showPrices);
+    h += renderTradeQuoteOpenButton(data, main);
+
+    var others = packs.filter(function(p, i) { return i !== openIdx; });
+    if (others.length) {
+      h += '<div class="sow-others-k">' + (acceptedIdx >= 0 ? 'Other quotes sent' : 'Earlier quotes') + '</div>';
+      others.forEach(function(pack) {
+        var ost = tradeQuoteStatus(pack);
+        var osent = tradeQuoteDate(pack.sent_at);
+        h += '<details class="sow-other">';
+        h += '<summary><span data-quote-number class="sow-qn sm">' + esc(pack.quote_number || 'Quote') + '</span>';
+        h += '<span class="sow-badge ' + ost.cls + '">' + ost.label + '</span>';
+        if (osent) h += '<span class="sow-date">' + esc(osent) + '</span>';
+        h += '</summary>';
+        if (pack.summary) h += '<div class="sow-summary">' + esc(redactTradePriceText(pack.summary)) + '</div>';
+        h += renderQuotePackItems(pack, showPrices);
+        h += renderTradeQuoteOpenButton(data, pack);
+        h += '</details>';
+      });
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // Files tab: one row per sent quote — number, status, and the price-free
+  // "Open" when a frozen extract exists. Never a priced quote PDF.
+  function renderTradeQuoteDocumentRows(data) {
+    var packs = tradeQuotePacks(data);
+    var extracts = tradeQuoteExtracts(data);
+    if (!packs.length && !extracts.length) return '';
+    var seen = {};
+    var rows = [];
+    packs.forEach(function(pack) {
+      var qn = pack.quote_number || '';
+      if (qn) seen[qn] = true;
+      rows.push({ qn: qn || 'Quote', status: tradeQuoteStatus(pack), sent: tradeQuoteDate(pack.sent_at), extract: tradeQuoteExtractForPack(data, pack) });
+    });
+    extracts.forEach(function(x) {
+      if (seen[x.quote_number]) return;
+      rows.push({ qn: x.quote_number, status: tradeQuoteStatus(x), sent: tradeQuoteDate(x.sent_at), extract: x });
+    });
+    var jobId = (data && data.job && data.job.id) || '';
+    var h = '';
+    rows.forEach(function(r) {
+      h += '<div class="doc-row" data-quote-doc="' + esc(r.qn) + '">';
+      h += '<span class="doc-ico">&#128196;</span>';
+      h += '<div class="doc-main"><div class="doc-name">Quote ' + esc(r.qn) + ' <span class="sow-badge ' + r.status.cls + '">' + r.status.label + '</span></div>';
+      h += '<div class="doc-sub">' + (r.sent ? 'Sent ' + esc(r.sent) + ' · ' : '') + 'Scope and quantities, no prices</div></div>';
+      if (r.extract) {
+        h += '<button type="button" class="doc-open" data-quote-extract="' + esc(r.qn) + '" onclick="openTradeQuoteExtract(\'' + esc(jobId) + '\', \'' + esc(r.extract.job_document_id || '') + '\', \'Quote ' + esc(r.qn) + '\')">Open</button>';
+      } else {
+        h += '<span class="doc-muted">No file yet</span>';
+      }
+      h += '</div>';
+    });
     return h;
   }
 
@@ -10455,6 +10595,10 @@
     findMakesafeWorkOrderDocument: findMakesafeWorkOrderDocument,
     tradeWorkOrderPdfUrl: tradeWorkOrderPdfUrl,
     renderQuotePacks: renderQuotePacks,
+    tradeQuoteExtracts: tradeQuoteExtracts,
+    tradeQuoteExtractForPack: tradeQuoteExtractForPack,
+    renderTradeQuoteOpenButton: renderTradeQuoteOpenButton,
+    renderTradeQuoteDocumentRows: renderTradeQuoteDocumentRows,
     renderCompactWorkOrderItems: renderCompactWorkOrderItems
   };
   // </trade-scope-media>
@@ -10759,9 +10903,8 @@
     var type = (job.type || 'patio').toLowerCase();
     var color = JOB_TYPE_COLORS[type] || JOB_TYPE_COLORS.patio;
 
-    var h = '<div class="detail-section">';
-    h += '<h3>Scope of Work</h3>';
-    if (job.job_number) h += '<div style="font-size:12px;color:var(--sw-mid);margin-bottom:8px">' + esc(job.job_number) + '</div>';
+    var h = '<div class="detail-section" data-build-spec>';
+    h += '<h3>Build spec</h3>';
 
     // Large dimensions — readable from 3 metres
     if (type === 'fencing') {
@@ -10861,9 +11004,10 @@
       return '<div class="detail-section"><h3>Materials &amp; Receipts</h3><div style="padding:16px;background:#FFF8E1;border-radius:10px;font-size:13px;color:#B8860B;text-align:center">No purchase orders yet — materials will be listed here once ordered</div></div>';
     }
 
-    var h = '<div class="detail-section">';
+    window._scopePoCache = pos;
+    var h = '<div class="detail-section" data-materials>';
     h += '  <h3>Materials &amp; Receipts</h3>';
-    pos.forEach(function(po) {
+    pos.forEach(function(po, poIdx) {
       var isApproved = po.status === 'authorised' || po.status === 'billed';
       var isDraft = po.status === 'draft';
       var statusColor = isApproved ? 'var(--sw-green)' : isDraft ? 'var(--sw-text-sec)' : 'var(--sw-yellow)';
@@ -10932,6 +11076,11 @@
         } else {
           h += '  <div style="margin-top:8px"><button class="btn btn-secondary btn-small" onclick="confirmMaterials(\'' + po.id + '\', \'' + esc(po.po_number || '') + '\', \'' + esc(job.id) + '\')" style="width:100%;font-size:12px;padding:8px;background:#E8F4FD;color:#2980B9;border:1px solid #B3D9F2">📦 All Materials Received</button></div>';
         }
+      }
+
+      // PO PDF — price-free (description + qty only), for the trade counter
+      if (isApproved) {
+        h += '  <div style="margin-top:8px"><button class="btn btn-secondary btn-small" data-po-pdf="' + esc(po.id) + '" onclick="generatePOPdf(window._scopePoCache[' + poIdx + '], \'' + esc(job.job_number || '') + '\')" style="width:100%;font-size:12px;padding:8px">&#128196; PO PDF ' + esc(po.po_number || '') + '</button></div>';
       }
 
       // Receipt upload
@@ -11680,8 +11829,8 @@
     var job = data.job;
     var buttons = '';
 
-    // Call button — only if phone available
-    if (job.client_phone && canCall()) {
+    // Call button — only if phone available, never on another crew's job
+    if (job.client_phone && canCall() && !isForeignCrewJob(data)) {
       buttons += '<a href="tel:' + esc(job.client_phone) + '" class="jd-action-btn act-call" onclick="scheduleCallNotes(\'' + esc(job.id) + '\')">';
       buttons += '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
       buttons += ' Call</a>';
@@ -12257,17 +12406,38 @@
     }
   }
 
+  // Office instructions for the crew: work order special instructions (+ est.
+  // hours), else the scoping tool's installer note. Rendered at the top of the
+  // Scope tab so a tier-1 installer sees them without the Work tab.
+  function renderTradeInstructions(data) {
+    var wo = (data && (data.workOrder || data.work_order)) || {};
+    var scope = (data && data.job && data.job.scope_json) || {};
+    var text = String(wo.special_instructions || '').trim();
+    if (!text) {
+      var installerNote = (scope.notes && scope.notes.noteWorkOrder) ? String(scope.notes.noteWorkOrder).trim() : '';
+      if (installerNote && !quotePacksHaveNote(data)) text = installerNote;
+    }
+    var hours = wo.estimated_hours;
+    if (!text && !hours) return '';
+    var h = '<div class="detail-section jd-instr" data-trade-instructions>';
+    h += '<div class="jd-instr-k">Instructions</div>';
+    if (text) h += '<div class="jd-instr-body">' + escSowText(text) + '</div>';
+    if (hours) h += '<div class="jd-instr-hours"><span>Estimated hours</span><b>' + esc(String(hours)) + 'h</b></div>';
+    h += '</div>';
+    return h;
+  }
+
   function renderJobTab_scope(data, phase, container) {
     var job = data.job;
     var h = '';
 
-    // Walkthrough + every other job video, then quote writing + WO lines
-    // (Tier 1 default tab). Quote-pack / compact WO rates stay office-only.
-    h += renderScopeVideoCard(data);
+    // Trade reading order (Captain review 2026-09-08): what the office told you
+    // → what was sold (quote writing, price-free) → build spec → work order
+    // lines → videos → materials. Quote-pack / compact WO rates stay office-only.
+    h += renderTradeInstructions(data);
     h += renderQuotePacks(data);
-    h += renderCompactWorkOrderItems(data);
 
-    // 1. Scope of Work (primary content — includes dimensions)
+    // 1. Build spec (dimensions, colours, attachment)
     h += renderEnhancedScope(data, phase);
 
     // 3D model button (inside scope flow, not standalone)
@@ -12288,6 +12458,10 @@
       h += '</div>';
     }());
 
+    // Work order lines (crew WO), then every job video
+    h += renderCompactWorkOrderItems(data);
+    h += renderScopeVideoCard(data);
+
     // 2. Materials & POs
     h += renderEnhancedPOs(data, phase);
 
@@ -12300,18 +12474,9 @@
     // 5. Variation request
     h += renderEnhancedVariation(data, phase);
 
-    // 6. Crew (compact inline)
-    var crew = data.crew || [];
-    if (crew.length > 0) {
-      var crewNames = [];
-      crew.forEach(function(c) {
-        var name = (c.users && c.users.name) || 'TBA';
-        if (crewNames.indexOf(name) < 0) crewNames.push(name);
-      });
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);padding:4px 0">&#128100; Crew: ' + crewNames.map(function(n) { return esc(n); }).join(', ') + '</div>';
-    }
+    // 6. Crew is the roster panel above the tabs — not repeated here.
 
-    // 7. Special instructions (compact — no card if empty)
+    // 7. Site notes from the office (compact — no card if empty)
     h += renderSpecialInstructions(data, phase);
 
     // Labour budget (complete phase, office only)
@@ -12371,37 +12536,40 @@
     container.innerHTML = h;
   }
 
+  // Files tab "Quotes & orders": sent quotes (price-free extract) and the
+  // purchase orders as PDFs (description + qty only). Priced quote PDFs and
+  // priced WO PDFs never appear here for trades.
+  function renderTradeQuoteAndOrderDocs(data) {
+    var job = data.job || {};
+    var rows = renderTradeQuoteDocumentRows(data);
+    var pos = data.purchaseOrders || [];
+    window._scopePoCache = pos;
+    pos.forEach(function(po, idx) {
+      var isApproved = po.status === 'authorised' || po.status === 'billed';
+      rows += '<div class="doc-row" data-po-doc="' + esc(po.id) + '">';
+      rows += '<span class="doc-ico">&#128230;</span>';
+      rows += '<div class="doc-main"><div class="doc-name">PO ' + esc(po.po_number || '') + '</div>';
+      rows += '<div class="doc-sub">' + esc(po.supplier_name || 'Supplier') + (po.delivery_date ? ' · Delivery ' + formatDate(po.delivery_date) : '') + (isApproved ? '' : ' · Awaiting approval') + '</div></div>';
+      if (isApproved) rows += '<button type="button" class="doc-open" data-po-pdf="' + esc(po.id) + '" onclick="generatePOPdf(window._scopePoCache[' + idx + '], \'' + esc(job.job_number || '') + '\')">PDF</button>';
+      else rows += '<span class="doc-muted">Draft</span>';
+      rows += '</div>';
+    });
+    if (!rows) return '';
+    return '<div class="detail-section" data-quote-order-docs><h3>Quotes &amp; orders</h3>' + rows + '</div>';
+  }
+
   function renderJobTab_files(data, phase, container) {
     var h = '';
 
-    // Trade documents (uploaded docs)
+    // Quotes (price-free) + PO PDFs, then approvals / plans / engineering.
+    // The priced WO PDF stays office-only inside renderTradeDocuments.
+    h += renderTradeQuoteAndOrderDocs(data);
     h += renderTradeDocuments(data, phase);
 
-    h += renderQuotePacks(data);
     h += renderScopeVideoCard(data);
 
-    // Other documents (plans, drawings, council approvals) — trades-visible only.
-    // Priced WO PDFs (canonical or filename/type aliases) stay on the office
-    // renderTradeDocuments path — never as a second unguarded link.
-    var docs = data.documents || [];
-    var otherDocs = docs.filter(function(d) {
-      return d.visible_to_trades && d.type !== 'site_photo' && !isPricedWorkOrderDocument(d);
-    });
-    if (otherDocs.length > 0) {
-      h += '<div class="detail-section">';
-      h += '  <h3>Documents</h3>';
-      otherDocs.forEach(function(d) {
-        var docUrl = getTradeDocOpenUrl(d);
-        if (!docUrl) return;
-        h += '<a href="' + esc(docUrl) + '" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--sw-light);border-radius:8px;text-decoration:none;margin-bottom:4px">';
-        h += '<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--sw-mid)"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></svg>';
-        h += '<div style="flex:1;font-size:13px;color:var(--sw-dark)">' + esc(d.file_name || d.type || 'Document') + '</div>';
-        h += '</a>';
-      });
-      h += '</div>';
-    }
-
     // Scope / site photos (from quoting stage)
+    var docs = data.documents || [];
     var media = filterTradeGalleryMedia(data.media);
     var scopePhotos = media.filter(function(m) { return m.phase === 'scope' && !isScopeVideo(m); });
     var docPhotos = docs.filter(function(d) { return d.visible_to_trades && d.type === 'site_photo' && d.storage_url && !isPricedWorkOrderDocument(d); });
@@ -12530,6 +12698,54 @@
 
     container.innerHTML = h;
   }
+
+  // ── Price-free quote viewer ──
+  // trade_quote_extract needs the Bearer token, so it cannot be a plain link.
+  // Fetch the HTML and show it in-app; "Print / Save PDF" uses the phone's
+  // print sheet. The backend guarantees the extract carries no money.
+  window.openTradeQuoteExtract = function(jobId, documentId, label) {
+    var ov = document.getElementById('quoteExtractOverlay');
+    var frame = document.getElementById('quoteExtractFrame');
+    var status = document.getElementById('quoteExtractStatus');
+    var title = document.getElementById('quoteExtractTitle');
+    if (!ov || !frame || !status) return;
+    if (title) title.textContent = label || 'Quote';
+    frame.removeAttribute('srcdoc');
+    frame.style.display = 'none';
+    status.style.display = 'block';
+    status.innerHTML = '<div class="spinner" style="width:20px;height:20px;display:inline-block;vertical-align:middle;margin-right:8px"></div>Loading quote...';
+    ov.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    getAuthToken().then(function(token) {
+      if (!token) throw _apiError(401, 'Sign in required');
+      var url = _opsApiBase + '?action=trade_quote_extract&format=html&jobId=' + encodeURIComponent(jobId || '');
+      if (documentId) url += '&document_id=' + encodeURIComponent(documentId);
+      return fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    }).then(function(r) {
+      if (!r.ok) return _readApiError(r, 'Quote is not available');
+      return r.text();
+    }).then(function(html) {
+      status.style.display = 'none';
+      frame.style.display = 'block';
+      frame.srcdoc = html;
+    }).catch(function(err) {
+      status.innerHTML = '<div style="font-size:14px;color:var(--sw-text)">Could not open the quote.</div><div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">' + esc(friendlyError(err)) + '</div>';
+    });
+  };
+  window.closeTradeQuoteExtract = function() {
+    var ov = document.getElementById('quoteExtractOverlay');
+    var frame = document.getElementById('quoteExtractFrame');
+    if (frame) frame.removeAttribute('srcdoc');
+    if (ov) ov.style.display = 'none';
+    document.body.style.overflow = '';
+  };
+  window.printTradeQuoteExtract = function() {
+    var frame = document.getElementById('quoteExtractFrame');
+    try {
+      if (frame && frame.contentWindow && frame.srcdoc) { frame.contentWindow.focus(); frame.contentWindow.print(); return; }
+    } catch (e) {}
+    toast('Quote is still loading', true);
+  };
 
   // Photo upload handler for the Photos tab
   window.handleTabPhotoUpload = function(input) {
@@ -23348,6 +23564,9 @@
 
     doc.save((po.po_number || 'PO') + '_' + (jobNumber || 'job') + '.pdf');
   }
+  // Inline onclick handlers can only reach window.* — without this the
+  // "Download PO PDF" buttons throw ReferenceError and do nothing.
+  window.generatePOPdf = generatePOPdf;
 
   function _generateInvoicePDF(data) {
     var jsPDF = window.jspdf ? window.jspdf.jsPDF : null;
@@ -29787,6 +30006,15 @@
 </script>
 
 <!-- Expense Overlay -->
+<div class="eod-overlay qx-overlay" id="quoteExtractOverlay" style="display:none" data-quote-extract-overlay>
+  <div class="qx-head">
+    <button type="button" class="qx-btn" onclick="closeTradeQuoteExtract()">&larr; Back</button>
+    <div class="qx-title" id="quoteExtractTitle">Quote</div>
+    <button type="button" class="qx-btn qx-print" onclick="printTradeQuoteExtract()">Print / PDF</button>
+  </div>
+  <div class="qx-status" id="quoteExtractStatus"></div>
+  <iframe id="quoteExtractFrame" class="qx-frame" title="Quote extract" style="display:none"></iframe>
+</div>
 <div class="eod-overlay" id="expenseOverlay" style="display:none">
   <div class="wiz-header">
     <button class="wiz-btn wiz-btn-secondary" style="max-width:60px;padding:8px" onclick="closeExpenseOverlay()">&#8592;</button>

@@ -3023,7 +3023,8 @@
     .alloc-current-row .alloc-remove{flex:0 0 auto;min-height:36px;padding:6px 12px;border:1px solid rgba(220,53,69,.4);border-radius:8px;background:#fff;color:#c0392b;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
     .alloc-current-row .alloc-remove:disabled{opacity:.5;cursor:default}
     .alloc-current-row .locked{flex:0 0 auto;font-size:11px;color:var(--sw-text-sec)}
-    .crw-act.danger{color:#c0392b;border-color:rgba(220,53,69,.4)}
+    .crw-remove{flex:0 0 auto;min-height:44px;padding:0 12px;border:1px solid rgba(220,53,69,.4);border-radius:9px;background:var(--sw-card);color:#c0392b;font:700 11.5px var(--sw-font);cursor:pointer;white-space:nowrap}
+    .crw-remove:disabled{opacity:.5;cursor:default}
     .alloc-empty{font-size:13px;color:var(--sw-text-sec);padding:10px 4px}
     .alloc-confirm{margin-top:8px}
     .alloc-confirm .cline{font-size:13px;color:var(--sw-dark);text-align:center;margin-bottom:10px;min-height:18px}
@@ -9280,7 +9281,7 @@
       // A dispatcher or a manager of this job's vertical may take a crew member
       // off the job (delete_assignment). Finished work stays.
       if (view.canManageCrew && crewMemberRemovable(member)) {
-        h += '<button type="button" class="crw-act danger" onclick="removeCrewMemberFromJob(\'' + esc(member.key) + '\')">Remove</button>';
+        h += '<button type="button" class="crw-remove" data-crew-remove onclick="removeCrewMemberFromJob(\'' + esc(member.key) + '\')">Remove</button>';
       }
       h += '</div>';
     });
@@ -9374,7 +9375,7 @@
     var member = TradeCrewCore.build(data).members.filter(function (m) { return m.key === memberKey; })[0];
     if (!member || !crewMemberRemovable(member)) return;
     var panel = document.getElementById('crewRosterPanel');
-    var buttons = panel ? panel.querySelectorAll('.crw-act') : [];
+    var buttons = panel ? panel.querySelectorAll('.crw-act, .crw-remove') : [];
     var i;
     for (i = 0; i < buttons.length; i++) buttons[i].disabled = true;
     removeAssignmentsForMember(member, (data.job || {}).job_number).then(function (res) {
@@ -9397,7 +9398,7 @@
     var doClear = !!clear;
     if (!doClear && !assignmentId) return;
     var panel = document.getElementById('crewRosterPanel');
-    var buttons = panel ? panel.querySelectorAll('.crw-act') : [];
+    var buttons = panel ? panel.querySelectorAll('.crw-act, .crw-remove') : [];
     var i;
     for (i = 0; i < buttons.length; i++) buttons[i].disabled = true;
     var err = panel && panel.querySelector('.crw-err');

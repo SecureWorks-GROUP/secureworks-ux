@@ -307,6 +307,93 @@ test.describe('Fencing manager visibility', () => {
     });
   });
 
+  test.describe('fencing crew management', () => {
+    test.use({ feedScenario: 'fencing-crew-manage' });
+
+    test('changing crew starts from who is on the job, adds without replacing, and never re-posts the current person', async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.fencing_manager);
+      await page.locator('#navBoard').click();
+      const card = page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' });
+      await card.locator('button.act.primary').click();
+
+      await expect(page.locator('#allocHead')).toContainText('Change crew');
+      await expect(page.locator('#allocHead')).toContainText('now Henry Fence');
+      // Current crew is listed from the server, with Remove for live rows.
+      const current = page.locator('[data-alloc-current]');
+      await expect(current).toContainText('On this job now');
+      await expect(current.locator('[data-alloc-current-member]')).toHaveCount(1);
+      await expect(current).toContainText('Henry Fence');
+      await expect(current.getByRole('button', { name: 'Remove' })).toHaveCount(1);
+
+      // The current person is pre-selected; only ticking them means no write.
+      await expect(page.locator('#allocRoster .alloc-crew.cur.sel')).toHaveCount(1);
+      await expect(page.locator('#allocConfirmLine')).toContainText('Henry Fence stays');
+      await expect(page.locator('#allocConfirmBtn')).toBeDisabled();
+
+      // Tick a second person → Add, Henry stays.
+      await page.locator('#allocRoster .alloc-crew').filter({ hasText: 'Alyx Crew' }).click();
+      await expect(page.locator('#allocConfirmLine')).toHaveText('Add Alyx Crew to FENCE-HENRY-001 · Henry Fence stays');
+      await expect(page.locator('#allocConfirmBtn')).toHaveText('Add');
+      await page.locator('#allocConfirmBtn').click();
+      await expect(page.locator('#toast')).toContainText('Crew updated');
+
+      const writes = feedRequests.filter((entry) => entry.action === 'allocate_job');
+      expect(writes).toHaveLength(1);
+      expect(writes[0].body).toMatchObject({ jobId: 'fence-job-henry', userId: 'e2e-alyx' });
+      expect(writes[0].body).not.toHaveProperty('assignmentId');
+      expect(feedRequests.some((entry) => entry.action === 'allocate_job' && entry.body && entry.body.userId === 'e2e-henry')).toBe(false);
+
+      // Reopen: both people listed; remove Alyx.
+      await card.locator('button.act.primary').click();
+      const rows = page.locator('[data-alloc-current-member]');
+      await expect(rows).toHaveCount(2);
+      await rows.filter({ hasText: 'Alyx Crew' }).getByRole('button', { name: 'Remove' }).click();
+      await expect(page.locator('#confirmMsg')).toContainText('Take Alyx Crew off FENCE-HENRY-001');
+      await page.locator('#confirmOk').click();
+      await expect(page.locator('#toast')).toContainText('Removed Alyx Crew from FENCE-HENRY-001');
+      const deletes = feedRequests.filter((entry) => entry.action === 'delete_assignment');
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0].method).toBe('POST');
+      expect(deletes[0].authorization).toBe('Bearer e2e-access-token');
+      expect(deletes[0].body).toEqual({ assignmentId: 'fence-assignment-added-e2e-alyx' });
+      expect(feedRequests.some((entry) => entry.action === 'reassign_crew')).toBe(false);
+    });
+
+    test('unticking the current person and picking another swaps with one silent reassign write', async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.fencing_manager);
+      await page.locator('#navBoard').click();
+      const card = page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' });
+      await card.locator('button.act.primary').click();
+      await page.locator('#allocRoster .alloc-crew.cur').click(); // untick Henry
+      await expect(page.locator('#allocConfirmLine')).toContainText('Select at least one crew member');
+      await page.locator('#allocRoster .alloc-crew').filter({ hasText: 'Alyx Crew' }).click();
+      await expect(page.locator('#allocConfirmLine')).toHaveText('Replace Henry Fence with Alyx Crew on FENCE-HENRY-001');
+      await expect(page.locator('#allocConfirmBtn')).toHaveText('Swap');
+      await page.locator('#allocConfirmBtn').click();
+      await expect(page.locator('#toast')).toContainText('Crew reassigned');
+      const writes = feedRequests.filter((entry) => entry.action === 'allocate_job');
+      expect(writes).toHaveLength(1);
+      expect(writes[0].body).toEqual({ assignmentId: 'fence-assignment-henry', userId: 'e2e-alyx' });
+    });
+
+    test('job detail offers Remove to the fencing manager and refetches the crew', async ({ appPage: page, feedRequests }) => {
+      await signIn(page, PERSONAS.fencing_manager);
+      await page.locator('#navBoard').click();
+      await page.locator('#board-col-scheduled .jc').filter({ hasText: 'FENCE-HENRY-001' }).locator('.jc-place').click();
+      const panel = page.locator('#crewRosterPanel');
+      await expect(panel).toContainText('Henry Fence');
+      const row = panel.locator('.crw-row').filter({ hasText: 'Henry Fence' });
+      await expect(row.getByRole('button', { name: 'Remove' })).toBeVisible();
+      await row.getByRole('button', { name: 'Remove' }).click();
+      await expect(page.locator('#confirmMsg')).toContainText('Take Henry Fence off FENCE-HENRY-001');
+      await page.locator('#confirmOk').click();
+      await expect(page.locator('#toast')).toContainText('Removed Henry Fence from FENCE-HENRY-001');
+      const deletes = feedRequests.filter((entry) => entry.action === 'delete_assignment');
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0].body).toEqual({ assignmentId: 'fence-assignment-henry' });
+    });
+  });
+
   test.describe('fencing assignment lifecycle refresh', () => {
     test.use({ feedScenario: 'fencing-stage-lifecycle' });
 

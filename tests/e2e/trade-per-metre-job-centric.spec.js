@@ -459,7 +459,8 @@ test.describe('Henry job-centric submit', () => {
 
     const anyCard = page.locator('.jc-card').filter({ hasText: 'FENCE-ANY-002' });
     await expect(anyCard).toBeVisible();
-    await expect(anyCard.getByRole('button', { name: 'Work Order', exact: true })).toBeDisabled();
+    // Work Order mode is open on any job, with or without an ops work order.
+    await expect(anyCard.getByRole('button', { name: 'Work Order', exact: true })).toBeEnabled();
     await anyCard.locator('[data-cardhours]').fill('2');
     await anyCard.locator('[data-cardrate]').fill('55');
     await anyCard.locator('input[placeholder="Description of work"]').fill('Install extra panels');
@@ -480,6 +481,48 @@ test.describe('Henry job-centric submit', () => {
     expect(added.date || added.scheduled_date).toBe(perthWeekMonday());
     expect(Number(added.quantity || added.hours)).toBe(2);
     expect(Number(added.rate)).toBe(55);
+  });
+
+  test('Henry invoices an added job as a Work Order and deducts a trade and another amount without an ops work order', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.locator('[data-view="hours"]').click();
+    await page.getByRole('button', { name: 'Weekly Invoice' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
+    await expect(page.locator('[data-pm-wo-hydrate="pending"]')).toHaveCount(0);
+
+    await page.getByRole('button', { name: '+ Add job' }).first().click();
+    await page.locator('#jcSearchInput_0').fill('FENCE-ANY');
+    await page.locator('.jc-job-search-hit').first().click();
+    const card = page.locator('.jc-card').filter({ hasText: 'FENCE-ANY-002' });
+    await card.getByRole('button', { name: 'Work Order', exact: true }).click();
+    await card.locator('[data-cardwoalloc]').fill('420');
+    await card.locator('[data-cardwoalloc]').press('Tab');
+    await card.getByRole('button', { name: '+ Deduct work order paid to a trade' }).click();
+    await card.locator('[data-cardwollname]').last().fill('Sonny');
+    await card.locator('[data-cardwollamt]').last().fill('120');
+    await card.locator('[data-cardwollamt]').last().press('Tab');
+    await card.getByRole('button', { name: '+ Add amount' }).click();
+    await card.locator('[data-cardlumpdesc]').last().fill('Plinths supplied by office');
+    await card.locator('[data-cardlumpamt]').last().fill('50');
+    await card.locator('[data-cardlumpamt]').last().press('Tab');
+    await expect(card.locator('[data-cardamt]')).toHaveText('$250.00');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    const woRow = (writes[0].body.extra_items || []).find((item) => item.row_type === 'work_order' && /FENCE-ANY-002/.test(item.job_number || ''));
+    expect(woRow).toBeTruthy();
+    expect(woRow.work_order_id == null).toBeTruthy();
+    expect(Number(woRow.wo_allocated)).toBe(420);
+    expect(Number(woRow.rate)).toBe(250);
+    expect(Number(woRow.wo_labour_deduction)).toBe(170);
+    const names = (woRow.wo_labour_lines || []).map((line) => line.trade_name);
+    expect(names).toEqual(expect.arrayContaining(['Sonny', 'Plinths supplied by office']));
+    expect((woRow.wo_labour_lines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0)).toBe(170);
   });
 
   test('Henry weekly submit keeps invoice-level lump-sum deducts without a job', async ({ appPage: page, feedRequests }) => {

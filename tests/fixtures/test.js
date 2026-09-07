@@ -457,6 +457,7 @@ const test = base.extend({
     // accidentally widen an existing one.
     const WRITE_SCENARIOS = {
       'fencing-allocation': ['allocate_job'],
+      'fencing-crew-manage': ['allocate_job', 'delete_assignment'],
       'fencing-stage-lifecycle': ['update_my_assignment', 'clock_event'],
       'wo-labour-explainer': ['generate_trade_invoice'],
       'trade-invoice-super-gst': ['generate_trade_invoice', 'attach_invoice_pdf'],
@@ -880,11 +881,54 @@ const test = base.extend({
           }
           return { work_orders: persona === 'fencing_manager' ? workOrders : [] };
         },
+        delete_assignment: async ({ request }) => {
+          if (feedScenario !== 'fencing-crew-manage' || persona !== 'fencing_manager') {
+            return { status: 409, body: { error: 'Crew manage fixture is not enabled' } };
+          }
+          const body = request.postDataJSON();
+          const id = body.assignmentId || body.assignment_id || body.id;
+          let found = false;
+          ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'].forEach((bucket) => {
+            const before = (fencingAll[bucket] || []).length;
+            fencingAll[bucket] = (fencingAll[bucket] || []).filter((row) => row.id !== id);
+            if (fencingAll[bucket].length !== before) found = true;
+          });
+          if (!found) return { status: 404, body: { error: 'assignment not found' } };
+          return { success: true };
+        },
         allocate_job: async ({ request }) => {
-          if (feedScenario !== 'fencing-allocation' || persona !== 'fencing_manager') {
+          if (!['fencing-allocation', 'fencing-crew-manage'].includes(feedScenario) || persona !== 'fencing_manager') {
             return { status: 409, body: { error: 'Allocation fixture is not enabled' } };
           }
           const body = request.postDataJSON();
+          if (feedScenario === 'fencing-crew-manage') {
+            const crewName = body.userId === PERSONAS.fencing_manager.profile.id ? PERSONAS.fencing_manager.profile.name : 'Alyx Crew';
+            if (body.assignmentId) {
+              // Swap: move the existing row to the new installer, same date.
+              const row = fencingRows().find((entry) => entry.id === body.assignmentId);
+              if (!row) return { status: 404, body: { error: 'assignment not found' } };
+              if (Object.hasOwn(body, 'scheduledDate') || Object.hasOwn(body, 'crewName')) {
+                return { status: 422, body: { error: 'reassign must stay silent (no schedule/crew keys)' } };
+              }
+              row.user_id = body.userId;
+              row.crew_name = crewName;
+              return { ok: true, mode: 'reassign', assignment: row };
+            }
+            const base = fencingRows().find((entry) => entry.jobs && entry.jobs.id === body.jobId);
+            if (!base) return { status: 404, body: { error: 'job not found' } };
+            const created = {
+              ...base,
+              id: 'fence-assignment-added-' + body.userId,
+              user_id: body.userId,
+              crew_name: crewName,
+              status: 'scheduled',
+              scheduled_date: body.scheduledDate,
+              start_time: body.startTime || null,
+              end_time: body.endTime || null
+            };
+            fencingAll.today = (fencingAll.today || []).concat([created]);
+            return { ok: true, mode: 'create', assignment: created };
+          }
           const open = (fencingAll.makesafePool || []).find((row) => row.jobs && row.jobs.id === body.jobId);
           if (!open) return { ok: true, mode: 'idempotent', deduped: true };
           const assignment = {

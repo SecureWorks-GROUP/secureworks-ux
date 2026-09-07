@@ -2999,6 +2999,7 @@
       .tjb-wrap.fencing .tjb-col{flex:0 0 100%;width:100%;margin-bottom:0;scroll-snap-align:start;scroll-snap-stop:always}
     }
     /* M3 U3 — allocation sheet: tap a board card -> pick crew -> confirm -> allocate_job */
+    .confirm-overlay{z-index:700}
     .alloc-overlay{position:fixed;inset:0;z-index:560;background:rgba(0,0,0,0.5);display:none;align-items:flex-end;justify-content:center}
     .alloc-overlay.active{display:flex}
     .alloc-sheet{background:var(--sw-card);border-radius:16px 16px 0 0;width:100%;max-width:480px;padding:18px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:82vh;overflow-y:auto;font-family:var(--sw-font)}
@@ -3014,6 +3015,16 @@
     .alloc-crew .role{display:block;font-size:11px;font-weight:500;color:var(--sw-text-sec);text-transform:capitalize;margin-top:1px}
     .alloc-crew.sel{border-color:var(--sw-orange);background:#FFF8F0}
     .alloc-crew.cur{opacity:.55}
+    .alloc-crew.cur.sel{opacity:1}
+    .alloc-current{margin:0 0 12px}
+    .alloc-current-row{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;background:var(--sw-card);border:1px solid var(--sw-border);border-radius:10px;font-size:14px;color:var(--sw-text)}
+    .alloc-current-row .who{flex:1;min-width:0}
+    .alloc-current-row .who small{display:block;font-size:11px;color:var(--sw-text-sec);margin-top:1px}
+    .alloc-current-row .alloc-remove{flex:0 0 auto;min-height:36px;padding:6px 12px;border:1px solid rgba(220,53,69,.4);border-radius:8px;background:#fff;color:#c0392b;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+    .alloc-current-row .alloc-remove:disabled{opacity:.5;cursor:default}
+    .alloc-current-row .locked{flex:0 0 auto;font-size:11px;color:var(--sw-text-sec)}
+    .crw-remove{flex:0 0 auto;min-height:44px;padding:0 12px;border:1px solid rgba(220,53,69,.4);border-radius:9px;background:var(--sw-card);color:#c0392b;font:700 11.5px var(--sw-font);cursor:pointer;white-space:nowrap}
+    .crw-remove:disabled{opacity:.5;cursor:default}
     .alloc-empty{font-size:13px;color:var(--sw-text-sec);padding:10px 4px}
     .alloc-confirm{margin-top:8px}
     .alloc-confirm .cline{font-size:13px;color:var(--sw-dark);text-align:center;margin-bottom:10px;min-height:18px}
@@ -3588,7 +3599,8 @@
 <div class="alloc-overlay" id="allocOverlay" onclick="if(event.target===this)closeAllocateSheet()">
   <div class="alloc-sheet" id="allocSheet">
     <div class="alloc-head" id="allocHead"></div>
-    <div class="alloc-label">Assign to crew</div>
+    <div id="allocCurrent"></div>
+    <div class="alloc-label" id="allocRosterLabel">Assign to crew</div>
     <div id="allocRoster"></div>
     <div id="allocSchedule"></div>
     <div class="alloc-confirm">
@@ -8504,12 +8516,17 @@
             assignmentId: row.id || null,
             name: name,
             isLead: false,
-            days: []
+            days: [],
+            assignmentIds: [],
+            statuses: []
           };
           byKey[key] = entry;
           out.push(entry);
         }
         if (!entry.name && name) entry.name = name;
+        if (row.id && entry.assignmentIds.indexOf(row.id) === -1) entry.assignmentIds.push(row.id);
+        var rowStatus = String(row.status || '').toLowerCase();
+        if (rowStatus && entry.statuses.indexOf(rowStatus) === -1) entry.statuses.push(rowStatus);
         if (row.is_lead === true) {
           entry.isLead = true;
           // Point a later set/clear at the row the database actually flagged.
@@ -8589,7 +8606,22 @@
       return false;
     }
 
-    return { crewName: crewName, leadSupported: leadSupported, roster: roster, build: build, canSetLead: canSetLead };
+    // Same server authority as allocate_job / delete_assignment: a dispatcher or
+    // a manager of the job's vertical. Independent of whether the payload can
+    // express a lead installer.
+    function canManageCrew(ctx) {
+      ctx = ctx || {};
+      if (ctx.isDispatcher === true) return true;
+      var vertical = String(ctx.jobType || '').toLowerCase().trim();
+      if (!vertical) return false;
+      var managed = ctx.managedVerticals || [];
+      for (var i = 0; i < managed.length; i++) {
+        if (String(managed[i] || '').toLowerCase().trim() === vertical) return true;
+      }
+      return false;
+    }
+
+    return { crewName: crewName, leadSupported: leadSupported, roster: roster, build: build, canSetLead: canSetLead, canManageCrew: canManageCrew };
   })();
   // </trade-crew-roster-core>
 
@@ -9179,14 +9211,16 @@
   // renders `role` (see the core module for why that field is not the signal).
   function tradeCrewRosterAuthority(data) {
     var model = TradeCrewCore.build(data);
+    var authz = {
+      leadSupported: model.leadSupported,
+      isDispatcher: _isAdmin,
+      managedVerticals: managedTradeVerticals(_user),
+      jobType: getTradeJobType((data && data.job) || {})
+    };
     return {
       model: model,
-      canSetLead: TradeCrewCore.canSetLead({
-        leadSupported: model.leadSupported,
-        isDispatcher: _isAdmin,
-        managedVerticals: managedTradeVerticals(_user),
-        jobType: getTradeJobType((data && data.job) || {})
-      })
+      canSetLead: TradeCrewCore.canSetLead(authz),
+      canManageCrew: TradeCrewCore.canManageCrew(authz)
     };
   }
 
@@ -9244,6 +9278,11 @@
           h += '<button type="button" class="crw-act" onclick="setJobLeadInstaller(\'' + esc(member.assignmentId) + '\', 0)">Make lead</button>';
         }
       }
+      // A dispatcher or a manager of this job's vertical may take a crew member
+      // off the job (delete_assignment). Finished work stays.
+      if (view.canManageCrew && crewMemberRemovable(member)) {
+        h += '<button type="button" class="crw-remove" data-crew-remove onclick="removeCrewMemberFromJob(\'' + esc(member.key) + '\')">Remove</button>';
+      }
       h += '</div>';
     });
 
@@ -9297,6 +9336,61 @@
   }
 
   // Manager action: name (or clear) the lead installer on this job.
+  // A member is removable while every one of their rows is still schedule
+  // truth. Once a row is complete/submitted/verified it is work done and money
+  // provenance; the office adjusts those, not the allocate sheet.
+  var CREW_ROW_FINISHED = { complete: 1, completed: 1, submitted: 1, verified: 1, invoiced: 1 };
+  function crewMemberRemovable(member) {
+    if (!member || !(member.assignmentIds || []).length) return false;
+    return !(member.statuses || []).some(function (status) { return CREW_ROW_FINISHED[status] === 1; });
+  }
+
+  // Remove every assignment row this person holds on the job (a multi-day
+  // allocation is one row per day). Server gate: assertAssignmentMutationAuthz
+  // on delete_assignment, the same authority as allocate_job / set_job_lead.
+  function removeAssignmentsForMember(member, jobLabel) {
+    var ids = (member && member.assignmentIds) || [];
+    var name = (member && member.name) || 'this crew member';
+    return showConfirm('Remove from job', 'Take ' + name + ' off ' + (jobLabel || 'this job') + '? They will no longer see it in their Trade app.', 'Remove').then(function (ok) {
+      if (!ok) return null;
+      var failed = [];
+      var chain = Promise.resolve();
+      ids.forEach(function (assignmentId) {
+        chain = chain.then(function () {
+          return api('delete_assignment', null, { assignmentId: assignmentId }).catch(function (err) { failed.push(err); });
+        });
+      });
+      return chain.then(function () {
+        _invalidateAssignmentLifecycleCaches();
+        if (failed.length) throw failed[0];
+        return { removed: ids.length - failed.length, name: name };
+      });
+    });
+  }
+
+  window.removeCrewMemberFromJob = function removeCrewMemberFromJob(memberKey) {
+    var data = _currentJob;
+    var jobId = (data && data.job && data.job.id) || _currentJobId;
+    if (!jobId) return;
+    var member = TradeCrewCore.build(data).members.filter(function (m) { return m.key === memberKey; })[0];
+    if (!member || !crewMemberRemovable(member)) return;
+    var panel = document.getElementById('crewRosterPanel');
+    var buttons = panel ? panel.querySelectorAll('.crw-act, .crw-remove') : [];
+    var i;
+    for (i = 0; i < buttons.length; i++) buttons[i].disabled = true;
+    removeAssignmentsForMember(member, (data.job || {}).job_number).then(function (res) {
+      if (!res) {
+        for (var k = 0; k < buttons.length; k++) buttons[k].disabled = false;
+        return;
+      }
+      toast('Removed ' + res.name + ' from ' + ((data.job || {}).job_number || 'the job'));
+      if (_currentJobId) window.loadJobDetail(_currentJobId);
+    }).catch(function (e) {
+      for (var j = 0; j < buttons.length; j++) buttons[j].disabled = false;
+      showCrewRosterError(friendlyError(e));
+    });
+  };
+
   window.setJobLeadInstaller = function setJobLeadInstaller(assignmentId, clear) {
     var data = _currentJob;
     var jobId = (data && data.job && data.job.id) || _currentJobId;
@@ -9304,7 +9398,7 @@
     var doClear = !!clear;
     if (!doClear && !assignmentId) return;
     var panel = document.getElementById('crewRosterPanel');
-    var buttons = panel ? panel.querySelectorAll('.crw-act') : [];
+    var buttons = panel ? panel.querySelectorAll('.crw-act, .crw-remove') : [];
     var i;
     for (i = 0; i < buttons.length; i++) buttons[i].disabled = true;
     var err = panel && panel.querySelector('.crw-err');
@@ -20575,7 +20669,12 @@
       included: true,
       _blank_job: false,
       wo_mode: _defaultJobCardWoMode(),
-      requires_work_order_id: isPerMetreUser(),
+      // Every trade may invoice a job as a Work Order (WO allocated less the
+      // work-order amounts paid to other trades, labour and other deductions),
+      // whether or not ops issued a work_orders row. A server work order still
+      // prefills and locks the card when one exists (hydrate); its absence is
+      // not a reason to force hours-only. Marnin, 2026-09-07.
+      requires_work_order_id: false,
       wo_allocated: null,
       wo_labour_lines: [],
       wo_lump_lines: [],
@@ -21317,7 +21416,7 @@
         html += '<button type="button" ' + (hoursLocked ? 'disabled aria-disabled="true" title="This work order cannot switch to hours until you confirm" ' : '')
           + 'style="' + modeStyles + (cardMode === 'hours' ? modeActive : modeInactive)
           + (hoursLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'hours\')">Hours</button>';
-        var woLocked = !c.work_order_id && (c.requires_work_order_id || isPerMetreUser());
+        var woLocked = !c.work_order_id && !!c.requires_work_order_id;
         html += '<button type="button" ' + (woLocked ? 'disabled aria-disabled="true" title="No work order on this job yet" ' : '')
           + 'style="' + modeStyles + 'border-left:1px solid var(--sw-border);' + (cardMode === 'work_order' ? modeActive : modeInactive)
           + (woLocked ? 'opacity:0.45;cursor:not-allowed;' : '') + '" onclick="setJobCardMode(' + c._idx + ',\'work_order\')">Work Order</button>';
@@ -21810,7 +21909,7 @@
   // ── Card mode switcher: hours | work_order | commission [Q15, Q16] ──────
   window.setJobCardMode = function(idx, mode) {
     var c = _jobCards[idx]; if (!c) return;
-    if (mode === 'work_order' && !c.work_order_id && (c.requires_work_order_id || isPerMetreUser())) {
+    if (mode === 'work_order' && !c.work_order_id && c.requires_work_order_id) {
       toast('This job has no work order yet. Invoice hours, or wait for the work order to load.', true);
       return;
     }
@@ -24847,6 +24946,8 @@
     var reassign = ctx.mode === 'reassign';
     var ref = model.ref || '';
     var curCrew = model.crew || '';
+    _allocSel.currentUserId = reassign ? String(row.user_id || (row.user && row.user.id) || '') : '';
+    _allocSel.currentName = curCrew;
     var openAction = (model.type === 'makesafe') ? 'openMakesafeV5Detail' : 'openJob';
     var openArg = row._makesafePool ? '' : (row.id || '');
     // Stamp the job type onto the sheet so the primary Allocate action resolves
@@ -24858,7 +24959,7 @@
       '<div class="at">' + esc(model.sub || 'Site TBC') + '</div>' +
       '<div class="as">' + esc(model.typeLabel || 'Job') + (ref ? ' &middot; ' + esc(ref) : '') + '</div>' +
       '<div class="ameta">' + (reassign
-        ? ('Reassign' + (curCrew ? ' &middot; now ' + esc(curCrew) : ''))
+        ? ('Change crew' + (curCrew ? ' &middot; now ' + esc(curCrew) : ''))
         : ('New allocation &middot; ' + esc(AllocateCore.fmtDate(ctx.scheduledDate)))) + '</div>' +
       '<button class="alloc-openjob" onclick="closeAllocateSheet();' + openAction + '(\'' + esc(job.id || '') + '\',\'' + esc(openArg) + '\')">Open job details <span class="ar" aria-hidden="true">&#8599;</span></button>';
 
@@ -24869,14 +24970,21 @@
       return aid === bid ? String(a.name).localeCompare(String(b.name)) : (aid ? -1 : 1);
     });
     var mount = document.getElementById('allocRoster');
+    var rosterLabel = document.getElementById('allocRosterLabel');
+    if (rosterLabel) rosterLabel.textContent = reassign ? 'Add or swap crew' : 'Assign to crew';
+    _renderAllocCurrentCrew(reassign ? { loading: true } : null);
+    if (reassign) _loadAllocCurrentCrew(job.id, ref);
     if (!roster.length) {
       mount.innerHTML = '<div class="alloc-empty">No crew found on the roster.</div>';
     } else {
       var curId = row.user_id || (row.user && row.user.id) || null;
-      var defaultCrew = roster.filter(function (u) { return _user && String(u.id) === String(_user.id); })[0] || roster[0];
+      // Changing crew starts from who is on the job now, so tapping a second
+      // person ADDS them. A new allocation still starts from the manager.
+      var currentOnRoster = reassign && curId ? roster.filter(function (u) { return String(u.id) === String(curId); })[0] : null;
+      var defaultCrew = currentOnRoster || roster.filter(function (u) { return _user && String(u.id) === String(_user.id); })[0] || roster[0];
       _allocSel.userId = String(defaultCrew.id); _allocSel.crew = defaultCrew;
       _allocSel.userIds = [String(defaultCrew.id)]; _allocSel.crews = [defaultCrew];
-      mount.innerHTML = '<div class="alloc-label" style="margin-bottom:8px">Crew · tap to select one or more</div>' + roster.map(function (u) {
+      mount.innerHTML = '<div class="alloc-label" style="margin-bottom:8px">' + (reassign ? 'Crew · keep who stays, tap to add, untick to swap' : 'Crew · tap to select one or more') + '</div>' + roster.map(function (u) {
         var isCur = reassign && curId && String(u.id) === String(curId);
         var isDefault = String(u.id) === String(defaultCrew.id);
         return '<button type="button" class="alloc-crew' + (isCur ? ' cur' : '') + (isDefault ? ' sel' : '') + '" onclick="selectAllocCrew(this,\'' + esc(u.id) + '\')">' +
@@ -24943,7 +25051,22 @@
     var who = names.length <= 2 ? names.join(' & ') : (names.slice(0, 2).join(', ') + ' +' + (names.length - 2));
     var what = model.ref || model.sub || 'job';
     if (ctx.mode === 'reassign') {
-      lineEl.textContent = (names.length > 1 ? 'Assign ' : 'Reassign ') + what + ' to ' + who;
+      var curId = String(sel.currentUserId || '');
+      var keepsCurrent = !!curId && (sel.userIds || []).indexOf(curId) !== -1;
+      var added = (sel.crews || []).filter(function (c) { return c && String(c.id) !== curId; }).map(function (c) { return c.name || 'crew'; });
+      var addedWho = added.length <= 2 ? added.join(' & ') : (added.slice(0, 2).join(', ') + ' +' + (added.length - 2));
+      if (keepsCurrent && !added.length) {
+        lineEl.textContent = (sel.currentName || 'Current crew') + ' stays on ' + what + ' · nothing to change';
+        if (btn) { btn.disabled = true; btn.textContent = 'No change'; }
+        return;
+      }
+      if (keepsCurrent) {
+        lineEl.textContent = 'Add ' + addedWho + ' to ' + what + ' · ' + (sel.currentName || 'current crew') + ' stays';
+      } else {
+        lineEl.textContent = 'Replace ' + (sel.currentName || 'current crew') + ' with ' + addedWho + ' on ' + what;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = keepsCurrent ? (added.length > 1 ? 'Add ' + added.length : 'Add') : 'Swap'; }
+      return;
     } else {
       var eff = AllocateCore.withSchedule(ctx, _readAllocSchedule());
       var line = 'Assign ' + what + ' to ' + who + ' · ' + AllocateCore.fmtDate(eff.scheduledDate);
@@ -25032,12 +25155,16 @@
         ops.push(AllocateCore.buildPayload(AllocateCore.withSchedule(AllocateCore.withUser(ctx, uid), sched)));
       });
     } else {
-      // Assigned job: first pick reassigns the existing assignment (silent path);
-      // each additional pick creates a new assignment on the same job.
+      // Assigned job. The person already on the job never needs a write. If
+      // they were unticked, the first new pick takes over their assignment
+      // (swap); every other pick is added as a new assignment on the same job.
       var baseDate = AllocateCore.normDate(sched.date) || String((sel.model._boardRow || {}).scheduled_date || '').slice(0, 10) || AllocateCore.awstToday();
       var st = AllocateCore.normTime(sched.start), en = AllocateCore.normTime(sched.end);
-      users.forEach(function (uid, i) {
-        if (i === 0) { ops.push(AllocateCore.buildPayload(AllocateCore.withUser(ctx, uid))); return; }
+      var curId = String(sel.currentUserId || '');
+      var keepsCurrent = !!curId && users.indexOf(curId) !== -1;
+      var newUsers = users.filter(function (uid) { return String(uid) !== curId; });
+      newUsers.forEach(function (uid, i) {
+        if (i === 0 && !keepsCurrent) { ops.push(AllocateCore.buildPayload(AllocateCore.withUser(ctx, uid))); return; }
         var c = { mode: 'create', jobId: jobId, userId: uid, scheduledDate: baseDate };
         if (st) c.startTime = st;
         if (en) c.endTime = en;
@@ -25046,6 +25173,73 @@
     }
     return ops;
   }
+
+  // ── Current crew on an assigned job (allocate sheet) ──
+  // Read from trade_job_detail so every person and every day is listed, not
+  // only the one row this Board card represents.
+  function _renderAllocCurrentCrew(state) {
+    var mount = document.getElementById('allocCurrent');
+    if (!mount) return;
+    if (!state) { mount.innerHTML = ''; return; }
+    var h = '<div class="alloc-current" data-alloc-current><div class="alloc-label">On this job now</div>';
+    if (state.loading) {
+      h += '<div class="alloc-empty">Loading crew...</div>';
+    } else if (state.error) {
+      h += '<div class="alloc-empty">Could not load the current crew: ' + esc(state.error) + '</div>';
+    } else if (!(state.members || []).length) {
+      h += '<div class="alloc-empty">Nobody allocated yet.</div>';
+    } else {
+      state.members.forEach(function (member) {
+        var days = crewMemberDaysLabel(member);
+        h += '<div class="alloc-current-row" data-alloc-current-member="' + esc(member.key) + '"><span class="who">' + esc(member.name || 'Name not on file')
+          + (member.isLead ? ' · lead' : '') + (days ? '<small>' + esc(days) + '</small>' : '') + '</span>';
+        if (crewMemberRemovable(member)) {
+          h += '<button type="button" class="alloc-remove" ' + (state.busy ? 'disabled ' : '') + 'onclick="removeAllocCurrentCrew(\'' + esc(member.key) + '\')">Remove</button>';
+        } else {
+          h += '<span class="locked">Work done · office adjusts</span>';
+        }
+        h += '</div>';
+      });
+    }
+    mount.innerHTML = h + '</div>';
+  }
+
+  function _loadAllocCurrentCrew(jobId, jobLabel) {
+    var sel = _allocSel;
+    if (!sel || !jobId) { _renderAllocCurrentCrew(null); return; }
+    api('trade_job_detail', { jobId: jobId }).then(function (res) {
+      if (_allocSel !== sel) return;
+      var members = TradeCrewCore.build(res || {}).members;
+      sel.currentCrew = { members: members, jobId: jobId, jobLabel: jobLabel || ((res && res.job && res.job.job_number) || '') };
+      _renderAllocCurrentCrew(sel.currentCrew);
+    }).catch(function (err) {
+      if (_allocSel !== sel) return;
+      _renderAllocCurrentCrew({ error: friendlyError(err) });
+    });
+  }
+
+  window.removeAllocCurrentCrew = function (memberKey) {
+    var sel = _allocSel;
+    if (!sel || !sel.currentCrew || (_allocGuard && _allocGuard.busy)) return;
+    var member = (sel.currentCrew.members || []).filter(function (m) { return m.key === memberKey; })[0];
+    if (!member || !crewMemberRemovable(member)) return;
+    sel.currentCrew.busy = true;
+    _renderAllocCurrentCrew(sel.currentCrew);
+    removeAssignmentsForMember(member, sel.currentCrew.jobLabel).then(function (res) {
+      if (_allocSel !== sel) return;
+      sel.currentCrew.busy = false;
+      if (!res) { _renderAllocCurrentCrew(sel.currentCrew); return; }
+      toast('Removed ' + res.name + ' from ' + (sel.currentCrew.jobLabel || 'the job'));
+      closeAllocateSheet();
+      _refreshBoardSilent();
+      if (_currentView === 'schedule') renderNewCalendar();
+    }).catch(function (err) {
+      if (_allocSel !== sel) return;
+      sel.currentCrew.busy = false;
+      _renderAllocCurrentCrew(sel.currentCrew);
+      toast('Could not remove: ' + friendlyError(err), true);
+    });
+  };
 
   // Proven single-write path: optimistic apply + rollback + double-fire guard.
   function _confirmAllocateSingle() {
@@ -25082,8 +25276,23 @@
     if (!_allocSel || !_boardCache) return;
     var sel = _allocSel, users = sel.userIds || [];
     if (!users.length) return;
-    // One person → the proven optimistic single-write path (no regression).
-    if (users.length === 1) { sel.userId = users[0]; sel.crew = sel.crews[0]; return _confirmAllocateSingle(); }
+    // Changing crew: the person already on the job is never re-posted. Only
+    // the current person ticked = nothing to write.
+    if (sel.ctx && sel.ctx.mode === 'reassign' && sel.currentUserId) {
+      var others = users.filter(function (uid) { return String(uid) !== String(sel.currentUserId); });
+      if (!others.length) { toast('Already assigned'); return; }
+      var keepsCurrent = users.indexOf(String(sel.currentUserId)) !== -1;
+      // Exactly one new person and the current one unticked → the proven single swap write.
+      if (others.length === 1 && !keepsCurrent) {
+        sel.userId = others[0];
+        sel.crew = (sel.crews || []).filter(function (c) { return c && String(c.id) === String(others[0]); })[0] || sel.crew;
+        return _confirmAllocateSingle();
+      }
+      // Otherwise fall through to the multi-write path (adds, or swap + adds).
+    } else if (users.length === 1) {
+      // One person → the proven optimistic single-write path (no regression).
+      sel.userId = users[0]; sel.crew = sel.crews[0]; return _confirmAllocateSingle();
+    }
     // Multiple people → fire one supported allocate_job per pick, sequentially.
     if (_allocGuard && _allocGuard.busy) return;
     if (_allocGuard) _allocGuard.busy = true;
@@ -25096,7 +25305,7 @@
       if (i >= ops.length) {
         if (_allocGuard) _allocGuard.busy = false;
         closeAllocateSheet();
-        toast(failed ? ('Assigned ' + done + ' of ' + ops.length + ' — ' + failed + ' failed') : ('Allocated ' + done + ' crew'), !!failed);
+        toast(failed ? ('Assigned ' + done + ' of ' + ops.length + ' — ' + failed + ' failed') : (isCreateMode ? ('Allocated ' + done + ' crew') : ('Crew updated · ' + done + ' change' + (done === 1 ? '' : 's'))), !!failed);
         if (sel.model && sel.model.type === 'fencing' && isCreateMode && done > 0 && ops[0]) {
           _selectFencingBoardWeek(ops[0].scheduledDate, 'scheduled');
         }

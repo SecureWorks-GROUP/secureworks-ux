@@ -597,7 +597,10 @@ cycles in `ops-dashboard.md`; keep those documents authoritative rather than
 duplicating the contracts here.
 
 Gotchas:
-- `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global. To
+- `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global —
+  an inline `onclick="fn(...)"` on a rendered string reaches ONLY `window.fn`.
+  `generatePOPdf` shipped as a dead button this way; expose the fn or the
+  button silently throws. To
   QA internal renderers, serve over http (the browser extension blocks `file://`)
   and eval the sentinel-delimited modules in a harness.
 - Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.

@@ -72,6 +72,32 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   job read-only. Failed writes leave the roster truthful rather than applying
   an optimistic badge. The shared roster renderer is used by standard detail
   and the make-safe report surface.
+- **Scope tab reading order (2026-09-08)**: Instructions (work order
+  `special_instructions` + estimated hours, else the scoping tool's installer
+  note) → **Scope of works** (the sent quote's writing and quantities, accepted
+  quote open, older quotes collapsed, `notes` shown) → **Build spec**
+  (dimensions/colours) → work order lines → job videos → Materials & Receipts.
+  The crew line under the tabs is gone; the roster panel above the tabs is the
+  crew. Guard: `tests/e2e/trade-job-scope-clarity.spec.js`.
+- **Open quote (no prices)**: when `trade_job_detail` carries a
+  `quote_extracts` pointer (frozen pack + client send), the quote card and the
+  Files tab offer "Open quote". `openTradeQuoteExtract` fetches
+  `trade_quote_extract&format=html` with the trade JWT and shows it in the
+  in-app `#quoteExtractOverlay` (iframe `srcdoc`) with Print / Save PDF. A
+  pack without an extract shows "No file yet" — never a priced quote PDF.
+  Helpers live in `// <trade-scope-media>` (`tradeQuoteExtracts`,
+  `tradeQuoteExtractForPack`, `renderTradeQuoteDocumentRows`) and are pinned by
+  `scripts/test-trade-scope-media.js`.
+- **Files tab**: "Quotes & orders" (quote rows + PO PDF per approved PO) →
+  "Approvals & Documents" (`renderTradeDocuments`) → videos → site photos. The
+  old second unguarded document list was removed (it duplicated every doc).
+- **PO PDF**: `generatePOPdf` (jsPDF, description + qty only, no money) is on
+  `window` — the Work tab button called it through an inline `onclick` and was
+  a dead ReferenceError before 2026-09-08. Scope tab and Files tab offer it for
+  authorised/billed POs; drafts keep the "do not purchase" lock.
+- **Client phone**: every allocated trade (tier 1 included) gets Call in the
+  action bar and the number in the hero; view-only (another crew's job) hides
+  both. `canCall()` no longer gates on tier 2.
 - **Work order**: structured scope items + special instructions + PDF link
 - **Materials / Purchase Orders**: PO cards with status badges, line items, delivery dates
   - Draft POs show lock icon: "PO not yet approved — do not purchase"

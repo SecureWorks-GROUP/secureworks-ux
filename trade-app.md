@@ -162,6 +162,13 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   `CompleteInvoiceCore` in `// <trade-complete-invoice>`, pinned by
   `scripts/test-trade-complete-invoice.js`; guard
   `tests/e2e/trade-complete-to-invoice.spec.js`.
+- **Reopen a submitted make-safe report (2026-09-08)**: the submitted panel
+  shows the signature and two actions: "Edit this report" (confirm, then
+  `unlock_makesafe_report {job_id}`; the server refuses once the office has
+  sent the report or docs, or the job is invoiced) and "Log a separate
+  attendance" (existing re-attend). After unlock the tab reloads and the form
+  comes back prefilled from `checklist_json`; submit rewrites the same visit's
+  report. Guard: `tests/e2e/trade-makesafe-unlock-report.spec.js`.
 - **Client phone**: every allocated trade (tier 1 included) gets Call in the
   action bar and the number in the hero; view-only (another crew's job) hides
   both. `canCall()` no longer gates on tier 2.

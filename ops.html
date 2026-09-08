@@ -20006,7 +20006,7 @@ function openMakesafeRawTradeReport(reportId) {
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px;">';
   html += renderMakesafeRawReportField('Attendance cycle', 'Visit ' + cycleNumber, false);
   html += renderMakesafeRawReportField('Submitted at', report.submitted_at ? fmtMakesafeSendDate(report.submitted_at) : report.created_at, false);
-  html += renderMakesafeRawReportField('Submitted by', report.submitted_by || report.submitted_by_name || 'trade app', false);
+  html += renderMakesafeRawReportField('Submitted by', report.submitted_by_name || report.submitted_by || 'trade app', false);
   html += renderMakesafeRawReportField('Report status', report.status || 'submitted', false);
   html += renderMakesafeRawReportField('Arrival time', checklist.arrival_time, false);
   html += renderMakesafeRawReportField('MakeSafe type', submittedType, false);
@@ -20033,6 +20033,11 @@ function openMakesafeRawTradeReport(reportId) {
     html += '</div>';
   } else {
     html += '<div style="font-size:12px;color:var(--sw-text-sec);">No photos returned in this job detail payload.</div>';
+  }
+  // 2026-09-08: the trade's signature was returned but never shown.
+  if (report.signature_data) {
+    html += '<div style="font-size:10px;font-weight:850;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.35px;margin:14px 0 6px;">Signature' + (report.signature_name ? ' · ' + escapeHtml(report.signature_name) : '') + '</div>';
+    html += '<img src="' + escapeHtml(report.signature_data) + '" alt="Signature" data-raw-report-signature style="max-width:260px;background:#fff;border:1px solid var(--sw-border);border-radius:6px;">';
   }
   html += '</div>';
   modal.innerHTML = html;

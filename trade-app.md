@@ -138,6 +138,19 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   view / weekly invoice pick it up. The row then reads "2 hrs on your week
   (w/e Sun 13 Sep). Tap to change." Guard:
   `tests/e2e/trade-makesafe-roof-report-hours.spec.js`.
+- **My money (2026-09-08)**: Hours view and Invoice history carry a "My money"
+  button (`openMyMoney` → `my_money`). It shows ABN and GST status, this month
+  and financial-year-to-date cards (Earned, Paid to you, Still owed, with Super
+  and GST underneath), a by-month table, and every invoice with its Xero state
+  ("Paid 10 Aug 2026", "Approved, awaiting payment", "With the office",
+  "Voided"). Pure `MyMoneyCore` in `// <trade-my-money>`, pinned by
+  `scripts/test-trade-my-money.js`; guard `tests/e2e/trade-my-money.spec.js`.
+- **GST from the profile (2026-09-08)**: the Profile "My Details" form has a
+  "GST registered" toggle (`#tdGst`) saved explicitly through
+  `update_trade_profile` (server merges, so other phones cannot wipe it). The
+  form prefills from the server profile first. `_invoiceGstDefault` no longer
+  falls back to browser storage: the server profile (or the invoice's own
+  `gst_on`) is the only authority.
 - **Client phone**: every allocated trade (tier 1 included) gets Call in the
   action bar and the number in the hero; view-only (another crew's job) hides
   both. `canCall()` no longer gates on tier 2.

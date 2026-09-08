@@ -3,7 +3,7 @@
     {
       "id": "e2e-assignment-1",
       "user_id": "e2e-installer",
-      "status": "scheduled",
+      "status": "confirmed",
       "scheduled_date": "{{TODAY}}",
       "start_time": "08:30",
       "crew_name": "E2E Installer",

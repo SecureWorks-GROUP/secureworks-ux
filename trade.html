@@ -2471,6 +2471,49 @@
     }
 
     /* Large Dimension Display */
+    /* ── My money (2026-09-08) ── */
+    .mm-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .mm-head h2 { font-size: 18px; font-weight: 800; color: var(--sw-dark); margin: 0; }
+    .mm-head-btns { display: flex; gap: 6px; }
+    .mm-profile { background: var(--sw-dark); color: #fff; border-radius: var(--sw-radius); padding: 14px; margin-bottom: 12px; }
+    .mm-profile-name { font-size: 16px; font-weight: 800; }
+    .mm-profile-line { font-size: 12px; opacity: .85; margin-top: 2px; font-family: var(--sw-mono); }
+    .mm-badges { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    .mm-badge { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 4px 9px; border-radius: 12px; }
+    .mm-badge.on { background: #2ECC71; color: #0B3D23; }
+    .mm-badge.off { background: rgba(255,255,255,.18); color: #fff; }
+    .mm-link { background: none; border: none; color: #fff; text-decoration: underline; font-family: var(--sw-font); font-size: 12px; cursor: pointer; padding: 0; }
+    .mm-card { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 14px; margin-bottom: 12px; }
+    .mm-card-t { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 800; color: var(--sw-dark); margin-bottom: 10px; }
+    .mm-card-n { font-size: 11px; font-weight: 600; color: var(--sw-text-sec); }
+    .mm-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .mm-stat { background: var(--sw-light); border-radius: 10px; padding: 10px 8px; text-align: center; }
+    .mm-stat-v { font-size: 17px; font-weight: 800; color: var(--sw-dark); letter-spacing: -0.01em; word-break: break-all; }
+    .mm-stat-l { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--sw-text-sec); margin-top: 3px; }
+    .mm-stat.paid .mm-stat-v { color: #1E8449; }
+    .mm-stat.owed .mm-stat-v { color: var(--sw-orange); }
+    .mm-sub { font-size: 12px; color: var(--sw-text-sec); margin-top: 10px; }
+    .mm-note { font-size: 11px; color: #92400E; background: #FEF3C7; border-radius: 8px; padding: 7px 9px; margin-top: 8px; line-height: 1.4; }
+    .mm-table-wrap { overflow-x: auto; }
+    .mm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mm-table th { text-align: right; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--sw-text-sec); padding: 0 4px 6px; }
+    .mm-table th:first-child, .mm-table td:first-child { text-align: left; }
+    .mm-table td { text-align: right; padding: 7px 4px; border-top: 1px solid var(--sw-border); color: var(--sw-dark); font-variant-numeric: tabular-nums; }
+    .mm-table td.owed { color: var(--sw-orange); font-weight: 700; }
+    .mm-inv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--sw-border); cursor: pointer; }
+    .mm-inv:first-of-type { border-top: none; }
+    .mm-inv-when { font-size: 13px; font-weight: 700; color: var(--sw-dark); }
+    .mm-inv-num { font-size: 11px; color: var(--sw-text-sec); font-family: var(--sw-mono); margin-top: 2px; }
+    .mm-inv-r { text-align: right; flex: 0 0 auto; }
+    .mm-inv-amt { font-size: 14px; font-weight: 800; color: var(--sw-dark); }
+    .mm-status { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; padding: 3px 7px; border-radius: 10px; margin-top: 3px; background: var(--sw-light); color: var(--sw-text-sec); }
+    .mm-status.paid { background: #D4EDDA; color: #155724; }
+    .mm-status.owed { background: #FFEDD5; color: #9A3412; }
+    .mm-status.review { background: #FEF3C7; color: #92400E; }
+    .mm-status.void { background: #F3F4F6; color: #6B7280; text-decoration: line-through; }
+    .mm-empty { font-size: 13px; color: var(--sw-text-sec); padding: 8px 0; }
+    .mm-foot { font-size: 11px; color: var(--sw-text-sec); line-height: 1.5; padding: 4px 2px 20px; }
+    .td-gst { margin: 4px 0 14px; }
     /* ── Roof report + one-tap hours (2026-09-08) ── */
     .rr-option { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 14px; margin: 0 0 14px; }
     .rr-option.rr-loading { font-size: 12px; color: var(--sw-text-sec); }
@@ -19039,7 +19082,7 @@
     html += '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--sw-border)">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
     html += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark)">Recent Activity</div>';
-    html += '<button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">View All</button>';
+    html += '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-small" data-open-my-money onclick="openMyMoney()">My money</button><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">View All</button></div>';
     html += '</div>';
     html += '<div id="hoursRecentActivity"><div style="font-size:12px;color:var(--sw-text-sec)"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading...</div></div>';
     html += '</div>';
@@ -20410,12 +20453,142 @@
     });
   };
 
+  // ══════════════════════════════════════════════════════════════════════
+  // 2026-09-08 (Marnin) — MY MONEY. "He needs to see the actual invoices he
+  // is creating and sending to us, year to date, how much per month, and when
+  // we reconcile one of his bills as paid it shows there. How much they have
+  // earned, how much they are still owed, and how much is super." Data comes
+  // from `my_money` (server aggregates; Xero paid state on every invoice).
+  // MyMoneyCore is PURE (no DOM/network) and pinned by
+  // scripts/test-trade-my-money.js.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-my-money>
+  var MyMoneyCore = (function () {
+    'use strict';
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function money(n) {
+      n = Number(n || 0);
+      if (!isFinite(n)) n = 0;
+      var neg = n < 0;
+      var s = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      return (neg ? '-' : '') + '$' + s;
+    }
+    function dateShort(iso) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+      if (!m) return '';
+      return Number(m[3]) + ' ' + MON[Number(m[2]) - 1] + ' ' + m[1];
+    }
+    // One honest line per invoice: what Xero and the office say about it.
+    function statusOf(row) {
+      row = row || {};
+      var bill = String(row.xero_bill_status || '').toUpperCase();
+      var ours = String(row.status || '');
+      if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
+      if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
+      if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
+      if (ours === 'ops-reject' || ours === 'failed') return { label: 'Not accepted', cls: 'void' };
+      if (ours === 'pending_ops_review' || ours === 'queried') return { label: 'Under review', cls: 'review' };
+      if (bill === 'AUTHORISED') return { label: 'Approved, awaiting payment', cls: 'owed' };
+      if (Number(row.amount_paid || 0) > 0 && Number(row.outstanding || 0) > 0) return { label: 'Part paid', cls: 'owed' };
+      return { label: 'With the office', cls: 'sent' };
+    }
+    function profileHTML(p) {
+      p = p || {};
+      var h = '<div class="mm-profile">';
+      h += '<div class="mm-profile-name">' + esc(p.name || 'My money') + '</div>';
+      h += '<div class="mm-profile-line">' + (p.abn ? 'ABN ' + esc(p.abn) : 'No ABN on file') + '</div>';
+      h += '<div class="mm-badges"><span class="mm-badge ' + (p.gst_registered ? 'on' : 'off') + '" data-mm-gst="' + (p.gst_registered ? 'on' : 'off') + '">' + (p.gst_registered ? 'GST registered' : 'Not GST registered') + '</span>';
+      h += '<button type="button" class="mm-link" onclick="showView(\'profile\')">Update in Profile</button></div>';
+      h += '</div>';
+      return h;
+    }
+    function statHTML(label, value, cls) {
+      return '<div class="mm-stat' + (cls ? ' ' + cls : '') + '"><div class="mm-stat-v">' + esc(value) + '</div><div class="mm-stat-l">' + esc(label) + '</div></div>';
+    }
+    function periodHTML(title, t, opts) {
+      t = t || {}; opts = opts || {};
+      var h = '<div class="mm-card" data-mm-period="' + esc(opts.key || '') + '">';
+      h += '<div class="mm-card-t">' + esc(title) + '<span class="mm-card-n">' + Number(t.invoices || 0) + (Number(t.invoices || 0) === 1 ? ' invoice' : ' invoices') + '</span></div>';
+      h += '<div class="mm-stats">';
+      h += statHTML('Earned', money(t.gross_earned), 'earned');
+      h += statHTML('Paid to you', money(t.paid_total), 'paid');
+      h += statHTML('Still owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
+      h += '</div>';
+      h += '<div class="mm-sub">Super ' + money(t.super_amount) + (Number(t.gst || 0) > 0 ? ' &middot; GST ' + money(t.gst) : '') + ' &middot; Payable ' + money(t.payable) + '</div>';
+      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note">' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Cash figures are still counted.</div>';
+      h += '</div>';
+      return h;
+    }
+    function monthsHTML(months) {
+      months = months || [];
+      if (!months.length) return '';
+      var h = '<div class="mm-card"><div class="mm-card-t">By month</div><div class="mm-table-wrap"><table class="mm-table" data-mm-months><thead><tr><th>Month</th><th>Earned</th><th>Super</th><th>Paid</th><th>Owed</th></tr></thead><tbody>';
+      months.forEach(function (m) {
+        h += '<tr data-mm-month="' + esc(m.month) + '"><td>' + esc(m.label) + '</td><td>' + money(m.gross_earned) + '</td><td>' + money(m.super_amount) + '</td><td>' + money(m.paid_total) + '</td><td class="' + (Number(m.outstanding || 0) > 0 ? 'owed' : '') + '">' + money(m.outstanding) + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+      return h;
+    }
+    function invoiceRowHTML(row) {
+      row = row || {};
+      var st = statusOf(row);
+      var when = row.week_end ? 'Week ending ' + dateShort(row.week_end) : (row.created_at ? dateShort(row.created_at) : '');
+      var amount = row.figures_ok === false && row.trade_payable == null && row.total_inc == null ? 'Figures unavailable' : money(row.payable);
+      var onclick = String(row.status || '') === 'draft' ? "openInvoiceDraft('" + esc(row.id) + "')" : "viewInvoiceDetail('" + esc(row.id) + "')";
+      var h = '<div class="mm-inv" data-mm-invoice="' + esc(row.id) + '" data-mm-status="' + esc(st.cls) + '" onclick="' + onclick + '">';
+      h += '<div class="mm-inv-l"><div class="mm-inv-when">' + esc(when) + '</div><div class="mm-inv-num">' + esc(row.invoice_number || '') + (row.counts === false ? ' (not counted)' : '') + '</div></div>';
+      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amount) + '</div><span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+      h += '</div>';
+      return h;
+    }
+    function viewHTML(res) {
+      res = res || {};
+      var h = '<div class="mm" data-mm-view>';
+      h += '<div class="mm-head"><h2>My money</h2><div class="mm-head-btns"><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">Invoices</button><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div></div>';
+      h += profileHTML(res.profile);
+      h += periodHTML((res.month && res.month.label) ? res.month.label : 'This month', res.month, { key: 'month' });
+      h += periodHTML((res.fy_label || 'This financial year') + ' to date', res.fytd, { key: 'fytd' });
+      h += monthsHTML(res.months);
+      var rows = Array.isArray(res.invoices) ? res.invoices : [];
+      h += '<div class="mm-card"><div class="mm-card-t">Every invoice<span class="mm-card-n">' + rows.length + '</span></div>';
+      if (!rows.length) h += '<div class="mm-empty">No invoices yet. Your first weekly invoice will show here with its paid status.</div>';
+      rows.forEach(function (r) { h += invoiceRowHTML(r); });
+      h += '</div>';
+      h += '<div class="mm-foot">Paid status comes from Xero when the office reconciles your bill. Super is paid to your fund separately and is shown so the numbers add up.</div>';
+      h += '</div>';
+      return h;
+    }
+    return { money: money, dateShort: dateShort, statusOf: statusOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML };
+  })();
+  // </trade-my-money>
+
+  window.openMyMoney = function () {
+    _leaveWeeklyWorkOrderInvoice();
+    var req = { ctx: _invoiceApiContext(), seq: ++_invoiceViewSeq };
+    var container = document.getElementById('hoursContent');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading your money...</div>';
+    api('my_money', { months: 12 }).then(function (res) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
+      if (res && res.profile && _user) {
+        _user.trade_details = Object.assign({}, _user.trade_details || {}, { gstRegistered: res.profile.gst_registered === true });
+        if (res.profile.abn) _user.abn = res.profile.abn;
+      }
+      container.innerHTML = MyMoneyCore.viewHTML(res);
+      container.scrollTop = 0;
+    }).catch(function (err) {
+      if (req.seq !== _invoiceViewSeq || !_invoiceApiCurrent(req.ctx)) return;
+      container.innerHTML = '<div class="hours-no-data">Could not load your money: ' + esc(friendlyError(err)) + '<br><button class="btn btn-secondary btn-small" style="margin-top:10px" onclick="openMyMoney()">Retry</button></div>';
+    });
+  };
+
   function renderInvoiceHistory(invoices) {
     var container = document.getElementById('hoursContent');
     var html = '';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
     html += '<h2 style="font-size:18px;font-weight:700;color:var(--sw-dark);margin:0">My Invoices</h2>';
-    html += '<button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button>';
+    html += '<div style="display:flex;gap:6px"><button class="btn btn-secondary btn-small" data-open-my-money onclick="openMyMoney()">My money</button><button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back</button></div>';
     html += '</div>';
 
     if (invoices.length === 0) {
@@ -20427,6 +20600,9 @@
     invoices.forEach(function(inv) {
       var statusCls = (inv.status || 'draft').replace(/ /g, '_');
       var label = (inv.status || 'draft').replace(/_/g, ' ');
+      // 2026-09-08: Xero paid state on the row (my_money carries the detail).
+      if (inv.paid || inv.status === 'paid') { statusCls = 'paid'; label = 'paid' + (inv.paid_at ? ' ' + MyMoneyCore.dateShort(inv.paid_at) : ''); }
+      else if (String(inv.xero_bill_status || '').toUpperCase() === 'AUTHORISED') { label = 'approved, awaiting payment'; }
       var dateLabel = inv.week_ending ? 'Week ending ' + formatDateShort(inv.week_ending) : (inv.invoice_number || 'Expense Invoice');
       var onclick = inv.status === 'draft' ? 'openInvoiceDraft(\'' + inv.id + '\')' : 'viewInvoiceDetail(\'' + inv.id + '\')';
       html += '<div class="inv-history-item" onclick="' + onclick + '">';
@@ -20463,8 +20639,10 @@
     var tradeDetails = (source && source.trade_details) || (_user && _user.trade_details) || {};
     var profile = _invoiceBool(tradeDetails, ['gst_on', 'gst_registered', 'gstRegistered']);
     if (profile != null) return profile;
-    var saved = loadTradeDetails();
-    return saved.gstRegistered === true;
+    // 2026-09-08: the server profile is the only GST authority. Browser
+    // storage used to decide this on a fresh phone and could under-invoice
+    // a registered trade by 10%.
+    return false;
   }
 
   function _invoiceSuperRate(value) {
@@ -26083,7 +26261,11 @@
     html += '</div>';
 
     // ── My Details (for invoices / PDF) ──
-    var saved = loadTradeDetails();
+    // Server profile first (it is what the invoice uses); browser copy only
+    // fills gaps for a phone that saved before the account sync existed.
+    var saved = Object.assign({}, loadTradeDetails(), (_user && _user.trade_details) || {});
+    if (_user && _user.abn) saved.abn = _user.abn;
+    var gstOn = (_user && _user.trade_details && _user.trade_details.gstRegistered === true);
     html += '<div style="margin-top:16px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';
     html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:4px">My Details</div>';
     html += '  <div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:12px">Used on your invoice PDFs</div>';
@@ -26106,6 +26288,9 @@
       html += '</div>';
     });
 
+    html += '<div class="td-gst"><label style="font-size:12px;color:var(--sw-text-sec);display:block;margin-bottom:5px">GST registered</label>';
+    html += '<div class="rr-toggle" id="tdGst" data-value="' + (gstOn ? 'yes' : 'no') + '"><button type="button" class="rr-tbtn' + (gstOn ? ' on' : '') + '" data-td-gst="yes" onclick="tdGstToggle(this)">Yes, add 10% GST</button><button type="button" class="rr-tbtn' + (gstOn ? '' : ' on') + '" data-td-gst="no" onclick="tdGstToggle(this)">No GST</button></div>';
+    html += '<div class="rr-help">Only turn this on if your ABN is registered for GST. New invoices then add GST by default; you can still change it per invoice.</div></div>';
     html += '<button onclick="saveTradeDetails()" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font)">Save Details</button>';
     html += '<div id="tdSaveStatus" style="font-size:12px;color:var(--sw-text-sec);margin-top:6px;text-align:center"></div>';
     html += '</div>';
@@ -28451,6 +28636,13 @@
     } catch (e) { return {}; }
   }
 
+  window.tdGstToggle = function(btn) {
+    var wrap = document.getElementById('tdGst'); if (!wrap || !btn) return;
+    var v = btn.getAttribute('data-td-gst');
+    wrap.setAttribute('data-value', v);
+    Array.prototype.forEach.call(wrap.querySelectorAll('[data-td-gst]'), function(b) { b.classList.toggle('on', b === btn); });
+  };
+
   window.saveTradeDetails = function() {
     var details = {
       fullName:      (document.getElementById('tdFullName') || {}).value || '',
@@ -28461,9 +28653,9 @@
       accountNo:     (document.getElementById('tdAccountNo') || {}).value || '',
       accountName:   (document.getElementById('tdAccountName') || {}).value || '',
       licence:       (document.getElementById('tdLicence') || {}).value || '',
-      // Preserve the known backend/profile choice. The invoice builder owns
-      // per-invoice gst_on; editing bank details must not silently turn GST off.
-      gstRegistered: _invoiceGstDefault(_user),
+      // The GST toggle on this form is explicit; the server merges, so a
+      // phone that never saw the flag cannot wipe it.
+      gstRegistered: (function () { var t = document.getElementById('tdGst'); return t ? t.getAttribute('data-value') === 'yes' : _invoiceGstDefault(_user); })(),
     };
 
     // Save to localStorage immediately
@@ -28472,7 +28664,13 @@
     var status = document.getElementById('tdSaveStatus');
 
     // Sync to backend
-    api('update_trade_profile', null, details).then(function() {
+    api('update_trade_profile', null, details).then(function(res) {
+      if (res && res.profile && _user) {
+        _user.trade_details = res.profile.trade_details || _user.trade_details;
+        if (res.profile.abn !== undefined) _user.abn = res.profile.abn;
+      } else if (_user) {
+        _user.trade_details = Object.assign({}, _user.trade_details || {}, { gstRegistered: details.gstRegistered === true });
+      }
       if (status) { status.textContent = 'Saved to your account'; status.style.color = 'var(--sw-green)'; }
       toast('Details saved');
     }).catch(function(err) {

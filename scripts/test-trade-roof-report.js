@@ -68,6 +68,7 @@ check('no fee or dollar sign reaches the trade form', form.indexOf('$') === -1);
 check('brand is SecureWorks Group, never WA', form.indexOf('SecureWorks Group') !== -1 && form.indexOf('SecureWorks WA') === -1);
 check('no em dash in trade copy', form.indexOf('—') === -1);
 check('saved label shown', form.indexOf('Draft restored') !== -1);
+check('form says the words go onto the PDF verbatim', /data-rr-verbatim/.test(form) && /Word for word/.test(form));
 
 // ── collect (fake DOM) ──
 function fakeRoot(entries) {
@@ -110,6 +111,7 @@ check('draft card offers Continue', R.optionHTML({ status: 'draft' }, 'j1', {}).
 const done1 = R.optionHTML({ status: 'submitted' }, 'j1', { when: '2 min ago', docUrl: 'https://x/roof.pdf' });
 check('submitted card shows the PDF link', done1.indexOf('Roof report submitted') !== -1 && done1.indexOf('href="https://x/roof.pdf"') !== -1);
 check('submitted card without a doc explains where it lands', R.optionHTML({ status: 'submitted' }, 'j1', {}).indexOf('Files') !== -1);
+check('submitted card offers Rebuild PDF with the photo count', /data-rr-rebuild/.test(done1) && R.optionHTML({ status: 'submitted' }, 'j1', { photoCount: 137 }).indexOf('(137)') !== -1);
 check('option copy escapes', R.optionHTML({ status: 'none' }, "j'1", { title: '<x>' }).indexOf('&lt;x&gt;') !== -1);
 
 // ── hours ──

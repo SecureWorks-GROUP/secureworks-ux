@@ -2536,6 +2536,9 @@
     .rr-done { background: #D4EDDA; border: 1px solid #C3E6CB; border-radius: 8px; padding: 12px; }
     .rr-done-t { font-weight: 800; color: #155724; }
     .rr-done-s { font-size: 12px; color: #155724; margin-top: 4px; line-height: 1.4; }
+    .rr-verbatim { margin-top: 10px; background: #FFF7ED; border: 1px solid #FDBA74; border-radius: 8px; padding: 9px 11px; font-size: 13px; color: #9A3412; line-height: 1.45; }
+    .rr-rebuild { display: block; width: 100%; margin-top: 8px; min-height: 40px; border: 1.5px solid #155724; border-radius: 8px; background: #fff; color: #155724; font-family: var(--sw-font); font-size: 13px; font-weight: 800; cursor: pointer; }
+    .rr-rebuild:disabled { opacity: .6; }
     .rr-openpdf { display: flex; align-items: center; justify-content: center; margin-top: 10px; min-height: 44px; border-radius: 8px; background: var(--sw-dark); color: #fff; font-weight: 800; font-size: 14px; text-decoration: none; }
     .rr-form { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 16px 14px; margin: 0 0 16px; }
     .rr-title { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--sw-dark); }
@@ -13807,7 +13810,8 @@
       var fs = fieldsOf(tpl), secs = sectionsOf(tpl);
       var h = '<div class="rr-form" id="rrForm" data-rr-form>';
       h += '<div class="rr-head"><div class="rr-title">SecureWorks roof report</div>';
-      h += '<div class="rr-sub">Fill in what you saw on site. It saves as you go and becomes a SecureWorks Group PDF when you submit.</div></div>';
+      h += '<div class="rr-sub">Fill in what you saw on site. It saves as you go and becomes a SecureWorks Group PDF when you submit.</div>';
+      h += '<div class="rr-verbatim" data-rr-verbatim><strong>Word for word.</strong> Exactly what you type here goes onto the final PDF the builder receives. Full sentences, check your spelling, no shorthand.</div></div>';
       secs.forEach(function (sec) {
         var inSec = fs.filter(function (f) { return f.section === sec.key; });
         if (!inSec.length) return;
@@ -13858,6 +13862,7 @@
         h += '<div class="rr-done-s">' + (ctx.when ? 'Sent ' + esc(ctx.when) + '. ' : '') + 'It is on the job as a SecureWorks Group PDF and the office has it.</div>';
         if (ctx.docUrl) h += '<a class="rr-openpdf" href="' + esc(ctx.docUrl) + '" target="_blank" rel="noopener" data-rr-pdf>Open roof report PDF &#8599;</a>';
         else h += '<div class="rr-help">The PDF shows under Files once the job refreshes.</div>';
+        h += '<button type="button" class="rr-rebuild" data-rr-rebuild onclick="rrRebuild(\'' + esc(jobId) + '\')">Rebuild PDF with the photos on the job now' + (ctx.photoCount != null ? ' (' + Number(ctx.photoCount) + ')' : '') + '</button>';
         h += '</div>';
       } else {
         var cont = state.status === 'draft';
@@ -13940,7 +13945,8 @@
       var cur = document.getElementById('rrOption'); if (!cur) return;
       cur.outerHTML = RoofReportCore.optionHTML(state, jobId, Object.assign({
         docUrl: rrDocUrl(_currentJob || {}),
-        when: state.submittedAt ? timeAgo(state.submittedAt) : ''
+        when: state.submittedAt ? timeAgo(state.submittedAt) : '',
+        photoCount: rrPhotoCount(_currentJob || {})
       }, ctx || {}));
     }).catch(function (err) {
       var cur = document.getElementById('rrOption');
@@ -14028,6 +14034,24 @@
     }).catch(function (err) {
       if (btn) { btn.disabled = false; btn.textContent = 'Submit roof report'; }
       toast('Could not submit: ' + friendlyError(err), true);
+    });
+  };
+  // Rebuild the submitted PDF with every photo on the job now (Marnin: Hugo's
+  // 137-photo visit had 20 in the PDF). Server re-renders, board untouched.
+  window.rrRebuild = function (jobId) {
+    var btn = document.querySelector('[data-rr-rebuild]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Rebuilding PDF...'; }
+    api('submit_roof_report', null, { job_id: jobId, force_render: true }).then(function (res) {
+      if (!res || res.ok !== true) throw new Error((res && (res.error || res.message)) || 'Could not rebuild the PDF');
+      toast('PDF rebuilt with ' + (res.photo_count != null ? res.photo_count + ' photos' : 'the latest photos'));
+      return api('trade_job_detail', { jobId: jobId }).then(function (data) {
+        if (data && _currentJob && _currentJobLoaded === jobId) _currentJob.documents = data.documents || _currentJob.documents;
+        var opt = document.getElementById('rrOption');
+        if (opt && _rrCtx && _rrCtx.state) opt.outerHTML = RoofReportCore.optionHTML(_rrCtx.state, jobId, { when: 'just now', docUrl: rrDocUrl(_currentJob || {}), photoCount: rrPhotoCount(_currentJob || {}) });
+      }).catch(function () {});
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Rebuild PDF with the photos on the job now'; }
+      toast('Could not rebuild: ' + friendlyError(err), true);
     });
   };
   window.rrPhotoUpload = function (input) {

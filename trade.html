@@ -2471,6 +2471,11 @@
     }
 
     /* Large Dimension Display */
+    /* ── Make-safe submitted report actions (2026-09-08) ── */
+    .ms-after { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 12px; margin: 0 0 14px; }
+    .ms-after-btn { display: block; width: 100%; min-height: 46px; border: none; border-radius: 10px; background: var(--sw-dark); color: #fff; font-family: var(--sw-font); font-size: 15px; font-weight: 800; cursor: pointer; margin-bottom: 8px; }
+    .ms-after-btn.secondary { background: #fff; color: var(--sw-dark); border: 1.5px solid var(--sw-dark); }
+    .ms-after-btn:disabled { opacity: .6; }
     /* ── Complete-to-invoice cards on the wizard success screen (2026-09-08) ── */
     .wiz-inv { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 12px 14px; margin: 12px 0 0; text-align: left; }
     .wiz-inv-t { font-size: 14px; font-weight: 800; color: var(--sw-dark); }
@@ -14165,6 +14170,18 @@
       h += '<div style="font-weight:700;color:#155724;">Report Submitted</div>';
       h += '<div style="font-size:12px;color:#155724;margin-top:4px;">Submitted ' + timeAgo(report.submitted_at) + '. Admin will review and send to requesting company.</div>';
       h += '</div>';
+      // 2026-09-08 (Marnin): the trade can unlock and fix their report until
+      // the office sends it, or log a separate attendance. Server decides.
+      var msSent = !!(msDetails.report_sent_at);
+      h += '<div class="ms-after" data-ms-after>';
+      if (!msSent) h += '<button type="button" class="ms-after-btn" data-ms-unlock onclick="unlockMakesafeReportAsk(\'' + esc(job.id) + '\')">Edit this report</button>';
+      h += '<button type="button" class="ms-after-btn secondary" data-ms-reattend onclick="reattendAsk()">Log a separate attendance</button>';
+      h += '<div class="rr-help">' + (msSent ? 'The office has sent this report to the builder, so it is locked. A return visit is a separate attendance.' : 'Editing reopens this report until the office sends it. A return visit is a separate attendance.') + '</div>';
+      h += '<div id="msUnlockConfirm" style="display:none;margin-top:8px;"><div style="font-size:13px;color:var(--sw-dark);margin-bottom:8px;">Reopen this report to make changes? The office will see it as waiting on you again.</div><div style="display:flex;gap:8px;"><button type="button" class="ms-after-btn secondary" onclick="document.getElementById(\'msUnlockConfirm\').style.display=\'none\'">Cancel</button><button type="button" class="ms-after-btn" data-ms-unlock-yes onclick="unlockMakesafeReport(\'' + esc(job.id) + '\')">Yes, reopen</button></div></div>';
+      h += '</div>';
+      if (report.signature_data) {
+        h += '<div style="margin-bottom:8px;"><strong>Signature:</strong><br><img src="' + esc(report.signature_data) + '" alt="Signature" data-ms-signature style="max-width:220px;border:1px solid var(--sw-border);border-radius:8px;margin-top:4px;background:#fff"></div>';
+      }
       if (report.checklist_json) {
         var cl = report.checklist_json;
         var arrivalParts = parseArrival(cl.arrival_time);
@@ -15173,6 +15190,25 @@
     }
     return h;
   }
+  window.unlockMakesafeReportAsk = function (jobId) {
+    var row = document.getElementById('msUnlockConfirm');
+    if (row) row.style.display = row.style.display === 'none' ? 'block' : 'none';
+  };
+  window.unlockMakesafeReport = function (jobId) {
+    jobId = jobId || _currentJobId;
+    var yes = document.querySelector('[data-ms-unlock-yes]');
+    if (yes) { yes.disabled = true; yes.textContent = 'Reopening...'; }
+    api('unlock_makesafe_report', null, { job_id: jobId }).then(function (res) {
+      if (!res || res.ok !== true) throw new Error((res && (res.error || res.message)) || 'Could not reopen the report');
+      toast(res.already ? 'Report is already open for editing' : 'Report reopened. Make your changes and submit again.');
+      if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(jobId);
+      else refreshJobTab('ms_report');
+    }).catch(function (err) {
+      if (yes) { yes.disabled = false; yes.textContent = 'Yes, reopen'; }
+      toast('Could not reopen: ' + friendlyError(err), true);
+    });
+  };
+
   window.reattendAsk = function () {
     var row = document.getElementById('reattendConfirmRow');
     var btn = document.getElementById('reattendAskBtn');

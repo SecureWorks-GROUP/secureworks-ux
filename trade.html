@@ -2471,6 +2471,47 @@
     }
 
     /* Large Dimension Display */
+    /* ── Roof report + one-tap hours (2026-09-08) ── */
+    .rr-option { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 14px; margin: 0 0 14px; }
+    .rr-option.rr-loading { font-size: 12px; color: var(--sw-text-sec); }
+    .rr-opt-t { font-size: 15px; font-weight: 800; color: var(--sw-dark); }
+    .rr-opt-s { font-size: 12px; color: var(--sw-text-sec); line-height: 1.45; margin: 4px 0 10px; }
+    .rr-opt-btn { display: block; width: 100%; min-height: 46px; border: 1.5px solid var(--sw-dark); border-radius: 10px; background: #fff; color: var(--sw-dark); font-family: var(--sw-font); font-size: 15px; font-weight: 800; cursor: pointer; }
+    .rr-opt-btn.cont { background: var(--sw-dark); color: #fff; }
+    .rr-done { background: #D4EDDA; border: 1px solid #C3E6CB; border-radius: 8px; padding: 12px; }
+    .rr-done-t { font-weight: 800; color: #155724; }
+    .rr-done-s { font-size: 12px; color: #155724; margin-top: 4px; line-height: 1.4; }
+    .rr-openpdf { display: flex; align-items: center; justify-content: center; margin-top: 10px; min-height: 44px; border-radius: 8px; background: var(--sw-dark); color: #fff; font-weight: 800; font-size: 14px; text-decoration: none; }
+    .rr-form { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 16px 14px; margin: 0 0 16px; }
+    .rr-title { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; color: var(--sw-dark); }
+    .rr-sub { font-size: 12px; color: var(--sw-text-sec); line-height: 1.45; margin-top: 4px; }
+    .rr-kick { font-family: var(--sw-mono); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--sw-text-sec); margin: 20px 0 10px; padding-top: 14px; border-top: 1px solid var(--sw-border); }
+    .rr-field { margin-bottom: 14px; }
+    .rr-label { display: block; font-size: 13px; font-weight: 700; color: var(--sw-dark); margin-bottom: 5px; }
+    .rr-req { color: var(--sw-orange); }
+    .rr-help { font-size: 11px; color: var(--sw-text-sec); margin-top: 4px; line-height: 1.4; }
+    .rr-toggle { display: flex; gap: 8px; }
+    .rr-tbtn { flex: 1; min-height: 44px; border: 1.5px solid var(--sw-border); border-radius: 10px; background: #fff; color: var(--sw-text); font-family: var(--sw-font); font-size: 15px; font-weight: 700; cursor: pointer; }
+    .rr-tbtn.on { border-color: var(--sw-dark); background: var(--sw-dark); color: #fff; }
+    .rr-photos { border: 1px solid var(--sw-border); border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+    .rr-photorow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+    .rr-photocount { font-size: 13px; font-weight: 700; color: var(--sw-dark); }
+    .rr-addphoto { min-height: 40px; padding: 0 14px; border: 1.5px solid var(--sw-dark); border-radius: 8px; background: #fff; color: var(--sw-dark); font-family: var(--sw-font); font-size: 13px; font-weight: 800; cursor: pointer; }
+    .rr-actions { margin-top: 18px; }
+    .rr-savestate { font-size: 11px; color: var(--sw-text-sec); min-height: 14px; margin-bottom: 8px; text-align: right; }
+    .rr-submit { display: block; width: 100%; min-height: 52px; border: none; border-radius: 12px; background: var(--sw-orange); color: #fff; font-family: var(--sw-font); font-size: 17px; font-weight: 800; cursor: pointer; }
+    .rr-submit:disabled { opacity: .6; }
+    .rr-errors { margin-top: 10px; background: #FEF3C7; color: #92400E; border-radius: 8px; padding: 10px; font-size: 12px; line-height: 1.5; }
+    .rr-hours { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 14px; margin: 0 0 14px; }
+    .rr-hours-t { font-size: 15px; font-weight: 800; color: var(--sw-dark); }
+    .rr-hours-s { font-size: 12px; color: var(--sw-text-sec); line-height: 1.45; margin: 4px 0 10px; }
+    .rr-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .rr-chip { flex: 1 1 60px; min-height: 44px; padding: 0 10px; border: 1.5px solid var(--sw-border); border-radius: 22px; background: #fff; color: var(--sw-dark); font-family: var(--sw-font); font-size: 15px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+    .rr-chip.on { border-color: var(--sw-orange); background: var(--sw-orange); color: #fff; }
+    .rr-chip:disabled { opacity: .6; }
+    .rr-hours-other { display: flex; gap: 8px; margin-top: 10px; }
+    .rr-hours-other input { flex: 1; min-height: 44px; padding: 0 12px; border: 1px solid var(--sw-border); border-radius: 10px; font-size: 16px; font-family: var(--sw-font); }
+    .rr-hours-other .rr-chip { flex: 0 0 auto; }
     /* ── Accept gate + job stepper (2026-09-08) ── */
     .accept-gate { margin: 0 0 16px; }
     .accept-gate-body { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 20px 16px; margin-top: 12px; text-align: center; }
@@ -11323,6 +11364,9 @@
       council_plans: { icon: '🏛️', label: 'Council Plans' },
       engineering: { icon: '📐', label: 'Engineering Drawings' },
       work_order: { icon: '📋', label: 'Work Order' },
+      roof_report: { icon: '🏠', label: 'Roof Report (SecureWorks)' },
+      makesafe_report: { icon: '🛠️', label: 'Make-Safe Report' },
+      swms: { icon: '🦺', label: 'SWMS' },
       approval: { icon: '✅', label: 'Approval' },
       supplier_quote: { icon: '💰', label: 'Supplier Quote' },
       quote: { icon: '📄', label: 'Quote' },
@@ -13636,6 +13680,359 @@
     if (p) p.catch(function () {});
   };
 
+  // ══════════════════════════════════════════════════════════════════════
+  // 2026-09-08 (Marnin) — SecureWorks roof report in the app + one-tap hours.
+  // "There should be an ability for them to do a custom roof report if
+  // required" (151 Deanmore Rd) and "they mark it as complete, put the 2
+  // hours on their invoice, and we see it is done on our end". The backend
+  // already had roof_report_template / save_roof_report / submit_roof_report;
+  // nothing in the app called them. RoofReportCore is PURE (no DOM/network):
+  // it renders the form from the server template, collects/validates the fill,
+  // and renders the option / done / hours panels. The glue below binds it.
+  // ══════════════════════════════════════════════════════════════════════
+  // <trade-roof-report>
+  var RoofReportCore = (function () {
+    'use strict';
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    var HOUR_CHIPS = [1, 2, 3, 4];
+    var INPUT_STYLE = 'width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:15px;box-sizing:border-box;background:#fff;font-family:var(--sw-font);';
+    // Server payload {template, job, draft} -> a small state object the panels read.
+    function stateOf(tpl) {
+      tpl = tpl || {}; var d = tpl.draft || null;
+      var fields = (d && d.fields_json && typeof d.fields_json === 'object') ? d.fields_json : {};
+      return {
+        status: d ? (d.status === 'submitted' ? 'submitted' : 'draft') : 'none',
+        docId: d && d.report_doc_id ? String(d.report_doc_id) : '',
+        submittedAt: d && d.submitted_at ? String(d.submitted_at) : '',
+        fields: fields,
+        storey: d && d.storey ? String(d.storey) : ''
+      };
+    }
+    function fieldsOf(tpl) { var t = tpl && tpl.template; return (t && Array.isArray(t.fields)) ? t.fields : []; }
+    function sectionsOf(tpl) { var t = tpl && tpl.template; return (t && Array.isArray(t.sections)) ? t.sections : []; }
+    function toggleValue(v) {
+      if (v === true || v === 'true' || v === 'yes' || v === 'Yes') return 'yes';
+      if (v === false || v === 'false' || v === 'no' || v === 'No') return 'no';
+      return '';
+    }
+    function fieldHTML(f, val) {
+      var key = esc(f.key);
+      var h = '<div class="rr-field" data-rr-wrap="' + key + '"><label class="rr-label">' + esc(f.label) + (f.required ? ' <span class="rr-req">*</span>' : '') + '</label>';
+      if (f.type === 'textarea') {
+        h += '<textarea data-rr-field="' + key + '" rows="3" placeholder="' + esc(f.placeholder || '') + '" style="' + INPUT_STYLE + 'resize:vertical;" oninput="rrChanged()">' + esc(val == null ? '' : val) + '</textarea>';
+      } else if (f.type === 'select') {
+        h += '<select data-rr-field="' + key + '" style="' + INPUT_STYLE + '" onchange="rrChanged()"><option value="">Choose</option>';
+        (f.options || []).forEach(function (o) { h += '<option value="' + esc(o) + '"' + (String(val == null ? '' : val) === String(o) ? ' selected' : '') + '>' + esc(o) + '</option>'; });
+        h += '</select>';
+      } else if (f.type === 'toggle') {
+        var tv = toggleValue(val);
+        h += '<div class="rr-toggle" data-rr-field="' + key + '" data-rr-type="toggle" data-value="' + tv + '">';
+        h += '<button type="button" class="rr-tbtn' + (tv === 'yes' ? ' on' : '') + '" data-rr-toggle="yes" onclick="rrToggle(this)">Yes</button>';
+        h += '<button type="button" class="rr-tbtn' + (tv === 'no' ? ' on' : '') + '" data-rr-toggle="no" onclick="rrToggle(this)">No</button>';
+        h += '</div>';
+      } else {
+        var t = f.type === 'date' ? 'date' : (f.type === 'time' ? 'time' : 'text');
+        h += '<input type="' + t + '" data-rr-field="' + key + '" value="' + esc(val == null ? '' : val) + '" placeholder="' + esc(f.placeholder || '') + '" style="' + INPUT_STYLE + '" oninput="rrChanged()">';
+      }
+      if (f.help) h += '<div class="rr-help">' + esc(f.help) + '</div>';
+      h += '</div>';
+      return h;
+    }
+    function photosHTML(count) {
+      var h = '<div class="rr-photos" id="rrPhotos"><div class="rr-label">Roof photos</div>';
+      h += '<div class="rr-help">Photos already on this job go into the report. Add more here if you need to.</div>';
+      h += '<div class="rr-photorow"><div class="rr-photocount"><span id="rrPhotoCount">' + Number(count || 0) + '</span> photo(s) on this job</div>';
+      h += '<button type="button" class="rr-addphoto" onclick="document.getElementById(\'rrPhotoInput\').click()">Add photos</button></div>';
+      h += '<input type="file" id="rrPhotoInput" accept="image/*" multiple style="display:none" onchange="rrPhotoUpload(this)"></div>';
+      return h;
+    }
+    // The whole form from the server template. fields = current fill.
+    function formHTML(tpl, fields, opts) {
+      opts = opts || {}; fields = fields || {};
+      var fs = fieldsOf(tpl), secs = sectionsOf(tpl);
+      var h = '<div class="rr-form" id="rrForm" data-rr-form>';
+      h += '<div class="rr-head"><div class="rr-title">SecureWorks roof report</div>';
+      h += '<div class="rr-sub">Fill in what you saw on site. It saves as you go and becomes a SecureWorks Group PDF when you submit.</div></div>';
+      secs.forEach(function (sec) {
+        var inSec = fs.filter(function (f) { return f.section === sec.key; });
+        if (!inSec.length) return;
+        h += '<div class="rr-kick">' + esc(sec.title) + '</div>';
+        inSec.forEach(function (f) {
+          if (f.type === 'photos') { h += photosHTML(opts.photoCount || 0); return; }
+          h += fieldHTML(f, fields[f.key]);
+        });
+      });
+      h += '<div class="rr-actions"><div class="rr-savestate" id="rrSaveState">' + esc(opts.savedLabel || '') + '</div>';
+      h += '<button type="button" class="rr-submit" id="rrSubmitBtn" onclick="rrSubmit()">Submit roof report</button>';
+      h += '<div id="rrErrors" class="rr-errors" style="display:none"></div></div>';
+      h += '</div>';
+      return h;
+    }
+    // Read the fill back off the form. Blank text is omitted; toggles become booleans.
+    function collect(root) {
+      var out = {};
+      if (!root || !root.querySelectorAll) return out;
+      var els = root.querySelectorAll('[data-rr-field]');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i], key = el.getAttribute('data-rr-field');
+        if (el.getAttribute('data-rr-type') === 'toggle') {
+          var v = el.getAttribute('data-value');
+          if (v === 'yes') out[key] = true; else if (v === 'no') out[key] = false;
+          continue;
+        }
+        var val = String(el.value == null ? '' : el.value).trim();
+        if (val !== '') out[key] = val;
+      }
+      return out;
+    }
+    function validate(tpl, fields) {
+      var errs = []; fields = fields || {};
+      fieldsOf(tpl).forEach(function (f) {
+        if (!f.required) return;
+        var v = fields[f.key];
+        if (v === undefined || v === null || String(v).trim() === '') errs.push(f.label + ' is required');
+      });
+      return errs;
+    }
+    // The card a trade sees before/after: start, continue, or submitted + PDF.
+    function optionHTML(state, jobId, ctx) {
+      ctx = ctx || {}; state = state || { status: 'none' };
+      var h = '<div class="rr-option" id="rrOption" data-rr-state="' + esc(state.status) + '">';
+      if (state.status === 'submitted') {
+        h += '<div class="rr-done"><div class="rr-done-t">Roof report submitted &#10003;</div>';
+        h += '<div class="rr-done-s">' + (ctx.when ? 'Sent ' + esc(ctx.when) + '. ' : '') + 'It is on the job as a SecureWorks Group PDF and the office has it.</div>';
+        if (ctx.docUrl) h += '<a class="rr-openpdf" href="' + esc(ctx.docUrl) + '" target="_blank" rel="noopener" data-rr-pdf>Open roof report PDF &#8599;</a>';
+        else h += '<div class="rr-help">The PDF shows under Files once the job refreshes.</div>';
+        h += '</div>';
+      } else {
+        var cont = state.status === 'draft';
+        h += '<div class="rr-opt-t">' + esc(ctx.title || 'Need a roof report?') + '</div>';
+        h += '<div class="rr-opt-s">' + esc(ctx.blurb || 'Fill a simple roof report here and it becomes a SecureWorks Group PDF. No builder portal needed.') + '</div>';
+        h += '<button type="button" class="rr-opt-btn' + (cont ? ' cont' : '') + '" data-rr-open onclick="rrOpen(\'' + esc(jobId) + '\')">' + (cont ? 'Continue roof report' : 'Start roof report') + '</button>';
+      }
+      h += '</div>';
+      return h;
+    }
+    function hoursLabel(h) {
+      h = Number(h);
+      var s = (h % 1 === 0) ? String(h) : h.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+      return s + (h === 1 ? ' hr' : ' hrs');
+    }
+    function weekLabel(weekEnding) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(weekEnding || ''));
+      if (!m) return '';
+      var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return 'w/e ' + days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
+    }
+    // One-tap hours row. current = hours already on the trade's assignment.
+    function hoursHTML(jobId, current, ctx) {
+      ctx = ctx || {};
+      var cur = (current == null || current === '') ? null : Number(current);
+      var custom = cur != null && HOUR_CHIPS.indexOf(cur) < 0;
+      var h = '<div class="rr-hours" id="rrHours" data-rr-hours' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
+      h += '<div class="rr-hours-t">' + esc(ctx.title || 'Hours for this job') + '</div>';
+      if (cur != null) h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '. Tap to change.</div>';
+      else h += '<div class="rr-hours-s">One tap puts it on this week\'s invoice. You can still change it under Hours.</div>';
+      h += '<div class="rr-chips">';
+      HOUR_CHIPS.forEach(function (n) {
+        h += '<button type="button" class="rr-chip' + (cur === n ? ' on' : '') + '" data-rr-hour="' + n + '" onclick="rrLogHours(\'' + esc(jobId) + '\',' + n + ')">' + n + (n === 1 ? ' hr' : ' hrs') + '</button>';
+      });
+      h += '<button type="button" class="rr-chip other' + (custom ? ' on' : '') + '" data-rr-hour="other" onclick="rrHoursOther()">' + (custom ? esc(hoursLabel(cur)) : 'Other') + '</button>';
+      h += '</div>';
+      h += '<div class="rr-hours-other" id="rrHoursOther" style="display:none"><input type="number" id="rrHoursInput" min="0.25" max="24" step="0.25" placeholder="Hours" inputmode="decimal">';
+      h += '<button type="button" class="rr-chip on" data-rr-hour-add onclick="rrLogHoursCustom(\'' + esc(jobId) + '\')">Add</button></div>';
+      h += '</div>';
+      return h;
+    }
+    function isOk(res) { res = res || {}; return res.ok === true || res.success === true || res.status === 'submitted' || res.saved === true; }
+    return {
+      stateOf: stateOf, fieldsOf: fieldsOf, sectionsOf: sectionsOf, toggleValue: toggleValue,
+      formHTML: formHTML, collect: collect, validate: validate, optionHTML: optionHTML,
+      hoursHTML: hoursHTML, hoursLabel: hoursLabel, weekLabel: weekLabel, isOk: isOk, HOUR_CHIPS: HOUR_CHIPS
+    };
+  })();
+  // </trade-roof-report>
+
+  // ── Roof report + hours DOM glue ──
+  var _rrCtx = null; // { jobId, tpl, state, timer, saving, cycleId }
+  function rrDocUrl(data) {
+    var docs = (data && data.documents) || [];
+    for (var i = docs.length - 1; i >= 0; i--) {
+      if (docs[i] && docs[i].type === 'roof_report') { var u = getTradeDocOpenUrl(docs[i]); if (u) return u; }
+    }
+    return '';
+  }
+  function rrMyHours(data) {
+    var a = getMyAssignment(data || {});
+    return (a && a.hours_worked != null && a.hours_worked !== '') ? Number(a.hours_worked) : null;
+  }
+  function rrPhotoCount(data) {
+    var cyc = getActiveMakesafeAttendanceCycleId(data || {});
+    return filterTradeGalleryMedia((data && data.media) || []).filter(function (m) { return isMakesafeReportPhoto(m, cyc); }).length;
+  }
+  function rrTodayIso() {
+    var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  }
+  // Fill #rrOption with the job's roof report state (needs one read).
+  window.rrLoadState = function (jobId, ctx) {
+    if (!document.getElementById('rrOption')) return;
+    api('roof_report_template', { job_id: jobId }).then(function (tpl) {
+      var state = RoofReportCore.stateOf(tpl);
+      _rrCtx = { jobId: jobId, tpl: tpl, state: state, timer: null, saving: false, cycleId: getActiveMakesafeAttendanceCycleId(_currentJob || {}) };
+      var cur = document.getElementById('rrOption'); if (!cur) return;
+      cur.outerHTML = RoofReportCore.optionHTML(state, jobId, Object.assign({
+        docUrl: rrDocUrl(_currentJob || {}),
+        when: state.submittedAt ? timeAgo(state.submittedAt) : ''
+      }, ctx || {}));
+    }).catch(function (err) {
+      var cur = document.getElementById('rrOption');
+      if (cur) cur.innerHTML = '<div class="rr-help">Roof report not available right now: ' + esc(friendlyError(err)) + '</div>';
+    });
+  };
+  window.rrOpen = function (jobId) {
+    var panel = document.getElementById('rrPanel'); if (!panel) return;
+    function go(tpl) {
+      var state = RoofReportCore.stateOf(tpl);
+      _rrCtx = { jobId: jobId, tpl: tpl, state: state, timer: null, saving: false, cycleId: getActiveMakesafeAttendanceCycleId(_currentJob || {}) };
+      var fields = Object.assign({}, state.fields);
+      if (!fields.inspection_date) fields.inspection_date = rrTodayIso();
+      if (!fields.inspected_by && _user) fields.inspected_by = _user.name || _user.full_name || _user.display_name || '';
+      panel.innerHTML = RoofReportCore.formHTML(tpl, fields, { photoCount: rrPhotoCount(_currentJob || {}), savedLabel: state.status === 'draft' ? 'Draft restored' : '' });
+      var opt = document.getElementById('rrOption'); if (opt) opt.style.display = 'none';
+      if (panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    if (_rrCtx && _rrCtx.tpl && _rrCtx.jobId === jobId) { go(_rrCtx.tpl); return; }
+    api('roof_report_template', { job_id: jobId }).then(go).catch(function (err) { toast('Could not load the roof report: ' + friendlyError(err), true); });
+  };
+  window.rrToggle = function (btn) {
+    var wrap = btn.parentElement; if (!wrap) return;
+    var v = btn.getAttribute('data-rr-toggle');
+    var same = wrap.getAttribute('data-value') === v;
+    wrap.setAttribute('data-value', same ? '' : v);
+    Array.prototype.forEach.call(wrap.querySelectorAll('[data-rr-toggle]'), function (b) { b.classList.toggle('on', !same && b === btn); });
+    rrChanged();
+  };
+  window.rrChanged = function () {
+    if (!_rrCtx) return;
+    var st = document.getElementById('rrSaveState'); if (st) st.textContent = 'Saving...';
+    clearTimeout(_rrCtx.timer);
+    _rrCtx.timer = setTimeout(function () { rrSave(); }, 1200);
+  };
+  window.rrSave = function () {
+    if (!_rrCtx || _rrCtx.saving) return Promise.resolve();
+    var form = document.getElementById('rrForm'); if (!form) return Promise.resolve();
+    var fields = RoofReportCore.collect(form);
+    _rrCtx.saving = true;
+    return api('save_roof_report', null, { job_id: _rrCtx.jobId, fields: fields }).then(function () {
+      _rrCtx.saving = false;
+      if (_rrCtx.state && _rrCtx.state.status === 'none') _rrCtx.state.status = 'draft';
+      var st = document.getElementById('rrSaveState'); if (st) st.textContent = 'Saved';
+    }).catch(function (err) {
+      _rrCtx.saving = false;
+      var st = document.getElementById('rrSaveState'); if (st) st.textContent = 'Not saved: ' + friendlyError(err);
+    });
+  };
+  window.rrSubmit = function () {
+    if (!_rrCtx) return;
+    var form = document.getElementById('rrForm');
+    var fields = RoofReportCore.collect(form);
+    var errs = RoofReportCore.validate(_rrCtx.tpl, fields);
+    var errBox = document.getElementById('rrErrors');
+    if (errs.length) {
+      if (errBox) { errBox.style.display = 'block'; errBox.innerHTML = errs.map(esc).join('<br>'); }
+      toast(errs[0], true);
+      return;
+    }
+    if (errBox) errBox.style.display = 'none';
+    var btn = document.getElementById('rrSubmitBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Building PDF...'; }
+    clearTimeout(_rrCtx.timer);
+    var jobId = _rrCtx.jobId;
+    api('submit_roof_report', null, { job_id: jobId, fields: fields }).then(function (res) {
+      if (!RoofReportCore.isOk(res)) throw new Error((res && (res.error || res.message)) || 'Could not submit the roof report');
+      toast('Roof report submitted');
+      _rrCtx.state = { status: 'submitted', docId: res.report_doc_id || '', submittedAt: new Date().toISOString(), fields: fields, storey: '' };
+      // The hidden option card is replaced by the submitted card inside the panel (one #rrOption).
+      var oldOpt = document.getElementById('rrOption');
+      if (oldOpt && oldOpt.parentNode) oldOpt.parentNode.removeChild(oldOpt);
+      var panel = document.getElementById('rrPanel');
+      if (panel) {
+        panel.innerHTML = RoofReportCore.optionHTML(_rrCtx.state, jobId, { when: 'just now' }) +
+          (document.getElementById('rrHours') ? '' : RoofReportCore.hoursHTML(jobId, rrMyHours(_currentJob || {}), { title: 'Hours for this report' }));
+      }
+      // Pull the fresh document list so the PDF link and Files tab are real.
+      api('trade_job_detail', { jobId: jobId }).then(function (data) {
+        if (!data || !_currentJob || _currentJobLoaded !== jobId) return;
+        _currentJob.documents = data.documents || _currentJob.documents;
+        var url = rrDocUrl(_currentJob);
+        var opt = document.getElementById('rrOption');
+        if (url && opt && !opt.querySelector('[data-rr-pdf]')) opt.outerHTML = RoofReportCore.optionHTML(_rrCtx.state, jobId, { when: 'just now', docUrl: url });
+      }).catch(function () {});
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit roof report'; }
+      toast('Could not submit: ' + friendlyError(err), true);
+    });
+  };
+  window.rrPhotoUpload = function (input) {
+    var files = Array.from(input.files || []);
+    if (!files.length || !_rrCtx) return;
+    var jobId = _rrCtx.jobId, cyc = _rrCtx.cycleId, done = 0;
+    var cnt = document.getElementById('rrPhotoCount');
+    var btn = document.querySelector('.rr-addphoto');
+    if (btn) { btn.disabled = true; btn.textContent = 'Uploading 0/' + files.length; }
+    files.reduce(function (p, f) {
+      return p.then(function () {
+        return uploadOnePhoto(f, jobId, 'completion', 'Roof report photo', cyc).then(function () {
+          done++;
+          if (btn) btn.textContent = 'Uploading ' + done + '/' + files.length;
+          if (cnt) cnt.textContent = String(Number(cnt.textContent || 0) + 1);
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      toast(done + ' photo(s) added to the job');
+    }).catch(function (err) {
+      toast('Upload failed: ' + friendlyError(err), true);
+    }).then(function () {
+      if (btn) { btn.disabled = false; btn.textContent = 'Add photos'; }
+      input.value = '';
+    });
+  };
+  window.rrLogHours = function (jobId, hours) {
+    var chips = document.querySelectorAll('#rrHours .rr-chip');
+    Array.prototype.forEach.call(chips, function (b) { b.disabled = true; });
+    var titleEl = document.querySelector('#rrHours .rr-hours-t');
+    var title = titleEl ? titleEl.textContent : undefined;
+    return api('log_my_job_hours', null, { job_id: jobId, hours: hours, source: 'job_view' }).then(function (res) {
+      if (!res || res.ok !== true) throw new Error((res && (res.error || res.message)) || 'Could not log hours');
+      var mine = getMyAssignment(_currentJob || {});
+      if (mine) { mine.hours_worked = res.hours; if (res.assignment && res.assignment.status) mine.status = res.assignment.status; }
+      else if (_currentJob && res.assignment && _user) {
+        _currentJob.crew = (_currentJob.crew || []).concat([{ id: res.assignment.id, user_id: _user.id, status: res.assignment.status, hours_worked: res.hours, scheduled_date: res.assignment.scheduled_date }]);
+      }
+      var week = RoofReportCore.weekLabel(res.week_ending);
+      var cur = document.getElementById('rrHours');
+      if (cur) cur.outerHTML = RoofReportCore.hoursHTML(jobId, res.hours, { week: week, title: title });
+      toast(RoofReportCore.hoursLabel(res.hours) + ' added to your week' + (week ? ' (' + week + ')' : ''));
+    }).catch(function (err) {
+      Array.prototype.forEach.call(document.querySelectorAll('#rrHours .rr-chip'), function (b) { b.disabled = false; });
+      toast('Could not log hours: ' + friendlyError(err), true);
+    });
+  };
+  window.rrHoursOther = function () {
+    var row = document.getElementById('rrHoursOther'); if (!row) return;
+    var open = row.style.display === 'none';
+    row.style.display = open ? 'flex' : 'none';
+    var inp = document.getElementById('rrHoursInput'); if (inp && open) inp.focus();
+  };
+  window.rrLogHoursCustom = function (jobId) {
+    var inp = document.getElementById('rrHoursInput');
+    var v = inp ? Number(inp.value) : NaN;
+    if (!isFinite(v) || v <= 0) { toast('Enter the hours first', true); return; }
+    return rrLogHours(jobId, v);
+  };
+
   function renderJobTab_makesafeReport(data, phase, container) {
     var job = data.job;
     var report = data.serviceReport;
@@ -13651,7 +14048,16 @@
       _reportDoneCtx = { jobId: _rdModel.jobId, model: _rdModel };
       _reportDoneGuard = { busy: false };
       h += ReportDoneCore.panelHTML(_rdModel);
+      // 2026-09-08: once the report is done (portal or in-app), one tap puts
+      // the hours on the trade's week. The in-app SecureWorks roof report is
+      // always offered as the alternative to the builder portal.
+      if (_rdModel.done) h += RoofReportCore.hoursHTML(_rdModel.jobId, rrMyHours(data), { title: 'Hours for this report' });
+      h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;
+      rrLoadState(_rdModel.jobId, {
+        title: 'Do the roof report in the app instead',
+        blurb: 'If the builder portal is not working, fill our roof report here. We turn it into a SecureWorks Group PDF and mark the report done.'
+      });
       return;
     }
 
@@ -13728,7 +14134,12 @@
         var extra = cl.extra_notes || cl.access_issues || cl.invoice_notes || '';
         if (extra) h += '<div style="margin-bottom:8px;"><strong>Extra notes:</strong> ' + esc(extra) + '</div>';
       }
+      // 2026-09-08: report done, hours on the week with one tap; roof report
+      // still offered in case the builder needs one on top of the make-safe.
+      h += RoofReportCore.hoursHTML(job.id, rrMyHours(data), { title: 'Hours for this job' });
+      h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;
+      rrLoadState(job.id, {});
       return;
     }
 
@@ -13736,7 +14147,10 @@
     h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:6px;">Make-Safe Report</div>';
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.45;">Open the work order above, then complete the report before moving to the next MakeSafe.</div>';
     h += '<div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#9A3412;line-height:1.45;"><strong>Quick rule:</strong> date/time, what failed, what you made safe, labour, materials and clear photos.</div>';
-    h += '<button onclick="submitTradeAdminNote(\'' + esc(job.id) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:4px;">&#128221; Note for admin</button>';
+    h += '<button onclick="submitTradeAdminNote(\'' + esc(job.id) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:12px;">&#128221; Note for admin</button>';
+    // 2026-09-08: any make-safe can carry a SecureWorks roof report (151
+    // Deanmore Rd). It never replaces the make-safe report below.
+    h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
 
     var cl = (report && report.checklist_json) || {};
     var arrivalParts = parseArrival(cl.arrival_time);
@@ -13833,6 +14247,7 @@
     h += '<button onclick="submitMakesafeReport()" style="width:100%;background:var(--sw-orange);color:#fff;border:none;padding:14px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer;min-height:50px;">Submit MakeSafe report</button>';
 
     container.innerHTML = h;
+    rrLoadState(job.id, {});
   }
 
   window.submitMakesafeReport = function() {

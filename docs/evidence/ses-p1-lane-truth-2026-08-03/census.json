@@ -1,0 +1,76 @@
+{
+  "generated_by": "scripts/makesafe-ui-truth-census.js",
+  "board": "ops.html?noAutoIntake=1#jobs → Make-Safes",
+  "feed": "ops-api?action=makesafe_board&projection=ops (makesafe-board.v1) + makesafe_pipeline?history=all (presentation join)",
+  "population": {
+    "canonical_rows_rendered": 442,
+    "cards_per_rendered_column": {
+      "intake": 10,
+      "new": 37,
+      "allocated": 36,
+      "trade_report_in": 5,
+      "report_ready": 27,
+      "completed": 0,
+      "archive": 304,
+      "cancelled": 33
+    },
+    "note": "The `intake` column holds intake DRAFTS, which are not `makesafe-board.v1` rows and are not part of this population."
+  },
+  "family_tags": {
+    "cards_with_a_tag": 442,
+    "agree_with_canonical_ses_family": 442,
+    "disagree": 0,
+    "undetermined_rendered_as_not_determined": 22,
+    "label_vocabulary": {
+      "MakeSafe": 178,
+      "Temporary Fence MakeSafe": 126,
+      "Roof Report": 61,
+      "Restoration": 1,
+      "Assessment / Quote Report": 54,
+      "Family not determined": 22
+    }
+  },
+  "detail_vs_column": {
+    "contradictions_now": 0,
+    "contradictions_with_the_pre_change_derivation": 319,
+    "pre_change_contradictions_offering_a_move_on_a_terminal_card": 58,
+    "detail_stage_sources": {
+      "board_feed": 442
+    }
+  },
+  "docs_ready_pack_truth": {
+    "cards": 27,
+    "canonical_pack_drafted": 9,
+    "no_pack_chip_rendered": 18
+  },
+  "card_face_links": {
+    "builder_link_anchors": 230,
+    "cards_with_at_least_one_builder_link": 114,
+    "anchors_total_including_other_card_links": 230
+  },
+  "privacy_scan_of_the_rendered_dom": {
+    "emails": 0,
+    "phones": 0,
+    "street_lines": 0
+  },
+  "screenshots": [],
+  "requests": {
+    "total": 8,
+    "by_method": {
+      "GET": 8
+    },
+    "non_get": 0,
+    "actions": {
+      "list_users": 1,
+      "pipeline": 1,
+      "list_intake_drafts": 2,
+      "makesafe_audit": 2,
+      "makesafe_pipeline": 1,
+      "makesafe_board": 1
+    }
+  },
+  "console": {
+    "total": 4,
+    "errors": 0
+  }
+}

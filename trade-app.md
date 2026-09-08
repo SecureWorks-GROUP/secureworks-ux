@@ -120,6 +120,24 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   `window` — the Work tab button called it through an inline `onclick` and was
   a dead ReferenceError before 2026-09-08. Scope tab and Files tab offer it for
   authorised/billed POs; drafts keep the "do not purchase" lock.
+- **Roof report in the app (2026-09-08)**: every make-safe report tab offers
+  the SecureWorks letterhead roof report (`#rrOption` → `rrOpen` → `#rrForm`).
+  The form is rendered from the server template (`roof_report_template`),
+  autosaves through `save_roof_report` (1.2s debounce) and submits through
+  `submit_roof_report`; the PDF then shows under Files as "Roof Report
+  (SecureWorks)". Report-type jobs keep the builder-portal done flow and get
+  the roof form as the alternative ("Do the roof report in the app instead").
+  Photos already on the job go into the PDF; "Add photos" uploads more with
+  the make-safe attendance cycle bound. Pure core `RoofReportCore` lives in
+  `// <trade-roof-report>` and is pinned by `scripts/test-trade-roof-report.js`.
+- **One-tap hours (2026-09-08)**: once a report is done (make-safe report
+  submitted, portal report marked done, or roof report submitted) the tab
+  shows "Hours for this job/report" chips (1 to 4 hrs + Other). A tap posts
+  `log_my_job_hours {job_id, hours}`; the server writes the hours onto the
+  trade's own assignment (replace, not add), marks it complete and the week
+  view / weekly invoice pick it up. The row then reads "2 hrs on your week
+  (w/e Sun 13 Sep). Tap to change." Guard:
+  `tests/e2e/trade-makesafe-roof-report-hours.spec.js`.
 - **Client phone**: every allocated trade (tier 1 included) gets Call in the
   action bar and the number in the hero; view-only (another crew's job) hides
   both. `canCall()` no longer gates on tier 2.

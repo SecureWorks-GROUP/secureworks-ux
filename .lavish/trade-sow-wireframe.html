@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trade job wireframe: one SOW, no clock, many videos</title>
+  <style>
+    :root {
+      --sw-orange: #F15A29;
+      --sw-orange-deep: #C7431B;
+      --sw-dark: #293C46;
+      --sw-mid: #4C6A7C;
+      --sw-light: #EBEFF1;
+      --sw-bg: #F5F7F8;
+      --sw-frame: #EBEFF1;
+      --sw-border: #E2E9EC;
+      --sw-text: #22333D;
+      --sw-text-sec: #6B7A83;
+      --sw-card: #FFFFFF;
+      --sw-green: #27AE60;
+      --sw-red: #E74C3C;
+      --sw-font: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Display", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sw-font);
+      background: #E8EEF1;
+      color: var(--sw-text);
+      line-height: 1.45;
+    }
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 20px 80px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--sw-dark);
+      margin: 0 0 8px;
+    }
+    .lede {
+      font-size: 16px;
+      color: var(--sw-text-sec);
+      max-width: 62ch;
+      margin: 0 0 28px;
+    }
+    .stamp {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sw-orange);
+      margin-bottom: 8px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: minmax(0, 1fr); }
+    }
+    .col h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--sw-text-sec);
+      margin: 0 0 10px;
+    }
+    .phone {
+      width: 100%;
+      max-width: 390px;
+      background: var(--sw-bg);
+      border: 1px solid var(--sw-border);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(41,60,70,0.12);
+    }
+    .phone-bar {
+      background: var(--sw-dark);
+      color: #F5F7F8;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .phone-bar span { color: #9DB2BD; font-weight: 500; }
+    .phone-body {
+      padding: 10px 14px 16px;
+      max-height: 720px;
+      overflow: auto;
+    }
+    .back {
+      color: var(--sw-mid);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .hero {
+      background: var(--sw-dark);
+      color: #fff;
+      border-radius: 12px;
+      padding: 12px 14px 14px;
+      margin-bottom: 12px;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .chip {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .chip.ok { background: var(--sw-orange); }
+    .hero h3 { margin: 0; font-size: 22px; font-weight: 800; }
+    .hero p { margin: 4px 0 0; font-size: 13px; color: #9DB2BD; }
+    .row2 { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn {
+      flex: 1;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 8px;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: inherit;
+      min-height: 44px;
+    }
+    .btn-ghost {
+      background: var(--sw-card);
+      color: var(--sw-dark);
+      border: 1px solid var(--sw-border);
+    }
+    .btn-red { background: var(--sw-red); color: #fff; }
+    .btn-green { background: var(--sw-green); color: #fff; }
+    .btn-orange { background: var(--sw-orange); color: #fff; }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--sw-border);
+    }
+    .tab {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--sw-text-sec);
+      padding: 8px 10px;
+      border: none;
+      background: none;
+      font-family: inherit;
+    }
+    .tab.on {
+      color: var(--sw-dark);
+      box-shadow: inset 0 -2px 0 var(--sw-orange);
+    }
+    .block { margin-bottom: 14px; }
+    .block h4 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--sw-dark);
+    }
+    .pack {
+      background: var(--sw-card);
+      border: 1px solid var(--sw-border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .pack-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px;
+    }
+    .pack-head strong { font-size: 15px; }
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: var(--sw-orange);
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .badge.muted { background: var(--sw-border); color: var(--sw-dark); }
+    .spec {
+      padding: 0 14px 8px;
+      font-size: 12px;
+      color: var(--sw-text-sec);
+    }
+    table.sow {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    table.sow th {
+      text-align: left;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--sw-text-sec);
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--sw-border);
+    }
+    table.sow th:nth-child(2),
+    table.sow td:nth-child(2),
+    table.sow th:nth-child(3),
+    table.sow td:nth-child(3) { text-align: right; }
+    table.sow td {
+      padding: 9px 14px;
+      border-top: 1px solid var(--sw-border);
+      color: var(--sw-text);
+    }
+    table.sow td:last-child { font-weight: 600; color: var(--sw-dark); }
+    .note {
+      margin: 8px 12px 12px;
+      padding: 10px 12px;
+      background: var(--sw-light);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .vid {
+      background: #111;
+      border-radius: 8px;
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .vid-cap { font-size: 12px; color: var(--sw-text-sec); margin-bottom: 10px; }
+    .details {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--sw-dark);
+      padding: 10px 0;
+      border-top: 1px solid var(--sw-border);
+    }
+    .ghost {
+      color: var(--sw-text-sec);
+      font-size: 12px;
+      font-weight: 400;
+    }
+    .x {
+      text-decoration: line-through;
+      color: #b0bac0;
+    }
+    .cut-list, .keep-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 14px;
+    }
+    .cut-list li { margin: 6px 0; }
+    .keep-list li { margin: 6px 0; }
+    .ops {
+      background: var(--sw-card);
+      border: 1px solid var(--sw-border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .drop {
+      border: 2px dashed var(--sw-border);
+      border-radius: 10px;
+      padding: 22px 14px;
+      text-align: center;
+      background: var(--sw-light);
+      font-size: 13px;
+      color: var(--sw-text-sec);
+      margin: 10px 0 12px;
+    }
+    .vrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--sw-border);
+      font-size: 13px;
+    }
+    .vrow .thumb {
+      width: 56px;
+      height: 36px;
+      background: #111;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .ask {
+      margin-top: 36px;
+      background: var(--sw-card);
+      border: 1px solid var(--sw-border);
+      border-radius: 14px;
+      padding: 20px 22px;
+    }
+    .ask h2 { margin: 0 0 6px; font-size: 18px; }
+    fieldset {
+      border: none;
+      padding: 0;
+      margin: 18px 0 0;
+    }
+    legend {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--sw-dark);
+      margin-bottom: 8px;
+    }
+    label.opt {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+    .ask button[type="submit"] {
+      margin-top: 10px;
+      background: var(--sw-orange);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .today-shot {
+      width: 100%;
+      max-width: 390px;
+      max-height: 720px;
+      object-fit: cover;
+      object-position: top;
+      border-radius: 18px;
+      border: 1px solid var(--sw-border);
+      display: block;
+    }
+    .cap {
+      font-size: 12px;
+      color: var(--sw-text-sec);
+      margin-top: 8px;
+      max-width: 390px;
+    }
+  </style>
+  <script>
+    function queueAnswer(question, answer, form) {
+      var text = question + ': ' + answer;
+      if (window.lavish && typeof window.lavish.queuePrompt === 'function') {
+        window.lavish.queuePrompt(text, { tag: 'choice', text: text, element: form, data: { question: question, answer: answer } });
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="page">
+    <div class="stamp">Wireframe. Not live yet.</div>
+    <h1>Trade job: one scope of works</h1>
+    <p class="lede">Installer opens the job and sees what to build, from which quote, at which labour rates, plus every walkthrough Khairo attached. Clock On / Clock Off is gone from this screen. Empty cards are gone. Same job is not repeated three times.</p>
+
+    <div class="grid">
+      <div class="col">
+        <h2>Today (live Work tab)</h2>
+        <img class="today-shot" src="today-work.png" alt="Live trade Work tab: clock strip, accept buttons, then stacked duplicate scope cards">
+        <p class="cap">Clock On / Working / Clock Off / Complete sits above Accept, then a second Work Order header, quote pack, video, empty crew WO, the same installer note again, then a conflicting “what you’re building” grid (panels 0), then generic safety lists.</p>
+      </div>
+      <div class="col">
+        <h2>Proposed Work tab</h2>
+        <div class="phone">
+          <div class="phone-bar">SecureWorks Trade <span>Henry</span></div>
+          <div class="phone-body">
+            <div class="back">&larr; Back to Jobs</div>
+            <div class="hero">
+              <div class="chips">
+                <span class="chip">28m</span>
+                <span class="chip">Trimclad</span>
+                <span class="chip">Shale Grey</span>
+                <span class="chip">SWF-25101</span>
+                <span class="chip ok">Allocated</span>
+              </div>
+              <h3>Balcatta</h3>
+              <p>Rear boundary, Balcatta<br>Live fencing job</p>
+            </div>
+            <div class="row2">
+              <button class="btn btn-ghost" type="button">Text</button>
+              <button class="btn btn-ghost" type="button">Navigate</button>
+            </div>
+            <div class="tabs">
+              <button class="tab on" type="button">Work</button>
+              <button class="tab" type="button">Scope</button>
+              <button class="tab" type="button">Files</button>
+              <button class="tab" type="button">Photos</button>
+            </div>
+
+            <div class="block">
+              <h4>Scope of works</h4>
+              <div class="pack">
+                <div class="pack-head">
+                  <strong>SWF-25101-02</strong>
+                  <span class="badge">Accepted</span>
+                  <span style="margin-left:auto;font-size:11px;color:var(--sw-text-sec)">4 Sep</span>
+                </div>
+                <div class="spec">Metroll · Trimclad · Shale Grey</div>
+                <table class="sow">
+                  <tr><th>Item</th><th>Qty</th><th>Rate</th></tr>
+                  <tr><td>Rear · Colorbond install 1800mm</td><td>19 m</td><td>$30</td></tr>
+                  <tr><td>Rear · retaining plinths</td><td>8 ea</td><td>$12.50</td></tr>
+                  <tr><td>LHS · Colorbond install 1800mm</td><td>8.5 m</td><td>$30</td></tr>
+                  <tr><td>Pedestrian gate 900mm</td><td>1 ea</td><td>$250</td></tr>
+                  <tr><td>Remove Colorbond fence</td><td>12 m</td><td></td></tr>
+                </table>
+                <div class="note">Watch the dog. Access via side gate.</div>
+              </div>
+              <div class="pack">
+                <div class="pack-head">
+                  <strong>SWF-25101-01</strong>
+                  <span class="badge muted">Older</span>
+                  <span style="margin-left:auto;font-size:11px;color:var(--sw-text-sec)">2 Sep</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="block">
+              <h4>Walkthroughs</h4>
+              <div class="vid">Play · Rear run</div>
+              <div class="vid-cap">Rear run</div>
+              <div class="vid">Play · LHS and gate</div>
+              <div class="vid-cap">LHS and gate</div>
+            </div>
+
+            <div class="details">How to build <span class="ghost">panel heights, collapsed</span></div>
+          </div>
+        </div>
+        <p class="cap">No clock strip. No second Work Order header. No “no work order assigned”. No empty photos/charges. Older quotes stay listed, closed. Rates stay trade labour only. Blank rate means TBA (Henry install $/m still not set).</p>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:36px">
+      <div class="col">
+        <h2>Khairo: add videos on the job (Ops)</h2>
+        <div class="ops">
+          <div style="font-size:12px;font-weight:700;color:var(--sw-text-sec);margin-bottom:4px">Ops · SWF-25101 Files</div>
+          <h3 style="margin:0 0 4px;font-size:16px">Scope videos</h3>
+          <p style="margin:0;font-size:13px;color:var(--sw-text-sec)">Shown to the installer on the job. Multiple files. Auto visible to trades.</p>
+          <div class="drop">Drop videos here or tap to add<br><span style="font-size:11px">mp4, mov · as many as the job needs</span></div>
+          <div class="vrow">
+            <div class="thumb"></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600">Rear run.mp4</div>
+              <div style="font-size:12px;color:var(--sw-green)">Visible to trades</div>
+            </div>
+            <span style="font-size:12px;color:var(--sw-text-sec)">Remove</span>
+          </div>
+          <div class="vrow">
+            <div class="thumb"></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600">LHS and gate.mp4</div>
+              <div style="font-size:12px;color:var(--sw-green)">Visible to trades</div>
+            </div>
+            <span style="font-size:12px;color:var(--sw-text-sec)">Remove</span>
+          </div>
+        </div>
+        <p class="cap">Today videos land in the generic Files dump as “site photo”, and the trade app only plays the first walkthrough. This dedicated list is the fix. Fencing scoping tool can wait; Ops is where Khairo already attaches files.</p>
+      </div>
+      <div class="col">
+        <h2>What leaves this screen</h2>
+        <ul class="cut-list">
+          <li>Clock On, Working, Clock Off, Complete stepper</li>
+          <li>Live timer, Pause, Travel / Clock On (on site)</li>
+          <li>Duplicate “Work Order / Fencing Install” header</li>
+          <li>Quote summary paragraph that repeats the table</li>
+          <li>Empty “No work order assigned yet”</li>
+          <li>Installer note twice</li>
+          <li>“What you’re building” stats that fight the quote (Panels: 0)</li>
+          <li>Generic safety / completion checklists on Work</li>
+          <li>Empty Scope Photos / Crew Charges cards</li>
+          <li>Same SOW dumped again on Files</li>
+        </ul>
+        <h2 style="margin-top:22px">What stays</h2>
+        <ul class="keep-list">
+          <li>Hero: suburb, job number, colour, allocated</li>
+          <li>Text and Navigate</li>
+          <li>Accept / Decline only while the job is still scheduled (not shown on the mock because that is a one-time step)</li>
+          <li>Quote numbers, accepted badge, no client sell price</li>
+          <li>Weekly Invoice for pay. Clock times no longer run the job screen.</li>
+          <li>Photos tab still owns Take Photo and before/during/after</li>
+          <li>Complete job as a single action on Photos once work is done, not a clock step</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="ask">
+      <h2>Lock this before I build</h2>
+      <p style="margin:0;font-size:14px;color:var(--sw-text-sec)">Annotate the phones if something is wrong. Or answer here and Send to Agent.</p>
+
+      <form data-lavish-question="clock" onsubmit="event.preventDefault(); var v=new FormData(event.currentTarget).get('clock'); if(v) queueAnswer('clock', v, event.currentTarget);">
+        <fieldset>
+          <legend>1. Clock On / Clock Off</legend>
+          <label class="opt"><input type="radio" name="clock" value="gone" checked> Take the whole clock strip off the job. Hours live on Weekly Invoice / work order rates only.</label>
+          <label class="opt"><input type="radio" name="clock" value="rename"> Keep start/finish somewhere, but never call it Clock On / Clock Off. One “Start day” and one “Finish day”.</label>
+          <label class="opt"><input type="radio" name="clock" value="keep-accept-only"> Strip the stepper and timer. Keep Accept / Decline. No time buttons on the job at all.</label>
+        </fieldset>
+        <button type="submit">Queue this answer</button>
+      </form>
+
+      <form data-lavish-question="complete" onsubmit="event.preventDefault(); var v=new FormData(event.currentTarget).get('complete'); if(v) queueAnswer('complete', v, event.currentTarget);">
+        <fieldset>
+          <legend>2. Where does “job is done” live?</legend>
+          <label class="opt"><input type="radio" name="complete" value="photos" checked> Photos tab. They take after photos, then mark complete. Work tab stays SOW only.</label>
+          <label class="opt"><input type="radio" name="complete" value="work-bottom"> Quiet button at the bottom of Work, after the SOW.</label>
+          <label class="opt"><input type="radio" name="complete" value="none"> Nowhere on trade. Ops marks the job complete.</label>
+        </fieldset>
+        <button type="submit">Queue this answer</button>
+      </form>
+
+      <form data-lavish-question="videos" onsubmit="event.preventDefault(); var v=new FormData(event.currentTarget).get('videos'); if(v) queueAnswer('videos', v, event.currentTarget);">
+        <fieldset>
+          <legend>3. Where Khairo adds the videos</legend>
+          <label class="opt"><input type="radio" name="videos" value="ops-files" checked> Ops job Files, dedicated Scope videos list (the mock). This ship first.</label>
+          <label class="opt"><input type="radio" name="videos" value="ops-and-scoper"> Ops now, and also from the fencing scoping tool when he sends the quote.</label>
+          <label class="opt"><input type="radio" name="videos" value="scoper-only"> Only in the fencing scoping tool, not Ops.</label>
+        </fieldset>
+        <button type="submit">Queue this answer</button>
+      </form>
+
+      <form data-lavish-question="build" onsubmit="event.preventDefault(); var v=new FormData(event.currentTarget).get('build'); if(v) queueAnswer('build', v, event.currentTarget);">
+        <fieldset>
+          <legend>4. Build this?</legend>
+          <label class="opt"><input type="radio" name="build" value="yes-as-drawn" checked> Yes. Build the right-hand phone plus Ops scope videos.</label>
+          <label class="opt"><input type="radio" name="build" value="yes-after-notes"> Yes, but wait for my annotations on the mock.</label>
+          <label class="opt"><input type="radio" name="build" value="change"> Do not build yet. I will mark what to change.</label>
+        </fieldset>
+        <button type="submit">Queue this answer</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

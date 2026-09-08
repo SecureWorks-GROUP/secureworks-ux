@@ -72,6 +72,31 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   job read-only. Failed writes leave the roster truthful rather than applying
   an optimistic badge. The shared roster renderer is used by standard detail
   and the make-safe report surface.
+- **Accept gate (2026-09-08)**: an installer (tier 1/2, not a vertical
+  manager, not office, not view-only) with a `scheduled` assignment sees ONLY
+  suburb, date, one-line scope and co-crew, plus "I'm on it" / "Can't do it"
+  (`renderAcceptGate`). Address, client, tabs and files open on accept. Test
+  fixtures for the installer persona carry `status: confirmed` so every other
+  spec still opens a full job.
+- **Job stepper**: Accepted → Working → Done in one card (`renderJobStepper`,
+  replaces the confirmed-state block of `renderSmartStatusFlow`). "Start work"
+  = `clock_event clock_on`; working state shows the elapsed timer and offers
+  "Job complete" (opens the completion wizard) or "End my day (job continues)"
+  (`clock_off`). Make-safe jobs offer "Do the report" instead. `clockEvent`
+  writes the server assignment back onto `_currentJob.crew` so the stepper
+  re-renders truthfully.
+- **Completion wizard**: fencing inserts a "Neighbour sign-off" step (one
+  screenshot slot per named neighbour, min one, or a waiver with a reason that
+  `waive_neighbour_signoff` logs on the job). Screenshots upload as
+  `phase: neighbour_signoff` BEFORE `complete_my_job`, which is the trade door
+  (staff fall back to `complete_job`). The server refuses completion and every
+  job-invoice path until `completion_evidence` is satisfied. The wizard's
+  "Complete Job" button was a dead inline onclick (`wizExecuteCompletion` was
+  not on `window`) for every trade before 2026-09-08.
+- **Quote lines**: `quote_packs[].quote_lines` (the client quote's own rows,
+  price-free) + `quote_notes` render as the scope of works; the derived
+  installer lines sit under a collapsed "Install summary". Guard:
+  `tests/e2e/trade-job-accept-stepper-complete.spec.js`.
 - **Scope tab reading order (2026-09-08)**: Instructions (work order
   `special_instructions` + estimated hours, else the scoping tool's installer
   note) → **Scope of works** (the sent quote's writing and quantities, accepted

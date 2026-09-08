@@ -19,7 +19,7 @@
       "user_id": "e2e-installer",
       "name": "E2E Installer",
       "is_lead": false,
-      "status": "scheduled",
+      "status": "confirmed",
       "scheduled_date": "{{TODAY}}",
       "start_time": "08:30"
     },

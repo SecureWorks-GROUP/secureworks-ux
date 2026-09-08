@@ -2471,6 +2471,39 @@
     }
 
     /* Large Dimension Display */
+    /* ── Accept gate + job stepper (2026-09-08) ── */
+    .accept-gate { margin: 0 0 16px; }
+    .accept-gate-body { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 20px 16px; margin-top: 12px; text-align: center; }
+    .accept-gate-q { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; color: var(--sw-dark); }
+    .accept-gate-sub { font-size: 13px; color: var(--sw-text-sec); margin: 6px auto 18px; max-width: 320px; line-height: 1.5; }
+    .accept-gate-yes { display: block; width: 100%; min-height: 56px; border: none; border-radius: 12px; background: var(--jc-a, var(--sw-orange)); color: #fff; font-family: var(--sw-font); font-size: 18px; font-weight: 800; cursor: pointer; }
+    .accept-gate-yes:active { opacity: 0.85; }
+    .accept-gate-no { display: block; width: 100%; min-height: 44px; margin-top: 10px; border: 1px solid var(--sw-border); border-radius: 12px; background: transparent; color: var(--sw-text-sec); font-family: var(--sw-font); font-size: 14px; font-weight: 600; cursor: pointer; }
+    .job-stepper { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 14px 16px 16px; margin-bottom: 12px; }
+    .js-track { display: flex; align-items: center; margin-bottom: 12px; }
+    .js-step { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 64px; }
+    .js-dot { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; font-family: var(--sw-mono); background: var(--sw-light); color: var(--sw-text-sec); border: 2px solid var(--sw-border); }
+    .js-label { font-size: 11px; font-weight: 600; color: var(--sw-text-sec); letter-spacing: 0.02em; }
+    .js-step.done .js-dot { background: var(--sw-green); border-color: var(--sw-green); color: #fff; }
+    .js-step.done .js-label { color: var(--sw-green); }
+    .js-step.active .js-dot { background: var(--sw-dark); border-color: var(--sw-dark); color: #fff; box-shadow: 0 0 0 4px rgba(41,60,70,0.12); }
+    .js-step.active .js-label { color: var(--sw-dark); font-weight: 700; }
+    .js-step.future { opacity: 0.55; }
+    .js-line { flex: 1; height: 2px; background: var(--sw-border); margin: 0 4px 18px; border-radius: 2px; }
+    .js-line.done { background: var(--sw-green); }
+    .js-state { font-size: 13px; color: var(--sw-text-sec); text-align: center; margin-bottom: 10px; }
+    .js-state #timerElapsed { font-family: var(--sw-mono); font-weight: 700; color: var(--sw-dark); }
+    .js-state-done { color: var(--sw-green); font-weight: 700; font-size: 15px; margin-bottom: 0; }
+    .js-primary { display: block; width: 100%; min-height: 54px; border: none; border-radius: 12px; background: var(--sw-dark); color: #fff; font-family: var(--sw-font); font-size: 17px; font-weight: 800; cursor: pointer; }
+    .job-stepper[data-stepper-state="working"] .js-primary { background: var(--sw-green); }
+    .js-primary:active { opacity: 0.85; }
+    .js-secondary { display: block; width: 100%; min-height: 40px; margin-top: 8px; border: none; background: transparent; color: var(--sw-text-sec); font-family: var(--sw-font); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .sow-install { margin-top: 10px; border: 1px dashed var(--sw-border); border-radius: 10px; padding: 0 12px; }
+    .sow-install > summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; list-style: none; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sw-text-sec); }
+    .sow-install > summary::-webkit-details-marker { display: none; }
+    .sow-install-sub { font-weight: 500; text-transform: none; letter-spacing: 0; }
+    .sow-install .sow-items { border-top: none; margin-bottom: 8px; }
+
     /* ── Job detail: scope of works / instructions / documents (2026-09-08) ── */
     .jd-instr { background: var(--sw-orange-tint); border: 1px solid var(--sw-orange-line); }
     .jd-instr-k { font-family: var(--sw-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--sw-orange-deep); font-weight: 600; margin-bottom: 8px; }
@@ -9454,6 +9487,119 @@
   // JOB DETAIL REDESIGN — Section Renderers
   // ══════════════════════════════════════════════════
 
+  // One-line scope for the hero and the accept gate (no address, no client).
+  function heroScopeLine(job, type) {
+    var config = (job.scope_json && (job.scope_json.config || job.scope_json)) || {};
+    var parts = [];
+    if (type === 'fencing') {
+      var fj = (job.scope_json && job.scope_json.job) || {};
+      var runs = fj.runs || [];
+      var m = 0;
+      runs.forEach(function(r) { m += Number(r.length) || Number(r.lengthM) || Number(r.totalLength) || 0; });
+      if (m > 0) parts.push(Math.round(m * 10) / 10 + 'm');
+      else if (config.totalLength || config.length) parts.push((config.totalLength || config.length) + 'm');
+      if (fj.profile || config.material) parts.push(humanise('material', fj.profile || config.material));
+      if (fj.sheetHeight || config.height) parts.push((fj.sheetHeight || config.height) + 'mm');
+      if (fj.colour || config.colour || config.color) parts.push(fj.colour || config.colour || config.color);
+      var gates = fj.gates || config.gates || config.gateCount || 0;
+      if (typeof gates === 'object' && Array.isArray(gates)) gates = gates.length;
+      if (gates > 0) parts.push(gates + ' gate' + (gates > 1 ? 's' : ''));
+    } else if (type !== 'makesafe') {
+      if (config.length && config.projection) parts.push(config.length + 'm × ' + config.projection + 'm');
+      if (config.roofStyle) parts.push(humanise('roofStyle', config.roofStyle));
+      if (config.roofing) parts.push(humanise('roofing', config.roofing));
+      if (config.connection) parts.push(humanise('connection', config.connection));
+      if (config.posts) parts.push(config.posts + ' post' + (config.posts > 1 ? 's' : ''));
+    }
+    return parts.join(' · ');
+  }
+
+  // Before accepting: what it is, where (suburb only), when. Address, client,
+  // scope and files stay hidden until "I'm on it".
+  function renderAcceptGate(data, assignment) {
+    var job = data.job;
+    var type = getTradeJobType(job);
+    var cls = UnifiedJobCard.typeCls(type);
+    var isMs = type === 'makesafe';
+    var stamp = isMs ? getTradeMakesafeTypeLabel(job) : getTradeStandardTypeLabel(job, type);
+    var suburb = String(job.site_suburb || '').trim() || 'Suburb TBC';
+    var when = assignment.scheduled_date ? formatDate(assignment.scheduled_date) : 'Date TBC';
+    if (assignment.start_time) when += ' · ' + String(assignment.start_time).slice(0, 5);
+    var dates = {};
+    (data.crew || []).forEach(function(c) { if (c.user_id === assignment.user_id && c.scheduled_date) dates[c.scheduled_date] = true; });
+    var dayCount = Object.keys(dates).length;
+    var scope = heroScopeLine(job, type);
+    var others = [];
+    (data.crew || []).forEach(function(c) {
+      var n = (c.users && c.users.name) || c.name || c.crew_name;
+      if (c.user_id !== assignment.user_id && n && others.indexOf(n) < 0) others.push(n);
+    });
+    var h = '<div class="accept-gate ' + cls + '" data-accept-gate>';
+    h += '<div class="dh ' + cls + '"><div class="dh-top"><span class="jc-stamp">' + esc(stamp) + '</span>';
+    if (job.job_number) h += '<span class="dh-num">' + esc(job.job_number) + '</span>';
+    h += '<span class="jc-status alloc" style="margin-left:auto">New</span></div>';
+    h += '<div class="dh-place">' + esc(suburb) + '</div>';
+    h += '<div class="dh-addr">' + esc(when) + (dayCount > 1 ? ' · ' + dayCount + ' days' : '') + '</div>';
+    if (scope) h += '<div class="dh-parties"><span><span class="k">Scope</span><b style="font-weight:500">' + esc(scope) + '</b></span></div>';
+    if (others.length) h += '<div class="dh-parties"><span><span class="k">With</span><b style="font-weight:500">' + esc(others.join(', ')) + '</b></span></div>';
+    h += '</div>';
+    h += '<div class="accept-gate-body">';
+    h += '<div class="accept-gate-q">Can you take this job?</div>';
+    h += '<div class="accept-gate-sub">The address, client details, scope of works and files open up once you\'re on it.</div>';
+    h += '<button type="button" class="accept-gate-yes" data-accept-yes onclick="acceptAssignment(\'' + esc(assignment.id) + '\')">I\'m on it</button>';
+    h += '<button type="button" class="accept-gate-no" data-accept-no onclick="declineAssignment(\'' + esc(assignment.id) + '\')">Can\'t do it</button>';
+    h += '</div></div>';
+    return h;
+  }
+
+  // ── Job stepper: Accepted → Working → Done, one tap each (Captain 2026-09-08) ──
+  function myAssignmentStartedAt(a) {
+    return (a && (a.clocked_on_at || a.started_at)) || null;
+  }
+
+  function renderJobStepper(data, phase, myAssignment) {
+    var a = myAssignment;
+    var status = String(a.status || '');
+    var working = status === 'in_progress';
+    var done = status === 'complete' || isJobDone(phase);
+    var jobDone = phase === 'complete';
+    var startedAt = myAssignmentStartedAt(a);
+    var isMs = getTradeJobType(data.job) === 'makesafe';
+    var stepCls = function(n) {
+      var idx = done ? 3 : working ? 2 : 1;
+      if (n < idx) return 'done';
+      if (n === idx) return 'active';
+      return 'future';
+    };
+    var h = '<div class="job-stepper" data-job-stepper data-stepper-state="' + (done ? 'done' : working ? 'working' : 'accepted') + '">';
+    h += '<div class="js-track">';
+    h += '<div class="js-step ' + stepCls(1) + '"><span class="js-dot">' + (stepCls(1) === 'done' ? '&#10003;' : '1') + '</span><span class="js-label">Accepted</span></div>';
+    h += '<div class="js-line ' + (working || done ? 'done' : '') + '"></div>';
+    h += '<div class="js-step ' + stepCls(2) + '"><span class="js-dot">' + (stepCls(2) === 'done' ? '&#10003;' : '2') + '</span><span class="js-label">Working</span></div>';
+    h += '<div class="js-line ' + (done ? 'done' : '') + '"></div>';
+    h += '<div class="js-step ' + stepCls(3) + '"><span class="js-dot">' + (done ? '&#10003;' : '3') + '</span><span class="js-label">' + (isMs ? 'Report' : 'Done') + '</span></div>';
+    h += '</div>';
+    if (done) {
+      h += '<div class="js-state js-state-done">' + (jobDone ? 'Job complete' : 'Your day on this job is complete') + '</div>';
+    } else if (working) {
+      var since = startedAt ? new Date(startedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) : '';
+      h += '<div class="js-state">Working' + (since ? ' since ' + esc(since) : '') + (startedAt ? ' · <span id="timerElapsed">' + esc(formatElapsed(startedAt)) + '</span>' : '') + '</div>';
+      if (isMs) {
+        h += '<button type="button" class="js-primary" data-stepper-finish onclick="switchJobTab(\'ms_report\')">Do the report</button>';
+        h += '<button type="button" class="js-secondary" data-stepper-endday onclick="timerAction(\'clock_off\', \'' + esc(a.id) + '\')">Leaving site (no report yet)</button>';
+      } else {
+        h += '<button type="button" class="js-primary" data-stepper-finish onclick="confirmThenComplete()">Job complete</button>';
+        h += '<button type="button" class="js-secondary" data-stepper-endday onclick="timerAction(\'clock_off\', \'' + esc(a.id) + '\')">End my day (job continues)</button>';
+      }
+    } else {
+      var sched = a.scheduled_date ? formatDate(a.scheduled_date) : '';
+      h += '<div class="js-state">Scheduled' + (sched ? ' for ' + esc(sched) : '') + (a.start_time ? ' · ' + esc(String(a.start_time).slice(0, 5)) : '') + '</div>';
+      h += '<button type="button" class="js-primary" data-stepper-start onclick="timerAction(\'clock_on\', \'' + esc(a.id) + '\')">Start work</button>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   function renderHeroCard(data, phase) {
     var job = data.job;
     var type = getTradeJobType(job);
@@ -9550,6 +9696,7 @@
     var h = '';
 
     if (!isJobDone(phase) && myAssignment.status === 'scheduled') {
+      // Only office (tier 3) reaches here — everyone else is behind the accept gate.
       h += '<div style="margin-bottom:12px">';
       h += '<div style="font-size:13px;color:var(--sw-text-sec);text-align:center;margin-bottom:10px;">You\'ve been scheduled for this job</div>';
       h += '<div style="display:flex;gap:8px;margin-bottom:8px;">';
@@ -9558,6 +9705,8 @@
       h += '<button class="sf-action-btn" style="flex:1;background:var(--sw-green);font-size:15px;padding:14px 12px" onclick="acceptAssignment(\'' + myAssignment.id + '\')">';
       h += 'Accept</button>';
       h += '</div></div>';
+    } else if (!isJobDone(phase) && (myAssignment.status === 'confirmed' || myAssignment.status === 'in_progress')) {
+      h += renderJobStepper(data, phase, myAssignment);
     } else if (phase === 'complete') {
       h += '<div style="text-align:center;margin-bottom:12px;padding:12px;background:var(--sw-light);border-radius:10px">';
       h += '<div style="font-size:15px;font-weight:800;color:var(--sw-green)">Completed</div>';
@@ -10423,9 +10572,55 @@
       + ' Open quote <span class="sow-open-sub">no prices</span></button>';
   }
 
+  function tradeQuoteLines(pack) {
+    return (pack && Array.isArray(pack.quote_lines)) ? pack.quote_lines.filter(function(l) { return l && String(l.description || '').trim(); }) : [];
+  }
+
+  function tradeQuoteNotes(pack) {
+    return (pack && Array.isArray(pack.quote_notes)) ? pack.quote_notes.map(function(n) { return String(n || '').trim(); }).filter(Boolean) : [];
+  }
+
+  // The quote's own rows (exactly what the client's quote printed, minus
+  // money) are the scope of works. The derived installer lines (metres /
+  // plinths / gates, the per-metre pay basis) sit under "Install summary".
   function renderQuotePackItems(pack, showPrices) {
+    var lines = tradeQuoteLines(pack);
+    var notes = tradeQuoteNotes(pack);
+    if (lines.length || notes.length) {
+      var q = '<div class="sow-items" data-quote-lines>';
+      lines.forEach(function(line) {
+        var qty = line.quantity ? (line.quantity + (line.unit ? ' ' + line.unit : '')) : (line.unit || '');
+        q += '<div class="sow-item">';
+        q += '<div class="sow-item-desc">' + esc(redactTradePriceText(line.description || '')) + '</div>';
+        if (qty) q += '<div class="sow-qty">' + esc(String(qty)) + '</div>';
+        q += '</div>';
+      });
+      q += '</div>';
+      notes.forEach(function(note, i) {
+        q += '<div class="sow-note" data-quote-note>' + (i === 0 ? '<span class="sow-note-k">From the quote</span>' : '') + esc(redactTradePriceText(note)) + '</div>';
+      });
+      var installer = String((pack && pack.notes) || '').trim();
+      if (installer) q += '<div class="sow-note"><span class="sow-note-k">Installer note</span>' + esc(redactTradePriceText(installer)) + '</div>';
+      var derived = (pack.items || []).filter(function(i) { return i && i.kind !== 'note'; });
+      if (derived.length) {
+        q += '<details class="sow-install" data-install-summary' + (showPrices ? ' open' : '') + '>';
+        q += '<summary>Install summary <span class="sow-install-sub">' + derived.length + ' line' + (derived.length === 1 ? '' : 's') + '</span></summary>';
+        q += renderDerivedPackItems(derived, showPrices);
+        q += '</details>';
+      }
+      return q;
+    }
+    return renderDerivedPackItems(pack.items || [], showPrices) + renderPackNotes(pack);
+  }
+
+  function renderPackNotes(pack) {
+    var notes = String((pack && pack.notes) || '').trim();
+    return notes ? '<div class="sow-note"><span class="sow-note-k">Quote notes</span>' + esc(redactTradePriceText(notes)) + '</div>' : '';
+  }
+
+  function renderDerivedPackItems(items, showPrices) {
     var h = '<div class="sow-items">';
-    (pack.items || []).forEach(function(item) {
+    (items || []).forEach(function(item) {
       if (!item) return;
       if (item.kind === 'note') {
         var noteText = String(item.description || '').trim();
@@ -10442,8 +10637,6 @@
       h += '</div>';
     });
     h += '</div>';
-    var notes = String((pack && pack.notes) || '').trim();
-    if (notes) h += '<div class="sow-note"><span class="sow-note-k">Quote notes</span>' + esc(redactTradePriceText(notes)) + '</div>';
     return h;
   }
 
@@ -10595,6 +10788,9 @@
     findMakesafeWorkOrderDocument: findMakesafeWorkOrderDocument,
     tradeWorkOrderPdfUrl: tradeWorkOrderPdfUrl,
     renderQuotePacks: renderQuotePacks,
+    renderQuotePackItems: renderQuotePackItems,
+    tradeQuoteLines: tradeQuoteLines,
+    tradeQuoteNotes: tradeQuoteNotes,
     tradeQuoteExtracts: tradeQuoteExtracts,
     tradeQuoteExtractForPack: tradeQuoteExtractForPack,
     renderTradeQuoteOpenButton: renderTradeQuoteOpenButton,
@@ -11608,6 +11804,21 @@
       html += '<div id="jobViewOnlyBanner" style="padding:12px 14px;background:var(--sw-light);border:1px solid var(--sw-border);border-radius:10px;margin-bottom:12px;font-size:13px;color:var(--sw-text-sec)">';
       html += '&#128065; <strong style="color:var(--sw-dark)">View only</strong> — ' + (allocatedTo ? esc(allocatedTo) + ' is' : 'another crew is') + ' allocated to this job.';
       html += '</div>';
+    }
+
+    // ── Accept gate: nothing about the job until the trade says they're on it ──
+    // (Captain 2026-09-08). Office (tier 3), vertical managers (they open
+    // jobs to manage crew) and view-only (another crew's job) are never
+    // gated; a declined/complete assignment is not gated.
+    var myGateAssignment = getMyAssignment(data);
+    if (!viewOnly && myGateAssignment && myGateAssignment.status === 'scheduled' && !isJobDone(phase) && _userTier < 3 && !canUseEveryoneLens() && !tradeDetailGrantsManagerAccess(data)) {
+      html += renderAcceptGate(data, myGateAssignment);
+      container.innerHTML = html;
+      var bottomNavGate = document.getElementById('bottomNav');
+      if (bottomNavGate) bottomNavGate.style.display = '';
+      var existingToolsGate = document.getElementById('onsiteTools');
+      if (existingToolsGate) existingToolsGate.remove();
+      return;
     }
 
     // ── Section 1: Job Hero Card ──
@@ -26001,6 +26212,14 @@
 
       // Update local state FROM SERVER response
       var ass = result.assignment;
+      if (ass && _currentJob && Array.isArray(_currentJob.crew)) {
+        _currentJob.crew.forEach(function(row) {
+          if (!row || row.id !== ass.id) return;
+          ['status', 'started_at', 'completed_at', 'clocked_on_at', 'clocked_off_at', 'travel_started_at', 'arrived_at', 'job_phase', 'hours_worked', 'break_minutes'].forEach(function(k) {
+            if (k in ass) row[k] = ass[k];
+          });
+        });
+      }
       if (ass) {
         _clockedOnAt = ass.clocked_on_at || _clockedOnAt;
         _travelStartTime = ass.travel_started_at || _travelStartTime;
@@ -26823,10 +27042,50 @@
   var _wizChecklist = { cleaned: false, tools: false, noDamage: false, maintenance: false };
   var _wizClientNotOnSite = false;
   var _wizClientSmsSent = false;
+  // Neighbour sign-off (fencing): one screenshot per affected neighbour, or a
+  // waiver with a reason. Server gate: completion_evidence on complete_my_job
+  // and on every job-invoice path.
+  var _wizSteps = ['photos', 'signoff', 'checklist', 'submit'];
+  var _wizNeighbourShots = [];      // [{ label, file }]
+  var _wizNeighbourWaiver = { on: false, reason: '' };
+
+  function wizJobIsFencing() {
+    var job = _currentJob ? _currentJob.job : {};
+    return String(job.type || '').toLowerCase() === 'fencing';
+  }
+
+  function wizNamedNeighbours() {
+    var job = _currentJob ? _currentJob.job : {};
+    var sj = (job.scope_json && job.scope_json.job) || {};
+    var rows = Array.isArray(sj.neighbours) ? sj.neighbours : [];
+    var names = [];
+    rows.forEach(function(n) {
+      if (!n) return;
+      var name = [n.firstName, n.lastName].filter(Boolean).join(' ').trim() || String(n.name || '').trim() || String(n.address || '').trim();
+      if (name) names.push(name);
+    });
+    return names;
+  }
+
+  function wizNeighbourSlotsRequired() {
+    var ev = _currentJob && _currentJob.completion_evidence;
+    if (ev && typeof ev.signoffs_required === 'number' && !ev.waived) return Math.max(1, ev.signoffs_required);
+    return Math.max(1, wizNamedNeighbours().length);
+  }
+
+  function wizNeighbourStepSatisfied() {
+    if (_wizNeighbourWaiver.on) return String(_wizNeighbourWaiver.reason || '').trim().length >= 3;
+    var filled = _wizNeighbourShots.filter(function(x) { return x && x.file; }).length;
+    return filled >= wizNeighbourSlotsRequired();
+  }
 
   window.openWizard = function() {
     _wizStep = 1;
-    _wizStepCount = 4;
+    _wizSteps = wizJobIsFencing() ? ['photos', 'neighbours', 'signoff', 'checklist', 'submit'] : ['photos', 'signoff', 'checklist', 'submit'];
+    _wizStepCount = _wizSteps.length;
+    _wizNeighbourShots = wizNamedNeighbours().map(function(n) { return { label: n, file: null }; });
+    if (_wizNeighbourShots.length === 0) _wizNeighbourShots = [{ label: 'Neighbour', file: null }];
+    _wizNeighbourWaiver = { on: false, reason: '' };
     _wizSatisfaction = 0;
     _wizPhotos = {};
     _wizMarketingPhotos = [];
@@ -26893,10 +27152,89 @@
     }
     document.getElementById('wizProgress').innerHTML = progHtml;
 
-    if (_wizStep === 1) renderWizStep1(body, footer);
-    else if (_wizStep === 2) renderWizStep2_signoff(body, footer);
-    else if (_wizStep === 3) renderWizStep3_checklist(body, footer);
-    else if (_wizStep === 4) renderWizStep4_submit(body, footer);
+    var key = _wizSteps[_wizStep - 1] || 'submit';
+    if (key === 'photos') renderWizStep1(body, footer);
+    else if (key === 'neighbours') renderWizStepNeighbours(body, footer);
+    else if (key === 'signoff') renderWizStep2_signoff(body, footer);
+    else if (key === 'checklist') renderWizStep3_checklist(body, footer);
+    else renderWizStep4_submit(body, footer);
+  };
+
+  window.wizNext = function() { if (_wizStep < _wizStepCount) { _wizStep++; renderWizStep(); } };
+
+  // ── STEP (fencing): Neighbour sign-off screenshots ──
+  function renderWizStepNeighbours(body, footer) {
+    var required = wizNeighbourSlotsRequired();
+    var filled = _wizNeighbourShots.filter(function(x) { return x && x.file; }).length;
+    var html = '';
+    html += '<div class="wiz-step-title">Neighbour sign-off</div>';
+    html += '<div class="wiz-step-desc">A screenshot of each neighbour\'s sign-off text (SMS, WhatsApp, email). Needed before this job can be invoiced.</div>';
+    if (!_wizNeighbourWaiver.on) {
+      html += '<div style="padding:0 16px 8px;font-size:12px;color:var(--sw-text-sec)">' + filled + ' of ' + required + ' on file</div>';
+      _wizNeighbourShots.forEach(function(slot, i) {
+        var has = !!slot.file;
+        html += '<div class="wiz-photo-prompt' + (has ? ' done' : '') + '" data-neighbour-slot="' + i + '">';
+        if (has && slot.file._thumbUrl) html += '<img class="wiz-photo-thumb" src="' + slot.file._thumbUrl + '">';
+        html += '<span class="wiz-prompt-label">' + esc(slot.label) + (has ? ' &#10003;' : '') + '</span>';
+        html += '<div class="wiz-prompt-btns">';
+        html += '<button class="wiz-photo-btn wiz-photo-btn-lib" onclick="wizCaptureNeighbour(' + i + ')">' + (has ? 'Replace' : 'Screenshot') + '</button>';
+        if (_wizNeighbourShots.length > 1) html += '<button class="wiz-photo-btn wiz-photo-btn-lib" onclick="wizRemoveNeighbour(' + i + ')">&times;</button>';
+        html += '</div></div>';
+      });
+      html += '<div style="padding:4px 16px 12px"><button class="wiz-btn wiz-btn-secondary" style="font-size:13px" onclick="wizAddNeighbour()">+ Another neighbour</button></div>';
+      html += '<div style="padding:0 16px 16px"><button class="wiz-btn wiz-btn-skip" data-neighbour-waive style="font-size:13px" onclick="wizToggleNeighbourWaiver(true)">No neighbour sign-off needed</button></div>';
+    } else {
+      html += '<div style="padding:0 16px 16px">';
+      html += '<div style="font-size:14px;font-weight:600;margin-bottom:8px">Why is no neighbour sign-off needed?</div>';
+      html += '<textarea data-neighbour-waiver-reason rows="3" placeholder="e.g. Front boundary fence, no shared neighbour" oninput="wizSetNeighbourWaiverReason(this.value)" style="width:100%;padding:10px;border:1.5px solid var(--sw-border);border-radius:8px;font-size:15px;font-family:var(--sw-font);box-sizing:border-box">' + esc(_wizNeighbourWaiver.reason) + '</textarea>';
+      html += '<div style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">Logged on the job for the office.</div>';
+      html += '<button class="wiz-btn wiz-btn-secondary" style="margin-top:10px;font-size:13px" onclick="wizToggleNeighbourWaiver(false)">Back to screenshots</button>';
+      html += '</div>';
+    }
+    body.innerHTML = html;
+    wizRefreshNeighbourFooter();
+  }
+
+  window.wizRefreshNeighbourFooter = function() {
+    var footer = document.getElementById('wizFooter');
+    if (!footer) return;
+    var ok = wizNeighbourStepSatisfied();
+    var fh = '<div style="display:flex;gap:8px">';
+    fh += '<button class="wiz-btn wiz-btn-secondary" onclick="wizBack()">Back</button>';
+    fh += '<button class="wiz-btn wiz-btn-primary" data-neighbour-next' + (ok ? '' : ' disabled') + ' onclick="wizNext()">Next — Client sign-off</button>';
+    fh += '</div>';
+    footer.innerHTML = fh;
+  };
+
+  window.wizCaptureNeighbour = function(i) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function() {
+      var file = input.files[0];
+      if (!file) return;
+      file._thumbUrl = URL.createObjectURL(file);
+      if (_wizNeighbourShots[i]) _wizNeighbourShots[i].file = file;
+      renderWizStep();
+    };
+    input.click();
+  };
+  window.wizAddNeighbour = function() {
+    _wizNeighbourShots.push({ label: 'Neighbour ' + (_wizNeighbourShots.length + 1), file: null });
+    renderWizStep();
+  };
+  window.wizRemoveNeighbour = function(i) {
+    if (_wizNeighbourShots.length <= 1) return;
+    _wizNeighbourShots.splice(i, 1);
+    renderWizStep();
+  };
+  window.wizSetNeighbourWaiverReason = function(v) {
+    _wizNeighbourWaiver.reason = String(v || '');
+    wizRefreshNeighbourFooter();
+  };
+  window.wizToggleNeighbourWaiver = function(on) {
+    _wizNeighbourWaiver.on = !!on;
+    renderWizStep();
   };
 
   // ── STEP 1: Stage Photos ──
@@ -26924,7 +27262,7 @@
     body.innerHTML = html;
 
     var canProceed = count >= 3;
-    footer.innerHTML = '<button class="wiz-btn wiz-btn-primary"' + (canProceed ? '' : ' disabled') + ' onclick="wizGoStep(2)">Next — Voice Summary</button>';
+    footer.innerHTML = '<button class="wiz-btn wiz-btn-primary"' + (canProceed ? '' : ' disabled') + ' onclick="wizNext()">Next' + (wizJobIsFencing() ? ' — Neighbour sign-off' : ' — Client sign-off') + '</button>';
   }
 
   window.wizCapturePhoto = function(label, useCamera) {
@@ -26993,7 +27331,7 @@
     var canProceed = _wizSatisfaction > 0 && (_wizClientNotOnSite || (_wizSigCanvas && _wizSigDrawing));
     var fh = '<div style="display:flex;gap:8px">';
     fh += '<button class="wiz-btn wiz-btn-secondary" onclick="wizBack()">Back</button>';
-    fh += '<button class="wiz-btn wiz-btn-primary" onclick="wizGoStep(3)">Next — Checklist</button>';
+    fh += '<button class="wiz-btn wiz-btn-primary" onclick="wizNext()">Next — Checklist</button>';
     fh += '</div>';
     footer.innerHTML = fh;
   }
@@ -27062,7 +27400,7 @@
     var allChecked = items.every(function(item) { return _wizChecklist[item.key]; });
     var fh = '<div style="display:flex;gap:8px">';
     fh += '<button class="wiz-btn wiz-btn-secondary" onclick="wizBack()">Back</button>';
-    fh += '<button class="wiz-btn wiz-btn-primary" onclick="wizGoStep(4)"' + (allChecked ? '' : ' disabled style="opacity:0.5"') + '>Next — Submit</button>';
+    fh += '<button class="wiz-btn wiz-btn-primary" onclick="wizNext()"' + (allChecked ? '' : ' disabled style="opacity:0.5"') + '>Next — Submit</button>';
     fh += '</div>';
     if (!allChecked) {
       fh += '<div style="font-size:11px;color:var(--sw-yellow);text-align:center;margin-top:6px">Check all items to continue</div>';
@@ -27083,6 +27421,10 @@
     html += '<div style="padding:16px">';
     html += '<div style="background:var(--sw-light);border-radius:12px;padding:16px;margin-bottom:16px">';
     html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px"><span>Photos</span><span style="font-weight:700">' + photoCount + '</span></div>';
+    if (wizJobIsFencing()) {
+      var nsText = _wizNeighbourWaiver.on ? 'Waived: ' + (_wizNeighbourWaiver.reason || '') : (_wizNeighbourShots.filter(function(x) { return x && x.file; }).length + ' screenshot' + (_wizNeighbourShots.filter(function(x) { return x && x.file; }).length === 1 ? '' : 's'));
+      html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px;gap:12px"><span>Neighbour sign-off</span><span data-neighbour-summary style="font-weight:700;text-align:right">' + esc(nsText) + '</span></div>';
+    }
     html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px"><span>Client Rating</span><span style="font-weight:700">' + (_wizSatisfaction > 0 ? _wizSatisfaction + '/5' : 'N/A') + '</span></div>';
     html += '<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:8px"><span>Signature</span><span style="font-weight:700;color:' + (_wizClientNotOnSite ? (_wizClientSmsSent ? 'var(--sw-green)' : 'var(--sw-yellow)') : 'var(--sw-green)') + '">' + (_wizClientNotOnSite ? (_wizClientSmsSent ? 'Client absent - SMS sent' : 'Client absent') : 'Captured') + '</span></div>';
     html += '<div style="display:flex;justify-content:space-between;font-size:14px"><span>Checklist</span><span style="font-weight:700;color:var(--sw-green)">All done</span></div>';
@@ -27480,11 +27822,16 @@
     if (bar) bar.style.width = pct + '%';
   }
 
+  // Inline onclick on the submit step reaches only window.* — this was a dead
+  // "Complete Job" button for every trade (same class as generatePOPdf).
+  window.wizExecuteCompletion = wizExecuteCompletion;
   function wizExecuteCompletion() {
     var job = _currentJob ? _currentJob.job : {};
     var jobId = _currentJobId;
     var photoKeys = Object.keys(_wizPhotos);
-    var totalSteps = photoKeys.length + _wizMarketingPhotos.length + (_wizAudioBlob ? 1 : 0) + 1 + 1; // +sig +complete_job
+    var neighbourShots = wizJobIsFencing() ? _wizNeighbourShots.filter(function(x) { return x && x.file; }) : [];
+    var neighbourWaive = wizJobIsFencing() && _wizNeighbourWaiver.on;
+    var totalSteps = photoKeys.length + neighbourShots.length + (neighbourWaive ? 1 : 0) + _wizMarketingPhotos.length + (_wizAudioBlob ? 1 : 0) + 1 + 1; // +sig +complete
     var completed = 0;
 
     function tick(msg) {
@@ -27501,6 +27848,21 @@
         return uploadOnePhoto(_wizPhotos[label], jobId, 'completion', label);
       });
     });
+
+    // 1b. Neighbour sign-off screenshots (fencing) — before completion so the
+    //     server evidence gate sees them; a waiver is logged on the job instead.
+    neighbourShots.forEach(function(slot, i) {
+      photoChain = photoChain.then(function() {
+        tick('Uploading neighbour sign-off ' + (i + 1) + ' of ' + neighbourShots.length + '...');
+        return uploadOnePhoto(slot.file, jobId, 'neighbour_signoff', 'Neighbour sign-off: ' + slot.label);
+      });
+    });
+    if (neighbourWaive) {
+      photoChain = photoChain.then(function() {
+        tick('Logging neighbour sign-off waiver...');
+        return api('waive_neighbour_signoff', null, { jobId: jobId, reason: _wizNeighbourWaiver.reason });
+      });
+    }
 
     // 2. Upload marketing photos
     _wizMarketingPhotos.forEach(function(f, i) {
@@ -27529,7 +27891,14 @@
       tick('Updating job status...');
       var completePayload = { jobId: jobId, signatureName: _wizSigName };
       if (_wizSatisfaction > 0) completePayload.satisfaction_rating = _wizSatisfaction;
-      return api('complete_job', null, completePayload).then(function(result) {
+      // complete_my_job is the trade door (assignment / vertical-manager
+      // access + fencing evidence gate). Staff accounts keep complete_job.
+      return api('complete_my_job', null, completePayload).catch(function(err) {
+        if (err && (err.status === 403 || err.status === 404) && typeof canSeeFullPricing === 'function' && canSeeFullPricing()) {
+          return api('complete_job', null, completePayload);
+        }
+        throw err;
+      }).then(function(result) {
         _invalidateAssignmentLifecycleCaches();
         return result;
       });

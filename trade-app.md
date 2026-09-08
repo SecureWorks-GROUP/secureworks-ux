@@ -151,6 +151,17 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   form prefills from the server profile first. `_invoiceGstDefault` no longer
   falls back to browser storage: the server profile (or the invoice's own
   `gst_on`) is the only authority.
+- **Complete-to-invoice (2026-09-08)**: the completion wizard's Done screen
+  reads `invoice_queue` from `complete_my_job`. Per-metre trades: each priced
+  work order gets a card and is added to this week's weekly draft automatically
+  (`openWeeklyWorkOrderInvoice({workOrderId, autoSave:true})` → the normal
+  `save_trade_invoice_draft` path; `_weeklyDraftSavedHook` reports back). The
+  card then reads "On your weekly invoice draft (w/e ...)" with "Review weekly
+  invoice", or names the refusal and points to My Work Orders. Hourly trades
+  see hours already clocked, or the one-tap hours row. Pure
+  `CompleteInvoiceCore` in `// <trade-complete-invoice>`, pinned by
+  `scripts/test-trade-complete-invoice.js`; guard
+  `tests/e2e/trade-complete-to-invoice.spec.js`.
 - **Client phone**: every allocated trade (tier 1 included) gets Call in the
   action bar and the number in the hero; view-only (another crew's job) hides
   both. `canCall()` no longer gates on tier 2.

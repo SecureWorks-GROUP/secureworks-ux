@@ -2471,6 +2471,13 @@
     }
 
     /* Large Dimension Display */
+    /* ── Complete-to-invoice cards on the wizard success screen (2026-09-08) ── */
+    .wiz-inv { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 12px 14px; margin: 12px 0 0; text-align: left; }
+    .wiz-inv-t { font-size: 14px; font-weight: 800; color: var(--sw-dark); }
+    .wiz-inv-s { font-size: 12px; color: var(--sw-text-sec); margin-top: 4px; line-height: 1.45; }
+    .wiz-inv-s.ok { color: #155724; }
+    .wiz-inv-s.warn { color: #92400E; }
+    .wiz-inv-btn { margin-top: 10px; min-height: 40px; padding: 0 14px; border: 1.5px solid var(--sw-dark); border-radius: 8px; background: #fff; color: var(--sw-dark); font-family: var(--sw-font); font-size: 13px; font-weight: 800; cursor: pointer; }
     /* ── My money (2026-09-08) ── */
     .mm-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px; }
     .mm-head h2 { font-size: 18px; font-weight: 800; color: var(--sw-dark); margin: 0; }
@@ -19652,12 +19659,18 @@
       if (entryWorkOrderId && !_weeklyApplyEntryWorkOrder(_weeklyWoInvoice, entryWorkOrderId, true)) {
         toast('This work order is no longer available for that invoice week', true);
       }
+      if (entryWorkOrderId && opts.autoSave && !_weeklyWoInvoice.workOrders.some(function (w) { return String(w.id || '') === entryWorkOrderId; })) {
+        if (_weeklyDraftSavedHook) { var hMissing = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; hMissing(null, new Error('This work order is not ready for the weekly invoice yet')); }
+        renderWeeklyWorkOrderInvoice();
+        return;
+      }
       if (opts.invoice && String(opts.invoice.invoice_source || '') === 'weekly_work_order') {
         if (!_hydrateWeeklyDraft(opts.invoice)) toast('Saved weekly draft is missing server totals. Save again before submitting.', true);
         if (entryWorkOrderId && !_weeklyApplyEntryWorkOrder(_weeklyWoInvoice, entryWorkOrderId, false)) {
           toast('This work order is no longer available for that invoice week', true);
         }
         renderWeeklyWorkOrderInvoice();
+        _weeklyAutoSaveKick(opts);
         return;
       }
       var draftId = '';
@@ -19668,6 +19681,7 @@
       });
       if (!draftId) {
         renderWeeklyWorkOrderInvoice();
+        _weeklyAutoSaveKick(opts);
         return;
       }
       api('get_trade_invoice', { invoice_id: draftId }).then(function(detail) {
@@ -19679,12 +19693,15 @@
           }
         }
         renderWeeklyWorkOrderInvoice();
+        _weeklyAutoSaveKick(opts);
       }).catch(function(err) {
         if (!_weeklyStateCurrent(_weeklyWoInvoice) || loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
         toast('Could not reopen the weekly draft: ' + friendlyError(err), true);
         renderWeeklyWorkOrderInvoice();
+        if (_weeklyDraftSavedHook) { var hReopen = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; hReopen(null, err); }
       });
     }).catch(function(err) {
+      if (_weeklyDraftSavedHook) { var hLoad = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; hLoad(null, err); }
       if (loadSeq !== _weeklyWoInvoiceLoadSeq || loadWeekStart !== _hoursWeekStart || loadWeekEnd !== _hoursWeekEnd || !_invoiceApiCurrent(loadCtx)) return;
       container.innerHTML = '<div data-weekly-wo-load-error class="hours-no-data">'
         + esc(friendlyError(err) || 'Could not load work orders.')
@@ -19992,7 +20009,9 @@
       state.saveUnresolved = false;
       toast('Draft saved — totals calculated by SecureWorks');
       renderWeeklyWorkOrderInvoice();
+      if (_weeklyDraftSavedHook) { var hSaved = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; try { hSaved(state, null); } catch (e) {} }
     }).catch(function(err) {
+      if (_weeklyDraftSavedHook) { var hFailed = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; try { hFailed(null, err); } catch (e) {} }
       if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
       return _handleFinancialWriteFailure('save_trade_invoice_draft', payload, err, ctx).then(function(result) {
         if (_financialWriteAborted(result)) {
@@ -28500,6 +28519,7 @@
         throw err;
       }).then(function(result) {
         _invalidateAssignmentLifecycleCaches();
+        _wizCompleteResult = result || null;
         return result;
       });
     });
@@ -28529,7 +28549,7 @@
     }
 
     photoChain.then(function() {
-      wizShowSuccess(job);
+      wizShowSuccess(job, _wizCompleteResult);
     }).catch(function(err) {
       wizUpdateProgress('Error: ' + friendlyError(err), 100);
       var footer = document.getElementById('wizFooter');
@@ -28608,21 +28628,130 @@
     });
   }
 
-  function wizShowSuccess(job) {
+  var _wizCompleteResult = null; // complete_my_job response (carries invoice_queue)
+
+  // ── Complete-to-invoice (2026-09-08, Marnin) ──
+  // "When they say job complete it should tie to their weekly invoice
+  // automatically; end of week is a review." The server marks the trade's own
+  // work orders complete and names the lane. Per-metre trades get the work
+  // order added to this week's draft here; hourly trades get the one-tap
+  // hours row when nothing is clocked yet.
+  // <trade-complete-invoice>
+  var CompleteInvoiceCore = (function () {
+    'use strict';
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+    function weekLabel(weekEnd) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(weekEnd || ''));
+      if (!m) return '';
+      var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return 'w/e ' + days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
+    }
+    // What the success screen should do with the server's invoice_queue.
+    //   { kind: 'weekly', workOrders: [...] }  per-metre, priced WOs to auto-add
+    //   { kind: 'hours', hoursLogged: n|null } everyone else
+    //   { kind: 'none' }                       nothing to do (no queue info)
+    function plan(queue) {
+      queue = queue || {};
+      var wos = Array.isArray(queue.work_orders) ? queue.work_orders : [];
+      if (queue.lane === 'weekly_work_order') {
+        var priced = wos.filter(function (w) { return w && w.priced !== false; });
+        if (priced.length) return { kind: 'weekly', workOrders: priced, unpriced: wos.filter(function (w) { return w && w.priced === false; }) };
+        return { kind: 'hours', hoursLogged: queue.hours_logged == null ? null : Number(queue.hours_logged), unpriced: wos };
+      }
+      if (queue.lane === 'hours') return { kind: 'hours', hoursLogged: queue.hours_logged == null ? null : Number(queue.hours_logged), workOrders: wos };
+      return { kind: 'none' };
+    }
+    function weeklyCardHTML(wo, state, detail) {
+      wo = wo || {}; state = state || 'adding';
+      var week = weekLabel(wo.week_end);
+      var h = '<div class="wiz-inv" data-wiz-invoice="' + esc(wo.id) + '" data-wiz-invoice-state="' + esc(state) + '">';
+      h += '<div class="wiz-inv-t">Work order ' + esc(wo.wo_number || '') + ' complete</div>';
+      if (state === 'adding') h += '<div class="wiz-inv-s"><span class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></span>Adding it to your weekly invoice' + (week ? ' (' + esc(week) + ')' : '') + '...</div>';
+      else if (state === 'added') h += '<div class="wiz-inv-s ok">On your weekly invoice draft' + (week ? ' (' + esc(week) + ')' : '') + '. Review it under Hours when the week is done.</div>';
+      else h += '<div class="wiz-inv-s warn">Could not add it automatically' + (detail ? ': ' + esc(detail) : '') + '. Add it from My Work Orders.</div>';
+      h += '<button type="button" class="wiz-inv-btn" data-wiz-review onclick="wizReviewWeeklyInvoice(\'' + esc(wo.id) + '\',\'' + esc(wo.business_date || '') + '\')">Review weekly invoice</button>';
+      h += '</div>';
+      return h;
+    }
+    function hoursIntroHTML(hoursLogged) {
+      if (hoursLogged != null) return '<div class="wiz-inv"><div class="wiz-inv-t">' + esc(String(hoursLogged)) + (Number(hoursLogged) === 1 ? ' hr' : ' hrs') + ' on your week for this job</div><div class="wiz-inv-s">Change it under Hours if that is not right.</div></div>';
+      return '';
+    }
+    return { plan: plan, weeklyCardHTML: weeklyCardHTML, hoursIntroHTML: hoursIntroHTML, weekLabel: weekLabel };
+  })();
+  // </trade-complete-invoice>
+
+  var _weeklyDraftSavedHook = null; // set by the wizard auto-add; called once by the save path
+  function _weeklyAutoSaveKick(opts) {
+    if (!opts || !opts.autoSave) return;
+    var state = _weeklyWoInvoice;
+    if (!state) { if (_weeklyDraftSavedHook) { var h0 = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; h0(null, new Error('Weekly invoice did not load')); } return; }
+    if (!state.dirty && state.preview) { if (_weeklyDraftSavedHook) { var h1 = _weeklyDraftSavedHook; _weeklyDraftSavedHook = null; h1(state, null); } return; }
+    saveWeeklyWorkOrderInvoice();
+  }
+  window.wizReviewWeeklyInvoice = function (workOrderId, businessDate) {
+    closeWizard();
+    showView('hours');
+    setTimeout(function () { openWeeklyWorkOrderInvoice({ workOrderId: workOrderId, workOrderDate: businessDate || undefined }); }, 50);
+  };
+  function wizAutoQueueWeekly(wo) {
+    var setState = function (state, detail) {
+      var card = document.querySelector('[data-wiz-invoice="' + wo.id + '"]');
+      if (card) card.outerHTML = CompleteInvoiceCore.weeklyCardHTML(wo, state, detail);
+    };
+    _weeklyDraftSavedHook = function (state, err) {
+      if (err) { setState('failed', friendlyError(err)); return; }
+      setState('added');
+    };
+    try {
+      openWeeklyWorkOrderInvoice({ workOrderId: wo.id, workOrderDate: wo.business_date || undefined, autoSave: true });
+    } catch (e) {
+      _weeklyDraftSavedHook = null;
+      setState('failed', friendlyError(e));
+    }
+  }
+
+  function wizShowSuccess(job, result) {
     var body = document.getElementById('wizBody');
     var footer = document.getElementById('wizFooter');
     document.getElementById('wizStepLabel').textContent = '';
     document.getElementById('wizTitle').textContent = 'Done!';
 
-    body.innerHTML = '<div class="wiz-success">' +
+    var plan = CompleteInvoiceCore.plan(result && result.invoice_queue);
+    var h = '<div class="wiz-success">' +
       '<div class="wiz-success-icon">&#10003;</div>' +
       '<div style="font-size:22px;font-weight:800;color:var(--sw-dark);margin-bottom:8px">Job Complete!</div>' +
       '<div style="font-size:14px;color:var(--sw-text-sec)">' + esc(job.job_number || '') + ' — ' + esc(job.client_name || '') + '</div>' +
       '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:4px">All photos, voice note, and signature uploaded.</div>' +
       '</div>';
+    if (plan.kind === 'weekly') {
+      plan.workOrders.forEach(function (wo) { h += CompleteInvoiceCore.weeklyCardHTML(wo, 'adding'); });
+    } else if (plan.kind === 'hours') {
+      h += CompleteInvoiceCore.hoursIntroHTML(plan.hoursLogged);
+      if (plan.hoursLogged == null) h += RoofReportCore.hoursHTML(job.id, null, { title: 'Hours for this job' });
+    }
+    (plan.unpriced || []).forEach(function (wo) {
+      h += '<div class="wiz-inv"><div class="wiz-inv-t">Work order ' + esc(wo.wo_number || '') + ' complete</div><div class="wiz-inv-s">The office prices this one.</div></div>';
+    });
+    body.innerHTML = h;
 
     footer.innerHTML = '<button class="wiz-btn wiz-btn-primary" onclick="closeWizard();showView(\'myJobs\')">Back to My Jobs</button>';
     if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+    if (plan.kind === 'weekly') {
+      // One at a time: the weekly draft is a single replaceable document.
+      var queue = plan.workOrders.slice();
+      var next = function () {
+        var wo = queue.shift();
+        if (!wo) return;
+        var prevHook = null;
+        wizAutoQueueWeekly(wo);
+        prevHook = _weeklyDraftSavedHook;
+        _weeklyDraftSavedHook = function (state, err) { try { prevHook(state, err); } catch (e) {} next(); };
+      };
+      next();
+    }
   }
 
   // ══════════════════════════════════════════════════

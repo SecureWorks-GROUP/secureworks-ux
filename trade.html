@@ -2308,6 +2308,7 @@
     .jd-action-btn.act-call svg { fill: var(--sw-green); }
     .jd-action-btn.act-text svg { fill: var(--sw-blue); }
     .jd-action-btn.act-nav svg { fill: var(--sw-mid); }
+    .jd-action-btn.act-issue svg { fill: var(--sw-orange); }
 
     /* ══════════════════════════════════════════════════
        JOB DETAIL — Tab System (pill-style)
@@ -11921,8 +11922,8 @@
 
     var html = '';
 
-    // ── Back button ──
-    html += '<button onclick="showView(\'myJobs\')" style="display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--sw-mid);font-size:14px;font-weight:600;padding:8px 0;margin-bottom:4px;cursor:pointer;min-height:44px;">&larr; Back to Jobs</button>';
+    // Back lives in the app header (#btnBack -> goBack); a second in-page
+    // "Back to Jobs" button was a duplicate (2026-09-09).
 
     // ── View-only notice (another crew's job) ──
     if (viewOnly) {
@@ -12187,6 +12188,14 @@
       buttons += '<button class="jd-action-btn act-nav" onclick="navigateToJob(\'' + esc(job.site_address || '') + '\', \'' + esc(job.site_suburb || '') + '\', ' + (job.site_lat || 'null') + ', ' + (job.site_lng || 'null') + ')">';
       buttons += '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71 11.29l-9-9a.996.996 0 0 0-1.41 0l-9 9a.996.996 0 0 0 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a.996.996 0 0 0 0-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>';
       buttons += ' Navigate</button>';
+    }
+
+    // Report an issue to the office, reachable for anyone on the job. This was
+    // only offered from the on-site tools bar, which no phase renders any more.
+    if (!isForeignCrewJob(data) && getMyAssignment(data)) {
+      buttons += '<button class="jd-action-btn act-issue" data-report-issue onclick="reportIssue()">';
+      buttons += '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>';
+      buttons += ' Issue</button>';
     }
 
     // Don't render the bar at all if no buttons available

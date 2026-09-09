@@ -103,3 +103,10 @@ test('Files tab document rows read cleanly', async ({ appPage: page }) => {
   await expect(files).not.toContainText('2026-08-28');
   await expect(page.locator('#jobDetailContent')).not.toContainText('not available from this server');
 });
+
+test('action bar offers Issue to the allocated trade, and back lives only in the header', async ({ appPage: page }) => {
+  await openJob(page);
+  await expect(page.locator('.jd-action-bar [data-report-issue]')).toBeVisible();
+  await expect(page.locator('#btnBack')).toBeVisible();
+  await expect(page.locator('#jobDetailContent').getByRole('button', { name: /Back to Jobs/ })).toHaveCount(0);
+});

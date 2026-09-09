@@ -17,5 +17,6 @@ test('My Jobs renders an installer assignment and opens its job detail', async (
   await expect(page.locator('#viewJob')).toHaveClass(/active/);
   await expect(page.locator('#jobDetailContent')).toContainText('E2E-JOB-001');
   await expect(page.locator('#jobDetailContent')).toContainText('Fixture Homeowner');
-  await expect(page.getByRole('button', { name: /Back to Jobs/ })).toBeVisible();
+  await expect(page.locator('#btnBack')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Back to Jobs/ })).toHaveCount(0);
 });

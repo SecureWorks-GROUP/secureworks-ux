@@ -387,3 +387,4 @@ The user (Marnin) wants this enforced: **no approved PO = no purchase allowed**.
 - The Log tab hides the bottom Notes block (`#jobBottomNotes`) since it lists the same notes, groups consecutive photos into one strip (`.log-photos`), and skips videos (they live on Scope / Files / Photos).
 - Document rows: `tradePoLabel()` never prints "PO PO-2041"; `tradeQuoteDate()` prints "28 Aug 2026" rather than ISO. The crew panel no longer shows the dev message about lead support.
 - Spec: `tests/e2e/trade-job-view-layout.spec.js` (390x844 mobile viewport).
+- Back is only the header arrow (`#btnBack`); the in-page "Back to Jobs" button is gone. The action bar (Call / Navigate) gained **Issue** (`reportIssue()`, `create_trade_alert`) because the on-site tools bar it lived on is never rendered (no phase resolves to `on_site`).

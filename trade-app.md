@@ -380,3 +380,10 @@ The user (Marnin) wants this enforced: **no approved PO = no purchase allowed**.
 6. Trade buys materials per PO, photographs receipt → linked to PO
 7. Ops can verify receipt matches PO in job detail
 8. Bookkeeper enters into Xero with proper job/project coding
+
+## Job view layout truth (2026-09-09)
+- The Scope / Files / Photos / Log tab bar is wrapped in `.jd-tabs-wrap`, sticky at `top: var(--sw-header-h)`. The app header is also sticky (z-index 100), so a `top: 0` tab bar used to slide underneath it on scroll. `--sw-header-h` is set from the real header height by a ResizeObserver near the iOS keyboard handler.
+- The completion wizard is a flex column: header and footer are normal flex children, only `#wizBody` scrolls. The old `position: fixed` footer floated to mid-screen when the iOS keyboard opened.
+- The Log tab hides the bottom Notes block (`#jobBottomNotes`) since it lists the same notes, groups consecutive photos into one strip (`.log-photos`), and skips videos (they live on Scope / Files / Photos).
+- Document rows: `tradePoLabel()` never prints "PO PO-2041"; `tradeQuoteDate()` prints "28 Aug 2026" rather than ISO. The crew panel no longer shows the dev message about lead support.
+- Spec: `tests/e2e/trade-job-view-layout.spec.js` (390x844 mobile viewport).

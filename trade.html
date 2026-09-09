@@ -1720,7 +1720,7 @@
     .notif-banner {
       background: var(--sw-orange); color: #fff; padding: 10px 16px;
       font-size: 13px; font-weight: 600; cursor: pointer;
-      position: sticky; top: 48px; z-index: 99;
+      position: sticky; top: var(--sw-header-h, 56px); z-index: 99;
     }
     .notif-banner-summary {
       display: flex; justify-content: space-between; align-items: center;
@@ -1833,7 +1833,7 @@
        ══════════════════════════════════════════════════ */
     .wiz-overlay {
       position: fixed; inset: 0; z-index: 600;
-      background: var(--sw-bg); overflow-y: auto;
+      background: var(--sw-bg); overflow: hidden;
       display: none; flex-direction: column;
     }
     .wiz-overlay.active { display: flex; }
@@ -1841,7 +1841,7 @@
       background: var(--sw-dark); color: #fff;
       padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
       display: flex; align-items: center; gap: 12px;
-      position: sticky; top: 0; z-index: 10;
+      position: relative; z-index: 10; flex-shrink: 0;
     }
     .wiz-header-back {
       background: none; border: none; color: #fff; font-size: 22px;
@@ -1860,8 +1860,13 @@
     }
     .wiz-progress-dot.done { background: var(--sw-green); }
     .wiz-progress-dot.active { background: var(--sw-orange); }
+    .wiz-progress { flex-shrink: 0; }
+    /* Only the body scrolls; header and footer stay put. A position:fixed
+       footer floated to the middle of the screen whenever the iOS keyboard
+       opened or Safari's toolbar collapsed (2026-09-09). */
     .wiz-body {
-      flex: 1; padding: 16px; padding-bottom: 100px;
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 16px; padding-bottom: 32px;
     }
     .wiz-step-title {
       font-size: 18px; font-weight: 800; color: var(--sw-dark); margin-bottom: 4px;
@@ -1870,11 +1875,12 @@
       font-size: 13px; color: var(--sw-text-sec); margin-bottom: 16px;
     }
     .wiz-footer {
-      position: fixed; bottom: 0; left: 0; right: 0;
+      flex-shrink: 0;
       padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom));
       background: #fff; border-top: 1px solid var(--sw-border);
       display: flex; gap: 8px; z-index: 10;
     }
+    .wiz-footer:empty { display: none; }
     .wiz-btn {
       flex: 1; padding: 14px; border: none; border-radius: 10px;
       font-size: 15px; font-weight: 700; font-family: var(--sw-font);
@@ -2306,16 +2312,25 @@
     /* ══════════════════════════════════════════════════
        JOB DETAIL — Tab System (pill-style)
        ══════════════════════════════════════════════════ */
+    /* The tab bar sticks just under the app header (which is itself sticky,
+       z-index 100). It used to stick at top:0 and slide underneath the header
+       on scroll. The wrapper carries a solid page-colour backdrop so content
+       never shows through the side gaps while stuck (2026-09-09). */
+    .jd-tabs-wrap {
+      position: sticky;
+      top: var(--sw-header-h, 56px);
+      z-index: 40;
+      background: var(--sw-bg);
+      padding: 8px 16px;
+      margin: 0 -2px;
+    }
     .jd-tabs {
       display: flex;
       gap: 0;
       background: var(--sw-light);
       border-radius: 10px;
       padding: 3px;
-      margin: 8px 16px;
-      position: sticky;
-      top: 0;
-      z-index: 40;
+      margin: 0 2px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
     .jd-tab {
@@ -9452,9 +9467,7 @@
       h += '</div>';
     });
 
-    if (!m.leadSupported) {
-      h += '<div class="crw-note">Lead installer is not available from this server yet.</div>';
-    }
+    // No lead support from this server: say nothing rather than a dev message.
     h += '</div>';
     return h;
   }
@@ -10655,7 +10668,18 @@
   }
 
   function tradeQuoteDate(value) {
-    return value ? String(value).slice(0, 10) : '';
+    if (!value) return '';
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return String(value).slice(0, 10);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  // "PO-2041" stays "PO-2041"; a bare "2041" becomes "PO 2041".
+  function tradePoLabel(num) {
+    var n = String(num || '').trim();
+    if (!n) return 'Purchase order';
+    return /^po\b/i.test(n) ? n : 'PO ' + n;
   }
 
   // "Open quote" — the office-frozen, price-free extract (trade_quote_extract).
@@ -12006,7 +12030,7 @@
     // ── Tab Bar ──
     var mediaCount = filterTradeGalleryMedia(data.media).length;
     var noteCount = tradeCommsNotes(data.notes).length;
-    html += '<div class="jd-tabs">';
+    html += '<div class="jd-tabs-wrap"><div class="jd-tabs">';
     if (canMessage()) {
       html += '<button class="jd-tab" data-tab="workorder" onclick="switchJobTab(\'workorder\')">Work</button>';
     }
@@ -12026,7 +12050,7 @@
     if (type === 'makesafe') {
       html += '<button class="jd-tab" data-tab="ms_report" onclick="switchJobTab(\'ms_report\')" style="color:var(--sw-red);font-weight:700;">Report</button>';
     }
-    html += '</div>';
+    html += '</div></div>';
 
     // ── Tab Content Containers (lazy-loaded) ──
     html += '<div class="jd-tab-content" id="jdTab_workorder"></div>';
@@ -12039,8 +12063,8 @@
       html += '<div class="jd-tab-content" id="jdTab_ms_report"></div>';
     }
 
-    // ── Notes Section (always visible below tabs) ──
-    html += '<div style="margin-top:20px;padding:16px;border-top:1px solid var(--sw-border);">';
+    // ── Notes Section (below tabs; hidden while the Log tab shows the same notes) ──
+    html += '<div id="jobBottomNotes" style="margin-top:20px;padding:16px;border-top:1px solid var(--sw-border);">';
     html += '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">Notes</div>';
     var allNotes = tradeCommsNotes(data.notes);
     if (allNotes.length > 0) {
@@ -12192,6 +12216,8 @@
     var tabBtn = document.querySelector('.jd-tab[data-tab="' + tabName + '"]');
     var tabContent = document.getElementById('jdTab_' + tabName);
     if (tabBtn) tabBtn.classList.add('active');
+    var bottomNotes = document.getElementById('jobBottomNotes');
+    if (bottomNotes) bottomNotes.style.display = (tabName === 'log') ? 'none' : '';
     if (tabContent) {
       tabContent.classList.add('active');
       // Lazy-load content on first open
@@ -12861,7 +12887,7 @@
       var isApproved = po.status === 'authorised' || po.status === 'billed';
       rows += '<div class="doc-row" data-po-doc="' + esc(po.id) + '">';
       rows += '<span class="doc-ico">&#128230;</span>';
-      rows += '<div class="doc-main"><div class="doc-name">PO ' + esc(po.po_number || '') + '</div>';
+      rows += '<div class="doc-main"><div class="doc-name">' + esc(tradePoLabel(po.po_number)) + '</div>';
       rows += '<div class="doc-sub">' + esc(po.supplier_name || 'Supplier') + (po.delivery_date ? ' · Delivery ' + formatDate(po.delivery_date) : '') + (isApproved ? '' : ' · Awaiting approval') + '</div></div>';
       if (isApproved) rows += '<button type="button" class="doc-open" data-po-pdf="' + esc(po.id) + '" onclick="generatePOPdf(window._scopePoCache[' + idx + '], \'' + esc(job.job_number || '') + '\')">PDF</button>';
       else rows += '<span class="doc-muted">Draft</span>';
@@ -13382,8 +13408,9 @@
       });
     });
 
-    // Photos (show as timeline entries)
+    // Photos (show as timeline entries). Videos live on Scope / Files / Photos.
     media.forEach(function(m) {
+      if (isScopeVideo(m)) return;
       var labels = { scope: 'Before', in_progress: 'During', completion: 'After', issue: 'Issue' };
       timeline.push({
         time: m.created_at,
@@ -13398,6 +13425,16 @@
 
     // Sort newest first
     timeline.sort(function(a, b) { return new Date(b.time) - new Date(a.time); });
+
+    // Consecutive photos collapse into one strip (one card per photo was a wall)
+    var grouped = [];
+    timeline.forEach(function(entry) {
+      var last = grouped[grouped.length - 1];
+      if (entry.type === 'photo' && last && last.type === 'photos') { last.items.push(entry); return; }
+      if (entry.type === 'photo') { grouped.push({ type: 'photos', time: entry.time, items: [entry] }); return; }
+      grouped.push(entry);
+    });
+    timeline = grouped;
 
     // Pending offline notes
     var pendingNotes = [];
@@ -13418,6 +13455,24 @@
       h += '<div style="padding:20px;text-align:center;color:var(--sw-text-sec);font-size:13px">No activity logged yet</div>';
     } else {
       timeline.forEach(function(entry) {
+        if (entry.type === 'photos') {
+          var labelsSeen = {};
+          entry.items.forEach(function(p) { var k = (p.text || '').split(':')[0]; if (k) labelsSeen[k] = true; });
+          h += '<div class="log-photos" style="padding:10px;margin-bottom:6px;border-radius:8px;background:var(--sw-light)">';
+          h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">';
+          h += '<span style="font-size:14px">&#128248;</span>';
+          h += '<span style="font-size:12px;font-weight:600;color:var(--sw-dark)">' + entry.items.length + ' photo' + (entry.items.length === 1 ? '' : 's') + '</span>';
+          h += '<span style="font-size:11px;color:var(--sw-text-sec)">' + esc(Object.keys(labelsSeen).join(' · ')) + '</span>';
+          h += '<span style="flex:1"></span>';
+          h += '<span style="font-size:11px;color:var(--sw-text-sec)">' + timeAgo(entry.time) + '</span>';
+          h += '</div>';
+          h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">';
+          entry.items.forEach(function(p) {
+            h += '<img src="' + esc(p.thumb) + '" alt="' + esc(p.text || 'Photo') + '" onclick="openLightbox(\'' + esc(p.fullUrl) + '\')" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer">';
+          });
+          h += '</div></div>';
+          return;
+        }
         var adminStyle = entry.isAdmin ? 'background:#E8F4FD;border-left:3px solid var(--sw-blue);' : '';
         h += '<div style="padding:10px;margin-bottom:6px;border-radius:8px;background:var(--sw-light);' + adminStyle + '">';
         h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
@@ -30675,6 +30730,21 @@
       toast('All synced \u2714');
     }
   };
+
+  // ══════════════════════════════════════════════════
+  // HEADER HEIGHT → --sw-header-h (sticky bars sit under the header)
+  // ══════════════════════════════════════════════════
+  (function trackHeaderHeight() {
+    var header = document.querySelector('.header');
+    if (!header) return;
+    function apply() {
+      var h = header.offsetHeight || 56;
+      document.documentElement.style.setProperty('--sw-header-h', h + 'px');
+    }
+    apply();
+    if (window.ResizeObserver) { new ResizeObserver(apply).observe(header); }
+    else { window.addEventListener('resize', apply); }
+  })();
 
   // ══════════════════════════════════════════════════
   // iOS KEYBOARD — hide bottom nav when keyboard is up

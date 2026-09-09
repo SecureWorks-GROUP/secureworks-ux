@@ -149,7 +149,7 @@ test.describe('A server that predates PR 513', () => {
     await expect(panel(page)).toHaveAttribute('data-lead-supported', '0');
     await expect(panel(page)).not.toContainText('No lead installer set');
     await expect(panel(page).locator('.crw-badge')).toHaveCount(0);
-    await expect(panel(page)).toContainText('not available from this server yet');
+    await expect(panel(page)).not.toContainText('not available from this server');
 
     // And the action is not offered against a server that cannot store it.
     await expect(panel(page).locator('.crw-act')).toHaveCount(0);

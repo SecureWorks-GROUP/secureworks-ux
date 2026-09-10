@@ -23742,6 +23742,10 @@
     document.querySelectorAll('.jc-card[data-card]').forEach(function(el) {
       el.style.border = '1px solid var(--sw-border)';
     });
+    // 2026-09-10: remember the total the trade was looking at. The DOM sync and
+    // work-order reconcile below can rewrite card amounts; if the total moves,
+    // the trade must see the new figure, never a silent post at a different price.
+    var shownGross = _currentInvoiceGross();
     // FIX2: flush DOM→state before building payload so mobile taps without blur
     // don't leave hours/rate as null even though the field visually shows a value.
     _syncJobCardsFromDOM();
@@ -23795,6 +23799,13 @@
 
     var sub = built.subtotal;
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
+    var postGross = Math.round((sub - _invLumpTotal()) * 100) / 100;
+    if (Math.abs(postGross - shownGross) > 0.01) {
+      renderInvoiceBuilder();
+      _updateInvoiceMoneySummary(postGross);
+      toast('Your total changed from $' + shownGross.toFixed(2) + ' to $' + postGross.toFixed(2) + ' when the job cards were re-checked. Nothing was sent. Review the amounts and press Submit again.', true);
+      return;
+    }
 
     // 2026-09-10: the posted week must be the week the ticked jobs belong to.
     // A stale _hoursWeekStart (viewed invoice, restored draft) once sent a new
@@ -23819,7 +23830,7 @@
       return;
     }
 
-    showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
+    showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super)?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();

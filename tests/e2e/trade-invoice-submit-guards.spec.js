@@ -48,7 +48,7 @@ test.describe('server already holds an invoice for the week (409 shape)', () => 
     await expect(page.locator('#toast')).toContainText('NOT saved');
     await expectStillEditable(page);
     // The old invoice's money must not be painted as this submission's result.
-    await expect(page.getByText('Net pay$1099.56')).toHaveCount(0);
+    await expect(page.getByText('You get paid$1099.56')).toHaveCount(0);
     expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
   });
 });
@@ -64,7 +64,7 @@ test.describe('server already holds an invoice for the week (pre-fix success sha
     await expect(page.locator('#toast')).toContainText('already have an invoice for the week');
     await expectStillEditable(page);
     // The old invoice's money must not be painted as this submission's result.
-    await expect(page.getByText('Net pay$1099.56')).toHaveCount(0);
+    await expect(page.getByText('You get paid$1099.56')).toHaveCount(0);
     expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
   });
 });

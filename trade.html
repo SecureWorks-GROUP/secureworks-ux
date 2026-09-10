@@ -4352,7 +4352,13 @@
 
   function _readApiError(r, fallback) {
     return r.json().catch(function() { return {}; }).then(function(body) {
-      throw _apiError(r.status, body.error || body.message || fallback || r.statusText);
+      body = body && typeof body === 'object' ? body : {};
+      // Prefer the server's plain-English userMessage over a bare statusText
+      // like "Conflict" (2026-09-10: WEEK_ALREADY_INVOICED read as "Conflict").
+      var err = _apiError(r.status, body.userMessage || body.error || body.message || fallback || r.statusText);
+      if (r.status !== 401 && r.status !== 403 && typeof body.code === 'string' && body.code) err.code = body.code;
+      err.body = body;
+      throw err;
     });
   }
 
@@ -20518,7 +20524,7 @@
         var refStr = extRef ? ' · ' + esc(extRef) : '';
         html += '<div class="inv-line-desc">' + esc(l.job_number || 'Job') + refStr + ' · ' + esc(l.client_name || '') + '</div>';
         html += '<div class="inv-line-amount">$' + Number(l.line_total_ex || 0).toFixed(2) + '</div>';
-        html += '</div><div class="inv-line-detail">' + Number(l.total_hours || 0).toFixed(2) + 'h × $' + Number(l.hourly_rate || 0).toFixed(2) + '/hr</div>';
+        html += '</div><div class="inv-line-detail">' + Number(l.total_hours || 0).toFixed(2) + 'h × $' + Number(l.hourly_rate || l.unit_rate || 0).toFixed(2) + '/hr</div>';
         html += '<span class="inv-line-type labour">Labour</span></div>';
       });
     }
@@ -23742,6 +23748,10 @@
     document.querySelectorAll('.jc-card[data-card]').forEach(function(el) {
       el.style.border = '1px solid var(--sw-border)';
     });
+    // 2026-09-10: remember the total the trade was looking at. The DOM sync and
+    // work-order reconcile below can rewrite card amounts; if the total moves,
+    // the trade must see the new figure, never a silent post at a different price.
+    var shownGross = _currentInvoiceGross();
     // FIX2: flush DOM→state before building payload so mobile taps without blur
     // don't leave hours/rate as null even though the field visually shows a value.
     _syncJobCardsFromDOM();
@@ -23795,13 +23805,44 @@
 
     var sub = built.subtotal;
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
+    var finalDeductionTotal = _invFinalDeductions().reduce(function(t, d) { return t + (Number(d.unit_rate) || 0); }, 0);
+    var postGross = Math.round((sub - finalDeductionTotal) * 100) / 100;
+    if (Math.abs(postGross - shownGross) > 0.01) {
+      renderInvoiceBuilder();
+      _updateInvoiceMoneySummary(postGross);
+      toast('Your total changed from $' + shownGross.toFixed(2) + ' to $' + postGross.toFixed(2) + ' when the job cards were re-checked. Nothing was sent. Review the amounts and press Submit again.', true);
+      return;
+    }
 
-    showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' (' + _jobCardsTotalStr().replace('Subtotal: ', '') + ')?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
+    // 2026-09-10: the posted week must be the week the ticked jobs belong to.
+    // A stale _hoursWeekStart (viewed invoice, restored draft) once sent a new
+    // week of work under an already-invoiced week; the server answered with
+    // the old invoice and the form said "Submitted". Block it here by date.
+    var postWeekStart = _hoursWeekStart || getWeekStartMonday(0);
+    var postWeekEnd = _hoursWeekEnd || _weeklyDatePlusDays(postWeekStart, 6) || getWeekEndSunday(0);
+    var outOfWeek = _jobCards.filter(function(c) {
+      // Assigned cards only: they were loaded for the viewed week, so a date
+      // outside it proves the week is stale. Searched-in jobs may be late claims.
+      if (!c || !c.included || !c.scheduled_date || c.manually_added) return false;
+      var d = String(c.scheduled_date).slice(0, 10);
+      return d < postWeekStart || d > postWeekEnd;
+    });
+    if (outOfWeek.length > 0) {
+      var owLbl = outOfWeek[0].job_number || outOfWeek[0].client_name || 'A job';
+      toast(owLbl + ' is dated ' + String(outOfWeek[0].scheduled_date).slice(0, 10) + ' but this invoice is for the week ' + formatWeekRange(postWeekEnd) + '. Go back to Pay, pick the right week, and submit again.', true);
+      outOfWeek.forEach(function(c) {
+        var el = document.querySelector('.jc-card[data-card="' + c._idx + '"]');
+        if (el) el.style.border = '2px solid #d33';
+      });
+      return;
+    }
+
+    showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super)?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();
       var jobCentricBody = {
-        week_start: _hoursWeekStart || getWeekStartMonday(0),
+        week_start: postWeekStart,
         manual_assignments: manualAssignments,
         extra_items: extraItems,
         final_deductions: finalDeductions,
@@ -23869,7 +23910,10 @@
         // Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE / ALREADY_INVOICED)
         //   is a HARD block — invoice NOT created. Toast userMessage, keep them on the form, re-enable.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!_invoiceSubmitSucceeded(result)) {
+        // 2026-09-10: an already_submitted answer means the server kept a
+        // DIFFERENT, earlier invoice for that week and saved nothing from this
+        // form. It must never paint the success screen (Alyx lost a week).
+        if (!_invoiceSubmitSucceeded(result) || result.already_submitted === true) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
@@ -23932,6 +23976,14 @@
           toast((err && (err.code === 'wo_exclusive_reread_blocked' || err.code === 'wo_exclusive_reread_incomplete') && err.message)
             ? err.message
             : 'Could not confirm this work order is still exclusive. Invoice was not sent.', true);
+          renderInvoiceBuilder();
+          return;
+        }
+        // 2026-09-10: the server already holds a live invoice for this week.
+        // Nothing from this form was saved, so this is never "landed" and must
+        // not route to Invoice history as if it had been. Say so, keep the form.
+        if (err && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
+          toast(err.message || 'You already have an invoice for this week. This submission was NOT saved. Check the week shown at the top of the invoice.', true);
           renderInvoiceBuilder();
           return;
         }
@@ -24356,7 +24408,10 @@
         //   surfaces userMessage. Any other ok:false (RATE_NOT_CONFIGURED / ASSIGNMENT_NOT_INVOICEABLE /
         //   ALREADY_INVOICED) is a HARD block — invoice NOT created; toast, re-enable, keep on form.
         var xeroWarn = result.code === 'XERO_PUSH_FAILED';
-        if (!_invoiceSubmitSucceeded(result)) {
+        // 2026-09-10: an already_submitted answer means the server kept a
+        // DIFFERENT, earlier invoice for that week and saved nothing from this
+        // form. It must never paint the success screen (Alyx lost a week).
+        if (!_invoiceSubmitSucceeded(result) || result.already_submitted === true) {
           var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {

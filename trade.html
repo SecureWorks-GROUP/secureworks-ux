@@ -23799,7 +23799,8 @@
 
     var sub = built.subtotal;
     legacyExtras.forEach(function(e) { sub += (Number(e.quantity || 0) * Number(e.rate || 0)); });
-    var postGross = Math.round((sub - _invLumpTotal()) * 100) / 100;
+    var finalDeductionTotal = _invFinalDeductions().reduce(function(t, d) { return t + (Number(d.unit_rate) || 0); }, 0);
+    var postGross = Math.round((sub - finalDeductionTotal) * 100) / 100;
     if (Math.abs(postGross - shownGross) > 0.01) {
       renderInvoiceBuilder();
       _updateInvoiceMoneySummary(postGross);

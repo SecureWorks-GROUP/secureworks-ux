@@ -20966,8 +20966,10 @@
     if (opts.id) attrs += ' id="' + opts.id + '"';
     var html = '<div' + attrs + '>';
     html += '<div class="inv-money-row"><span>Earned</span><span>' + _invoiceMoney(money.gross_earned) + '</span></div>';
-    html += '<div class="inv-money-row"><span>Less super (' + _invoiceRateLabel(money.super_rate) + ')</span><span>−' + _invoiceMoney(money.super_amount) + '</span></div>';
-    html += '<div class="inv-money-row net"><span>Net pay</span><span>' + _invoiceMoney(money.net_pay) + '</span></div>';
+    // 2026-09-10 (Alyx): "Net pay" read as the app changing his amounts. Say
+    // where the money goes in plain words; the job amounts are never touched.
+    html += '<div class="inv-money-row"><span>Super (' + _invoiceRateLabel(money.super_rate) + ') paid into your super fund</span><span>−' + _invoiceMoney(money.super_amount) + '</span></div>';
+    html += '<div class="inv-money-row net"><span>You get paid</span><span>' + _invoiceMoney(money.net_pay) + '</span></div>';
     if (opts.gstSwitch) {
       html += '<div class="inv-gst-control">';
       html += '<div class="inv-gst-copy"><strong>Add GST to this invoice</strong><span>Turn on only if you are GST registered.</span></div>';
@@ -20978,6 +20980,7 @@
       html += '<div class="inv-money-row"><span>GST</span><span>' + (money.gst_on ? _invoiceMoney(money.gst_amount) : 'Off') + '</span></div>';
       if (money.total_inc != null) html += '<div class="inv-money-row total"><span>Invoice total</span><span>' + _invoiceMoney(money.total_inc) + '</span></div>';
     }
+    html += '<div class="inv-money-note">Your job amounts are not changed. Super comes out of what you earned and goes into your super fund each week.</div>';
     if (money.estimated) html += '<div class="inv-money-note">Estimate — SecureWorks confirms these figures when you submit.</div>';
     html += '</div>';
     return html;

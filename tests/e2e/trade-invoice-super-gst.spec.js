@@ -39,8 +39,8 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
 
   const money = page.locator('[data-invoice-money-summary]');
   await expect(money).toContainText('Earned$400.00');
-  await expect(money).toContainText('Less super (12%)−$48.00');
-  await expect(money).toContainText('Net pay$352.00');
+  await expect(money).toContainText('Super (12%) paid into your super fund−$48.00');
+  await expect(money).toContainText('You get paid$352.00');
   await expect(money).toContainText('Estimate — SecureWorks confirms these figures when you submit.');
 
   const gstSwitch = page.getByRole('switch', { name: 'Add GST to this invoice' });
@@ -62,8 +62,8 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   await card.locator('[data-cardwollrate]').press('Tab');
 
   await expect(money).toContainText('Earned$272.00');
-  await expect(money).toContainText('Less super (12%)−$32.64');
-  await expect(money).toContainText('Net pay$239.36');
+  await expect(money).toContainText('Super (12%) paid into your super fund−$32.64');
+  await expect(money).toContainText('You get paid$239.36');
 
   const builderScreenshot = testInfo.outputPath('trade-invoice-money-builder.png');
   await page.locator('#hoursContent').screenshot({ path: builderScreenshot });
@@ -76,8 +76,8 @@ test('shows earned less super and net pay, and submits the saved GST choice', as
   const submitted = page.locator('[data-invoice-money-summary]');
   await expect(page.getByText('Invoice Submitted')).toBeVisible();
   await expect(submitted).toContainText('Earned$272.00');
-  await expect(submitted).toContainText('Less super (12%)−$32.64');
-  await expect(submitted).toContainText('Net pay$239.36');
+  await expect(submitted).toContainText('Super (12%) paid into your super fund−$32.64');
+  await expect(submitted).toContainText('You get paid$239.36');
   await expect(submitted).toContainText('GST$23.94');
   await expect(submitted).toContainText('Invoice total$263.30');
   await expect(submitted).not.toContainText('Estimate');
@@ -195,7 +195,7 @@ test.describe('submitted response has complete money but no persisted lines', ()
       await page.locator('#confirmOk').click();
 
       await expect(page.getByText('Invoice Submitted')).toBeVisible();
-      await expect(page.locator('[data-invoice-money-summary]')).toContainText('Net pay$352.00');
+      await expect(page.locator('[data-invoice-money-summary]')).toContainText('You get paid$352.00');
       await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
       expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
     });
@@ -217,7 +217,7 @@ test.describe('submitted response has incomplete persisted lines', () => {
       await page.locator('#confirmOk').click();
 
       await expect(page.getByText('Invoice Submitted')).toBeVisible();
-      await expect(page.locator('[data-invoice-money-summary]')).toContainText('Net pay$352.00');
+      await expect(page.locator('[data-invoice-money-summary]')).toContainText('You get paid$352.00');
       await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
       expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
     });

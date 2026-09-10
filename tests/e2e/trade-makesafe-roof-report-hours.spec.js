@@ -155,7 +155,8 @@ test.describe('Trade app: roof report in the app + one-tap hours', () => {
     await content.locator('#reportDoneAskBtn').click();
     await content.locator('#reportDoneYesBtn').click();
     await expect.poll(() => state.log.filter((e) => e[0] === 'portal_done').length).toBe(1);
-    await expect(content).toContainText('Report completed on builder portal');
+    await expect(content).toContainText('Report completion recorded');
+    await expect(content).not.toContainText('office will invoice');
     const hours = content.locator('#rrHours');
     await expect(hours).toBeVisible();
     await expect(hours).toContainText('Hours for this report');

@@ -75,6 +75,15 @@ assert(unverifiedHtml.includes('If the link has expired'), 'the trade sees the a
 
 const verifiedHtml = core.panelHTML({ ...unverifiedModel, done: true });
 assert(!verifiedHtml.includes('id="reportDoneAskBtn"'), 'verified cards do not render the confirmation button');
-assert(verifiedHtml.includes('Report completed on builder portal'), 'verified cards render the completion state');
+assert(verifiedHtml.includes('Report completion recorded'), 'shared completion stamp does not invent a portal source');
+assert(!verifiedHtml.includes('office will invoice'), 'report completion does not promise an unchecked invoice');
+assert(!unverifiedHtml.includes('there is no photo report in this app'), 'portal instructions agree with the in-app report option');
+assert(unverifiedHtml.includes('in-app option below'), 'trade can find the existing custom report alternative');
+const ownTemplateModel = core.buildViewModel({job: {id: 'roof-job'}, makesafe_details: {
+  cycle_number: 2, portal_verified_at: '2026-09-10T10:00:00Z', portal_verified_cycle: 2,
+  portal_verified_signal: 'secureworks roof report submitted'
+}});
+assert(ownTemplateModel.done, 'existing completion visibility is preserved for an own-template submission');
+assert(!core.panelHTML(ownTemplateModel).includes('Report completed on builder portal'), 'own-template submission is not labelled as portal completion');
 
 console.log('PASS Trade App portal confirmation visibility regressions');

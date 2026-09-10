@@ -466,6 +466,10 @@ const test = base.extend({
       'trade-invoice-super-gst-incomplete-lines': ['generate_trade_invoice'],
       'trade-invoice-super-gst-empty-response': ['generate_trade_invoice'],
       'trade-invoice-super-gst-xero-failed': ['generate_trade_invoice'],
+      'trade-invoice-week-collision-409': ['generate_trade_invoice'],
+      'trade-invoice-week-collision-legacy': ['generate_trade_invoice'],
+      'trade-invoice-total-drift': [],
+      'trade-invoice-stale-week': [],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
@@ -717,9 +721,14 @@ const test = base.extend({
               total_inc: undefined,
               total: 338.80
             }
-          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario)
+          : ['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy', 'trade-invoice-total-drift', 'trade-invoice-stale-week'].includes(feedScenario)
             ? {
               ...labourExplainerHours,
+              // Stale-week guard fixture: the card belongs to LAST week while the
+              // builder is on this week, the exact shape that lost Alyx a week.
+              ...(feedScenario === 'trade-invoice-stale-week'
+                ? { assignments: labourExplainerHours.assignments.map((a) => ({ ...a, scheduled_date: addIsoDays(weekStart, -6) })) }
+                : {}),
               super_rate: 0.12,
               gross_earned: 400,
               super_amount: 48,
@@ -1077,8 +1086,33 @@ const test = base.extend({
               xero_bill_id: 'stubbed-xero-bill-31'
             };
           }
-          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed'].includes(feedScenario) || persona !== 'installer') {
+          if (!['wo-labour-explainer', 'trade-invoice-super-gst', 'trade-invoice-super-gst-incomplete', 'trade-invoice-super-gst-missing-lines', 'trade-invoice-super-gst-incomplete-lines', 'trade-invoice-super-gst-empty-response', 'trade-invoice-super-gst-xero-failed', 'trade-invoice-week-collision-409', 'trade-invoice-week-collision-legacy'].includes(feedScenario) || persona !== 'installer') {
             return { status: 409, body: { error: 'WO labour explainer fixture is not enabled' } };
+          }
+          // Live-week collision (2026-09-10 Alyx). The server already holds an
+          // invoice for this week; nothing from this form was saved.
+          const oldWeekInvoice = {
+            already_submitted: true,
+            invoice_id: 'old-week-invoice-025',
+            invoice_number: 'SW-INV-OLD-025',
+            status: 'pushed_to_xero',
+            xero_bill_id: 'xero-old-025',
+            gst_on: false,
+            gross_earned: 1249.5,
+            super_rate: 0.12,
+            super_amount: 149.94,
+            net_pay: 1099.56,
+            gst: 0,
+            total_inc: 1249.5,
+            trade_payable: 1099.56,
+            userMessage: 'You already have an invoice for the week 2026-08-24 to 2026-08-30 (SW-INV-OLD-025). This submission was NOT saved. Check the week shown at the top of the invoice, or contact the office if that invoice needs changing.'
+          };
+          if (feedScenario === 'trade-invoice-week-collision-409') {
+            return { status: 409, body: { ...oldWeekInvoice, ok: false, success: false, saved: false, code: 'WEEK_ALREADY_INVOICED' } };
+          }
+          if (feedScenario === 'trade-invoice-week-collision-legacy') {
+            // Pre-fix ops-api shape: success: true with the OLD invoice attached.
+            return { ...oldWeekInvoice, success: true };
           }
           const body = request.postDataJSON();
           const line = body.extra_items && body.extra_items[0];

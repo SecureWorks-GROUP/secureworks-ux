@@ -13702,14 +13702,14 @@
       var h = '<div id="reportDonePanel">';
       if (m.done) {
         h += '<div style="background:#D4EDDA;border:1px solid #C3E6CB;border-radius:8px;padding:12px;margin-bottom:12px;">';
-        h += '<div style="font-weight:700;color:#155724;">Report completed on builder portal &#10003;</div>';
-        h += '<div style="font-size:12px;color:#155724;margin-top:4px;">Marked done &mdash; office will invoice the builder. Nothing else to do on this job\'s report.</div>';
+        h += '<div style="font-weight:700;color:#155724;">Report completion recorded &#10003;</div>';
+        h += '<div style="font-size:12px;color:#155724;margin-top:4px;">The office can now review the report and prepare the pack.</div>';
         h += '</div>';
         h += '</div>';
         return h;
       }
       h += '<div style="font-size:15px;font-weight:700;color:var(--sw-dark);margin-bottom:8px;">' + esc(m.label) + '</div>';
-      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">The report for this job is completed on the <strong>builder\'s portal</strong> &mdash; there is no photo report in this app. Open the work order above, do the report on the portal, then mark it done here.</div>';
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin-bottom:10px;line-height:1.4;">Complete the report on the <strong>builder\'s portal</strong>, then mark it done here. If you need a SecureWorks roof report, use the in-app option below.</div>';
       // FIX C (D10): the escalation path every make-safe report surface has —
       // same affordance + submit path as the normal form, verbatim.
       h += '<button onclick="submitTradeAdminNote(\'' + esc(m.jobId) + '\')" style="width:100%;background:#7C3AED;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;min-height:44px;margin-bottom:16px;">&#128221; Note for admin</button>';
@@ -13795,7 +13795,7 @@
         if (panel && _reportDoneCtx) {
           panel.outerHTML = ReportDoneCore.panelHTML(Object.assign({}, _reportDoneCtx.model, { done: true }));
         }
-        toast(ReportDoneCore.isAlready(res) ? 'Already marked done' : 'Marked done — office will invoice');
+        toast(ReportDoneCore.isAlready(res) ? 'Already marked done' : 'Report completion recorded — ready for office review');
         if (_reportMode === 'makesafe' && _currentView === 'report') loadMakesafeReport(jobId);
         else refreshJobTab('ms_report');
       },

@@ -4352,7 +4352,13 @@
 
   function _readApiError(r, fallback) {
     return r.json().catch(function() { return {}; }).then(function(body) {
-      throw _apiError(r.status, body.error || body.message || fallback || r.statusText);
+      body = body && typeof body === 'object' ? body : {};
+      // Prefer the server's plain-English userMessage over a bare statusText
+      // like "Conflict" (2026-09-10: WEEK_ALREADY_INVOICED read as "Conflict").
+      var err = _apiError(r.status, body.userMessage || body.error || body.message || fallback || r.statusText);
+      if (r.status !== 401 && r.status !== 403 && typeof body.code === 'string' && body.code) err.code = body.code;
+      err.body = body;
+      throw err;
     });
   }
 
@@ -23970,6 +23976,14 @@
           toast((err && (err.code === 'wo_exclusive_reread_blocked' || err.code === 'wo_exclusive_reread_incomplete') && err.message)
             ? err.message
             : 'Could not confirm this work order is still exclusive. Invoice was not sent.', true);
+          renderInvoiceBuilder();
+          return;
+        }
+        // 2026-09-10: the server already holds a live invoice for this week.
+        // Nothing from this form was saved, so this is never "landed" and must
+        // not route to Invoice history as if it had been. Say so, keep the form.
+        if (err && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
+          toast(err.message || 'You already have an invoice for this week. This submission was NOT saved. Check the week shown at the top of the invoice.', true);
           renderInvoiceBuilder();
           return;
         }

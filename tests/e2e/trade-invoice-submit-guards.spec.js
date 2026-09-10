@@ -63,7 +63,8 @@ test.describe('server already holds an invoice for the week (pre-fix success sha
 
     await expect(page.locator('#toast')).toContainText('already have an invoice for the week');
     await expectStillEditable(page);
-    await expect(page.getByText('SW-INV-OLD-025')).toHaveCount(0);
+    // The old invoice's money must not be painted as this submission's result.
+    await expect(page.getByText('Net pay$1099.56')).toHaveCount(0);
     expect(feedRequests.some((entry) => entry.action === 'attach_invoice_pdf')).toBe(false);
   });
 });
@@ -119,6 +120,7 @@ test.describe('confirm popup states the exact total and week being posted', () =
     await expect(msg).toContainText('Submit 1 job for ');
     await expect(msg).toContainText('($400.00 before super)');
     await page.locator('#confirmOk').click();
+    await expect(page.getByText('Invoice Submitted')).toBeVisible();
 
     const submit = feedRequests.find((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice');
     expect(submit).toBeTruthy();

@@ -114,6 +114,8 @@ test.describe('confirm popup states the exact total and week being posted', () =
 
   test('the number in the popup is the number that posts', async ({ appPage: page, feedRequests }) => {
     await openBuilder(page);
+    // The base scenario's stub insists on an explicit GST choice, as the server does.
+    await page.getByRole('switch', { name: 'Add GST to this invoice' }).click();
     await page.locator('#invSubmitBtn').click();
 
     const msg = page.locator('#confirmMsg');

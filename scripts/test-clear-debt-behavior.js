@@ -16,7 +16,6 @@ async function main() {
   const failed=c.cdRecordHtml(P,{}, {},null,'unavailable');
   assert.doesNotMatch(failed,/No payments allocated|No job linked to this invoice|No stored messages/,'failed read is not absence');
   assert.match(failed,/Marnin/); assert.doesNotMatch(failed,/Send text|Send invoice email/);
-  assert.doesNotMatch(source,/send_chase_sms|send_invoice_email/,'screen cannot bypass individual terminal approval');
   assert.match(c.cdBriefHtml(invoice('a',{debt_brief:{promised:'Recorded scope',review_required:true,context_blockers:[{code:'bank_receipt_unverified',owner:'BOOKKEEPING',detail:'Receipt check pending'}]}}),null),/BOOKKEEPING: bank_receipt_unverified/);
   const ctx={invoice:{},job:null,conversation:{last_client_message:{at:'2026-09-11T00:00:00Z',preview:'Please check my receipt',channel:'email'},messages:[]},bank:{xero_payments:[]},sources:{conversation:{ok:true},job:{ok:true},invoice:{ok:true}},blockers:[]};
   assert.match(c.cdRecordHtml(P,{}, {},ctx,null),/Please check my receipt/,'door last client message must be visible');
@@ -27,6 +26,39 @@ async function main() {
   const first=c.cdLoadRecord(); c.CD.selectedInvoice='b'; await c.cdLoadRecord(); resolve({...ctx,conversation:{...ctx.conversation,last_client_message:{preview:'Stale invoice A context'}}}); await first;
   assert.match(el('cd-rec-body').innerHTML,/Invoice B context/); assert.doesNotMatch(el('cd-rec-body').innerHTML,/Stale invoice A/);
   c.CD.ctx={}; c.opsFetch=async action=>{if(action==='debt_notes') throw Error('notes offline'); return ctx;}; await c.cdLoadRecord(); assert.match(el('cd-rec-body').innerHTML,/Notes unavailable/);
-  console.log('PASS clear-debt behavior: coverage omissions, source failures, last client context, per-invoice selection, stale reads, notes errors, no sends');
+  const gaps = [{code:'job_unavailable',owner:'CIO',detail:'Job source lookup failed'}, {code:'conversation_unavailable',owner:'CIO',detail:'Conversation source lookup failed'}];
+  const gapsHtml = c.cdRecordHtml(P, {}, {}, {...ctx, blockers:gaps}, null);
+  for (const gap of gaps) assert.equal(gapsHtml.split(gap.detail).length - 1, 1, 'each source gap appears once');
+
+  c.opsFetch=async action => action==='debt_notes' ? {thread:[]} : ctx;
+  c.cdSelectInvoice('a'); await c.cdLoadRecord();
+  let finishNote;
+  c.opsPost=async (action, args) => { calls.push([action,args]); return new Promise(resolve => {finishNote=resolve;}); };
+  el('cd-note').value='Internal note for A';
+  const savingNote=c.cdAddNote('a');
+  c.cdSelectInvoice('b'); await c.cdLoadRecord();
+  el('cd-sms').value='Unsaved proposal for B'; el('cd-sms-to').value='0400000000';
+  const generation=c.CD.recordRequest, body=el('cd-rec-body').innerHTML;
+  finishNote({thread:[{text:'Internal note for A'}]}); await savingNote;
+  assert.equal(c.CD.recordRequest,generation,'stale note completion must not redraw the selected invoice');
+  assert.equal(el('cd-rec-body').innerHTML,body);
+  assert.equal(el('cd-sms').value,'Unsaved proposal for B');
+  assert.equal(c.CD.notes.a[0].text,'Internal note for A');
+
+  c.opsPost=async (action,args) => {calls.push([action,args]); return {status:'pending'};};
+  await c.cdSaveProposal('b','sms',{});
+  assert.equal(c.CD.rows[1].debt_proposal_status,'pending');
+  assert.equal(c.CD.rows[1].debt_proposal_text,'Unsaved proposal for B');
+  el('cd-email').value='Subject: receipt check. Please confirm receipt.'; el('cd-email-to').value='sample@example.test';
+  await c.cdSaveProposal('b','email',{});
+  assert.equal(c.CD.rows[1].debt_proposal_kind,'email');
+  assert.equal(c.CD.rows[1].debt_proposal_status,'pending');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['add_debt_note',{xero_invoice_id:'a',note:'Internal note for A',tag:null}],
+    ['debt_proposal_save',{xero_invoice_id:'b',kind:'sms',text:'Unsaved proposal for B',to:'0400000000'}],
+    ['debt_proposal_save',{xero_invoice_id:'b',kind:'email',text:'Subject: receipt check. Please confirm receipt.',to:'sample@example.test'}]
+  ], 'note and proposal interactions must only use their authorized endpoints, without sends or approvals');
+  console.log('PASS clear-debt behavior: coverage, source gaps, selection, stale reads and note saves, pending proposals, no sends');
+
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

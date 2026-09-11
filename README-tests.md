@@ -122,3 +122,13 @@ npm run test:e2e:headed
 ```
 
 On CI failure, download the `trade-e2e-failure-*` artifact. It includes the HTML report plus retained traces and screenshots from `test-results/`.
+
+Clear Debt's focused guards are `node scripts/test-clear-debt-v2.js` and
+`tests/e2e/clear-debt-picture.spec.js`. They cover missing coverage rows, unavailable
+source reads, latest client context, invoice selection inside a payer, stale async
+reads, unavailable notes, and pending-only proposal saves at desktop/mobile widths.
+The browser test uses sample identities and stubbed actions; it never sends a
+client message or writes a live record. The screen requires the backend
+`debt_proposal_save` action before publishing. Individual Marnin terminal approval
+remains separate. Full Ops integration and live twenty-invoice truth checking are
+separate acceptance gates.

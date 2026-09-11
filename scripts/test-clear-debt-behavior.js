@@ -17,6 +17,7 @@ async function main() {
   assert.doesNotMatch(failed,/No payments allocated|No job linked to this invoice|No stored messages/,'failed read is not absence');
   assert.match(failed,/Marnin/); assert.doesNotMatch(failed,/Send text|Send invoice email/);
   assert.doesNotMatch(source,/send_chase_sms|send_invoice_email/,'screen cannot bypass individual terminal approval');
+  assert.match(c.cdBriefHtml(invoice('a',{debt_brief:{promised:'Recorded scope',review_required:true,context_blockers:[{code:'bank_receipt_unverified',owner:'BOOKKEEPING',detail:'Receipt check pending'}]}}),null),/BOOKKEEPING: bank_receipt_unverified/);
   const ctx={invoice:{},job:null,conversation:{last_client_message:{at:'2026-09-11T00:00:00Z',preview:'Please check my receipt',channel:'email'},messages:[]},bank:{xero_payments:[]},sources:{conversation:{ok:true},job:{ok:true},invoice:{ok:true}},blockers:[]};
   assert.match(c.cdRecordHtml(P,{}, {},ctx,null),/Please check my receipt/,'door last client message must be visible');
   c.CD.seg='chase'; c.CD.open='deposit|payer'; c.cdSelectInvoice('b');

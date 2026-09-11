@@ -19219,6 +19219,13 @@ async function saveContextVerdict(event, index) {
   var verdict = form.querySelector('select').value;
   if (!row || !['true','false','wrong_job'].includes(verdict)) return;
   var body = {week_start:data.week_start, fact_id:row.fact_id, fact_store:row.fact_store, verdict:verdict, invented_payment:verdict === 'false' && form.querySelector('input[type=checkbox]').checked};
+  var drafts = new Map();
+  data.samples.forEach(function(sample, i) {
+    if (i === index) return;
+    var select = document.getElementById('ctx-verdict-' + i), payment = document.getElementById('ctx-payment-' + i);
+    if (!select || !payment || (select.value === (sample.verdict || '') && payment.checked === !!sample.invented_payment)) return;
+    drafts.set(JSON.stringify([data.week_start, sample.fact_store, sample.fact_id]), {baseline:JSON.stringify(sample), verdict:select.value, payment:payment.checked});
+  });
   contextReviewSaving = true;
   document.querySelectorAll('#contextPipelinePanel button, #contextPipelinePanel input, #contextPipelinePanel select').forEach(function(control) { control.disabled = true; });
   try {
@@ -19227,6 +19234,15 @@ async function saveContextVerdict(event, index) {
     if (document.getElementById('contextAccuracyReview') && contextReviewData === data) {
       contextReviewData = fresh;
       renderContextReview('Verdict saved and read back.');
+      var changed = false;
+      (fresh.samples || []).forEach(function(sample, i) {
+        var draft = drafts.get(JSON.stringify([fresh.week_start, sample.fact_store, sample.fact_id]));
+        if (!draft) return;
+        if (draft.baseline !== JSON.stringify(sample)) { changed = true; return; }
+        document.getElementById('ctx-verdict-' + i).value = draft.verdict;
+        document.getElementById('ctx-payment-' + i).checked = draft.payment;
+      });
+      if (changed) document.querySelector('#contextAccuracyReview [role=status]').textContent += ' Other edited facts changed on the server; their latest stored values are shown. Review them again before saving.';
       await loadContextPipeline();
     }
   } catch (e) {

@@ -10,13 +10,20 @@ const status = {as_of:'2026-09-11T04:00:00Z',switches:{all_stop:false,capture:tr
 async function setup(page, options={}) {
   let rows = structuredClone(options.rows || [fact]);
   const requests=[];
+  let saved = false;
   await page.route('**/*', route => route.abort());
   await page.route('https://context-fixture.test/**', async route => {
     const req=route.request(), action=new URL(req.url()).searchParams.get('action'); requests.push({action,method:req.method(),headers:req.headers(),body:req.postDataJSON()});
     if (options.fail) return route.fulfill({status:503,json:{error:'Synthetic unavailable'}});
     if (action==='context_pipeline_status') return route.fulfill({json:options.status || status});
-    if (action==='context_accuracy_sample') return route.fulfill({json:{week_start:'2026-08-31',requested:40,sampled:rows.length,missing:40-rows.length,state:rows.length?'insufficient_sample':'not_drawn',samples:rows}});
+    if (action==='context_accuracy_sample') {
+      if (saved && options.failReadback) return route.fulfill({status:503,json:{error:'Synthetic readback unavailable'}});
+      const week = new URL(req.url()).searchParams.get('week_start') || '2026-08-31';
+      const sampleRows = saved && options.readbackRows ? options.readbackRows(rows) : rows;
+      return route.fulfill({json:{week_start:week,requested:40,sampled:sampleRows.length,missing:40-sampleRows.length,state:sampleRows.length?'insufficient_sample':'not_drawn',samples:sampleRows}});
+    }
     if (action==='context_accuracy_verdict') {
+      saved = true;
       const body=req.postDataJSON(); rows=rows.map(row=>row.fact_id===body.fact_id?{...row,...body,judged_by:'Synthetic operator',judged_at:'2026-09-11T04:00:00Z'}:row);
       return route.fulfill({json:{week:{}}});
     }
@@ -98,4 +105,49 @@ test('unknown business source date never becomes ingestion time',async({page})=>
   const render=source.slice(source.indexOf('async function renderJarvisView('),source.indexOf('// Runs a raw-source audit'));
   await page.addScriptTag({content:render});await page.evaluate(async()=>{document.getElementById('fixture').innerHTML='<div id="jdJarvis"></div>';window.SUPABASE_URL='https://context-fixture.test';await renderJarvisView({job:{id:'synthetic-job'},events:[],business_events:[{event_type:'email.received',event_at:null,occurred_at:'2026-09-11T04:00:00Z',created_at:'2026-09-11T04:00:00Z'}]});});
   await expect(page.locator('#jdJarvis')).toContainText('source date unknown');
+});
+
+const secondFact = {...fact, fact_id:'33333333-3333-4333-8333-333333333333'};
+async function editTwoFacts(page, options={}) {
+  const requests = await setup(page, {rows:[fact, secondFact], ...options});
+  await page.getByText('Review weekly facts',{exact:true}).click();
+  await page.getByRole('button',{name:'Load weekly review'}).click();
+  await page.locator('#ctx-verdict-0').selectOption('true');
+  await page.locator('#ctx-verdict-1').selectOption('false');
+  await page.locator('#ctx-payment-1').check();
+  await page.getByRole('button',{name:'Save my verdict'}).first().click();
+  return requests;
+}
+test('saving one fact preserves the other draft by identity after reordered readback', async ({page})=>{
+  const requests = await editTwoFacts(page, {readbackRows:rows=>[...rows].reverse()});
+  await expect(page.locator('#contextAccuracyReview')).toContainText('Verdict saved and read back');
+  await expect(page.locator('#contextAccuracyReview')).toContainText('1 unjudged');
+  await expect(page.locator('#ctx-verdict-0')).toHaveValue('false');
+  await expect(page.locator('#ctx-payment-0')).toBeChecked();
+  await expect(page.locator('#ctx-payment-0')).toBeEnabled();
+  await expect(page.locator('#ctx-verdict-1')).toHaveValue('true');
+  expect(requests.filter(r=>r.method==='POST')).toHaveLength(1);
+  await page.locator('#contextReviewWeek').fill('2026-09-07');
+  await page.getByRole('button',{name:'Load weekly review'}).click();
+  await expect(page.locator('#contextAccuracyReview')).toContainText('Week of 2026-09-07');
+  await expect(page.locator('#ctx-verdict-0')).toHaveValue('');
+  await expect(page.locator('#ctx-payment-0')).not.toBeChecked();
+  await expect(page.locator('#ctx-payment-0')).toBeDisabled();
+});
+test('failed save readback retains both edited rows without claiming confirmation', async ({page})=>{
+  await editTwoFacts(page, {failReadback:true});
+  await expect(page.locator('.ctx-fact [role=alert]')).toContainText('Could not confirm saved verdict');
+  await expect(page.locator('#ctx-verdict-0')).toHaveValue('true');
+  await expect(page.locator('#ctx-verdict-1')).toHaveValue('false');
+  await expect(page.locator('#ctx-payment-1')).toBeChecked();
+  await expect(page.locator('#ctx-payment-1')).toBeEnabled();
+  await expect(page.locator('#contextAccuracyReview')).not.toContainText('Verdict saved and read back');
+});
+test('newer persisted verdict wins over an unrelated draft with a visible notice', async ({page})=>{
+  await editTwoFacts(page, {readbackRows:rows=>rows.map((row,i)=>i===1?{...row,verdict:'wrong_job',invented_payment:false,judged_by:'Another operator',judged_at:'2026-09-11T05:00:00Z'}:row)});
+  await expect(page.locator('#contextAccuracyReview')).toContainText('Other edited facts changed on the server');
+  await expect(page.locator('#ctx-verdict-1')).toHaveValue('wrong_job');
+  await expect(page.locator('#ctx-payment-1')).not.toBeChecked();
+  await expect(page.locator('#ctx-payment-1')).toBeDisabled();
+  await expect(page.locator('#contextAccuracyReview')).toContainText('0 unjudged');
 });

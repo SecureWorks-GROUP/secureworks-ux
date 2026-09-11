@@ -4,14 +4,14 @@
 //   secureworks-wiki lanes/DEBT_COLLECTION/DESIGN-clear-debt-2026-09-11.md
 // Reads: ops-api list_debt_picture (classification rows), debt_context_coverage
 //   (picture flags), invoice_context (one record), debt_notes (thread).
-// Writes: debt_note, debt_proposal_mark, send_chase_sms (GHL text), send_invoice_email.
+// Writes: add_debt_note and debt_proposal_save (pending only). Marnin approves in the terminal.
 // Never voids, never touches Xero, never tags GHL. Every field's origin is in the design page.
 // ════════════════════════════════════════════════════════════
 
 var CD = {
   rows: [], totals: {}, coverage: {}, asOf: null, pictureAsOf: null,
-  seg: null, open: null, ctx: {}, notes: {}, loading: false,
-  ACTIONS: { text: 'send_chase_sms', email: 'send_invoice_email', call: null, note: 'add_debt_note', mark: 'debt_proposal_mark' },
+  seg: null, open: null, selectedInvoice: null, ctx: {}, notes: {}, noteErrors: {}, recordRequest: 0, loading: false,
+  ACTIONS: { note: 'add_debt_note', proposal: 'debt_proposal_save' },
 };
 var CD_KINDS = [
   { key: 'chase',    label: 'Chase now',                  color: '#F15A29' },
@@ -56,7 +56,7 @@ function cdCss() {
   var s = document.createElement('style'); s.id = 'cd-css';
   s.textContent = '\
 #subCleardebt{--cdbg:#F5F2EE;--cdcard:#fff;--cdline:#E3E0DA;--cdline2:#EEEBE6;--cddark:#293C46;--cddeep:#1A272E;--cdmid:#5B7385;--cdmidl:#93A4B1;--cdlight:#F1EFEB;--cdor:#F15A29;--cdord:#C4481F;--cdort:#FDF1EC;--cdorl:#F9D3C5;--cdsage:#4F7F60;--cdsaget:#E6F0E8;--cdred:#B93A2C;--cdamber:#B8741C;color:var(--cddeep);font-size:14.5px;line-height:1.5}\
-#subCleardebt *{box-sizing:border-box;min-width:0}#subCleardebt .cd-num{font-variant-numeric:tabular-nums}#subCleardebt button{font:inherit;cursor:pointer;color:inherit}\
+#subCleardebt *{box-sizing:border-box;min-width:0}#subCleardebt .cd-num{font-variant-numeric:tabular-nums}#subCleardebt button{font:inherit;cursor:pointer;color:inherit}#subCleardebt :focus-visible{outline:2px solid var(--cdor);outline-offset:3px}.cd-invoice-select{display:flex;gap:12px;align-items:center;margin-bottom:16px}.cd-invoice-select select{font:inherit;padding:8px;max-width:100%}.cd-last-client{grid-column:1/-1;overflow-wrap:anywhere}.cd-last-client p{margin:6px 0}.cd-card,.cd-pend,.cd-note{overflow-wrap:anywhere}\
 .cd-i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px;flex:none}\
 .cd-k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--cdmidl);font-weight:600}\
 .cd-crumbs{font-size:13px;color:var(--cdmid);margin-bottom:12px;min-height:18px;display:flex;gap:8px;align-items:center}.cd-crumbs button{background:none;border:0;padding:0;color:var(--cdmid)}.cd-crumbs b{color:var(--cddeep);font-weight:600}\
@@ -83,7 +83,7 @@ function cdCss() {
 .cd-reach{display:grid;grid-template-columns:1.1fr 1.1fr .75fr 1.25fr;gap:14px;margin-top:16px}.cd-rc{background:var(--cdcard);border:1px solid var(--cdline);padding:14px 16px;display:flex;flex-direction:column;gap:8px}.cd-rc .cd-k{display:flex;align-items:center;gap:7px}\
 .cd-rc textarea{width:100%;border:1px solid var(--cdline);padding:9px 11px;font:inherit;font-size:14px;background:#FBFAF8;resize:vertical;line-height:1.45}.cd-rc textarea:focus{background:#fff;border-color:var(--cdor);outline:0}\
 .cd-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cd-acts .st{font-size:12.5px;color:var(--cdmid)}\
-.cd-btn{border:1px solid var(--cddark);background:var(--cddark);color:#fff;padding:8px 14px;font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px}.cd-btn.o{background:var(--cdor);border-color:var(--cdor)}.cd-btn.l{background:#fff;color:var(--cddark)}.cd-btn:disabled{opacity:.55;cursor:default}\
+.cd-btn{border:1px solid var(--cddark);background:var(--cddark);color:#fff;padding:8px 14px;font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px}.cd-btn.o{background:var(--cdor);border-color:var(--cdor)}.cd-btn.l{background:#fff;color:var(--cddark)}#subCleardebt .cd-btn{color:#fff}#subCleardebt .cd-btn.l{color:var(--cddark)}.cd-btn:disabled{opacity:.55;cursor:default}\
 .cd-tel{font-size:18px;font-weight:700;margin:2px 0}.cd-tel a{color:inherit;text-decoration:none}.cd-via{font-size:12px;color:var(--cdmidl)}\
 .cd-tags{display:flex;gap:4px;flex-wrap:wrap}.cd-tags button{border:1px solid var(--cdline);background:#fff;font-size:12px;padding:4px 9px;border-radius:100px;color:var(--cdmid)}.cd-tags button.on{border-color:var(--cdor);color:var(--cdord);background:var(--cdort)}\
 .cd-nthread{max-height:220px;overflow-y:auto;margin-top:6px;border-top:1px solid var(--cdline2)}.cd-note{padding:8px 0;border-bottom:1px solid var(--cdline2);font-size:13px;line-height:1.4}.cd-note .who{color:var(--cdmid);font-size:12.5px}.cd-note .tag{font-size:11px;padding:1px 8px;border-radius:100px;background:var(--cdlight);color:var(--cdmid);white-space:nowrap;font-weight:600}\
@@ -97,7 +97,7 @@ function cdCss() {
 .cd-thread{max-height:360px;overflow-y:auto;padding-right:6px;display:flex;flex-direction:column;gap:6px}.cd-msg{padding:9px 12px;font-size:13.5px;line-height:1.45;max-width:92%}.cd-msg.outbound,.cd-msg.internal{background:var(--cdlight);align-self:flex-end}.cd-msg.inbound{background:var(--cdort);align-self:flex-start}.cd-msg .w{font-size:11.5px;color:var(--cdmid);margin-bottom:2px}.cd-msg.inbound .w{color:var(--cdord)}\
 .cd-facts{margin-top:12px;padding-top:10px;border-top:1px solid var(--cdline2)}.cd-fact{padding:6px 0;font-size:13.5px}.cd-fact b{display:block;font-size:12px;color:var(--cdmid);font-weight:600}\
 .cd-quiet{color:var(--cdmidl);font-size:13px}.cd-pend{padding:12px 14px;background:var(--cdlight);color:var(--cdmid);font-size:13.5px}.cd-pend b{color:var(--cddeep)}.cd-err{padding:14px;background:#FBE6E2;color:var(--cdred)}\
-@media(max-width:900px){.cd-big{font-size:36px}.cd-row{grid-template-columns:1fr 96px 20px}.cd-row .old,.cd-row .nx{display:none}.cd-story,.cd-reach,.cd-three{grid-template-columns:1fr}.cd-rh .amt{text-align:left}}';
+.cd-rc input{font:inherit;width:100%;padding:8px;border:1px solid var(--cdline)}.cd-invoice-select{flex-wrap:wrap}@media(max-width:900px){.cd-rc textarea,.cd-rc input{font-size:16px}.cd-big{font-size:36px}.cd-row{grid-template-columns:1fr 96px 20px}.cd-row .old,.cd-row .nx{display:none}.cd-story,.cd-reach,.cd-three{grid-template-columns:1fr}.cd-rh .amt{text-align:left}}';
   document.head.appendChild(s);
 }
 
@@ -106,11 +106,13 @@ async function loadClearDebt() {
   cdCss();
   var stats = document.getElementById('clearDebtStats'), filt = document.getElementById('clearDebtFilters'), cards = document.getElementById('clearDebtCards');
   if (!stats) return;
+  CD.recordRequest++; CD.ctx = {}; CD.noteErrors = {};
+  cards.innerHTML = ''; filt.innerHTML = '';
   stats.style.display = 'block'; filt.style.display = 'block';
   stats.innerHTML = '<div class="cd-quiet">Loading the debt picture…</div>';
   try {
     var pic = await opsFetch('list_debt_picture');
-    CD.rows = pic.rows || []; CD.totals = pic.totals || {}; CD.asOf = pic.as_of; CD.pictureAsOf = pic.picture_as_of;
+    CD.rows = pic.rows || []; CD.totals = pic.totals || {}; CD.asOf = pic.as_of; CD.pictureAsOf = pic.picture_as_of; CD.pictureWarnings = pic.warnings || [];
   } catch (e) {
     stats.innerHTML = '<div class="cd-err">The debt picture could not be read: ' + cdEsc(e.message) + '. If this is the first day, the backend action list_debt_picture has not deployed yet.</div>';
     return;
@@ -118,8 +120,8 @@ async function loadClearDebt() {
   try {
     var cov = await opsFetch('debt_context_coverage', { population: 'open' });
     CD.coverage = {}; (cov.rows || []).forEach(function (r) { CD.coverage[r.xero_invoice_id] = r; });
-    CD.coverageAsOf = cov.as_of; CD.coverageTotals = cov.totals || {};
-  } catch (e) { CD.coverage = {}; CD.coverageAsOf = null; }
+    CD.coverageAsOf = cov.as_of; CD.coverageTotals = cov.totals || {}; CD.coverageWarnings = cov.warnings || [];
+  } catch (e) { CD.coverage = {}; CD.coverageAsOf = null; CD.coverageWarnings = [e.message]; }
   cdRender();
 }
 
@@ -145,7 +147,7 @@ function cdRender() {
   var kinds = cdGroups(), total = 0, count = 0, overdue = 0, overdueN = 0;
   CD.rows.forEach(function (r) { total += Number(r.amount_due || 0); count += 1; if (r.days_overdue > 0) { overdue += Number(r.amount_due || 0); overdueN += 1; } });
   var proposals = CD.rows.filter(function (r) { return r.debt_proposal_status === 'pending'; }).length;
-  var incomplete = Object.keys(CD.coverage).filter(function (k) { return CD.coverage[k] && CD.coverage[k].complete === false; }).length;
+  var incomplete = CD.rows.filter(function (r) { var c = CD.coverage[r.xero_invoice_id]; return !c || (c.blockers || []).length > 0 || (c.complete !== true && !(c.complete === undefined && Array.isArray(c.blockers) && c.blockers.length === 0)); }).length;
   var bar = '', leg = '';
   CD_KINDS.forEach(function (k) {
     var K = kinds[k.key]; if (!K.n && k.key === 'unclass') return;
@@ -156,9 +158,9 @@ function cdRender() {
   document.getElementById('clearDebtStats').innerHTML =
     '<div class="cd-crumbs">' + (CD.seg ? '<button onclick="cdGo(null)">Outstanding ' + cdMoney0(total) + '</button>' + CD_IC.chev + '<b>' + kinds[CD.seg].label + '</b>' : '') + '</div>' +
     '<div class="cd-head"><div><div class="cd-h1">Clear Debt</div><div class="cd-big cd-num">' + cdMoney0(total) + '<small>' + count + ' invoices · ' + overdueN + ' overdue for ' + cdMoney0(overdue) + '</small></div></div>' +
-    '<div class="cd-meta"><div>Picture refreshed<b>' + (CD.pictureAsOf ? cdWhen(CD.pictureAsOf) : 'never') + '</b></div><div>Picture incomplete<b>' + (CD.coverageAsOf ? incomplete + ' of ' + count : 'door unavailable') + '</b></div><div>Texts waiting for Marnin<b>' + proposals + '</b></div></div></div>' +
+    '<div class="cd-meta"><div>Picture refreshed<b>' + (CD.pictureAsOf ? cdWhen(CD.pictureAsOf) : 'never') + '</b></div><div>Picture incomplete<b>' + (CD.coverageAsOf ? incomplete + ' of ' + count : 'door unavailable') + '</b></div><div>Proposals waiting for Marnin<b id="cd-proposal-count">' + proposals + '</b></div></div></div>' +
     '<div class="cd-bar" role="group" aria-label="Outstanding by kind">' + bar + '</div><div class="cd-legend">' + leg + '</div>' + (CD.seg ? '' : '<p class="cd-hint">Pick a piece of the bar to see who owes it, grouped by the type of debt.</p>');
-  document.getElementById('clearDebtFilters').innerHTML = '';
+  document.getElementById('clearDebtFilters').innerHTML = (CD.pictureWarnings || []).concat(CD.coverageWarnings || []).map(function (w) { return '<div class="cd-pend">Picture warning: ' + cdEsc(w) + '</div>'; }).join('');
   var cards = document.getElementById('clearDebtCards');
   if (!CD.seg) { cards.innerHTML = ''; return; }
   var K = kinds[CD.seg], h = '';
@@ -166,15 +168,15 @@ function cdRender() {
     h += '<div class="cd-grp" style="--sw:' + K.color + '"><span class="lab"><i></i><b>' + cdEsc(S.label) + '</b><span class="o">' + cdEsc(S.desc || S.owner) + '</span></span><span class="t cd-num">' + cdMoney0(S.amount) + '<small>' + S.n + ' invoice' + (S.n === 1 ? '' : 's') + '</small></span></div>';
     S.payers.forEach(function (P) {
       var key = S.key + '|' + P.key, on = CD.open === key;
-      h += '<button class="cd-row ' + (on ? 'on' : '') + '" onclick="cdToggle(\'' + cdEsc(key).replace(/'/g, "\\'") + '\')" aria-expanded="' + on + '"><span><div class="nm">' + cdEsc(P.name) + '</div><div class="sub">' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + '</div></span><span class="amt cd-num">' + cdMoney(P.amount) + '</span><span class="old">' + cdAge(P.oldest) + '</span><span class="nx">' + (P.proposal ? '<span class="pp">text ready</span>' : '') + cdEsc(P.next.length > 48 ? P.next.slice(0, 46) + '…' : P.next) + '</span><span class="car">' + CD_IC.chev + '</span></button>';
+      h += '<button class="cd-row ' + (on ? 'on' : '') + '" onclick="cdToggle(\'' + cdEsc(key).replace(/'/g, "\\'") + '\')" aria-expanded="' + on + '"><span><div class="nm">' + cdEsc(P.name) + '</div><div class="sub">' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + '</div></span><span class="amt cd-num">' + cdMoney(P.amount) + '</span><span class="old">' + cdAge(P.oldest) + '</span><span class="nx">' + (P.proposal ? '<span class="pp">proposal</span>' : '') + cdEsc(P.next.length > 48 ? P.next.slice(0, 46) + '…' : P.next) + '</span><span class="car">' + CD_IC.chev + '</span></button>';
       if (on) h += '<div class="cd-rec" id="cd-rec" style="--sw:' + K.color + '">' + cdRecordShell(P, S, K) + '</div>';
     });
   });
   cards.innerHTML = '<div class="cd-panel"><div class="cd-ph"><h2>' + K.label + '</h2><span class="cd-num">' + cdMoney0(K.amount) + ' · ' + K.n + ' invoices</span></div>' + h + '</div>';
   if (CD.open) cdLoadRecord();
 }
-function cdGo(seg) { CD.seg = seg; CD.open = null; cdRender(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function cdToggle(key) { CD.open = CD.open === key ? null : key; cdRender(); }
+function cdGo(seg) { CD.seg = seg; CD.open = null; CD.selectedInvoice = null; CD.recordRequest++; cdRender(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+function cdToggle(key) { CD.selectedInvoice = null; CD.recordRequest++; CD.open = CD.open === key ? null : key; cdRender(); }
 
 // ── Record ──
 function cdOpenPayer() {
@@ -182,48 +184,59 @@ function cdOpenPayer() {
   var parts = CD.open.split('|'); for (var i = 0; i < K.subs.length; i++) { var S = K.subs[i]; if (S.key !== parts[0]) continue; for (var j = 0; j < S.payers.length; j++) if (S.payers[j].key === parts[1]) return { P: S.payers[j], S: S, K: K }; }
   return null;
 }
+function cdLead(P) { return P.invoices.find(function (r) { return r.xero_invoice_id === CD.selectedInvoice; }) || P.invoices[0]; }
+function cdSelectInvoice(xid) { var o = cdOpenPayer(); if (!o || !o.P.invoices.some(function (r) { return r.xero_invoice_id === xid; })) return; CD.selectedInvoice = xid; cdRender(); }
+function cdInvoicePicker(P) {
+  var lead = cdLead(P);
+  return '<label class="cd-invoice-select">Invoice context <select aria-label="Invoice context" onchange="cdSelectInvoice(this.value)">' + P.invoices.map(function (r) { return '<option value="' + cdEsc(r.xero_invoice_id) + '"' + (r === lead ? ' selected' : '') + '>' + cdEsc(r.invoice_number) + ' · ' + cdMoney(r.amount_due) + '</option>'; }).join('') + '</select></label>';
+}
 function cdRecordShell(P, S, K) {
-  var lead = P.invoices[0];
-  return '<div class="cd-rh"><div><h2>' + cdEsc(P.name) + '</h2><div class="cd-chips"><span class="cd-chip d">' + cdEsc(P.owner) + '</span><span class="cd-chip">' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ' · ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</span>' + cdAge(P.oldest) + '</div></div><div class="amt cd-num">' + cdMoney(P.amount) + '<small>' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + ' · picture refreshed ' + (lead.debt_as_of ? cdWhen(lead.debt_as_of) : 'never') + '</small></div></div>' +
-    '<div id="cd-rec-body"><div class="cd-quiet">Reading the record…</div></div>';
+  var lead = cdLead(P);
+  return '<div class="cd-rh"><div><h2>' + cdEsc(P.name) + '</h2><div class="cd-chips"><span class="cd-chip d">' + cdEsc(lead.debt_owner || P.owner) + '</span><span class="cd-chip">' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ' · ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</span>' + cdAge(P.oldest) + '</div></div><div class="amt cd-num">' + cdMoney(P.amount) + '<small>' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + ' · picture refreshed ' + (lead.debt_as_of ? cdWhen(lead.debt_as_of) : 'never') + '</small></div></div>' +
+    cdInvoicePicker(P) + '<div id="cd-rec-body"><div class="cd-quiet">Reading the record…</div></div>';
 }
 async function cdLoadRecord() {
-  var o = cdOpenPayer(); if (!o) return; var P = o.P, lead = P.invoices[0], body = document.getElementById('cd-rec-body'); if (!body) return;
-  var ctx = null, notes = null, err = null;
-  try { ctx = CD.ctx[lead.xero_invoice_id] || (CD.ctx[lead.xero_invoice_id] = await opsFetch('invoice_context', { xero_invoice_id: lead.xero_invoice_id, mode: 'card' })); } catch (e) { err = e.message; }
-  try { notes = await opsFetch('debt_notes', { xero_invoice_id: lead.xero_invoice_id }); CD.notes[lead.xero_invoice_id] = notes.thread || []; } catch (e) { CD.notes[lead.xero_invoice_id] = []; }
-  if (!document.getElementById('cd-rec-body')) return;
+  var o = cdOpenPayer(); if (!o) return; var P = o.P, lead = cdLead(P), body = document.getElementById('cd-rec-body'); if (!body) return;
+  var request = ++CD.recordRequest; var ctx = null, notes = null, err = null;
+  try { ctx = CD.ctx[lead.xero_invoice_id] || await opsFetch('invoice_context', { xero_invoice_id: lead.xero_invoice_id, mode: 'card' }); if (request === CD.recordRequest) CD.ctx[lead.xero_invoice_id] = ctx; } catch (e) { err = e.message; }
+  try { notes = await opsFetch('debt_notes', { xero_invoice_id: lead.xero_invoice_id }); CD.notes[lead.xero_invoice_id] = notes.thread || []; delete CD.noteErrors[lead.xero_invoice_id]; } catch (e) { CD.noteErrors[lead.xero_invoice_id] = e.message; }
+  if (request !== CD.recordRequest || !document.getElementById('cd-rec-body')) return;
   document.getElementById('cd-rec-body').innerHTML = cdRecordHtml(P, o.S, o.K, ctx, err);
 }
 function cdBriefHtml(lead, ctx) {
-  var b = lead.debt_brief;
+  var b = lead.debt_brief; var last = ctx && ctx.conversation && ctx.conversation.last_client_message;
+  var lastHtml = '<div class="cd-last-client"><b>Last client words</b><p>' + (last ? cdEsc(last.preview) + '</p><small>' + cdEsc(cdWhen(last.at)) + ' · ' + cdEsc(last.channel) + '</small>' : (ctx && ctx.sources && ctx.sources.conversation && ctx.sources.conversation.ok === true ? 'No client message in the stored conversation.</p>' : 'Client conversation unavailable from the door.</p>')) + '</div>';
   if (b && b.promised) {
-    var ev = (b.evidence || []).map(function (e) { return '<a href="' + cdEsc(e.href || '#') + '" onclick="event.stopPropagation()">' + (CD_IC[e.kind] || CD_IC.file) + cdEsc(e.label) + '</a>'; }).join('');
-    return '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Promised</dt><dd>' + cdEsc(b.promised) + '</dd><dt>Delivered</dt><dd>' + cdEsc(b.delivered) + '</dd><dt>Client says</dt><dd>' + cdEsc(b.client_says) + '</dd><dt>Our side</dt><dd>' + cdEsc(b.our_side) + '</dd></dl>' + (ev ? '<div class="cd-ev">' + ev + '</div>' : '') + '</div>';
+    var refs = (b.sources || []).map(function (r) { return '<span title="' + cdEsc(r.source_ref || '') + '">' + cdEsc(r.label || r.source) + ' · ' + cdEsc(r.source_ref || '') + '</span>'; }).join('');
+    var review = (b.review_required ? '<div class="cd-pend">This brief needs desk review before a client proposal.</div>' : '') + (b.context_blockers || []).map(function (r) { return '<div class="cd-pend"><b>' + cdEsc(r.owner) + ': ' + cdEsc(r.code) + '</b> ' + cdEsc(r.detail) + '</div>'; }).join('');
+    var ev = (b.evidence || []).filter(function (e) { return /^https?:\/\//i.test(e.href || ''); }).map(function (e) { return '<a href="' + cdEsc(e.href || '#') + '" onclick="event.stopPropagation()">' + (CD_IC[e.kind] || CD_IC.file) + cdEsc(e.label) + '</a>'; }).join('');
+    return lastHtml + '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Promised</dt><dd>' + cdEsc(b.promised) + '</dd><dt>Delivered</dt><dd>' + cdEsc(b.delivered) + '</dd><dt>Client says</dt><dd>' + cdEsc(b.client_says) + '</dd><dt>Our side</dt><dd>' + cdEsc(b.our_side) + '</dd></dl>' + review + (ev || refs ? '<div class="cd-ev">' + ev + refs + '</div>' : '') + '</div>';
   }
   var blockers = ctx && ctx.blockers ? ctx.blockers.map(function (x) { return '<div class="cd-pend"><b>' + cdEsc(x.code.replace(/_/g, ' ')) + ', ' + cdEsc(x.owner) + '.</b> ' + cdEsc(x.detail) + '</div>'; }).join('') : '';
-  return '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Why unpaid</dt><dd>' + cdEsc(lead.debt_classification_reason || 'not yet written by the refresh') + '</dd></dl><div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' + (blockers || '<div class="cd-quiet">The four-line brief is written by the refresh once the door has facts for this job.</div>') + '</div></div>';
+  return lastHtml + '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Why unpaid</dt><dd>' + cdEsc(lead.debt_classification_reason || 'not yet written by the refresh') + '</dd></dl><div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' + (blockers || '<div class="cd-quiet">The four-line brief is written by the refresh once the door has facts for this job.</div>') + '</div></div>';
 }
 function cdRecordHtml(P, S, K, ctx, err) {
-  var lead = P.invoices[0], job = ctx && ctx.job, conv = ctx && ctx.conversation, inv = ctx && ctx.invoice;
-  var next = '<div class="cd-next"><span class="cd-k">What happens from here</span><div class="big2">' + cdEsc(lead.debt_next_action || 'No next step recorded') + '</div>' + (lead.debt_next_action_at ? '<span class="when">' + cdEsc(lead.debt_next_action_at) + '</span>' : '') + '<div class="rowk"><div>Whose move<b>' + cdEsc(P.owner) + '</b></div><div>Kind<b>' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ', ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</b></div></div></div>';
-  var ghl = job && job.ghl_contact_id, phone = (job && job.client_phone) || '', email = (job && job.client_email) || '';
+  var lead = cdLead(P), job = ctx && ctx.job, conv = ctx && ctx.conversation, inv = ctx && ctx.invoice;
+  var next = '<div class="cd-next"><span class="cd-k">What happens from here</span><div class="big2">' + cdEsc(lead.debt_next_action || 'No next step recorded') + '</div>' + (lead.debt_next_action_at ? '<span class="when">' + cdEsc(lead.debt_next_action_at) + '</span>' : '') + '<div class="rowk"><div>Whose move<b>' + cdEsc(lead.debt_owner || P.owner) + '</b></div><div>Kind<b>' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ', ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</b></div></div></div>';
+  var phone = (job && job.client_phone) || '', email = (job && job.client_email) || '';
   var draft = lead.debt_proposal_status === 'pending' && lead.debt_proposal_kind === 'sms' ? lead.debt_proposal_text : '';
-  var thread = (CD.notes[lead.xero_invoice_id] || []).map(function (n) { return '<div class="cd-note"><div class="who">' + cdEsc(cdWhen(n.at)) + ' · ' + cdEsc(n.who || n.source) + (n.tag ? ' <span class="tag">' + cdEsc(n.tag) + '</span>' : '') + '</div><div>' + cdEsc(n.text) + '</div></div>'; }).join('') || '<div class="cd-quiet">No notes yet.</div>';
+  var thread = CD.noteErrors[lead.xero_invoice_id] ? '<div class="cd-pend">Notes unavailable: ' + cdEsc(CD.noteErrors[lead.xero_invoice_id]) + '. Refresh to retry.</div>' : (CD.notes[lead.xero_invoice_id] || []).map(function (n) { return '<div class="cd-note"><div class="who">' + cdEsc(cdWhen(n.at)) + ' · ' + cdEsc(n.who || n.source) + (n.tag ? ' <span class="tag">' + cdEsc(n.tag) + '</span>' : '') + '</div><div>' + cdEsc(n.text) + '</div></div>'; }).join('') || '<div class="cd-quiet">No notes yet.</div>';
   var reach = '<div class="cd-reach">' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.msg + 'Text</div><textarea id="cd-sms" rows="' + (draft ? 4 : 2) + '" placeholder="Write a text…">' + cdEsc(draft) + '</textarea><div class="cd-acts"><button class="cd-btn o" ' + (ghl ? '' : 'disabled title="No GHL contact on the job"') + ' onclick="cdSendText(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(ghl || '') + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.msg + 'Send text</button><span class="st">' + (draft ? 'Drafted by the desk. Sending is your approval.' : (ghl ? 'From 771 via GoHighLevel' : 'No GHL contact on the job')) + '</span></div></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.mail + 'Email</div><textarea id="cd-email-subject" rows="1" placeholder="Subject (the invoice PDF is attached)"></textarea><div class="cd-acts"><button class="cd-btn" ' + (email && job ? '' : 'disabled title="No email on the job"') + ' onclick="cdSendEmail(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(email) + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.mail + 'Send invoice email</button><span class="st">' + (email ? 'to ' + cdEsc(email) + ' by Outlook' : 'no email on the job') + '</span></div></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.phone + 'Call</div><div class="cd-tel">' + (phone ? '<a href="tel:' + cdEsc(phone) + '">' + cdEsc(phone) + '</a>' : '<span class="cd-quiet">no phone on the job</span>') + '</div><div class="cd-acts">' + (ghl ? '<a class="cd-btn l" target="_blank" rel="noopener" href="https://app.gohighlevel.com/v2/location/' + cdEsc(window.GHL_LOCATION_ID || '') + '/conversations/conversations/' + cdEsc(ghl) + '">' + CD_IC.phone + 'Open GHL conversation</a>' : '') + '</div><span class="cd-via">Click to call through GoHighLevel arrives with the CIO action.</span></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.note + 'Note</div><textarea id="cd-note" rows="2" placeholder="For whoever opens this next…"></textarea><div class="cd-tags" id="cd-tags">' + ['promised', 'call back', 'waiting on client', 'park until', 'propose void', 'dispute'].map(function (t) { return '<button onclick="cdTag(this)">' + t + '</button>'; }).join('') + '</div><div class="cd-acts"><button class="cd-btn" onclick="cdAddNote(\'' + lead.xero_invoice_id + '\')">' + CD_IC.note + 'Add note</button></div><div class="cd-nthread" id="cd-nthread">' + thread + '</div></div></div>';
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.msg + 'Text proposal</div><textarea aria-label="Text proposal" id="cd-sms" rows="4" placeholder="Draft a text for Marnin">' + cdEsc(draft) + '</textarea><span class="st">Marnin approves each client message individually in the terminal.</span>' + cdProposalControls(lead, 'sms', phone) + '</div>' +
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.mail + 'Email proposal</div><textarea aria-label="Email proposal" id="cd-email" rows="4" placeholder="Draft the complete email for Marnin">' + cdEsc(lead.debt_proposal_kind === 'email' && lead.debt_proposal_status === 'pending' ? lead.debt_proposal_text : '') + '</textarea><span class="st">Include the subject and full message. Marnin approves in the terminal.</span>' + cdProposalControls(lead, 'email', email) + '</div>' +
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.phone + 'Call context</div><div class="cd-tel">' + cdEsc(phone || 'No phone available from the door') + '</div><span class="cd-via">Any client contact is proposed to Marnin first.</span></div>' +
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.note + 'Note</div><textarea id="cd-note" aria-label="Internal note" rows="2" placeholder="For whoever opens this next…"></textarea><div class="cd-tags" id="cd-tags">' + ['promised', 'call back', 'waiting on client', 'park until', 'propose void', 'dispute'].map(function (t) { return '<button onclick="cdTag(this)">' + t + '</button>'; }).join('') + '</div><div class="cd-acts"><button class="cd-btn" onclick="cdAddNote(\'' + lead.xero_invoice_id + '\')">' + CD_IC.note + 'Add note</button></div><div class="cd-nthread" id="cd-nthread">' + thread + '</div></div></div>';
   var invs = P.invoices.map(function (i) { return '<div class="r"><span><a class="cd-lnk" target="_blank" rel="noopener" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + cdEsc(i.xero_invoice_id) + '" onclick="event.stopPropagation()" title="Open in Xero">' + cdEsc(i.invoice_number) + '</a> ' + cdAge(i.days_overdue) + ' <button class="cd-peek" onclick="event.stopPropagation();cdPreview(\'' + cdEsc(i.xero_invoice_id) + '\',this)">preview</button></span><span class="cd-num">' + cdMoney(i.amount_due) + '</span></div><div class="cd-prev" id="cd-prev-' + cdEsc(i.xero_invoice_id) + '" hidden></div>'; }).join('');
-  var pays = ctx && ctx.bank && ctx.bank.xero_payments && ctx.bank.xero_payments.length ? '<div class="cd-led" style="margin-top:8px">' + ctx.bank.xero_payments.map(function (m) { return '<div><span class="d">' + cdEsc(m.date) + '</span><span>' + cdMoney(m.amount) + (m.reference ? ' · ' + cdEsc(m.reference) : '') + '<br><span class="st">Allocated in Xero</span></span></div>'; }).join('') + '</div>' : '<div class="cd-quiet" style="margin-top:10px">No payments allocated on this invoice.</div>';
+  var pays = ctx && ctx.bank && ctx.bank.xero_payments && ctx.bank.xero_payments.length ? '<div class="cd-led" style="margin-top:8px">' + ctx.bank.xero_payments.map(function (m) { return '<div><span class="d">' + cdEsc(m.date) + '</span><span>' + cdMoney(m.amount) + (m.reference ? ' · ' + cdEsc(m.reference) : '') + '<br><span class="st">Allocated in Xero</span></span></div>'; }).join('') + '</div>' : '<div class="cd-quiet" style="margin-top:10px">' + (ctx && ctx.sources && ctx.sources.invoice && ctx.sources.invoice.ok === true && ctx.bank && Array.isArray(ctx.bank.xero_payments) ? 'No payments allocated in the stored Xero record for ' + cdEsc(lead.invoice_number) + '.' : 'Payment information unavailable from the door.') + '</div>';
   var jobHtml = job ? '<dl class="cd-kv"><dt>Job</dt><dd><a class="cd-lnk" href="#" onclick="event.preventDefault();event.stopPropagation();openJobDetail(\'' + cdEsc(job.id) + '\')">' + cdEsc(job.job_number) + '</a> ' + cdEsc(job.type || '') + '</dd><dt>Site</dt><dd>' + cdEsc(job.site_address || job.site_suburb || '') + '</dd><dt>Status</dt><dd>' + cdEsc(job.status || '') + '</dd><dt>Value</dt><dd>' + (job.promised && job.promised.quote_total ? cdMoney(job.promised.quote_total) : '<span class="cd-quiet">no quote total on the job</span>') + '</dd></dl>' +
     '<div class="cd-docs">' + (inv ? '<div><a class="cd-lnk" target="_blank" rel="noopener" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + cdEsc(inv.xero_invoice_id) + '">' + CD_IC.file + ' ' + cdEsc(inv.invoice_number) + '</a><span class="sub">' + cdEsc(inv.reference || '') + '</span></div>' : '') + ((job.other_open_invoices || []).map(function (x) { return '<div><span>' + CD_IC.file + ' ' + cdEsc(x.invoice_number) + '</span><span class="sub">' + cdMoney(x.amount_due) + ' due ' + cdEsc(x.due_date) + '</span></div>'; }).join('')) + ((job.promised && job.promised.work_orders || []).map(function (w) { return '<div><span>' + CD_IC.file + ' WO ' + cdEsc(w.wo_number) + '</span><span class="sub">' + cdEsc(w.trade || '') + ' · ' + cdEsc(w.status || '') + '</span></div>'; }).join('')) + '</div>'
-    : '<div class="cd-pend"><b>' + (ctx && ctx.link && ctx.link.status === 'ambiguous' ? 'More than one job matches this contact.' : 'No job linked to this invoice.') + '</b> ' + (ctx && ctx.blockers && ctx.blockers.length ? cdEsc(ctx.blockers[0].detail) : '') + '</div>';
-  var chat = conv && conv.messages && conv.messages.length ? '<div class="cd-thread">' + conv.messages.slice().reverse().map(function (m) { return '<div class="cd-msg ' + cdEsc(m.direction || 'internal') + '"><div class="w">' + cdEsc(cdWhen(m.at)) + ' · ' + cdEsc(m.author || m.channel) + ' · ' + cdEsc(m.channel) + '</div>' + cdEsc(m.preview || '') + '</div>'; }).join('') + '</div>' : '<div class="cd-pend"><b>No stored messages.</b> ' + (ctx && ctx.blockers ? cdEsc((ctx.blockers.filter(function (b) { return /conversation|ghl/.test(b.code); })[0] || {}).detail || '') : '') + '</div>';
+    : '<div class="cd-pend"><b>' + (!ctx || (ctx.sources && ctx.sources.job && ctx.sources.job.ok === false) ? 'Job information unavailable from the door.' : ctx.link && ctx.link.status === 'ambiguous' ? 'More than one job matches this contact.' : ctx.link && ctx.link.status === 'none' ? 'No job linked to this invoice.' : 'Job context pending.') + '</b> ' + (ctx && ctx.blockers && ctx.blockers.length ? cdEsc(ctx.blockers[0].detail) : '') + '</div>';
+  var chat = conv && conv.messages && conv.messages.length ? '<div class="cd-thread">' + conv.messages.slice().reverse().map(function (m) { return '<div class="cd-msg ' + cdEsc(m.direction || 'internal') + '"><div class="w">' + cdEsc(cdWhen(m.at)) + ' · ' + cdEsc(m.author || m.channel) + ' · ' + cdEsc(m.channel) + '</div>' + cdEsc(m.preview || '') + '</div>'; }).join('') + '</div>' : '<div class="cd-pend"><b>' + (ctx && ctx.sources && ctx.sources.conversation && ctx.sources.conversation.ok === true ? 'No stored messages.' : 'Conversation unavailable from the door.') + '</b> ' + (ctx && ctx.blockers ? cdEsc((ctx.blockers.filter(function (b) { return /conversation|ghl/.test(b.code); })[0] || {}).detail || '') : '') + '</div>';
   var facts = ctx && ctx.facts && ctx.facts.length ? '<div class="cd-facts"><div class="cd-k" style="margin-bottom:4px">Facts pulled by Luna</div>' + ctx.facts.map(function (f) { return '<div class="cd-fact"><b>' + cdEsc(f.kind) + '</b>' + cdEsc(typeof f.value === 'string' ? f.value : (f.value && (f.value.text || JSON.stringify(f.value)))) + '</div>'; }).join('') + '</div>' : '';
   var errHtml = err ? '<div class="cd-err" style="margin-bottom:12px">The door did not answer for this invoice: ' + cdEsc(err) + '</div>' : '';
-  return errHtml + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +
+  var honesty = ctx ? (ctx.blockers || []).map(function (b) { return '<div class="cd-pend"><b>' + cdEsc(b.owner) + ': ' + cdEsc(b.code) + '</b> ' + cdEsc(b.detail) + '</div>'; }).join('') + (ctx.warnings || []).map(function (w) { return '<div class="cd-pend">' + cdEsc(w) + '</div>'; }).join('') : '';
+  var handoff = lead.debt_handoff_ref ? '<p>Handoff: ' + cdEsc(lead.debt_handoff_ref) + ' · ' + cdEsc(cdWhen(lead.debt_handoff_at)) + '</p>' : '';
+  return errHtml + honesty + '<p>Context and notes for <b>' + cdEsc(lead.invoice_number) + '</b>: ' + cdEsc(lead.debt_classification_reason || 'Reason unavailable; desk review needed') + '</p>' + handoff + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +
     '<div class="cd-three"><div class="cd-card"><h3 class="cd-k">' + CD_IC.bank + 'Money<em>Xero</em></h3><div class="cd-il">' + invs + '</div>' + pays + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.file + 'Job and files<em>job record</em></h3>' + jobHtml + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.msg + 'Conversation<em>' + (conv && conv.sources ? Object.keys(conv.sources).filter(function (k) { return conv.sources[k]; }).length + ' sources' : 'door') + ' · newest first</em></h3>' + chat + facts + '</div></div>';
 }
 
@@ -246,18 +259,24 @@ async function cdAddNote(xid) {
   var ta = document.getElementById('cd-note'), tagEl = document.querySelector('#cd-tags button.on'); var note = ta && ta.value.trim(); if (!note) { showToast('Write the note first', 'warning'); return; }
   try { var res = await opsPost(CD.ACTIONS.note, { xero_invoice_id: xid, note: note, tag: tagEl ? tagEl.textContent : null }); CD.notes[xid] = res.thread || []; ta.value = ''; showToast('Note added', 'success'); cdRender(); } catch (e) { showToast('Note failed: ' + e.message, 'warning'); }
 }
-async function cdSendText(xid, ghl, jobId) {
-  var ta = document.getElementById('cd-sms'), msg = ta && ta.value.trim(); if (!msg) { showToast('Write the text first', 'warning'); return; }
-  if (/—/.test(msg)) { showToast('Remove the em dash before sending', 'warning'); return; }
-  if (!confirm('Send this text from 771 now?\n\n' + msg)) return;
-  try {
-    var res = await opsPost(CD.ACTIONS.text, { ghl_contact_id: ghl, xero_invoice_id: xid, job_id: jobId || null, message: msg });
-    try { await opsPost(CD.ACTIONS.mark, { xero_invoice_id: xid, status: 'sent', sent_ref: res && (res.messageId || res.message_id) || null, text: msg }); } catch (e2) {}
-    showToast('Text sent', 'success'); CD.ctx[xid] = null; await loadClearDebt();
-  } catch (e) { showToast('Text failed: ' + e.message, 'warning'); }
+
+function cdProposalControls(lead, kind, fallbackTo) {
+  var to = lead.debt_proposal_kind === kind ? lead.debt_proposal_to : fallbackTo;
+  return '<label>Proposed recipient<input id="cd-' + kind + '-to" aria-label="' + kind + ' proposal recipient" value="' + cdEsc(to || '') + '"></label><button class="cd-btn" onclick="cdSaveProposal(\'' + lead.xero_invoice_id + '\',\'' + kind + '\',this)">Save proposal for Marnin</button><span class="cd-quiet">One pending proposal per invoice. Saving replaces its previous proposal and requires fresh approval.</span>';
 }
-async function cdSendEmail(xid, to, jobId) {
-  var subj = document.getElementById('cd-email-subject'), subject = subj && subj.value.trim();
-  if (!confirm('Email the invoice PDF to ' + to + ' now?')) return;
-  try { await opsPost(CD.ACTIONS.email, { xero_invoice_id: xid, to_email: to, job_id: jobId || null, subject_override: subject || undefined }); showToast('Invoice emailed', 'success'); await loadClearDebt(); } catch (e) { showToast('Email failed: ' + e.message, 'warning'); }
+async function cdSaveProposal(xid, kind, button) {
+  if (CD.savingProposal) return;
+  var text = document.getElementById(kind === 'sms' ? 'cd-sms' : 'cd-email').value.trim();
+  var to = document.getElementById('cd-' + kind + '-to').value.trim();
+  if (!text || !to) { showToast('Write the full proposal and proposed recipient first', 'warning'); return; }
+  CD.savingProposal = true; if (button) button.disabled = true;
+  try {
+    var res = await opsPost(CD.ACTIONS.proposal, { xero_invoice_id: xid, kind: kind, text: text, to: to });
+    if (!res || res.status !== 'pending') throw new Error('Pending proposal was not confirmed. Refresh before retrying.');
+    var row = CD.rows.find(function (r) { return r.xero_invoice_id === xid; });
+    if (row) Object.assign(row, { debt_proposal_kind: kind, debt_proposal_text: text, debt_proposal_to: to, debt_proposal_status: 'pending' });
+    var count = document.getElementById('cd-proposal-count'); if (count) count.textContent = CD.rows.filter(function (r) { return r.debt_proposal_status === 'pending'; }).length;
+    showToast(res.audit_warning || 'Proposal saved for Marnin. Nothing sent.', res.audit_warning ? 'warning' : 'success');
+  } catch (e) { showToast('Proposal save failed: ' + e.message, 'warning'); }
+  finally { CD.savingProposal = false; if (button) button.disabled = false; }
 }

@@ -4510,7 +4510,16 @@
     .msr-fb-btn.dark:hover { background: var(--sw-dark-deep); }
     .msr-fb-btn.brand { background: var(--sw-orange); color: #fff; font-weight: 800; }
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
-  </style>
+
+/* Scoped extension of the existing JARVIS Context panel. */
+.ctx-panel {background:var(--sw-card);border:1px solid var(--sw-border);padding:14px 16px;border-radius:3px;margin-bottom:12px;color:var(--sw-dark);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.ctx-panel h3 {font-size:15px;margin:0 0 10px}.ctx-panel h4 {font-size:13px;margin:18px 0 6px}.ctx-panel p {margin:6px 0}.ctx-muted {color:var(--sw-text-sec)}
+.ctx-status {display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr);gap:6px 12px;margin:14px 0;font-variant-numeric:tabular-nums}.ctx-status dt,.ctx-status dd {margin:0}.ctx-status dt {color:var(--sw-text-sec)}
+.ctx-panel button,.ctx-panel select,.ctx-panel input[type=date] {font:inherit;padding:8px 10px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);color:var(--sw-dark);min-height:40px;max-width:100%}.ctx-panel button {cursor:pointer;font-weight:600}.ctx-panel button:hover {border-color:var(--sw-orange)}.ctx-panel :focus-visible {outline:2px solid var(--sw-orange);outline-offset:3px}.ctx-panel :disabled {opacity:.55;cursor:not-allowed}
+.ctx-panel details {margin-top:14px}.ctx-panel summary {cursor:pointer;font-weight:600;padding:8px 0}.ctx-controls {display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.ctx-fact {border-top:1px solid var(--sw-border);margin-top:18px;padding-top:4px}.ctx-fact blockquote {margin:10px 0;padding:10px;background:var(--sw-bg);white-space:pre-wrap}.ctx-fact>label {display:block;margin:10px 0 5px}.ctx-check {display:flex!important;gap:8px;align-items:center}.ctx-check input {width:18px;height:18px;accent-color:var(--sw-orange)}
+@media(max-width:480px){.ctx-status {grid-template-columns:1fr;gap:2px}.ctx-status dd {margin-bottom:8px}.ctx-panel {padding:12px}.ctx-controls>* {width:100%}}
+
+</style>
 </head>
 <body>
 
@@ -19099,6 +19108,142 @@ function showJobSubView(tab) {
   renderNotesPanel(_currentJobData);
 }
 
+// <context-pipeline-panel>
+// Existing Ops visual language; company-wide status stays separate from this job.
+var contextPanelEpoch = 0;
+var contextReviewData = null;
+var contextReviewSaving = false;
+var contextReviewEpoch = 0;
+function contextText(value) { return escapeHtml(value == null ? 'Unknown' : String(value)); }
+function contextDate(value) {
+  if (!value || !Number.isFinite(Date.parse(value))) return 'Not available';
+  return contextText(new Date(value).toLocaleString('en-AU', { timeZone: 'Australia/Perth' })) + ' Perth';
+}
+function contextCount(value) { return typeof value === 'number' && Number.isFinite(value) ? String(value) : 'Unknown'; }
+function contextState(value) { return value === true ? 'On' : value === false ? 'Off' : 'Unknown'; }
+function contextAccuracy(week) {
+  if (!week) return '<p>No weekly review recorded.</p>';
+  var reviewed = Number(week.n_true || 0) + Number(week.n_false || 0) + Number(week.n_wrong_job || 0);
+  var sampled = Number(week.n_sampled || 0);
+  return '<p>Week of ' + contextText(week.week_start) + ' · 40 requested · ' + sampled + ' sampled · ' + Math.max(0, 40 - sampled) + ' missing · ' + Math.max(0, sampled - reviewed) + ' unjudged</p>' +
+    '<p>' + contextCount(week.n_true) + ' true · ' + contextCount(week.n_false) + ' false · ' + contextCount(week.n_wrong_job) + ' wrong job. ' +
+    (sampled > 0 && reviewed === sampled ? 'Accuracy: ' + contextCount(week.n_true) + '/' + sampled + ' (' + Math.round(100 * week.n_true / sampled) + '%).' : 'Accuracy pending human review.') +
+    (sampled < 40 ? ' Sample is insufficient for the 40-fact weekly target.' : '') + '</p>';
+}
+function renderContextPipeline(status) {
+  var switches = status.switches || {}, lanes = status.lanes || {};
+  var html = '<p class="ctx-muted">Company-wide · Read at ' + contextDate(status.as_of) + '</p>';
+  html += '<dl class="ctx-status"><dt>All-stop switch</dt><dd>' + contextState(switches.all_stop) + '</dd>';
+  ['capture','attribution','extraction'].forEach(function(lane) {
+    html += '<dt>' + lane.charAt(0).toUpperCase() + lane.slice(1) + '</dt><dd>Switch ' + contextState(switches[lane]) + ' · effective ' + contextState(lanes[lane]) + '</dd>';
+  });
+  html += '<dt>Shared model calls today</dt><dd>' + (status.model_call_budget_state === 'available' ? contextCount(status.model_calls_used) : 'Unavailable') + ' / ' + contextCount(status.model_call_cap) + '</dd>';
+  html += '<dt>Extraction slots today</dt><dd>' + contextCount(status.runs_used) + ' / ' + contextCount(status.run_cap) + '</dd>';
+  html += '<dt>Ready jobs</dt><dd>' + contextCount(status.ready_jobs) + (status.ready_jobs_is_lower_bound ? ' or more (query limit)' : '') + '</dd>';
+  html += '<dt>Admin bucket</dt><dd>' + contextCount(status.admin_bucket_size) + '</dd><dt>Missing source dates</dt><dd>' + contextCount(status.missing_event_time) + '</dd>';
+  html += '<dt>Oldest pending source</dt><dd>' + contextDate(status.oldest_pending_event_at) + '</dd><dt>Last completed pass</dt><dd>' + contextDate(status.last_pass_finished_at) + '</dd></dl>';
+  html += '<p>Unprocessed evidence: ' + (Object.entries(status.evidence_by_attribution_status || {}).map(function(pair) { return contextText(pair[0]) + ': ' + contextCount(pair[1]); }).join(' · ') || 'No queued evidence reported') + '</p>';
+  html += '<h4>Coverage</h4><p class="ctx-muted">Evidence availability, separate from whether facts are correct.</p>';
+  ['jobs','invoices'].forEach(function(kind) {
+    var c = (status.coverage || {})[kind] || {};
+    html += '<p>' + (kind === 'jobs' ? 'Open jobs' : 'Open receivable invoices') + ': ' + contextCount(c.with_current_fact) + ' / ' + contextCount(c.total) + ' with current facts · ' + contextCount(c.no_evidence_yet) + ' no evidence yet' + (kind === 'invoices' ? ' · ' + contextCount(c.unlinked) + ' unlinked' : '') + '</p>';
+  });
+  html += '<h4>Latest weekly accuracy</h4>' + contextAccuracy(status.latest_accuracy_week);
+  html += '<h4>Pending stop alerts</h4>';
+  var alerts = status.accuracy_alerts;
+  if (!Array.isArray(alerts)) html += '<p>Alert status unavailable.</p>';
+  else if (!alerts.length) html += '<p>No pending alerts reported.</p>';
+  else alerts.forEach(function(a) { html += '<p role="status">' + contextText(a.reason === 'invented_payment' ? 'Invented payment finding' : a.reason === 'accuracy_two_weeks' ? 'Accuracy breach across two weeks' : a.reason) + ' · week ' + contextText(a.week_start) + ' · ' + contextDate(a.created_at) + '. Notification pending; delivery not confirmed.</p>'; });
+  return html;
+}
+async function loadContextPipeline() {
+  var el = document.getElementById('contextPipelineStatus');
+  if (!el) return;
+  var epoch = ++contextPanelEpoch;
+  el.innerHTML = '<p role="status">Loading pipeline status…</p>';
+  try {
+    var data = await opsFetch('context_pipeline_status');
+    if (epoch !== contextPanelEpoch || !el.isConnected) return;
+    el.innerHTML = renderContextPipeline(data);
+  } catch (e) {
+    if (epoch === contextPanelEpoch && el.isConnected) el.innerHTML = '<p role="alert">Pipeline status unavailable. ' + contextText(e.message) + ' Use Refresh status to retry.</p>';
+  }
+}
+async function loadContextReview() {
+  if (contextReviewSaving) return;
+  var el = document.getElementById('contextAccuracyReview');
+  var input = document.getElementById('contextReviewWeek');
+  var week = input.value;
+  var epoch = ++contextReviewEpoch;
+  contextReviewData = null;
+  el.innerHTML = '<p role="status">Loading stored sample…</p>';
+  try {
+    var data = await opsFetch('context_accuracy_sample', week ? {week_start: week} : {});
+    if (!el.isConnected || input.value !== week || epoch !== contextReviewEpoch) return;
+    contextReviewData = data;
+    input.value = data.week_start;
+    renderContextReview();
+  } catch (e) { if (el.isConnected && epoch === contextReviewEpoch) el.innerHTML = '<p role="alert">Review unavailable. ' + contextText(e.message) + ' Use Load weekly review to retry.</p>'; }
+}
+function renderContextReview(message) {
+  var el = document.getElementById('contextAccuracyReview'), data = contextReviewData;
+  if (!el || !data) return;
+  var rows = data.samples || [], judged = rows.filter(function(row) { return ['true','false','wrong_job'].includes(row.verdict); }).length;
+  var html = '<p role="status">' + contextText(message || '') + '</p><p>Week of ' + contextText(data.week_start) + ' · 40 requested · ' + rows.length + ' sampled · ' + Math.max(0, 40 - rows.length) + ' missing · ' + (rows.length - judged) + ' unjudged</p>';
+  if (data.state === 'not_drawn') html += '<p>This week has not been drawn. Loading a review does not create a sample.</p>';
+  else if (rows.length < 40) html += '<p>Insufficient sample. Review the available facts; missing facts do not count as correct.</p>';
+  rows.forEach(function(row, i) {
+    var fact = row.fact_snapshot || {}, value = fact.value || {};
+    html += '<form class="ctx-fact" onsubmit="saveContextVerdict(event,' + i + ')"><h4>' + (i+1) + '. ' + contextText(fact.job_number || fact.job_id || 'Job unknown') + ' · ' + contextText(row.bucket) + '</h4>';
+    html += '<p>' + contextText(typeof value === 'string' ? value : value.text || fact.text || JSON.stringify(value)) + '</p>';
+    html += '<p class="ctx-muted">' + contextText(fact.kind) + ' · Source date ' + contextText(row.event_date) + '</p><blockquote>' + contextText(row.excerpt) + '</blockquote>';
+    html += '<details><summary>Source references</summary><p>' + contextText((row.source_event_ids || []).join(', ')) + '</p><p>Fact ' + contextText(row.fact_id) + ' · ' + contextText(row.fact_store) + '</p></details>';
+    html += '<label for="ctx-verdict-' + i + '">Your verdict</label><select id="ctx-verdict-' + i + '" required onchange="contextVerdictChanged(' + i + ')"><option value="">Choose verdict</option>';
+    [['true','True'],['false','False'],['wrong_job','Wrong job']].forEach(function(v) { html += '<option value="' + v[0] + '"' + (row.verdict === v[0] ? ' selected' : '') + '>' + v[1] + '</option>'; });
+    html += '</select><label class="ctx-check"><input type="checkbox" id="ctx-payment-' + i + '"' + (row.invented_payment ? ' checked' : '') + (row.verdict !== 'false' ? ' disabled' : '') + '> This false fact invented a payment</label>';
+    html += '<p class="ctx-muted">An invented-payment finding stops extraction immediately.</p><button type="submit">Save my verdict</button>';
+    if (row.verdict) html += '<p>Recorded: ' + contextText(row.verdict) + ' by ' + contextText(row.judged_by) + ' · ' + contextDate(row.judged_at) + '</p>';
+    html += '</form>';
+  });
+  el.innerHTML = html;
+}
+function contextVerdictChanged(i) {
+  var box = document.getElementById('ctx-payment-' + i);
+  box.disabled = document.getElementById('ctx-verdict-' + i).value !== 'false';
+  if (box.disabled) box.checked = false;
+}
+async function saveContextVerdict(event, index) {
+  event.preventDefault();
+  if (contextReviewSaving || !contextReviewData) return;
+  var data = contextReviewData, row = data.samples[index], form = event.target;
+  var verdict = form.querySelector('select').value;
+  if (!row || !['true','false','wrong_job'].includes(verdict)) return;
+  var body = {week_start:data.week_start, fact_id:row.fact_id, fact_store:row.fact_store, verdict:verdict, invented_payment:verdict === 'false' && form.querySelector('input[type=checkbox]').checked};
+  contextReviewSaving = true;
+  document.querySelectorAll('#contextPipelinePanel button, #contextPipelinePanel input, #contextPipelinePanel select').forEach(function(control) { control.disabled = true; });
+  try {
+    await opsPost('context_accuracy_verdict', body);
+    var fresh = await opsFetch('context_accuracy_sample', {week_start:data.week_start});
+    if (document.getElementById('contextAccuracyReview') && contextReviewData === data) {
+      contextReviewData = fresh;
+      renderContextReview('Verdict saved and read back.');
+      await loadContextPipeline();
+    }
+  } catch (e) {
+    var note = document.createElement('p'); note.setAttribute('role','alert');
+    note.textContent = 'Could not confirm saved verdict: ' + e.message + '. Reload the weekly review before retrying.';
+    form.appendChild(note);
+  } finally {
+    contextReviewSaving = false;
+    document.querySelectorAll('#contextPipelinePanel button, #contextPipelinePanel input, #contextPipelinePanel select').forEach(function(control) { control.disabled = false; });
+    if (contextReviewData) contextReviewData.samples.forEach(function(_, i) { if (document.getElementById('ctx-payment-' + i)) contextVerdictChanged(i); });
+  }
+}
+function contextPanelMarkup() {
+  return '<section id="contextPipelinePanel" class="ctx-panel"><h3>Context pipeline</h3><button type="button" onclick="loadContextPipeline()">Refresh status</button><div id="contextPipelineStatus" aria-live="polite"></div><details><summary>Review weekly facts</summary><p>Compare each fact with its stored source. Your signed-in operator identity records your verdict. No automatic verdicts.</p><label for="contextReviewWeek">Week beginning Monday (blank selects previous completed week)</label><div class="ctx-controls"><input type="date" id="contextReviewWeek"><button type="button" onclick="loadContextReview()">Load weekly review</button></div><div id="contextAccuracyReview" aria-live="polite"></div></details></section>';
+}
+// </context-pipeline-panel>
+
 // ── JARVIS Context Panel ──
 // 2026-04-24 v1 — operational intelligence surface.
 // 5-row layout: readiness+context, latest update (deterministic fallback),
@@ -19191,6 +19336,8 @@ async function renderJarvisView(data) {
 
     var html = '<div style="padding:16px">';
 
+    html += contextPanelMarkup();
+
     // ═══════════════════════════════════════════════════════════
     // ROW 1 — Readiness + Context Summary
     // ═══════════════════════════════════════════════════════════
@@ -19261,9 +19408,9 @@ async function renderJarvisView(data) {
       }
       var latestActivity = events[0] || businessEvents[0];
       if (latestActivity) {
-        var lwhen = latestActivity.created_at || latestActivity.occurred_at;
+        var lwhen = events[0] ? latestActivity.created_at : latestActivity.event_at;
         var ltype = latestActivity.event_type || '';
-        lines.push('Latest activity: ' + escapeHtml(ltype) + ' ' + _timeAgo(lwhen));
+        lines.push('Latest activity: ' + escapeHtml(ltype) + ' ' + (lwhen ? _timeAgo(lwhen) : '(source date unknown)'));
       }
       if ((readiness.blockers || []).length) {
         lines.push('Blockers: ' + readiness.blockers.slice(0, 3).map(function(b){return escapeHtml(String(b));}).join(', '));
@@ -19293,7 +19440,7 @@ async function renderJarvisView(data) {
     var evidence = [
       { label: 'Notes', count: noteEvents.length, latest: noteEvents[0] && noteEvents[0].created_at, tab: 'overview' },
       { label: 'History', count: events.length, latest: events[0] && events[0].created_at, tab: 'history' },
-      { label: 'Comms', count: commsEvents.length, latest: commsEvents[0] && commsEvents[0].occurred_at, tab: 'comms' },
+      { label: 'Comms', count: commsEvents.length, latest: commsEvents[0] && commsEvents[0].event_at, tab: 'comms' },
       { label: 'Files', count: documents.length + (data.work_orders || []).length, latest: filesLatest && filesLatest.created_at, tab: 'files' },
     ];
     html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">';
@@ -19415,6 +19562,8 @@ async function renderJarvisView(data) {
 
     html += '</div>';
     el.innerHTML = html;
+    contextReviewData = null;
+    loadContextPipeline();
     // Cache the snapshot of what JARVIS just rendered — used by runJarvisVerify to compare
     // against a fresh raw-source snapshot. Values picked are the ones the Verify strip checks.
     window._jarvisLastRender = {

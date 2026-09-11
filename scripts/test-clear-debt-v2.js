@@ -14,7 +14,7 @@ if (/—/.test(strings)) fail('em dash found in user-facing text');
 const ctx = { document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({}) }, window: {}, opsFetch: async () => ({}), opsPost: async () => ({}), showToast() {}, openJobDetail() {}, confirm: () => false, console };
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
-for (const fn of ['loadClearDebt', 'cdGroups', 'cdRender', 'cdKindOf', 'cdSubOf', 'cdAddNote', 'cdSendText']) if (typeof ctx[fn] !== 'function') fail('missing function ' + fn);
+for (const fn of ['loadClearDebt', 'cdGroups', 'cdRender', 'cdKindOf', 'cdSubOf', 'cdAddNote', 'cdSaveProposal']) if (typeof ctx[fn] !== 'function') fail('missing function ' + fn);
 const rows = [
   { xero_invoice_id: 'a', xero_contact_id: 'c1', contact_name: 'A', amount_due: 100, days_overdue: 10, debt_classification: 'genuine_debt', debt_type: 'deposit', debt_owner: 'DEBT' },
   { xero_invoice_id: 'b', xero_contact_id: 'c1', contact_name: 'A', amount_due: 50, days_overdue: -3, debt_classification: 'genuine_debt', debt_type: 'final_balance', debt_owner: 'DEBT' },
@@ -35,3 +35,5 @@ if (k.chase.subs[0].payers[0].xero_contact_id !== 'c1') fail('payers must key by
 const total = Object.values(k).reduce((a, K) => a + K.amount, 0);
 if (Math.abs(total - 286) > 0.001) fail('totals must add up, got ' + total);
 console.log('PASS clear-debt-v2: module parses, mount correct, 8 kinds grouped, sub-groups by type and blocker, payers keyed by contact id');
+
+require('./test-clear-debt-behavior.js');

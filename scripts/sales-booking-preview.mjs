@@ -10,7 +10,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const assess = require('../modules/sales-booking-assess.cjs');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SALES_BOOKING_PREVIEW_PORT || 4174);
@@ -92,25 +96,19 @@ function displayFromEvent(ev) {
   return s.replace(/^Scope:\s*/i, '').split(',')[0].trim() || s;
 }
 
-function interpretProposal(messages, suburb) {
-  if (!Array.isArray(messages) || !messages.length) return null;
-  const inbound = messages.filter((m) => m.direction === 'inbound' && (m.body || m.text));
-  const last = inbound[inbound.length - 1] || messages[messages.length - 1];
-  const text = String((last && (last.body || last.text)) || '');
-  const lower = text.toLowerCase();
-  if (/cancel|can'?t do|don'?t come|not going ahead/.test(lower)) {
-    return { kind: 'repair', window_label: 'Later message overrides earlier agreement', reason: 'Customer cancellation or withdrawal in thread. Diary still occupies until authorised readback.' };
-  }
-  if (/thursday after 1|after 13|after 1:00|thu.*1/.test(lower) && /carlisle/i.test(suburb + text)) {
-    return { kind: 'proposal', start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T14:00:00', window_start_iso: '2026-09-17T13:00:00', window_end_iso: '2026-09-17T17:00:00', window_label: 'Thursday after 13:00 (interpreted)', reason: 'Customer window, not exact acceptance.', draft: 'Hi, Thursday 17 September at 1:00pm in Carlisle works for me. Can someone be there then? If not, send another time that week. Nithin, SecureWorks Patios' };
-  }
-  if (/friday morning|before 11/.test(lower) && /merriwa/i.test(suburb + text)) {
-    return { kind: 'proposal', start_iso: '2026-09-18T09:45:00', end_iso: '2026-09-18T10:45:00', window_start_iso: '2026-09-18T08:00:00', window_end_iso: '2026-09-18T11:00:00', window_label: 'Friday morning before 11:00 (interpreted)', reason: 'Customer window, not exact acceptance.', draft: 'Hi, Friday morning works. I can be in Merriwa at 9:45am on Friday 18 September. Does that suit before you start at 11? Nithin, SecureWorks Patios' };
-  }
-  if (/2\s*(pm|p\.m)|14:00|2:00/.test(lower) && /hawthorn/i.test(suburb + text)) {
-    return { kind: 'proposal', start_iso: '2026-09-15T14:00:00', end_iso: '2026-09-15T15:00:00', window_start_iso: '2026-09-15T14:00:00', window_end_iso: '2026-09-15T16:00:00', window_label: '14:00-16:00 (interpreted)', reason: 'Outstanding Fremantle 13:00 and Scarborough 15:00 offers still constrain Tuesday.' };
-  }
-  return null;
+function interpretProposal(messages, suburb, resourceId, weekStart, events) {
+  const spec = RESOURCES[resourceId] || RESOURCES.nithin;
+  const rules = resourceId === 'nithin'
+    ? { monday_from: 12, no_wednesday: true, last_start: 15.5 }
+    : { monday_from: 8, no_wednesday: false, last_start: 15.5 };
+  return assess.assess({
+    week_start: weekStart,
+    resource: { name: spec.name, lane: spec.lane, desk_rules: rules },
+    suburb,
+    messages,
+    events,
+    pending_offers: []
+  });
 }
 
 async function salesBookingRead(query) {
@@ -164,23 +162,16 @@ async function salesBookingRead(query) {
     try {
       const convo = await mcpCall('sw_get_conversation', { contact_id: row.contact_id });
       const messages = convo.messages || convo.result?.messages || [];
-      const interp = interpretProposal(messages, row.suburb);
+      const interp = interpretProposal(messages, row.suburb, resourceId, weekStart, events);
       if (convo.contact && convo.contact.name) display = convo.contact.name;
       if (interp) {
-        proposal = interp;
-        if (interp.kind === 'repair') {
-          status = 'repair';
-          reason = interp.reason;
-        } else if (row.status === 'waiting') {
-          status = 'waiting';
-          proposal.kind = 'offer';
-          reason = 'Outstanding offer. Not a confirmed visit.';
-        } else if (row.status === 'needs_decision') {
+        status = interp.status;
+        reason = interp.reason;
+        if (interp.proposal) {
+          proposal = Object.assign({ kind: interp.exact_acceptance ? 'offer' : 'proposal' }, interp.proposal);
+        }
+        if (interp.exact_acceptance) {
           status = 'needs_decision';
-          reason = interp.reason;
-        } else {
-          status = 'ready';
-          reason = interp.reason;
         }
       }
     } catch {

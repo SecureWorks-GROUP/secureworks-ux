@@ -194,7 +194,10 @@
   function acceptedSlotStillCurrent(c) {
     if (!c || !c.exact_acceptance) return false;
     if (!c.accepted_start_iso || !c.proposal || !c.proposal.start_iso) return false;
-    return c.accepted_start_iso === c.proposal.start_iso;
+    if (c.accepted_start_iso !== c.proposal.start_iso) return false;
+    if (c.accepted_end_iso && c.proposal.end_iso && c.accepted_end_iso !== c.proposal.end_iso) return false;
+    if (c.accepted_offer_id && c.proposal.offer_id && c.accepted_offer_id !== c.proposal.offer_id) return false;
+    return true;
   }
 
   function actionKind(c) {
@@ -212,6 +215,8 @@
     if (kind === 'acceptance') {
       c.exact_acceptance = true;
       c.accepted_start_iso = c.proposal && c.proposal.start_iso || null;
+      c.accepted_end_iso = c.proposal && c.proposal.end_iso || null;
+      c.accepted_offer_id = c.proposal && c.proposal.offer_id || c.accepted_offer_id || null;
       c.status = 'needs_decision';
     } else if (kind === 'decline' || kind === 'new_availability') {
       c.exact_acceptance = false;
@@ -245,7 +250,7 @@
     if (c.event_id) return true;
     if (c.proposal && (c.status === 'waiting' || c.status === 'offer')) return true;
     if (c.proposal && (c.exact_acceptance || c.accepted_start_iso)) return true;
-    if (c.proposal && c.send_evidence === 'sent') return true;
+    if (c.proposal && (c.send_evidence === 'sent' || c.status === 'follow_up')) return true;
     return false;
   }
 
@@ -278,7 +283,7 @@
   function reviseProposedTime(startIso) {
     var c = selectedCase();
     if (!c || !c.proposal) return { ok: false, reason: 'no_proposal' };
-    var slotChanged = c.proposal.start_iso !== startIso;
+    var slotChanged = c.proposal.start_iso !== startIso || (c.accepted_end_iso && c.proposal.end_iso && c.accepted_end_iso !== c.proposal.end_iso);
     c.proposal.start_iso = startIso;
     c.proposal.end_iso = addHourIso(startIso);
     c.proposal.revision = (c.proposal.revision || 0) + 1;
@@ -449,7 +454,7 @@
       });
       cases().forEach(function (c) {
         if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
-        var heldOffer = c.status === 'offer' || c.status === 'waiting' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
+        var heldOffer = c.status === 'offer' || c.status === 'waiting' || c.status === 'follow_up' || c.send_evidence === 'sent' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
         if (heldOffer) {
           body += renderWindows(c);
           body += renderEvent({

@@ -283,6 +283,30 @@ test('selecting a provider event with no contact clears the previous thread', ()
   assert.doesNotMatch(html, /previous customer/);
 });
 
+test('follow_up with a sent offer still occupies the calendar and cannot be archived', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.data.cases[0].status = 'follow_up';
+  api.state.data.cases[0].send_evidence = 'sent';
+  api.state.selectedId = 'case-a';
+  const html = api.renderHTML();
+  assert.match(html, /event offer/);
+  const blocked = api.archiveCase('declined', '');
+  assert.equal(blocked.ok, false);
+});
+
+test('accepted duration change invalidates confirm booking', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.data.cases[0].proposal.start_iso = '2026-09-17T13:00:00';
+  api.state.data.cases[0].proposal.end_iso = '2026-09-17T13:30:00';
+  api.applyInboundReply('acceptance');
+  assert.equal(api.actionKind(api.state.data.cases[0]), 'confirm_booking');
+  api.state.data.cases[0].proposal.end_iso = '2026-09-17T14:00:00';
+  assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
+});
+
 test('Marnin sender stays unresolved between 772 and 776', () => {
   api.state.resourceId = 'marnin';
   const route = api.resolveSender(api.RESOURCES.marnin);

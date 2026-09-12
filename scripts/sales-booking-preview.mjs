@@ -12,6 +12,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { handleLocal } from './sales-booking-local-api.mjs';
 
 const require = createRequire(import.meta.url);
 const assess = require('../modules/sales-booking-assess.cjs');
@@ -235,16 +236,39 @@ async function salesBookingRead(query) {
 }
 
 function inject(html) {
-  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";</script>';
+  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";</script>';
   if (html.includes('</head>')) return html.replace('</head>', tag + '</head>');
   return tag + html;
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://' + HOST + ':' + PORT);
-  if (url.pathname === '/sales-booking-read') {
+  const STORE = path.join(ROOT, '.sales-booking-preview-store.json');
+  if (url.pathname === '/sales-booking-read' || url.pathname === '/booking-api') {
     try {
-      const body = await salesBookingRead(url.searchParams);
+      let payload = {};
+      if (req.method === 'POST') {
+        payload = JSON.parse(await new Promise((resolve, reject) => {
+          let raw = '';
+          req.on('data', (c) => { raw += c; });
+          req.on('end', () => resolve(raw || '{}'));
+          req.on('error', reject);
+        }));
+      }
+      const action = url.searchParams.get('action') || (url.pathname === '/sales-booking-read' ? 'sales_booking_read' : payload.action);
+      const params = Object.fromEntries(url.searchParams.entries());
+      let body;
+      if (action === 'sales_booking_read') {
+        const enumerated = await handleLocal('sales_booking_read', params, payload, mcpCall, STORE);
+        const calBody = await salesBookingRead(url.searchParams);
+        body = Object.assign({}, calBody, enumerated, {
+          events: calBody.events,
+          cases: [].concat(enumerated.cases || [], (calBody.cases || []).filter((c) => c.event_id)),
+          fixture: false
+        });
+      } else {
+        body = await handleLocal(action, params, payload, mcpCall, STORE);
+      }
       res.writeHead(body.ok === false ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify(body));
     } catch (e) {

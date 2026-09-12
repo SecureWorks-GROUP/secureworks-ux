@@ -1,6 +1,6 @@
 'use strict';
 
-var VERSION = 'sales-booking-assess-v2.1';
+var VERSION = 'sales-booking-assess-v2.2';
 var INTERPRETER_FALLBACK = 'conservative-fallback';
 var TZ_PERTH = 'Australia/Perth';
 var MONTHS = {
@@ -134,15 +134,50 @@ function isExplicitCancel(text) {
   return /\b(cancel(led)?|call(ed)? it off|not going ahead|can't make( it)?|cannot make( it)?)\b/i.test(text);
 }
 
-function coverageReady(coverage) {
-  if (!coverage) return false;
-  if (coverage.calendar === false) return false;
-  if (coverage.leave === 'unavailable' || coverage.leave === 'not_read' || coverage.leave === false) return false;
-  if (coverage.route === false || coverage.travel === false) return false;
-  if (coverage.calendar !== true) return false;
-  if (coverage.leave !== true && coverage.leave !== 'read') return false;
-  if (coverage.route !== true && coverage.travel !== true) return false;
-  return true;
+function messageById(messages, id) {
+  if (!id) return null;
+  var found = null;
+  (messages || []).forEach(function (m) {
+    if (m && m.id === id) found = m;
+  });
+  return found;
+}
+
+function occupancyGaps(input) {
+  var gaps = [];
+  if (!input.calendar_retrieved_at && !(input.coverage && input.coverage.calendar_retrieved_at)) {
+    gaps.push('calendar_unobserved');
+  }
+  if (!input.leave_retrieved_at && !Array.isArray(input.leave_intervals)) {
+    gaps.push('leave_unobserved');
+  }
+  if (input.travel_minutes == null && !input.travel_retrieved_at && !Array.isArray(input.route_legs)) {
+    gaps.push('travel_unobserved');
+  }
+  if (!input.now && !input.as_of) gaps.push('as_of_missing');
+  (input.events || []).forEach(function (ev) {
+    if (toInstant(ev.start_iso || ev.start) == null || toInstant(ev.end_iso || ev.end) == null) {
+      gaps.push('malformed_occupancy');
+    }
+  });
+  (input.leave_intervals || []).forEach(function (iv) {
+    if (toInstant(iv.start_iso || iv.start) == null || toInstant(iv.end_iso || iv.end) == null) {
+      gaps.push('malformed_leave');
+    }
+  });
+  if (input.coverage) {
+    if (input.coverage.leave === 'not_read' || input.coverage.leave === false || input.coverage.calendar === false || input.coverage.travel === false || input.coverage.route === false) {
+      gaps.push('coverage_flag_not_ready');
+    }
+    if ((input.coverage.calendar === true || input.coverage.leave === 'read' || input.coverage.travel === true) && !input.calendar_retrieved_at && !input.leave_retrieved_at) {
+      gaps.push('boolean_coverage_is_not_interval_proof');
+    }
+  }
+  return gaps;
+}
+
+function coverageReady(input) {
+  return occupancyGaps(input).length === 0;
 }
 
 function rangeOverlap(aStart, aEnd, bStart, bEnd) {
@@ -155,33 +190,70 @@ function busyInstants(events, offers) {
   (events || []).concat(offers || []).forEach(function (ev) {
     var s = toInstant(ev.start_iso || ev.start);
     var e = toInstant(ev.end_iso || ev.end);
-    if (s == null || e == null) return;
+    if (s == null || e == null) {
+      out.push({ start: null, end: null, malformed: true, id: ev.event_id || ev.offer_id || null });
+      return;
+    }
     out.push({ start: s, end: e, id: ev.event_id || ev.offer_id || null });
   });
   return out;
 }
 
-function precedingSentOffer(inbound, input, messages) {
-  var inboundMs = toInstant(inbound.timestamp);
-  var offers = input.sent_offers || [];
-  var found = null;
-  offers.forEach(function (off) {
-    if (off.send_evidence !== 'sent') return;
-    var sentMs = toInstant(off.sent_at || off.timestamp);
-    if (inboundMs != null && sentMs != null && sentMs >= inboundMs) return;
-    if (off.message_id) {
-      var idxOffer = -1;
-      var idxIn = -1;
-      messages.forEach(function (m, i) {
-        if (m.id === off.message_id) idxOffer = i;
-        if (m.id === inbound.id || m === inbound) idxIn = i;
-      });
-      if (idxOffer >= 0 && idxIn >= 0 && idxOffer >= idxIn) return;
-    }
-    found = off;
+function sortedSentOffers(input) {
+  return (input.sent_offers || []).slice().filter(function (off) {
+    return off && off.send_evidence === 'sent' && off.offer_id && off.slot_revision != null && toInstant(off.sent_at || off.timestamp) != null;
+  }).sort(function (a, b) {
+    return (toInstant(b.sent_at || b.timestamp) || 0) - (toInstant(a.sent_at || a.timestamp) || 0);
   });
-  if (found) return found;
-  return null;
+}
+
+function precedingSentOffer(inbound, input, messages) {
+  if (!inbound) return null;
+  var inboundMs = toInstant(inbound.timestamp);
+  if (inboundMs == null) return null;
+  var eligible = sortedSentOffers(input).filter(function (off) {
+    var sentMs = toInstant(off.sent_at || off.timestamp);
+    if (sentMs >= inboundMs) return false;
+    if (off.message_id) {
+      var msg = messageById(messages, off.message_id);
+      if (!msg) return false;
+      if ((msg.direction || 'inbound') === 'inbound') return false;
+      var msgMs = toInstant(msg.timestamp);
+      if (msgMs == null || msgMs >= inboundMs) return false;
+    }
+    return true;
+  });
+  return eligible[0] || null;
+}
+
+function verifyCitedOffer(input, claimed, inbound, messages) {
+  if (!claimed || !claimed.offer_id || claimed.slot_revision == null) {
+    return { ok: false, reason: 'unbound' };
+  }
+  if (!inbound || !isUnqualifiedYes(bodyOf(inbound))) {
+    return { ok: false, reason: 'inbound_is_not_unqualified_yes' };
+  }
+  var matches = sortedSentOffers(input).filter(function (o) { return o.offer_id === claimed.offer_id; });
+  if (matches.length !== 1) return { ok: false, reason: 'offer_not_in_sent_evidence' };
+  var offer = matches[0];
+  if (String(offer.slot_revision) !== String(claimed.slot_revision)) {
+    return { ok: false, reason: 'slot_revision_mismatch' };
+  }
+  var bound = precedingSentOffer(inbound, input, messages);
+  if (!bound || bound.offer_id !== offer.offer_id) {
+    return { ok: false, reason: 'not_preceding_sent_offer' };
+  }
+  if (claimed.message_id) {
+    var cited = messageById(messages, claimed.message_id);
+    if (!cited || (cited.direction || 'inbound') !== 'inbound') {
+      return { ok: false, reason: 'cited_message_not_inbound' };
+    }
+    if (cited.id !== inbound.id) return { ok: false, reason: 'cited_message_not_latest_inbound' };
+  }
+  if (claimed.start_iso && offer.start_iso && toInstant(claimed.start_iso) !== toInstant(offer.start_iso)) {
+    return { ok: false, reason: 'accepted_slot_mismatch' };
+  }
+  return { ok: true, offer: offer };
 }
 
 function conservativeExtract(input) {
@@ -349,7 +421,10 @@ function proposeCandidate(input, facts) {
         continue;
       }
       var slotEnd = ms + 60 * 60 * 1000;
-      var clash = busy.some(function (b) { return rangeOverlap(ms, slotEnd, b.start, b.end); });
+      var clash = busy.some(function (b) {
+        if (b.malformed) return true;
+        return rangeOverlap(ms, slotEnd, b.start, b.end);
+      });
       if (!clash) {
         found = {
           start_iso: isoPerth(local.date, local.hour).local,
@@ -397,7 +472,10 @@ function proposeFromWindows(windows, input) {
         continue;
       }
       var slotEnd = cursor + 60 * 60 * 1000;
-      var clash = busy.some(function (b) { return rangeOverlap(cursor, slotEnd, b.start, b.end); });
+      var clash = busy.some(function (b) {
+        if (b.malformed) return true;
+        return rangeOverlap(cursor, slotEnd, b.start, b.end);
+      });
       if (!clash) {
         found = {
           start_iso: isoPerth(local.date, local.hour).local,
@@ -416,35 +494,88 @@ function proposeFromWindows(windows, input) {
   return found;
 }
 
-function validate(extracted, input) {
-  var reasons = (extracted.review_reasons || []).slice();
+function lastInbound(input) {
+  var inbound = sortMessages(input.messages).filter(function (m) {
+    return (m.direction || 'inbound') !== 'outbound';
+  });
+  return inbound.length ? inbound[inbound.length - 1] : null;
+}
+
+function leaveClash(startMs, endMs, input) {
+  return (input.leave_intervals || []).some(function (iv) {
+    var s = toInstant(iv.start_iso || iv.start);
+    var e = toInstant(iv.end_iso || iv.end);
+    if (s == null || e == null) return true;
+    return rangeOverlap(startMs, endMs, s, e);
+  });
+}
+
+function travelClash(startMs, input) {
+  var prior = input.previous_visit;
+  if (!prior) return false;
+  var end = toInstant(prior.end_iso);
+  if (end == null) return true;
+  var travelMs = Number(input.travel_minutes || 0) * 60 * 1000;
+  return startMs < end + travelMs;
+}
+
+function validate(ground, model, input) {
+  input = input || {};
+  ground = ground || conservativeExtract(input);
+  var reasons = (ground.review_reasons || []).slice();
   var status = 'needs_decision';
   var exact = false;
   var proposal = null;
-  var replyKind = extracted.reply_kind || 'unknown';
+  var messages = sortMessages(input.messages);
+  var inbound = lastInbound(input);
+  var replyKind = ground.reply_kind || 'unknown';
+  var facts = ground.customer_facts || { date_specified: false };
+  var windows = (ground.windows || []).slice();
 
-  var inboundBodies = sortMessages(input.messages).filter(function (m) {
-    return (m.direction || 'inbound') !== 'outbound';
-  }).map(bodyOf).join(' ');
-  var explicitDate = parseExplicitDate(inboundBodies, yearFrom(input));
-  if (extracted.windows) {
-    extracted.windows = extracted.windows.filter(function (w) {
-      if (w.source_message_id === 'outbound' || w.from_outbound === true) return false;
-      if (explicitDate && w.start_iso && String(w.start_iso).slice(0, 10) !== explicitDate) {
-        reasons.push('Proposed date does not match the inbound calendar date.');
-        return false;
+  if (model && Array.isArray(model.customer_windows)) {
+    model.customer_windows.forEach(function (w) {
+      var cited = messageById(messages, w.source_message_id);
+      if (!cited || (cited.direction || 'inbound') === 'outbound') {
+        reasons.push('Model window cited a missing or outbound message.');
+        return;
       }
-      return true;
+      var citedDate = parseExplicitDate(bodyOf(cited), yearFrom(input));
+      if (!citedDate || !w.start_iso || String(w.start_iso).slice(0, 10) !== citedDate) {
+        reasons.push('Model window does not match the cited inbound date.');
+      }
     });
   }
-  if (!explicitDate) {
-    extracted.windows = [];
+
+  if (model && model.exact_acceptance) {
+    var checked = verifyCitedOffer(input, model.accepted_offer, inbound, messages);
+    if (!checked.ok) {
+      reasons.push('Model acceptance is not bound to a real sent offer (' + checked.reason + ').');
+    }
   }
-  if (extracted.customer_facts && extracted.customer_facts.date_specified === false) {
-    extracted.windows = [];
+  if (model && model.reply_kind === 'cancellation' && !(inbound && isExplicitCancel(bodyOf(inbound)))) {
+    reasons.push('Model cancellation contradicts inbound text.');
+    if (replyKind === 'cancellation') replyKind = 'ordinary';
   }
-  if (!extracted.customer_facts) {
-    extracted.customer_facts = { date_specified: !!explicitDate, explicit_date: explicitDate || null };
+  if (model && model.customer_facts) {
+    reasons.push('Model customer_facts are untrusted and were ignored.');
+  }
+
+  var bound = inbound && isUnqualifiedYes(bodyOf(inbound)) ? precedingSentOffer(inbound, input, messages) : null;
+  if (replyKind === 'acceptance') {
+    if (!bound) {
+      exact = false;
+      replyKind = 'ordinary';
+      reasons.push('Acceptance is not bound to a preceding sent offer id and slot revision.');
+    } else {
+      exact = true;
+      ground.accepted_offer = {
+        offer_id: bound.offer_id,
+        slot_revision: bound.slot_revision,
+        start_iso: bound.start_iso,
+        end_iso: bound.end_iso,
+        message_id: inbound.id || null
+      };
+    }
   }
 
   var tags = (input.tags || []).map(function (t) { return String(t).toLowerCase(); });
@@ -457,34 +588,37 @@ function validate(extracted, input) {
   }
   if (input.quoted) reasons.push('Already quoted. Confirm whether this is a new request.');
 
-  if (extracted.exact_acceptance) {
-    var acc = extracted.accepted_offer;
-    if (!acc || !acc.offer_id || acc.slot_revision == null) {
-      exact = false;
-      reasons.push('Acceptance is not bound to a sent offer id and slot revision.');
-      replyKind = 'ordinary';
-    } else {
-      exact = true;
-    }
-  }
-
-  if (replyKind === 'cancellation' && !wrongLane) {
+  if (replyKind === 'cancellation' && !wrongLane && inbound && isExplicitCancel(bodyOf(inbound))) {
     status = 'repair';
   } else if (exact && !wrongLane) {
     status = 'needs_decision';
   } else {
     var slot = null;
-    if (extracted.windows && extracted.windows.length) {
-      slot = proposeFromWindows(extracted.windows, input);
+    if (windows && windows.length) {
+      slot = proposeFromWindows(windows, input);
       if (slot) {
         slot.date_source = 'customer';
         slot.customer_date_specified = true;
       }
     } else if (!wrongLane) {
-      slot = proposeCandidate(input, extracted.customer_facts);
+      slot = proposeCandidate(input, facts);
     }
-    if (!coverageReady(input.coverage)) {
-      reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready.');
+    var capGaps = occupancyGaps(input);
+    var nowMs = toInstant(input.now || input.as_of);
+    if (slot && nowMs != null && slot.start_instant < nowMs) {
+      reasons.push('Candidate slot is in the past.');
+      slot = null;
+    }
+    if (slot && leaveClash(slot.start_instant, slot.end_instant, input)) {
+      reasons.push('Candidate overlaps leave.');
+      slot = null;
+    }
+    if (slot && travelClash(slot.start_instant, input)) {
+      reasons.push('Candidate ignores travel from the previous visit.');
+      slot = null;
+    }
+    if (capGaps.length) {
+      reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready. ' + capGaps.join(','));
       status = 'needs_decision';
       proposal = null;
     } else if (!slot) {
@@ -529,23 +663,25 @@ function validate(extracted, input) {
 
   return {
     version: VERSION,
-    interpreter: extracted.interpreter || INTERPRETER_FALLBACK,
-    intelligent_automation: extracted.intelligent_automation === true,
+    interpreter: ground.interpreter || INTERPRETER_FALLBACK,
+    intelligent_automation: false,
     week_start: mondayIso(input.week_start || '2026-09-14'),
     reply_kind: replyKind,
     exact_acceptance: exact,
-    accepted_offer: exact ? extracted.accepted_offer : null,
+    accepted_offer: exact ? ground.accepted_offer : null,
     status: status,
     reason: reasons[0] || (status === 'ready' ? 'Candidate slot for approval. This is not exact acceptance.' : 'Needs a human decision.'),
     review_reasons: reasons,
-    customer_facts: extracted.customer_facts || null,
-    windows: extracted.windows || [],
+    customer_facts: facts,
+    windows: windows,
     proposal: proposal,
     draft: draft,
     evidence: {
-      source_message_ids: extracted.source_message_ids || [],
-      accepted_offer_id: exact && extracted.accepted_offer ? extracted.accepted_offer.offer_id : null,
-      slot_revision: exact && extracted.accepted_offer ? extracted.accepted_offer.slot_revision : null,
+      source_message_ids: (inbound && inbound.id ? [inbound.id] : []).concat(
+        (input.sent_offers || []).map(function (o) { return o.message_id; }).filter(Boolean)
+      ),
+      accepted_offer_id: exact && ground.accepted_offer ? ground.accepted_offer.offer_id : null,
+      slot_revision: exact && ground.accepted_offer ? ground.accepted_offer.slot_revision : null,
       coverage: input.coverage || null,
       rule_version: input.rule_version || 'desk-rules-inline',
       wrong_lane: !!wrongLane,
@@ -581,13 +717,9 @@ function mergeReasoned(raw, input) {
 
 function assess(input) {
   input = input || {};
-  var extracted;
-  if (typeof input.reason === 'function') {
-    extracted = mergeReasoned(input.reason(input), input);
-  } else {
-    extracted = conservativeExtract(input);
-  }
-  return validate(extracted, input);
+  var ground = conservativeExtract(input);
+  var model = typeof input.reason === 'function' ? input.reason(input) : null;
+  return validate(ground, model, input);
 }
 
 function reasonPrompt(input) {
@@ -622,8 +754,9 @@ async function assessWithReason(input) {
   input = input || {};
   var adapter = input.reasonAsync || (typeof globalThis !== 'undefined' && globalThis.SALES_BOOKING_REASON);
   if (typeof adapter !== 'function') return assess(input);
+  var ground = conservativeExtract(input);
   var raw = await adapter(reasonPrompt(input));
-  return validate(mergeReasoned(raw, input), input);
+  return validate(ground, raw, input);
 }
 
 function applyReplyToStatus(currentStatus, replyKind, bound) {

@@ -132,7 +132,7 @@
       } catch (error) { state.supply.errors[kind] = error.message; state.supply.coverage[kind] = false; emit(); }
     }
     async function execution(id) {
-      try { state.executions.set(id, await options.get('dispatch_execution', { job_id: id })); }
+      try { const result = await options.get('dispatch_execution', { job_id: id }); state.executions.set(id, { ...result, uncertain: state.executions.get(id)?.uncertain === true }); }
       catch (error) { state.executions.set(id, { actions: [], capabilities: { enabled: false }, error: error.message }); }
       emit();
     }
@@ -140,7 +140,13 @@
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       setLayer(layer, enabled) { if (Object.hasOwn(state.layers, layer)) { state.layers[layer] = enabled; emit(); } },
       approveDraft(id, payload) { return command(id, 'approve_draft', payload, 'dispatch_draft_approve'); },
-      async executeDraft(id, draftId, approvalId) { const result = await options.post('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId }); await execution(id); return result; },
+      async executeDraft(id, draftId, approvalId) {
+        const previous = state.executions.get(id) || {};
+        if (previous.submitting || previous.uncertain) throw new Error('Read back the previous action before any recovery.');
+        state.executions.set(id, { ...previous, submitting: true }); emit();
+        try { const result = await options.post('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId }); await execution(id); return result; }
+        catch (error) { await execution(id); state.executions.set(id, { ...state.executions.get(id), submitting: false, uncertain: true, error: 'Execution outcome uncertain. Refresh action status and read back the provider receipt.' }); emit(); throw error; }
+      },
       async readbackExecution(id, approvalId) { const result = await options.post('dispatch_execution_readback', { approval_id: approvalId }); await execution(id); return result; },
       communications(params) { return options.get('dispatch_communications', params); },
       assess(id) { return command(id, 'assess', {}, 'dispatch_assess'); }, uuid: options.id || uuid };

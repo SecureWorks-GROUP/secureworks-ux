@@ -182,7 +182,9 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     const cases = Object.values(store.cases).filter((c) => c.resource_id === resource).map((c) => Object.assign({}, c, {
       draft: store.drafts[c.id] || null,
       assessment: store.assessments[c.id] || null,
-      archived: store.archives[c.id] && !store.archives[c.id].restored ? store.archives[c.id] : null
+      archived: store.archives[c.id] && !store.archives[c.id].restored ? store.archives[c.id] : null,
+      conversation: c.conversation || null,
+      context: c.context || null
     }));
     return {
       ok: true,
@@ -233,8 +235,9 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   }
   if (action === 'sales_booking_restore') {
     if (store.archives[body.case_id]) store.archives[body.case_id].restored = true;
+    if (store.cases[body.case_id]) store.cases[body.case_id].archived = null;
     db.save(store);
-    return { ok: true, crm_deleted: false };
+    return { ok: true, crm_deleted: false, restored: true };
   }
   if (action === 'sales_booking_assess') {
     const input = Object.assign({}, body.input || {});

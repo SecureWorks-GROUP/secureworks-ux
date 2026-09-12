@@ -483,6 +483,21 @@ test('archive does not delete the GHL contact and cannot hide an outstanding off
   assert.equal(restored.crm_deleted, false);
 });
 
+test('restore persists through the workflow API so reload cannot revive the archive', async () => {
+  const posts = [];
+  global.opsPost = async (action, body) => { posts.push({ action, body }); return { ok: true, restored: true }; };
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.data.cases[0].status = 'ready';
+  api.state.data.cases[0].event_id = null;
+  api.archiveCase('declined', '');
+  api.restoreCase('case-a');
+  assert.ok(posts.some((p) => p.action === 'sales_booking_archive'));
+  assert.ok(posts.some((p) => p.action === 'sales_booking_restore' && p.body.case_id === 'case-a'));
+  assert.equal(api.state.archives['case-a'].restored, true);
+  delete global.opsPost;
+});
+
 test('opsFetch for the workspace uses the signed-in token', async () => {
   const source = fs.readFileSync(require.resolve('../ops.html'), 'utf8');
   const start = source.indexOf('async function opsAuthHeaders(');

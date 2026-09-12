@@ -606,6 +606,7 @@
     if (!c && !rec) return { ok: false, reason: 'not_archived' };
     if (rec) rec.restored = true;
     if (c && c.archived) c.archived.restored = true;
+    workflowPost('sales_booking_restore', { case_id: id });
     return { ok: true, contact_id: (c && c.contact_id) || (rec && rec.contact_id), crm_deleted: false };
   }
 

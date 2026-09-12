@@ -362,6 +362,35 @@ test('model window citing inbound No is not a customer date', async () => {
   assert.equal((result.windows || []).some(function (w) { return w.customer_date_specified; }), false);
 });
 
+test('later only-after-3pm inbound drops an older 1pm model window', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [
+      inbound('Monday after 1pm'),
+      inbound('only after 3pm', { id: 'in-2', timestamp: '2026-09-12T14:00:00Z' })
+    ],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.notEqual(result.proposal && result.proposal.start_iso, '2026-09-14T13:00:00');
+  if (result.proposal) {
+    const hour = Number(String(result.proposal.start_iso).slice(11, 13));
+    assert.ok(hour >= 15);
+    assert.equal(result.proposal.customer_date_specified, false);
+  }
+});
+
+test('explicit unavailability is not a Ready fallback slot even if a model window exists', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [inbound('I am unavailable then')],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+});
+
 test('older model window is dropped when a later inbound excludes that day', async () => {
   const result = await assess.assessWithReason(proof({
     messages: [

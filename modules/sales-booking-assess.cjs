@@ -172,6 +172,12 @@ function textContradictsWindow(text, w, year) {
   if (laterDay && windowDay && laterDay !== windowDay && /\b(instead|now|not|unavailable|rather)\b/i.test(text)) {
     return true;
   }
+  var laterClock = parseClock(text);
+  var hour = windowHour(w.start_iso);
+  if (laterClock != null && hour != null) {
+    if (/\bafter\b/i.test(text) && hour < laterClock - 0.01) return true;
+    if (/\bbefore\b/i.test(text) && hour >= laterClock) return true;
+  }
   return false;
 }
 
@@ -837,8 +843,9 @@ function validate(ground, model, input) {
   var lastText = inbound ? bodyOf(inbound) : '';
   var inboundRejectsAvailability = inbound && (
     isBareNo(lastText) ||
-    (isUnavailability(lastText) && !facts.date_specified && !(windows && windows.length) && !facts.time_of_day)
+    isUnavailability(lastText)
   );
+  if (inboundRejectsAvailability) windows = [];
 
   if (replyKind === 'cancellation' && !wrongLane && inbound && isExplicitCancel(bodyOf(inbound))) {
     status = 'repair';

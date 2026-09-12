@@ -234,30 +234,103 @@
     return null;
   }
 
-  function persistDraftToServer(c, d) {
-    if (!c || !d) return null;
+  function hasDraftTransport() {
+    return !!(global.SALES_BOOKING_PREVIEW_API || (global.window && global.window.SALES_BOOKING_PREVIEW_API) || typeof global.opsPost === 'function');
+  }
+
+  function draftIsDirty(d) {
+    if (!d) return false;
+    return (d.text || '') !== (d.savedText || '');
+  }
+
+  function draftIsAcknowledged(d) {
+    if (!d) return false;
+    if (d.savePending || d.saveQueue) return false;
+    if (d.casConflict || d.saveError) return false;
+    if (Number(d.serverRevision || 0) < 1) return false;
+    return !draftIsDirty(d);
+  }
+
+  function draftBlocksApproval(d) {
+    if (!hasDraftTransport()) return false;
+    return !draftIsAcknowledged(d);
+  }
+
+  function applyDraftAck(d, rec, sentText, expected, gen) {
+    if (!d || gen !== d.saveGeneration) return rec;
+    d.savePending = false;
+    if (!rec) {
+      d.saveError = 'Draft save returned nothing';
+      return rec;
+    }
+    if (rec.code === 'cas_conflict' || rec.http_status === 409) {
+      d.casConflict = true;
+      d.saveError = rec.error || 'Draft revision conflict';
+      return rec;
+    }
+    if (rec.ok === false) {
+      d.saveError = rec.error || 'Draft save failed';
+      return rec;
+    }
+    if (typeof rec.revision !== 'number') {
+      d.saveError = 'Draft save returned no revision';
+      return rec;
+    }
+    if (Number(expected) !== Number(d.serverRevision || 0)) return rec;
+    if (Number(rec.revision) <= Number(d.serverRevision || 0)) return rec;
+    d.serverRevision = rec.revision;
+    d.revision = rec.revision;
+    d.savedText = sentText;
+    d.casConflict = false;
+    d.saveError = null;
+    return rec;
+  }
+
+  function flushDraftSave(c, d) {
+    if (!c || !d) return Promise.resolve(null);
+    d.saveQueue = false;
+    var text = d.text;
+    var expected = Number(d.serverRevision || 0);
+    var gen = (d.saveGeneration = (d.saveGeneration || 0) + 1);
+    d.savePending = true;
+    d.saveError = null;
     var posted = workflowPost('sales_booking_draft', {
       case_id: c.id,
-      text: d.text,
+      text: text,
       human_edited: !!d.humanEdited,
       sender: d.sender || null,
-      expected_revision: Number(d.serverRevision || 0)
+      expected_revision: expected
     });
-    if (!posted || typeof posted.then !== 'function') return posted;
-    return posted.then(function (rec) {
-      if (!rec) return rec;
-      if (rec.code === 'cas_conflict' || rec.http_status === 409) {
-        d.casConflict = true;
+    var chain = Promise.resolve(posted).then(function (rec) {
+      applyDraftAck(d, rec, text, expected, gen);
+      if (gen !== d.saveGeneration) return rec;
+      if (d.saveQueue || draftIsDirty(d)) {
+        if (d.casConflict || d.saveError) return rec;
+        d.saveChain = flushDraftSave(c, d);
         return rec;
       }
-      if (rec.ok === false) return rec;
-      if (typeof rec.revision === 'number') {
-        d.serverRevision = rec.revision;
-        d.revision = rec.revision;
-        d.casConflict = false;
-      }
       return rec;
+    }, function (err) {
+      if (gen !== d.saveGeneration) return { ok: false };
+      d.savePending = false;
+      d.saveError = (err && err.message) || 'Draft save failed';
+      return { ok: false, error: d.saveError };
     });
+    d.saveChain = chain;
+    return chain;
+  }
+
+  function persistDraftToServer(c, d) {
+    if (!c || !d) return Promise.resolve(null);
+    if (!hasDraftTransport()) return Promise.resolve({ ok: false, reason: 'no_transport' });
+    if (d.savePending && d.saveChain) {
+      d.saveQueue = true;
+      return d.saveChain;
+    }
+    if (!draftIsDirty(d) && Number(d.serverRevision || 0) > 0 && !d.casConflict && !d.saveError) {
+      return Promise.resolve({ ok: true, revision: d.serverRevision, skipped: true });
+    }
+    return flushDraftSave(c, d);
   }
 
   function enqueueReassess(c, eventKey) {
@@ -375,6 +448,7 @@
     if (c.status === 'booked') return 'none';
     if (c.status === 'repair') return 'repair';
     if (evidencePending(c) || bindingMismatch(c)) return 'none';
+    if (draftBlocksApproval(draftFor(c))) return 'none';
     if (acceptedSlotStillCurrent(c)) return 'confirm_booking';
     if (c.status === 'ready' || c.status === 'proposal') return 'approve_offer';
     return 'none';
@@ -567,9 +641,11 @@
   function bindDraft(c) {
     if (!c || !draftKey(c)) return;
     var d = draftFor(c);
+    if (d.savePending || d.saveQueue || draftIsDirty(d) || d.casConflict) return;
     if (c.draft && typeof c.draft.revision === 'number') {
       d.serverRevision = Number(c.draft.revision);
       d.revision = d.serverRevision;
+      d.savedText = c.draft.text || d.savedText || '';
       if (!d.humanEdited) {
         d.text = c.draft.text || d.text || '';
         d.sender = c.draft.sender || d.sender;
@@ -784,10 +860,14 @@
       '<div><h3>GHL conversation</h3><div class="thread" id="salesBookingThread">' + renderMessages() + '</div></div>' +
       '</div>' +
       '<div class="actionzone">' + holdNote + conflict +
-      '<div class="senderline">' + senderLine(res) + ' · To this case only · Draft revision ' + esc((d.revision || 0)) + '</div>' +
+      '<div class="senderline">' + senderLine(res) + ' · To this case only · Saved revision ' + esc((d.serverRevision || 0)) + '</div>' +
+      (d.savePending ? '<p class="small muted">Saving draft…</p>' : '') +
+      (d.casConflict ? '<p class="notice error" role="alert">Draft conflict. Your wording is kept. Retry save before approval.</p>' : '') +
+      (d.saveError && !d.casConflict ? '<p class="notice error" role="alert">Draft save failed. Your wording is kept.</p>' : '') +
+      (draftIsDirty(d) && !d.savePending && !d.casConflict && !d.saveError ? '<p class="small muted">Unsaved draft. Approval waits for the acknowledged revision.</p>' : '') +
       '<label class="small muted">Draft SMS</label>' +
       '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea>' +
-      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || stale || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
+      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || stale || draftBlocksApproval(d) || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
       archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
       '<p class="small muted" style="margin-top:8px">Approve offer does not create a visit. Confirm booking needs exact acceptance and a fresh preflight. Both stay held.</p></div>';
@@ -975,7 +1055,7 @@
     var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0, serverRevision: 0 };
     var route = resolveSender();
     if (kind !== 'approve_offer' && kind !== 'confirm_booking' && kind !== 'repair') {
-      var blocked = evidencePending(c) ? 'evidence_pending' : (bindingMismatch(c) ? 'binding_mismatch' : 'not_actionable');
+      var blocked = evidencePending(c) ? 'evidence_pending' : (bindingMismatch(c) ? 'binding_mismatch' : (draftBlocksApproval(d) ? 'draft_unacknowledged' : 'not_actionable'));
       state.lastSendCall = { action: 'none', reason: blocked, case_id: c && c.id, persisted: false };
       return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: blocked, action: 'none', persisted: false };
     }
@@ -1005,14 +1085,18 @@
     if (kind === 'approve_offer' || kind === 'confirm_booking') {
       var save = persistDraftToServer(c, d);
       var sendApprove = function () {
-        payload.draft_revision = Number(d.serverRevision || payload.draft_revision || 0);
-        payload.text = d.text || payload.text;
+        if (draftBlocksApproval(d)) {
+          state.lastSendCall = { action: 'none', reason: 'draft_unacknowledged', case_id: c.id, persisted: false };
+          return { ok: false, reason: 'draft_unacknowledged', action: 'none', persisted: false };
+        }
+        payload.draft_revision = Number(d.serverRevision || 0);
+        payload.text = d.savedText || d.text || payload.text;
         state.lastSendCall = payload;
         return workflowPost(kind === 'confirm_booking' ? 'sales_booking_confirm' : 'sales_booking_approve', payload);
       };
       if (save && typeof save.then === 'function') {
         save.then(function (rec) {
-          if (rec && (rec.code === 'cas_conflict' || rec.http_status === 409)) return rec;
+          if (rec && (rec.code === 'cas_conflict' || rec.http_status === 409 || rec.ok === false)) return rec;
           return sendApprove();
         });
       } else sendApprove();
@@ -1115,7 +1199,11 @@
         d.text = e.target.value;
         d.humanEdited = true;
         d.sender = resolveSender().number;
-        persistDraftToServer(c, d);
+        persistDraftToServer(c, d).then(function () {
+          var box = root() && root().querySelector('[data-booking-draft]');
+          if (global.document && box && global.document.activeElement === box) return;
+          render();
+        });
       }
     });
   }
@@ -1136,6 +1224,8 @@
     loadConversation: loadConversation,
     attemptApprove: attemptApprove,
     persistDraftToServer: persistDraftToServer,
+    draftIsAcknowledged: draftIsAcknowledged,
+    bindDraft: bindDraft,
     draftKey: draftKey,
     draftFor: draftFor,
     resolveSender: resolveSender,

@@ -1,6 +1,6 @@
 'use strict';
 
-var VERSION = 'sales-booking-assess-v2';
+var VERSION = 'sales-booking-assess-v2.1';
 var INTERPRETER_FALLBACK = 'conservative-fallback';
 var TZ_PERTH = 'Australia/Perth';
 var MONTHS = {
@@ -195,6 +195,16 @@ function conservativeExtract(input) {
   var lastIn = inbound.length ? inbound[inbound.length - 1] : null;
   var review = [];
   var windows = [];
+  var facts = {
+    date_specified: false,
+    weekday: null,
+    time_of_day: null,
+    after_hour: null,
+    before_hour: null,
+    clock: null,
+    explicit_date: null,
+    source_message_id: lastIn && lastIn.id || null
+  };
   var replyKind = lastIn ? 'ordinary' : 'none';
   var exact = false;
   var accepted = null;
@@ -230,7 +240,9 @@ function conservativeExtract(input) {
     var afternoonOnly = /\bafternoons?\b/i.test(text) && !date && !dayName;
     var morningOnly = /\bmornings?\b/i.test(text) && !date && !dayName;
     if (afternoonOnly || morningOnly) {
-      review.push('Day is not specified. Do not invent a date.');
+      facts.time_of_day = afternoonOnly ? 'afternoon' : 'morning';
+      facts.date_specified = false;
+      review.push('Customer date unspecified. Any chosen day is an AI proposal, not a customer-stated date.');
     } else if (date) {
       var startH = null;
       var endH = null;
@@ -241,6 +253,10 @@ function conservativeExtract(input) {
       else if (/\bafternoon\b/i.test(text)) { startH = 13; endH = 16.5; }
       else review.push('Date without a time is not a unique slot.');
       if (startH != null) {
+        facts.date_specified = true;
+        facts.explicit_date = date;
+        facts.clock = clock;
+        facts.time_of_day = startH >= 13 ? 'afternoon' : (endH <= 12 ? 'morning' : null);
         var start = isoPerth(date, startH);
         var end = isoPerth(date, endH);
         windows.push({
@@ -252,12 +268,18 @@ function conservativeExtract(input) {
           explicit_date: true
         });
       }
-    } else if (dayName && clock != null && !date) {
-      review.push('Weekday without a calendar date is not a unique slot.');
-    } else if (dayName && /\bafter\s+\d/i.test(text) && !date) {
-      review.push('Relative weekday window needs a dated offer or an explicit date.');
+    } else if (dayName && !date) {
+      facts.weekday = dayName;
+      facts.date_specified = false;
+      facts.clock = clock;
+      if (clock != null && /\bafter\b/i.test(text)) facts.after_hour = clock;
+      if (clock != null && /\bbefore\b/i.test(text)) facts.before_hour = clock;
+      review.push('Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal.');
     } else if (!date && !dayName && clock != null) {
-      review.push('Time without a date is not a unique slot.');
+      facts.clock = clock;
+      facts.date_specified = false;
+      if (/\bafter\b/i.test(text)) facts.after_hour = clock;
+      review.push('Customer named a time without a date. The chosen day is an AI proposal.');
     }
   }
 
@@ -270,9 +292,80 @@ function conservativeExtract(input) {
     exact_acceptance: exact,
     accepted_offer: accepted,
     windows: windows,
+    customer_facts: facts,
     review_reasons: review,
     source_message_ids: messages.map(function (m) { return m.id || null; }).filter(Boolean)
   };
+}
+
+function addDaysIso(iso, n) {
+  var parts = String(iso).slice(0, 10).split('-').map(Number);
+  var utc = Date.UTC(parts[0], parts[1] - 1, parts[2] + n);
+  return new Date(utc).toISOString().slice(0, 10);
+}
+
+function proposeCandidate(input, facts) {
+  facts = facts || {};
+  var weekStart = mondayIso(input.week_start || '2026-09-14');
+  var rules = (input.resource && input.resource.desk_rules) || {};
+  var busy = busyInstants(input.events, input.pending_offers);
+  var days = [];
+  if (facts.explicit_date) days = [facts.explicit_date];
+  else {
+    for (var i = 0; i < 5; i++) days.push(addDaysIso(weekStart, i));
+    if (facts.weekday) {
+      var want = WEEKDAYS.indexOf(facts.weekday);
+      days = days.filter(function (d) {
+        var parts = d.split('-').map(Number);
+        var dow = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+        return dow === want;
+      });
+    }
+  }
+  var found = null;
+  days.forEach(function (date) {
+    if (found) return;
+    var startH = 8;
+    var endH = 16.5;
+    if (facts.time_of_day === 'afternoon') { startH = 13; endH = 16.5; }
+    else if (facts.time_of_day === 'morning') { startH = 8; endH = 12; }
+    if (facts.after_hour != null) startH = Math.max(startH, facts.after_hour);
+    if (facts.before_hour != null) endH = Math.min(endH, facts.before_hour);
+    if (facts.clock != null && facts.after_hour == null && facts.before_hour == null && facts.time_of_day == null && facts.date_specified) {
+      startH = facts.clock;
+      endH = facts.clock + 1;
+    } else if (facts.clock != null && facts.after_hour == null && facts.before_hour == null && facts.time_of_day == null && !facts.date_specified) {
+      startH = facts.clock;
+      endH = Math.min(16.5, facts.clock + 2);
+    }
+    var cursor = isoPerth(date, startH);
+    var end = isoPerth(date, endH);
+    if (cursor.instant == null || end.instant == null) return;
+    var ms = cursor.instant;
+    while (ms + 60 * 60 * 1000 <= end.instant + 1) {
+      var local = perthParts(ms);
+      if (!legalStart(local.hour, rules, local.date, weekStart)) {
+        ms += 15 * 60 * 1000;
+        continue;
+      }
+      var slotEnd = ms + 60 * 60 * 1000;
+      var clash = busy.some(function (b) { return rangeOverlap(ms, slotEnd, b.start, b.end); });
+      if (!clash) {
+        found = {
+          start_iso: isoPerth(local.date, local.hour).local,
+          end_iso: isoPerth(local.date, local.hour + 1).local,
+          start_instant: ms,
+          end_instant: slotEnd,
+          date_source: facts.date_specified ? 'customer' : 'ai_proposed',
+          customer_date_specified: !!facts.date_specified,
+          window_label: facts.date_specified ? 'customer date' : 'AI-proposed date, customer date unspecified'
+        };
+        return;
+      }
+      ms += 15 * 60 * 1000;
+    }
+  });
+  return found;
 }
 
 function legalStart(hour, rules, perthDate, weekStart) {
@@ -344,6 +437,15 @@ function validate(extracted, input) {
       return true;
     });
   }
+  if (!explicitDate) {
+    extracted.windows = [];
+  }
+  if (extracted.customer_facts && extracted.customer_facts.date_specified === false) {
+    extracted.windows = [];
+  }
+  if (!extracted.customer_facts) {
+    extracted.customer_facts = { date_specified: !!explicitDate, explicit_date: explicitDate || null };
+  }
 
   var tags = (input.tags || []).map(function (t) { return String(t).toLowerCase(); });
   var wrongLane = input.resource && input.resource.lane === 'patio' && tags.some(function (t) {
@@ -371,7 +473,16 @@ function validate(extracted, input) {
   } else if (exact && !wrongLane) {
     status = 'needs_decision';
   } else {
-    var slot = proposeFromWindows(extracted.windows, input);
+    var slot = null;
+    if (extracted.windows && extracted.windows.length) {
+      slot = proposeFromWindows(extracted.windows, input);
+      if (slot) {
+        slot.date_source = 'customer';
+        slot.customer_date_specified = true;
+      }
+    } else if (!wrongLane) {
+      slot = proposeCandidate(input, extracted.customer_facts);
+    }
     if (!coverageReady(input.coverage)) {
       reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready.');
       status = 'needs_decision';
@@ -383,14 +494,12 @@ function validate(extracted, input) {
     } else if (wrongLane) {
       status = 'needs_decision';
       proposal = null;
-    } else if (extracted.windows && extracted.windows.length && reasons.filter(function (r) { return /not specified|not a unique|Relative weekday/.test(r); }).length) {
-      status = 'needs_decision';
-      proposal = null;
-    } else if (extracted.windows && extracted.windows.length) {
+    } else {
       status = 'ready';
       proposal = slot;
-    } else {
-      status = 'needs_decision';
+      if (slot.date_source === 'ai_proposed') {
+        reasons.push('AI-proposed date, customer date unspecified.');
+      }
     }
   }
 
@@ -408,7 +517,12 @@ function validate(extracted, input) {
     var h12 = hour % 12 || 12;
     var who = (input.resource && input.resource.name) || 'SecureWorks';
     var lane = input.resource && input.resource.lane === 'fencing' ? 'SecureWorks Fencing' : 'SecureWorks Patios';
-    draft = 'Hi, ' + String(proposal.start_iso).slice(0, 10) + ' at ' + h12 + ':' + min + ampm + ' in ' + (input.suburb || 'the site') + ' works for me. Can someone be there then? ' + who + ', ' + lane;
+    var when = String(proposal.start_iso).slice(0, 10) + ' at ' + h12 + ':' + min + ampm;
+    if (proposal.date_source === 'ai_proposed') {
+      draft = 'Hi, I can visit ' + when + ' in ' + (input.suburb || 'the site') + '. Does that suit? ' + who + ', ' + lane;
+    } else {
+      draft = 'Hi, ' + when + ' in ' + (input.suburb || 'the site') + ' works for me. Can someone be there then? ' + who + ', ' + lane;
+    }
     proposal.draft = draft;
     proposal.kind = 'proposal';
   }
@@ -422,8 +536,9 @@ function validate(extracted, input) {
     exact_acceptance: exact,
     accepted_offer: exact ? extracted.accepted_offer : null,
     status: status,
-    reason: reasons[0] || (status === 'ready' ? 'Customer inbound window supports a proposed offer. This is not exact acceptance.' : 'Needs a human decision.'),
+    reason: reasons[0] || (status === 'ready' ? 'Candidate slot for approval. This is not exact acceptance.' : 'Needs a human decision.'),
     review_reasons: reasons,
+    customer_facts: extracted.customer_facts || null,
     windows: extracted.windows || [],
     proposal: proposal,
     draft: draft,
@@ -458,6 +573,7 @@ function mergeReasoned(raw, input) {
     exact_acceptance: !!raw.exact_acceptance,
     accepted_offer: raw.accepted_offer || null,
     windows: windows,
+    customer_facts: raw.customer_facts || null,
     review_reasons: raw.review_reasons || [],
     source_message_ids: raw.source_message_ids || []
   };
@@ -481,11 +597,14 @@ function reasonPrompt(input) {
     timezone: TZ_PERTH,
     instructions: [
       'Return JSON only.',
+      'Separate customer facts from candidate scheduling.',
       'Customer constraints may come from inbound messages only.',
+      'If the customer gives a time-of-day with no date, record that preference and you may suggest a verified-free slot labelled AI-proposed date, customer date unspecified.',
+      'Do not write an AI-suggested day as a customer-declared window or exact acceptance.',
+      'Initial outreach may propose a suitable slot pending approval without pretending the customer supplied availability.',
       'Exact acceptance requires the preceding sent offer id and slot revision.',
-      'Do not invent dates, weekdays or times that the inbound text does not state.',
-      'Ambiguous or negated language is review, never cancellation or acceptance.',
-      'Do not map an explicit calendar date onto a different week.'
+      'Do not map an explicit calendar date onto a different week.',
+      'Ambiguous or negated language is never cancellation or exact acceptance.'
     ],
     input: {
       week_start: input.week_start,

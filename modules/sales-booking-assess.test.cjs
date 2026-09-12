@@ -25,16 +25,24 @@ test('explicit 22 September is not mapped onto Tuesday 15', () => {
   assert.notEqual(result.proposal && result.proposal.start_iso, '2026-09-15T10:00:00');
 });
 
-test('afternoons without a day stay review, not invented Monday', () => {
+test('afternoons without a day may get an AI-proposed afternoon, not a customer Monday fact', () => {
   const result = assess.assess({
     week_start: '2026-09-14',
     resource: nithin,
     coverage: coverageOk,
     messages: [inbound('Afternoons work for me')]
   });
-  assert.equal(result.status, 'needs_decision');
-  assert.equal(result.proposal, null);
-  assert.match(result.reason, /Day is not specified|Needs a human/);
+  assert.equal(result.exact_acceptance, false);
+  assert.equal(result.customer_facts.date_specified, false);
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
+  assert.equal((result.windows || []).length, 0);
+  assert.ok(result.proposal);
+  assert.equal(result.proposal.date_source, 'ai_proposed');
+  assert.equal(result.proposal.customer_date_specified, false);
+  const hour = Number(String(result.proposal.start_iso).slice(11, 13));
+  assert.ok(hour >= 13);
+  assert.equal(result.status, 'ready');
+  assert.match(result.proposal.window_label, /AI-proposed date/);
 });
 
 test('please do not cancel is not cancellation', () => {
@@ -89,15 +97,18 @@ test('an earlier yes does not accept a later outbound offer', () => {
   assert.notEqual(result.accepted_offer && result.accepted_offer.offer_id, 'off-late');
 });
 
-test('outbound-only text is not customer availability', () => {
+test('outbound-only text is not customer availability; outreach may still propose a slot', () => {
   const result = assess.assess({
     week_start: '2026-09-14',
     resource: nithin,
     coverage: coverageOk,
     messages: [{ direction: 'outbound', timestamp: '2026-09-12T12:00:00Z', id: 'out-1', body: 'Can I come Thursday at 1pm?' }]
   });
-  assert.equal(result.proposal, null);
-  assert.notEqual(result.status, 'ready');
+  assert.equal((result.windows || []).length, 0);
+  assert.equal(result.exact_acceptance, false);
+  assert.ok(result.proposal);
+  assert.equal(result.proposal.date_source, 'ai_proposed');
+  assert.equal(result.proposal.customer_date_specified, false);
 });
 
 test('02:00Z busy collides with 10:00 Perth', () => {
@@ -110,6 +121,18 @@ test('02:00Z busy collides with 10:00 Perth', () => {
   });
   assert.equal(result.proposal, null);
   assert.notEqual(result.status, 'ready');
+});
+
+test('AI afternoon suggestion still requires coverage', () => {
+  const result = assess.assess({
+    week_start: '2026-09-14',
+    resource: nithin,
+    coverage: { leave: 'not_read', calendar: true, route: false },
+    messages: [inbound('Afternoons work for me')]
+  });
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
 });
 
 test('missing calendar, leave or travel cannot be ready', () => {

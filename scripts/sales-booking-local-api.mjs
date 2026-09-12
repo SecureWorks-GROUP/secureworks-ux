@@ -74,6 +74,8 @@ export async function readPerformance(params, fetchStored, now = new Date()) {
           ok: true,
           fixture: false,
           read_only: true,
+          unpublished: stored.unpublished === true,
+          storage_provenance: stored.storage_provenance || null,
           fetched_at: stored.fetched_at || fetched_at
         });
       }
@@ -84,6 +86,8 @@ export async function readPerformance(params, fetchStored, now = new Date()) {
         ok: true,
         fixture: false,
         read_only: true,
+        unpublished: true,
+        storage_provenance: null,
         rows: [],
         week_start: week,
         week_starts,
@@ -96,9 +100,10 @@ export async function readPerformance(params, fetchStored, now = new Date()) {
           complete: false,
           as_of: fetched_at,
           source: 'sales_performance_read',
+          storage_provenance: null,
           gaps: [
-            'Stored weekly desk reports were not retrieved: ' + (e && e.message ? e.message : 'provider error'),
-            'Empty rows are missing reports, not zero measures.'
+            'sales_performance_weeks is not deployed. Empty rows are unpublished, not zero measures.',
+            'Stored weekly desk reports were not retrieved: ' + (e && e.message ? e.message : 'provider error')
           ]
         }
       };
@@ -110,6 +115,8 @@ export async function readPerformance(params, fetchStored, now = new Date()) {
     ok: true,
     fixture: false,
     read_only: true,
+    unpublished: true,
+    storage_provenance: null,
     rows: [],
     week_start: week,
     week_starts,
@@ -122,10 +129,10 @@ export async function readPerformance(params, fetchStored, now = new Date()) {
       complete: false,
       as_of: fetched_at,
       source: 'sales_performance_read',
+      storage_provenance: null,
       gaps: [
-        'Isolated preview has no staff JWT for ops-api sales_performance_read.',
-        'Production path remains authenticated opsFetch sales_performance_read.',
-        'Empty rows are missing reports, not zero measures. Filters and drilldowns still operate on this envelope.'
+        'sales_performance_weeks is not deployed. This envelope is unpublished with null storage provenance.',
+        'Empty rows are missing reports, not zero measures. Combined host may overlay authentic collector captures labelled unpublished. No production write.'
       ]
     }
   };

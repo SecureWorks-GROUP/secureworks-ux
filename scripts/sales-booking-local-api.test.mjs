@@ -66,6 +66,8 @@ test('performance read never invents measure rows when storage is unavailable', 
   assert.equal(r.missing_latest_closed_week, true);
   assert.equal(r.coverage.complete, false);
   assert.equal(r.coverage.source, 'sales_performance_read');
+  assert.equal(r.unpublished, true);
+  assert.equal(r.storage_provenance, null);
   assert.ok(r.coverage.as_of);
 });
 

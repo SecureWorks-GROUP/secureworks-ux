@@ -7219,6 +7219,7 @@ function showView(view) {
 
   var viewEl = document.getElementById('view' + view.charAt(0).toUpperCase() + view.slice(1));
   if (viewEl) viewEl.classList.add('active');
+  if (window.DispatchOps) DispatchOps.setActive(view === 'dispatch');
 
   // Prevent page scroll on calendar view
   document.body.style.overflow = (view === 'calendar') ? 'hidden' : '';

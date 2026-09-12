@@ -1,71 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const DispatchCore = require('../../modules/ops-dispatch-core.js');
-
-const clone = value => JSON.parse(JSON.stringify(value));
-const record = id => ({
-  job: { id, job_number: `FIX-${id}`, work_type: 'fencing', eligibility: { state: 'accepted' } },
-  version: 0, source_version: 'source-1', groups: [], requirements: [], drafts: [], notes: [],
-  allocations: [], receipts: [], purchase_orders: [], movements: [], media: [], communications: []
-});
-class FormValues {
-  constructor(form) { this.entries = Object.entries(form.values); }
-  get(name) { return this.entries.find(([key]) => key === name)?.[1] ?? null; }
-  getAll(name) { return this.entries.filter(([key]) => key === name).flatMap(([, value]) => value); }
-  [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
-}
-async function workspace() {
-  const listeners = new Map(), records = { a: record('a'), b: record('b') }, commands = [], lots = [];
-  const host = {
-    innerHTML: '', classList: { add() {} }, contains: node => !!node,
-    querySelectorAll: () => [], querySelector: () => null,
-    addEventListener: (type, listener) => listeners.set(type, listener)
-  };
-  let count = 0, pendingSave;
-  const core = DispatchCore.create({
-    id: () => `fixture-${++count}`,
-    get: async (action, params) => {
-      if (action === 'dispatch_list') return { jobs: Object.values(records).map(r => r.job), coverage: { complete: true } };
-      if (action === 'dispatch_job') return clone(records[params.job_id]);
-      if (action === 'dispatch_calendar') return { events: [], undated: [], coverage: { complete: true } };
-      if (action === 'dispatch_execution') return { actions: [], capabilities: { release_hold: true } };
-      if (action === 'dispatch_supply') return { supply_lots: lots.filter(lot => lot.supply_kind === params.kind), coverage: { complete: true } };
-      throw new Error(`Unexpected fixture read: ${action}`);
-    },
-    post: async (action, envelope) => {
-      commands.push(clone({ action, ...envelope }));
-      if (pendingSave) await pendingSave;
-      const current = records[envelope.job_id];
-      if (envelope.command === 'group_upsert') current.groups.push(clone(envelope.payload));
-      current.version++;
-      return clone(current);
-    }
-  });
-  const context = vm.createContext({ DispatchCore, document: { activeElement: null }, FormData: FormValues, URL, innerWidth: 1200 });
-  context.window = context;
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../modules/ops-dispatch.js'), 'utf8'), context);
-  const app = context.DispatchOps.mount(host, { core, now: new Date('2026-09-14T04:00:00Z') });
-  await app.load();
-  return {
-    app, core, host, records, commands, lots,
-    hold() { let release; pendingSave = new Promise(resolve => { release = resolve; }); return () => { pendingSave = null; release(); }; },
-    click(action, id) {
-      const target = { dataset: { action, id }, closest: selector => selector === '[data-action]' ? target : null };
-      return listeners.get('click')({ target, preventDefault() {} });
-    },
-    input(kind, values, editor) {
-      const form = { dataset: { form: kind }, values };
-      const target = { dataset: editor ? { editor } : {}, form, closest: () => form };
-      return listeners.get('input')({ target });
-    },
-    submit(kind, values) {
-      return listeners.get('submit')({ target: { dataset: { form: kind }, values }, preventDefault() {} });
-    }
-  };
-}
+const { workspace, clone } = require('./workspace-harness.cjs');
 
 for (const switchAway of [false, true]) {
   test(`older group save preserves a replacement editor${switchAway ? ' across a job switch' : ''}`, async () => {
@@ -134,6 +69,109 @@ test('History and Compose recover the exact unsaved draft and isolate each job',
   assert.equal(ui.commands.length, 0);
 });
 
+test('reply drafts use captured outbound recipients and inbound senders', async () => {
+  const outbound = await workspace();
+  outbound.records.a.communications = [{
+    id: 'sent-po',
+    job_id: 'a',
+    direction: 'sent',
+    subject: 'PO 123',
+    to_email: 'supplier@example.test',
+    cc_email: 'qs@example.test,accounts@example.test',
+    from_email: 'ops@example.test',
+    sender: 'SecureWorks Ops',
+    mailbox: 'ops@example.test',
+    body_text: 'Sent PO body'
+  }];
+  await outbound.core.load('a');
+  await outbound.click('tab', 'email');
+  await outbound.click('mail', 'sent-po');
+  await outbound.click('reply-mail');
+  const outboundDraftKey = [...outbound.core.state.editors.get('a').keys()].find(key => key.startsWith('draft:'));
+  assert.deepEqual(outbound.core.editor('a', outboundDraftKey).to, ['supplier@example.test']);
+  assert.deepEqual(outbound.core.editor('a', outboundDraftKey).cc, ['qs@example.test', 'accounts@example.test']);
+  assert.equal(outbound.core.editor('a', outboundDraftKey).sender, 'ops@example.test');
+
+  const inbound = await workspace();
+  inbound.records.a.communications = [{
+    id: 'inbound-po',
+    job_id: 'a',
+    direction: 'received',
+    subject: 'Question about PO',
+    to_email: 'ops@example.test',
+    from_email: 'fallback@example.test',
+    sender: 'supplier-inbound@example.test',
+    mailbox: 'ops@example.test',
+    body_text: 'Supplier question'
+  }];
+  await inbound.core.load('a');
+  await inbound.click('tab', 'email');
+  await inbound.click('mail', 'inbound-po');
+  await inbound.click('reply-mail');
+  const inboundDraftKey = [...inbound.core.state.editors.get('a').keys()].find(key => key.startsWith('draft:'));
+  assert.deepEqual(inbound.core.editor('a', inboundDraftKey).to, ['supplier-inbound@example.test']);
+  assert.equal(inbound.core.editor('a', inboundDraftKey).sender, 'ops@example.test');
+});
+
+test('past-job mail cannot carry recipients into the selected job', async () => {
+  const ui = await workspace();
+  ui.records.a.communications = [{ id: 'foreign', job_id: 'b', direction: 'sent', to_email: 'foreign@example.test', cc_email: 'foreign-copy@example.test', body_text: 'Original job B message' }];
+  await ui.core.load('a');
+  await ui.click('tab', 'email');
+  await ui.click('mail', 'foreign');
+  await ui.click('reply-mail');
+  assert.match(ui.host.innerHTML, /Open the original job to reply/);
+  await ui.click('new-draft');
+  const key = [...ui.core.state.editors.get('a').keys()].find(key => key.startsWith('draft:'));
+  assert.deepEqual(ui.core.editor('a', key).to, []);
+  assert.deepEqual(ui.core.editor('a', key).cc, []);
+  assert.equal(ui.commands.length, 0);
+});
+
+test('captured mail prefers parsed full HTML over snippets and keeps text precedence', async () => {
+  const parsed = [];
+  class BodyParser {
+    parseFromString(html, type) {
+      parsed.push({ html, type });
+      return { querySelectorAll: () => [], body: { textContent: 'Full body line\nSecond & complete' } };
+    }
+  }
+  const ui = await workspace({ globals: { DOMParser: BodyParser } });
+  ui.records.a.communications = [
+    {
+      id: 'html-mail',
+      job_id: 'a',
+      subject: 'HTML full body',
+      mailbox: 'ops@example.test',
+      body_html: '<p>Full body line</p><p>Second &amp; complete</p>',
+      snippet: 'Short snippet only'
+    },
+    {
+      id: 'text-mail',
+      job_id: 'a',
+      subject: 'Text wins',
+      mailbox: 'ops@example.test',
+      body_text: 'Authoritative text body',
+      body_html: '<p>HTML body</p>',
+      snippet: 'Snippet body'
+    }
+  ];
+  await ui.core.load('a');
+  await ui.click('tab', 'email');
+  await ui.click('mail', 'html-mail');
+  assert.match(ui.host.innerHTML, /Full body line/);
+  assert.match(ui.host.innerHTML, /Second &amp; complete/);
+  assert.doesNotMatch(ui.host.innerHTML, /Short snippet only/);
+  assert.ok(parsed.length > 0);
+  assert.equal(parsed[0].html, ui.records.a.communications[0].body_html);
+  assert.equal(parsed[0].type, 'text/html');
+  const parsedBeforeText = parsed.length;
+  await ui.click('mail', 'text-mail');
+  assert.match(ui.host.innerHTML, /Authoritative text body/);
+  assert.doesNotMatch(ui.host.innerHTML, /HTML body|Snippet body/);
+  assert.equal(parsed.length, parsedBeforeText);
+});
+
 async function withReceipt() {
   const ui = await workspace();
   ui.records.a.requirements = [{ id: 'requirement-a', description: 'Custom fence panels', quantity: 8, unit: 'each' }];
@@ -157,7 +195,7 @@ test('receipt identifies its requirement and chosen partial transfer survives re
   await ui.submit('transfer', values);
   assert.equal(ui.commands.length, 1);
   assert.equal(ui.commands[0].command, 'receipt_transfer');
-  assert.deepEqual(ui.commands[0].payload, { id: 'receipt-a', quantity: 2.5, location: 'site', evidence: values.evidence });
+  assert.deepEqual(ui.commands[0].payload, { id: 'receipt-a', new_id: ui.commands[0].payload.new_id, quantity: 2.5, location: 'site', evidence: values.evidence });
 });
 
 for (const quantity of ['', '0', '-1', '5.01', 'NaN', 'Infinity']) {

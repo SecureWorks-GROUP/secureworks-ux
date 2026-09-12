@@ -6,12 +6,18 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
 
-function dispatchContext() {
+function dispatchContext(opsFetch) {
+  const elements = {
+    dispatchCalendarLayers: { innerHTML: '', addEventListener() {} },
+    calendarBody: { addEventListener() {} },
+    viewCalendar: { classList: { contains() { return false; } } },
+  };
   const context = {
     console,
-    document: { getElementById() { return null; } },
-    opsFetch() { throw new Error('unexpected live read'); },
+    document: { getElementById(id) { return elements[id] || null; } },
+    opsFetch: opsFetch || function () { throw new Error('unexpected live read'); },
     opsPost() { throw new Error('unexpected live write'); },
+    renderCalendar() {},
   };
   context.globalThis = context;
   context.window = context;
@@ -125,6 +131,55 @@ test('dispatch calendar projection keeps late material warnings on shared PO blo
   assert.doesNotMatch(meetingBlock, / warning/);
   assert.match(meetingBlock, /needs review/);
   assert.match(meetingBlock, /requested delivery/);
+});
+
+test('dispatch calendar projection ignores stale overlay events during pending range reads', async () => {
+  let calls = 0, resolvePending;
+  const pending = new Promise(resolve => { resolvePending = resolve; });
+  const context = dispatchContext(async () => {
+    calls++;
+    if (calls === 1) return { events: [{ id: 'po:legacy', job_id: 'fresh', job_number: 'OLD', title: 'Stale Dispatch PO', date: '2026-09-09', layer: 'materials', status: 'promised' }], undated: [], coverage: { complete: true } };
+    return pending;
+  });
+  const oldRange = { from: '2026-09-01', to: '2026-09-07' };
+  const nextRange = { from: '2026-09-08', to: '2026-09-14' };
+  await context.DispatchOps.loadMainCalendar(oldRange);
+
+  const loading = context.DispatchOps.loadMainCalendar(nextRange);
+  const projected = context.DispatchOps.projectMain(
+    [{ job_id: 'fresh', assignment_type: 'install', scheduled_date: '2026-09-08' }],
+    [{ id: 'legacy', job_id: 'fresh', job_number: 'NEW', supplier_name: 'Fresh Incumbent PO', delivery_date: '2026-09-09', status: 'requested' }],
+    nextRange
+  );
+
+  assert.equal(projected.deliveries.length, 1);
+  assert.equal(projected.deliveries[0].supplier_name, 'Fresh Incumbent PO');
+  assert.equal(projected.deliveries[0].job_number, 'NEW');
+
+  resolvePending({ events: [{ id: 'po:legacy', job_id: 'fresh', job_number: 'DISPATCH', title: 'Fresh Dispatch PO', date: '2026-09-09', layer: 'materials', status: 'promised' }], undated: [], coverage: { complete: true } });
+  await loading;
+  const fresh = context.DispatchOps.projectMain(
+    [{ job_id: 'fresh', assignment_type: 'install', scheduled_date: '2026-09-08' }],
+    [{ id: 'legacy', job_id: 'fresh', job_number: 'NEW', supplier_name: 'Fresh Incumbent PO', delivery_date: '2026-09-09', status: 'requested' }],
+    nextRange
+  );
+  assert.equal(fresh.deliveries[0].supplier_name, 'Fresh Dispatch PO');
+  assert.equal(fresh.deliveries[0].job_number, 'DISPATCH');
+});
+
+test('failed Dispatch refresh cannot overwrite the fresh incumbent delivery date', async () => {
+  let failed = false;
+  const context = dispatchContext(async () => {
+    if (failed) throw Error('Dispatch range unavailable');
+    return { events: [{ id: 'po:one', job_id: 'a', date: '2026-09-15', layer: 'materials', title: 'Supplier' }], coverage: { complete: true } };
+  });
+  const range = { from: '2026-09-14', to: '2026-09-20' };
+  await context.DispatchOps.loadMainCalendar(range);
+  failed = true;
+  await context.DispatchOps.loadMainCalendar(range);
+  const projected = context.DispatchOps.projectMain([], [{ id: 'one', job_id: 'a', delivery_date: '2026-09-17' }], range);
+  assert.equal(projected.deliveries.length, 1);
+  assert.equal(projected.deliveries[0].delivery_date, '2026-09-17');
 });
 
 test('schedule view reserves delivery rows above actionable job bars', () => {

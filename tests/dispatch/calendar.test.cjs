@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '../..');
 
 function dispatchContext(opsFetch) {
   const elements = {
-    dispatchCalendarLayers: { innerHTML: '', addEventListener() {} },
+    dispatchCalendarLayers: { innerHTML: '', addEventListener() {}, contains() { return false; } },
     calendarBody: { addEventListener() {} },
     viewCalendar: { classList: { contains() { return false; } } },
   };

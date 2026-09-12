@@ -59,6 +59,30 @@ async function compose(page, body='Human draft A') {
   await page.getByLabel('To',{exact:true}).fill('supplier@example.test');
   await page.getByLabel('Exact message',{exact:true}).fill(body);
 }
+test('History and scope disclosures retain search focus through refresh and job navigation', async ({ page }) => {
+  await setup(page);
+  await compose(page, 'Keep the open job draft');
+  const history = page.locator('[data-disclosure="history"]');
+  if (!(await history.evaluate(detail => detail.open))) await history.locator('summary').click();
+  const search = history.getByLabel('Search captured correspondence');
+  await search.fill('Original supplier history');
+  await search.evaluate(input => input.setSelectionRange(4, 11));
+  await page.evaluate(() => app.refresh());
+  await expect(search).toBeVisible();
+  await expect(search).toBeFocused();
+  expect(await search.evaluate(input => [input.selectionStart, input.selectionEnd])).toEqual([4, 11]);
+  await page.locator('.dp-job[data-id="b"]').click();
+  await page.locator('.dp-job[data-id="a"]').click();
+  await expect(search).toBeVisible();
+  await expect(search).toHaveValue('Original supplier history');
+  await expect(search).toBeFocused();
+  await expect(page.getByLabel('Exact message', { exact: true })).toHaveValue('Keep the open job draft');
+  await page.getByRole('tab', { name: 'Scope & quote', exact: true }).click();
+  const context = page.locator('[data-disclosure="context"]');
+  await context.locator('summary').click();
+  await page.evaluate(() => app.refresh());
+  await expect(context.getByRole('button', { name: 'Review current context evidence' })).toBeVisible();
+});
 test('arbitrary groups preserve requirement identity through rename, move and removal',async({page})=>{
   await setup(page);await page.getByRole('button',{name:'+ Your group'}).click();await page.getByLabel('Name',{exact:true}).fill('Shaun’s first run');await page.getByRole('button',{name:'Save group',exact:true}).click();
   await page.getByRole('button',{name:'+ Requirement',exact:true}).click();await page.getByLabel('Description',{exact:true}).fill('Operator chosen material');await page.getByRole('button',{name:'Save candidate'}).click();

@@ -21,10 +21,18 @@ async function workspace(options = {}) {
   const timers = new Map(), windowListeners = new Map(), documentListeners = new Map(), forms = new Map();
   const document = { activeElement: null, visibilityState: 'visible',
     addEventListener: (name, fn) => documentListeners.set(name, fn), removeEventListener: name => documentListeners.delete(name) };
+  let detailNodes = [], markup = '';
   let focusNodes = [], count = 0, timerId = 0, pendingSave;
   const host = {
-    innerHTML: '', isConnected: true, classList: { add() {} }, contains: node => !!node,
-    querySelectorAll: () => focusNodes,
+    get innerHTML() { return markup; },
+    set innerHTML(value) {
+      markup = value;
+      detailNodes = [...value.matchAll(/<details\b([^>]*)>/g)].flatMap(([, attrs]) => {
+        const key = attrs.match(/data-disclosure="([^"]*)"/)?.[1];
+        return key ? [{ dataset: { disclosure: key }, open: /(?:^|\s)open(?:\s|$)/.test(attrs) }] : [];
+      });
+    }, isConnected: true, classList: { add() {} }, contains: node => !!node,
+    querySelectorAll: selector => selector === 'details[data-disclosure]' ? detailNodes : focusNodes,
     querySelector: selector => forms.get(selector.match(/^\[data-form="([^"]+)"\]$/)?.[1]) || null,
     addEventListener: (type, listener) => listeners.set(type, listener)
   };
@@ -68,6 +76,8 @@ async function workspace(options = {}) {
   return {
     app, core, host, records, commands, reads, lots, timers, document, context,
     hold() { let release; pendingSave = new Promise(resolve => { release = resolve; }); return () => { pendingSave = null; release(); }; },
+    detail(key) { return detailNodes.find(node => node.dataset.disclosure === key); },
+    blur() { const target = document.activeElement; listeners.get('focusout')?.({ target }); document.activeElement = null; },
     click(action, id) {
       const target = { dataset: { action, id }, closest: selector => selector === '[data-action]' ? target : null };
       return listeners.get('click')({ target, preventDefault() {} });
@@ -75,7 +85,7 @@ async function workspace(options = {}) {
     input(kind, values, editor) {
       const form = { dataset: { form: kind }, values, reportValidity: () => true };
       forms.set(kind, form);
-      const target = { dataset: editor ? { editor } : {}, form, closest: () => form };
+      const target = { dataset: editor ? { editor } : {}, value: editor === 'note' ? values.text : undefined, form, closest: () => form };
       return listeners.get('input')({ target });
     },
     submit(kind, values) {

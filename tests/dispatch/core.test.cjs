@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const { create, filteredJobs, week } = require('../../modules/ops-dispatch-core.js');
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return {promise,resolve,reject}; };
 const record = (id, version=0) => ({job:{id},version,source_version:'src1',groups:[],requirements:[],drafts:[]});
+test('stale evidence cannot resolve a pending write conflict', async () => {
+ let version=2;
+ const core=create({get:async()=>record('a',version),post:async()=>{throw Object.assign(Error('Changed plan'),{status:409});},id:()=> 'request'});
+ await core.load('a');
+ await assert.rejects(core.command('a','note_upsert',{id:'n'}));
+ version=1;
+ await assert.rejects(core.resolveConflict('a'),/conflict remains unresolved/);
+ assert.equal(core.state.pending.get('a').conflict,true);
+});
 function harness(get, post) { let id=0; return create({get,post,id:()=>`request-${++id}`}); }
 test('population consumes every cursor, retains unresolved/no-PO work and filters only presentation',async()=>{
  const pages=[]; const core=harness(async(action,p)=>{if(action==='dispatch_job')return record(p.job_id);pages.push(p.cursor);return p.cursor?{jobs:[{id:'b',work_type:'patio',eligibility:{state:'unresolved'}}],next_cursor:null,coverage:{complete:true}}:{jobs:[{id:'a',work_type:'fencing'}],next_cursor:'second',coverage:{complete:false}};});

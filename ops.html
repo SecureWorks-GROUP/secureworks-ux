@@ -195,6 +195,7 @@
     }
     .cal-sidebar-item input:checked + .cal-sidebar-dot { /* filled -- color set inline */ }
     .cal-sidebar-item input:not(:checked) + .cal-sidebar-dot { background: transparent !important; border-color: #ccc; }
+    #dispatchCalendarLayers .cal-sidebar-item input[type="checkbox"] { display:inline-block; width:14px; height:14px; padding:0; margin:0 6px 0 0; accent-color:var(--sw-orange); flex:0 0 auto; }
     .cal-sidebar-item input[type="checkbox"]:checked + .cal-sidebar-dot::after {
       content: ''; position: absolute; top: 1px; left: 3px; width: 4px; height: 6px;
       border: solid #fff; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
@@ -750,11 +751,11 @@
     /* ── Schedule View Grid ── */
     .cal-schedule-grid {
       border: 2px solid var(--sw-border); border-radius: 8px; overflow: hidden;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); min-width: 0;
     }
     .cal-schedule-week {
-      display: grid; grid-template-columns: repeat(7, 1fr); gap: 0;
-      position: relative;
+      display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0;
+      position: relative; min-width: 0;
     }
     .cal-schedule-week + .cal-schedule-week { border-top: 1px solid var(--sw-border); }
     /* That selector reaches only the FIRST week row, because the header is itself
@@ -765,7 +766,8 @@
     .cal-schedule-header {
       background: var(--sw-dark); color: #fff; font-size: 11px; font-weight: 600;
       text-align: center; padding: 6px 4px; text-transform: uppercase; letter-spacing: 0.5px;
-      border-right: 1px solid rgba(255,255,255,0.1);
+      border-right: 1px solid rgba(255,255,255,0.1); min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .cal-schedule-header:last-child { border-right: 0; }
     .cal-schedule-header.today { color: var(--sw-orange); }
@@ -773,7 +775,7 @@
     .cal-schedule-header .sh-num { font-size: 16px; font-weight: 700; font-family: var(--sw-font-num); }
     .cal-schedule-cell {
       background: var(--sw-card); min-height: 90px; padding: 22px 3px 3px 3px;
-      position: relative; cursor: pointer;
+      position: relative; cursor: pointer; min-width: 0;
       border-right: 1px solid var(--sw-border); border-bottom: 1px solid var(--sw-border);
     }
     .cal-schedule-cell:last-child { border-right: 0; }
@@ -806,7 +808,7 @@
       color: var(--sw-text-sec);
     }
     .cal-schedule-cell.today .cal-schedule-day-num { color: var(--sw-orange); font-weight: 700; }
-    .cal-schedule-deliveries { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; }
+    .cal-schedule-deliveries { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; min-width: 0; }
 
     /* Job bars */
     .cal-schedule-bar-layer {
@@ -871,7 +873,7 @@
       font-weight: 700; font-style: normal;
     }
     .cal-schedule-deliveries .cal-delivery-block {
-      height: 34px; margin-bottom: 0; line-height: 12px; white-space: nowrap;
+      height: 34px; margin-bottom: 0; line-height: 12px; white-space: nowrap; max-width: 100%;
     }
     .cal-schedule-deliveries .cal-delivery-block small {
       display: block; line-height: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

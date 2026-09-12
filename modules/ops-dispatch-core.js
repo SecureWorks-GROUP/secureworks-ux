@@ -14,6 +14,7 @@
     const listeners = new Set();
     let listGeneration = 0, calendarGeneration = 0;
     const recordGeneration = new Map();
+    const executionGeneration = new Map();
     const emit = () => listeners.forEach(listener => listener(state));
     function accept(record, id) {
       if (!record || record.job?.id !== id || !Number.isInteger(record.version)) throw new Error('Invalid Dispatch response; work remains unchanged.');
@@ -132,9 +133,36 @@
       } catch (error) { state.supply.errors[kind] = error.message; state.supply.coverage[kind] = false; emit(); }
     }
     async function execution(id) {
-      try { const result = await options.get('dispatch_execution', { job_id: id }); state.executions.set(id, { ...result, uncertain: state.executions.get(id)?.uncertain === true }); }
-      catch (error) { state.executions.set(id, { actions: [], capabilities: { enabled: false }, error: error.message }); }
-      emit();
+      const generation = (executionGeneration.get(id) || 0) + 1;
+      executionGeneration.set(id, generation);
+      let current = false;
+      try {
+        const result = await options.get('dispatch_execution', { job_id: id });
+        current = generation === executionGeneration.get(id);
+        if (!current) return result;
+        const previous = state.executions.get(id) || {};
+        state.executions.set(id, { ...result,
+          submitting: previous.submitting === true,
+          uncertain: previous.uncertain === true || result.actions?.some(action => action.status === 'outcome_unknown') === true });
+        return result;
+      }
+      catch (error) {
+        current = generation === executionGeneration.get(id);
+        if (current) {
+          const previous = state.executions.get(id) || {};
+          state.executions.set(id, { ...previous,
+            actions: previous.actions || [],
+            capabilities: { ...(previous.capabilities || {}), enabled: false, approval_enabled: false, release_hold: true },
+            coverage: { ...(previous.coverage || {}), complete: false },
+            submitting: previous.submitting === true,
+            uncertain: previous.uncertain === true,
+            error: error.message });
+        }
+        return null;
+      }
+      finally {
+        if (current) emit();
+      }
     }
     return { state, list, load, select, edit, editor, clearEditor, command, retry, resolveConflict, calendar, supply, execution,
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
@@ -144,7 +172,15 @@
         const previous = state.executions.get(id) || {};
         if (previous.submitting || previous.uncertain) throw new Error('Read back the previous action before any recovery.');
         state.executions.set(id, { ...previous, submitting: true }); emit();
-        try { const result = await options.post('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId }); await execution(id); return result; }
+        try {
+          const result = await options.post('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId });
+          const status = await execution(id);
+          const current = state.executions.get(id) || {};
+          state.executions.set(id, { ...current, submitting: false, uncertain: status ? current.uncertain === true : true,
+            ...(status ? {} : { error: 'Execution outcome uncertain. Refresh action status and read back the provider receipt.' }) });
+          emit();
+          return result;
+        }
         catch (error) { await execution(id); state.executions.set(id, { ...state.executions.get(id), submitting: false, uncertain: true, error: 'Execution outcome uncertain. Refresh action status and read back the provider receipt.' }); emit(); throw error; }
       },
       async readbackExecution(id, approvalId) { const result = await options.post('dispatch_execution_readback', { approval_id: approvalId }); await execution(id); return result; },

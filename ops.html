@@ -806,6 +806,7 @@
       color: var(--sw-text-sec);
     }
     .cal-schedule-cell.today .cal-schedule-day-num { color: var(--sw-orange); font-weight: 700; }
+    .cal-schedule-deliveries { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; }
 
     /* Job bars */
     .cal-schedule-bar-layer {
@@ -868,6 +869,12 @@
     .cal-delivery-block.warning {
       background: rgba(231,76,60,0.12); color: var(--sw-red); border-left-color: var(--sw-red);
       font-weight: 700; font-style: normal;
+    }
+    .cal-schedule-deliveries .cal-delivery-block {
+      height: 34px; margin-bottom: 0; line-height: 12px; white-space: nowrap;
+    }
+    .cal-schedule-deliveries .cal-delivery-block small {
+      display: block; line-height: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     /* Unscheduled sidebar */
@@ -8909,6 +8916,8 @@ function renderSwimlaneView(container, range) {
   // Job start date lookup for material warnings
   var jobStartDates = {};
   _calEvents.forEach(function(ev) {
+    var evType = ev.assignment_type || 'install';
+    if (!ev.job_id || evType !== 'install') return;
     if (!jobStartDates[ev.job_id] || ev.scheduled_date < jobStartDates[ev.job_id]) {
       jobStartDates[ev.job_id] = ev.scheduled_date;
     }
@@ -9487,10 +9496,16 @@ function renderScheduleView(container, range) {
       }
     });
 
-    var numLanes = Math.max(lanes.length, 1);
     var barHeight = 22;
     var barGap = 2;
-    var cellMinHeight = Math.max(90, 22 + numLanes * (barHeight + barGap) + 4);
+    var numLanes = Math.max(lanes.length, 1);
+    var deliveryRows = weekDates.reduce(function(max, ds) {
+      return Math.max(max, _calDeliveries.filter(function(del) { return del.delivery_date === ds; }).length);
+    }, 0);
+    var deliveryRowHeight = 34;
+    var deliveryOffset = deliveryRows ? deliveryRows * (deliveryRowHeight + barGap) : 0;
+    var barTopBase = 22 + deliveryOffset;
+    var cellMinHeight = Math.max(90, barTopBase + numLanes * (barHeight + barGap) + 4);
 
     // Day number + date headers
     html += '<div class="cal-schedule-week">';
@@ -9520,7 +9535,12 @@ function renderScheduleView(container, range) {
       }
       html += ' onclick="openAssignmentModal(null,\'' + ds + '\')">';
       html += '<span class="cal-schedule-day-num">' + dd.getDate() + '</span>';
-      if (window.DispatchOps) _calDeliveries.filter(function(del) { return del.delivery_date === ds; }).forEach(function(del) { html += DispatchOps.mainBlock(del); });
+      var dayDeliveries = _calDeliveries.filter(function(del) { return del.delivery_date === ds; });
+      if (window.DispatchOps && dayDeliveries.length) {
+        html += '<div class="cal-schedule-deliveries">';
+        dayDeliveries.forEach(function(del) { html += DispatchOps.mainBlock(del); });
+        html += '</div>';
+      }
       if (isHoliday) html += '<span class="cal-schedule-holiday-badge">' + escapeHtml(holidayMap[ds]) + '</span>';
       // Crew on leave. Schedule view has no crew rows, so name them on the day.
       var leaveNames = (_calEventFilters.leave && _calLeaveByDate[ds]) || [];
@@ -9556,7 +9576,7 @@ function renderScheduleView(container, range) {
       var widthPct = ((endIdx - startIdx + 1) / 7 * 100).toFixed(2);
 
       var lane = jobLanes[job.id] || 0;
-      var topPx = 22 + lane * (barHeight + barGap);
+      var topPx = barTopBase + lane * (barHeight + barGap);
 
       if (job.isLabel) {
         // Internal / job-less bar

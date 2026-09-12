@@ -12,7 +12,7 @@ async function setup(page) {
     const uuid = () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
     const a = { id:'a',job_number:'FIX-101',client_name:'Fixture Patio',site_address:'Fictional site A',work_type:'patio',eligibility:{state:'unresolved'},next_action:'Review material obligations' };
     const b = { id:'b',job_number:'FIX-102',client_name:'Fixture Fence',site_address:'Fictional site B',work_type:'fencing',eligibility:{state:'accepted'},next_action:'Review material obligations' };
-    const record = job => ({ job,version:0,source_version:'source-1',reviewed_source_version:null,groups:[],requirements:[],notes:[],drafts:[],movements:[],allocations:[],receipts:[],purchase_orders:[],media:[],communications:[],coverage:{complete:true},live_actions_enabled:false });
+    const record = job => ({ job,version:0,source_version:'source-1',reviewed_source_version:null,groups:[],requirements:[],notes:[],drafts:[],movements:[],allocations:[],receipts:[],purchase_orders:[],order_drafts:[],media:[],communications:[],coverage:{complete:true},live_actions_enabled:false });
     window.fixture = { records:{a:record(a),b:record(b)},commands:[], hold:false, failure:false, mailParams:null };
     const clone = value => JSON.parse(JSON.stringify(value));
     window.fixture.get = async (action,p) => {
@@ -20,6 +20,7 @@ async function setup(page) {
       if(action==='dispatch_job')return clone(fixture.records[p.job_id]);
       if(action==='dispatch_calendar')return {events:[{id:'assignment:source-a',job_id:'a',job_number:'FIX-101',title:'Fixture crew',date:'2026-09-14',layer:'staff',status:'tentative'},{id:'po:source-b',job_id:'b',job_number:'FIX-102',title:'Fixture delivery request',date:'2026-09-15',layer:'materials',status:'requested'}],undated:[],coverage:{complete:true}};
       if(action==='dispatch_communications') { fixture.mailParams=p; return {records:[{id:'mail-b',job_id:'b',jobs:{job_number:'FIX-102'},subject:'Fixture original supplier thread',from_email:'supplier@example.test',body_text:'Original job B evidence',mailbox:'ops@example.test',thread_id:'thread-b'}],next_cursor:null,coverage:{complete:true,outlook:{available:false}}}; }
+      if(action==='dispatch_supply')return {supply_lots:fixture.supply_lots||[],coverage:{complete:true}};
       throw Error('Unknown fixture action');
     };
     window.fixture.post = async (action, envelope) => {
@@ -33,6 +34,9 @@ async function setup(page) {
         case 'group_delete':r.groups=r.groups.filter(g=>g.id!==p.id);r.requirements.forEach(item=>{if(item.group_id===p.id)item.group_id=null;});break;
         case 'requirement_upsert':upsert(r.requirements,p);break;
         case 'requirement_move':r.requirements.find(x=>x.id===p.id).group_id=p.group_id;break;
+        case 'allocation_upsert':upsert(r.allocations,{...p,unit:r.requirements.find(x=>x.id===p.requirement_id)?.unit||null});break;
+        case 'receipt_upsert':upsert(r.receipts,p);break;
+        case 'order_prepare':upsert(r.order_drafts,{...p,line_items:(p.requirement_ids||[]).map(id=>({dispatch_requirement_id:id,quantity:p.quantities?.[id]??null,unit_price:p.unit_prices?.[id]??null}))});break;
         case 'note_upsert':upsert(r.notes,p);break;
         case 'draft_upsert':upsert(r.drafts,{...p,status:'draft',content_hash:'fixture-hash:'+p.body});break;
         case 'draft_review':{const d=r.drafts.find(x=>x.id===p.id);d.status='reviewed';d.review={content_hash:d.content_hash,source_version:r.source_version};break;}
@@ -111,3 +115,118 @@ test('narrow workspace keeps exact compose usable without horizontal page overfl
 
 test('edits during the second review request cannot inherit the older approval',async({page})=>{await setup(page);await compose(page);await page.evaluate(()=>{const original=fixture.post;core=window.app.core;const review=core.command;core.command=async(...args)=>{if(args[1]==='draft_review')fixture.hold=true;return review(...args);};});await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect.poll(()=>page.evaluate(()=>fixture.commands.some(c=>c.command==='draft_review'))).toBe(true);await page.getByLabel('Exact message',{exact:true}).fill('New text during review');await page.evaluate(()=>{fixture.hold=false;fixture.release();});await expect(page.getByText('New edits were preserved. Review the latest content again.',{exact:true})).toBeVisible();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toHaveCount(0);});
 test('actual source fields and HTML-only mail render safely without invented links',async({page})=>{await setup(page);await page.evaluate(async()=>{fixture.records.a.job.scope_json={job:{runs:[{length:12.5}]}};fixture.records.a.job.pricing_json={customer_quote:{total:123}};fixture.records.a.media=[{id:'photo',name:'Captured site photo',storage_url:'https://example.test/photo.jpg'},{id:'missing',name:'Missing original'},{id:'script',name:'Unsafe source',storage_url:'javascript:alert(1)'}];fixture.records.a.communications=[{id:'html-mail',job_id:'a',subject:'HTML-only captured mail',snippet:'Only a truncated snippet',body_html:'<p>First paragraph</p><script>window.injected=true</script><p>Second paragraph</p>'}];await core.load('a');});await expect(page.getByText('Stored job scope',{exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Open original',exact:true})).toHaveCount(1);await expect(page.getByRole('link',{name:'Open original',exact:true})).toHaveAttribute('href','https://example.test/photo.jpg');await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('button',{name:/HTML-only captured mail/}).click();await expect(page.getByText(/First paragraph/)).toBeVisible();await expect(page.getByText(/Second paragraph/)).toBeVisible();await expect(page.getByText('Only a truncated snippet')).toHaveCount(0);expect(await page.evaluate(()=>window.injected)).toBeUndefined();});
+
+
+
+test('receipt allocation selection remains explicit after source removal', async ({ page }) => {
+  await setup(page);
+  await page.evaluate(async () => {
+    fixture.records.a.requirements = [
+      { id: 'requirement-a', description: 'Removed panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' },
+      { id: 'requirement-b', description: 'Remaining panels', quantity: 6, unit: 'each', reviewed_source_version: 'source-1' }
+    ];
+    fixture.records.a.allocations = [
+      { id: 'allocation-a', requirement_id: 'requirement-a', quantity: 4, unit: 'each', supply_id: 'stock:removed' },
+      { id: 'allocation-b', requirement_id: 'requirement-b', quantity: 6, unit: 'each', supply_id: 'stock:remaining' }
+    ];
+    await core.load('a');
+  });
+  const allocations = page.locator('[data-disclosure="allocations"]');
+  await allocations.locator('summary').click();
+  await page.getByRole('button', { name: 'Verify receipt', exact: true }).click();
+  await page.getByLabel('Allocation', { exact: true }).selectOption('allocation-a');
+  await page.getByLabel('Usable quantity', { exact: true }).fill('2');
+  await page.getByLabel('Damaged quantity', { exact: true }).fill('0');
+  await page.getByLabel('Received location', { exact: true }).fill('yard');
+  await page.getByLabel('Evidence', { exact: true }).fill('Initial docket');
+  await page.evaluate(async () => {
+    fixture.records.a.requirements = fixture.records.a.requirements.filter(item => item.id !== 'requirement-a');
+    fixture.records.a.allocations = fixture.records.a.allocations.filter(item => item.id !== 'allocation-a');
+    fixture.records.a.version += 1;
+    await core.load('a');
+  });
+  const allocationSelect = page.getByLabel('Allocation', { exact: true });
+  await expect(allocationSelect).toHaveValue('allocation-a');
+  expect(await allocationSelect.locator('option:checked').textContent()).toContain('Unavailable allocation: allocation-a');
+  await page.getByLabel('Received location', { exact: true }).fill('site');
+  await page.getByRole('button', { name: 'Save verified custody', exact: true }).click();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.getByRole('button', { name: 'I reviewed changes · keep my edits', exact: true }).click();
+  await expect(page.getByText('Changed evidence acknowledged. Your exact values remain for review and saving.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.getByRole('button', { name: 'Save verified custody', exact: true }).click();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await allocationSelect.selectOption('allocation-b');
+  await page.getByRole('button', { name: 'Save verified custody', exact: true }).click();
+  const command = await page.evaluate(() => fixture.commands.at(-1));
+  expect(command.command).toBe('receipt_upsert');
+  expect(command.payload).toEqual({ id: command.payload.id, allocation_id: 'allocation-b', usable_quantity: 2, damaged_quantity: 0, location: 'site', evidence: 'Initial docket' });
+});
+
+test('allocation requirement selection remains explicit after source removal', async ({ page }) => {
+  await setup(page);
+  await page.evaluate(async () => {
+    fixture.records.a.requirements = [
+      { id: 'requirement-a', description: 'Removed panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' },
+      { id: 'requirement-b', description: 'Remaining panels', quantity: 6, unit: 'each', reviewed_source_version: 'source-1' }
+    ];
+    fixture.supply_lots = [{ id: 'stock:shared-lot', description: 'Shared panels', quantity: 10, unit: 'each', location: 'yard' }];
+    await core.load('a');
+  });
+  const allocations = page.locator('[data-disclosure="allocations"]');
+  await allocations.locator('summary').click();
+  await page.getByRole('button', { name: 'Allocate supply', exact: true }).click();
+  await page.getByLabel('Requirement', { exact: true }).selectOption('requirement-a');
+  await page.getByLabel('Recorded supply lot', { exact: true }).selectOption('stock:shared-lot');
+  await page.getByLabel('Quantity', { exact: true }).fill('3');
+  await page.evaluate(async () => {
+    fixture.records.a.requirements = fixture.records.a.requirements.filter(item => item.id !== 'requirement-a');
+    fixture.records.a.version += 1;
+    await core.load('a');
+  });
+  const requirementSelect = page.getByLabel('Requirement', { exact: true });
+  await expect(requirementSelect).toHaveValue('requirement-a');
+  expect(await requirementSelect.locator('option:checked').textContent()).toContain('Unavailable requirement: requirement-a');
+  await page.getByLabel('Quantity', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Save allocation', exact: true }).click();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.getByRole('button', { name: 'I reviewed changes · keep my edits', exact: true }).click();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.getByRole('button', { name: 'Save allocation', exact: true }).click();
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await requirementSelect.selectOption('requirement-b');
+  await page.getByRole('button', { name: 'Save allocation', exact: true }).click();
+  const command = await page.evaluate(() => fixture.commands.at(-1));
+  expect(command.command).toBe('allocation_upsert');
+  expect(command.payload).toEqual({ id: command.payload.id, requirement_id: 'requirement-b', supply_id: 'stock:shared-lot', quantity: 4 });
+});
+
+test('purchase order destination cannot silently refill after being cleared', async ({ page }) => {
+  await setup(page);
+  await page.evaluate(async () => {
+    fixture.records.a.job.site_address = 'Original site address must not refill';
+    fixture.records.a.requirements = [{ id: 'requirement-a', description: 'Reviewed panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' }];
+    await core.load('a');
+  });
+  await page.getByRole('button', { name: 'Prepare purchase order', exact: true }).click();
+  await page.getByLabel('Supplier name', { exact: true }).fill('Supplier One');
+  await page.getByLabel('Delivery destination', { exact: true }).fill('North yard');
+  await page.getByLabel('Delivery destination', { exact: true }).fill('');
+  await page.getByLabel('Reviewed panels · 4 each · Reviewed').check();
+  await page.evaluate(() => core.load('a'));
+  await page.locator('.dp-job[data-id="b"]').click();
+  await page.locator('.dp-job[data-id="a"]').click();
+  const destination = page.getByLabel('Delivery destination', { exact: true });
+  await expect(destination).toHaveValue('');
+  await page.getByRole('button', { name: 'Save purchase order draft', exact: true }).click();
+  expect(await destination.evaluate(input => input.validity.valueMissing)).toBe(true);
+  expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await destination.fill('Replacement site gate');
+  await page.getByLabel('I checked linked orders and existing supply for duplication.').check();
+  await page.getByRole('button', { name: 'Save purchase order draft', exact: true }).click();
+  const command = await page.evaluate(() => fixture.commands.at(-1));
+  expect(command.command).toBe('order_prepare');
+  expect(command.payload.delivery_address).toBe('Replacement site gate');
+  expect(command.payload.supplier_name).toBe('Supplier One');
+  expect(command.payload.requirement_ids).toEqual(['requirement-a']);
+});

@@ -44,6 +44,7 @@ for (const [action, kind, values] of [
     const ui = await workspace();
     ui.records.a.requirements = [{ ...requirement, reviewed_source_version: 'source-1' }];
     ui.records.a.allocations = [{ id: 'a', requirement_id: 'r', quantity: 5 }];
+    ui.records.a.supply_lots = [{ id: 'stock:s', description: 'Recorded panels', quantity: 5, unit: 'each' }];
     ui.records.a.receipts = [{ id: 'receipt', allocation_id: 'a', usable_quantity: 5, damaged_quantity: 1, location: 'yard' }];
     await ui.core.load('a');
     await ui.click(action, action === 'transfer-receipt' ? 'receipt' : 'a');

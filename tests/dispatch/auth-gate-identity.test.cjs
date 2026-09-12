@@ -153,6 +153,64 @@ test('invalid or denied profiles do not unlock without verified user and org ide
   assert.equal(switched.cloud.signedOut(), 1);
 });
 
+test('pending profile keeps the gate locked without signing out', () => {
+  const run = gateHarness({ profile: null, loggedIn: true });
+
+  assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), false);
+  assert.equal(run.context.SW_AUTH_GATE.identity(), null);
+  assert.equal(run.events.some(event => event.type === 'sw:auth-unlocked'), false);
+  assert.ok(run.document.getElementById('swAuthGateStyle'));
+  assert.equal(run.cloud.signedOut(), 0);
+});
+
+test('delayed verified profile unlocks from the pending profile state', () => {
+  const profile = { id: 'user-1', org_id: 'org-1', role: 'admin' };
+  const run = gateHarness({ profile: null, currentProfile: null, loggedIn: true });
+  run.cloud.setUser(profile);
+  run.cloud.emit('auth:login', profile);
+
+  assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), true);
+  assert.deepEqual(own(run.context.SW_AUTH_GATE.identity()), { id: 'user-1', org_id: 'org-1' });
+  assert.equal(run.cloud.signedOut(), 0);
+});
+
+test('delayed null profile remains locked without signing out', () => {
+  const run = gateHarness({ profile: null, loggedIn: true });
+  run.cloud.emit('auth:login', null);
+
+  assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), false);
+  assert.equal(run.context.SW_AUTH_GATE.identity(), null);
+  assert.equal(run.events.some(event => event.type === 'sw:auth-unlocked'), false);
+  assert.ok(run.document.getElementById('swAuthGateStyle'));
+  assert.equal(run.cloud.signedOut(), 0);
+});
+
+test('delayed profile without the required role fails verification and stays locked', () => {
+  const run = gateHarness({ profile: null, loggedIn: true });
+  const denied = { id: 'user-1', org_id: 'org-1', role: 'estimator' };
+  run.cloud.setUser(denied);
+  run.cloud.emit('auth:login', denied);
+
+  assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), false);
+  assert.equal(run.context.SW_AUTH_GATE.identity(), null);
+  assert.equal(run.events.some(event => event.type === 'sw:auth-unlocked'), false);
+  assert.equal(run.cloud.signedOut(), 1);
+});
+
+test('late prior user profile is denied from the pending profile state', () => {
+  const current = { id: 'current-user', org_id: 'org-1', role: 'admin' };
+  const prior = { id: 'prior-user', org_id: 'org-1', role: 'admin' };
+  const run = gateHarness({ profile: null, currentProfile: null, loggedIn: true });
+  run.cloud.setUser(current);
+  run.cloud.emit('auth:login', prior);
+
+  assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), false);
+  assert.equal(run.context.SW_AUTH_GATE.identity(), null);
+  assert.equal(run.events.some(event => event.type === 'sw:auth-unlocked'), false);
+  assert.ok(run.document.getElementById('swAuthGateStyle'));
+  assert.equal(run.cloud.signedOut(), 1);
+});
+
 test('denied login event after unlock locks before signout completes', () => {
   const run = gateHarness({ profile: { id: 'user-1', org_id: 'org-1', role: 'admin' } });
   assert.equal(run.context.SW_AUTH_GATE.isUnlocked(), true);

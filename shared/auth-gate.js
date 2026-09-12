@@ -121,7 +121,7 @@
   }
 
   function _checkRole(cloud, profile) {
-    if (!profile) { _denyAuth(cloud, 'Login failed'); return; }
+    if (!profile) { _injectGate(); return; }
     var identity = _identityFromProfile(profile);
     if (!identity) {
       _denyAuth(cloud, 'Access denied — your profile is missing verified identity.');

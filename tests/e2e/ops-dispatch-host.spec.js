@@ -12,6 +12,11 @@ async function openStaticOps(page) {
   await page.waitForFunction(() => window.DispatchOps && typeof window.DispatchOps.loadMainCalendar === 'function' && typeof window.renderScheduleView === 'function');
   await revealOpsStaticFixture(page);
   await page.evaluate(() => {
+    const identity = { id: 'fixture-operator', org_id: 'fixture-org' };
+    window.SW_AUTH_GATE.identity = () => identity;
+    window.dispatchEvent(new CustomEvent('sw:auth-identity', { detail: identity }));
+  });
+  await page.evaluate(() => {
     document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
     document.getElementById('viewCalendar').classList.add('active');
   });

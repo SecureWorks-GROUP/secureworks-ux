@@ -1,0 +1,150 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+function extractOpsTransport() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('async function opsAuthHeaders');
+  const end = html.indexOf('// Compatibility name retained', start);
+  assert.ok(start > -1 && end > start, 'ops transport functions found');
+  return html.slice(start, end);
+}
+
+function transportContext({ token, guardAvailable = true } = {}) {
+  const calls = [];
+  const tokenGate = token || deferred();
+  let guardValid = true;
+  let currentUser = { email: 'current@example.test' };
+  const context = {
+    _opsApiBase: 'https://ops.example/functions/v1/ops-api',
+    _opsUserEmail: 'sticky@example.test',
+    cloud: {
+      auth: {
+        getAccessToken() { return tokenGate.promise; },
+        getUser() { return currentUser; },
+      },
+    },
+    DispatchOps: guardAvailable ? { identityGuard() { return function assertIdentity() {
+      if (!guardValid) { const error = new Error('changed'); error.code = 'dispatch_identity_changed'; throw error; }
+    }; } } : {},
+    fetch: async (url, options) => {
+      calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  };
+  context.window = context;
+  vm.runInNewContext(extractOpsTransport(), context);
+  return {
+    context,
+    calls,
+    tokenGate,
+    invalidate() { guardValid = false; },
+    setCurrentUser(user) { currentUser = user; },
+  };
+}
+
+test('Dispatch opsFetch aborts before fetch when identity changes while token is pending', async () => {
+  const h = transportContext();
+  const result = h.context.opsFetch('dispatch_job', { job_id: 'job-a' }).then(
+    () => null,
+    error => error
+  );
+  await Promise.resolve();
+  h.invalidate();
+  h.tokenGate.resolve('new-token');
+  const error = await result;
+
+  assert.equal(error.code, 'dispatch_identity_changed');
+  assert.equal(h.calls.length, 0);
+});
+
+test('Dispatch opsPost aborts before fetch when identity guard is unavailable', async () => {
+  const token = deferred();
+  token.resolve('token');
+  const h = transportContext({ token, guardAvailable: false });
+  const error = await h.context.opsPost('dispatch_command', { command: 'draft_upsert' }).then(
+    () => null,
+    err => err
+  );
+
+  assert.equal(error.code, 'dispatch_identity_changed');
+  assert.equal(h.calls.length, 0);
+});
+
+test('guarded Dispatch opsPost attributes the current verified user, not sticky cached email', async () => {
+  const token = deferred();
+  token.resolve('token');
+  const h = transportContext({ token });
+  h.setCurrentUser({ email: 'verified@example.test' });
+  await h.context.opsPost('dispatch_command', { command: 'draft_upsert' });
+
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].body.operator_email, 'verified@example.test');
+});
+
+function extractLoadCalendar() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('async function loadCalendar()');
+  const end = html.indexOf('// <calendar-ops-core>', start);
+  assert.ok(start > -1 && end > start, 'loadCalendar function found');
+  return html.slice(start, end);
+}
+
+test('loadCalendar ignores a late incumbent response after Dispatch identity changes', async () => {
+  const calendarRead = deferred();
+  let guardValid = true;
+  let renderCount = 0;
+  const body = { innerHTML: '' };
+  const context = {
+    _calEvents: [{ job_id: 'old' }],
+    _calDeliveries: [{ id: 'old-po' }],
+    _calReadiness: { old: true },
+    _calOrgEvents: [{ id: 'old-org' }],
+    _calTruncated: false,
+    _unschedJobs: ['old-unscheduled'],
+    _calAvailability: {},
+    _calLeaveByDate: {},
+    _crewList: [],
+    document: { getElementById(id) { return id === 'calendarBody' ? body : null; } },
+    getCalRange() { return { from: '2026-09-14', to: '2026-09-20' }; },
+    DispatchOps: {
+      loadMainCalendar() {},
+      identityGuard() { return function assertIdentity() {
+        if (!guardValid) { const error = new Error('changed'); error.code = 'dispatch_identity_changed'; throw error; }
+      }; },
+    },
+    opsFetch(action) {
+      if (action === 'calendar') return calendarRead.promise;
+      throw new Error('unexpected enrichment read before calendar commit: ' + action);
+    },
+    initCalEventFilterChips() { throw new Error('should not initialize filters after identity change'); },
+    renderCalendar() { renderCount++; },
+    renderCalUnschedSidebar() {},
+    renderCalSummary() {},
+    console: { error() {} },
+    showToast() { throw new Error('identity changes should not toast calendar failures'); },
+  };
+  context.window = context;
+  vm.runInNewContext(extractLoadCalendar(), context);
+
+  const load = context.loadCalendar();
+  await Promise.resolve();
+  guardValid = false;
+  calendarRead.resolve({ events: [{ job_id: 'new' }], deliveries: [{ id: 'new-po' }], readiness: { new: true }, orgEvents: [{ id: 'new-org' }], truncated: true });
+  await load;
+
+  assert.deepEqual(context._calEvents, [{ job_id: 'old' }]);
+  assert.deepEqual(context._calDeliveries, [{ id: 'old-po' }]);
+  assert.deepEqual(context._calReadiness, { old: true });
+  assert.deepEqual(context._calOrgEvents, [{ id: 'old-org' }]);
+  assert.equal(context._calTruncated, false);
+  assert.equal(renderCount, 0);
+});

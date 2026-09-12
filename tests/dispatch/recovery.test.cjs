@@ -118,7 +118,7 @@ for (const [field, value] of [
 test('allocation suitability review requires reason and evidence without receipt inference', async () => {
   const ui = await workspace();
   ui.records.a.requirements = [{ id: 'requirement-a', description: 'Custom fence panels', quantity: 8, unit: 'each' }];
-  ui.records.a.allocations = [{ id: 'allocation-a', requirement_id: 'requirement-a', quantity: 8, unit: 'each', supply_id: 'stock:yard', suitability_obligation: 'Confirm compatibility' }];
+  ui.records.a.allocations = [{ id: 'allocation-a', requirement_id: 'requirement-a', quantity: 8, unit: 'each', supply_id: 'stock:yard', suitability_status: 'stale', suitability_obligation: { code: 'allocation_suitability', allocation_id: 'allocation-a', requirement_id: 'requirement-a', owner: 'Shaun', next_action: 'Confirm compatibility' } }];
   ui.records.a.receipts = [{ id: 'receipt-a', allocation_id: 'allocation-a', usable_quantity: 8, damaged_quantity: 0, location: 'site', evidence: 'Quantity only' }];
   await ui.core.load('a');
   await ui.click('review-allocation', 'allocation-a');
@@ -128,13 +128,13 @@ test('allocation suitability review requires reason and evidence without receipt
   assert.match(ui.host.innerHTML, /A reason and compatibility evidence are required/);
   assert.match(ui.host.innerHTML, /8 usable · 0 damaged · site/);
   assert.match(ui.host.innerHTML, /Confirm compatibility/);
-  assert.doesNotMatch(ui.host.innerHTML, /Compatibility current|Current compatibility/);
+  assert.doesNotMatch(ui.host.innerHTML, /Compatibility: current|Current compatibility/);
 });
 
 test('allocation suitability edits survive refresh and job switches', async () => {
   const ui = await workspace();
   ui.records.a.requirements = [{ id: 'requirement-a', description: 'Custom fence panels', quantity: 8, unit: 'each' }];
-  ui.records.a.allocations = [{ id: 'allocation-a', requirement_id: 'requirement-a', quantity: 8, unit: 'each', supply_id: 'stock:yard', suitability_obligation: 'Confirm compatibility' }];
+  ui.records.a.allocations = [{ id: 'allocation-a', requirement_id: 'requirement-a', quantity: 8, unit: 'each', supply_id: 'stock:yard', suitability_status: 'stale', suitability_obligation: { code: 'allocation_suitability', allocation_id: 'allocation-a', requirement_id: 'requirement-a', owner: 'Shaun', next_action: 'Confirm compatibility' } }];
   await ui.core.load('a');
   await ui.click('review-allocation', 'allocation-a');
   ui.input('suitability', { reason: 'Matches signed scope', evidence: 'Photo and docket checked' });

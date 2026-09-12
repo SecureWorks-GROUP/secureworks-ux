@@ -34,9 +34,10 @@ async function workspace(options = {}) {
     }, isConnected: true, classList: { add() {} }, contains: node => !!node,
     querySelectorAll: selector => selector === 'details[data-disclosure]' ? detailNodes : focusNodes,
     querySelector: selector => forms.get(selector.match(/^\[data-form="([^"]+)"\]$/)?.[1]) || null,
-    addEventListener: (type, listener) => listeners.set(type, listener)
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type, listener) => { if (listeners.get(type) === listener) listeners.delete(type); }
   };
-  const core = DispatchCore.create({
+  const transport = {
     id: options.id || (() => `00000000-0000-4000-8000-${String(++count).padStart(12, '0')}`),
     get: async (action, params) => {
       reads.push({ action, params: clone(params) });
@@ -64,14 +65,18 @@ async function workspace(options = {}) {
       current.version++;
       return clone(current);
     }
-  });
+  };
+  let core = DispatchCore.create(transport);
   const context = vm.createContext({ DispatchCore, document, FormData: FormValues, URL, innerWidth: 1200,
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id),
     addEventListener: (name, fn) => windowListeners.set(name, fn), removeEventListener: name => windowListeners.delete(name),
+    ...(options.hostIdentity ? { SW_AUTH_GATE: { identity: () => options.hostIdentity }, opsFetch: transport.get, opsPost: transport.post } : {}),
     ...options.globals });
   context.window = context;
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../modules/ops-dispatch.js'), 'utf8'), context);
-  const app = context.DispatchOps.mount(host, { core, now: new Date('2026-09-14T04:00:00Z') });
+  const app = context.DispatchOps.mount(host, { ...(options.hostIdentity ? {} : { core }), now: new Date('2026-09-14T04:00:00Z') });
+  core = app.core;
+  document.getElementById = id => id === 'dispatchRoot' ? host : null;
   await app.load();
   return {
     app, core, host, records, commands, reads, lots, timers, document, context,
@@ -97,7 +102,8 @@ async function workspace(options = {}) {
       const next = { ...prior, focused: false, focus() { this.focused = true; document.activeElement = this; }, setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; } };
       document.activeElement = prior; focusNodes = [next]; return next;
     },
-    emit(name) { return (windowListeners.get(name) || documentListeners.get(name))?.(); },
+    emit(name, detail) { return (windowListeners.get(name) || documentListeners.get(name))?.({ detail }); },
+    identity(value) { options.hostIdentity = value; return windowListeners.get('sw:auth-identity')?.({ detail: value }); },
     async visibility(visible) { document.visibilityState = visible ? 'visible' : 'hidden'; await documentListeners.get('visibilitychange')?.(); },
     async tick() { const entry = timers.entries().next().value; if (entry) { timers.delete(entry[0]); await entry[1].fn(); } }
   };

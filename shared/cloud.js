@@ -92,6 +92,9 @@
   var _user = null;
   var _userProfile = null;
   var _orgId = null;
+  var _authGeneration = 0;
+  var _authAttempt = 0;
+  var _profileGeneration = 0;
   var _online = navigator.onLine;
   var _offlineQueue = [];
   var _listeners = {};
@@ -110,6 +113,38 @@
   function off(event, fn) {
     if (!_listeners[event]) return;
     _listeners[event] = _listeners[event].filter(function(f) { return f !== fn; });
+  }
+
+  function _sameAuthUser(a, b) {
+    return !!a && !!b && a.id === b.id && (a.email || '') === (b.email || '');
+  }
+
+  function _beginUserAuth(user) {
+    if (_sameAuthUser(_user, user)) {
+      _user = user;
+      return _authGeneration;
+    }
+    _authGeneration++;
+    _authAttempt++;
+    emit('auth:changing', user ? { id: user.id, email: user.email || '' } : null);
+    _user = user;
+    _userProfile = null;
+    _orgId = null;
+    return _authGeneration;
+  }
+
+  function _beginSignOut() {
+    _authGeneration++;
+    _authAttempt++;
+    emit('auth:changing', null);
+    _user = null;
+    _userProfile = null;
+    _orgId = null;
+    return _authGeneration;
+  }
+
+  function _authCurrent(generation, userId) {
+    return generation === _authGeneration && _user && _user.id === userId;
   }
 
   // ── Online/Offline Detection ──
@@ -185,21 +220,22 @@
 
     // Sign in with email + password (fallback)
     async signIn(email, password) {
+      var attempt = ++_authAttempt;
       var result = await sb.auth.signInWithPassword({ email: email, password: password });
       if (result.error) throw result.error;
-      _user = result.data.user;
-      await _loadUserProfile();
+      if (attempt !== _authAttempt && !_sameAuthUser(_user, result.data.user)) throw new Error('Auth identity changed during sign in');
+      var generation = _beginUserAuth(result.data.user);
+      var profile = await _loadUserProfile(result.data.user, generation);
+      if (!_authCurrent(generation, result.data.user.id) || !profile || profile !== _userProfile) throw new Error('Auth identity changed during sign in');
       emit('auth:login', _userProfile);
       return _userProfile;
     },
 
     // Sign out
     async signOut() {
+      var generation = _beginSignOut();
       await sb.auth.signOut();
-      _user = null;
-      _userProfile = null;
-      _orgId = null;
-      emit('auth:logout');
+      if (generation === _authGeneration && !_user) emit('auth:logout');
     },
 
     // Get current user
@@ -216,37 +252,47 @@
   };
 
   // Load user profile via edge function (bypasses RLS)
-  async function _loadUserProfile() {
-    if (!_user) return;
+  async function _loadUserProfile(user, generation) {
+    if (!user) return;
+    var userId = user.id;
+    var email = user.email || '';
+    var profileGeneration = ++_profileGeneration;
+    function current() { return profileGeneration === _profileGeneration && _authCurrent(generation, userId); }
     try {
+      var headers = await _swHeaders();
+      if (!current()) return;
       var res = await fetch(SUPABASE_URL + '/functions/v1/ghl-proxy?action=get_profile', {
         method: 'POST',
-        headers: await _swHeaders(),
-        body: JSON.stringify({ userId: _user.id, email: _user.email || '' })
+        headers: headers,
+        body: JSON.stringify({ userId: userId, email: email })
       });
+      if (!current()) return;
       var data = await res.json();
+      if (!current()) return;
       if (!res.ok) throw new Error(data.error || 'Profile load failed');
       _userProfile = data.profile;
       _orgId = _userProfile.org_id;
+      return _userProfile;
     } catch(e) {
+      if (!current()) return;
       console.warn('[Cloud] Profile load failed, using auth data:', e);
       // Fallback: use basic auth data so user isn't blocked
-      _userProfile = { id: _user.id, email: _user.email, name: (_user.email || '').split('@')[0], role: 'estimator', org_id: '00000000-0000-0000-0000-000000000001' };
+      _userProfile = { id: userId, email: email, name: email.split('@')[0], role: 'estimator', org_id: '00000000-0000-0000-0000-000000000001' };
       _orgId = _userProfile.org_id;
+      return _userProfile;
     }
   }
 
   // Listen for auth state changes
   sb.auth.onAuthStateChange(async function(event, session) {
     if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
-      _user = session.user;
-      await _loadUserProfile();
+      var generation = _beginUserAuth(session.user);
+      var profile = await _loadUserProfile(session.user, generation);
+      if (!_authCurrent(generation, session.user.id) || !profile || profile !== _userProfile) return;
       emit('auth:login', _userProfile);
       _flushQueue();
     } else if (event === 'SIGNED_OUT') {
-      _user = null;
-      _userProfile = null;
-      _orgId = null;
+      _beginSignOut();
       emit('auth:logout');
     }
   });
@@ -1434,10 +1480,13 @@
     _loadQueue();
 
     try {
+      var generation = _authGeneration;
       var session = await sb.auth.getSession();
+      if (generation !== _authGeneration) return;
       if (session.data?.session?.user) {
-        _user = session.data.session.user;
-        await _loadUserProfile();
+        var userGeneration = _beginUserAuth(session.data.session.user);
+        var profile = await _loadUserProfile(session.data.session.user, userGeneration);
+        if (!_authCurrent(userGeneration, session.data.session.user.id) || !profile || profile !== _userProfile) return;
         emit('auth:login', _userProfile);
         _flushQueue();
       }

@@ -6540,15 +6540,33 @@ async function opsAuthHeaders(extra) {
   return headers;
 }
 
-async function opsFetch(action, params, options) {
+function dispatchTransportOptions(action, options) {
   options = options || {};
+  if (String(action).indexOf('dispatch_') !== 0 || options.assertIdentity) return options;
+  var assertIdentity = null;
+  if (window.DispatchOps && DispatchOps.identityGuard) assertIdentity = DispatchOps.identityGuard();
+  return Object.assign({}, options, { assertIdentity: function() {
+    if (!assertIdentity) {
+      var error = new Error('Dispatch auth identity changed; reload Dispatch before retrying.');
+      error.code = 'dispatch_identity_changed';
+      throw error;
+    }
+    assertIdentity();
+  }});
+}
+
+async function opsFetch(action, params, options) {
+  options = dispatchTransportOptions(action, options);
   var url = _opsApiBase + '?action=' + action;
   if (params) {
     Object.keys(params).forEach(function(k) {
       if (params[k] != null) url += '&' + k + '=' + encodeURIComponent(params[k]);
     });
   }
-  var fetchOpts = { cache: 'no-store', headers: await opsAuthHeaders() };
+  if (options.assertIdentity) options.assertIdentity();
+  var headers = await opsAuthHeaders();
+  if (options.assertIdentity) options.assertIdentity();
+  var fetchOpts = { cache: 'no-store', headers: headers };
   if (options.signal) fetchOpts.signal = options.signal;
   return fetch(url, fetchOpts).then(function(resp) {
     if (!resp.ok) {
@@ -6566,11 +6584,22 @@ async function opsFetch(action, params, options) {
   });
 }
 
-async function opsPost(action, body) {
-  body = Object.assign({}, body, { operator_email: _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null });
+async function opsPost(action, body, options) {
+  options = dispatchTransportOptions(action, options);
+  if (options.assertIdentity) options.assertIdentity();
+  var dispatchGuarded = String(action).indexOf('dispatch_') === 0 && options.assertIdentity;
+  var operatorEmail = _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null;
+  if (dispatchGuarded) {
+    var currentUser = null;
+    try { currentUser = cloud && cloud.auth && cloud.auth.getUser ? cloud.auth.getUser() : null; } catch (e) { currentUser = null; }
+    operatorEmail = currentUser && currentUser.email || null;
+  }
+  body = Object.assign({}, body, { operator_email: operatorEmail });
+  var headers = await opsAuthHeaders({ 'Content-Type': 'application/json' });
+  if (options.assertIdentity) options.assertIdentity();
   return fetch(_opsApiBase + '?action=' + action, {
     method: 'POST',
-    headers: await opsAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: headers,
     body: JSON.stringify(body),
   }).then(function(resp) {
     if (!resp.ok) {
@@ -8432,6 +8461,8 @@ function toggleCalUnsched() {
 
 async function loadCalendar() {
   var range = getCalRange();
+  var assertDispatchIdentity = window.DispatchOps && DispatchOps.identityGuard ? DispatchOps.identityGuard() : null;
+  function checkDispatchIdentity() { if (assertDispatchIdentity) assertDispatchIdentity(); }
   if (window.DispatchOps) DispatchOps.loadMainCalendar(range);
 
   // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
@@ -8440,7 +8471,9 @@ async function loadCalendar() {
 
   try {
     // ── Grid-critical fetch ── the grid only needs the calendar events; draw it as soon as they arrive.
+    checkDispatchIdentity();
     var data = await opsFetch('calendar', { from: range.from, to: range.to });
+    checkDispatchIdentity();
     _calEvents = (data.events || []).filter(function(ev) {
       // Filter out legacy GHL imports and completed-without-job-number ghosts
       if (ev.legacy === true) return false;
@@ -8457,14 +8490,16 @@ async function loadCalendar() {
     // ── Enrichment fetches ── these don't gate the grid; patch in when they resolve.
     // Unscheduled sidebar (from pipeline)
     opsFetch('pipeline').then(function(p) {
+      checkDispatchIdentity();
       if (!p) return;
       _unschedJobs = ((p.columns || {}).accepted || []);
       if (typeof renderCalUnschedSidebar === 'function') renderCalUnschedSidebar();
       if (typeof renderCalSummary === 'function') renderCalSummary(getCalRange());
-    }).catch(function(e) { console.error('calendar pipeline enrich failed:', e); });
+    }).catch(function(e) { if (e && e.code === 'dispatch_identity_changed') return; console.error('calendar pipeline enrich failed:', e); });
 
     // Crew availability shading
     opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
+      checkDispatchIdentity();
       _calAvailability = {};
       _calLeaveByDate = {};
       // ops-api returns { availability: [...] }, never a bare array. The old
@@ -8488,8 +8523,9 @@ async function loadCalendar() {
         });
         renderCalendar(); // re-paint with availability backgrounds
       }
-    }).catch(function(e) { console.error('calendar availability enrich failed:', e); });
+    }).catch(function(e) { if (e && e.code === 'dispatch_identity_changed') return; console.error('calendar availability enrich failed:', e); });
   } catch (e) {
+    if (e && e.code === 'dispatch_identity_changed') return;
     console.error('loadCalendar error:', e);
     if (bodyEl) bodyEl.innerHTML = '';
     showToast('Failed to load calendar', 'warning', [

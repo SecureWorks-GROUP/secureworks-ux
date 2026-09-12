@@ -8,20 +8,26 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   const uuid = () => globalThis.crypto.randomUUID();
   function create(options) {
+    const initialTasks = () => ({ items: [], sourceFailures: [], status: null, loading: false, loaded: false, error: null,
+      offset: 0, nextOffset: 0, hasMore: false, sourceFailuresOffset: 0, sourceFailuresNextOffset: 0, sourceFailuresHasMore: false,
+      read: { items: { loading: false, loaded: false, error: null, complete: false }, sourceFailures: { loading: false, loaded: false, error: null, complete: false } } });
     const state = { jobs: [], coverage: null, selectedId: null, jobsLoading: false, error: null,
       supply: { lots: [], coverage: {}, errors: {} }, executions: new Map(), records: new Map(), editors: new Map(), pending: new Map(), errors: new Map(),
-      tasks: { items: [], sourceFailures: [], status: null, loading: false, loaded: false, error: null,
-        offset: 0, nextOffset: 0, hasMore: false, sourceFailuresOffset: 0, sourceFailuresNextOffset: 0, sourceFailuresHasMore: false,
-        read: { items: { loading: false, loaded: false, error: null, complete: false }, sourceFailures: { loading: false, loaded: false, error: null, complete: false } } },
+      tasks: initialTasks(),
       taskRetries: new Map(),
       evidence: new Map(), calendar: { events: [], undated: [], coverage: null, loading: false, loadedRange: null }, calendarRange: null, layers: { staff: true, materials: true, logistics: true } };
     const listeners = new Set();
+    let disposed = false;
     let listGeneration = 0, calendarGeneration = 0, tasksGeneration = 0;
     const recordGeneration = new Map();
     const recordLoads = new Map();
     const executionGeneration = new Map();
     const taskLoads = new Map();
     const emit = () => listeners.forEach(listener => listener(state));
+    const inactive = () => new Error('Dispatch core disposed.');
+    const ensureActive = () => { if (disposed) throw inactive(); };
+    const apiGet = async (action, params) => { ensureActive(); const result = await options.get(action, params); ensureActive(); return result; };
+    const apiPost = async (action, body) => { ensureActive(); const result = await options.post(action, body); ensureActive(); return result; };
     const now = () => Date.now();
     const jobEvidence = id => {
       if (!state.evidence.has(id)) state.evidence.set(id, { loading: false, lastSuccessAt: null, error: null, verified: false });
@@ -50,13 +56,15 @@
       return record;
     }
     async function list() {
+      ensureActive();
       const generation = ++listGeneration;
       state.jobsLoading = true; state.error = null; emit();
       const jobs = new Map(), cursors = new Set();
       let cursor, coverage;
       try {
         do {
-          const result = await options.get('dispatch_list', { limit: 100, ...(cursor ? { cursor } : {}) });
+          const result = await apiGet('dispatch_list', { limit: 100, ...(cursor ? { cursor } : {}) });
+          ensureActive();
           if (generation !== listGeneration) return;
           if (!Array.isArray(result.jobs)) throw new Error('Dispatch population is unavailable.');
           result.jobs.forEach(job => jobs.set(job.id, job));
@@ -67,13 +75,15 @@
           state.jobs = [...jobs.values()]; state.coverage = { ...coverage, complete: !cursor && coverage?.complete === true, has_more: !!cursor }; emit();
         } while (cursor);
       } catch (error) {
+        if (disposed) throw error;
         if (generation === listGeneration) { state.error = error.message; state.coverage = { ...coverage, complete: false }; }
       } finally {
-        if (generation === listGeneration) { state.jobsLoading = false; emit(); }
+        if (!disposed && generation === listGeneration) { state.jobsLoading = false; emit(); }
       }
-      if (!state.selectedId && state.jobs.length) await select(state.jobs[0].id);
+      if (!disposed && !state.selectedId && state.jobs.length) await select(state.jobs[0].id);
     }
     async function load(id) {
+      ensureActive();
       if (recordLoads.has(id)) return recordLoads.get(id);
       const generation = nextRecordGeneration(id);
       const readStartedDuringWrite = state.pending.get(id)?.running === true;
@@ -82,7 +92,8 @@
       promise = (async () => {
         let current = false;
         try {
-          const record = await options.get('dispatch_job', { job_id: id });
+          const record = await apiGet('dispatch_job', { job_id: id });
+          ensureActive();
           current = generation === recordGeneration.get(id);
           if (current) {
             if (!readStartedDuringWrite) acceptAuthoritative(record, id);
@@ -90,6 +101,7 @@
           }
           return record;
         } catch (error) {
+          if (disposed) throw error;
           current = generation === recordGeneration.get(id);
           if (current) {
             state.errors.set(id, error.message);
@@ -98,36 +110,47 @@
           throw error;
         } finally {
           if (recordLoads.get(id) === promise) recordLoads.delete(id);
-          if (current) emit();
+          if (!disposed && current) emit();
         }
       })();
       recordLoads.set(id, promise);
       return promise;
     }
     async function select(id) {
+      ensureActive();
       state.selectedId = id; emit();
-      try { return await load(id); } catch (_) { return null; }
+      try { return await load(id); } catch (error) { if (disposed) throw error; return null; }
     }
     function edit(id, key, value) {
+      ensureActive();
       if (!state.editors.has(id)) state.editors.set(id, new Map());
       state.editors.get(id).set(key, copy(value));
     }
     function editor(id, key) { return state.editors.get(id)?.get(key); }
+    function baseline(id) {
+      const record = state.records.get(id);
+      return record ? { version: record.version, source_version: record.source_version } : null;
+    }
     function clearEditor(id, key, expected) {
+      ensureActive();
       const current = editor(id, key);
       if (expected === undefined || JSON.stringify(current) === JSON.stringify(expected)) state.editors.get(id)?.delete(key);
     }
     async function execute(id, envelope, action) {
+      ensureActive();
       const pending = state.pending.get(id);
       if (pending?.running) throw new Error('A Dispatch change is still being checked.');
       state.pending.set(id, { envelope, action, running: true }); recordLoads.delete(id); nextRecordGeneration(id); state.errors.delete(id); emit();
       try {
-        const result = await options.post(action, envelope);
+        const result = await apiPost(action, envelope);
+        ensureActive();
         // A committed command is followed by a fresh server read. A failed read keeps the
         // exact request identity for safe retry; it never repeats a new command blindly.
-        const record = result?.job ? result : await options.get('dispatch_job', { job_id: id });
-        acceptAuthoritative(record, id); state.pending.delete(id); emit(); return record;
+        const record = result?.job ? result : await apiGet('dispatch_job', { job_id: id });
+        ensureActive();
+        acceptAuthoritative(record, id); nextRecordGeneration(id); state.pending.delete(id); emit(); return record;
       } catch (error) {
+        if (disposed) throw error;
         const conflict = error.status === 409 || error.code === 'version_conflict';
         const definiteRefusal = [400, 401, 403, 404, 422].includes(error.status);
         // A definite validation/authority refusal did not commit. Let the operator
@@ -138,20 +161,26 @@
         state.errors.set(id, error.message); emit(); throw error;
       }
     }
-    async function command(id, commandName, payload, action = 'dispatch_command') {
+    async function command(id, commandName, payload, action = 'dispatch_command', reviewBaseline) {
+      ensureActive();
       if (state.pending.has(id)) throw new Error('Resolve the previous change before making another one.');
       const record = state.records.get(id);
       if (!record) throw new Error('Read this job before changing its plan.');
       if (state.evidence.get(id)?.verified !== true) throw new Error('Refresh this job before changing its plan.');
-      return execute(id, { job_id: id, expected_version: record.version, source_version: record.source_version,
+      const version = reviewBaseline ? reviewBaseline.version : record.version;
+      const sourceVersion = reviewBaseline ? reviewBaseline.source_version : record.source_version;
+      if (reviewBaseline && (record.version !== version || record.source_version !== sourceVersion)) throw new Error('Dispatch review changed; reconcile this editor before saving.');
+      return execute(id, { job_id: id, expected_version: version, source_version: sourceVersion,
         request_id: (options.id || uuid)(), command: commandName, payload: copy(payload) }, action);
     }
     async function retry(id) {
+      ensureActive();
       const pending = state.pending.get(id);
       if (!pending || pending.conflict) throw new Error('Reload and review the changed sources before preparing a new change.');
       return execute(id, pending.envelope, pending.action);
     }
     async function resolveConflict(id) {
+      ensureActive();
       const pending = state.pending.get(id);
       if (!pending?.conflict) throw new Error('An uncertain write must be retried with its original identity.');
       await load(id);
@@ -159,24 +188,29 @@
       state.pending.delete(id); emit();
     }
     async function calendar(from, to) {
+      ensureActive();
       const generation = ++calendarGeneration;
       state.calendarRange = { from, to };
       state.calendar = { ...state.calendar, loading: true, coverage: { ...(state.calendar.coverage || {}), complete: false } };
       emit();
       try {
-        const result = await options.get('dispatch_calendar', { from, to });
+        const result = await apiGet('dispatch_calendar', { from, to });
+        ensureActive();
         if (generation === calendarGeneration) state.calendar = { ...result, error: null, loading: false, loadedRange: { from, to } };
       } catch (error) {
+        if (disposed) throw error;
         if (generation === calendarGeneration) state.calendar = { ...state.calendar, loading: false, error: error.message, coverage: { ...(state.calendar.coverage || {}), complete: false } };
       }
-      emit();
+      if (!disposed) emit();
     }
     async function supply(kind) {
+      ensureActive();
       const lots = new Map(); let cursor; const seen = new Set();
       state.supply.errors[kind] = null;
       try {
         do {
-          const result = await options.get('dispatch_supply', { kind, ...(cursor ? { cursor } : {}) });
+          const result = await apiGet('dispatch_supply', { kind, ...(cursor ? { cursor } : {}) });
+          ensureActive();
           if (!Array.isArray(result.supply_lots)) throw new Error('Supply records unavailable.');
           result.supply_lots.forEach(lot => lots.set(lot.id, { ...lot, supply_kind: kind }));
           cursor = result.next_cursor;
@@ -185,7 +219,7 @@
           state.supply.lots = state.supply.lots.filter(lot => lot.supply_kind !== kind).concat([...lots.values()]);
           state.supply.coverage[kind] = !cursor && result.coverage?.complete === true; emit();
         } while (cursor);
-      } catch (error) { state.supply.errors[kind] = error.message; state.supply.coverage[kind] = false; emit(); }
+      } catch (error) { if (disposed) throw error; state.supply.errors[kind] = error.message; state.supply.coverage[kind] = false; emit(); }
     }
     const readState = (patch = {}) => ({ loading: false, loaded: false, error: null, complete: false, ...patch });
     const taskIdentity = task => `task:${task?.job_id}:${task?.source_version}:${task?.plan_version}`;
@@ -238,6 +272,7 @@
       };
     }
     async function tasks({ status = null, more = false } = {}) {
+      ensureActive();
       const reset = !more || status !== state.tasks.status;
       const firstOffset = reset ? 0 : Math.min(...activeTaskOffsets());
       const offset = Number.isFinite(firstOffset) ? firstOffset : 0;
@@ -256,7 +291,8 @@
           do {
             if (seenOffsets.has(pageOffset)) throw new Error('Repeated Dispatch task cursor; coverage is incomplete.');
             seenOffsets.add(pageOffset);
-            result = await options.get('dispatch_tasks', { ...(status ? { status } : {}), limit: 25, offset: pageOffset });
+            result = await apiGet('dispatch_tasks', { ...(status ? { status } : {}), limit: 25, offset: pageOffset });
+            ensureActive();
             current = generation === tasksGeneration;
             if (!current) return null;
             validateTaskPage(result, pageOffset);
@@ -269,6 +305,7 @@
           } while (more && pageOffset > 0);
           return state.tasks;
         } catch (error) {
+          if (disposed) throw error;
           current = generation === tasksGeneration;
           if (current) {
             state.tasks = { ...state.tasks, loading: false, loaded: false, error: error.message,
@@ -287,19 +324,23 @@
     const taskKey = (task, sourceFailure = false) => sourceFailure ? sourceFailureIdentity(task) : taskIdentity(task);
     const definiteTaskRetryRefusal = error => [400, 401, 403, 404, 409, 422].includes(error?.status);
     async function postTaskRetry(key, envelope) {
+      ensureActive();
       const previous = state.taskRetries.get(key) || {};
       state.taskRetries.set(key, { ...previous, key, envelope, reason: envelope.reason, running: true, error: null }); emit();
       try {
-        const result = await options.post('dispatch_retry_task', envelope);
+        const result = await apiPost('dispatch_retry_task', envelope);
+        ensureActive();
         state.taskRetries.set(key, { key, envelope, reason: envelope.reason, running: false, error: null, uncertain: false, refusal: false, result }); emit();
         return result;
       } catch (error) {
+        if (disposed) throw error;
         const refusal = definiteTaskRetryRefusal(error);
         state.taskRetries.set(key, { key, envelope, reason: envelope.reason, running: false, error: error.message, uncertain: !refusal, refusal, result: null }); emit();
         throw error;
       }
     }
     async function retryTask(task, reason, { sourceFailure = false } = {}) {
+      ensureActive();
       const text = String(reason || '').trim();
       if (!text) throw new Error('Retry reason is required.');
       if (!task?.job_id) throw new Error('Task job is required.');
@@ -316,6 +357,7 @@
       state.taskRetries.set(key, { key, envelope, reason: envelope.reason, running: true, error: null, uncertain: false, refusal: false, result: null }); emit();
       if (!sourceFailure) {
         await load(task.job_id).catch(() => null);
+        ensureActive();
         const record = state.records.get(task.job_id);
         const verified = state.evidence.get(task.job_id)?.verified === true;
         if (!verified || record?.source_version !== task.source_version || record?.version !== task.plan_version) {
@@ -327,6 +369,7 @@
       return postTaskRetry(key, envelope);
     }
     async function retryTaskRequest(key) {
+      ensureActive();
       const retry = state.taskRetries.get(key);
       if (!retry?.envelope || retry.uncertain !== true) throw new Error('Only an uncertain task retry can be replayed.');
       if (retry.running) throw new Error('This task retry is already pending.');
@@ -353,11 +396,13 @@
     const setExecutionIds = (entry, uncertain, completed, unknownWithoutApproval = entry.unknownWithoutApproval === true) => ({ ...entry, uncertain: uncertain.size > 0 || unknownWithoutApproval,
       uncertainApprovals: [...uncertain], completedApprovals: [...completed], unknownWithoutApproval });
     async function execution(id) {
+      ensureActive();
       const generation = (executionGeneration.get(id) || 0) + 1;
       executionGeneration.set(id, generation);
       let current = false;
       try {
-        const result = await options.get('dispatch_execution', { job_id: id });
+        const result = await apiGet('dispatch_execution', { job_id: id });
+        ensureActive();
         current = generation === executionGeneration.get(id);
         if (!current) return null;
         const previous = state.executions.get(id) || {};
@@ -371,6 +416,7 @@
         return result;
       }
       catch (error) {
+        if (disposed) throw error;
         current = generation === executionGeneration.get(id);
         if (current) {
           const previous = state.executions.get(id) || {};
@@ -385,21 +431,36 @@
         return null;
       }
       finally {
-        if (current) emit();
+        if (!disposed && current) emit();
       }
     }
-    return { state, list, load, select, edit, editor, clearEditor, command, retry, resolveConflict, calendar, supply, tasks, taskKey, retryTask, retryTaskRequest, execution,
-      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-      setLayer(layer, enabled) { if (Object.hasOwn(state.layers, layer)) { state.layers[layer] = enabled; emit(); } },
+    function dispose() {
+      if (disposed) return;
+      disposed = true;
+      listGeneration++; calendarGeneration++; tasksGeneration++;
+      recordGeneration.clear(); recordLoads.clear(); executionGeneration.clear(); taskLoads.clear();
+      state.jobs = []; state.coverage = null; state.selectedId = null; state.jobsLoading = false; state.error = null;
+      state.supply = { lots: [], coverage: {}, errors: {} };
+      state.executions.clear(); state.records.clear(); state.editors.clear(); state.pending.clear(); state.errors.clear(); state.evidence.clear();
+      state.calendar = { events: [], undated: [], coverage: null, loading: false, loadedRange: null }; state.calendarRange = null;
+      state.tasks = initialTasks(); state.taskRetries.clear();
+      emit(); listeners.clear();
+    }
+    return { state, list, load, select, edit, editor, baseline, clearEditor, command, retry, resolveConflict, calendar, supply, tasks, taskKey, retryTask, retryTaskRequest, execution, dispose,
+      subscribe(listener) { ensureActive(); listeners.add(listener); return () => listeners.delete(listener); },
+      setLayer(layer, enabled) { ensureActive(); if (Object.hasOwn(state.layers, layer)) { state.layers[layer] = enabled; emit(); } },
       approveDraft(id, payload) { return command(id, 'approve_draft', payload, 'dispatch_draft_approve'); },
       async executeDraft(id, draftId, approvalId) {
+        ensureActive();
         const previous = state.executions.get(id) || {};
         if (previous.submitting || previous.uncertain) throw new Error('Read back the previous action before any recovery.');
         if ((previous.completedApprovals || []).includes(approvalId)) throw new Error('This approved action already has an execution receipt.');
         state.executions.set(id, { ...previous, submitting: true }); emit();
         try {
-          const result = await options.post('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId });
+          const result = await apiPost('dispatch_execute', { job_id: id, draft_id: draftId, approval_id: approvalId });
+          ensureActive();
           const status = await execution(id);
+          ensureActive();
           const current = state.executions.get(id) || {};
           const uncertain = new Set(current.uncertainApprovals || []);
           const completed = new Set(current.completedApprovals || []);
@@ -409,11 +470,14 @@
           emit();
           return result;
         }
-        catch (error) { await execution(id); const current = state.executions.get(id) || {}; const uncertain = new Set(current.uncertainApprovals || []); uncertain.add(approvalId); state.executions.set(id, setExecutionIds({ ...current, submitting: false, error: 'Execution outcome uncertain. Refresh action status and read back the provider receipt.' }, uncertain, new Set(current.completedApprovals || []))); emit(); throw error; }
+        catch (error) { if (disposed) throw error; await execution(id); const current = state.executions.get(id) || {}; const uncertain = new Set(current.uncertainApprovals || []); uncertain.add(approvalId); state.executions.set(id, setExecutionIds({ ...current, submitting: false, error: 'Execution outcome uncertain. Refresh action status and read back the provider receipt.' }, uncertain, new Set(current.completedApprovals || []))); emit(); throw error; }
       },
       async readbackExecution(id, approvalId) {
-        const result = await options.post('dispatch_execution_readback', { approval_id: approvalId });
+        ensureActive();
+        const result = await apiPost('dispatch_execution_readback', { approval_id: approvalId });
+        ensureActive();
         const status = await execution(id);
+        ensureActive();
         const action = result?.action || null;
         const readbackMatch = action?.id && action.approval_id === approvalId && action.status === 'accepted_not_delivered' &&
           result.retry_safe === false && result.readback_required === false && result.readback_recorded === true;
@@ -427,7 +491,7 @@
         }
         return result;
       },
-      communications(params) { return options.get('dispatch_communications', params); },
+      communications(params) { return apiGet('dispatch_communications', params); },
       assess(id) { return command(id, 'assess', {}, 'dispatch_assess'); }, uuid: options.id || uuid };
   }
   const normalize = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');

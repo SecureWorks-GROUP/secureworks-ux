@@ -46,9 +46,29 @@
     if (!value || typeof value !== 'object') return `<p class="dp-small">${esc(value ?? 'Unavailable')}</p>`;
     return `<dl class="dp-source-fields">${Object.entries(value).map(([key, item]) => `<dt>${esc(label(key))}</dt><dd>${item && typeof item === 'object' ? `<details data-disclosure="${esc(JSON.stringify([...sourcePath, key]))}"><summary>${Array.isArray(item) ? item.length + ' recorded values' : 'Recorded details'}</summary>${structuredSource(item, [...sourcePath, key])}</details>` : esc(item ?? 'Unknown')}</dd>`).join('')}</dl>`;
   }
-  let shared;
+  const copy = value => JSON.parse(JSON.stringify(value));
+  const identityKey = value => value?.id && value?.org_id ? JSON.stringify([value.id, value.org_id]) : null;
+  let shared, identity = identityKey(root.SW_AUTH_GATE?.identity?.()), identityGeneration = 0;
+  const mounts = new Set();
+  function identityGuard() {
+    const generation = identityGeneration, owner = identity;
+    return () => {
+      if (!owner || generation !== identityGeneration || owner !== identityKey(root.SW_AUTH_GATE?.identity?.())) {
+        const error = new Error('Dispatch identity changed. Sign in and read the current workspace.');
+        error.code = 'dispatch_identity_changed';
+        throw error;
+      }
+    };
+  }
   function controller() {
-    if (!shared) shared = root.DispatchCore.create({ get: (action, params) => root.opsFetch(action, params), post: (action, body) => root.opsPost(action, body) });
+    if (!shared) {
+      const assertIdentity = identityGuard();
+      assertIdentity();
+      shared = root.DispatchCore.create({
+        get: (action, params) => { assertIdentity(); return root.opsFetch(action, params, { assertIdentity }); },
+        post: (action, body) => { assertIdentity(); return root.opsPost(action, body, { assertIdentity }); }
+      });
+    }
     return shared;
   }
   function calendarHTML(core, dates) {
@@ -64,7 +84,7 @@
     const core = options.core || controller();
     let dates = root.DispatchCore.week(options.now), trade = 'all', query = '', workflow = 'all', tab = 'scope', selectedGroup = 'all';
     let form = null, contextJob = null, message = '', mailResults = null, mailGeneration = 0, selectedMail = null;
-    const uiByJob = new Map(), formsByJob = new Map();
+    const uiByJob = new Map(), formsByJob = new Map(), editorCustody = new Map();
     let focusOnLoad = null;
     const job = () => core.state.records.get(core.state.selectedId);
     const button = (action, text, attrs = '') => `<button data-action="${action}" ${attrs}>${text}</button>`;
@@ -72,6 +92,11 @@
     const evidenceCurrent = record => core.state.evidence.get(record.job.id)?.verified === true;
     const purchaseRequired = draft => !!draft.po_id || draft.purchase_commitment !== false;
     let active = true, destroyed = false, refreshTimer = null, refreshing = null;
+    const handlers = [];
+    function listen(type, handler, capture) {
+      const guarded = event => { if (!destroyed) return handler(event); };
+      handlers.push([type, guarded, capture]); element.addEventListener(type, guarded, capture);
+    }
     const visible = () => active && !destroyed && document.visibilityState !== 'hidden' && element.isConnected !== false && (!element.getClientRects || element.getClientRects().length > 0);
     function scheduleRefresh() {
       if (!root.setTimeout || !root.clearTimeout) return;
@@ -83,7 +108,7 @@
       if (refreshing) return refreshing;
       const id = core.state.selectedId;
       refreshing = Promise.all([...(id ? [core.load(id).catch(() => {}), core.execution(id)] : []), ...(currentUI().disclosures['assessment-status'] ? [core.tasks().catch(() => {})] : [])])
-        .finally(() => { refreshing = null; scheduleRefresh(); });
+        .catch(error => { if (!destroyed) throw error; }).finally(() => { refreshing = null; scheduleRefresh(); });
       return refreshing;
     }
     function resumeRefresh() { if (visible()) return refreshEvidence(); scheduleRefresh(); }
@@ -92,9 +117,26 @@
       if (!uiByJob.has(id)) uiByJob.set(id, { draftId: null, draftReview: null, mailSearch: { scope: 'job', search: '' }, disclosures: {}, focus: null });
       return uiByJob.get(id);
     }
+    const binding = record => ({ base: { version: record.version, source_version: record.source_version }, snapshot: copy(record) });
+    const matches = (custody, record) => custody?.base.version === record.version && custody?.base.source_version === record.source_version;
+    function editorBinding(record, key, value) {
+      if (!editorCustody.has(record.job.id)) editorCustody.set(record.job.id, new Map());
+      const entries = editorCustody.get(record.job.id);
+      if (!entries.has(key)) entries.set(key, { ...binding(record), value: copy(value) });
+      return entries.get(key);
+    }
+    function reconciliationHTML(custody, record, key) {
+      if (!custody || matches(custody, record)) return '';
+      const fields = [...new Set([...Object.keys(custody.snapshot), ...Object.keys(record)])].filter(field => JSON.stringify(custody.snapshot[field]) !== JSON.stringify(record[field]));
+      const changes = Object.fromEntries(fields.map(field => [field, { 'when editing began': custody.snapshot[field] ?? null, 'current evidence': record[field] ?? null }]));
+      return `<div class="dp-conflict" role="alert">Evidence changed since this editor opened. Your values are retained; reconcile before saving.<details data-disclosure="reconcile:${esc(key)}"><summary>Review changed evidence</summary>${structuredSource(changes, ['reconcile', key])}${button('reconcile-editor', 'I reviewed changes · keep my edits', `data-id="${esc(key)}" ${evidenceCurrent(record) ? '' : 'disabled'}`)}</details></div>`;
+    }
     function draftValue(record) {
-      const ui = currentUI();
-      return core.editor(record.job.id, `draft:${ui.draftId}`) || array(record.drafts).find(draft => draft.id === ui.draftId);
+      const key = `draft:${currentUI().draftId}`;
+      const value = core.editor(record.job.id, key) || array(record.drafts).find(draft => draft.id === currentUI().draftId);
+      if (!value) return;
+      const custody = editorBinding(record, key, value);
+      return core.editor(record.job.id, key) || custody.value;
     }
     function jobDrafts(record) {
       const drafts = new Map(array(record.drafts).map(draft => [draft.id, draft]));
@@ -110,17 +152,18 @@
     }
     function notesHTML(record) {
       const buffer = core.editor(record.job.id, 'note') || { id: core.uuid(), text: '' };
-      if (!core.editor(record.job.id, 'note')) core.edit(record.job.id, 'note', buffer);
-      return `<h3>Working notes</h3><p class="dp-small dp-muted">Scratch notes stay separate from requirements and orders.</p><form data-form="note" class="dp-editor"><label>New working note<textarea name="text" data-editor="note">${esc(buffer.text)}</textarea></label>${button('save-note', 'Save working note', busy() ? 'disabled' : '')}</form>${array(record.notes).map(note => `<div class="dp-source"><p>${esc(note.text)}</p>${button('promote-note', 'Review as a requirement', `data-id="${esc(note.id)}"`)}</div>`).join('')}`;
+      if (!core.editor(record.job.id, 'note')) { core.edit(record.job.id, 'note', buffer); editorCustody.get(record.job.id)?.delete('note'); }
+      const custody = editorBinding(record, 'note', buffer);
+      return `<h3>Working notes</h3><p class="dp-small dp-muted">Scratch notes stay separate from requirements and orders.</p>${reconciliationHTML(custody, record, 'note')}<form data-form="note" class="dp-editor"><label>New working note<textarea name="text" data-editor="note">${esc(buffer.text)}</textarea></label>${button('save-note', 'Save working note', busy() ? 'disabled' : '')}</form>${array(record.notes).map(note => `<div class="dp-source"><p>${esc(note.text)}</p>${button('promote-note', 'Review as a requirement', `data-id="${esc(note.id)}"`)}</div>`).join('')}`;
     }
     function executionHTML(record, draft) {
       const execution = core.state.executions.get(record.job.id), capabilities = execution?.capabilities || {};
       const actions = array(execution?.actions).filter(action => action.draft_id === draft.id || action.approval_id === draft.approval?.id);
       const approval = draft.approval;
-      const reviewCurrent = evidenceCurrent(record) && draft.review?.content_hash === draft.content_hash && draft.review?.source_version === record.source_version;
+      const reviewCurrent = matches(editorBinding(record, `draft:${draft.id}`, draft), record) && evidenceCurrent(record) && draft.review?.content_hash === draft.content_hash && draft.review?.source_version === record.source_version;
       const approvalKey = `${draft.id}:${draft.content_hash}:${record.source_version}`;
       const checks = currentUI().approval?.key === approvalKey ? currentUI().approval : {};
-      const approved = evidenceCurrent(record) && approval && approval.content_hash === draft.content_hash && approval.source_version === record.source_version && !core.editor(record.job.id, `draft:${draft.id}`);
+      const approved = reviewCurrent && evidenceCurrent(record) && approval && approval.content_hash === draft.content_hash && approval.source_version === record.source_version && !core.editor(record.job.id, `draft:${draft.id}`);
       return `<div class="dp-divider"><h3>Communications approval & delivery</h3><p class="dp-authority">${capabilities.release_hold !== false ? 'Sending is held by the server. No provider contact is authorised.' : 'Release enabled; exact communications approval is still required.'}${draft.thread_id && !capabilities.captured_thread_send_available ? ' Captured-thread sending is not available on this transport.' : ''}</p>${execution?.uncertain ? '<p class="dp-conflict">The previous send outcome remains uncertain. Sending stays held until authoritative recovery establishes another attempt is safe.</p>' : ''}${execution?.error ? `<p class="dp-conflict">Status unavailable: ${esc(execution.error)}</p>` : ''}
         <form data-form="approval" class="dp-editor"><label><span><input type="checkbox" name="communications_approved" ${checks.communications_approved ? 'checked' : ''}>Approve this exact message and attachments</span></label>${purchaseRequired(draft) ? `<label><span><input type="checkbox" name="purchase_approved" ${checks.purchase_approved ? 'checked' : ''}>Separate purchase approval for this exact ${draft.po_id ? 'PO' : 'message'}</span></label>` : ''}<div class="dp-tools">${button('approve-draft', 'Record exact approval', !capabilities.approval_enabled || !reviewCurrent || core.editor(record.job.id, `draft:${draft.id}`) ? 'disabled' : '')}${button('execute-draft', capabilities.release_hold !== false ? 'Send held' : 'Send approved draft', capabilities.release_hold !== false || execution?.submitting || execution?.uncertain || execution?.coverage?.complete !== true || array(execution?.completedApprovals).includes(approval?.id) || !approved || (draft.thread_id && !capabilities.captured_thread_send_available) || actions.some(action => action.status !== 'held') ? 'disabled' : '')}${button('execution-status', 'Refresh action status')}</div></form>
         ${actions.map(action => `<div class="dp-source"><strong>${esc(label(action.status))}</strong><p>${action.status === 'accepted_not_delivered' ? 'Provider accepted the request; delivery is not established.' : action.status === 'outcome_unknown' ? 'Outcome uncertain. Read back the provider record before any recovery; no blind resend.' : 'Action state from the server.'}</p><details data-disclosure="receipt:${esc(action.id)}"><summary>Action receipt</summary><div class="dp-exact-review">${esc(JSON.stringify(action.receipt || {}, null, 2))}</div></details>${button('execution-readback', 'Read back provider receipt', `data-id="${esc(action.approval_id)}"`)}</div>`).join('')}
@@ -130,12 +173,12 @@
       const draft = draftValue(record), ui = currentUI();
       if (ui.draftReview) {
         const saved = array(record.drafts).find(item => item.id === ui.draftId);
-        if (!evidenceCurrent(record) || !saved || saved.review?.content_hash !== saved.content_hash || saved.review?.source_version !== record.source_version || core.editor(record.job.id, `draft:${ui.draftId}`)) ui.draftReview = null;
+        if (!draft || !matches(editorBinding(record, `draft:${ui.draftId}`, draft), record) || !evidenceCurrent(record) || !saved || saved.review?.content_hash !== saved.content_hash || saved.review?.source_version !== record.source_version || core.editor(record.job.id, `draft:${ui.draftId}`)) ui.draftReview = null;
       }
       const history = `<details data-disclosure="history" ${draft ? '' : 'open'}><summary>History & past-job search</summary><p class="dp-small dp-muted">Captured job/PO mail. Orders use the existing PO transport; Outlook-wide search is a separate, unverified capability.</p><form data-form="mail-search" class="dp-editor"><label>Search scope<select name="scope"><option value="job" ${ui.mailSearch.scope === 'job' ? 'selected' : ''}>This job</option><option value="all" ${ui.mailSearch.scope === 'all' ? 'selected' : ''}>Search all jobs</option></select></label><label>Search captured correspondence<input name="search" value="${esc(ui.mailSearch.search)}" placeholder="Supplier, job or subject"></label><button type="submit">Search</button></form>${array(record.communication_links).map(link => `<div class="dp-source"><strong>Linked past-job reference</strong><p>Original job ${esc(link.source_job_id)} · message ${esc(link.communication_id)}</p><p>${esc(link.reason)}</p>${button('open-linked-mail', 'Read original reference', `data-id="${esc(link.communication_id)}" data-job="${esc(link.source_job_id)}"`)}</div>`).join('')}${mailResults?.error ? `<p class="dp-conflict">${esc(mailResults.error)}</p>` : ''}${array(mailResults?.communications || record.communications).map(mail => `<button class="dp-email-result" data-action="mail" data-id="${esc(mail.id)}"><strong>${esc(mail.subject || 'Untitled message')}</strong><small>${esc(mail.source_job_number || mail.jobs?.job_number || mail.job_number || mail.job_id)} · ${esc(mail.sender || mail.from_email || mail.from || 'Sender unknown')} · ${esc(mail.source || 'Captured mail')}</small></button>`).join('')}<p class="dp-small dp-muted">${mailResults?.coverage?.complete ? 'Captured search range complete' : 'History coverage limited; absence is not proof of no email.'}</p>${mailResults?.next_cursor ? button('more-mail', 'Load more captured mail') : ''}</details>`;
       const viewed = selectedMail ? `<div class="dp-source"><strong>${esc(selectedMail.subject)}</strong><p>Original job ${esc(selectedMail.source_job_number || selectedMail.jobs?.job_number || selectedMail.job_number || selectedMail.job_id)} · ${esc(selectedMail.mailbox || selectedMail.mailbox_email || 'Mailbox unknown')}</p><div class="dp-exact-review">${esc(plainMail(selectedMail))}</div>${selectedMail.job_id !== record.job.id ? button('link-mail', 'Link as a reference — keep original job') : button('reply-mail', 'Prepare reply draft') }</div>` : '';
       if (!draft) return `<h3>Job email</h3><div class="dp-tools">${button('new-draft', 'Compose email', 'class="dp-primary"')}</div>${jobDrafts(record).map(item => `<button class="dp-email-result" data-action="open-draft" data-id="${esc(item.id)}">${esc(item.subject || 'Untitled draft')}<small>${core.editor(record.job.id, `draft:${item.id}`) ? 'Unsaved Dispatch edits · kept for this session' : 'Saved Dispatch draft'} · ${esc(item.status || 'not sent')}</small></button>`).join('')}<div class="dp-divider">${history}${viewed}</div>`;
-      return `<div class="dp-row"><h3 class="dp-grow">Compose · ${esc(record.job.job_number)}</h3>${button('close-draft', 'History')}</div><p class="dp-small dp-muted">Dispatch draft · ${draft.po_id ? 'Linked PO' : 'Job correspondence'} · ${draft.thread_id ? 'Reply thread retained' : 'New conversation'}</p><form data-form="draft" class="dp-editor">
+      return `<div class="dp-row"><h3 class="dp-grow">Compose · ${esc(record.job.job_number)}</h3>${button('close-draft', 'History')}</div><p class="dp-small dp-muted">Dispatch draft · ${draft.po_id ? 'Linked PO' : 'Job correspondence'} · ${draft.thread_id ? 'Reply thread retained' : 'New conversation'}</p>${reconciliationHTML(editorBinding(record, `draft:${draft.id}`, draft), record, `draft:${draft.id}`)}<form data-form="draft" class="dp-editor">
         <label>Purchase authority<select name="purchase_commitment" data-editor="draft" ${draft.po_id ? 'disabled' : ''}><option value="true" ${purchaseRequired(draft) ? 'selected' : ''}>Requires separate purchase approval</option><option value="false" ${!purchaseRequired(draft) ? 'selected' : ''}>Does not commit to a purchase</option></select></label>${draft.po_id ? '<p class="dp-small">PO-linked correspondence always requires purchase authority.</p>' : ''}
         <label>Sender mailbox<input name="sender" data-editor="draft" value="${esc(draft.sender)}" required></label><label>To<input name="to" data-editor="draft" value="${esc(array(draft.to).join(', '))}" placeholder="supplier@example.com" required></label><label>CC<input name="cc" data-editor="draft" value="${esc(array(draft.cc).join(', '))}"></label><label>Subject<input name="subject" data-editor="draft" value="${esc(draft.subject)}" required></label><label>Exact message<textarea name="body" data-editor="draft" rows="9" required>${esc(draft.body)}</textarea></label><label>Proposed delivery time (Perth)<input type="datetime-local" name="proposed_delivery_at" data-editor="draft" value="${esc(draft.proposed_delivery_at || '')}"></label>
         <details data-disclosure="attachments:${esc(draft.id)}"><summary>Attachments (${array(draft.attachments).length})</summary>${attachmentOptions(record, draft).map(media => `<label><span><input type="checkbox" name="attachment" data-editor="draft" value="${esc(media.id)}" ${array(draft.attachments).some(a => a.id === media.id) ? 'checked' : ''}> ${esc(media.name || media.title)} · ${esc(media.revision || 'Revision unknown')}${media.unavailable ? ' · original unavailable' : ''}</span></label>`).join('') || '<p class="dp-small">No verified attachment available.</p>'}${array(draft.attachments).map(a => `<p class="dp-small">${esc(a.name)} · ${esc(a.revision)} · ${esc(refLabel(a.source_ref))}</p>`).join('')}</details><div class="dp-tools">${button('save-draft', 'Save Dispatch draft', busy() ? 'disabled' : '')}${button('review-draft', 'Review exact draft', `class="dp-primary" ${busy() ? 'disabled' : ''}`)}</div></form>
@@ -170,20 +213,21 @@
       const stale = !evidenceCurrent(record) || record.reviewed_source_version !== record.source_version;
       return `<div class="dp-workhead"><div class="dp-row"><div class="dp-grow"><h2>${esc(record.job.job_number)} <span class="dp-muted">${esc(record.job.client_name)}</span></h2><p>${esc(record.job.site_address || 'Site address unavailable')} · ${esc(record.job.work_type || record.job.type || 'Work type unknown')}</p></div><span class="dp-tag ${record.job.eligibility?.state !== 'accepted' ? 'dp-tag-held' : ''}">${esc(label(record.job.eligibility?.state || 'Eligibility unresolved'))}</span></div><p>${stale ? 'Requirements review incomplete or sources changed' : 'Current source set reviewed'} · Version ${record.version}</p></div>${calendarHTML(core, dates)}
         <div class="dp-pad"><div class="dp-row"><h3 class="dp-grow">Order groups</h3>${button('add-group', '+ Your group')}</div><p class="dp-small dp-muted">Organise the work in your own terms. Every requirement stays attached to this job.</p><div class="dp-group-list"><button class="dp-group" data-action="group" data-id="all" aria-pressed="${selectedGroup === 'all'}">All requirements<span>${requirements.length} recorded · completeness separate</span></button>${groups.map(group => `<button class="dp-group" data-action="group" data-id="${esc(group.id)}" aria-pressed="${selectedGroup === group.id}">${esc(group.name)}<span>${requirements.filter(r => r.group_id === group.id).length} requirements</span></button>`).join('')}<button class="dp-group" data-action="group" data-id="none" aria-pressed="${selectedGroup === 'none'}">Ungrouped<span>${requirements.filter(r => !r.group_id).length} requirements</span></button></div>
-        <div class="dp-tools">${button('add-requirement', '+ Requirement')}${button('review-set', 'Review complete source set')}${groups.some(g => g.id === selectedGroup) ? button('rename-group', 'Rename group') + button('delete-group', 'Remove group · keep requirements') : ''}</div>${formHTML(record)}
+        <div class="dp-tools">${button('add-requirement', '+ Requirement')}${button('review-set', 'Review complete source set')}${groups.some(g => g.id === selectedGroup) ? button('rename-group', 'Rename group') + button('delete-group', 'Remove group · keep requirements') : ''}</div>${form ? reconciliationHTML(form.custody, record, 'form') : ''}${formHTML(record)}
         <div class="dp-tablewrap"><table><thead><tr><th>Requirement / source</th><th>Required</th><th>Group</th><th>Supply & destination</th><th>Review</th></tr></thead><tbody>${shown.map(requirement => `<tr data-requirement="${esc(requirement.id)}"><td><strong>${esc(requirement.description)}</strong><small>${esc(requirement.specification || 'Specification unresolved')}</small><small>${esc(refLabel(requirement.source_ref))}</small></td><td>${requirement.quantity == null ? 'Unknown' : esc(requirement.quantity)} ${esc(requirement.unit)}</td><td><select data-move="${esc(requirement.id)}" aria-label="Group for ${esc(requirement.description)}"><option value="">Ungrouped</option>${groups.map(group => `<option value="${esc(group.id)}" ${requirement.group_id === group.id ? 'selected' : ''}>${esc(group.name)}</option>`).join('')}</select></td><td>${esc(supplyTotals(record, requirement).usable)} recorded usable<small>${esc(supplyTotals(record, requirement).remaining)} remaining</small><small>${esc(requirement.destination || 'Destination unresolved')}</small></td><td>${esc(evidenceCurrent(record) && requirement.reviewed_source_version === record.source_version ? 'Reviewed' : 'Candidate / stale')}<div class="dp-tools">${button('edit-requirement', 'Edit', `data-id="${esc(requirement.id)}"`)}${button('review-requirement', 'Review', `data-id="${esc(requirement.id)}"`)}</div></td></tr>`).join('') || '<tr><td colspan="5">No requirements recorded in this group. This does not establish that materials are complete.</td></tr>'}</tbody></table></div>
-        <div class="dp-divider"><div class="dp-row"><h3 class="dp-grow">Purchase orders & movements</h3>${button('prepare-order', 'Prepare purchase order')}${button('add-movement', '+ Movement')}</div>${array(record.purchase_orders).map(po => `<button class="dp-po" data-action="po" data-id="${esc(po.id)}"><strong>${esc(po.po_number || po.order_number || po.id)} · ${esc(po.supplier_name || po.supplier || 'Supplier unknown')}</strong><span>${esc(label(po.status))} · ${esc(po.delivery_date || 'Delivery unconfirmed')} · ${esc(po.delivery_address || 'Destination unknown')}</span>${array(po.items || po.line_items).map(line => `<span>${esc(line.description)} · ${esc(line.quantity ?? '?')} ${esc(line.unit)}</span>`).join('')}</button>`).join('') || '<p class="dp-small dp-muted">No linked purchase orders returned. Check requirements and reusable supply before preparing a new order.</p>'}${array(record.order_drafts).map(order => `<div class="dp-tools">${button('edit-order', 'Edit saved purchase order draft', `data-id="${esc(order.id)}"`)}</div>`).join('')}${array(record.movements).map(move => `<div class="dp-source"><strong>${esc(move.title)}</strong><p>${esc(move.from_location)} → ${esc(move.to_location)} · ${esc(move.date || 'Undated')} ${esc(move.time)} · ${esc(label(move.status || 'proposed'))}</p></div>`).join('')}<details class="dp-divider" data-disclosure="allocations"><summary>Allocations & receipts</summary><div class="dp-tools">${button('add-allocation', 'Allocate supply')}${button('record-stock', 'Record verified stock')}${button('add-receipt', 'Verify receipt')}</div><p class="dp-small">Usable quantity must be verified at its destination. Paid, ordered, acknowledged and received are different facts; the same stock cannot fulfil two jobs.</p>${array(record.allocations).map(item => `<div class="dp-source"><strong>${esc(record.requirements.find(r => r.id === item.requirement_id)?.description)}</strong><p>${esc(item.quantity)} ${esc(item.unit)} allocated · ${esc(item.supply_id)}</p>${item.suitability_obligation ? `<p>${esc(item.suitability_obligation)}</p>` : ''}${button('review-allocation', 'Review compatibility evidence', `data-id="${esc(item.id)}"`)}${button('delete-allocation', 'Release unreceived allocation', `data-id="${esc(item.id)}"`)}</div>`).join('')}${array(record.receipts).map(item => `<div class="dp-source"><strong>${esc(array(record.requirements).find(requirement => requirement.id === array(record.allocations).find(allocation => allocation.id === item.allocation_id)?.requirement_id)?.description || 'Requirement not identified')}</strong><p>${esc(item.usable_quantity)} usable · ${esc(item.damaged_quantity)} damaged · ${esc(item.location)}</p><p>${esc(item.evidence)}</p>${button('transfer-receipt', 'Verify transfer', `data-id="${esc(item.id)}"`)}</div>`).join('') || '<p class="dp-small">No verified receipt returned.</p>'}</details></div></div>
+        <div class="dp-divider"><div class="dp-row"><h3 class="dp-grow">Purchase orders & movements</h3>${button('prepare-order', 'Prepare purchase order')}${button('add-movement', '+ Movement')}</div>${array(record.purchase_orders).map(po => `<button class="dp-po" data-action="po" data-id="${esc(po.id)}"><strong>${esc(po.po_number || po.order_number || po.id)} · ${esc(po.supplier_name || po.supplier || 'Supplier unknown')}</strong><span>${esc(label(po.status))} · ${esc(po.delivery_date || 'Delivery unconfirmed')} · ${esc(po.delivery_address || 'Destination unknown')}</span>${array(po.items || po.line_items).map(line => `<span>${esc(line.description)} · ${esc(line.quantity ?? '?')} ${esc(line.unit)}</span>`).join('')}</button>`).join('') || '<p class="dp-small dp-muted">No linked purchase orders returned. Check requirements and reusable supply before preparing a new order.</p>'}${array(record.order_drafts).map(order => `<div class="dp-tools">${button('edit-order', 'Edit saved purchase order draft', `data-id="${esc(order.id)}"`)}</div>`).join('')}${array(record.movements).map(move => `<div class="dp-source"><strong>${esc(move.title)}</strong><p>${esc(move.from_location)} → ${esc(move.to_location)} · ${esc(move.date || 'Undated')} ${esc(move.time)} · ${esc(label(move.status || 'proposed'))}</p></div>`).join('')}<details class="dp-divider" data-disclosure="allocations"><summary>Allocations & receipts</summary><div class="dp-tools">${button('add-allocation', 'Allocate supply')}${button('record-stock', 'Record verified stock')}${button('add-receipt', 'Verify receipt')}</div><p class="dp-small">Usable quantity must be verified at its destination. Paid, ordered, acknowledged and received are different facts; the same stock cannot fulfil two jobs.</p>${array(record.allocations).map(item => `<div class="dp-source"><strong>${esc(record.requirements.find(r => r.id === item.requirement_id)?.description)}</strong><p>${esc(item.quantity)} ${esc(item.unit)} allocated · ${esc(item.supply_id)}</p><p>Compatibility: ${evidenceCurrent(record) && ['current', 'stale'].includes(item.suitability_status) ? esc(item.suitability_status) : 'unknown / unavailable'}</p>${item.suitability_obligation && typeof item.suitability_obligation === 'object' ? `<p>Owner: ${esc(item.suitability_obligation.owner || 'unavailable')}</p><p>Next action: ${esc(item.suitability_obligation.next_action || 'unavailable')}</p>` : ''}${button('review-allocation', 'Review compatibility evidence', `data-id="${esc(item.id)}"`)}${button('delete-allocation', 'Release unreceived allocation', `data-id="${esc(item.id)}"`)}</div>`).join('')}${array(record.receipts).map(item => `<div class="dp-source"><strong>${esc(array(record.requirements).find(requirement => requirement.id === array(record.allocations).find(allocation => allocation.id === item.allocation_id)?.requirement_id)?.description || 'Requirement not identified')}</strong><p>${esc(item.usable_quantity)} usable · ${esc(item.damaged_quantity)} damaged · ${esc(item.location)}</p><p>${esc(item.evidence)}</p>${button('transfer-receipt', 'Verify transfer', `data-id="${esc(item.id)}"`)}</div>`).join('') || '<p class="dp-small">No verified receipt returned.</p>'}</details></div></div>
         <section class="dp-assessment"><div class="dp-row"><h3 class="dp-grow">Next action assessment</h3>${button('assess', 'Assess current evidence', busy() ? 'disabled' : '')}</div>${record.assessment ? `<p>${esc(record.assessment.summary || record.assessment.next_action || 'Assessment recorded')}</p><ul>${array(record.assessment.obligations || record.assessment.findings || record.assessment.blockers).map(finding => `<li>${esc(typeof finding === 'string' ? finding : finding.next_action || finding.message || finding.description)} ${esc(finding.owner || '')}</li>`).join('')}</ul><p class="dp-small">Source ${esc(record.assessment.source_version)} ${record.assessment.stale || record.assessment.source_version !== record.source_version ? '· Stale — reassess current evidence' : ''}</p>` : '<p>Reconcile requirements, linked supply and movements against the current source set.</p>'}${assessmentStatusHTML()}</section>`;
     }
     function captureFocus(focused) {
       return element.contains(focused) && (focused.name || focused.dataset.filter || focused.dataset.move || focused.dataset.layer) ? { name: focused.name, form: focused.form?.dataset.form, data: { ...focused.dataset }, type: focused.type, value: focused.value, jobId: contextJob, draftId: uiByJob.get(contextJob)?.draftId, start: focused.selectionStart, end: focused.selectionEnd } : null;
     }
-    element.addEventListener('focusout', event => {
+    listen('focusout', event => {
       if (destroyed) return;
       const focus = captureFocus(event.target);
       if (focus?.form && contextJob) uiByJob.get(contextJob).focus = focus;
     });
     function render() {
+      if (destroyed) return;
       const liveFocus = captureFocus(document.activeElement);
       if (contextJob) {
         const previous = uiByJob.get(contextJob);
@@ -229,18 +273,18 @@
       core.edit(record.job.id, `draft:${id}`, { id, sender: '', to: [], cc: [], subject: `Materials · ${record.job.job_number}`, body: '', attachments: [], purchase_commitment: true, ...extra }); tab = 'email'; render();
       element.querySelector('[data-form="draft"] input')?.focus();
     }
-    async function save(command, payload, id = core.state.selectedId) { const result = await core.command(id, command, payload); if (['movement_upsert', 'order_prepare'].includes(command)) { const range = core.state.calendarRange || { from: dates[0], to: dates[6] }; await core.calendar(range.from, range.to); } return result; }
+    async function save(command, payload, id = core.state.selectedId, base) { if (destroyed) throw new Error('Dispatch workspace closed.'); const result = await core.command(id, command, payload, 'dispatch_command', base); if (['movement_upsert', 'order_prepare'].includes(command)) { const range = core.state.calendarRange || { from: dates[0], to: dates[6] }; await core.calendar(range.from, range.to); } return result; }
     async function searchMail(params, append = false) {
       const generation = ++mailGeneration, id = core.state.selectedId;
       try { const result = await core.communications({ job_id: id, ...params }); if (generation === mailGeneration && id === core.state.selectedId) { mailResults = { ...result, communications: [...(append ? array(mailResults?.communications) : []), ...array(result.records || result.communications)], params }; render(); } }
       catch (error) { if (generation === mailGeneration) { mailResults = { error: error.message }; render(); } }
     }
-    element.addEventListener('toggle', event => {
+    listen('toggle', event => {
       if (destroyed || !element.contains(event.target) || !event.target.dataset.disclosure) return;
       currentUI().disclosures[event.target.dataset.disclosure] = event.target.open;
       if (event.target.dataset.disclosure === 'assessment-status' && event.target.open && !core.state.tasks.loaded && !core.state.tasks.loading && !core.state.tasks.error) core.tasks().catch(() => {});
     }, true);
-    element.addEventListener('input', event => {
+    listen('input', event => {
       const target = event.target, record = job();
       if (target.dataset.filter === 'search') { query = target.value; const start = target.selectionStart; render(); const input = element.querySelector('[data-filter="search"]'); input.focus(); input.setSelectionRange(start, start); }
       if (target.dataset.editor === 'draft' && record) captureDraft(target.form, record);
@@ -254,7 +298,7 @@
       }
       if (target.closest('[data-form]')?.dataset.form === form?.kind && form && !target.dataset.editor) { const data = new FormData(target.closest('form')); Object.assign(form.values, Object.fromEntries(data)); if (form.kind === 'order' || form.kind === 'movement') form.values.requirement_ids = data.getAll('requirement_id'); if (form.kind === 'order') form.values.existing_supply_reviewed = data.has('existing_supply_reviewed'); }
     });
-    element.addEventListener('change', async event => {
+    listen('change', async event => {
       try {
         const target = event.target;
         if (target.dataset.editor === 'draft' && target.name === 'purchase_commitment' && job()) { captureDraft(target.form, job()); render(); }
@@ -263,7 +307,7 @@
         if (target.dataset.move) await save('requirement_move', { id: target.dataset.move, group_id: target.value || null });
       } catch (error) { message = error.message; render(); }
     });
-    element.addEventListener('submit', async event => {
+    listen('submit', async event => {
       event.preventDefault(); const type = event.target.dataset.form, record = job();
       const id = record?.job.id, data = Object.fromEntries(new FormData(event.target));
       if (type === 'assessment-retry') {
@@ -279,29 +323,30 @@
       const submittedForm = form;
       if (submittedForm && !submittedForm.values.id) submittedForm.values.id = core.uuid();
       const submittedFields = submittedForm ? JSON.stringify(submittedForm.values) : null;
+      const saveForm = (command, payload, jobId) => save(command, payload, jobId, submittedForm?.custody.base);
       try {
         if (type === 'mail-search') return await searchMail(data);
         if (type === 'draft' || type === 'note' || type === 'approval') return;
-        if (type === 'group') await save('group_upsert', { id: form.values.id || core.uuid(), name: data.name.trim(), position: form.values.position ?? array(record.groups).length }, id);
+        if (type === 'group') await saveForm('group_upsert', { id: form.values.id || core.uuid(), name: data.name.trim(), position: form.values.position ?? array(record.groups).length }, id);
         if (type === 'requirement') {
           const requirement = { id: form.values.id || core.uuid(), description: data.description.trim(), quantity: data.quantity === '' ? null : Number(data.quantity), unit: data.unit || null, specification: data.specification || null, group_id: data.group_id || null, phase: data.phase, destination: data.destination, needed_by: data.needed_by || null, owner: data.owner, source_ref: form.values.source_ref || null };
-          const previous = record.requirements.find(item => item.id === requirement.id); const reconcile = previous && record.allocations.some(a => a.requirement_id === requirement.id) && ['quantity', 'unit', 'specification', 'description'].some(key => previous[key] !== requirement[key]); if (reconcile && !data.reconciliation_reason?.trim()) throw new Error('Explain the supplied-scope change and establish applicable approval before reconciliation.'); await save(form.noteId ? 'note_promote' : reconcile ? 'requirement_reconcile' : 'requirement_upsert', form.noteId ? { id: form.noteId, requirement } : { ...requirement, ...(reconcile ? { reason: data.reconciliation_reason.trim() } : {}) }, id);
+          const previous = record.requirements.find(item => item.id === requirement.id); const reconcile = previous && record.allocations.some(a => a.requirement_id === requirement.id) && ['quantity', 'unit', 'specification', 'description'].some(key => previous[key] !== requirement[key]); if (reconcile && !data.reconciliation_reason?.trim()) throw new Error('Explain the supplied-scope change and establish applicable approval before reconciliation.'); await saveForm(form.noteId ? 'note_promote' : reconcile ? 'requirement_reconcile' : 'requirement_upsert', form.noteId ? { id: form.noteId, requirement } : { ...requirement, ...(reconcile ? { reason: data.reconciliation_reason.trim() } : {}) }, id);
         }
-        if (type === 'order') { const ids = new FormData(event.target).getAll('requirement_id'); if (!ids.length) throw new Error('Select at least one reviewed requirement.'); await save('order_prepare', { id: form.values.id || core.uuid(), supplier_name: data.supplier_name, delivery_address: data.delivery_address, delivery_date: data.delivery_date || null, notes: data.notes, requirement_ids: ids, quantities: Object.fromEntries(ids.filter(key => data['quantity:' + key] !== '').map(key => [key, Number(data['quantity:' + key])])), unit_prices: Object.fromEntries(ids.map(key => [key, data['price:' + key] === '' ? null : Number(data['price:' + key])])), existing_supply_reviewed: data.existing_supply_reviewed === 'on' }, id); }
-        if (type === 'stock') { await save('stock_record', { id: form.values.id || core.uuid(), ...data, quantity: Number(data.quantity) }, id); await core.supply('stock'); }
+        if (type === 'order') { const ids = new FormData(event.target).getAll('requirement_id'); if (!ids.length) throw new Error('Select at least one reviewed requirement.'); await saveForm('order_prepare', { id: form.values.id || core.uuid(), supplier_name: data.supplier_name, delivery_address: data.delivery_address, delivery_date: data.delivery_date || null, notes: data.notes, requirement_ids: ids, quantities: Object.fromEntries(ids.filter(key => data['quantity:' + key] !== '').map(key => [key, Number(data['quantity:' + key])])), unit_prices: Object.fromEntries(ids.map(key => [key, data['price:' + key] === '' ? null : Number(data['price:' + key])])), existing_supply_reviewed: data.existing_supply_reviewed === 'on' }, id); }
+        if (type === 'stock') { await saveForm('stock_record', { id: form.values.id || core.uuid(), ...data, quantity: Number(data.quantity) }, id); await core.supply('stock'); }
         if (type === 'suitability') {
           if (!data.reason?.trim() || !data.evidence?.trim()) throw new Error('A reason and compatibility evidence are required.');
-          await save('allocation_confirm_suitability', { id: submittedForm.values.id, reason: data.reason.trim(), evidence: data.evidence.trim() }, id);
+          await saveForm('allocation_confirm_suitability', { id: submittedForm.values.id, reason: data.reason.trim(), evidence: data.evidence.trim() }, id);
         }
-        if (type === 'allocation') await save('allocation_upsert', { id: form.values.id || core.uuid(), requirement_id: data.requirement_id, supply_id: data.supply_id, quantity: Number(data.quantity) }, id);
-        if (type === 'receipt') await save('receipt_upsert', { id: form.values.id || core.uuid(), allocation_id: data.allocation_id, usable_quantity: Number(data.usable_quantity), damaged_quantity: Number(data.damaged_quantity), location: data.location, evidence: data.evidence }, id);
+        if (type === 'allocation') await saveForm('allocation_upsert', { id: form.values.id || core.uuid(), requirement_id: data.requirement_id, supply_id: data.supply_id, quantity: Number(data.quantity) }, id);
+        if (type === 'receipt') await saveForm('receipt_upsert', { id: form.values.id || core.uuid(), allocation_id: data.allocation_id, usable_quantity: Number(data.usable_quantity), damaged_quantity: Number(data.damaged_quantity), location: data.location, evidence: data.evidence }, id);
         if (type === 'transfer') {
           const receipt = array(record.receipts).find(item => item.id === submittedForm.values.id);
           const quantity = Number(data.quantity), usable = Number(receipt?.usable_quantity);
           if (!receipt || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(usable) || quantity > usable) throw new Error('Enter a positive transfer quantity no greater than the recorded usable amount.');
-          await save('receipt_transfer', { id: submittedForm.values.id, new_id: submittedForm.values.new_id, quantity, location: data.location, evidence: data.evidence }, id);
+          await saveForm('receipt_transfer', { id: submittedForm.values.id, new_id: submittedForm.values.new_id, quantity, location: data.location, evidence: data.evidence }, id);
         }
-        if (type === 'movement') await save('movement_upsert', { id: form.values.id || core.uuid(), ...data, date: data.date || null, time: data.time || null, requirement_ids: new FormData(event.target).getAll('requirement_id') }, id);
+        if (type === 'movement') await saveForm('movement_upsert', { id: form.values.id || core.uuid(), ...data, date: data.date || null, time: data.time || null, requirement_ids: new FormData(event.target).getAll('requirement_id') }, id);
         if (submittedForm && JSON.stringify(submittedForm.values) !== submittedFields) {
           if (submittedForm.noteId) delete submittedForm.noteId;
           if (form === submittedForm) message = 'Earlier values saved. New edits remain for review.';
@@ -312,7 +357,7 @@
       } catch (error) { if (core.state.selectedId === id) message = error.message; }
       render();
     });
-    element.addEventListener('click', async event => {
+    listen('click', async event => {
       const target = event.target.closest('[data-action]'); if (!target || !element.contains(target)) return;
       if (target.closest('form')) event.preventDefault();
       const action = target.dataset.action, record = job(), id = core.state.selectedId;
@@ -346,31 +391,39 @@
           render(); return;
         }
         if (!record) return render();
+        if (action === 'reconcile-editor') {
+          if (!evidenceCurrent(record)) throw new Error('Refresh current evidence before reconciling.');
+          const key = target.dataset.id, custody = key === 'form' ? form?.custody : editorCustody.get(id)?.get(key);
+          if (!custody) throw new Error('Open the retained editor first.');
+          if (key.startsWith('draft:')) { core.edit(id, key, core.editor(id, key) || custody.value); currentUI().draftReview = null; currentUI().approval = null; }
+          Object.assign(custody, binding(record));
+          message = 'Changed evidence acknowledged. Your exact values remain for review and saving.';
+        }
         if (action === 'group') selectedGroup = target.dataset.id;
-        if (action === 'add-group') form = { kind: 'group', jobId: id, values: {} };
-        if (action === 'rename-group') form = { kind: 'group', jobId: id, values: { ...record.groups.find(group => group.id === selectedGroup) } };
+        if (action === 'add-group') form = { kind: 'group', jobId: id, custody: binding(record), values: {} };
+        if (action === 'rename-group') form = { kind: 'group', jobId: id, custody: binding(record), values: { ...record.groups.find(group => group.id === selectedGroup) } };
         if (action === 'delete-group') { await save('group_delete', { id: selectedGroup }); selectedGroup = 'all'; }
-        if (action === 'add-requirement') form = { kind: 'requirement', jobId: id, values: { group_id: record.groups.some(group => group.id === selectedGroup) ? selectedGroup : null } };
-        if (action === 'edit-requirement') form = { kind: 'requirement', jobId: id, values: { ...record.requirements.find(item => item.id === target.dataset.id) } };
+        if (action === 'add-requirement') form = { kind: 'requirement', jobId: id, custody: binding(record), values: { group_id: record.groups.some(group => group.id === selectedGroup) ? selectedGroup : null } };
+        if (action === 'edit-requirement') form = { kind: 'requirement', jobId: id, custody: binding(record), values: { ...record.requirements.find(item => item.id === target.dataset.id) } };
         if (action === 'review-requirement') await save('requirement_review', { id: target.dataset.id });
         if (action === 'review-set') await save('set_review', {});
         if (action === 'cancel-form') { formsByJob.delete(id); form = null; }
-        if (action === 'edit-order') { const order = record.order_drafts.find(item => item.id === target.dataset.id); form = { kind: 'order', jobId: id, values: { ...order, ...Object.fromEntries(array(order.line_items).flatMap(line => [['quantity:' + line.dispatch_requirement_id, line.quantity], ['price:' + line.dispatch_requirement_id, line.unit_price]])), requirement_ids: array(order.line_items).map(line => line.dispatch_requirement_id) } }; }
-        if (action === 'prepare-order') form = { kind: 'order', jobId: id, values: { id: core.uuid() } };
-        if (action === 'add-allocation') { form = { kind: 'allocation', jobId: id, values: {} }; render(); await Promise.all([core.supply('po'), core.supply('stock')]); }
-        if (action === 'record-stock') form = { kind: 'stock', jobId: id, values: {} };
+        if (action === 'edit-order') { const order = record.order_drafts.find(item => item.id === target.dataset.id); form = { kind: 'order', jobId: id, custody: binding(record), values: { ...order, ...Object.fromEntries(array(order.line_items).flatMap(line => [['quantity:' + line.dispatch_requirement_id, line.quantity], ['price:' + line.dispatch_requirement_id, line.unit_price]])), requirement_ids: array(order.line_items).map(line => line.dispatch_requirement_id) } }; }
+        if (action === 'prepare-order') form = { kind: 'order', jobId: id, custody: binding(record), values: { id: core.uuid() } };
+        if (action === 'add-allocation') { form = { kind: 'allocation', jobId: id, custody: binding(record), values: {} }; render(); await Promise.all([core.supply('po'), core.supply('stock')]); }
+        if (action === 'record-stock') form = { kind: 'stock', jobId: id, custody: binding(record), values: {} };
         if (action === 'review-context') await save('context_review', {});
-        if (action === 'add-receipt') form = { kind: 'receipt', jobId: id, values: {} };
-        if (action === 'transfer-receipt') form = { kind: 'transfer', jobId: id, values: { id: target.dataset.id, new_id: core.uuid() } };
-        if (action === 'review-allocation') form = { kind: 'suitability', jobId: id, values: { id: target.dataset.id } };
+        if (action === 'add-receipt') form = { kind: 'receipt', jobId: id, custody: binding(record), values: {} };
+        if (action === 'transfer-receipt') form = { kind: 'transfer', jobId: id, custody: binding(record), values: { id: target.dataset.id, new_id: core.uuid() } };
+        if (action === 'review-allocation') form = { kind: 'suitability', jobId: id, custody: binding(record), values: { id: target.dataset.id } };
         if (action === 'delete-allocation') await save('allocation_delete', { id: target.dataset.id });
-        if (action === 'add-movement') form = { kind: 'movement', jobId: id, values: {} };
+        if (action === 'add-movement') form = { kind: 'movement', jobId: id, custody: binding(record), values: {} };
         if (action === 'assess') await core.assess(id);
         if (action === 'reload-job') await core.load(id);
         if (action === 'retry-write') await core.retry(id);
         if (action === 'resolve-conflict') { await core.resolveConflict(id); message = 'Sources reloaded. Your edits remain; inspect changes before saving again.'; }
-        if (action === 'save-note') { const value = core.editor(id, 'note'); if (!value?.text.trim()) throw new Error('Write a note first.'); await save('note_upsert', value, id); core.clearEditor(id, 'note', value); }
-        if (action === 'promote-note') { const note = record.notes.find(item => item.id === target.dataset.id); form = { kind: 'requirement', jobId: id, noteId: note.id, values: { description: note.text, source_ref: { type: 'working_note', id: note.id } } }; }
+        if (action === 'save-note') { const value = core.editor(id, 'note'); if (!value?.text.trim()) throw new Error('Write a note first.'); await save('note_upsert', value, id, editorBinding(record, 'note', value).base); core.clearEditor(id, 'note', value); if (!core.editor(id, 'note')) editorCustody.get(id)?.delete('note'); }
+        if (action === 'promote-note') { const note = record.notes.find(item => item.id === target.dataset.id); form = { kind: 'requirement', jobId: id, custody: binding(record), noteId: note.id, values: { description: note.text, source_ref: { type: 'working_note', id: note.id } } }; }
         if (action === 'new-draft') {
           const unsaved = jobDrafts(record).find(draft => !draft.po_id && !draft.thread_id && !array(record.drafts).some(saved => saved.id === draft.id));
           if (!unsaved) return newDraft(record);
@@ -382,28 +435,31 @@
         if (action === 'execution-status') await core.execution(id);
         if (action === 'approve-draft') {
           const draft = draftValue(record), data = new FormData(element.querySelector('[data-form="approval"]'));
-          if (!evidenceCurrent(record) || core.editor(id, `draft:${draft.id}`) || draft.review?.content_hash !== draft.content_hash || draft.review?.source_version !== record.source_version) throw new Error('Save and review the current exact draft before approving it.');
+          if (!matches(editorBinding(record, `draft:${draft.id}`, draft), record) || !evidenceCurrent(record) || core.editor(id, `draft:${draft.id}`) || draft.review?.content_hash !== draft.content_hash || draft.review?.source_version !== record.source_version) throw new Error('Save and review the current exact draft before approving it.');
           if (!data.has('communications_approved') || (purchaseRequired(draft) && !data.has('purchase_approved'))) throw new Error('Explicit communications approval and any separate purchase approval are required.');
-          await core.approveDraft(id, { id: draft.id, approval_id: core.uuid(), content_hash: draft.content_hash, communications_approved: true, purchase_approved: data.has('purchase_approved') });
+          const approvedRecord = await core.approveDraft(id, { id: draft.id, approval_id: core.uuid(), content_hash: draft.content_hash, communications_approved: true, purchase_approved: data.has('purchase_approved') });
+          if (!core.editor(id, `draft:${draft.id}`)) editorCustody.get(id).set(`draft:${draft.id}`, { ...binding(approvedRecord), value: copy(array(approvedRecord.drafts).find(item => item.id === draft.id)) });
           await core.execution(id);
         }
-        if (action === 'execute-draft') { const draft = draftValue(record); if (!evidenceCurrent(record) || core.editor(id, `draft:${draft.id}`) || !draft.approval || draft.approval.content_hash !== draft.content_hash || draft.approval.source_version !== record.source_version) throw new Error('Current exact approval is required; unsaved changes cannot be sent.'); await core.executeDraft(id, draft.id, draft.approval.id); }
+        if (action === 'execute-draft') { const draft = draftValue(record); if (!matches(editorBinding(record, `draft:${draft.id}`, draft), record) || !evidenceCurrent(record) || core.editor(id, `draft:${draft.id}`) || !draft.approval || draft.approval.content_hash !== draft.content_hash || draft.approval.source_version !== record.source_version) throw new Error('Current exact approval is required; unsaved changes cannot be sent.'); await core.executeDraft(id, draft.id, draft.approval.id); }
         if (action === 'execution-readback') await core.readbackExecution(id, target.dataset.id);
         if (action === 'save-draft' || action === 'review-draft') {
           if (action === 'review-draft' && !evidenceCurrent(record)) throw new Error('Refresh current evidence before reviewing this draft.');
           const formElement = element.querySelector('[data-form="draft"]'); if (!formElement.reportValidity()) return;
           const value = captureDraft(formElement, record), reviewUI = currentUI();
-          const savedRecord = await save('draft_upsert', { ...value, attachments: value.attachments.map(item => ({ id: item.id })) }, id);
+          const savedRecord = await save('draft_upsert', { ...value, attachments: value.attachments.map(item => ({ id: item.id })) }, id, editorBinding(record, `draft:${value.id}`, value).base);
           const canonicalDraft = array(savedRecord.drafts).find(item => item.id === value.id);
           const savedHash = canonicalDraft?.content_hash;
           const changedDuringSave = core.editor(id, `draft:${value.id}`) && JSON.stringify(core.editor(id, `draft:${value.id}`)) !== JSON.stringify(value);
           core.clearEditor(id, `draft:${value.id}`, value);
+          if (!changedDuringSave) editorCustody.get(id).set(`draft:${value.id}`, { ...binding(savedRecord), value: copy(canonicalDraft) });
           if (action === 'review-draft' && changedDuringSave) throw new Error('New edits were preserved. Review the latest content again.');
           if (action === 'review-draft' && !sameAttachments(canonicalDraft?.attachments || [], value.attachments)) { message = 'Attachment bytes resolved. Inspect the returned exact files and hashes, then review the draft again.'; render(); return; }
-          if (action === 'review-draft') { const reviewedRecord = await save('draft_review', { id: value.id }, id);
+          if (action === 'review-draft') { const reviewedRecord = await save('draft_review', { id: value.id }, id, { version: savedRecord.version, source_version: savedRecord.source_version });
             const reviewed = array(reviewedRecord.drafts).find(item => item.id === value.id);
             const latestEdit = core.editor(id, `draft:${value.id}`);
             if (latestEdit && JSON.stringify(latestEdit) !== JSON.stringify(value)) throw new Error('New edits were preserved. Review the latest content again.');
+            if (!latestEdit) editorCustody.get(id).set(`draft:${value.id}`, { ...binding(reviewedRecord), value: copy(reviewed) });
             if (reviewUI.draftId !== value.id) return;
             if (!savedHash || reviewed?.review?.content_hash !== savedHash || reviewed?.review?.source_version !== reviewedRecord.source_version) throw new Error('Review evidence changed. Reload and review the current draft.');
             reviewUI.draftReview = `From: ${value.sender}\nTo: ${value.to.join(', ')}\nCC: ${value.cc.join(', ')}\nSubject: ${value.subject}\nPurchase authority: ${purchaseRequired(value) ? 'Requires separate purchase approval' : 'Does not commit to a purchase'}\nDelivery: ${value.proposed_delivery_at || 'Not specified'}\nAttachments: ${canonicalDraft.attachments.map(item => item.name + ' [' + item.revision + ']').join(', ') || 'None'}\n\n${value.body}`; }
@@ -435,13 +491,15 @@
     document.addEventListener?.('visibilitychange', resumeRefresh);
     root.addEventListener?.('focus', resumeRefresh);
     scheduleRefresh();
-    return { core, render, refresh: refreshEvidence,
+    const app = { core, render, refresh: refreshEvidence,
       setActive(value) { const changed = active !== value; active = value; if (changed && visible()) return refreshEvidence(); scheduleRefresh(); },
       load: () => Promise.all([core.list(), core.calendar(dates[0], dates[6]), core.state.selectedId ? refreshEvidence() : null]),
-      destroy() { destroyed = true; root.clearTimeout?.(refreshTimer); document.removeEventListener?.('visibilitychange', resumeRefresh); root.removeEventListener?.('focus', resumeRefresh); unsubscribe(); }
+      destroy() { destroyed = true; mailGeneration++; root.clearTimeout?.(refreshTimer); document.removeEventListener?.('visibilitychange', resumeRefresh); root.removeEventListener?.('focus', resumeRefresh); unsubscribe(); handlers.forEach(args => element.removeEventListener?.(...args)); formsByJob.clear(); uiByJob.clear(); editorCustody.clear(); form = null; selectedMail = null; mailResults = null; message = ''; element.innerHTML = ''; mounts.delete(app); }
     };
+    mounts.add(app);
+    return app;
   }
-  let instance, mainConnected = false;
+  let instance, mainCleanup;
   function installationStarts(events) {
     const starts = {};
     array(events).forEach(event => {
@@ -482,28 +540,56 @@
     const detail = [timing, label(event.dispatch_layer), label(event.status), event.delivery_time].filter(Boolean).join(' · ');
     return `<button type="button" class="cal-delivery-block dispatch-calendar-event${event.late_material ? ' warning' : ''}" data-source-event-id="${esc(event.dispatch_event_id)}" data-dispatch-job="${esc(event.job_id)}" data-layer="${esc(event.dispatch_layer)}" title="${esc([event.job_number || event.po_number, event.supplier_name, detail].filter(Boolean).join(' · '))}"><strong>${esc(event.job_number || event.po_number || '')}</strong> ${esc(event.supplier_name)}${event.late_material ? ' &#9888;' : ''}<small>${esc(detail)}</small></button>`;
   }
-  root.DispatchOps = { mount,
+  function changeIdentity(event) {
+    const next = identityKey(event.detail);
+    if (next && next === identity) return;
+    identity = next; identityGeneration++;
+    const retired = new Set([...mounts].map(app => app.core));
+    if (shared) retired.add(shared);
+    mounts.forEach(app => app.destroy());
+    mainCleanup?.(); mainCleanup = null;
+    retired.forEach(core => core.dispose());
+    instance = null; shared = null;
+    for (const id of ['dispatchRoot', 'dispatchCalendarLayers', 'calendarBody']) {
+      const element = document.getElementById?.(id); if (element) element.innerHTML = '';
+    }
+    root._calEvents = []; root._calDeliveries = [];
+  }
+  root.addEventListener?.('sw:auth-identity', changeIdentity);
+  root.addEventListener?.('sw:auth-locked', () => changeIdentity({ detail: null }));
+  root.addEventListener?.('sw:auth-unlocked', () => {
+    if (!identity) return;
+    if (document.getElementById?.('viewDispatch')?.classList.contains('active')) root.DispatchOps.load().catch(() => {});
+    if (document.getElementById?.('viewCalendar')?.classList.contains('active')) root.loadCalendar?.();
+  });
+  root.DispatchOps = { mount, identityGuard,
     setActive(value) { return instance?.setActive(value); },
-    load() { const element = document.getElementById('dispatchRoot'); if (!element) return; if (!instance) instance = mount(element); return instance.load(); },
-    projectMain(events, deliveries, range) { return { events: controller().state.layers.staff ? events : [], deliveries: mainDeliveries(deliveries, range, events) }; },
+    load() { if (!identity) return Promise.resolve(); const element = document.getElementById('dispatchRoot'); if (!element) return; if (!instance) instance = mount(element); return instance.load(); },
+    projectMain(events, deliveries, range) { if (!identity) return { events: [], deliveries: [] }; return { events: controller().state.layers.staff ? events : [], deliveries: mainDeliveries(deliveries, range, events) }; },
     mainBlock,
-    staffVisible() { return controller().state.layers.staff; },
+    staffVisible() { return !!identity && controller().state.layers.staff; },
     loadMainCalendar(range) {
+      if (!identity) return Promise.resolve();
       const core = controller(), element = document.getElementById('dispatchCalendarLayers');
       if (!element) return;
-      if (!mainConnected) {
+      if (!mainCleanup) {
+        const assertIdentity = identityGuard();
         const render = () => {
+          assertIdentity();
           const focusedLayer = element.contains(document.activeElement) ? document.activeElement.dataset.dispatchLayer : null;
           element.innerHTML = '<div class="cal-sidebar-heading">Work layers</div>' + Object.entries(core.state.layers).map(([layer, enabled]) => `<label class="cal-sidebar-item"><input type="checkbox" data-dispatch-layer="${layer}" ${enabled ? 'checked' : ''}>${label(layer)}</label>`).join('') + `<p class="dp-main-coverage">${core.state.calendar.error ? esc(core.state.calendar.error) : core.state.calendar.coverage?.complete ? 'Material / movement range captured' : 'Material / movement coverage partial'}</p>`;
           if (focusedLayer) element.querySelector(`[data-dispatch-layer="${focusedLayer}"]`)?.focus();
           if (document.getElementById('viewCalendar')?.classList.contains('active')) root.renderCalendar();
         };
-        core.subscribe(render);
-        element.addEventListener('change', event => { if (event.target.dataset.dispatchLayer) core.setLayer(event.target.dataset.dispatchLayer, event.target.checked); });
-        document.getElementById('calendarBody')?.addEventListener('click', async event => { const target = event.target.closest('[data-dispatch-job]'); if (!target?.dataset.dispatchJob) return; event.stopPropagation(); root.showView('dispatch'); await core.select(target.dataset.dispatchJob); }, true);
-        mainConnected = true; render();
+        const unsubscribe = core.subscribe(render);
+        const change = event => { assertIdentity(); if (event.target.dataset.dispatchLayer) core.setLayer(event.target.dataset.dispatchLayer, event.target.checked); };
+        const click = async event => { const target = event.target.closest('[data-dispatch-job]'); if (!target?.dataset.dispatchJob) return; assertIdentity(); event.stopPropagation(); root.showView('dispatch'); await core.select(target.dataset.dispatchJob); };
+        const body = document.getElementById('calendarBody');
+        element.addEventListener('change', change); body?.addEventListener('click', click, true);
+        mainCleanup = () => { unsubscribe(); element.removeEventListener?.('change', change); body?.removeEventListener?.('click', click, true); };
+        render();
       }
-      return core.calendar(range.from, range.to);
+      return core.calendar(range.from, range.to).catch(error => { if (shared === core) throw error; });
     }
   };
 })(window);

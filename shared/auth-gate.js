@@ -13,10 +13,22 @@
     return meta ? meta.content.split(',').map(function(r){return r.trim();}) : [];
   })();
   var _unlocked = false;
+  var _identity = null;
+
+  function _identityFromProfile(profile) {
+    if (!profile || !profile.id || !profile.org_id) return null;
+    return { id: profile.id, org_id: profile.org_id };
+  }
+
+  function _setIdentity(identity) {
+    _identity = identity ? { id: identity.id, org_id: identity.org_id } : null;
+    window.dispatchEvent(new CustomEvent('sw:auth-identity', { detail: _identity }));
+  }
 
   // ── Hide main content immediately ──
   function _lock() {
     _unlocked = false;
+    _setIdentity(null);
     var style = document.getElementById('swAuthGateStyle');
     if (!style) {
       style = document.createElement('style');
@@ -65,6 +77,14 @@
     if (el) { el.textContent = msg; el.style.display = 'block'; }
   }
 
+  function _denyAuth(cloud, msg) {
+    _injectGate();
+    _showError(msg);
+    cloud.auth.signOut();
+    var btn = document.getElementById('swAuthSubmit');
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+  }
+
   function _doLogin() {
     var email = document.getElementById('swAuthEmail').value.trim();
     var password = document.getElementById('swAuthPassword').value;
@@ -101,15 +121,25 @@
   }
 
   function _checkRole(cloud, profile) {
-    if (!profile) { _showError('Login failed'); return; }
-    var role = profile.role || 'unknown';
-    if (ALLOWED_ROLES.length > 0 && ALLOWED_ROLES.indexOf(role) === -1) {
-      _showError('Access denied — your role (' + role + ') does not have permission for this page.');
-      cloud.auth.signOut();
-      var btn = document.getElementById('swAuthSubmit');
-      if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+    if (!profile) { _denyAuth(cloud, 'Login failed'); return; }
+    var identity = _identityFromProfile(profile);
+    if (!identity) {
+      _denyAuth(cloud, 'Access denied — your profile is missing verified identity.');
       return;
     }
+    var currentProfile = null;
+    try { currentProfile = cloud.auth.isLoggedIn() && cloud.auth.getUser ? cloud.auth.getUser() : null; } catch (e) { currentProfile = null; }
+    var currentIdentity = _identityFromProfile(currentProfile);
+    if (!currentIdentity || currentIdentity.id !== identity.id || currentIdentity.org_id !== identity.org_id) {
+      _denyAuth(cloud, 'Access denied — sign-in identity changed before verification completed.');
+      return;
+    }
+    var role = profile.role || 'unknown';
+    if (ALLOWED_ROLES.length > 0 && ALLOWED_ROLES.indexOf(role) === -1) {
+      _denyAuth(cloud, 'Access denied — your role (' + role + ') does not have permission for this page.');
+      return;
+    }
+    _setIdentity(identity);
     _unlock();
   }
 
@@ -152,6 +182,10 @@
         _checkRole(cloud, profile);
       });
 
+      cloud.on('auth:changing', function() {
+        _injectGate();
+      });
+
       // Listen for logout
       cloud.on('auth:logout', function() {
         _injectGate();
@@ -161,6 +195,7 @@
   });
 
   window.SW_AUTH_GATE = {
-    isUnlocked: function() { return _unlocked; }
+    isUnlocked: function() { return _unlocked; },
+    identity: function() { return _identity ? { id: _identity.id, org_id: _identity.org_id } : null; }
   };
 })();

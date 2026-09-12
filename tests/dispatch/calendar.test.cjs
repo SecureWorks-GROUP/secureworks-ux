@@ -14,6 +14,7 @@ function dispatchContext(opsFetch) {
   };
   const context = {
     console,
+    SW_AUTH_GATE: { identity: () => ({ id: 'operator-a', org_id: 'org-a' }) },
     document: { getElementById(id) { return elements[id] || null; } },
     opsFetch: opsFetch || function () { throw new Error('unexpected live read'); },
     opsPost() { throw new Error('unexpected live write'); },

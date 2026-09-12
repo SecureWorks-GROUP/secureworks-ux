@@ -14,6 +14,8 @@
       lane: 'patio',
       sender: '+61489267774',
       sender_label: 'SecureWorks Patios 774',
+      sender_resolved: true,
+      sender_sources: ['secureworks-patio-scope-booking/SKILL.md'],
       desk_rules: { monday_from: 12, no_wednesday: true, last_start: 15.5, hours: '08:00-16:30 except Monday from 12:00, no Wednesday' }
     },
     marnin: {
@@ -21,8 +23,13 @@
       name: 'Marnin',
       scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498',
       lane: 'fencing',
-      sender: '+61489267772',
-      sender_label: 'SecureWorks Fencing Sales 772',
+      sender: null,
+      sender_label: 'Unresolved Marnin sender (772 vs 776)',
+      sender_resolved: false,
+      sender_candidates: [
+        { number: '+61489267772', label: 'SecureWorks Fencing Sales 772', source: 'CIO-to-FENCING_SALES-marnin-calendar-2026-09-11.md' },
+        { number: '+61489267776', label: 'SecureWorks Group Ops 776', source: 'SALES-booking-page-audit.md; OPS.md automated booking-path exemption' }
+      ],
       desk_rules: { monday_from: 8, no_wednesday: false, last_start: 15.5, hours: '08:00-16:30 Mon-Fri; Tuesday/Friday Stratco pattern is a fencing rule' }
     },
     khairo: {
@@ -32,6 +39,8 @@
       lane: 'fencing',
       sender: '+61489267772',
       sender_label: 'SecureWorks Fencing Sales 772',
+      sender_resolved: true,
+      sender_sources: ['OPS.md fencing sales line'],
       desk_rules: { monday_from: 8, no_wednesday: false, last_start: 15.5, hours: '08:00-16:30 Mon-Fri; Calendly is not this calendar' }
     }
   };
@@ -48,7 +57,7 @@
     filter: 'all',
     search: '',
     layers: { confirmed: true, proposal: true, offer: true, availability: true },
-    conversation: { contactId: null, loading: false, error: null, messages: [], generation: 0 },
+    conversation: { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: 0 },
     drafts: {},
     archives: {},
     sendAttempted: false,
@@ -67,6 +76,26 @@
 
   function resource() {
     return RESOURCES[state.resourceId] || RESOURCES.nithin;
+  }
+
+  function resolveSender(res) {
+    res = res || resource();
+    if (res.sender_resolved === false) {
+      return {
+        resolved: false,
+        number: null,
+        label: res.sender_label || 'Sender unresolved',
+        candidates: res.sender_candidates || [],
+        reason: 'Authoritative sources disagree. Do not guess a line.'
+      };
+    }
+    return {
+      resolved: true,
+      number: res.sender,
+      label: res.sender_label,
+      candidates: [],
+      sources: res.sender_sources || []
+    };
   }
 
   function mondayIso(iso) {
@@ -162,10 +191,16 @@
     return true;
   }
 
+  function acceptedSlotStillCurrent(c) {
+    if (!c || !c.exact_acceptance) return false;
+    if (!c.accepted_start_iso || !c.proposal || !c.proposal.start_iso) return false;
+    return c.accepted_start_iso === c.proposal.start_iso;
+  }
+
   function actionKind(c) {
     if (!c) return 'none';
     if (c.status === 'repair') return 'repair';
-    if (c.exact_acceptance && c.status !== 'booked') return 'confirm_booking';
+    if (acceptedSlotStillCurrent(c) && c.status !== 'booked') return 'confirm_booking';
     if (c.status === 'booked') return 'none';
     return 'approve_offer';
   }
@@ -176,6 +211,7 @@
     var previous = c.status;
     if (kind === 'acceptance') {
       c.exact_acceptance = true;
+      c.accepted_start_iso = c.proposal && c.proposal.start_iso || null;
       c.status = 'needs_decision';
     } else if (kind === 'decline' || kind === 'new_availability') {
       c.exact_acceptance = false;
@@ -208,6 +244,8 @@
     if (!c) return false;
     if (c.event_id) return true;
     if (c.proposal && (c.status === 'waiting' || c.status === 'offer')) return true;
+    if (c.proposal && (c.exact_acceptance || c.accepted_start_iso)) return true;
+    if (c.proposal && c.send_evidence === 'sent') return true;
     return false;
   }
 
@@ -240,11 +278,16 @@
   function reviseProposedTime(startIso) {
     var c = selectedCase();
     if (!c || !c.proposal) return { ok: false, reason: 'no_proposal' };
-    if (!c.contact_id) return { ok: false, reason: 'no_contact' };
+    var slotChanged = c.proposal.start_iso !== startIso;
     c.proposal.start_iso = startIso;
     c.proposal.end_iso = addHourIso(startIso);
     c.proposal.revision = (c.proposal.revision || 0) + 1;
-    var d = draftFor(c.contact_id);
+    if (slotChanged && c.exact_acceptance && c.accepted_start_iso && c.accepted_start_iso !== startIso) {
+      c.exact_acceptance = false;
+      c.acceptance_invalidated = true;
+      if (c.status === 'needs_decision') c.status = 'ready';
+    }
+    var d = draftFor(c);
     var suggested = suggestedDraft(c);
     if (d.humanEdited && d.text && d.text !== suggested) {
       d.conflict = true;
@@ -255,9 +298,11 @@
       d.conflict = false;
       d.suggested = suggested;
       d.revision = (d.revision || 0) + 1;
+      c.proposal.draft = suggested;
     }
-    d.sender = resource().sender;
-    return { ok: true, conflict: !!d.conflict, revision: d.revision, text: d.text, suggested: suggested };
+    var route = resolveSender();
+    d.sender = route.number;
+    return { ok: true, conflict: !!d.conflict, revision: d.revision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance };
   }
 
   function archiveCase(reason, note) {
@@ -300,19 +345,25 @@
     return global.document && global.document.getElementById('salesBookingRoot');
   }
 
-  function draftFor(contactId) {
-    if (!contactId) return { text: '', revision: 0, humanEdited: false };
-    if (!state.drafts[contactId]) state.drafts[contactId] = { text: '', revision: 0, humanEdited: false, sender: null };
-    return state.drafts[contactId];
+  function draftKey(c) {
+    if (!c) return '';
+    return c.id || '';
+  }
+
+  function draftFor(c) {
+    var key = typeof c === 'string' ? c : draftKey(c);
+    if (!key) return { text: '', revision: 0, humanEdited: false, sender: null };
+    if (!state.drafts[key]) state.drafts[key] = { text: '', revision: 0, humanEdited: false, sender: null, case_id: key };
+    return state.drafts[key];
   }
 
   function bindDraft(c) {
-    if (!c || !c.contact_id) return;
-    var d = draftFor(c.contact_id);
-    if (!d.humanEdited) {
-      d.text = (c.proposal && c.proposal.draft) || '';
-      d.sender = resource().sender;
-    }
+    if (!c || !draftKey(c)) return;
+    var d = draftFor(c);
+    if (d.humanEdited) return;
+    if (d.revision > 0) return;
+    d.text = (c.proposal && c.proposal.draft) || d.text || '';
+    d.sender = resolveSender().number;
   }
 
   function coverageGaps(data) {
@@ -397,28 +448,28 @@
         }, ev.layer || 'confirmed');
       });
       cases().forEach(function (c) {
-        if (c.proposal && (c.status === 'proposal' || c.status === 'ready')) {
-          if (dayIndexFromIso(c.proposal.start_iso, state.weekStart) === d) {
-            body += renderWindows(c);
-            body += renderEvent({
-              id: c.id,
-              start_iso: c.proposal.start_iso,
-              end_iso: c.proposal.end_iso,
-              display_name: c.display_name,
-              suburb: c.suburb
-            }, 'proposal');
-          }
+        if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
+        var heldOffer = c.status === 'offer' || c.status === 'waiting' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
+        if (heldOffer) {
+          body += renderWindows(c);
+          body += renderEvent({
+            id: c.id,
+            start_iso: c.proposal.start_iso,
+            end_iso: c.proposal.end_iso,
+            display_name: c.display_name,
+            suburb: c.suburb
+          }, 'offer');
+          return;
         }
-        if (c.proposal && (c.status === 'offer' || c.status === 'waiting')) {
-          if (dayIndexFromIso(c.proposal.start_iso, state.weekStart) === d) {
-            body += renderEvent({
-              id: c.id,
-              start_iso: c.proposal.start_iso,
-              end_iso: c.proposal.end_iso,
-              display_name: c.display_name,
-              suburb: c.suburb
-            }, 'offer');
-          }
+        if (c.status === 'proposal' || c.status === 'ready' || c.status === 'needs_decision') {
+          body += renderWindows(c);
+          body += renderEvent({
+            id: c.id,
+            start_iso: c.proposal.start_iso,
+            end_iso: c.proposal.end_iso,
+            display_name: c.display_name,
+            suburb: c.suburb
+          }, 'proposal');
         }
       });
       cols += '<div class="daycolumn">' + wed + body + '</div>';
@@ -458,6 +509,9 @@
 
   function renderMessages() {
     var conv = state.conversation;
+    var selected = selectedCase();
+    if (!selected || !selected.contact_id) return '<div class="comms-empty">No GHL contact on this case. Thread is not shown.</div>';
+    if (conv.contactId && conv.contactId !== selected.contact_id) return '<div class="comms-empty">Thread belongs to another case; it is not shown.</div>';
     if (conv.loading) return '<div class="comms-empty">Loading conversation…</div>';
     if (conv.error) return '<div class="comms-empty">Conversation failed: ' + esc(conv.error) + '</div>';
     if (!conv.contactId) return '<div class="comms-empty">Select a case with a GHL contact to open the thread.</div>';
@@ -477,7 +531,7 @@
       return '<div class="detailhead"><p class="muted">No case selected</p><h2>Choose an enquiry</h2></div><div class="detailbody"><p class="muted">The thread, the interpreted window, and the draft stay together for one request.</p></div>';
     }
     bindDraft(c);
-    var d = c.contact_id ? draftFor(c.contact_id) : { text: '' };
+    var d = draftKey(c) ? draftFor(c) : { text: '' };
     var kind = actionKind(c);
     var holdNote = SEND_HOLD
       ? '<div class="holdnote">Send hold is active. This action does not send and does not write the diary.</div>'
@@ -501,10 +555,10 @@
       '<div><h3>GHL conversation</h3><div class="thread" id="salesBookingThread">' + renderMessages() + '</div></div>' +
       '</div>' +
       '<div class="actionzone">' + holdNote + conflict +
-      '<div class="senderline">From ' + esc(res.sender_label) + ' (' + esc(res.sender) + ') · To this contact only · Draft revision ' + esc((d.revision || 0)) + '</div>' +
+      '<div class="senderline">' + senderLine(res) + ' · To this case only · Draft revision ' + esc((d.revision || 0)) + '</div>' +
       '<label class="small muted">Draft SMS</label>' +
       '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea>' +
-      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
+      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
       archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
       '<p class="small muted" style="margin-top:8px">Approve offer does not create a visit. Confirm booking needs exact acceptance and a fresh preflight. Both stay held.</p></div>';
@@ -553,17 +607,35 @@
   }
 
   function clearConversation() {
-    state.conversation = { contactId: null, loading: false, error: null, messages: [], generation: state.conversation.generation + 1 };
+    state.conversation = { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: state.conversation.generation + 1 };
     if (convoAbort && convoAbort.abort) convoAbort.abort();
     convoAbort = null;
+  }
+
+  function senderLine(res) {
+    var route = resolveSender(res);
+    if (!route.resolved) {
+      var bits = (route.candidates || []).map(function (cand) { return cand.label + ' (' + cand.source + ')'; }).join(' vs ');
+      return 'From unresolved: ' + esc(bits || route.label);
+    }
+    return 'From ' + esc(route.label) + ' (' + esc(route.number) + ')';
   }
 
   function selectCase(id) {
     state.selectedId = id;
     var c = selectedCase();
+    if (!c || !c.contact_id) {
+      clearConversation();
+      render();
+      return;
+    }
+    if (state.conversation.contactId !== c.contact_id || state.conversation.caseId !== c.id) {
+      clearConversation();
+      state.conversation.contactId = c.contact_id;
+      state.conversation.caseId = c.id;
+    }
     render();
-    if (c && c.contact_id) loadConversation(c.contact_id);
-    else clearConversation();
+    loadConversation(c.contact_id, c.id);
   }
 
   function switchResource(id) {
@@ -613,9 +685,10 @@
     }
   }
 
-  async function loadConversation(contactId) {
+  async function loadConversation(contactId, caseId) {
     var generation = ++state.conversation.generation;
     state.conversation.contactId = contactId;
+    state.conversation.caseId = caseId || null;
     state.conversation.loading = true;
     state.conversation.error = null;
     state.conversation.messages = [];
@@ -632,7 +705,9 @@
         signal: convoAbort && convoAbort.signal
       });
       var data = await resp.json();
-      if (generation !== state.conversation.generation || state.conversation.contactId !== contactId) return;
+      if (generation !== state.conversation.generation) return;
+      if (state.conversation.contactId !== contactId) return;
+      if (caseId && state.conversation.caseId !== caseId) return;
       if (data.error) throw new Error(data.error);
       var msgs = data.messages || [];
       msgs.sort(function (a, b) { return String(a.timestamp || '') < String(b.timestamp || '') ? -1 : 1; });
@@ -650,18 +725,24 @@
   function attemptApprove() {
     var c = selectedCase();
     var kind = actionKind(c);
-    var d = c && c.contact_id ? draftFor(c.contact_id) : { text: '', revision: 0 };
+    var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0 };
+    var route = resolveSender();
     var payload = {
       action: kind,
+      case_id: c && c.id,
       contact_id: c && c.contact_id,
-      sender: resource().sender,
+      sender: route.number,
+      sender_resolved: route.resolved,
       resource: state.resourceId,
       revision: d.revision || 0,
       text: d.text || '',
       start_iso: c && c.proposal && c.proposal.start_iso,
-      exact_acceptance: !!(c && c.exact_acceptance)
+      exact_acceptance: acceptedSlotStillCurrent(c)
     };
     state.lastSendCall = payload;
+    if (!route.resolved) {
+      return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'sender_unresolved', action: kind };
+    }
     if (kind === 'confirm_booking' && !payload.exact_acceptance) {
       return { ok: false, held: true, sent: false, booked: false, reason: 'no_exact_acceptance' };
     }
@@ -752,12 +833,12 @@
       }
       if (e.target.matches && e.target.matches('[data-booking-draft]')) {
         var c = selectedCase();
-        if (!c || !c.contact_id) return;
-        var d = draftFor(c.contact_id);
+        if (!c || !draftKey(c)) return;
+        var d = draftFor(c);
         d.text = e.target.value;
         d.humanEdited = true;
         d.revision = (d.revision || 0) + 1;
-        d.sender = resource().sender;
+        d.sender = resolveSender().number;
       }
     });
   }
@@ -777,6 +858,10 @@
     switchResource: switchResource,
     loadConversation: loadConversation,
     attemptApprove: attemptApprove,
+    draftKey: draftKey,
+    draftFor: draftFor,
+    resolveSender: resolveSender,
+    acceptedSlotStillCurrent: acceptedSlotStillCurrent,
     applyInboundReply: applyInboundReply,
     markSendResult: markSendResult,
     actionKind: actionKind,

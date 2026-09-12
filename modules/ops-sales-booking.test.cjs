@@ -191,6 +191,7 @@ test('confirm booking is not offered without exact acceptance', () => {
   api.state.selectedId = 'case-a';
   assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
   api.state.data.cases[0].exact_acceptance = true;
+  api.state.data.cases[0].accepted_start_iso = api.state.data.cases[0].proposal.start_iso;
   assert.equal(api.actionKind(api.state.data.cases[0]), 'confirm_booking');
   const result = api.attemptApprove();
   assert.equal(result.booked, false);
@@ -206,12 +207,93 @@ test('time change revises an unedited draft and keeps a human edit with a confli
   assert.equal(first.conflict, false);
   assert.match(first.text, /2:00pm/);
   assert.match(first.text, /Nithin/);
-  api.state.drafts['contact-a'].humanEdited = true;
-  api.state.drafts['contact-a'].text = 'Keep my wording';
+  api.state.drafts['case-a'].humanEdited = true;
+  api.state.drafts['case-a'].text = 'Keep my wording';
   const second = api.reviseProposedTime('2026-09-17T15:00:00');
   assert.equal(second.conflict, true);
-  assert.equal(api.state.drafts['contact-a'].text, 'Keep my wording');
+  assert.equal(api.state.drafts['case-a'].text, 'Keep my wording');
   assert.match(second.suggested, /3:00pm/);
+});
+
+test('render after unedited time change keeps the revised draft, not the old proposal text', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.drafts = {};
+  api.reviseProposedTime('2026-09-17T14:00:00');
+  const html = api.renderHTML();
+  assert.match(html, /2:00pm/);
+  assert.doesNotMatch(html, /Thursday 1:00pm works/);
+});
+
+test('changing an accepted slot invalidates Confirm booking', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.data.cases[0].proposal.start_iso = '2026-09-17T13:00:00';
+  api.applyInboundReply('acceptance');
+  assert.equal(api.actionKind(api.state.data.cases[0]), 'confirm_booking');
+  const revised = api.reviseProposedTime('2026-09-17T14:00:00');
+  assert.equal(revised.exact_acceptance, false);
+  assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
+});
+
+test('two requests for one contact keep separate human drafts', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.data.cases.push({
+    id: 'case-b',
+    contact_id: 'contact-a',
+    display_name: 'Sample A request 2',
+    suburb: 'Carlisle',
+    status: 'ready',
+    proposal: { start_iso: '2026-09-18T09:00:00', end_iso: '2026-09-18T10:00:00', draft: 'Second request draft' }
+  });
+  api.state.drafts = {};
+  const firstCase = api.state.data.cases.find((c) => c.id === 'case-a');
+  const secondCase = api.state.data.cases.find((c) => c.id === 'case-b');
+  api.draftFor(firstCase).text = 'First request human';
+  api.draftFor(firstCase).humanEdited = true;
+  const second = api.draftFor(secondCase);
+  assert.notEqual(second.text, 'First request human');
+  assert.equal(api.draftKey(firstCase), 'case-a');
+  assert.equal(api.draftKey(secondCase), 'case-b');
+});
+
+test('accepted offer stays on the calendar and cannot be archived before an event exists', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.applyInboundReply('acceptance');
+  const html = api.renderHTML();
+  assert.match(html, /event offer/);
+  const blocked = api.archiveCase('declined', '');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, 'commitment_visible');
+});
+
+test('selecting a provider event with no contact clears the previous thread', () => {
+  api.state.conversation = { contactId: 'contact-a', caseId: 'case-a', loading: false, error: null, messages: [{ body: 'previous customer', direction: 'inbound', timestamp: '1' }], generation: 3 };
+  api.state.data = sampleRead();
+  api.state.selectedId = 'evt-1';
+  api.selectCase('evt-1');
+  assert.equal(api.state.conversation.contactId, null);
+  assert.equal(api.state.conversation.messages.length, 0);
+  const html = api.renderHTML();
+  assert.doesNotMatch(html, /previous customer/);
+});
+
+test('Marnin sender stays unresolved between 772 and 776', () => {
+  api.state.resourceId = 'marnin';
+  const route = api.resolveSender(api.RESOURCES.marnin);
+  assert.equal(route.resolved, false);
+  assert.equal(route.number, null);
+  assert.equal(route.candidates.length, 2);
+  api.state.data = sampleRead('marnin');
+  api.state.selectedId = 'case-a';
+  const result = api.attemptApprove();
+  assert.equal(result.reason, 'sender_unresolved');
+  assert.equal(result.sent, false);
 });
 
 test('inbound replies leave waiting and pick the matching simple action', () => {

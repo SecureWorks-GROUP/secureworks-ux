@@ -16,7 +16,11 @@ Default list is not-yet-scoped work, including booked visits until they happen. 
 
 ## Selected case
 
-Chat, proposed time and editable draft are one panel. Approve offer before exact acceptance; Confirm booking after. Both are held. Time edits revise the draft unless the human edited it, in which case the conflict is flagged. Archive is reversible and does not delete GHL/contact/job data; it cannot hide a diary event or outstanding offer.
+Chat, proposed time and editable draft are one panel. Approve offer before exact acceptance; Confirm booking after. Both are held. Time edits revise the draft unless the human edited it, in which case the conflict is flagged. Changing an accepted slot invalidates exact acceptance. Drafts are keyed by request, not contact. An accepted offer stays on the calendar and cannot be archived until a provider event exists or the commitment is withdrawn. Switching to a diary block with no GHL contact clears the previous thread.
+
+## Sender routing
+
+Patio 774 is source-backed. Marnin is **unresolved** between Fencing Sales 772 (CIO 11 Sep calendar note) and Group Ops 776 (joint audit / OPS automated booking-path exemption). The UI must not guess. Khairo uses the OPS fencing sales line 772 with that source cited.
 
 ## Preview
 

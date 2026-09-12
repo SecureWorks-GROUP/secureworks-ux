@@ -8,6 +8,8 @@ Ops > **Sales > Performance | Booking**. Booking uses Ops tokens (warm canvas `#
 
 `SalesBooking.load` calls `opsFetch('sales_booking_read', {resource, week_start, scoper_user_id})`. The isolated preview injects `SALES_BOOKING_PREVIEW_URL` and reads live Microsoft calendars through `sw-mcp`. There is no in-page fixture fallback.
 
+Conversation interpretation is `sales-booking-assess-v2`. Authoritative path is structured ops-ai output plus deterministic validation. The conservative extractor is an explicit fallback (`intelligent_automation: false`) and sends unsupported language to review. It does not invent dates, accept qualified yes, treat "do not cancel" as cancel, or mark Ready when calendar/leave/travel is missing or no slot exists. Exact acceptance binds a preceding sent offer id and slot revision. Instants are compared in UTC after Perth-normalising naive timestamps.
+
 GHL threads use `ghl-proxy?action=get_conversation` with `opsAuthHeaders`, aborted on case/resource switch. Patio sender is 774, not the incumbent 776 default.
 
 ## Queue (flow amendment)

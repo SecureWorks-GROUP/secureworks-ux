@@ -96,7 +96,7 @@ function displayFromEvent(ev) {
   return s.replace(/^Scope:\s*/i, '').split(',')[0].trim() || s;
 }
 
-function interpretProposal(messages, suburb, resourceId, weekStart, events) {
+function interpretProposal(messages, suburb, resourceId, weekStart, events, coverage) {
   const spec = RESOURCES[resourceId] || RESOURCES.nithin;
   const rules = resourceId === 'nithin'
     ? { monday_from: 12, no_wednesday: true, last_start: 15.5 }
@@ -107,7 +107,8 @@ function interpretProposal(messages, suburb, resourceId, weekStart, events) {
     suburb,
     messages,
     events,
-    pending_offers: []
+    pending_offers: [],
+    coverage: coverage || { calendar: false, leave: 'not_read', route: false, travel: false }
   });
 }
 
@@ -162,7 +163,13 @@ async function salesBookingRead(query) {
     try {
       const convo = await mcpCall('sw_get_conversation', { contact_id: row.contact_id });
       const messages = convo.messages || convo.result?.messages || [];
-      const interp = interpretProposal(messages, row.suburb, resourceId, weekStart, events);
+      const coverage = {
+        calendar: !!(cal.ok !== false && cal.coverage && cal.coverage.calendar_view_complete),
+        leave: (cal.coverage && cal.coverage.operational_leave === 'not_read') ? 'not_read' : false,
+        route: false,
+        travel: false
+      };
+      const interp = interpretProposal(messages, row.suburb, resourceId, weekStart, events, coverage);
       if (convo.contact && convo.contact.name) display = convo.contact.name;
       if (interp) {
         status = interp.status;

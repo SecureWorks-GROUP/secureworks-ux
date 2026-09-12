@@ -1,6 +1,6 @@
 'use strict';
 
-var VERSION = 'sales-booking-assess-v2.3';
+var VERSION = 'sales-booking-assess-v2.4';
 var MAX_OBSERVATION_AGE_MS = 72 * 60 * 60 * 1000;
 var INTERPRETER_FALLBACK = 'conservative-fallback';
 var TZ_PERTH = 'Australia/Perth';
@@ -135,6 +135,105 @@ function isExplicitCancel(text) {
   return /\b(cancel(led)?|call(ed)? it off|not going ahead|can't make( it)?|cannot make( it)?)\b/i.test(text);
 }
 
+function isBareNo(text) {
+  return /^(no|nope|nah)([.! ]|$)/i.test(String(text || '').trim());
+}
+
+function isUnavailability(text) {
+  return /\b(unavailable|not available|can't make|cannot make|doesn't work|does not work|won't work|will not work|i am not free)\b/i.test(text);
+}
+
+function perthWeekdayName(dateIso) {
+  var parts = String(dateIso || '').slice(0, 10).split('-').map(Number);
+  if (!parts[0] || !parts[1] || !parts[2]) return null;
+  return WEEKDAYS[new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay()] || null;
+}
+
+function windowHour(iso) {
+  var m = String(iso || '').match(/T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+
+function textContradictsWindow(text, w, year) {
+  if (isExplicitCancel(text) || isBareNo(text)) return true;
+  var windowDate = String(w.start_iso).slice(0, 10);
+  var windowDay = perthWeekdayName(windowDate);
+  var lower = String(text || '').toLowerCase();
+  if (isUnavailability(text)) {
+    if (windowDay && lower.indexOf(windowDay) >= 0) return true;
+    var blocked = parseExplicitDate(text, year);
+    if (blocked && blocked === windowDate) return true;
+    if (!blocked && !weekdayName(text)) return true;
+  }
+  var laterDate = parseExplicitDate(text, year);
+  if (laterDate && laterDate !== windowDate) return true;
+  var laterDay = weekdayName(text);
+  if (laterDay && windowDay && laterDay !== windowDay && /\b(instead|now|not|unavailable|rather)\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function laterInboundContradicts(messages, cited, w, year) {
+  var citedMs = toInstant(cited && cited.timestamp);
+  var citedId = cited && cited.id;
+  return sortMessages(messages).some(function (m) {
+    if ((m.direction || 'inbound') === 'outbound') return false;
+    if (citedId && m.id === citedId) return false;
+    var ms = toInstant(m.timestamp);
+    if (citedMs != null && ms != null && ms <= citedMs) return false;
+    return textContradictsWindow(bodyOf(m), w, year);
+  });
+}
+
+function groundWindowAgainstText(w, text, year) {
+  var windowDate = String(w.start_iso).slice(0, 10);
+  var windowDay = perthWeekdayName(windowDate);
+  var hour = windowHour(w.start_iso);
+  var date = parseExplicitDate(text, year);
+  var clock = parseClock(text);
+  var dayName = weekdayName(text);
+  var afternoonOnly = /\bafternoons?\b/i.test(text) && !date && !dayName;
+  var morningOnly = /\bmornings?\b/i.test(text) && !date && !dayName;
+  if (isExplicitCancel(text) || isBareNo(text)) {
+    return { ok: false, reason: 'cited_inbound_contradicts_window' };
+  }
+  if (isUnavailability(text) && (!date || date === windowDate) && (!dayName || dayName === windowDay)) {
+    return { ok: false, reason: 'cited_inbound_contradicts_window' };
+  }
+  if (date) {
+    if (date !== windowDate) return { ok: false, reason: 'window_date_not_in_cited_text' };
+    if (clock != null && hour != null) {
+      if (/\bafter\b/i.test(text) && hour < clock - 0.01) return { ok: false, reason: 'window_time_contradicts_cited_text' };
+      if (/\bbefore\b/i.test(text) && hour >= clock) return { ok: false, reason: 'window_time_contradicts_cited_text' };
+      if (!/\bafter\b/i.test(text) && !/\bbefore\b/i.test(text) && Math.abs(hour - clock) > 0.26) {
+        return { ok: false, reason: 'window_time_contradicts_cited_text' };
+      }
+    }
+    return { ok: true, customer_date_specified: true, date_source: 'customer' };
+  }
+  if (dayName) {
+    if (windowDay !== dayName) return { ok: false, reason: 'window_weekday_not_in_cited_text' };
+    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', weekday: dayName };
+  }
+  if (afternoonOnly) {
+    if (hour != null && hour < 13) return { ok: false, reason: 'window_time_contradicts_preference' };
+    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', time_of_day: 'afternoon' };
+  }
+  if (morningOnly) {
+    if (hour != null && hour >= 12) return { ok: false, reason: 'window_time_contradicts_preference' };
+    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', time_of_day: 'morning' };
+  }
+  if (clock != null && !date && !dayName) {
+    if (/\bafter\b/i.test(text) && hour != null && hour < clock - 0.01) {
+      return { ok: false, reason: 'window_time_contradicts_cited_text' };
+    }
+    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed' };
+  }
+  return { ok: false, reason: 'window_not_grounded_in_cited_text', unverifiable: true };
+}
+
 function messageById(messages, id) {
   if (!id) return null;
   var found = null;
@@ -152,23 +251,25 @@ function observationFresh(iso, nowMs) {
 
 function occupancyGaps(input) {
   var gaps = [];
-  var nowMs = toInstant(input.now || input.as_of);
-  if (!input.calendar_retrieved_at && !(input.coverage && input.coverage.calendar_retrieved_at)) {
+  var nowRaw = input.now || input.as_of;
+  var nowMs = toInstant(nowRaw);
+  if (!nowRaw || nowMs == null) gaps.push('as_of_missing');
+  var calAt = input.calendar_retrieved_at || (input.coverage && input.coverage.calendar_retrieved_at) || null;
+  if (!calAt) {
     gaps.push('calendar_unobserved');
-  } else if (nowMs && !observationFresh(input.calendar_retrieved_at || (input.coverage && input.coverage.calendar_retrieved_at), nowMs)) {
+  } else if (nowMs == null || !observationFresh(calAt, nowMs)) {
     gaps.push('stale_calendar_observation');
   }
-  if (!input.leave_retrieved_at && !Array.isArray(input.leave_intervals)) {
+  if (!input.leave_retrieved_at) {
     gaps.push('leave_unobserved');
-  } else if (input.leave_retrieved_at && nowMs && !observationFresh(input.leave_retrieved_at, nowMs)) {
+  } else if (nowMs == null || !observationFresh(input.leave_retrieved_at, nowMs)) {
     gaps.push('stale_leave_observation');
   }
-  if (input.travel_minutes == null && !input.travel_retrieved_at && !Array.isArray(input.route_legs)) {
+  if (!input.travel_retrieved_at) {
     gaps.push('travel_unobserved');
-  } else if (input.travel_retrieved_at && nowMs && !observationFresh(input.travel_retrieved_at, nowMs)) {
+  } else if (nowMs == null || !observationFresh(input.travel_retrieved_at, nowMs)) {
     gaps.push('stale_travel_observation');
   }
-  if (!input.now && !input.as_of) gaps.push('as_of_missing');
   (input.events || []).forEach(function (ev) {
     if (toInstant(ev.start_iso || ev.start) == null || toInstant(ev.end_iso || ev.end) == null) {
       gaps.push('malformed_occupancy');
@@ -367,12 +468,17 @@ function conservativeExtract(input) {
         });
       }
     } else if (dayName && !date) {
-      facts.weekday = dayName;
       facts.date_specified = false;
       facts.clock = clock;
-      if (clock != null && /\bafter\b/i.test(text)) facts.after_hour = clock;
-      if (clock != null && /\bbefore\b/i.test(text)) facts.before_hour = clock;
-      review.push('Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal.');
+      if (isUnavailability(text)) {
+        facts.weekday_excluded = dayName;
+        review.push('Customer excluded a weekday. Do not treat it as availability.');
+      } else {
+        facts.weekday = dayName;
+        if (clock != null && /\bafter\b/i.test(text)) facts.after_hour = clock;
+        if (clock != null && /\bbefore\b/i.test(text)) facts.before_hour = clock;
+        review.push('Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal.');
+      }
     } else if (!date && !dayName && clock != null) {
       facts.clock = clock;
       facts.date_specified = false;
@@ -418,6 +524,9 @@ function proposeCandidate(input, facts) {
         var dow = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
         return dow === want;
       });
+    }
+    if (facts.weekday_excluded) {
+      days = days.filter(function (d) { return perthWeekdayName(d) !== facts.weekday_excluded; });
     }
   }
   var found = null;
@@ -503,6 +612,7 @@ function proposeFromWindows(windows, input) {
         if (b.malformed) return true;
         return rangeOverlap(cursor, slotEnd, b.start, b.end);
       });
+      var customerDate = !!(w.explicit_date || w.customer_date_specified);
       var cand = {
         start_iso: isoPerth(local.date, local.hour).local,
         end_iso: perthParts(slotEnd).date === local.date
@@ -510,7 +620,11 @@ function proposeFromWindows(windows, input) {
           : isoPerth(perthParts(slotEnd).date, perthParts(slotEnd).hour).local,
         start_instant: cursor,
         end_instant: slotEnd,
-        window_label: w.source_message_id ? 'inbound ' + w.source_message_id : 'inbound window'
+        date_source: w.date_source || (customerDate ? 'customer' : 'ai_proposed'),
+        customer_date_specified: customerDate,
+        window_label: customerDate
+          ? (w.source_message_id ? 'inbound ' + w.source_message_id : 'inbound window')
+          : 'AI-proposed date, customer date unspecified'
       };
       if (!clash && slotFeasible(cand, input)) {
         found = cand;
@@ -539,6 +653,8 @@ function leaveClash(startMs, endMs, input) {
 }
 
 function travelMinutesBetween(input, fromSuburb, toSuburb) {
+  if (!fromSuburb || !toSuburb) return null;
+  if (fromSuburb === toSuburb) return 0;
   var legs = input.route_legs || [];
   var i;
   for (i = 0; i < legs.length; i++) {
@@ -546,23 +662,53 @@ function travelMinutesBetween(input, fromSuburb, toSuburb) {
       return legs[i].minutes;
     }
   }
-  return Number(input.travel_minutes || 0);
+  if (typeof input.travel_minutes === 'number') return input.travel_minutes;
+  return null;
+}
+
+function occupancyVisits(input) {
+  var out = [];
+  (input.events || []).concat(input.pending_offers || []).forEach(function (ev) {
+    var s = toInstant(ev.start_iso || ev.start);
+    var e = toInstant(ev.end_iso || ev.end);
+    if (s == null || e == null) return;
+    out.push({ start: s, end: e, suburb: ev.suburb || ev.location || null });
+  });
+  out.sort(function (a, b) { return a.start - b.start; });
+  return out;
+}
+
+function resolveTravelMinutes(input, fromSuburb, toSuburb) {
+  var mins = travelMinutesBetween(input, fromSuburb, toSuburb);
+  if (mins != null) return mins;
+  if (typeof input.travel_minutes === 'number') return input.travel_minutes;
+  if (fromSuburb && toSuburb && fromSuburb !== toSuburb) return null;
+  return 0;
 }
 
 function travelClash(startMs, endMs, input) {
-  var prior = input.previous_visit;
-  if (prior) {
-    var priorEnd = toInstant(prior.end_iso);
-    if (priorEnd == null) return true;
-    var afterPrior = travelMinutesBetween(input, prior.suburb, input.suburb) * 60 * 1000;
-    if (priorEnd <= startMs && startMs < priorEnd + afterPrior) return true;
+  var site = input.suburb;
+  var prev = input.previous_visit
+    ? { end: toInstant(input.previous_visit.end_iso), suburb: input.previous_visit.suburb }
+    : null;
+  var next = input.next_visit
+    ? { start: toInstant(input.next_visit.start_iso), suburb: input.next_visit.suburb }
+    : null;
+  occupancyVisits(input).forEach(function (v) {
+    if (v.end <= startMs && (!prev || prev.end == null || v.end >= prev.end)) prev = { end: v.end, suburb: v.suburb };
+    if (v.start >= endMs && (!next || next.start == null || v.start < next.start)) next = { start: v.start, suburb: v.suburb };
+  });
+  if (prev) {
+    if (prev.end == null) return true;
+    var afterPrior = resolveTravelMinutes(input, prev.suburb, site);
+    if (afterPrior == null) return true;
+    if (prev.end <= startMs && startMs < prev.end + afterPrior * 60 * 1000) return true;
   }
-  var next = input.next_visit;
   if (next) {
-    var nextStart = toInstant(next.start_iso);
-    if (nextStart == null) return true;
-    var toNext = travelMinutesBetween(input, input.suburb, next.suburb) * 60 * 1000;
-    if (startMs < nextStart && endMs + toNext > nextStart) return true;
+    if (next.start == null) return true;
+    var toNext = resolveTravelMinutes(input, site, next.suburb);
+    if (toNext == null) return true;
+    if (startMs < next.start && endMs + toNext * 60 * 1000 > next.start) return true;
   }
   return false;
 }
@@ -591,7 +737,8 @@ function validate(ground, model, input) {
   var usedModelWindows = false;
 
   if (model && Array.isArray(model.customer_windows)) {
-    var adopted = [];
+    var adoptedCustomer = [];
+    var year = yearFrom(input);
     model.customer_windows.forEach(function (w) {
       var cited = messageById(messages, w.source_message_id);
       if (!cited || (cited.direction || 'inbound') === 'outbound') {
@@ -608,21 +755,35 @@ function validate(ground, model, input) {
         reasons.push('Model window conflicts with an explicit customer date.');
         return;
       }
-      adopted.push({
+      if (laterInboundContradicts(messages, cited, w, year)) {
+        reasons.push('Model window is contradicted by a later inbound message.');
+        return;
+      }
+      var grounded = groundWindowAgainstText(w, bodyOf(cited), year);
+      if (!grounded.ok) {
+        reasons.push(grounded.unverifiable
+          ? 'Model window is not independently grounded in the cited inbound text.'
+          : 'Model window contradicts the cited inbound text.');
+        return;
+      }
+      if (!grounded.customer_date_specified) {
+        reasons.push('Model suggested a slot that is not a customer-declared date.');
+        return;
+      }
+      adoptedCustomer.push({
         start_iso: w.start_iso,
         end_iso: w.end_iso,
         start_instant: startI,
         end_instant: endI,
         source_message_id: w.source_message_id,
-        explicit_date: true
+        explicit_date: true,
+        date_source: 'customer',
+        customer_date_specified: true
       });
     });
-    if (adopted.length && !windows.length) {
-      windows = adopted;
+    if (adoptedCustomer.length) {
+      windows = windows.length ? windows.concat(adoptedCustomer) : adoptedCustomer;
       facts.date_specified = true;
-      usedModelWindows = true;
-    } else if (adopted.length && windows.length) {
-      windows = windows.concat(adopted);
       usedModelWindows = true;
     }
   }
@@ -677,9 +838,9 @@ function validate(ground, model, input) {
     var slot = null;
     if (windows && windows.length) {
       slot = proposeFromWindows(windows, input);
-      if (slot) {
-        slot.date_source = 'customer';
-        slot.customer_date_specified = true;
+      if (slot && slot.customer_date_specified !== true && slot.date_source !== 'customer') {
+        slot.date_source = slot.date_source || 'ai_proposed';
+        slot.customer_date_specified = false;
       }
     } else if (!wrongLane) {
       slot = proposeCandidate(input, facts);
@@ -799,8 +960,11 @@ function reasonPrompt(input) {
       'Return JSON only.',
       'Separate customer facts from candidate scheduling.',
       'Customer constraints may come from inbound messages only.',
+      'A cited inbound id is not proof of the window content. The cited text must independently support the date and time.',
       'If the customer gives a time-of-day with no date, record that preference and you may suggest a verified-free slot labelled AI-proposed date, customer date unspecified.',
       'Do not write an AI-suggested day as a customer-declared window or exact acceptance.',
+      'If a later inbound contradicts an earlier window, drop the earlier window.',
+      'If the interpretation is not verifiable from the cited text, return review_reasons and do not invent a customer date.',
       'Initial outreach may propose a suitable slot pending approval without pretending the customer supplied availability.',
       'Exact acceptance requires the preceding sent offer id and slot revision.',
       'Do not map an explicit calendar date onto a different week.',

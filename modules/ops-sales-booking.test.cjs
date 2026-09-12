@@ -401,3 +401,68 @@ test('opsFetch for the workspace uses the signed-in token', async () => {
   vm.runInContext(source.slice(start, end), ctx);
   await ctx.opsFetch('sales_booking_read', { resource: 'nithin', week_start: '2026-09-14' });
 });
+
+test('same inbound that bound acceptance is not revoked on reload', async () => {
+  const posts = [];
+  global.opsPost = async (action, body) => { posts.push({ action, body }); return {}; };
+  global.opsAuthHeaders = async () => ({});
+  global._commsGHLBase = 'https://invalid.test';
+  global.fetch = async () => ({ json: async () => ({ messages: [{ id: 'in1', direction: 'inbound', timestamp: '2026-09-12T13:00:00Z', body: 'Yes' }] }) });
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  const c = api.state.data.cases[0];
+  c.status = 'needs_decision';
+  c.exact_acceptance = true;
+  c.accepted_start_iso = c.proposal.start_iso;
+  c.accepted_end_iso = c.proposal.end_iso;
+  c.accepted_offer_id = c.proposal.offer_id;
+  c.accepted_message_id = 'in1';
+  await api.loadConversation(c.contact_id, c.id);
+  assert.equal(c.exact_acceptance, true);
+  assert.equal(c.status, 'needs_decision');
+  assert.equal(posts.length, 0);
+  delete global.opsPost;
+  delete global.opsAuthHeaders;
+  delete global._commsGHLBase;
+  delete global.fetch;
+});
+
+test('new ordinary availability invalidates a ready proposal and reassesses', async () => {
+  const posts = [];
+  global.opsPost = async (action, body) => { posts.push({ action, body }); return {}; };
+  global.opsAuthHeaders = async () => ({});
+  global._commsGHLBase = 'https://invalid.test';
+  global.fetch = async () => ({ json: async () => ({ messages: [{ id: 'new2', direction: 'inbound', timestamp: '2026-09-12T15:00:00Z', body: 'Actually Friday instead' }] }) });
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  const c = api.state.data.cases[0];
+  c.status = 'ready';
+  c.exact_acceptance = false;
+  await api.loadConversation(c.contact_id, c.id);
+  assert.equal(c.status, 'needs_decision');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, 'sales_booking_on_event');
+  delete global.opsPost;
+  delete global.opsAuthHeaders;
+  delete global._commsGHLBase;
+  delete global.fetch;
+});
+
+test('confirm is refused when recipient or resource no longer match the accepted slot', () => {
+  api.state.resourceId = 'khairo';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  const c = api.state.data.cases[0];
+  c.exact_acceptance = true;
+  c.accepted_start_iso = c.proposal.start_iso;
+  c.accepted_end_iso = c.proposal.end_iso;
+  c.accepted_offer_id = c.proposal.offer_id;
+  c.accepted_resource_id = 'nithin';
+  c.accepted_contact_id = 'contact1';
+  c.contact_id = 'contact2';
+  assert.equal(api.acceptedSlotStillCurrent(c), false);
+  const result = api.attemptApprove();
+  assert.notEqual(result.action, 'confirm_booking');
+  assert.equal(api.state.lastSendCall.exact_acceptance, false);
+  api.state.resourceId = 'nithin';
+});

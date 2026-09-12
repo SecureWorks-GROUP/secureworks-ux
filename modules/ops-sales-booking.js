@@ -198,6 +198,9 @@
     if (c.accepted_start_iso !== c.proposal.start_iso) return false;
     if (c.accepted_end_iso !== c.proposal.end_iso) return false;
     if (c.accepted_offer_id !== c.proposal.offer_id) return false;
+    var boundResource = c.accepted_resource_id || c.resource_id || null;
+    if (boundResource && boundResource !== state.resourceId) return false;
+    if (c.accepted_contact_id && c.contact_id && c.accepted_contact_id !== c.contact_id) return false;
     return true;
   }
 
@@ -212,6 +215,11 @@
     global.opsPost('sales_booking_on_event', { event_key: eventKey, type: 'inbound', case_id: c.id });
   }
 
+  function inboundFrontier(m) {
+    if (!m) return null;
+    return String(m.id || '') + ':' + String(m.timestamp || '');
+  }
+
   function applyLatestInboundToCase(msgs, c) {
     if (!c || !msgs || !msgs.length) return;
     var last = null;
@@ -219,7 +227,14 @@
       if ((m.direction || 'inbound') !== 'outbound') last = m;
     });
     if (!last) return;
+    var frontier = inboundFrontier(last);
     var key = 'ghl:' + c.id + ':' + (last.id || last.timestamp || 'latest');
+    if (c.exact_acceptance && c.accepted_message_id && last.id && String(c.accepted_message_id) === String(last.id)) {
+      c.conversation_frontier = frontier;
+      return;
+    }
+    if (c.conversation_frontier && c.conversation_frontier === frontier) return;
+    c.conversation_frontier = frontier;
     if (looksLikeCancel(last.body || last.text || '')) {
       c.exact_acceptance = false;
       c.status = 'repair';
@@ -229,6 +244,12 @@
     if (c.exact_acceptance) {
       c.exact_acceptance = false;
       c.status = 'needs_decision';
+      enqueueReassess(c, key);
+      return;
+    }
+    if (c.status === 'ready' || c.status === 'proposal' || c.status === 'waiting' || c.status === 'offer') {
+      c.status = 'needs_decision';
+      c.proposal_stale = true;
       enqueueReassess(c, key);
     }
   }
@@ -250,6 +271,8 @@
       c.accepted_start_iso = c.proposal && c.proposal.start_iso || null;
       c.accepted_end_iso = c.proposal && c.proposal.end_iso || null;
       c.accepted_offer_id = c.proposal && c.proposal.offer_id || c.accepted_offer_id || null;
+      c.accepted_resource_id = state.resourceId;
+      c.accepted_contact_id = c.contact_id || null;
       c.status = 'needs_decision';
     } else if (kind === 'decline' || kind === 'new_availability') {
       c.exact_acceptance = false;
@@ -790,6 +813,14 @@
     var kind = actionKind(c);
     var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0 };
     var route = resolveSender();
+    if (c && c.contact_id && state.conversation.contactId === c.contact_id) {
+      if (state.conversation.loading) {
+        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_pending', action: kind };
+      }
+      if (state.conversation.error) {
+        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_error', action: kind };
+      }
+    }
     var payload = {
       action: kind,
       case_id: c && c.id,
@@ -797,9 +828,13 @@
       sender: route.number,
       sender_resolved: route.resolved,
       resource: state.resourceId,
+      accepted_resource_id: c && c.accepted_resource_id || null,
+      accepted_contact_id: c && c.accepted_contact_id || (c && c.contact_id) || null,
       revision: d.revision || 0,
       text: d.text || '',
       start_iso: c && c.proposal && c.proposal.start_iso,
+      end_iso: c && c.proposal && c.proposal.end_iso,
+      offer_id: c && c.proposal && c.proposal.offer_id,
       exact_acceptance: acceptedSlotStillCurrent(c)
     };
     state.lastSendCall = payload;

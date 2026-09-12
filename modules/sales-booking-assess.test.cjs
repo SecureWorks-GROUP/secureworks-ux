@@ -321,6 +321,90 @@ test('travel from a previous visit blocks an immediate next suburb', () => {
   assert.notEqual(result.status, 'ready');
 });
 
+test('model window citing any inbound cannot invent a customer Monday from afternoons', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [inbound('Afternoons work')],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.equal(result.customer_facts.date_specified, false);
+  if (result.proposal) {
+    assert.equal(result.proposal.date_source, 'ai_proposed');
+    assert.equal(result.proposal.customer_date_specified, false);
+  }
+});
+
+test('model window citing inbound No is not a customer date', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [inbound('No')],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.equal(result.exact_acceptance, false);
+  if (result.proposal) {
+    assert.notEqual(result.proposal.date_source, 'customer');
+    assert.equal(result.proposal.customer_date_specified, false);
+  }
+  assert.equal((result.windows || []).some(function (w) { return w.customer_date_specified; }), false);
+});
+
+test('older model window is dropped when a later inbound excludes that day', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [
+      inbound('Monday after 1pm'),
+      inbound('I am unavailable Monday now', { id: 'in-2', timestamp: '2026-09-12T14:00:00Z' })
+    ],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.notEqual(result.proposal && String(result.proposal.start_iso).slice(0, 10), '2026-09-14');
+  assert.equal(result.customer_facts.date_specified, false);
+});
+
+test('invalid now cannot bypass freshness of a 2020 calendar observation', () => {
+  const result = assess.assess(proof({
+    now: 'invalid-date',
+    calendar_retrieved_at: '2020-01-01T00:00:00Z',
+    leave_retrieved_at: null,
+    travel_retrieved_at: null
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+});
+
+test('event adjacency with a supplied route blocks the slot before the next suburb', () => {
+  const result = assess.assess(proof({
+    suburb: 'Joondalup',
+    messages: [inbound('Afternoons work for me')],
+    events: [{ event_id: 'other', start_iso: '2026-09-14T14:00:00', end_iso: '2026-09-14T15:00:00', suburb: 'Fremantle' }],
+    route_legs: [
+      { from: 'Joondalup', to: 'Fremantle', minutes: 60 },
+      { from: 'Fremantle', to: 'Joondalup', minutes: 60 }
+    ],
+    travel_minutes: 60
+  }));
+  if (result.proposal) {
+    assert.notEqual(result.proposal.start_iso, '2026-09-14T13:00:00');
+    assert.notEqual(String(result.proposal.start_iso).slice(0, 13), '2026-09-14T13');
+  }
+});
+
+test('grounded explicit date from a cited inbound remains a customer window', async () => {
+  const result = await assess.assessWithReason(proof({
+    suburb: 'Sampleton',
+    messages: [inbound('Thursday 17 September after 1pm is ok if that works')],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T16:30:00' }]
+    })
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.proposal.customer_date_specified, true);
+  assert.equal(String(result.proposal.start_iso).slice(0, 10), '2026-09-17');
+});
+
 test('sent_offers array order does not bind an older offer', () => {
   const result = assess.assess(proof({
     sent_offers: [

@@ -37,6 +37,7 @@ function sampleRead(resource) {
       proposal: {
         start_iso: '2026-09-17T13:00:00',
         end_iso: '2026-09-17T14:00:00',
+        offer_id: 'off-a',
         window_start_iso: '2026-09-17T13:00:00',
         window_end_iso: '2026-09-17T17:00:00',
         window_label: 'Thursday after 13:00',
@@ -192,6 +193,8 @@ test('confirm booking is not offered without exact acceptance', () => {
   assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
   api.state.data.cases[0].exact_acceptance = true;
   api.state.data.cases[0].accepted_start_iso = api.state.data.cases[0].proposal.start_iso;
+  api.state.data.cases[0].accepted_end_iso = api.state.data.cases[0].proposal.end_iso;
+  api.state.data.cases[0].accepted_offer_id = api.state.data.cases[0].proposal.offer_id;
   assert.equal(api.actionKind(api.state.data.cases[0]), 'confirm_booking');
   const result = api.attemptApprove();
   assert.equal(result.booked, false);

@@ -1,6 +1,7 @@
 'use strict';
 
-var VERSION = 'sales-booking-assess-v2.2';
+var VERSION = 'sales-booking-assess-v2.3';
+var MAX_OBSERVATION_AGE_MS = 72 * 60 * 60 * 1000;
 var INTERPRETER_FALLBACK = 'conservative-fallback';
 var TZ_PERTH = 'Australia/Perth';
 var MONTHS = {
@@ -143,16 +144,29 @@ function messageById(messages, id) {
   return found;
 }
 
+function observationFresh(iso, nowMs) {
+  var t = toInstant(iso);
+  if (t == null || nowMs == null) return false;
+  return nowMs - t <= MAX_OBSERVATION_AGE_MS && t <= nowMs + 60 * 1000;
+}
+
 function occupancyGaps(input) {
   var gaps = [];
+  var nowMs = toInstant(input.now || input.as_of);
   if (!input.calendar_retrieved_at && !(input.coverage && input.coverage.calendar_retrieved_at)) {
     gaps.push('calendar_unobserved');
+  } else if (nowMs && !observationFresh(input.calendar_retrieved_at || (input.coverage && input.coverage.calendar_retrieved_at), nowMs)) {
+    gaps.push('stale_calendar_observation');
   }
   if (!input.leave_retrieved_at && !Array.isArray(input.leave_intervals)) {
     gaps.push('leave_unobserved');
+  } else if (input.leave_retrieved_at && nowMs && !observationFresh(input.leave_retrieved_at, nowMs)) {
+    gaps.push('stale_leave_observation');
   }
   if (input.travel_minutes == null && !input.travel_retrieved_at && !Array.isArray(input.route_legs)) {
     gaps.push('travel_unobserved');
+  } else if (input.travel_retrieved_at && nowMs && !observationFresh(input.travel_retrieved_at, nowMs)) {
+    gaps.push('stale_travel_observation');
   }
   if (!input.now && !input.as_of) gaps.push('as_of_missing');
   (input.events || []).forEach(function (ev) {
@@ -207,20 +221,32 @@ function sortedSentOffers(input) {
   });
 }
 
+function immediatelyPrecedingOutbound(inbound, messages) {
+  var sorted = sortMessages(messages);
+  var idx = -1;
+  sorted.forEach(function (m, i) {
+    if (m === inbound || (inbound.id && m.id === inbound.id)) idx = i;
+  });
+  if (idx < 0) idx = sorted.length;
+  for (var i = idx - 1; i >= 0; i--) {
+    if ((sorted[i].direction || 'inbound') === 'outbound') return sorted[i];
+  }
+  return null;
+}
+
 function precedingSentOffer(inbound, input, messages) {
   if (!inbound) return null;
   var inboundMs = toInstant(inbound.timestamp);
   if (inboundMs == null) return null;
+  var prevOut = immediatelyPrecedingOutbound(inbound, messages);
+  if (!prevOut) return null;
   var eligible = sortedSentOffers(input).filter(function (off) {
     var sentMs = toInstant(off.sent_at || off.timestamp);
     if (sentMs >= inboundMs) return false;
-    if (off.message_id) {
-      var msg = messageById(messages, off.message_id);
-      if (!msg) return false;
-      if ((msg.direction || 'inbound') === 'inbound') return false;
-      var msgMs = toInstant(msg.timestamp);
-      if (msgMs == null || msgMs >= inboundMs) return false;
-    }
+    if (!off.message_id || off.message_id !== prevOut.id) return false;
+    var msg = messageById(messages, off.message_id);
+    if (!msg) return false;
+    if ((msg.direction || 'inbound') === 'inbound') return false;
     return true;
   });
   return eligible[0] || null;
@@ -425,16 +451,17 @@ function proposeCandidate(input, facts) {
         if (b.malformed) return true;
         return rangeOverlap(ms, slotEnd, b.start, b.end);
       });
-      if (!clash) {
-        found = {
-          start_iso: isoPerth(local.date, local.hour).local,
-          end_iso: isoPerth(local.date, local.hour + 1).local,
-          start_instant: ms,
-          end_instant: slotEnd,
-          date_source: facts.date_specified ? 'customer' : 'ai_proposed',
-          customer_date_specified: !!facts.date_specified,
-          window_label: facts.date_specified ? 'customer date' : 'AI-proposed date, customer date unspecified'
-        };
+      var candidate = {
+        start_iso: isoPerth(local.date, local.hour).local,
+        end_iso: isoPerth(local.date, local.hour + 1).local,
+        start_instant: ms,
+        end_instant: slotEnd,
+        date_source: facts.date_specified ? 'customer' : 'ai_proposed',
+        customer_date_specified: !!facts.date_specified,
+        window_label: facts.date_specified ? 'customer date' : 'AI-proposed date, customer date unspecified'
+      };
+      if (!clash && slotFeasible(candidate, input)) {
+        found = candidate;
         return;
       }
       ms += 15 * 60 * 1000;
@@ -476,16 +503,17 @@ function proposeFromWindows(windows, input) {
         if (b.malformed) return true;
         return rangeOverlap(cursor, slotEnd, b.start, b.end);
       });
-      if (!clash) {
-        found = {
-          start_iso: isoPerth(local.date, local.hour).local,
-          end_iso: perthParts(slotEnd).date === local.date
-            ? isoPerth(local.date, local.hour + 1).local
-            : isoPerth(perthParts(slotEnd).date, perthParts(slotEnd).hour).local,
-          start_instant: cursor,
-          end_instant: slotEnd,
-          window_label: w.source_message_id ? 'inbound ' + w.source_message_id : 'inbound window'
-        };
+      var cand = {
+        start_iso: isoPerth(local.date, local.hour).local,
+        end_iso: perthParts(slotEnd).date === local.date
+          ? isoPerth(local.date, local.hour + 1).local
+          : isoPerth(perthParts(slotEnd).date, perthParts(slotEnd).hour).local,
+        start_instant: cursor,
+        end_instant: slotEnd,
+        window_label: w.source_message_id ? 'inbound ' + w.source_message_id : 'inbound window'
+      };
+      if (!clash && slotFeasible(cand, input)) {
+        found = cand;
         return;
       }
       cursor += 15 * 60 * 1000;
@@ -510,13 +538,42 @@ function leaveClash(startMs, endMs, input) {
   });
 }
 
-function travelClash(startMs, input) {
+function travelMinutesBetween(input, fromSuburb, toSuburb) {
+  var legs = input.route_legs || [];
+  var i;
+  for (i = 0; i < legs.length; i++) {
+    if (legs[i].from === fromSuburb && legs[i].to === toSuburb && typeof legs[i].minutes === 'number') {
+      return legs[i].minutes;
+    }
+  }
+  return Number(input.travel_minutes || 0);
+}
+
+function travelClash(startMs, endMs, input) {
   var prior = input.previous_visit;
-  if (!prior) return false;
-  var end = toInstant(prior.end_iso);
-  if (end == null) return true;
-  var travelMs = Number(input.travel_minutes || 0) * 60 * 1000;
-  return startMs < end + travelMs;
+  if (prior) {
+    var priorEnd = toInstant(prior.end_iso);
+    if (priorEnd == null) return true;
+    var afterPrior = travelMinutesBetween(input, prior.suburb, input.suburb) * 60 * 1000;
+    if (priorEnd <= startMs && startMs < priorEnd + afterPrior) return true;
+  }
+  var next = input.next_visit;
+  if (next) {
+    var nextStart = toInstant(next.start_iso);
+    if (nextStart == null) return true;
+    var toNext = travelMinutesBetween(input, input.suburb, next.suburb) * 60 * 1000;
+    if (startMs < nextStart && endMs + toNext > nextStart) return true;
+  }
+  return false;
+}
+
+function slotFeasible(slot, input) {
+  if (!slot || slot.start_instant == null || slot.end_instant == null) return false;
+  var nowMs = toInstant(input.now || input.as_of);
+  if (nowMs != null && slot.start_instant < nowMs) return false;
+  if (leaveClash(slot.start_instant, slot.end_instant, input)) return false;
+  if (travelClash(slot.start_instant, slot.end_instant, input)) return false;
+  return true;
 }
 
 function validate(ground, model, input) {
@@ -531,19 +588,43 @@ function validate(ground, model, input) {
   var replyKind = ground.reply_kind || 'unknown';
   var facts = ground.customer_facts || { date_specified: false };
   var windows = (ground.windows || []).slice();
+  var usedModelWindows = false;
 
   if (model && Array.isArray(model.customer_windows)) {
+    var adopted = [];
     model.customer_windows.forEach(function (w) {
       var cited = messageById(messages, w.source_message_id);
       if (!cited || (cited.direction || 'inbound') === 'outbound') {
         reasons.push('Model window cited a missing or outbound message.');
         return;
       }
-      var citedDate = parseExplicitDate(bodyOf(cited), yearFrom(input));
-      if (!citedDate || !w.start_iso || String(w.start_iso).slice(0, 10) !== citedDate) {
-        reasons.push('Model window does not match the cited inbound date.');
+      var startI = toInstant(w.start_iso);
+      var endI = toInstant(w.end_iso);
+      if (startI == null || endI == null || endI <= startI) {
+        reasons.push('Model window times are not valid instants.');
+        return;
       }
+      if (facts.explicit_date && String(w.start_iso).slice(0, 10) !== facts.explicit_date) {
+        reasons.push('Model window conflicts with an explicit customer date.');
+        return;
+      }
+      adopted.push({
+        start_iso: w.start_iso,
+        end_iso: w.end_iso,
+        start_instant: startI,
+        end_instant: endI,
+        source_message_id: w.source_message_id,
+        explicit_date: true
+      });
     });
+    if (adopted.length && !windows.length) {
+      windows = adopted;
+      facts.date_specified = true;
+      usedModelWindows = true;
+    } else if (adopted.length && windows.length) {
+      windows = windows.concat(adopted);
+      usedModelWindows = true;
+    }
   }
 
   if (model && model.exact_acceptance) {
@@ -604,19 +685,6 @@ function validate(ground, model, input) {
       slot = proposeCandidate(input, facts);
     }
     var capGaps = occupancyGaps(input);
-    var nowMs = toInstant(input.now || input.as_of);
-    if (slot && nowMs != null && slot.start_instant < nowMs) {
-      reasons.push('Candidate slot is in the past.');
-      slot = null;
-    }
-    if (slot && leaveClash(slot.start_instant, slot.end_instant, input)) {
-      reasons.push('Candidate overlaps leave.');
-      slot = null;
-    }
-    if (slot && travelClash(slot.start_instant, input)) {
-      reasons.push('Candidate ignores travel from the previous visit.');
-      slot = null;
-    }
     if (capGaps.length) {
       reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready. ' + capGaps.join(','));
       status = 'needs_decision';
@@ -663,8 +731,8 @@ function validate(ground, model, input) {
 
   return {
     version: VERSION,
-    interpreter: ground.interpreter || INTERPRETER_FALLBACK,
-    intelligent_automation: false,
+    interpreter: usedModelWindows ? 'ops-ai-structured-validated' : (ground.interpreter || INTERPRETER_FALLBACK),
+    intelligent_automation: !!usedModelWindows,
     week_start: mondayIso(input.week_start || '2026-09-14'),
     reply_kind: replyKind,
     exact_acceptance: exact,

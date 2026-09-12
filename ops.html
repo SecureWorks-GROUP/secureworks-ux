@@ -4511,6 +4511,7 @@
     .msr-fb-btn.brand { background: var(--sw-orange); color: #fff; font-weight: 800; }
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
   </style>
+<link rel="stylesheet" href="modules/ops-dispatch.css?v=1">
 </head>
 <body>
 
@@ -4526,6 +4527,7 @@
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
         <button onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
+        <button onclick="showView('dispatch')" data-view="dispatch">Dispatch</button>
         <button onclick="showView('materials')" data-view="materials">Materials</button>
         <button onclick="showView('inbox')" data-view="inbox">Inbox <span id="inboxBadge" class="nav-badge" style="display:none;"></span></button>
         <button onclick="showView('approvals')" data-view="approvals">Approvals</button>
@@ -4677,6 +4679,7 @@
             <label class="cal-sidebar-item"><input type="checkbox" data-filter="reminders" onchange="toggleCalEventFilter('reminders',this)" checked><span class="cal-sidebar-dot" style="background:#10B981;"></span>Reminders</label>
           </div>
         </div>
+        <div id="dispatchCalendarLayers" class="cal-sidebar-section" aria-label="Shared work calendar layers"></div>
         <div class="cal-sidebar-section">
           <div class="cal-sidebar-heading" onclick="this.parentElement.classList.toggle('collapsed')">
             <span>Divisions</span>
@@ -4938,6 +4941,7 @@
     </div>
 
     <!-- ═══════════ MATERIALS TAB ═══════════ -->
+    <div id="viewDispatch" class="view"><div id="dispatchRoot"></div></div>
     <div id="viewMaterials" class="view">
 
       <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
@@ -5106,6 +5110,7 @@
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
     <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
+    <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#9638;</span>Dispatch</button>
     <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
     <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
     <button onclick="showView('approvals')" data-view="approvals"><span class="nav-icon">&#127963;</span>Approvals</button>
@@ -6168,6 +6173,8 @@
 <script src="modules/ops-makesafe-reporting-cockpit.js?v=9"></script>
 <script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
 <script src="modules/ops-modals.js?v=4"></script>
+<script src="modules/ops-dispatch-core.js?v=1"></script>
+<script src="modules/ops-dispatch.js?v=1"></script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -7218,6 +7225,7 @@ function showView(view) {
 
   if (view === 'today') { loadToday(); }
   if (view === 'calendar') loadCalendar();
+  if (view === 'dispatch' && window.DispatchOps) DispatchOps.load();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
   if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
@@ -7274,7 +7282,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'inbox'];
+  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'inbox', 'dispatch'];
   if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
   var saved = localStorage.getItem('sw_ops_tab');
   if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }
@@ -8414,6 +8422,7 @@ function toggleCalUnsched() {
 
 async function loadCalendar() {
   var range = getCalRange();
+  if (window.DispatchOps) DispatchOps.loadMainCalendar(range);
 
   // Show a loading state immediately so the area never reads as a frozen/old page while we fetch.
   var bodyEl = document.getElementById('calendarBody');
@@ -8757,12 +8766,15 @@ function renderCalendar() {
     b.classList.toggle('active', b.id === 'btnView' + _calViewMode.charAt(0).toUpperCase() + _calViewMode.slice(1));
   });
 
-  // Render: schedule or crew swimlane
-  if (_calViewMode === 'schedule') {
-    renderScheduleView(container, range);
-  } else {
-    renderSwimlaneView(container, range);
-  }
+  // Project shared work layers into the existing grid and date range. Keep the
+  // source arrays intact for schedule editing and management summaries.
+  var sourceEvents = _calEvents, sourceDeliveries = _calDeliveries;
+  var projected = window.DispatchOps ? DispatchOps.projectMain(sourceEvents, sourceDeliveries, range) : { events: sourceEvents, deliveries: sourceDeliveries };
+  _calEvents = projected.events; _calDeliveries = projected.deliveries;
+  try {
+    if (_calViewMode === 'schedule') renderScheduleView(container, range);
+    else renderSwimlaneView(container, range);
+  } finally { _calEvents = sourceEvents; _calDeliveries = sourceDeliveries; }
   renderCalSummary(range);
   renderCalUnschedSidebar();
   clampCalendarScroll();
@@ -8920,6 +8932,7 @@ function renderSwimlaneView(container, range) {
     crewNames.push('Unassigned');
   }
 
+  if (window.DispatchOps && !DispatchOps.staffVisible()) crewNames = [];
   var numCols = numDays + 1;
   var isMonthMode = _calRangeMode === 'month';
   var holidayMap = _calEventFilters.holidays ? getHolidayMap() : {};
@@ -9051,6 +9064,7 @@ function renderSwimlaneView(container, range) {
         var isDraggable = confStatus !== 'confirmed' && aType !== 'meeting';
 
         html += '<div class="' + blockClass + '"';
+        html += ' data-source-event-id="assignment:' + escapeHtml(ev.assignment_id || '') + '"';
         html += ' draggable="' + isDraggable + '"';
         if (isDraggable) {
           html += ' ondragstart="handleBlockDragStart(event,\'' + ev.assignment_id + '\')"';
@@ -9105,10 +9119,10 @@ function renderSwimlaneView(container, range) {
   // Delivery row
   var hasDeliveries = dates.some(function(ds) { return deliveryMap[ds] && deliveryMap[ds].length > 0; });
   if (hasDeliveries) {
-    html += '<div class="cal-division-label">Deliveries</div>';
+    html += '<div class="cal-division-label">Materials &amp; logistics</div>';
     html += '<div class="cal-crew-label">';
     html += '<span class="crew-initial" style="background:var(--sw-purple);">D</span>';
-    html += '<span>Deliveries</span>';
+    html += '<span>Materials / logistics</span>';
     html += '</div>';
     dates.forEach(function(dateStr) {
       var dd = new Date(dateStr + 'T00:00:00');
@@ -9119,6 +9133,7 @@ function renderSwimlaneView(container, range) {
       html += '<div class="' + cellClass + '">';
       var dels = deliveryMap[dateStr] || [];
       dels.forEach(function(del) {
+        if (window.DispatchOps && del.dispatch_event_id) { html += DispatchOps.mainBlock(del); return; }
         var isWarning = del.job_id && jobStartDates[del.job_id] && del.delivery_date > jobStartDates[del.job_id];
         html += '<div class="cal-delivery-block' + (isWarning ? ' warning' : '') + '" title="' + del.po_number + ' — ' + del.supplier_name + '">';
         html += del.supplier_name;
@@ -9505,6 +9520,7 @@ function renderScheduleView(container, range) {
       }
       html += ' onclick="openAssignmentModal(null,\'' + ds + '\')">';
       html += '<span class="cal-schedule-day-num">' + dd.getDate() + '</span>';
+      if (window.DispatchOps) _calDeliveries.filter(function(del) { return del.delivery_date === ds; }).forEach(function(del) { html += DispatchOps.mainBlock(del); });
       if (isHoliday) html += '<span class="cal-schedule-holiday-badge">' + escapeHtml(holidayMap[ds]) + '</span>';
       // Crew on leave. Schedule view has no crew rows, so name them on the day.
       var leaveNames = (_calEventFilters.leave && _calLeaveByDate[ds]) || [];

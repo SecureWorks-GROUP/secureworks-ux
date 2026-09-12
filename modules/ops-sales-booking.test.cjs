@@ -440,8 +440,16 @@ test('new ordinary availability invalidates a ready proposal and reassesses', as
   c.exact_acceptance = false;
   await api.loadConversation(c.contact_id, c.id);
   assert.equal(c.status, 'needs_decision');
+  assert.equal(c.proposal_stale, true);
   assert.ok(posts.length >= 1);
   assert.ok(posts.some((p) => p.action === 'sales_booking_on_event'));
+  const html = api.renderHTML();
+  assert.match(html, /Invalid — waiting for refreshed evidence/);
+  assert.match(html, /Approval not offered/);
+  const blocked = api.attemptApprove();
+  assert.equal(blocked.action, 'none');
+  assert.equal(blocked.reason, 'evidence_pending');
+  assert.equal(blocked.persisted, false);
   delete global.opsPost;
   delete global.opsAuthHeaders;
   delete global._commsGHLBase;
@@ -494,7 +502,9 @@ test('confirm is refused when recipient or resource no longer match the accepted
   c.contact_id = 'contact2';
   assert.equal(api.acceptedSlotStillCurrent(c), false);
   const result = api.attemptApprove();
-  assert.notEqual(result.action, 'confirm_booking');
-  assert.equal(api.state.lastSendCall.exact_acceptance, false);
+  assert.equal(result.action, 'none');
+  assert.equal(result.reason, 'binding_mismatch');
+  assert.equal(result.persisted, false);
+  assert.equal(api.state.lastSendCall.action, 'none');
   api.state.resourceId = 'nithin';
 });

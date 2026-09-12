@@ -310,12 +310,32 @@
     });
   }
 
+  function evidencePending(c) {
+    if (!c) return true;
+    if (c.proposal_stale) return true;
+    if (c.contact_id && state.conversation.contactId === c.contact_id) {
+      if (state.conversation.loading) return true;
+      if (state.conversation.error) return true;
+    }
+    return false;
+  }
+
+  function bindingMismatch(c) {
+    if (!c) return false;
+    var boundResource = c.accepted_resource_id || c.resource_id || null;
+    if (boundResource && boundResource !== state.resourceId) return true;
+    if (c.accepted_contact_id && c.contact_id && c.accepted_contact_id !== c.contact_id) return true;
+    return false;
+  }
+
   function actionKind(c) {
     if (!c) return 'none';
-    if (c.status === 'repair') return 'repair';
-    if (acceptedSlotStillCurrent(c) && c.status !== 'booked') return 'confirm_booking';
     if (c.status === 'booked') return 'none';
-    return 'approve_offer';
+    if (c.status === 'repair') return 'repair';
+    if (evidencePending(c) || bindingMismatch(c)) return 'none';
+    if (acceptedSlotStillCurrent(c)) return 'confirm_booking';
+    if (c.status === 'ready' || c.status === 'proposal') return 'approve_offer';
+    return 'none';
   }
 
   function applyInboundReply(kind) {
@@ -602,7 +622,7 @@
           }, 'offer');
           return;
         }
-        if (c.status === 'proposal' || c.status === 'ready' || c.status === 'needs_decision') {
+        if (!c.proposal_stale && (c.status === 'proposal' || c.status === 'ready')) {
           body += renderWindows(c);
           body += renderEvent({
             id: c.id,
@@ -682,12 +702,19 @@
     var holdNote = SEND_HOLD
       ? '<div class="holdnote">Send hold is active. This action does not send and does not write the diary.</div>'
       : '';
-    var pick = c.proposal && c.proposal.start_iso ? String(c.proposal.start_iso).replace('T', ' ').slice(0, 16) : '';
-    var windowLabel = (c.proposal && c.proposal.window_label) || 'No customer window extracted';
-    var actionLabel = kind === 'confirm_booking' ? 'Confirm booking (held)' : kind === 'repair' ? 'Calendar repair (held)' : 'Approve offer (held)';
-    var timeInput = c.proposal && c.proposal.start_iso
-      ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
-      : '<p class="small muted">No proposed time yet.</p>';
+    var stale = !!(c.proposal_stale || evidencePending(c));
+    var pick = stale
+      ? 'Invalid — waiting for refreshed evidence'
+      : (c.proposal && c.proposal.start_iso ? String(c.proposal.start_iso).replace('T', ' ').slice(0, 16) : '');
+    var windowLabel = stale
+      ? 'Previous window is not current. Do not approve until assessment catches up.'
+      : ((c.proposal && c.proposal.window_label) || 'No customer window extracted');
+    var actionLabel = kind === 'confirm_booking' ? 'Confirm booking (held)' : kind === 'repair' ? 'Calendar repair (held)' : kind === 'approve_offer' ? 'Approve offer (held)' : 'Approval not offered';
+    var timeInput = stale
+      ? '<p class="small muted">Proposed time is invalid until the new inbound is assessed.</p>'
+      : (c.proposal && c.proposal.start_iso
+        ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
+        : '<p class="small muted">No proposed time yet.</p>');
     var conflict = d.conflict
       ? '<div class="notice error">Time changed. Your edited draft was kept. Suggested text is ready for review, not applied.</div>'
       : '';
@@ -704,7 +731,7 @@
       '<div class="senderline">' + senderLine(res) + ' · To this case only · Draft revision ' + esc((d.revision || 0)) + '</div>' +
       '<label class="small muted">Draft SMS</label>' +
       '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea>' +
-      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
+      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || stale || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
       archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
       '<p class="small muted" style="margin-top:8px">Approve offer does not create a visit. Confirm booking needs exact acceptance and a fresh preflight. Both stay held.</p></div>';
@@ -890,12 +917,17 @@
     var kind = actionKind(c);
     var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0 };
     var route = resolveSender();
+    if (kind !== 'approve_offer' && kind !== 'confirm_booking' && kind !== 'repair') {
+      var blocked = evidencePending(c) ? 'evidence_pending' : (bindingMismatch(c) ? 'binding_mismatch' : 'not_actionable');
+      state.lastSendCall = { action: 'none', reason: blocked, case_id: c && c.id, persisted: false };
+      return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: blocked, action: 'none', persisted: false };
+    }
     if (c && c.contact_id && state.conversation.contactId === c.contact_id) {
       if (state.conversation.loading) {
-        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_pending', action: kind };
+        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_pending', action: 'none', persisted: false };
       }
       if (state.conversation.error) {
-        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_error', action: kind };
+        return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'conversation_error', action: 'none', persisted: false };
       }
     }
     var payload = {
@@ -912,7 +944,8 @@
       start_iso: c && c.proposal && c.proposal.start_iso,
       end_iso: c && c.proposal && c.proposal.end_iso,
       offer_id: c && c.proposal && c.proposal.offer_id,
-      exact_acceptance: acceptedSlotStillCurrent(c)
+      exact_acceptance: acceptedSlotStillCurrent(c),
+      persisted: false
     };
     state.lastSendCall = payload;
     if (kind === 'approve_offer' || kind === 'confirm_booking') {

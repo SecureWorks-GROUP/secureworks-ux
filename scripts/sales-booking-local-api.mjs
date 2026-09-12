@@ -27,6 +27,110 @@ function phoneLike(name) {
   return !!name && /^(\+61|0)\d/.test(String(name).replace(/\s/g, ''));
 }
 
+function shiftMonday(week, days) {
+  return new Date(Date.parse(week + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10);
+}
+
+/** Same closed-week clock as ops-api sales_performance_read (Australia/Perth). */
+export function latestClosedWeek(now = new Date()) {
+  const perth = new Date(now.getTime() + 8 * 3600000);
+  return shiftMonday(perth.toISOString().slice(0, 10), -((perth.getUTCDay() + 6) % 7) - 7);
+}
+
+function mondayOrThrow(value) {
+  const week = String(value || '');
+  const date = new Date(week + 'T00:00:00Z');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== week || date.getUTCDay() !== 1) {
+    const err = new Error('invalid_week_start');
+    err.code = 'invalid_week_start';
+    throw err;
+  }
+  return week;
+}
+
+/**
+ * Read-only stored weekly desk reports. Same envelope as ops-api sales_performance_read.
+ * Never invents measure rows. Empty rows mean missing reports, not zeros.
+ */
+export async function readPerformance(params, fetchStored, now = new Date()) {
+  const fetched_at = now.toISOString();
+  const closed = latestClosedWeek(now);
+  let requested = null;
+  if (params && params.week_start) {
+    try {
+      requested = mondayOrThrow(params.week_start);
+    } catch {
+      return { ok: false, fixture: false, read_only: true, error: 'invalid_week_start', rows: [], week_starts: [] };
+    }
+  }
+  if (typeof fetchStored === 'function') {
+    try {
+      const stored = await fetchStored({ week_start: requested });
+      if (stored && Array.isArray(stored.rows) && Array.isArray(stored.week_starts)) {
+        if (stored.fixture === true) {
+          return { ok: false, fixture: false, read_only: true, error: 'Fixture performance rows are refused.', rows: [], week_starts: [] };
+        }
+        return Object.assign({}, stored, {
+          ok: true,
+          fixture: false,
+          read_only: true,
+          fetched_at: stored.fetched_at || fetched_at
+        });
+      }
+    } catch (e) {
+      const week = requested || closed;
+      const week_starts = [0, 1, 2, 3].map((i) => shiftMonday(week, -7 * i));
+      return {
+        ok: true,
+        fixture: false,
+        read_only: true,
+        rows: [],
+        week_start: week,
+        week_starts,
+        latest_closed_week: closed,
+        latest_stored_closed_week: null,
+        missing_latest_closed_week: true,
+        available_weeks: [],
+        fetched_at,
+        coverage: {
+          complete: false,
+          as_of: fetched_at,
+          source: 'sales_performance_read',
+          gaps: [
+            'Stored weekly desk reports were not retrieved: ' + (e && e.message ? e.message : 'provider error'),
+            'Empty rows are missing reports, not zero measures.'
+          ]
+        }
+      };
+    }
+  }
+  const week = requested || closed;
+  const week_starts = [0, 1, 2, 3].map((i) => shiftMonday(week, -7 * i));
+  return {
+    ok: true,
+    fixture: false,
+    read_only: true,
+    rows: [],
+    week_start: week,
+    week_starts,
+    latest_closed_week: closed,
+    latest_stored_closed_week: null,
+    missing_latest_closed_week: true,
+    available_weeks: [],
+    fetched_at,
+    coverage: {
+      complete: false,
+      as_of: fetched_at,
+      source: 'sales_performance_read',
+      gaps: [
+        'Isolated preview has no staff JWT for ops-api sales_performance_read.',
+        'Production path remains authenticated opsFetch sales_performance_read.',
+        'Empty rows are missing reports, not zero measures. Filters and drilldowns still operate on this envelope.'
+      ]
+    }
+  };
+}
+
 export async function handleLocal(action, params, body, mcpCall, storeFile) {
   const db = createLocalStore(storeFile);
   const store = db.load();

@@ -11,7 +11,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { handleLocal, readConversation } from './sales-booking-local-api.mjs';
+import { handleLocal, readConversation, readPerformance } from './sales-booking-local-api.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SALES_BOOKING_PREVIEW_PORT || 4174);
@@ -164,7 +164,7 @@ async function salesBookingRead(query) {
 }
 
 function inject(html) {
-  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";window.SALES_BOOKING_PREVIEW_CONVERSATION_URL="http://' + HOST + ':' + PORT + '/sales-booking-conversation";</script>';
+  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";window.SALES_BOOKING_PREVIEW_CONVERSATION_URL="http://' + HOST + ':' + PORT + '/sales-booking-conversation";window.SALES_PERFORMANCE_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-performance-read";</script>';
   if (html.includes('</head>')) return html.replace('</head>', tag + '</head>');
   return tag + html;
 }
@@ -172,6 +172,35 @@ function inject(html) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://' + HOST + ':' + PORT);
   const STORE = path.join(ROOT, '.sales-booking-preview-store.json');
+  if (url.pathname === '/sales-performance-read') {
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', allow: 'GET' });
+      res.end(JSON.stringify({ ok: false, fixture: false, read_only: true, error: 'Performance endpoint is read-only GET', rows: [], week_starts: [] }));
+      return;
+    }
+    try {
+      const storedUrl = process.env.SUPABASE_URL;
+      const bearer = process.env.SALES_PERFORMANCE_READ_BEARER || process.env.OPS_API_BEARER;
+      const fetchStored = (storedUrl && bearer)
+        ? async ({ week_start }) => {
+          const q = new URL(storedUrl.replace(/\/$/, '') + '/functions/v1/ops-api');
+          q.searchParams.set('action', 'sales_performance_read');
+          if (week_start) q.searchParams.set('week_start', week_start);
+          const resp = await fetch(q, { headers: { Authorization: 'Bearer ' + bearer }, cache: 'no-store' });
+          const body = await resp.json();
+          if (!resp.ok) throw new Error(body.error || ('ops-api ' + resp.status));
+          return body;
+        }
+        : null;
+      const body = await readPerformance(Object.fromEntries(url.searchParams.entries()), fetchStored);
+      res.writeHead(body.ok === false ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(body));
+    } catch (e) {
+      res.writeHead(502, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, fixture: false, read_only: true, error: e.message, rows: [], week_starts: [] }));
+    }
+    return;
+  }
   if (url.pathname === '/sales-booking-conversation') {
     if (req.method !== 'GET') {
       res.writeHead(405, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', allow: 'GET' });

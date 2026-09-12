@@ -152,7 +152,17 @@
     if(state.loading && (week || null)===(state.week || null)) return;
     const request=++state.request; state.week=week || null;state.loading=true;state.error=null;render();
     try {
-      const data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});
+      const preview=global.SALES_PERFORMANCE_PREVIEW_URL || (global.window && global.window.SALES_PERFORMANCE_PREVIEW_URL);
+      let data;
+      if(preview){
+        const url=preview+(week?((preview.indexOf('?')>=0?'&':'?')+'week_start='+encodeURIComponent(week)):'');
+        const resp=await global.fetch(url,{cache:'no-store'});
+        data=await resp.json();
+        if(data && data.fixture) throw new Error('Fixture performance rows are refused. Stored report required.');
+        if(data && data.ok===false) throw new Error(data.error || 'Performance read failed.');
+      } else {
+        data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});
+      }
       if(request!==state.request)return;
       if(!data || !Array.isArray(data.rows) || !Array.isArray(data.week_starts)) throw new Error('Report response was incomplete. Retry the report.');
       state.data=data;state.week=data.week_start;

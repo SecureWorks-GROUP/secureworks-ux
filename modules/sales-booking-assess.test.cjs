@@ -335,6 +335,18 @@ test('model window citing any inbound cannot invent a customer Monday from after
   }
 });
 
+test('inbound No is not a Ready customer date or AI outreach slot', async () => {
+  const result = await assess.assessWithReason(proof({
+    messages: [inbound('No')],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-14T13:00:00', end_iso: '2026-09-14T14:00:00' }]
+    })
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+  assert.equal(result.customer_facts.date_specified, false);
+});
+
 test('model window citing inbound No is not a customer date', async () => {
   const result = await assess.assessWithReason(proof({
     messages: [inbound('No')],

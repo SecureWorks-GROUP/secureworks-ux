@@ -10,12 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { handleLocal } from './sales-booking-local-api.mjs';
-
-const require = createRequire(import.meta.url);
-const assess = require('../modules/sales-booking-assess.cjs');
+import { handleLocal, readConversation } from './sales-booking-local-api.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SALES_BOOKING_PREVIEW_PORT || 4174);
@@ -24,19 +20,8 @@ const HOST = '127.0.0.1';
 
 const RESOURCES = {
   nithin: { id: 'nithin', name: 'Nithin', scoper_user_id: '5862cf1d-0a3b-4836-8fd1-d69f95aa2f73', lane: 'patio', sender: '+61489267774' },
-  marnin: { id: 'marnin', name: 'Marnin', scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498', lane: 'fencing', sender: '+61489267772' },
+  marnin: { id: 'marnin', name: 'Marnin', scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498', lane: 'fencing', sender: null },
   khairo: { id: 'khairo', name: 'Khairo', scoper_user_id: 'be6c2188-2b7b-49c7-b6e4-5b0d0deb6415', lane: 'fencing', sender: '+61489267772' }
-};
-
-const OPEN_CASES = {
-  nithin: [
-    { id: 'carlisle', contact_id: 'lzDhp42dobzHkWcobELw', suburb: 'Carlisle', status: 'ready' },
-    { id: 'merriwa', contact_id: 'CGKe1K4CGdiyas0O4CF2', suburb: 'Merriwa', status: 'ready' },
-    { id: 'mt-hawthorn', contact_id: '4Br9KgbHjzyQSko5mP9O', suburb: 'Mt Hawthorn', status: 'needs_decision' },
-    { id: 'fremantle', contact_id: '9WW7WNfh6sl91Syqc2t3', suburb: 'Fremantle', status: 'waiting' },
-    { id: 'scarborough', contact_id: 'mfIowxn0WUitsoZ4HG4r', suburb: 'Scarborough', status: 'waiting' },
-    { id: 'marangaroo', contact_id: 'G3wHUgxtmdxiDmTef0iQ', suburb: 'Marangaroo', status: 'repair' }
-  ]
 };
 
 function mime(file) {
@@ -97,22 +82,6 @@ function displayFromEvent(ev) {
   return s.replace(/^Scope:\s*/i, '').split(',')[0].trim() || s;
 }
 
-function interpretProposal(messages, suburb, resourceId, weekStart, events, coverage) {
-  const spec = RESOURCES[resourceId] || RESOURCES.nithin;
-  const rules = resourceId === 'nithin'
-    ? { monday_from: 12, no_wednesday: true, last_start: 15.5 }
-    : { monday_from: 8, no_wednesday: false, last_start: 15.5 };
-  return assess.assess({
-    week_start: weekStart,
-    resource: { name: spec.name, lane: spec.lane, desk_rules: rules },
-    suburb,
-    messages,
-    events,
-    pending_offers: [],
-    coverage: coverage || { calendar: false, leave: 'not_read', route: false, travel: false }
-  });
-}
-
 async function salesBookingRead(query) {
   const resourceId = query.get('resource') || 'nithin';
   const weekStart = query.get('week_start') || '2026-09-14';
@@ -155,47 +124,6 @@ async function salesBookingRead(query) {
     event_id: ev.event_id,
     proposal: null
   }));
-  const extra = OPEN_CASES[resourceId] || [];
-  for (const row of extra) {
-    let proposal = null;
-    let display = row.suburb + ' enquiry';
-    let status = row.status;
-    let reason = 'Open enquiry on the proof-week work list. Conversation is loaded from GHL when selected.';
-    try {
-      const convo = await mcpCall('sw_get_conversation', { contact_id: row.contact_id });
-      const messages = convo.messages || convo.result?.messages || [];
-      const coverage = {
-        calendar: !!(cal.ok !== false && cal.coverage && cal.coverage.calendar_view_complete),
-        leave: (cal.coverage && cal.coverage.operational_leave === 'not_read') ? 'not_read' : false,
-        route: false,
-        travel: false
-      };
-      const interp = interpretProposal(messages, row.suburb, resourceId, weekStart, events, coverage);
-      if (convo.contact && convo.contact.name) display = convo.contact.name;
-      if (interp) {
-        status = interp.status;
-        reason = interp.reason;
-        if (interp.proposal) {
-          proposal = Object.assign({ kind: interp.exact_acceptance ? 'offer' : 'proposal' }, interp.proposal);
-        }
-        if (interp.exact_acceptance) {
-          status = 'needs_decision';
-        }
-      }
-    } catch {
-      reason = 'GHL conversation was not retrieved in this preview read. Select the case to load the thread through the signed-in GHL path.';
-    }
-    cases.push({
-      id: row.id,
-      contact_id: row.contact_id,
-      suburb: row.suburb,
-      display_name: display,
-      status,
-      reason,
-      event_id: null,
-      proposal
-    });
-  }
   return {
     ok: true,
     send_hold: true,
@@ -225,9 +153,9 @@ async function salesBookingRead(query) {
       non_primary_calendars: 'not_read',
       full_population: false,
       gaps: [
-        'Preview read uses sw-mcp; live ops-api sales_booking_read is not deployed.',
-        'Enquiry population outside this scoper/week is not loaded.',
-        '152 stage-only unresolved patio rows remain on the audit queue.'
+        'Preview calendar is sw_scoper_calendar_events. Enquiry population is sw_list_ghl_opportunities, not a six-case seed.',
+        'Leave and travel Graph assembly are unread. Missing coverage is not free capacity.',
+        'Live ops-api sales_booking_read is not deployed. Send and calendar writes stay held.'
       ]
     },
     events,
@@ -236,7 +164,7 @@ async function salesBookingRead(query) {
 }
 
 function inject(html) {
-  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";</script>';
+  const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";window.SALES_BOOKING_PREVIEW_CONVERSATION_URL="http://' + HOST + ':' + PORT + '/sales-booking-conversation";</script>';
   if (html.includes('</head>')) return html.replace('</head>', tag + '</head>');
   return tag + html;
 }
@@ -244,6 +172,22 @@ function inject(html) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://' + HOST + ':' + PORT);
   const STORE = path.join(ROOT, '.sales-booking-preview-store.json');
+  if (url.pathname === '/sales-booking-conversation') {
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', allow: 'GET' });
+      res.end(JSON.stringify({ ok: false, fixture: false, read_only: true, error: 'Conversation endpoint is read-only GET', messages: [] }));
+      return;
+    }
+    try {
+      const body = await readConversation(Object.fromEntries(url.searchParams.entries()), mcpCall);
+      res.writeHead(body.ok === false ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(body));
+    } catch (e) {
+      res.writeHead(502, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, fixture: false, read_only: true, error: e.message, messages: [] }));
+    }
+    return;
+  }
   if (url.pathname === '/sales-booking-read' || url.pathname === '/booking-api') {
     try {
       let payload = {};
@@ -263,8 +207,15 @@ const server = http.createServer(async (req, res) => {
         const calBody = await salesBookingRead(url.searchParams);
         body = Object.assign({}, calBody, enumerated, {
           events: calBody.events,
+          retrieved_at: calBody.retrieved_at || null,
           cases: [].concat(enumerated.cases || [], (calBody.cases || []).filter((c) => c.event_id)),
-          fixture: false
+          fixture: false,
+          coverage: Object.assign({}, calBody.coverage || {}, enumerated.coverage || {}, {
+            calendar_retrieved_at: calBody.retrieved_at || null,
+            leave_retrieved_at: null,
+            travel_retrieved_at: null,
+            operational_leave: 'not_read'
+          })
         });
       } else {
         body = await handleLocal(action, params, payload, mcpCall, STORE);

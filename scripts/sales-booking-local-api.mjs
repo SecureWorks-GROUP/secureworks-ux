@@ -37,7 +37,7 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     const resource = params.resource || 'nithin';
     const weekStart = params.week_start || '2026-09-14';
     const pipeline = PIPELINES[resource];
-    const cursorKey = 'opps:' + resource;
+    const cursorKey = 'consume:' + resource + ':' + weekStart;
     const cursor = store.cursors[cursorKey] || { complete: false, next: null, total: null, pages: 0 };
     let pages = 0;
     while (!cursor.complete && pages < 8) {
@@ -52,27 +52,34 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       for (const item of items) {
         const contact = item.contact || {};
         const name = contact.name || item.name || '';
-        store.cases[item.id] = Object.assign({}, store.cases[item.id], {
+        const existing = store.cases[item.id] || {};
+        if (existing.resource_id && existing.resource_id !== resource) continue;
+        store.cases[item.id] = Object.assign({}, existing, {
           id: item.id,
           resource_id: resource,
           opportunity_id: item.id,
           contact_id: item.contactId || contact.id || null,
-          suburb: null,
-          display_name: phoneLike(name) ? 'Enquiry' : (name || 'Enquiry'),
-          status: (store.cases[item.id] && store.cases[item.id].status) || 'needs_decision',
+          suburb: existing.suburb || null,
+          display_name: phoneLike(name) ? (existing.suburb || 'Enquiry') : (name || existing.display_name || 'Enquiry'),
+          status: existing.status || 'needs_decision',
           tags: contact.tags || []
         });
       }
       cursor.pages = (cursor.pages || 0) + 1;
       cursor.total = (page.data && page.data.meta && page.data.meta.total) || pag.total || cursor.total;
-      cursor.complete = pag.has_more === false || pag.complete === true || items.length === 0;
-      cursor.next = pag.next_cursor || null;
+      cursor.complete = pag.complete === true || pag.has_more === false;
+      if (items.length === 0 && pag.complete !== true && pag.has_more == null) cursor.complete = false;
+      cursor.next = pag.next_cursor || (pag.has_more === false ? null : cursor.next);
       store.cursors[cursorKey] = cursor;
       pages += 1;
-      if (cursor.complete) break;
+      if (pag.complete !== true && pag.has_more !== false) break;
     }
     db.save(store);
-    const cases = Object.values(store.cases).filter((c) => c.resource_id === resource);
+    const cases = Object.values(store.cases).filter((c) => c.resource_id === resource).map((c) => Object.assign({}, c, {
+      draft: store.drafts[c.id] || null,
+      assessment: store.assessments[c.id] || null,
+      archived: store.archives[c.id] && !store.archives[c.id].restored ? store.archives[c.id] : null
+    }));
     return {
       ok: true,
       fixture: false,
@@ -80,12 +87,12 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       version: 'sales-booking-api/v1',
       week_start: weekStart,
       coverage: {
-        full_population: !!cursor.complete,
-        enumerated: cases.length,
-        total: cursor.total || cases.length,
+        full_population: cursor.complete === true,
+        enumerated: cases.filter((c) => c.opportunity_id).length,
+        total: cursor.total || null,
         operational_leave: 'not_read',
         gaps: [
-          cursor.complete ? 'Opportunity enumeration terminal for this resource.' : 'Opportunity enumeration still paging; not a completed empty book.',
+          cursor.complete === true ? 'Opportunity enumeration terminal for this resource.' : 'Opportunity enumeration still paging; empty or missing-next is not a completed book.',
           'Leave and travel remain unread. Missing coverage is not free capacity.'
         ]
       },
@@ -97,7 +104,10 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   if (action === 'sales_booking_draft') {
     const id = body.case_id;
     const prev = store.drafts[id] || { revision: 0 };
-    store.drafts[id] = { case_id: id, text: body.text, human_edited: !!body.human_edited, revision: prev.revision + 1 };
+    if (body.expected_revision != null && Number(prev.revision || 0) !== Number(body.expected_revision)) {
+      return { ok: false, code: 'cas_conflict', error: 'Draft revision conflict' };
+    }
+    store.drafts[id] = { case_id: id, text: body.text, human_edited: !!body.human_edited, sender: body.sender || prev.sender || null, revision: Number(prev.revision || 0) + 1 };
     db.save(store);
     return store.drafts[id];
   }
@@ -115,7 +125,6 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   }
   if (action === 'sales_booking_assess') {
     const input = Object.assign({}, body.input || {});
-    delete input.coverage;
     const payload = typeof assess.assessWithReason === 'function'
       ? await assess.assessWithReason(input)
       : assess.assess(input);
@@ -124,10 +133,34 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     return store.assessments[body.case_id];
   }
   if (action === 'sales_booking_approve' || action === 'sales_booking_confirm') {
-    if (body.execute && !body.fake) return { ok: false, reason: 'live_write_refused', sent: false };
-    store.actions.push({ kind: action, case_id: body.case_id, status: 'held', send_evidence: 'held' });
+    if (body.fake === true || body.execute === true) return { ok: false, reason: 'fixture_control_refused', sent: false, held: true };
+    if (action === 'sales_booking_confirm') {
+      const c = store.cases[body.case_id] || {};
+      if (!c.exact_acceptance || !body.start_iso || !body.end_iso || !body.offer_id) {
+        return { ok: false, reason: 'no_exact_acceptance', sent: false, held: true, booked: false };
+      }
+      if (body.resource && c.accepted_resource_id && body.resource !== c.accepted_resource_id) {
+        return { ok: false, reason: 'resource_mismatch', sent: false, held: true };
+      }
+      if (body.contact_id && c.accepted_contact_id && body.contact_id !== c.accepted_contact_id) {
+        return { ok: false, reason: 'recipient_mismatch', sent: false, held: true };
+      }
+    }
+    store.actions.push({
+      kind: action,
+      case_id: body.case_id,
+      status: 'held',
+      send_evidence: 'held',
+      start_iso: body.start_iso || null,
+      end_iso: body.end_iso || null,
+      offer_id: body.offer_id || null,
+      resource: body.resource || null,
+      contact_id: body.contact_id || null,
+      sender: body.sender || null,
+      revision: body.revision || 0
+    });
     db.save(store);
-    return { ok: false, held: true, sent: false, waiting: false, reason: 'send_hold' };
+    return { ok: false, held: true, sent: false, waiting: false, booked: false, reason: 'send_hold' };
   }
   if (action === 'sales_booking_on_event') {
     if (store.seenEvents.includes(body.event_key)) return { ok: true, duplicate: true };
@@ -138,4 +171,148 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   if (action === 'sales_booking_reconcile') return { ok: true, invalidated: Object.keys(store.assessments).length, activation: 'held' };
   if (action === 'sales_booking_runner') return { ok: true, ran: false, reason: 'runner_held' };
   return { ok: false, error: 'unknown action' };
+}
+
+function unwrapProvider(page) {
+  if (!page || typeof page !== 'object') return {};
+  if (page.data && typeof page.data === 'object' && !Array.isArray(page.data)) {
+    return Object.assign({}, page, page.data);
+  }
+  return page;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function paginationOf(page) {
+  return (page && page.pagination) || {};
+}
+
+function paginationHasMore(page) {
+  const pag = paginationOf(page);
+  if (pag.complete === true) return false;
+  if (pag.has_more === false) return false;
+  if (pag.has_more === true) return true;
+  if (pag.next_cursor) return true;
+  return false;
+}
+
+function paginationCursor(page, key) {
+  const pag = paginationOf(page);
+  if (pag.next_cursor) return pag.next_cursor;
+  if (key && pag[key]) return pag[key];
+  return null;
+}
+
+function rawMessagesOf(page) {
+  if (Array.isArray(page.messages)) return page.messages;
+  if (page.messages && Array.isArray(page.messages.messages)) return page.messages.messages;
+  if (Array.isArray(page.data)) return page.data;
+  return [];
+}
+
+function normalizeMessage(m) {
+  if (!m || typeof m !== 'object') return null;
+  return {
+    id: m.id || m.message_id || null,
+    type: String(m.messageType || m.type || 'SMS').toUpperCase(),
+    direction: m.direction || (m.userId ? 'outbound' : 'inbound'),
+    body: m.body || m.message || m.text || '',
+    timestamp: m.dateAdded || m.createdAt || m.timestamp || '',
+    sender_name: m.userName || (m.user && m.user.name) || ''
+  };
+}
+
+/** Read-only GHL thread via the authorised sw-mcp provider route. Never invents messages. */
+export async function readConversation(params, mcpCall) {
+  const contactId = params.contactId || params.contact_id || '';
+  if (!contactId) {
+    return { ok: false, error: 'contactId required', fixture: false, read_only: true, messages: [] };
+  }
+  const retrieved_at = new Date().toISOString();
+  const limit = Math.min(100, Math.max(1, Number(params.limit || 50)));
+  let conversationId = params.conversationId || params.conversation_id || null;
+  const gaps = [];
+  let conversationHasMore = false;
+  let conversationNext = null;
+  let conversationCount = conversationId ? 1 : 0;
+
+  if (!conversationId) {
+    const convPage = unwrapProvider(await mcpCall('sw_list_ghl_conversations', {
+      contact_id: contactId,
+      limit: 50,
+      ...(params.start_after_date ? { start_after_date: params.start_after_date } : {})
+    }));
+    const convs = asArray(convPage.conversations);
+    conversationCount = convs.length;
+    conversationHasMore = paginationHasMore(convPage);
+    conversationNext = paginationCursor(convPage, 'start_after_date');
+    conversationId = convs[0] && (convs[0].id || convs[0].conversation_id) || null;
+    if (conversationHasMore) gaps.push('Additional conversations exist; this page is not the full set.');
+    if (!conversationId) {
+      return {
+        ok: true,
+        fixture: false,
+        read_only: true,
+        contact_id: contactId,
+        conversation_id: null,
+        messages: [],
+        retrieved_at,
+        pagination: { has_more: conversationHasMore, next_cursor: conversationNext, last_message_id: null },
+        coverage: {
+          complete: conversationHasMore === false,
+          has_more: conversationHasMore,
+          next_cursor: conversationNext,
+          conversation_count: conversationCount,
+          message_count: 0,
+          contact_id: contactId,
+          conversation_id: null,
+          source: 'sw_list_ghl_conversations',
+          source_message_ids: [],
+          retrieved_at,
+          gaps: gaps.concat(['No conversation found for this contact in this provider page.'])
+        }
+      };
+    }
+  }
+
+  const msgArgs = { contact_id: contactId, conversation_id: conversationId, limit };
+  if (params.last_message_id) msgArgs.last_message_id = params.last_message_id;
+  const msgPage = unwrapProvider(await mcpCall('sw_list_ghl_messages', msgArgs));
+  const raw = rawMessagesOf(msgPage);
+  const messages = raw.map(normalizeMessage).filter(Boolean);
+  const msgHasMore = paginationHasMore(msgPage);
+  const lastId = messages.length ? messages[messages.length - 1].id : null;
+  const msgNext = paginationCursor(msgPage, 'last_message_id') || (msgHasMore ? lastId : null);
+  if (msgHasMore) gaps.push('Older messages exist. Follow last_message_id.');
+  if (messages.some((m) => !m.id)) gaps.push('Some messages arrived without a provider id.');
+
+  return {
+    ok: true,
+    fixture: false,
+    read_only: true,
+    contact_id: contactId,
+    conversation_id: conversationId,
+    messages,
+    retrieved_at,
+    pagination: {
+      has_more: msgHasMore,
+      next_cursor: msgNext,
+      last_message_id: msgHasMore ? msgNext : null
+    },
+    coverage: {
+      complete: msgHasMore === false && conversationHasMore === false,
+      has_more: msgHasMore || conversationHasMore,
+      next_cursor: msgHasMore ? msgNext : conversationNext,
+      conversation_count: conversationCount,
+      message_count: messages.length,
+      contact_id: contactId,
+      conversation_id: conversationId,
+      source: 'sw_list_ghl_conversations+sw_list_ghl_messages',
+      source_message_ids: messages.map((m) => m.id).filter(Boolean),
+      retrieved_at,
+      gaps
+    }
+  };
 }

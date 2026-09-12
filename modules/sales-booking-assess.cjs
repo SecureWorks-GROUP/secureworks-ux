@@ -428,6 +428,10 @@ function conservativeExtract(input) {
         replyKind = 'ordinary';
         review.push('Yes is not bound to a preceding sent offer id and slot revision.');
       }
+    } else if (isBareNo(text) || (isUnavailability(text) && !parseExplicitDate(text, year) && !weekdayName(text))) {
+      replyKind = 'ordinary';
+      facts.date_specified = false;
+      review.push('Latest inbound is a rejection or unavailability, not a booking window.');
     } else if (/\byes\b/i.test(text) && /\b(but|only|after|before)\b/i.test(text)) {
       replyKind = 'new_availability';
       review.push('Qualified yes is not exact acceptance.');
@@ -830,10 +834,20 @@ function validate(ground, model, input) {
   }
   if (input.quoted) reasons.push('Already quoted. Confirm whether this is a new request.');
 
+  var lastText = inbound ? bodyOf(inbound) : '';
+  var inboundRejectsAvailability = inbound && (
+    isBareNo(lastText) ||
+    (isUnavailability(lastText) && !facts.date_specified && !(windows && windows.length) && !facts.time_of_day)
+  );
+
   if (replyKind === 'cancellation' && !wrongLane && inbound && isExplicitCancel(bodyOf(inbound))) {
     status = 'repair';
   } else if (exact && !wrongLane) {
     status = 'needs_decision';
+  } else if (inboundRejectsAvailability) {
+    status = 'needs_decision';
+    proposal = null;
+    reasons.push('Latest inbound is not availability. Do not invent a customer date or Ready offer.');
   } else {
     var slot = null;
     if (windows && windows.length) {

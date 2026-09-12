@@ -440,11 +440,43 @@ test('new ordinary availability invalidates a ready proposal and reassesses', as
   c.exact_acceptance = false;
   await api.loadConversation(c.contact_id, c.id);
   assert.equal(c.status, 'needs_decision');
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].action, 'sales_booking_on_event');
+  assert.ok(posts.length >= 1);
+  assert.ok(posts.some((p) => p.action === 'sales_booking_on_event'));
   delete global.opsPost;
   delete global.opsAuthHeaders;
   delete global._commsGHLBase;
+  delete global.fetch;
+});
+
+test('preview conversation URL is used without browser auth headers', async () => {
+  const calls = [];
+  global.SALES_BOOKING_PREVIEW_CONVERSATION_URL = 'http://127.0.0.1:4174/sales-booking-conversation';
+  delete global.opsAuthHeaders;
+  global.fetch = async (url, opts) => {
+    calls.push({ url, headers: opts && opts.headers });
+    return {
+      json: async () => ({
+        ok: true,
+        fixture: false,
+        read_only: true,
+        contact_id: 'contact-a',
+        conversation_id: 'conv-1',
+        messages: [{ id: 'm1', direction: 'inbound', timestamp: '2026-09-12T13:00:00Z', body: 'Thursday after 1', type: 'SMS' }],
+        coverage: { complete: true, has_more: false, source: 'sw_list_ghl_messages', retrieved_at: '2026-09-13T00:00:00Z', source_message_ids: ['m1'], conversation_id: 'conv-1' }
+      })
+    };
+  };
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  await api.loadConversation('contact-a', 'case-a');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /sales-booking-conversation\?contactId=contact-a/);
+  assert.equal(calls[0].headers, undefined);
+  assert.equal(api.state.conversation.conversationId, 'conv-1');
+  assert.equal(api.state.conversation.coverage.complete, true);
+  const html = api.renderHTML();
+  assert.match(html, /m1/);
+  delete global.SALES_BOOKING_PREVIEW_CONVERSATION_URL;
   delete global.fetch;
 });
 

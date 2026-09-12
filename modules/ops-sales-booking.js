@@ -57,7 +57,7 @@
     filter: 'all',
     search: '',
     layers: { confirmed: true, proposal: true, offer: true, availability: true },
-    conversation: { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: 0 },
+    conversation: { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: 0, coverage: null, conversationId: null },
     drafts: {},
     archives: {},
     sendAttempted: false,
@@ -204,20 +204,64 @@
     return true;
   }
 
-  function looksLikeCancel(text) {
-    var t = String(text || '');
-    if (/\b(do not|don't|dont|please do not|please don't)\s+cancel\b/i.test(t)) return false;
-    return /\b(cancel(led)?|call(ed)? it off|not going ahead)\b/i.test(t);
+  function workflowPost(action, body) {
+    var previewApi = global.SALES_BOOKING_PREVIEW_API || (global.window && global.window.SALES_BOOKING_PREVIEW_API);
+    if (previewApi && typeof global.fetch === 'function') {
+      return global.fetch(previewApi + '?action=' + encodeURIComponent(action), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify(Object.assign({ action: action }, body || {}))
+      }).then(function (resp) { return resp.json(); });
+    }
+    if (typeof global.opsPost === 'function') return global.opsPost(action, body);
+    return null;
   }
 
   function enqueueReassess(c, eventKey) {
-    if (!c || typeof global.opsPost !== 'function') return;
-    global.opsPost('sales_booking_on_event', { event_key: eventKey, type: 'inbound', case_id: c.id });
+    if (!c) return;
+    workflowPost('sales_booking_on_event', { event_key: eventKey, type: 'inbound', case_id: c.id });
   }
 
   function inboundFrontier(m) {
     if (!m) return null;
     return String(m.id || '') + ':' + String(m.timestamp || '');
+  }
+
+  function coverageEnvelope() {
+    var cov = (state.data && state.data.coverage) || {};
+    return {
+      calendar_retrieved_at: cov.calendar_retrieved_at || (state.data && state.data.retrieved_at) || null,
+      leave_retrieved_at: cov.leave_retrieved_at || null,
+      travel_retrieved_at: cov.travel_retrieved_at || null,
+      leave_intervals: cov.leave_intervals,
+      travel_minutes: cov.travel_minutes,
+      now: cov.as_of || (state.data && state.data.retrieved_at) || null
+    };
+  }
+
+  function applyAssessmentToCase(c, rec) {
+    var result = rec && rec.payload ? rec.payload : rec;
+    if (!c || !result || typeof result !== 'object') return false;
+    if (!result.status && result.exact_acceptance == null) return false;
+    if (result.status) c.status = result.status;
+    if (result.reason) c.reason = result.reason;
+    c.exact_acceptance = !!result.exact_acceptance;
+    if (result.exact_acceptance && result.accepted_offer) {
+      c.accepted_offer_id = result.accepted_offer.offer_id;
+      c.accepted_start_iso = result.accepted_offer.start_iso;
+      c.accepted_end_iso = result.accepted_offer.end_iso || c.accepted_end_iso || null;
+      c.accepted_message_id = result.accepted_offer.message_id || c.accepted_message_id || null;
+      c.accepted_resource_id = state.resourceId;
+      c.accepted_contact_id = c.contact_id || null;
+    }
+    if (result.proposal) {
+      c.proposal = result.proposal;
+      c.proposal_stale = false;
+    } else if (result.status && result.status !== 'ready') {
+      c.proposal_stale = true;
+    }
+    return true;
   }
 
   function applyLatestInboundToCase(msgs, c) {
@@ -235,23 +279,35 @@
     }
     if (c.conversation_frontier && c.conversation_frontier === frontier) return;
     c.conversation_frontier = frontier;
-    if (looksLikeCancel(last.body || last.text || '')) {
-      c.exact_acceptance = false;
-      c.status = 'repair';
-      enqueueReassess(c, key);
-      return;
-    }
     if (c.exact_acceptance) {
       c.exact_acceptance = false;
       c.status = 'needs_decision';
-      enqueueReassess(c, key);
-      return;
-    }
-    if (c.status === 'ready' || c.status === 'proposal' || c.status === 'waiting' || c.status === 'offer') {
+    } else if (c.status === 'ready' || c.status === 'proposal' || c.status === 'waiting' || c.status === 'offer') {
       c.status = 'needs_decision';
       c.proposal_stale = true;
-      enqueueReassess(c, key);
     }
+    enqueueReassess(c, key);
+    var env = coverageEnvelope();
+    var posted = workflowPost('sales_booking_assess', {
+      case_id: c.id,
+      input: {
+        messages: msgs,
+        events: events(),
+        week_start: state.weekStart,
+        resource: resource(),
+        suburb: c.suburb,
+        now: env.now,
+        calendar_retrieved_at: env.calendar_retrieved_at,
+        leave_retrieved_at: env.leave_retrieved_at,
+        travel_retrieved_at: env.travel_retrieved_at,
+        leave_intervals: env.leave_intervals,
+        travel_minutes: env.travel_minutes
+      }
+    });
+    if (!posted || typeof posted.then !== 'function') return posted;
+    return posted.then(function (rec) {
+      if (!applyAssessmentToCase(c, rec)) c.status = 'needs_decision';
+    });
   }
 
   function actionKind(c) {
@@ -400,6 +456,7 @@
     var rec = { reason: reason, note: note || '', at: new Date().toISOString(), actor: 'preview', restored: false, contact_id: c.contact_id };
     state.archives[c.id] = rec;
     c.archived = rec;
+    workflowPost('sales_booking_archive', { case_id: c.id, reason: reason, note: note || '' });
     state.lastArchiveCall = { ok: true, contact_id: c.contact_id, crm_deleted: false, reason: reason };
     return state.lastArchiveCall;
   }
@@ -600,11 +657,16 @@
     if (conv.error) return '<div class="comms-empty">Conversation failed: ' + esc(conv.error) + '</div>';
     if (!conv.contactId) return '<div class="comms-empty">Select a case with a GHL contact to open the thread.</div>';
     if (!conv.messages || !conv.messages.length) return '<div class="comms-empty">No messages in this bounded read. Pagination limits still apply.</div>';
-    return conv.messages.map(function (msg) {
+    var cover = conv.coverage || {};
+    var coverNote = cover.has_more
+      ? '<div class="comms-empty">Older messages exist. This page is not a complete thread. Source ' + esc(cover.source || 'provider') + ' at ' + esc(cover.retrieved_at || '') + '.</div>'
+      : (cover.retrieved_at ? '<div class="comms-msg-meta">Latest read ' + esc(cover.retrieved_at) + (cover.conversation_id ? ' · conversation ' + esc(cover.conversation_id) : '') + '</div>' : '');
+    return coverNote + conv.messages.map(function (msg) {
       var dir = msg.direction === 'outbound' ? 'outbound' : 'inbound';
       var ts = msg.timestamp ? String(msg.timestamp) : '';
       var type = String(msg.type || 'SMS');
-      return '<div class="comms-msg ' + dir + '"><div>' + esc(msg.body || msg.subject || type) + '</div><div class="comms-msg-meta">' + esc(ts) + (msg.sender_name ? ' · ' + esc(msg.sender_name) : '') + ' · ' + esc(type) + '</div></div>';
+      var mid = msg.id ? ' · id ' + esc(msg.id) : '';
+      return '<div class="comms-msg ' + dir + '"><div>' + esc(msg.body || msg.subject || type) + '</div><div class="comms-msg-meta">' + esc(ts) + (msg.sender_name ? ' · ' + esc(msg.sender_name) : '') + ' · ' + esc(type) + mid + '</div></div>';
     }).join('');
   }
 
@@ -691,7 +753,7 @@
   }
 
   function clearConversation() {
-    state.conversation = { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: state.conversation.generation + 1 };
+    state.conversation = { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: state.conversation.generation + 1, coverage: null, conversationId: null };
     if (convoAbort && convoAbort.abort) convoAbort.abort();
     convoAbort = null;
   }
@@ -780,25 +842,40 @@
     convoAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     render();
     try {
-      if (typeof global.opsAuthHeaders !== 'function') throw new Error('Sign in required for GHL conversation.');
-      var base = global._commsGHLBase || ((global.window && global.window.SUPABASE_URL) ? global.window.SUPABASE_URL + '/functions/v1/ghl-proxy' : '');
-      if (!base) throw new Error('GHL transport is not configured.');
-      var headers = await global.opsAuthHeaders();
-      var resp = await global.fetch(base + '?action=get_conversation&contactId=' + encodeURIComponent(contactId), {
-        headers: headers,
-        signal: convoAbort && convoAbort.signal
-      });
+      var previewConvo = global.SALES_BOOKING_PREVIEW_CONVERSATION_URL || (global.window && global.window.SALES_BOOKING_PREVIEW_CONVERSATION_URL);
+      var resp;
+      if (previewConvo) {
+        resp = await global.fetch(previewConvo + '?contactId=' + encodeURIComponent(contactId), {
+          cache: 'no-store',
+          signal: convoAbort && convoAbort.signal
+        });
+      } else {
+        if (typeof global.opsAuthHeaders !== 'function') throw new Error('Sign in required for GHL conversation.');
+        var base = global._commsGHLBase || ((global.window && global.window.SUPABASE_URL) ? global.window.SUPABASE_URL + '/functions/v1/ghl-proxy' : '');
+        if (!base) throw new Error('GHL transport is not configured.');
+        var headers = await global.opsAuthHeaders();
+        resp = await global.fetch(base + '?action=get_conversation&contactId=' + encodeURIComponent(contactId), {
+          headers: headers,
+          signal: convoAbort && convoAbort.signal
+        });
+      }
       var data = await resp.json();
       if (generation !== state.conversation.generation) return;
       if (state.conversation.contactId !== contactId) return;
       if (caseId && state.conversation.caseId !== caseId) return;
       if (data.error) throw new Error(data.error);
+      if (data.fixture) throw new Error('Fixture conversation is refused. Provider read required.');
       var msgs = data.messages || [];
       msgs.sort(function (a, b) { return String(a.timestamp || '') < String(b.timestamp || '') ? -1 : 1; });
       state.conversation.messages = msgs;
+      state.conversation.coverage = data.coverage || null;
+      state.conversation.conversationId = data.conversation_id || data.conversationId || null;
       state.conversation.loading = false;
       var selected = selectedCase();
-      if (selected && selected.contact_id === contactId) applyLatestInboundToCase(msgs, selected);
+      if (selected && selected.contact_id === contactId) {
+        var applied = applyLatestInboundToCase(msgs, selected);
+        if (applied && typeof applied.then === 'function') await applied;
+      }
     } catch (e) {
       if (generation !== state.conversation.generation) return;
       if (e && e.name === 'AbortError') return;
@@ -838,6 +915,9 @@
       exact_acceptance: acceptedSlotStillCurrent(c)
     };
     state.lastSendCall = payload;
+    if (kind === 'approve_offer' || kind === 'confirm_booking') {
+      workflowPost(kind === 'confirm_booking' ? 'sales_booking_confirm' : 'sales_booking_approve', payload);
+    }
     if (!route.resolved) {
       return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'sender_unresolved', action: kind };
     }
@@ -937,6 +1017,15 @@
         d.humanEdited = true;
         d.revision = (d.revision || 0) + 1;
         d.sender = resolveSender().number;
+        if (c) {
+          workflowPost('sales_booking_draft', {
+            case_id: c.id,
+            text: d.text,
+            human_edited: true,
+            expected_revision: Math.max(0, (d.revision || 1) - 1),
+            sender: d.sender
+          });
+        }
       }
     });
   }

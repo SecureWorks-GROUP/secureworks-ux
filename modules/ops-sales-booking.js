@@ -212,10 +212,52 @@
         headers: { 'content-type': 'application/json' },
         cache: 'no-store',
         body: JSON.stringify(Object.assign({ action: action }, body || {}))
-      }).then(function (resp) { return resp.json(); });
+      }).then(function (resp) {
+        return resp.json().then(function (data) {
+          data = data || {};
+          data.http_status = resp.status;
+          if (resp.status === 409 && !data.code) data.code = 'cas_conflict';
+          return data;
+        });
+      });
     }
-    if (typeof global.opsPost === 'function') return global.opsPost(action, body);
+    if (typeof global.opsPost === 'function') {
+      return Promise.resolve(global.opsPost(action, body)).catch(function (e) {
+        return {
+          ok: false,
+          code: (e && e.code) || 'cas_conflict',
+          error: e && e.message,
+          http_status: e && e.status
+        };
+      });
+    }
     return null;
+  }
+
+  function persistDraftToServer(c, d) {
+    if (!c || !d) return null;
+    var posted = workflowPost('sales_booking_draft', {
+      case_id: c.id,
+      text: d.text,
+      human_edited: !!d.humanEdited,
+      sender: d.sender || null,
+      expected_revision: Number(d.serverRevision || 0)
+    });
+    if (!posted || typeof posted.then !== 'function') return posted;
+    return posted.then(function (rec) {
+      if (!rec) return rec;
+      if (rec.code === 'cas_conflict' || rec.http_status === 409) {
+        d.casConflict = true;
+        return rec;
+      }
+      if (rec.ok === false) return rec;
+      if (typeof rec.revision === 'number') {
+        d.serverRevision = rec.revision;
+        d.revision = rec.revision;
+        d.casConflict = false;
+      }
+      return rec;
+    });
   }
 
   function enqueueReassess(c, eventKey) {
@@ -445,7 +487,8 @@
     }
     var route = resolveSender();
     d.sender = route.number;
-    return { ok: true, conflict: !!d.conflict, revision: d.revision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance, end_iso: c.proposal.end_iso };
+    persistDraftToServer(c, d);
+    return { ok: true, conflict: !!d.conflict, revision: d.revision, serverRevision: d.serverRevision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance, end_iso: c.proposal.end_iso };
   }
 
   function reviseProposedSlot(startIso, endIso) {
@@ -513,15 +556,28 @@
 
   function draftFor(c) {
     var key = typeof c === 'string' ? c : draftKey(c);
-    if (!key) return { text: '', revision: 0, humanEdited: false, sender: null };
-    if (!state.drafts[key]) state.drafts[key] = { text: '', revision: 0, humanEdited: false, sender: null, case_id: key };
+    if (!key) return { text: '', revision: 0, serverRevision: 0, humanEdited: false, sender: null };
+    if (!state.drafts[key]) {
+      state.drafts[key] = { text: '', revision: 0, serverRevision: 0, humanEdited: false, sender: null, case_id: key };
+    }
+    if (state.drafts[key].serverRevision == null) state.drafts[key].serverRevision = 0;
     return state.drafts[key];
   }
 
   function bindDraft(c) {
     if (!c || !draftKey(c)) return;
     var d = draftFor(c);
+    if (c.draft && typeof c.draft.revision === 'number') {
+      d.serverRevision = Number(c.draft.revision);
+      d.revision = d.serverRevision;
+      if (!d.humanEdited) {
+        d.text = c.draft.text || d.text || '';
+        d.sender = c.draft.sender || d.sender;
+        d.humanEdited = !!c.draft.human_edited;
+      }
+    }
     if (d.humanEdited) return;
+    if (d.serverRevision > 0) return;
     if (d.revision > 0) return;
     d.text = (c.proposal && c.proposal.draft) || d.text || '';
     d.sender = resolveSender().number;
@@ -846,6 +902,7 @@
       if (data.fixture) throw new Error('Fixture fallback is refused. Provider read required.');
       state.data = data;
       if (data.week_start) state.weekStart = data.week_start;
+      (data.cases || []).forEach(function (row) { bindDraft(row); });
     } catch (e) {
       if (request !== state.request) return;
       state.error = e.message || 'Request failed';
@@ -915,7 +972,7 @@
   function attemptApprove() {
     var c = selectedCase();
     var kind = actionKind(c);
-    var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0 };
+    var d = c && draftKey(c) ? draftFor(c) : { text: '', revision: 0, serverRevision: 0 };
     var route = resolveSender();
     if (kind !== 'approve_offer' && kind !== 'confirm_booking' && kind !== 'repair') {
       var blocked = evidencePending(c) ? 'evidence_pending' : (bindingMismatch(c) ? 'binding_mismatch' : 'not_actionable');
@@ -931,25 +988,34 @@
       }
     }
     var payload = {
-      action: kind,
       case_id: c && c.id,
-      contact_id: c && c.contact_id,
-      sender: route.number,
-      sender_resolved: route.resolved,
-      resource: state.resourceId,
-      accepted_resource_id: c && c.accepted_resource_id || null,
-      accepted_contact_id: c && c.accepted_contact_id || (c && c.contact_id) || null,
-      revision: d.revision || 0,
-      text: d.text || '',
+      kind: kind,
+      offer_id: c && c.proposal && c.proposal.offer_id || undefined,
+      draft_revision: Number(d.serverRevision || 0),
       start_iso: c && c.proposal && c.proposal.start_iso,
       end_iso: c && c.proposal && c.proposal.end_iso,
-      offer_id: c && c.proposal && c.proposal.offer_id,
-      exact_acceptance: acceptedSlotStillCurrent(c),
+      resource_id: state.resourceId,
+      recipient: c && c.contact_id,
+      sender: route.number,
+      source_version: c && c.source_version || null,
+      text: d.text || '',
       persisted: false
     };
     state.lastSendCall = payload;
     if (kind === 'approve_offer' || kind === 'confirm_booking') {
-      workflowPost(kind === 'confirm_booking' ? 'sales_booking_confirm' : 'sales_booking_approve', payload);
+      var save = persistDraftToServer(c, d);
+      var sendApprove = function () {
+        payload.draft_revision = Number(d.serverRevision || payload.draft_revision || 0);
+        payload.text = d.text || payload.text;
+        state.lastSendCall = payload;
+        return workflowPost(kind === 'confirm_booking' ? 'sales_booking_confirm' : 'sales_booking_approve', payload);
+      };
+      if (save && typeof save.then === 'function') {
+        save.then(function (rec) {
+          if (rec && (rec.code === 'cas_conflict' || rec.http_status === 409)) return rec;
+          return sendApprove();
+        });
+      } else sendApprove();
     }
     if (!route.resolved) {
       return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'sender_unresolved', action: kind };
@@ -1048,17 +1114,8 @@
         var d = draftFor(c);
         d.text = e.target.value;
         d.humanEdited = true;
-        d.revision = (d.revision || 0) + 1;
         d.sender = resolveSender().number;
-        if (c) {
-          workflowPost('sales_booking_draft', {
-            case_id: c.id,
-            text: d.text,
-            human_edited: true,
-            expected_revision: Math.max(0, (d.revision || 1) - 1),
-            sender: d.sender
-          });
-        }
+        persistDraftToServer(c, d);
       }
     });
   }
@@ -1078,6 +1135,7 @@
     switchResource: switchResource,
     loadConversation: loadConversation,
     attemptApprove: attemptApprove,
+    persistDraftToServer: persistDraftToServer,
     draftKey: draftKey,
     draftFor: draftFor,
     resolveSender: resolveSender,

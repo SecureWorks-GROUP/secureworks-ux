@@ -249,7 +249,8 @@ const server = http.createServer(async (req, res) => {
       } else {
         body = await handleLocal(action, params, payload, mcpCall, STORE);
       }
-      res.writeHead(body.ok === false ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      const status = body.ok === false ? (body.code === 'cas_conflict' ? 409 : 400) : 200;
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify(body));
     } catch (e) {
       res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });

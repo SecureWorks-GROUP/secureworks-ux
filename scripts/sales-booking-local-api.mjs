@@ -208,12 +208,21 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   if (action === 'sales_booking_draft') {
     const id = body.case_id;
     const prev = store.drafts[id] || { revision: 0 };
-    if (body.expected_revision != null && Number(prev.revision || 0) !== Number(body.expected_revision)) {
+    const expected = body.expected_revision == null ? 0 : Number(body.expected_revision);
+    if (Number(prev.revision || 0) !== expected) {
       return { ok: false, code: 'cas_conflict', error: 'Draft revision conflict' };
     }
-    store.drafts[id] = { case_id: id, text: body.text, human_edited: !!body.human_edited, sender: body.sender || prev.sender || null, revision: Number(prev.revision || 0) + 1 };
+    const next = {
+      ok: true,
+      case_id: id,
+      text: body.text,
+      human_edited: !!body.human_edited,
+      sender: body.sender || prev.sender || null,
+      revision: Number(prev.revision || 0) + 1
+    };
+    store.drafts[id] = next;
     db.save(store);
-    return store.drafts[id];
+    return next;
   }
   if (action === 'sales_booking_archive') {
     const c = store.cases[body.case_id];
@@ -238,33 +247,41 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
   }
   if (action === 'sales_booking_approve' || action === 'sales_booking_confirm') {
     if (body.fake === true || body.execute === true) return { ok: false, reason: 'fixture_control_refused', sent: false, held: true };
+    const c = store.cases[body.case_id] || {};
+    const draft = store.drafts[body.case_id];
+    if (body.kind && body.kind !== (action === 'sales_booking_confirm' ? 'confirm_booking' : 'approve_offer')) {
+      return { ok: false, reason: 'invalid_action_kind', held: true };
+    }
+    if (body.recipient && c.contact_id && body.recipient !== String(c.contact_id)) {
+      return { ok: false, reason: 'recipient_mismatch', sent: false, held: true };
+    }
+    if (body.resource_id && c.resource_id && body.resource_id !== c.resource_id) {
+      return { ok: false, reason: 'resource_mismatch', sent: false, held: true };
+    }
     if (action === 'sales_booking_confirm') {
-      const c = store.cases[body.case_id] || {};
       if (!c.exact_acceptance || !body.start_iso || !body.end_iso || !body.offer_id) {
         return { ok: false, reason: 'no_exact_acceptance', sent: false, held: true, booked: false };
       }
-      if (body.resource && c.accepted_resource_id && body.resource !== c.accepted_resource_id) {
-        return { ok: false, reason: 'resource_mismatch', sent: false, held: true };
-      }
-      if (body.contact_id && c.accepted_contact_id && body.contact_id !== c.accepted_contact_id) {
-        return { ok: false, reason: 'recipient_mismatch', sent: false, held: true };
+      if (c.accepted_offer_id && body.offer_id !== c.accepted_offer_id) {
+        return { ok: false, reason: 'accepted_slot_mismatch', sent: false, held: true, booked: false };
       }
     }
     store.actions.push({
-      kind: action,
+      kind: body.kind || (action === 'sales_booking_confirm' ? 'confirm_booking' : 'approve_offer'),
       case_id: body.case_id,
       status: 'held',
       send_evidence: 'held',
       start_iso: body.start_iso || null,
       end_iso: body.end_iso || null,
       offer_id: body.offer_id || null,
-      resource: body.resource || null,
-      contact_id: body.contact_id || null,
+      resource_id: body.resource_id || null,
+      recipient: body.recipient || null,
       sender: body.sender || null,
-      revision: body.revision || 0
+      draft_revision: body.draft_revision || (draft && draft.revision) || 0,
+      source_version: body.source_version || null
     });
     db.save(store);
-    return { ok: false, held: true, sent: false, waiting: false, booked: false, reason: 'send_hold' };
+    return { ok: false, held: true, sent: false, waiting: false, booked: false, reason: 'send_hold', persisted: true };
   }
   if (action === 'sales_booking_on_event') {
     if (store.seenEvents.includes(body.event_key)) return { ok: true, duplicate: true };

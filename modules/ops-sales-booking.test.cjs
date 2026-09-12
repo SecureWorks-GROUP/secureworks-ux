@@ -71,8 +71,44 @@ test('send hold refuses the provider send and records the intended recipient', (
   const result = api.attemptApprove();
   assert.equal(result.sent, false);
   assert.equal(result.held, true);
-  assert.equal(api.state.lastSendCall.contact_id, 'contact-a');
+  assert.equal(api.state.lastSendCall.recipient, 'contact-a');
+  assert.equal(api.state.lastSendCall.resource_id, 'nithin');
+  assert.equal(api.state.lastSendCall.kind, 'approve_offer');
   assert.equal(api.state.lastSendCall.sender, '+61489267774');
+});
+
+test('draft persist uses expected_revision and keeps the acknowledged server revision', async () => {
+  const posts = [];
+  global.opsPost = async (action, body) => {
+    posts.push({ action, body });
+    if (action === 'sales_booking_draft') {
+      if (Number(body.expected_revision) !== 0) return { ok: false, code: 'cas_conflict', http_status: 409 };
+      return { ok: true, revision: 1, text: body.text, case_id: body.case_id, human_edited: true };
+    }
+    return { held: true };
+  };
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  const c = api.state.data.cases[0];
+  const d = api.draftFor(c);
+  d.text = 'Hi, Thursday 1:00pm works.';
+  d.humanEdited = true;
+  d.sender = '+61489267774';
+  d.serverRevision = 0;
+  await api.persistDraftToServer(c, d);
+  assert.equal(posts[0].action, 'sales_booking_draft');
+  assert.equal(posts[0].body.expected_revision, 0);
+  assert.equal(d.serverRevision, 1);
+  const conflict = await api.persistDraftToServer(c, d);
+  assert.equal(conflict.code, 'cas_conflict');
+  assert.equal(d.serverRevision, 1);
+  const sent = api.attemptApprove();
+  assert.equal(api.state.lastSendCall.recipient, 'contact-a');
+  assert.equal(api.state.lastSendCall.resource_id, 'nithin');
+  assert.equal(api.state.lastSendCall.draft_revision, 1);
+  assert.equal(api.state.lastSendCall.kind, 'approve_offer');
+  assert.equal(sent.held, true);
+  delete global.opsPost;
 });
 
 test('resource switch uses configured scoper ids, not fictional calendars', () => {

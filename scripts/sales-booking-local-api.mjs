@@ -114,7 +114,11 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     return { ok: true, crm_deleted: false };
   }
   if (action === 'sales_booking_assess') {
-    const payload = assess.assess(body.input || {});
+    const input = Object.assign({}, body.input || {});
+    delete input.coverage;
+    const payload = typeof assess.assessWithReason === 'function'
+      ? await assess.assessWithReason(input)
+      : assess.assess(input);
     store.assessments[body.case_id] = { version: payload.version, payload, at: new Date().toISOString() };
     db.save(store);
     return store.assessments[body.case_id];

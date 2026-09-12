@@ -287,7 +287,6 @@ test('follow_up with a sent offer still occupies the calendar and cannot be arch
   api.state.resourceId = 'nithin';
   api.state.data = sampleRead();
   api.state.data.cases[0].status = 'follow_up';
-  api.state.data.cases[0].send_evidence = 'sent';
   api.state.selectedId = 'case-a';
   const html = api.renderHTML();
   assert.match(html, /event offer/);
@@ -303,7 +302,11 @@ test('accepted duration change invalidates confirm booking', () => {
   api.state.data.cases[0].proposal.end_iso = '2026-09-17T13:30:00';
   api.applyInboundReply('acceptance');
   assert.equal(api.actionKind(api.state.data.cases[0]), 'confirm_booking');
-  api.state.data.cases[0].proposal.end_iso = '2026-09-17T14:00:00';
+  const sameStart = api.reviseProposedTime('2026-09-17T13:00:00');
+  assert.equal(sameStart.end_iso, '2026-09-17T13:30:00');
+  assert.equal(sameStart.exact_acceptance, true);
+  const stretched = api.reviseProposedSlot('2026-09-17T13:00:00', '2026-09-17T14:00:00');
+  assert.equal(stretched.exact_acceptance, false);
   assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
 });
 

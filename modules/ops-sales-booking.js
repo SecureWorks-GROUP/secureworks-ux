@@ -283,11 +283,17 @@
   function reviseProposedTime(startIso) {
     var c = selectedCase();
     if (!c || !c.proposal) return { ok: false, reason: 'no_proposal' };
-    var slotChanged = c.proposal.start_iso !== startIso || (c.accepted_end_iso && c.proposal.end_iso && c.accepted_end_iso !== c.proposal.end_iso);
+    var nextEnd = (startIso === c.proposal.start_iso && c.proposal.end_iso)
+      ? c.proposal.end_iso
+      : addHourIso(startIso);
+    var slotChanged = c.proposal.start_iso !== startIso
+      || c.proposal.end_iso !== nextEnd
+      || (c.accepted_end_iso && nextEnd !== c.accepted_end_iso)
+      || (c.accepted_start_iso && startIso !== c.accepted_start_iso);
     c.proposal.start_iso = startIso;
-    c.proposal.end_iso = addHourIso(startIso);
+    c.proposal.end_iso = nextEnd;
     c.proposal.revision = (c.proposal.revision || 0) + 1;
-    if (slotChanged && c.exact_acceptance && c.accepted_start_iso && c.accepted_start_iso !== startIso) {
+    if (slotChanged && c.exact_acceptance) {
       c.exact_acceptance = false;
       c.acceptance_invalidated = true;
       if (c.status === 'needs_decision') c.status = 'ready';
@@ -307,7 +313,24 @@
     }
     var route = resolveSender();
     d.sender = route.number;
-    return { ok: true, conflict: !!d.conflict, revision: d.revision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance };
+    return { ok: true, conflict: !!d.conflict, revision: d.revision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance, end_iso: c.proposal.end_iso };
+  }
+
+  function reviseProposedSlot(startIso, endIso) {
+    var c = selectedCase();
+    if (!c || !c.proposal) return { ok: false, reason: 'no_proposal' };
+    c.proposal.start_iso = startIso;
+    c.proposal.end_iso = endIso;
+    c.proposal.revision = (c.proposal.revision || 0) + 1;
+    if (c.exact_acceptance) {
+      var same = c.accepted_start_iso === startIso && c.accepted_end_iso === endIso;
+      if (!same) {
+        c.exact_acceptance = false;
+        c.acceptance_invalidated = true;
+        if (c.status === 'needs_decision') c.status = 'ready';
+      }
+    }
+    return { ok: true, exact_acceptance: !!c.exact_acceptance, start_iso: startIso, end_iso: endIso };
   }
 
   function archiveCase(reason, note) {
@@ -871,6 +894,7 @@
     markSendResult: markSendResult,
     actionKind: actionKind,
     reviseProposedTime: reviseProposedTime,
+    reviseProposedSlot: reviseProposedSlot,
     archiveCase: archiveCase,
     restoreCase: restoreCase,
     suggestedDraft: suggestedDraft,

@@ -14,6 +14,7 @@
     "test:ops-job-detail-refresh": "node scripts/test-ops-job-detail-autorefresh.js",
     "test:makesafe-reporting-cockpit": "node modules/ops-makesafe-reporting-cockpit.smoke.mjs",
     "test:clear-debt-v2": "node scripts/test-clear-debt-v2.js",
+    "test:sales-booking": "node --test modules/ops-sales-booking.test.cjs modules/ops-sales-performance.test.cjs modules/sales-booking-assess.test.cjs",
     "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:alyx-visibility && npm run test:crew-lead-core && npm run test:trade-scope-media && npm run test:trade-roof-report && npm run test:trade-my-money && npm run test:trade-complete-invoice && npm run test:makesafe-intake-sweep && npm run test:ops-job-detail-refresh && npm run test:makesafe-reporting-cockpit && npm run test:clear-debt-v2 && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },

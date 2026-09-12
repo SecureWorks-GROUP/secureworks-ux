@@ -246,17 +246,18 @@
   function draftIsAcknowledged(d) {
     if (!d) return false;
     if (d.savePending || d.saveQueue) return false;
-    if (d.casConflict || d.saveError) return false;
+    if (d.conflict || d.casConflict || d.saveError) return false;
     if (Number(d.serverRevision || 0) < 1) return false;
     return !draftIsDirty(d);
   }
 
   function draftBlocksApproval(d) {
+    if (d && d.conflict) return true;
     if (!hasDraftTransport()) return false;
     return !draftIsAcknowledged(d);
   }
 
-  function applyDraftAck(d, rec, sentText, expected, gen) {
+  function applyDraftAck(c, d, rec, sentText, expected, gen) {
     if (!d || gen !== d.saveGeneration) return rec;
     d.savePending = false;
     if (!rec) {
@@ -283,6 +284,14 @@
     d.savedText = sentText;
     d.casConflict = false;
     d.saveError = null;
+    if (c) {
+      c.draft = {
+        revision: rec.revision,
+        text: sentText,
+        human_edited: !!d.humanEdited,
+        sender: d.sender || null
+      };
+    }
     return rec;
   }
 
@@ -302,7 +311,7 @@
       expected_revision: expected
     });
     var chain = Promise.resolve(posted).then(function (rec) {
-      applyDraftAck(d, rec, text, expected, gen);
+      applyDraftAck(c, d, rec, text, expected, gen);
       if (gen !== d.saveGeneration) return rec;
       if (d.saveQueue || draftIsDirty(d)) {
         if (d.casConflict || d.saveError) return rec;
@@ -359,6 +368,8 @@
     var result = rec && rec.payload ? rec.payload : rec;
     if (!c || !result || typeof result !== 'object') return false;
     if (!result.status && result.exact_acceptance == null) return false;
+    bindDraft(c);
+    var previousProposal = c.proposal;
     if (result.status) c.status = result.status;
     if (result.reason) c.reason = result.reason;
     c.exact_acceptance = !!result.exact_acceptance;
@@ -373,6 +384,9 @@
     if (result.proposal) {
       c.proposal = result.proposal;
       c.proposal_stale = false;
+      if (!previousProposal || previousProposal.start_iso !== c.proposal.start_iso || previousProposal.end_iso !== c.proposal.end_iso) {
+        synchronizeProposalDraft(c, result.draft || c.proposal.draft || suggestedDraft(c));
+      }
     } else if (result.status && result.status !== 'ready') {
       c.proposal_stale = true;
     }
@@ -403,6 +417,9 @@
     }
     enqueueReassess(c, key);
     var env = coverageEnvelope();
+    var resourceId = state.resourceId;
+    var request = state.request;
+    var contactId = c.contact_id;
     var posted = workflowPost('sales_booking_assess', {
       case_id: c.id,
       input: {
@@ -421,6 +438,7 @@
     });
     if (!posted || typeof posted.then !== 'function') return posted;
     return posted.then(function (rec) {
+      if (selectedCase() !== c || state.resourceId !== resourceId || state.request !== request || c.contact_id !== contactId || c.conversation_frontier !== frontier) return;
       if (!applyAssessmentToCase(c, rec)) c.status = 'needs_decision';
     });
   }
@@ -546,9 +564,14 @@
       c.acceptance_invalidated = true;
       if (c.status === 'needs_decision') c.status = 'ready';
     }
-    var d = draftFor(c);
     var suggested = suggestedDraft(c);
-    if (d.humanEdited && d.text && d.text !== suggested) {
+    var d = synchronizeProposalDraft(c, suggested);
+    return { ok: true, conflict: !!d.conflict, revision: d.revision, serverRevision: d.serverRevision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance, end_iso: c.proposal.end_iso };
+  }
+
+  function synchronizeProposalDraft(c, suggested) {
+    var d = draftFor(c);
+    if (d.humanEdited && d.text !== suggested) {
       d.conflict = true;
       d.suggested = suggested;
       d.revision = (d.revision || 0) + 1;
@@ -561,8 +584,8 @@
     }
     var route = resolveSender();
     d.sender = route.number;
-    persistDraftToServer(c, d);
-    return { ok: true, conflict: !!d.conflict, revision: d.revision, serverRevision: d.serverRevision, text: d.text, suggested: suggested, exact_acceptance: !!c.exact_acceptance, end_iso: c.proposal.end_iso };
+    if (!d.conflict) persistDraftToServer(c, d);
+    return d;
   }
 
   function reviseProposedSlot(startIso, endIso) {
@@ -579,7 +602,8 @@
         if (c.status === 'needs_decision') c.status = 'ready';
       }
     }
-    return { ok: true, exact_acceptance: !!c.exact_acceptance, start_iso: startIso, end_iso: endIso };
+    var d = synchronizeProposalDraft(c, suggestedDraft(c));
+    return { ok: true, exact_acceptance: !!c.exact_acceptance, start_iso: startIso, end_iso: endIso, conflict: !!d.conflict };
   }
 
   function archiveCase(reason, note) {
@@ -598,16 +622,30 @@
     return state.lastArchiveCall;
   }
 
-  function restoreCase(id) {
+  async function restoreCase(id) {
     var rec = state.archives[id];
     var list = cases();
     var c = null;
     for (var i = 0; i < list.length; i++) if (list[i].id === id) c = list[i];
     if (!c && !rec) return { ok: false, reason: 'not_archived' };
-    if (rec) rec.restored = true;
-    if (c && c.archived) c.archived.restored = true;
-    workflowPost('sales_booking_restore', { case_id: id });
-    return { ok: true, contact_id: (c && c.contact_id) || (rec && rec.contact_id), crm_deleted: false };
+    if (c && c.restorePending) return { ok: false, reason: 'restore_pending' };
+    if (c) { c.restorePending = true; c.restoreError = null; }
+    try {
+      var response = await workflowPost('sales_booking_restore', { case_id: id });
+      if (!response || response.ok !== true || response.restored === false || response.http_status >= 400) {
+        throw new Error(response && (response.error || response.reason) || 'Restore was not acknowledged.');
+      }
+      if (state.archives[id]) state.archives[id].restored = true;
+      cases().forEach(function (row) {
+        if (row.id === id && row.archived) row.archived.restored = true;
+      });
+      return { ok: true, contact_id: (c && c.contact_id) || (rec && rec.contact_id), crm_deleted: false };
+    } catch (error) {
+      if (c) c.restoreError = error.message || 'Restore failed.';
+      return { ok: false, reason: 'restore_failed', error: error.message, crm_deleted: false };
+    } finally {
+      if (c) c.restorePending = false;
+    }
   }
 
   function matchesSearch(c) {
@@ -643,12 +681,12 @@
     if (!c || !draftKey(c)) return;
     var d = draftFor(c);
     if (d.savePending || d.saveQueue || draftIsDirty(d) || d.casConflict) return;
-    if (c.draft && typeof c.draft.revision === 'number') {
+    if (c.draft && typeof c.draft.revision === 'number' && c.draft.revision > d.serverRevision) {
       d.serverRevision = Number(c.draft.revision);
       d.revision = d.serverRevision;
-      d.savedText = c.draft.text || d.savedText || '';
+      d.savedText = c.draft.text || '';
       if (!d.humanEdited) {
-        d.text = c.draft.text || d.text || '';
+        d.text = c.draft.text || '';
         d.sender = c.draft.sender || d.sender;
         d.humanEdited = !!c.draft.human_edited;
       }
@@ -687,8 +725,7 @@
   }
 
   function renderEvent(block, kind) {
-    if (!state.layers[kind] && kind !== 'confirmed') return '';
-    if (kind === 'confirmed' && !state.layers.confirmed) return '';
+    if (!state.layers[kind]) return '';
     var hour = hourFromIso(block.start_iso);
     var day = dayIndexFromIso(block.start_iso, state.weekStart);
     if (hour == null || day == null) return '';
@@ -710,6 +747,29 @@
     return '<div class="window" style="top:' + topPx(hour) + 'px;height:' + Math.max(24, h * PX_PER_HOUR) + 'px"><b>Window</b>' + esc(c.proposal.window_label || '') + '</div>';
   }
 
+  function calendarItems() {
+    var items = events().map(function (ev) {
+      return Object.assign({}, ev, { id: ev.case_id || ev.event_id, layer: ev.layer || 'confirmed' });
+    });
+    cases().forEach(function (c) {
+      if (!c.proposal) return;
+      var heldOffer = c.status === 'offer' || c.status === 'waiting' || c.status === 'follow_up' || c.send_evidence === 'sent' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
+      if (!heldOffer && (c.proposal_stale || (c.status !== 'proposal' && c.status !== 'ready'))) return;
+      items.push({
+        id: c.id,
+        start_iso: c.proposal.start_iso,
+        end_iso: c.proposal.end_iso,
+        display_name: c.display_name,
+        suburb: c.suburb,
+        layer: heldOffer ? 'offer' : 'proposal',
+        bookingCase: c
+      });
+    });
+    return items.filter(function (item) {
+      return dayIndexFromIso(item.start_iso, state.weekStart) != null && hourFromIso(item.start_iso) != null;
+    });
+  }
+
   function renderCalendar() {
     var data = state.data;
     var res = resource();
@@ -723,6 +783,7 @@
       return '<div class="dayheader' + (off ? ' off' : '') + '">' + name.slice(0, 3) + '<b>' + iso.slice(8, 10) + '</b></div>';
     }).join('');
     var cols = '';
+    var items = calendarItems();
     for (var d = 0; d < 5; d++) {
       var off = res.desk_rules.no_wednesday && d === 2;
       var mondayBlock = res.desk_rules.monday_from > DAY_START && d === 0
@@ -730,41 +791,10 @@
         : '';
       var wed = off ? '<div class="block off"><strong>Unavailable</strong><span>Desk rule</span></div>' : mondayBlock;
       var body = '';
-      events().forEach(function (ev) {
-        if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
-        body += renderEvent({
-          id: ev.case_id || ev.event_id,
-          start_iso: ev.start_iso,
-          end_iso: ev.end_iso,
-          display_name: ev.display_name || ev.subject,
-          suburb: ev.suburb || '',
-          subject: ev.subject
-        }, ev.layer || 'confirmed');
-      });
-      cases().forEach(function (c) {
-        if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
-        var heldOffer = c.status === 'offer' || c.status === 'waiting' || c.status === 'follow_up' || c.send_evidence === 'sent' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
-        if (heldOffer) {
-          body += renderWindows(c);
-          body += renderEvent({
-            id: c.id,
-            start_iso: c.proposal.start_iso,
-            end_iso: c.proposal.end_iso,
-            display_name: c.display_name,
-            suburb: c.suburb
-          }, 'offer');
-          return;
-        }
-        if (!c.proposal_stale && (c.status === 'proposal' || c.status === 'ready')) {
-          body += renderWindows(c);
-          body += renderEvent({
-            id: c.id,
-            start_iso: c.proposal.start_iso,
-            end_iso: c.proposal.end_iso,
-            display_name: c.display_name,
-            suburb: c.suburb
-          }, 'proposal');
-        }
+      items.forEach(function (item) {
+        if (dayIndexFromIso(item.start_iso, state.weekStart) !== d) return;
+        if (item.bookingCase) body += renderWindows(item.bookingCase);
+        body += renderEvent(item, item.layer);
       });
       cols += '<div class="daycolumn">' + wed + body + '</div>';
     }
@@ -791,13 +821,11 @@
   }
 
   function renderAgenda() {
-    var items = events().concat(cases().filter(function (c) { return c.proposal; }).map(function (c) {
-      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: c.suburb, id: c.id, layer: c.status === 'offer' ? 'offer' : 'proposal' };
-    }));
+    var items = calendarItems().filter(function (item) { return state.layers[item.layer]; });
     items.sort(function (a, b) { return String(a.start_iso) < String(b.start_iso) ? -1 : 1; });
     if (!items.length) return '<div class="emptyqueue">No provider events or proposals in this week.</div>';
     return items.map(function (it) {
-      return '<button type="button" class="lead" data-booking-case="' + esc(it.id || it.event_id) + '"><strong>' + esc(String(it.start_iso || '').slice(11, 16)) + '</strong> ' + esc(it.display_name || it.subject || '') + ' · ' + esc(it.suburb || '') + '</button>';
+      return '<button type="button" class="lead" data-booking-case="' + esc(it.id) + '"><strong>' + esc(String(it.start_iso).slice(0, 10) + ' ' + String(it.start_iso).slice(11, 16)) + '</strong> ' + esc(it.display_name || it.subject || '') + ' · ' + esc(it.suburb || '') + '</button>';
     }).join('');
   }
 
@@ -849,12 +877,12 @@
         ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
         : '<p class="small muted">No proposed time yet.</p>');
     var conflict = d.conflict
-      ? '<div class="notice error">Time changed. Your edited draft was kept. Suggested text is ready for review, not applied.</div>'
+      ? '<div class="notice error">Time changed. Your edited draft was kept. Update your draft before approval.<p>' + esc(d.suggested || '') + '</p></div>'
       : '';
     var archiveBlock = hasBlockingCommitment(c)
       ? '<p class="small muted">Archive is blocked while a diary event or outstanding offer remains. Withdrawal is a separate held action.</p>'
       : '<div class="archive-row"><label class="small muted">Archive reason <select data-booking-archive-reason><option value="">Choose…</option><option value="out_of_service">Out of service</option><option value="declined">Declined</option><option value="duplicate">Duplicate</option><option value="no_longer_proceeding">No longer proceeding</option></select></label><button type="button" data-booking-archive="1">Archive</button></div>';
-    if (isArchived(c)) archiveBlock = '<button type="button" data-booking-restore="' + esc(c.id) + '">Restore to workload</button>';
+    if (isArchived(c)) archiveBlock = '<button type="button" data-booking-restore="' + esc(c.id) + '"' + (c.restorePending ? ' disabled' : '') + '>' + (c.restorePending ? 'Restoring…' : 'Restore to workload') + '</button>' + (c.restoreError ? '<p class="notice error" role="alert">' + esc(c.restoreError) + '</p>' : '');
     return '<div class="detailhead"><span class="smalltag">' + esc(statusLabel(c.status)) + '</span><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p class="muted">' + esc(c.suburb || '') + (c.contact_id ? '' : ' · no GHL contact') + '</p></div>' +
       '<div class="detailbody">' +
       '<div class="timing"><div><span>Customer window</span><strong>' + esc(windowLabel) + '</strong></div><div><span>Proposed time</span><strong>' + esc(pick || 'None') + '</strong></div>' + timeInput + '</div>' +
@@ -914,6 +942,16 @@
       view.classList.toggle('sales-sub-booking', state.subtab === 'booking');
       view.classList.toggle('sales-sub-performance', state.subtab === 'performance');
     }
+  }
+
+  function applySearch(value) {
+    state.search = value;
+    var host = root();
+    var queue = host && host.querySelector('.queuelist');
+    var count = host && host.querySelector('.queue .count');
+    if (queue) queue.innerHTML = renderQueue();
+    if (count) count.textContent = String(visibleCases().length);
+    if (!queue && !count) render();
   }
 
   function clearConversation() {
@@ -1105,7 +1143,7 @@
     if (!route.resolved) {
       return { ok: false, held: true, sent: false, booked: false, waiting: false, reason: 'sender_unresolved', action: kind };
     }
-    if (kind === 'confirm_booking' && !payload.exact_acceptance) {
+    if (kind === 'confirm_booking' && !acceptedSlotStillCurrent(c)) {
       return { ok: false, held: true, sent: false, booked: false, reason: 'no_exact_acceptance' };
     }
     if (SEND_HOLD) {
@@ -1168,7 +1206,7 @@
       var rest = e.target.closest && e.target.closest('[data-booking-restore]');
       if (rest) {
         e.preventDefault();
-        restoreCase(rest.getAttribute('data-booking-restore'));
+        restoreCase(rest.getAttribute('data-booking-restore')).then(render);
         render();
         return;
       }
@@ -1190,8 +1228,7 @@
     });
     global.document.addEventListener('input', function (e) {
       if (e.target.matches && e.target.matches('[data-booking-search]')) {
-        state.search = e.target.value;
-        render();
+        applySearch(e.target.value);
       }
       if (e.target.matches && e.target.matches('[data-booking-draft]')) {
         var c = selectedCase();
@@ -1199,6 +1236,7 @@
         var d = draftFor(c);
         d.text = e.target.value;
         d.humanEdited = true;
+        d.conflict = false;
         d.sender = resolveSender().number;
         persistDraftToServer(c, d).then(function () {
           var box = root() && root().querySelector('[data-booking-draft]');
@@ -1220,6 +1258,7 @@
     load: load,
     render: render,
     renderHTML: renderHTML,
+    applySearch: applySearch,
     selectCase: selectCase,
     switchResource: switchResource,
     loadConversation: loadConversation,

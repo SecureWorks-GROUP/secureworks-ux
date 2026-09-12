@@ -14,7 +14,7 @@ const PIPELINES = {
 export function createLocalStore(filePath) {
   const empty = { cases: {}, drafts: {}, offers: {}, actions: [], archives: {}, assessments: {}, cursors: {}, seenEvents: [] };
   function load() {
-    try { return Object.assign(empty, JSON.parse(fs.readFileSync(filePath, 'utf8'))); } catch { return structuredClone(empty); }
+    try { return Object.assign(structuredClone(empty), JSON.parse(fs.readFileSync(filePath, 'utf8'))); } catch { return structuredClone(empty); }
   }
   function save(s) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -149,7 +149,9 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     const weekStart = params.week_start || '2026-09-14';
     const pipeline = PIPELINES[resource];
     const cursorKey = 'consume:' + resource + ':' + weekStart;
-    const cursor = store.cursors[cursorKey] || { complete: false, next: null, total: null, pages: 0 };
+    const previousCursor = store.cursors[cursorKey] || { complete: false, next: null, total: null, pages: 0 };
+    const cursor = Object.assign({}, previousCursor.complete ? { complete: false, next: null, total: previousCursor.total ?? null, pages: previousCursor.pages || 0 } : previousCursor);
+    const updates = {};
     let pages = 0;
     while (!cursor.complete && pages < 8) {
       const args = { pipeline_id: pipeline, status: 'open', limit: 20 };
@@ -163,21 +165,17 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       for (const item of items) {
         const contact = item.contact || {};
         const name = contact.name || item.name || '';
-        const existing = store.cases[item.id] || {};
-        if (existing.resource_id && existing.resource_id !== resource) continue;
-        store.cases[item.id] = Object.assign({}, existing, {
+        updates[item.id] = {
           id: item.id,
           resource_id: resource,
           opportunity_id: item.id,
           contact_id: item.contactId || contact.id || null,
-          suburb: existing.suburb || null,
-          display_name: phoneLike(name) ? (existing.suburb || 'Enquiry') : (name || existing.display_name || 'Enquiry'),
-          status: existing.status || 'needs_decision',
+          source_name: name,
           tags: contact.tags || []
-        });
+        };
       }
       cursor.pages = (cursor.pages || 0) + 1;
-      cursor.total = (page.data && page.data.meta && page.data.meta.total) || pag.total || cursor.total;
+      cursor.total = (page.data && page.data.meta && page.data.meta.total) ?? pag.total ?? cursor.total;
       cursor.complete = pag.complete === true || pag.has_more === false;
       if (items.length === 0 && pag.complete !== true && pag.has_more == null) cursor.complete = false;
       cursor.next = pag.next_cursor || (pag.has_more === false ? null : cursor.next);
@@ -185,11 +183,27 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       pages += 1;
       if (pag.complete !== true && pag.has_more !== false) break;
     }
-    db.save(store);
-    const cases = Object.values(store.cases).filter((c) => c.resource_id === resource).map((c) => Object.assign({}, c, {
-      draft: store.drafts[c.id] || null,
-      assessment: store.assessments[c.id] || null,
-      archived: store.archives[c.id] && !store.archives[c.id].restored ? store.archives[c.id] : null,
+    const latest = db.load();
+    for (const update of Object.values(updates)) {
+      const existing = latest.cases[update.id] || {};
+      if (existing.resource_id && existing.resource_id !== resource) continue;
+      latest.cases[update.id] = Object.assign({}, existing, {
+        id: update.id,
+        resource_id: resource,
+        opportunity_id: update.opportunity_id,
+        contact_id: update.contact_id,
+        suburb: existing.suburb || null,
+        display_name: phoneLike(update.source_name) ? (existing.suburb || 'Enquiry') : (update.source_name || existing.display_name || 'Enquiry'),
+        status: existing.status || 'needs_decision',
+        tags: update.tags || []
+      });
+    }
+    latest.cursors[cursorKey] = cursor;
+    db.save(latest);
+    const cases = Object.values(latest.cases).filter((c) => c.resource_id === resource).map((c) => Object.assign({}, c, {
+      draft: latest.drafts[c.id] || null,
+      assessment: latest.assessments[c.id] || null,
+      archived: latest.archives[c.id] && !latest.archives[c.id].restored ? latest.archives[c.id] : null,
       conversation: c.conversation || null,
       context: c.context || null
     }));
@@ -202,7 +216,7 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       coverage: {
         full_population: cursor.complete === true,
         enumerated: cases.filter((c) => c.opportunity_id).length,
-        total: cursor.total || null,
+        total: cursor.total ?? null,
         operational_leave: 'not_read',
         gaps: [
           cursor.complete === true ? 'Opportunity enumeration terminal for this resource.' : 'Opportunity enumeration still paging; empty or missing-next is not a completed book.',
@@ -210,7 +224,7 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
         ]
       },
       cases,
-      drafts: store.drafts,
+      drafts: latest.drafts,
       policy: { activation: 'held' }
     };
   }
@@ -251,9 +265,10 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     const payload = typeof assess.assessWithReason === 'function'
       ? await assess.assessWithReason(input)
       : assess.assess(input);
-    store.assessments[body.case_id] = { version: payload.version, payload, at: new Date().toISOString() };
-    db.save(store);
-    return store.assessments[body.case_id];
+    const latest = db.load();
+    latest.assessments[body.case_id] = { version: payload.version, payload, at: new Date().toISOString() };
+    db.save(latest);
+    return latest.assessments[body.case_id];
   }
   if (action === 'sales_booking_approve' || action === 'sales_booking_confirm') {
     if (body.fake === true || body.execute === true) return { ok: false, reason: 'fixture_control_refused', sent: false, held: true };

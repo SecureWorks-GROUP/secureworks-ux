@@ -155,9 +155,63 @@ function windowHour(iso) {
   return Number(m[1]) + Number(m[2]) / 60;
 }
 
+function localWindowPoint(iso) {
+  var instant = toInstant(iso);
+  if (instant != null) {
+    var local = perthParts(instant);
+    return { date: local.date, hour: local.hour };
+  }
+  return { date: String(iso || '').slice(0, 10), hour: windowHour(iso) };
+}
+
+function windowBounds(w) {
+  var start = localWindowPoint(w.start_iso);
+  var end = localWindowPoint(w.end_iso);
+  return {
+    start_date: start.date,
+    end_date: end.date,
+    start_hour: start.hour,
+    end_hour: end.hour
+  };
+}
+
+function textTimeBounds(text, clock) {
+  var bounds = { start: null, end: null, exact: false, time_of_day: null };
+  if (/\bafternoons?\b/i.test(text) || /\bafternoon\b/i.test(text)) {
+    bounds.start = 13;
+    bounds.end = 16.5;
+    bounds.time_of_day = 'afternoon';
+  } else if (/\bmornings?\b/i.test(text) || /\bmorning\b/i.test(text)) {
+    bounds.start = 8;
+    bounds.end = 12;
+    bounds.time_of_day = 'morning';
+  }
+  if (clock != null && /\bafter\b/i.test(text)) {
+    bounds.start = Math.max(bounds.start == null ? clock : bounds.start, clock);
+  } else if (clock != null && /\bbefore\b/i.test(text)) {
+    bounds.end = Math.min(bounds.end == null ? clock : bounds.end, clock);
+  } else if (clock != null) {
+    bounds.start = clock;
+    bounds.end = clock + 1;
+    bounds.exact = true;
+  }
+  return bounds;
+}
+
+function windowMatchesTextTime(text, w, clock) {
+  var span = windowBounds(w);
+  if (span.start_hour == null || span.end_hour == null) return true;
+  if (span.start_date !== span.end_date) return false;
+  var bounds = textTimeBounds(text, clock);
+  if (bounds.start != null && span.start_hour < bounds.start - 0.01) return false;
+  if (bounds.end != null && span.end_hour > bounds.end + 0.01) return false;
+  if (bounds.exact && Math.abs(span.start_hour - clock) > 0.26) return false;
+  return true;
+}
+
 function textContradictsWindow(text, w, year) {
   if (isExplicitCancel(text) || isBareNo(text)) return true;
-  var windowDate = String(w.start_iso).slice(0, 10);
+  var windowDate = localWindowPoint(w.start_iso).date;
   var windowDay = perthWeekdayName(windowDate);
   var lower = String(text || '').toLowerCase();
   if (isUnavailability(text)) {
@@ -173,11 +227,7 @@ function textContradictsWindow(text, w, year) {
     return true;
   }
   var laterClock = parseClock(text);
-  var hour = windowHour(w.start_iso);
-  if (laterClock != null && hour != null) {
-    if (/\bafter\b/i.test(text) && hour < laterClock - 0.01) return true;
-    if (/\bbefore\b/i.test(text) && hour >= laterClock) return true;
-  }
+  if (!windowMatchesTextTime(text, w, laterClock)) return true;
   return false;
 }
 
@@ -194,9 +244,8 @@ function laterInboundContradicts(messages, cited, w, year) {
 }
 
 function groundWindowAgainstText(w, text, year) {
-  var windowDate = String(w.start_iso).slice(0, 10);
+  var windowDate = localWindowPoint(w.start_iso).date;
   var windowDay = perthWeekdayName(windowDate);
-  var hour = windowHour(w.start_iso);
   var date = parseExplicitDate(text, year);
   var clock = parseClock(text);
   var dayName = weekdayName(text);
@@ -210,32 +259,57 @@ function groundWindowAgainstText(w, text, year) {
   }
   if (date) {
     if (date !== windowDate) return { ok: false, reason: 'window_date_not_in_cited_text' };
-    if (clock != null && hour != null) {
-      if (/\bafter\b/i.test(text) && hour < clock - 0.01) return { ok: false, reason: 'window_time_contradicts_cited_text' };
-      if (/\bbefore\b/i.test(text) && hour >= clock) return { ok: false, reason: 'window_time_contradicts_cited_text' };
-      if (!/\bafter\b/i.test(text) && !/\bbefore\b/i.test(text) && Math.abs(hour - clock) > 0.26) {
-        return { ok: false, reason: 'window_time_contradicts_cited_text' };
-      }
-    }
+    if (!windowMatchesTextTime(text, w, clock)) return { ok: false, reason: 'window_time_contradicts_cited_text' };
     return { ok: true, customer_date_specified: true, date_source: 'customer' };
   }
   if (dayName) {
     if (windowDay !== dayName) return { ok: false, reason: 'window_weekday_not_in_cited_text' };
-    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', weekday: dayName };
+    if (!windowMatchesTextTime(text, w, clock)) return { ok: false, reason: 'window_time_contradicts_cited_text' };
+    var dayBounds = textTimeBounds(text, clock);
+    return {
+      ok: true,
+      customer_date_specified: false,
+      date_source: 'ai_proposed',
+      weekday: dayName,
+      time_of_day: dayBounds.time_of_day,
+      after_hour: dayBounds.start,
+      before_hour: dayBounds.end
+    };
   }
   if (afternoonOnly) {
-    if (hour != null && hour < 13) return { ok: false, reason: 'window_time_contradicts_preference' };
-    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', time_of_day: 'afternoon' };
+    if (!windowMatchesTextTime(text, w, clock)) return { ok: false, reason: 'window_time_contradicts_preference' };
+    var afternoonBounds = textTimeBounds(text, clock);
+    return {
+      ok: true,
+      customer_date_specified: false,
+      date_source: 'ai_proposed',
+      time_of_day: 'afternoon',
+      after_hour: afternoonBounds.start,
+      before_hour: afternoonBounds.end
+    };
   }
   if (morningOnly) {
-    if (hour != null && hour >= 12) return { ok: false, reason: 'window_time_contradicts_preference' };
-    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed', time_of_day: 'morning' };
+    if (!windowMatchesTextTime(text, w, clock)) return { ok: false, reason: 'window_time_contradicts_preference' };
+    var morningBounds = textTimeBounds(text, clock);
+    return {
+      ok: true,
+      customer_date_specified: false,
+      date_source: 'ai_proposed',
+      time_of_day: 'morning',
+      after_hour: morningBounds.start,
+      before_hour: morningBounds.end
+    };
   }
   if (clock != null && !date && !dayName) {
-    if (/\bafter\b/i.test(text) && hour != null && hour < clock - 0.01) {
-      return { ok: false, reason: 'window_time_contradicts_cited_text' };
-    }
-    return { ok: true, customer_date_specified: false, date_source: 'ai_proposed' };
+    if (!windowMatchesTextTime(text, w, clock)) return { ok: false, reason: 'window_time_contradicts_cited_text' };
+    var clockBounds = textTimeBounds(text, clock);
+    return {
+      ok: true,
+      customer_date_specified: false,
+      date_source: 'ai_proposed',
+      after_hour: clockBounds.start,
+      before_hour: clockBounds.end
+    };
   }
   return { ok: false, reason: 'window_not_grounded_in_cited_text', unverifiable: true };
 }
@@ -446,26 +520,26 @@ function conservativeExtract(input) {
     var date = parseExplicitDate(text, year);
     var clock = parseClock(text);
     var dayName = weekdayName(text);
+    var statedBounds = textTimeBounds(text, clock);
     var afternoonOnly = /\bafternoons?\b/i.test(text) && !date && !dayName;
     var morningOnly = /\bmornings?\b/i.test(text) && !date && !dayName;
     if (afternoonOnly || morningOnly) {
       facts.time_of_day = afternoonOnly ? 'afternoon' : 'morning';
       facts.date_specified = false;
+      if (statedBounds.start != null) facts.after_hour = statedBounds.start;
+      if (statedBounds.end != null) facts.before_hour = statedBounds.end;
       review.push('Customer date unspecified. Any chosen day is an AI proposal, not a customer-stated date.');
     } else if (date) {
-      var startH = null;
-      var endH = null;
-      if (clock != null && /\bafter\b/i.test(text)) { startH = clock; endH = 16.5; }
-      else if (clock != null && /\bbefore\b/i.test(text)) { startH = 8; endH = clock; }
-      else if (clock != null) { startH = clock; endH = clock + 1; }
-      else if (/\bmorning\b/i.test(text)) { startH = 8; endH = 12; }
-      else if (/\bafternoon\b/i.test(text)) { startH = 13; endH = 16.5; }
-      else review.push('Date without a time is not a unique slot.');
-      if (startH != null) {
+      var hasTimeBounds = statedBounds.start != null || statedBounds.end != null;
+      if (hasTimeBounds) {
+        var startH = statedBounds.start != null ? statedBounds.start : 8;
+        var endH = statedBounds.end != null ? statedBounds.end : 16.5;
         facts.date_specified = true;
         facts.explicit_date = date;
         facts.clock = clock;
-        facts.time_of_day = startH >= 13 ? 'afternoon' : (endH <= 12 ? 'morning' : null);
+        facts.time_of_day = statedBounds.time_of_day || (startH >= 13 ? 'afternoon' : (endH <= 12 ? 'morning' : null));
+        if (statedBounds.start != null) facts.after_hour = statedBounds.start;
+        if (statedBounds.end != null) facts.before_hour = statedBounds.end;
         var start = isoPerth(date, startH);
         var end = isoPerth(date, endH);
         windows.push({
@@ -476,6 +550,8 @@ function conservativeExtract(input) {
           source_message_id: lastIn.id || null,
           explicit_date: true
         });
+      } else {
+        review.push('Date without a time is not a unique slot.');
       }
     } else if (dayName && !date) {
       facts.date_specified = false;
@@ -485,14 +561,16 @@ function conservativeExtract(input) {
         review.push('Customer excluded a weekday. Do not treat it as availability.');
       } else {
         facts.weekday = dayName;
-        if (clock != null && /\bafter\b/i.test(text)) facts.after_hour = clock;
-        if (clock != null && /\bbefore\b/i.test(text)) facts.before_hour = clock;
+        if (statedBounds.time_of_day) facts.time_of_day = statedBounds.time_of_day;
+        if (statedBounds.start != null) facts.after_hour = statedBounds.start;
+        if (statedBounds.end != null) facts.before_hour = statedBounds.end;
         review.push('Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal.');
       }
     } else if (!date && !dayName && clock != null) {
       facts.clock = clock;
       facts.date_specified = false;
-      if (/\bafter\b/i.test(text)) facts.after_hour = clock;
+      if (statedBounds.start != null) facts.after_hour = statedBounds.start;
+      if (statedBounds.end != null) facts.before_hour = statedBounds.end;
       review.push('Customer named a time without a date. The chosen day is an AI proposal.');
     }
   }
@@ -594,6 +672,7 @@ function legalStart(hour, rules, perthDate, weekStart) {
   var utc = Date.UTC(parts[0], parts[1] - 1, parts[2]);
   var dow = new Date(utc).getUTCDay();
   var dayIndex = dow === 0 ? 6 : dow - 1;
+  if (dayIndex > 4) return false;
   if (hour < 8 || hour > (rules.last_start != null ? rules.last_start : 15.5)) return false;
   if (rules.no_wednesday && dayIndex === 2) return false;
   if (dayIndex === 0 && rules.monday_from != null && hour < rules.monday_from) return false;
@@ -761,7 +840,7 @@ function validate(ground, model, input) {
         reasons.push('Model window times are not valid instants.');
         return;
       }
-      if (facts.explicit_date && String(w.start_iso).slice(0, 10) !== facts.explicit_date) {
+      if (facts.explicit_date && localWindowPoint(w.start_iso).date !== facts.explicit_date) {
         reasons.push('Model window conflicts with an explicit customer date.');
         return;
       }

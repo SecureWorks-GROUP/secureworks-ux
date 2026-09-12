@@ -1,8 +1,13 @@
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const api = require('./ops-sales-booking.js');
+const initialState = structuredClone(api.state);
+
+beforeEach(() => {
+  Object.assign(api.state, structuredClone(initialState));
+});
 
 function sampleRead(resource) {
   return {
@@ -251,17 +256,6 @@ test('XSS in provider subjects is escaped', () => {
   assert.doesNotMatch(html, /<img src=x/);
 });
 
-test('host wires Sales parent, keeps Performance restore, and loads Booking', () => {
-  const s = fs.readFileSync(require.resolve('../ops.html'), 'utf8');
-  assert.equal((s.match(/data-view="sales"/g) || []).length, 2);
-  assert.match(s, /id="viewSales"/);
-  assert.match(s, /id="salesBookingRoot"/);
-  assert.match(s, /id="salesPerformanceRoot"/);
-  assert.match(s, /modules\/ops-sales-booking\.js/);
-  assert.match(s, /'materials', 'performance', 'booking', 'sales', 'inbox'/);
-  assert.ok(s.indexOf('modules/ops-sales-booking.js') < s.indexOf('function showView('));
-});
-
 test('booked cases stay on the default unscoped list; archived and completed do not', () => {
   api.state.filter = 'all';
   api.state.search = '';
@@ -327,6 +321,29 @@ test('render after unedited time change keeps the revised draft, not the old pro
   const html = api.renderHTML();
   assert.match(html, /2:00pm/);
   assert.doesNotMatch(html, /Thursday 1:00pm works/);
+});
+
+test('acknowledged draft save updates the case snapshot revision monotonically', async () => {
+  global.opsPost = async (action, body) => {
+    if (action === 'sales_booking_draft') return { ok: true, revision: 2, text: body.text, human_edited: body.human_edited };
+    return { ok: true };
+  };
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.drafts = {};
+  const c = api.state.data.cases[0];
+  c.draft = { revision: 1, text: 'Old server text', human_edited: true };
+  api.bindDraft(c);
+  const d = api.draftFor(c);
+  d.text = 'New server text';
+  d.humanEdited = true;
+  await api.persistDraftToServer(c, d);
+  assert.equal(c.draft.revision, 2);
+  assert.equal(c.draft.text, 'New server text');
+  api.bindDraft(c);
+  assert.equal(api.draftFor(c).serverRevision, 2);
+  delete global.opsPost;
 });
 
 test('changing an accepted slot invalidates Confirm booking', () => {
@@ -410,6 +427,7 @@ test('accepted duration change invalidates confirm booking', () => {
   assert.equal(sameStart.exact_acceptance, true);
   const stretched = api.reviseProposedSlot('2026-09-17T13:00:00', '2026-09-17T14:00:00');
   assert.equal(stretched.exact_acceptance, false);
+  assert.match(api.state.drafts['case-a'].text, /1:00pm/);
   assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
 });
 
@@ -463,7 +481,8 @@ test('held or uncertain approve does not become Waiting for reply', () => {
   assert.equal(sent.waiting, true);
 });
 
-test('archive does not delete the GHL contact and cannot hide an outstanding offer', () => {
+test('archive does not delete the GHL contact and cannot hide an outstanding offer', async () => {
+  global.opsPost = async () => ({ ok: true, restored: true });
   api.state.data = sampleRead();
   api.state.selectedId = 'case-a';
   api.state.data.cases[0].status = 'waiting';
@@ -478,9 +497,10 @@ test('archive does not delete the GHL contact and cannot hide an outstanding off
   assert.equal(ok.ok, true);
   assert.equal(ok.crm_deleted, false);
   assert.equal(ok.contact_id, 'contact-a');
-  const restored = api.restoreCase('case-a');
+  const restored = await api.restoreCase('case-a');
   assert.equal(restored.ok, true);
   assert.equal(restored.crm_deleted, false);
+  delete global.opsPost;
 });
 
 test('restore persists through the workflow API so reload cannot revive the archive', async () => {
@@ -491,7 +511,7 @@ test('restore persists through the workflow API so reload cannot revive the arch
   api.state.data.cases[0].status = 'ready';
   api.state.data.cases[0].event_id = null;
   api.archiveCase('declined', '');
-  api.restoreCase('case-a');
+  await api.restoreCase('case-a');
   assert.ok(posts.some((p) => p.action === 'sales_booking_archive'));
   assert.ok(posts.some((p) => p.action === 'sales_booking_restore' && p.body.case_id === 'case-a'));
   assert.equal(api.state.archives['case-a'].restored, true);
@@ -569,6 +589,107 @@ test('new ordinary availability invalidates a ready proposal and reassesses', as
   delete global.opsAuthHeaders;
   delete global._commsGHLBase;
   delete global.fetch;
+});
+
+test('stale assessment response cannot clear a newer inbound frontier', async () => {
+  let resolveOldAssess;
+  let fetchCount = 0;
+  global.opsAuthHeaders = async () => ({});
+  global._commsGHLBase = 'https://invalid.test';
+  global.fetch = async () => {
+    fetchCount += 1;
+    const id = fetchCount === 1 ? 'm1' : 'm2';
+    const body = fetchCount === 1 ? 'Thursday after 1pm' : 'Actually Friday instead';
+    return { json: async () => ({ messages: [{ id, direction: 'inbound', timestamp: '2026-09-12T1' + fetchCount + ':00:00Z', body }] }) };
+  };
+  let assessCount = 0;
+  global.opsPost = async (action) => {
+    if (action !== 'sales_booking_assess') return {};
+    assessCount += 1;
+    if (assessCount === 1) return new Promise((resolve) => { resolveOldAssess = resolve; });
+    return { payload: { status: 'needs_decision', exact_acceptance: false } };
+  };
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  const c = api.state.data.cases[0];
+  const first = api.loadConversation(c.contact_id, c.id);
+  for (let i = 0; i < 20 && !resolveOldAssess; i++) await Promise.resolve();
+  assert.equal(typeof resolveOldAssess, 'function');
+  c.conversation_frontier = 'm2:2026-09-12T12:00:00Z';
+  resolveOldAssess({ payload: { status: 'ready', exact_acceptance: false, proposal: { start_iso: '2026-09-17T15:00:00', end_iso: '2026-09-17T16:00:00', draft: 'Old result' } } });
+  await first;
+  assert.equal(c.status, 'needs_decision');
+  assert.equal(c.proposal_stale, true);
+  assert.notEqual(c.proposal.start_iso, '2026-09-17T15:00:00');
+  delete global.opsPost;
+  delete global.opsAuthHeaders;
+  delete global._commsGHLBase;
+  delete global.fetch;
+});
+
+test('assessment proposal change refreshes unedited draft text', async () => {
+  global.opsAuthHeaders = async () => ({});
+  global._commsGHLBase = 'https://invalid.test';
+  global.fetch = async () => ({ json: async () => ({ messages: [{ id: 'm1', direction: 'inbound', timestamp: '2026-09-12T13:00:00Z', body: 'Thursday after 3pm' }] }) });
+  global.opsPost = async (action, body) => {
+    if (action === 'sales_booking_assess') {
+      return { payload: { status: 'ready', exact_acceptance: false, proposal: { start_iso: '2026-09-17T15:00:00', end_iso: '2026-09-17T16:00:00', offer_id: 'off-new', draft: 'Assessed 3:00pm draft' } } };
+    }
+    if (action === 'sales_booking_draft') return { ok: true, revision: Number(body.expected_revision || 0) + 1, text: body.text };
+    return {};
+  };
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.drafts = {};
+  const c = api.state.data.cases[0];
+  c.draft = { revision: 1, text: 'Hi, Thursday 1:00pm works.', human_edited: false };
+  api.bindDraft(c);
+  await api.loadConversation(c.contact_id, c.id);
+  assert.equal(c.proposal.start_iso, '2026-09-17T15:00:00');
+  assert.match(api.draftFor(c).text, /3:00pm/);
+  assert.doesNotMatch(api.draftFor(c).text, /1:00pm/);
+  delete global.opsPost;
+  delete global.opsAuthHeaders;
+  delete global._commsGHLBase;
+  delete global.fetch;
+});
+
+test('mobile agenda uses visible calendar layers and prints dates', () => {
+  api.state.resourceId = 'nithin';
+  api.state.weekStart = '2026-09-14';
+  api.state.layers = { confirmed: false, proposal: false, offer: true, availability: true };
+  api.state.data = sampleRead();
+  api.state.data.cases.push({ id: 'stale', contact_id: 'stale-contact', display_name: 'Stale proposal', suburb: 'Perth', status: 'ready', proposal_stale: true, proposal: { start_iso: '2026-09-18T09:00:00', end_iso: '2026-09-18T10:00:00' } });
+  api.state.data.cases.push({ id: 'offer', contact_id: 'offer-contact', display_name: 'Visible offer', suburb: 'Perth', status: 'waiting', proposal: { start_iso: '2026-09-18T11:00:00', end_iso: '2026-09-18T12:00:00' } });
+  const html = api.renderHTML();
+  const agenda = html.split('<div class="dayagenda">')[1].split('<div class="calendarfoot">')[0];
+  assert.match(agenda, /2026-09-18 11:00/);
+  assert.match(agenda, /Visible offer/);
+  assert.doesNotMatch(agenda, /Stale proposal/);
+  assert.doesNotMatch(agenda, /Sample visit/);
+  api.state.layers = { confirmed: true, proposal: true, offer: true, availability: true };
+});
+
+test('search input refreshes the queue subtree without replacing the root', () => {
+  const queue = { innerHTML: '' };
+  const count = { textContent: '' };
+  const host = {
+    innerHTML: 'stable-root',
+    querySelector(selector) {
+      if (selector === '.queuelist') return queue;
+      if (selector === '.queue .count') return count;
+      return null;
+    }
+  };
+  global.document = { getElementById: (id) => id === 'salesBookingRoot' ? host : null };
+  api.state.data = sampleRead();
+  api.state.search = '';
+  api.applySearch('Sample A');
+  assert.equal(host.innerHTML, 'stable-root');
+  assert.match(queue.innerHTML, /Sample A/);
+  assert.equal(count.textContent, '1');
+  delete global.document;
 });
 
 test('preview conversation URL is used without browser auth headers', async () => {

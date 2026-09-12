@@ -446,6 +446,118 @@ test('grounded explicit date from a cited inbound remains a customer window', as
   assert.equal(String(result.proposal.start_iso).slice(0, 10), '2026-09-17');
 });
 
+test('model window must end inside a customer before-bound', async () => {
+  const result = await assess.assessWithReason(proof({
+    suburb: 'Sampleton',
+    messages: [inbound('Thursday 17 September before 2pm')],
+    events: [{ start_iso: '2026-09-17T08:00:00', end_iso: '2026-09-17T14:00:00' }],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T16:00:00' }]
+    })
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+  assert.match(result.review_reasons.join('\n'), /Model window contradicts the cited inbound text/);
+});
+
+test('later inbound before-bound rejects an older overlong model window', async () => {
+  const result = await assess.assessWithReason(proof({
+    suburb: 'Sampleton',
+    messages: [
+      inbound('Thursday 17 September after 1pm'),
+      inbound('only before 2pm', { id: 'in-2', timestamp: '2026-09-12T14:00:00Z' })
+    ],
+    events: [{ start_iso: '2026-09-14T08:00:00', end_iso: '2026-09-18T14:00:00' }],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T16:00:00' }]
+    })
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+  assert.match(result.review_reasons.join('\n'), /Model window is contradicted by a later inbound message/);
+});
+
+test('weekday afternoon keeps both weekday and daypart constraints', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Thursday afternoon works for me')]
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.customer_facts.weekday, 'thursday');
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
+  assert.equal(result.proposal.start_iso, '2026-09-17T13:00:00');
+  assert.equal(result.proposal.date_source, 'ai_proposed');
+});
+
+test('weekday afternoon before-bound keeps both constraints', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Thursday afternoon before 3pm works for me')]
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.customer_facts.weekday, 'thursday');
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
+  assert.equal(result.customer_facts.after_hour, 13);
+  assert.equal(result.customer_facts.before_hour, 15);
+  assert.equal(result.proposal.start_iso, '2026-09-17T13:00:00');
+  assert.equal(result.proposal.end_iso, '2026-09-17T14:00:00');
+});
+
+test('undated afternoon after-bound keeps both constraints', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Afternoons only after 3pm')]
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
+  assert.equal(result.customer_facts.after_hour, 15);
+  assert.equal(result.customer_facts.before_hour, 16.5);
+  assert.equal(result.proposal.start_iso, '2026-09-14T15:00:00');
+});
+
+test('explicit date afternoon before-bound creates the bounded customer window', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Thursday 17 September afternoon before 3pm')]
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.customer_facts.date_specified, true);
+  assert.equal(result.customer_facts.time_of_day, 'afternoon');
+  assert.equal(result.customer_facts.after_hour, 13);
+  assert.equal(result.customer_facts.before_hour, 15);
+  assert.equal(result.windows[0].start_iso, '2026-09-17T13:00:00');
+  assert.equal(result.windows[0].end_iso, '2026-09-17T15:00:00');
+  assert.equal(result.proposal.customer_date_specified, true);
+});
+
+test('undated before-bound does not become a start at that bound', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Only before 3pm')]
+  }));
+  assert.equal(result.status, 'ready');
+  assert.equal(result.customer_facts.before_hour, 15);
+  assert.ok(Number(String(result.proposal.start_iso).slice(11, 13)) < 15);
+  assert.ok(Number(String(result.proposal.end_iso).slice(11, 13)) <= 15);
+});
+
+test('explicit Saturday availability is not a ready scheduling slot', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Saturday 19 September at 10am')]
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+});
+
+test('offset model window is checked against Perth customer bounds', async () => {
+  const result = await assess.assessWithReason(proof({
+    suburb: 'Sampleton',
+    messages: [inbound('Thursday 17 September before 2pm')],
+    events: [{ start_iso: '2026-09-17T08:00:00', end_iso: '2026-09-17T14:00:00' }],
+    reasonAsync: async () => ({
+      customer_windows: [{ source_message_id: 'in-1', start_iso: '2026-09-17T05:00:00Z', end_iso: '2026-09-17T08:00:00Z' }]
+    })
+  }));
+  assert.notEqual(result.status, 'ready');
+  assert.equal(result.proposal, null);
+  assert.match(result.review_reasons.join('\n'), /Model window contradicts the cited inbound text/);
+});
+
 test('sent_offers array order does not bind an older offer', () => {
   const result = assess.assess(proof({
     sent_offers: [

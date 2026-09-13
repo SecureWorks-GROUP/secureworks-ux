@@ -39,7 +39,11 @@
     ).join('');
     return '<section class="sales-week-board" data-week="' + esc(data.week) + '">' +
       '<h3>Proposed week ' + esc(data.week) + ' · ' + esc(data.scoper && data.scoper.id) + '</h3>' +
-      '<p class="dp-small">Send and calendar writes held. Tentative overlays are not Ready. 495 opportunities are not 495 jobs.</p>' +
+      '<p class="dp-small">Send and calendar writes held. Tentative overlays are not Ready. Population ' +
+      esc((data.eligible_accounted && data.eligible_accounted.isolated_nithin_opportunities) || 495) + ' opps / ' +
+      esc((data.eligible_accounted && data.eligible_accounted.customers) || 476) + ' customers / ' +
+      esc((data.eligible_accounted && data.eligible_accounted.eligible_unscoped) || 495) + ' eligible unscoped / ' +
+      esc((data.eligible_accounted && data.eligible_accounted.waiting_reply) || 1) + ' waiting_reply. 495 opportunities are not 495 jobs. Queue hygiene e26c908e is 4180 author evidence only.</p>' +
       leave + travel +
       '<h4>Existing commitments</h4><ul>' + existing + '</ul>' +
       '<h4>Tentative placements</h4><ul>' + tentative + '</ul>' +

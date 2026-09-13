@@ -30,6 +30,9 @@ test('proposed week is 14-18 Sep with existing vs tentative distinct and leave n
   assert.match(html, /Unread or incomplete leave is not free capacity/);
   assert.match(html, /Travel minutes unavailable/);
   assert.match(html, /495 opportunities are not 495 jobs/);
+  assert.match(html, /476 customers/);
+  assert.match(html, /1 waiting_reply/);
+  assert.match(html, /e26c908e is 4180 author evidence only/);
   assert.match(html, /Send and calendar writes held/);
   assert.match(html, /not Ready/);
 });

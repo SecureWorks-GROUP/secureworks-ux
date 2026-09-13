@@ -34,7 +34,13 @@
     "booking_subset_register": 25,
     "period_arrivals_7sep_collect": 17,
     "isolated_nithin_opportunities": 495,
-    "note": "495 opportunities is not 495 jobs. Week pack uses the 25-register booking subset plus 17 period arrivals. Remaining 495 minus those are omitted from placement with reason unreviewed_this_week_pack."
+    "customers": 476,
+    "eligible_unscoped": 495,
+    "waiting_reply": 1,
+    "hygiene_pin": "e26c908e",
+    "hygiene_runtime": "127.0.0.1:4180",
+    "author_only": true,
+    "note": "495 opportunities is not 495 jobs. 476 customers. 495 eligible unscoped. 1 waiting_reply from last outbound, not scoped by age. Duplicate same-suburb suppresses a second proposal. Runner does not Ready on incomplete leave. Isolated 4180 author evidence until a different reviewer accepts. Do not import e828cf48."
   },
   "existing_commitments": [
     {

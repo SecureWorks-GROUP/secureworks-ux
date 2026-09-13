@@ -18,6 +18,13 @@ module.exports={data,patio,weeks};
 test('desktop and mobile nav, restore and module load use the same view',()=>{const s=fs.readFileSync(require('node:path').join(__dirname,'../ops.html'),'utf8');assert.equal((s.match(/data-view="performance"/g)||[]).length,2);assert.equal((s.match(/id="viewPerformance"/g)||[]).length,1);assert.match(s,/if \(view === 'performance'\) SalesPerformance.load\(\)/);assert.match(s,/'materials', 'performance', 'inbox'/);assert.ok(s.indexOf('modules/ops-sales-performance.js')<s.indexOf('function showView('));});
 test('opening synthesises available measures with distinct population wording',()=>{const f={lane:'fencing',week_start:weeks[0],metrics:{opportunity_creations_in_week:{count:8},quality_review:{reply_time_hours:{substantive_non_template:{median:7,max:20,n:3}},unanswered_inbound:{still_open:2}},quotes:{sent_this_week_with_document_evidence:{count:3,amount_inc_sum:1234}}},queues:{}};const html=api.renderHTML(data([patio(weeks[0]),f]),'week');const opening=html.split('<div class="lede">')[1].split('</div>')[0];assert.match(opening,/7 h/);assert.match(opening,/\$1,234/);assert.match(opening,/reviewed population/);assert.match(html,/2 h target/);assert.match(html,/Tier B/);assert.doesNotMatch(html,/<select/);});
 test('unanswered distributions require retained ages, and threshold cannot be inferred from count',()=>{const p=patio(weeks[0]);p.queues.unanswered_no_reply=[{name:'Synthetic enquiry',unanswered_age_hours:31}];const f={lane:'fencing',week_start:weeks[0],metrics:{quality_review:{unanswered_inbound:{still_open:2}}},queues:{quality_cases:[{unanswered_inbound:[{still_open:true,staffed_hours_waiting:25},{still_open:true,staffed_hours_waiting:5}]}]}};let html=api.renderHTML(data([p,f]),'week');assert.match(html,/31 h/);assert.match(html,/1 are beyond 24 staffed hours; 1 are within it/);f.queues.quality_cases=[];html=api.renderHTML(data([p,f]),'week');assert.match(html,/Open \/ over-threshold distribution unavailable/);assert.doesNotMatch(html,/1 are beyond 24 staffed hours/);});
+test('patio raw arrivals are not qualified enquiries or quote zeros',()=>{
+  const a=api.adapt({lane:'patio',metrics:{raw_arrivals:17,enquiries_in:null,quotes_sent:null,unanswered_no_reply:4},coverage:{collection_complete:false},queues:{}});
+  assert.equal(a.measures.A1.value,17);
+  assert.match(a.measures.A1.sub,/qualified eligible unmeasured/);
+  assert.equal(a.measures.C1.value,null);
+  assert.equal(a.measures.C2.value,null);
+});
 test('quote follow-up queue is not C1 document sends',()=>{
   const follow=Array.from({length:213},(_,i)=>({id:'q'+i}));
   const a=api.adapt({lane:'fencing',metrics:{opportunity_creations_in_week:{count:27}},queues:{quote_followup_queue:follow}});

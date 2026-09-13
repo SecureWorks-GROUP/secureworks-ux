@@ -50,13 +50,22 @@
     "booking": {
       "title": "Sales Booking",
       "owner": "PATIO SALES",
-      "definition_status": "pending_domain_owner",
+      "definition_status": "owner_definition_reviewed",
       "skill_path": "harness/ops/skills/secureworks-patio-scope-booking/SKILL.md",
-      "business": ["Place unscoped enquiries on a real calendar without double-booking."],
+      "skill_version": "sales-booking-workflow/2026-09-13",
+      "business": [
+        "Unscoped patio enquiries stay on the Booking queue until a visit is scoped.",
+        "Chat, draft and time sit together. Staff save drafts, leave, return and reload.",
+        "Approve offer and Confirm booking are distinct. Confirm requires exact customer agreement.",
+        "Send and calendar write stay held until a per-action Captain approval exists."
+      ],
       "technical": {
         "page": "Sales > Booking",
-        "manual_command": "Patio supplies the durable assessment/action command.",
-        "cloud": "Patio definition pending. This host does not invent a runner."
+        "api": "ops-api actions sales_booking_read, sales_booking_assess, sales_booking_draft (authenticated). 4174/4175 JSON preview is not connected.",
+        "manual_command": "Patio isolated assess/refresh on the registered sales_booking_* handler",
+        "cloud": "Approved targets 60s / 15min / after-06. Cloud runner held. Runtime unread on this host until the authenticated handler answers.",
+        "ux_pin": "f048ca533e4c9b375b3928710aacdbebd97f4bc9",
+        "backend_pin": "69412f373fc557157268b2c064f27a38ad620830"
       }
     },
     "performance": {
@@ -68,7 +77,7 @@
       "technical": {
         "page": "Sales > Performance",
         "manual_command": "harness/ops/skills/secureworks-fencing-sales-weekly/scripts/run.sh --period closed",
-        "cloud": "Fencing owner supplies persisted report/read proof. Unpublished collector is not production storage."
+        "cloud": "public.sales_performance_weeks is not deployed (SELECT 2026-09-13 03:10:38 UTC). Empty is missing, not zero. Runtime pending the Fencing feed."
       }
     }
   }

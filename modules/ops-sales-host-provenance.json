@@ -1,0 +1,14 @@
+{
+  "owner": "OPERATIONS",
+  "copied": "2026-09-13",
+  "source_ux": "patio/sales-booking-20260912",
+  "source_sha": "f048ca533e4c9b375b3928710aacdbebd97f4bc9",
+  "backend_pin": "69412f373fc557157268b2c064f27a38ad620830",
+  "note": "Bytes are a host copy of Patio's committed modules. Patio owns the Booking engine. This host must not set SALES_BOOKING_PREVIEW_* or SALES_PERFORMANCE_PREVIEW_URL. 4174/4175 JSON preview paths are out of acceptance. Reviewer 4176 is preserved and must not receive writes from this host.",
+  "files": {
+    "ops-sales-booking.js": "c3877ed3072a396696e0930d5639c5b4c0854a229cf4803fd732b6e54166f77c",
+    "ops-sales-booking.css": "d68744c320681f2756513890852990a1d8c2b42c7e816edbc07fa798e8bd3ffc",
+    "ops-sales-performance.js": "cd578a13de8ddcc9767043a33771c26c99bf49ef6fa3484772732ba5fd789941",
+    "ops-sales-performance.css": "987e75159f2628adafe4c3775673ace4ba420c7add26b0e6f375b7b82a237610"
+  }
+}

@@ -21,8 +21,12 @@ test('How it works contract names all five workflows and does not claim the Disp
   assert.equal(contract.definition_version, 'ops-how-it-works/v1');
   assert.deepEqual(Object.keys(contract.workflows).sort(), ['booking', 'debt', 'dispatch', 'performance', 'ses']);
   assert.match(contract.workflows.dispatch.technical.cloud, /enabled:false|disabled/i);
-  assert.equal(contract.workflows.booking.definition_status, 'pending_domain_owner');
+  assert.equal(contract.workflows.booking.definition_status, 'owner_definition_reviewed');
+  assert.match(contract.workflows.booking.technical.api, /authenticated/i);
+  assert.doesNotMatch(JSON.stringify(contract), /127\.0\.0\.1:4174|127\.0\.0\.1:4175|SALES_BOOKING_PREVIEW_/);
+  assert.match(contract.workflows.booking.technical.api, /not connected/);
   assert.equal(contract.workflows.performance.definition_status, 'pending_domain_owner');
+  assert.match(contract.workflows.performance.technical.cloud, /not deployed/i);
   assert.equal(contract.workflows.debt.definition_status, 'pending_domain_owner');
   assert.equal(contract.workflows.ses.definition_status, 'pending_domain_owner');
 });
@@ -81,6 +85,7 @@ test('How it works reports unread runtime for Booking without inventing a runner
   vm.runInNewContext(source, context);
   await context.OpsHowItWorks.open('booking');
   assert.match(host.innerHTML, /How Sales Booking works/);
-  assert.match(host.innerHTML, /pending|unread|Patio/i);
+  assert.match(host.innerHTML, /pending|unread|Patio|owner definition reviewed/i);
   assert.doesNotMatch(host.innerHTML, /worker is running/i);
+  assert.doesNotMatch(host.innerHTML, /4174|4175/);
 });

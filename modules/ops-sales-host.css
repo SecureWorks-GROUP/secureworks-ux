@@ -1,0 +1,7 @@
+/* Host chrome only. Do not edit the copied Patio Booking/Performance modules. */
+#viewSales.sales-sub-booking #salesPerformanceRoot,
+#viewSales.sales-sub-booking #salesPerformanceHostNotice { display: none; }
+#viewSales.sales-sub-performance #salesBookingRoot,
+#viewSales.sales-sub-performance #salesBookingHostNotice { display: none; }
+#salesPerformanceHostNotice,
+#salesBookingHostNotice { margin: 8px 0 12px; }

@@ -4526,6 +4526,9 @@
   </style>
 <link rel="stylesheet" href="modules/ops-dispatch.css?v=1">
 <link rel="stylesheet" href="modules/ops-how-it-works.css?v=1">
+<link rel="stylesheet" href="modules/ops-sales-performance.css?v=1">
+<link rel="stylesheet" href="modules/ops-sales-booking.css?v=1">
+<link rel="stylesheet" href="modules/ops-sales-host.css?v=1">
 </head>
 <body>
 
@@ -4959,26 +4962,16 @@
       </div>
     </div>
 
-    <!-- ═══════════ SALES TAB (combined host; Booking/Performance modules remain owner-supplied) ═══════════ -->
+    <!-- ═══════════ SALES TAB (combined host; Patio Booking pin f048ca5 copied; no 4174/4175 preview) ═══════════ -->
     <div id="viewSales" class="view">
       <div class="sub-tabs">
         <button class="sales-sub-tab active" onclick="showSalesSub('performance')" data-sales-sub="performance">Performance</button>
+        <button type="button" class="ops-how-it-works-icon" data-how-it-works="performance" aria-haspopup="dialog" aria-label="How Sales Performance works">?</button>
         <button class="sales-sub-tab" onclick="showSalesSub('booking')" data-sales-sub="booking">Booking</button>
+        <button type="button" class="ops-how-it-works-icon" data-how-it-works="booking" aria-haspopup="dialog" aria-label="How Sales Booking works">?</button>
       </div>
-      <div id="subSalesPerformance" class="sales-sub-view active">
-        <div class="dp-row" style="margin-bottom:12px;gap:8px;align-items:center;">
-          <div class="section-heading" style="margin:0;">Sales Performance</div>
-          <button type="button" class="ops-how-it-works-icon" data-how-it-works="performance" aria-haspopup="dialog" aria-label="How Sales Performance works">?</button>
-        </div>
-        <div id="salesPerformanceRoot" class="dp-notice">Fencing/Patio Performance module is not installed in this Dispatch host yet. The How it works view is available; live numbers wait on the reviewed Performance pin.</div>
-      </div>
-      <div id="subSalesBooking" class="sales-sub-view">
-        <div class="dp-row" style="margin-bottom:12px;gap:8px;align-items:center;">
-          <div class="section-heading" style="margin:0;">Sales Booking</div>
-          <button type="button" class="ops-how-it-works-icon" data-how-it-works="booking" aria-haspopup="dialog" aria-label="How Sales Booking works">?</button>
-        </div>
-        <div id="salesBookingRoot" class="dp-notice">Patio Booking module is not installed in this Dispatch host yet. The How it works view is available; live booking waits on the reviewed Booking pin.</div>
-      </div>
+      <div id="salesPerformanceRoot"></div>
+      <div id="salesBookingRoot"></div>
     </div>
     <!-- ═══════════ MATERIALS TAB ═══════════ -->
     <div id="viewDispatch" class="view"><div id="dispatchRoot"></div></div>
@@ -6217,6 +6210,11 @@
 <script src="modules/ops-dispatch-core.js?v=1"></script>
 <script src="modules/ops-dispatch.js?v=1"></script>
 <script src="modules/ops-how-it-works.js?v=1"></script>
+<script src="modules/ops-context-mail.js?v=1"></script>
+<script src="modules/ops-workflow-refresh.js?v=1"></script>
+<script src="modules/ops-sales-performance.js?v=1"></script>
+<script src="modules/ops-sales-booking.js?v=1"></script>
+<script src="modules/ops-sales-host.js?v=1"></script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -16591,11 +16589,15 @@ function renderJobList(container, columns) {
 
 function showSalesSub(tab) {
   document.querySelectorAll('.sales-sub-tab').forEach(function(el) { el.classList.remove('active'); });
-  document.querySelectorAll('.sales-sub-view').forEach(function(el) { el.classList.remove('active'); });
   var btn = document.querySelector('[data-sales-sub="' + tab + '"]');
   if (btn) btn.classList.add('active');
-  var view = document.getElementById('subSales' + tab.charAt(0).toUpperCase() + tab.slice(1));
-  if (view) view.classList.add('active');
+  if (window.OpsSalesHost && typeof window.OpsSalesHost.show === 'function') {
+    window.OpsSalesHost.show(tab);
+    return;
+  }
+  if (window.SalesBooking && typeof window.SalesBooking.show === 'function') {
+    window.SalesBooking.show(tab);
+  }
 }
 
 function showSubTab(tab) {

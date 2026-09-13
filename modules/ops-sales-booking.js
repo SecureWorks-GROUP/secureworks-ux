@@ -62,6 +62,7 @@
     archives: {},
     sendAttempted: false,
     lastSendCall: null,
+    lastHeldEnqueue: null,
     lastArchiveCall: null
   };
   var convoAbort = null;
@@ -230,9 +231,21 @@
     return /\b(cancel(led)?|call(ed)? it off|not going ahead)\b/i.test(t);
   }
 
+  /* The send hold is absolute: while it is on, nothing on this page performs an
+     authenticated write of any kind. This is not a send and not a calendar
+     write, it is an assessment queue enqueue, but it is a write shaped call and
+     it needs no button press, so it fires on its own the moment a GHL thread
+     loads. The hold covers it too. The skipped call is recorded so the surface
+     can say what it did not do rather than doing it silently. */
   function enqueueReassess(c, eventKey) {
-    if (!c || typeof global.opsPost !== 'function') return;
+    if (!c) return { ok: false, held: false, sent: false, reason: 'no_case' };
+    if (SEND_HOLD) {
+      state.lastHeldEnqueue = { event_key: eventKey, case_id: c.id, at: Date.now() };
+      return { ok: false, held: true, sent: false, reason: 'send_hold' };
+    }
+    if (typeof global.opsPost !== 'function') return { ok: false, held: false, sent: false, reason: 'no_transport' };
     global.opsPost('sales_booking_on_event', { event_key: eventKey, type: 'inbound', case_id: c.id });
+    return { ok: true, held: false, sent: true, reason: null };
   }
 
   function applyLatestInboundToCase(msgs, c) {
@@ -1001,7 +1014,8 @@
     stratcoOverlay: stratcoOverlay,
     stratcoFlags: stratcoFlags,
     readResultExists: readResultExists,
-    readStatus: readStatus
+    readStatus: readStatus,
+    enqueueReassess: enqueueReassess
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

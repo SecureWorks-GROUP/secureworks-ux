@@ -606,3 +606,85 @@ test('a disconnected calendar keeps the flags and still refuses to count what it
   assert.match(html, /Woodlands 231399 contradicts the customer.s acceptance/);
   assert.doesNotMatch(html, /0 provider events/);
 });
+
+/* The send hold covers every write shaped call, including the ones that fire
+   without a button press. */
+
+test('the assessment enqueue does not fire while the send hold is on', () => {
+  marninWeek();
+  assert.equal(api.SEND_HOLD, true);
+  const calls = [];
+  const previous = global.opsPost;
+  global.opsPost = (action, params) => { calls.push({ action, params }); return Promise.resolve({}); };
+
+  const result = api.enqueueReassess({ id: 'case-1' }, 'ghl:case-1:msg-9');
+  assert.deepEqual(calls, [], 'no authenticated POST was made');
+  assert.deepEqual(result, { ok: false, held: true, sent: false, reason: 'send_hold' });
+  assert.equal(api.state.lastHeldEnqueue.case_id, 'case-1');
+  assert.equal(api.state.lastHeldEnqueue.event_key, 'ghl:case-1:msg-9');
+
+  global.opsPost = previous;
+});
+
+test('loading a thread that reads as a cancel still writes nothing while the hold is on', async () => {
+  marninWeek();
+  const posts = [];
+  const previousPost = global.opsPost;
+  const previousHeaders = global.opsAuthHeaders;
+  const previousFetch = global.fetch;
+  global.opsPost = (action, params) => { posts.push({ action, params }); return Promise.resolve({}); };
+  global.opsAuthHeaders = async () => ({ Authorization: 'Bearer synthetic' });
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      messages: [
+        { id: 'm1', direction: 'outbound', body: 'Tuesday 11:30 works?', timestamp: '2026-09-11T08:00:00Z' },
+        { id: 'm2', direction: 'inbound', body: 'Sorry, cancel it', timestamp: '2026-09-11T09:00:00Z' }
+      ]
+    })
+  });
+
+  api.state.data.cases.push({ id: 'cancelled-case', contact_id: 'c-1', suburb: 'Balga', display_name: 'Enquiry', status: 'booked', proposal: null });
+  await api.loadConversation('c-1', 'cancelled-case');
+
+  assert.equal(posts.length, 0, 'a cancel-shaped inbound triggered no authenticated POST');
+  assert.equal(api.SEND_HOLD, true);
+
+  global.opsPost = previousPost;
+  global.opsAuthHeaders = previousHeaders;
+  global.fetch = previousFetch;
+});
+
+test('with the hold lifted the enqueue is the only thing that would fire, and it is not a send', () => {
+  // The hold is a constant, so this asserts the shape of what it gates rather
+  // than lifting it: the gated call is an assessment enqueue, never a send and
+  // never a calendar write.
+  const source = fs.readFileSync(require('node:path').join(__dirname, 'ops-sales-booking.js'), 'utf8');
+  const start = source.indexOf('function enqueueReassess(');
+  const end = source.indexOf('\n  function applyLatestInboundToCase(', start);
+  const body = source.slice(start, end);
+  assert.ok(end > start);
+  assert.match(body, /if \(SEND_HOLD\) \{/);
+  // The hold check precedes the only transport call in the function.
+  assert.ok(body.indexOf('if (SEND_HOLD)') < body.indexOf('global.opsPost('), 'the hold is checked before the transport');
+  assert.equal((body.match(/global\.opsPost\(/g) || []).length, 1);
+  assert.equal((body.match(/sales_booking_on_event/g) || []).length, 1);
+});
+
+test('no authenticated write leaves this module while the hold is on', () => {
+  marninWeek();
+  const posts = [];
+  const previous = global.opsPost;
+  global.opsPost = (action) => { posts.push(action); return Promise.resolve({}); };
+
+  const approve = api.attemptApprove();
+  assert.equal(approve.sent, false);
+  assert.equal(approve.held, true);
+  api.enqueueReassess({ id: 'x' }, 'k');
+  api.archiveCase('declined', '');
+  api.restoreCase('x');
+  api.renderHTML();
+
+  assert.deepEqual(posts, [], 'the whole surface performed no authenticated POST');
+  global.opsPost = previous;
+});

@@ -45,6 +45,15 @@ Three rules hold this surface:
 
 - **No control.** There is no move or cancel tool for a scope event, so every
   flag ends at the captain and the overlay renders no button, input or form.
+- **The send hold covers every write shaped call, not only the ones with a
+  button.** `enqueueReassess` posts `sales_booking_on_event` and fires on its
+  own the moment a GHL thread loads, with no press. It is an assessment queue
+  enqueue rather than a send or a calendar write, but the hold is absolute, so
+  it returns `{held: true, sent: false, reason: 'send_hold'}` and records the
+  skipped call on `state.lastHeldEnqueue` instead of writing. Guards in
+  `modules/ops-sales-booking.test.cjs` assert that loading a cancel-shaped
+  thread posts nothing and that the whole surface performs no authenticated
+  POST while the hold is on.
 - **A filed block says filed.** When the live read cannot paint the week, the
   overlay paints the filed events so an unreachable calendar does not read as an
   empty week, and marks every painted block `filed`. When the live read does

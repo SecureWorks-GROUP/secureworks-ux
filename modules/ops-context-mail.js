@@ -5,14 +5,25 @@
   const VERSION = 'ops-context-mail/v2';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
-  function coverageHonesty(coverage) {
-    if (!coverage) return { complete: false, reason: 'coverage unread' };
+  function coverageHonesty(coverage, result) {
+    if (!coverage) coverage = {};
+    const messages = (result && (result.messages || result.records)) || [];
+    const lastStatus = (result && result.last_capture_status) || coverage.last_capture_status;
+    if (result && result.inbox_only_boundary) {
+      return { complete: false, reason: 'Inbox-only boundary: sent mailbox not captured.' };
+    }
+    if (lastStatus && lastStatus !== 'captured') {
+      return { complete: false, reason: 'last_capture_status=' + lastStatus + ' — not complete' };
+    }
+    if (messages.some(m => m.complete === false || m.capture_status === 'partial' || m.capture_status === 'failed')) {
+      return { complete: false, reason: 'a message capture is partial or failed — not complete' };
+    }
     if (coverage.capture_failed || coverage.status === 'failed' || coverage.status === 'partial') {
       return { complete: false, reason: coverage.reason || 'capture failed or partial — not complete' };
     }
     if (coverage.has_more) return { complete: false, reason: 'has_more' };
     if (coverage.complete === true && coverage.capture_failed) return { complete: false, reason: 'failed capture cannot be complete' };
-    return coverage;
+    return { complete: coverage.complete === true, reason: coverage.reason };
   }
 
   function pendingHTML(kind, selection, extra) {
@@ -49,19 +60,17 @@
           coverage: coverageHonesty(result && result.coverage)
         };
       }
-      const coverage = coverageHonesty(result.coverage);
-      if (coverage.complete && (result.capture_failed || result.status === 'failed')) {
-        coverage.complete = false;
-        coverage.reason = 'failed capture cannot be complete';
-      }
+      const coverage = coverageHonesty(result.coverage, result);
       return {
         capability: 'connected',
         records: result.records || result.occurrences || result.messages || [],
         unresolved: result.unresolved || result.review_queue || [],
         coverage,
-        capture_cutoff: result.capture_cutoff || result.source_cutoff || null,
-        assessment_cutoff: result.assessment_cutoff || result.assessed_at || null,
+        capture_cutoff: result.capture_cutoff || result.last_capture_at || result.source_cutoff || null,
+        assessment_cutoff: result.assessment_cutoff || result.last_assess_at || result.assessed_at || null,
         stale_proposals: result.stale_proposals || result.invalidated || [],
+        proposal_requires_reassessment: result.proposal_requires_reassessment === true,
+        inbox_only_boundary: result.inbox_only_boundary === true,
         ghl: result.ghl || null
       };
     } catch (error) {
@@ -75,16 +84,32 @@
       return { ok: false, reason: 'attachment identity incomplete' };
     }
     if (typeof root.opsFetch !== 'function') return { ok: false, reason: 'Authenticated attachment read is not available.' };
-    return root.opsFetch('message_attachment', {
-      event_id: item.event_id,
-      store: item.store,
-      object_id: item.object_id
-    });
+    try {
+      return await root.opsFetch('open_message_attachment', {
+        event_id: item.event_id,
+        store: item.store,
+        object_id: item.object_id
+      });
+    } catch (error) {
+      if (error && error.status === 404) {
+        return root.opsFetch('message_attachment', {
+          event_id: item.event_id,
+          store: item.store,
+          object_id: item.object_id
+        });
+      }
+      throw error;
+    }
   }
 
   async function correctLink(payload) {
     if (typeof root.opsPost !== 'function') return { ok: false, reason: 'Authenticated correction is not available.' };
-    return root.opsPost('message_work_link_correct', payload);
+    try {
+      return await root.opsPost('correct_message_work_link', payload);
+    } catch (error) {
+      if (error && error.status === 404) return root.opsPost('message_work_link_correct', payload);
+      throw error;
+    }
   }
 
   function rowHTML(item) {
@@ -105,13 +130,15 @@
     if (!state || state.capability !== 'connected') {
       return pendingHTML(kind, selection, state && state.reason);
     }
-    const coverage = coverageHonesty(state.coverage);
+    const coverage = coverageHonesty(state.coverage, { messages: state.records, inbox_only_boundary: state.inbox_only_boundary });
     const coverLine = coverage.complete
       ? 'Canonical coverage complete for this selection.'
       : `Canonical coverage partial${coverage.reason ? ' · ' + coverage.reason : ''}.`;
     const cutoffs = `<p class="dp-small">Source check: ${esc(state.capture_cutoff || 'unread')} · Assessment: ${esc(state.assessment_cutoff || 'unread')}. New source after assessment needs reassessment.</p>`;
-    const stale = (state.stale_proposals || []).length
-      ? `<p class="dp-notice">New mail after a draft/proposal. Reassess before treating the earlier slot or message as current. Drafts are kept.</p>`
+    const inbox = state.inbox_only_boundary
+      ? `<p class="dp-notice">Inbox-only boundary. Sent mailbox was not captured. This is not complete history.</p>` : '';
+    const stale = (state.proposal_requires_reassessment || (state.stale_proposals || []).length)
+      ? `<p class="dp-notice">New mail flags proposal_requires_reassessment. Reassess before treating the earlier draft or slot as current. Drafts are kept. A paid email is not settlement.</p>`
       : '';
     const unresolved = (state.unresolved || []).length
       ? `<p class="dp-notice">Review queue: ${(state.unresolved || []).length} uncertain or multi-job message(s). Link/unlink is auditable. Correction advances source version and does not erase drafts.</p>${(state.unresolved || []).map(item => `<button type="button" data-action="canonical-mail-correct" data-id="${esc(item.event_id || item.id)}">Correct link · ${esc(item.subject || item.event_id)}</button>`).join('')}`
@@ -124,7 +151,7 @@
     return `<section class="ops-context-mail" data-context-mail="${esc(kind)}" data-capability="connected" data-complete="${coverage.complete ? 'true' : 'false'}">
       <h3>Original email history</h3>
       <p class="dp-small">${coverLine} Whole-job history unless a PO/invoice filter is selected. Attachments use object permission, not only the parent job. Opening this viewer sends nothing.</p>
-      ${cutoffs}${stale}${ghl}${unresolved}${rows}
+      ${cutoffs}${inbox}${stale}${ghl}${unresolved}${rows}
     </section>`;
   }
 

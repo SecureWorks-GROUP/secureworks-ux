@@ -20,6 +20,7 @@
     ['B2','Scopes done','Attendance evidence required','scopes_done'],
     ['B3','Stage vs calendar disagree','Board and calendar contradictions','hygiene'],
     ['C1','Quotes sent','Document send evidence in the week','quotes'],
+    ['Q','Quote follow-up','Open follow-up stage, not sends this week','quote_followup_queue'],
     ['C2','Won','Accepted jobs with an acceptance stamp','cash_chain'],
     ['C3','Deposited','Deposit raised and paid are separate','cash_chain'],
     ['C4','Invoiced vs sold','Final invoices against quoted value','invoiced'],
@@ -41,6 +42,7 @@
       B2:{value:patio?value('scopes_done'):null,sub:'Attendance evidence not published'},
       B3:{value:null,sub:'Calendar comparison not published'},
       C1:{value:patio?value('quotes_sent'):value('quotes.sent_this_week_with_document_evidence.count'),sub:patio?'Quote send evidence not published':'document-evidenced sends · '+money(value('quotes.sent_this_week_with_document_evidence.amount_inc_sum')),queueKey:'quotes'},
+      Q:{value:patio?null:(Array.isArray(q.quote_followup_queue)?q.quote_followup_queue.length:value('quote_followup.count')),sub:patio?'Patio does not use this fencing stage queue':'open Following up Quote Sent stage · not document-proven sends this week',queueKey:patio?null:'quote_followup_queue'},
       C2:{value:null,sub:'Weekly accepted-job measure not published'},
       C3:{value:null,sub:'Weekly deposit payment evidence not published'},
       C4:{value:patio?value('invoiced_value'):null,sub:'Final invoice comparison not published'},
@@ -49,7 +51,11 @@
     };
     return {row,m,q,lane,elapsed,staffed,measures,contacted:patio && row.coverage && row.coverage.collection_complete === true && Array.isArray(q.answered)?q.answered.length:null};
   }
-  function rowsFor(data,week) { return lanes.map(lane => (data.rows || []).find(r => r.week_start === week && r.lane === lane) || null); }
+  function rowsFor(data,week) {
+    const unpublished = (data.unpublished_rows || []).filter(r => r.week_start === week);
+    const stored = (data.rows || []).filter(r => r.week_start === week);
+    return lanes.map(lane => unpublished.find(r => r.lane === lane) || stored.find(r => r.lane === lane) || null);
+  }
   function rolling(data,lane,key) {
     const weeks = (data.week_starts || []).slice(0,4);
     const readings = weeks.map(week => (data.rows || []).find(r=>r.week_start===week && r.lane===lane)).filter(Boolean).map(adapt);

@@ -21,10 +21,32 @@ const WOODLANDS_EVENT = 'AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQB
 const BALGA_EVENT = 'AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==';
 const GREENWOOD_EVENT = 'AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA==';
 
-const panel = () => api.renderPerformanceHTML(null);
-const flags = (live) => api.flagsHTML(WEEK, SCOPER, live === undefined ? null : live);
-const overlay = (day, live) => api.dayOverlayHTML(day, WEEK, SCOPER, { pxPerHour: 68, dayStart: 8 }, live === undefined ? null : live);
+const NOT_READ = { status: 'not_attempted', events: null, error: null };
+const FAILED = { status: 'failed', events: null, error: 'Sign in required' };
+const readOf = (events) => ({ status: 'read', events: events, error: null });
+
+const panel = (read) => api.renderPerformanceHTML(read === undefined ? NOT_READ : read);
+const flags = (read) => api.flagsHTML(WEEK, SCOPER, read === undefined ? NOT_READ : read);
+const overlay = (day, read) => api.dayOverlayHTML(day, WEEK, SCOPER, { pxPerHour: 68, dayStart: 8 }, read === undefined ? NOT_READ : read);
 const breachOf = (ref) => api.FILED.breaches.find((b) => b.stratco_ref === ref);
+
+/* One breach's own flag card. An assertion over the whole flags HTML is
+   satisfied by either breach, which is how a wrong hours figure on Balga alone
+   survived a mutation sweep. Scope every per-breach claim to its own card. */
+/* The event id is rendered with its discriminating tail wrapped in a <b>, so
+   the string a human reads is only whole once the markup is stripped. Assert
+   against that, which is the stronger claim: the full 152 characters still
+   reach the page verbatim. */
+function readable(html) {
+  return String(html).replace(/<[^>]*>/g, '');
+}
+
+function flagFor(ref) {
+  const cards = flags().split('<li class="fsw-flag ');
+  const hit = cards.filter((c) => c.indexOf(ref) !== -1 && c.indexOf('contradicts') !== -1);
+  assert.equal(hit.length, 1, 'exactly one breach card for ref ' + ref);
+  return hit[0];
+}
 
 /* ---- The four countable figures ------------------------------------- */
 
@@ -55,9 +77,14 @@ test('each figure reaches the panel with its label, its value and no stray place
   assert.doesNotMatch(html, /undefined|NaN|\[object/);
 });
 
-test('the two counts that disagree are the two breaches the surface then names', () => {
+test('agreed minus in-calendar and the breach count are two different twos', () => {
   const gap = api.FILED.counts.visits_agreed - api.FILED.counts.in_calendar;
-  assert.equal(gap, 2, '8 agreed against 6 in the calendar');
+  assert.equal(gap, 2, '8 agreed against 6 in the calendar: agreed visits with no event at all');
+  // Both breached events EXIST, so they sit inside the 6 and are not the gap.
+  api.FILED.breaches.forEach((b) => {
+    assert.ok(api.FILED.stratco_events.some((e) => e.event_id === b.event_id), b.stratco_ref + ' has an event');
+  });
+  assert.match(panel(), /This is a different 2 from the 2 breaches: a breach is an event that exists and contradicts an acceptance, and both breached events are inside the 6\./);
   assert.equal(api.FILED.breaches.length, api.FILED.counts.agreed_versus_calendar_breaches);
   assert.deepEqual(api.FILED.breaches.map((b) => b.stratco_ref).sort(), ['231211', '231399']);
   assert.equal(api.FILED.unanswered_threads.length, api.FILED.counts.initial_booking_threads_unanswered);
@@ -106,11 +133,13 @@ test('Woodlands 231399: agreed Friday 18 September 08:30, calendar reads Tuesday
   const written = flags();
   assert.match(written, /Woodlands 231399 contradicts the customer.s acceptance/);
   assert.match(written, /Wrong day and wrong time\. The customer agreed Friday 18 September 08:30\. The event reads Tuesday 15 September 11:45 to 12:30\./);
-  assert.ok(written.includes(api.escape(WOODLANDS_EVENT)), 'the full Woodlands event id is printed');
-  assert.match(written, /It has been wrong for over 51 hours as at the filed read/);
+  assert.ok(readable(written).includes(WOODLANDS_EVENT), 'the full Woodlands event id is printed');
+  assert.equal(b.wrong_since_hours_at_read, 51);
+  assert.match(flagFor('231399'), /It has been wrong for over 51 hours as at the filed read/);
 
   assert.match(panel(), /<b>Woodlands 231399\.<\/b> Wrong day and wrong time\./);
-  assert.ok(panel().includes(api.escape(WOODLANDS_EVENT)));
+  assert.match(panel(), /<b>Woodlands 231399\.<\/b>[^<]*Wrong for over 51 hours at the read\./);
+  assert.ok(readable(panel()).includes(WOODLANDS_EVENT));
 });
 
 test('the Friday 08:30 Woodlands slot is shown as agreed with no event, in the right place', () => {
@@ -148,10 +177,13 @@ test('Balga 231211: agreed 11:30, calendar reads 11:15, fifteen minutes early', 
   const written = flags();
   assert.match(written, /Balga 231211 contradicts the customer.s acceptance/);
   assert.match(written, /Fifteen minutes early\. The customer agreed 11:30\. The event reads Tuesday 15 September 11:15 to 11:45\./);
-  assert.ok(written.includes(api.escape(BALGA_EVENT)), 'the full Balga event id is printed');
+  assert.ok(readable(written).includes(BALGA_EVENT), 'the full Balga event id is printed');
+  assert.equal(b.wrong_since_hours_at_read, 51);
+  assert.match(flagFor('231211'), /It has been wrong for over 51 hours as at the filed read/);
 
   assert.match(panel(), /<b>Balga 231211\.<\/b> Fifteen minutes early\./);
-  assert.ok(panel().includes(api.escape(BALGA_EVENT)));
+  assert.match(panel(), /<b>Balga 231211\.<\/b>[^<]*Wrong for over 51 hours at the read\./);
+  assert.ok(readable(panel()).includes(BALGA_EVENT));
 });
 
 test('the Balga breach outline sits on its own event and names the agreed time', () => {
@@ -209,7 +241,7 @@ test('the Tuesday 13:00 to 15:30 band is clear on the letter and broken on trave
   assert.match(written, /Woodlands ends 12:30 in Woodlands 6018 and the Canning Vale board room starts 13:00\. That leg does not fit in 30 minutes\./);
   assert.match(written, /The cause is the Woodlands event being on Tuesday at all/);
   assert.match(written, /Balga at 11:30 to 12:00 leaves 60 minutes to Canning Vale/);
-  assert.ok(written.includes(api.escape(WOODLANDS_EVENT)), 'the blocking event is named by id');
+  assert.ok(readable(written).includes(WOODLANDS_EVENT), 'the blocking event is named by id');
 
   // 13:00 is 340px down and the two and a half hour band is 170px tall.
   const tuesday = overlay(1);
@@ -224,7 +256,9 @@ test('every flag ends at the captain and the surface offers no move, cancel or s
   const written = flags();
   assert.equal(api.FILED.move_cancel_tool_present, false);
   assert.equal((written.match(/No move or cancel tool exists for a scope event\. This is the captain.s call, not a desk action\./g) || []).length, 6);
-  assert.match(written, /The tool catalog exposes sw_create_scope_booking and calendar reads only/);
+  assert.equal(api.FILED.no_tool_line, 'The tool catalog exposes sw_create_scope_booking and calendar reads only. There is no move or cancel action for a scope event, so no desk can fix these. The fix is the captain\u2019s call.');
+  assert.match(written, /The tool catalog exposes sw_create_scope_booking and calendar reads only\. There is no move or cancel action for a scope event, so no desk can fix these\. The fix is the captain.s call\./);
+  assert.match(panel(), /There is no move or cancel action for a scope event, so no desk can fix these\./);
   assert.match(written, /Calendar writes 0\. SMS sent 0\. Customer contact none\./);
   [written, panel(), overlay(1), overlay(4)].forEach((html) => {
     assert.doesNotMatch(html, /<button|<input|<select|<form|<a\s|onclick=|href=/);
@@ -237,8 +271,9 @@ test('with no live read the surface says so and paints the filed week, marked fi
   assert.equal(api.liveCoversWeek(null), false);
   assert.equal(api.liveCoversWeek([]), false);
   assert.equal(api.liveCoversWeek([{ event_id: 'someone-elses-event' }]), false);
-  assert.match(flags(), /No live calendar read in this copy, so the week above is painted from the filed read of 20:04 Perth, Sunday 13 September 2026 and every block on it is marked filed\./);
-  assert.match(flags(), /A provider event count of zero on this calendar is the live read, which returned nothing here\./);
+  assert.match(flags(), /No live calendar read was attempted in this copy\./);
+  assert.match(flags(), /The week above is painted from the filed read of 20:04 Perth, Sunday 13 September 2026, every block on it is marked filed, and the flags below state that same read\./);
+  assert.match(flags(), /This calendar shows no provider event count, because there is no read to count\./);
 
   const tuesday = overlay(1);
   assert.equal((tuesday.match(/class="fsw-filed/g) || []).length, 5, 'four Tuesday visits plus the Canning Vale meeting');
@@ -251,28 +286,28 @@ test('with no live read the surface says so and paints the filed week, marked fi
 test('a live read that agrees is reported as agreeing and the grid stops painting filed blocks', () => {
   const live = api.FILED.stratco_events.map((e) => ({ event_id: e.event_id, start_iso: e.start, end_iso: e.end }));
   assert.equal(api.liveCoversWeek(live), true);
-  const rec = api.reconcile(live);
+  const rec = api.reconcile(readOf(live));
   assert.equal(rec.has_live, true);
   assert.equal(rec.rows.filter((r) => r.status === 'agrees').length, 6);
   assert.match(rec.summary, /6 of 6 filed Stratco events are confirmed unchanged by the live read in this copy/);
-  assert.equal((overlay(1, live).match(/class="fsw-filed/g) || []).length, 0);
+  assert.equal((overlay(1, readOf(live)).match(/class="fsw-filed/g) || []).length, 0);
   // The flags stay, because the breaches are still true.
-  assert.match(flags(live), /Woodlands 231399 contradicts/);
-  assert.match(flags(live), /Balga 231211 contradicts/);
+  assert.match(flags(readOf(live)), /Woodlands 231399 contradicts/);
+  assert.match(flags(readOf(live)), /Balga 231211 contradicts/);
 });
 
 test('a live read that differs is named rather than smoothed away', () => {
   const live = api.FILED.stratco_events.map((e, i) => i === 3
     ? { event_id: e.event_id, start_iso: '2026-09-18T08:30:00', end_iso: '2026-09-18T09:15:00' }
     : { event_id: e.event_id, start_iso: e.start, end_iso: e.end });
-  const rec = api.reconcile(live);
+  const rec = api.reconcile(readOf(live));
   const woodlands = rec.rows.find((r) => r.stratco_ref === '231399');
   assert.equal(woodlands.status, 'moved');
   assert.match(woodlands.note, /Live read differs\. Filed Tuesday 15 September 11:45 to 12:30\. Live Friday 18 September 08:30 to 09:15\./);
   assert.match(woodlands.note, /The filed read is what the flags below describe/);
   assert.match(rec.summary, /5 of 6 filed Stratco events are confirmed unchanged/);
 
-  const partial = api.reconcile([{ event_id: BALGA_EVENT, start_iso: '2026-09-15T11:15:00', end_iso: '2026-09-15T11:45:00' }]);
+  const partial = api.reconcile(readOf([{ event_id: BALGA_EVENT, start_iso: '2026-09-15T11:15:00', end_iso: '2026-09-15T11:45:00' }]));
   assert.equal(partial.rows.filter((r) => r.status === 'absent').length, 5);
   assert.match(partial.rows.find((r) => r.stratco_ref === '231399').note, /Filed read holds this event\. The live read in this copy does not return it\./);
 });
@@ -286,10 +321,10 @@ test('the read speaks only for Marnin and only for the week of 14 September 2026
   assert.equal(api.appliesTo(WEEK, 'khairo'), false, 'Khairo keeps his own calendar');
   assert.equal(api.appliesTo(WEEK, 'nithin'), false, 'the patio lane is separate');
 
-  assert.equal(api.dayOverlayHTML(1, '2026-09-21', SCOPER, {}, null), '');
-  assert.equal(api.dayOverlayHTML(1, WEEK, 'nithin', {}, null), '');
-  assert.match(api.flagsHTML(WEEK, 'nithin', null), /The filed Stratco read covers the fencing week of 2026-09-14 on Marnin.s calendar\. Nothing is claimed about this week or this scoper\./);
-  assert.match(api.flagsHTML('2026-09-21', SCOPER, null), /Nothing is claimed about this week or this scoper/);
+  assert.equal(api.dayOverlayHTML(1, '2026-09-21', SCOPER, {}, NOT_READ), '');
+  assert.equal(api.dayOverlayHTML(1, WEEK, 'nithin', {}, NOT_READ), '');
+  assert.match(api.flagsHTML(WEEK, 'nithin', NOT_READ), /The filed Stratco read covers the fencing week of 2026-09-14 on Marnin.s calendar\. Nothing is claimed about this week or this scoper\./);
+  assert.match(api.flagsHTML('2026-09-21', SCOPER, NOT_READ), /Nothing is claimed about this week or this scoper/);
 });
 
 test('a date with no zone is never shifted through a Perth to UTC conversion', () => {
@@ -313,7 +348,7 @@ test('the module is still a faithful copy of the checked-in evidence file', () =
   assert.equal(api.FILED.read_iso, filed.read_clock.perth_local);
   assert.equal(api.FILED.move_cancel_tool_present, filed.move_cancel_tool_present);
   assert.equal(api.FILED.evidence_file, 'docs/evidence/fencing-stratco-week-2026-09-13/stratco-week-filed-read.json');
-  const shape = (b) => [b.stratco_ref, b.suburb, b.event_id, b.calendar_start, b.calendar_end, b.agreed_start, b.agreed_end, b.acceptance_message_id];
+  const shape = (b) => [b.stratco_ref, b.suburb, b.event_id, b.calendar_start, b.calendar_end, b.agreed_start, b.agreed_end, b.acceptance_message_id, b.wrong_since_hours_at_read, b.kind, b.summary];
   assert.deepEqual(api.FILED.breaches.map(shape), filed.breaches.map(shape));
   assert.deepEqual(api.FILED.stratco_events, filed.stratco_events);
   assert.deepEqual(api.FILED.zero_travel_adjacencies, filed.zero_travel_adjacencies);
@@ -337,7 +372,128 @@ test('no client identity reaches this repository and no captain-facing copy carr
 test('untrusted text cannot break out of this surface', () => {
   assert.equal(api.escape('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
   assert.equal(api.escape(null), '');
-  const hostile = api.reconcile([{ event_id: WOODLANDS_EVENT, start_iso: '<script>bad()</script>', end_iso: null }]);
+  const hostile = api.reconcile(readOf([{ event_id: WOODLANDS_EVENT, start_iso: '<script>bad()</script>', end_iso: null }]));
   assert.equal(hostile.rows.find((r) => r.stratco_ref === '231399').status, 'moved');
   assert.doesNotMatch(api.escape(hostile.summary), /<script>/);
+});
+
+/* ---- A read that did not happen is never a count --------------------- */
+
+test('a failed read, a read still in flight and a read that came back empty are three different statements', () => {
+  const failed = flags(FAILED);
+  assert.match(failed, /The live calendar read failed \(Sign in required\), so nothing was read\./);
+  assert.match(failed, /This calendar shows no provider event count, because there is no read to count\./);
+  assert.doesNotMatch(failed, /provider event count of zero .* is the live read/);
+
+  const reading = flags({ status: 'reading', events: null, error: null });
+  assert.match(reading, /The live calendar read has not come back yet\./);
+  assert.match(reading, /no provider event count, because there is no read to count/);
+
+  const never = flags(NOT_READ);
+  assert.match(never, /No live calendar read was attempted in this copy\./);
+
+  // A read that DID come back and held none of these events is the only case
+  // that may speak about a count, and it says whose count it is.
+  const empty = flags(readOf([]));
+  assert.match(empty, /The live calendar read came back\./);
+  assert.match(empty, /The provider event count on this calendar is that live read, which returned none of these events\./);
+
+  // Each of the four is a distinct sentence; none is reused for another.
+  const sentences = [failed, reading, never, empty].map((h) => h.split('<div class="fsw-flags-head">')[1].split('</p>')[0]);
+  assert.equal(new Set(sentences).size, 4);
+});
+
+test('reconcile reports the read status it was given and never upgrades it', () => {
+  assert.equal(api.reconcile(FAILED, 'grid').read_status, 'failed');
+  assert.equal(api.reconcile({ status: 'reading' }, 'grid').read_status, 'reading');
+  assert.equal(api.reconcile(NOT_READ, 'grid').read_status, 'not_attempted');
+  assert.equal(api.reconcile(readOf([]), 'grid').read_status, 'read');
+  // A caller that hands in nothing at all must not be read as "read and empty".
+  assert.equal(api.reconcile(null, 'grid').read_status, 'not_attempted');
+  assert.equal(api.reconcile(undefined, 'grid').read_status, 'not_attempted');
+  // A bare array is a read result, because there is no other way to produce one.
+  assert.equal(api.reconcile([], 'grid').read_status, 'read');
+});
+
+/* ---- The panel describes the panel ----------------------------------- */
+
+test('the Performance panel never describes a week grid it does not have', () => {
+  const html = panel();
+  assert.match(html, /The four figures above and the facts below are the filed read of 20:04 Perth, Sunday 13 September 2026\. There is no calendar grid on this surface\./);
+  assert.doesNotMatch(html, /the week above/);
+  assert.doesNotMatch(html, /every block on it/);
+  assert.doesNotMatch(html, /provider event count/);
+  // The grid surface keeps the grid sentence.
+  assert.match(flags(), /The week above is painted from the filed read/);
+  assert.doesNotMatch(flags(), /There is no calendar grid on this surface/);
+  // And it is the surface argument that decides, not the read.
+  assert.match(api.reconcile(NOT_READ, 'panel').summary, /There is no calendar grid on this surface/);
+  assert.match(api.reconcile(NOT_READ, 'grid').summary, /The week above is painted/);
+});
+
+/* ---- The headline 8 is shown, and shown as unsettled ----------------- */
+
+test('the eighth agreed visit is named as unsettled without inventing it or changing the 8', () => {
+  // The filed figure is untouched.
+  assert.equal(api.FILED.counts.visits_agreed, 8);
+  assert.equal(api.counts().find((c) => c.key === 'visits_agreed').value, 8);
+  // The evidence can only enumerate seven.
+  assert.equal(api.FILED.agreed_threads_enumerable_in_evidence.length, 7);
+  assert.deepEqual(api.FILED.agreed_threads_enumerable_in_evidence,
+    ['230769', '231238', '231211', '231399', '231514', '231284', '230849']);
+  assert.deepEqual(api.FILED.agreed_threads_enumerable_in_evidence, filed.agreed_threads_enumerable_in_evidence);
+  assert.equal(api.FILED.agreed_threads_enumerable_in_evidence.length + 1, api.FILED.counts.visits_agreed);
+
+  const html = panel();
+  assert.match(html, /<span class="fsw-n">8<\/span>/, 'the filed 8 still renders');
+  assert.doesNotMatch(html, /<span class="fsw-n">7<\/span>/, 'the 8 was not quietly changed to a 7');
+  // The tile itself says it is not settled.
+  assert.match(html, /<span class="fsw-caveat">Not settled\. The filed read states 8; its own thread record enumerates 7\. See the eighth agreed visit below\.<\/span>/);
+  assert.match(html, /class="fsw-figure caveated"/);
+  // And the discrepancy is named the same way the other unmeasured facts are.
+  assert.match(html, /<b>The eighth agreed visit:<\/b> unmeasured\. Not settled\./);
+  assert.match(html, /its own thread record enumerates only 7 carrying an agreed time: refs 230769, 231238, 231211, 231399, 231514, 231284 and 230849/);
+  assert.match(html, /Settling this needs the agreement threads re-read, not a different number on this page\./);
+  // Only the figure the check challenged carries a caveat.
+  assert.equal(api.counts().filter((c) => c.caveat).length, 1);
+  assert.equal((html.match(/fsw-caveat/g) || []).length, 1);
+});
+
+test('a long event id is printed whole, with the characters that discriminate it emphasised', () => {
+  // The two ids differ at one character near the end. Plain, they are
+  // indistinguishable by eye across the seven places they appear.
+  assert.equal(WOODLANDS_EVENT.length, 152);
+  assert.equal(BALGA_EVENT.length, 152);
+  const diffAt = [...WOODLANDS_EVENT].findIndex((c, i) => c !== BALGA_EVENT[i]);
+  assert.equal(diffAt, 145);
+  assert.ok(diffAt >= WOODLANDS_EVENT.length - 12, 'the emphasised tail covers the differing character');
+
+  const rendered = api.eventIdHTML(WOODLANDS_EVENT);
+  assert.equal(readable(rendered), api.escape(WOODLANDS_EVENT).replace(/&[a-z]+;/g, (m) => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }[m])));
+  assert.match(rendered, /<b class="fsw-eid-tail">.{12}<\/b>$/);
+  // Whole id still reaches the page, and the two tails are different.
+  assert.ok(readable(api.eventIdHTML(WOODLANDS_EVENT)).endsWith('0CAObgAAAA=='));
+  assert.ok(readable(api.eventIdHTML(BALGA_EVENT)).endsWith('0CAObQAAAA=='));
+  assert.notEqual(WOODLANDS_EVENT.slice(-12), BALGA_EVENT.slice(-12));
+  // A short id is never split.
+  assert.equal(api.eventIdHTML('abc'), 'abc');
+  assert.equal(api.eventIdHTML(''), '');
+  assert.equal(api.eventIdHTML(null), '');
+  // Untrusted text still cannot break out.
+  assert.doesNotMatch(api.eventIdHTML('<script>'.repeat(4)), /<script>/);
+});
+
+test('a 30-minute filed block folds its ref onto the time line rather than clipping it', () => {
+  const tuesday = overlay(1);
+  // Balga is 11:15 to 11:45: 34px, too short for three lines.
+  assert.match(tuesday, /class="fsw-filed off short"[^>]*><span class="fsw-t">11:15 · 231211 · filed<\/span><span class="fsw-s">Balga<\/span>/);
+  // Alkimos is a full hour: it keeps the three-line form.
+  assert.match(tuesday, /class="fsw-filed"[^>]*><span class="fsw-t">08:30 to 09:30<\/span><span class="fsw-s">Alkimos<\/span><span class="fsw-r">230769 · filed<\/span>/);
+  // Whatever the form, every painted block still says filed and names its ref.
+  const blocks = tuesday.split('<div class="fsw-filed').slice(1);
+  assert.equal(blocks.length, 5);
+  blocks.forEach((b) => assert.match(b, /· filed<\/span>/));
+  api.FILED.stratco_events
+    .filter((e) => api.dayIndex(e.start, WEEK) === 1)
+    .forEach((e) => assert.ok(tuesday.includes(e.stratco_ref), e.stratco_ref + ' is named'));
 });

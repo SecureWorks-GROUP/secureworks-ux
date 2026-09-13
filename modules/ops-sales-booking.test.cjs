@@ -434,7 +434,7 @@ test('Woodlands 231399 is flagged in place against its agreed Friday 08:30, and 
   assert.match(html, /Wrong day and wrong time\. The customer agreed Friday 18 September 08:30\. The event reads Tuesday 15 September 11:45 to 12:30\./);
   assert.match(html, /Woodlands 231399 agreed Friday 18 September 08:30 to 09:15, no event exists/);
   assert.match(html, /Friday holds 2 events against an agreed run of 3/);
-  assert.ok(html.includes(api.esc(breach.event_id)), 'full Woodlands event id is printed');
+  assert.ok(String(html).replace(/<[^>]*>/g,'').includes(breach.event_id), 'full Woodlands event id is printed');
   // Painted in place: Tuesday carries the breach outline, Friday the missing slot.
   const tuesday = api.stratcoOverlay(1);
   const friday = api.stratcoOverlay(4);
@@ -449,7 +449,7 @@ test('Balga 231211 is flagged in place against its agreed 11:30 to 12:00', () =>
   const breach = filedRead.breaches.find(b => b.stratco_ref === '231211');
   assert.match(html, /Balga 231211 contradicts the customer.s acceptance/);
   assert.match(html, /Fifteen minutes early\. The customer agreed 11:30\. The event reads Tuesday 15 September 11:15 to 11:45\./);
-  assert.ok(html.includes(api.esc(breach.event_id)), 'full Balga event id is printed');
+  assert.ok(String(html).replace(/<[^>]*>/g,'').includes(breach.event_id), 'full Balga event id is printed');
   const tuesday = api.stratcoOverlay(1);
   assert.match(tuesday, /class="fsw-flagged" style="top:221px;height:34px"/);
   assert.match(tuesday, /Agreed 11:30/);
@@ -461,7 +461,7 @@ test('both Tuesday zero-travel adjacencies and the unreachable protected band ar
   assert.match(html, /Balga into Woodlands at 11:45 leaves zero travel/);
   assert.match(html, /Tuesday 13:00 to 15:30 is not reachable by travel/);
   assert.match(html, /That leg does not fit in 30 minutes/);
-  assert.ok(html.includes(api.esc(filedRead.protected_band.blocked_by_event_id)), 'the blocking event id is named');
+  assert.ok(String(html).replace(/<[^>]*>/g,'').includes(filedRead.protected_band.blocked_by_event_id), 'the blocking event id is named');
   const tuesday = api.stratcoOverlay(1);
   assert.equal((tuesday.match(/class="fsw-seam"/g) || []).length, 2);
   assert.match(tuesday, /class="fsw-band" style="top:340px;height:170px"/);
@@ -490,7 +490,8 @@ test('the overlay is scoped to Marnin and this week, and never fabricates a live
   api.state.weekStart = '2026-09-14';
   assert.match(api.stratcoFlags(), /6 of 6 filed Stratco events are confirmed unchanged by the live read/);
   api.state.data = null;
-  assert.match(api.stratcoFlags(), /No live calendar read in this copy/);
+  api.state.error = null;
+  assert.match(api.stratcoFlags(), /No live calendar read was attempted in this copy/);
   assert.match(api.renderHTML(), /Woodlands 231399 contradicts/);
 });
 
@@ -524,6 +525,8 @@ test('with no live read the grid paints the filed week rather than an empty one'
   // No live read at all, and a live read that carries none of these events,
   // are the same thing to this grid: paint the filed week and label it filed.
   api.state.data = null;
+  api.state.error = null;
+  api.state.loading = false;
   assert.equal(stratco.liveCoversWeek(null), false);
   const tuesday = api.stratcoOverlay(1);
   const friday = api.stratcoOverlay(4);
@@ -536,4 +539,70 @@ test('with no live read the grid paints the filed week rather than an empty one'
   // The breaches keep their outline on top of the filed blocks.
   assert.match(tuesday, /class="fsw-flagged"/);
   assert.equal((api.stratcoOverlay(0).match(/class="fsw-filed/g) || []).length, 0, 'Monday carries no Stratco visit');
+});
+
+/* <read-happened-or-it-did-not> A zero on this page must be a read result. */
+
+test('a failed calendar read never renders as a count of zero anywhere on the page', async () => {
+  marninWeek();
+  const previous = global.opsFetch;
+  global.opsFetch = async () => { throw new Error('Sign in required'); };
+  await api.load('marnin', '2026-09-14');
+  global.opsFetch = previous;
+
+  assert.equal(api.state.error, 'Sign in required');
+  assert.equal(api.state.data, null);
+  assert.equal(api.readResultExists(), false);
+  assert.equal(api.readStatus(), 'failed');
+
+  const html = api.renderHTML();
+  // The grid header states the absence rather than counting it.
+  assert.match(html, /<span class="notread">Provider events not read<\/span>/);
+  assert.match(html, /The calendar read failed\. This is not an empty diary and not a count\. Sign in required\./);
+  assert.doesNotMatch(html, /0 provider events/);
+  assert.doesNotMatch(html, /Empty diary is not spare capacity/);
+  // The queue badge is the same class of claim.
+  assert.match(html, /<h2>Unscoped work<\/h2><span class="count notread">read failed<\/span>/);
+  // And the Stratco flags say what actually happened.
+  assert.match(html, /The live calendar read failed \(Sign in required\), so nothing was read\./);
+  assert.doesNotMatch(html, /is the live read, which returned nothing here/);
+  // The week is still painted from the filed read, so the captain sees it.
+  assert.equal((html.match(/class="fsw-filed/g) || []).length, 7);
+});
+
+test('a read that came back empty is still allowed to say zero, because it is a reading', () => {
+  marninWeek();
+  api.state.data.events = [];
+  api.state.error = null;
+  assert.equal(api.readResultExists(), true);
+  assert.equal(api.readStatus(), 'read');
+  const html = api.renderHTML();
+  assert.match(html, /<span>0 provider events<\/span>/);
+  assert.match(html, /Empty diary is not spare capacity\. Leave unread\./);
+  assert.doesNotMatch(html, /Provider events not read/);
+  assert.match(html, /The live calendar read came back\./);
+  assert.match(html, /The provider event count on this calendar is that live read, which returned none of these events\./);
+});
+
+test('a read still in flight is not a zero either', () => {
+  marninWeek();
+  api.state.data = null;
+  api.state.error = null;
+  api.state.loading = true;
+  assert.equal(api.readStatus(), 'reading');
+  const html = api.renderHTML();
+  assert.match(html, /The calendar still reading\. This is not an empty diary and not a count\./);
+  assert.match(html, /<span class="count notread">still reading<\/span>/);
+  assert.match(html, /The live calendar read has not come back yet\./);
+  assert.doesNotMatch(html, /0 provider events/);
+  api.state.loading = false;
+});
+
+test('a disconnected calendar keeps the flags and still refuses to count what it did not read', () => {
+  marninWeek();
+  api.state.data.resource.calendar = { ok: false, error: 'Calendar read failed' };
+  const html = api.renderHTML();
+  assert.match(html, /Calendar not connected/);
+  assert.match(html, /Woodlands 231399 contradicts the customer.s acceptance/);
+  assert.doesNotMatch(html, /0 provider events/);
 });

@@ -49,9 +49,24 @@ Three rules hold this surface:
   overlay paints the filed events so an unreachable calendar does not read as an
   empty week, and marks every painted block `filed`. When the live read does
   carry the week it paints no events at all, only the flags.
+- **A read that did not happen is never a count.** `readResultExists()` is the
+  one predicate: `state.data` is null while loading, after a failed read, and
+  before the first attempt, and none of those is a zero. The grid header reads
+  "Provider events not read" and the queue badge reads the same rather than 0,
+  and both name which of the three it is. Only a read that came back may print a
+  count, and then it says whose count it is. Search
+  `<read-happened-or-it-did-not>`. This matters because `sales_booking_read` is
+  not deployed, so the failed read is the normal production state, not an edge
+  case. Both Stratco seams pass `{status, events, error}` rather than a bare
+  array so the module can tell the three apart.
 - **The fixture refusal stands.** `load()` still rejects `data.fixture`. This
   overlay is not a fixture and does not go through the read path.
 
 `npm run preview:stratco-week` opens both surfaces with no credential and no
 live Ops read; `scripts/sales-booking-preview.mjs` remains the live-read path.
 Search `<fencing-stratco-filed-read>`.
+
+Guards for the read-honesty rule live in `modules/ops-sales-booking.test.cjs`:
+a failed read, a read in flight, a read that came back empty and a read that
+was never attempted are four distinct statements and none of them prints a zero
+the surface does not have.

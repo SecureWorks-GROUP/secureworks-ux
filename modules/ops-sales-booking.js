@@ -147,6 +147,29 @@
     return (state.data && state.data.events) || [];
   }
 
+  /* <read-happened-or-it-did-not> A zero is only a fact when a read came back.
+     state.data is null while loading, after a failed read, and before the first
+     attempt, and in all three cases nothing was read. Collapsing those into a
+     confident "0" is the exact lie the Stratco surfaces exist to stop, so every
+     count on this page asks this first. */
+  function readResultExists() {
+    return !!state.data;
+  }
+
+  function readStatus() {
+    if (readResultExists()) return 'read';
+    if (state.loading) return 'reading';
+    if (state.error) return 'failed';
+    return 'not_attempted';
+  }
+
+  function notReadLabel() {
+    var status = readStatus();
+    if (status === 'reading') return 'still reading';
+    if (status === 'failed') return 'read failed';
+    return 'not read';
+  }
+
   function selectedCase() {
     var id = state.selectedId;
     if (!id) return null;
@@ -486,18 +509,24 @@
     return global.FencingStratcoWeek || null;
   }
 
+  function stratcoRead() {
+    return {
+      status: readStatus(),
+      events: state.data && Array.isArray(state.data.events) ? state.data.events : null,
+      error: state.error || null
+    };
+  }
+
   function stratcoOverlay(dayIdx) {
     var truth = stratcoTruth();
     if (!truth) return '';
-    var live = state.data && Array.isArray(state.data.events) ? state.data.events : null;
-    return truth.dayOverlayHTML(dayIdx, state.weekStart, state.resourceId, { pxPerHour: PX_PER_HOUR, dayStart: DAY_START }, live);
+    return truth.dayOverlayHTML(dayIdx, state.weekStart, state.resourceId, { pxPerHour: PX_PER_HOUR, dayStart: DAY_START }, stratcoRead());
   }
 
   function stratcoFlags() {
     var truth = stratcoTruth();
     if (!truth) return '';
-    var live = state.data && Array.isArray(state.data.events) ? state.data.events : null;
-    return truth.flagsHTML(state.weekStart, state.resourceId, live);
+    return truth.flagsHTML(state.weekStart, state.resourceId, stratcoRead());
   }
 
   function renderCalendar() {
@@ -564,8 +593,15 @@
       times += '<div class="time small" style="position:absolute;right:6px;top:' + topPx(h) + 'px;transform:translateY(-50%)">' + (h < 10 ? '0' : '') + h + ':00</div>';
     }
     var evCount = events().length;
-    var info = '<span>' + evCount + ' provider event' + (evCount === 1 ? '' : 's') + '</span>';
-    if (evCount === 0) info += '<span class="repairtext">Empty diary is not spare capacity. Leave unread.</span>';
+    var info;
+    if (!readResultExists()) {
+      info = '<span class="notread">Provider events not read</span>' +
+        '<span class="repairtext">The calendar ' + esc(notReadLabel()) + '. This is not an empty diary and not a count.' +
+        (state.error ? ' ' + esc(state.error) + '.' : '') + '</span>';
+    } else {
+      info = '<span>' + evCount + ' provider event' + (evCount === 1 ? '' : 's') + '</span>';
+      if (evCount === 0) info += '<span class="repairtext">Empty diary is not spare capacity. Leave unread.</span>';
+    }
     return '<div class="layers">' +
       '<label class="layer"><input type="checkbox" data-booking-layer="confirmed"' + (state.layers.confirmed ? ' checked' : '') + '> Diary</label>' +
       '<label class="layer"><input type="checkbox" data-booking-layer="proposal"' + (state.layers.proposal ? ' checked' : '') + '> AI proposals</label>' +
@@ -667,7 +703,7 @@
       '</select></label></div></div>' + notice +
       '<div class="notice">Source ' + esc(mailbox) + ' · week of ' + esc(state.weekStart) + ' · Australia/Perth · rules: ' + esc(res.desk_rules.hours) + '</div>' +
       '<div class="workspace">' +
-      '<section class="panel queue"><div class="panelhead"><h2>Unscoped work</h2><span class="count">' + visibleCases().length + '</span></div>' +
+      '<section class="panel queue"><div class="panelhead"><h2>Unscoped work</h2><span class="count' + (readResultExists() ? '' : ' notread') + '">' + (readResultExists() ? visibleCases().length : esc(notReadLabel())) + '</span></div>' +
       '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div>' +
       '<select data-booking-filter aria-label="Filter work queue">' +
       [['all', 'All unscoped'], ['ready', 'Ready to contact'], ['waiting', 'Waiting for reply'], ['follow_up', 'Follow-up due'], ['booked', 'Booked'], ['needs_decision', 'Needs a decision'], ['archived', 'Archived'], ['completed', 'Completed']].map(function (opt) {
@@ -963,7 +999,9 @@
     coverageGaps: coverageGaps,
     bookingRead: bookingRead,
     stratcoOverlay: stratcoOverlay,
-    stratcoFlags: stratcoFlags
+    stratcoFlags: stratcoFlags,
+    readResultExists: readResultExists,
+    readStatus: readStatus
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

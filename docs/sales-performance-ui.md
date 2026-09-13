@@ -51,7 +51,18 @@ Three rules hold this surface:
   that way today, including Khairo's own calendar, which was not read.
 - A filed figure is never dressed as a live one. Where a live read is present,
   `reconcile()` matches it by event id and states any difference rather than
-  smoothing it away.
+  smoothing it away. `reconcile(read, surface)` takes the surface so the panel,
+  which has four tiles and no grid, never describes a week of blocks.
+- A figure the filed evidence cannot rebuild carries a caveat on its own tile.
+  Visits agreed is the one: the read states 8 and its own thread record
+  enumerates 7, so the tile says "Not settled" and the eighth is named in the
+  unmeasured column. The 8 is not changed to a 7 and the eighth is not invented.
+  Settling it needs the agreement threads re-read, not a different number here.
+
+The whole page, not only this panel, is held to the no-em-dash rule: the empty
+measure cell reads "No reading" rather than a dash glyph, and the guard in
+`ops-sales-performance.test.cjs` runs over `SalesPerformance.renderHTML` in all
+four of its states.
 
 Guard: `modules/ops-fencing-stratco-week.test.cjs` (22 tests: the four figures,
 each breach by ref, agreed time, calendar time and full event id, both

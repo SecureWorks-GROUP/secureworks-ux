@@ -94,3 +94,15 @@
 #salesBookingRoot .fsw-flag .fsw-owner{color:var(--accent-text);font-weight:650}
 #salesBookingRoot .fsw-flags .fsw-note{font-size:10px;color:var(--ink-2);margin-top:11px;line-height:1.6;word-break:break-word}
 #viewSales.sales-sub-booking #fencingStratcoWeekRoot{display:none}
+#fencingStratcoWeekRoot .fsw-caveat{font-size:10.5px;line-height:1.4;color:var(--fsw-accent-text);background:var(--fsw-wash);border-left:2px solid var(--fsw-accent);padding:5px 7px;margin-top:6px}
+#fencingStratcoWeekRoot .fsw-figure.caveated .fsw-n{color:var(--fsw-accent-text)}
+/* A read that did not happen is never a number. */
+#salesBookingRoot .notread{color:var(--accent-text);font-weight:650}
+#salesBookingRoot .count.notread{background:var(--wash);color:var(--accent-text);font-weight:650}
+/* The two Stratco event ids are 152 characters and differ only near the end.
+   The discriminating tail is emphasised so the captain can actually compare. */
+#fencingStratcoWeekRoot .fsw-eid-tail,
+#salesBookingRoot .fsw-eid-tail{color:var(--fsw-accent-text,#C4481F);font-weight:700;background:rgba(241,90,41,.10);padding:0 1px}
+#salesBookingRoot .fsw-eid-tail{color:#C4481F}
+#salesBookingRoot .fsw-filed.short .fsw-t{font-size:8px}
+#salesBookingRoot .fsw-filed.short .fsw-s{font-size:9px}

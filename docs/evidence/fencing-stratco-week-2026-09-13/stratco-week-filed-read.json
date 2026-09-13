@@ -12,11 +12,19 @@
     "utc": "2026-09-13T12:04:31.465Z",
     "display": "20:04 Perth, Sunday 13 September 2026"
   },
-  "read_only_pass": { "calendar_writes": 0, "sms_sent": 0, "customer_contact": "none" },
+  "read_only_pass": {
+    "calendar_writes": 0,
+    "sms_sent": 0,
+    "customer_contact": "none"
+  },
   "lane": "fencing",
   "week_start": "2026-09-14",
   "timezone": "Australia/Perth",
-  "scoper": { "name": "Marnin", "resource_id": "marnin", "scoper_user_id": "706c5258-70dd-483a-b36c-af6864b24498" },
+  "scoper": {
+    "name": "Marnin",
+    "resource_id": "marnin",
+    "scoper_user_id": "706c5258-70dd-483a-b36c-af6864b24498"
+  },
   "counts": {
     "visits_agreed": 8,
     "in_calendar": 6,
@@ -24,10 +32,31 @@
     "agreed_versus_calendar_breaches": 2
   },
   "unmeasured": [
-    { "key": "khairo_calendar", "label": "Khairo's own Stratco calendar", "reason": "Not read in this pass. Khairo's calendar is separate from Marnin's and was outside the read." },
-    { "key": "agreed_without_event_composition", "label": "Which 2 agreed visits have no event at all", "reason": "The read publishes the totals 8 agreed and 6 in calendar. It does not enumerate the 2 with no event, so this copy does not name them. The one the report does name is ref 230849 Redcliffe." },
-    { "key": "operational_leave", "label": "Operational leave", "reason": "Not read in this pass." },
-    { "key": "non_primary_calendars", "label": "Non-primary calendars", "reason": "Not read in this pass." }
+    {
+      "key": "khairo_calendar",
+      "label": "Khairo's own Stratco calendar",
+      "reason": "Not read in this pass. Khairo's calendar is separate from Marnin's and was outside the read."
+    },
+    {
+      "key": "eighth_agreed_visit",
+      "label": "The eighth agreed visit",
+      "reason": "Not settled. The filed read states 8 agreed and its basis line says eight agreement threads were read, but its own thread record enumerates only 7 carrying an agreed time: refs 230769, 231238, 231211, 231399, 231514, 231284 and 230849. The eighth is not identified anywhere in the filed read, so it is not named here and the 8 is not changed to a 7. Ref 230492 Balcatta asked for a time we never answered and the Sorrento thread has no time agreed, so neither is the eighth. Settling this needs the agreement threads re-read, not a different number on this page."
+    },
+    {
+      "key": "agreed_without_event_composition",
+      "label": "Which 2 agreed visits have no event at all",
+      "reason": "The read publishes the totals 8 agreed and 6 in calendar. It does not enumerate the 2 with no event, so this copy does not name them. The one the report does name is ref 230849 Redcliffe. This is a different 2 from the 2 breaches: a breach is an event that exists and contradicts an acceptance, and both breached events are inside the 6."
+    },
+    {
+      "key": "operational_leave",
+      "label": "Operational leave",
+      "reason": "Not read in this pass."
+    },
+    {
+      "key": "non_primary_calendars",
+      "label": "Non-primary calendars",
+      "reason": "Not read in this pass."
+    }
   ],
   "move_cancel_tool_present": false,
   "no_tool_line": "The tool catalog exposes sw_create_scope_booking and calendar reads only. There is no move or cancel action for a scope event, so no desk can fix these. The fix is the captain's call.",
@@ -76,15 +105,35 @@
     {
       "id": "greenwood-balga-1115",
       "at": "2026-09-15T11:15:00",
-      "from": { "suburb": "Greenwood", "stratco_ref": "231238", "ends": "2026-09-15T11:15:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA==" },
-      "to": { "suburb": "Balga", "stratco_ref": "231211", "starts": "2026-09-15T11:15:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
+      "from": {
+        "suburb": "Greenwood",
+        "stratco_ref": "231238",
+        "ends": "2026-09-15T11:15:00",
+        "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA=="
+      },
+      "to": {
+        "suburb": "Balga",
+        "stratco_ref": "231211",
+        "starts": "2026-09-15T11:15:00",
+        "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA=="
+      },
       "summary": "Greenwood ends 11:15 and Balga starts 11:15. Zero travel."
     },
     {
       "id": "balga-woodlands-1145",
       "at": "2026-09-15T11:45:00",
-      "from": { "suburb": "Balga", "stratco_ref": "231211", "ends": "2026-09-15T11:45:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
-      "to": { "suburb": "Woodlands", "stratco_ref": "231399", "starts": "2026-09-15T11:45:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA==" },
+      "from": {
+        "suburb": "Balga",
+        "stratco_ref": "231211",
+        "ends": "2026-09-15T11:45:00",
+        "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA=="
+      },
+      "to": {
+        "suburb": "Woodlands",
+        "stratco_ref": "231399",
+        "starts": "2026-09-15T11:45:00",
+        "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA=="
+      },
       "summary": "Balga ends 11:45 and Woodlands starts 11:45. Zero travel."
     }
   ],
@@ -107,21 +156,104 @@
     "blocked_by_event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA=="
   },
   "stratco_events": [
-    { "stratco_ref": "230769", "suburb": "Alkimos", "start": "2026-09-15T08:30:00", "end": "2026-09-15T09:30:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAOawAAAA==" },
-    { "stratco_ref": "231238", "suburb": "Greenwood", "start": "2026-09-15T10:30:00", "end": "2026-09-15T11:15:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA==" },
-    { "stratco_ref": "231211", "suburb": "Balga", "start": "2026-09-15T11:15:00", "end": "2026-09-15T11:45:00", "matches_agreed_run": false, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
-    { "stratco_ref": "231399", "suburb": "Woodlands", "start": "2026-09-15T11:45:00", "end": "2026-09-15T12:30:00", "matches_agreed_run": false, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA==" },
-    { "stratco_ref": "231514", "suburb": "Scarborough", "start": "2026-09-18T10:00:00", "end": "2026-09-18T10:45:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0SwuDAAAAA==" },
-    { "stratco_ref": "231284", "suburb": "Aubin Grove", "start": "2026-09-18T13:30:00", "end": "2026-09-18T14:30:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObwAAAA==" }
+    {
+      "stratco_ref": "230769",
+      "suburb": "Alkimos",
+      "start": "2026-09-15T08:30:00",
+      "end": "2026-09-15T09:30:00",
+      "matches_agreed_run": true,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAOawAAAA=="
+    },
+    {
+      "stratco_ref": "231238",
+      "suburb": "Greenwood",
+      "start": "2026-09-15T10:30:00",
+      "end": "2026-09-15T11:15:00",
+      "matches_agreed_run": true,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA=="
+    },
+    {
+      "stratco_ref": "231211",
+      "suburb": "Balga",
+      "start": "2026-09-15T11:15:00",
+      "end": "2026-09-15T11:45:00",
+      "matches_agreed_run": false,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA=="
+    },
+    {
+      "stratco_ref": "231399",
+      "suburb": "Woodlands",
+      "start": "2026-09-15T11:45:00",
+      "end": "2026-09-15T12:30:00",
+      "matches_agreed_run": false,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA=="
+    },
+    {
+      "stratco_ref": "231514",
+      "suburb": "Scarborough",
+      "start": "2026-09-18T10:00:00",
+      "end": "2026-09-18T10:45:00",
+      "matches_agreed_run": true,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0SwuDAAAAA=="
+    },
+    {
+      "stratco_ref": "231284",
+      "suburb": "Aubin Grove",
+      "start": "2026-09-18T13:30:00",
+      "end": "2026-09-18T14:30:00",
+      "matches_agreed_run": true,
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObwAAAA=="
+    }
   ],
   "unanswered_threads": [
-    { "stratco_ref": "230183", "suburb": "Balga", "direction": "outbound", "silent_since_perth": "2026-09-11T08:03:00+08:00" },
-    { "stratco_ref": "231030", "suburb": "Camboon Road", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
-    { "stratco_ref": "230052", "suburb": "Fenchurch Street", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
-    { "stratco_ref": "230442", "suburb": "Princeville Tor", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
-    { "stratco_ref": "230997", "suburb": "Sinagra", "direction": "outbound", "silent_since_perth": "2026-09-11T08:06:00+08:00" }
+    {
+      "stratco_ref": "230183",
+      "suburb": "Balga",
+      "direction": "outbound",
+      "silent_since_perth": "2026-09-11T08:03:00+08:00"
+    },
+    {
+      "stratco_ref": "231030",
+      "suburb": "Camboon Road",
+      "direction": "outbound",
+      "silent_since_perth": "2026-09-11T08:05:00+08:00"
+    },
+    {
+      "stratco_ref": "230052",
+      "suburb": "Fenchurch Street",
+      "direction": "outbound",
+      "silent_since_perth": "2026-09-11T08:05:00+08:00"
+    },
+    {
+      "stratco_ref": "230442",
+      "suburb": "Princeville Tor",
+      "direction": "outbound",
+      "silent_since_perth": "2026-09-11T08:05:00+08:00"
+    },
+    {
+      "stratco_ref": "230997",
+      "suburb": "Sinagra",
+      "direction": "outbound",
+      "silent_since_perth": "2026-09-11T08:06:00+08:00"
+    }
   ],
   "agreed_not_in_calendar_named": [
-    { "stratco_ref": "230849", "suburb": "Redcliffe", "detail": "Accepted Tuesday 15:45 is not in the calendar, so it is not a live breach. Booked, it would breach both the protected band's tail and the 16:30 scoper window close." }
+    {
+      "stratco_ref": "230849",
+      "suburb": "Redcliffe",
+      "detail": "Accepted Tuesday 15:45 is not in the calendar, so it is not a live breach. Booked, it would breach both the protected band's tail and the 16:30 scoper window close."
+    }
+  ],
+  "counts_caveat": {
+    "visits_agreed": "Not settled. The filed read states 8; its own thread record enumerates 7 threads carrying an agreed time. Recorded by the independent check of 14 September 2026. The figure is left at what the filed read states."
+  },
+  "agreed_threads_enumerable_in_evidence": [
+    "230769",
+    "231238",
+    "231211",
+    "231399",
+    "231514",
+    "231284",
+    "230849"
   ]
 }

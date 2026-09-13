@@ -48,7 +48,8 @@
     },
     unmeasured: [
       { key: 'khairo_calendar', label: 'Khairo’s own Stratco calendar', reason: 'Not read in this pass. Khairo’s calendar is separate from Marnin’s and was outside the read.' },
-      { key: 'agreed_without_event_composition', label: 'Which 2 agreed visits have no event at all', reason: 'The read publishes the totals 8 agreed and 6 in calendar. It does not enumerate the 2 with no event, so this surface does not name them. The one the report does name is ref 230849 Redcliffe.' },
+      { key: 'eighth_agreed_visit', label: 'The eighth agreed visit', reason: 'Not settled. The filed read states 8 agreed and its basis line says eight agreement threads were read, but its own thread record enumerates only 7 carrying an agreed time: refs 230769, 231238, 231211, 231399, 231514, 231284 and 230849. The eighth is not identified anywhere in the filed read, so it is not named here and the 8 is not changed to a 7. Ref 230492 Balcatta asked for a time we never answered and the Sorrento thread has no time agreed, so neither is the eighth. Settling this needs the agreement threads re-read, not a different number on this page.' },
+      { key: 'agreed_without_event_composition', label: 'Which 2 agreed visits have no event at all', reason: 'The read publishes the totals 8 agreed and 6 in calendar. It does not enumerate the 2 with no event, so this surface does not name them. The one the report does name is ref 230849 Redcliffe. This is a different 2 from the 2 breaches: a breach is an event that exists and contradicts an acceptance, and both breached events are inside the 6.' },
       { key: 'operational_leave', label: 'Operational leave', reason: 'Not read in this pass.' },
       { key: 'non_primary_calendars', label: 'Non-primary calendars', reason: 'Not read in this pass.' }
     ],
@@ -142,6 +143,7 @@
       { stratco_ref: '230442', suburb: 'Princeville Tor', direction: 'outbound', silent_since_perth: '2026-09-11T08:05:00+08:00' },
       { stratco_ref: '230997', suburb: 'Sinagra', direction: 'outbound', silent_since_perth: '2026-09-11T08:06:00+08:00' }
     ],
+    agreed_threads_enumerable_in_evidence: ['230769', '231238', '231211', '231399', '231514', '231284', '230849'],
     agreed_not_in_calendar_named: [
       { stratco_ref: '230849', suburb: 'Redcliffe', detail: 'Accepted Tuesday 15:45 is not in the calendar, so it is not a live breach. Booked, it would breach both the protected band’s tail and the 16:30 scoper window close.' }
     ]
@@ -183,6 +185,18 @@
     return DAY_NAMES[(day + 6) % 7] + ' ' + parts[2] + ' ' + MONTHS[parts[1] - 1];
   }
 
+  /* The Woodlands and Balga ids are both 152 characters and differ at index 145
+     only. Printed plain, a captain cannot tell them apart, which defeats the
+     point of printing them. The tail that actually discriminates is emphasised
+     and the rest is left muted. The full string is still present verbatim. */
+  var EVENT_ID_TAIL = 12;
+  function eventIdHTML(id) {
+    var value = String(id || '');
+    if (value.length <= EVENT_ID_TAIL) return esc(value);
+    return esc(value.slice(0, value.length - EVENT_ID_TAIL)) +
+      '<b class="fsw-eid-tail">' + esc(value.slice(-EVENT_ID_TAIL)) + '</b>';
+  }
+
   function when(startIso, endIso) {
     return longDate(startIso) + ' ' + timeOf(startIso) + (endIso ? ' to ' + timeOf(endIso) : '');
   }
@@ -196,7 +210,7 @@
   function counts() {
     var c = FILED.counts;
     return [
-      { key: 'visits_agreed', label: 'Visits agreed', value: num(c.visits_agreed), detail: 'Customers who said yes to a time for this week.' },
+      { key: 'visits_agreed', label: 'Visits agreed', value: num(c.visits_agreed), detail: 'Customers who said yes to a time for this week.', caveat: 'Not settled. The filed read states 8; its own thread record enumerates 7. See the eighth agreed visit below.' },
       { key: 'in_calendar', label: 'In calendar', value: num(c.in_calendar), detail: 'Stratco events actually present in Marnin’s primary calendar for this week.' },
       { key: 'initial_booking_threads_unanswered', label: 'Booking threads unanswered', value: num(c.initial_booking_threads_unanswered), detail: 'First offers sent 11 September that no customer has answered.' },
       { key: 'agreed_versus_calendar_breaches', label: 'Agreed versus calendar breaches', value: num(c.agreed_versus_calendar_breaches), detail: 'Events that contradict a recorded customer acceptance. Both are named below.' }
@@ -205,15 +219,55 @@
 
   function num(value) { return typeof value === 'number' && isFinite(value) ? value : null; }
 
+  /* <read-happened-or-it-did-not> Callers hand in a read descriptor, not a bare
+     array, because "the read came back and held nothing" and "no read happened"
+     are different facts and only one of them is a zero. A bare array or null is
+     still accepted and is treated as an unknown read status, which is the
+     cautious reading: it claims no read occurred. */
+  function asRead(input) {
+    if (Array.isArray(input)) return { status: 'read', events: input, error: null };
+    if (input && typeof input === 'object') {
+      return {
+        status: input.status || (Array.isArray(input.events) ? 'read' : 'not_attempted'),
+        events: Array.isArray(input.events) ? input.events : null,
+        error: input.error || null
+      };
+    }
+    return { status: 'not_attempted', events: null, error: null };
+  }
+
+  /* What the surface may honestly say about the live calendar. */
+  function readNarrative(read) {
+    if (read.status === 'reading') return 'The live calendar read has not come back yet.';
+    if (read.status === 'failed') return 'The live calendar read failed' + (read.error ? ' (' + read.error + ')' : '') + ', so nothing was read.';
+    if (read.status === 'read') return 'The live calendar read came back.';
+    return 'No live calendar read was attempted in this copy.';
+  }
+
   /* A live read, when one is present, is reconciled against the filed one by
      event id. A difference is stated, never smoothed away. */
-  function reconcile(liveEvents) {
-    var live = Array.isArray(liveEvents) ? liveEvents : null;
+  function reconcile(input, surface) {
+    var read = asRead(input);
+    var live = read.events;
+    var grid = surface !== 'panel';
     if (!live || !liveCoversWeek(live)) {
+      /* The two surfaces hold different things, so they get different
+         sentences. The panel has four figures and no grid; pointing it at a
+         week of blocks would point at nothing. */
+      var where = grid
+        ? ' The week above is painted from the filed read of ' + FILED.read_display + ', every block on it is marked filed, and the flags below state that same read.'
+        : ' The four figures above and the facts below are the filed read of ' + FILED.read_display + '. There is no calendar grid on this surface.';
+      var zeroNote = '';
+      if (grid) {
+        zeroNote = read.status === 'read'
+          ? ' The provider event count on this calendar is that live read, which returned none of these events.'
+          : ' This calendar shows no provider event count, because there is no read to count.';
+      }
       return {
         has_live: false,
+        read_status: read.status,
         rows: [],
-        summary: 'No live calendar read in this copy, so the week above is painted from the filed read of ' + FILED.read_display + ' and every block on it is marked filed. A provider event count of zero on this calendar is the live read, which returned nothing here.'
+        summary: readNarrative(read) + where + zeroNote
       };
     }
     var byId = {};
@@ -235,6 +289,7 @@
     var agreeing = rows.filter(function (r) { return r.status === 'agrees'; }).length;
     return {
       has_live: true,
+      read_status: read.status,
       rows: rows,
       summary: agreeing + ' of ' + rows.length + ' filed Stratco events are confirmed unchanged by the live read in this copy. The flags state the filed read.'
     };
@@ -244,21 +299,22 @@
 
   function figureHTML(item) {
     var unmeasured = item.value === null;
-    return '<div class="fsw-figure' + (unmeasured ? ' unmeasured' : '') + '">' +
+    return '<div class="fsw-figure' + (unmeasured ? ' unmeasured' : '') + (item.caveat ? ' caveated' : '') + '">' +
       '<span class="fsw-n">' + (unmeasured ? 'Unmeasured' : esc(String(item.value))) + '</span>' +
       '<span class="fsw-k">' + esc(item.label) + '</span>' +
       '<span class="fsw-d">' + esc(item.detail) + '</span>' +
+      (item.caveat ? '<span class="fsw-caveat">' + esc(item.caveat) + '</span>' : '') +
       '<span class="fsw-src">Filed read ' + esc(FILED.read_display) + ' · <code>' + esc(FILED.evidence_file) + '</code></span>' +
       '</div>';
   }
 
-  function renderPerformanceHTML(liveEvents) {
-    var rec = reconcile(liveEvents);
+  function renderPerformanceHTML(read) {
+    var rec = reconcile(read, 'panel');
     var figures = counts().map(figureHTML).join('');
     var named = FILED.breaches.map(function (b) {
       return '<li><b>' + esc(b.suburb) + ' ' + esc(b.stratco_ref) + '.</b> ' + esc(b.summary) +
         ' Wrong for over ' + esc(String(b.wrong_since_hours_at_read)) + ' hours at the read.' +
-        '<br><span class="fsw-eid">Event ' + esc(b.event_id) + '</span></li>';
+        '<br><span class="fsw-eid">Event ' + eventIdHTML(b.event_id) + '</span></li>';
     }).join('');
     var unmeasured = FILED.unmeasured.map(function (u) {
       return '<li><b>' + esc(u.label) + ':</b> unmeasured. ' + esc(u.reason) + '</li>';
@@ -303,7 +359,7 @@
 
   /* Overlay blocks painted into the week grid. Geometry comes from the caller
      so this module never keeps a second copy of the calendar's scale. */
-  function dayOverlayHTML(dayIdx, weekStart, resourceId, geometry, liveEvents) {
+  function dayOverlayHTML(dayIdx, weekStart, resourceId, geometry, read) {
     if (!appliesTo(weekStart, resourceId)) return '';
     var geo = geometry || {};
     var pxPerHour = num(geo.pxPerHour) || 68;
@@ -322,13 +378,20 @@
        the thing this surface exists to stop. When the live read cannot paint
        the week, paint the filed events and say on every block that they are
        filed. */
-    if (!liveCoversWeek(liveEvents)) {
+    if (!liveCoversWeek(asRead(read).events)) {
       FILED.stratco_events.forEach(function (ev) {
         if (dayIndex(ev.start, weekStart) !== dayIdx) return;
-        out += place(ev.start, ev.end, 'fsw-filed' + (ev.matches_agreed_run ? '' : ' off'),
-          '<span class="fsw-t">' + esc(timeOf(ev.start)) + ' to ' + esc(timeOf(ev.end)) + '</span>' +
-          '<span class="fsw-s">' + esc(ev.suburb) + '</span>' +
-          '<span class="fsw-r">' + esc(ev.stratco_ref) + ' · filed</span>');
+        /* A 30-minute visit is 34px tall. Three lines clip inside it and the
+           clipped line was the one saying "filed", so short blocks fold the
+           ref and the marker onto the time line rather than losing them. */
+        var short = (hourOf(ev.end) - hourOf(ev.start)) * pxPerHour < 40;
+        var body = short
+          ? '<span class="fsw-t">' + esc(timeOf(ev.start)) + ' · ' + esc(ev.stratco_ref) + ' · filed</span>' +
+            '<span class="fsw-s">' + esc(ev.suburb) + '</span>'
+          : '<span class="fsw-t">' + esc(timeOf(ev.start)) + ' to ' + esc(timeOf(ev.end)) + '</span>' +
+            '<span class="fsw-s">' + esc(ev.suburb) + '</span>' +
+            '<span class="fsw-r">' + esc(ev.stratco_ref) + ' · filed</span>';
+        out += place(ev.start, ev.end, 'fsw-filed' + (ev.matches_agreed_run ? '' : ' off') + (short ? ' short' : ''), body);
       });
       var meeting = FILED.protected_band.meeting;
       if (dayIndex(meeting.start, weekStart) === dayIdx) {
@@ -368,11 +431,11 @@
 
   /* The written flags. Each one names its full event id and ends at the
      captain, because there is nothing here that can move or cancel an event. */
-  function flagsHTML(weekStart, resourceId, liveEvents) {
+  function flagsHTML(weekStart, resourceId, read) {
     if (!appliesTo(weekStart, resourceId)) {
       return '<div class="fsw-flags quiet"><p>The filed Stratco read covers the fencing week of ' + esc(FILED.week_start) + ' on ' + esc(FILED.scoper_name) + '’s calendar. Nothing is claimed about this week or this scoper.</p></div>';
     }
-    var rec = reconcile(liveEvents);
+    var rec = reconcile(read, 'grid');
     var band = FILED.protected_band;
     var items = [];
 
@@ -411,7 +474,7 @@
 
     var list = items.map(function (it) {
       return '<li class="fsw-flag ' + esc(it.tone) + '"><b>' + esc(it.title) + '</b><p>' + esc(it.body) + '</p>' +
-        (it.event_id ? '<p class="fsw-eid">Event ' + esc(it.event_id) + '</p>' : '') +
+        (it.event_id ? '<p class="fsw-eid">Event ' + eventIdHTML(it.event_id) + '</p>' : '') +
         '<p class="fsw-owner">No move or cancel tool exists for a scope event. This is the captain’s call, not a desk action.</p></li>';
     }).join('');
 
@@ -449,7 +512,9 @@
     when: when,
     dayIndex: dayIndex,
     agreedShort: agreedShort,
-    liveCoversWeek: liveCoversWeek
+    liveCoversWeek: liveCoversWeek,
+    eventIdHTML: eventIdHTML,
+    asRead: asRead
   };
   global.FencingStratcoWeek = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

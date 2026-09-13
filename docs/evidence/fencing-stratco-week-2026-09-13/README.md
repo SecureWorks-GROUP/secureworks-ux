@@ -32,9 +32,20 @@ Stratco ref and provider event id only, which is the same rule
 | Initial booking threads unanswered | 5 |
 | Agreed versus calendar breaches | 2 |
 
-Four things the read does not measure are named as unmeasured on the surface,
-never as zero: Khairo's own calendar, which two agreed visits have no event at
-all, operational leave, and non-primary calendars.
+Five things the read does not measure are named as unmeasured on the surface,
+never as zero: Khairo's own calendar, the eighth agreed visit, which two agreed
+visits have no event at all, operational leave, and non-primary calendars.
+
+## The eighth agreed visit is not settled
+
+The independent check of 14 September 2026 found that the headline 8 cannot be
+rebuilt from this evidence. The thread record enumerates seven threads carrying
+an agreed time: refs 230769, 231238, 231211, 231399, 231514, 231284
+and 230849. The eighth is not identified anywhere in the filed read.
+
+The page shows 8, because that is what the filed read states, and the tile says
+plainly that it is not settled. The figure is not quietly changed to 7 and no
+eighth visit is invented. Settling it needs the agreement threads re-read.
 
 ## The two breaches
 

@@ -1,6 +1,6 @@
 const {test,expect}=require('@playwright/test');
 const path=require('node:path');
-for (const width of [1280,390]) test(`Clear Debt invoice context and proposal only at ${width}px`,async({page})=>{
+for (const width of [1280,390]) test(`Clear Debt invoice context and proposal only at ${width}px`,async({page},testInfo)=>{
  await page.setViewportSize({width,height:900});
  await page.setContent('<main id="subCleardebt"><div id="clearDebtStats"></div><div id="clearDebtFilters"></div><div id="clearDebtCards"></div></main>');
  await page.addScriptTag({path:path.resolve('modules/ops-clear-debt-v2.js')});
@@ -21,6 +21,9 @@ for (const width of [1280,390]) test(`Clear Debt invoice context and proposal on
  await page.getByRole('button',{name:'Save proposal for Marnin',exact:true}).first().click();
  const posts=await page.evaluate(()=>window.posted);
  expect(posts).toEqual([{action:'debt_proposal_save',body:{xero_invoice_id:'b',kind:'sms',text:'Please review the invoice with Marnin.',to:'+61491570156'}}]);
+ expect(posts.some(p=>/send_/i.test(p.action))).toBe(false);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await page.screenshot({path:`/private/tmp/clear-debt-${width}.png`,fullPage:true});
+ const shot=testInfo.outputPath(`clear-debt-${width}.png`);
+ await page.screenshot({path:shot,fullPage:true});
+ await testInfo.attach(`clear-debt-${width}`,{path:shot,contentType:'image/png'});
 });

@@ -22,6 +22,7 @@ test('disclosures retain separate job state through navigation and refresh', asy
   ui.records.a.job.scope_json = { runs: { length: 12 } };
   ui.records.b.job.scope_json = { runs: { length: 3 } };
   await ui.core.load('a');
+  await ui.click('tab', 'scope');
   ui.detail('scope').open = false;
   ui.detail('context').open = true;
   await ui.click('select', 'b');

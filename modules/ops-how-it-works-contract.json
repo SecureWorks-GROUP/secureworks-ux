@@ -9,11 +9,11 @@
       "skill_path": "scripts/dispatch/SKILL.md",
       "skill_version": "dispatch-workflow/v1",
       "business": [
-        "Account for every accepted job, including those with no order, date or deposit.",
-        "Organise requirements in Shaun's groups. Quote lines are evidence, not a complete kit.",
-        "Reuse existing supply before preparing a new unsent purchase-order draft.",
-        "A confirmed PO is not a receipt. Usable quantity must be counted at its destination.",
-        "Assessment and drafts do not send. Supplier messages stay held until separate approval."
+        "Select an accepted job and work it as a workshop: grounding, materials to order, and relevant history in one place.",
+        "No purchase order is not proof nothing was ordered. Confirmed is not received or paid.",
+        "Organise multiple material sets in Shaun's groups. Quote lines are evidence, not a complete kit.",
+        "Whole-job communications by default; narrow to a PO or group only when useful.",
+        "The workshop works without an AI plan. Evidence refresh reloads source and keeps human edits. AI suggestions are future and optional."
       ],
       "technical": {
         "page": "Ops > Dispatch",

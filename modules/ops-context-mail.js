@@ -17,12 +17,12 @@
 
   function pendingHTML(kind, selection, extra) {
     const job = selection && (selection.job_number || selection.job_id);
-    const po = selection && selection.po_number ? 'PO ' + selection.po_number : (selection && selection.po_id ? 'selected order' : 'whole job');
+    const po = selection && selection.po_number ? 'PO ' + selection.po_number : (selection && selection.po_id ? 'selected order' : 'no PO selected');
     const inv = selection && selection.invoice_id ? ' · invoice ' + selection.invoice_id : '';
     return `<section class="ops-context-mail" data-context-mail="${esc(kind)}" data-capability="pending">
       <h3>Original email history</h3>
       <p class="dp-small">One canonical store (CIO). Captured PO mail below is not that store. Inbox-only capture is not complete sent history.</p>
-      <p class="dp-notice" role="status">${job ? 'Job ' + esc(job) + ' · ' + esc(po) + esc(inv) + '.' : 'Select a job to see all relevant history, then narrow to a PO/group if needed.'} ${esc(extra || 'Canonical reader unread. Absence is not proof of no email.')}</p>
+      <p class="dp-notice" role="status">${job ? 'Selected ' + esc(job) + ' · ' + esc(po) + esc(inv) + '.' : 'Select a job to see all relevant history, then narrow to a PO/group if needed.'} ${esc(extra || 'Canonical reader unread. Absence is not proof of no email.')}</p>
     </section>`;
   }
 

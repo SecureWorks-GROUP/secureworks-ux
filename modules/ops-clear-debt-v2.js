@@ -209,7 +209,7 @@ async function cdLoadRecord() {
 }
 function cdHostSelection(lead, ctx) {
   var jobId = (ctx && ctx.link && ctx.link.job_id) || (ctx && ctx.job && ctx.job.id) || lead.job_id || null;
-  return { kind: 'debt', invoice_id: lead.xero_invoice_id, job_id: jobId };
+  return { kind: 'debt', invoice_id: lead.xero_invoice_id, job_id: jobId, stale_proposals: cdProposalStale(lead, ctx) };
 }
 function cdProposalStale(lead, ctx) {
   if (lead.debt_proposal_status !== 'pending' || !lead.debt_proposal_at) return null;
@@ -257,7 +257,7 @@ function cdRecordHtml(P, S, K, ctx, err) {
   var honesty = ctx ? (ctx.blockers || []).map(function (b) { return '<div class="cd-pend"><b>' + cdEsc(b.owner) + ': ' + cdEsc(b.code) + '</b> ' + cdEsc(b.detail) + '</div>'; }).join('') + (ctx.warnings || []).map(function (w) { return '<div class="cd-pend">' + cdEsc(w) + '</div>'; }).join('') : '';
   var handoff = lead.debt_handoff_ref ? '<p>Handoff: ' + cdEsc(lead.debt_handoff_ref) + ' · ' + cdEsc(cdWhen(lead.debt_handoff_at)) + '</p>' : '';
   var sel = cdHostSelection(lead, ctx);
-  var selHtml = '<p class="cd-quiet" data-how-it-works-kind="debt" data-invoice-id="' + cdEsc(sel.invoice_id || '') + '" data-job-id="' + cdEsc(sel.job_id || '') + '">Host communications: invoice_id ' + cdEsc(sel.invoice_id || 'none') + (sel.job_id ? ' · job_id ' + cdEsc(sel.job_id) : '') + '. Email sits with GHL. A paid claim in mail is evidence to review, not settlement.</p>';
+  var selHtml = '<p class="cd-quiet" data-how-it-works-kind="debt" data-invoice-id="' + cdEsc(sel.invoice_id || '') + '" data-job-id="' + cdEsc(sel.job_id || '') + '" data-stale-proposals="' + cdEsc(sel.stale_proposals || '') + '">Host communications: kind=debt invoice_id ' + cdEsc(sel.invoice_id || 'none') + (sel.job_id ? ' · job_id ' + cdEsc(sel.job_id) : '') + '. Email sits with GHL. A paid claim in mail is evidence to review, not settlement.</p>';
   var stale = cdProposalStale(lead, ctx);
   var staleHtml = stale ? '<div class="cd-pend"><b>Proposal stale</b> ' + (stale === 'client_reply' ? 'A newer client message arrived after this draft. Reassess before Marnin sees it.' : 'A newer Xero allocation arrived after this draft. That is not by itself proof of payment in the bank. Reassess.') + '</div>' : '';
   return errHtml + honesty + selHtml + staleHtml + '<p>Context and notes for <b>' + cdEsc(lead.invoice_number) + '</b>: ' + cdEsc(lead.debt_classification_reason || 'Reason unavailable; desk review needed') + '</p>' + handoff + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +

@@ -30,8 +30,10 @@ async function main() {
   const fetches=[]; c.CD.open=null; c.CD.seg=null; c.opsFetch=async (action)=>{fetches.push(action); if(action==='list_debt_picture') return {rows:[invoice('a')],totals:{genuine_debt:{count:1,amount_due:100}},picture_as_of:'2026-09-13T00:00:00Z'}; if(action==='debt_context_coverage') return {as_of:'2026-09-13T00:00:00Z',rows:[{xero_invoice_id:'a',complete:true}],totals:{invoices:1}}; return {};}; c.opsPost=async (...args)=>{calls.push(args); throw new Error('refresh must not post');}; await c.cdRefreshPicture(); assert.deepEqual(fetches,['list_debt_picture','debt_context_coverage']); assert.equal(calls.filter(a=>String(a[0]).includes('send')).length,0);
   c.CD.rows=[invoice('a')]; c.CD.savingProposal=false; el('cd-sms').value='Please review the invoice with Marnin.'; el('cd-sms-to').value='+61491570156'; c.opsPost=async ()=>({status:409,error:'Invoice or proposal changed. Refresh before saving again.'}); await c.cdSaveProposal('a','sms',null); assert.notEqual(c.CD.rows[0].debt_proposal_status,'pending');
   const pending=invoice('a',{debt_proposal_status:'pending',debt_proposal_at:'2026-09-10T00:00:00Z',debt_proposal_text:'old',job_id:'job-1'});
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).kind,'debt');
   assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).invoice_id,'a');
   assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).job_id,'job-1');
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'},conversation:{last_client_message:{at:'2026-09-12T00:00:00Z'}}}).stale_proposals,'client_reply');
   assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-12T00:00:00Z'}},bank:{xero_payments:[]}}),'client_reply');
   assert.equal(c.cdProposalStale(pending,{conversation:{},bank:{xero_payments:[{date:'2026-09-12',amount:50}]}}),'xero_payment');
   assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-09T00:00:00Z'}},bank:{xero_payments:[]}}),null);

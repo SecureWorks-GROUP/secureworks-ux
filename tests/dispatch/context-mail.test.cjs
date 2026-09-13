@@ -62,5 +62,5 @@ test('PO filter is passed so delivery A does not request PO B', async () => {
   const html = mail.render('dispatch', { job_id: 'job-1', po_id: 'po-a' }, state);
   assert.match(html, /Inbox-only boundary/);
   assert.match(html, /proposal_requires_reassessment/);
-  assert.doesNotMatch(html, /settlement/);
+  assert.match(html, /not settlement/);
 });

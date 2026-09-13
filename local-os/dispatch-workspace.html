@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecureWorks · Dispatch workspace</title>
+<link rel="stylesheet" href="os.css">
+<style>
+.shell { display: grid; grid-template-columns: 250px minmax(0,1fr) 320px; min-height: calc(100vh - 90px); }
+.rail, .mail { background: #f0ede7; border-right: 1px solid var(--line); padding: 16px 14px; }
+.mail { border-right: 0; border-left: 1px solid var(--line); background: var(--paper); }
+.work { padding: 18px 20px 40px; min-width: 0; }
+h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -.02em; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+.jobbtn {
+  display: block; width: 100%; text-align: left; border: 1px solid transparent;
+  background: transparent; padding: 10px 9px; margin-bottom: 4px;
+}
+.jobbtn[aria-pressed="true"] { background: var(--paper); border-color: #aebcc4; }
+.jobbtn strong { display: block; }
+.jobbtn small { display: block; color: var(--muted); margin-top: 2px; }
+.seq { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
+.seq button { padding: 6px 9px; min-height: 34px; font-size: 12px; border: 1px solid var(--line); background: var(--paper); }
+.seq button[aria-current="step"] { background: var(--dark); color: #fff; border-color: var(--dark); }
+.seq .done { box-shadow: inset 0 -2px 0 var(--green); }
+.pack { border: 1px solid var(--line); background: var(--paper); padding: 12px; margin: 0 0 10px; }
+.pack h3 { margin: 0 0 6px; font-size: 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 12px; }
+.grid2 b { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.lines { width: 100%; min-height: 110px; padding: 8px; border: 1px solid var(--line); background: #fff; }
+.draft { width: 100%; min-height: 140px; padding: 10px; border: 1px solid var(--line); }
+.dim { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.dim label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.release { margin-top: 14px; padding: 12px; border: 1px solid var(--line); }
+.release.blocked { background: #fff4f1; border-color: #e3b6ad; }
+.mailitem { border-bottom: 1px solid var(--line); padding: 10px 0; font-size: 12px; }
+.mailitem strong { display: block; }
+.note { font-size: 12px; color: var(--muted); }
+.ai { background: #fff7ee; border: 1px dashed var(--orange); padding: 10px; font-size: 12px; margin: 10px 0; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--dark); color: #fff; padding: 10px 14px; z-index: 5; }
+.search { width: 100%; padding: 9px; border: 1px solid var(--line); background: #fff; margin-bottom: 10px; }
+@media (max-width: 1100px) { .shell { grid-template-columns: 210px minmax(0,1fr); } .mail { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); } }
+@media (max-width: 700px) { .shell { display: block; } .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="os-top">
+  <span class="os-brand"><span class="os-mark"></span>SecureWorks</span>
+  <a href="index.html">Local OS</a>
+  <a href="context-door.html">Context</a>
+  <a href="executive-door.html">Executive</a>
+  <a href="dispatch-workspace.html" aria-current="page">Dispatch</a>
+  <a href="booking-door.html">Booking</a>
+  <span class="os-hold">Send hold on · no supplier mail</span>
+</header>
+<div class="os-banner">
+  <strong>Local workshop.</strong> Snapshot 12 Sep 07:47 Perth (DISPATCH-SAMPLE-DATA / MONDAY-READINESS). Live Suite job cards re-read 13 Sep 17:13 Perth for status only. Ticks live in this browser. They do not pay, send, or move a crew.
+</div>
+<details class="how" open>
+  <summary>How Dispatch works on this page</summary>
+  <ol>
+    <li>Pick a job. The notebook is the list, not a status percentage.</li>
+    <li>Write the lines. Split them by supplier (B&amp;D versus R&amp;R, Bondor, Lysaght, Ampelite). A multi-supplier job stays in pieces.</li>
+    <li>Draft the supplier email here. Stamp it locally. The page cannot send.</li>
+    <li>Paid, ready, pickup and schedule are separate. Unknown and unpaid stay visible. AI may suggest. Shaun confirms.</li>
+    <li>Paid roof sheets never turn a job green. Clarkson stays HOLD while permit and steel are missing.</li>
+  </ol>
+</details>
+<div class="shell">
+  <aside class="rail" aria-label="Jobs">
+    <label class="sr-only" for="search">Find job</label>
+    <input id="search" class="search" type="search" placeholder="Job, suburb, supplier">
+    <h2>Proof jobs</h2>
+    <div id="proofList"></div>
+    <h2 style="margin-top:16px">Also on the week</h2>
+    <div id="otherList"></div>
+    <p class="note">Undated money stays in the mail panel even when a job has no date.</p>
+  </aside>
+  <main class="work" id="workshop"></main>
+  <aside class="mail" id="mail" aria-label="POs and supplier mail"></aside>
+</div>
+<div id="toast" class="toast" hidden role="status"></div>
+<script>
+const AS_OF = '12 Sep 2026, 07:47 Perth';
+const LIVE = '13 Sep 2026, 17:13 Perth';
+const STEPS = ['lines','split','draft','paid','ready','pickup','schedule'];
+const STEP_LABEL = {lines:'1 Lines',split:'2 Split suppliers',draft:'3 Draft email',paid:'4 Paid',ready:'5 Ready',pickup:'6 Pickup / call',schedule:'7 Schedule'};
+const JOBS = [
+  {id:'SWP-26941',proof:true,suburb:'Clarkson',install:'14-15 Sep',crew:'Henry, Isaac, Jan',booking:'tentative',hold:true,
+    liveStatus:'scheduled (live job card '+LIVE+')',
+    permit:'Council still Drafting, no CDC',
+    next:'Confirm existing steel/flashings order before placing another. Hold install release.',
+    owner:'Shaun',
+    lines:'SolarSpan 75 mm, 16 sheets, last cut 800 mm\nRidge cap and gable infill\n4 posts, beams, trusses, purlins, risers, brackets\nGutter and downpipes\nAmpelite sheets (pickup noted 9 Sep)\nPermit: wall photos still owed to surveyor',
+    packs:[
+      {id:'clarkson-roof',supplier:'Bondor / roof sheets',kind:'Roof sheets',qty:'16 SolarSpan claimed delivered',po:null,order:'Claim recorded',send:'Not separately evidenced',reply:'Delivered claim 10 Sep',promised:'None in sample',receipt:'Claimed delivered 10 Sep. Not steel proof.',payment:'Not the steel package',ai:'Roof claim does not release steel or permit.',greenNever:true},
+      {id:'clarkson-amp',supplier:'Ampelite',kind:'Polycarbonate',qty:'Pickup noted 9 Sep',po:null,order:'Noted',send:'Unknown',reply:'Unknown',promised:'Pickup 9 Sep noted',receipt:'Unknown',payment:'Paid per 11 Sep register',ai:'Ampelite paid does not complete steel.'},
+      {id:'clarkson-steel',supplier:'B&D Metals / CMI',kind:'Steel and flashings',qty:'Exact take-off needs confirmation',po:null,order:'No evidence found',send:'No send recorded',reply:'No acceptance recorded',promised:'None',receipt:'None',payment:'Unknown',ai:'Do not invent a kit. Confirm whether an order already exists.'}
+    ],
+    mail:[{when:'No steel/flashings mail in the 12 Sep sample',who:'B&D / CMI',text:'Bounded sample found no steel order. Check before ordering again.'},{when:'Roof claim · 10 Sep',who:'Roof sheets',text:'Claimed delivered. This is not a physical receipt for steel.'}],
+    pos:[{no:'none','for':'Steel / flashings',state:'No system PO'},{no:'none','for':'Roof sheets',state:'No system PO. Delivery is a claim.'}],
+    undated:['Permit still Drafting. No CDC.']},
+  {id:'SWF-261271',proof:true,suburb:'Scarborough',install:'14 Sep',crew:'Henry',booking:'confirmed',hold:false,
+    liveStatus:'scheduled, fencing, value $4,060.10 (live job card '+LIVE+')',
+    next:'Get delivery receipt and match the supplier invoice before Henry starts.',
+    owner:'Operations',
+    lines:'Monument Sameside 7 panels / 16.7 m rear run\n7 plinths\nPosts and rails to suit\nSupplier R&R',
+    packs:[{id:'scarborough-rr',supplier:'R&R Fencing',kind:'Panels and plinths',qty:'7 panels, 7 plinths',po:'PO-294460',amount:1163.8,order:'PO confirmed in app',send:'PO confirmed. Outbound send not separately evidenced.',reply:'No delivery confirmation recorded',promised:'Requested 10 Sep (target, not a verified promise)',receipt:'delivery_confirmed_at empty. Not received.',payment:'paid_at empty; no Xero bill link. Customer deposit INV-1401 is not supplier settlement.',ai:'Treat 10 Sep as a missed target, not as arrived.'}],
+    mail:[{when:'PO communications array empty · 12 Sep 07:47',who:'R&R',text:'No supplier reply in the joined PO record. Arrival is unverified.'}],
+    pos:[{no:'PO-294460','for':'R&R Monument Sameside',state:'confirmed $1,163.80 inc GST. paid_at null. delivery_confirmed_at null. xero_bill_id null.'}]},
+  {id:'SWF-26968',proof:true,suburb:'Spearwood',install:'14 Sep',crew:'Henry',booking:'confirmed',hold:false,
+    liveStatus:'scheduled. purchase_orders 0. INV-1400 PAID $1,665.13 deposit. deposit stamp still empty ('+LIVE+')',
+    next:'Marnin pay decision. Do not collect Monday as paid.',
+    owner:'Operations',
+    lines:'Paperbark Neetascreen 4 panels, 8.5 m\n14 plinths\n5 x 76x38 RHS tubes, 3000 mm (B&D)\nLysaght panels ordered/paid separately',
+    packs:[
+      {id:'spearwood-lys',supplier:'Lysaght',kind:'Neetascreen panels',qty:'4 panels, 14 plinths',po:null,order:'Ordered/paid per 11 Sep register',send:'Mail-only, not a system PO',reply:'Lysaght delivery planned 11 Sep',promised:'11 Sep planned',receipt:'Unknown in 12 Sep sample',payment:'Neetascreen ordered/paid (register)',ai:'Panels paid is not B&D tubes paid.'},
+      {id:'spearwood-bd',supplier:'B&D Metals',kind:'RHS tubes',qty:'5 tubes 76x38 x 3000 mm',po:null,order:'Supplier says order ready',send:'No system PO',reply:'11 Sep 11:51 Perth: order ready for pickup',promised:'Ready-for-pickup claim 11 Sep',receipt:'Collection not evidenced',payment:'Not paid. Bookkeeping 12 Sep: no bill for 26968. A five-tube draft is coded Alexander Heights.',ai:'Do not collect as paid. Paying B&D is a named yes.'}
+    ],
+    mail:[{when:'11 Sep 2026, 11:51 Perth',who:'B&D Metals',text:'Order ready for pickup. Collection not evidenced. This is a supplier claim, not a paid bill.'},{when:'12 Sep Bookkeeping',who:'Xero bills',text:'No paid or authorised B&D bill for SWF-26968. Do not collect as paid.'}],
+    pos:[{no:'none','for':'B&D tubes',state:'No system PO. Payment proof is not in a PO record.'}],
+    undated:['B&D Spearwood unpaid. Do not collect as paid.']},
+  {id:'SWF-26979',proof:false,suburb:'Lynwood',install:'15 Sep',crew:'Henry',booking:'confirmed',
+    lines:'Woodland Grey Ridgeside 9 panels / 20 m\n8 plinths',
+    packs:[{id:'lynwood-rr',supplier:'R&R Fencing',kind:'Panels',qty:'9 panels, 8 plinths',po:'PO-298035',amount:1417.8,order:'PO confirmed',send:'PO confirmed',reply:'Receipt unknown',promised:'Requested 11 Sep',receipt:'Unknown',payment:'paid_at empty'}],
+    mail:[{when:'12 Sep 07:47',who:'R&R',text:'PO-298035 confirmed. delivery_confirmed_at null.'}],
+    pos:[{no:'PO-298035','for':'R&R',state:'confirmed $1,417.80. paid_at null. delivery_confirmed_at null.'}],
+    next:'Verify receipt before Tuesday.',owner:'Operations'},
+  {id:'SWF-26168',proof:false,suburb:'South Perth',install:'17-18 Sep',crew:'Henry',booking:'tentative',
+    lines:'Ridgeside panels/posts (R&R)\nSteel for 600 mm slat infill (B&D)',
+    packs:[
+      {id:'sp-rr',supplier:'R&R Fencing',kind:'Ridgeside',qty:'Per PO-302382',po:'PO-302382',amount:1727.8,order:'PO confirmed',send:'PO confirmed',reply:'Email 9 Sep: delivered Monday 14 Sep as requested',promised:'Mon 14 Sep · supplier promise (email 9 Sep, not AI)',receipt:'Not recorded',payment:'paid_at empty'},
+      {id:'sp-bd',supplier:'B&D Metals',kind:'Slat steel',qty:'To confirm',po:null,order:'Supplier invoice on hand',send:'No system PO',reply:'Delivery Wed 16 only after payment',promised:'Wed 16 unconfirmed / conditional',receipt:'Not recorded',payment:'Invoice unpaid. Due date not transcribed.'}
+    ],
+    mail:[{when:'9 Sep (supplier email)',who:'R&R',text:'Will be delivered Monday 14 Sep as requested. Promise, not receipt.'}],
+    pos:[{no:'PO-302382','for':'R&R',state:'confirmed $1,727.80'}],
+    next:'Proposed 15-16 is a label only. $2,653.75 bank credit is SWF-261408, not this slat job.',
+    undated:['B&D slat-steel invoice unpaid. Due date not transcribed.']}
+];
+const UNDATED = [
+  'SWF-26968 B&D: ready to collect claim; Bookkeeping 12 Sep found no paid bill. Do not collect as paid.',
+  'SWF-26168 B&D slat-steel invoice unpaid; due date not transcribed.',
+  'SWF-261408 (same South Perth site): $2,653.75 in the bank, no invoice. Not the slat job.'
+];
+let selected = 'SWP-26941';
+let step = 'lines';
+const storeKey = 'sw_local_os_dispatch_v1';
+const state = JSON.parse(localStorage.getItem(storeKey) || '{}');
+function save(){ localStorage.setItem(storeKey, JSON.stringify(state)); }
+function jobState(id){
+  if (!state[id]) state[id] = {lines:null, ticks:{}, draft:{}, confirmed:{}, notes:''};
+  return state[id];
+}
+function jobGreenNever(j){
+  if (j.id === 'SWP-26941') return true;
+  return j.packs.some(p => p.greenNever);
+}
+function releaseBlocked(j, js){
+  if (j.hold || j.id === 'SWP-26941') return {blocked:true, why:'HOLD. Permit and steel/flashings evidence missing. Roof sheets do not release this job.'};
+  const unpaid = j.packs.filter(p => /not paid|unknown|empty|unpaid/i.test(p.payment) && !/not the steel/i.test(p.payment));
+  const unreceived = j.packs.filter(p => /not recorded|empty|unknown|not received|not evidenced/i.test(p.receipt));
+  if (j.id === 'SWF-26968') return {blocked:true, why:'Tubes claimed ready. B&D not paid. Do not collect as paid. Monday install remains on the calendar anyway.'};
+  if (j.id === 'SWF-261271') return {blocked:true, why:'Arrival unverified. PO confirmed is not received.'};
+  if (unpaid.length || unreceived.length) return {blocked:true, why:'At least one package is unpaid or unreceived.'};
+  return {blocked:false, why:'No automatic release. Shaun still confirms on the day.'};
+}
+function toast(t){ const el = document.getElementById('toast'); el.textContent = t; el.hidden = false; clearTimeout(window._t); window._t = setTimeout(() => el.hidden = true, 4000); }
+function renderRail(){
+  const q = document.getElementById('search').value.toLowerCase();
+  const match = j => !q || `${j.id} ${j.suburb} ${j.packs.map(p=>p.supplier).join(' ')}`.toLowerCase().includes(q);
+  const btn = j => `<button class="jobbtn" data-job="${j.id}" aria-pressed="${selected===j.id}"><strong>${j.id} · ${j.suburb}</strong><small>${j.install} · ${j.booking}${j.hold?' · HOLD':''}</small></button>`;
+  document.getElementById('proofList').innerHTML = JOBS.filter(j=>j.proof&&match(j)).map(btn).join('');
+  document.getElementById('otherList').innerHTML = JOBS.filter(j=>!j.proof&&match(j)).map(btn).join('') || '<p class="note">No other matches.</p>';
+  document.querySelectorAll('[data-job]').forEach(b => b.onclick = () => { selected = b.dataset.job; step = 'lines'; render(); });
+}
+function renderWork(){
+  const j = JOBS.find(x => x.id === selected);
+  const js = jobState(j.id);
+  const lines = js.lines ?? j.lines;
+  const rel = releaseBlocked(j, js);
+  const grouped = {};
+  j.packs.forEach(p => { (grouped[p.supplier] ||= []).push(p); });
+  let body = `<h1>${j.id} ${j.suburb}</h1>
+    <p class="note">${j.install} · ${j.crew || ''} · ${j.booking}. Live card: ${j.liveStatus || 'not re-read'}. Snapshot ${AS_OF}.</p>
+    <p><span class="pill ${j.hold?'hold':'warn'}">${j.hold?'HOLD':'Open packages'}</span> <span class="stamp">Owner ${j.owner}. Next: ${j.next}</span></p>
+    <div class="seq">${STEPS.map(s => `<button data-step="${s}" aria-current="${step===s?'step':'false'}" class="${js.ticks[s]?'done':''}">${STEP_LABEL[s]}</button>`).join('')}</div>`;
+  if (step === 'lines') {
+    body += `<h2>Write the list</h2><p class="note">Take-off from ORDERS-2026-09-11.md, 19:53 Perth, plus 12 Sep live facts. Edit locally. This is not an order book.</p>
+      <textarea class="lines" id="lines">${escape(lines)}</textarea>
+      <div class="dim"><button class="btn primary" id="saveLines">Keep list in this browser</button></div>`;
+  }
+  if (step === 'split') {
+    body += `<h2>Split by supplier</h2><p class="note">B&amp;D and R&amp;R stay separate. Amounts are not added across suppliers.</p>` +
+      Object.entries(grouped).map(([sup, packs]) => `<section class="pack"><h3>${escape(sup)}</h3>${packs.map(p => `<p><strong>${escape(p.kind)}</strong> · ${escape(p.qty)}${p.po?` · ${p.po}`:''}${p.amount?` · $${p.amount.toFixed(2)}`:''}</p>`).join('')}</section>`).join('');
+  }
+  if (step === 'draft') {
+    const drafts = {
+      'SWP-26941': 'Hi, please confirm whether an order already exists for SWP-26941 Clarkson steel and flashings before we place another. Kind regards, SecureWorks Group Operations',
+      'SWF-261271': 'Hi, please send delivery receipt for PO-294460 SWF-261271 Scarborough, Monument Sameside 7 panels. Kind regards, SecureWorks Group Operations',
+      'SWF-26968': 'Hi, thanks for confirming SWF-26968 is ready for pickup. We will collect once payment is on your account. Please confirm the Malaga cutoff time. Kind regards, SecureWorks Group Operations'
+    };
+    const current = js.draft.text || drafts[j.id] || 'Draft a supplier note. No send from this page.';
+    body += `<h2>Draft supplier email</h2>
+      <p class="note">From admin@ if later approved. Exact OPERATIONS proposals 12 Sep. Stamp only.</p>
+      <label class="note">Recipient (local)</label>
+      <input id="draftTo" style="width:100%;padding:8px;border:1px solid var(--line);margin:6px 0" value="${escape(js.draft.to || (j.packs[0]&&j.packs[0].supplier) || '')}">
+      <textarea class="draft" id="draftText">${escape(current)}</textarea>
+      <div class="ai"><strong>AI suggestion, not a send.</strong> ${escape(j.packs[0].ai)} Shaun confirms wording before any later approved send.</div>
+      <div class="dim"><button class="btn primary" id="stampDraft">Stamp locally</button><button class="btn" disabled>Send (held)</button></div>
+      ${js.draft.stamped ? `<p class="pill ok">Stamped ${js.draft.stamped}. Nothing left this machine.</p>` : ''}`;
+  }
+  if (step === 'paid') {
+    body += `<h2>Paid is its own column</h2>` + j.packs.map(p => `<section class="pack"><h3>${escape(p.supplier)} · ${escape(p.kind)}</h3>
+      <div class="grid2"><div><b>Payment evidence</b><span>${escape(p.payment)}</span></div><div><b>PO</b><span>${escape(p.po || 'none')}</span></div></div>
+      <label class="note"><input type="checkbox" data-tick="paid:${p.id}" ${js.ticks['paid:'+p.id]?'checked':''}> Shaun confirms paid</label>
+      ${/unknown|empty|not paid|unpaid/i.test(p.payment) ? '<p class="pill hold">Unpaid / unknown stays visible</p>' : ''}</section>`).join('');
+  }
+  if (step === 'ready') {
+    body += `<h2>Ready is a supplier claim until Shaun says otherwise</h2>` + j.packs.map(p => `<section class="pack"><h3>${escape(p.supplier)}</h3>
+      <div class="grid2"><div><b>Reply</b><span>${escape(p.reply)}</span></div><div><b>Receipt</b><span>${escape(p.receipt)}</span></div></div>
+      <label class="note"><input type="checkbox" data-tick="ready:${p.id}" ${js.ticks['ready:'+p.id]?'checked':''}> Shaun confirms ready</label></section>`).join('');
+  }
+  if (step === 'pickup') {
+    body += `<h2>Call on the date, then collect</h2>
+      <p class="note">Pickup is not site arrival. Collection receipt is separate from a ready claim.</p>` +
+      j.packs.map(p => `<section class="pack"><h3>${escape(p.supplier)}</h3><p>${escape(p.receipt)}</p>
+      <label>Collector <input data-field="collector:${p.id}" value="${escape(js.ticks['collector:'+p.id] || '')}" style="padding:6px;border:1px solid var(--line)"></label>
+      </section>`).join('');
+  }
+  if (step === 'schedule') {
+    body += `<h2>Schedule last</h2>
+      <p>Current booking: <strong>${j.install}</strong> · ${j.crew || 'crew not named'} · ${j.booking}.</p>
+      <p class="note">This page cannot move Outlook or Ops calendar. Clarkson 14-15 Sep is still on the live calendar as a tentative hold case.</p>`;
+  }
+  const roof = j.id === 'SWP-26941' && (js.ticks['paid:clarkson-roof'] || js.ticks['ready:clarkson-roof']);
+  body += `<div class="release ${rel.blocked?'blocked':''}"><strong>${rel.blocked ? 'Do not release the crew' : 'No automatic green'}</strong>
+    <p>${escape(rel.why)}</p>
+    ${roof ? '<p class="pill hold">Paid or claimed roof sheets are ticked. Job is still not green.</p>' : ''}
+    <p class="stamp">Job-green rule is computed from evidence, not from local ticks.</p>
+    <label class="note"><input type="checkbox" data-tick="step:${step}" ${js.ticks[step]?'checked':''}> Shaun confirms this step</label>
+  </div>`;
+  document.getElementById('workshop').innerHTML = body;
+  document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { step = b.dataset.step; render(); });
+  document.getElementById('saveLines')?.addEventListener('click', () => { js.lines = document.getElementById('lines').value; js.ticks.lines = true; save(); toast('List kept in this browser only.'); render(); });
+  document.getElementById('stampDraft')?.addEventListener('click', () => {
+    js.draft = {to: document.getElementById('draftTo').value, text: document.getElementById('draftText').value, stamped: new Date().toLocaleString('en-AU', {timeZone:'Australia/Perth'})};
+    js.ticks.draft = true; save(); toast('Draft stamped locally. Send hold remains.'); render();
+  });
+  document.querySelectorAll('[data-tick]').forEach(el => el.onchange = () => { js.ticks[el.dataset.tick] = el.checked; if (el.dataset.tick.startsWith('step:')) js.ticks[step] = el.checked; save(); render(); });
+  document.querySelectorAll('[data-field]').forEach(el => el.onchange = () => { js.ticks[el.dataset.field] = el.value; save(); });
+}
+function renderMail(){
+  const j = JOBS.find(x => x.id === selected);
+  document.getElementById('mail').innerHTML = `<h2>Purchase orders</h2>
+    ${j.pos.map(p => `<div class="mailitem"><strong>${escape(p.no)}</strong><span>${escape(p.for)}</span><div class="note">${escape(p.state)}</div></div>`).join('')}
+    <h2 style="margin-top:18px">Supplier mail</h2>
+    ${j.mail.map(m => `<div class="mailitem"><strong>${escape(m.who)}</strong><span class="stamp">${escape(m.when)}</span><p>${escape(m.text)}</p></div>`).join('')}
+    <h2 style="margin-top:18px">Undated / unpaid</h2>
+    ${(j.undated || []).concat(UNDATED.filter(u => u.includes(j.id) || u.includes('261408'))).filter((v,i,a)=>a.indexOf(v)===i).map(u => `<div class="mailitem"><span class="pill hold">Open</span><p>${escape(u)}</p></div>`).join('')}
+    <p class="stamp">Sources: DISPATCH-SAMPLE-DATA.json ${AS_OF}; OPERATIONS TODAY 12 Sep; BOOKKEEPING 12 Sep 08:05; live Suite ${LIVE} for job status only.</p>`;
+}
+function escape(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function render(){ renderRail(); renderWork(); renderMail(); }
+document.getElementById('search').addEventListener('input', renderRail);
+render();
+</script>
+</body>
+</html>

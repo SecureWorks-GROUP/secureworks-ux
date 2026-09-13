@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecureWorks · Context door</title>
+<link rel="stylesheet" href="os.css">
+<style>
+.layout { display: grid; grid-template-columns: 240px minmax(0,1fr) 300px; min-height: calc(100vh - 120px); }
+.jobs, .wiki { background: #f0ede7; padding: 16px 14px; }
+.wiki { background: var(--paper); border-left: 1px solid var(--line); }
+.main { padding: 18px 20px 40px; border-left: 1px solid var(--line); }
+.health { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin: 12px 22px; }
+.stat { background: var(--paper); border: 1px solid var(--line); padding: 12px; }
+.stat b { display: block; font-size: 20px; letter-spacing: -.03em; }
+.stat span { font-size: 11px; color: var(--muted); }
+.jobbtn { display:block;width:100%;text-align:left;border:1px solid transparent;background:transparent;padding:10px 8px;margin-bottom:3px; }
+.jobbtn[aria-pressed="true"] { background: var(--paper); border-color:#aebcc4; }
+.cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.col { background: var(--paper); border: 1px solid var(--line); padding: 12px; min-height: 220px; }
+.col h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mid); }
+.fact { border-bottom: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
+.fact .src { display:block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.search { width:100%; padding:8px; border:1px solid var(--line); background:#fff; margin-bottom:10px; }
+.wiki p, .wiki li { font-size: 12px; color: var(--muted); }
+@media (max-width: 1100px) { .layout { grid-template-columns: 200px minmax(0,1fr); } .wiki { grid-column: 1 / -1; } .cols { grid-template-columns: 1fr; } .health { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<header class="os-top">
+  <span class="os-brand"><span class="os-mark"></span>SecureWorks</span>
+  <a href="index.html">Local OS</a>
+  <a href="context-door.html" aria-current="page">Context</a>
+  <a href="executive-door.html">Executive</a>
+  <a href="dispatch-workspace.html">Dispatch</a>
+  <a href="booking-door.html">Booking</a>
+  <span class="os-hold">Read only · no extraction write</span>
+</header>
+<div class="os-banner">
+  <strong>What the system currently knows.</strong>
+  Luna facts are only rows written by <code>context-luna-subscription:v1</code>. Coverage-door "Luna" counts are any <code>current_job_context_facts</code> row, including old Haiku. Every figure below is labelled with its source time.
+</div>
+<details class="how">
+  <summary>How this door works</summary>
+  <ol>
+    <li>Pick a job. The three columns are facts, evidence, and the honest gap. A gap is not filled with a story.</li>
+    <li>Worker health is the Luna fence (once-daily 06:00 Perth, cap 400), last proven run, and the fail-closed switch if it was readable.</li>
+    <li>Wiki / operating memory is the ceo-ops lane files, not a second company brain.</li>
+    <li>Live Suite AXI on 13 Sep 17:13 Perth returned job cards. It did not return Luna fact rows. Those stay on the 12 Sep CIO snapshot.</li>
+  </ol>
+</details>
+<section class="health" aria-label="Pipeline health">
+  <div class="stat"><b>3</b><span>Luna facts live · 10 Sep 12:05Z last write<br>Source: CIO SQL 12 Sep 19:07 Perth</span></div>
+  <div class="stat"><b>565</b><span>Current facts / 305 jobs, all expiry null<br>Most are not Luna. Source: same SQL</span></div>
+  <div class="stat"><b>true</b><span>Railway CONTEXT_WORKER_ENABLED<br>Last deploy 11 Sep 13:39 Perth. Fence: 06:00 / cap 400. Old MAX_HOURLY=4 on that service is the 11 Sep S-06 batch, not the approved rate.</span></div>
+  <div class="stat"><b>held</b><span>B1 switch #833 unmerged. Fail-closed DB switch not in production. Source: CIO TODAY 12 Sep</span></div>
+</section>
+<div class="layout">
+  <aside class="jobs">
+    <input id="search" class="search" type="search" placeholder="Job or suburb">
+    <h2 style="font-size:14px">Jobs</h2>
+    <div id="list"></div>
+  </aside>
+  <main class="main" id="panel"></main>
+  <aside class="wiki" id="wiki"></aside>
+</div>
+<script>
+const JOBS = [
+  {id:'SWP-26941',suburb:'Clarkson',type:'patio',status:'scheduled',group:'empty',
+    live:'Live job card 13 Sep 17:13 Perth: scheduled, value $24,111.94. No Luna facts on this read.',
+    facts:[],
+    evidence:[
+      {t:'Calendar 14-15 Sep tentative · Henry, Isaac, Jan',s:'OPERATIONS TODAY 12 Sep 07:47 Perth'},
+      {t:'Council still Drafting, no CDC',s:'MONDAY-READINESS 12 Sep 07:47 Perth'},
+      {t:'Roof sheets claimed delivered 10 Sep. Steel/flashings: no order evidence.',s:'DISPATCH-SAMPLE-DATA 12 Sep 07:47 Perth'},
+      {t:'INV-1013 PAID $9,000 in cache. Job deposit_amount still empty.',s:'MONDAY-READINESS 12 Sep'}
+    ],
+    gaps:['No current_job_context_facts row in the 12 Sep Luna census (only SWF-261387, SWP-261376, SWF-261407).','Steel take-off not confirmed.','Permit photos still owed.','Live Suite view returned scope config, not a job story.']},
+  {id:'SWF-261271',suburb:'Scarborough',type:'fencing',status:'scheduled',
+    live:'Live job card 13 Sep 17:13 Perth: scheduled, fencing, $4,060.10. Internal quote cost $1,565.50 / labour $654.50 / margin $1,101.90 (pricing_json). That is quote math, not actuals.',
+    facts:[],
+    evidence:[
+      {t:'PO-294460 confirmed $1,163.80. delivery_date 10 Sep. delivery_confirmed_at null. paid_at null.',s:'DISPATCH-SAMPLE-DATA 12 Sep 07:47 Perth'},
+      {t:'Customer deposit INV-1401 PAID $2,030.05. Stamp written 11 Sep by CIO backfill.',s:'MONDAY-READINESS 12 Sep'},
+      {t:'Henry confirmed 14 Sep. Arrival unverified.',s:'OPERATIONS TODAY 12 Sep'}
+    ],
+    gaps:['No Luna fact.','Supplier mail array empty.','No Xero bill link.','Quote internal cost is not a job-cost actual.']},
+  {id:'SWF-26968',suburb:'Spearwood',type:'fencing',status:'scheduled',
+    live:'Live job card 13 Sep 17:13 Perth: scheduled. purchase_orders 0. INV-1400 PAID $1,665.13. deposit stamp empty.',
+    facts:[],
+    evidence:[
+      {t:'B&D email 11 Sep 11:51 Perth: order ready for pickup. Collection not evidenced.',s:'OPERATIONS TODAY / sample 12 Sep'},
+      {t:'Bookkeeping 12 Sep 08:05: no Xero bill for 26968. A five-tube draft is coded Alexander Heights, unpaid.',s:'BOOKKEEPING TODAY 12 Sep 08:05 Perth'},
+      {t:'Client told Monday by SMS on 4 Sep (historical, not this hold).',s:'MONDAY-READINESS 12 Sep'}
+    ],
+    gaps:['No Luna fact.','No system PO.','Paid deposit is not a paid B&D bill.']},
+  {id:'SWF-261387',suburb:'(Luna job)',type:'fencing',status:'quoted',group:'luna',
+    live:'Live job card 13 Sep 17:13 Perth: quoted $8,296.75. Suite view did not return fact rows.',
+    facts:[{t:'Unread. A Luna row exists. The fact body was not copied into the wiki snapshot.',s:'CIO live facts 12 Sep 18:40 Perth · extractor context-luna-subscription:v1 / gpt-5.6-luna · extracted 10 Sep 10:50Z · expires_at null'}],
+    evidence:[{t:'One of three production Luna facts. Not in the open-receivable 21.',s:'lanes/CIO/evidence/2026-09-12-live-luna-facts.md'}],
+    gaps:['Fact body unread. Live Suite job view did not expose current_job_context_facts. We know a Luna write happened, not what it said.']},
+  {id:'SWP-261376',suburb:'Dorothy',type:'patio',status:'awaiting_deposit',group:'luna',
+    live:'Live job card 13 Sep 17:13 Perth: awaiting_deposit, $19,948.56 (Dorothy).',
+    facts:[{t:'Unread. A Luna row exists. The fact body was not copied into the wiki snapshot.',s:'CIO 12 Sep 18:40 Perth · context-luna-subscription:v1 · extracted 10 Sep 11:06Z · expires_at null'}],
+    evidence:[{t:'Second of three Luna facts. Not in the debt-door 21.',s:'2026-09-12-live-luna-facts.md'}],
+    gaps:['Fact body unread here.']},
+  {id:'SWF-261407',suburb:'(Luna job)',type:'fencing',status:'unknown on this door',group:'luna',
+    live:'Not in the 13 Sep Suite jobs sample page. Status not re-proved today.',
+    facts:[{t:'Unread. A Luna row exists. Last Luna write in production, 10 Sep 12:05Z. Body not in the wiki snapshot.',s:'CIO 12 Sep 18:40 Perth · context-luna-subscription:v1'}],
+    evidence:[{t:'Third of three Luna facts.',s:'2026-09-12-live-luna-facts.md'}],
+    gaps:['Job card not in the 13 Sep Suite sample. Fact body unread.']},
+  {id:'SWP-26354',suburb:'(debt sample)',type:'patio',status:'open receivable sample',group:'haiku',
+    live:'Named in CIO 12 Sep as a sampled writer. Not a Luna job.',
+    facts:[{t:'Stored facts exist. Writer is Haiku, not Luna.',s:'CIO 12 Sep 18:40 Perth · context-fact-extractor:v1.5 / claude-haiku-4-5-20251001 or internal-instruction-extractor.ts · expires_at null'}],
+    evidence:[{t:'Coverage door would count this as "has facts". That label is not Luna.',s:'invoice_context.ts factsCountByJob counts any current_job_context_facts row'}],
+    gaps:['Do not call this a Luna understanding. Body not in the snapshot.']},
+  {id:'SWF-261408',suburb:'South Perth',type:'fencing',status:'awaiting_supplier',
+    live:'Live job card 13 Sep 17:13 Perth: awaiting_supplier, value $0 on that listing.',
+    facts:[],
+    evidence:[
+      {t:'$2,653.75 in the bank 2 Sep. OPERATIONS 12 Sep: 17.3 m fence, 50 percent of $5,307.50. Not SWF-26168.',s:'CASH-WITHOUT-INVOICE.md 12 Sep'},
+      {t:'No Xero contact on the job. Create-draft waits on a named yes.',s:'BOOKKEEPING TODAY 12 Sep 08:05'}
+    ],
+    gaps:['No invoice. No Luna fact. Cash is selected credit, not a job story.']}
+];
+let selected = 'SWP-26941';
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderList(){
+  const q = document.getElementById('search').value.toLowerCase();
+  const shown = JOBS.filter(j => !q || `${j.id} ${j.suburb} ${j.type} ${j.group||''}`.toLowerCase().includes(q));
+  const groups = [
+    {id:'empty', label:'Empty of Luna facts'},
+    {id:'luna', label:'Luna (body unread)'},
+    {id:'haiku', label:'Haiku, not Luna'},
+    {id:'other', label:'Also on this door'}
+  ];
+  const btn = j => `<button class="jobbtn" data-id="${j.id}" aria-pressed="${selected===j.id}"><strong>${j.id}</strong><br><span class="stamp">${j.suburb} · ${j.type}</span></button>`;
+  document.getElementById('list').innerHTML = groups.map(g => {
+    const rows = shown.filter(j => (j.group || 'other') === g.id);
+    return rows.length ? `<h3 class="stamp" style="margin:12px 0 4px">${g.label}</h3>${rows.map(btn).join('')}` : '';
+  }).join('');
+  document.querySelectorAll('[data-id]').forEach(b => b.onclick = () => { selected = b.dataset.id; render(); });
+}
+function renderPanel(){
+  const j = JOBS.find(x => x.id === selected);
+  const luna = j.group === 'luna' || j.facts.some(f => /Luna row|Luna fact/i.test(f.t));
+  const haiku = j.group === 'haiku' || j.facts.some(f => /Haiku/i.test(f.t));
+  document.getElementById('panel').innerHTML = `
+    <p class="stamp">${j.type} · ${j.status}</p>
+    <h1 style="margin:0 0 8px;font-size:24px">${j.id} ${esc(j.suburb)}</h1>
+    <p>${luna?'<span class="pill ok">Luna</span>':haiku?'<span class="pill warn">Haiku, not Luna</span>':'<span class="pill">No current fact</span>'}</p>
+    <p class="note" style="color:var(--muted);font-size:13px">${esc(j.live)}</p>
+    <div class="cols">
+      <section class="col"><h3>Current facts</h3>${j.facts.length?j.facts.map(f=>`<div class="fact">${esc(f.t)}<span class="src">${esc(f.s)}</span></div>`).join(''):'<p class="stamp">None on this door. That is the answer, not a missing widget.</p>'}</section>
+      <section class="col"><h3>Evidence</h3>${j.evidence.map(f=>`<div class="fact">${esc(f.t)}<span class="src">${esc(f.s)}</span></div>`).join('')}</section>
+      <section class="col"><h3>Honest gap</h3>${j.gaps.map(g=>`<div class="fact">${esc(g)}</div>`).join('')}</section>
+    </div>`;
+}
+function renderWiki(){
+  document.getElementById('wiki').innerHTML = `
+    <h2 style="font-size:15px;margin:0 0 8px">Operating memory</h2>
+    <p>Wiki ceo-ops campaign, not a second memory store. CIO owns capture and facts. Workflows read; they do not write company memory.</p>
+    <p><strong>Approved mechanic</strong> (11 Sep 16:05, Marnin): evidence in, attributed, facts on the job, readable. Extraction once daily 06:00 Perth, cap 400. Quiet jobs skip. Switch fails closed. Source: audits/2026-09-11-context-TARGET-ARCHITECTURE.md</p>
+    <p><strong>Live production 12 Sep 19:07 Perth:</strong> 565 current facts / 305 jobs, 3 Luna, all expiry null. B1-B4 tables absent. Coverage 21-with-facts is any-fact, not Luna.</p>
+    <p><strong>Send hold 12 Sep:</strong> no customer, supplier or subcontractor message. Proposals only.</p>
+    <p><strong>Monday collisions still on the calendar:</strong> Clarkson + Scarborough + Spearwood on Henry 14 Sep. Source: OPERATIONS TODAY 12 Sep.</p>
+    <p><strong>Packets:</strong> backend #833 first production gate, unmerged. Zero packets accepted live. Source: CIO TODAY 12 Sep.</p>
+    <p class="stamp">This pane is a dated reading of the wiki. It is not live graph memory.</p>`;
+}
+function render(){ renderList(); renderPanel(); renderWiki(); }
+document.getElementById('search').addEventListener('input', renderList);
+render();
+</script>
+</body>
+</html>

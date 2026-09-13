@@ -618,6 +618,10 @@ Gotchas:
   in the first place. Guards: `tests/e2e/ops-inverted-span-surfaces.spec.js` and
   `tests/e2e/ops-schedule-lane-overlap.spec.js`.
 
+## Local company OS (v1, local-only)
+
+Four openable HTML doors live in `local-os/` (`index.html` plus Context, Executive, Dispatch, Booking). They are dated local pages, not production Ops Dash. Send hold stays on. Do not merge them into `ops.html` without a named yes.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

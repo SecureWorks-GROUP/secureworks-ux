@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecureWorks · Executive door</title>
+<link rel="stylesheet" href="os.css">
+<style>
+.page { padding: 18px 22px 48px; }
+h1 { font-size: 26px; letter-spacing: -.03em; margin: 0 0 6px; }
+.seats { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.seats button { min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); background: var(--paper); }
+.seats button[aria-selected="true"] { background: var(--dark); color: #fff; border-color: var(--dark); }
+.grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 16px; }
+.card { background: var(--paper); border: 1px solid var(--line); padding: 16px; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+h3 { font-size: 13px; margin: 14px 0 6px; color: var(--mid); text-transform: uppercase; letter-spacing: .04em; }
+.q { background: var(--wash); border: 1px solid #f3c1ae; padding: 14px; margin: 12px 0 18px; }
+.q strong { display: block; font-size: 15px; margin-bottom: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.stop li { margin: 6px 0; }
+.decision { border-left: 3px solid var(--orange); padding: 8px 10px; margin: 8px 0; background: #fff; }
+.muted { color: var(--muted); font-size: 12px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="os-top">
+  <span class="os-brand"><span class="os-mark"></span>SecureWorks</span>
+  <a href="index.html">Local OS</a>
+  <a href="context-door.html">Context</a>
+  <a href="executive-door.html" aria-current="page">Executive</a>
+  <a href="dispatch-workspace.html">Dispatch</a>
+  <a href="booking-door.html">Booking</a>
+  <span class="os-hold">Marnin only · send hold on</span>
+</header>
+<div class="os-banner">
+  <strong>CEO, CFO and COO as one seat.</strong>
+  Lane TODAY files 12 Sep. Master plan wiki company/strategy/master-plan.md (trajectory table). Live Suite money 13 Sep 17:13 Perth returned bank_balance 0 / accounts 0, so cash of record stays the 10 Sep statement close. Not a production CEO page.
+</div>
+<main class="page">
+  <p class="stamp">Local OS · Australia/Perth</p>
+  <h1>Executive</h1>
+  <p class="muted">Dialogue and decisions. Growth toward five then ten million. Cash and risk. Job costing. Workflows and SOPs. Reads and stamps only.</p>
+  <section class="q" aria-label="Research question">
+    <strong>Research question on this page</strong>
+    <p>If Shaun can operate Dispatch as a notebook next week, which loop still cannot run unless Marnin is in the seat: supplier pay, customer send, calendar hold, or job-cost actuals?</p>
+    <p class="muted">Working answer from 12 Sep desks: all four still need him. The sharpest Monday failure is not the notebook. It is Clarkson on the calendar with no CDC and no steel, plus Spearwood tubes claimed ready and unpaid. Job-cost actuals are not a desk at all.</p>
+  </section>
+  <div class="seats" role="tablist">
+    <button id="tab-ceo" aria-selected="true">CEO</button>
+    <button id="tab-cfo" aria-selected="false">CFO</button>
+    <button id="tab-coo" aria-selected="false">COO</button>
+  </div>
+  <div id="seat" class="grid"></div>
+</main>
+<script>
+const SEATS = {
+ceo: () => `
+  <article class="card">
+    <h2>Thesis: $5M then $10M</h2>
+    <p class="muted">Source: wiki company/strategy/master-plan.md trajectory. Not re-forecast today.</p>
+    <table>
+      <tr><th>Year</th><th>Target</th><th>Note</th></tr>
+      <tr><td>2026 end</td><td>$3M</td><td>2.1x from $1.4M</td></tr>
+      <tr><td>2027 end</td><td>$5M</td><td>Patios $3.0M · fencing $1.5M · decking + other $0.5M</td></tr>
+      <tr><td>Organic compound</td><td>about $10M</td><td>Layer 1 + Layer 2. Expansion plays close $10M to $20M.</td></tr>
+    </table>
+    <h3>What this week actually is</h3>
+    <p>Revenue motion this week is patio scopes and fencing Stratco visits, not a new layer. Insurance make-safe is utilisation, with 3 Docs Ready packs unsent. Source: EXECUTIVE / PATIO / FENCING / INSURANCE TODAY 12 Sep.</p>
+    <h3>Jarvis / OS</h3>
+    <p>Context mechanic approved, zero packets live. Ops Dash is the v1 operating system. These local doors are how you look through it before any merge. Source: CIO TODAY 12 Sep; this worktree 13 Sep.</p>
+  </article>
+  <article class="card">
+    <h2>What to stop</h2>
+    <ul class="stop">
+      <li>Stop treating CRM stage as a booking. 495 patio rows are not 495 visits. Source: PATIO TODAY 12 Sep 21:46 Perth.</li>
+      <li>Stop calling Haiku rows Luna. Coverage 21-with-facts is any fact. Source: 2026-09-12-live-luna-facts.md.</li>
+      <li>Stop treating selected bank credits as cash. $2,653.75 is SWF-261408, not South Perth slats. Source: BOOKKEEPING 12 Sep.</li>
+      <li>Stop treating paid roof sheets as a green job. Clarkson stays HOLD. Source: DISPATCH-DESIGN / MONDAY-READINESS.</li>
+      <li>Stop sending. Hold is absolute. Desks write proposals. You stamp. Source: 12 Sep handover.</li>
+      <li>Stop stacking design while Monday collisions remain on the calendar. Dispatch after current delivery. Source: EXECUTIVE PRIORITIES 12 Sep.</li>
+    </ul>
+    <h3>Decisions already filed for Monday 09:00</h3>
+    <div class="decision">Tag or archive CANARY / TEST / sample jobs so reports exclude them.</div>
+    <div class="decision">Jan writes the dated bank closing line before 09:00, or the brief prints cash unavailable.</div>
+    <div class="decision">SES cron job 98 and scheduler key, one retained case, no client send.</div>
+    <p class="muted">Source: lanes/EXECUTIVE/weekly/inputs/decisions.json · 12 Sep.</p>
+  </article>`,
+cfo: () => `
+  <article class="card">
+    <h2>Cash versus selected credits</h2>
+    <table>
+      <tr><th>Figure</th><th>Amount</th><th>Source time</th></tr>
+      <tr><td>Cash of record (statement close)</td><td>$53,110.58</td><td>Bank through 10 Sep. BOOKKEEPING TODAY 12 Sep 08:05. Monday cash line is 14 Sep.</td></tr>
+      <tr><td>Xero Operations ledger</td><td>$56,934.88</td><td>1-11 Sep. Same file. Not the cash line.</td></tr>
+      <tr><td>Live Suite money waterfall</td><td>bank_balance 0, accounts 0</td><td>13 Sep 17:13 Perth. Failed as a cash read. Do not use. Overdue on that call $108,727 / 111. Completed-not-invoiced $483,701 across a 232-job dump that includes $0 stubs. Treat as degraded.</td></tr>
+      <tr><td>Payables reread</td><td>$545,857</td><td>BOOKKEEPING: paginated reread still unverified 12 Sep.</td></tr>
+    </table>
+    <h3>Uninvoiced bank</h3>
+    <p>$8,610.43 in the 3 Aug-10 Sep bank still has no live receivable. Source: CASH-WITHOUT-INVOICE.md 12 Sep.</p>
+    <table>
+      <tr><th>Bank date</th><th>Amount</th><th>Hold on</th></tr>
+      <tr><td>8 Sep</td><td>$2,372.50</td><td>SWP-26373. Draft waits named yes.</td></tr>
+      <tr><td>2 Sep</td><td>$2,653.75</td><td>SWF-261408, not SWF-26168.</td></tr>
+      <tr><td>8 Sep</td><td>$600.00</td><td>SWF-26698 extra works.</td></tr>
+      <tr><td>12 Aug</td><td>$948.20</td><td>SWMS-26845 / voided INV-0868. Insurance.</td></tr>
+      <tr><td>4 Sep</td><td>$1,018.18</td><td>SWF-261371 stub. Fencing quote unfinished.</td></tr>
+      <tr><td>2 Sep</td><td>$1,018.00</td><td>SWF-261335 quoted. Neighbour of 261371.</td></tr>
+    </table>
+  </article>
+  <article class="card">
+    <h2>Debt quality</h2>
+    <p class="muted">Two populations. Do not mix them.</p>
+    <table>
+      <tr><th>Read</th><th>Count / amount</th><th>When</th></tr>
+      <tr><td>Xero outstanding</td><td>199 / $182,580.98</td><td>DEBT 12 Sep 07:55 Perth (same 13 missing as 11 Sep evening)</td></tr>
+      <tr><td>Door</td><td>186 / $171,650.96</td><td>12 Sep 07:55. 13 missing / $10,930.02</td></tr>
+      <tr><td>Genuine</td><td>137 / $124,738.42</td><td>After 12 Sep class writes</td></tr>
+      <tr><td>Blocked by us</td><td>38 / $35,212.74</td><td>Includes rectification, invoice wrong, no job linked</td></tr>
+      <tr><td>Not owed</td><td>9 / $11,347.80</td><td></td></tr>
+      <tr><td>Dispute</td><td>2 / $352</td><td></td></tr>
+      <tr><td>Overdue of record for Monday brief</td><td>130 / $119,726.79</td><td>10 Sep 19:36. Do not substitute the 11 Sep open book.</td></tr>
+    </table>
+    <p>Context complete 17 of 186 (12 Sep DEBT). Those are any facts, not Luna. Rayleigh twenty-invoice truth check still open.</p>
+    <h3>Job-costing hole</h3>
+    <p>Quote files carry internal cost / labour / margin (example: SWF-261271 live 13 Sep: cost $1,565.50, labour $654.50, margin $1,101.90). There is no live actual: supplier bill paid, hours, variations, remainder. Alyx hours for two weeks are unsubmitted. Three confirmed POs have paid_at null. This seat cannot say whether Monday's fences made money. Source: Suite job view 13 Sep; OPERATIONS 12 Sep; BOOKKEEPING Alyx note.</p>
+  </article>`,
+coo: () => `
+  <article class="card">
+    <h2>Loops that are live</h2>
+    <table>
+      <tr><th>Loop</th><th>State</th><th>Source time</th></tr>
+      <tr><td>Make-safe board</td><td>Live. See Insurance book.</td><td>INSURANCE board 12 Sep 07:46 Perth</td></tr>
+      <tr><td>Invoice context door</td><td>Live. Coverage not Luna-filtered.</td><td>CIO 12 Sep</td></tr>
+      <tr><td>Deposit stamps</td><td>PRs merged. Remaining accept-stamp gap on sales fix 1, undeployed.</td><td>CIO 12 Sep</td></tr>
+      <tr><td>SES trigger code</td><td>Merged. Unattended drain blocked on job 98 / key.</td><td>CIO / INSURANCE 12 Sep</td></tr>
+      <tr><td>Monday launchd jobs</td><td>Seven loaded. First 14 Sep 09:00 firing unobserved.</td><td>EXECUTIVE 12 Sep</td></tr>
+      <tr><td>Patio calendar</td><td>5 events, 4 standing, 1 cancel still in Outlook</td><td>PATIO 12 Sep 21:46 Perth</td></tr>
+      <tr><td>Stratco calendar</td><td>6 events, 8 agreements, 2 moves blocked</td><td>FENCING 12 Sep 07:47 Perth</td></tr>
+    </table>
+    <h3>Insurance book (not three packs alone)</h3>
+    <p class="muted">Make-safe columns live 12 Sep 07:46 Perth. Repair is a parallel board, last listed 11 Sep. This seat does not mint a fifth OS product.</p>
+    <table>
+      <tr><th>Column</th><th>Count</th><th>Honesty</th></tr>
+      <tr><td>Allocated</td><td>37</td><td>Live board. Attendance timestamp still missing.</td></tr>
+      <tr><td>Report In</td><td>6</td><td>Trade report received. Same live read.</td></tr>
+      <tr><td>Repair</td><td>15</td><td>11 Sep cache, not re-listed on 12 Sep. Parallel to make-safe. Invoice cache $8,206, not cash.</td></tr>
+      <tr><td>Docs Ready</td><td>3</td><td>Unsent. Hillman SWMS-26585 INV-0702 AUTHORISED $561. Scarborough SWMS-261313 INV-1514 DRAFT $275. Marangaroo SWMS-261403 INV-1515 DRAFT $374. sent_at empty. Cockpit click is still you.</td></tr>
+    </table>
+    <p class="muted">Also on that live read: New 0, completed 12, archive 445, cancelled 71. Four inspect-409 cards have no current docket. Source: lanes/INSURANCE/TODAY.md 12 Sep 08:15 Perth.</p>
+    <h3>SOPs that still are you</h3>
+    <ul class="stop">
+      <li>Every customer / supplier / subcontractor send.</li>
+      <li>Docs Ready APPROVE AND SEND (Hillman, Scarborough, Marangaroo).</li>
+      <li>Supplier pay (Spearwood tubes, South Perth slat steel).</li>
+      <li>Clarkson calendar hold S-3a.</li>
+      <li>Merge backend #833 and production migrate.</li>
+      <li>Disk: 98% full, 4.6 GB free on the 12 Sep evening audit. Seven jobs fire on this Mac.</li>
+    </ul>
+  </article>
+  <article class="card">
+    <h2>Shaun Monday, if he has a notebook</h2>
+    <p>Sight Scarborough panels before Henry starts. Do not collect Spearwood as paid. Do not start Clarkson. Meetings 08:00, 11:00, 15:00. He cannot be Clarkson cover. Source: MONDAY-READINESS 12 Sep.</p>
+    <h3>Workflows still on paper</h3>
+    <p>Dispatch is this local workspace, not Ops Dash. Booking concept approved, isolated only. Performance not live. Context packets unmerged. Debt screen still has Send until UX PR 310 merges (https://github.com/SecureWorks-GROUP/secureworks-ux/pull/310).</p>
+    <h3>Needs you, yes or no, already filed</h3>
+    <p class="muted">Do not re-ask the hold. Sample of open named yes lines: OPERATIONS S-3a/S-3b/P-1 pay; BOOKKEEPING draft invoices; INSURANCE three packs; PATIO P1 Carlisle / P2 Merriwa; FENCING P1-P10. Full lists stay in the lane proposal files.</p>
+  </article>`
+};
+function paint(id){
+  document.getElementById('seat').innerHTML = SEATS[id]();
+  document.querySelectorAll('.seats button').forEach(b => b.setAttribute('aria-selected', b.id === 'tab-'+id));
+}
+document.getElementById('tab-ceo').onclick = () => paint('ceo');
+document.getElementById('tab-cfo').onclick = () => paint('cfo');
+document.getElementById('tab-coo').onclick = () => paint('coo');
+paint('ceo');
+</script>
+</body>
+</html>

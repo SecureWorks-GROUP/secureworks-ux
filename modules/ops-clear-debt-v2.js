@@ -215,6 +215,7 @@ function cdProposalStale(lead, ctx) {
   if (lead.debt_proposal_status !== 'pending' || !lead.debt_proposal_at) return null;
   var at = Date.parse(lead.debt_proposal_at);
   if (!at) return null;
+  if (ctx && ctx.proposal_requires_reassessment === true) return 'client_reply';
   var last = ctx && ctx.conversation && ctx.conversation.last_client_message && ctx.conversation.last_client_message.at;
   if (last && Date.parse(last) > at) return 'client_reply';
   var pays = (ctx && ctx.bank && ctx.bank.xero_payments) || [];

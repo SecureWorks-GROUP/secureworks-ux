@@ -37,6 +37,10 @@ async function main() {
   assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-12T00:00:00Z'}},bank:{xero_payments:[]}}),'client_reply');
   assert.equal(c.cdProposalStale(pending,{conversation:{},bank:{xero_payments:[{date:'2026-09-12',amount:50}]}}),'xero_payment');
   assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-09T00:00:00Z'}},bank:{xero_payments:[]}}),null);
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).invoice_id,'a');
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).job_id,'job-1');
+  assert.equal(c.cdProposalStale(pending,{proposal_requires_reassessment:true,conversation:{},bank:{xero_payments:[]}}),'client_reply');
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'},proposal_requires_reassessment:true}).stale_proposals,'client_reply');
   c.CD.rows=[pending]; c.CD.selectedInvoice='a';
   const staleHtml=c.cdRecordHtml({invoices:[pending],name:'Sample',owner:'DEBT',amount:100,n:1,oldest:10},{}, {},{conversation:{last_client_message:{at:'2026-09-12T00:00:00Z',preview:'paid thanks',channel:'email'},messages:[]},bank:{xero_payments:[]},sources:{conversation:{ok:true},invoice:{ok:true}},link:{job_id:'job-1'},job:{id:'job-1'}},null);
   assert.match(staleHtml,/Proposal stale/);
@@ -44,6 +48,10 @@ async function main() {
   assert.match(staleHtml,/data-job-id="job-1"/);
   assert.match(staleHtml,/not settlement/);
   assert.doesNotMatch(staleHtml,/marked paid|invoice is paid/i);
-  console.log('PASS clear-debt behavior: coverage omissions, source failures, last client context, per-invoice selection, stale reads, notes errors, no sends, refresh reads only, conflict does not mark pending, host invoice_id, stale proposal');
+  const mailPaid=c.cdRecordHtml({invoices:[pending],name:'Sample',owner:'DEBT',amount:100,n:1,oldest:10},{}, {},{proposal_requires_reassessment:true,conversation:{last_client_message:{at:'2026-09-12T00:00:00Z',preview:'paid thanks',channel:'email'},messages:[]},bank:{xero_payments:[]},sources:{conversation:{ok:true},invoice:{ok:true}},link:{job_id:'job-1'},job:{id:'job-1'},coverage:{complete:false}},null);
+  assert.match(mailPaid,/Proposal stale/);
+  assert.match(mailPaid,/not settlement/);
+  assert.doesNotMatch(mailPaid,/marked paid|invoice is paid/i);
+  console.log('PASS clear-debt behavior: coverage omissions, source failures, last client context, per-invoice selection, stale reads, notes errors, no sends, refresh reads only, conflict does not mark pending, host invoice_id/job_id, proposal_requires_reassessment, paid email not settlement');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

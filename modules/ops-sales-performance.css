@@ -1,0 +1,173 @@
+/* Approved Performance mockup tokens are local to this view. */
+#salesPerformanceRoot{--canvas:#F5F7F8;--surface:#fff;--surface-2:#FAFBFC;--ink:#293C46;--ink-2:#4C6A7C;--ink-3:#5C7787;--line:#E2E8EB;--line-soft:#EDF1F3;--accent:#F15A29;--accent-text:#C4390F;--empty:#C9D4DA;--fig:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--canvas);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;min-height:80vh}
+#salesPerformanceRoot *{box-sizing:border-box}
+#salesPerformanceRoot [hidden]{display:none!important}
+#salesPerformanceRoot ::selection{background:var(--accent);color:white}
+#salesPerformanceRoot :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#salesPerformanceRoot button,#salesPerformanceRoot select{font:inherit;color:inherit;cursor:pointer}
+#salesPerformanceRoot button:disabled{opacity:.5;cursor:wait}
+#salesPerformanceRoot .page{max-width:1180px;margin:0 auto;padding:36px 24px 88px}
+#salesPerformanceRoot .pagehead{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-end;justify-content:space-between;margin-bottom:34px}
+#salesPerformanceRoot h1{font-size:26px;line-height:1.15;letter-spacing:-.025em;margin:0 0 6px;font-weight:600}
+#salesPerformanceRoot h2{font-size:16px;letter-spacing:-.015em;font-weight:600;margin:0}
+#salesPerformanceRoot h3{font-size:13px;font-weight:600;margin:0 0 10px}
+#salesPerformanceRoot .week-line{margin:0;color:var(--ink-2);font-size:13.5px}
+#salesPerformanceRoot .headctl{display:flex;flex-direction:column;gap:10px}
+#salesPerformanceRoot .seg{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+#salesPerformanceRoot .seg button{border:0;background:transparent;padding:6px 12px;border-radius:5px;font-size:12.5px;color:var(--ink-2)}
+#salesPerformanceRoot .seg button[aria-selected=true]{background:var(--ink);color:var(--surface);font-weight:600}
+#salesPerformanceRoot .week-picker{font-size:12px;color:var(--ink-2)}
+#salesPerformanceRoot select{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:100%;margin-left:8px}
+#salesPerformanceRoot .notice{padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:13px;margin:0 0 20px}
+#salesPerformanceRoot .lede-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:start;margin-bottom:40px}
+#salesPerformanceRoot .lede{max-width:22em}
+#salesPerformanceRoot .lede p{margin:0 0 4px;font-size:27px;line-height:1.32;letter-spacing:-.022em;text-wrap:balance}
+#salesPerformanceRoot .n{font-weight:650;font-variant-numeric:tabular-nums}
+#salesPerformanceRoot .lede-sub{font-size:13.5px;line-height:1.62;color:var(--ink-2);max-width:66ch;margin:18px 0 0}
+#salesPerformanceRoot .fresh{border-left:1px solid var(--line);padding-left:22px}
+#salesPerformanceRoot .fresh h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);margin-bottom:12px}
+#salesPerformanceRoot .fresh dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin:0;font-size:12.5px}
+#salesPerformanceRoot .fresh dt{color:var(--ink-3)}
+#salesPerformanceRoot .fresh dd{font:12px var(--fig);margin:0;color:var(--ink-2)}
+#salesPerformanceRoot .note{font-size:12px;color:var(--ink-3);line-height:1.55;margin-top:14px}
+#salesPerformanceRoot .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:20px}
+#salesPerformanceRoot .card-head{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:baseline;justify-content:space-between}
+#salesPerformanceRoot .card-note{margin:6px 0 20px;color:var(--ink-3);font-size:12.5px;line-height:1.6;max-width:74ch}
+#salesPerformanceRoot .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-2)}
+#salesPerformanceRoot .legend span{display:inline-flex;align-items:center;gap:6px}
+#salesPerformanceRoot .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
+#salesPerformanceRoot .patio{fill:var(--accent)}
+#salesPerformanceRoot .fencing{fill:var(--ink-2)}
+#salesPerformanceRoot .swatch.patio,#salesPerformanceRoot .patio .bar{background:var(--accent)}
+#salesPerformanceRoot .swatch.fencing,#salesPerformanceRoot .fencing .bar{background:var(--ink-2)}
+#salesPerformanceRoot .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+#salesPerformanceRoot .funnel-head,#salesPerformanceRoot .funnel-row{display:grid;grid-template-columns:minmax(0,1fr) 86px minmax(0,1fr);gap:16px}
+#salesPerformanceRoot .funnel-head{font-weight:600;font-size:13px;margin-bottom:15px}
+#salesPerformanceRoot .funnel-head span:first-child{text-align:right}
+#salesPerformanceRoot .funnel-row{align-items:start;min-height:70px}
+#salesPerformanceRoot .funnel-stage{text-align:center;font-size:12.5px;font-weight:600;padding-top:7px}
+#salesPerformanceRoot .funnel-cell{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border:0;background:none;min-width:0;padding:6px 0}
+#salesPerformanceRoot .funnel-cell:hover,#salesPerformanceRoot .cellbtn:hover,#salesPerformanceRoot .speed-row:hover{background:var(--surface-2)}
+#salesPerformanceRoot .funnel-cell.patio{flex-direction:row-reverse;text-align:right}
+#salesPerformanceRoot .funnel-cell.fencing{text-align:left}
+#salesPerformanceRoot .funnel-value{font:600 14px var(--fig)}
+#salesPerformanceRoot .bar-track{flex:1;min-width:20px;display:flex}
+#salesPerformanceRoot .patio .bar-track{justify-content:flex-end}
+#salesPerformanceRoot .bar{display:block;height:17px;border-radius:2px}
+#salesPerformanceRoot .bar.stub{background:var(--empty);height:2px;min-width:10px}
+#salesPerformanceRoot .funnel-sub{width:100%;font-size:10.5px;line-height:1.35;color:var(--ink-3)}
+#salesPerformanceRoot .speed-row{display:grid;grid-template-columns:120px minmax(0,1fr);width:100%;align-items:center;background:none;border:0;text-align:left;padding:10px 0;border-bottom:1px solid var(--line-soft)}
+#salesPerformanceRoot .speed-row small{display:block;font-size:11px;color:var(--ink-3)}
+#salesPerformanceRoot svg{width:100%;display:block;overflow:visible}
+#salesPerformanceRoot svg text{font:11px var(--fig);fill:var(--ink-3)}
+#salesPerformanceRoot .axis{stroke:var(--line)}
+#salesPerformanceRoot .range{stroke-width:2;fill:none}
+#salesPerformanceRoot .range.patio{stroke:var(--accent)}
+#salesPerformanceRoot .range.fencing{stroke:var(--ink-2)}
+#salesPerformanceRoot .trendgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 26px}
+#salesPerformanceRoot .trend-item p{font-size:11px;color:var(--ink-3);margin:3px 0 8px}
+#salesPerformanceRoot .fig{font-family:var(--fig);font-variant-numeric:tabular-nums;font-size:24px;letter-spacing:-.03em}
+#salesPerformanceRoot .week-slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);margin-top:14px;padding-top:10px;font-size:10px;color:var(--ink-3)}
+#salesPerformanceRoot .week-slots b{display:block;margin-top:5px;font:11px var(--fig);color:var(--ink-2)}
+#salesPerformanceRoot .tbl{width:100%;border-collapse:collapse;font-size:13px}
+#salesPerformanceRoot .tbl caption{text-align:left;font-size:12.5px;color:var(--ink-3);padding:6px 0 20px}
+#salesPerformanceRoot .tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);padding:0 12px 9px 0;border-bottom:1px solid var(--line)}
+#salesPerformanceRoot .tbl td{padding:0;border-bottom:1px solid var(--line-soft);vertical-align:top;width:33%}
+#salesPerformanceRoot .tbl .mcell{padding:13px 12px 13px 0}
+#salesPerformanceRoot .code{font:10.5px var(--fig);margin-right:9px;color:var(--ink-3)}
+#salesPerformanceRoot .mname{font-weight:600}
+#salesPerformanceRoot .mdef{display:block;margin-top:3px;font-size:11.5px;color:var(--ink-3)}
+#salesPerformanceRoot .cellbtn{display:block;width:100%;text-align:left;border:0;background:none;padding:13px 12px;border-radius:6px}
+#salesPerformanceRoot .cellbtn .v{display:block;font:600 17px var(--fig)}
+#salesPerformanceRoot .cellbtn .u{display:block;font-size:11.5px;color:var(--ink-3);margin-top:2px}
+#salesPerformanceRoot .cellbtn.none .v{color:var(--ink-3);font-size:14px;font-weight:400}
+#salesPerformanceRoot .provenance{overflow-wrap:anywhere;font-size:11px;color:var(--ink-3)}
+#salesPerformanceRoot li{margin-bottom:12px;font-size:12.5px;color:var(--ink-2)}
+@media(max-width:900px){#salesPerformanceRoot .lede-wrap{grid-template-columns:1fr;gap:28px}#salesPerformanceRoot .fresh{border-left:0;border-top:1px solid var(--line);padding:20px 0 0}#salesPerformanceRoot .trendgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){#salesPerformanceRoot .page{padding:26px 16px 64px}#salesPerformanceRoot h1{font-size:22px}#salesPerformanceRoot .lede p{font-size:21px}#salesPerformanceRoot .card{padding:18px 16px}#salesPerformanceRoot .two,#salesPerformanceRoot .trendgrid{grid-template-columns:1fr}#salesPerformanceRoot .funnel-head,#salesPerformanceRoot .funnel-row{grid-template-columns:minmax(0,1fr) 62px minmax(0,1fr);gap:6px}#salesPerformanceRoot .speed-row{grid-template-columns:1fr}#salesPerformanceRoot .speed-row svg{min-height:64px}#salesPerformanceRoot .tbl,#salesPerformanceRoot .tbl tbody,#salesPerformanceRoot .tbl tr,#salesPerformanceRoot .tbl td{display:block;width:100%}#salesPerformanceRoot .tbl thead{display:none}#salesPerformanceRoot .tbl td[data-lane-label]::before{content:attr(data-lane-label);display:block;font-size:11px;color:var(--ink-3);padding:6px 12px 0}#salesPerformanceRoot .tbl .mcell{padding-top:20px}#salesPerformanceRoot .fresh dl{gap:7px 10px}#salesPerformanceRoot .week-slots{gap:5px}}
+#salesPerformanceRoot .source-buckets{border-top:1px solid var(--line);padding-top:18px;margin-top:10px}
+#salesPerformanceRoot .source-buckets p{font-size:12px;color:var(--ink-3)}
+#salesPerformanceRoot .speed-plot{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--empty) transparent;display:block}
+#salesPerformanceRoot .speed-plot svg{min-width:640px}
+#salesPerformanceRoot .funnel-value{flex:0 0 42px}
+/* Finish review: match the approved compact comparison grammar. */
+#salesPerformanceRoot .bad{color:var(--accent-text)}
+#salesPerformanceRoot .lede{max-width:22em}
+#salesPerformanceRoot .lede p{margin-bottom:10px}
+#salesPerformanceRoot .weeks{display:flex;gap:6px;max-width:360px;flex-wrap:wrap}
+#salesPerformanceRoot .weeks button{font:12px var(--fig);padding:5px 11px;border-radius:99px;border:1px solid var(--line);background:var(--surface);color:var(--ink-2)}
+#salesPerformanceRoot .weeks button[aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+#salesPerformanceRoot .funnel-row{min-height:52px;align-items:center;border-bottom:1px solid var(--line-soft)}
+#salesPerformanceRoot .funnel-cell{display:block;padding:8px 0;position:relative}
+#salesPerformanceRoot .funnel-stage{padding-top:0}
+#salesPerformanceRoot .bar-track{display:flex;height:17px;margin:0 32px;align-items:center}
+#salesPerformanceRoot .bar{position:relative;min-width:0}
+#salesPerformanceRoot .funnel-value{position:absolute;top:0;line-height:17px;white-space:nowrap}
+#salesPerformanceRoot .patio .funnel-value{right:calc(100% + 8px)}
+#salesPerformanceRoot .fencing .funnel-value{left:calc(100% + 8px)}
+#salesPerformanceRoot .funnel-sub{display:block;margin-top:3px}
+#salesPerformanceRoot .funnel-head{margin-bottom:8px}
+#salesPerformanceRoot .speed-row{grid-template-columns:170px minmax(0,1fr);padding:12px 0 24px;gap:16px}
+#salesPerformanceRoot .speed-plot{overflow:visible;min-width:0;padding:0 12px;display:block}
+#salesPerformanceRoot .speed-summary{display:flex;gap:6px;align-items:baseline;font-size:11px;color:var(--ink-3);margin-bottom:10px;flex-wrap:wrap}
+#salesPerformanceRoot .speed-summary strong{font:600 16px var(--fig);color:var(--ink)}
+#salesPerformanceRoot .speed-summary>span{margin-left:auto}
+#salesPerformanceRoot .speed-axis{position:relative;display:block;height:24px;border-bottom:1px solid var(--line-soft)}
+#salesPerformanceRoot .grid-tick{position:absolute;top:0;height:32px;border-left:1px solid var(--line-soft)}
+#salesPerformanceRoot .target-line{position:absolute;top:-6px;height:42px;border-left:1.5px dashed var(--accent);z-index:2}
+#salesPerformanceRoot .speed-range{position:absolute;top:12px;height:2px;background:var(--ink-2)}
+#salesPerformanceRoot .speed-range.patio{background:var(--accent)}
+#salesPerformanceRoot .speed-dot,#salesPerformanceRoot .median-dot{position:absolute;top:9px;width:7px;height:7px;border-radius:50%;background:var(--ink-2);transform:translateX(-50%)}
+#salesPerformanceRoot .speed-dot.patio,#salesPerformanceRoot .median-dot.patio{background:var(--accent)}
+#salesPerformanceRoot .median-dot{width:11px;height:11px;top:7px;outline:1px solid currentColor;outline-offset:2px;color:var(--ink-2)}
+#salesPerformanceRoot .median-dot.patio{color:var(--accent)}
+#salesPerformanceRoot .worst-tick{position:absolute;top:6px;height:14px;border-left:2px solid var(--ink-2)}
+#salesPerformanceRoot .worst-tick.patio{border-color:var(--accent)}
+#salesPerformanceRoot .speed-ticks{position:relative;display:block;height:18px;margin-top:8px}
+#salesPerformanceRoot .speed-ticks span{position:absolute;transform:translateX(-50%);font:10px var(--fig);color:var(--ink-3);white-space:nowrap}
+#salesPerformanceRoot .target-key{font:11px var(--fig);color:var(--accent-text);margin:6px 0 16px}
+#salesPerformanceRoot .axis-unit{text-align:right;font-size:11px;color:var(--ink-3);margin-bottom:0}
+#salesPerformanceRoot .trendgrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:30px}
+#salesPerformanceRoot .trend-lane>h3{font-size:14px;margin-bottom:18px}
+#salesPerformanceRoot .trend-item{margin-bottom:24px}
+#salesPerformanceRoot .distribution-gap{font-size:12px;line-height:1.6;color:var(--ink-3);border-top:1px solid var(--line-soft);padding-top:14px}
+#salesPerformanceRoot .unit-grid{display:grid;grid-template-columns:repeat(10,18px);gap:5px;margin:12px 0}
+#salesPerformanceRoot .unit-grid i{width:18px;height:18px;background:var(--empty);border-radius:2px}
+#salesPerformanceRoot .unit-grid i.over{background:var(--accent)}
+#salesPerformanceRoot .unitstat{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:baseline;margin-top:14px}
+#salesPerformanceRoot .unitstat strong{font:600 24px var(--fig)}
+#salesPerformanceRoot .unitstat span{font-size:12px;color:var(--ink-3)}
+#salesPerformanceRoot .age-row{display:grid;grid-template-columns:100px minmax(0,1fr) 55px;gap:8px;width:100%;border:0;background:none;padding:10px 0;align-items:center;text-align:left}
+#salesPerformanceRoot .age-row>span:first-child{font-size:11px;overflow-wrap:anywhere;color:var(--ink-3)}
+#salesPerformanceRoot .age-row b{font:11px var(--fig)}
+#salesPerformanceRoot .age-track{height:12px;display:block}
+#salesPerformanceRoot .age-track i{display:block;background:var(--accent);height:12px;border-radius:2px}
+#salesPerformanceRoot .tbl .tierrow td{width:auto;padding:20px 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);border-bottom:1px solid var(--line)}
+#salesPerformanceRoot .tbl .tierrow:first-child td{padding-top:0}
+#salesPerformanceRoot .tbl .cellbtn.none .v{color:var(--empty);font-size:15px}
+#salesPerformanceRoot .tbl .cellbtn.none .u{display:inline-block;font-size:10.5px;line-height:1.45;border:1px solid var(--line);border-radius:12px;padding:2px 8px;background:var(--surface-2);margin-top:5px}
+@media(max-width:640px){
+#salesPerformanceRoot .speed-row{grid-template-columns:1fr;gap:12px;padding-bottom:16px}
+#salesPerformanceRoot .speed-plot{padding:0 10px}
+#salesPerformanceRoot .speed-summary{font-size:10.5px}
+#salesPerformanceRoot .speed-summary strong{font-size:14px}
+#salesPerformanceRoot .speed-ticks span{font-size:10px}
+#salesPerformanceRoot .funnel-cell{padding:8px 0}
+#salesPerformanceRoot .bar-track{margin:0 20px}
+#salesPerformanceRoot .funnel-sub{font-size:10px;line-height:1.3}
+#salesPerformanceRoot .funnel-value{font-size:12px}
+#salesPerformanceRoot .funnel-row{min-height:56px}
+#salesPerformanceRoot .trendgrid{grid-template-columns:1fr}
+#salesPerformanceRoot .tbl tr:not(.tierrow){display:grid;grid-template-columns:1fr 1fr;padding-bottom:12px;border-bottom:1px solid var(--line-soft)}
+#salesPerformanceRoot .tbl .mcell{grid-column:1/-1;border:0;padding:16px 0 8px}
+#salesPerformanceRoot .tbl td[data-lane-label]{border:0;min-width:0}
+#salesPerformanceRoot .tbl .cellbtn{padding:6px 8px}
+#salesPerformanceRoot .tbl td[data-lane-label]::before{padding:6px 8px 0}
+#salesPerformanceRoot .age-row{grid-template-columns:82px minmax(0,1fr) 48px}
+}
+/* The incumbent Approvals view carries inline display:flex. Keep it out of
+   Performance without changing its layout or any other route. */
+body.performance-view-active #viewApprovals:not(.active){display:none!important}
+@media(max-width:640px){body.performance-view-active .header-left>div[style]:not(.header-brand){display:none!important}}
+
+@media(max-width:640px){#salesPerformanceRoot .tbl caption{display:block;width:100%;}}

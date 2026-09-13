@@ -10,7 +10,7 @@
     'SALES_PERFORMANCE_PREVIEW_URL'
   ];
   const PERFORMANCE_UNPUBLISHED =
-    'Sales Performance uses PR313 08d27c7b on this host. public.sales_performance_weeks is not deployed. Empty is missing, not zero. Isolated 8765 is proof-only. C1 is unmeasured; quote follow-up is a separate drill.';
+    'Sales Performance uses PR313 bc8514eb. Patio week of 7 Sep is locked to run-2026-09-11-061615 SHA 6e46bc14: A1 17 raw arrivals; qualified and C1/C2 unmeasured (not zero). 31 Aug Patio unmeasured. Isolated 8765 serves that mapping. public.sales_performance_weeks is not deployed.';
   const BOOKING_AUTH =
     'Booking module is Patio UX 9dda1c49 (R26/R27). Backend bind is 70d96b0e on isolated 4179 only. e828cf48 is not imported. 4176 stays. 4174/4175 preview is not connected. Authenticated staff JWT still required. Send and calendar remain held.';
   const initialBooking = JSON.stringify(root.SalesBooking.state);

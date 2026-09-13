@@ -263,7 +263,10 @@ test('copied Booking and Performance bytes match accepted 9dda and PR313 pins', 
   assert.equal(provenance.source_sha, '9dda1c49c133b488fd77e901e3a2da581bee4819');
   assert.equal(provenance.baseline_sha, 'f048ca533e4c9b375b3928710aacdbebd97f4bc9');
   assert.equal(provenance.backend_pin, '70d96b0e8790f7966ad34f6bf0a3e9c4c3a5a80b');
-  assert.equal(provenance.performance_sha, '08d27c7b9a40a4270e4dbefe5062907e4b3c7505');
+  assert.equal(provenance.performance_sha, 'bc8514ebb6172ced416162d96a28b77c56ad86fa');
+  assert.equal(provenance.performance_not_latest, '08d27c7b');
+  assert.equal(provenance.patio_week_lock, 'run-2026-09-11-061615');
+  assert.equal(provenance.patio_week_sha, '6e46bc146db282b037cd4a57043b836e52e73696b2eb5fb1c7270aa727cc1348');
   assert.equal(provenance.backend_do_not_import, 'e828cf48');
   for (const [file, digest] of Object.entries(provenance.files)) {
     assert.equal(sha256(file), digest, file);
@@ -340,6 +343,12 @@ test('host strips preview globals and mounts accepted Booking 9dda without 4174/
   assert.match(notice, /4174\/4175 preview is not connected/);
   context.OpsSalesHost.show('performance');
   assert.deepEqual(shown, [['booking', 'booking'], ['booking', 'performance']]);
+  const performanceNotice = context.document.getElementById('salesPerformanceHostNotice').textContent;
+  assert.match(performanceNotice, /bc8514eb/);
+  assert.match(performanceNotice, /run-2026-09-11-061615/);
+  assert.match(performanceNotice, /6e46bc14/);
+  assert.match(performanceNotice, /A1 17 raw arrivals/);
+  assert.doesNotMatch(performanceNotice, /08d27c7b/);
 });
 
 test('Sales transport aborts when identity changes while auth token is pending', async () => {
@@ -404,6 +413,60 @@ test('Performance unpublished envelope keeps missing measures missing, not zero'
   assert.match(rootEl.innerHTML, /No report/);
   assert.doesNotMatch(rootEl.innerHTML, /class="v">0</);
   assert.doesNotMatch(rootEl.innerHTML, /class="funnel-value">0</);
+});
+
+test('Patio week of 7 Sep unpublished_rows maps A1 from 17 raw arrivals; 31 Aug Patio stays unmeasured', () => {
+  const context = {
+    document: {
+      addEventListener() {},
+      getElementById() { return null; }
+    }
+  };
+  context.window = context;
+  vm.runInNewContext(performanceSource, context);
+  const patio7 = {
+    lane: 'patio',
+    week_start: '2026-09-07',
+    metrics: {
+      raw_arrivals: 17,
+      enquiries_in: null,
+      quotes_sent: null,
+      qualified_eligible_enquiries: null,
+      partial_week: true,
+      as_of: '2026-09-11'
+    },
+    coverage: { collection_complete: false, period_kind: 'partial' }
+  };
+  const fencingClosed = {
+    lane: 'fencing',
+    week_start: '2026-08-31',
+    metrics: { opportunity_creations_in_week: { count: 9 } }
+  };
+  const adapted = context.SalesPerformance.adapt(patio7);
+  assert.equal(adapted.measures.A1.value, 17);
+  assert.match(adapted.measures.A1.sub, /raw pipeline arrivals/);
+  assert.equal(adapted.measures.C1.value, null);
+  assert.equal(adapted.measures.C2.value, null);
+  assert.equal(adapted.contacted, null);
+  assert.equal(context.SalesPerformance.adapt({ lane: 'patio', metrics: { enquiries_in: 4 } }).measures.A1.value, 4);
+
+  const payload = {
+    unpublished_rows: [patio7],
+    rows: [fencingClosed],
+    week_start: '2026-09-07',
+    week_starts: ['2026-09-07', '2026-08-31'],
+    available_weeks: ['2026-08-31'],
+    unpublished: true
+  };
+  const html7 = context.SalesPerformance.renderHTML(payload, 'week');
+  assert.match(html7, /class="funnel-value">17</);
+  assert.match(html7, /raw pipeline arrivals/);
+  assert.doesNotMatch(html7, /class="funnel-value">0</);
+  assert.match(html7, /Fencing has no report for this week/);
+
+  const html31 = context.SalesPerformance.renderHTML({ ...payload, week_start: '2026-08-31' }, 'week');
+  assert.match(html31, /Patio has no report for this week/);
+  assert.doesNotMatch(html31, /class="funnel-value">17</);
 });
 
 test('Booking authenticated read refuses fixture fallback and does not use preview URLs', async () => {

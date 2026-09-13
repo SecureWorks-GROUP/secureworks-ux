@@ -34,7 +34,7 @@
     const elapsed = patio ? {median:value('speed_to_lead_median_elapsed'),max:value('speed_to_lead_worst_elapsed'),n:Array.isArray(q.answered)?q.answered.length:null} : get(m,'quality_review.reply_time_hours.substantive_non_template') || {};
     const staffed = patio ? {median:value('speed_to_lead_median_staffed'),max:value('speed_to_lead_worst_staffed'),n:null} : get(m,'quality_review.reply_time_staffed_hours.substantive_non_template') || {};
     const measures = {
-      A1:{value:patio?value('enquiries_in'):value('opportunity_creations_in_week.count'),sub:patio?'eligible enquiries':'opportunity creations; eligibility unmeasured',queueKey:patio?'enquiries':null},
+      A1:{value:patio?(value('raw_arrivals')!==null?value('raw_arrivals'):value('enquiries_in')):value('opportunity_creations_in_week.count'),sub:patio?'raw pipeline arrivals · qualified eligible unmeasured':'opportunity creations; eligibility unmeasured',queueKey:patio?'enquiries':null},
       A2:{value:num(elapsed.median),sub:'hours median · elapsed',queueKey:patio?'answered':'quality_cases'},
       A3:{value:patio?value('unanswered_no_reply'):value('quality_review.unanswered_inbound.still_open'),sub:patio?'enquiry cohort · no human reply at run time':'customer texts still open · reviewed population',queueKey:patio?'unanswered_no_reply':'quality_cases'},
       A4:{value:null,sub:'Complete weekly activity not published'},

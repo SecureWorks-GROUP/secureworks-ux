@@ -257,3 +257,60 @@ test('a late restore acknowledgement cannot restore a next-operator case with th
   assert.equal(result.ok, false);
   assert.equal(booking.state.data.cases[0].archived.restored, false);
 });
+
+test('Patio week of 7 Sep maps A1 from 17 raw arrivals; C1/C2 stay unmeasured; 31 Aug Patio is missing', async () => {
+  const patio7 = {
+    lane: 'patio',
+    week_start: '2026-09-07',
+    metrics: {
+      raw_arrivals: 17,
+      enquiries_in: null,
+      quotes_sent: null,
+      qualified_eligible_enquiries: null,
+      partial_week: true,
+      as_of: '2026-09-11',
+      observed_until: '2026-09-10T22:16:31.896Z'
+    },
+    coverage: {
+      collection_complete: false,
+      period_kind: 'partial',
+      gaps: ['Patio pin: run-2026-09-11-061615 SHA-256 6e46bc146db282b037cd4a57043b836e52e73696b2eb5fb1c7270aa727cc1348.']
+    }
+  };
+  const fencingClosed = {
+    lane: 'fencing',
+    week_start: '2026-08-31',
+    metrics: { opportunity_creations_in_week: { count: 9 } }
+  };
+  const payload = {
+    ok: true,
+    unpublished: true,
+    unpublished_rows: [patio7],
+    rows: [fencingClosed],
+    week_start: '2026-09-07',
+    week_starts: ['2026-09-07', '2026-08-31'],
+    available_weeks: ['2026-08-31']
+  };
+  const h = host({ get: action => {
+    assert.equal(action, 'sales_performance_read');
+    return payload;
+  } });
+  await h.context.SalesPerformance.load();
+  const patio = h.context.SalesPerformance.adapt(patio7);
+  assert.equal(patio.measures.A1.value, 17);
+  assert.match(patio.measures.A1.sub, /raw pipeline arrivals/);
+  assert.equal(patio.measures.C1.value, null);
+  assert.equal(patio.measures.C2.value, null);
+  assert.equal(patio.contacted, null);
+  assert.equal(
+    h.context.SalesPerformance.adapt({ lane: 'patio', metrics: { enquiries_in: 4 } }).measures.A1.value,
+    4
+  );
+  const html = h.nodes.get('salesPerformanceRoot').innerHTML;
+  assert.match(html, /class="funnel-value">17</);
+  assert.doesNotMatch(html, /class="funnel-value">0</);
+  assert.match(html, /Fencing has no report for this week/);
+  const html31 = h.context.SalesPerformance.renderHTML({ ...payload, week_start: '2026-08-31' }, 'week');
+  assert.match(html31, /Patio has no report for this week/);
+  assert.doesNotMatch(html31, /class="funnel-value">17</);
+});

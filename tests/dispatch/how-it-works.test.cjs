@@ -75,6 +75,10 @@ test('How it works contract names the five workflow definitions and their curren
   assert.equal(contract.workflows.dispatch.technical.runtime_action, 'dispatch_workflow');
   assert.equal(contract.workflows.booking.technical.page, 'Sales > Booking');
   assert.equal(contract.workflows.performance.technical.page, 'Sales > Performance');
+  assert.equal(contract.workflows.performance.technical.ux_pin, 'bc8514ebb6172ced416162d96a28b77c56ad86fa');
+  assert.match(contract.workflows.performance.runtime_receipt.deployed, /bc8514eb/);
+  assert.match(contract.workflows.performance.runtime_receipt.observed_successful, /A1=17/);
+  assert.doesNotMatch(contract.workflows.performance.runtime_receipt.deployed, /08d27c7b/);
 });
 
 test('Dispatch How it works overlay reads live workflow status and keeps the selected job', async () => {

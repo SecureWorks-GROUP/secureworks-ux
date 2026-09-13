@@ -90,7 +90,7 @@
   function mount(element, options = {}) {
     const core = options.core || controller();
     let dates = root.DispatchCore.week(options.now), queue = 'current', trade = 'all', query = '', workflow = 'all', tab = 'scope', selectedGroup = 'all';
-    let form = null, contextJob = null, message = '', mailResults = null, mailGeneration = 0, selectedMail = null;
+    let form = null, contextJob = null, message = '', mailResults = null, mailGeneration = 0, selectedMail = null, canonicalMailGeneration = 0;
     const uiByJob = new Map(), formsByJob = new Map(), editorCustody = new Map();
     let focusOnLoad = null;
     const job = () => core.state.records.get(core.state.selectedId);
@@ -150,7 +150,7 @@
     function resumeRefresh() { if (visible()) return refreshEvidence(); scheduleRefresh(); }
     function currentUI() {
       const id = core.state.selectedId;
-      if (!uiByJob.has(id)) uiByJob.set(id, { draftId: null, draftReview: null, mailSearch: { scope: 'job', search: '' }, disclosures: {}, focus: null });
+      if (!uiByJob.has(id)) uiByJob.set(id, { draftId: null, draftReview: null, mailPoId: '', canonicalMail: null, mailSearch: { scope: 'job', search: '' }, disclosures: {}, focus: null });
       return uiByJob.get(id);
     }
     const binding = record => ({ base: { version: record.version, source_version: record.source_version }, snapshot: copy(record) });
@@ -205,15 +205,38 @@
         ${actions.map(action => `<div class="dp-source"><strong>${esc(label(action.status))}</strong><p>${action.status === 'accepted_not_delivered' ? 'Provider accepted the request; delivery is not established.' : action.status === 'outcome_unknown' ? 'Outcome uncertain. Read back the provider record before any recovery; no blind resend.' : 'Action state from the server.'}</p><details data-disclosure="receipt:${esc(action.id)}"><summary>Action receipt</summary><div class="dp-exact-review">${esc(JSON.stringify(action.receipt || {}, null, 2))}</div></details>${button('execution-readback', 'Read back provider receipt', `data-id="${esc(action.approval_id)}"`)}</div>`).join('')}
       </div>`;
     }
+    function mailSelection(record, ui) {
+      const po = array(record.purchase_orders).find(item => item.id === ui.mailPoId);
+      return { job_id: record.job.id, job_number: record.job.job_number, ...(ui.mailPoId ? { po_id: ui.mailPoId, po_number: po?.po_number || po?.order_number || ui.mailPoId } : {}) };
+    }
+    async function loadCanonicalMail() {
+      const record = job();
+      if (!record || !root.OpsContextMail) return;
+      const ui = currentUI(), selection = mailSelection(record, ui), generation = ++canonicalMailGeneration;
+      ui.canonicalMail = null;
+      render();
+      if (ui.mailPoId && !array(record.purchase_orders).some(po => po.id === ui.mailPoId)) return;
+      const result = await root.OpsContextMail.load('dispatch', selection);
+      if (destroyed || generation !== canonicalMailGeneration || core.state.selectedId !== selection.job_id || ui.mailPoId !== (selection.po_id || '')) return;
+      ui.canonicalMail = result;
+      render();
+    }
     function emailHTML(record) {
       const draft = draftValue(record), ui = currentUI();
       if (ui.draftReview) {
         const saved = array(record.drafts).find(item => item.id === ui.draftId);
         if (!draft || !matches(editorBinding(record, `draft:${ui.draftId}`, draft), record) || !evidenceCurrent(record) || !saved || saved.review?.content_hash !== saved.content_hash || saved.review?.source_version !== record.source_version || core.editor(record.job.id, `draft:${ui.draftId}`)) ui.draftReview = null;
       }
-      const canonicalMail = root.OpsContextMail
-        ? root.OpsContextMail.render('dispatch', { job_id: record.job.id, job_number: record.job.job_number, po_id: record.purchase_orders && record.purchase_orders[0] && record.purchase_orders[0].id, po_number: record.purchase_orders && record.purchase_orders[0] && (record.purchase_orders[0].po_number || record.purchase_orders[0].order_number) }, core.state.canonicalMail)
-        : '<p class="dp-notice" role="status">Canonical mail reader pending. Captured PO mail below is not the company inbox.</p>';
+      const poOptions = array(record.purchase_orders).map(po => {
+        const requirements = new Set(array(po.line_items).map(line => line.dispatch_requirement_id));
+        const groupIds = new Set(array(record.requirements).filter(item => requirements.has(item.id)).map(item => item.group_id));
+        const groups = array(record.groups).filter(group => groupIds.has(group.id)).map(group => group.name);
+        return `<option value="${esc(po.id)}" ${ui.mailPoId === po.id ? 'selected' : ''}>PO ${esc(po.po_number || po.order_number || po.id)} · ${esc(groups.join(', ') || 'Group link unavailable')}</option>`;
+      }).join('');
+      const mailPicker = `<label>Email history by PO / order group<select data-filter="mail-po"><option value="" ${ui.mailPoId ? '' : 'selected'}>Whole job history</option>${unavailableOption(array(record.purchase_orders), ui.mailPoId, 'PO')}${poOptions}</select></label>`;
+      const canonicalMail = mailPicker + (root.OpsContextMail
+        ? root.OpsContextMail.render('dispatch', mailSelection(record, ui), ui.canonicalMail)
+        : '<p class="dp-notice" role="status">Canonical mail reader pending. Captured PO mail below is not the company inbox.</p>');
       const history = `<details data-disclosure="history" ${draft ? '' : 'open'}><summary>History & past-job search</summary>${canonicalMail}<p class="dp-small dp-muted">Captured job/PO mail. This is not the canonical email store. Orders use the existing PO transport; Outlook-wide search is a separate, unverified capability.</p><form data-form="mail-search" class="dp-editor"><label>Search scope<select name="scope"><option value="job" ${ui.mailSearch.scope === 'job' ? 'selected' : ''}>This job</option><option value="all" ${ui.mailSearch.scope === 'all' ? 'selected' : ''}>Search all jobs</option></select></label><label>Search captured correspondence<input name="search" value="${esc(ui.mailSearch.search)}" placeholder="Supplier, job or subject"></label><button type="submit">Search</button></form>${array(record.communication_links).map(link => `<div class="dp-source"><strong>Linked past-job reference</strong><p>Original job ${esc(link.source_job_id)} · message ${esc(link.communication_id)}</p><p>${esc(link.reason)}</p>${button('open-linked-mail', 'Read original reference', `data-id="${esc(link.communication_id)}" data-job="${esc(link.source_job_id)}"`)}</div>`).join('')}${mailResults?.error ? `<p class="dp-conflict">${esc(mailResults.error)}</p>` : ''}${array(mailResults?.communications || record.communications).map(mail => `<button class="dp-email-result" data-action="mail" data-id="${esc(mail.id)}"><strong>${esc(mail.subject || 'Untitled message')}</strong><small>${esc(mail.source_job_number || mail.jobs?.job_number || mail.job_number || mail.job_id)} · ${esc(mail.sender || mail.from_email || mail.from || 'Sender unknown')} · ${esc(mail.source || 'Captured mail')}</small></button>`).join('')}<p class="dp-small dp-muted">${mailResults?.coverage?.complete ? 'Captured search range complete' : 'History coverage limited; absence is not proof of no email.'}</p>${mailResults?.next_cursor ? button('more-mail', 'Load more captured mail') : ''}</details>`;
       const viewed = selectedMail ? `<div class="dp-source"><strong>${esc(selectedMail.subject)}</strong><p>Original job ${esc(selectedMail.source_job_number || selectedMail.jobs?.job_number || selectedMail.job_number || selectedMail.job_id)} · ${esc(selectedMail.mailbox || selectedMail.mailbox_email || 'Mailbox unknown')}</p><div class="dp-exact-review">${esc(plainMail(selectedMail))}</div>${selectedMail.job_id !== record.job.id ? button('link-mail', 'Link as a reference — keep original job') : button('reply-mail', 'Prepare reply draft') }</div>` : '';
       if (!draft) return `<h3>Job email</h3><div class="dp-tools">${button('new-draft', 'Compose email', 'class="dp-primary"')}</div>${jobDrafts(record).map(item => `<button class="dp-email-result" data-action="open-draft" data-id="${esc(item.id)}">${esc(item.subject || 'Untitled draft')}<small>${core.editor(record.job.id, `draft:${item.id}`) ? 'Unsaved Dispatch edits · kept for this session' : 'Saved Dispatch draft'} · ${esc(item.status || 'not sent')}</small></button>`).join('')}<div class="dp-divider">${history}${viewed}</div>`;
@@ -275,7 +298,7 @@
       }
       const changedJob = contextJob !== core.state.selectedId;
       const state = core.state, record = job();
-      if (contextJob !== state.selectedId) { if (form && contextJob) formsByJob.set(contextJob, form); contextJob = state.selectedId; selectedGroup = 'all'; form = formsByJob.get(contextJob) || null; selectedMail = null; mailResults = null; mailGeneration++; message = ''; }
+      if (contextJob !== state.selectedId) { if (form && contextJob) formsByJob.set(contextJob, form); contextJob = state.selectedId; selectedGroup = 'all'; form = formsByJob.get(contextJob) || null; selectedMail = null; mailResults = null; mailGeneration++; canonicalMailGeneration++; message = ''; }
       if (changedJob) focusOnLoad = currentUI().focus;
       const focus = liveFocus?.jobId === state.selectedId ? liveFocus : focusOnLoad;
       const queueJobs = state.jobs.filter(queueMatches);
@@ -358,6 +381,7 @@
         if (target.dataset.editor === 'draft' && target.name === 'purchase_commitment' && job()) { captureDraft(target.form, job()); render(); }
         if (target.dataset.layer) core.setLayer(target.dataset.layer, target.checked);
         if (target.dataset.filter === 'workflow') { workflow = target.value; render(); }
+        if (target.dataset.filter === 'mail-po' && job()) { currentUI().mailPoId = target.value; await loadCanonicalMail(); }
         if (target.dataset.move) await save('requirement_move', { id: target.dataset.move, group_id: target.value || null });
       } catch (error) { message = error.message; render(); }
     });
@@ -444,9 +468,9 @@
         if (action === 'event') { if (target.dataset.job) await core.select(target.dataset.job); return; }
         if (action === 'refresh') { await Promise.all([core.list(), core.calendar(dates[0], dates[6]), refreshEvidence()]); return; }
         if (action === 'workflow-refresh') {
+          if (!id) { message = 'Choose a job before assessing it.'; render(); return; }
           if (!root.OpsWorkflowRefresh) { message = 'Workflow Refresh control is not installed.'; render(); return; }
-          const scope = id ? { job_id: id } : {};
-          const run = await root.OpsWorkflowRefresh.start('dispatch', scope);
+          const run = await root.OpsWorkflowRefresh.start('dispatch', { job_id: id });
           core.state.workflowRefresh = run;
           if (run.lease_token) throw new Error('Refresh readback exposed a lease token.');
           message = root.OpsWorkflowRefresh.label(run);
@@ -462,10 +486,7 @@
           tab = target.dataset.id; render();
           if (tab === 'email' && id) {
             await core.execution(id);
-            if (root.OpsContextMail) {
-              core.state.canonicalMail = await root.OpsContextMail.load('dispatch', { job_id: id });
-              render();
-            }
+            if (!destroyed && core.state.selectedId === id && tab === 'email') await loadCanonicalMail();
           }
         }
         if (action === 'refresh-assessments' || action === 'more-assessments') { await core.tasks({ more: action === 'more-assessments' }).catch(() => {}); render(); return; }
@@ -665,6 +686,8 @@
     root._editAssignmentId = null;
     root._calPopupAssignment = null;
     root._calDragData = null;
+    root._quickAllocateExisting = [];
+    root._quickAllocateAssertIdentity = null;
     root._calUnschedOpen = false;
     root._calTruncated = false;
     const confirmProceed = document.getElementById?.('confirmModalProceed');
@@ -673,17 +696,28 @@
     const setText = (id, value) => { const element = document.getElementById?.(id); if (element) element.textContent = value; };
     setText('assignModalTitle', 'Schedule Assignment');
     ['assignJobSearch', 'assignJobSelect', 'assignDate', 'assignEndDate', 'assignStartTime', 'assignEndTime', 'assignNotes'].forEach(id => setValue(id, ''));
+    ['eventTitle', 'eventDate', 'eventEndDate', 'eventStartTime', 'eventEndTime', 'eventNotes', 'eventJobSearch', 'eventJobSelect', 'eventRecEndDate', 'quickAllocateJobId', 'quickAllocateDate', 'quickAllocateTime', 'quickAllocateNotes'].forEach(id => setValue(id, ''));
+    Object.entries({ eventType: 'meeting', eventRecurrence: 'none', eventRecEndType: 'never', eventRecCount: '52', eventRecInterval: '1', eventRecPeriod: 'weeks' }).forEach(([id, value]) => setValue(id, value));
+    const visibleToTrades = document.getElementById?.('eventVisibleToTrades'); if (visibleToTrades) visibleToTrades.checked = false;
+    document.querySelectorAll?.('#eventRecDaysRow input').forEach(input => { input.checked = false; });
+    for (const id of ['eventRecurrenceEnds', 'eventCustomRecurrence', 'eventRecCountGroup', 'eventRecDateGroup']) {
+      const element = document.getElementById?.(id); if (element?.style) element.style.display = 'none';
+    }
+    setText('quickAllocateJobLabel', '');
+    setText('quickAllocateSubmitBtn', 'Allocate');
+    const quickSubmit = document.getElementById?.('quickAllocateSubmitBtn'); if (quickSubmit) quickSubmit.disabled = false;
+    document.querySelectorAll?.('#recurrenceScopeModal').forEach(modal => { modal.innerHTML = ''; delete modal.dataset.updates; modal.remove(); });
     const assignType = document.getElementById?.('assignType'); if (assignType) assignType.value = 'install';
     const assignJobType = document.getElementById?.('assignJobType'); if (assignJobType) assignJobType.value = 'fencing';
     const assignDuration = document.getElementById?.('assignDuration'); if (assignDuration) assignDuration.value = '2';
-    for (const id of ['assignCrewContainer', 'assignMembersContainer', 'assignJobDropdown']) {
+    for (const id of ['assignCrewContainer', 'assignMembersContainer', 'assignJobDropdown', 'eventCrewContainer', 'eventJobDropdown', 'quickAllocateCrewContainer']) {
       const element = document.getElementById?.(id); if (element) element.innerHTML = '';
     }
     const assignTypeGroup = document.getElementById?.('assignTypeGroup'); if (assignTypeGroup?.style) assignTypeGroup.style.display = 'none';
     for (const id of ['dispatchRoot', 'dispatchCalendarLayers', 'calendarBody', 'calUnschedSidebar', 'calSidebar', 'calSchedModal', 'calConfirmModal', 'calJobPopup']) {
       const element = document.getElementById?.(id); if (element) element.innerHTML = '';
     }
-    for (const id of ['calSchedModal', 'calSchedBackdrop', 'calConfirmBackdrop', 'calJobPopup', 'assignmentModal']) {
+    for (const id of ['calSchedModal', 'calSchedBackdrop', 'calConfirmBackdrop', 'calJobPopup', 'assignmentModal', 'addEventModal', 'quickAllocateModal']) {
       document.getElementById?.(id)?.classList?.remove?.('open', 'active');
     }
   }

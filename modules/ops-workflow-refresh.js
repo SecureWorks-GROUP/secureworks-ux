@@ -9,7 +9,8 @@
 
   function label(run) {
     if (!run) return 'Workflow Refresh has not been requested.';
-    if (run.capability === 'pending') return run.reason || 'Shared Refresh door is not on this host yet. Evidence re-read remains a separate control.';
+    if (run.capability === 'pending') return esc(run.reason || 'Shared Refresh door is not on this host yet. Evidence re-read remains a separate control.');
+    if (run.capability === 'failed') return `Workflow Refresh failed: ${esc(run.reason || 'Workflow Refresh unread.')}.`;
     if (run.outcome === 'unavailable' || run.capability === 'unavailable') {
       return `Workflow Refresh unavailable: ${esc(run.reason || 'driver_not_registered')}. Pending until the domain driver is registered and produces ${esc(run.declared_output || 'its declared output')}.`;
     }

@@ -169,3 +169,46 @@ test('same-identity refresh retains editor but signout fences even a same-identi
   assert.equal(ui.host.innerHTML, '');
   assert.equal(ui.core.state.editors.size, 0);
 });
+
+test('signout clears event, recurring-series and Quick Allocate editors before the next operator unlocks', async () => {
+  const ui = await workspace({ hostIdentity: operator });
+  const fields = ['eventTitle', 'eventDate', 'eventEndDate', 'eventStartTime', 'eventEndTime', 'eventNotes', 'eventJobSearch', 'eventJobSelect', 'eventRecEndDate', 'quickAllocateJobId', 'quickAllocateDate', 'quickAllocateTime', 'quickAllocateNotes'];
+  const nodes = Object.fromEntries(fields.map(id => [id, { value: 'Private A value' }]));
+  for (const id of ['eventCrewContainer', 'eventJobDropdown', 'quickAllocateCrewContainer']) nodes[id] = { innerHTML: 'Private A selection' };
+  for (const id of ['addEventModal', 'quickAllocateModal']) {
+    const classes = new Set(['active']);
+    nodes[id] = { classList: { remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name) } };
+  }
+  for (const id of ['eventRecurrenceEnds', 'eventCustomRecurrence', 'eventRecCountGroup', 'eventRecDateGroup']) nodes[id] = { style: { display: 'block' } };
+  nodes.quickAllocateJobLabel = { textContent: 'Private A customer' };
+  nodes.quickAllocateSubmitBtn = { textContent: 'Saving...', disabled: true };
+  nodes.eventVisibleToTrades = { checked: true };
+  nodes.eventRecurrence = { value: 'custom' };
+  const days = [{ checked: true }, { checked: false }];
+  const series = [1, 2].map(id => ({ innerHTML: `Private A series ${id} action`, dataset: { updates: '{"notes":"Private A"}' }, removed: false, remove() { this.removed = true; } }));
+  ui.document.getElementById = id => nodes[id] || null;
+  ui.document.querySelectorAll = selector => selector === '#recurrenceScopeModal' ? series : selector === '#eventRecDaysRow input' ? days : [];
+  ui.context._quickAllocateExisting = [{ id: 'assignment-a', userId: 'crew-a' }];
+  const origin = ui.context.DispatchOps.identityGuard();
+  ui.context._quickAllocateAssertIdentity = origin;
+
+  ui.identity(null);
+  ui.identity({ id: 'operator-b', org_id: 'org-a' });
+  ui.emit('sw:auth-unlocked');
+
+  for (const id of fields) assert.equal(nodes[id].value, '', id);
+  for (const id of ['eventCrewContainer', 'eventJobDropdown', 'quickAllocateCrewContainer']) assert.equal(nodes[id].innerHTML, '', id);
+  for (const id of ['addEventModal', 'quickAllocateModal']) assert.equal(nodes[id].classList.contains('active'), false, id);
+  for (const id of ['eventRecurrenceEnds', 'eventCustomRecurrence', 'eventRecCountGroup', 'eventRecDateGroup']) assert.equal(nodes[id].style.display, 'none', id);
+  assert.equal(nodes.quickAllocateJobLabel.textContent, '');
+  assert.equal(nodes.quickAllocateSubmitBtn.textContent, 'Allocate');
+  assert.equal(nodes.quickAllocateSubmitBtn.disabled, false);
+  assert.equal(nodes.eventVisibleToTrades.checked, false);
+  assert.equal(nodes.eventRecurrence.value, 'none');
+  assert.ok(days.every(day => !day.checked));
+  assert.ok(series.every(modal => modal.removed && modal.innerHTML === '' && !modal.dataset.updates));
+  assert.deepEqual(clone(ui.context._quickAllocateExisting), []);
+  assert.equal(ui.context._quickAllocateAssertIdentity, null);
+  assert.throws(origin, error => error.code === 'dispatch_identity_changed');
+  assert.equal(ui.commands.length, 0);
+});

@@ -14647,8 +14647,12 @@ async function advanceMakesafeSubstatus(jobId, newSubstatus) {
 // Active assignments on the job when the modal was opened: [{ id, userId, role, sched }].
 // Drives pre-ticking the current crew and lets submit delete anyone removed.
 var _quickAllocateExisting = [];
+var _quickAllocateAssertIdentity = null;
 
 async function openQuickAllocateModal(jobId, clientName) {
+  var assertIdentity = DispatchOps.identityGuard();
+  assertIdentity();
+  _quickAllocateAssertIdentity = assertIdentity;
   document.getElementById('quickAllocateJobId').value = jobId;
   document.getElementById('quickAllocateJobLabel').textContent = clientName || 'Make-Safe Job';
   // Default to today (editable). Reassignment keeps the job's existing day if it has one.
@@ -14660,13 +14664,15 @@ async function openQuickAllocateModal(jobId, clientName) {
   document.getElementById('quickAllocateModal').classList.add('active');
   _quickAllocateExisting = [];
   await loadCrewList();
+  assertIdentity();
   // Flat people picker — tick whoever is on the job (no lead/helper distinction in the UI).
   document.getElementById('quickAllocateCrewContainer').innerHTML = renderMemberCheckboxes('');
 
   // Reassignment support: load the job's current active assignments so we can pre-tick the
   // people already on it (and hold their assignment ids, to delete anyone who gets removed).
   try {
-    var detail = await opsFetch('job_detail', { jobId: jobId });
+    var detail = await opsFetch('job_detail', { jobId: jobId }, { assertIdentity: assertIdentity });
+    assertIdentity();
     var active = (detail.assignments || []).filter(function(a) {
       var s = String(a.status || '').toLowerCase();
       return s !== 'cancelled' && s !== 'complete' && s !== 'completed';
@@ -14685,11 +14691,15 @@ async function openQuickAllocateModal(jobId, clientName) {
     if (existingDate) document.getElementById('quickAllocateDate').value = existingDate;
     if (_quickAllocateExisting.length) document.getElementById('quickAllocateSubmitBtn').textContent = 'Save changes';
   } catch (e) {
+    if (e && e.code === 'dispatch_identity_changed') throw e;
     console.log('Quick-allocate: could not load existing assignments:', e && e.message);
   }
 }
 
 async function submitQuickAllocate() {
+  var assertIdentity = _quickAllocateAssertIdentity;
+  if (!assertIdentity) return;
+  assertIdentity();
   var jobId = document.getElementById('quickAllocateJobId').value;
   var date = document.getElementById('quickAllocateDate').value;
   var startTime = document.getElementById('quickAllocateTime').value || '07:00';
@@ -14711,12 +14721,13 @@ async function submitQuickAllocate() {
     var toClear = existing.slice();
     if (!toClear.length) {
       try {
-        var d2 = await opsFetch('job_detail', { jobId: jobId });
+        var d2 = await opsFetch('job_detail', { jobId: jobId }, { assertIdentity: assertIdentity });
+        assertIdentity();
         toClear = (d2.assignments || []).filter(function(a) {
           var s = String(a.status || '').toLowerCase();
           return a.id && s !== 'cancelled' && s !== 'complete' && s !== 'completed';
         }).map(function(a) { return { id: a.id }; });
-      } catch (e) { console.log('Remove-all: assignment re-fetch failed:', e && e.message); }
+      } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Remove-all: assignment re-fetch failed:', e && e.message); }
     }
     if (!toClear.length) { alert('Please pick at least one person.'); return; }
     if (!confirm('Remove all crew from this make-safe and send it back to New?')) return;
@@ -14725,14 +14736,16 @@ async function submitQuickAllocate() {
     rbtn.textContent = 'Removing...';
     try {
       for (var r = 0; r < toClear.length; r++) {
-        await opsPost('delete_assignment', { assignmentId: toClear[r].id });
+        await opsPost('delete_assignment', { assignmentId: toClear[r].id }, { assertIdentity: assertIdentity });
       }
-      try { await opsPost('update_job_status', { jobId: jobId, status: 'accepted' }); } catch (e) { console.log('Status revert skipped:', e.message); }
-      try { await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'pending_allocation' }); } catch (e) { console.log('Substatus revert skipped:', e.message); }
+      try { await opsPost('update_job_status', { jobId: jobId, status: 'accepted' }, { assertIdentity: assertIdentity }); } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Status revert skipped:', e.message); }
+      try { await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'pending_allocation' }, { assertIdentity: assertIdentity }); } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Substatus revert skipped:', e.message); }
+      assertIdentity();
       closeModal('quickAllocateModal');
       showToast('All crew removed — back to New', 'success');
       loadJobs();
     } catch (e) {
+      if (e && e.code === 'dispatch_identity_changed') throw e;
       alert('Failed to remove crew: ' + e.message);
       rbtn.disabled = false;
       rbtn.textContent = 'Save changes';
@@ -14764,7 +14777,7 @@ async function submitQuickAllocate() {
   try {
     // 1. Remove anyone unticked — deletes their assignment so the job leaves their trade app.
     for (var d = 0; d < toDelete.length; d++) {
-      await opsPost('delete_assignment', { assignmentId: toDelete[d].id });
+      await opsPost('delete_assignment', { assignmentId: toDelete[d].id }, { assertIdentity: assertIdentity });
     }
 
     // 2. Add anyone newly ticked (first creation auto-moves job accepted -> scheduled).
@@ -14780,32 +14793,34 @@ async function submitQuickAllocate() {
         userId: toAdd[i].id,
         role: (!keptHasLead && i === 0) ? 'lead_installer' : 'helper',
         notes: notes
-      });
+      }, { assertIdentity: assertIdentity });
     }
 
     // 3. If the date changed on a reassignment, move the people who stayed too.
     if (dateChanged) {
       for (var k = 0; k < kept.length; k++) {
         try {
-          await opsPost('update_assignment', { assignmentId: kept[k].id, scheduled_date: date, scheduled_end: date });
-        } catch (e) { console.log('Kept assignment date update skipped:', e.message); }
+          await opsPost('update_assignment', { assignmentId: kept[k].id, scheduled_date: date, scheduled_end: date }, { assertIdentity: assertIdentity });
+        } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Kept assignment date update skipped:', e.message); }
       }
     }
 
     // 4. Keep the job in the allocated state (status + makesafe substatus).
     try {
-      await opsPost('update_job_status', { jobId: jobId, status: 'scheduled' });
-    } catch (e) { console.log('Status update skipped:', e.message); }
+      await opsPost('update_job_status', { jobId: jobId, status: 'scheduled' }, { assertIdentity: assertIdentity });
+    } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Status update skipped:', e.message); }
     try {
-      await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'waiting_on_trade_report' });
-    } catch (e) { console.log('Substatus update skipped:', e.message); }
+      await opsPost('update_makesafe_substatus', { jobId: jobId, substatus: 'waiting_on_trade_report' }, { assertIdentity: assertIdentity });
+    } catch (e) { if (e && e.code === 'dispatch_identity_changed') throw e; console.log('Substatus update skipped:', e.message); }
 
+    assertIdentity();
     closeModal('quickAllocateModal');
     var msg = 'Allocated to ' + people.length + ' ' + (people.length === 1 ? 'person' : 'people');
     if (toDelete.length) msg += ' (' + toDelete.length + ' removed)';
     showToast(msg, 'success');
     loadJobs(); // Refresh kanban
   } catch (e) {
+    if (e && e.code === 'dispatch_identity_changed') throw e;
     alert('Failed to allocate: ' + e.message);
     btn.disabled = false;
     btn.textContent = origLabel || 'Allocate';
@@ -16620,10 +16635,6 @@ function showSalesSub(tab) {
   if (btn) btn.classList.add('active');
   if (window.OpsSalesHost && typeof window.OpsSalesHost.show === 'function') {
     window.OpsSalesHost.show(tab);
-    return;
-  }
-  if (window.SalesBooking && typeof window.SalesBooking.show === 'function') {
-    window.SalesBooking.show(tab);
   }
 }
 

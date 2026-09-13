@@ -294,6 +294,29 @@ test('mobile Sales navigation restores and mounts the verified Sales host', () =
   assert.deepEqual(saved.salesShows, ['performance']);
 });
 
+test('showSalesSub does not bypass OpsSalesHost with a direct Booking fallback', () => {
+  const calls = [];
+  const tabs = [
+    element('sales-performance-tab', { dataset: { salesSub: 'performance' }, classes: ['sales-sub-tab', 'active'] }),
+    element('sales-booking-tab', { dataset: { salesSub: 'booking' }, classes: ['sales-sub-tab'] })
+  ];
+  const context = {
+    window: null,
+    document: {
+      querySelectorAll(selector) { return selector === '.sales-sub-tab' ? tabs : []; },
+      querySelector(selector) { return selector === '[data-sales-sub="booking"]' ? tabs[1] : null; }
+    },
+    SalesBooking: { show(tab) { calls.push(tab); } }
+  };
+  context.window = context;
+  vm.runInNewContext(extractFunction(opsHtml, 'showSalesSub'), context);
+
+  context.showSalesSub('booking');
+
+  assert.ok(tabs[1].classList.contains('active'));
+  assert.deepEqual(calls, []);
+});
+
 test('host strips preview globals and shows the pinned Booking integration blocker', async () => {
   const { context, inserted, sales, shown } = salesHostHarness();
   vm.runInNewContext(hostSource, context);

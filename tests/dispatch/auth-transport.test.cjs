@@ -231,6 +231,256 @@ function extractPOJobList() {
   return html.slice(start, end);
 }
 
+function extractQuickAllocate() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('var _quickAllocateExisting = []');
+  const end = html.indexOf('// ── New Make-Safe Modal', start);
+  assert.ok(start > -1 && end > start, 'quick allocate functions found');
+  return html.slice(start, end);
+}
+
+function quickAllocateElements() {
+  const elements = new Map();
+  function el(id, value) {
+    const node = {
+      id,
+      value: value || '',
+      textContent: '',
+      innerHTML: value || '',
+      disabled: false,
+      classList: { add() {}, remove() {} },
+    };
+    elements.set(id, node);
+    return node;
+  }
+  el('quickAllocateJobId');
+  el('quickAllocateJobLabel');
+  el('quickAllocateDate');
+  el('quickAllocateTime');
+  el('quickAllocateNotes');
+  el('quickAllocateSubmitBtn');
+  el('quickAllocateModal');
+  el('quickAllocateCrewContainer', 'Loading crew...');
+  return elements;
+}
+
+test('openQuickAllocateModal ignores late crew loads after Dispatch identity changes', async () => {
+  const crewRead = deferred();
+  let guardValid = true;
+  let rendered = false;
+  const elements = quickAllocateElements();
+  elements.get('quickAllocateCrewContainer').innerHTML = 'Loading crew...';
+  const context = {
+    window: null,
+    document: {
+      getElementById(id) { return elements.get(id) || null; },
+      querySelector() { throw new Error('stale detail must not pre-tick crew'); },
+    },
+    DispatchOps: {
+      identityGuard() {
+        return function assertIdentity() {
+          if (!guardValid) { const error = new Error('changed'); error.code = 'dispatch_identity_changed'; throw error; }
+        };
+      },
+    },
+    localDateStr() { return '2026-09-14'; },
+    loadCrewList() { return crewRead.promise; },
+    renderMemberCheckboxes() { rendered = true; return '<label>Crew</label>'; },
+    opsFetch() { throw new Error('stale open must not fetch job detail'); },
+    console: { log() {} },
+  };
+  context.window = context;
+  vm.runInNewContext(extractQuickAllocate(), context);
+
+  const opening = context.openQuickAllocateModal('job-a', 'Private A').then(
+    () => null,
+    error => error
+  );
+  await Promise.resolve();
+  guardValid = false;
+  crewRead.resolve();
+  const error = await opening;
+
+  assert.equal(error.code, 'dispatch_identity_changed');
+  assert.equal(rendered, false);
+  assert.equal(elements.get('quickAllocateCrewContainer').innerHTML, 'Loading crew...');
+  assert.deepEqual(JSON.parse(JSON.stringify(context._quickAllocateExisting)), []);
+});
+
+test('openQuickAllocateModal ignores late detail loads after Dispatch identity reset clears the modal', async () => {
+  const h = transportContext();
+  const detailRead = deferred();
+  const detailStarted = deferred();
+  h.tokenGate.resolve('operator-a-token');
+  const elements = quickAllocateElements();
+  elements.get('quickAllocateCrewContainer').innerHTML = 'Loading crew...';
+  Object.assign(h.context, {
+    document: {
+      getElementById(id) { return elements.get(id) || null; },
+      querySelector() { throw new Error('stale detail must not pre-tick crew'); },
+      querySelectorAll() { return []; },
+    },
+    localDateStr() { return '2026-09-14'; },
+    loadCrewList() { return Promise.resolve(); },
+    renderMemberCheckboxes() { return '<label>Crew</label>'; },
+    console: { log() {} },
+    fetch: async (url, options) => {
+      const action = new URL(url).searchParams.get('action');
+      h.calls.push({ action, body: options.body ? JSON.parse(options.body) : null, headers: options.headers });
+      if (action === 'job_detail') { detailStarted.resolve(); return { ok: true, json: () => detailRead.promise }; }
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+  vm.runInNewContext(extractQuickAllocate(), h.context);
+
+  const opening = h.context.openQuickAllocateModal('job-a', 'Private A').then(
+    () => null,
+    error => error
+  );
+  await detailStarted.promise;
+  assert.equal(elements.get('quickAllocateCrewContainer').innerHTML, '<label>Crew</label>');
+  h.invalidate();
+  detailRead.resolve({ assignments: [{ id: 'assignment-a', user_id: 'crew-a', status: 'scheduled', scheduled_date: '2026-09-15' }] });
+  const error = await opening;
+
+  assert.equal(error.code, 'dispatch_identity_changed');
+  assert.deepEqual(h.calls.map(call => call.action), ['job_detail']);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context._quickAllocateExisting)), []);
+  assert.equal(h.context._quickAllocateAssertIdentity, null);
+  assert.equal(elements.get('quickAllocateJobId').value, '');
+  assert.equal(elements.get('quickAllocateDate').value, '');
+  assert.equal(elements.get('quickAllocateTime').value, '');
+  assert.equal(elements.get('quickAllocateCrewContainer').innerHTML, '');
+});
+
+test('submitQuickAllocate without an opening identity owner performs no requests or UI effects', async () => {
+  const h = transportContext();
+  h.tokenGate.resolve('operator-a-token');
+  const elements = quickAllocateElements();
+  elements.get('quickAllocateJobId').value = 'job-a';
+  elements.get('quickAllocateDate').value = '2026-09-14';
+  const effects = [];
+  Object.assign(h.context, {
+    document: {
+      getElementById(id) { return elements.get(id) || null; },
+      querySelectorAll() { throw new Error('unowned editor must not read selected crew'); },
+    },
+    closeModal() { effects.push('close'); },
+    showToast() { effects.push('toast'); },
+    loadJobs() { effects.push('jobs'); },
+    alert(message) { effects.push('alert:' + message); },
+    fetch() { throw new Error('unowned editor must not write'); },
+  });
+  vm.runInNewContext(extractQuickAllocate(), h.context);
+
+  await h.context.submitQuickAllocate();
+
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(effects, []);
+});
+
+const quickAllocateIdentityCases = [
+  {
+    name: 'new crew create',
+    pendingAction: 'create_assignment',
+    selected: ['crew-a', 'crew-b'],
+    existing: [],
+    expectedActions: ['create_assignment'],
+  },
+  {
+    name: 'kept crew date update',
+    pendingAction: 'update_assignment',
+    selected: ['crew-a', 'crew-b'],
+    existing: [
+      { id: 'assignment-a', userId: 'crew-a', role: 'lead_installer', sched: '2026-09-13' },
+      { id: 'assignment-b', userId: 'crew-b', role: 'helper', sched: '2026-09-13' },
+    ],
+    expectedActions: ['update_assignment'],
+  },
+  {
+    name: 'allocated status write',
+    pendingAction: 'update_job_status',
+    selected: ['crew-a'],
+    existing: [],
+    expectedActions: ['create_assignment', 'update_job_status'],
+  },
+  {
+    name: 'allocated substatus write',
+    pendingAction: 'update_makesafe_substatus',
+    selected: ['crew-a'],
+    existing: [],
+    expectedActions: ['create_assignment', 'update_job_status', 'update_makesafe_substatus'],
+  },
+  {
+    name: 'remove-all status revert',
+    pendingAction: 'update_job_status',
+    selected: [],
+    existing: [{ id: 'assignment-a', userId: 'crew-a', role: 'lead_installer', sched: '2026-09-13' }],
+    confirmRemove: true,
+    expectedActions: ['delete_assignment', 'update_job_status'],
+  },
+];
+
+for (const scenario of quickAllocateIdentityCases) {
+  test(`submitQuickAllocate stops writes and UI effects after late ${scenario.name} identity change`, async () => {
+    const h = transportContext();
+    const pending = deferred();
+    const started = deferred();
+    const completions = [];
+    h.tokenGate.resolve('operator-a-token');
+    const elements = quickAllocateElements();
+    elements.get('quickAllocateJobId').value = 'job-a';
+    elements.get('quickAllocateDate').value = '2026-09-14';
+    elements.get('quickAllocateTime').value = '07:00';
+    elements.get('quickAllocateNotes').value = 'note';
+    elements.get('quickAllocateSubmitBtn').textContent = scenario.confirmRemove ? 'Save changes' : 'Allocate';
+    const selected = new Set(scenario.selected);
+    Object.assign(h.context, {
+      document: {
+        getElementById(id) { return elements.get(id) || null; },
+        querySelectorAll(selector) {
+          if (selector !== '#quickAllocateModal .assign-member-cb:checked') return [];
+          return ['crew-a', 'crew-b'].filter(id => selected.has(id)).map(id => ({
+            value: id,
+            getAttribute(name) { return name === 'data-name' ? (id === 'crew-a' ? 'Crew A' : 'Crew B') : null; },
+          }));
+        },
+      },
+      confirm(message) { completions.push('confirm:' + message); return scenario.confirmRemove === true; },
+      closeModal() { completions.push('close'); },
+      showToast() { completions.push('toast'); },
+      loadJobs() { completions.push('jobs'); },
+      alert(message) { completions.push('alert:' + message); },
+      fetch: async (url, options) => {
+        const action = new URL(url).searchParams.get('action');
+        h.calls.push({ action, body: JSON.parse(options.body), headers: options.headers });
+        if (action === scenario.pendingAction && !started.settled) {
+          started.settled = true;
+          started.resolve();
+          return { ok: true, json: () => pending.promise };
+        }
+        return { ok: true, json: async () => ({ ok: true }) };
+      },
+    });
+    vm.runInNewContext(extractQuickAllocate(), h.context);
+    h.context._quickAllocateExisting = scenario.existing;
+    h.context._quickAllocateAssertIdentity = h.context.DispatchOps.identityGuard();
+
+    const saving = h.context.submitQuickAllocate().then(
+      () => null,
+      error => error
+    );
+    await started.promise;
+    h.invalidate();
+    pending.resolve({ ok: true });
+    const error = await saving;
+
+    assert.equal(error.code, 'dispatch_identity_changed');
+    assert.deepEqual(h.calls.map(call => call.action), scenario.expectedActions);
+    assert.deepEqual(completions.filter(effect => !effect.startsWith('confirm:')), []);
+  });
+}
+
 test('loadCalendar ignores a late incumbent response after Dispatch identity changes', async () => {
   const calendarRead = deferred();
   let guardValid = true;

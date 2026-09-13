@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { workspace } = require('./workspace-harness.cjs');
 
 const root = path.resolve(__dirname, '../..');
 
@@ -202,4 +203,74 @@ test('schedule view reserves delivery rows above actionable job bars', () => {
   assert.match(container.innerHTML, /min-height:122px/);
   assert.match(container.innerHTML, /top:94px/);
   assert.doesNotMatch(container.innerHTML, /cal-schedule-bar [^"]*" style="position:absolute;top:22px/);
+});
+
+test('main calendar projection keeps material groups, movement proposals, layer toggles and identity recovery separate', async () => {
+  const range = { from: '2026-09-14', to: '2026-09-20' };
+  const own = value => JSON.parse(JSON.stringify(value));
+  let calendarEvents = [
+    { id: 'po:job-a:steel', job_id: 'a', job_number: 'FIX-A', title: 'Steel supplier', date: '2026-09-15', layer: 'materials', status: 'confirmed', delivery_kind: 'promised' },
+    { id: 'po:job-a:concrete', job_id: 'a', job_number: 'FIX-A', title: 'Concrete supplier', date: '2026-09-16', layer: 'materials', status: 'planned', delivery_kind: 'requested' },
+    { id: 'movement:job-a:yard', job_id: 'a', job_number: 'FIX-A', title: 'Move panels from yard to site', date: '2026-09-17', layer: 'logistics', status: 'proposed' }
+  ];
+  const ui = await workspace({
+    hostIdentity: { id: 'operator-a', org_id: 'org-a' },
+    get: async (action) => {
+      if (action === 'dispatch_calendar') return { events: calendarEvents, undated: [], coverage: { complete: true } };
+    }
+  });
+  ui.records.a.groups = [{ id: 'steel', name: 'Steel' }, { id: 'concrete', name: 'Concrete' }];
+  ui.records.a.requirements = [
+    { id: 'requirement-steel', description: 'Steel posts', group_id: 'steel' },
+    { id: 'requirement-concrete', description: 'Concrete bags', group_id: 'concrete' }
+  ];
+  ui.records.a.purchase_orders = [{ id: 'po-a', line_items: [
+    { dispatch_requirement_id: 'requirement-steel', description: 'Steel posts' },
+    { dispatch_requirement_id: 'requirement-concrete', description: 'Concrete bags' }
+  ] }];
+  let layerChange;
+  const layerHost = { innerHTML: '', addEventListener(type, listener) { if (type === 'change') layerChange = listener; }, removeEventListener(type, listener) { if (type === 'change' && layerChange === listener) layerChange = null; }, querySelector() { return null; }, contains() { return false; } };
+  const originalGetElementById = ui.document.getElementById;
+  ui.document.getElementById = id => id === 'dispatchCalendarLayers' ? layerHost : originalGetElementById(id);
+  await ui.context.DispatchOps.loadMainCalendar(range);
+
+  const staff = [{ id: 'assignment:job-a', job_id: 'a', assignment_type: 'install', scheduled_date: '2026-09-15', job_number: 'FIX-A' }];
+  const incumbent = [{ id: 'confirmed', job_id: 'a', job_number: 'FIX-A', supplier_name: 'Confirmed PO supplier', confirmed_delivery_date: '2026-09-14', status: 'confirmed', received: false, paid: false }];
+  const projected = ui.context.DispatchOps.projectMain(staff, incumbent, range);
+  assert.deepEqual(own(projected.events.map(event => event.id)), ['assignment:job-a']);
+  const steel = projected.deliveries.find(event => event.dispatch_event_id === 'po:job-a:steel');
+  const concrete = projected.deliveries.find(event => event.dispatch_event_id === 'po:job-a:concrete');
+  assert.deepEqual([steel?.supplier_name, steel?.delivery_date, steel?.job_id, steel?.delivery_kind], ['Steel supplier', '2026-09-15', 'a', 'promised']);
+  assert.deepEqual([concrete?.supplier_name, concrete?.delivery_date, concrete?.job_id, concrete?.delivery_kind], ['Concrete supplier', '2026-09-16', 'a', 'requested']);
+  const movement = projected.deliveries.find(event => event.dispatch_event_id === 'movement:job-a:yard');
+  assert.deepEqual([movement?.supplier_name, movement?.delivery_date, movement?.job_id, movement?.dispatch_layer], ['Move panels from yard to site', '2026-09-17', 'a', 'logistics']);
+  assert.ok(projected.deliveries.some(event => event.dispatch_event_id === 'po:confirmed'));
+  const confirmed = projected.deliveries.find(event => event.dispatch_event_id === 'po:confirmed');
+  const confirmedBlock = ui.context.DispatchOps.mainBlock(confirmed);
+  assert.match(confirmedBlock, /confirmed|promised|requested|delivery/);
+  assert.doesNotMatch(confirmedBlock, /receipt|received|paid|payment/i);
+
+  assert.equal(typeof layerChange, 'function');
+  layerChange({ target: { matches: selector => selector === '[data-dispatch-layer]', dataset: { dispatchLayer: 'staff' }, checked: false } });
+  let toggled = ui.context.DispatchOps.projectMain(staff, incumbent, range);
+  assert.deepEqual(own(toggled.events), []);
+  assert.ok(toggled.deliveries.some(event => event.dispatch_event_id === 'po:job-a:steel'));
+  layerChange({ target: { matches: selector => selector === '[data-dispatch-layer]', dataset: { dispatchLayer: 'materials' }, checked: false } });
+  toggled = ui.context.DispatchOps.projectMain(staff, incumbent, range);
+  assert.equal(toggled.deliveries.some(event => event.dispatch_layer === 'materials'), false);
+  assert.ok(toggled.deliveries.some(event => event.dispatch_event_id === 'movement:job-a:yard'));
+  layerChange({ target: { matches: selector => selector === '[data-dispatch-layer]', dataset: { dispatchLayer: 'materials' }, checked: true } });
+  layerChange({ target: { matches: selector => selector === '[data-dispatch-layer]', dataset: { dispatchLayer: 'logistics' }, checked: false } });
+  toggled = ui.context.DispatchOps.projectMain(staff, incumbent, range);
+  assert.ok(toggled.deliveries.some(event => event.dispatch_event_id === 'po:job-a:steel'));
+  assert.equal(toggled.deliveries.some(event => event.dispatch_layer === 'logistics'), false);
+
+  ui.identity(null);
+  assert.deepEqual(own(ui.context.DispatchOps.projectMain(staff, incumbent, range)), { events: [], deliveries: [] });
+  calendarEvents = [{ id: 'po:job-b:fresh', job_id: 'b', job_number: 'FIX-B', title: 'Fresh operator supplier', date: '2026-09-18', layer: 'materials', status: 'planned', delivery_kind: 'requested' }];
+  ui.identity({ id: 'operator-b', org_id: 'org-a' });
+  await ui.context.DispatchOps.loadMainCalendar(range);
+  const recovered = ui.context.DispatchOps.projectMain([{ id: 'assignment:job-b', job_id: 'b', assignment_type: 'install', scheduled_date: '2026-09-18' }], [], range);
+  assert.equal(recovered.deliveries.some(event => event.dispatch_event_id === 'po:job-a:steel'), false);
+  assert.ok(recovered.deliveries.some(event => event.dispatch_event_id === 'po:job-b:fresh'));
 });

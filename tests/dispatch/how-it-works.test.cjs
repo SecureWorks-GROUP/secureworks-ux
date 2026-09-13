@@ -63,7 +63,7 @@ test('How it works contract names the five workflow definitions and their curren
   assert.equal(contract.workflows.dispatch.definition_status, 'reviewed_local');
   assert.equal(contract.workflows.booking.definition_status, 'owner_definition_reviewed');
   assert.equal(contract.workflows.performance.definition_status, 'pending_domain_owner');
-  assert.equal(contract.workflows.debt.definition_status, 'pending_domain_owner');
+  assert.equal(contract.workflows.debt.definition_status, 'owner_definition_reviewed');
   assert.equal(contract.workflows.ses.definition_status, 'pending_domain_owner');
   assert.equal(contract.workflows.dispatch.technical.runtime_action, 'dispatch_workflow');
   assert.equal(contract.workflows.booking.technical.page, 'Sales > Booking');

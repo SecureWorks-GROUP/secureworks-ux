@@ -26,13 +26,23 @@
     "debt": {
       "title": "Debt Collection",
       "owner": "DEBT COLLECTION",
-      "definition_status": "pending_domain_owner",
+      "definition_status": "owner_definition_reviewed",
       "skill_path": "harness/ops/skills/secureworks-debt-live/SKILL.md",
-      "business": ["Classify every open receivable and propose the next action. Refresh does not send."],
+      "skill_version": "clear-debt-workflow/2026-09-13",
+      "ux_pin": "c89d6e46fac85994794feace96dd8941f7cca0b7",
+      "backend_pin": "e04145b5",
+      "wiki_pin": "08afbb57",
+      "business": [
+        "Classify every unpaid invoice: genuine, blocked by us, in dispute, not owed.",
+        "Hand blocked items to the owning desk. Chase only genuine debt.",
+        "Every customer message is a named proposal. Marnin approves one at a time.",
+        "Refresh reads the picture. It does not send and does not move money."
+      ],
       "technical": {
         "page": "Financials > Clear Debt",
-        "manual_command": "python3 harness/ops/skills/secureworks-debt-live/scripts/debt_live.py",
-        "cloud": "Picture apply is attended. Weekly report is a separate Monday job. Runtime unread here."
+        "api": "ops-api GET list_debt_picture, debt_context_coverage, invoice_context, debt_notes; POST upsert_debt_picture (attended apply only); POST debt_proposal_save (PR 837, pending only). JWT must not call record_workflow_refresh_receipt. Host Refresh is assessment-only GET until CIO debt_source_v1.",
+        "manual_command": "python3 harness/ops/skills/secureworks-debt-live/scripts/debt_live.py --assess --out DIR [--provider-open FILE]",
+        "cloud": "Intended: Monday 08:20 Perth com.secureworks.debt-weekly weekly wiki snapshot, not classification refresh. Observed: loaded, runs=0, never exited. Picture apply remains attended."
       }
     },
     "ses": {

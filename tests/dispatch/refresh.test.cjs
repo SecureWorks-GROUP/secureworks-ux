@@ -90,3 +90,63 @@ test('returned types stay selectable independently of next action through empty 
   await ui.click('trade', 'decking'); await ui.filter('workflow', 'Check scope'); assert.match(ui.host.innerHTML, /class="dp-job" data-action="select" data-id="a"/); assert.doesNotMatch(ui.host.innerHTML, /class="dp-job" data-action="select" data-id="b"/);
   empty = true; await ui.core.list(); assert.match(ui.host.innerHTML, /data-id="decking" aria-pressed="true"/); assert.match(ui.host.innerHTML, /Coverage incomplete/); assert.match(ui.host.innerHTML, /value="Check scope" selected/);
 });
+
+test('default Dispatch queue shows current accepted material separate from acceptance review and historical work', async () => {
+  const jobs = [
+    { id: 'a', job_number: 'MAT-1', client_name: 'Accepted Customer', site_address: 'Accepted site', work_type: 'Decking', eligibility: { state: 'accepted' }, next_action: 'Order materials', status: 'accepted' },
+    { id: 'b', job_number: 'REV-1', client_name: 'Review Customer', site_address: 'Review site', work_type: 'Decking', eligibility: { state: 'unresolved' }, next_action: 'Resolve acceptance', status: 'quoted' },
+    { id: 'c', job_number: 'HIS-1', client_name: 'Complete Customer', site_address: 'Complete site', work_type: 'Fencing', eligibility: { state: 'accepted' }, next_action: 'Close file', status: 'complete' },
+    { id: 'd', job_number: 'HIS-2', client_name: 'Invoice Customer', site_address: 'Invoice site', work_type: 'Patio', eligibility: { state: 'accepted' }, next_action: 'final_payment', status: 'invoiced' }
+  ];
+  const ui = await workspace({ get: async action => action === 'dispatch_list' ? { jobs, coverage: { complete: true, universe: 4, accepted: 3, unresolved: 1 } } : undefined });
+  assert.match(ui.host.innerHTML, /MAT-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /REV-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /HIS-1/);
+  assert.match(ui.host.innerHTML, /Universe 4 · accepted 3 · unresolved 1/);
+  assert.doesNotMatch(ui.host.innerHTML, /632 to order/);
+
+  await ui.click('queue', 'acceptance-review');
+  assert.match(ui.host.innerHTML, /REV-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /MAT-1/);
+  await ui.click('trade', 'decking');
+  await ui.filter('workflow', 'Resolve acceptance');
+  assert.match(ui.host.innerHTML, /REV-1/);
+  assert.match(ui.host.innerHTML, /data-id="decking" aria-pressed="true"/);
+  assert.match(ui.host.innerHTML, /value="Resolve acceptance" selected/);
+
+  await ui.click('trade', 'all');
+  await ui.filter('workflow', 'all');
+  await ui.click('queue', 'historical');
+  assert.match(ui.host.innerHTML, /HIS-1/);
+  assert.match(ui.host.innerHTML, /HIS-2/);
+  assert.doesNotMatch(ui.host.innerHTML, /MAT-1/);
+});
+
+test('Dispatch queue fallback names the census snapshot without inventing order totals', async () => {
+  const ui = await workspace({ get: async action => action === 'dispatch_list' ? { jobs: [
+    { id: 'a', job_number: 'MAT-1', client_name: 'Accepted Customer', site_address: 'Accepted site', work_type: 'Decking', eligibility: { state: 'accepted' }, next_action: 'Order materials', status: 'accepted' }
+  ], coverage: { complete: true } } : undefined });
+  assert.match(ui.host.innerHTML, /2026-09-13 04:33:06Z census SNAPSHOT only, not live page counts/);
+  assert.doesNotMatch(ui.host.innerHTML, /632/);
+  assert.doesNotMatch(ui.host.innerHTML, /to order/);
+});
+
+test('Dispatch acceptance review does not infer acceptance from lifecycle status alone', async () => {
+  const jobs = [
+    { id: 'a', job_number: 'STA-1', client_name: 'Status Accepted', site_address: 'Status site', work_type: 'Decking', status: 'accepted', next_action: 'Order materials' },
+    { id: 'b', job_number: 'SCH-1', client_name: 'Scheduled Status', site_address: 'Scheduled site', work_type: 'Decking', eligibility: { state: 'unresolved' }, status: 'scheduled', next_action: 'Order materials' },
+    { id: 'c', job_number: 'APP-1', client_name: 'Approvals Stage', site_address: 'Approvals site', work_type: 'Patio', eligibility: { state: 'unresolved' }, stage: 'approvals', status: 'quoted', next_action: 'Order materials' },
+    { id: 'd', job_number: 'MAT-1', client_name: 'Accepted Evidence', site_address: 'Accepted site', work_type: 'Fencing', eligibility: { state: 'accepted' }, status: 'accepted', next_action: 'Order materials' }
+  ];
+  const ui = await workspace({ get: async action => action === 'dispatch_list' ? { jobs, coverage: { complete: true, universe: 4, accepted: 1, unresolved: 3 } } : undefined });
+  assert.match(ui.host.innerHTML, /MAT-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /STA-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /SCH-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /APP-1/);
+
+  await ui.click('queue', 'acceptance-review');
+  assert.match(ui.host.innerHTML, /STA-1/);
+  assert.match(ui.host.innerHTML, /SCH-1/);
+  assert.match(ui.host.innerHTML, /APP-1/);
+  assert.doesNotMatch(ui.host.innerHTML, /MAT-1/);
+});

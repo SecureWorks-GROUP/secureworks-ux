@@ -174,6 +174,82 @@ test('loadCalendar ignores a late incumbent response after Dispatch identity cha
   assert.equal(renderCount, 0);
 });
 
+test('loadCalendar reloads verified crew before joining availability rows', async () => {
+  const own = value => JSON.parse(JSON.stringify(value));
+  const scenarios = [
+    {
+      availability: [{ user_id: 'crew-b', date: '2026-09-14', status: 'leave', note: 'RDO' }],
+      expectedAvailability: { 'Crew B_2026-09-14': { status: 'leave', note: 'RDO' } },
+      expectedLeaveByDate: { '2026-09-14': ['Crew B'] },
+    },
+    {
+      availability: [],
+      expectedAvailability: {},
+      expectedLeaveByDate: {},
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const crewRead = deferred();
+    const availabilityRead = deferred();
+    const availabilityStarted = deferred();
+    const repainted = deferred();
+    let availabilityCalls = 0;
+    let renderCount = 0;
+    const context = {
+      _crewList: [],
+      _calEvents: [],
+      _calDeliveries: [],
+      _calReadiness: {},
+      _calOrgEvents: [],
+      _calTruncated: false,
+      _unschedJobs: [],
+      _calAvailability: { stale: { status: 'leave', note: 'old' } },
+      _calLeaveByDate: { '2026-09-13': ['Old Crew'] },
+      document: { getElementById(id) { return id === 'calendarBody' ? { innerHTML: '' } : null; } },
+      getCalRange() { return { from: '2026-09-14', to: '2026-09-20' }; },
+      DispatchOps: {
+        loadMainCalendar() {},
+        identityGuard() { return function assertIdentity() {}; },
+      },
+      opsFetch(action) {
+        if (action === 'calendar') return Promise.resolve({ events: [], deliveries: [], readiness: {}, orgEvents: [], truncated: false });
+        if (action === 'pipeline') return Promise.resolve({ columns: { accepted: [] } });
+        if (action === 'list_users') return crewRead.promise;
+        if (action === 'get_crew_availability') {
+          availabilityCalls++;
+          availabilityStarted.resolve();
+          return availabilityRead.promise;
+        }
+        throw new Error('unexpected read: ' + action);
+      },
+      initCalEventFilterChips() {},
+      renderCalendar() { renderCount++; if (renderCount === 2) repainted.resolve(); },
+      renderCalUnschedSidebar() {},
+      renderCalSummary() {},
+      console: { error() {}, warn() {} },
+      showToast() { throw new Error('calendar should not fail'); },
+    };
+    context.window = context;
+    vm.runInNewContext(extractCrewList() + '\n' + extractLoadCalendar(), context);
+
+    await context.loadCalendar();
+    assert.equal(availabilityCalls, 0);
+
+    crewRead.resolve({ users: [{ id: 'crew-b', name: 'Crew B', email: 'crew.b@example.test', role: 'installer' }] });
+    await availabilityStarted.promise;
+    assert.equal(availabilityCalls, 1);
+
+    availabilityRead.resolve({ availability: scenario.availability });
+    await repainted.promise;
+
+    assert.deepEqual(own(context._crewList), [{ id: 'crew-b', name: 'Crew B', email: 'crew.b@example.test', role: 'installer', division: 'trade' }]);
+    assert.deepEqual(own(context._calAvailability), scenario.expectedAvailability);
+    assert.deepEqual(own(context._calLeaveByDate), scenario.expectedLeaveByDate);
+    assert.equal(renderCount, 2);
+  }
+});
+
 test('loadCrewList ignores stale prior identity completion without clearing newer crew', async () => {
   const oldRead = deferred();
   const newRead = deferred();

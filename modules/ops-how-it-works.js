@@ -3,7 +3,7 @@
   'use strict';
   const VERSION = 'ops-how-it-works/v1';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  let openWorkflow = null, lastFocus = null, host = null, runtime = null, runtimeError = null, loading = false, loadedContract = root.OPS_HOW_IT_WORKS_CONTRACT || null;
+  let openWorkflow = null, lastFocus = null, host = null, runtime = null, runtimeError = null, loading = false, requestGeneration = 0, loadedContract = root.OPS_HOW_IT_WORKS_CONTRACT || null;
 
   function contract() {
     return loadedContract || { definition_version: VERSION, workflows: {} };
@@ -100,17 +100,20 @@
       loadedContract = { definition_version: VERSION, workflows: {} };
     }
   }
-  async function loadRuntime(id) {
-    runtime = null; runtimeError = null; loading = true;
+  async function loadRuntime(id, generation) {
     await ensureContract();
+    if (generation !== requestGeneration || openWorkflow !== id) return;
     if (id !== 'dispatch' || typeof root.opsFetch !== 'function') {
       if (id !== 'dispatch') runtimeError = 'Domain runtime adapter pending. Intended behaviour is shown; live status is unread.';
       loading = false; render(); return;
     }
     try {
-      runtime = await root.opsFetch('dispatch_workflow', {});
+      const nextRuntime = await root.opsFetch('dispatch_workflow', {});
+      if (generation !== requestGeneration || openWorkflow !== id) return;
+      runtime = nextRuntime;
       if (root.SW_AUTH_GATE?.identity && !root.SW_AUTH_GATE.identity()) throw new Error('Dispatch identity changed. Sign in and read the current workspace.');
     } catch (error) {
+      if (generation !== requestGeneration || openWorkflow !== id) return;
       runtime = null;
       runtimeError = error.message || 'Dispatch runtime unread';
     }
@@ -121,10 +124,15 @@
     ensureHost();
     lastFocus = document.activeElement;
     openWorkflow = id;
+    const generation = ++requestGeneration;
+    runtime = null;
+    runtimeError = null;
+    loading = true;
     render();
-    loadRuntime(id);
+    return loadRuntime(id, generation);
   }
   function close() {
+    requestGeneration++;
     openWorkflow = null;
     runtime = null;
     runtimeError = null;

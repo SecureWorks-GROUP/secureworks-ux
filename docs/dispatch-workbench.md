@@ -1,6 +1,6 @@
 # Dispatch workbench
 
-Dispatch adds an accepted-work queue, operator-owned order groups, requirements and source review, working notes, linked purchase orders, exact correspondence drafts, and material custody planning to Ops. The integrated calendar and Main Calendar projection consume the same source event IDs and layer state.
+Dispatch adds an accepted-work queue, operator-owned order groups, requirements and source review, working notes, linked purchase orders, exact correspondence drafts, and material custody planning to Ops. The integrated calendar and Main Calendar projection consume the same source event IDs and layer state. The default queue is current material work: acceptance-evidenced jobs that are not complete, invoiced, final-payment or review-collection history; acceptance-review and historical filters are explicit, while work type and next action remain independent filters.
 
 `modules/ops-dispatch-core.js` owns data custody and optimistic writes. `modules/ops-dispatch.js` renders the workspace through the existing authenticated `opsFetch` / `opsPost` adapter. Missing endpoints render errors and partial coverage; product code contains no sample fallback. `modules/ops-dispatch.css` is scoped to Dispatch.
 

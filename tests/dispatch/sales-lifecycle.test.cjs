@@ -21,14 +21,24 @@ function host({ get, post, fetch, headers } = {}) {
   const listen = map => (name, fn) => map.set(name, [...(map.get(name) || []), fn]);
   const emit = (map, name, event) => (map.get(name) || []).forEach(fn => fn(event));
   const document = { activeElement: null, addEventListener: listen(docEvents), getElementById: id => nodes.get(id) || null };
-  function element(id) {
-    let html = '';
+  function element(id, tagName = 'div') {
+    let html = '', text = '';
+    const events = new Map();
     const classes = new Set();
     const node = {
-      id, isConnected: true,
+      id, tagName, isConnected: true, children: [], value: '',
       classList: { add: value => classes.add(value), contains: value => classes.has(value), toggle(value, on) { if (on) classes.add(value); else classes.delete(value); } },
       setAttribute() {}, querySelector() { return null; }, contains() { return true; },
       parentNode: { insertBefore(child) { nodes.set(child.id, child); } },
+      addEventListener: listen(events),
+      fire(type) { emit(events, type, { target: node }); },
+      append(...children) { children.forEach(child => { child.parentNode = node; node.children.push(child); }); },
+      replaceChildren(...children) { node.children.forEach(child => child.remove()); node.children = []; node.append(...children); },
+      remove() { node.isConnected = false; if (node.parentNode?.children) node.parentNode.children = node.parentNode.children.filter(child => child !== node); },
+      showModal() { node.open = true; },
+      close() { node.open = false; node.fire('close'); },
+      get textContent() { return text + node.children.map(child => child.textContent).join(''); },
+      set textContent(value) { text = String(value); node.replaceChildren(); },
       dispatchEvent(event) { emit(docEvents, event.type, event); },
       focus() { document.activeElement = node; },
       get innerHTML() { return html; },
@@ -36,10 +46,8 @@ function host({ get, post, fetch, headers } = {}) {
     };
     return node;
   }
-  document.createElement = () => element('');
+  document.createElement = tagName => element('', tagName);
   for (const id of ['viewSales', 'salesBookingRoot', 'salesPerformanceRoot', 'salesPerformanceNotes']) nodes.set(id, element(id));
-  const detailPanel = element('detail-panel');
-  nodes.get('salesPerformanceNotes').firstElementChild = detailPanel;
   document.body = element('body');
   const context = vm.createContext({ document, AbortController,
     CustomEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
@@ -51,10 +59,12 @@ function host({ get, post, fetch, headers } = {}) {
     fetch: fetch || (async () => ({ json: async () => ({ messages: [] }) }))
   });
   context.window = context;
-  for (const file of ['ops-sales-performance.js', 'ops-sales-booking.js', 'ops-sales-host.js']) {
+  for (const file of ['ops-sales-performance.js', 'ops-sales-booking.js', 'ops-sales-performance-detail.js', 'ops-sales-host.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../modules', file), 'utf8'), context);
   }
-  return { context, nodes, calls, document, detailPanel,
+  const descendants = node => node.children.flatMap(child => [child, ...descendants(child)]);
+  return { context, nodes, calls, document,
+    elements(tagName) { return descendants(document.body).filter(node => node.tagName === tagName); },
     identity(value) { actor = value; emit(winEvents, 'sw:auth-identity', { detail: value }); },
     emit(name, detail) { emit(docEvents, name, { detail }); },
     click(target) { emit(docEvents, 'click', { target, preventDefault() {} }); }
@@ -150,28 +160,69 @@ test('Performance measure clicks expose missing evidence and restore focus on cl
     focus() { h.document.activeElement = trigger; }
   };
   h.click(trigger);
-  const notes = h.nodes.get('salesPerformanceNotes');
-  assert.match(notes.innerHTML, /Patio · Leads in/);
-  assert.match(notes.innerHTML, /No report is published/);
-  assert.match(notes.innerHTML, /evidence are unavailable/);
-  assert.equal(h.document.activeElement, h.detailPanel);
-  const close = { closest: selector => selector === '[data-performance-detail-close]' ? close : null };
-  h.click(close);
-  assert.equal(notes.innerHTML, '');
+  const dialog = h.elements('dialog')[0];
+  assert.equal(dialog.open, true);
+  assert.match(dialog.textContent, /Patio · Leads in/);
+  assert.match(dialog.textContent, /No report is published/);
+  assert.match(dialog.textContent, /evidence are unavailable/);
+  assert.equal(h.document.activeElement, h.elements('input')[0]);
+  h.elements('button').find(node => node.textContent === 'Close').fire('click');
+  assert.equal(h.elements('dialog').length, 0);
   assert.equal(h.document.activeElement, trigger);
   h.click(trigger);
   h.identity(null);
-  assert.equal(notes.innerHTML, '');
+  assert.equal(h.elements('dialog').length, 0);
 });
 
-test('Performance unpublished measure keeps its declared reason and escapes coverage facts', async () => {
+test('Performance unpublished measure keeps its declared reason and displays coverage as text', async () => {
   const h = host({ get: () => ({ rows: [{ lane: 'patio', week_start: week, metrics: {}, coverage: { gaps: ['<script>private coverage</script>'] } }], week_start: week, week_starts: [week] }) });
   await h.context.SalesPerformance.load();
   h.emit('sales-performance:drill', { lane: 'patio', measure: 'B2', week_start: week });
-  const markup = h.nodes.get('salesPerformanceNotes').innerHTML;
-  assert.match(markup, /Attendance evidence not published/);
-  assert.match(markup, /&lt;script&gt;private coverage&lt;\/script&gt;/);
-  assert.doesNotMatch(markup, /<script>/);
+  assert.match(h.elements('dialog')[0].textContent, /Attendance evidence not published/);
+  assert.match(h.elements('pre')[0].textContent, /<script>private coverage<\/script>/);
+  assert.equal(h.elements('script').length, 0);
+});
+
+for (const quotes of [undefined, []]) {
+  test(`C1 exposes related follow-up when quotes are ${quotes ? 'empty' : 'missing'}, without measuring sends`, async () => {
+    const row = { lane: 'fencing', week_start: week, source_mode: 'collector_capture', metrics: {}, queues: { quotes,
+      quote_followup_queue: Array.from({ length: 27 }, (_, i) => ({ id: 'followup-' + i, name: 'Follow-up customer ' + i }))
+    } };
+    const h = host({ get: () => ({ rows: [row], week_start: week, week_starts: [week] }) });
+    await h.context.SalesPerformance.load();
+    h.emit('sales-performance:drill', { lane: 'fencing', measure: 'C1', week_start: week, row: { metrics: { quotes_sent: 99 } }, queueKey: 'incorrect' });
+    const dialog = h.elements('dialog')[0];
+    assert.match(dialog.textContent, /Unpublished report/);
+    assert.match(dialog.textContent, /No reading/);
+    assert.match(dialog.textContent, /Related quote follow-up evidence only/);
+    assert.match(dialog.textContent, /25 of 27 matching retained rows/);
+    assert.equal(h.elements('article').length, 25);
+    h.elements('button').find(node => node.textContent === 'Show more retained rows').fire('click');
+    assert.equal(h.elements('article').length, 27);
+    const search = h.elements('input')[0]; search.value = 'customer 26'; search.fire('input');
+    assert.equal(h.elements('article').length, 1);
+    assert.match(h.elements('article')[0].textContent, /followup-26/);
+    assert.equal(h.context.SalesPerformance.adapt(h.context.SalesPerformance.state.data.rows[0]).measures.C1.value, null);
+    h.context.SalesPerformance.render();
+    assert.equal(h.elements('dialog').length, 0);
+    h.emit('sales-performance:drill', { lane: 'fencing', measure: 'C1', week_start: 'previous-week', row });
+    assert.equal(h.elements('dialog').length, 0);
+    assert.equal(h.calls.length, 1);
+  });
+}
+
+test('C1 document evidence retains its period filter when a quotes queue exists', async () => {
+  const quote = { name: 'Documented quote', documents_read: true, quote_docs: 1, sent_to_client: true, first_sent_at: '2026-09-15T10:00:00Z' };
+  const row = { lane: 'fencing', week_start: week, metrics: { period: { since: '2026-09-14T00:00:00Z', until_exclusive: '2026-09-21T00:00:00Z' } }, queues: {
+    quotes: [quote, { ...quote, name: 'Unverified quote', documents_read: false }, { ...quote, name: 'Later quote', first_sent_at: '2026-09-21T00:00:00Z' }],
+    quote_followup_queue: [{ name: 'Related follow-up' }]
+  } };
+  const h = host({ get: () => ({ rows: [row], week_start: week, week_starts: [week] }) });
+  await h.context.SalesPerformance.load();
+  h.emit('sales-performance:drill', { lane: 'fencing', measure: 'C1', week_start: week });
+  assert.equal(h.elements('article').length, 1);
+  assert.match(h.elements('article')[0].textContent, /Documented quote/);
+  assert.match(h.elements('dialog')[0].textContent, /No reading/);
 });
 
 function useAuthenticatedTransport(h, token = async () => 'operator-token') {

@@ -183,6 +183,7 @@ function salesHostHarness() {
       identityGuard() { return function assertVerifiedSalesIdentity() {}; }
     },
     document: {
+      body: element('body'),
       addEventListener(type, handler) { listeners.push({ target: 'document', type, handler }); },
       getElementById(id) {
         if (id === 'viewSales') return sales;
@@ -293,7 +294,7 @@ test('mobile Sales navigation restores and mounts the verified Sales host', () =
   assert.deepEqual(saved.salesShows, ['performance']);
 });
 
-test('host strips preview globals and mounts authenticated Booking', async () => {
+test('host strips preview globals and shows the pinned Booking integration blocker', async () => {
   const { context, inserted, sales, shown } = salesHostHarness();
   vm.runInNewContext(hostSource, context);
   context.OpsSalesHost.show('booking');
@@ -304,7 +305,15 @@ test('host strips preview globals and mounts authenticated Booking', async () =>
   assert.ok(sales.classList.contains('sales-sub-booking'));
   assert.ok(!sales.classList.contains('sales-sub-performance'));
   assert.deepEqual(inserted.sort(), ['salesBookingHostNotice', 'salesPerformanceHostNotice']);
-  assert.deepEqual(shown, [['booking', 'booking']]);
+  assert.deepEqual(shown, []);
+  assert.equal(context.document.getElementById('salesBookingRoot').innerHTML, '');
+  const blocker = context.document.getElementById('salesBookingHostNotice').textContent;
+  assert.match(blocker, /Booking integration blocked pending a replacement Patio pin/);
+  assert.match(blocker, /f048ca5.*R26\/R27/);
+  assert.match(blocker, /refreshing a draft can overwrite another operator’s edits/);
+  assert.match(blocker, /a failed archive can hide an active case/);
+  context.OpsSalesHost.show('performance');
+  assert.deepEqual(shown, [['performance', 'load']]);
 });
 
 test('Sales transport aborts when identity changes while auth token is pending', async () => {

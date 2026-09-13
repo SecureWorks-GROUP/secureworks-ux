@@ -252,6 +252,63 @@ test('auth changing locks the gate before the next verified identity arrives', (
   assert.equal(run.order.at(-1), 'sw:auth-identity:null');
 });
 
+function extractOpsStartup() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('var _opsAppStarted = false;');
+  const end = html.indexOf("if (document.readyState === 'loading')", start);
+  assert.ok(start > -1 && end > start, 'ops startup functions found');
+  return html.slice(start, end);
+}
+
+test('ops startup waits for verified auth-gate identity before loading private views', () => {
+  const listeners = new Map();
+  const cloudListeners = new Map();
+  const calls = [];
+  let unlocked = false;
+  let identity = null;
+  const context = {
+    window: null,
+    document: {
+      getElementById() { return null; },
+    },
+    SECUREWORKS_CLOUD: {
+      auth: { isLoggedIn() { return true; } },
+      on(type, listener) { cloudListeners.set(type, listener); },
+    },
+    SW_AUTH_GATE: {
+      isUnlocked() { return unlocked; },
+      identity() { return identity; },
+    },
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(listener);
+    },
+    dispatchEvent(event) {
+      for (const listener of listeners.get(event.type) || []) listener(event);
+      return true;
+    },
+    loadCrewList() { calls.push('crew'); },
+    restoreTab() { calls.push('restore'); },
+    updateJarvisSummary() { calls.push('summary'); },
+    setTimeout() { return 1; },
+    console: { log() {} },
+  };
+  context.window = context;
+  vm.runInNewContext(extractOpsStartup(), context);
+
+  context.bootOpsApp();
+  cloudListeners.get('auth:login')?.();
+  assert.equal(context._opsAppStarted, false);
+  assert.deepEqual(calls, []);
+
+  unlocked = true;
+  identity = { id: 'user-1', org_id: 'org-1' };
+  context.dispatchEvent({ type: 'sw:auth-unlocked', detail: identity });
+
+  assert.equal(context._opsAppStarted, true);
+  assert.deepEqual(calls, ['crew', 'restore']);
+});
+
 function deferred() {
   let resolve, reject;
   const promise = new Promise((res, rej) => { resolve = res; reject = rej; });

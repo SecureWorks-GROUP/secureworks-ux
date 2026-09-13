@@ -4527,6 +4527,7 @@
 <link rel="stylesheet" href="modules/ops-dispatch.css?v=1">
 <link rel="stylesheet" href="modules/ops-how-it-works.css?v=1">
 <link rel="stylesheet" href="modules/ops-sales-performance.css?v=1">
+<link rel="stylesheet" href="modules/ops-sales-performance-detail.css?v=1">
 <link rel="stylesheet" href="modules/ops-sales-booking.css?v=1">
 <link rel="stylesheet" href="modules/ops-sales-host.css?v=1">
 </head>
@@ -6215,6 +6216,7 @@
 <script src="modules/ops-workflow-refresh.js?v=1"></script>
 <script src="modules/ops-sales-performance.js?v=1"></script>
 <script src="modules/ops-sales-booking.js?v=1"></script>
+<script src="modules/ops-sales-performance-detail.js?v=1"></script>
 <script src="modules/ops-sales-host.js?v=1"></script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
@@ -8548,7 +8550,10 @@ async function loadCalendar() {
     }).catch(function(e) { if (e && e.code === 'dispatch_identity_changed') return; console.error('calendar pipeline enrich failed:', e); });
 
     // Crew availability shading
-    opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
+    loadCrewList().then(function() {
+      checkDispatchIdentity();
+      return opsFetch('get_crew_availability', { from: range.from, to: range.to });
+    }).then(function(av) {
       checkDispatchIdentity();
       _calAvailability = {};
       _calLeaveByDate = {};
@@ -8571,8 +8576,8 @@ async function loadCalendar() {
             (_calLeaveByDate[a.date] = _calLeaveByDate[a.date] || []).push(name);
           }
         });
-        renderCalendar(); // re-paint with availability backgrounds
       }
+      renderCalendar(); // re-paint with availability backgrounds
     }).catch(function(e) { if (e && e.code === 'dispatch_identity_changed') return; console.error('calendar availability enrich failed:', e); });
   } catch (e) {
     if (e && e.code === 'dispatch_identity_changed') return;
@@ -27933,6 +27938,7 @@ var _opsAppStarted = false;
 function initApp() {
   cloud = window.SECUREWORKS_CLOUD;
   if (_opsAppStarted || !cloud || !cloud.auth || !cloud.auth.isLoggedIn()) return;
+  if (!window.SW_AUTH_GATE || !SW_AUTH_GATE.isUnlocked || !SW_AUTH_GATE.isUnlocked() || !SW_AUTH_GATE.identity || !SW_AUTH_GATE.identity()) return;
   _opsAppStarted = true;
   // M-F W1-E(a) — cache the signed-in operator email so opsPost can attach it
   // synchronously (getUser() is a Promise). Also drives the admin cancel gate.
@@ -27991,6 +27997,7 @@ function bootOpsApp() {
     return;
   }
   cloud.on('auth:login', function() { initApp(); });
+  window.addEventListener('sw:auth-unlocked', function() { initApp(); });
   if (cloud.auth.isLoggedIn()) initApp();
 }
 

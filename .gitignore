@@ -12,6 +12,9 @@ CLAUDE.local.md
 scratch/
 drafts/
 
+# Isolated Booking preview persistence (not company truth)
+.sales-booking-preview-store.json
+
 # Local browser/test audit output
 .gstack/
 node_modules/

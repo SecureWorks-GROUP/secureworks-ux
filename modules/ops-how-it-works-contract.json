@@ -42,9 +42,9 @@
       ],
       "technical": {
         "page": "Financials > Clear Debt",
-        "api": "ops-api GET list_debt_picture, debt_context_coverage, invoice_context, debt_notes; POST upsert_debt_picture (attended apply only); POST debt_proposal_save (PR 837, pending only). JWT must not call record_workflow_refresh_receipt. Host Refresh is assessment-only GET until CIO debt_source_v1.",
+        "api": "ops-api GET list_debt_picture, debt_context_coverage, invoice_context, debt_notes; POST upsert_debt_picture (attended apply only); POST debt_proposal_save (PR 837 e04145b5, pending only). JWT must not call record_workflow_refresh_receipt. workflow_refresh start(debt) is unavailable; Debt cannot register. Refresh RPCs at Luna 12da8360. ea0beae5 is not completion-safe Refresh. Cache restore ea0beae5 UPDATE 13 existing only; production write BLOCKED until named Marnin yes.",
         "manual_command": "python3 harness/ops/skills/secureworks-debt-live/scripts/debt_live.py --assess --out DIR [--provider-open FILE]",
-        "cloud": "Intended: Monday 08:20 Perth com.secureworks.debt-weekly weekly wiki snapshot, not classification refresh. Observed: loaded, runs=0, never exited. Picture apply remains attended."
+        "cloud": "Intended: Monday 08:20 Perth com.secureworks.debt-weekly weekly wiki snapshot, not classification refresh. Observed: loaded, runs=0, never exited. Picture apply remains attended. Host Refresh unavailable until CIO debt_source_v1."
       }
     },
     "ses": {

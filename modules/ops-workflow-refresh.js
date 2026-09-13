@@ -28,11 +28,23 @@
 
   async function start(workflow, scope, { assertIdentity }) {
     assertIdentity();
+    if (workflow === 'debt') {
+      return {
+        capability: 'unavailable',
+        outcome: 'unavailable',
+        reason: 'debt_cannot_register; start(debt) unavailable until CIO debt_source_v1. Picture GET only. JWT must not call record_workflow_refresh_receipt. ea0beae5 is not completion-safe Refresh.',
+        declared_output: 'debt_source_v1',
+        workflow
+      };
+    }
     if (typeof root.opsPost !== 'function') {
       return { capability: 'pending', reason: 'Authenticated Ops write is not available.', workflow };
     }
     try {
       const result = await root.opsPost('workflow_refresh', { op: 'start', workflow, scope }, { assertIdentity });
+      if (result && (result.op === 'record_workflow_refresh_receipt' || result.called === 'record_workflow_refresh_receipt')) {
+        throw new Error('JWT must not call record_workflow_refresh_receipt.');
+      }
       assertIdentity();
       if (result && result.lease_token) throw new Error('Refresh readback exposed a lease token.');
       let run = {

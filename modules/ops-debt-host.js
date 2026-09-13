@@ -49,6 +49,9 @@
     syncMail,
     selection,
     refreshIsPictureGet: true,
-    mustNotCallReceipt: true
+    mustNotCallReceipt: true,
+    workflowRefreshUnavailable: true,
+    refreshPin: '12da836047ecae8029b9dedf3907edaa42b00a06',
+    notCompletionPin: 'ea0beae5'
   };
 })(typeof window !== 'undefined' ? window : globalThis);

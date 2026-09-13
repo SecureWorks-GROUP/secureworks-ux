@@ -65,5 +65,19 @@ test('Debt host mail selection uses invoice_id and never posts a refresh receipt
   assert.equal(sel.job_id, '7daa5692-bed9-4836-92af-09d1e0ddf52a');
   assert.equal(context.OpsDebtHost.refreshIsPictureGet, true);
   assert.equal(context.OpsDebtHost.mustNotCallReceipt, true);
+  assert.equal(context.OpsDebtHost.workflowRefreshUnavailable, true);
   assert.equal(posts.includes('record_workflow_refresh_receipt'), false);
+});
+
+test('workflow_refresh start(debt) is unavailable and does not POST receipt', async () => {
+  const posts = [];
+  const context = {
+    opsPost: async (action) => { posts.push(action); return { outcome: 'completed' }; }
+  };
+  const refreshSrc = fs.readFileSync(path.join(root, 'modules/ops-workflow-refresh.js'), 'utf8');
+  vm.runInNewContext(refreshSrc, context);
+  const run = await context.OpsWorkflowRefresh.start('debt', {}, { assertIdentity() {} });
+  assert.equal(run.outcome, 'unavailable');
+  assert.match(run.reason, /debt_cannot_register|start\(debt\) unavailable/);
+  assert.equal(posts.length, 0);
 });

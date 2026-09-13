@@ -63,6 +63,9 @@ async function compose(page, body='Human draft A') {
   await page.getByLabel('To',{exact:true}).fill('supplier@example.test');
   await page.getByLabel('Exact message',{exact:true}).fill(body);
 }
+async function showAcceptanceReview(page) {
+  await page.getByRole('button', { name: 'Acceptance review', exact: true }).click();
+}
 test('History and scope disclosures retain search focus through refresh and job navigation', async ({ page }) => {
   await setup(page);
   await compose(page, 'Keep the open job draft');
@@ -76,6 +79,7 @@ test('History and scope disclosures retain search focus through refresh and job 
   await expect(search).toBeFocused();
   expect(await search.evaluate(input => [input.selectionStart, input.selectionEnd])).toEqual([4, 11]);
   await page.locator('.dp-job[data-id="b"]').click();
+  await showAcceptanceReview(page);
   await page.locator('.dp-job[data-id="a"]').click();
   await expect(search).toBeVisible();
   await expect(search).toHaveValue('Original supplier history');
@@ -97,7 +101,7 @@ test('arbitrary groups preserve requirement identity through rename, move and re
 });
 test('exact drafts persist and each job retains human edits during selection',async({page})=>{
   await setup(page);await compose(page);await page.getByRole('button',{name:'Save Dispatch draft',exact:true}).click();await expect(page.getByText('Dispatch draft saved. No message sent.',{exact:true})).toBeVisible();
-  await page.getByLabel('Exact message',{exact:true}).fill('Unsaved newer A');await page.locator('.dp-job[data-id="b"]').click();await page.getByRole('button',{name:'Compose email',exact:true}).click();await page.getByLabel('Exact message',{exact:true}).fill('Job B buffer');await page.locator('.dp-job[data-id="a"]').click();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Unsaved newer A');
+  await page.getByLabel('Exact message',{exact:true}).fill('Unsaved newer A');await page.locator('.dp-job[data-id="b"]').click();await page.getByRole('button',{name:'Compose email',exact:true}).click();await page.getByLabel('Exact message',{exact:true}).fill('Job B buffer');await showAcceptanceReview(page);await page.locator('.dp-job[data-id="a"]').click();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Unsaved newer A');
   await page.getByRole('button',{name:'Save Dispatch draft',exact:true}).click();await page.evaluate(()=>{document.getElementById('dispatchRoot').replaceWith(Object.assign(document.createElement('div'),{id:'dispatchRoot'}));return mountFixture();});await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('button',{name:/Materials · FIX-101/}).click();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Unsaved newer A');
 });
 test('edits made during save never receive an older exact review',async({page})=>{
@@ -107,7 +111,7 @@ test('broader mail search keeps original attribution and never imports recipient
   await setup(page);await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByLabel('Search scope',{exact:true}).selectOption('all');await page.getByLabel('Search captured correspondence',{exact:true}).fill('supplier');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('button',{name:/Fixture original supplier thread/}).click();await expect(page.getByText('Original job B evidence',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Link as a reference — keep original job',exact:true}).click();expect(await page.evaluate(()=>fixture.records.a.communication_links[0].source_job_id)).toBe('b');await page.getByRole('button',{name:'Compose email',exact:true}).click();await expect(page.getByLabel('To',{exact:true})).toHaveValue('');expect(await page.evaluate(()=>fixture.mailParams.scope)).toBe('all');
 });
 test('calendar layers keep event identity and link back to the original job',async({page})=>{
-  await setup(page);await page.locator('input[data-layer="materials"]').uncheck();await expect(page.locator('[data-id="po:source-b"]')).toHaveCount(0);await page.locator('input[data-layer="materials"]').check();await page.locator('[data-id="po:source-b"]').click();await expect(page.getByRole('heading',{name:/FIX-102/})).toBeVisible();await page.getByRole('button',{name:'patio',exact:true}).click();await expect(page.locator('.dp-job')).toHaveCount(1);expect(await page.evaluate(()=>core.state.jobs.length)).toBe(2);
+  await setup(page);await page.locator('input[data-layer="materials"]').uncheck();await expect(page.locator('[data-id="po:source-b"]')).toHaveCount(0);await page.locator('input[data-layer="materials"]').check();await page.locator('[data-id="po:source-b"]').click();await expect(page.getByRole('heading',{name:/FIX-102/})).toBeVisible();await page.getByRole('button',{name:'patio',exact:true}).click();await expect(page.locator('.dp-job')).toHaveCount(0);await showAcceptanceReview(page);await expect(page.locator('.dp-job')).toHaveCount(1);expect(await page.evaluate(()=>core.state.jobs.length)).toBe(2);
 });
 test('narrow workspace keeps exact compose usable without horizontal page overflow',async({page})=>{
   await page.setViewportSize({width:390,height:844});await setup(page);await compose(page);await expect(page.getByLabel('Exact message',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toBeVisible();
@@ -151,6 +155,7 @@ test('receipt allocation selection remains explicit after source removal', async
   await page.getByLabel('Received location', { exact: true }).fill('site');
   await page.getByRole('button', { name: 'Save verified custody', exact: true }).click();
   expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.locator('[data-disclosure="reconcile:form"] > summary').click();
   await page.getByRole('button', { name: 'I reviewed changes · keep my edits', exact: true }).click();
   await expect(page.getByText('Changed evidence acknowledged. Your exact values remain for review and saving.', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
@@ -190,6 +195,7 @@ test('allocation requirement selection remains explicit after source removal', a
   await page.getByLabel('Quantity', { exact: true }).fill('4');
   await page.getByRole('button', { name: 'Save allocation', exact: true }).click();
   expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
+  await page.locator('[data-disclosure="reconcile:form"] > summary').click();
   await page.getByRole('button', { name: 'I reviewed changes · keep my edits', exact: true }).click();
   expect(await page.evaluate(() => fixture.commands.length)).toBe(0);
   await page.getByRole('button', { name: 'Save allocation', exact: true }).click();
@@ -215,6 +221,7 @@ test('purchase order destination cannot silently refill after being cleared', as
   await page.getByLabel('Reviewed panels · 4 each · Reviewed').check();
   await page.evaluate(() => core.load('a'));
   await page.locator('.dp-job[data-id="b"]').click();
+  await showAcceptanceReview(page);
   await page.locator('.dp-job[data-id="a"]').click();
   const destination = page.getByLabel('Delivery destination', { exact: true });
   await expect(destination).toHaveValue('');

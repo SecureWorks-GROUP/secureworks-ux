@@ -16,6 +16,7 @@ function cloudHarness({ initialSession = { data: { session: null } } } = {}) {
   const sessions = [initialSession];
   let authCallback = null;
   const signOutGate = deferred();
+  let signOutCalls = 0;
   const passwordReplies = [];
   const profileReplies = [];
   const sb = {
@@ -29,7 +30,7 @@ function cloudHarness({ initialSession = { data: { session: null } } } = {}) {
         if (reply) return reply.promise || Promise.resolve(reply);
         return Promise.resolve({ data: { user: { id: args.email, email: args.email } } });
       },
-      signOut() { return signOutGate.promise; },
+      signOut() { signOutCalls++; return signOutGate.promise; },
       onAuthStateChange(fn) { authCallback = fn; },
     },
     from() { throw new Error('unexpected table call'); },
@@ -74,7 +75,129 @@ function cloudHarness({ initialSession = { data: { session: null } } } = {}) {
     passwordReplies,
     profileReplies,
     signOutGate,
+    signedOut() { return signOutCalls; },
     pushSession(session) { sessions.push(session); },
+    trigger(event, user) { return authCallback(event, user ? { user } : null); },
+  };
+}
+
+function validProfile(user, extra = {}) {
+  return Object.assign({ id: user.id, email: user.email, org_id: 'org-a', role: 'admin' }, extra);
+}
+
+function cloudGateHarness() {
+  const events = [];
+  const fetches = [];
+  const profileReplies = [];
+  const windowListeners = new Map();
+  const documentListeners = new Map();
+  const elements = new Map();
+  let authCallback = null;
+  let signOutCalls = 0;
+  let sessionReads = 0;
+
+  class Element {
+    constructor(tag) {
+      this.tagName = tag.toUpperCase();
+      this.children = [];
+      this.parentNode = null;
+      this.style = {};
+      this.listeners = new Map();
+      this.textContent = '';
+      this.disabled = false;
+      this.value = '';
+    }
+    set id(value) { this._id = value; if (value) elements.set(value, this); }
+    get id() { return this._id; }
+    set cssText(value) { this._cssText = value; }
+    get cssText() { return this._cssText || ''; }
+    set innerHTML(value) {
+      this._innerHTML = value;
+      for (const match of String(value).matchAll(/id="([^"]+)"/g)) {
+        const child = new Element('div');
+        child.id = match[1];
+        child.parentNode = this;
+        this.children.push(child);
+      }
+    }
+    get innerHTML() { return this._innerHTML || ''; }
+    appendChild(child) { child.parentNode = this; this.children.push(child); if (child.id) elements.set(child.id, child); return child; }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    remove() {
+      elements.delete(this.id);
+      if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    }
+  }
+
+  const head = new Element('head');
+  const body = new Element('body');
+  const main = new Element('main');
+  main.id = 'mainApp';
+  body.appendChild(main);
+
+  const sb = {
+    auth: {
+      getSession() { return Promise.resolve({ data: { session: sessionReads++ === 0 ? null : { access_token: 'fixture-token' } } }); },
+      signInWithPassword() { throw new Error('unexpected password signin'); },
+      signOut() { signOutCalls++; return Promise.resolve({}); },
+      onAuthStateChange(fn) { authCallback = fn; },
+    },
+    from() { throw new Error('unexpected table call'); },
+    storage: { from() { throw new Error('unexpected storage call'); } },
+  };
+  const context = {
+    URLSearchParams,
+    SUPABASE_URL: 'https://supabase.example.test',
+    SUPABASE_ANON_KEY: 'anon',
+    supabase: { createClient() { return sb; } },
+    navigator: { onLine: true },
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    document: {
+      head,
+      body,
+      title: 'Ops',
+      querySelector(selector) {
+        if (selector === 'meta[name="sw-allowed-roles"]') return { content: 'admin' };
+        if (selector === '.main-content' || selector === 'main') return main;
+        return null;
+      },
+      createElement(tag) { return new Element(tag); },
+      getElementById(id) { return elements.get(id) || null; },
+      addEventListener(type, listener) { documentListeners.set(type, listener); },
+      fire(type) { return documentListeners.get(type)?.(); },
+    },
+    location: { href: 'https://app.example.test/ops.html', search: '' },
+    addEventListener(type, listener) {
+      if (!windowListeners.has(type)) windowListeners.set(type, new Set());
+      windowListeners.get(type).add(listener);
+    },
+    dispatchEvent(event) {
+      events.push({ type: event.type, detail: event.detail == null ? event.detail : JSON.parse(JSON.stringify(event.detail)) });
+      for (const listener of [...(windowListeners.get(event.type) || [])]) listener(event);
+      return true;
+    },
+    CustomEvent: class CustomEvent { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } },
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout(fn) { return fn(); },
+    console: { log() {}, warn() {} },
+    fetch(url, options) {
+      const reply = profileReplies.shift() || deferred();
+      fetches.push({ url, options, body: JSON.parse(options.body), reply });
+      return reply.promise;
+    },
+  };
+  context.window = context;
+  context.window.top = context.window;
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../shared/cloud.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../shared/auth-gate.js'), 'utf8'), context);
+  context.document.fire('DOMContentLoaded');
+  return {
+    context,
+    events,
+    fetches,
+    profileReplies,
+    signedOut() { return signOutCalls; },
     trigger(event, user) { return authCallback(event, user ? { user } : null); },
   };
 }
@@ -107,6 +230,75 @@ test('new auth identity emits changing before profile loading can complete', asy
   await pending;
   assert.equal(h.events[1].event, 'auth:login');
   assert.equal(h.events[1].detail.id, 'user-b');
+});
+
+test('profile load failure keeps the session active but unverified', async () => {
+  const h = cloudHarness();
+  h.pushSession({ data: { session: { access_token: 'token-a' } } });
+  const profile = deferred();
+  h.profileReplies.push(profile);
+  const pending = h.trigger('SIGNED_IN', { id: 'user-a', email: 'a@example.test' });
+  await new Promise(resolve => setImmediate(resolve));
+  profile.resolve({ ok: false, json: async () => ({ error: 'profile unavailable' }) });
+  await pending;
+
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.isLoggedIn(), true);
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser(), null);
+  assert.deepEqual(h.events, [{ event: 'auth:changing', detail: { id: 'user-a', email: 'a@example.test' } }]);
+  assert.equal(h.signedOut(), 0);
+});
+
+test('mismatched or incomplete profiles are not accepted as verified identity', async () => {
+  const cases = [
+    { id: 'other-user', email: 'a@example.test', org_id: 'org-a', role: 'admin' },
+    { id: 'user-a', email: 'a@example.test', role: 'admin' },
+    { id: 'user-a', email: 'a@example.test', org_id: 'org-a' },
+  ];
+
+  for (const profile of cases) {
+    const h = cloudHarness();
+    h.pushSession({ data: { session: { access_token: 'token-a' } } });
+    const reply = deferred();
+    h.profileReplies.push(reply);
+    const pending = h.trigger('SIGNED_IN', { id: 'user-a', email: 'a@example.test' });
+    await new Promise(resolve => setImmediate(resolve));
+    reply.resolve({ ok: true, json: async () => ({ profile }) });
+    await pending;
+
+    assert.equal(h.context.SECUREWORKS_CLOUD.auth.isLoggedIn(), true);
+    assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser(), null);
+    assert.deepEqual(h.events, [{ event: 'auth:changing', detail: { id: 'user-a', email: 'a@example.test' } }]);
+    assert.equal(h.signedOut(), 0);
+  }
+});
+
+test('auth gate stays locked after failed cloud profile and unlocks after recovery', async () => {
+  const h = cloudGateHarness();
+  const user = { id: 'user-a', email: 'a@example.test' };
+  const failedProfile = deferred();
+  h.profileReplies.push(failedProfile);
+  const failed = h.trigger('SIGNED_IN', user);
+  await new Promise(resolve => setImmediate(resolve));
+  failedProfile.resolve({ ok: false, json: async () => ({ error: 'profile unavailable' }) });
+  await failed;
+
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.isLoggedIn(), true);
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser(), null);
+  assert.equal(h.context.SW_AUTH_GATE.isUnlocked(), false);
+  assert.equal(h.context.SW_AUTH_GATE.identity(), null);
+  assert.equal(h.signedOut(), 0);
+
+  const goodProfile = deferred();
+  h.profileReplies.push(goodProfile);
+  const recovered = h.trigger('SIGNED_IN', user);
+  await new Promise(resolve => setImmediate(resolve));
+  goodProfile.resolve({ ok: true, json: async () => ({ profile: validProfile(user) }) });
+  await recovered;
+
+  assert.equal(h.context.SW_AUTH_GATE.isUnlocked(), true);
+  assert.equal(h.context.SW_AUTH_GATE.identity().id, 'user-a');
+  assert.equal(h.context.SW_AUTH_GATE.identity().org_id, 'org-a');
+  assert.equal(h.signedOut(), 0);
 });
 
 test('older profile success cannot overwrite a later signed-in user', async () => {
@@ -209,7 +401,7 @@ test('late signout completion does not emit logout after a newer sign-in', async
   assert.deepEqual(h.events.filter(event => event.event === 'auth:logout'), []);
 });
 
-test('same identity token refresh does not emit changing or clear profile', async () => {
+test('same identity token refresh keeps profile while the fresh match loads', async () => {
   const h = cloudHarness();
   h.pushSession({ data: { session: { access_token: 'token-a' } } });
   h.pushSession({ data: { session: { access_token: 'token-a2' } } });
@@ -227,6 +419,36 @@ test('same identity token refresh does not emit changing or clear profile', asyn
   assert.deepEqual(h.events.filter(event => event.event === 'auth:changing'), []);
   profileA2.resolve({ ok: true, json: async () => ({ profile: { id: 'user-a', email: 'a@example.test', org_id: 'org-a', role: 'admin' } }) });
   await second;
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser().id, 'user-a');
+  assert.deepEqual(h.events.map(event => event.event), ['auth:login']);
+});
+
+test('failed same identity reverify clears stale verified profile without signing out', async () => {
+  const h = cloudHarness();
+  h.pushSession({ data: { session: { access_token: 'token-a' } } });
+  h.pushSession({ data: { session: { access_token: 'token-a2' } } });
+  const profileA = deferred();
+  const profileA2 = deferred();
+  h.profileReplies.push(profileA, profileA2);
+  const user = { id: 'user-a', email: 'a@example.test' };
+  const first = h.trigger('SIGNED_IN', user);
+  await new Promise(resolve => setImmediate(resolve));
+  profileA.resolve({ ok: true, json: async () => ({ profile: validProfile(user) }) });
+  await first;
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser().id, 'user-a');
+
+  h.events.length = 0;
+  const second = h.trigger('SIGNED_IN', user);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser().id, 'user-a');
+  assert.deepEqual(h.events, []);
+  profileA2.resolve({ ok: false, json: async () => ({ error: 'profile unavailable' }) });
+  await second;
+
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.isLoggedIn(), true);
+  assert.equal(h.context.SECUREWORKS_CLOUD.auth.getUser(), null);
+  assert.deepEqual(h.events, [{ event: 'auth:changing', detail: { id: 'user-a', email: 'a@example.test' } }]);
+  assert.equal(h.signedOut(), 0);
 });
 
 

@@ -6582,7 +6582,8 @@ function dispatchTransportOptions(action, options) {
   if (String(action).indexOf('sales_booking_') === 0 || action === 'sales_performance_read') {
     return Object.assign({}, options, { assertIdentity: window.OpsSalesHost.identityGuard() });
   }
-  if (String(action).indexOf('dispatch_') !== 0 || options.assertIdentity) return options;
+  var calendarAction = ['create_assignment', 'update_assignment', 'delete_assignment', 'confirm_assignment', 'bulk_confirm', 'create_org_event', 'update_recurring_events', 'delete_recurring_events', 'send_client_update'].includes(action);
+  if ((!calendarAction && String(action).indexOf('dispatch_') !== 0) || options.assertIdentity) return options;
   var assertIdentity = null;
   if (window.DispatchOps && DispatchOps.identityGuard) assertIdentity = DispatchOps.identityGuard();
   return Object.assign({}, options, { assertIdentity: function() {
@@ -6661,6 +6662,9 @@ async function opsPost(action, body, options) {
   }).then(function(data) {
     if (options.assertIdentity) options.assertIdentity();
     return data;
+  }, function(error) {
+    if (options.assertIdentity) options.assertIdentity();
+    throw error;
   });
 }
 
@@ -10716,7 +10720,7 @@ async function doConfirmAssignment(assignmentId, notify) {
           assignmentId: siblingIds[i],
           notifyClient: false,
         });
-      } catch(e) { /* best effort */ }
+      } catch(e) { if (e.code === 'dispatch_identity_changed') throw e; }
     }
 
     closeCalJobPopup();
@@ -24784,7 +24788,7 @@ async function submitAssignment() {
               scheduled_date: date,
               scheduled_end: endDate,
             });
-          } catch(e) { /* best effort */ }
+          } catch(e) { if (e.code === 'dispatch_identity_changed') throw e; }
         }
       }
 

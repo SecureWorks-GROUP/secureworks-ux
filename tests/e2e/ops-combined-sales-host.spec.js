@@ -12,6 +12,7 @@ async function openCombinedHost(page) {
   await page.waitForFunction(() => window.OpsSalesHost && window.SalesBooking && window.SalesPerformance);
   await revealOpsStaticFixture(page);
   await page.evaluate(() => {
+    window.fixtureActions = [];
     const identity = { id: 'fixture-operator', org_id: 'fixture-org' };
     window.SW_AUTH_GATE.identity = () => identity;
     window.dispatchEvent(new CustomEvent('sw:auth-identity', { detail: identity }));
@@ -25,6 +26,7 @@ async function openCombinedHost(page) {
       throw new Error('unexpected write: ' + action);
     };
     window.opsFetch = async (action) => {
+      window.fixtureActions.push(action);
       if (action === 'sales_performance_read') {
         return {
           ok: true,
@@ -37,9 +39,6 @@ async function openCombinedHost(page) {
           fetched_at: '2026-09-13T03:10:38.718631Z'
         };
       }
-      if (action === 'sales_booking_read') {
-        return { ok: false, error: 'Authenticated Booking handler is Patio-owned. 4174/4175 JSON preview is not connected.' };
-      }
       if (action === 'dispatch_list') return { jobs: [], coverage: { complete: true } };
       if (action === 'dispatch_calendar') return { events: [], undated: [], coverage: { complete: true } };
       if (action === 'dispatch_workflow') return { workflow: 'dispatch', worker: { intended_enabled: false, observed_enabled: false } };
@@ -48,7 +47,7 @@ async function openCombinedHost(page) {
   });
 }
 
-test('combined Sales host mounts Booking and unpublished Performance without preview ports', async ({ page }) => {
+test('combined Sales host keeps Booking blocked and Performance unpublished without preview ports', async ({ page }) => {
   await openCombinedHost(page);
   await page.evaluate(() => window.showView('sales'));
   await expect(page.locator('#salesPerformanceRoot')).toBeVisible();
@@ -61,9 +60,13 @@ test('combined Sales host mounts Booking and unpublished Performance without pre
   expect(preview.performance).toBeFalsy();
 
   await page.locator('[data-sales-sub="booking"]').click();
-  await expect(page.locator('#salesBookingRoot')).toBeVisible();
-  await expect(page.locator('#salesBookingHostNotice')).toContainText('4174/4175');
-  await expect(page.locator('#salesBookingRoot')).toContainText(/4174\/4175 JSON preview is not connected|Authenticated/);
+  await expect(page.locator('#salesBookingHostNotice')).toBeVisible();
+  await expect(page.locator('#salesBookingHostNotice')).toContainText('replacement Patio pin');
+  await expect(page.locator('#salesBookingHostNotice')).toContainText('Booking controls are unavailable');
+  await expect(page.locator('#salesBookingRoot')).toBeAttached();
+  await expect(page.locator('#salesBookingRoot')).toBeEmpty();
+  await expect(page.locator('#salesBookingRoot [data-booking-refresh], #salesBookingRoot [data-booking-case], #salesBookingRoot [data-booking-draft], #salesBookingRoot [data-booking-approve], #salesBookingRoot [data-booking-archive]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.fixtureActions.filter(action => action === 'sales_booking_read').length)).toBe(0);
 });
 
 test('Dispatch Workflow Refresh stays unavailable and does not claim a lease', async ({ page }) => {

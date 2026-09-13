@@ -150,3 +150,31 @@ test('Dispatch acceptance review does not infer acceptance from lifecycle status
   assert.match(ui.host.innerHTML, /APP-1/);
   assert.doesNotMatch(ui.host.innerHTML, /MAT-1/);
 });
+
+for (const scenario of [
+  { eligibility: 'accepted', status: 'accepted', queue: 'current', other: 'historical' },
+  { eligibility: 'unresolved', status: 'quoted', queue: 'acceptance-review', other: 'current' },
+  { eligibility: 'accepted', status: 'complete', queue: 'historical', other: 'current' }
+]) {
+  test(`show selected job restores its ${scenario.queue} queue without losing edits`, async () => {
+    const ui = await workspace();
+    Object.assign(ui.records.a.job, { eligibility: { state: scenario.eligibility }, status: scenario.status, work_type: 'Patio' });
+    await ui.core.list();
+    await ui.click('queue', scenario.queue);
+    await ui.click('select', 'a');
+    await ui.click('add-requirement');
+    ui.input('requirement', { description: 'Retained operator requirement', quantity: '3', unit: 'each' });
+    await ui.click('queue', scenario.other);
+    await ui.click('trade', 'fencing');
+    await ui.filter('workflow', 'Unrelated action');
+    await ui.filter('search', 'Unrelated job');
+    assert.match(ui.host.innerHTML, /Selected job is outside this filter/);
+    await ui.click('reset-filters');
+    assert.match(ui.host.innerHTML, new RegExp(`data-action="queue" data-id="${scenario.queue}" aria-pressed="true"`));
+    assert.match(ui.host.innerHTML, /class="dp-job" data-action="select" data-id="a" aria-pressed="true"/);
+    assert.doesNotMatch(ui.host.innerHTML, /Selected job is outside this filter/);
+    assert.match(ui.host.innerHTML, /name="description" value="Retained operator requirement"/);
+    assert.equal(ui.core.state.selectedId, 'a');
+    assert.equal(ui.commands.length, 0);
+  });
+}

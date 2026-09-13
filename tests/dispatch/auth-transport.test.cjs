@@ -21,7 +21,8 @@ function extractOpsTransport() {
 function transportContext({ token, guardAvailable = true } = {}) {
   const calls = [];
   const tokenGate = token || deferred();
-  let guardValid = true;
+  let actor = { id: 'operator-a', org_id: 'org-a' };
+  const listeners = new Map();
   let currentUser = { email: 'current@example.test' };
   const context = {
     _opsApiBase: 'https://ops.example/functions/v1/ops-api',
@@ -32,21 +33,28 @@ function transportContext({ token, guardAvailable = true } = {}) {
         getUser() { return currentUser; },
       },
     },
-    DispatchOps: guardAvailable ? { identityGuard() { return function assertIdentity() {
-      if (!guardValid) { const error = new Error('changed'); error.code = 'dispatch_identity_changed'; throw error; }
-    }; } } : {},
+    document: { getElementById() { return null; } },
+    SW_AUTH_GATE: { identity() { return actor; } },
+    addEventListener(name, listener) { listeners.set(name, [...(listeners.get(name) || []), listener]); },
+    DispatchOps: {},
     fetch: async (url, options) => {
       calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
       return { ok: true, json: async () => ({ ok: true }) };
     },
   };
   context.window = context;
+  if (guardAvailable) vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../modules/ops-dispatch.js'), 'utf8'), context);
   vm.runInNewContext(extractOpsTransport(), context);
   return {
     context,
     calls,
     tokenGate,
-    invalidate() { guardValid = false; },
+    invalidate() {
+      for (const next of [null, { id: 'operator-b', org_id: 'org-a' }]) {
+        actor = next;
+        for (const listener of listeners.get('sw:auth-identity') || []) listener({ detail: actor });
+      }
+    },
     setCurrentUser(user) { currentUser = user; },
   };
 }
@@ -89,6 +97,106 @@ test('guarded Dispatch opsPost attributes the current verified user, not sticky 
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].body.operator_email, 'verified@example.test');
 });
+
+function loadCalendarMoveFunctions(context) {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const coreStart = html.indexOf('// <calendar-ops-core>');
+  const coreEnd = html.indexOf('// </calendar-ops-core>', coreStart);
+  const moveStart = html.indexOf('async function doMoveAssignment(');
+  const moveEnd = html.indexOf('// ── Job Block Popup', moveStart);
+  const smsStart = html.indexOf('function maybeOfferRescheduleSms(');
+  const smsEnd = html.indexOf('function handleCellClick(', smsStart);
+  vm.runInNewContext([html.slice(coreStart, coreEnd), html.slice(moveStart, moveEnd), html.slice(smsStart, smsEnd)].join('\n'), context);
+}
+
+for (const pendingAction of ['delete_assignment', 'create_assignment', 'update_assignment']) {
+  test(`late ${pendingAction} completion cannot continue an old calendar move under a new operator`, async () => {
+    const h = transportContext(), pending = deferred(), started = deferred();
+    const dialogs = [], toasts = [], reloads = [];
+    h.tokenGate.resolve('operator-a-token');
+    Object.assign(h.context, {
+      _calEvents: [{ assignment_id: 'assignment-a', job_id: 'private-job-a', user_id: 'crew-a', crew_name: 'Crew A', client_name: 'Private client A', scheduled_date: '2026-09-14', scheduled_end: '2026-09-15' }],
+      _crewList: [{ id: 'crew-a', name: 'Crew A' }, { id: 'crew-other', name: 'Other Crew' }],
+      __SW_CAL_DRAGV2_ENABLED: true,
+      showToast(message) { toasts.push(message); },
+      showConfirmModal(...args) { dialogs.push(args); },
+      loadCalendar() { reloads.push(true); },
+      escapeHtml(value) { return value; }, fmtDate(value) { return value; },
+      fetch: async (url, options) => {
+        const action = new URL(url).searchParams.get('action');
+        h.calls.push({ action, body: JSON.parse(options.body), headers: options.headers });
+        if (action === pendingAction) { started.resolve(); return { ok: true, json: () => pending.promise }; }
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+    });
+    loadCalendarMoveFunctions(h.context);
+    const moving = h.context.doMoveAssignment('assignment-a', pendingAction === 'update_assignment' ? 'Crew A' : 'Other Crew', '2026-09-16');
+    await started.promise;
+    const sent = h.calls.length;
+    h.invalidate();
+    h.setCurrentUser({ email: 'operator-b@example.test' });
+    h.context.cloud.auth.getAccessToken = async () => 'operator-b-token';
+    pending.resolve({ ok: true });
+    await moving;
+    assert.equal(h.calls.length, sent);
+    assert.deepEqual(dialogs, []);
+    assert.deepEqual(reloads, []);
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0], /identity changed/i);
+    await h.context.opsPost('update_assignment', { assignmentId: 'current-b-assignment' });
+    assert.equal(h.calls.at(-1).body.operator_email, 'operator-b@example.test');
+    assert.equal(h.calls.at(-1).headers.Authorization, 'Bearer operator-b-token');
+  });
+}
+
+test('late calendar error cannot expose prior-operator response facts', async () => {
+  const h = transportContext(), response = deferred(), started = deferred();
+  h.tokenGate.resolve('operator-a-token');
+  h.context.fetch = async () => { started.resolve(); return { ok: false, status: 409, json: () => response.promise }; };
+  const saving = h.context.opsPost('update_assignment', { assignmentId: 'old-assignment' });
+  const rejected = assert.rejects(saving, error => error.code === 'dispatch_identity_changed' && !error.message.includes('Private client A'));
+  await started.promise;
+  h.invalidate();
+  response.resolve({ error: 'Private client A cannot move' });
+  await rejected;
+});
+
+for (const operation of ['doConfirmAssignment', 'submitAssignment']) {
+  test(`${operation} stops sibling writes when the operator changes during a best-effort update`, async () => {
+    const h = transportContext(), pending = deferred(), started = deferred();
+    const notices = [], completions = [];
+    h.tokenGate.resolve('operator-a-token');
+    const values = { assignJobSelect: 'job-a', assignDate: '2026-09-16', assignEndDate: '2026-09-17', assignType: 'install', assignStartTime: '', assignEndTime: '', assignNotes: '' };
+    const controls = Object.fromEntries(Object.entries(values).map(([id, value]) => [id, { value }]));
+    Object.assign(h.context, {
+      _editAssignmentId: 'assignment-a',
+      _calEvents: ['assignment-a', 'sibling-1', 'sibling-2'].map(assignment_id => ({ assignment_id, job_id: 'job-a', user_id: 'crew-a' })),
+      document: { getElementById(id) { return controls[id] || null; } },
+      getCrewSelectId() { return 'crew-a'; }, getCrewSelectName() { return 'Crew A'; }, syncAssignEndDate() {},
+      showToast(message) { notices.push(message); }, alert(message) { notices.push(message); },
+      closeCalJobPopup() { completions.push('popup'); }, closeModal() { completions.push('modal'); }, loadCalendar() { completions.push('calendar'); },
+      fetch: async (url, options) => {
+        const body = JSON.parse(options.body);
+        h.calls.push({ action: new URL(url).searchParams.get('action'), body });
+        if (body.assignmentId === 'sibling-1') { started.resolve(); return { ok: true, json: () => pending.promise }; }
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+    });
+    const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+    const start = html.indexOf('async function ' + operation + '(');
+    const end = html.indexOf(operation === 'submitAssignment' ? 'function addPOLine(' : 'window.updateCertainty =', start);
+    vm.runInNewContext(html.slice(start, end), h.context);
+    const saving = operation === 'submitAssignment' ? h.context.submitAssignment() : h.context.doConfirmAssignment('assignment-a', false);
+    await started.promise;
+    h.invalidate();
+    pending.resolve({ ok: true });
+    await saving;
+    assert.deepEqual(h.calls.map(call => call.body.assignmentId), ['assignment-a', 'sibling-1']);
+    assert.deepEqual(completions, []);
+    assert.equal(notices.length, 1);
+    assert.match(notices[0], /identity changed/i);
+  });
+}
 
 function extractLoadCalendar() {
   const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');

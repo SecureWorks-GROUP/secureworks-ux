@@ -270,16 +270,18 @@
       var data = await res.json();
       if (!current()) return;
       if (!res.ok) throw new Error(data.error || 'Profile load failed');
+      if (!data.profile || data.profile.id !== user.id || !data.profile.org_id || !data.profile.role) throw new Error('Profile identity did not match signed-in user');
       _userProfile = data.profile;
       _orgId = _userProfile.org_id;
       return _userProfile;
     } catch(e) {
       if (!current()) return;
-      console.warn('[Cloud] Profile load failed, using auth data:', e);
-      // Fallback: use basic auth data so user isn't blocked
-      _userProfile = { id: userId, email: email, name: email.split('@')[0], role: 'estimator', org_id: '00000000-0000-0000-0000-000000000001' };
-      _orgId = _userProfile.org_id;
-      return _userProfile;
+      console.warn('[Cloud] Profile load failed:', e);
+      var wasVerified = !!_userProfile;
+      _userProfile = null;
+      _orgId = null;
+      if (wasVerified) emit('auth:changing', { id: userId, email: email });
+      return null;
     }
   }
 

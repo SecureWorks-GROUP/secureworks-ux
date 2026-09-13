@@ -104,7 +104,8 @@
     const historicalStates = new Set(['complete', 'completed', 'invoiced', 'final_payment', 'get_review']);
     const jobAccepted = job => job?.eligibility?.state === 'accepted';
     const jobHistorical = job => [job?.status, job?.substatus].some(value => historicalStates.has(normalizeToken(value)));
-    const queueMatches = job => queue === 'historical' ? jobHistorical(job) : queue === 'acceptance-review' ? !jobAccepted(job) && !jobHistorical(job) : jobAccepted(job) && !jobHistorical(job);
+    const jobQueue = job => jobHistorical(job) ? 'historical' : jobAccepted(job) ? 'current' : 'acceptance-review';
+    const queueMatches = job => jobQueue(job) === queue;
     const coverageCount = (coverage, key) => Number.isFinite(coverage?.[key]) ? coverage[key] : null;
     const queueFooter = state => {
       const coverage = state.coverage || {};
@@ -438,7 +439,7 @@
       try {
         message = '';
         if (action === 'choose-job') { element.querySelector('.dp-queue').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-        if (action === 'reset-filters') { queue = 'current'; trade = 'all'; workflow = 'all'; query = ''; render(); return; }
+        if (action === 'reset-filters') { queue = jobQueue(core.state.jobs.find(item => item.id === id) || record?.job); trade = 'all'; workflow = 'all'; query = ''; render(); return; }
         if (action === 'select') { await core.select(target.dataset.id); if (innerWidth <= 700) element.querySelector('.dp-workspace').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
         if (action === 'event') { if (target.dataset.job) await core.select(target.dataset.job); return; }
         if (action === 'refresh') { await Promise.all([core.list(), core.calendar(dates[0], dates[6]), refreshEvidence()]); return; }

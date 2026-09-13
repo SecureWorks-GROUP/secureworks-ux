@@ -30,7 +30,8 @@ test('proposed week is 14-18 Sep with existing vs tentative distinct and leave n
   assert.match(html, /Unread or incomplete leave is not free capacity/);
   assert.match(html, /Travel minutes unavailable/);
   assert.match(html, /495 opportunities are not 495 jobs/);
-  assert.doesNotMatch(html, /Ready to send|calendar write/);
+  assert.match(html, /Send and calendar writes held/);
+  assert.match(html, /not Ready/);
 });
 
 test('Needs Scoper item stays open and client send is not approved', () => {

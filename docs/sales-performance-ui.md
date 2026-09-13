@@ -53,4 +53,11 @@ Three rules hold this surface:
   `reconcile()` matches it by event id and states any difference rather than
   smoothing it away.
 
+Guard: `modules/ops-fencing-stratco-week.test.cjs` (22 tests: the four figures,
+each breach by ref, agreed time, calendar time and full event id, both
+zero-travel adjacencies, the protected band's travel reason, unmeasured versus
+zero, filed versus live reconciliation, scope, and the no-PII / no-em-dash rule).
+It runs under `npm run test:stratco-week` and `npm run test:sales-booking`, and
+inside `npm run test:e2e`.
+
 Search `<fencing-stratco-filed-read>`.

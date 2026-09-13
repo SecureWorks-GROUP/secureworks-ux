@@ -2,13 +2,21 @@
   "owner": "OPERATIONS",
   "copied": "2026-09-13",
   "source_ux": "patio/sales-booking-20260912",
-  "source_sha": "f048ca533e4c9b375b3928710aacdbebd97f4bc9",
-  "backend_pin": "69412f373fc557157268b2c064f27a38ad620830",
-  "note": "Bytes are a host copy of Patio's committed modules. Patio owns the Booking engine. This host must not set SALES_BOOKING_PREVIEW_* or SALES_PERFORMANCE_PREVIEW_URL. 4174/4175 JSON preview paths are out of acceptance. Reviewer 4176 is preserved and must not receive writes from this host.",
+  "source_sha": "9dda1c49c133b488fd77e901e3a2da581bee4819",
+  "baseline_sha": "f048ca533e4c9b375b3928710aacdbebd97f4bc9",
+  "backend_pin": "70d96b0e8790f7966ad34f6bf0a3e9c4c3a5a80b",
+  "backend_do_not_import": "e828cf48",
+  "performance_sha": "08d27c7b9a40a4270e4dbefe5062907e4b3c7505",
+  "performance_not_latest": "0ad8fb3b",
+  "isolated_booking": "127.0.0.1:4179",
+  "isolated_performance": "127.0.0.1:8765",
+  "note": "Host copies only. Patio/Fencing own engines. No SALES_*_PREVIEW_*. 4174/4175 out of acceptance. 4176 baseline preserved. 8765 proof-only.",
   "files": {
-    "ops-sales-booking.js": "c3877ed3072a396696e0930d5639c5b4c0854a229cf4803fd732b6e54166f77c",
+    "ops-sales-booking.js": "35ce90d955ebc10bdcafb1fe6867500115a347b1b6cd3a771c82c396b493ef64",
     "ops-sales-booking.css": "d68744c320681f2756513890852990a1d8c2b42c7e816edbc07fa798e8bd3ffc",
-    "ops-sales-performance.js": "cd578a13de8ddcc9767043a33771c26c99bf49ef6fa3484772732ba5fd789941",
-    "ops-sales-performance.css": "987e75159f2628adafe4c3775673ace4ba420c7add26b0e6f375b7b82a237610"
+    "ops-sales-performance.js": "e65b09b16913b3ce66a17421f9308943b548ad8c54b31e80028b9c598f0f1d53",
+    "ops-sales-performance.css": "987e75159f2628adafe4c3775673ace4ba420c7add26b0e6f375b7b82a237610",
+    "ops-sales-performance-detail.js": "b2ac92bffe3d50b24251167085346a54fdbf1a3e03f593253775a29dfd12aa1c",
+    "ops-sales-performance-detail.css": "087bc8ea21fc5ba69699aff403714cf5e4522bee1276cb02ac3bb4508b0d4d6d"
   }
 }

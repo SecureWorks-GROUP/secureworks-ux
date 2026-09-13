@@ -20,6 +20,7 @@
     ['B2','Scopes done','Attendance evidence required','scopes_done'],
     ['B3','Stage vs calendar disagree','Board and calendar contradictions','hygiene'],
     ['C1','Quotes sent','Document send evidence in the week','quotes'],
+    ['Q','Quote follow-up','Open follow-up stage, not sends this week','quote_followup_queue'],
     ['C2','Won','Accepted jobs with an acceptance stamp','cash_chain'],
     ['C3','Deposited','Deposit raised and paid are separate','cash_chain'],
     ['C4','Invoiced vs sold','Final invoices against quoted value','invoiced'],
@@ -41,6 +42,7 @@
       B2:{value:patio?value('scopes_done'):null,sub:'Attendance evidence not published'},
       B3:{value:null,sub:'Calendar comparison not published'},
       C1:{value:patio?value('quotes_sent'):value('quotes.sent_this_week_with_document_evidence.count'),sub:patio?'Quote send evidence not published':'document-evidenced sends · '+money(value('quotes.sent_this_week_with_document_evidence.amount_inc_sum')),queueKey:'quotes'},
+      Q:{value:patio?null:(Array.isArray(q.quote_followup_queue)?q.quote_followup_queue.length:value('quote_followup.count')),sub:patio?'Patio does not use this fencing stage queue':'open Following up Quote Sent stage · not document-proven sends this week',queueKey:patio?null:'quote_followup_queue'},
       C2:{value:null,sub:'Weekly accepted-job measure not published'},
       C3:{value:null,sub:'Weekly deposit payment evidence not published'},
       C4:{value:patio?value('invoiced_value'):null,sub:'Final invoice comparison not published'},
@@ -49,7 +51,11 @@
     };
     return {row,m,q,lane,elapsed,staffed,measures,contacted:patio && row.coverage && row.coverage.collection_complete === true && Array.isArray(q.answered)?q.answered.length:null};
   }
-  function rowsFor(data,week) { return lanes.map(lane => (data.rows || []).find(r => r.week_start === week && r.lane === lane) || null); }
+  function rowsFor(data,week) {
+    const unpublished = (data.unpublished_rows || []).filter(r => r.week_start === week);
+    const stored = (data.rows || []).filter(r => r.week_start === week);
+    return lanes.map(lane => unpublished.find(r => r.lane === lane) || stored.find(r => r.lane === lane) || null);
+  }
   function rolling(data,lane,key) {
     const weeks = (data.week_starts || []).slice(0,4);
     const readings = weeks.map(week => (data.rows || []).find(r=>r.week_start===week && r.lane===lane)).filter(Boolean).map(adapt);
@@ -152,17 +158,7 @@
     if(state.loading && (week || null)===(state.week || null)) return;
     const request=++state.request; state.week=week || null;state.loading=true;state.error=null;render();
     try {
-      const preview=global.SALES_PERFORMANCE_PREVIEW_URL || (global.window && global.window.SALES_PERFORMANCE_PREVIEW_URL);
-      let data;
-      if(preview){
-        const url=preview+(week?((preview.indexOf('?')>=0?'&':'?')+'week_start='+encodeURIComponent(week)):'');
-        const resp=await global.fetch(url,{cache:'no-store'});
-        data=await resp.json();
-        if(data && data.fixture) throw new Error('Fixture performance rows are refused. Stored report required.');
-        if(data && data.ok===false) throw new Error(data.error || 'Performance read failed.');
-      } else {
-        data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});
-      }
+      const data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});
       if(request!==state.request)return;
       if(!data || !Array.isArray(data.rows) || !Array.isArray(data.week_starts)) throw new Error('Report response was incomplete. Retry the report.');
       state.data=data;state.week=data.week_start;

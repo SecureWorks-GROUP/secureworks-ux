@@ -64,8 +64,8 @@
         "api": "ops-api actions sales_booking_read, sales_booking_assess, sales_booking_draft (authenticated). 4174/4175 JSON preview is not connected.",
         "manual_command": "Patio isolated assess/refresh on the registered sales_booking_* handler",
         "cloud": "Approved targets 60s / 15min / after-06. Cloud runner held. Runtime unread on this host until the authenticated handler answers.",
-        "ux_pin": "f048ca533e4c9b375b3928710aacdbebd97f4bc9",
-        "backend_pin": "69412f373fc557157268b2c064f27a38ad620830"
+        "ux_pin": "9dda1c49c133b488fd77e901e3a2da581bee4819",
+        "backend_pin": "70d96b0e8790f7966ad34f6bf0a3e9c4c3a5a80b"
       }
     },
     "performance": {

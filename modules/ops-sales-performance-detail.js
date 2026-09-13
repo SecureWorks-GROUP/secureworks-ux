@@ -5,16 +5,21 @@
   const json = value => JSON.stringify(value, null, 2);
   function evidence(detail) {
     const value = detail?.row?.queues?.[detail.queueKey];
-    const followup = detail?.row?.queues?.quote_followup_queue;
-    if (detail.measure === 'C1' && detail.queueKey === 'quotes' && (!Array.isArray(value) || !value.length) && Array.isArray(followup)) {
-      return {rows: followup, available: true, scope: 'Related quote follow-up evidence only; this queue does not establish document-evidenced sends or measure C1'};
+    if (detail.lane === 'fencing' && detail.measure === 'C1') {
+      if (!Array.isArray(value) || !value.length) {
+        return {rows: [], available: false, scope: 'No document-evidenced send queue was retained. The follow-up stage queue is a different population and is opened from Quote follow-up, not from C1.'};
+      }
     }
     if (!Array.isArray(value)) return {rows: [], available: false, scope: 'No named queue retained'};
     const period = detail.row.metrics?.period;
     const start = Date.parse(Array.isArray(period) ? period[0] : period?.since);
     const end = Date.parse(Array.isArray(period) ? period[1] : period?.until_exclusive);
+    if (detail.queueKey === 'quote_followup_queue') {
+      return {rows: value, available: true, scope: 'Open Following up Quote Sent stage. This is the current-stage follow-up queue, not C1 document-proven quote sends this week.'};
+    }
     if (detail.lane === 'fencing' && detail.measure === 'C1' && detail.queueKey === 'quotes' && Number.isFinite(start) && Number.isFinite(end)) {
-      return {rows: value.filter(item => item.documents_read === true && item.quote_docs > 0 && item.sent_to_client === true && Date.parse(item.first_sent_at) >= start && Date.parse(item.first_sent_at) < end), available: true, scope: 'Retained quotes with document evidence and first_sent_at inside the original report period'};
+      const rows = value.filter(item => item.documents_read === true && item.quote_docs > 0 && item.sent_to_client === true && Date.parse(item.first_sent_at) >= start && Date.parse(item.first_sent_at) < end);
+      return {rows, available: true, scope: 'Retained quotes with document evidence and first_sent_at inside the original report period. Not the follow-up stage queue.'};
     }
     return {rows: value, available: true, scope: 'Related retained collector queue; these records may use a different unit or population from the aggregate'};
   }
@@ -39,12 +44,11 @@
     const dialog = el('dialog', undefined, 'sp-detail'); active = dialog;
     dialog.setAttribute('aria-labelledby', 'salesPerformanceDetailTitle');
     const heading = el('div', undefined, 'sp-detail-heading');
-    const title = el('h2', (detail.lane === 'patio' ? 'Patio' : detail.lane === 'fencing' ? 'Fencing' : 'Lane') + ' · ' + (detail.label || detail.measure || 'Evidence')); title.id = 'salesPerformanceDetailTitle'; heading.append(title);
+    const title = el('h2', (detail.lane || 'Lane') + ' · ' + (detail.label || detail.measure || 'Evidence')); title.id = 'salesPerformanceDetailTitle'; heading.append(title);
     const dismiss = el('button', 'Close'); dismiss.type = 'button'; dismiss.addEventListener('click', close); heading.append(dismiss); dialog.append(heading);
     dialog.append(el('p', sourceLabel(row) + ' · week of ' + detail.week_start, 'sp-detail-mode'));
     const metric = row && global.SalesPerformance?.adapt(row)?.measures?.[detail.measure];
     dialog.append(el('p', (typeof metric?.value === 'number' ? String(metric.value) : 'No reading') + ' · ' + (metric?.sub || 'Measure unavailable for this lane and week'), 'sp-detail-measure'));
-    if (!row) dialog.append(el('p', 'No report is published for this lane and week. This measure and its evidence are unavailable.', 'sp-detail-muted'));
     const provenance = row?.source_mode === 'collector_capture'
       ? 'Original collector evidence. Publication is not established; exact source and calculation details are retained below.'
       : 'Calculated ' + readableTime(row?.computed_at) + ' Perth. Exact report provenance is retained below.';
@@ -74,6 +78,7 @@
     doc.body.append(dialog); renderRows(); dialog.showModal(); search.focus();
   }
   if (global.document) {
+    global.document.addEventListener('sales-performance:drill', event => open(event.detail));
     global.document.addEventListener('sales-performance:render', close);
     global.addEventListener('hashchange', close);
     global.addEventListener('sw:auth-identity', close);

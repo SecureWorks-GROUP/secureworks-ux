@@ -259,8 +259,12 @@ function salesTransportHarness() {
   };
 }
 
-test('copied Booking and Performance bytes match the Patio f048ca5 provenance', () => {
-  assert.equal(provenance.source_sha, 'f048ca533e4c9b375b3928710aacdbebd97f4bc9');
+test('copied Booking and Performance bytes match accepted 9dda and PR313 pins', () => {
+  assert.equal(provenance.source_sha, '9dda1c49c133b488fd77e901e3a2da581bee4819');
+  assert.equal(provenance.baseline_sha, 'f048ca533e4c9b375b3928710aacdbebd97f4bc9');
+  assert.equal(provenance.backend_pin, '70d96b0e8790f7966ad34f6bf0a3e9c4c3a5a80b');
+  assert.equal(provenance.performance_sha, '08d27c7b9a40a4270e4dbefe5062907e4b3c7505');
+  assert.equal(provenance.backend_do_not_import, 'e828cf48');
   for (const [file, digest] of Object.entries(provenance.files)) {
     assert.equal(sha256(file), digest, file);
   }
@@ -317,7 +321,7 @@ test('showSalesSub does not bypass OpsSalesHost with a direct Booking fallback',
   assert.deepEqual(calls, []);
 });
 
-test('host strips preview globals and shows the pinned Booking integration blocker', async () => {
+test('host strips preview globals and mounts accepted Booking 9dda without 4174/4175', async () => {
   const { context, inserted, sales, shown } = salesHostHarness();
   vm.runInNewContext(hostSource, context);
   context.OpsSalesHost.show('booking');
@@ -328,15 +332,14 @@ test('host strips preview globals and shows the pinned Booking integration block
   assert.ok(sales.classList.contains('sales-sub-booking'));
   assert.ok(!sales.classList.contains('sales-sub-performance'));
   assert.deepEqual(inserted.sort(), ['salesBookingHostNotice', 'salesPerformanceHostNotice']);
-  assert.deepEqual(shown, []);
-  assert.equal(context.document.getElementById('salesBookingRoot').innerHTML, '');
-  const blocker = context.document.getElementById('salesBookingHostNotice').textContent;
-  assert.match(blocker, /Booking integration blocked pending a replacement Patio pin/);
-  assert.match(blocker, /f048ca5.*R26\/R27/);
-  assert.match(blocker, /refreshing a draft can overwrite another operator’s edits/);
-  assert.match(blocker, /a failed archive can hide an active case/);
+  assert.deepEqual(shown, [['booking', 'booking']]);
+  const notice = context.document.getElementById('salesBookingHostNotice').textContent;
+  assert.match(notice, /9dda1c49/);
+  assert.match(notice, /70d96b0e/);
+  assert.match(notice, /e828cf48 is not imported/);
+  assert.match(notice, /4174\/4175 preview is not connected/);
   context.OpsSalesHost.show('performance');
-  assert.deepEqual(shown, [['performance', 'load']]);
+  assert.deepEqual(shown, [['booking', 'booking'], ['booking', 'performance']]);
 });
 
 test('Sales transport aborts when identity changes while auth token is pending', async () => {

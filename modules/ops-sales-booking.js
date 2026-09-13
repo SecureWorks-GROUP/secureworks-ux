@@ -645,18 +645,33 @@
 
   function archiveCase(reason, note) {
     var c = selectedCase();
-    if (!c) return { ok: false, reason: 'no_case', crm_deleted: false };
+    if (!c) return Promise.resolve({ ok: false, reason: 'no_case', crm_deleted: false });
     if (hasBlockingCommitment(c)) {
       state.lastArchiveCall = { ok: false, reason: 'commitment_visible', contact_id: c.contact_id, crm_deleted: false };
-      return state.lastArchiveCall;
+      return Promise.resolve(state.lastArchiveCall);
     }
-    if (!reason) return { ok: false, reason: 'reason_required', crm_deleted: false };
-    var rec = { reason: reason, note: note || '', at: new Date().toISOString(), actor: 'preview', restored: false, contact_id: c.contact_id };
-    state.archives[c.id] = rec;
-    c.archived = rec;
-    workflowPost('sales_booking_archive', { case_id: c.id, reason: reason, note: note || '' });
-    state.lastArchiveCall = { ok: true, contact_id: c.contact_id, crm_deleted: false, reason: reason };
-    return state.lastArchiveCall;
+    if (!reason) return Promise.resolve({ ok: false, reason: 'reason_required', crm_deleted: false });
+    if (c.archivePending) return Promise.resolve({ ok: false, reason: 'archive_pending', crm_deleted: false });
+    c.archivePending = true;
+    c.archiveError = null;
+    return Promise.resolve(workflowPost('sales_booking_archive', { case_id: c.id, reason: reason, note: note || '' })).then(function (response) {
+      if (!response || response.ok === false || response.http_status >= 400) {
+        throw new Error((response && (response.error || response.reason)) || 'Archive was not acknowledged.');
+      }
+      var rec = { reason: reason, note: note || '', at: new Date().toISOString(), actor: 'preview', restored: false, contact_id: c.contact_id };
+      state.archives[c.id] = rec;
+      c.archived = rec;
+      state.lastArchiveCall = { ok: true, contact_id: c.contact_id, crm_deleted: false, reason: reason };
+      return state.lastArchiveCall;
+    }).catch(function (error) {
+      c.archiveError = error.message || 'Archive failed.';
+      if (c.archived) c.archived = null;
+      delete state.archives[c.id];
+      state.lastArchiveCall = { ok: false, reason: 'archive_failed', error: c.archiveError, crm_deleted: false, contact_id: c.contact_id };
+      return state.lastArchiveCall;
+    }).finally(function () {
+      c.archivePending = false;
+    });
   }
 
   async function restoreCase(id) {
@@ -717,13 +732,20 @@
   function bindDraft(c) {
     if (!c || !draftKey(c)) return;
     var d = draftFor(c);
-    if (d.savePending || d.saveQueue || draftIsDirty(d) || d.casConflict) return;
+    if (d.savePending || d.saveQueue || d.casConflict) return;
     if (c.draft && typeof c.draft.revision === 'number' && c.draft.revision > d.serverRevision) {
+      var incomingText = c.draft.text || '';
+      if (d.humanEdited && (d.text || '') !== incomingText) {
+        d.casConflict = true;
+        d.conflictServerText = incomingText;
+        d.conflictServerRevision = Number(c.draft.revision);
+        return;
+      }
       d.serverRevision = Number(c.draft.revision);
       d.revision = d.serverRevision;
-      d.savedText = c.draft.text || '';
+      d.savedText = incomingText;
       if (!d.humanEdited) {
-        d.text = c.draft.text || '';
+        d.text = incomingText;
         d.sender = c.draft.sender || d.sender;
         d.humanEdited = !!c.draft.human_edited;
       }
@@ -923,7 +945,7 @@
       : '';
     var archiveBlock = hasBlockingCommitment(c)
       ? '<p class="small muted">Archive is blocked while a diary event or outstanding offer remains. Withdrawal is a separate held action.</p>'
-      : '<div class="archive-row"><label class="small muted">Archive reason <select data-booking-archive-reason><option value="">Choose…</option><option value="out_of_service">Out of service</option><option value="declined">Declined</option><option value="duplicate">Duplicate</option><option value="no_longer_proceeding">No longer proceeding</option></select></label><button type="button" data-booking-archive="1">Archive</button></div>';
+      : '<div class="archive-row"><label class="small muted">Archive reason <select data-booking-archive-reason><option value="">Choose…</option><option value="out_of_service">Out of service</option><option value="declined">Declined</option><option value="duplicate">Duplicate</option><option value="no_longer_proceeding">No longer proceeding</option></select></label><button type="button" data-booking-archive="1"' + (c.archivePending ? ' disabled' : '') + '>' + (c.archivePending ? 'Archiving…' : 'Archive') + '</button></div>' + (c.archiveError ? '<p class="notice error" role="alert">' + esc(c.archiveError) + '</p>' : '');
     if (isArchived(c)) archiveBlock = '<button type="button" data-booking-restore="' + esc(c.id) + '"' + (c.restorePending ? ' disabled' : '') + '>' + (c.restorePending ? 'Restoring…' : 'Restore to workload') + '</button>' + (c.restoreError ? '<p class="notice error" role="alert">' + esc(c.restoreError) + '</p>' : '');
     return '<div class="detailhead"><span class="smalltag">' + esc(statusLabel(c.status)) + '</span><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p class="muted">' + esc(c.suburb || '') + (c.contact_id ? '' : ' · no GHL contact') + '</p></div>' +
       '<div class="detailbody">' +
@@ -1273,7 +1295,7 @@
       if (arch) {
         e.preventDefault();
         var reasonEl = root() && root().querySelector('[data-booking-archive-reason]');
-        archiveCase(reasonEl && reasonEl.value, '');
+        archiveCase(reasonEl && reasonEl.value, '').then(render);
         render();
         return;
       }

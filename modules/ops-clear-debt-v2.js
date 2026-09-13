@@ -207,6 +207,22 @@ async function cdLoadRecord() {
   if (request !== CD.recordRequest || !document.getElementById('cd-rec-body')) return;
   document.getElementById('cd-rec-body').innerHTML = cdRecordHtml(P, o.S, o.K, ctx, err);
 }
+function cdHostSelection(lead, ctx) {
+  var jobId = (ctx && ctx.link && ctx.link.job_id) || (ctx && ctx.job && ctx.job.id) || lead.job_id || null;
+  return { kind: 'debt', invoice_id: lead.xero_invoice_id, job_id: jobId };
+}
+function cdProposalStale(lead, ctx) {
+  if (lead.debt_proposal_status !== 'pending' || !lead.debt_proposal_at) return null;
+  var at = Date.parse(lead.debt_proposal_at);
+  if (!at) return null;
+  var last = ctx && ctx.conversation && ctx.conversation.last_client_message && ctx.conversation.last_client_message.at;
+  if (last && Date.parse(last) > at) return 'client_reply';
+  var pays = (ctx && ctx.bank && ctx.bank.xero_payments) || [];
+  for (var i = 0; i < pays.length; i++) {
+    if (pays[i].date && Date.parse(pays[i].date) > at) return 'xero_payment';
+  }
+  return null;
+}
 function cdBriefHtml(lead, ctx) {
   var b = lead.debt_brief; var last = ctx && ctx.conversation && ctx.conversation.last_client_message;
   var lastHtml = '<div class="cd-last-client"><b>Last client words</b><p>' + (last ? cdEsc(last.preview) + '</p><small>' + cdEsc(cdWhen(last.at)) + ' · ' + cdEsc(last.channel) + '</small>' : (ctx && ctx.sources && ctx.sources.conversation && ctx.sources.conversation.ok === true ? 'No client message in the stored conversation.</p>' : 'Client conversation unavailable from the door.</p>')) + '</div>';
@@ -240,7 +256,11 @@ function cdRecordHtml(P, S, K, ctx, err) {
   var errHtml = err ? '<div class="cd-err" style="margin-bottom:12px">The door did not answer for this invoice: ' + cdEsc(err) + '</div>' : '';
   var honesty = ctx ? (ctx.blockers || []).map(function (b) { return '<div class="cd-pend"><b>' + cdEsc(b.owner) + ': ' + cdEsc(b.code) + '</b> ' + cdEsc(b.detail) + '</div>'; }).join('') + (ctx.warnings || []).map(function (w) { return '<div class="cd-pend">' + cdEsc(w) + '</div>'; }).join('') : '';
   var handoff = lead.debt_handoff_ref ? '<p>Handoff: ' + cdEsc(lead.debt_handoff_ref) + ' · ' + cdEsc(cdWhen(lead.debt_handoff_at)) + '</p>' : '';
-  return errHtml + honesty + '<p>Context and notes for <b>' + cdEsc(lead.invoice_number) + '</b>: ' + cdEsc(lead.debt_classification_reason || 'Reason unavailable; desk review needed') + '</p>' + handoff + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +
+  var sel = cdHostSelection(lead, ctx);
+  var selHtml = '<p class="cd-quiet" data-how-it-works-kind="debt" data-invoice-id="' + cdEsc(sel.invoice_id || '') + '" data-job-id="' + cdEsc(sel.job_id || '') + '">Host communications: invoice_id ' + cdEsc(sel.invoice_id || 'none') + (sel.job_id ? ' · job_id ' + cdEsc(sel.job_id) : '') + '. Email sits with GHL. A paid claim in mail is evidence to review, not settlement.</p>';
+  var stale = cdProposalStale(lead, ctx);
+  var staleHtml = stale ? '<div class="cd-pend"><b>Proposal stale</b> ' + (stale === 'client_reply' ? 'A newer client message arrived after this draft. Reassess before Marnin sees it.' : 'A newer Xero allocation arrived after this draft. That is not by itself proof of payment in the bank. Reassess.') + '</div>' : '';
+  return errHtml + honesty + selHtml + staleHtml + '<p>Context and notes for <b>' + cdEsc(lead.invoice_number) + '</b>: ' + cdEsc(lead.debt_classification_reason || 'Reason unavailable; desk review needed') + '</p>' + handoff + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +
     '<div class="cd-three"><div class="cd-card"><h3 class="cd-k">' + CD_IC.bank + 'Money<em>Xero</em></h3><div class="cd-il">' + invs + '</div>' + pays + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.file + 'Job and files<em>job record</em></h3>' + jobHtml + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.msg + 'Conversation<em>' + (conv && conv.sources ? Object.keys(conv.sources).filter(function (k) { return conv.sources[k]; }).length + ' sources' : 'door') + ' · newest first</em></h3>' + chat + facts + '</div></div>';
 }
 

@@ -29,6 +29,19 @@ async function main() {
   c.CD.ctx={}; c.opsFetch=async action=>{if(action==='debt_notes') throw Error('notes offline'); return ctx;}; await c.cdLoadRecord(); assert.match(el('cd-rec-body').innerHTML,/Notes unavailable/);
   const fetches=[]; c.CD.open=null; c.CD.seg=null; c.opsFetch=async (action)=>{fetches.push(action); if(action==='list_debt_picture') return {rows:[invoice('a')],totals:{genuine_debt:{count:1,amount_due:100}},picture_as_of:'2026-09-13T00:00:00Z'}; if(action==='debt_context_coverage') return {as_of:'2026-09-13T00:00:00Z',rows:[{xero_invoice_id:'a',complete:true}],totals:{invoices:1}}; return {};}; c.opsPost=async (...args)=>{calls.push(args); throw new Error('refresh must not post');}; await c.cdRefreshPicture(); assert.deepEqual(fetches,['list_debt_picture','debt_context_coverage']); assert.equal(calls.filter(a=>String(a[0]).includes('send')).length,0);
   c.CD.rows=[invoice('a')]; c.CD.savingProposal=false; el('cd-sms').value='Please review the invoice with Marnin.'; el('cd-sms-to').value='+61491570156'; c.opsPost=async ()=>({status:409,error:'Invoice or proposal changed. Refresh before saving again.'}); await c.cdSaveProposal('a','sms',null); assert.notEqual(c.CD.rows[0].debt_proposal_status,'pending');
-  console.log('PASS clear-debt behavior: coverage omissions, source failures, last client context, per-invoice selection, stale reads, notes errors, no sends, refresh reads only, conflict does not mark pending');
+  const pending=invoice('a',{debt_proposal_status:'pending',debt_proposal_at:'2026-09-10T00:00:00Z',debt_proposal_text:'old',job_id:'job-1'});
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).invoice_id,'a');
+  assert.equal(c.cdHostSelection(pending,{link:{job_id:'job-1'}}).job_id,'job-1');
+  assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-12T00:00:00Z'}},bank:{xero_payments:[]}}),'client_reply');
+  assert.equal(c.cdProposalStale(pending,{conversation:{},bank:{xero_payments:[{date:'2026-09-12',amount:50}]}}),'xero_payment');
+  assert.equal(c.cdProposalStale(pending,{conversation:{last_client_message:{at:'2026-09-09T00:00:00Z'}},bank:{xero_payments:[]}}),null);
+  c.CD.rows=[pending]; c.CD.selectedInvoice='a';
+  const staleHtml=c.cdRecordHtml({invoices:[pending],name:'Sample',owner:'DEBT',amount:100,n:1,oldest:10},{}, {},{conversation:{last_client_message:{at:'2026-09-12T00:00:00Z',preview:'paid thanks',channel:'email'},messages:[]},bank:{xero_payments:[]},sources:{conversation:{ok:true},invoice:{ok:true}},link:{job_id:'job-1'},job:{id:'job-1'}},null);
+  assert.match(staleHtml,/Proposal stale/);
+  assert.match(staleHtml,/data-invoice-id="a"/);
+  assert.match(staleHtml,/data-job-id="job-1"/);
+  assert.match(staleHtml,/not settlement/);
+  assert.doesNotMatch(staleHtml,/marked paid|invoice is paid/i);
+  console.log('PASS clear-debt behavior: coverage omissions, source failures, last client context, per-invoice selection, stale reads, notes errors, no sends, refresh reads only, conflict does not mark pending, host invoice_id, stale proposal');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -13,12 +13,14 @@ async function openCombinedHost(page) {
   await revealOpsStaticFixture(page);
   await page.evaluate(() => {
     window.fixtureActions = [];
+    window.fixtureWrites = [];
     const identity = { id: 'fixture-operator', org_id: 'fixture-org' };
     window.SW_AUTH_GATE.identity = () => identity;
     window.dispatchEvent(new CustomEvent('sw:auth-identity', { detail: identity }));
     window.SALES_BOOKING_PREVIEW_URL = 'http://127.0.0.1:4174/sales-booking-read';
     window.SALES_PERFORMANCE_PREVIEW_URL = 'http://127.0.0.1:4174/sales-performance-read';
     window.opsPost = async (action, body) => {
+      window.fixtureWrites.push({ action, body });
       if (action === 'workflow_refresh') {
         if (['claim', 'consume', 'finish'].includes(body && body.op)) throw new Error('operators may request or read a run, not claim or finish it');
         return { outcome: 'unavailable', reason: 'driver_not_registered', declared_output: 'dispatch_refresh/v1' };
@@ -69,7 +71,7 @@ test('combined Sales host keeps Booking blocked and Performance unpublished with
   expect(await page.evaluate(() => window.fixtureActions.filter(action => action === 'sales_booking_read').length)).toBe(0);
 });
 
-test('Dispatch Workflow Refresh stays unavailable and does not claim a lease', async ({ page }) => {
+test('Dispatch Workflow Refresh asks for a selected job before contacting the driver', async ({ page }) => {
   await openCombinedHost(page);
   await page.evaluate(async () => {
     document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
@@ -79,5 +81,6 @@ test('Dispatch Workflow Refresh stays unavailable and does not claim a lease', a
   const refresh = page.locator('[data-action="workflow-refresh"]');
   await expect(refresh).toBeVisible();
   await refresh.click();
-  await expect(page.locator('[data-workflow-refresh="dispatch"]')).toContainText(/unavailable|driver_not_registered|pending/i);
+  await expect(page.locator('#viewDispatch')).toContainText('Choose a job before assessing it.');
+  expect(await page.evaluate(() => window.fixtureWrites.filter(write => write.action === 'workflow_refresh').length)).toBe(0);
 });

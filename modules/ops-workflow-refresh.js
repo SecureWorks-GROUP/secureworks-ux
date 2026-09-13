@@ -5,7 +5,6 @@
   'use strict';
   const VERSION = 'ops-workflow-refresh/v1';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  const state = { runs: Object.create(null) };
 
   function label(run) {
     if (!run) return 'Workflow Refresh has not been requested.';
@@ -19,8 +18,7 @@
     return `Workflow Refresh ${esc(status)}${cutoff}.`;
   }
 
-  function html(workflow, run) {
-    const current = run || state.runs[workflow];
+  function html(workflow, current) {
     const pending = !current || current.capability === 'pending' || current.outcome === 'unavailable' || current.capability === 'unavailable';
     return `<div class="ops-workflow-refresh" data-workflow-refresh="${esc(workflow)}" data-capability="${esc((current && current.capability) || (pending ? 'pending' : 'connected'))}">
       <button type="button" data-action="workflow-refresh" data-workflow="${esc(workflow)}">Workflow Refresh</button>
@@ -28,49 +26,43 @@
     </div>`;
   }
 
-  async function start(workflow, scope) {
+  async function start(workflow, scope, { assertIdentity }) {
+    assertIdentity();
     if (typeof root.opsPost !== 'function') {
-      const run = { capability: 'pending', reason: 'Authenticated Ops write is not available.', workflow };
-      state.runs[workflow] = run;
-      return run;
+      return { capability: 'pending', reason: 'Authenticated Ops write is not available.', workflow };
     }
     try {
-      const result = await root.opsPost('workflow_refresh', { op: 'start', workflow, scope: scope || {} });
+      const result = await root.opsPost('workflow_refresh', { op: 'start', workflow, scope }, { assertIdentity });
+      assertIdentity();
       if (result && result.lease_token) throw new Error('Refresh readback exposed a lease token.');
-      const run = {
+      let run = {
         capability: result && result.outcome === 'unavailable' ? 'unavailable' : 'connected',
         ...result,
         workflow
       };
-      state.runs[workflow] = run;
-      if (run.id && run.outcome !== 'unavailable') await readback(workflow, run.id);
-      return state.runs[workflow];
+      if (run.id && run.outcome !== 'unavailable') {
+        const result = await root.opsPost('workflow_refresh', { op: 'readback', id: run.id, workflow }, { assertIdentity });
+        assertIdentity();
+        if (result && result.lease_token) throw new Error('Refresh readback exposed a lease token.');
+        run = { capability: 'connected', ...result, workflow };
+      }
+      return run;
     } catch (error) {
+      assertIdentity();
       const pending = error && (error.status === 404 || /unknown|not connected|Unknown Dispatch/i.test(String(error.message)));
       const run = {
         capability: pending ? 'pending' : 'failed',
         reason: error && error.message || 'Workflow Refresh unread.',
         workflow
       };
-      state.runs[workflow] = run;
       return run;
     }
-  }
-
-  async function readback(workflow, id) {
-    if (typeof root.opsPost !== 'function' || !id) return state.runs[workflow];
-    const result = await root.opsPost('workflow_refresh', { op: 'readback', id, workflow });
-    if (result && result.lease_token) throw new Error('Refresh readback exposed a lease token.');
-    state.runs[workflow] = { capability: 'connected', ...result, workflow };
-    return state.runs[workflow];
   }
 
   root.OpsWorkflowRefresh = {
     version: VERSION,
     html,
     label,
-    start,
-    readback,
-    state: () => state.runs
+    start
   };
 })(typeof window !== 'undefined' ? window : globalThis);

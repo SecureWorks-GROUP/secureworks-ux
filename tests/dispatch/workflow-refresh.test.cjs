@@ -19,7 +19,7 @@ test('Workflow Refresh displays failed transport status with escaped reason', as
     error.status = 500;
     throw error;
   });
-  const run = await refresh.start('dispatch', { job_id: 'job-a' });
+  const run = await refresh.start('dispatch', { job_id: 'job-a' }, { assertIdentity() {} });
   assert.equal(run.capability, 'failed');
   assert.equal(refresh.label(run), 'Workflow Refresh failed: HTTP 500 &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;.');
   const html = refresh.html('dispatch', run);

@@ -3,6 +3,40 @@ const assert = require('node:assert/strict');
 const { workspace, clone } = require('./workspace-harness.cjs');
 
 const requirement = { id: 'r', description: 'Fence panel', specification: 'Original profile', quantity: 10, unit: 'each', phase: 'installation', destination: 'site', owner: 'Shaun' };
+
+for (const action of ['add-requirement', 'edit-requirement', 'promote-note']) {
+  test(`${action} initializes requirement defaults once and retains cleared fields through redraw and submission`, async () => {
+    const ui = await workspace();
+    ui.records.a.requirements = [clone(requirement)];
+    ui.records.a.notes = [{ id: 'note', text: 'Candidate from note' }];
+    await ui.core.load('a');
+    await ui.click(action, action === 'promote-note' ? 'note' : 'r');
+    for (const [field, value] of Object.entries({ phase: 'installation', destination: 'site', owner: 'Shaun' })) {
+      assert.match(ui.host.innerHTML, new RegExp(`name="${field}" value="${value}"`));
+    }
+    const values = { description: 'Retained requirement wording', quantity: '10', unit: 'each', phase: '', destination: '', owner: '', group_id: '' };
+    ui.input('requirement', values);
+    ui.app.render();
+    await ui.app.refresh();
+    await ui.click('select', 'b');
+    await ui.click('select', 'a');
+    for (const field of ['phase', 'destination', 'owner']) assert.match(ui.host.innerHTML, new RegExp(`name="${field}" value=""`));
+    assert.match(ui.host.innerHTML, /Retained requirement wording/);
+    await ui.submit('requirement', values);
+    assert.equal(ui.commands.length, 1);
+    const saved = action === 'promote-note' ? ui.commands[0].payload.requirement : ui.commands[0].payload;
+    for (const field of ['phase', 'destination', 'owner']) assert.equal(saved[field], '');
+  });
+}
+
+test('opening an existing requirement preserves already empty phase, destination and owner', async () => {
+  const ui = await workspace();
+  ui.records.a.requirements = [{ ...requirement, phase: '', destination: '', owner: '' }];
+  await ui.core.load('a');
+  await ui.click('edit-requirement', 'r');
+  for (const field of ['phase', 'destination', 'owner']) assert.match(ui.host.innerHTML, new RegExp(`name="${field}" value=""`));
+});
+
 test('an edited requirement keeps its original quantity until explicit reconciliation', async () => {
   const ui = await workspace();
   ui.records.a.requirements = [clone(requirement)];

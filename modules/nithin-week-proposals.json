@@ -10,7 +10,10 @@
   "calendar_coverage": {
     "operational_leave": "not_read",
     "non_primary_calendars": "not_read",
-    "calendar_view_complete": true
+    "calendar_view_complete": true,
+    "treat_as_free": false,
+    "any_unread_or_not_read": true,
+    "primary": "captured"
   },
   "desk_rules": {
     "monday_from": 12,
@@ -40,7 +43,7 @@
     "hygiene_pin": "e26c908e",
     "hygiene_runtime": "127.0.0.1:4180",
     "author_only": true,
-    "note": "495 opportunities is not 495 jobs. 476 customers. 495 eligible unscoped. 1 waiting_reply from last outbound, not scoped by age. Duplicate same-suburb suppresses a second proposal. Runner does not Ready on incomplete leave. Isolated 4180 author evidence until a different reviewer accepts. Do not import e828cf48."
+    "note": "495 opportunities is not 495 jobs. Four tentative drafts persisted on 4180 (Midland Mon 13:00, Stirling Tue 09:45, Byford Thu 10:00, Fremantle Thu 13:00). Wednesday empty by desk rule, not extra capacity. Unread leave is not free. Travel unavailable. Send held."
   },
   "existing_commitments": [
     {
@@ -109,7 +112,9 @@
         "travel_unavailable",
         "customer_availability_unknown"
       ],
-      "kind": "tentative"
+      "kind": "tentative",
+      "persisted_on_4180": true,
+      "actionable": false
     },
     {
       "opportunity_id": "zQWua5fn1mwr0xe7t8Aa",
@@ -129,7 +134,9 @@
         "travel_unavailable",
         "prior_window_elapsed"
       ],
-      "kind": "tentative"
+      "kind": "tentative",
+      "persisted_on_4180": true,
+      "actionable": false
     },
     {
       "opportunity_id": "oQKxRwnAjJX8FguiDMYj",
@@ -149,7 +156,9 @@
         "travel_unavailable",
         "prior_window_elapsed"
       ],
-      "kind": "tentative"
+      "kind": "tentative",
+      "persisted_on_4180": true,
+      "actionable": false
     },
     {
       "opportunity_id": "RgcflXTA2JAEE2FU3Heq",
@@ -169,7 +178,9 @@
         "travel_unavailable",
         "street_missing"
       ],
-      "kind": "tentative"
+      "kind": "tentative",
+      "persisted_on_4180": true,
+      "actionable": false
     },
     {
       "opportunity_id": "QJOdjHb4Jyh9VCwz7UeF",
@@ -188,9 +199,25 @@
         "travel_unavailable"
       ],
       "kind": "tentative",
-      "cited_message_id": "UI2ZaoyoLuvLGu52Dr5y"
+      "cited_message_id": "UI2ZaoyoLuvLGu52Dr5y",
+      "persisted_on_4180": false,
+      "actionable": false
     }
   ],
+  "persisted_on": {
+    "runtime": "4180",
+    "sql": "booking_test",
+    "kind": "tentative",
+    "actionable": false,
+    "send": "held",
+    "case_ids": [
+      "1kwKzLLTU9RyZA4aDOoj",
+      "zQWua5fn1mwr0xe7t8Aa",
+      "oQKxRwnAjJX8FguiDMYj",
+      "RgcflXTA2JAEE2FU3Heq",
+      "QJOdjHb4Jyh9VCwz7UeF"
+    ]
+  },
   "needs_scoper": [
     {
       "item_id": "69f6b4c4-ca2b-48cd-a1ed-99bc01ba03e5",
@@ -205,6 +232,47 @@
       "cio_pin": "fe2b7f5d"
     }
   ],
+  "unfilled_holes": [
+    {
+      "day": "2026-09-14",
+      "slot": "12:00",
+      "reason": "unread_leave_not_free"
+    },
+    {
+      "day": "2026-09-15",
+      "slot": "after_12:30_west",
+      "reason": "waiting_reply_not_second_chase"
+    },
+    {
+      "day": "2026-09-16",
+      "slot": "all",
+      "reason": "desk_rule_no_wednesday"
+    },
+    {
+      "day": "2026-09-17",
+      "slot": "morning_extra",
+      "reason": "unread_leave_not_free"
+    },
+    {
+      "day": "2026-09-18",
+      "slot": "11:00_north",
+      "reason": "waiting_reply_not_second_chase"
+    }
+  ],
+  "unplaced": [
+    {
+      "opportunity_id": "K112bxgGQTUMpwG85OFy",
+      "reason": "no suburb in thread"
+    },
+    {
+      "opportunity_id": "7rl6gaZIxXvOdj24Qcc2",
+      "reason": "waiting_reply last outbound, not scoped by age, not this week"
+    },
+    {
+      "opportunity_id": "remaining_495",
+      "reason": "not current eligible visit demand; 495 is not 495 jobs"
+    }
+  ],
   "capacity": {
     "full": false,
     "holes": [
@@ -214,6 +282,7 @@
       "Fri 11:00 north"
     ],
     "leave": "not_read_not_free",
-    "travel": "unavailable"
+    "travel": "unavailable",
+    "wednesday": "empty_desk_rule_not_capacity"
   }
 }

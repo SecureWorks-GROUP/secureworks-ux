@@ -23,10 +23,16 @@
     const existing = (data.existing_commitments || []).map(ev =>
       '<li data-kind="existing_calendar">' + esc(ev.date) + ' ' + esc(ev.start) + '–' + esc(ev.end) + ' ' + esc(ev.suburb) + ' · existing</li>'
     ).join('');
+    const wednesday = (data.desk_rules && data.desk_rules.no_wednesday)
+      ? '<p class="dp-notice" data-wednesday="empty-desk-rule">Wednesday is empty by patio desk rule. Empty is not extra capacity.</p>' : '';
     const tentative = (data.tentative_placements || []).map(ev =>
-      '<li data-kind="tentative" data-opportunity="' + esc(ev.opportunity_id) + '">' +
-      esc(ev.start_iso) + ' ' + esc(ev.suburb) + ' · tentative · ' + esc((ev.holds || []).join(', ')) +
+      '<li data-kind="tentative" data-opportunity="' + esc(ev.opportunity_id) + '" data-persisted-4180="' + (ev.persisted_on_4180 ? 'true' : 'false') + '">' +
+      esc(ev.start_iso) + ' ' + esc(ev.suburb) + ' · tentative' + (ev.persisted_on_4180 ? ' · held on 4180' : '') +
+      ' · ' + esc((ev.holds || []).join(', ')) +
       '<p class="dp-small">' + esc(ev.draft) + '</p></li>'
+    ).join('');
+    const unplaced = (data.unplaced || []).map(row =>
+      '<li data-kind="unplaced">' + esc(row.opportunity_id) + ' · ' + esc(row.reason) + '</li>'
     ).join('');
     const ns = (data.needs_scoper || []).map(item =>
       '<article data-needs-scoper="' + esc(item.item_id) + '"><strong>Needs Scoper</strong>' +
@@ -44,9 +50,10 @@
       esc((data.eligible_accounted && data.eligible_accounted.customers) || 476) + ' customers / ' +
       esc((data.eligible_accounted && data.eligible_accounted.eligible_unscoped) || 495) + ' eligible unscoped / ' +
       esc((data.eligible_accounted && data.eligible_accounted.waiting_reply) || 1) + ' waiting_reply. 495 opportunities are not 495 jobs. Queue hygiene e26c908e is 4180 author evidence only.</p>' +
-      leave + travel +
-      '<h4>Existing commitments</h4><ul>' + existing + '</ul>' +
-      '<h4>Tentative placements</h4><ul>' + tentative + '</ul>' +
+      leave + travel + wednesday +
+      '<h4>Existing Outlook scopes</h4><ul>' + existing + '</ul>' +
+      '<h4>Tentative held drafts</h4><ul>' + tentative + '</ul>' +
+      '<h4>Not placed</h4><ul>' + unplaced + '</ul>' +
       '<h4>Remaining holes</h4><ul>' + holes + '</ul>' +
       ns + '</section>';
   }

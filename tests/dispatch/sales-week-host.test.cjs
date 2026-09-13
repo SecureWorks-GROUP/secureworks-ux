@@ -19,7 +19,8 @@ test('proposed week is 14-18 Sep with existing vs tentative distinct and leave n
   assert.equal(week.week, '2026-09-14/2026-09-18');
   assert.equal(week.scoper.id, 'nithin');
   assert.equal(week.existing_commitments.length, 5);
-  assert.equal(week.tentative_placements.length, 5);
+  assert.equal(week.tentative_placements.filter(p => p.persisted_on_4180).length, 4);
+  assert.equal(week.desk_rules.no_wednesday, true);
   assert.equal(week.leave.state, 'incomplete');
   assert.equal(week.travel.state, 'unavailable');
   assert.equal(week.send, 'held');
@@ -33,6 +34,9 @@ test('proposed week is 14-18 Sep with existing vs tentative distinct and leave n
   assert.match(html, /476 customers/);
   assert.match(html, /1 waiting_reply/);
   assert.match(html, /e26c908e is 4180 author evidence only/);
+  assert.match(html, /Wednesday is empty by patio desk rule/);
+  assert.match(html, /held on 4180/);
+  assert.match(html, /data-kind="unplaced"/);
   assert.match(html, /Send and calendar writes held/);
   assert.match(html, /not Ready/);
 });

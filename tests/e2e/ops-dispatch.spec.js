@@ -61,7 +61,7 @@ async function compose(page, body='Human draft A') {
   await page.getByRole('button',{name:'Compose email',exact:true}).click();
   await page.getByLabel('Sender mailbox',{exact:true}).fill('ops@example.test');
   await page.getByLabel('To',{exact:true}).fill('supplier@example.test');
-  await page.getByLabel('Exact message',{exact:true}).fill(body);
+  await page.getByRole('textbox',{name:'Exact message',exact:true}).fill(body);
 }
 async function showAcceptanceReview(page) {
   await page.getByRole('button', { name: 'Acceptance review', exact: true }).click();
@@ -84,7 +84,7 @@ test('History and scope disclosures retain search focus through refresh and job 
   await expect(search).toBeVisible();
   await expect(search).toHaveValue('Original supplier history');
   await expect(search).toBeFocused();
-  await expect(page.getByLabel('Exact message', { exact: true })).toHaveValue('Keep the open job draft');
+  await expect(page.getByRole('textbox', { name: 'Exact message', exact: true })).toHaveValue('Keep the open job draft');
   await page.getByRole('tab', { name: 'Scope & quote', exact: true }).click();
   const context = page.locator('[data-disclosure="context"]');
   await context.locator('summary').click();
@@ -101,23 +101,23 @@ test('arbitrary groups preserve requirement identity through rename, move and re
 });
 test('exact drafts persist and each job retains human edits during selection',async({page})=>{
   await setup(page);await compose(page);await page.getByRole('button',{name:'Save Dispatch draft',exact:true}).click();await expect(page.getByText('Dispatch draft saved. No message sent.',{exact:true})).toBeVisible();
-  await page.getByLabel('Exact message',{exact:true}).fill('Unsaved newer A');await page.locator('.dp-job[data-id="b"]').click();await page.getByRole('button',{name:'Compose email',exact:true}).click();await page.getByLabel('Exact message',{exact:true}).fill('Job B buffer');await showAcceptanceReview(page);await page.locator('.dp-job[data-id="a"]').click();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Unsaved newer A');
-  await page.getByRole('button',{name:'Save Dispatch draft',exact:true}).click();await page.evaluate(()=>{document.getElementById('dispatchRoot').replaceWith(Object.assign(document.createElement('div'),{id:'dispatchRoot'}));return mountFixture();});await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('button',{name:/Materials · FIX-101/}).click();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Unsaved newer A');
+  await page.getByRole('textbox',{name:'Exact message',exact:true}).fill('Unsaved newer A');await page.locator('.dp-job[data-id="b"]').click();await page.getByRole('button',{name:'Compose email',exact:true}).click();await page.getByRole('textbox',{name:'Exact message',exact:true}).fill('Job B buffer');await showAcceptanceReview(page);await page.locator('.dp-job[data-id="a"]').click();await expect(page.getByRole('textbox',{name:'Exact message',exact:true})).toHaveValue('Unsaved newer A');
+  await page.getByRole('button',{name:'Save Dispatch draft',exact:true}).click();await page.evaluate(()=>{document.getElementById('dispatchRoot').replaceWith(Object.assign(document.createElement('div'),{id:'dispatchRoot'}));return mountFixture();});await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('button',{name:/Materials · FIX-101/}).click();await expect(page.getByRole('textbox',{name:'Exact message',exact:true})).toHaveValue('Unsaved newer A');
 });
 test('edits made during save never receive an older exact review',async({page})=>{
-  await setup(page);await compose(page);await page.evaluate(()=>{fixture.hold=true;});await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await page.getByLabel('Exact message',{exact:true}).fill('Changed while saving');await page.evaluate(()=>{fixture.hold=false;fixture.release();});await expect(page.getByText('New edits were preserved. Review the latest content again.',{exact:true})).toBeVisible();await expect(page.getByLabel('Exact message',{exact:true})).toHaveValue('Changed while saving');expect(await page.evaluate(()=>fixture.commands.filter(c=>c.command==='draft_review').length)).toBe(0);
+  await setup(page);await compose(page);await page.evaluate(()=>{fixture.hold=true;});await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await page.getByRole('textbox',{name:'Exact message',exact:true}).fill('Changed while saving');await page.evaluate(()=>{fixture.hold=false;fixture.release();});await expect(page.getByText('New edits were preserved. Review the latest content again.',{exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Exact message',exact:true})).toHaveValue('Changed while saving');expect(await page.evaluate(()=>fixture.commands.filter(c=>c.command==='draft_review').length)).toBe(0);
 });
 test('broader mail search keeps original attribution and never imports recipients on reference link',async({page})=>{
-  await setup(page);await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByLabel('Search scope',{exact:true}).selectOption('all');await page.getByLabel('Search captured correspondence',{exact:true}).fill('supplier');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('button',{name:/Fixture original supplier thread/}).click();await expect(page.getByText('Original job B evidence',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Link as a reference — keep original job',exact:true}).click();expect(await page.evaluate(()=>fixture.records.a.communication_links[0].source_job_id)).toBe('b');await page.getByRole('button',{name:'Compose email',exact:true}).click();await expect(page.getByLabel('To',{exact:true})).toHaveValue('');expect(await page.evaluate(()=>fixture.mailParams.scope)).toBe('all');
+  await setup(page);await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('combobox',{name:'Search scope',exact:true}).selectOption('all');await page.getByLabel('Search captured correspondence',{exact:true}).fill('supplier');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByRole('button',{name:/Fixture original supplier thread/}).click();await expect(page.getByText('Original job B evidence',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Link as a reference — keep original job',exact:true}).click();expect(await page.evaluate(()=>fixture.records.a.communication_links[0].source_job_id)).toBe('b');await page.getByRole('button',{name:'Compose email',exact:true}).click();await expect(page.getByLabel('To',{exact:true})).toHaveValue('');expect(await page.evaluate(()=>fixture.mailParams.scope)).toBe('all');
 });
 test('calendar layers keep event identity and link back to the original job',async({page})=>{
   await setup(page);await page.locator('input[data-layer="materials"]').uncheck();await expect(page.locator('[data-id="po:source-b"]')).toHaveCount(0);await page.locator('input[data-layer="materials"]').check();await page.locator('[data-id="po:source-b"]').click();await expect(page.getByRole('heading',{name:/FIX-102/})).toBeVisible();await page.getByRole('button',{name:'patio',exact:true}).click();await expect(page.locator('.dp-job')).toHaveCount(0);await showAcceptanceReview(page);await expect(page.locator('.dp-job')).toHaveCount(1);expect(await page.evaluate(()=>core.state.jobs.length)).toBe(2);
 });
 test('narrow workspace keeps exact compose usable without horizontal page overflow',async({page})=>{
-  await page.setViewportSize({width:390,height:844});await setup(page);await compose(page);await expect(page.getByLabel('Exact message',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});await setup(page);await compose(page);await expect(page.getByRole('textbox',{name:'Exact message',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toBeVisible();
 });
 
-test('edits during the second review request cannot inherit the older approval',async({page})=>{await setup(page);await compose(page);await page.evaluate(()=>{const original=fixture.post;core=window.app.core;const review=core.command;core.command=async(...args)=>{if(args[1]==='draft_review')fixture.hold=true;return review(...args);};});await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect.poll(()=>page.evaluate(()=>fixture.commands.some(c=>c.command==='draft_review'))).toBe(true);await page.getByLabel('Exact message',{exact:true}).fill('New text during review');await page.evaluate(()=>{fixture.hold=false;fixture.release();});await expect(page.getByText('New edits were preserved. Review the latest content again.',{exact:true})).toBeVisible();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toHaveCount(0);});
+test('edits during the second review request cannot inherit the older approval',async({page})=>{await setup(page);await compose(page);await page.evaluate(()=>{const original=fixture.post;core=window.app.core;const review=core.command;core.command=async(...args)=>{if(args[1]==='draft_review')fixture.hold=true;return review(...args);};});await page.getByRole('button',{name:'Review exact draft',exact:true}).click();await expect.poll(()=>page.evaluate(()=>fixture.commands.some(c=>c.command==='draft_review'))).toBe(true);await page.getByRole('textbox',{name:'Exact message',exact:true}).fill('New text during review');await page.evaluate(()=>{fixture.hold=false;fixture.release();});await expect(page.getByText('New edits were preserved. Review the latest content again.',{exact:true})).toBeVisible();await expect(page.getByText('Exact draft reviewed and persisted. No message sent.',{exact:true})).toHaveCount(0);});
 test('actual source fields and HTML-only mail render safely without invented links',async({page})=>{await setup(page);await page.evaluate(async()=>{fixture.records.a.job.scope_json={job:{runs:[{length:12.5}]}};fixture.records.a.job.pricing_json={customer_quote:{total:123}};fixture.records.a.media=[{id:'photo',name:'Captured site photo',storage_url:'https://example.test/photo.jpg'},{id:'missing',name:'Missing original'},{id:'script',name:'Unsafe source',storage_url:'javascript:alert(1)'}];fixture.records.a.communications=[{id:'html-mail',job_id:'a',subject:'HTML-only captured mail',snippet:'Only a truncated snippet',body_html:'<p>First paragraph</p><script>window.injected=true</script><p>Second paragraph</p>'}];await core.load('a');});await expect(page.getByText('Stored job scope',{exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'Open original',exact:true})).toHaveCount(1);await expect(page.getByRole('link',{name:'Open original',exact:true})).toHaveAttribute('href','https://example.test/photo.jpg');await page.getByRole('tab',{name:'Email',exact:true}).click();await page.getByRole('button',{name:/HTML-only captured mail/}).click();await expect(page.getByText(/First paragraph/)).toBeVisible();await expect(page.getByText(/Second paragraph/)).toBeVisible();await expect(page.getByText('Only a truncated snippet')).toHaveCount(0);expect(await page.evaluate(()=>window.injected)).toBeUndefined();});
 
 
@@ -138,7 +138,7 @@ test('receipt allocation selection remains explicit after source removal', async
   const allocations = page.locator('[data-disclosure="allocations"]');
   await allocations.locator('summary').click();
   await page.getByRole('button', { name: 'Verify receipt', exact: true }).click();
-  await page.getByLabel('Allocation', { exact: true }).selectOption('allocation-a');
+  await page.getByRole('combobox', { name: 'Allocation', exact: true }).selectOption('allocation-a');
   await page.getByLabel('Usable quantity', { exact: true }).fill('2');
   await page.getByLabel('Damaged quantity', { exact: true }).fill('0');
   await page.getByLabel('Received location', { exact: true }).fill('yard');
@@ -149,7 +149,7 @@ test('receipt allocation selection remains explicit after source removal', async
     fixture.records.a.version += 1;
     await core.load('a');
   });
-  const allocationSelect = page.getByLabel('Allocation', { exact: true });
+  const allocationSelect = page.getByRole('combobox', { name: 'Allocation', exact: true });
   await expect(allocationSelect).toHaveValue('allocation-a');
   expect(await allocationSelect.locator('option:checked').textContent()).toContain('Unavailable allocation: allocation-a');
   await page.getByLabel('Received location', { exact: true }).fill('site');
@@ -181,15 +181,15 @@ test('allocation requirement selection remains explicit after source removal', a
   const allocations = page.locator('[data-disclosure="allocations"]');
   await allocations.locator('summary').click();
   await page.getByRole('button', { name: 'Allocate supply', exact: true }).click();
-  await page.getByLabel('Requirement', { exact: true }).selectOption('requirement-a');
-  await page.getByLabel('Recorded supply lot', { exact: true }).selectOption('stock:shared-lot');
+  await page.getByRole('combobox', { name: 'Requirement', exact: true }).selectOption('requirement-a');
+  await page.getByRole('combobox', { name: 'Recorded supply lot', exact: true }).selectOption('stock:shared-lot');
   await page.getByLabel('Quantity', { exact: true }).fill('3');
   await page.evaluate(async () => {
     fixture.records.a.requirements = fixture.records.a.requirements.filter(item => item.id !== 'requirement-a');
     fixture.records.a.version += 1;
     await core.load('a');
   });
-  const requirementSelect = page.getByLabel('Requirement', { exact: true });
+  const requirementSelect = page.getByRole('combobox', { name: 'Requirement', exact: true });
   await expect(requirementSelect).toHaveValue('requirement-a');
   expect(await requirementSelect.locator('option:checked').textContent()).toContain('Unavailable requirement: requirement-a');
   await page.getByLabel('Quantity', { exact: true }).fill('4');

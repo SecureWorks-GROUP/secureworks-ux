@@ -28,3 +28,29 @@ The current host-* screenshots and host-proof.json verify the actual ops.html ho
 The opening now includes available lead, response, unanswered and quote-value evidence while naming different populations. The funnel restores outer-end values, fine row rules and compact spacing. Response plots use a shared tick scale, two-hour marker and visible median/worst hierarchy. Patio unanswered age bars and Fencing open/over-24-staffed-hour squares render only from retained queue ages; incomplete membership produces a specific distribution gap. Measures are grouped by tiers with compact unavailable chips and paired mobile lane cells. Week buttons replace the select; rolling measures keep Patio left and Fencing right.
 
 Host capture exposed an incumbent inline display:flex on inactive Approvals. A Performance-only body class hides that inactive view and the overflowing mobile search control, preserving the brand and other routes. The mobile table caption has an explicit full-width block layout. No detector rerun was made.
+
+## Fencing Stratco week panel (filed read)
+
+`#fencingStratcoWeekRoot` sits above `#salesPerformanceRoot` inside `#viewSales`
+and is painted by `modules/ops-fencing-stratco-week.js`. It is deliberately NOT
+mounted into `#salesPerformanceNotes`: that seam is wiped on every Performance
+render and is absent in the loading and error states, and this panel must stay
+readable when the weekly report cannot load at all. The `sales-performance:drill`
+/ `sales-performance:render` / `#salesPerformanceNotes` seams are untouched; the
+module only listens to `sales-performance:render` to repaint itself.
+
+Its figures come from a FILED read of 20:04 Perth, Sunday 13 September 2026,
+checked in at `docs/evidence/fencing-stratco-week-2026-09-13/` and copied into
+the module so the browser needs no fetch. `ops-sales-performance.test.cjs`
+asserts the copy still equals the file, so the two cannot drift.
+
+Three rules hold this surface:
+
+- Every figure carries the read time and the evidence file it came from.
+- A figure with no evidence renders as unmeasured, never as zero. Four are named
+  that way today, including Khairo's own calendar, which was not read.
+- A filed figure is never dressed as a live one. Where a live read is present,
+  `reconcile()` matches it by event id and states any difference rather than
+  smoothing it away.
+
+Search `<fencing-stratco-filed-read>`.

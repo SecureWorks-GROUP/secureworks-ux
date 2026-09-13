@@ -1,0 +1,127 @@
+{
+  "what_this_is": "Checked-in, privacy-scrubbed copy of the filed Stratco calendar read for the week starting Monday 14 September 2026. It is a FILED read, not a live one. The Sales Performance and Sales Booking surfaces render these numbers and label them as filed.",
+  "source_of_truth": {
+    "repo": "secureworks-wiki",
+    "report": "coding/work/campaigns/ceo-ops/lanes/FENCING_SALES/STRATCO-CALENDAR-TRUTH-2026-09-13.md",
+    "evidence": "coding/work/campaigns/ceo-ops/lanes/FENCING_SALES/evidence/2026-09-13-stratco-calendar-readback.json",
+    "authority": "coding/work/campaigns/ceo-ops/lanes/FENCING_SALES/CAPTAIN-RULING-2026-09-11-STRATCO-BOOKING.md"
+  },
+  "privacy": "Customer names and street addresses are deliberately not carried into this repository. Suburb, Stratco ref, provider event id and times only, matching the house rule used by tests/e2e/fixtures/ses-docs-ready-bertram.js.",
+  "read_clock": {
+    "perth_local": "2026-09-13T20:04:31+08:00",
+    "utc": "2026-09-13T12:04:31.465Z",
+    "display": "20:04 Perth, Sunday 13 September 2026"
+  },
+  "read_only_pass": { "calendar_writes": 0, "sms_sent": 0, "customer_contact": "none" },
+  "lane": "fencing",
+  "week_start": "2026-09-14",
+  "timezone": "Australia/Perth",
+  "scoper": { "name": "Marnin", "resource_id": "marnin", "scoper_user_id": "706c5258-70dd-483a-b36c-af6864b24498" },
+  "counts": {
+    "visits_agreed": 8,
+    "in_calendar": 6,
+    "initial_booking_threads_unanswered": 5,
+    "agreed_versus_calendar_breaches": 2
+  },
+  "unmeasured": [
+    { "key": "khairo_calendar", "label": "Khairo's own Stratco calendar", "reason": "Not read in this pass. Khairo's calendar is separate from Marnin's and was outside the read." },
+    { "key": "agreed_without_event_composition", "label": "Which 2 agreed visits have no event at all", "reason": "The read publishes the totals 8 agreed and 6 in calendar. It does not enumerate the 2 with no event, so this copy does not name them. The one the report does name is ref 230849 Redcliffe." },
+    { "key": "operational_leave", "label": "Operational leave", "reason": "Not read in this pass." },
+    { "key": "non_primary_calendars", "label": "Non-primary calendars", "reason": "Not read in this pass." }
+  ],
+  "move_cancel_tool_present": false,
+  "no_tool_line": "The tool catalog exposes sw_create_scope_booking and calendar reads only. There is no move or cancel action for a scope event, so no desk can fix these. The fix is the captain's call.",
+  "breaches": [
+    {
+      "id": "woodlands-231399",
+      "stratco_ref": "231399",
+      "suburb": "Woodlands",
+      "postcode": "6018",
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA==",
+      "calendar_start": "2026-09-15T11:45:00",
+      "calendar_end": "2026-09-15T12:30:00",
+      "agreed_start": "2026-09-18T08:30:00",
+      "agreed_end": "2026-09-18T09:15:00",
+      "kind": "wrong_day_and_time",
+      "summary": "Wrong day and wrong time. The customer agreed Friday 18 September 08:30. The event reads Tuesday 15 September 11:45 to 12:30.",
+      "acceptance_message_id": "BGN3JeJ8PRJsQKoQ2IgW",
+      "acceptance_at_utc": "2026-09-11T08:25:20.398Z",
+      "wrong_since_hours_at_read": 51,
+      "missing_slot": {
+        "start": "2026-09-18T08:30:00",
+        "end": "2026-09-18T09:15:00",
+        "label": "Agreed, not in the calendar",
+        "detail": "Friday holds 2 events against an agreed run of 3. Woodlands 08:30 is missing from Friday entirely because its event sits on Tuesday."
+      }
+    },
+    {
+      "id": "balga-231211",
+      "stratco_ref": "231211",
+      "suburb": "Balga",
+      "postcode": "6061",
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==",
+      "calendar_start": "2026-09-15T11:15:00",
+      "calendar_end": "2026-09-15T11:45:00",
+      "agreed_start": "2026-09-15T11:30:00",
+      "agreed_end": "2026-09-15T12:00:00",
+      "kind": "fifteen_minutes_early",
+      "summary": "Fifteen minutes early. The customer agreed 11:30. The event reads Tuesday 15 September 11:15 to 11:45.",
+      "acceptance_message_id": "mmD399s42QS42Dh9lLHZ",
+      "acceptance_at_utc": "2026-09-11T08:19:19.009Z",
+      "wrong_since_hours_at_read": 51,
+      "missing_slot": null
+    }
+  ],
+  "zero_travel_adjacencies": [
+    {
+      "id": "greenwood-balga-1115",
+      "at": "2026-09-15T11:15:00",
+      "from": { "suburb": "Greenwood", "stratco_ref": "231238", "ends": "2026-09-15T11:15:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA==" },
+      "to": { "suburb": "Balga", "stratco_ref": "231211", "starts": "2026-09-15T11:15:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
+      "summary": "Greenwood ends 11:15 and Balga starts 11:15. Zero travel."
+    },
+    {
+      "id": "balga-woodlands-1145",
+      "at": "2026-09-15T11:45:00",
+      "from": { "suburb": "Balga", "stratco_ref": "231211", "ends": "2026-09-15T11:45:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
+      "to": { "suburb": "Woodlands", "stratco_ref": "231399", "starts": "2026-09-15T11:45:00", "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA==" },
+      "summary": "Balga ends 11:45 and Woodlands starts 11:45. Zero travel."
+    }
+  ],
+  "protected_band": {
+    "start": "2026-09-15T13:00:00",
+    "end": "2026-09-15T15:30:00",
+    "label": "Protected for the Canning Vale meeting",
+    "stratco_events_inside": 0,
+    "letter_clear": true,
+    "travel_clear": false,
+    "meeting": {
+      "subject": "Outback Agreements",
+      "suburb": "Canning Vale",
+      "start": "2026-09-15T13:00:00",
+      "end": "2026-09-15T14:00:00",
+      "show_as": "tentative",
+      "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAOagAAAA=="
+    },
+    "reason": "No Stratco visit sits inside the band, so the letter of the rule holds. Travel breaks it. Woodlands ends 12:30 in Woodlands 6018 and the Canning Vale board room starts 13:00. That leg does not fit in 30 minutes. The cause is the Woodlands event being on Tuesday at all. With it gone, Balga at 11:30 to 12:00 leaves 60 minutes to Canning Vale, which is what the agreed run assumes.",
+    "blocked_by_event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA=="
+  },
+  "stratco_events": [
+    { "stratco_ref": "230769", "suburb": "Alkimos", "start": "2026-09-15T08:30:00", "end": "2026-09-15T09:30:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAOawAAAA==" },
+    { "stratco_ref": "231238", "suburb": "Greenwood", "start": "2026-09-15T10:30:00", "end": "2026-09-15T11:15:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObAAAAA==" },
+    { "stratco_ref": "231211", "suburb": "Balga", "start": "2026-09-15T11:15:00", "end": "2026-09-15T11:45:00", "matches_agreed_run": false, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObQAAAA==" },
+    { "stratco_ref": "231399", "suburb": "Woodlands", "start": "2026-09-15T11:45:00", "end": "2026-09-15T12:30:00", "matches_agreed_run": false, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObgAAAA==" },
+    { "stratco_ref": "231514", "suburb": "Scarborough", "start": "2026-09-18T10:00:00", "end": "2026-09-18T10:45:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0SwuDAAAAA==" },
+    { "stratco_ref": "231284", "suburb": "Aubin Grove", "start": "2026-09-18T13:30:00", "end": "2026-09-18T14:30:00", "matches_agreed_run": true, "event_id": "AQMkADg5YzhkM2IzLTdhYzAtNGY5ZC05NjQwLTRkMjRjMmI2OTIwNQBGAAADa9g1DmLEXUCA7RkJlzBCdgcA--dzT5ogUEm3FVkMazsV7QAAAgENAAAA--dzT5ogUEm3FVkMazsV7QAD0CAObwAAAA==" }
+  ],
+  "unanswered_threads": [
+    { "stratco_ref": "230183", "suburb": "Balga", "direction": "outbound", "silent_since_perth": "2026-09-11T08:03:00+08:00" },
+    { "stratco_ref": "231030", "suburb": "Camboon Road", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
+    { "stratco_ref": "230052", "suburb": "Fenchurch Street", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
+    { "stratco_ref": "230442", "suburb": "Princeville Tor", "direction": "outbound", "silent_since_perth": "2026-09-11T08:05:00+08:00" },
+    { "stratco_ref": "230997", "suburb": "Sinagra", "direction": "outbound", "silent_since_perth": "2026-09-11T08:06:00+08:00" }
+  ],
+  "agreed_not_in_calendar_named": [
+    { "stratco_ref": "230849", "suburb": "Redcliffe", "detail": "Accepted Tuesday 15:45 is not in the calendar, so it is not a live breach. Booked, it would breach both the protected band's tail and the 16:30 scoper window close." }
+  ]
+}

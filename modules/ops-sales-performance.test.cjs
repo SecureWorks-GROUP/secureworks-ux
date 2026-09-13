@@ -56,3 +56,70 @@ test('detail C1 does not open the 213 follow-up records',()=>{
   assert.equal(q.rows.length,213);
   assert.match(q.scope,/not C1/);
 });
+
+/* Fencing Stratco week panel, the filed read of 20:04 Perth, 13 Sep 2026. */
+const stratco=require('./ops-fencing-stratco-week.js');
+const filed=JSON.parse(fs.readFileSync(require('node:path').join(__dirname,'../docs/evidence/fencing-stratco-week-2026-09-13/stratco-week-filed-read.json'),'utf8'));
+test('the panel states the four Stratco-week numbers the filed read published',()=>{
+  const html=stratco.renderPerformanceHTML(null);
+  assert.deepEqual(stratco.counts().map(c=>[c.key,c.value]),[['visits_agreed',8],['in_calendar',6],['initial_booking_threads_unanswered',5],['agreed_versus_calendar_breaches',2]]);
+  ['Visits agreed','In calendar','Booking threads unanswered','Agreed versus calendar breaches'].forEach(label=>assert.ok(html.includes(label),label));
+  assert.match(html,/Week of Monday 14 September 2026/);
+  assert.doesNotMatch(html,/undefined|NaN/);
+});
+test('the checked-in module never drifts from the checked-in evidence file',()=>{
+  assert.deepEqual(stratco.FILED.counts,filed.counts);
+  assert.equal(stratco.FILED.week_start,filed.week_start);
+  assert.equal(stratco.FILED.read_iso,filed.read_clock.perth_local);
+  assert.equal(stratco.FILED.move_cancel_tool_present,filed.move_cancel_tool_present);
+  assert.deepEqual(stratco.FILED.breaches.map(b=>[b.stratco_ref,b.event_id,b.calendar_start,b.agreed_start]),filed.breaches.map(b=>[b.stratco_ref,b.event_id,b.calendar_start,b.agreed_start]));
+  assert.deepEqual(stratco.FILED.stratco_events.map(e=>e.event_id),filed.stratco_events.map(e=>e.event_id));
+  assert.deepEqual(stratco.FILED.unmeasured.map(u=>u.key),filed.unmeasured.map(u=>u.key));
+});
+test('every number carries the read time and its evidence file, and no live claim is made',()=>{
+  const html=stratco.renderPerformanceHTML(null);
+  const stamps=html.split('Filed read 20:04 Perth, Sunday 13 September 2026').length-1;
+  assert.equal(stamps,stratco.counts().length);
+  assert.equal(html.split('docs/evidence/fencing-stratco-week-2026-09-13/stratco-week-filed-read.json').length-1,stratco.counts().length+1);
+  assert.match(html,/Filed read, not live/);
+  assert.match(html,/No live calendar read in this copy/);
+  assert.match(html,/Calendar writes 0\. SMS sent 0\. Customer contact none\./);
+});
+test('a figure with no evidence reads unmeasured, never zero',()=>{
+  const html=stratco.renderPerformanceHTML(null);
+  assert.match(html,/Khairo.s own Stratco calendar:<\/b> unmeasured/);
+  assert.match(html,/Which 2 agreed visits have no event at all:<\/b> unmeasured/);
+  assert.equal(stratco.FILED.unmeasured.every(u=>u.reason && u.reason.length>10),true);
+  const unmeasuredFigure=stratco.renderPerformanceHTML.call(null,null);
+  assert.doesNotMatch(unmeasuredFigure,/<span class="fsw-n">0<\/span>/);
+});
+test('a live read that agrees is reported as agreeing; one that differs is named, not smoothed',()=>{
+  const live=filed.stratco_events.map(e=>({event_id:e.event_id,start_iso:e.start,end_iso:e.end}));
+  const agrees=stratco.reconcile(live);
+  assert.equal(agrees.has_live,true);
+  assert.equal(agrees.rows.filter(r=>r.status==='agrees').length,6);
+  assert.match(agrees.summary,/6 of 6 filed Stratco events are confirmed unchanged/);
+  const moved=live.map((e,i)=>i===0?{...e,start_iso:'2026-09-16T09:00:00',end_iso:'2026-09-16T10:00:00'}:e);
+  const drift=stratco.reconcile(moved);
+  assert.equal(drift.rows[0].status,'moved');
+  assert.match(drift.rows[0].note,/Live read differs\. Filed Tuesday 15 September 08:30 to 09:30\. Live Wednesday 16 September 09:00 to 10:00\./);
+  const absent=stratco.reconcile([]);
+  assert.equal(absent.rows.every(r=>r.status==='absent'),true);
+  assert.match(stratco.reconcile(null).summary,/No live calendar read in this copy/);
+});
+test('the panel names both breaches with full event ids and no desk fix',()=>{
+  const html=stratco.renderPerformanceHTML(null);
+  assert.match(html,/<b>Woodlands 231399\.<\/b> Wrong day and wrong time\. The customer agreed Friday 18 September 08:30\./);
+  assert.match(html,/<b>Balga 231211\.<\/b> Fifteen minutes early\. The customer agreed 11:30\./);
+  filed.breaches.forEach(b=>assert.ok(html.includes(stratco.escape(b.event_id)),b.stratco_ref));
+  assert.match(html,/no move or cancel action for a scope event/);
+  assert.match(html,/the captain.s call/);
+});
+test('no captain-facing Stratco copy carries an em dash and no client identity leaks',()=>{
+  const source=fs.readFileSync(require('node:path').join(__dirname,'ops-fencing-stratco-week.js'),'utf8');
+  const evidence=fs.readFileSync(require('node:path').join(__dirname,'../docs/evidence/fencing-stratco-week-2026-09-13/stratco-week-filed-read.json'),'utf8');
+  [source,evidence,stratco.renderPerformanceHTML(null),stratco.flagsHTML('2026-09-14','marnin',null)].forEach(text=>{
+    assert.doesNotMatch(text,/—/);
+    ['Lawrence Guo','Oliver Parks','Gareth Chapman','Bruce Reidy-Crofts','Melanie Nouchy','Basil Laing','Granich Gardens','Framfield Way','Martin Place','Providence Drive'].forEach(pii=>assert.equal(text.includes(pii),false,pii));
+  });
+});

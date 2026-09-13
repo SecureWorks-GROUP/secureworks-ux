@@ -401,3 +401,139 @@ test('opsFetch for the workspace uses the signed-in token', async () => {
   vm.runInContext(source.slice(start, end), ctx);
   await ctx.opsFetch('sales_booking_read', { resource: 'nithin', week_start: '2026-09-14' });
 });
+
+/* Fencing Stratco week overlay on the Booking grid. The filed read of
+   20:04 Perth, Sunday 13 September 2026, painted in place with no control
+   that could move, cancel or send anything. */
+const stratco = require('./ops-fencing-stratco-week.js');
+const filedRead = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, '../docs/evidence/fencing-stratco-week-2026-09-13/stratco-week-filed-read.json'), 'utf8'));
+
+function marninWeek() {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.selectedId = null;
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    send_hold: true,
+    resource: { id: 'marnin', name: 'Marnin', scoper_user_id: filedRead.scoper.scoper_user_id, calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au', can_edit: true, leave: 'not_read' } },
+    week_start: '2026-09-14',
+    coverage: { operational_leave: 'not_read', non_primary_calendars: 'not_read', full_population: false, gaps: [] },
+    events: filedRead.stratco_events.map(e => ({ event_id: e.event_id, case_id: e.event_id, subject: 'Scope visit', display_name: e.suburb + ' visit', suburb: e.suburb, start_iso: e.start, end_iso: e.end, layer: 'confirmed' })),
+    cases: []
+  };
+  return api.renderHTML();
+}
+
+test('Woodlands 231399 is flagged in place against its agreed Friday 08:30, and the missing Friday slot is shown', () => {
+  const html = marninWeek();
+  const breach = filedRead.breaches.find(b => b.stratco_ref === '231399');
+  assert.match(html, /Woodlands 231399 contradicts the customer.s acceptance/);
+  assert.match(html, /Wrong day and wrong time\. The customer agreed Friday 18 September 08:30\. The event reads Tuesday 15 September 11:45 to 12:30\./);
+  assert.match(html, /Woodlands 231399 agreed Friday 18 September 08:30 to 09:15, no event exists/);
+  assert.match(html, /Friday holds 2 events against an agreed run of 3/);
+  assert.ok(html.includes(api.esc(breach.event_id)), 'full Woodlands event id is printed');
+  // Painted in place: Tuesday carries the breach outline, Friday the missing slot.
+  const tuesday = api.stratcoOverlay(1);
+  const friday = api.stratcoOverlay(4);
+  assert.match(tuesday, /class="fsw-flagged" style="top:255px;height:51px"/);
+  assert.match(tuesday, /Agreed Fri 18 Sep 08:30/);
+  assert.match(friday, /class="fsw-missing" style="top:34px;height:51px"/);
+  assert.match(friday, /Agreed, not in the calendar/);
+});
+
+test('Balga 231211 is flagged in place against its agreed 11:30 to 12:00', () => {
+  const html = marninWeek();
+  const breach = filedRead.breaches.find(b => b.stratco_ref === '231211');
+  assert.match(html, /Balga 231211 contradicts the customer.s acceptance/);
+  assert.match(html, /Fifteen minutes early\. The customer agreed 11:30\. The event reads Tuesday 15 September 11:15 to 11:45\./);
+  assert.ok(html.includes(api.esc(breach.event_id)), 'full Balga event id is printed');
+  const tuesday = api.stratcoOverlay(1);
+  assert.match(tuesday, /class="fsw-flagged" style="top:221px;height:34px"/);
+  assert.match(tuesday, /Agreed 11:30/);
+});
+
+test('both Tuesday zero-travel adjacencies and the unreachable protected band are on the grid', () => {
+  const html = marninWeek();
+  assert.match(html, /Greenwood into Balga at 11:15 leaves zero travel/);
+  assert.match(html, /Balga into Woodlands at 11:45 leaves zero travel/);
+  assert.match(html, /Tuesday 13:00 to 15:30 is not reachable by travel/);
+  assert.match(html, /That leg does not fit in 30 minutes/);
+  assert.ok(html.includes(api.esc(filedRead.protected_band.blocked_by_event_id)), 'the blocking event id is named');
+  const tuesday = api.stratcoOverlay(1);
+  assert.equal((tuesday.match(/class="fsw-seam"/g) || []).length, 2);
+  assert.match(tuesday, /class="fsw-band" style="top:340px;height:170px"/);
+  assert.match(tuesday, /Not reachable by travel/);
+});
+
+test('every Stratco flag ends at the captain and offers no move, cancel or send control', () => {
+  const html = marninWeek();
+  const flags = html.slice(html.indexOf('<div class="fsw-flags">'));
+  assert.equal((flags.match(/No move or cancel tool exists for a scope event\. This is the captain.s call, not a desk action\./g) || []).length, 6);
+  assert.doesNotMatch(flags, /<button|<input|<select|<form|onclick=/);
+  assert.match(flags, /no move or cancel action for a scope event/);
+  assert.match(flags, /Calendar writes 0\. SMS sent 0\. Customer contact none\./);
+});
+
+test('the overlay is scoped to Marnin and this week, and never fabricates a live read', () => {
+  marninWeek();
+  assert.equal(api.stratcoOverlay(1).length > 0, true);
+  api.state.resourceId = 'nithin';
+  assert.equal(api.stratcoOverlay(1), '');
+  assert.match(api.stratcoFlags(), /Nothing is claimed about this week or this scoper/);
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-21';
+  assert.equal(api.stratcoOverlay(1), '');
+  assert.match(api.stratcoFlags(), /Nothing is claimed about this week or this scoper/);
+  api.state.weekStart = '2026-09-14';
+  assert.match(api.stratcoFlags(), /6 of 6 filed Stratco events are confirmed unchanged by the live read/);
+  api.state.data = null;
+  assert.match(api.stratcoFlags(), /No live calendar read in this copy/);
+  assert.match(api.renderHTML(), /Woodlands 231399 contradicts/);
+});
+
+test('a disconnected calendar still shows the filed Stratco flags rather than an empty week', () => {
+  marninWeek();
+  api.state.data.resource.calendar = { ok: false, error: 'Calendar read failed' };
+  const html = api.renderHTML();
+  assert.match(html, /Calendar not connected/);
+  assert.match(html, /Woodlands 231399 contradicts the customer.s acceptance/);
+  assert.match(html, /Balga 231211 contradicts the customer.s acceptance/);
+  assert.match(html, /Missing coverage is not a free week/);
+});
+
+test('the Booking surface keeps the send hold and the module still refuses a fixture fallback', async () => {
+  marninWeek();
+  assert.equal(api.SEND_HOLD, true);
+  const previous = global.opsFetch;
+  global.opsFetch = async () => ({ ok: true, fixture: true, events: [], cases: [] });
+  await api.load('marnin', '2026-09-14');
+  assert.match(api.state.error, /Fixture fallback is refused/);
+  assert.equal(api.state.data, null);
+  global.opsFetch = previous;
+});
+
+test('with no live read the grid paints the filed week rather than an empty one', () => {
+  marninWeek();
+  // A live read that carries the week: the grid already shows it, so the
+  // overlay adds only the flags.
+  assert.equal(stratco.liveCoversWeek(api.state.data.events), true);
+  assert.equal((api.stratcoOverlay(1).match(/class="fsw-filed/g) || []).length, 0);
+  // No live read at all, and a live read that carries none of these events,
+  // are the same thing to this grid: paint the filed week and label it filed.
+  api.state.data = null;
+  assert.equal(stratco.liveCoversWeek(null), false);
+  const tuesday = api.stratcoOverlay(1);
+  const friday = api.stratcoOverlay(4);
+  assert.equal((tuesday.match(/class="fsw-filed/g) || []).length, 5, 'four Tuesday visits plus the Canning Vale meeting');
+  assert.equal((friday.match(/class="fsw-filed/g) || []).length, 2, 'two Friday visits');
+  assert.equal((tuesday.match(/· filed<\/span>/g) || []).length, 5, 'every painted block says it is filed');
+  assert.match(tuesday, /08:30 to 09:30<\/span><span class="fsw-s">Alkimos/);
+  assert.match(tuesday, /13:00 to 14:00<\/span><span class="fsw-s">Canning Vale<\/span><span class="fsw-r">tentative · filed/);
+  assert.match(friday, /10:00 to 10:45<\/span><span class="fsw-s">Scarborough/);
+  // The breaches keep their outline on top of the filed blocks.
+  assert.match(tuesday, /class="fsw-flagged"/);
+  assert.equal((api.stratcoOverlay(0).match(/class="fsw-filed/g) || []).length, 0, 'Monday carries no Stratco visit');
+});

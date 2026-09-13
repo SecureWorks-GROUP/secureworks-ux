@@ -477,12 +477,35 @@
     return '<div class="window" style="top:' + topPx(hour) + 'px;height:' + Math.max(24, h * PX_PER_HOUR) + 'px"><b>Window</b>' + esc(c.proposal.window_label || '') + '</div>';
   }
 
+  /* <fencing-stratco-filed-read> The filed Stratco read for Marnin's fencing
+     week of 2026-09-14 is painted over this grid and written out beneath it.
+     It is a filed read, never live, and it adds no control: there is no move
+     or cancel tool for a scope event, so every flag ends at the captain.
+     Both helpers no-op on any other resource or week. */
+  function stratcoTruth() {
+    return global.FencingStratcoWeek || null;
+  }
+
+  function stratcoOverlay(dayIdx) {
+    var truth = stratcoTruth();
+    if (!truth) return '';
+    var live = state.data && Array.isArray(state.data.events) ? state.data.events : null;
+    return truth.dayOverlayHTML(dayIdx, state.weekStart, state.resourceId, { pxPerHour: PX_PER_HOUR, dayStart: DAY_START }, live);
+  }
+
+  function stratcoFlags() {
+    var truth = stratcoTruth();
+    if (!truth) return '';
+    var live = state.data && Array.isArray(state.data.events) ? state.data.events : null;
+    return truth.flagsHTML(state.weekStart, state.resourceId, live);
+  }
+
   function renderCalendar() {
     var data = state.data;
     var res = resource();
     var cal = data && data.resource && data.resource.calendar;
     if (data && cal && cal.ok === false) {
-      return '<div class="unknownstaff"><h3>Calendar not connected</h3><p>' + esc(cal.error || 'This resource has no verified provider calendar.') + '</p><p class="small">Missing coverage is not a free week.</p></div>';
+      return '<div class="unknownstaff"><h3>Calendar not connected</h3><p>' + esc(cal.error || 'This resource has no verified provider calendar.') + '</p><p class="small">Missing coverage is not a free week.</p></div>' + stratcoFlags();
     }
     var headers = '<div class="timezonelabel small">AWST</div>' + DAYS.map(function (name, i) {
       var iso = addDays(state.weekStart, i);
@@ -533,6 +556,7 @@
           }, 'proposal');
         }
       });
+      body += stratcoOverlay(d);
       cols += '<div class="daycolumn">' + wed + body + '</div>';
     }
     var times = '';
@@ -554,7 +578,8 @@
         return '<button type="button" data-booking-day="' + i + '">' + name.slice(0, 3) + '<b>' + addDays(state.weekStart, i).slice(8, 10) + '</b></button>';
       }).join('') + '</div>' +
       '<div class="dayagenda">' + renderAgenda() + '</div>' +
-      '<div class="calendarfoot">Solid blocks are provider events with actual duration. Dashed blocks are unsent proposals. Dotted blocks are outstanding offers. A window is not acceptance. Leave and other calendars are not in this read.</div>';
+      '<div class="calendarfoot">Solid blocks are provider events with actual duration. Dashed blocks are unsent proposals. Dotted blocks are outstanding offers. A window is not acceptance. Leave and other calendars are not in this read.</div>' +
+      stratcoFlags();
   }
 
   function renderAgenda() {
@@ -936,7 +961,9 @@
     hasBlockingCommitment: hasBlockingCommitment,
     show: showSales,
     coverageGaps: coverageGaps,
-    bookingRead: bookingRead
+    bookingRead: bookingRead,
+    stratcoOverlay: stratcoOverlay,
+    stratcoFlags: stratcoFlags
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

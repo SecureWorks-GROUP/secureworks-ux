@@ -1,0 +1,96 @@
+/* Fencing Stratco week, filed read. Ops brand tokens, calm by instruction:
+   one accent at a time, no decoration competing with the numbers. */
+#fencingStratcoWeekRoot{
+  --fsw-canvas:#F8F6F3;
+  --fsw-surface:#FCFBFA;
+  --fsw-ink:#293C46;
+  --fsw-ink-2:#4C6A7C;
+  --fsw-line:#D4DEE4;
+  --fsw-accent:#F15A29;
+  --fsw-accent-text:#C4481F;
+  --fsw-wash:#FDF2EE;
+  --fsw-muted:#8FA4B2;
+  font:13px/1.45 'Helvetica Neue',Helvetica,Arial,-apple-system,BlinkMacSystemFont,sans-serif;
+  color:var(--fsw-ink);
+  background:var(--fsw-canvas);
+  display:block;
+}
+#fencingStratcoWeekRoot *{box-sizing:border-box}
+#fencingStratcoWeekRoot h2,#fencingStratcoWeekRoot h3,#fencingStratcoWeekRoot p{margin:0}
+#fencingStratcoWeekRoot code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:var(--fsw-ink-2);word-break:break-all}
+#fencingStratcoWeekRoot .fsw{background:var(--fsw-surface);border:1px solid var(--fsw-line);padding:18px 20px;margin:18px 20px 0}
+#fencingStratcoWeekRoot .fsw-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+#fencingStratcoWeekRoot .fsw-eyebrow{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--fsw-accent-text);font-weight:650}
+#fencingStratcoWeekRoot .fsw h2{font-size:20px;letter-spacing:-.01em;font-weight:650;margin-top:3px}
+#fencingStratcoWeekRoot .fsw-sub{font-size:12px;color:var(--fsw-ink-2);margin-top:4px}
+#fencingStratcoWeekRoot .fsw-stamp{font-size:10px;color:var(--fsw-accent-text);text-align:right;line-height:1.5;background:var(--fsw-wash);padding:8px 10px;border:1px solid #FADDD2}
+#fencingStratcoWeekRoot .fsw-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--fsw-line);border:1px solid var(--fsw-line);margin-top:16px}
+#fencingStratcoWeekRoot .fsw-figure{background:var(--fsw-surface);padding:14px;display:flex;flex-direction:column;gap:3px}
+#fencingStratcoWeekRoot .fsw-n{font-size:34px;line-height:1;font-weight:600;letter-spacing:-.02em}
+#fencingStratcoWeekRoot .fsw-figure.unmeasured .fsw-n{font-size:15px;font-weight:650;color:var(--fsw-muted);padding:9px 0}
+#fencingStratcoWeekRoot .fsw-k{font-size:12px;font-weight:650;margin-top:4px}
+#fencingStratcoWeekRoot .fsw-d{font-size:11px;color:var(--fsw-ink-2)}
+#fencingStratcoWeekRoot .fsw-src{font-size:9.5px;color:var(--fsw-muted);margin-top:6px;border-top:1px solid var(--fsw-line);padding-top:6px;word-break:break-all}
+#fencingStratcoWeekRoot .fsw-recon{font-size:11px;color:var(--fsw-ink-2);margin-top:10px}
+#fencingStratcoWeekRoot .fsw-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:16px}
+#fencingStratcoWeekRoot .fsw-cols h3{font-size:12px;font-weight:650;margin-bottom:7px}
+#fencingStratcoWeekRoot .fsw-list{list-style:none;padding:0;margin:0;display:grid;gap:9px}
+#fencingStratcoWeekRoot .fsw-list li{font-size:11.5px;line-height:1.5;color:var(--fsw-ink-2);border-left:2px solid var(--fsw-line);padding-left:9px}
+#fencingStratcoWeekRoot .fsw-cols>div:first-child .fsw-list li{border-left-color:var(--fsw-accent)}
+#fencingStratcoWeekRoot .fsw-list b{color:var(--fsw-ink)}
+#fencingStratcoWeekRoot .fsw-eid{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:var(--fsw-muted);word-break:break-all;margin-top:3px}
+#fencingStratcoWeekRoot .fsw-note{font-size:11px;color:var(--fsw-accent-text);margin-top:9px}
+#fencingStratcoWeekRoot .fsw-prov{font-size:10px;color:var(--fsw-muted);margin-top:14px;border-top:1px solid var(--fsw-line);padding-top:9px;line-height:1.6}
+@media (max-width:720px){
+  #fencingStratcoWeekRoot .fsw{margin:12px;padding:14px}
+  #fencingStratcoWeekRoot .fsw-stamp{text-align:left}
+}
+
+/* Booking week grid overlay. Painted over the day columns of the Sales
+   Booking calendar; carries no control that could move or cancel anything. */
+#salesBookingRoot .fsw-filed,
+#salesBookingRoot .fsw-flagged,
+#salesBookingRoot .fsw-missing,
+#salesBookingRoot .fsw-band{position:absolute;left:3px;right:3px;z-index:4;padding:2px 4px;font-size:8.5px;line-height:1.25;pointer-events:none;overflow:hidden}
+/* Filed events. Painted only when no live read can paint the week, so an
+   unreachable calendar reads as the week it is rather than an empty one. */
+#salesBookingRoot .fsw-filed{background:#FCFBFA;border:1px solid #8FA4B2;color:#293C46;z-index:2}
+#salesBookingRoot .fsw-filed.off{border-color:#C4481F;border-style:solid;background:#FFF}
+#salesBookingRoot .fsw-filed.meeting{background:#EDF1F4;border-style:dashed;color:#4C6A7C}
+#salesBookingRoot .fsw-filed .fsw-t{font-weight:650}
+#salesBookingRoot .fsw-filed .fsw-s{font-weight:650;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#salesBookingRoot .fsw-filed .fsw-r{color:#8FA4B2;font-size:8px}
+/* The outline sits over a painted filed block, so its own words carry a
+   backing chip rather than colliding with the text underneath. */
+#salesBookingRoot .fsw-flagged{background:transparent;border:2px solid #C4481F;color:#C4481F;z-index:6;text-align:right;padding:1px 2px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end}
+#salesBookingRoot .fsw-flagged b,#salesBookingRoot .fsw-flagged span{background:#FCFBFA;box-shadow:0 0 0 2px #FCFBFA;display:inline-block;max-width:100%}
+#salesBookingRoot .fsw-flagged b{font-size:8px;letter-spacing:.06em;text-transform:uppercase}
+#salesBookingRoot .fsw-flagged span:first-of-type{font-size:8px}
+#salesBookingRoot .fsw-flagged span:last-child{font-weight:650;white-space:nowrap}
+#salesBookingRoot .fsw-missing{background:repeating-linear-gradient(135deg,#FDF2EE,#FDF2EE 6px,#FCFBFA 6px,#FCFBFA 12px);border:1.5px dashed #C4481F;color:#C4481F;z-index:5}
+#salesBookingRoot .fsw-missing b{font-size:8px;letter-spacing:.04em;text-transform:uppercase}
+/* The Canning Vale meeting is painted on top of this band, so the band's own
+   label is pinned to the bottom where it stays readable. */
+#salesBookingRoot .fsw-band{background:rgba(76,106,124,.07);border:1px solid #4C6A7C;border-left-width:3px;color:#4C6A7C;z-index:1;display:flex;align-items:flex-end}
+#salesBookingRoot .fsw-band-label{display:block;width:100%}
+#salesBookingRoot .fsw-band-label b{display:block}
+#salesBookingRoot .fsw-filed span,#salesBookingRoot .fsw-flagged span,#salesBookingRoot .fsw-missing span,#salesBookingRoot .fsw-band span{display:block}
+#salesBookingRoot .fsw-seam{position:absolute;left:0;right:0;height:0;border-top:2px dotted #C4481F;z-index:7;pointer-events:none}
+/* Left-aligned so the label clears the right-aligned breach chips. */
+#salesBookingRoot .fsw-seam span{position:absolute;left:2px;top:-10px;font-size:7.5px;font-weight:650;color:#C4481F;background:#FCFBFA;box-shadow:0 0 0 2px #FCFBFA;padding:0 2px;white-space:nowrap}
+#salesBookingRoot .fsw-flags{padding:14px 16px;border-top:1px solid var(--line);background:#F8F6F3}
+#salesBookingRoot .fsw-flags.quiet{color:var(--ink-2);font-size:11px}
+#salesBookingRoot .fsw-flags-head h3{font-size:12px;font-weight:650}
+#salesBookingRoot .fsw-flags-head p{font-size:10.5px;color:var(--ink-2);margin-top:3px}
+#salesBookingRoot .fsw-flags ul{list-style:none;padding:0;margin:11px 0 0;display:grid;gap:9px}
+#salesBookingRoot .fsw-flag{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--muted);padding:9px 11px}
+#salesBookingRoot .fsw-flag.breach{border-left-color:var(--accent-text)}
+#salesBookingRoot .fsw-flag.missing{border-left-color:var(--accent)}
+#salesBookingRoot .fsw-flag.seam{border-left-color:#C4481F}
+#salesBookingRoot .fsw-flag.band{border-left-color:var(--ink-2)}
+#salesBookingRoot .fsw-flag b{font-size:11.5px}
+#salesBookingRoot .fsw-flag p{font-size:11px;color:var(--ink-2);margin-top:4px;line-height:1.5}
+#salesBookingRoot .fsw-flag .fsw-eid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;color:var(--muted);word-break:break-all}
+#salesBookingRoot .fsw-flag .fsw-owner{color:var(--accent-text);font-weight:650}
+#salesBookingRoot .fsw-flags .fsw-note{font-size:10px;color:var(--ink-2);margin-top:11px;line-height:1.6;word-break:break-word}
+#viewSales.sales-sub-booking #fencingStratcoWeekRoot{display:none}

@@ -27,3 +27,31 @@ Patio 774 is source-backed. Marnin is **unresolved** between Fencing Sales 772 (
 ## Preview
 
 `node scripts/sales-booking-preview.mjs` then open `http://127.0.0.1:4174/ops.html#booking`. Sign-in is still required for the GHL thread. Calendar reads go through the local preview action. Customer send remains held.
+
+## Fencing Stratco week flags (filed read)
+
+The week grid for Marnin's fencing resource carries the filed Stratco read of
+20:04 Perth, Sunday 13 September 2026 in place: the two breaches outlined over
+their own events, the agreed Friday 08:30 slot that has no event, both Tuesday
+zero-travel seams, and the protected 13:00 to 15:30 band marked unreachable by
+travel. Beneath the grid, `flagsHTML` writes each one out with its full event id.
+
+Owned by `modules/ops-fencing-stratco-week.js`. This module calls it through two
+one-line seams, `stratcoOverlay(dayIndex)` and `stratcoFlags()`, and keeps the
+calendar's geometry (`PX_PER_HOUR`, `DAY_START`) as the only source of scale.
+Both no-op on any other scoper or week.
+
+Three rules hold this surface:
+
+- **No control.** There is no move or cancel tool for a scope event, so every
+  flag ends at the captain and the overlay renders no button, input or form.
+- **A filed block says filed.** When the live read cannot paint the week, the
+  overlay paints the filed events so an unreachable calendar does not read as an
+  empty week, and marks every painted block `filed`. When the live read does
+  carry the week it paints no events at all, only the flags.
+- **The fixture refusal stands.** `load()` still rejects `data.fixture`. This
+  overlay is not a fixture and does not go through the read path.
+
+`npm run preview:stratco-week` opens both surfaces with no credential and no
+live Ops read; `scripts/sales-booking-preview.mjs` remains the live-read path.
+Search `<fencing-stratco-filed-read>`.

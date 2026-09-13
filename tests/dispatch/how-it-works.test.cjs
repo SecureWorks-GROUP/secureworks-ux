@@ -64,6 +64,13 @@ test('How it works contract names the five workflow definitions and their curren
   assert.equal(contract.workflows.booking.definition_status, 'owner_definition_reviewed');
   assert.equal(contract.workflows.performance.definition_status, 'pending_domain_owner');
   assert.equal(contract.workflows.debt.definition_status, 'owner_definition_reviewed');
+  assert.ok(contract.workflows.dispatch.runtime_receipt);
+  assert.match(contract.workflows.dispatch.runtime_receipt.enabled, /false|disabled|workshop/i);
+  assert.match(contract.workflows.dispatch.runtime_receipt.deployed, /dispatch_job_workshop|118b6f9/);
+  assert.match(contract.workflows.dispatch.runtime_receipt.observed_successful, /SQL PASS|isolated/i);
+  assert.match(contract.workflows.booking.runtime_receipt.deployed, /9dda1c49/);
+  assert.match(contract.workflows.booking.runtime_receipt.enabled, /held/);
+  assert.doesNotMatch(JSON.stringify(contract.workflows.dispatch.runtime_receipt), /AI assessment/);
   assert.equal(contract.workflows.ses.definition_status, 'pending_domain_owner');
   assert.equal(contract.workflows.dispatch.technical.runtime_action, 'dispatch_workflow');
   assert.equal(contract.workflows.booking.technical.page, 'Sales > Booking');
@@ -96,6 +103,9 @@ test('Dispatch How it works overlay reads live workflow status and keeps the sel
   assert.equal(ui.core.state.selectedId, selected);
   assert.match(ui.host.innerHTML, /Dispatch/);
   assert.match(host.innerHTML, /How Dispatch works/);
+  assert.match(host.innerHTML, /<dt>Enabled<\/dt>/);
+  assert.match(host.innerHTML, /<dt>Deployed<\/dt>/);
+  assert.match(host.innerHTML, /<dt>Observed successful<\/dt>/);
   assert.match(host.innerHTML, /disabled/);
   assert.doesNotMatch(host.innerHTML, /DISPATCH_WORKER_TOKEN|worker is running/);
   ui.identity(null);

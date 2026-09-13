@@ -62,10 +62,12 @@
               <dt>Manual command</dt><dd><code>${esc(tech.manual_command || worker.manual_command || 'Unavailable')}</code></dd>
               <dt>Runtime owner</dt><dd>${esc(def.owner || 'Unspecified')}</dd>
               <dt>Cloud / trigger</dt><dd>${esc(tech.cloud || 'Unread')}</dd>
+              <dt>Enabled</dt><dd>${esc((def.runtime_receipt && def.runtime_receipt.enabled) || (live ? (worker.intended_enabled ? 'enabled' : 'disabled') : 'unread'))}</dd>
+              <dt>Deployed</dt><dd>${esc((def.runtime_receipt && def.runtime_receipt.deployed) || 'unread')}</dd>
+              <dt>Observed successful</dt><dd>${esc((def.runtime_receipt && def.runtime_receipt.observed_successful) || (live && live.latest_task && live.latest_task.status === 'done' ? 'Last captured task is done' : 'No successful worker result captured'))}</dd>
               <dt>Worker intended</dt><dd>${live ? (worker.intended_enabled ? 'enabled' : 'disabled') : 'unread'}</dd>
               <dt>Worker observed</dt><dd>${live ? (worker.observed_enabled ? 'enabled' : 'disabled') : 'unread'}${worker.schedule_installed === false ? ' · no scheduler installed' : ''}</dd>
               <dt>Latest attempt</dt><dd>${live && live.latest_task ? esc(`${live.latest_task.status || 'unknown'} · job ${live.latest_task.job_id || 'unspecified'}`) : 'None captured / unread'}</dd>
-              <dt>Latest successful result</dt><dd>${live && live.latest_task && live.latest_task.status === 'done' ? 'Last captured task is done' : 'No successful worker result captured'}</dd>
               <dt>Coverage</dt><dd>${live && live.coverage ? `tasks ${live.coverage.tasks_complete ? 'complete' : 'partial'}; source failures ${live.coverage.source_failures_complete ? 'complete' : 'partial'}` : 'Unread'}</dd>
             </dl>
           </section>

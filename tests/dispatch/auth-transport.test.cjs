@@ -98,6 +98,31 @@ function extractLoadCalendar() {
   return html.slice(start, end);
 }
 
+function extractCrewList() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('var CREW_NAME_MAP =');
+  const end = html.indexOf('function renderCrewDropdown(', start);
+  assert.ok(start > -1 && end > start, 'crew list functions found');
+  return html.slice(start, end);
+}
+
+
+function extractOpenAssignmentModalForJob() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('function openAssignmentModalForJob(jobId)');
+  const end = html.indexOf('// ── Hover Preview Popover', start);
+  assert.ok(start > -1 && end > start, 'assignment modal callback found');
+  return html.slice(start, end);
+}
+
+function extractPOJobList() {
+  const html = fs.readFileSync(path.resolve(__dirname, '../../ops.html'), 'utf8');
+  const start = html.indexOf('var _poJobList = []');
+  const end = html.indexOf('// ── Unified searchable job picker', start);
+  assert.ok(start > -1 && end > start, 'PO job picker functions found');
+  return html.slice(start, end);
+}
+
 test('loadCalendar ignores a late incumbent response after Dispatch identity changes', async () => {
   const calendarRead = deferred();
   let guardValid = true;
@@ -147,4 +172,122 @@ test('loadCalendar ignores a late incumbent response after Dispatch identity cha
   assert.deepEqual(context._calOrgEvents, [{ id: 'old-org' }]);
   assert.equal(context._calTruncated, false);
   assert.equal(renderCount, 0);
+});
+
+test('loadCrewList ignores stale prior identity completion without clearing newer crew', async () => {
+  const oldRead = deferred();
+  const newRead = deferred();
+  let currentGeneration = 1;
+  let calls = 0;
+  const own = value => JSON.parse(JSON.stringify(value));
+  const context = {
+    _crewList: [],
+    window: null,
+    DispatchOps: {
+      identityGuard() {
+        const generation = currentGeneration;
+        return function assertIdentity() {
+          if (generation !== currentGeneration) {
+            const error = new Error('changed');
+            error.code = 'dispatch_identity_changed';
+            throw error;
+          }
+        };
+      },
+    },
+    opsFetch(action) {
+      assert.equal(action, 'list_users');
+      calls++;
+      return calls === 1 ? oldRead.promise : newRead.promise;
+    },
+    console: { warn() { throw new Error('stale identity should not warn'); } },
+  };
+  context.window = context;
+  vm.runInNewContext(extractCrewList(), context);
+
+  const oldLoad = context.loadCrewList();
+  await Promise.resolve();
+  currentGeneration++;
+  context._crewList = [];
+  const newLoad = context.loadCrewList();
+  newRead.resolve({ users: [{ id: 'crew-b', name: 'Crew B', email: 'crew.b@example.test', role: 'installer' }] });
+  await newLoad;
+  assert.deepEqual(own(context._crewList), [{ id: 'crew-b', name: 'Crew B', email: 'crew.b@example.test', role: 'installer', division: 'trade' }]);
+  oldRead.resolve({ users: [{ id: 'crew-a', name: 'Private A', email: 'private.a@example.test', role: 'installer' }] });
+  await oldLoad;
+  assert.deepEqual(own(context._crewList), [{ id: 'crew-b', name: 'Crew B', email: 'crew.b@example.test', role: 'installer', division: 'trade' }]);
+});
+
+test('loadPOJobList ignores stale prior identity completion without clearing newer jobs', async () => {
+  const oldRead = deferred();
+  const newRead = deferred();
+  let currentGeneration = 1;
+  let calls = 0;
+  const own = value => JSON.parse(JSON.stringify(value));
+  const context = {
+    window: null,
+    DispatchOps: {
+      identityGuard() {
+        const generation = currentGeneration;
+        return function assertIdentity() {
+          if (generation !== currentGeneration) {
+            const error = new Error('changed');
+            error.code = 'dispatch_identity_changed';
+            throw error;
+          }
+        };
+      },
+    },
+    opsFetch(action) {
+      assert.equal(action, 'pipeline');
+      calls++;
+      return calls === 1 ? oldRead.promise : newRead.promise;
+    },
+    console: { error() { throw new Error('stale identity should not log picker errors'); } },
+  };
+  context.window = context;
+  vm.runInNewContext(extractPOJobList(), context);
+
+  const oldLoad = context.loadPOJobList();
+  await Promise.resolve();
+  currentGeneration++;
+  context._poJobList = [];
+  const newLoad = context.loadPOJobList();
+  newRead.resolve({ columns: { accepted: [{ id: 'job-b', client_name: 'Crew B job' }] } });
+  await newLoad;
+  assert.deepEqual(own(context._poJobList), [{ id: 'job-b', client_name: 'Crew B job' }]);
+  oldRead.resolve({ columns: { accepted: [{ id: 'job-a', client_name: 'Private A job' }] } });
+  await oldLoad;
+  assert.deepEqual(own(context._poJobList), [{ id: 'job-b', client_name: 'Crew B job' }]);
+});
+
+test('openAssignmentModalForJob suppresses stale delayed preselect after identity changes', async () => {
+  let currentGeneration = 1;
+  let timer;
+  const select = { value: '' };
+  const context = {
+    window: null,
+    DispatchOps: {
+      identityGuard() {
+        const generation = currentGeneration;
+        return function assertIdentity() {
+          if (generation !== currentGeneration) {
+            const error = new Error('changed');
+            error.code = 'dispatch_identity_changed';
+            throw error;
+          }
+        };
+      },
+    },
+    openAssignmentModal() {},
+    setTimeout(fn) { timer = fn; },
+    document: { getElementById(id) { return id === 'assignJobSelect' ? select : null; } },
+  };
+  context.window = context;
+  vm.runInNewContext(extractOpenAssignmentModalForJob(), context);
+
+  context.openAssignmentModalForJob('job-a');
+  currentGeneration++;
+  timer();
+  assert.equal(select.value, '');
 });

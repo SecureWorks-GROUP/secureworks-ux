@@ -36,7 +36,7 @@ for (const [action, kind, values] of [
   ['add-allocation', 'allocation', { requirement_id: 'r', supply_id: 'stock:s', quantity: '2' }],
   ['add-receipt', 'receipt', { allocation_id: 'a', usable_quantity: '2', damaged_quantity: '1', location: 'yard', evidence: 'Exact receipt' }],
   ['transfer-receipt', 'transfer', { quantity: '2', location: 'site', evidence: 'Exact transfer' }],
-  ['add-movement', 'movement', { title: 'Chosen movement', from_location: 'yard', to_location: 'site', date: '', time: '', requirement_id: ['r'] }],
+  ['add-movement', 'movement', { title: 'Chosen movement', from_location: 'yard', to_location: 'site', date: '', time: '' }],
   ['review-allocation', 'suitability', { reason: 'Exact reason', evidence: 'Exact compatibility evidence' }]
 ]) {
   test(`${kind} editor retains source binding through refresh and job navigation`, async () => {
@@ -48,6 +48,7 @@ for (const [action, kind, values] of [
     await ui.core.load('a');
     await ui.click(action, action === 'transfer-receipt' ? 'receipt' : 'a');
     ui.input(kind, values);
+    if (kind === 'movement') ui.inputControl(kind, values, { name: 'requirement_id', value: 'r', checked: true });
     ui.records.a.source_version = 'source-2';
     await ui.core.load('a');
     await ui.click('select', 'b');
@@ -63,7 +64,7 @@ for (const [action, kind, values] of [
 }
 
 test('order editor retains selected requirements and still requires resolving stale rows', async () => {
-  const values = { supplier_name: 'Chosen supplier', delivery_address: 'Chosen destination', delivery_date: '', notes: 'Exact order notes', requirement_id: ['r'], 'quantity:r': '2', 'price:r': '3', existing_supply_reviewed: 'on' };
+  const values = { supplier_name: 'Chosen supplier', delivery_address: 'Chosen destination', delivery_date: '', notes: 'Exact order notes', 'quantity:r': '2', 'price:r': '3', existing_supply_reviewed: 'on' };
   const ui = await workspace();
   ui.records.a.requirements = [{ ...requirement, reviewed_source_version: 'source-1' }];
   ui.records.a.allocations = [{ id: 'a', requirement_id: 'r', quantity: 5 }];
@@ -72,13 +73,14 @@ test('order editor retains selected requirements and still requires resolving st
   await ui.core.load('a');
   await ui.click('prepare-order');
   ui.input('order', values);
+  ui.inputControl('order', values, { name: 'requirement_id', value: 'r', checked: true });
   ui.records.a.source_version = 'source-2';
   await ui.core.load('a');
   await ui.click('select', 'b');
   await ui.click('select', 'a');
   await ui.submit('order', values);
   assert.equal(ui.commands.length, 0);
-  assert.match(ui.host.innerHTML, /reconcile this editor/);
+  assert.match(ui.host.innerHTML, /reconcile before saving/);
   await ui.click('reconcile-editor', 'form');
   await ui.submit('order', values);
   assert.equal(ui.commands.length, 0);

@@ -73,7 +73,9 @@ test('stale order requirement stays selected through refresh and cannot be dropp
   });
   await ui.core.load('a');
   await ui.click('prepare-order');
-  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
+  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-a', checked: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-b', checked: true });
   ui.records.a.requirements[0].reviewed_source_version = 'source-2';
   ui.records.a.version++;
   await ui.app.refresh();
@@ -82,17 +84,110 @@ test('stale order requirement stays selected through refresh and cannot be dropp
   assert.match(ui.host.innerHTML, /stale or unavailable/);
   ui.input('order', { supplier_name: 'Keep my edits', notes: 'unrelated field' });
   await ui.click('reconcile-editor', 'form');
-  await ui.submit('order', { supplier_name: 'Keep my edits', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-b'] });
+  await ui.submit('order', { supplier_name: 'Keep my edits', delivery_address: 'Site', existing_supply_reviewed: true });
   assert.equal(ui.commands.length, 0);
   assert.match(ui.host.innerHTML, /Resolve stale or unavailable requirement selections/);
   ui.records.a.requirements[0].reviewed_source_version = 'source-1';
   await ui.core.load('a');
   await ui.click('reconcile-editor', 'form');
-  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
-  await ui.submit('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-a', checked: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-b', checked: true });
+  await ui.submit('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true });
   assert.equal(ui.commands.length, 1);
   assert.equal(ui.commands[0].command, 'order_prepare');
   assert.deepEqual(ui.commands[0].payload.requirement_ids, ['req-a', 'req-b']);
+});
+
+test('retained stale order requirement can be explicitly removed without losing edits', async () => {
+  const ui = await workspace();
+  Object.assign(ui.records.a, {
+    source_version: 'source-1',
+    requirements: [
+      { id: 'req-a', description: 'First panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' },
+      { id: 'req-b', description: 'Remaining panels', quantity: 6, unit: 'each', reviewed_source_version: 'source-1' }
+    ]
+  });
+  await ui.core.load('a');
+  await ui.click('prepare-order');
+  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-a', checked: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-b', checked: true });
+  ui.records.a.requirements[0].reviewed_source_version = 'source-2';
+  ui.records.a.version++;
+  await ui.app.refresh();
+  await ui.click('reconcile-editor', 'form');
+  assert.match(ui.host.innerHTML, /Remove from this draft/);
+  await ui.click('drop-requirement-selection', 'req-a');
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true }, { name: 'notes' });
+  assert.match(ui.host.innerHTML, /name="supplier_name" value="Exact supplier"/);
+  assert.match(ui.host.innerHTML, /Keep order note/);
+  assert.doesNotMatch(ui.host.innerHTML, /Remove from this draft/);
+  await ui.submit('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: 'on' });
+  assert.equal(ui.commands.length, 1);
+  assert.equal(ui.commands[0].command, 'order_prepare');
+  assert.deepEqual(ui.commands[0].payload.requirement_ids, ['req-b']);
+  assert.equal(ui.commands[0].payload.notes, 'Keep order note');
+});
+
+test('retained missing order requirement can be explicitly removed without losing the remaining selection', async () => {
+  const ui = await workspace();
+  Object.assign(ui.records.a, {
+    source_version: 'source-1',
+    requirements: [
+      { id: 'req-a', description: 'First panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' },
+      { id: 'req-b', description: 'Remaining panels', quantity: 6, unit: 'each', reviewed_source_version: 'source-1' }
+    ]
+  });
+  await ui.core.load('a');
+  await ui.click('prepare-order');
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-a', checked: true });
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note', existing_supply_reviewed: true }, { name: 'requirement_id', value: 'req-b', checked: true });
+  ui.records.a.requirements = ui.records.a.requirements.filter(item => item.id !== 'req-a');
+  ui.records.a.version++;
+  await ui.app.refresh();
+  await ui.click('reconcile-editor', 'form');
+  assert.match(ui.host.innerHTML, /Previous selection unavailable/);
+  await ui.click('drop-requirement-selection', 'req-a');
+  ui.inputControl('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note changed', existing_supply_reviewed: true }, { name: 'notes' });
+  ui.app.render();
+  assert.match(ui.host.innerHTML, /Keep order note changed/);
+  assert.doesNotMatch(ui.host.innerHTML, /Previous selection unavailable/);
+  await ui.submit('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', notes: 'Keep order note changed', existing_supply_reviewed: 'on' });
+  assert.equal(ui.commands.length, 1);
+  assert.equal(ui.commands[0].command, 'order_prepare');
+  assert.deepEqual(ui.commands[0].payload.requirement_ids, ['req-b']);
+  assert.equal(ui.commands[0].payload.notes, 'Keep order note changed');
+});
+
+test('retained unavailable movement requirement can be explicitly removed without losing edits', async () => {
+  const ui = await workspace();
+  Object.assign(ui.records.a, {
+    requirements: [
+      { id: 'req-a', description: 'First panels', quantity: 4, unit: 'each' },
+      { id: 'req-b', description: 'Remaining panels', quantity: 6, unit: 'each' }
+    ]
+  });
+  await ui.core.load('a');
+  await ui.click('add-movement');
+  ui.input('movement', { title: 'Move exact panels', from_location: 'Yard', to_location: 'Site', date: '', time: '' });
+  ui.inputControl('movement', { title: 'Move exact panels', from_location: 'Yard', to_location: 'Site', date: '', time: '' }, { name: 'requirement_id', value: 'req-a', checked: true });
+  ui.inputControl('movement', { title: 'Move exact panels', from_location: 'Yard', to_location: 'Site', date: '', time: '' }, { name: 'requirement_id', value: 'req-b', checked: true });
+  ui.records.a.requirements = ui.records.a.requirements.filter(item => item.id !== 'req-a');
+  ui.records.a.version++;
+  await ui.app.refresh();
+  await ui.click('reconcile-editor', 'form');
+  assert.match(ui.host.innerHTML, /This selected requirement is no longer in the current source set/);
+  await ui.click('drop-requirement-selection', 'req-a');
+  ui.inputControl('movement', { title: 'Move exact panels updated', from_location: 'Yard', to_location: 'Site', date: '', time: '' }, { name: 'title' });
+  ui.app.render();
+  assert.match(ui.host.innerHTML, /name="title" required value="Move exact panels updated"/);
+  assert.match(ui.host.innerHTML, /name="from_location" required value="Yard"/);
+  assert.doesNotMatch(ui.host.innerHTML, /This selected requirement is no longer in the current source set/);
+  await ui.submit('movement', { title: 'Move exact panels updated', from_location: 'Yard', to_location: 'Site', date: '', time: '' });
+  assert.equal(ui.commands.length, 1);
+  assert.equal(ui.commands[0].command, 'movement_upsert');
+  assert.deepEqual(ui.commands[0].payload.requirement_ids, ['req-b']);
+  assert.equal(ui.commands[0].payload.title, 'Move exact panels updated');
 });
 
 test('new custody forms require an explicit allocation or requirement choice', async () => {

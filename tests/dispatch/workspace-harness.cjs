@@ -88,9 +88,17 @@ async function workspace(options = {}) {
       return listeners.get('click')({ target, preventDefault() {} });
     },
     input(kind, values, editor) {
-      const form = { dataset: { form: kind }, values, reportValidity: () => true };
+      const form = forms.get(kind) || { dataset: { form: kind }, values: {}, reportValidity: () => true };
+      form.values = { ...form.values, ...values };
       forms.set(kind, form);
       const target = { dataset: editor ? { editor } : {}, value: editor === 'note' ? values.text : undefined, form, closest: () => form };
+      return listeners.get('input')({ target });
+    },
+    inputControl(kind, formValues, control) {
+      const form = forms.get(kind) || { dataset: { form: kind }, values: {}, reportValidity: () => true };
+      form.values = { ...form.values, ...formValues };
+      forms.set(kind, form);
+      const target = { dataset: {}, form, closest: () => form, ...control };
       return listeners.get('input')({ target });
     },
     submit(kind, values) {

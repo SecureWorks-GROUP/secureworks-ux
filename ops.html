@@ -5144,6 +5144,7 @@
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
     <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
+    <button onclick="showView('sales')" data-view="sales"><span class="nav-icon">&#128200;</span>Sales</button>
     <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#9638;</span>Dispatch</button>
     <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
     <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
@@ -6557,6 +6558,8 @@ var MS_CANCEL_REASONS_OPS = [
 var MS_CANCEL_REASON_LABELS_OPS = MS_CANCEL_REASONS_OPS.reduce(function(m, r) { m[r.code] = r.label; return m; }, {});
 
 async function opsAuthHeaders(extra) {
+  var assertIdentity = window.OpsSalesHost && OpsSalesHost.identityGuard();
+  if (assertIdentity) assertIdentity();
   var token = null;
   try {
     if (cloud && cloud.auth && cloud.auth.getAccessToken) token = await cloud.auth.getAccessToken();
@@ -6565,6 +6568,7 @@ async function opsAuthHeaders(extra) {
       token = sess && sess.data && sess.data.session && sess.data.session.access_token;
     }
   } catch (e) { token = null; }
+  if (assertIdentity) assertIdentity();
   if (!token) throw new Error('Sign in required');
   var headers = { 'Authorization': 'Bearer ' + token };
   if (extra) Object.keys(extra).forEach(function(k) { headers[k] = extra[k]; });
@@ -6573,6 +6577,9 @@ async function opsAuthHeaders(extra) {
 
 function dispatchTransportOptions(action, options) {
   options = options || {};
+  if (String(action).indexOf('sales_booking_') === 0 || action === 'sales_performance_read') {
+    return Object.assign({}, options, { assertIdentity: window.OpsSalesHost.identityGuard() });
+  }
   if (String(action).indexOf('dispatch_') !== 0 || options.assertIdentity) return options;
   var assertIdentity = null;
   if (window.DispatchOps && DispatchOps.identityGuard) assertIdentity = DispatchOps.identityGuard();
@@ -6612,15 +6619,17 @@ async function opsFetch(action, params, options) {
       });
     }
     return resp.json();
+  }).then(function(data) {
+    if (options.assertIdentity) options.assertIdentity();
+    return data;
   });
 }
 
 async function opsPost(action, body, options) {
   options = dispatchTransportOptions(action, options);
   if (options.assertIdentity) options.assertIdentity();
-  var dispatchGuarded = String(action).indexOf('dispatch_') === 0 && options.assertIdentity;
   var operatorEmail = _opsUserEmail || (cloud && cloud.user && cloud.user.email) || null;
-  if (dispatchGuarded) {
+  if (options.assertIdentity) {
     var currentUser = null;
     try { currentUser = cloud && cloud.auth && cloud.auth.getUser ? cloud.auth.getUser() : null; } catch (e) { currentUser = null; }
     operatorEmail = currentUser && currentUser.email || null;
@@ -6647,6 +6656,9 @@ async function opsPost(action, body, options) {
       });
     }
     return resp.json();
+  }).then(function(data) {
+    if (options.assertIdentity) options.assertIdentity();
+    return data;
   });
 }
 
@@ -7204,11 +7216,14 @@ function crewDisplayName(ev) {
 
 async function loadCrewList() {
   if (_crewList.length > 0) return;
+  var assertIdentity = window.DispatchOps && typeof window.DispatchOps.identityGuard === 'function' ? window.DispatchOps.identityGuard() : null;
   try {
+    if (assertIdentity) assertIdentity();
     var data = await opsFetch('list_users');
+    if (assertIdentity) assertIdentity();
     // Hide duplicate/invalid users by email prefix
     var CREW_HIDE = ['isaac']; // hide the non-real Isaac (isaac.b3lch3r is the real one)
-    _crewList = (data.users || []).filter(function(u) {
+    var crew = (data.users || []).filter(function(u) {
       var prefix = u.email ? u.email.split('@')[0].toLowerCase() : '';
       return !CREW_HIDE.some(function(h) { return prefix === h; });
     }).map(function(u) {
@@ -7219,7 +7234,10 @@ async function loadCrewList() {
       var displayName = cleanCrewName(rawName);
       return { id: u.id, name: displayName, email: u.email, role: u.role || '', division: div };
     }).sort(function(a, b) { return a.name.localeCompare(b.name); });
+    if (assertIdentity) assertIdentity();
+    _crewList = crew;
   } catch (e) {
+    if (e && e.code === 'dispatch_identity_changed') return;
     console.warn('Failed to load crew list:', e);
   }
 }
@@ -7353,7 +7371,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'inbox', 'dispatch'];
+  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'sales', 'materials', 'inbox', 'dispatch'];
   if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
   var saved = localStorage.getItem('sw_ops_tab');
   if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }
@@ -23148,11 +23166,17 @@ function syncAssignEndDate() {
 
 // Helper to open assignment modal pre-filled for a specific job
 function openAssignmentModalForJob(jobId) {
+  var assertIdentity = window.DispatchOps && typeof window.DispatchOps.identityGuard === 'function' ? window.DispatchOps.identityGuard() : null;
   openAssignmentModal();
   // Pre-select the job after modal opens
   setTimeout(function() {
-    var sel = document.getElementById('assignJobSelect');
-    if (sel) sel.value = jobId;
+    try {
+      if (assertIdentity) assertIdentity();
+      var sel = document.getElementById('assignJobSelect');
+      if (sel) sel.value = jobId;
+    } catch (e) {
+      if (!e || e.code !== 'dispatch_identity_changed') throw e;
+    }
   }, 300);
 }
 
@@ -24310,6 +24334,7 @@ function closeModal(id) {
 }
 
 async function openAssignmentModal(preSelectJobId, preDate, preCrew) {
+  var assertIdentity = window.DispatchOps && typeof window.DispatchOps.identityGuard === 'function' ? window.DispatchOps.identityGuard() : null;
   _editAssignmentId = null; // Reset — this is a new assignment
   document.getElementById('assignmentModal').classList.add('active');
   document.getElementById('assignModalTitle').textContent = 'Schedule Assignment';
@@ -24319,7 +24344,9 @@ async function openAssignmentModal(preSelectJobId, preDate, preCrew) {
   document.getElementById('assignJobSearch').value = '';
   document.getElementById('assignJobSelect').value = '';
   await loadPOJobList();
+  if (assertIdentity) assertIdentity();
   await loadCrewList();
+  if (assertIdentity) assertIdentity();
   // Render crew dropdown — preCrew can be a user ID or a name
   var preCrewId = preCrew || '';
   if (preCrewId && !_crewList.some(function(u) { return u.id === preCrewId; })) {
@@ -24345,6 +24372,7 @@ async function openAssignmentModal(preSelectJobId, preDate, preCrew) {
 var _editAssignmentId = null;
 
 async function openEditAssignmentModal(assignmentId) {
+  var assertIdentity = window.DispatchOps && typeof window.DispatchOps.identityGuard === 'function' ? window.DispatchOps.identityGuard() : null;
   var ev = _calEvents.find(function(e) { return e.assignment_id === assignmentId; });
   if (!ev) { alert('Assignment not found'); return; }
 
@@ -24369,7 +24397,9 @@ async function openEditAssignmentModal(assignmentId) {
   document.getElementById('assignNotes').value = ev.notes || '';
 
   await loadPOJobList();
+  if (assertIdentity) assertIdentity();
   await loadCrewList();
+  if (assertIdentity) assertIdentity();
 
   // Pre-select crew
   var crewName = cleanCrewName(ev.crew_name || ev.assigned_to) || '';
@@ -24405,11 +24435,17 @@ async function openPOModal(preSelectJobId) {
 
 async function loadPOJobList() {
   if (_poJobList.length > 0) return;
+  var assertIdentity = window.DispatchOps && typeof window.DispatchOps.identityGuard === 'function' ? window.DispatchOps.identityGuard() : null;
   try {
+    if (assertIdentity) assertIdentity();
     var data = await opsFetch('pipeline');
-    _poJobList = [];
-    Object.values(data.columns).forEach(function(arr) { _poJobList = _poJobList.concat(arr); });
+    if (assertIdentity) assertIdentity();
+    var jobs = [];
+    Object.values(data.columns).forEach(function(arr) { jobs = jobs.concat(arr); });
+    if (assertIdentity) assertIdentity();
+    _poJobList = jobs;
   } catch (e) {
+    if (e && e.code === 'dispatch_identity_changed') return;
     console.error('loadPOJobList error:', e);
   }
 }

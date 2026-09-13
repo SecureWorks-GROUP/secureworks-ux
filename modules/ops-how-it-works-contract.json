@@ -30,6 +30,7 @@
       "skill_path": "harness/ops/skills/secureworks-debt-live/SKILL.md",
       "skill_version": "clear-debt-workflow/2026-09-13",
       "ux_pin": "c89d6e46fac85994794feace96dd8941f7cca0b7",
+      "ux_contains": "317b8b7",
       "backend_pin": "e04145b5",
       "wiki_pin": "08afbb57",
       "business": [

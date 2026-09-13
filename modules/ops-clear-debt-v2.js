@@ -125,6 +125,10 @@ async function loadClearDebt() {
   cdRender();
 }
 
+async function cdRefreshPicture() {
+  return loadClearDebt();
+}
+
 function cdGroups() {
   var kinds = {}; CD_KINDS.forEach(function (k) { kinds[k.key] = { key: k.key, label: k.label, color: k.color, amount: 0, n: 0, subs: {} }; });
   CD.rows.forEach(function (r) {
@@ -158,7 +162,7 @@ function cdRender() {
   document.getElementById('clearDebtStats').innerHTML =
     '<div class="cd-crumbs">' + (CD.seg ? '<button onclick="cdGo(null)">Outstanding ' + cdMoney0(total) + '</button>' + CD_IC.chev + '<b>' + kinds[CD.seg].label + '</b>' : '') + '</div>' +
     '<div class="cd-head"><div><div class="cd-h1">Clear Debt</div><div class="cd-big cd-num">' + cdMoney0(total) + '<small>' + count + ' invoices · ' + overdueN + ' overdue for ' + cdMoney0(overdue) + '</small></div></div>' +
-    '<div class="cd-meta"><div>Picture refreshed<b>' + (CD.pictureAsOf ? cdWhen(CD.pictureAsOf) : 'never') + '</b></div><div>Picture incomplete<b>' + (CD.coverageAsOf ? incomplete + ' of ' + count : 'door unavailable') + '</b></div><div>Proposals waiting for Marnin<b id="cd-proposal-count">' + proposals + '</b></div></div></div>' +
+    '<div class="cd-meta"><div>Picture refreshed<b>' + (CD.pictureAsOf ? cdWhen(CD.pictureAsOf) : 'never') + '</b></div><div>Picture incomplete<b>' + (CD.coverageAsOf ? incomplete + ' of ' + count : 'door unavailable') + '</b></div><div>Proposals waiting for Marnin<b id="cd-proposal-count">' + proposals + '</b></div><div><button class="cd-btn" id="cd-refresh" onclick="cdRefreshPicture()">Refresh picture</button><div class="cd-quiet">Reads the stored picture. Does not send or change Xero.</div></div></div></div>' +
     '<div class="cd-bar" role="group" aria-label="Outstanding by kind">' + bar + '</div><div class="cd-legend">' + leg + '</div>' + (CD.seg ? '' : '<p class="cd-hint">Pick a piece of the bar to see who owes it, grouped by the type of debt.</p>');
   document.getElementById('clearDebtFilters').innerHTML = (CD.pictureWarnings || []).concat(CD.coverageWarnings || []).map(function (w) { return '<div class="cd-pend">Picture warning: ' + cdEsc(w) + '</div>'; }).join('');
   var cards = document.getElementById('clearDebtCards');
@@ -272,6 +276,9 @@ async function cdSaveProposal(xid, kind, button) {
   CD.savingProposal = true; if (button) button.disabled = true;
   try {
     var res = await opsPost(CD.ACTIONS.proposal, { xero_invoice_id: xid, kind: kind, text: text, to: to });
+    if (res && (res.status === 409 || res.code === 'conflict' || /changed/i.test(String(res.error || res.message || '')))) {
+      throw new Error('Invoice or proposal changed. Refresh before saving again.');
+    }
     if (!res || res.status !== 'pending') throw new Error('Pending proposal was not confirmed. Refresh before retrying.');
     var row = CD.rows.find(function (r) { return r.xero_invoice_id === xid; });
     if (row) Object.assign(row, { debt_proposal_kind: kind, debt_proposal_text: text, debt_proposal_to: to, debt_proposal_status: 'pending' });

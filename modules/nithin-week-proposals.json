@@ -1,0 +1,213 @@
+{
+  "week": "2026-09-14/2026-09-18",
+  "timezone": "Australia/Perth",
+  "scoper": {
+    "id": "nithin",
+    "scoper_user_id": "5862cf1d-0a3b-4836-8fd1-d69f95aa2f73",
+    "mailbox": "nithin@secureworkswa.com.au"
+  },
+  "calendar_retrieved_at": "2026-09-13T07:57:01.524Z",
+  "calendar_coverage": {
+    "operational_leave": "not_read",
+    "non_primary_calendars": "not_read",
+    "calendar_view_complete": true
+  },
+  "desk_rules": {
+    "monday_from": 12,
+    "no_wednesday": true,
+    "last_start": 15.5,
+    "visit_minutes_assumed": 60
+  },
+  "travel": {
+    "state": "unavailable",
+    "source": "drive_time_cache missing on booking_test"
+  },
+  "leave": {
+    "state": "incomplete",
+    "nithin_rows_in_crew_availability": 0,
+    "roster_complete": false
+  },
+  "send": "held",
+  "kind": "tentative",
+  "source_cutoff_conversations": "2026-09-10 recent-refresh-1510 plus 13 Sep pager recapture of 7rl6gaZIxXvOdj24Qcc2",
+  "eligible_accounted": {
+    "booking_subset_register": 25,
+    "period_arrivals_7sep_collect": 17,
+    "isolated_nithin_opportunities": 495,
+    "note": "495 opportunities is not 495 jobs. Week pack uses the 25-register booking subset plus 17 period arrivals. Remaining 495 minus those are omitted from placement with reason unreviewed_this_week_pack."
+  },
+  "existing_commitments": [
+    {
+      "date": "2026-09-14",
+      "start": "15:30",
+      "end": "16:30",
+      "suburb": "South Guildford",
+      "subject": "Scope: Arlette",
+      "contact_id": "jCZ0t3Va1n7iJLNkynCt",
+      "opportunity_id": "gPM7cpTwkiMyR0OsLBae",
+      "kind": "existing_calendar"
+    },
+    {
+      "date": "2026-09-15",
+      "start": "08:30",
+      "end": "09:30",
+      "suburb": "Marangaroo",
+      "subject": "Scope: Jason",
+      "contact_id": "G3wHUgxtmdxiDmTef0iQ",
+      "kind": "existing_calendar"
+    },
+    {
+      "date": "2026-09-15",
+      "start": "11:30",
+      "end": "12:30",
+      "suburb": "City Beach",
+      "subject": "Scope: Eva",
+      "contact_id": "fR9FeQctTfilj8CTO7Yq",
+      "kind": "existing_calendar"
+    },
+    {
+      "date": "2026-09-17",
+      "start": "15:30",
+      "end": "16:30",
+      "suburb": "Queens Park",
+      "subject": "Scope: Aaron",
+      "contact_id": "rM0LqSefLch9eR0m0PKX",
+      "kind": "existing_calendar"
+    },
+    {
+      "date": "2026-09-18",
+      "start": "13:30",
+      "end": "14:30",
+      "suburb": "Bullsbrook",
+      "subject": "Scope: Jennifer",
+      "contact_id": "q5M9CVg5B1087p6Zcea1",
+      "kind": "existing_calendar"
+    }
+  ],
+  "tentative_placements": [
+    {
+      "opportunity_id": "1kwKzLLTU9RyZA4aDOoj",
+      "contact_id": "KB84u2d5GcT4vQd86Rg5",
+      "obligation_id": "S-17",
+      "owner": "nithin",
+      "lane": "patio",
+      "suburb": "Midland",
+      "start_iso": "2026-09-14T13:00:00+08:00",
+      "end_iso": "2026-09-14T14:00:00+08:00",
+      "duration_minutes": 60,
+      "geo_reason": "East cluster before existing 15:30 South Guildford",
+      "customer_window": "unknown",
+      "draft": "Hi, I can visit 2026-09-14 at 1:00pm in Midland on the way to South Guildford. Does that suit? Nithin, SecureWorks Patios",
+      "holds": [
+        "leave_roster_incomplete",
+        "travel_unavailable",
+        "customer_availability_unknown"
+      ],
+      "kind": "tentative"
+    },
+    {
+      "opportunity_id": "zQWua5fn1mwr0xe7t8Aa",
+      "contact_id": "cLKznuFzl4I1cBLb2Bfm",
+      "obligation_id": "S-13",
+      "owner": "nithin",
+      "lane": "patio",
+      "suburb": "Stirling",
+      "start_iso": "2026-09-15T09:45:00+08:00",
+      "end_iso": "2026-09-15T10:45:00+08:00",
+      "duration_minutes": 60,
+      "geo_reason": "Between Marangaroo 08:30 and City Beach 11:30; travel unverified",
+      "customer_window": "asked 9-10 Sep previously; 14-18 Sep not confirmed",
+      "draft": "Hi, I can visit 2026-09-15 at 9:45am in Stirling between other north-west stops. Does that suit? Nithin, SecureWorks Patios",
+      "holds": [
+        "leave_roster_incomplete",
+        "travel_unavailable",
+        "prior_window_elapsed"
+      ],
+      "kind": "tentative"
+    },
+    {
+      "opportunity_id": "oQKxRwnAjJX8FguiDMYj",
+      "contact_id": "0VrtPZb21xAkuxSTlKuF",
+      "obligation_id": "B-0VrtPZb21xAkuxSTlKuF-scope",
+      "owner": "nithin",
+      "lane": "patio",
+      "suburb": "Byford",
+      "start_iso": "2026-09-17T10:00:00+08:00",
+      "end_iso": "2026-09-17T11:00:00+08:00",
+      "duration_minutes": 60,
+      "geo_reason": "South cluster before existing 15:30 Queens Park",
+      "customer_window": "requested 7-11 Sep; 14-18 unknown",
+      "draft": "Hi, I can visit 2026-09-17 at 10:00am in Byford before a Queens Park stop. Does that still work this week? Nithin, SecureWorks Patios",
+      "holds": [
+        "leave_roster_incomplete",
+        "travel_unavailable",
+        "prior_window_elapsed"
+      ],
+      "kind": "tentative"
+    },
+    {
+      "opportunity_id": "RgcflXTA2JAEE2FU3Heq",
+      "contact_id": "9WW7WNfh6sl91Syqc2t3",
+      "obligation_id": "S-14",
+      "owner": "nithin",
+      "lane": "patio",
+      "suburb": "Fremantle",
+      "start_iso": "2026-09-17T13:00:00+08:00",
+      "end_iso": "2026-09-17T14:00:00+08:00",
+      "duration_minutes": 60,
+      "geo_reason": "Afternoon preference; then south-east to Queens Park 15:30; travel unverified",
+      "customer_window": "afternoon preference; street missing",
+      "draft": "Hi, I can visit 2026-09-17 at 1:00pm in Fremantle. Please confirm the street. Does that suit? Nithin, SecureWorks Patios",
+      "holds": [
+        "leave_roster_incomplete",
+        "travel_unavailable",
+        "street_missing"
+      ],
+      "kind": "tentative"
+    },
+    {
+      "opportunity_id": "QJOdjHb4Jyh9VCwz7UeF",
+      "contact_id": "CGKe1K4CGdiyas0O4CF2",
+      "owner": "nithin",
+      "lane": "patio",
+      "suburb": "Merriwa",
+      "start_iso": "2026-09-18T09:30:00+08:00",
+      "end_iso": "2026-09-18T10:30:00+08:00",
+      "duration_minutes": 60,
+      "geo_reason": "North cluster before existing 13:30 Bullsbrook; last inbound 11 Sep",
+      "customer_window": "morning / day word on 11 Sep inbound",
+      "draft": "Hi, I can visit 2026-09-18 at 9:30am in Merriwa before a Bullsbrook stop. Does that suit? Nithin, SecureWorks Patios",
+      "holds": [
+        "leave_roster_incomplete",
+        "travel_unavailable"
+      ],
+      "kind": "tentative",
+      "cited_message_id": "UI2ZaoyoLuvLGu52Dr5y"
+    }
+  ],
+  "needs_scoper": [
+    {
+      "item_id": "69f6b4c4-ca2b-48cd-a1ed-99bc01ba03e5",
+      "opportunity_id": "zQWua5fn1mwr0xe7t8Aa",
+      "conversation_id": "AaJKFdHnqK0orGcCRtbu",
+      "suburb": "Stirling",
+      "question": "can battens and shadecloth be priced separately without a visit?",
+      "status": "open",
+      "notify_state": "duplicate",
+      "client_send_approved": false,
+      "from": "+61489267771",
+      "cio_pin": "fe2b7f5d"
+    }
+  ],
+  "capacity": {
+    "full": false,
+    "holes": [
+      "Mon 12:00",
+      "Tue after 12:30 west",
+      "Thu morning extra",
+      "Fri 11:00 north"
+    ],
+    "leave": "not_read_not_free",
+    "travel": "unavailable"
+  }
+}

@@ -46,6 +46,49 @@
       state.records.set(id, record);
       return true;
     }
+    function workshopUnavailable(error) {
+      return error && (error.status === 404 || /unknown|Unexpected fixture|Unknown Dispatch/i.test(String(error.message || error)));
+    }
+    function normalizeWorkshop(raw, id) {
+      if (!raw) return raw;
+      if (raw.job && Number.isInteger(raw.version) && Array.isArray(raw.groups)) return raw;
+      const grounding = raw.grounding || {};
+      const job = { ...(raw.job || {}), id: (raw.job && (raw.job.id || raw.job.job_id)) || raw.job_id || id };
+      if (!job.eligibility) job.eligibility = { state: job.status === 'accepted' || job.accepted_at ? 'accepted' : 'unresolved' };
+      const version = Number.isInteger(grounding.plan_version) ? grounding.plan_version
+        : (Number.isInteger(raw.version) ? raw.version : 0);
+      const comms = raw.communications && Array.isArray(raw.communications.messages)
+        ? raw.communications.messages : (raw.communications || []);
+      return {
+        job,
+        version,
+        source_version: raw.source_revision || raw.source_version || null,
+        groups: grounding.groups || raw.groups || [],
+        requirements: grounding.requirements || raw.requirements || [],
+        notes: grounding.notes || raw.notes || [],
+        drafts: grounding.order_drafts || raw.drafts || [],
+        documents: raw.documents || [],
+        communications: comms,
+        purchase_orders: raw.purchase_orders || [],
+        movements: raw.movements || [],
+        media: raw.media || [],
+        allocations: raw.allocations || [],
+        receipts: raw.receipts || [],
+        ai_assessor_required: raw.ai_assessor_required === true,
+        source_reload_is_not_assessment: raw.source_reload_is_not_assessment !== false,
+        workshop: true
+      };
+    }
+    async function loadWorkshop(id, poId) {
+      try {
+        const params = { job_id: id };
+        if (poId) params.po_id = poId;
+        return normalizeWorkshop(await apiGet('dispatch_job_workshop', params), id);
+      } catch (error) {
+        if (!workshopUnavailable(error)) throw error;
+        return apiGet('dispatch_job', { job_id: id });
+      }
+    }
     function acceptAuthoritative(record, id) {
       if (!accept(record, id)) {
         setEvidence(id, { loading: false, error: 'Stale Dispatch response; refresh this job.', verified: false });
@@ -92,7 +135,7 @@
       promise = (async () => {
         let current = false;
         try {
-          const record = await apiGet('dispatch_job', { job_id: id });
+          const record = await loadWorkshop(id);
           ensureActive();
           current = generation === recordGeneration.get(id);
           if (current) {
@@ -146,7 +189,7 @@
         ensureActive();
         // A committed command is followed by a fresh server read. A failed read keeps the
         // exact request identity for safe retry; it never repeats a new command blindly.
-        const record = result?.job ? result : await apiGet('dispatch_job', { job_id: id });
+        const record = result?.job && Number.isInteger(result.version) ? result : await loadWorkshop(id);
         ensureActive();
         acceptAuthoritative(record, id); nextRecordGeneration(id); state.pending.delete(id); emit(); return record;
       } catch (error) {

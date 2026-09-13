@@ -49,6 +49,35 @@ test('late prior-operator save cannot restore editors or start another request',
   assert.equal(ui.commands.length, 1);
 });
 
+test('identity reset clears incumbent calendar caches and unscheduled sidebar hosts', async () => {
+  const sidebar = { innerHTML: 'Private A · Secret suburb · $999' };
+  const ui = await workspace({ hostIdentity: operator });
+  ui.document.getElementById = id => id === 'calUnschedSidebar' ? sidebar : id === 'dispatchRoot' ? ui.host : null;
+  Object.assign(ui.context, {
+    _unschedJobs: [{ client_name: 'Private A', site_suburb: 'Secret suburb', quoted_value: 999 }],
+    _calEvents: [{ job_id: 'old', client_name: 'Private A' }],
+    _calDeliveries: [{ id: 'old-po' }],
+    _calReadiness: { old: true },
+    _calOrgEvents: [{ id: 'old-org' }],
+    _calLeaveByDate: { '2026-09-14': ['Private A'] },
+    _calAvailability: { old: true },
+    _crewList: ['Private crew'],
+    _calTruncated: true
+  });
+  ui.identity(null);
+  assert.equal(JSON.stringify(ui.context._unschedJobs), '[]');
+  assert.equal(JSON.stringify(ui.context._calEvents), '[]');
+  assert.equal(JSON.stringify(ui.context._calDeliveries), '[]');
+  assert.equal(JSON.stringify(ui.context._calReadiness), '{}');
+  assert.equal(JSON.stringify(ui.context._calOrgEvents), '[]');
+  assert.equal(JSON.stringify(ui.context._calLeaveByDate), '{}');
+  assert.equal(JSON.stringify(ui.context._calAvailability), '{}');
+  assert.equal(JSON.stringify(ui.context._crewList), '[]');
+  assert.equal(ui.context._calTruncated, false);
+  assert.equal(sidebar.innerHTML, '');
+  assert.doesNotMatch(ui.host.innerHTML, /Private A|Secret suburb/);
+});
+
 test('same-identity refresh retains editor but signout fences even a same-identity return', async () => {
   const ui = await workspace({ hostIdentity: operator });
   await ui.click('new-draft'); ui.input('draft', mail, 'draft');

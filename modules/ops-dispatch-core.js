@@ -271,15 +271,15 @@
         }
       };
     }
-    async function tasks({ status = null, more = false } = {}) {
+    async function tasks({ more = false } = {}) {
       ensureActive();
-      const reset = !more || status !== state.tasks.status;
+      const reset = !more;
       const firstOffset = reset ? 0 : Math.min(...activeTaskOffsets());
       const offset = Number.isFinite(firstOffset) ? firstOffset : 0;
-      const key = JSON.stringify({ status });
+      const key = 'unfiltered';
       if (taskLoads.has(key)) return taskLoads.get(key);
       const generation = ++tasksGeneration;
-      state.tasks = { ...state.tasks, status, loading: true, error: null,
+      state.tasks = { ...state.tasks, status: null, loading: true, error: null,
         read: { items: readState({ ...state.tasks.read.items, loading: true, error: null }), sourceFailures: readState({ ...state.tasks.read.sourceFailures, loading: true, error: null }) } };
       emit();
       const promise = (async () => {
@@ -291,7 +291,7 @@
           do {
             if (seenOffsets.has(pageOffset)) throw new Error('Repeated Dispatch task cursor; coverage is incomplete.');
             seenOffsets.add(pageOffset);
-            result = await apiGet('dispatch_tasks', { ...(status ? { status } : {}), limit: 25, offset: pageOffset });
+            result = await apiGet('dispatch_tasks', { limit: 25, offset: pageOffset });
             ensureActive();
             current = generation === tasksGeneration;
             if (!current) return null;
@@ -299,7 +299,7 @@
             const nextOffsets = [];
             if (result.has_more) nextOffsets.push(result.next_offset);
             if (result.source_failures_has_more) nextOffsets.push(result.source_failures_next_offset);
-            applyTaskPage(result, status, pageOffset, reset && pageOffset === 0, more && nextOffsets.length > 0);
+            applyTaskPage(result, null, pageOffset, reset && pageOffset === 0, more && nextOffsets.length > 0);
             emit();
             pageOffset = nextOffsets.length ? Math.min(...nextOffsets) : 0;
           } while (more && pageOffset > 0);

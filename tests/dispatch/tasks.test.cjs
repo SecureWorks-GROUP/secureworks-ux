@@ -28,8 +28,8 @@ test('task read exposes separately paged task and source-failure state', async (
       live_actions_enabled: false
     };
   });
-  await core.tasks({ status: 'failed' });
-  assert.deepEqual(calls, [{ action: 'dispatch_tasks', params: { status: 'failed', limit: 25, offset: 0 } }]);
+  await core.tasks();
+  assert.deepEqual(calls, [{ action: 'dispatch_tasks', params: { limit: 25, offset: 0 } }]);
   assert.deepEqual(core.state.tasks.items.map(row => row.job_id), ['job-a']);
   assert.deepEqual(core.state.tasks.sourceFailures.map(row => row.job_id), ['job-b']);
   assert.equal(core.state.tasks.hasMore, true);
@@ -48,7 +48,7 @@ test('malformed task pages preserve previous rows and refuse complete coverage',
   });
   await core.tasks();
   malformed = true;
-  await assert.rejects(core.tasks({ status: 'failed' }), /incomplete/);
+  await assert.rejects(core.tasks(), /incomplete/);
   assert.deepEqual(core.state.tasks.items.map(row => row.job_id), ['job-a']);
   assert.equal(core.state.tasks.read.items.complete, false);
   assert.equal(core.state.tasks.read.sourceFailures.complete, false);
@@ -128,23 +128,25 @@ test('task load more stays loading and coalesces duplicate clicks until terminal
   assert.equal(core.state.tasks.loading, false);
 });
 
-test('matching task reads coalesce while newer reads protect against stale task pages', async () => {
+test('matching unfiltered task reads coalesce and ignore unused status options', async () => {
   const slow = deferred();
   let reads = 0;
   const core = harness(async (action, params) => {
     reads++;
-    if (params.status === 'failed') return slow.promise;
+    assert.equal(params.status, undefined);
+    if (reads === 1) return slow.promise;
     return { items: [{ job_id: 'job-new', source_version: 'src-new', plan_version: 2 }], has_more: false, source_failures: [], source_failures_has_more: false };
   });
   const first = core.tasks({ status: 'failed' });
-  const second = core.tasks({ status: 'failed' });
+  const second = core.tasks({ status: 'pending' });
   assert.equal(reads, 1);
-  await core.tasks({ status: 'pending' });
   slow.resolve({ items: [{ job_id: 'job-old', source_version: 'src-old', plan_version: 1 }], has_more: false, source_failures: [], source_failures_has_more: false });
-  assert.equal(await first, null);
-  assert.equal(await second, null);
+  assert.equal(await first, await second);
+  assert.deepEqual(core.state.tasks.items.map(row => row.job_id), ['job-old']);
+  assert.equal(core.state.tasks.status, null);
+  await core.tasks();
+  assert.equal(reads, 2);
   assert.deepEqual(core.state.tasks.items.map(row => row.job_id), ['job-new']);
-  assert.equal(core.state.tasks.status, 'pending');
 });
 
 test('failed current task read preserves rows and marks both channels incomplete', async () => {

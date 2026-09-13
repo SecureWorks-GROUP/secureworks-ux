@@ -199,7 +199,7 @@
       const transferReceipt = form.kind === 'transfer' ? array(record.receipts).find(receipt => receipt.id === values.id) : null;
       const lots = supplyLots(record);
       if (form.kind === 'requirement') return `<form class="dp-form" data-form="requirement"><h3>${form.noteId ? 'Review note as requirement' : 'Material requirement'}</h3><label>Description<input name="description" value="${esc(values.description)}" required></label><div class="dp-form-row"><label>Quantity (unknown stays blank)<input type="number" name="quantity" min="0" step="any" value="${esc(values.quantity)}"></label><label>Unit<input name="unit" value="${esc(values.unit)}"></label></div><label>Specification<input name="specification" value="${esc(values.specification)}"></label><div class="dp-form-row"><label>Phase<input name="phase" value="${esc(values.phase || 'installation')}"></label><label>Destination<input name="destination" value="${esc(values.destination || 'site')}"></label><label>Needed by<input type="date" name="needed_by" value="${esc(values.needed_by)}"></label><label>Owner<input name="owner" value="${esc(values.owner || 'Shaun')}"></label></div><label>Order group<select name="group_id">${unavailableOption(array(record.groups), values.group_id, 'group')}<option value="">Ungrouped</option>${array(record.groups).map(group => `<option value="${esc(group.id)}" ${values.group_id === group.id ? 'selected' : ''}>${esc(group.name)}</option>`).join('')}</select></label>${array(record.allocations).some(a => a.requirement_id === values.id) ? `<label>Reason for any physical scope change<textarea name="reconciliation_reason">${esc(values.reconciliation_reason)}</textarea></label><p class="dp-small">Existing allocations and receipts remain in custody. A physical change needs explicit reconciliation and any applicable scope approval.</p>` : ''}<p class="dp-authority">Manual candidate. Scope/design changes require applicable approval; material review is separate from purchase approval.</p><div class="dp-tools"><button type="submit" class="dp-primary">Save candidate</button>${button('cancel-form', 'Cancel')}</div></form>`;
-      if (form.kind === 'order') return `<form class="dp-form" data-form="order"><h3>Prepare purchase order draft</h3><p class="dp-small">Creates a recoverable purchase-order draft. It does not approve a purchase or send to the supplier.</p><label>Supplier name<input name="supplier_name" value="${esc(values.supplier_name)}" required></label><label>Delivery destination<input name="delivery_address" value="${esc(values.delivery_address)}" required></label><label>Requested delivery date<input name="delivery_date" type="date" value="${esc(values.delivery_date)}"></label><p class="dp-small dp-muted" style="margin-top:10px">Choose reviewed requirements. Unknown prices remain incomplete.</p>${array(record.requirements).map(r => `<label><span><input type="checkbox" name="requirement_id" value="${esc(r.id)}" ${array(values.requirement_ids).includes(r.id) ? 'checked' : ''} ${!evidenceCurrent(record) || r.reviewed_source_version !== record.source_version ? 'disabled' : ''}>${esc(r.description)} · ${esc(r.quantity ?? '?')} ${esc(r.unit)} · ${evidenceCurrent(record) && r.reviewed_source_version === record.source_version ? 'Reviewed' : 'Review first'}</span></label><div class="dp-form-row"><label>Quantity for this order (blank = uncovered)<input type="number" min="0.000001" step="any" name="quantity:${esc(r.id)}" value="${esc(values['quantity:' + r.id])}"></label><label>Unit price (unknown stays blank)<input type="number" min="0" step="any" name="price:${esc(r.id)}" value="${esc(values['price:' + r.id])}"></label></div>`).join('')}<label>Working order notes<textarea name="notes">${esc(values.notes)}</textarea></label><label><span><input type="checkbox" name="existing_supply_reviewed" ${values.existing_supply_reviewed ? 'checked' : ''} required>I checked linked orders and existing supply for duplication.</span></label><div class="dp-tools"><button type="submit" class="dp-primary">Save purchase order draft</button>${button('cancel-form', 'Cancel')}</div></form>`;
+      if (form.kind === 'order') return `<form class="dp-form" data-form="order"><h3>Prepare purchase order draft</h3><p class="dp-small">Creates a recoverable purchase-order draft. It does not approve a purchase or send to the supplier.</p><label>Supplier name<input name="supplier_name" value="${esc(values.supplier_name)}" required></label><label>Delivery destination<input name="delivery_address" value="${esc(values.delivery_address)}" required></label><label>Requested delivery date<input name="delivery_date" type="date" value="${esc(values.delivery_date)}"></label><p class="dp-small dp-muted" style="margin-top:10px">Choose reviewed requirements. Unknown prices remain incomplete.</p>${array(values.requirement_ids).some(id => { const requirement = array(record.requirements).find(item => item.id === id); return !requirement || requirement.reviewed_source_version !== record.source_version || !evidenceCurrent(record); }) ? '<p class="dp-conflict">A selected requirement is stale or unavailable. Uncheck or re-review it before preparing this order.</p>' : ''}${array(values.requirement_ids).filter(id => !array(record.requirements).some(item => item.id === id)).map(id => `<label><span><input type="checkbox" name="requirement_id" value="${esc(id)}" checked disabled>Previous selection unavailable</span></label>`).join('')}${array(record.requirements).map(r => `<label><span><input type="checkbox" name="requirement_id" value="${esc(r.id)}" ${array(values.requirement_ids).includes(r.id) ? 'checked' : ''} ${!evidenceCurrent(record) || r.reviewed_source_version !== record.source_version ? 'disabled' : ''}>${esc(r.description)} · ${esc(r.quantity ?? '?')} ${esc(r.unit)} · ${evidenceCurrent(record) && r.reviewed_source_version === record.source_version ? 'Reviewed' : 'Review first'}</span></label><div class="dp-form-row"><label>Quantity for this order (blank = uncovered)<input type="number" min="0.000001" step="any" name="quantity:${esc(r.id)}" value="${esc(values['quantity:' + r.id])}"></label><label>Unit price (unknown stays blank)<input type="number" min="0" step="any" name="price:${esc(r.id)}" value="${esc(values['price:' + r.id])}"></label></div>`).join('')}<label>Working order notes<textarea name="notes">${esc(values.notes)}</textarea></label><label><span><input type="checkbox" name="existing_supply_reviewed" ${values.existing_supply_reviewed ? 'checked' : ''} required>I checked linked orders and existing supply for duplication.</span></label><div class="dp-tools"><button type="submit" class="dp-primary">Save purchase order draft</button>${button('cancel-form', 'Cancel')}</div></form>`;
       if (form.kind === 'stock') return `<form class="dp-form" data-form="stock"><h3>Record verified physical stock</h3><label>Description<input name="description" value="${esc(values.description)}" required></label><div class="dp-form-row"><label>Counted quantity<input name="quantity" type="number" min="0.000001" step="any" value="${esc(values.quantity)}" required></label><label>Physical unit<input name="unit" value="${esc(values.unit)}" required></label></div><label>Location<input name="location" value="${esc(values.location)}" required></label><label>Count / ownership evidence<textarea name="evidence" required>${esc(values.evidence)}</textarea></label><p class="dp-authority">An audited physical count. Existing supplier totals and invoices are not stock counts.</p><div class="dp-tools"><button type="submit">Save verified stock record</button>${button('cancel-form', 'Cancel')}</div></form>`;
       if (form.kind === 'suitability') return `<form class="dp-form" data-form="suitability"><h3>Review allocation compatibility</h3><p class="dp-small">${esc(array(record.requirements).find(requirement => requirement.id === array(record.allocations).find(allocation => allocation.id === values.id)?.requirement_id)?.description || 'Requirement not identified')}</p><label>Reason for this compatibility review<textarea name="reason" required>${esc(values.reason)}</textarea></label><label>Evidence that this supply matches the physical requirement<textarea name="evidence" required>${esc(values.evidence)}</textarea></label><p class="dp-authority">Receipt and quantity do not establish compatibility. Record the evidence for the current physical specification.</p><div class="dp-tools"><button type="submit">Record compatibility evidence</button>${button('cancel-form', 'Cancel')}</div></form>`;
       if (form.kind === 'allocation') return `<form class="dp-form" data-form="allocation"><h3>Allocate existing supply</h3><p class="dp-small">Cross-job ordered supply: ${core.state.supply.coverage.po ? 'captured' : 'partial / loading'} · Recorded stock: ${core.state.supply.coverage.stock ? 'captured' : 'partial / loading'}</p>${Object.values(core.state.supply.errors).filter(Boolean).map(error => `<p class="dp-conflict">${esc(error)}</p>`).join('')}<label>Requirement<select name="requirement_id" required>${unavailableOption(array(record.requirements), values.requirement_id, 'requirement')}<option value="">Choose a requirement</option>${array(record.requirements).map(r => `<option value="${esc(r.id)}" ${values.requirement_id === r.id ? 'selected' : ''}>${esc(r.description)} · ${esc(r.quantity ?? 'Unknown')} ${esc(r.unit)}</option>`).join('')}</select></label><label>Recorded supply lot<select name="supply_id" required>${unavailableOption(lots, values.supply_id, 'supply lot')}<option value="">Choose a linked supply lot</option>${lots.map(lot => `<option value="${esc(lot.id)}" ${values.supply_id === lot.id ? 'selected' : ''} ${!lot.unit ? 'disabled' : ''}>${esc(supplyLabel(lot))}</option>`).join('')}</select></label><label>Quantity<input name="quantity" type="number" min="0.000001" step="any" value="${esc(values.quantity)}" required></label><p class="dp-authority">Server checks the remaining lot across all jobs. Allocation does not prove receipt.</p><div class="dp-tools"><button type="submit">Save allocation</button>${button('cancel-form', 'Cancel')}</div></form>`;
@@ -305,7 +305,22 @@
         const draft = draftValue(record), data = new FormData(target.form);
         currentUI().approval = { key: `${draft.id}:${draft.content_hash}:${record.source_version}`, communications_approved: data.has('communications_approved'), purchase_approved: data.has('purchase_approved') };
       }
-      if (target.closest('[data-form]')?.dataset.form === form?.kind && form && !target.dataset.editor) { const data = new FormData(target.closest('form')); Object.assign(form.values, Object.fromEntries(data)); if (form.kind === 'order' || form.kind === 'movement') form.values.requirement_ids = data.getAll('requirement_id'); if (form.kind === 'order') form.values.existing_supply_reviewed = data.has('existing_supply_reviewed'); }
+      if (target.closest('[data-form]')?.dataset.form === form?.kind && form && !target.dataset.editor) {
+        const data = new FormData(target.closest('form'));
+        const retainedIds = array(form.values.requirement_ids);
+        Object.assign(form.values, Object.fromEntries(data));
+        if (form.kind === 'order' || form.kind === 'movement') {
+          if (target.name === 'requirement_id' && !target.disabled) {
+            const selected = new Set(retainedIds);
+            if (target.checked) selected.add(target.value); else selected.delete(target.value);
+            form.values.requirement_ids = [...selected];
+          } else {
+            const named = array(form.values.requirement_id);
+            form.values.requirement_ids = retainedIds.length ? retainedIds : (named.length ? named : array(form.values.requirement_ids));
+          }
+        }
+        if (form.kind === 'order') form.values.existing_supply_reviewed = data.has('existing_supply_reviewed');
+      }
     });
     listen('change', async event => {
       try {
@@ -351,7 +366,21 @@
           const requirement = { id: form.values.id || core.uuid(), description: data.description.trim(), quantity: data.quantity === '' ? null : Number(data.quantity), unit: data.unit || null, specification: data.specification || null, group_id: data.group_id || null, phase: data.phase, destination: data.destination, needed_by: data.needed_by || null, owner: data.owner, source_ref: form.values.source_ref || null };
           const previous = record.requirements.find(item => item.id === requirement.id); const reconcile = previous && record.allocations.some(a => a.requirement_id === requirement.id) && ['quantity', 'unit', 'specification', 'description'].some(key => previous[key] !== requirement[key]); if (reconcile && !data.reconciliation_reason?.trim()) throw new Error('Explain the supplied-scope change and establish applicable approval before reconciliation.'); await saveForm(form.noteId ? 'note_promote' : reconcile ? 'requirement_reconcile' : 'requirement_upsert', form.noteId ? { id: form.noteId, requirement } : { ...requirement, ...(reconcile ? { reason: data.reconciliation_reason.trim() } : {}) }, id);
         }
-        if (type === 'order') { const ids = new FormData(event.target).getAll('requirement_id'); if (!ids.length) throw new Error('Select at least one reviewed requirement.'); await saveForm('order_prepare', { id: form.values.id || core.uuid(), supplier_name: data.supplier_name, delivery_address: data.delivery_address, delivery_date: data.delivery_date || null, notes: data.notes, requirement_ids: ids, quantities: Object.fromEntries(ids.filter(key => data['quantity:' + key] !== '').map(key => [key, Number(data['quantity:' + key])])), unit_prices: Object.fromEntries(ids.map(key => [key, data['price:' + key] === '' ? null : Number(data['price:' + key])])), existing_supply_reviewed: data.existing_supply_reviewed === 'on' }, id); }
+        if (type === 'order') {
+          const ids = array(submittedForm.values.requirement_ids).length ? array(submittedForm.values.requirement_ids) : array(submittedForm.values.requirement_id);
+          const payload = { id: form.values.id || core.uuid(), supplier_name: data.supplier_name, delivery_address: data.delivery_address, delivery_date: data.delivery_date || null, notes: data.notes, requirement_ids: ids, quantities: Object.fromEntries(ids.filter(key => data['quantity:' + key] !== '').map(key => [key, Number(data['quantity:' + key])])), unit_prices: Object.fromEntries(ids.map(key => [key, data['price:' + key] === '' ? null : Number(data['price:' + key])])), existing_supply_reviewed: data.existing_supply_reviewed === 'on' };
+          if (submittedForm?.custody && !matches(submittedForm.custody, record)) {
+            await saveForm('order_prepare', payload, id);
+          } else {
+            if (!ids.length) throw new Error('Select at least one reviewed requirement.');
+            const unresolved = ids.filter(requirementId => {
+              const requirement = array(record.requirements).find(item => item.id === requirementId);
+              return !requirement || requirement.reviewed_source_version !== record.source_version || !evidenceCurrent(record);
+            });
+            if (unresolved.length) throw new Error('Resolve stale or unavailable requirement selections before preparing this order.');
+            await saveForm('order_prepare', payload, id);
+          }
+        }
         if (type === 'stock') { await saveForm('stock_record', { id: form.values.id || core.uuid(), ...data, quantity: Number(data.quantity) }, id); await core.supply('stock'); }
         if (type === 'suitability') {
           if (!data.reason?.trim() || !data.evidence?.trim()) throw new Error('A reason and compatibility evidence are required.');
@@ -365,7 +394,17 @@
           if (!receipt || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(usable) || quantity > usable) throw new Error('Enter a positive transfer quantity no greater than the recorded usable amount.');
           await saveForm('receipt_transfer', { id: submittedForm.values.id, new_id: submittedForm.values.new_id, quantity, location: data.location, evidence: data.evidence }, id);
         }
-        if (type === 'movement') await saveForm('movement_upsert', { id: form.values.id || core.uuid(), ...data, date: data.date || null, time: data.time || null, requirement_ids: new FormData(event.target).getAll('requirement_id') }, id);
+        if (type === 'movement') {
+          const ids = array(submittedForm.values.requirement_ids).length ? array(submittedForm.values.requirement_ids) : array(submittedForm.values.requirement_id);
+          const payload = { id: form.values.id || core.uuid(), ...data, date: data.date || null, time: data.time || null, requirement_ids: ids };
+          if (submittedForm?.custody && !matches(submittedForm.custody, record)) {
+            await saveForm('movement_upsert', payload, id);
+          } else if (ids.some(requirementId => !array(record.requirements).some(item => item.id === requirementId))) {
+            throw new Error('Resolve stale or unavailable requirement selections before saving this movement.');
+          } else {
+            await saveForm('movement_upsert', payload, id);
+          }
+        }
         if (submittedForm && JSON.stringify(submittedForm.values) !== submittedFields) {
           if (submittedForm.noteId) delete submittedForm.noteId;
           if (form === submittedForm) message = 'Earlier values saved. New edits remain for review.';
@@ -569,10 +608,18 @@
     mainCleanup?.(); mainCleanup = null;
     retired.forEach(core => core.dispose());
     instance = null; shared = null;
-    for (const id of ['dispatchRoot', 'dispatchCalendarLayers', 'calendarBody']) {
+    root._calEvents = [];
+    root._calDeliveries = [];
+    root._calReadiness = {};
+    root._calOrgEvents = [];
+    root._calLeaveByDate = {};
+    root._calAvailability = {};
+    root._unschedJobs = [];
+    root._crewList = [];
+    root._calTruncated = false;
+    for (const id of ['dispatchRoot', 'dispatchCalendarLayers', 'calendarBody', 'calUnschedSidebar', 'calSidebar']) {
       const element = document.getElementById?.(id); if (element) element.innerHTML = '';
     }
-    root._calEvents = []; root._calDeliveries = [];
   }
   root.addEventListener?.('sw:auth-identity', changeIdentity);
   root.addEventListener?.('sw:auth-locked', () => changeIdentity({ detail: null }));

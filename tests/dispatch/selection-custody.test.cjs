@@ -62,6 +62,39 @@ for (const scenario of cases) test(`removed ${scenario.name} remains selected un
   }
 });
 
+test('stale order requirement stays selected through refresh and cannot be dropped by FormData', async () => {
+  const ui = await workspace();
+  Object.assign(ui.records.a, {
+    source_version: 'source-1',
+    requirements: [
+      { id: 'req-a', description: 'First panels', quantity: 4, unit: 'each', reviewed_source_version: 'source-1' },
+      { id: 'req-b', description: 'Remaining panels', quantity: 6, unit: 'each', reviewed_source_version: 'source-1' }
+    ]
+  });
+  await ui.core.load('a');
+  await ui.click('prepare-order');
+  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
+  ui.records.a.requirements[0].reviewed_source_version = 'source-2';
+  ui.records.a.version++;
+  await ui.app.refresh();
+  assert.match(ui.host.innerHTML, /value="req-a"[^>]*checked/);
+  assert.match(ui.host.innerHTML, /value="req-a"[^>]*disabled/);
+  assert.match(ui.host.innerHTML, /stale or unavailable/);
+  ui.input('order', { supplier_name: 'Keep my edits', notes: 'unrelated field' });
+  await ui.click('reconcile-editor', 'form');
+  await ui.submit('order', { supplier_name: 'Keep my edits', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-b'] });
+  assert.equal(ui.commands.length, 0);
+  assert.match(ui.host.innerHTML, /Resolve stale or unavailable requirement selections/);
+  ui.records.a.requirements[0].reviewed_source_version = 'source-1';
+  await ui.core.load('a');
+  await ui.click('reconcile-editor', 'form');
+  ui.input('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
+  await ui.submit('order', { supplier_name: 'Exact supplier', delivery_address: 'Site', existing_supply_reviewed: true, requirement_ids: ['req-a', 'req-b'] });
+  assert.equal(ui.commands.length, 1);
+  assert.equal(ui.commands[0].command, 'order_prepare');
+  assert.deepEqual(ui.commands[0].payload.requirement_ids, ['req-a', 'req-b']);
+});
+
 test('new custody forms require an explicit allocation or requirement choice', async () => {
   const ui = await workspace();
   ui.records.a.requirements = [{ id: 'ra', description: 'Panels', unit: 'each' }];

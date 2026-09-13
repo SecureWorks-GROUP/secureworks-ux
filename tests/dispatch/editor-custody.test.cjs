@@ -32,7 +32,6 @@ test('an edited requirement keeps its original quantity until explicit reconcili
 
 for (const [action, kind, values] of [
   ['add-group', 'group', { name: 'My retained group' }],
-  ['prepare-order', 'order', { supplier_name: 'Chosen supplier', delivery_address: 'Chosen destination', delivery_date: '', notes: 'Exact order notes', requirement_id: ['r'], 'quantity:r': '2', 'price:r': '3', existing_supply_reviewed: 'on' }],
   ['record-stock', 'stock', { description: 'Verified posts', quantity: '3', unit: 'each', location: 'yard', evidence: 'Exact count' }],
   ['add-allocation', 'allocation', { requirement_id: 'r', supply_id: 'stock:s', quantity: '2' }],
   ['add-receipt', 'receipt', { allocation_id: 'a', usable_quantity: '2', damaged_quantity: '1', location: 'yard', evidence: 'Exact receipt' }],
@@ -62,6 +61,36 @@ for (const [action, kind, values] of [
     assert.equal(ui.commands[0].source_version, 'source-2');
   });
 }
+
+test('order editor retains selected requirements and still requires resolving stale rows', async () => {
+  const values = { supplier_name: 'Chosen supplier', delivery_address: 'Chosen destination', delivery_date: '', notes: 'Exact order notes', requirement_id: ['r'], 'quantity:r': '2', 'price:r': '3', existing_supply_reviewed: 'on' };
+  const ui = await workspace();
+  ui.records.a.requirements = [{ ...requirement, reviewed_source_version: 'source-1' }];
+  ui.records.a.allocations = [{ id: 'a', requirement_id: 'r', quantity: 5 }];
+  ui.records.a.supply_lots = [{ id: 'stock:s', description: 'Recorded panels', quantity: 5, unit: 'each' }];
+  ui.records.a.receipts = [{ id: 'receipt', allocation_id: 'a', usable_quantity: 5, damaged_quantity: 1, location: 'yard' }];
+  await ui.core.load('a');
+  await ui.click('prepare-order');
+  ui.input('order', values);
+  ui.records.a.source_version = 'source-2';
+  await ui.core.load('a');
+  await ui.click('select', 'b');
+  await ui.click('select', 'a');
+  await ui.submit('order', values);
+  assert.equal(ui.commands.length, 0);
+  assert.match(ui.host.innerHTML, /reconcile this editor/);
+  await ui.click('reconcile-editor', 'form');
+  await ui.submit('order', values);
+  assert.equal(ui.commands.length, 0);
+  assert.match(ui.host.innerHTML, /Resolve stale or unavailable requirement selections/);
+  ui.records.a.requirements[0].reviewed_source_version = 'source-2';
+  await ui.core.load('a');
+  await ui.click('reconcile-editor', 'form');
+  await ui.submit('order', values);
+  assert.equal(ui.commands.length, 1);
+  assert.equal(ui.commands[0].command, 'order_prepare');
+  assert.deepEqual(ui.commands[0].payload.requirement_ids, ['r']);
+});
 
 const mail = { sender: 'ops@example.test', to: 'supplier@example.test', cc: 'copy@example.test', subject: 'Exact subject', body: 'Human text\nSecond line', purchase_commitment: 'false' };
 test('an open saved email keeps text and original evidence even before the first edit', async () => {

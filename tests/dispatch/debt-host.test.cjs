@@ -27,7 +27,8 @@ test('How it works debt adapter matches wiki skill JSON and forbids receipt RPC'
   assert.equal(debt.wiki_pin, '08afbb57');
   assert.match(debt.technical.api, /debt_proposal_save/);
   assert.match(debt.technical.api, /must not call record_workflow_refresh_receipt/);
-  assert.match(debt.technical.api, /assessment-only GET/);
+  assert.match(debt.technical.api, /start\(debt\) is unavailable/);
+  assert.match(debt.technical.api, /ea0beae5 is not completion-safe/);
   assert.match(debt.business.join(' '), /does not send/i);
 });
 

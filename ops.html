@@ -4512,6 +4512,7 @@
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
   </style>
 <link rel="stylesheet" href="modules/ops-sales-performance.css?v=1">
+<link rel="stylesheet" href="modules/ops-sales-booking.css?v=1">
 </head>
 <body>
 
@@ -4528,7 +4529,7 @@
         <button onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
         <button onclick="showView('materials')" data-view="materials">Materials</button>
-        <button onclick="showView('performance')" data-view="performance">Performance</button>
+        <button onclick="showView('sales')" data-view="sales">Sales</button>
         <button onclick="showView('inbox')" data-view="inbox">Inbox <span id="inboxBadge" class="nav-badge" style="display:none;"></span></button>
         <button onclick="showView('approvals')" data-view="approvals">Approvals</button>
       </div>
@@ -5098,7 +5099,16 @@
       </div>
     </div>
 
-    <div class="view" id="viewPerformance"><div id="salesPerformanceRoot"></div></div>
+    <div class="view" id="viewSales">
+      <div id="salesWorkspaceSubnav" class="sales-workspace-subnav" aria-label="Sales views">
+        <span class="sales-workspace-label">Sales</span>
+        <button type="button" data-sales-tab="performance">Performance</button>
+        <button type="button" data-sales-tab="booking">Booking</button>
+        <span class="sales-workspace-hold">Send hold active</span>
+      </div>
+      <div id="salesPerformanceRoot"></div>
+      <div id="salesBookingRoot"></div>
+    </div>
   </div><!-- /container -->
 
   <!-- Council detail renders inline in #approvalsDetailPanel (split-pane) -->
@@ -5110,7 +5120,7 @@
     <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
     <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
-    <button onclick="showView('performance')" data-view="performance"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Performance</button>
+    <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
     <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
     <button onclick="showView('approvals')" data-view="approvals"><span class="nav-icon">&#127963;</span>Approvals</button>
   </div>
@@ -6168,6 +6178,7 @@
 
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
 <script src="modules/ops-sales-performance.js?v=1"></script>
+<script src="modules/ops-sales-booking.js?v=1"></script>
 <script src="modules/ops-council.js?v=2"></script>
 <script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
 <script src="modules/ops-makesafe-reporting-cockpit.js?v=9"></script>
@@ -7200,7 +7211,15 @@ function jobDetailIsOpen() {
 }
 
 function showView(view) {
-  document.body.classList.toggle('performance-view-active', view === 'performance');
+  var salesTab = null;
+  if (view === 'performance' || view === 'booking' || view === 'sales') {
+    salesTab = (view === 'sales')
+      ? (localStorage.getItem('sw_ops_sales_tab') || 'booking')
+      : view;
+    view = 'sales';
+  }
+  document.body.classList.toggle('performance-view-active', view === 'sales' && salesTab === 'performance');
+  document.body.classList.toggle('sales-booking-view-active', view === 'sales' && salesTab === 'booking');
   // Close full-page job detail if open
   if (jobDetailIsOpen()) {
     closeJobDetail(true);
@@ -7218,16 +7237,21 @@ function showView(view) {
   document.querySelectorAll('[data-view="' + view + '"]').forEach(function(btn) {
     btn.classList.add('active');
   });
+  document.querySelectorAll('#salesWorkspaceSubnav [data-sales-tab]').forEach(function(btn) {
+    btn.setAttribute('aria-selected', String(btn.getAttribute('data-sales-tab') === salesTab));
+  });
 
-  if (history.replaceState) history.replaceState(null, '', '#' + view);
-  localStorage.setItem('sw_ops_tab', view);
+  var hash = salesTab || view;
+  if (history.replaceState) history.replaceState(null, '', '#' + hash);
+  localStorage.setItem('sw_ops_tab', hash);
+  if (salesTab) localStorage.setItem('sw_ops_sales_tab', salesTab);
 
   if (view === 'today') { loadToday(); }
   if (view === 'calendar') loadCalendar();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
   if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
-  if (view === 'performance') SalesPerformance.load();
+  if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);
   if (view === 'inbox') loadInbox();
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
   // Update Jarvis bar context
@@ -7281,7 +7305,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'performance', 'inbox'];
+  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'performance', 'booking', 'sales', 'inbox'];
   if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
   var saved = localStorage.getItem('sw_ops_tab');
   if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }

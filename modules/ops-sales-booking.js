@@ -35,7 +35,7 @@
         { number: '+61489267772', label: 'SecureWorks Fencing Sales 772', source: 'CIO-to-FENCING_SALES-marnin-calendar-2026-09-11.md' },
         { number: '+61489267776', label: 'SecureWorks Group Ops 776', source: 'SALES-booking-page-audit.md; OPS.md automated booking-path exemption' }
       ],
-      desk_rules: { monday_from: 8, no_wednesday: false, days: [1, 4], last_start: 15.5, protected_band: { day: 1, from: 13, to: 15.5, label: 'Canning Vale band', note: '13:00 to 15:30 protected' }, hours: 'Stratco lane is Tuesday and Friday; Canning Vale band Tue 13:00 to 15:30 protected' }
+      desk_rules: { monday_from: 8, no_wednesday: false, days: [1, 4], lane_note: 'Stratco scopes are offered Tue and Fri', last_start: 15.5, protected_band: { day: 1, from: 13, to: 15.5, label: 'Canning Vale band', note: '13:00 to 15:30 protected' }, hours: 'Stratco lane is Tuesday and Friday; Canning Vale band Tue 13:00 to 15:30 protected' }
     },
     khairo: {
       id: 'khairo',
@@ -567,6 +567,15 @@
     return !!c && (c.status === 'waiting' || c.status === 'offer');
   }
 
+  // An enumerated CRM row is not an assessed enquiry. Until the engine has derived a
+  // status for a case, it may not be counted as demand, ranked for urgency, or offered
+  // as stampable. It stays visible and findable in its own queue group instead.
+  function isAssessed(c) {
+    if (!c) return false;
+    if (typeof c.assessed === 'boolean') return c.assessed;
+    return !!(c.reason || c.proposal);
+  }
+
   function isToBook(c) {
     if (!c || isArchived(c) || isCompleted(c) || isBooked(c)) return false;
     return true;
@@ -600,6 +609,7 @@
 
   function urgency(c) {
     if (isArchived(c)) return ['', 'Archived'];
+    if (!isAssessed(c)) return ['', 'Not assessed'];
     if (isCompleted(c)) return c.quote_sent ? ['ok', 'Quoted'] : ['warn', 'Quote to send'];
     if (needsDecision(c)) return ['bad', 'Act today'];
     if (c.status === 'follow_up') return ['bad', 'Overdue'];
@@ -614,7 +624,7 @@
   function queueGroups() {
     var list = visibleCases();
     return [
-      ['Scope to be booked', list.filter(isToBook).sort(function (a, b) {
+      ['Scope to be booked', list.filter(function (c) { return isToBook(c) && isAssessed(c); }).sort(function (a, b) {
         var rank = function (c) { return needsDecision(c) ? 0 : c.status === 'follow_up' ? 1 : isWaiting(c) ? 3 : 2; };
         var d = rank(a) - rank(b);
         if (d) return d;
@@ -623,7 +633,8 @@
       ['Scope booked', list.filter(isBooked).sort(function (a, b) {
         return String((a.proposal && a.proposal.start_iso) || '') < String((b.proposal && b.proposal.start_iso) || '') ? -1 : 1;
       })],
-      ['Visited, quote to send', list.filter(quoteOutstanding)]
+      ['Visited, quote to send', list.filter(quoteOutstanding)],
+      ['Enumerated, not yet assessed', list.filter(function (c) { return isToBook(c) && !isAssessed(c); })]
     ];
   }
 
@@ -634,12 +645,14 @@
   // Follow-through counts. Captain default for v1 is the "this week plus last" window;
   // it is the window the backend was asked for, so the tiles count what came back.
   function followThrough() {
-    var list = cases().filter(function (c) { return !isArchived(c); });
+    var all = cases().filter(function (c) { return !isArchived(c); });
+    var list = all.filter(isAssessed);
     return {
       to_book: list.filter(function (c) { return isToBook(c) && !isWaiting(c); }).length,
       waiting: list.filter(isWaiting).length,
       booked: list.filter(isBooked).length,
-      quotes: list.filter(quoteOutstanding).length
+      quotes: list.filter(quoteOutstanding).length,
+      unassessed: all.filter(function (c) { return !isAssessed(c); }).length
     };
   }
 
@@ -757,7 +770,7 @@
     var place = (block.address ? block.address + ', ' : '') + (block.suburb || '');
     return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '" style="top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
       '<span class="stage">' + esc(stageTag(kind, stamped)) + '</span>' +
-      '<span class="t evtime">' + esc(clockLabel(hour)) + ' to ' + esc(clockLabel(hour + h)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
+      '<span class="t evtime">' + esc(clockLabel(hour)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
       '<span class="n evname">' + esc(place || 'Address not given yet') + '</span>' +
       '<span class="j evplace">' + esc(block.job || '') + '</span></button>';
   }
@@ -782,6 +795,22 @@
     return 'proposal';
   }
 
+  // A busy diary block whose case has been cancelled in the thread is NOT a confirmed
+  // booking. The slot stays occupied until the delete reads back, but it must read as
+  // cancelled, or the week shows a visit nobody is attending. The case's derived layer
+  // wins over the raw provider kind; personal and leave are the provider's to state.
+  function diaryLayerFor(ev) {
+    if (ev.layer === 'personal' || ev.layer === 'leave') return ev.layer;
+    var list = cases();
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c.id !== ev.id && c.event_id !== ev.id) continue;
+      var derived = caseLayer(c);
+      if (derived === 'blocked') return 'blocked';
+    }
+    return ev.layer;
+  }
+
   function renderCalendar() {
     var data = state.data;
     var res = resource();
@@ -800,7 +829,16 @@
       var off = days.indexOf(d) === -1;
       var body = '';
       if (off) {
-        body += '<div class="block off"><strong>' + (res.desk_rules.days ? 'Not a ' + esc(res.name) + ' day' : 'Unavailable') + '</strong><span>' + esc(res.desk_rules.days ? 'Tue and Fri only' : 'Desk rule') + '</span></div>';
+        // A desk rule says where new work may be OFFERED. It does not overrule the
+        // diary: when the provider already has events on an off-lane day, the full
+        // hatch would paint real bookings as an impossible day, so the rule is stated
+        // as a banner instead and the events keep the column.
+        var busy = diary().some(function (ev) {
+          return dayIndexFromIso(ev.start_iso, state.weekStart) === d && diaryLayerFor(ev) !== 'personal';
+        });
+        body += busy
+          ? '<div class="block rulebanner" style="top:0;height:' + Math.round(PX_PER_HOUR * 0.55) + 'px"><strong>Outside the ' + esc(res.name) + ' lane</strong><span>' + esc(res.desk_rules.lane_note || 'No new scopes offered here') + '</span></div>'
+          : '<div class="block off"><strong>' + (res.desk_rules.days ? 'Not a ' + esc(res.name) + ' day' : 'Unavailable') + '</strong><span>' + esc(res.desk_rules.days ? 'Tue and Fri only' : 'Desk rule') + '</span></div>';
       } else if (res.desk_rules.monday_from > DAY_START && d === 0) {
         body += '<div class="block" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR) + 'px"><strong>Not available</strong><span>Monday before ' + res.desk_rules.monday_from + ':00</span></div>';
       }
@@ -810,7 +848,7 @@
       }
       diary().forEach(function (ev) {
         if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
-        body += renderEvent(ev, ev.layer);
+        body += renderEvent(ev, diaryLayerFor(ev));
       });
       cases().forEach(function (c) {
         if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
@@ -950,7 +988,9 @@
     var f = followThrough();
     var win = CAPTAIN_DEFAULTS.scopes_done_window;
     return [
-      ['Enquiries still to book', f.to_book, 'came in ' + win + ', need a text or a decision'],
+      ['Enquiries still to book', f.to_book, f.unassessed
+        ? 'assessed, came in ' + win + '. ' + f.unassessed + ' more CRM rows are enumerated but not assessed, so they are not counted here'
+        : 'came in ' + win + ', need a text or a decision'],
       ['Waiting on a reply', f.waiting, 'text out, nothing back yet'],
       ['Booked to quote this week', f.booked, 'in the diary with a customer yes'],
       ['Quotes to send', f.quotes, 'visited ' + win + ', quote not out yet']
@@ -977,7 +1017,12 @@
   }
 
   function renderStampBoard() {
-    var list = cases().filter(function (c) { return !isArchived(c) && !isCompleted(c); });
+    // Only lines that carry a proposed time are stampable: a KEEP on a case with no
+    // proposal would decide nothing. The count of live cases held back is stated so a
+    // short board never reads as a short week.
+    var live = cases().filter(function (c) { return !isArchived(c) && !isCompleted(c); });
+    var list = live.filter(function (c) { return isAssessed(c) && c.proposal && c.proposal.start_iso; });
+    var withheld = live.length - list.length;
     var rec = stampRecord();
     var rows = list.map(function (c) {
       var st = stampStateOf(c);
@@ -996,8 +1041,9 @@
     return '<section class="stampboard"><div class="sbhead">' +
       '<div><h2>Captain stamp board</h2><p>KEEP or CUT each line. A stamp is a recorded decision, not a send. ' +
       esc(CAPTAIN_DEFAULTS.stamp_board.charAt(0).toUpperCase() + CAPTAIN_DEFAULTS.stamp_board.slice(1)) + '.</p></div>' +
-      '<span class="count">' + rec.approved.length + ' keep · ' + rec.rejected.length + ' cut · ' + list.length + ' lines</span></div>' +
-      (rows || '<div class="qempty">No live lines in this read.</div>') +
+      '<span class="count">' + rec.approved.length + ' keep · ' + rec.rejected.length + ' cut · ' + list.length + ' line' + (list.length === 1 ? '' : 's') + '</span></div>' +
+      (withheld ? '<div class="qempty">' + withheld + ' live case' + (withheld === 1 ? ' has' : 's have') + ' no proposed time yet, so there is nothing to stamp on ' + (withheld === 1 ? 'it' : 'them') + '. They stay in the work queue.</div>' : '') +
+      (rows || '<div class="qempty">No line in this read carries a proposed time. Nothing to stamp.</div>') +
       '<details class="filedetails"><summary>Show the file the terminal reads (stamp.json)</summary>' +
       '<div class="stampfile">' + esc(JSON.stringify(rec, null, 1)) + '</div></details></section>';
   }
@@ -1352,7 +1398,9 @@
     longDate: longDate,
     diary: diary,
     caseLayer: caseLayer,
+    diaryLayerFor: diaryLayerFor,
     urgency: urgency,
+    isAssessed: isAssessed,
     daysWaiting: daysWaiting,
     queueGroups: queueGroups,
     followThrough: followThrough,

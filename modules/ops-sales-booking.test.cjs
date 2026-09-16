@@ -508,7 +508,7 @@ test('the queue groups by stage and states an unread enquiry date rather than fa
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
   const groups = api.queueGroups().map((g) => g[0]);
-  assert.deepEqual(groups, ['Scope to be booked', 'Scope booked', 'Visited, quote to send']);
+  assert.deepEqual(groups, ['Scope to be booked', 'Scope booked', 'Visited, quote to send', 'Enumerated, not yet assessed']);
   const html = api.renderHTML();
   assert.match(html, /Came in Monday 7 September/);
   assert.match(html, /Flat patio, 6 x 4/);
@@ -574,4 +574,75 @@ test('the stamp file the terminal reads is shown verbatim and escaped', () => {
   assert.match(html, /stamp\.json/);
   assert.match(html, /&quot;approved&quot;/);
   assert.doesNotMatch(html, /<img src=x/);
+});
+
+test('the stamp board holds back cases with nothing to stamp and says how many', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.data.cases.push({ id: 'no-slot', display_name: 'No slot yet', suburb: 'Bayswater', status: 'ready', proposal: null });
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  const html = api.renderHTML();
+  // 'evt-1' is booked with no proposal and 'no-slot' has none either.
+  assert.match(html, /live cases have no proposed time yet/);
+  assert.match(html, /They stay in the work queue/);
+  // The withheld case is still findable in the queue, not dropped.
+  assert.match(html, /No slot yet/);
+});
+
+test('an enumerated CRM row is findable but is never counted or ranked as demand', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  // A bare opportunity row: no reason, no proposal, so the engine has not judged it.
+  api.state.data.cases.push({ id: 'raw-1', display_name: 'Raw CRM row', suburb: 'Bayswater', status: 'needs_decision' });
+  assert.equal(api.isAssessed(api.state.data.cases.find((c) => c.id === 'raw-1')), false);
+  assert.equal(api.isAssessed(api.state.data.cases[0]), true);
+  const f = api.followThrough();
+  assert.equal(f.unassessed, 1);
+  assert.equal(f.to_book, 1, 'the raw row must not inflate the demand tile');
+  const groups = api.queueGroups();
+  const toBook = groups.find((g) => g[0] === 'Scope to be booked')[1].map((c) => c.id);
+  const raw = groups.find((g) => g[0] === 'Enumerated, not yet assessed')[1].map((c) => c.id);
+  assert.ok(!toBook.includes('raw-1'));
+  assert.deepEqual(raw, ['raw-1']);
+  const html = api.renderHTML();
+  // Still findable, never dressed up as urgent, and the tile says why it is not counted.
+  assert.match(html, /Raw CRM row/);
+  assert.match(html, /Not assessed/);
+  assert.match(html, /1 more CRM rows are enumerated but not assessed/);
+  assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'raw-1'))[1], 'Not assessed');
+});
+
+test('a cancelled case does not leave its diary block reading as a confirmed booking', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const ev = { id: 'evt-1', layer: 'confirmed', start_iso: '2026-09-15T11:30:00' };
+  assert.equal(api.diaryLayerFor(ev), 'confirmed');
+  // Customer cancelled in the thread; Outlook still holds the slot.
+  api.state.data.cases[1].status = 'repair';
+  api.state.data.cases[1].event_id = 'evt-1';
+  assert.equal(api.diaryLayerFor(ev), 'blocked');
+  const html = api.renderHTML();
+  assert.match(html, /CANCELLED/);
+  // The slot is still occupied, so the block is drawn rather than freed.
+  assert.match(html, /class="ev blocked/);
+  // A personal block is the provider's own statement and is never overridden.
+  assert.equal(api.diaryLayerFor({ id: 'evt-1', layer: 'personal', start_iso: '2026-09-15T11:30:00' }), 'personal');
+});
+
+test('a desk rule states where work is offered and never overprints a real booking', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = doorRead();
+  api.state.data.resource.id = 'marnin';
+  // Tuesday 15 Sep is in the Stratco lane; the 17th (Thursday) is not.
+  api.state.data.events = [];
+  api.state.data.diary = [];
+  let html = api.renderHTML();
+  assert.match(html, /Not a Marnin day/, 'an empty off-lane day is hatched closed');
+  // Now the provider actually has a visit booked on that off-lane day.
+  api.state.data.events = [{ event_id: 'e9', display_name: 'Real visit', suburb: 'Alkimos', start_iso: '2026-09-17T09:00:00', end_iso: '2026-09-17T10:00:00', layer: 'confirmed' }];
+  html = api.renderHTML();
+  assert.match(html, /Outside the Marnin lane/);
+  assert.match(html, /Stratco scopes are offered Tue and Fri/);
+  assert.match(html, /Real visit/);
+  api.state.resourceId = 'nithin';
 });

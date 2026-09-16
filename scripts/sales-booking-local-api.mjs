@@ -59,6 +59,10 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
           contact_id: item.contactId || contact.id || null,
           suburb: null,
           display_name: phoneLike(name) ? 'Enquiry' : (name || 'Enquiry'),
+          // Pass the provider's own created date straight through. When GHL does not
+          // carry one the field stays null and the surface says the date was not read;
+          // it is never back-filled with today, which would read as a fresh enquiry.
+          enquiry_date: item.createdAt || item.dateAdded || item.created_at || contact.dateAdded || null,
           status: (store.cases[item.id] && store.cases[item.id].status) || 'needs_decision',
           tags: contact.tags || []
         });

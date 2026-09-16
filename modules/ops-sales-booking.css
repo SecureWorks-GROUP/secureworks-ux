@@ -132,6 +132,7 @@
 #salesBookingRoot .block strong{display:block;font-weight:600}
 #salesBookingRoot .block span{display:block;margin-top:3px;font-size:9px}
 #salesBookingRoot .block.off{top:0;height:100%;padding-top:26px;background:repeating-linear-gradient(135deg,#F2F5F6,#F2F5F6 7px,#EDF1F3 7px,#EDF1F3 8px)}
+#salesBookingRoot .block.rulebanner{background:repeating-linear-gradient(135deg,#F2F5F6,#F2F5F6 7px,#EDF1F3 7px,#EDF1F3 8px);border-bottom:1px solid var(--line);padding:5px 6px;font-size:9.5px}
 #salesBookingRoot .block.band{background:repeating-linear-gradient(135deg,#EEF3F6,#EEF3F6 7px,#E4EBEF 7px,#E4EBEF 8px);color:var(--mid)}
 #salesBookingRoot .window{position:absolute;left:3px;right:3px;z-index:1;border:1px dashed #C7D5DD;background:rgba(255,255,255,.55);border-radius:4px;padding:3px 5px;font-size:9px;color:var(--mid)}
 #salesBookingRoot .window b{display:block;font-weight:650}

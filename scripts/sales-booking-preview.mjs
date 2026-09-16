@@ -24,7 +24,7 @@ const HOST = '127.0.0.1';
 
 const RESOURCES = {
   nithin: { id: 'nithin', name: 'Nithin', scoper_user_id: '5862cf1d-0a3b-4836-8fd1-d69f95aa2f73', lane: 'patio', sender: '+61489267774' },
-  marnin: { id: 'marnin', name: 'Marnin', scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498', lane: 'fencing', sender: '+61489267772' },
+  marnin: { id: 'marnin', name: 'Marnin', scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498', lane: 'fencing', sender: '+61489267776' },
   khairo: { id: 'khairo', name: 'Khairo', scoper_user_id: 'be6c2188-2b7b-49c7-b6e4-5b0d0deb6415', lane: 'fencing', sender: '+61489267772' }
 };
 
@@ -261,9 +261,17 @@ const server = http.createServer(async (req, res) => {
       if (action === 'sales_booking_read') {
         const enumerated = await handleLocal('sales_booking_read', params, payload, mcpCall, STORE);
         const calBody = await salesBookingRead(url.searchParams);
+        // The assessed rows are the only ones carrying a proposal, a draft and a
+        // status the engine actually derived, so they must survive the merge. Filtering
+        // on event_id alone dropped every open enquiry and left the week with nothing
+        // to stamp. One person is still one card: an assessed row supersedes the bare
+        // enumerated row for the same contact.
+        const assessed = calBody.cases || [];
+        const assessedContacts = new Set(assessed.map((c) => c.contact_id).filter(Boolean));
+        const base = (enumerated.cases || []).filter((c) => !c.contact_id || !assessedContacts.has(c.contact_id));
         body = Object.assign({}, calBody, enumerated, {
           events: calBody.events,
-          cases: [].concat(enumerated.cases || [], (calBody.cases || []).filter((c) => c.event_id)),
+          cases: [].concat(base, assessed),
           fixture: false
         });
       } else {

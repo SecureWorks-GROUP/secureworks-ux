@@ -13,6 +13,33 @@ if a click reaches it. A **stamp is not a send**: KEEP and CUT write a local
 sent:false, calendar_written:false`) that ops auto-book reads on a separate authorised run.
 Switching scoper drops the stamp so one scoper's decisions cannot be carried onto another.
 
+## Stampable and execution-ready are different gates
+
+Captain ruling 2026-09-16. **Execution-ready** means exact acceptance bound to a sent offer
+id and slot revision. It gates **Confirm booking alone**, never the stamp board.
+
+The stamp board is the captain's KEEP or CUT over **AI proposals**. A slot the engine labels
+"AI-proposed date, customer date unspecified" is precisely what he stamps, so the engine's
+refusal reason is shown on the card as the **why-stamp checklist**, never used to hide the
+row. Coverage gaps (leave and travel unread) are warning chips, not a bar to stamping.
+`sales-booking-assess.cjs` therefore keeps the candidate slot and records
+`execution_ready:false, stampable:true, coverage_gaps[], warnings[]` instead of nulling the
+proposal.
+
+Only three things remove a stamp, and each says so on the board by name:
+
+1. The slot is blocked: cancelled in the thread with the diary event still present.
+2. The time is still held by another cancelled booking awaiting delete readback
+   (`blockingDiaryEvent()`, occupancy, so it holds against any customer's proposal).
+3. There is no proposed time at all.
+
+`stampBlockReason()` is the single predicate; the board, the detail panel and `stampCase()`
+all consult it, so a stale click cannot record what the markup refuses.
+
+The checklist dedupes **by meaning**, not by exact text (`checklistTopic()`): the engine
+emits the same fact as a warning, a review reason and a structured gap list, and letting all
+three through produced exactly the essay the captain has already rejected once.
+
 ## Captain defaults for v1 (2026-09-16)
 
 Recorded in `CAPTAIN_DEFAULTS` and rendered on the page so they can be flipped, not
@@ -54,8 +81,12 @@ case or resource switch.
 - **A desk rule is not the diary.** An off-lane day with real provider events shows
   "Outside the <name> lane" rather than hatching real bookings closed.
 - **An empty diary is not spare capacity.** Coverage gaps are named, not smoothed.
-- **The customer is promised a window, never a minute.** `suggestedDraft()` writes a 60 to
-  90 minute arrival window in the scoper's voice. No em dashes.
+- **The customer is promised a window, never a minute.** Both `suggestedDraft()` in the UI
+  and the engine's own draft in `sales-booking-assess.cjs` write a 60 to 90 minute arrival
+  window in the scoper's voice, with a spoken date rather than an ISO one. No em dashes.
+- **No card hides another.** `packLanes()` puts overlapping calendar cards side by side. Two
+  AI proposals on the same hour both render; a proposal concealed under another is a line the
+  captain never gets to stamp.
 
 ## The week grid
 

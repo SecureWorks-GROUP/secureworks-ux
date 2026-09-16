@@ -115,23 +115,33 @@ test('02:00Z busy collides with 10:00 Perth', () => {
   assert.notEqual(result.status, 'ready');
 });
 
-test('AI afternoon suggestion still requires coverage', () => {
+test('missing coverage is a warning carried on the proposal, not a withheld row', () => {
+  // Captain ruling 2026-09-16: execution-ready (exact acceptance bound to a sent offer)
+  // gates Confirm booking alone. A coverage gap is a warning chip on a stampable AI
+  // proposal; withholding the row hid exactly what the captain is there to stamp.
   const result = assess.assess(proof({
         coverage: { leave: 'not_read', calendar: true, route: false },
     messages: [inbound('Afternoons work for me')]
   }));
   assert.notEqual(result.status, 'ready');
-  assert.equal(result.proposal, null);
+  assert.ok(result.proposal, 'the slot survives so it can be stamped');
+  assert.equal(result.proposal.stampable, true);
+  assert.equal(result.proposal.execution_ready, false);
+  assert.ok(result.proposal.coverage_gaps.length);
+  assert.match(result.proposal.warnings.join(' '), /coverage is missing/);
+  assert.ok(result.draft, 'the captain is shown the text he would approve');
   assert.equal(result.customer_facts.time_of_day, 'afternoon');
 });
 
-test('missing calendar, leave or travel cannot be ready', () => {
+test('missing calendar, leave or travel cannot be ready, but stays stampable', () => {
   const result = assess.assess(proof({
         coverage: { leave: 'unavailable', calendar: false, route: false },
     messages: [inbound('Tuesday 15 September at 10am')]
   }));
   assert.notEqual(result.status, 'ready');
-  assert.equal(result.proposal, null);
+  assert.equal(result.proposal.execution_ready, false);
+  assert.ok(result.proposal.coverage_gaps.length);
+  assert.match(result.reason, /coverage is missing/);
 });
 
 test('no feasible slot is review, not ready', () => {
@@ -335,4 +345,18 @@ test('sent_offers array order does not bind an older offer', () => {
   }));
   assert.equal(result.exact_acceptance, true);
   assert.equal(result.accepted_offer.offer_id, 'new');
+});
+
+test('a proposed text promises an arrival window, never an exact minute or an ISO date', () => {
+  const result = assess.assess(proof({
+    messages: [inbound('Afternoons work for me')]
+  }));
+  assert.ok(result.draft);
+  assert.match(result.draft, /between \d{1,2}:\d{2} and \d{1,2}:\d{2}(am|pm)/);
+  assert.match(result.draft, /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2} [A-Z][a-z]+/);
+  assert.doesNotMatch(result.draft, /\d{4}-\d{2}-\d{2}/, 'no raw ISO date in customer text');
+  assert.doesNotMatch(result.draft, / at \d{1,2}:\d{2}(am|pm)/, 'no exact-minute promise');
+  assert.doesNotMatch(result.draft, /—/, 'no em dashes in customer text');
+  assert.equal(result.draft, result.proposal.draft);
+  assert.ok(result.proposal.arrival_window);
 });

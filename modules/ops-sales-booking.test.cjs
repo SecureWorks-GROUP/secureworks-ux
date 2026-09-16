@@ -582,11 +582,12 @@ test('the stamp board holds back cases with nothing to stamp and says how many',
   api.state.data.cases.push({ id: 'no-slot', display_name: 'No slot yet', suburb: 'Bayswater', status: 'ready', proposal: null });
   api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
   const html = api.renderHTML();
-  // 'evt-1' is booked with no proposal and 'no-slot' has none either.
-  assert.match(html, /live cases have no proposed time yet/);
+  // 'evt-1' is booked with no proposal and 'no-slot' has none either. Each withheld
+  // line names its reason and its people rather than vanishing into a count.
+  assert.match(html, /No proposed time on this case, so there is nothing to stamp/);
   assert.match(html, /They stay in the work queue/);
-  // The withheld case is still findable in the queue, not dropped.
   assert.match(html, /No slot yet/);
+  assert.match(html, /Sample visit/);
 });
 
 test('an enumerated CRM row is findable but is never counted or ranked as demand', () => {
@@ -645,4 +646,192 @@ test('a desk rule states where work is offered and never overprints a real booki
   assert.match(html, /Stratco scopes are offered Tue and Fri/);
   assert.match(html, /Real visit/);
   api.state.resourceId = 'nithin';
+});
+
+test('an AI proposal with a coverage gap is stampable and shows the reason, not hidden', () => {
+  // Captain ruling 2026-09-16: execution-ready gates Confirm booking alone. The stamp
+  // board is KEEP/CUT over AI proposals, and the engine's refusal reason belongs on the
+  // card as the why-stamp checklist.
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  const c = api.state.data.cases[0];
+  c.exact_acceptance = false;
+  c.proposal.date_source = 'ai_proposed';
+  c.proposal.customer_date_specified = false;
+  c.proposal.coverage_gaps = ['leave_unobserved', 'travel_unobserved'];
+  c.proposal.warnings = ['AI-proposed date, customer date unspecified.'];
+  c.proposal.execution_ready = false;
+  c.proposal.stampable = true;
+  c.review_reasons = ['Customer date unspecified. Any chosen day is an AI proposal, not a customer-stated date.'];
+
+  const html = api.renderHTML();
+  // The row is on the board, with KEEP and CUT live.
+  assert.match(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
+  assert.match(html, /data-booking-stamp="cut" data-booking-stamp-id="case-a"/);
+  // The refusal is shown as the checklist, not used to hide the row. Each fact appears
+  // once, in its shortest wording; see the dedupe-by-topic test below.
+  assert.match(html, /Coverage not read: leave_unobserved, travel_unobserved/);
+  assert.match(html, /AI-proposed date\. The customer did not name this day\./);
+  // Evidence chips carry the same facts in short form.
+  assert.match(html, /class="chip warn">Coverage partial/);
+  assert.match(html, /class="chip warn">AI date/);
+  // A stamp still offers a time; it never claims a confirmation.
+  assert.match(html, /this stamp offers a time\. It does not confirm one/);
+  // And the stamp itself is still not a send.
+  const res = api.stampCase('case-a', 'keep');
+  assert.equal(res.sent, false);
+  assert.equal(res.wrote_calendar, false);
+});
+
+test('a cancelled case with its diary event still present is never offered for stamping', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const c = api.state.data.cases[0];
+  c.status = 'repair';
+  c.event_id = 'evt-live';
+  assert.equal(api.caseLayer(c), 'blocked');
+  const html = api.renderHTML();
+  assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
+  assert.match(html, /Cancelled in the thread with the diary event still present/);
+  assert.match(html, /blocked until the delete reads back/);
+  // It is named, not silently dropped.
+  assert.match(html, /Sample A/);
+});
+
+test('the stamp refuses a blocked or undated case in the handler, not only in the markup', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  const c = api.state.data.cases[0];
+  c.status = 'repair';
+  c.event_id = 'evt-live';
+  const blocked = api.stampCase('case-a', 'keep');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, 'slot_blocked');
+  assert.equal(blocked.sent, false);
+  assert.deepEqual(api.stampRecord().approved, []);
+  // A case with no proposed time has nothing to decide either.
+  const undated = api.stampCase('evt-1', 'keep');
+  assert.equal(undated.ok, false);
+  assert.equal(undated.reason, 'no_proposed_time');
+  assert.deepEqual(api.stampRecord().approved, []);
+});
+
+test('a cancelled booking still in the diary blocks that time for anyone, not just its own case', () => {
+  // Standing rule: cancelled in thread with the event still present is a blocked slot
+  // until the delete reads back. That is occupancy, so it holds against a different
+  // customer proposed onto the same minutes.
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  // evt-1 (Tue 11:30 to 12:30) is cancelled but still in the diary.
+  api.state.data.cases[1].status = 'repair';
+  api.state.data.cases[1].event_id = 'evt-1';
+  // A different enquiry is proposed onto the same minutes.
+  api.state.data.cases[0].proposal.start_iso = '2026-09-15T12:00:00';
+  api.state.data.cases[0].proposal.end_iso = '2026-09-15T13:00:00';
+  const clash = api.blockingDiaryEvent(api.state.data.cases[0]);
+  assert.ok(clash, 'the surviving cancelled event is found');
+  assert.match(api.stampBlockReason(api.state.data.cases[0]), /still held by a cancelled booking/);
+  const res = api.stampCase('case-a', 'keep');
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'slot_still_held');
+  assert.deepEqual(api.stampRecord().approved, []);
+  const html = api.renderHTML();
+  // Withheld from the board with the reason named, never silently dropped.
+  assert.match(html, /still held by a cancelled booking/);
+  assert.match(html, /Sample A/);
+  assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
+  // Moving off the held minutes makes it stampable again.
+  api.state.data.cases[0].proposal.start_iso = '2026-09-15T14:00:00';
+  api.state.data.cases[0].proposal.end_iso = '2026-09-15T15:00:00';
+  assert.equal(api.blockingDiaryEvent(api.state.data.cases[0]), null);
+  assert.equal(api.stampBlockReason(api.state.data.cases[0]), null);
+  assert.equal(api.stampCase('case-a', 'keep').ok, true);
+});
+
+test('the why-stamp checklist states each fact once, in its shortest wording', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.drafts = {};
+  const c = api.state.data.cases[0];
+  c.exact_acceptance = false;
+  c.proposal.date_source = 'ai_proposed';
+  c.proposal.customer_date_specified = false;
+  c.proposal.coverage_gaps = ['leave_unobserved', 'travel_unobserved'];
+  // The engine says the same two facts again in its own longer wording.
+  c.proposal.warnings = [
+    'Calendar, leave or travel coverage is missing. Not execution-ready. leave_unobserved,travel_unobserved',
+    'AI-proposed date, customer date unspecified.'
+  ];
+  c.review_reasons = [
+    'Calendar, leave or travel coverage is missing. Not execution-ready. leave_unobserved,travel_unobserved',
+    'Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal.',
+    'Already quoted. Confirm whether this is a new request.'
+  ];
+  const list = api.stampChecklist(c);
+  const topics = list.map((i) => api.checklistTopic(i.text));
+  assert.equal(new Set(topics).size, topics.length, 'no topic is stated twice');
+  assert.equal(topics.filter((t) => t === 'coverage').length, 1);
+  assert.equal(topics.filter((t) => t === 'ai_date').length, 1);
+  // The short derived wording wins over the engine's long one.
+  assert.match(list.find((i) => api.checklistTopic(i.text) === 'coverage').text, /^Coverage not read:/);
+  // A fact the derived lines do not cover still gets through verbatim.
+  assert.ok(list.some((i) => /Already quoted/.test(i.text)));
+});
+
+test('every stamped line shows the text it would approve, not just the selected one', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.drafts = {};
+  // Two stampable cases; neither is the selected one.
+  api.state.data.cases.push({
+    id: 'case-b', contact_id: 'contact-b', display_name: 'Second enquiry', suburb: 'Merriwa',
+    status: 'ready', reason: 'Candidate slot for approval.',
+    proposal: { start_iso: '2026-09-18T08:00:00', end_iso: '2026-09-18T09:00:00', offer_id: 'off-b', draft: 'Hi Second, Friday 18 September between 8:00 and 9:30am. Does that suit?' }
+  });
+  api.state.selectedId = null;
+  const html = api.renderHTML();
+  assert.match(html, /Hi Second, Friday 18 September between 8:00 and 9:30am/);
+  assert.doesNotMatch(html, /No draft for this case/);
+});
+
+test('overlapping cards share the column so no proposal is hidden under another', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.layers = { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true };
+  const at = (id, start, end) => ({ block: { id, start_iso: start, end_iso: end }, kind: 'proposal' });
+  // Three proposals on the same hour, plus one clear of them.
+  const packed = api.packLanes([
+    at('a', '2026-09-14T12:00:00', '2026-09-14T13:00:00'),
+    at('b', '2026-09-14T12:00:00', '2026-09-14T13:00:00'),
+    at('c', '2026-09-14T12:30:00', '2026-09-14T13:30:00'),
+    at('d', '2026-09-14T16:00:00', '2026-09-14T17:00:00')
+  ]);
+  const byId = Object.fromEntries(packed.map((p) => [p.block.id, p.block]));
+  assert.equal(packed.length, 4, 'every card survives');
+  assert.equal(new Set([byId.a.lane, byId.b.lane, byId.c.lane]).size, 3, 'the clash gets three lanes');
+  assert.equal(byId.a.lanes, 3);
+  assert.equal(byId.d.lanes, 1, 'a card alone on its minutes keeps the full width');
+  // A hidden layer is excluded rather than given a lane.
+  api.state.layers.proposal = false;
+  assert.equal(api.packLanes([at('a', '2026-09-14T12:00:00', '2026-09-14T13:00:00')]).length, 0);
+  api.state.layers.proposal = true;
+});
+
+test('two proposals at the same time both render on the week', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.data.cases[0].proposal.start_iso = '2026-09-17T13:00:00';
+  api.state.data.cases[0].proposal.end_iso = '2026-09-17T14:00:00';
+  api.state.data.cases.push({
+    id: 'case-c', contact_id: 'c3', display_name: 'Clashing enquiry', suburb: 'Balga',
+    status: 'ready', reason: 'Candidate slot for approval.',
+    proposal: { start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T14:00:00', offer_id: 'off-c' }
+  });
+  const html = api.renderHTML();
+  assert.match(html, /data-booking-case="case-a"[^>]*style="left:calc\(0%/);
+  assert.match(html, /data-booking-case="case-c"[^>]*style="left:calc\(50%/);
+  assert.match(html, /Clashing enquiry/);
 });

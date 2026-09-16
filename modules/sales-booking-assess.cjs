@@ -11,6 +11,41 @@ var MONTHS = {
 };
 var WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
+var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function clockLabel(hour, withMeridiem) {
+  var h = Math.floor(hour);
+  var m = Math.round((hour - h) * 60);
+  var ampm = h >= 12 ? 'pm' : 'am';
+  var h12 = h % 12 || 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + (withMeridiem === false ? '' : ampm);
+}
+
+function hourOf(iso) {
+  var m = String(iso || '').match(/T(\d{2}):(\d{2})/);
+  return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+}
+
+// 60 to 90 minutes from the proposed start, widening only if the slot itself is longer.
+function arrivalWindowLabel(startIso, endIso) {
+  var start = hourOf(startIso);
+  if (start == null) return '';
+  var endHour = hourOf(endIso);
+  var span = endHour != null && endHour > start ? endHour - start : 0;
+  var end = start + (span > 1.5 ? span : 1.5);
+  var sameHalf = (start >= 12) === (end >= 12);
+  return clockLabel(start, !sameHalf) + ' and ' + clockLabel(end);
+}
+
+function longDateLabel(iso) {
+  var date = String(iso || '').slice(0, 10);
+  var parts = date.split('-').map(Number);
+  if (parts.length !== 3 || !parts[0]) return date;
+  var day = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+  return DAY_NAMES[day] + ' ' + parts[2] + ' ' + MONTH_NAMES[parts[1] - 1];
+}
+
 function mondayIso(iso) {
   var parts = String(iso).slice(0, 10).split('-').map(Number);
   var utc = Date.UTC(parts[0], parts[1] - 1, parts[2]);
@@ -685,11 +720,16 @@ function validate(ground, model, input) {
       slot = proposeCandidate(input, facts);
     }
     var capGaps = occupancyGaps(input);
-    if (capGaps.length) {
-      reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready. ' + capGaps.join(','));
-      status = 'needs_decision';
-      proposal = null;
-    } else if (!slot) {
+    // EXECUTION-READY AND STAMPABLE ARE DIFFERENT GATES (captain ruling 2026-09-16).
+    // Execution-ready means exact acceptance bound to a sent offer id, and it gates
+    // Confirm booking alone. An AI-proposed slot the customer has not dated is exactly
+    // what the captain stamps, so a coverage gap or an undated customer is a WARNING
+    // carried on the proposal, never a reason to withhold the row. Only two things
+    // leave nothing to stamp: no feasible slot at all, and a lane we must not speak in.
+    if (!slot) {
+      if (capGaps.length) {
+        reasons.push('Calendar, leave or travel coverage is missing. Not execution-ready. ' + capGaps.join(','));
+      }
       reasons.push('No feasible slot under current rules and occupancy.');
       status = 'needs_decision';
       proposal = null;
@@ -697,11 +737,23 @@ function validate(ground, model, input) {
       status = 'needs_decision';
       proposal = null;
     } else {
-      status = 'ready';
       proposal = slot;
-      if (slot.date_source === 'ai_proposed') {
-        reasons.push('AI-proposed date, customer date unspecified.');
+      var warnings = [];
+      if (capGaps.length) {
+        warnings.push('Calendar, leave or travel coverage is missing. Not execution-ready. ' + capGaps.join(','));
       }
+      if (slot.date_source === 'ai_proposed') {
+        warnings.push('AI-proposed date, customer date unspecified.');
+      }
+      warnings.forEach(function (w) { reasons.push(w); });
+      // An AI-proposed date is a normal proposal to approve, so it stays 'ready' as
+      // before. Missing coverage is the one caution that downgrades the status, because
+      // the slot may be sitting on leave or travel nobody has read.
+      status = capGaps.length ? 'needs_decision' : 'ready';
+      proposal.execution_ready = false;
+      proposal.stampable = true;
+      proposal.coverage_gaps = capGaps;
+      proposal.warnings = warnings;
     }
   }
 
@@ -710,22 +762,20 @@ function validate(ground, model, input) {
     reasons.push('Send is not evidenced. Cannot sit in Waiting for reply.');
   }
 
+  // A stampable proposal owes the captain the text he would be approving, so the draft
+  // is written for every surviving proposal, not only the uncautioned ones.
+  // STANDING RULE: the customer is promised a 60 to 90 minute ARRIVAL WINDOW, never an
+  // exact minute, and never a raw ISO date. No em dashes in customer text.
   var draft = '';
-  if (proposal && status === 'ready') {
-    var hm = String(proposal.start_iso).slice(11, 16);
-    var hour = Number(hm.slice(0, 2));
-    var min = hm.slice(3);
-    var ampm = hour >= 12 ? 'pm' : 'am';
-    var h12 = hour % 12 || 12;
+  if (proposal) {
     var who = (input.resource && input.resource.name) || 'SecureWorks';
     var lane = input.resource && input.resource.lane === 'fencing' ? 'SecureWorks Fencing' : 'SecureWorks Patios';
-    var when = String(proposal.start_iso).slice(0, 10) + ' at ' + h12 + ':' + min + ampm;
-    if (proposal.date_source === 'ai_proposed') {
-      draft = 'Hi, I can visit ' + when + ' in ' + (input.suburb || 'the site') + '. Does that suit? ' + who + ', ' + lane;
-    } else {
-      draft = 'Hi, ' + when + ' in ' + (input.suburb || 'the site') + ' works for me. Can someone be there then? ' + who + ', ' + lane;
-    }
+    var when = longDateLabel(proposal.start_iso);
+    var window = arrivalWindowLabel(proposal.start_iso, proposal.end_iso);
+    draft = 'Hi, it is ' + who + ' from ' + lane + '. I can come out to ' + (input.suburb || 'your place') +
+      ' on ' + when + ' between ' + window + ' to measure and quote. Does that suit?';
     proposal.draft = draft;
+    proposal.arrival_window = window;
     proposal.kind = 'proposal';
   }
 

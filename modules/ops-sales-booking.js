@@ -673,6 +673,9 @@
     var found = null;
     for (var i = 0; i < list.length; i++) if (list[i].id === id) found = list[i];
     if (!found) return { ok: false, reason: 'no_case' };
+    if (caseLayer(found) === 'blocked') return { ok: false, reason: 'slot_blocked', sent: false, wrote_calendar: false };
+    if (blockingDiaryEvent(found)) return { ok: false, reason: 'slot_still_held', sent: false, wrote_calendar: false };
+    if (!found.proposal || !found.proposal.start_iso) return { ok: false, reason: 'no_proposed_time', sent: false, wrote_calendar: false };
     state.stamp.approved = state.stamp.approved.filter(function (x) { return x !== id; });
     state.stamp.rejected = state.stamp.rejected.filter(function (x) { return x !== id; });
     if (decision === 'keep') state.stamp.approved.push(id);
@@ -701,6 +704,106 @@
       sent: false,
       calendar_written: false
     };
+  }
+
+  // Standing rule: cancelled in the thread with the event still in the diary is a
+  // BLOCKED SLOT until the delete reads back. That is occupancy, so it holds against
+  // any proposal landing on those minutes, not only against the same customer's row.
+  function blockingDiaryEvent(c) {
+    if (!c || !c.proposal || !c.proposal.start_iso) return null;
+    var start = String(c.proposal.start_iso);
+    var end = String(c.proposal.end_iso || c.proposal.start_iso);
+    var found = null;
+    diary().forEach(function (ev) {
+      if (found || diaryLayerFor(ev) !== 'blocked') return;
+      var evStart = String(ev.start_iso || '');
+      var evEnd = String(ev.end_iso || ev.start_iso || '');
+      if (!evStart) return;
+      if (evStart < end && start < evEnd) found = ev;
+    });
+    return found;
+  }
+
+  function stampBlockReason(c) {
+    if (caseLayer(c) === 'blocked') {
+      return 'Cancelled in the thread with the diary event still present. The slot stays blocked until the delete reads back.';
+    }
+    var clash = blockingDiaryEvent(c);
+    if (clash) {
+      return 'This time is still held by a cancelled booking (' + (clash.display_name || 'diary event') + ') that has not been deleted yet.';
+    }
+    if (!c || !c.proposal || !c.proposal.start_iso) return 'No proposed time on this case, so there is nothing to stamp.';
+    return null;
+  }
+
+  // The why-stamp checklist. These are the engine's OWN reasons, verbatim, and they
+  // are shown so the captain can weigh them, never used to hide the row. A coverage
+  // gap or an undated customer is a caution on a stampable proposal; only a cancelled
+  // slot and a missing proposal actually remove the stamp.
+  // The engine emits the same fact in several wordings (its own warning, its review
+  // reason, and the structured gap list). Deduping on exact text let all three through
+  // and turned the card into the essay the captain has already rejected once. Each
+  // fact is therefore keyed by what it MEANS, and the first, shortest statement wins.
+  function checklistTopic(text) {
+    var t = String(text || '').toLowerCase();
+    if (/coverage|unobserved|not execution-ready/.test(t)) return 'coverage';
+    if (/ai[- ]proposed|customer date unspecified|weekday without a calendar date|time without a date/.test(t)) return 'ai_date';
+    if (/exact acceptance|not bound to a preceding sent offer|qualified yes/.test(t)) return 'acceptance';
+    if (/cancelled|blocked|delete reads back/.test(t)) return 'blocked';
+    if (/lane/.test(t)) return 'lane';
+    return 'other:' + t;
+  }
+
+  function stampChecklist(c) {
+    var out = [];
+    var seen = {};
+    var push = function (level, text) {
+      var t = String(text || '').trim();
+      if (!t) return;
+      var key = checklistTopic(t);
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push({ level: level, text: t });
+    };
+    var p = (c && c.proposal) || null;
+    var clash = blockingDiaryEvent(c);
+    if (clash) push('bad', 'This time is still held by a cancelled booking (' + (clash.display_name || 'diary event') + ') awaiting delete readback.');
+    if (p) {
+      (p.coverage_gaps || []).length
+        ? push('warn', 'Coverage not read: ' + (p.coverage_gaps || []).join(', '))
+        : push('ok', 'Calendar, leave and travel coverage read.');
+      if (p.date_source === 'ai_proposed' || p.customer_date_specified === false) {
+        push('warn', 'AI-proposed date. The customer did not name this day.');
+      } else if (p.customer_date_specified) {
+        push('ok', 'Customer named this date.');
+      }
+    }
+    // Anything the engine said that is not already covered above still gets through.
+    (c && c.review_reasons ? c.review_reasons : (c && c.reason ? [c.reason] : [])).forEach(function (r) {
+      push('warn', r);
+    });
+    push(c && c.exact_acceptance ? 'ok' : 'warn',
+      c && c.exact_acceptance
+        ? 'Exact acceptance is bound to a sent offer. Confirm booking is available.'
+        : 'No exact acceptance yet, so this stamp offers a time. It does not confirm one.');
+    return out;
+  }
+
+  // Evidence chips: the short facts behind the checklist.
+  function evidenceChips(c) {
+    var p = (c && c.proposal) || null;
+    var facts = threadFacts(c);
+    var chips = [];
+    chips.push([p && !(p.coverage_gaps || []).length ? 'ok' : 'warn',
+      p && (p.coverage_gaps || []).length ? 'Coverage partial' : 'Coverage read']);
+    chips.push([p && p.customer_date_specified ? 'ok' : 'warn',
+      p && p.customer_date_specified ? 'Customer date' : 'AI date']);
+    chips.push([c && c.exact_acceptance ? 'ok' : '', c && c.exact_acceptance ? 'Acceptance bound' : 'No acceptance']);
+    if (facts && facts.read_ok === false) chips.push(['bad', 'Thread not read']);
+    else if (facts && facts.quiet_window) chips.push(['warn', 'Quiet ' + facts.quiet_window]);
+    if (c && c.send_evidence === 'sent') chips.push(['warn', 'Offer already out']);
+    if (blockingDiaryEvent(c)) chips.push(['bad', 'Slot still held']);
+    return chips;
   }
 
   // ---------------------------------------------------------------------------
@@ -768,7 +871,13 @@
     var stamped = stampStateOf({ id: block.id });
     var cls = 'ev ' + kind + (kind === 'proposal' && stamped === 'keep' ? ' stamped' : '') + (block.id && block.id === state.selectedId ? ' sel' : '');
     var place = (block.address ? block.address + ', ' : '') + (block.suburb || '');
-    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '" style="top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
+    // Overlapping cards share the column rather than stacking: a proposal hidden under
+    // another proposal is a line the captain never gets to stamp.
+    var lanes = Math.max(1, block.lanes || 1);
+    var lane = block.lane || 0;
+    var width = 100 / lanes;
+    var geom = 'left:calc(' + (lane * width) + '% + 3px);width:calc(' + width + '% - 6px);right:auto;';
+    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '" style="' + geom + 'top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
       '<span class="stage">' + esc(stageTag(kind, stamped)) + '</span>' +
       '<span class="t evtime">' + esc(clockLabel(hour)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
       '<span class="n evname">' + esc(place || 'Address not given yet') + '</span>' +
@@ -811,6 +920,44 @@
     return ev.layer;
   }
 
+  // Assign each card a lane so overlapping cards sit side by side. Cards that clash
+  // share the column width; a card alone on its minutes keeps the full width.
+  function packLanes(cards) {
+    var visible = cards.filter(function (card) {
+      return state.layers[card.kind] && hourFromIso(card.block.start_iso) != null;
+    });
+    visible.sort(function (a, b) { return String(a.block.start_iso) < String(b.block.start_iso) ? -1 : 1; });
+    var spanOf = function (card) {
+      var start = hourFromIso(card.block.start_iso);
+      return { start: start, end: start + Math.max(0.5, durationHours(card.block.start_iso, card.block.end_iso)) };
+    };
+    // Group into clusters of mutually overlapping cards, then lane within a cluster.
+    var clusters = [];
+    var current = null;
+    visible.forEach(function (card) {
+      var sp = spanOf(card);
+      if (current && sp.start < current.end) {
+        current.cards.push(card);
+        current.end = Math.max(current.end, sp.end);
+      } else {
+        current = { cards: [card], end: sp.end };
+        clusters.push(current);
+      }
+    });
+    clusters.forEach(function (cluster) {
+      var laneEnds = [];
+      cluster.cards.forEach(function (card) {
+        var sp = spanOf(card);
+        var lane = 0;
+        while (lane < laneEnds.length && laneEnds[lane] > sp.start) lane += 1;
+        laneEnds[lane] = sp.end;
+        card.block.lane = lane;
+      });
+      cluster.cards.forEach(function (card) { card.block.lanes = laneEnds.length; });
+    });
+    return visible;
+  }
+
   function renderCalendar() {
     var data = state.data;
     var res = resource();
@@ -846,23 +993,29 @@
       if (band && band.day === d) {
         body += '<div class="block band" style="top:' + topPx(band.from) + 'px;height:' + ((band.to - band.from) * PX_PER_HOUR) + 'px"><strong>' + esc(band.label) + '</strong><span>' + esc(band.note) + '</span></div>';
       }
+      var dayCards = [];
       diary().forEach(function (ev) {
         if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
-        body += renderEvent(ev, diaryLayerFor(ev));
+        dayCards.push({ block: ev, kind: diaryLayerFor(ev) });
       });
       cases().forEach(function (c) {
         if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
-        var layer = caseLayer(c);
         body += renderWindows(c);
-        body += renderEvent({
-          id: c.id,
-          start_iso: c.proposal.start_iso,
-          end_iso: c.proposal.end_iso,
-          display_name: c.display_name,
-          address: c.address || '',
-          suburb: c.suburb,
-          job: c.job || ''
-        }, layer);
+        dayCards.push({
+          block: {
+            id: c.id,
+            start_iso: c.proposal.start_iso,
+            end_iso: c.proposal.end_iso,
+            display_name: c.display_name,
+            address: c.address || '',
+            suburb: c.suburb,
+            job: c.job || ''
+          },
+          kind: caseLayer(c)
+        });
+      });
+      packLanes(dayCards).forEach(function (card) {
+        body += renderEvent(card.block, card.kind);
       });
       cols += '<div class="daycol daycolumn">' + body + '</div>';
     }
@@ -963,6 +1116,19 @@
     var timeInput = c.proposal && c.proposal.start_iso
       ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
       : '';
+    // The stamp must be unavailable on the same terms everywhere. A cancelled job whose
+    // diary event is still there is not a time to offer, and a case with no proposed
+    // time has nothing to decide, so neither surface offers a stamp for them.
+    var stampRow;
+    var blockReason = stampBlockReason(c);
+    if (blockReason) {
+      stampRow = '<p class="fine">' + esc(blockReason) + '</p>';
+    } else {
+      stampRow = '<div class="stamprow"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '">Stamp KEEP</button>' +
+        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '">Stamp CUT</button>' +
+        (stamped === 'keep' || stamped === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div>' +
+        '<p class="fine">A stamp is not a send. KEEP records the captain decision in stamp.json; ops auto-book performs the text and the diary write on a separate authorised run.</p>';
+    }
     return '<div class="detailhead"><div class="row">' + pill + '</div>' +
       '<h2>' + esc(c.display_name || 'Enquiry') + '</h2>' +
       '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + (c.contact_id ? '' : ' · no GHL contact') + '</p>' +
@@ -974,10 +1140,7 @@
       '<div class="senderline small muted">' + senderLine(res) + ' · To this case only · Draft revision ' + esc(d.revision || 0) + (outsideSmsHours() ? ' · outside 08:00 to 18:00 Perth' : '') + '</div>' +
       '<button type="button" class="primary" data-booking-approve="1" disabled title="' + esc(HOLD_REASON) + '">Send message (held)</button>' +
       '<button type="button" data-booking-confirm="1" disabled title="' + esc(HOLD_REASON) + '">' + esc(actionLabel) + ' (held)</button>' +
-      '<div class="stamprow"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '">Stamp KEEP</button>' +
-      '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '">Stamp CUT</button>' +
-      (stamped === 'keep' || stamped === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div>' +
-      '<p class="fine">A stamp is not a send. KEEP records the captain decision in stamp.json; ops auto-book performs the text and the diary write on a separate authorised run.</p>' +
+      stampRow +
       timeInput +
       archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
@@ -1021,29 +1184,53 @@
     // proposal would decide nothing. The count of live cases held back is stated so a
     // short board never reads as a short week.
     var live = cases().filter(function (c) { return !isArchived(c) && !isCompleted(c); });
-    var list = live.filter(function (c) { return isAssessed(c) && c.proposal && c.proposal.start_iso; });
-    var withheld = live.length - list.length;
+    // A cancelled job whose diary event is still there is not a line to offer; the slot
+    // is blocked until the delete reads back. Everything else with a proposed time is
+    // stampable, cautions and all.
+    var list = live.filter(function (c) { return isAssessed(c) && !stampBlockReason(c); });
+    // Every line this board does not offer says WHY, grouped by the reason and naming
+    // the people. A withheld row must never just vanish into a count.
+    var withheldGroups = {};
+    live.forEach(function (c) {
+      if (isAssessed(c) && !stampBlockReason(c)) return;
+      var why = isAssessed(c) ? stampBlockReason(c) : 'Enumerated CRM row the engine has not assessed yet.';
+      if (!withheldGroups[why]) withheldGroups[why] = [];
+      withheldGroups[why].push(c.display_name || c.id);
+    });
     var rec = stampRecord();
     var rows = list.map(function (c) {
       var st = stampStateOf(c);
+      bindDraft(c);
       var d = draftKey(c) ? draftFor(c) : { text: '' };
       var slot = c.proposal && c.proposal.start_iso
         ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
         : 'No proposed time';
+      var chips = evidenceChips(c).map(function (ch) {
+        return '<span class="chip ' + esc(ch[0]) + '">' + esc(ch[1]) + '</span>';
+      }).join('');
+      var checklist = stampChecklist(c).map(function (item) {
+        return '<li class="' + esc(item.level) + '">' + esc(item.text) + '</li>';
+      }).join('');
       return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '">' +
         '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(c.suburb || '') + '</b></button>' +
-        '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div></div>' +
-        '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div></div>' +
+        '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div>' +
+        '<div class="chips">' + chips + '</div></div>' +
+        '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div>' +
+        '<ul class="whylist">' + checklist + '</ul></div>' +
         '<div class="actions"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'keep' ? ' aria-pressed="true"' : '') + '>KEEP</button>' +
         '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'cut' ? ' aria-pressed="true"' : '') + '>CUT</button>' +
         (st === 'keep' || st === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div></div>';
     }).join('');
     return '<section class="stampboard"><div class="sbhead">' +
-      '<div><h2>Captain stamp board</h2><p>KEEP or CUT each line. A stamp is a recorded decision, not a send. ' +
+      '<div><h2>Captain stamp board</h2><p>KEEP or CUT each proposed time. The checklist is the engine\'s own reasons, shown so you can weigh them. A caution never removes a line. A stamp is a recorded decision, not a send. ' +
       esc(CAPTAIN_DEFAULTS.stamp_board.charAt(0).toUpperCase() + CAPTAIN_DEFAULTS.stamp_board.slice(1)) + '.</p></div>' +
       '<span class="count">' + rec.approved.length + ' keep · ' + rec.rejected.length + ' cut · ' + list.length + ' line' + (list.length === 1 ? '' : 's') + '</span></div>' +
-      (withheld ? '<div class="qempty">' + withheld + ' live case' + (withheld === 1 ? ' has' : 's have') + ' no proposed time yet, so there is nothing to stamp on ' + (withheld === 1 ? 'it' : 'them') + '. They stay in the work queue.</div>' : '') +
-      (rows || '<div class="qempty">No line in this read carries a proposed time. Nothing to stamp.</div>') +
+      Object.keys(withheldGroups).map(function (why) {
+        var who = withheldGroups[why];
+        var names = who.length > 6 ? who.slice(0, 6).join(', ') + ' and ' + (who.length - 6) + ' more' : who.join(', ');
+        return '<div class="qempty"><strong>' + who.length + ' not offered here.</strong> ' + esc(why) + ' They stay in the work queue: ' + esc(names) + '.</div>';
+      }).join('') +
+      (rows || '<div class="qempty">No line in this read carries a stampable proposed time.</div>') +
       '<details class="filedetails"><summary>Show the file the terminal reads (stamp.json)</summary>' +
       '<div class="stampfile">' + esc(JSON.stringify(rec, null, 1)) + '</div></details></section>';
   }
@@ -1399,6 +1586,7 @@
     diary: diary,
     caseLayer: caseLayer,
     diaryLayerFor: diaryLayerFor,
+    packLanes: packLanes,
     urgency: urgency,
     isAssessed: isAssessed,
     daysWaiting: daysWaiting,
@@ -1406,7 +1594,12 @@
     followThrough: followThrough,
     stampCase: stampCase,
     stampRecord: stampRecord,
-    stampStateOf: stampStateOf
+    stampStateOf: stampStateOf,
+    stampChecklist: stampChecklist,
+    checklistTopic: checklistTopic,
+    blockingDiaryEvent: blockingDiaryEvent,
+    stampBlockReason: stampBlockReason,
+    evidenceChips: evidenceChips
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

@@ -6,29 +6,39 @@ calendars (via `sw-mcp`) and **live** GHL threads. No fixtures: the module refus
 
 | Shot | What it shows |
 |---|---|
-| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events. Cancelled Marangaroo slot reads CANCELLED and stays blocked. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. |
+| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus 6 AI proposals. The cancelled Marangaroo slot reads CANCELLED and stays blocked. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
 | `marnin-week-14sep.png` | Marnin, week of 14 Sep. 11 real provider events, 776 line, Stratco lane stated as an offering rule over real off-lane bookings. |
-| `stamp-board-marnin.png` | Held actions, Stamp KEEP / CUT, and the `stamp.json` the terminal reads with `sent:false, calendar_written:false`. |
+| `stamp-board-nithin.png` | Six stampable AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough, Marangaroo) with evidence chips, the why-stamp checklist, and KEEP / CUT live. Withheld lines named with their reason, including Jason blocked. |
 
-## Finding the captain should see before tomorrow
+## How the stamp board reads on the real week
 
-On the real week of 14 Sep the engine produced **zero execution-ready proposals** for
-either scoper. Every assessed enquiry was refused with its own reason, read from the live
-thread:
+Every one of these is an **AI proposal**: the customer did not name the day, and calendar,
+leave and travel coverage was not read. Under the captain's ruling that is exactly what he
+stamps, so each line is offered with its reasons on the card rather than withheld.
 
-| Case | Engine's reason |
-|---|---|
-| Carlisle | Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal. |
-| Merriwa | Customer named a weekday without a calendar date. A slot on that weekday is an AI proposal. |
-| Mt Hawthorn | Yes is not bound to a preceding sent offer id and slot revision. |
-| Fremantle | Qualified yes is not exact acceptance. |
-| Scarborough | Customer date unspecified. Any chosen day is an AI proposal, not a customer-stated date. |
-| Marangaroo | Calendar, leave or travel coverage is missing. Not execution-ready. |
+| Case | Proposed | Why it is a caution, not a refusal |
+|---|---|---|
+| Carlisle | Tue 15 Sep, arrive 1:00 to 2:30pm | Weekday named without a calendar date |
+| Merriwa | Fri 18 Sep, arrive 8:00 to 9:30am | Weekday named without a calendar date |
+| Mt Hawthorn | Mon 14 Sep, arrive 12:00 to 1:30pm | Yes is not bound to a preceding sent offer id |
+| Fremantle | Mon 14 Sep, arrive 1:00 to 2:30pm | Qualified yes is not exact acceptance |
+| Scarborough | Mon 14 Sep, arrive 1:00 to 2:30pm | Customer date unspecified |
+| Marangaroo | Mon 14 Sep, arrive 12:00 to 1:30pm | Customer date unspecified |
 
-So the stamp board is correctly empty: there is nothing execution-ready to stamp. That is
-the engine holding the line, not the surface failing. The gating input is coverage
-(operational leave and travel are unread) plus threads that never named a date. Worth
-knowing before the surface is expected to produce stampable lines in the morning.
+Every line carries the coverage caution (calendar, leave and travel unread) and "No exact
+acceptance yet, so this stamp offers a time. It does not confirm one."
+
+Withheld and named on the board, never dropped:
+
+- **Jason** (1): cancelled in the thread with the diary event still present. Blocked until
+  the delete reads back.
+- **Arlette Bruggeman, Eva Suh, Aaron Koh, Jennifer** (4): booked visits with no proposed
+  time, so there is nothing to stamp.
+- **493 enumerated CRM rows**: the engine has not assessed them yet.
+
+Confirm booking is unavailable on every line, which is correct: execution-ready means exact
+acceptance bound to a sent offer, and none of these have it. That gate is separate from the
+stamp, and both are hard-held in any case.
 
 ## Capture method
 

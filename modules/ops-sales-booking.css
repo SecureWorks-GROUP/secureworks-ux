@@ -204,6 +204,21 @@
 #salesBookingRoot .stampcard .why{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}
 #salesBookingRoot .stampcard .actions{display:grid;gap:6px}
 #salesBookingRoot .stampcard .actions button{width:100%;font-size:11px}
+#salesBookingRoot .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+#salesBookingRoot .chip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;padding:2px 7px;border-radius:3px;border:1px solid var(--line);background:#fff;white-space:nowrap;color:var(--muted)}
+#salesBookingRoot .chip:before{content:'';width:7px;height:7px;border-radius:50%;background:#9BADB7}
+#salesBookingRoot .chip.ok{color:var(--green);border-color:#B8D6C8;background:#EDF7F1}
+#salesBookingRoot .chip.ok:before{background:var(--green)}
+#salesBookingRoot .chip.warn{color:var(--warn);border-color:#e8d2a8;background:#fbf3e6}
+#salesBookingRoot .chip.warn:before{background:#C9962B}
+#salesBookingRoot .chip.bad{color:var(--red);border-color:#D88F8C;background:#FFF2F1}
+#salesBookingRoot .chip.bad:before{background:var(--red)}
+#salesBookingRoot .whylist{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+#salesBookingRoot .whylist li{display:flex;gap:7px;font-size:11px;color:var(--muted);align-items:flex-start;line-height:1.45}
+#salesBookingRoot .whylist li:before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:#9BADB7;margin-top:5px}
+#salesBookingRoot .whylist li.ok:before{background:var(--green)}
+#salesBookingRoot .whylist li.warn:before{background:#C9962B}
+#salesBookingRoot .whylist li.bad:before{background:var(--red)}
 #salesBookingRoot .filedetails summary{padding:10px 16px;font-size:11.5px;color:var(--muted);cursor:pointer;background:var(--soft);border-top:1px solid var(--line)}
 #salesBookingRoot .stampfile{padding:14px 16px;background:var(--dark);color:#d9e0e3;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;line-height:1.5}
 

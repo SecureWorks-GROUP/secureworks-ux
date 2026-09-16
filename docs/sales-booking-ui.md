@@ -6,9 +6,10 @@ nothing.
 
 ## Nothing here writes
 
-`SEND_HOLD` is on. Send message, Approve offer, Confirm booking and every calendar write
-render **disabled** carrying `HOLD_REASON`, and `attemptApprove()` refuses on the hold even
-if a click reaches it. A **stamp is not a send**: KEEP and CUT write a local
+`SEND_HOLD` is on. Opening a case is a thread read only: `selectCase` loads
+`ghl-proxy?action=get_conversation` and posts nothing. Send message, Approve offer,
+Confirm booking and every calendar write render **disabled** carrying `HOLD_REASON`,
+and `attemptApprove()` refuses on the hold even if a click reaches it. A **stamp is not a send**: KEEP and CUT write a local
 `stamp.json`-shaped record (`captain, profile, week_start, approved, rejected, decisions,
 sent:false, calendar_written:false`) that ops auto-book reads on a separate authorised run.
 Switching scoper drops the stamp so one scoper's decisions cannot be carried onto another.
@@ -104,7 +105,10 @@ enquiry date with days waited, and an urgency tag.
 
 `node scripts/sales-booking-preview.mjs` then `http://127.0.0.1:4174/ops.html#booking`.
 Reads the live Microsoft calendar through `sw-mcp` and live GHL threads; customer send
-stays held. Sign-in is required for the in-page GHL thread only.
+stays held. Sign-in is required for the in-page GHL thread only. The preview attaches
+only the cancelled GHL enquiry (`status: repair`) to the diary event whose subject
+already matches `/jason|marangaroo/i` (`sales-booking-repair-event.cjs`). Other open
+enquiries keep `event_id` null, so a booked same-suburb visit cannot become their diary.
 
 Design source: the captain-approved end-state prototype after three rounds of feedback
 (`data/booking-endstate-prototype-20260916/`). Evidence:

@@ -6,9 +6,9 @@ calendars (via `sw-mcp`) and **live** GHL threads. No fixtures: the module refus
 
 | Shot | What it shows |
 |---|---|
-| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus 5 AI proposals. The cancelled Marangaroo slot reads CANCELLED and stays blocked. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
+| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus AI proposals. The Jason diary slot at Mon 8:30 reads CANCELLED. This capture still also paints the open Marangaroo enquiry as a Mon 12:00 proposal. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
 | `marnin-week-14sep.png` | Marnin, week of 14 Sep. 11 real provider events, 776 line, Stratco lane stated as an offering rule over real off-lane bookings. |
-| `stamp-board-nithin.png` | Five stampable AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough) with evidence chips, the why-stamp checklist, and KEEP / CUT live. Withheld lines named with their reason, including Marangaroo and Jason blocked. |
+| `stamp-board-nithin.png` | Capture still shows six KEEP / CUT lines, including Marangaroo. Current board withholds Marangaroo after the cancelled enquiry is attached to that diary event; see `docs/sales-booking-ui.md`. The five other AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough) carry evidence chips and the why-stamp checklist. |
 
 ## How the stamp board reads on the real week
 

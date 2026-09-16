@@ -221,38 +221,6 @@
     return true;
   }
 
-  function looksLikeCancel(text) {
-    var t = String(text || '');
-    if (/\b(do not|don't|dont|please do not|please don't)\s+cancel\b/i.test(t)) return false;
-    return /\b(cancel(led)?|call(ed)? it off|not going ahead)\b/i.test(t);
-  }
-
-  function enqueueReassess(c, eventKey) {
-    if (!c || typeof global.opsPost !== 'function') return;
-    global.opsPost('sales_booking_on_event', { event_key: eventKey, type: 'inbound', case_id: c.id });
-  }
-
-  function applyLatestInboundToCase(msgs, c) {
-    if (!c || !msgs || !msgs.length) return;
-    var last = null;
-    msgs.forEach(function (m) {
-      if ((m.direction || 'inbound') !== 'outbound') last = m;
-    });
-    if (!last) return;
-    var key = 'ghl:' + c.id + ':' + (last.id || last.timestamp || 'latest');
-    if (looksLikeCancel(last.body || last.text || '')) {
-      c.exact_acceptance = false;
-      c.status = 'repair';
-      enqueueReassess(c, key);
-      return;
-    }
-    if (c.exact_acceptance) {
-      c.exact_acceptance = false;
-      c.status = 'needs_decision';
-      enqueueReassess(c, key);
-    }
-  }
-
   function actionKind(c) {
     if (!c) return 'none';
     if (c.status === 'repair') return 'repair';
@@ -1109,10 +1077,6 @@
         '<span class="small muted">from ' + esc(route.label) + ' · edit it right here</span></div>' +
         '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea></div>'
       : '<div class="compose"><h3>Proposed text</h3><p class="small muted">No proposed time yet, so there is no text to review.</p></div>';
-    var archiveBlock = hasBlockingCommitment(c)
-      ? '<p class="fine">Archive is blocked while a diary event or outstanding offer remains. Withdrawal is a separate held action.</p>'
-      : '<div class="archive-row"><label class="small muted">Archive reason <select data-booking-archive-reason><option value="">Choose…</option><option value="out_of_service">Out of service</option><option value="declined">Declined</option><option value="duplicate">Duplicate</option><option value="no_longer_proceeding">No longer proceeding</option></select></label><button type="button" data-booking-archive="1">Archive</button></div>';
-    if (isArchived(c)) archiveBlock = '<button type="button" data-booking-restore="' + esc(c.id) + '">Restore to workload</button>';
     var timeInput = c.proposal && c.proposal.start_iso
       ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
       : '';
@@ -1142,7 +1106,6 @@
       '<button type="button" data-booking-confirm="1" disabled title="' + esc(HOLD_REASON) + '">' + esc(actionLabel) + ' (held)</button>' +
       stampRow +
       timeInput +
-      archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
       '</div>';
   }
@@ -1392,8 +1355,6 @@
       msgs.sort(function (a, b) { return String(a.timestamp || '') < String(b.timestamp || '') ? -1 : 1; });
       state.conversation.messages = msgs;
       state.conversation.loading = false;
-      var selected = selectedCase();
-      if (selected && selected.contact_id === contactId) applyLatestInboundToCase(msgs, selected);
     } catch (e) {
       if (generation !== state.conversation.generation) return;
       if (e && e.name === 'AbortError') return;
@@ -1495,21 +1456,6 @@
       if (approve) {
         e.preventDefault();
         attemptApprove();
-        render();
-        return;
-      }
-      var arch = e.target.closest && e.target.closest('[data-booking-archive]');
-      if (arch) {
-        e.preventDefault();
-        var reasonEl = root() && root().querySelector('[data-booking-archive-reason]');
-        archiveCase(reasonEl && reasonEl.value, '');
-        render();
-        return;
-      }
-      var rest = e.target.closest && e.target.closest('[data-booking-restore]');
-      if (rest) {
-        e.preventDefault();
-        restoreCase(rest.getAttribute('data-booking-restore'));
         render();
         return;
       }

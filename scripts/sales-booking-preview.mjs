@@ -16,6 +16,7 @@ import { handleLocal } from './sales-booking-local-api.mjs';
 
 const require = createRequire(import.meta.url);
 const assess = require('../modules/sales-booking-assess.cjs');
+const diaryJoin = require('../modules/sales-booking-diary-join.cjs');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SALES_BOOKING_PREVIEW_PORT || 4174);
@@ -185,7 +186,7 @@ async function salesBookingRead(query) {
     } catch {
       reason = 'GHL conversation was not retrieved in this preview read. Select the case to load the thread through the signed-in GHL path.';
     }
-    cases.push({
+    cases.push(diaryJoin.attachDiaryEvent(row, {
       id: row.id,
       contact_id: row.contact_id,
       suburb: row.suburb,
@@ -194,7 +195,7 @@ async function salesBookingRead(query) {
       reason,
       event_id: null,
       proposal
-    });
+    }, events));
   }
   return {
     ok: true,

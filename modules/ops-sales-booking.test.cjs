@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const api = require('./ops-sales-booking.js');
+const performance = require('./ops-sales-performance.js');
+const diaryJoin = require('./sales-booking-diary-join.cjs');
 
 function sampleRead(resource) {
   return {
@@ -106,6 +108,62 @@ test('slower previous resource cannot replace the current workspace', async () =
   assert.equal(api.state.resourceId, 'khairo');
 });
 
+test('opening a conversation is read-only and never posts a booking event', async () => {
+  const posts = [];
+  global.opsPost = (action, body) => { posts.push({ action, body }); };
+  global.opsAuthHeaders = async () => ({ Authorization: 'Bearer t' });
+  global._commsGHLBase = 'https://invalid.test/ghl-proxy';
+  global.fetch = async () => ({ json: async () => ({ messages: [{ body: 'please cancel', direction: 'inbound', timestamp: '1' }] }) });
+  api.state.data = sampleRead();
+  api.state.selectedId = 'case-a';
+  api.state.conversation.generation = 0;
+  await api.loadConversation('contact-a', 'case-a');
+  assert.equal(api.state.conversation.messages.length, 1);
+  assert.equal(posts.length, 0);
+  assert.equal(api.state.data.cases[0].status, 'ready');
+});
+
+test('a GHL case joins its surviving diary event so cancelled-plus-event-present blocks the stamp', () => {
+  const events = [{
+    event_id: 'evt-jason',
+    subject: 'Scope: Jason, Marangaroo',
+    display_name: 'Jason',
+    suburb: 'Marangaroo',
+    start_iso: '2026-09-14T10:00:00'
+  }];
+  const row = { id: 'marangaroo', suburb: 'Marangaroo', status: 'repair', contact_id: 'ghl-1' };
+  const built = {
+    id: 'marangaroo',
+    contact_id: 'ghl-1',
+    display_name: 'Marangaroo enquiry',
+    suburb: 'Marangaroo',
+    status: 'ready',
+    reason: 'AI proposal',
+    event_id: null,
+    proposal: { start_iso: '2026-09-14T12:00:00', end_iso: '2026-09-14T13:00:00' }
+  };
+  const joined = diaryJoin.attachDiaryEvent(row, built, events);
+  assert.equal(joined.event_id, 'evt-jason');
+  assert.equal(joined.status, 'repair');
+  assert.equal(api.caseLayer(joined), 'blocked');
+  assert.match(api.stampBlockReason(joined), /Cancelled in the thread with the diary event still present/);
+  api.state.resourceId = 'nithin';
+  api.state.data = sampleRead();
+  api.state.data.cases.push(joined);
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  const html = api.renderHTML();
+  assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="marangaroo"/);
+  assert.doesNotMatch(html, /data-booking-stamp="cut" data-booking-stamp-id="marangaroo"/);
+  assert.match(html, /Marangaroo enquiry/);
+  const open = diaryJoin.attachDiaryEvent(
+    { id: 'carlisle', suburb: 'Carlisle', status: 'ready' },
+    { id: 'carlisle', suburb: 'Carlisle', status: 'ready', event_id: null, proposal: built.proposal },
+    events
+  );
+  assert.equal(open.event_id, null);
+  assert.equal(open.status, 'ready');
+});
+
 test('stale conversation response is ignored after a case switch', async () => {
   let resolveOld;
   global.opsAuthHeaders = async () => ({ Authorization: 'Bearer t' });
@@ -151,15 +209,164 @@ test('XSS in provider subjects is escaped', () => {
   assert.doesNotMatch(html, /<img src=x/);
 });
 
-test('host wires Sales parent, keeps Performance restore, and loads Booking', () => {
-  const s = fs.readFileSync(require.resolve('../ops.html'), 'utf8');
-  assert.equal((s.match(/data-view="sales"/g) || []).length, 2);
-  assert.match(s, /id="viewSales"/);
-  assert.match(s, /id="salesBookingRoot"/);
-  assert.match(s, /id="salesPerformanceRoot"/);
-  assert.match(s, /modules\/ops-sales-booking\.js/);
-  assert.match(s, /'materials', 'performance', 'booking', 'sales', 'inbox'/);
-  assert.ok(s.indexOf('modules/ops-sales-booking.js') < s.indexOf('function showView('));
+function classList() {
+  const set = new Set();
+  return {
+    add: (...names) => names.forEach((n) => set.add(n)),
+    remove: (...names) => names.forEach((n) => set.delete(n)),
+    toggle: (name, on) => {
+      if (on === undefined) {
+        if (set.has(name)) set.delete(name);
+        else set.add(name);
+      } else if (on) set.add(name);
+      else set.delete(name);
+    },
+    contains: (name) => set.has(name)
+  };
+}
+
+function hostElement(id, attrs) {
+  const attributes = Object.assign({}, attrs);
+  return {
+    id: id || '',
+    classList: classList(),
+    style: {},
+    innerHTML: '',
+    dispatchEvent: () => true,
+    getAttribute: (key) => (attributes[key] == null ? null : attributes[key]),
+    setAttribute: (key, value) => { attributes[key] = String(value); },
+    hasAttribute: (key) => attributes[key] != null
+  };
+}
+
+function salesHost() {
+  const viewSales = hostElement('viewSales');
+  const viewToday = hostElement('viewToday');
+  const bookingRoot = hostElement('salesBookingRoot');
+  const performanceRoot = hostElement('salesPerformanceRoot');
+  const desktopSales = hostElement('', { 'data-view': 'sales' });
+  const mobileSales = hostElement('', { 'data-view': 'sales' });
+  const perfTab = hostElement('', { 'data-sales-tab': 'performance' });
+  const bookTab = hostElement('', { 'data-sales-tab': 'booking' });
+  const body = hostElement('body');
+  const byId = {
+    viewSales,
+    viewToday,
+    salesBookingRoot: bookingRoot,
+    salesPerformanceRoot: performanceRoot,
+    salesWorkspaceSubnav: hostElement('salesWorkspaceSubnav'),
+    jobDetailView: hostElement('jobDetailView')
+  };
+  return {
+    viewSales,
+    viewToday,
+    bookingRoot,
+    performanceRoot,
+    desktopSales,
+    mobileSales,
+    perfTab,
+    bookTab,
+    body,
+    document: {
+      body,
+      getElementById: (id) => byId[id] || null,
+      querySelectorAll: (sel) => {
+        if (sel === '.view') return [viewSales, viewToday];
+        if (sel === '.header-nav button') return [desktopSales];
+        if (sel === '.mobile-nav button') return [mobileSales];
+        if (sel === '[data-view="sales"]') return [desktopSales, mobileSales];
+        if (sel === '#salesWorkspaceSubnav [data-sales-tab]') return [perfTab, bookTab];
+        return [];
+      },
+      addEventListener: () => {}
+    }
+  };
+}
+
+async function waitUntil(pred) {
+  for (let i = 0; i < 30; i++) {
+    if (pred()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('timed out waiting for host view');
+}
+
+test('showView loads Booking beside Performance and restores the last Sales tab', async () => {
+  const host = salesHost();
+  const store = {};
+  const source = fs.readFileSync(require.resolve('../ops.html'), 'utf8');
+  const start = source.indexOf('function showView(view)');
+  const end = source.indexOf('\nvar _approvalsActiveTab', start);
+  assert.ok(end > start, 'showView slice must include the Sales host');
+  const prevDoc = global.document;
+  const prevFetch = global.opsFetch;
+  global.document = host.document;
+  global.opsFetch = async (action) => {
+    if (action === 'sales_booking_read') return sampleRead();
+    if (action === 'sales_performance_read') {
+      return { rows: [], week_start: '2026-08-31', week_starts: ['2026-08-31'], available_weeks: ['2026-08-31'], fetched_at: '2026-09-07T01:00:00Z' };
+    }
+    throw new Error('unexpected ' + action);
+  };
+  const ctx = {
+    document: host.document,
+    localStorage: {
+      getItem: (key) => (store[key] == null ? null : store[key]),
+      setItem: (key, value) => { store[key] = String(value); }
+    },
+    history: { replaceState: () => {} },
+    SalesWorkspace: global.SalesWorkspace,
+    jobDetailIsOpen: () => false,
+    closeJobDetail: () => {},
+    loadToday: () => {},
+    loadCalendar: () => {},
+    loadJobs: () => {},
+    loadFinancials: () => {},
+    loadMaterials: () => {},
+    loadInbox: () => {},
+    loadApprovals: () => {},
+    updateJarvisSummary: () => {},
+    setTimeout: () => 0
+  };
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(start, end), ctx);
+  try {
+    ctx.showView('booking');
+    await waitUntil(() => api.state.data && !api.state.loading);
+    assert.equal(api.state.subtab, 'booking');
+    assert.ok(host.viewSales.classList.contains('active'));
+    assert.ok(host.viewSales.classList.contains('sales-sub-booking'));
+    assert.ok(host.desktopSales.classList.contains('active'));
+    assert.ok(host.mobileSales.classList.contains('active'));
+    assert.equal(host.bookTab.getAttribute('aria-selected'), 'true');
+    assert.match(host.bookingRoot.innerHTML, /Sample A/);
+    assert.equal(store.sw_ops_sales_tab, 'booking');
+
+    ctx.showView('performance');
+    await waitUntil(() => performance.state.data && !performance.state.loading);
+    assert.equal(api.state.subtab, 'performance');
+    assert.ok(host.viewSales.classList.contains('sales-sub-performance'));
+    assert.match(host.performanceRoot.innerHTML, /Sales performance/);
+    assert.equal(host.perfTab.getAttribute('aria-selected'), 'true');
+    assert.ok(host.body.classList.contains('performance-view-active'));
+    assert.equal(store.sw_ops_sales_tab, 'performance');
+
+    ctx.showView('today');
+    assert.ok(host.viewToday.classList.contains('active'));
+    assert.equal(host.viewSales.classList.contains('active'), false);
+
+    ctx.showView('sales');
+    await waitUntil(() => performance.state.data && !performance.state.loading);
+    assert.equal(api.state.subtab, 'performance');
+    assert.equal(host.perfTab.getAttribute('aria-selected'), 'true');
+    assert.ok(host.viewSales.classList.contains('active'));
+    assert.ok(host.body.classList.contains('performance-view-active'));
+    assert.match(host.performanceRoot.innerHTML, /Sales performance/);
+    assert.match(host.bookingRoot.innerHTML, /Sample A/);
+  } finally {
+    global.document = prevDoc;
+    global.opsFetch = prevFetch;
+  }
 });
 
 test('booked cases stay on the default unscoped list; archived and completed do not', () => {
@@ -185,6 +392,9 @@ test('selected case shows chat, draft and proposed time together', () => {
   assert.match(html, /Proposed time/);
   assert.match(html, /Approve offer \(held\)/);
   assert.match(html, /2026-09-17T13:00:00/);
+  assert.doesNotMatch(html, /data-booking-archive/);
+  assert.doesNotMatch(html, /data-booking-restore/);
+  assert.doesNotMatch(html, />Archive</);
 });
 
 test('confirm booking is not offered without exact acceptance', () => {

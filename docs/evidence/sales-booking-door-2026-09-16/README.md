@@ -6,9 +6,9 @@ calendars (via `sw-mcp`) and **live** GHL threads. No fixtures: the module refus
 
 | Shot | What it shows |
 |---|---|
-| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus 6 AI proposals. The cancelled Marangaroo slot reads CANCELLED and stays blocked. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
+| `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus 5 AI proposals. The cancelled Marangaroo slot reads CANCELLED and stays blocked. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
 | `marnin-week-14sep.png` | Marnin, week of 14 Sep. 11 real provider events, 776 line, Stratco lane stated as an offering rule over real off-lane bookings. |
-| `stamp-board-nithin.png` | Six stampable AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough, Marangaroo) with evidence chips, the why-stamp checklist, and KEEP / CUT live. Withheld lines named with their reason, including Jason blocked. |
+| `stamp-board-nithin.png` | Five stampable AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough) with evidence chips, the why-stamp checklist, and KEEP / CUT live. Withheld lines named with their reason, including Marangaroo and Jason blocked. |
 
 ## How the stamp board reads on the real week
 
@@ -23,15 +23,14 @@ stamps, so each line is offered with its reasons on the card rather than withhel
 | Mt Hawthorn | Mon 14 Sep, arrive 12:00 to 1:30pm | Yes is not bound to a preceding sent offer id |
 | Fremantle | Mon 14 Sep, arrive 1:00 to 2:30pm | Qualified yes is not exact acceptance |
 | Scarborough | Mon 14 Sep, arrive 1:00 to 2:30pm | Customer date unspecified |
-| Marangaroo | Mon 14 Sep, arrive 12:00 to 1:30pm | Customer date unspecified |
 
 Every line carries the coverage caution (calendar, leave and travel unread) and "No exact
 acceptance yet, so this stamp offers a time. It does not confirm one."
 
 Withheld and named on the board, never dropped:
 
-- **Jason** (1): cancelled in the thread with the diary event still present. Blocked until
-  the delete reads back.
+- **Marangaroo** and **Jason** (2): cancelled in the thread with the diary event still
+  present. Blocked until the delete reads back. No KEEP / CUT.
 - **Arlette Bruggeman, Eva Suh, Aaron Koh, Jennifer** (4): booked visits with no proposed
   time, so there is nothing to stamp.
 - **493 enumerated CRM rows**: the engine has not assessed them yet.

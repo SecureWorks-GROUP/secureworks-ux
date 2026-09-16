@@ -91,11 +91,22 @@ The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 persisted at `localStorage.sw_cal_divs`) is a flat list of independently
 toggleable job-type buckets, not a hierarchy — Repair (Captain ruling
 2026-09-16) is its own division alongside Patios/Fencing/Make Safes, never
-folded under Make Safes. Adding a division touches three spots: the sidebar
-`<label>` markup, `allDivs` in `toggleCalDivision` (drives the "every division
-ticked -> collapse to All" rule), and the `f === '<div>' && div === ...` match
-list in `renderScheduleView`'s division filter (this is the only place that
-actually drops non-matching events; the Crew swimlane view only dims). Guard:
+folded under Make Safes. Which bucket an event belongs to is decided in ONE
+place, `calDivisionOf(ev)`: `repair` when the feed's `job_family` is `repair`
+(case-insensitive) OR `job_type === 'repair'`, else the job_type mapping
+(decking -> patio, makesafes -> makesafe). That family-first rule mirrors the
+board's `isRepairJob`, so a job moved onto the Repairs pipeline by family
+metadata alone (jobs.type still makesafe/fencing) files under Repair on the
+calendar too; `job_family` is a nullable feed field owned by the backend lane
+calendar-feed-job-family, and while absent the fallback is byte-identical to
+job_type. It is a FILTER bucket, not the type glyph — the Crew-view type icon
+still reads raw `job_type`, so decking keeps its own glyph. Adding a division
+touches three spots: the sidebar `<label>` markup, `allDivs` in
+`toggleCalDivision` (drives the "every division ticked -> collapse to All"
+rule), and `calDivisionOf` (plus its `.cal-schedule-bar.<div>` colour class),
+which `renderScheduleView`'s division filter compares against with
+`f === calDivisionOf(ev)` — the only place that actually drops non-matching
+events; the Crew swimlane view only dims. Guard:
 `tests/e2e/ops-calendar-repair-division.spec.js`.
 
 ## Ops Insurance Repairs board (`ops.html`)

@@ -4689,6 +4689,7 @@
             <label class="cal-sidebar-item"><input type="checkbox" data-caldiv="patio" onchange="toggleCalDivision('patio', this.checked)"><span class="cal-sidebar-dot" style="background:var(--sw-orange);"></span>Patios</label>
             <label class="cal-sidebar-item"><input type="checkbox" data-caldiv="fencing" onchange="toggleCalDivision('fencing', this.checked)"><span class="cal-sidebar-dot" style="background:var(--sw-mid);"></span>Fencing</label>
             <label class="cal-sidebar-item"><input type="checkbox" data-caldiv="makesafe" onchange="toggleCalDivision('makesafe', this.checked)"><span class="cal-sidebar-dot" style="background:#D97706;"></span>Make Safes</label>
+            <label class="cal-sidebar-item"><input type="checkbox" data-caldiv="repair" onchange="toggleCalDivision('repair', this.checked)"><span class="cal-sidebar-dot" style="background:#0D9488;"></span>Repair</label>
           </div>
         </div>
       </div>
@@ -8371,7 +8372,7 @@ function setCalRange(mode) {
 }
 
 function toggleCalDivision(div, checked) {
-  var allDivs = ['patio', 'fencing', 'makesafe'];
+  var allDivs = ['patio', 'fencing', 'makesafe', 'repair'];
   if (div === 'all') {
     // "All" toggled on -> select all, toggled off -> deselect all
     if (checked) {
@@ -8387,7 +8388,7 @@ function toggleCalDivision(div, checked) {
     } else {
       _calDivFilters = _calDivFilters.filter(function(d) { return d !== div; });
     }
-    // If all three are now selected, switch to 'all'
+    // If every division is now selected, switch to 'all'
     var allSelected = allDivs.every(function(d) { return _calDivFilters.indexOf(d) !== -1; });
     if (allSelected) _calDivFilters = ['all'];
     // If none selected, default to 'all'
@@ -9323,6 +9324,7 @@ function renderScheduleView(container, range) {
         if (f === 'patio' && (div === 'patio' || div === 'decking')) { match = true; break; }
         if (f === 'fencing' && div === 'fencing') { match = true; break; }
         if (f === 'makesafe' && (div === 'makesafe' || div === 'makesafes')) { match = true; break; }
+        if (f === 'repair' && div === 'repair') { match = true; break; }
       }
       if (!match) return;
     }

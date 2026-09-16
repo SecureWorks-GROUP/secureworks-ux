@@ -208,14 +208,17 @@ test('time change revises an unedited draft and keeps a human edit with a confli
   api.state.drafts = {};
   const first = api.reviseProposedTime('2026-09-17T14:00:00');
   assert.equal(first.conflict, false);
-  assert.match(first.text, /2:00pm/);
+  // The customer is promised an arrival window, never an exact minute (standing rule).
+  assert.match(first.text, /between 2:00 and 3:30pm/);
+  assert.doesNotMatch(first.text, /at 2:00pm/);
   assert.match(first.text, /Nithin/);
+  assert.doesNotMatch(first.text, /\u2014/);
   api.state.drafts['case-a'].humanEdited = true;
   api.state.drafts['case-a'].text = 'Keep my wording';
   const second = api.reviseProposedTime('2026-09-17T15:00:00');
   assert.equal(second.conflict, true);
   assert.equal(api.state.drafts['case-a'].text, 'Keep my wording');
-  assert.match(second.suggested, /3:00pm/);
+  assert.match(second.suggested, /between 3:00 and 4:30pm/);
 });
 
 test('render after unedited time change keeps the revised draft, not the old proposal text', () => {
@@ -225,7 +228,7 @@ test('render after unedited time change keeps the revised draft, not the old pro
   api.state.drafts = {};
   api.reviseProposedTime('2026-09-17T14:00:00');
   const html = api.renderHTML();
-  assert.match(html, /2:00pm/);
+  assert.match(html, /between 2:00 and 3:30pm/);
   assert.doesNotMatch(html, /Thursday 1:00pm works/);
 });
 
@@ -313,17 +316,26 @@ test('accepted duration change invalidates confirm booking', () => {
   assert.equal(api.actionKind(api.state.data.cases[0]), 'approve_offer');
 });
 
-test('Marnin sender stays unresolved between 772 and 776', () => {
+test('Marnin Stratco line is a captain default of 776 that still names both sources', () => {
+  // Captain ruling 2026-09-16 settled the 772-vs-776 disagreement for v1. It is a
+  // recorded default the captain can flip, not code guessing a line, so both source
+  // claims must survive on the record.
   api.state.resourceId = 'marnin';
   const route = api.resolveSender(api.RESOURCES.marnin);
-  assert.equal(route.resolved, false);
-  assert.equal(route.number, null);
-  assert.equal(route.candidates.length, 2);
+  assert.equal(route.resolved, true);
+  assert.equal(route.number, '+61489267776');
+  assert.equal(api.RESOURCES.marnin.sender_default.by, 'captain');
+  assert.equal(api.RESOURCES.marnin.sender_default.flippable, true);
+  assert.equal(api.RESOURCES.marnin.sender_candidates.length, 2);
+  assert.ok(api.RESOURCES.marnin.sender_candidates.some((c) => c.number === '+61489267772'));
+  assert.equal(api.CAPTAIN_DEFAULTS.stratco_sender_line, '776');
+  // A resolved line is still not permission to send.
   api.state.data = sampleRead('marnin');
   api.state.selectedId = 'case-a';
   const result = api.attemptApprove();
-  assert.equal(result.reason, 'sender_unresolved');
+  assert.equal(result.reason, 'send_hold');
   assert.equal(result.sent, false);
+  assert.equal(result.held, true);
 });
 
 test('inbound replies leave waiting and pick the matching simple action', () => {
@@ -400,4 +412,166 @@ test('opsFetch for the workspace uses the signed-in token', async () => {
   vm.createContext(ctx);
   vm.runInContext(source.slice(start, end), ctx);
   await ctx.opsFetch('sales_booking_read', { resource: 'nithin', week_start: '2026-09-14' });
+});
+
+// ---------------------------------------------------------------------------
+// The door design. These encode what the captain approved over three rounds, so
+// expect to change them deliberately rather than route around them.
+// ---------------------------------------------------------------------------
+
+function doorRead() {
+  const d = sampleRead();
+  d.cases[0].enquiry_date = '2026-09-07';
+  d.cases[0].address = '18 Riverbank Rd';
+  d.cases[0].job = 'Flat patio, 6 x 4';
+  d.diary = [{ start: '2026-09-17T08:00:00', end: '2026-09-17T09:00:00', title: 'Dentist', kind: 'personal', source: 'outlook' }];
+  d.thread_facts = { 'case-a': { quiet_window: '5 days', classification: 'no_reply', read_ok: true } };
+  return d;
+}
+
+test('every customer send, approval, confirmation and diary write renders held', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.selectedId = 'case-a';
+  const html = api.renderHTML();
+  assert.match(html, /Send message \(held\)/);
+  assert.match(html, /Approve offer \(held\)/);
+  assert.match(html, /does not send, approve, confirm or write a diary/);
+  // No enabled path to a provider write exists on the surface.
+  assert.doesNotMatch(html, /data-booking-approve="1"(?![^>]*disabled)/);
+  assert.doesNotMatch(html, /data-booking-confirm="1"(?![^>]*disabled)/);
+  // And the held handler still refuses if a click reaches it anyway.
+  const result = api.attemptApprove();
+  assert.equal(result.sent, false);
+  assert.equal(result.held, true);
+});
+
+test('a stamp records a captain decision and is never a send or a calendar write', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.selectedId = 'case-a';
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  const keep = api.stampCase('case-a', 'keep');
+  assert.equal(keep.sent, false);
+  assert.equal(keep.wrote_calendar, false);
+  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'keep');
+  const rec = api.stampRecord();
+  assert.deepEqual(rec.approved, ['opp:case-a']);
+  assert.deepEqual(rec.rejected, []);
+  assert.equal(rec.sent, false);
+  assert.equal(rec.calendar_written, false);
+  assert.equal(rec.week_start, '2026-09-14');
+  // KEEP then CUT replaces the decision rather than stacking two.
+  api.stampCase('case-a', 'cut');
+  const cut = api.stampRecord();
+  assert.deepEqual(cut.approved, []);
+  assert.deepEqual(cut.rejected, ['opp:case-a']);
+  api.stampCase('case-a', 'clear');
+  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'none');
+});
+
+test('switching scoper drops the stamp, so one scoper cannot be stamped into another', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.stamp = { approved: ['case-a'], rejected: [], decisions: {}, stage_moves: {} };
+  global.opsFetch = async () => doorRead();
+  api.switchResource('marnin');
+  assert.deepEqual(api.state.stamp.approved, []);
+  api.state.resourceId = 'nithin';
+});
+
+test('the five week layers each own a stage tag and can be switched off', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.selectedId = 'case-a';
+  api.state.layers = { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true };
+  let html = api.renderHTML();
+  assert.match(html, /data-booking-layer="blocked"/);
+  assert.match(html, /data-booking-layer="personal"/);
+  assert.match(html, /PROPOSED/);
+  assert.match(html, /CONFIRMED/);
+  assert.match(html, /PERSONAL/);
+  api.state.layers.personal = false;
+  html = api.renderHTML();
+  assert.doesNotMatch(html, /PERSONAL/);
+  api.state.layers.personal = true;
+});
+
+test('a cancelled thread whose diary event survives keeps the slot blocked, not free', () => {
+  const c = { id: 'x', status: 'repair', event_id: 'evt-9', proposal: { start_iso: '2026-09-15T09:00:00' } };
+  assert.equal(api.caseLayer(c), 'blocked');
+  // Without the surviving event it is a repair to decide, not an occupied slot.
+  assert.notEqual(api.caseLayer({ id: 'x', status: 'repair', proposal: c.proposal }), 'blocked');
+});
+
+test('the queue groups by stage and states an unread enquiry date rather than faking one', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const groups = api.queueGroups().map((g) => g[0]);
+  assert.deepEqual(groups, ['Scope to be booked', 'Scope booked', 'Visited, quote to send']);
+  const html = api.renderHTML();
+  assert.match(html, /Came in Monday 7 September/);
+  assert.match(html, /Flat patio, 6 x 4/);
+  delete api.state.data.cases[0].enquiry_date;
+  assert.equal(api.daysWaiting(api.state.data.cases[0]), null);
+  assert.match(api.renderHTML(), /Enquiry date not read/);
+});
+
+test('follow-through tiles count the queue and name the captain window', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const f = api.followThrough();
+  assert.equal(f.to_book, 1);
+  assert.equal(f.booked, 1);
+  const html = api.renderHTML();
+  assert.match(html, /Enquiries still to book/);
+  assert.match(html, /Waiting on a reply/);
+  assert.match(html, /Booked to quote this week/);
+  assert.match(html, /Quotes to send/);
+  assert.match(html, new RegExp(api.CAPTAIN_DEFAULTS.scopes_done_window));
+});
+
+test('v1 shows two scopers while Khairo stays configured for the flip', () => {
+  assert.deepEqual(api.V1_SCOPERS, ['nithin', 'marnin']);
+  assert.ok(api.RESOURCES.khairo);
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const html = api.renderHTML();
+  assert.match(html, /data-booking-resource-btn="nithin"/);
+  assert.match(html, /data-booking-resource-btn="marnin"/);
+  assert.doesNotMatch(html, /data-booking-resource-btn="khairo"/);
+  assert.match(html, /Khairo later/);
+});
+
+test('the Stratco lane paints Tue and Fri only with the Canning Vale band protected', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = doorRead();
+  api.state.data.resource.id = 'marnin';
+  const html = api.renderHTML();
+  assert.match(html, /Canning Vale band/);
+  assert.match(html, /13:00 to 15:30 protected/);
+  assert.match(html, /Not a Marnin day/);
+  api.state.resourceId = 'nithin';
+});
+
+test('the backend diary[] contract and the preview events[] shape both paint', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  const rows = api.diary();
+  assert.ok(rows.some((r) => r.layer === 'personal' && r.source === 'outlook'));
+  assert.ok(rows.some((r) => r.layer === 'confirmed' && r.display_name === 'Sample visit'));
+  // The same event arriving on both keys is one card, not two.
+  api.state.data.diary.push({ event_id: 'evt-1', start: '2026-09-15T11:30:00', end: '2026-09-15T12:30:00', title: 'Sample visit', kind: 'busy' });
+  assert.equal(api.diary().filter((r) => r.id === 'evt-1').length, 1);
+});
+
+test('the stamp file the terminal reads is shown verbatim and escaped', () => {
+  api.state.resourceId = 'nithin';
+  api.state.data = doorRead();
+  api.state.data.cases[0].display_name = '<img src=x onerror=alert(1)>';
+  api.state.stamp = { approved: ['case-a'], rejected: [], decisions: {}, stage_moves: {} };
+  const html = api.renderHTML();
+  assert.match(html, /stamp\.json/);
+  assert.match(html, /&quot;approved&quot;/);
+  assert.doesNotMatch(html, /<img src=x/);
 });

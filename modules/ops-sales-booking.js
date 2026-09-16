@@ -23,14 +23,19 @@
       name: 'Marnin',
       scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498',
       lane: 'fencing',
-      sender: null,
-      sender_label: 'Unresolved Marnin sender (772 vs 776)',
-      sender_resolved: false,
+      // Captain ruling 2026-09-16: the 772-vs-776 disagreement is settled for v1 by a
+      // captain default, not by code guessing. Both source claims stay on the record so
+      // the line is flippable tomorrow without re-deriving where they came from.
+      sender: '+61489267776',
+      sender_label: 'SecureWorks Group Ops 776',
+      sender_resolved: true,
+      sender_default: { by: 'captain', on: '2026-09-16', scope: 'v1', flippable: true },
+      sender_sources: ['Captain default 2026-09-16 (v1)'],
       sender_candidates: [
         { number: '+61489267772', label: 'SecureWorks Fencing Sales 772', source: 'CIO-to-FENCING_SALES-marnin-calendar-2026-09-11.md' },
         { number: '+61489267776', label: 'SecureWorks Group Ops 776', source: 'SALES-booking-page-audit.md; OPS.md automated booking-path exemption' }
       ],
-      desk_rules: { monday_from: 8, no_wednesday: false, last_start: 15.5, hours: '08:00-16:30 Mon-Fri; Tuesday/Friday Stratco pattern is a fencing rule' }
+      desk_rules: { monday_from: 8, no_wednesday: false, days: [1, 4], last_start: 15.5, protected_band: { day: 1, from: 13, to: 15.5, label: 'Canning Vale band', note: '13:00 to 15:30 protected' }, hours: 'Stratco lane is Tuesday and Friday; Canning Vale band Tue 13:00 to 15:30 protected' }
     },
     khairo: {
       id: 'khairo',
@@ -45,6 +50,19 @@
     }
   };
 
+  // v1 scoper list is a captain default, not a capability limit. Khairo stays fully
+  // configured above so tomorrow's flip is one entry in this array.
+  var V1_SCOPERS = ['nithin', 'marnin'];
+  var CAPTAIN_DEFAULTS = {
+    scopers: 'Nithin plus Marnin',
+    scopes_done_window: 'this week plus last',
+    stratco_sender_line: '776',
+    stamp_board: 'agent-driven, human-typed later'
+  };
+  // Every customer-facing or diary-facing write on this surface. Rendered disabled with
+  // this reason; the captain stamps KEEP or CUT and ops auto-book performs the write.
+  var HOLD_REASON = 'Held. This surface does not send, approve, confirm or write a diary.';
+
   var state = {
     subtab: 'booking',
     resourceId: 'nithin',
@@ -56,7 +74,9 @@
     selectedId: null,
     filter: 'all',
     search: '',
-    layers: { confirmed: true, proposal: true, offer: true, availability: true },
+    layers: { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true },
+    stamp: { approved: [], rejected: [], decisions: {}, stage_moves: {} },
+    showArchived: false,
     conversation: { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: 0 },
     drafts: {},
     archives: {},
@@ -287,20 +307,58 @@
     return false;
   }
 
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  // Clock label for a decimal hour. 13.5 -> '1:30pm'.
+  function clockLabel(hour, withMeridiem) {
+    if (hour == null) return '';
+    var h = Math.floor(hour);
+    var m = Math.round((hour - h) * 60);
+    var ampm = h >= 12 ? 'pm' : 'am';
+    var h12 = h % 12 || 12;
+    return h12 + ':' + (m < 10 ? '0' : '') + m + (withMeridiem === false ? '' : ampm);
+  }
+
+  // The customer is promised an ARRIVAL WINDOW, never an exact minute (standing rule).
+  // 90 minutes from the proposed start unless the slot itself is longer.
+  function arrivalWindow(startIso, endIso, joiner) {
+    var start = hourFromIso(startIso);
+    if (start == null) return '';
+    var span = durationHours(startIso, endIso);
+    var width = span && span > 1.5 ? span : 1.5;
+    var end = start + width;
+    var sameHalf = (start >= 12) === (end >= 12);
+    return clockLabel(start, !sameHalf) + ' ' + (joiner || 'to') + ' ' + clockLabel(end);
+  }
+
+  function longDate(iso) {
+    var date = String(iso || '').slice(0, 10);
+    var parts = date.split('-').map(Number);
+    if (parts.length !== 3 || !parts[0]) return date;
+    var day = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+    var names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return names[day] + ' ' + parts[2] + ' ' + MONTHS[parts[1] - 1];
+  }
+
+  // SMS hours are 08:00 to 18:00 Perth. A draft outside them is still drafted; the
+  // surface says so rather than silently holding a text the captain cannot see.
+  function outsideSmsHours() {
+    var now = new Date();
+    var perth = Number(now.toLocaleString('en-AU', { timeZone: 'Australia/Perth', hour: '2-digit', hour12: false }));
+    if (isNaN(perth)) return false;
+    return perth < 8 || perth >= 18;
+  }
+
   function suggestedDraft(c) {
     if (!c || !c.proposal || !c.proposal.start_iso) return '';
     var iso = c.proposal.start_iso;
-    var date = String(iso).slice(0, 10);
-    var hm = String(iso).slice(11, 16);
-    var hour = Number(hm.slice(0, 2));
-    var min = hm.slice(3);
-    var ampm = hour >= 12 ? 'pm' : 'am';
-    var h12 = hour % 12 || 12;
-    var time = h12 + ':' + min + ampm;
-    var suburb = c.suburb || 'the site';
     var who = resource().name;
     var lane = resource().lane === 'patio' ? 'SecureWorks Patios' : 'SecureWorks Fencing';
-    return 'Hi, ' + date + ' at ' + time + ' in ' + suburb + ' works for me. Can someone be there then? ' + who + ', ' + lane;
+    var suburb = c.suburb || 'your place';
+    var first = String(c.display_name || '').trim().split(/\s+/)[0] || 'there';
+    return 'Hi ' + first + ', it is ' + who + ' from ' + lane + '. I can come out to ' + suburb +
+      ' on ' + longDate(iso) + ' between ' + arrivalWindow(iso, c.proposal.end_iso, 'and') +
+      ' to measure and quote. Does that suit?';
   }
 
   function addHourIso(iso) {
@@ -437,39 +495,275 @@
     }
     if (cov.non_primary_calendars === 'not_read') gaps.push('Other calendars were not read.');
     if (cov.full_population !== true) gaps.push('This queue is not the full enquiry population.');
-    if (!data.events) gaps.push('No provider events in this response.');
+    if (!diary().length) gaps.push('No provider events in this response.');
     return gaps;
   }
 
-  function renderQueue() {
-    var list = visibleCases();
-    if (!list.length) {
-      return '<div class="emptyqueue">' + (state.loading ? 'Loading cases…' : 'No cases in this filter. Empty is not a completed audit.') + '</div>';
-    }
-    return list.map(function (c) {
-      return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
-        '<div style="display:flex;justify-content:space-between;gap:8px"><span class="leadname">' + esc(c.display_name || 'Unnamed enquiry') + '</span><span class="status ' + esc(c.status || '') + '">' + esc(statusLabel(c.status)) + '</span></div>' +
-        '<div class="location">' + esc(c.suburb || 'Suburb unknown') + '</div></button>';
-    }).join('');
+  // ---------------------------------------------------------------------------
+  // Diary: the backend contract ships scoper events as `diary[]` with a kind of
+  // busy | leave | personal. PR #312's preview ships them as `events[]` with a
+  // layer. Both are read here so the surface works before and after the backend
+  // lands, and neither shape is allowed to silently drop the other's rows.
+  // ---------------------------------------------------------------------------
+  function layerForKind(kind) {
+    var k = String(kind || '').toLowerCase();
+    if (k === 'personal') return 'personal';
+    if (k === 'leave') return 'leave';
+    return 'confirmed';
   }
 
+  function diary() {
+    var data = state.data;
+    if (!data) return [];
+    var out = [];
+    (data.events || []).forEach(function (ev) {
+      out.push({
+        id: ev.case_id || ev.event_id,
+        start_iso: ev.start_iso,
+        end_iso: ev.end_iso,
+        display_name: ev.display_name || ev.subject,
+        address: ev.address || '',
+        suburb: ev.suburb || '',
+        job: ev.job || ev.job_type || '',
+        layer: ev.layer || layerForKind(ev.kind),
+        source: ev.source || 'events'
+      });
+    });
+    (data.diary || []).forEach(function (ev) {
+      var id = ev.case_id || ev.event_id || ev.id || null;
+      if (id && out.some(function (o) { return o.id === id; })) return;
+      out.push({
+        id: id,
+        start_iso: ev.start || ev.start_iso,
+        end_iso: ev.end || ev.end_iso,
+        display_name: ev.title || ev.subject || ev.display_name,
+        address: ev.address || '',
+        suburb: ev.suburb || '',
+        job: ev.job || '',
+        layer: layerForKind(ev.kind),
+        source: ev.source || 'diary'
+      });
+    });
+    return out;
+  }
+
+  function threadFacts(c) {
+    var facts = (state.data && state.data.thread_facts) || {};
+    return (c && facts[c.id]) || null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Queue grouping, urgency and the follow-through counts.
+  // ---------------------------------------------------------------------------
+  function isBooked(c) {
+    return !!c && (c.status === 'booked' || c.status === 'confirmed');
+  }
+
+  function needsDecision(c) {
+    return !!c && (c.status === 'needs_decision' || c.status === 'repair');
+  }
+
+  function isWaiting(c) {
+    return !!c && (c.status === 'waiting' || c.status === 'offer');
+  }
+
+  function isToBook(c) {
+    if (!c || isArchived(c) || isCompleted(c) || isBooked(c)) return false;
+    return true;
+  }
+
+  function quoteOutstanding(c) {
+    return !!c && isCompleted(c) && !c.quote_sent;
+  }
+
+  // Days since the enquiry landed. Returns null when the feed did not carry a date;
+  // an unknown wait is said out loud, never rendered as a fresh enquiry.
+  function daysWaiting(c) {
+    var raw = c && (c.enquiry_date || c.created_at || c.enquiry_at);
+    if (!raw) return null;
+    var date = String(raw).slice(0, 10);
+    var parts = date.split('-').map(Number);
+    if (parts.length !== 3 || !parts[0]) return null;
+    var then = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+    var now = new Date();
+    var today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    var days = Math.round((today - then) / 86400000);
+    return days < 0 ? 0 : days;
+  }
+
+  function enquiryLine(c) {
+    var raw = c && (c.enquiry_date || c.created_at || c.enquiry_at);
+    if (!raw) return 'Enquiry date not read';
+    var days = daysWaiting(c);
+    return 'Came in ' + longDate(raw) + (days == null ? '' : ' (' + days + ' day' + (days === 1 ? '' : 's') + ' ago)');
+  }
+
+  function urgency(c) {
+    if (isArchived(c)) return ['', 'Archived'];
+    if (isCompleted(c)) return c.quote_sent ? ['ok', 'Quoted'] : ['warn', 'Quote to send'];
+    if (needsDecision(c)) return ['bad', 'Act today'];
+    if (c.status === 'follow_up') return ['bad', 'Overdue'];
+    if (isWaiting(c)) return ['q', 'Waiting'];
+    if (isBooked(c)) return ['ok', 'Booked'];
+    var days = daysWaiting(c);
+    if (days == null) return ['q', 'Wait unknown'];
+    if (days >= 5) return ['warn', 'Waited ' + days + ' days'];
+    return ['ai', 'This week'];
+  }
+
+  function queueGroups() {
+    var list = visibleCases();
+    return [
+      ['Scope to be booked', list.filter(isToBook).sort(function (a, b) {
+        var rank = function (c) { return needsDecision(c) ? 0 : c.status === 'follow_up' ? 1 : isWaiting(c) ? 3 : 2; };
+        var d = rank(a) - rank(b);
+        if (d) return d;
+        return (daysWaiting(b) || 0) - (daysWaiting(a) || 0);
+      })],
+      ['Scope booked', list.filter(isBooked).sort(function (a, b) {
+        return String((a.proposal && a.proposal.start_iso) || '') < String((b.proposal && b.proposal.start_iso) || '') ? -1 : 1;
+      })],
+      ['Visited, quote to send', list.filter(quoteOutstanding)]
+    ];
+  }
+
+  function foldedCases() {
+    return cases().filter(function (c) { return isArchived(c) || (isCompleted(c) && c.quote_sent); });
+  }
+
+  // Follow-through counts. Captain default for v1 is the "this week plus last" window;
+  // it is the window the backend was asked for, so the tiles count what came back.
+  function followThrough() {
+    var list = cases().filter(function (c) { return !isArchived(c); });
+    return {
+      to_book: list.filter(function (c) { return isToBook(c) && !isWaiting(c); }).length,
+      waiting: list.filter(isWaiting).length,
+      booked: list.filter(isBooked).length,
+      quotes: list.filter(quoteOutstanding).length
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // The captain stamp. KEEP or CUT records a local stamp.json-shaped decision.
+  // It is not a send: nothing here calls a provider, a diary or ops-api.
+  // ---------------------------------------------------------------------------
+  function stampStateOf(c) {
+    if (!c) return 'none';
+    if (state.stamp.rejected.indexOf(c.id) !== -1) return 'cut';
+    if (state.stamp.approved.indexOf(c.id) !== -1) return 'keep';
+    if (isBooked(c)) return 'booked';
+    return 'none';
+  }
+
+  function stampCase(id, decision) {
+    var list = cases();
+    var found = null;
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) found = list[i];
+    if (!found) return { ok: false, reason: 'no_case' };
+    state.stamp.approved = state.stamp.approved.filter(function (x) { return x !== id; });
+    state.stamp.rejected = state.stamp.rejected.filter(function (x) { return x !== id; });
+    if (decision === 'keep') state.stamp.approved.push(id);
+    else if (decision === 'cut') state.stamp.rejected.push(id);
+    else return { ok: true, decision: 'cleared', sent: false, wrote_calendar: false };
+    var d = draftKey(found) ? draftFor(found) : null;
+    if (d) state.stamp.decisions[id] = { text: d.text || '', revision: d.revision || 0, sender: resolveSender().number };
+    return { ok: true, decision: decision, case_id: id, sent: false, wrote_calendar: false, held: true };
+  }
+
+  function stampRecord() {
+    var res = resource();
+    var key = function (id) { return 'opp:' + id; };
+    var mine = function (id) { return cases().some(function (c) { return c.id === id; }); };
+    var decisions = {};
+    Object.keys(state.stamp.decisions).forEach(function (id) {
+      if (mine(id)) decisions[key(id)] = state.stamp.decisions[id];
+    });
+    return {
+      captain: 'marnin',
+      profile: res.lane === 'patio' ? 'patio-' + res.id : 'fencing-' + res.id,
+      week_start: state.weekStart,
+      approved: state.stamp.approved.filter(mine).map(key),
+      rejected: state.stamp.rejected.filter(mine).map(key),
+      decisions: decisions,
+      sent: false,
+      calendar_written: false
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+  function deskDays(res) {
+    if (res.desk_rules.days) return res.desk_rules.days;
+    var out = [];
+    for (var i = 0; i < 5; i++) if (!(res.desk_rules.no_wednesday && i === 2)) out.push(i);
+    return out;
+  }
+
+  function renderQueueRow(c) {
+    var u = urgency(c);
+    var stamped = stampStateOf(c);
+    var when = c.proposal && c.proposal.start_iso
+      ? DAYS[dayIndexFromIso(c.proposal.start_iso, state.weekStart)] || ''
+      : '';
+    var slot = when ? when.slice(0, 3) + ' ' + clockLabel(hourFromIso(c.proposal.start_iso)) : '';
+    var facts = threadFacts(c);
+    var quiet = facts && facts.read_ok === false
+      ? ' · thread not read'
+      : (facts && facts.quiet_window ? ' · quiet ' + esc(facts.quiet_window) : '');
+    return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
+      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(c.suburb || 'Suburb unknown') + '</span>' +
+      '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
+      '<div class="sub">' + esc(c.job || 'No job details yet') + '</div>' +
+      '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div></button>';
+  }
+
+  function renderQueue() {
+    var groups = queueGroups();
+    var html = '';
+    groups.forEach(function (g) {
+      html += '<div class="qgroup">' + esc(g[0]) + '<span class="count">' + g[1].length + '</span></div>';
+      html += g[1].length
+        ? g[1].map(renderQueueRow).join('')
+        : '<div class="qempty">Nobody here. Empty is not a completed audit.</div>';
+    });
+    var fold = foldedCases();
+    html += '<button type="button" class="qgroup qtoggle" data-booking-fold="1">' +
+      (state.showArchived ? 'Hide' : 'Show') + ' quoted and archived<span class="count">' + fold.length + '</span></button>';
+    if (state.showArchived) {
+      html += fold.length ? fold.map(renderQueueRow).join('') : '<div class="qempty">Nothing quoted or archived in this read.</div>';
+    }
+    return html;
+  }
+
+  function stageTag(layer, stamped) {
+    if (layer === 'confirmed') return 'CONFIRMED';
+    if (layer === 'blocked') return 'CANCELLED';
+    if (layer === 'offer') return 'OFFERED · NO REPLY';
+    if (layer === 'personal') return 'PERSONAL';
+    if (layer === 'leave') return 'LEAVE';
+    return stamped === 'keep' ? 'STAMPED KEEP' : 'PROPOSED';
+  }
+
+  // One calendar card: stage tag, then time and name, then address and suburb, then job.
   function renderEvent(block, kind) {
-    if (!state.layers[kind] && kind !== 'confirmed') return '';
-    if (kind === 'confirmed' && !state.layers.confirmed) return '';
+    if (!state.layers[kind]) return '';
     var hour = hourFromIso(block.start_iso);
     var day = dayIndexFromIso(block.start_iso, state.weekStart);
     if (hour == null || day == null) return '';
     var h = durationHours(block.start_iso, block.end_iso);
-    var cls = 'event ' + kind + (block.id === state.selectedId ? ' selected' : '');
-    return '<button type="button" class="' + cls + '" data-booking-case="' + esc(block.id) + '" style="top:' + topPx(hour) + 'px;height:' + (h * PX_PER_HOUR) + 'px">' +
-      '<span class="evtime">' + esc(String(block.start_iso).slice(11, 16)) + '</span>' +
-      '<span class="evname">' + esc(block.display_name || block.subject || 'Diary') + '</span>' +
-      '<span class="evplace">' + esc(block.suburb || '') + '</span>' +
-      '<span class="eventlabel">' + esc(kind === 'proposal' ? 'Unsent proposal' : kind === 'offer' ? 'Outstanding offer' : 'Provider event') + '</span></button>';
+    var stamped = stampStateOf({ id: block.id });
+    var cls = 'ev ' + kind + (kind === 'proposal' && stamped === 'keep' ? ' stamped' : '') + (block.id && block.id === state.selectedId ? ' sel' : '');
+    var place = (block.address ? block.address + ', ' : '') + (block.suburb || '');
+    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '" style="top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
+      '<span class="stage">' + esc(stageTag(kind, stamped)) + '</span>' +
+      '<span class="t evtime">' + esc(clockLabel(hour)) + ' to ' + esc(clockLabel(hour + h)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
+      '<span class="n evname">' + esc(place || 'Address not given yet') + '</span>' +
+      '<span class="j evplace">' + esc(block.job || '') + '</span></button>';
   }
 
   function renderWindows(c) {
-    if (!state.layers.availability || !c.proposal || !c.proposal.window_start_iso) return '';
+    if (!state.layers.proposal || !c.proposal || !c.proposal.window_start_iso) return '';
     var hour = hourFromIso(c.proposal.window_start_iso);
     var day = dayIndexFromIso(c.proposal.window_start_iso, state.weekStart);
     if (hour == null || day == null) return '';
@@ -477,152 +771,235 @@
     return '<div class="window" style="top:' + topPx(hour) + 'px;height:' + Math.max(24, h * PX_PER_HOUR) + 'px"><b>Window</b>' + esc(c.proposal.window_label || '') + '</div>';
   }
 
+  // Which layer a case paints on. A cancelled thread whose diary event is still there
+  // is 'blocked': the slot stays occupied until the delete reads back.
+  function caseLayer(c) {
+    if (c.status === 'repair' && c.event_id) return 'blocked';
+    if (isBooked(c) || c.event_id) return 'confirmed';
+    var heldOffer = c.status === 'offer' || c.status === 'waiting' || c.status === 'follow_up'
+      || c.send_evidence === 'sent' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
+    if (heldOffer) return 'offer';
+    return 'proposal';
+  }
+
   function renderCalendar() {
     var data = state.data;
     var res = resource();
     var cal = data && data.resource && data.resource.calendar;
     if (data && cal && cal.ok === false) {
-      return '<div class="unknownstaff"><h3>Calendar not connected</h3><p>' + esc(cal.error || 'This resource has no verified provider calendar.') + '</p><p class="small">Missing coverage is not a free week.</p></div>';
+      return '<div class="unknown unknownstaff"><h3>Calendar not connected</h3><p>' + esc(cal.error || 'This resource has no verified provider calendar.') + '</p><p class="small">Missing coverage is not a free week.</p></div>';
     }
-    var headers = '<div class="timezonelabel small">AWST</div>' + DAYS.map(function (name, i) {
+    var days = deskDays(res);
+    var headers = '<span></span>' + DAYS.map(function (name, i) {
       var iso = addDays(state.weekStart, i);
-      var off = res.desk_rules.no_wednesday && i === 2;
+      var off = days.indexOf(i) === -1;
       return '<div class="dayheader' + (off ? ' off' : '') + '">' + name.slice(0, 3) + '<b>' + iso.slice(8, 10) + '</b></div>';
     }).join('');
     var cols = '';
     for (var d = 0; d < 5; d++) {
-      var off = res.desk_rules.no_wednesday && d === 2;
-      var mondayBlock = res.desk_rules.monday_from > DAY_START && d === 0
-        ? '<div class="block" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR) + 'px"><strong>Mon from 12:00</strong></div>'
-        : '';
-      var wed = off ? '<div class="block off"><strong>Unavailable</strong><span>Desk rule</span></div>' : mondayBlock;
+      var off = days.indexOf(d) === -1;
       var body = '';
-      events().forEach(function (ev) {
+      if (off) {
+        body += '<div class="block off"><strong>' + (res.desk_rules.days ? 'Not a ' + esc(res.name) + ' day' : 'Unavailable') + '</strong><span>' + esc(res.desk_rules.days ? 'Tue and Fri only' : 'Desk rule') + '</span></div>';
+      } else if (res.desk_rules.monday_from > DAY_START && d === 0) {
+        body += '<div class="block" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR) + 'px"><strong>Not available</strong><span>Monday before ' + res.desk_rules.monday_from + ':00</span></div>';
+      }
+      var band = res.desk_rules.protected_band;
+      if (band && band.day === d) {
+        body += '<div class="block band" style="top:' + topPx(band.from) + 'px;height:' + ((band.to - band.from) * PX_PER_HOUR) + 'px"><strong>' + esc(band.label) + '</strong><span>' + esc(band.note) + '</span></div>';
+      }
+      diary().forEach(function (ev) {
         if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
-        body += renderEvent({
-          id: ev.case_id || ev.event_id,
-          start_iso: ev.start_iso,
-          end_iso: ev.end_iso,
-          display_name: ev.display_name || ev.subject,
-          suburb: ev.suburb || '',
-          subject: ev.subject
-        }, ev.layer || 'confirmed');
+        body += renderEvent(ev, ev.layer);
       });
       cases().forEach(function (c) {
         if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
-        var heldOffer = c.status === 'offer' || c.status === 'waiting' || c.status === 'follow_up' || c.send_evidence === 'sent' || ((c.exact_acceptance || c.accepted_start_iso) && !c.event_id);
-        if (heldOffer) {
-          body += renderWindows(c);
-          body += renderEvent({
-            id: c.id,
-            start_iso: c.proposal.start_iso,
-            end_iso: c.proposal.end_iso,
-            display_name: c.display_name,
-            suburb: c.suburb
-          }, 'offer');
-          return;
-        }
-        if (c.status === 'proposal' || c.status === 'ready' || c.status === 'needs_decision') {
-          body += renderWindows(c);
-          body += renderEvent({
-            id: c.id,
-            start_iso: c.proposal.start_iso,
-            end_iso: c.proposal.end_iso,
-            display_name: c.display_name,
-            suburb: c.suburb
-          }, 'proposal');
-        }
+        var layer = caseLayer(c);
+        body += renderWindows(c);
+        body += renderEvent({
+          id: c.id,
+          start_iso: c.proposal.start_iso,
+          end_iso: c.proposal.end_iso,
+          display_name: c.display_name,
+          address: c.address || '',
+          suburb: c.suburb,
+          job: c.job || ''
+        }, layer);
       });
-      cols += '<div class="daycolumn">' + wed + body + '</div>';
+      cols += '<div class="daycol daycolumn">' + body + '</div>';
     }
     var times = '';
     for (var h = DAY_START; h <= DAY_END; h++) {
       times += '<div class="time small" style="position:absolute;right:6px;top:' + topPx(h) + 'px;transform:translateY(-50%)">' + (h < 10 ? '0' : '') + h + ':00</div>';
     }
-    var evCount = events().length;
+    var evCount = diary().length;
     var info = '<span>' + evCount + ' provider event' + (evCount === 1 ? '' : 's') + '</span>';
     if (evCount === 0) info += '<span class="repairtext">Empty diary is not spare capacity. Leave unread.</span>';
-    return '<div class="layers">' +
-      '<label class="layer"><input type="checkbox" data-booking-layer="confirmed"' + (state.layers.confirmed ? ' checked' : '') + '> Diary</label>' +
-      '<label class="layer"><input type="checkbox" data-booking-layer="proposal"' + (state.layers.proposal ? ' checked' : '') + '> AI proposals</label>' +
-      '<label class="layer"><input type="checkbox" data-booking-layer="offer"' + (state.layers.offer ? ' checked' : '') + '> Offers</label>' +
-      '<label class="layer"><input type="checkbox" data-booking-layer="availability"' + (state.layers.availability ? ' checked' : '') + '> Window</label></div>' +
+    var legend = [
+      ['confirmed', '', 'Confirmed booking'],
+      ['proposal', 'proposal', 'Proposed, not sent'],
+      ['offer', 'offer', 'Offered, waiting on reply'],
+      ['blocked', 'blocked', 'Cancelled, still in diary'],
+      ['personal', 'personal', 'Personal']
+    ].map(function (l) {
+      return '<label class="layer"><input type="checkbox" data-booking-layer="' + l[0] + '"' + (state.layers[l[0]] ? ' checked' : '') + '>' +
+        '<span class="legendline ' + l[1] + '"></span>' + l[2] + '</label>';
+    }).join('');
+    return '<div class="layers">' + legend + '</div>' +
       '<div class="calendarinfo">' + info + '</div>' +
       '<div class="dayheaders">' + headers + '</div>' +
-      '<div class="calendarbody"><div class="timeaxis" style="position:relative">' + times + '</div>' + cols + '</div>' +
+      '<div class="calbody calendarbody"><div class="timeaxis" style="position:relative">' + times + '</div>' + cols + '</div>' +
       '<div class="dayselect">' + DAYS.map(function (name, i) {
         return '<button type="button" data-booking-day="' + i + '">' + name.slice(0, 3) + '<b>' + addDays(state.weekStart, i).slice(8, 10) + '</b></button>';
       }).join('') + '</div>' +
       '<div class="dayagenda">' + renderAgenda() + '</div>' +
-      '<div class="calendarfoot">Solid blocks are provider events with actual duration. Dashed blocks are unsent proposals. Dotted blocks are outstanding offers. A window is not acceptance. Leave and other calendars are not in this read.</div>';
+      '<div class="calfoot calendarfoot">The customer is promised the window, never the minute. A window is not acceptance. Leave and other calendars are not in this read.</div>';
   }
 
   function renderAgenda() {
-    var items = events().concat(cases().filter(function (c) { return c.proposal; }).map(function (c) {
-      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: c.suburb, id: c.id, layer: c.status === 'offer' ? 'offer' : 'proposal' };
+    var items = diary().concat(cases().filter(function (c) { return c.proposal; }).map(function (c) {
+      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: c.suburb, id: c.id, layer: caseLayer(c) };
     }));
     items.sort(function (a, b) { return String(a.start_iso) < String(b.start_iso) ? -1 : 1; });
-    if (!items.length) return '<div class="emptyqueue">No provider events or proposals in this week.</div>';
+    if (!items.length) return '<div class="emptyqueue qempty">No provider events or proposals in this week.</div>';
     return items.map(function (it) {
-      return '<button type="button" class="lead" data-booking-case="' + esc(it.id || it.event_id) + '"><strong>' + esc(String(it.start_iso || '').slice(11, 16)) + '</strong> ' + esc(it.display_name || it.subject || '') + ' · ' + esc(it.suburb || '') + '</button>';
+      return '<button type="button" class="lead" data-booking-case="' + esc(it.id || '') + '"><strong>' + esc(String(it.start_iso || '').slice(11, 16)) + '</strong> ' + esc(it.display_name || '') + ' · ' + esc(it.suburb || '') + '</button>';
     }).join('');
   }
 
   function renderMessages() {
     var conv = state.conversation;
     var selected = selectedCase();
-    if (!selected || !selected.contact_id) return '<div class="comms-empty">No GHL contact on this case. Thread is not shown.</div>';
-    if (conv.contactId && conv.contactId !== selected.contact_id) return '<div class="comms-empty">Thread belongs to another case; it is not shown.</div>';
-    if (conv.loading) return '<div class="comms-empty">Loading conversation…</div>';
-    if (conv.error) return '<div class="comms-empty">Conversation failed: ' + esc(conv.error) + '</div>';
-    if (!conv.contactId) return '<div class="comms-empty">Select a case with a GHL contact to open the thread.</div>';
-    if (!conv.messages || !conv.messages.length) return '<div class="comms-empty">No messages in this bounded read. Pagination limits still apply.</div>';
+    if (!selected || !selected.contact_id) return '<div class="comms-empty msg sys">No GHL contact on this case. Thread is not shown.</div>';
+    if (conv.contactId && conv.contactId !== selected.contact_id) return '<div class="comms-empty msg sys">Thread belongs to another case; it is not shown.</div>';
+    if (conv.loading) return '<div class="comms-empty msg sys">Loading conversation…</div>';
+    if (conv.error) return '<div class="comms-empty msg sys">Conversation failed: ' + esc(conv.error) + '</div>';
+    if (!conv.contactId) return '<div class="comms-empty msg sys">Select a case with a GHL contact to open the thread.</div>';
+    if (!conv.messages || !conv.messages.length) return '<div class="comms-empty msg sys">No messages in this bounded read. Pagination limits still apply.</div>';
     return conv.messages.map(function (msg) {
-      var dir = msg.direction === 'outbound' ? 'outbound' : 'inbound';
+      var dir = msg.direction === 'outbound' ? 'out' : 'in';
       var ts = msg.timestamp ? String(msg.timestamp) : '';
       var type = String(msg.type || 'SMS');
-      return '<div class="comms-msg ' + dir + '"><div>' + esc(msg.body || msg.subject || type) + '</div><div class="comms-msg-meta">' + esc(ts) + (msg.sender_name ? ' · ' + esc(msg.sender_name) : '') + ' · ' + esc(type) + '</div></div>';
+      var who = dir === 'in' ? (selected.display_name || 'Customer') : (msg.sender_name || resource().name);
+      return '<div class="msg comms-msg ' + dir + ' ' + (dir === 'out' ? 'outbound' : 'inbound') + '">' +
+        '<small class="comms-msg-meta">' + esc(who) + ' · ' + esc(ts) + ' · ' + esc(type) + '</small>' +
+        esc(msg.body || msg.subject || type) + '</div>';
     }).join('');
   }
 
+  // Detail panel, trimmed to the captain's list: name, address, job, proposed text,
+  // thread, Send and Edit. Send and Confirm are hard-held.
   function renderDetail() {
     var c = selectedCase();
     var res = resource();
     if (!c) {
-      return '<div class="detailhead"><p class="muted">No case selected</p><h2>Choose an enquiry</h2></div><div class="detailbody"><p class="muted">The thread, the interpreted window, and the draft stay together for one request.</p></div>';
+      return '<div class="detailhead"><p class="muted">No case selected</p><h2>Choose an enquiry</h2></div>' +
+        '<div class="detailbody"><p class="muted">The thread, the proposed time and the draft stay together for one request.</p></div>';
     }
     bindDraft(c);
     var d = draftKey(c) ? draftFor(c) : { text: '' };
     var kind = actionKind(c);
-    var holdNote = SEND_HOLD
-      ? '<div class="holdnote">Send hold is active. This action does not send and does not write the diary.</div>'
-      : '';
-    var pick = c.proposal && c.proposal.start_iso ? String(c.proposal.start_iso).replace('T', ' ').slice(0, 16) : '';
-    var windowLabel = (c.proposal && c.proposal.window_label) || 'No customer window extracted';
-    var actionLabel = kind === 'confirm_booking' ? 'Confirm booking (held)' : kind === 'repair' ? 'Calendar repair (held)' : 'Approve offer (held)';
-    var timeInput = c.proposal && c.proposal.start_iso
-      ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
-      : '<p class="small muted">No proposed time yet.</p>';
+    var route = resolveSender(res);
+    var u = urgency(c);
+    var stamped = stampStateOf(c);
+    var pill = stamped === 'keep' ? '<span class="pill ok">Stamped KEEP · not sent</span>'
+      : stamped === 'cut' ? '<span class="pill bad">Stamped CUT</span>'
+      : '<span class="pill ' + esc(u[0]) + '">' + esc(u[1]) + '</span>';
+    var place = (c.address ? c.address + ', ' : '') + (c.suburb || '');
+    var slot = c.proposal && c.proposal.start_iso
+      ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
+      : 'No proposed time yet';
     var conflict = d.conflict
       ? '<div class="notice error">Time changed. Your edited draft was kept. Suggested text is ready for review, not applied.</div>'
       : '';
+    var actionLabel = kind === 'confirm_booking' ? 'Confirm booking' : kind === 'repair' ? 'Calendar repair' : 'Approve offer';
+    var compose = c.proposal
+      ? '<div class="compose"><div class="row" style="justify-content:space-between"><h3>Proposed text</h3>' +
+        '<span class="small muted">from ' + esc(route.label) + ' · edit it right here</span></div>' +
+        '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea></div>'
+      : '<div class="compose"><h3>Proposed text</h3><p class="small muted">No proposed time yet, so there is no text to review.</p></div>';
     var archiveBlock = hasBlockingCommitment(c)
-      ? '<p class="small muted">Archive is blocked while a diary event or outstanding offer remains. Withdrawal is a separate held action.</p>'
+      ? '<p class="fine">Archive is blocked while a diary event or outstanding offer remains. Withdrawal is a separate held action.</p>'
       : '<div class="archive-row"><label class="small muted">Archive reason <select data-booking-archive-reason><option value="">Choose…</option><option value="out_of_service">Out of service</option><option value="declined">Declined</option><option value="duplicate">Duplicate</option><option value="no_longer_proceeding">No longer proceeding</option></select></label><button type="button" data-booking-archive="1">Archive</button></div>';
     if (isArchived(c)) archiveBlock = '<button type="button" data-booking-restore="' + esc(c.id) + '">Restore to workload</button>';
-    return '<div class="detailhead"><span class="smalltag">' + esc(statusLabel(c.status)) + '</span><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p class="muted">' + esc(c.suburb || '') + (c.contact_id ? '' : ' · no GHL contact') + '</p></div>' +
-      '<div class="detailbody">' +
-      '<div class="timing"><div><span>Customer window</span><strong>' + esc(windowLabel) + '</strong></div><div><span>Proposed time</span><strong>' + esc(pick || 'None') + '</strong></div>' + timeInput + '</div>' +
-      '<div><h3>GHL conversation</h3><div class="thread" id="salesBookingThread">' + renderMessages() + '</div></div>' +
-      '</div>' +
-      '<div class="actionzone">' + holdNote + conflict +
-      '<div class="senderline">' + senderLine(res) + ' · To this case only · Draft revision ' + esc((d.revision || 0)) + '</div>' +
-      '<label class="small muted">Draft SMS</label>' +
-      '<textarea data-booking-draft="1" aria-label="Draft SMS">' + esc(d.text || '') + '</textarea>' +
-      '<button type="button" class="primary" data-booking-approve="1"' + (SEND_HOLD || kind === 'none' || !resolveSender(res).resolved ? ' disabled' : '') + '>' + esc(actionLabel) + '</button>' +
+    var timeInput = c.proposal && c.proposal.start_iso
+      ? '<label class="small muted">Proposed time<input data-booking-time type="text" value="' + esc(c.proposal.start_iso) + '" aria-label="Proposed time"></label>'
+      : '';
+    return '<div class="detailhead"><div class="row">' + pill + '</div>' +
+      '<h2>' + esc(c.display_name || 'Enquiry') + '</h2>' +
+      '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + (c.contact_id ? '' : ' · no GHL contact') + '</p>' +
+      '<p class="sub muted"><b>' + esc(c.job || 'No job details yet') + '</b> · ' + esc(enquiryLine(c)) + ' · ' + esc(slot) + '</p></div>' +
+      '<div class="thread big" id="salesBookingThread">' + renderMessages() + '</div>' +
+      compose +
+      '<div class="actionzone">' +
+      '<div class="holdnote">' + esc(HOLD_REASON) + '</div>' + conflict +
+      '<div class="senderline small muted">' + senderLine(res) + ' · To this case only · Draft revision ' + esc(d.revision || 0) + (outsideSmsHours() ? ' · outside 08:00 to 18:00 Perth' : '') + '</div>' +
+      '<button type="button" class="primary" data-booking-approve="1" disabled title="' + esc(HOLD_REASON) + '">Send message (held)</button>' +
+      '<button type="button" data-booking-confirm="1" disabled title="' + esc(HOLD_REASON) + '">' + esc(actionLabel) + ' (held)</button>' +
+      '<div class="stamprow"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '">Stamp KEEP</button>' +
+      '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '">Stamp CUT</button>' +
+      (stamped === 'keep' || stamped === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div>' +
+      '<p class="fine">A stamp is not a send. KEEP records the captain decision in stamp.json; ops auto-book performs the text and the diary write on a separate authorised run.</p>' +
+      timeInput +
       archiveBlock +
       '<details class="inline-details"><summary>Evidence and coverage for this case</summary><p class="small muted">' + esc(c.reason || 'No reason filed') + (c.exact_acceptance ? ' Exact acceptance is recorded.' : ' Exact acceptance is not recorded.') + '</p></details>' +
-      '<p class="small muted" style="margin-top:8px">Approve offer does not create a visit. Confirm booking needs exact acceptance and a fresh preflight. Both stay held.</p></div>';
+      '</div>';
+  }
+
+  function renderTiles() {
+    var f = followThrough();
+    var win = CAPTAIN_DEFAULTS.scopes_done_window;
+    return [
+      ['Enquiries still to book', f.to_book, 'came in ' + win + ', need a text or a decision'],
+      ['Waiting on a reply', f.waiting, 'text out, nothing back yet'],
+      ['Booked to quote this week', f.booked, 'in the diary with a customer yes'],
+      ['Quotes to send', f.quotes, 'visited ' + win + ', quote not out yet']
+    ].map(function (t) {
+      return '<div class="tile"><div class="k">' + esc(t[0]) + '</div><div class="v">' + t[1] + '</div><div class="s">' + esc(t[2]) + '</div></div>';
+    }).join('') +
+      '<div class="tile sales"><div class="k">Sales side</div>' +
+      '<div class="v" style="font-size:15px;margin-top:6px"><button type="button" class="linklike" data-sales-tab="performance">Open Performance</button></div>' +
+      '<div class="s">Weekly numbers live there, not here.</div></div>';
+  }
+
+  function renderWeekTruth() {
+    var data = state.data;
+    if (!data) return '';
+    var list = cases();
+    var bits = [];
+    bits.push('<span class="ok">' + list.filter(isBooked).length + ' booked</span>');
+    bits.push(list.filter(function (c) { return caseLayer(c) === 'blocked'; }).length + ' cancelled still in diary');
+    bits.push(list.filter(function (c) { return c.proposal && caseLayer(c) === 'proposal'; }).length + ' proposals unsent');
+    bits.push(list.filter(isWaiting).length + ' texts out with no reply');
+    var cov = data.coverage || {};
+    if (cov.full_population !== true) bits.push('<strong>' + esc(cov.total == null ? 'CRM rows' : cov.total + ' CRM rows') + '</strong> are not visit demand');
+    return '<div class="weektruth"><strong>Week truth</strong>' + bits.map(function (b) { return '<span>' + b + '</span>'; }).join('') + '</div>';
+  }
+
+  function renderStampBoard() {
+    var list = cases().filter(function (c) { return !isArchived(c) && !isCompleted(c); });
+    var rec = stampRecord();
+    var rows = list.map(function (c) {
+      var st = stampStateOf(c);
+      var d = draftKey(c) ? draftFor(c) : { text: '' };
+      var slot = c.proposal && c.proposal.start_iso
+        ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
+        : 'No proposed time';
+      return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '">' +
+        '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(c.suburb || '') + '</b></button>' +
+        '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div></div>' +
+        '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div></div>' +
+        '<div class="actions"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'keep' ? ' aria-pressed="true"' : '') + '>KEEP</button>' +
+        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'cut' ? ' aria-pressed="true"' : '') + '>CUT</button>' +
+        (st === 'keep' || st === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div></div>';
+    }).join('');
+    return '<section class="stampboard"><div class="sbhead">' +
+      '<div><h2>Captain stamp board</h2><p>KEEP or CUT each line. A stamp is a recorded decision, not a send. ' +
+      esc(CAPTAIN_DEFAULTS.stamp_board.charAt(0).toUpperCase() + CAPTAIN_DEFAULTS.stamp_board.slice(1)) + '.</p></div>' +
+      '<span class="count">' + rec.approved.length + ' keep · ' + rec.rejected.length + ' cut · ' + list.length + ' lines</span></div>' +
+      (rows || '<div class="qempty">No live lines in this read.</div>') +
+      '<details class="filedetails"><summary>Show the file the terminal reads (stamp.json)</summary>' +
+      '<div class="stampfile">' + esc(JSON.stringify(rec, null, 1)) + '</div></details></section>';
   }
 
   function renderHTML() {
@@ -634,26 +1011,33 @@
       ? '<div class="notice error" role="alert">' + esc(state.error) + '</div>'
       : (state.loading ? '<div class="notice" role="status">Reading the provider calendar…</div>' : '');
     var gaps = coverageGaps(data).map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('');
-    return '<div class="page"><div class="pagehead"><div><h1>Build the week</h1><p>Customer windows, the diary, and the next conversation.</p></div>' +
-      '<div class="right"><label class="stafflabel">Scoper <select data-booking-resource aria-label="Choose scoper">' +
-      Object.keys(RESOURCES).map(function (id) {
-        return '<option value="' + id + '"' + (id === state.resourceId ? ' selected' : '') + '>' + esc(RESOURCES[id].name) + '</option>';
-      }).join('') +
-      '</select></label></div></div>' + notice +
+    var route = resolveSender(res);
+    var scopers = V1_SCOPERS.map(function (id) {
+      return '<button type="button" data-booking-resource-btn="' + id + '" aria-pressed="' + (id === state.resourceId) + '">' + esc(RESOURCES[id].name) + '</button>';
+    }).join('');
+    var hidden = Object.keys(RESOURCES).filter(function (id) { return V1_SCOPERS.indexOf(id) === -1; })
+      .map(function (id) { return RESOURCES[id].name; });
+    return '<div class="page"><div class="pagehead">' +
+      '<div><h1>Build the week</h1><p>' + esc(state.weekStart) + ' week · ' + esc(res.name) + ' · ' + esc(res.lane) + ' · texts go from ' + esc(route.resolved ? route.label : 'an unresolved line') + '</p></div>' +
+      '<div class="row"><span class="muted small">Scoper</span>' +
+      '<div class="scopers" role="group" aria-label="Scoper">' + scopers + '</div>' +
+      '<span class="lane ' + esc(res.lane) + '">' + esc(res.lane === 'patio' ? 'Patio' : 'Fencing') + ' · ' + esc(route.resolved ? route.number.slice(-3) : 'line unresolved') + '</span>' +
+      (hidden.length ? '<span class="pill q" title="Captain default for v1. Flip V1_SCOPERS to add them.">v1: ' + esc(CAPTAIN_DEFAULTS.scopers) + ' · ' + esc(hidden.join(', ')) + ' later</span>' : '') +
+      '</div></div>' + notice +
       '<div class="notice">Source ' + esc(mailbox) + ' · week of ' + esc(state.weekStart) + ' · Australia/Perth · rules: ' + esc(res.desk_rules.hours) + '</div>' +
+      renderWeekTruth() +
+      '<div class="scopesdone">' + renderTiles() + '</div>' +
       '<div class="workspace">' +
-      '<section class="panel queue"><div class="panelhead"><h2>Unscoped work</h2><span class="count">' + visibleCases().length + '</span></div>' +
-      '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div>' +
-      '<select data-booking-filter aria-label="Filter work queue">' +
-      [['all', 'All unscoped'], ['ready', 'Ready to contact'], ['waiting', 'Waiting for reply'], ['follow_up', 'Follow-up due'], ['booked', 'Booked'], ['needs_decision', 'Needs a decision'], ['archived', 'Archived'], ['completed', 'Completed']].map(function (opt) {
-        return '<option value="' + opt[0] + '"' + (state.filter === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>';
-      }).join('') +
-      '</select></div><div class="queuelist">' + renderQueue() + '</div>' +
-      '<div class="queuefoot">Not yet scoped, including booked visits until they happen.<br>CRM stage does not remove a row. Archive and completion are deliberate.</div></section>' +
-      '<section class="panel calendar"><div class="calendarhead"><h2>' + esc(state.weekStart) + ' week</h2><p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
+      '<section class="panel queue"><div class="panelhead"><h2>Work queue</h2><span class="count">' + visibleCases().length + ' people</span></div>' +
+      '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div></div>' +
+      '<div class="queuelist">' + renderQueue() + '</div>' +
+      '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>CRM stage does not remove a row. Archive and completion are deliberate.</div></section>' +
+      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2></div>' +
+      '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
       '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
+      renderStampBoard() +
       '<details class="notice" style="margin-top:16px"><summary>Coverage</summary><ul>' + gaps + '</ul>' +
-      '<p class="small">495 opportunity rows remain an enumeration, not qualified visits. 152 stage-only unresolved cases stay on the audit queue.</p></details></div>';
+      '<p class="small">An enumeration of opportunity rows is not qualified visit demand. Stage-only unresolved cases stay on the audit queue.</p></details></div>';
   }
 
   function render() {
@@ -701,6 +1085,7 @@
 
   function switchResource(id) {
     if (!RESOURCES[id]) return;
+    state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
     state.resourceId = id;
     state.selectedId = null;
     state.data = null;
@@ -851,7 +1236,29 @@
         render();
         return;
       }
-      var approve = e.target.closest && e.target.closest('[data-booking-approve]');
+      var stampBtn = e.target.closest && e.target.closest('[data-booking-stamp]');
+      if (stampBtn) {
+        e.preventDefault();
+        stampCase(stampBtn.getAttribute('data-booking-stamp-id'), stampBtn.getAttribute('data-booking-stamp'));
+        render();
+        return;
+      }
+      var fold = e.target.closest && e.target.closest('[data-booking-fold]');
+      if (fold) {
+        e.preventDefault();
+        state.showArchived = !state.showArchived;
+        render();
+        return;
+      }
+      var scoper = e.target.closest && e.target.closest('[data-booking-resource-btn]');
+      if (scoper) {
+        e.preventDefault();
+        switchResource(scoper.getAttribute('data-booking-resource-btn'));
+        return;
+      }
+      // Approve, Confirm and Send are rendered disabled. If a stale or scripted click
+      // still reaches here, attemptApprove refuses on SEND_HOLD and records the attempt.
+      var approve = e.target.closest && e.target.closest('[data-booking-approve], [data-booking-confirm]');
       if (approve) {
         e.preventDefault();
         attemptApprove();
@@ -936,7 +1343,22 @@
     hasBlockingCommitment: hasBlockingCommitment,
     show: showSales,
     coverageGaps: coverageGaps,
-    bookingRead: bookingRead
+    bookingRead: bookingRead,
+    V1_SCOPERS: V1_SCOPERS,
+    CAPTAIN_DEFAULTS: CAPTAIN_DEFAULTS,
+    HOLD_REASON: HOLD_REASON,
+    arrivalWindow: arrivalWindow,
+    clockLabel: clockLabel,
+    longDate: longDate,
+    diary: diary,
+    caseLayer: caseLayer,
+    urgency: urgency,
+    daysWaiting: daysWaiting,
+    queueGroups: queueGroups,
+    followThrough: followThrough,
+    stampCase: stampCase,
+    stampRecord: stampRecord,
+    stampStateOf: stampStateOf
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

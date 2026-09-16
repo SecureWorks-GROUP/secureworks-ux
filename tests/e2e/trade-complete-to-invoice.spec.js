@@ -2,12 +2,24 @@
 // invoice (per-metre: the work order goes onto the weekly draft; hourly: one-tap hours).
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { perthDate, perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
 const UPLOAD_URL = `${SUPABASE_ORIGIN}/storage/v1/object/upload/sign/job-photos/e2e`;
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const shot = (name) => ({ name, mimeType: 'image/png', buffer: PNG });
+
+// The app decides "this week" off the real Perth clock (see trade.html's
+// _weeklyWeekEndForDate / openWeeklyWorkOrderInvoice), and the shared
+// weeklyInvoiceWorkOrders fixture in tests/fixtures/test.js places its rows
+// in the CURRENT Perth week via perthWeekMonday(). Every date below is
+// derived the same way so henry-wo-1 always lands in the same week as that
+// fixture, on any run date.
+const CURRENT_WEEK_MONDAY = perthWeekMonday();
+const WO_BUSINESS_DATE = addIsoDays(CURRENT_WEEK_MONDAY, 1); // matches weeklyInvoiceWorkOrders[0].scheduled_date
+const WO_COMPLETED_AT = `${WO_BUSINESS_DATE}T02:00:00Z`;
+const WO_WEEK_END = addIsoDays(CURRENT_WEEK_MONDAY, 6);
 
 function fenceDetail(jobId, userId, userName) {
   return {
@@ -17,7 +29,7 @@ function fenceDetail(jobId, userId, userName) {
       client_name: 'Fixture Homeowner', client_phone: '0400333444', site_address: '20 Trappers Dr', site_suburb: 'Woodvale',
       scope_json: { job: { runs: [{ name: 'RHS', length: 7.1, sheetHeight: 1800 }], neighbours: [{ id: 'nb-1', firstName: 'Sue', lastName: 'Lee' }] } },
     },
-    crew: [{ id: 'asn-1', user_id: userId, users: { id: userId, name: userName }, scheduled_date: '2026-09-09', status: 'in_progress', started_at: '2026-09-09T00:00:00Z', clocked_on_at: '2026-09-09T00:00:00Z' }],
+    crew: [{ id: 'asn-1', user_id: userId, users: { id: userId, name: userName }, scheduled_date: perthDate(), status: 'in_progress', started_at: `${perthDate()}T00:00:00Z`, clocked_on_at: `${perthDate()}T00:00:00Z` }],
     purchaseOrders: [], documents: [], notes: [], media: [], quote_packs: [], quote_extracts: [],
     completion_evidence: { job_id: jobId, applies: true, satisfied: false, photos: 0, photos_required: 3, signoffs: 0, signoffs_required: 1, named_neighbours: 1, waived: false, waiver_reason: null, missing: ['completion_photos', 'neighbour_signoff'], read_failed: false },
     workOrder: null,
@@ -103,7 +115,7 @@ test.describe('Complete-to-invoice: per-metre trade', () => {
     await page.route(`${UPLOAD_URL}**`, (route) => route.fulfill({ status: 200, body: '' }));
     await baseRoutes(page, log, fenceDetail('henry-job-1', 'e2e-henry', 'Henry'), {
       lane: 'weekly_work_order', hours_logged: null,
-      work_orders: [{ id: 'henry-wo-1', wo_number: 'WO-HENRY-01', completed_at: '2026-09-08T02:00:00Z', business_date: '2026-09-08', week_end: '2026-09-13', priced: true, already_complete: false }],
+      work_orders: [{ id: 'henry-wo-1', wo_number: 'WO-HENRY-01', completed_at: WO_COMPLETED_AT, business_date: WO_BUSINESS_DATE, week_end: WO_WEEK_END, priced: true, already_complete: false }],
     });
     await signIn(page, PERSONAS.fencing_manager);
     await page.evaluate(() => window.openJob('henry-job-1'));

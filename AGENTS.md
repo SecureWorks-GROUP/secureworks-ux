@@ -31,6 +31,8 @@ Why: previously, deploys from stale base worktrees caused production breakage. S
 
 Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs on every pull request (`.github/workflows/playwright-e2e.yml`). Run it locally with `npm ci && npx playwright install chromium && npm run test:e2e`. Changing `trade.html` or `ops.html` markup or element IDs can break these specs. The suite also carries `tests/e2e/cal-workdays.spec.js` — a pure-node spec that extracts the code between `// <calendar-ops-core>` and `// </calendar-ops-core>` in `ops.html` and asserts against the REAL shipped functions, so renaming or moving those sentinels breaks CI. See `README-tests.md` for the covered flows and the copyable-template details.
 
+Any fixture whose app logic compares a date against "now"/"this week" (e.g. trade.html's weekly-invoice week matching) will date-rot if the fixture's dates are hard-coded absolute strings — it passes until the real week moves past them, then fails identically on every branch with no code change. Derive such dates at test-run time from `perthDate()`/`perthWeekMonday()`/`addIsoDays()` in `tests/helpers/feed-stub.js` (already used this way throughout `tests/fixtures/test.js`), not literals. This bit `tests/e2e/trade-complete-to-invoice.spec.js`'s per-metre scenario in 2026-09: its hard-coded work-order week no longer matched the dynamically-dated `weeklyInvoiceWorkOrders` fixture in `tests/fixtures/test.js` once the real week moved on.
+
 ## Ops Dash calendar drag (`ops.html`)
 
 CP1 drag-to-reschedule is behind a feature flag that is now DEFAULT ON. Kill

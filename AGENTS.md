@@ -86,6 +86,18 @@ ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
 
+The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
+`data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`
+persisted at `localStorage.sw_cal_divs`) is a flat list of independently
+toggleable job-type buckets, not a hierarchy — Repair (Captain ruling
+2026-09-16) is its own division alongside Patios/Fencing/Make Safes, never
+folded under Make Safes. Adding a division touches three spots: the sidebar
+`<label>` markup, `allDivs` in `toggleCalDivision` (drives the "every division
+ticked -> collapse to All" rule), and the `f === '<div>' && div === ...` match
+list in `renderScheduleView`'s division filter (this is the only place that
+actually drops non-matching events; the Crew swimlane view only dims). Guard:
+`tests/e2e/ops-calendar-repair-division.spec.js`.
+
 ## Ops Insurance Repairs board (`ops.html`)
 
 A NEW pipeline tab (`Repairs`, next to Patio) that is PARALLEL to and separate

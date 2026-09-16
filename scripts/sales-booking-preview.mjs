@@ -16,7 +16,7 @@ import { handleLocal } from './sales-booking-local-api.mjs';
 
 const require = createRequire(import.meta.url);
 const assess = require('../modules/sales-booking-assess.cjs');
-const diaryJoin = require('../modules/sales-booking-diary-join.cjs');
+const repairEvent = require('../modules/sales-booking-repair-event.cjs');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SALES_BOOKING_PREVIEW_PORT || 4174);
@@ -149,8 +149,8 @@ async function salesBookingRead(query) {
     contact_id: null,
     suburb: ev.suburb,
     display_name: ev.display_name,
-    status: /jason|marangaroo/i.test(ev.subject || '') ? 'repair' : 'booked',
-    reason: /jason|marangaroo/i.test(ev.subject || '')
+    status: repairEvent.isRepairDiaryEvent(ev) ? 'repair' : 'booked',
+    reason: repairEvent.isRepairDiaryEvent(ev)
       ? 'Customer cancelled. Outlook still occupies this slot until authorised deletion is read back.'
       : 'Provider calendar event. Booked visits stay on the workload until scoped.',
     event_id: ev.event_id,
@@ -186,7 +186,7 @@ async function salesBookingRead(query) {
     } catch {
       reason = 'GHL conversation was not retrieved in this preview read. Select the case to load the thread through the signed-in GHL path.';
     }
-    cases.push(diaryJoin.attachDiaryEvent(row, {
+    cases.push(repairEvent.attachCancelledEnquiry(row, {
       id: row.id,
       contact_id: row.contact_id,
       suburb: row.suburb,

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const api = require('./ops-sales-booking.js');
 const performance = require('./ops-sales-performance.js');
-const diaryJoin = require('./sales-booking-diary-join.cjs');
+const repairEvent = require('./sales-booking-repair-event.cjs');
 
 function sampleRead(resource) {
   return {
@@ -123,13 +123,19 @@ test('opening a conversation is read-only and never posts a booking event', asyn
   assert.equal(api.state.data.cases[0].status, 'ready');
 });
 
-test('a GHL case joins its surviving diary event so cancelled-plus-event-present blocks the stamp', () => {
+test('a Jason-only diary subject still blocks the cancelled Marangaroo enquiry', () => {
   const events = [{
     event_id: 'evt-jason',
-    subject: 'Scope: Jason, Marangaroo',
+    subject: 'Scope: Jason',
     display_name: 'Jason',
     suburb: 'Marangaroo',
     start_iso: '2026-09-14T10:00:00'
+  }, {
+    event_id: 'evt-carlisle-booked',
+    subject: 'Scope: Pat, Carlisle',
+    display_name: 'Pat',
+    suburb: 'Carlisle',
+    start_iso: '2026-09-15T09:00:00'
   }];
   const row = { id: 'marangaroo', suburb: 'Marangaroo', status: 'repair', contact_id: 'ghl-1' };
   const built = {
@@ -142,7 +148,7 @@ test('a GHL case joins its surviving diary event so cancelled-plus-event-present
     event_id: null,
     proposal: { start_iso: '2026-09-14T12:00:00', end_iso: '2026-09-14T13:00:00' }
   };
-  const joined = diaryJoin.attachDiaryEvent(row, built, events);
+  const joined = repairEvent.attachCancelledEnquiry(row, built, events);
   assert.equal(joined.event_id, 'evt-jason');
   assert.equal(joined.status, 'repair');
   assert.equal(api.caseLayer(joined), 'blocked');
@@ -155,7 +161,7 @@ test('a GHL case joins its surviving diary event so cancelled-plus-event-present
   assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="marangaroo"/);
   assert.doesNotMatch(html, /data-booking-stamp="cut" data-booking-stamp-id="marangaroo"/);
   assert.match(html, /Marangaroo enquiry/);
-  const open = diaryJoin.attachDiaryEvent(
+  const open = repairEvent.attachCancelledEnquiry(
     { id: 'carlisle', suburb: 'Carlisle', status: 'ready' },
     { id: 'carlisle', suburb: 'Carlisle', status: 'ready', event_id: null, proposal: built.proposal },
     events

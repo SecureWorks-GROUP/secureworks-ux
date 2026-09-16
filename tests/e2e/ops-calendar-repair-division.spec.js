@@ -30,6 +30,15 @@ const EVENTS = [
        job_type: 'makesafe', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
   ev({ job_id: 'j3', assignment_id: 'a3', job_number: 'SWR-27003', client_name: 'Cara Chen',
        job_type: 'repair', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
+  // Family-tagged repair: jobs.type still 'makesafe' (has not been re-typed), but
+  // job_family says repair — the calendar-feed-job-family contract (backend
+  // companion task). Must classify as Repair, not Make Safes, same as the board's
+  // isRepairJob. This is the case PR #314 left unhandled (SWMS-261319 et al).
+  ev({ job_id: 'j4', assignment_id: 'a4', job_number: 'SWMS-27004', client_name: 'Simon Davey',
+       job_type: 'makesafe', job_family: 'repair', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
+  // job_family absent entirely: must behave exactly as today (falls back to job_type).
+  ev({ job_id: 'j5', assignment_id: 'a5', job_number: 'SWMS-27005', client_name: 'Dana Diaz',
+       job_type: 'makesafe', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
 ];
 
 async function seedAndRender(page) {
@@ -78,26 +87,32 @@ test('sidebar offers a Repair division distinct from Make Safes', async ({ page 
 
 test('ticking only Repair shows the repair job and hides patio/makesafe', async ({ page }) => {
   // Baseline: All shows every division together.
-  expect(await visibleJobNumbers(page)).toEqual(expect.arrayContaining(['SWP-27001', 'SWMS-27002', 'SWR-27003']));
+  expect(await visibleJobNumbers(page)).toEqual(expect.arrayContaining(
+    ['SWP-27001', 'SWMS-27002', 'SWR-27003', 'SWMS-27004', 'SWMS-27005']));
 
   // Deselect All, then tick only Repair.
   await clickDiv(page, 'all');
   await clickDiv(page, 'repair');
 
   const visible = await visibleJobNumbers(page);
-  expect(visible).toEqual(['SWR-27003']);
+  // SWMS-27004 is job_type='makesafe' but job_family='repair' — must match Repair,
+  // never Make Safes, per calDivisionOf(). SWMS-27005 (no job_family) stays out.
+  expect(visible.sort()).toEqual(['SWMS-27004', 'SWR-27003']);
 
   const checks = await page.$$eval('[data-caldiv]', (els) =>
     Object.fromEntries(els.map((el) => [el.dataset.caldiv, el.checked])));
   expect(checks).toEqual({ all: false, patio: false, fencing: false, makesafe: false, repair: true });
 });
 
-test('ticking only Make Safes hides repair jobs', async ({ page }) => {
+test('ticking only Make Safes hides repair jobs, including family-tagged ones', async ({ page }) => {
   await clickDiv(page, 'all');
   await clickDiv(page, 'makesafe');
 
   const visible = await visibleJobNumbers(page);
-  expect(visible).toEqual(['SWMS-27002']);
+  // SWMS-27004 carries job_type='makesafe' but job_family='repair', so it must NOT
+  // show here even though jobs.type still says makesafe. SWMS-27005 has no
+  // job_family at all and falls back to job_type='makesafe' exactly as before.
+  expect(visible.sort()).toEqual(['SWMS-27002', 'SWMS-27005']);
 });
 
 test('ticking every individual division collapses to All', async ({ page }) => {
@@ -141,6 +156,7 @@ test('an old three-division stored selection loads sanely with Repair simply unt
   expect(checks).toEqual({ all: false, patio: true, fencing: true, makesafe: true, repair: false });
 
   const visible = await visibleJobNumbers(page);
-  expect(visible).toEqual(expect.arrayContaining(['SWP-27001', 'SWMS-27002']));
+  expect(visible).toEqual(expect.arrayContaining(['SWP-27001', 'SWMS-27002', 'SWMS-27005']));
   expect(visible).not.toContain('SWR-27003');
+  expect(visible).not.toContain('SWMS-27004'); // job_family='repair' — stays out of Make Safes
 });

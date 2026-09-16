@@ -8084,6 +8084,20 @@ var _calDivFilters = (function() {
   return ['all'];
 })(); // array of active divisions: ['all'] or subset of ['patio','fencing','makesafe','repair']
 var _calDivFilter = _calDivFilters.indexOf('all') !== -1 ? 'all' : _calDivFilters; // compat shim
+
+// Divisions filter bucket for a calendar event. job_family (calendar-feed-job-family,
+// once shipped) wins when it says 'repair' regardless of job_type, so a family-tagged
+// repair event never files under Make Safes/Fencing just because jobs.type lags behind
+// the Repairs pipeline move — same rule as the board's isRepairJob. job_family absent
+// or non-'repair' falls back to job_type exactly as before.
+function calDivisionOf(ev) {
+  if (String((ev && ev.job_family) || '').toLowerCase() === 'repair') return 'repair';
+  var t = (ev && ev.job_type) || 'patio';
+  if (t === 'repair') return 'repair';
+  if (t === 'decking') return 'patio';
+  if (t === 'makesafes') return 'makesafe';
+  return t;
+}
 var _calUnschedOpen = false;
 var _calAvailability = {}; // { 'CrewName_date': { status, note } }
 var _calLeaveByDate = {}; // { date: ['CrewName', ...] } — Schedule view leave badges
@@ -9096,7 +9110,7 @@ function renderSwimlaneView(container, range) {
         if (ev.recurrence_group_id) html += '<svg class="cal-recurrence-icon" viewBox="0 0 16 16"><path d="M2 8a6 6 0 0110.5-4M14 8a6 6 0 01-10.5 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.5 1v3h-3M3.5 15v-3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         // Type icon (inline SVG, week view only)
         if (!isMonthMode) {
-          var divType = ev.job_type || 'patio';
+          var divType = calDivisionOf(ev);
           html += calTypeIconSvg(divType);
         }
         html += '</div>';
@@ -9317,14 +9331,11 @@ function renderScheduleView(container, range) {
     }
     // Division filter (multi-select)
     if (_calDivFilter !== 'all') {
-      var div = ev.job_type || 'patio';
+      var div = calDivisionOf(ev);
       var match = false;
       for (var fi = 0; fi < _calDivFilters.length; fi++) {
         var f = _calDivFilters[fi];
-        if (f === 'patio' && (div === 'patio' || div === 'decking')) { match = true; break; }
-        if (f === 'fencing' && div === 'fencing') { match = true; break; }
-        if (f === 'makesafe' && (div === 'makesafe' || div === 'makesafes')) { match = true; break; }
-        if (f === 'repair' && div === 'repair') { match = true; break; }
+        if (f === div) { match = true; break; }
       }
       if (!match) return;
     }

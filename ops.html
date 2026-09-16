@@ -821,6 +821,7 @@
     .cal-schedule-bar.patio { background: rgba(241,90,41,0.18); border-left-color: var(--sw-orange); color: var(--sw-dark); border-top: 1px solid rgba(241,90,41,0.25); border-bottom: 1px solid rgba(241,90,41,0.25); }
     .cal-schedule-bar.fencing { background: rgba(76,106,124,0.18); border-left-color: var(--sw-mid); color: var(--sw-dark); border-top: 1px solid rgba(76,106,124,0.25); border-bottom: 1px solid rgba(76,106,124,0.25); }
     .cal-schedule-bar.decking { background: rgba(230,126,34,0.18); border-left-color: #E67E22; color: var(--sw-dark); border-top: 1px solid rgba(230,126,34,0.25); border-bottom: 1px solid rgba(230,126,34,0.25); }
+    .cal-schedule-bar.repair { background: rgba(13,148,136,0.18); border-left-color: #0D9488; color: var(--sw-dark); border-top: 1px solid rgba(13,148,136,0.25); border-bottom: 1px solid rgba(13,148,136,0.25); }
     .cal-schedule-bar.confirmed { border-right: 2px solid #27AE60; font-weight: 700; }
     .cal-schedule-bar.tentative { border-right: 1px dashed var(--sw-border); }
     .cal-schedule-bar.placeholder { opacity: 0.35; border-right: 1px dashed #ccc; }
@@ -9110,7 +9111,7 @@ function renderSwimlaneView(container, range) {
         if (ev.recurrence_group_id) html += '<svg class="cal-recurrence-icon" viewBox="0 0 16 16"><path d="M2 8a6 6 0 0110.5-4M14 8a6 6 0 01-10.5 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12.5 1v3h-3M3.5 15v-3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         // Type icon (inline SVG, week view only)
         if (!isMonthMode) {
-          var divType = calDivisionOf(ev);
+          var divType = ev.job_type || 'patio';
           html += calTypeIconSvg(divType);
         }
         html += '</div>';
@@ -9347,6 +9348,7 @@ function renderScheduleView(container, range) {
         site_suburb: ev.site_suburb || '',
         site_address: ev.site_address || '',
         job_type: ev.job_type || 'patio',
+        job_family: ev.job_family || null,
         confirmation: ev.confirmation_status || 'tentative',
         start_time: ev.start_time || null,
         end_time: ev.end_time || null,
@@ -9591,7 +9593,7 @@ function renderScheduleView(container, range) {
         html += '</div>';
       } else {
         var realJobId = job._jobId || job.id;
-        var typeClass = (job.job_type === 'fencing') ? 'fencing' : (job.job_type === 'decking') ? 'decking' : 'patio';
+        var typeClass = (calDivisionOf(job) === 'repair') ? 'repair' : (job.job_type === 'fencing') ? 'fencing' : (job.job_type === 'decking') ? 'decking' : 'patio';
         var confClass = job.confirmation || 'tentative';
         var readiness = _calReadiness[realJobId];
         var readinessClass = readiness ? ' readiness-' + readiness.status : '';

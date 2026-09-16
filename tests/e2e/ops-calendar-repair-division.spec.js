@@ -39,17 +39,26 @@ const EVENTS = [
   // job_family absent entirely: must behave exactly as today (falls back to job_type).
   ev({ job_id: 'j5', assignment_id: 'a5', job_number: 'SWMS-27005', client_name: 'Dana Diaz',
        job_type: 'makesafe', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
+  // Plain decking event, no job_family: files under Patio for the filter but must
+  // keep its own decking glyph/colour (calDivisionOf collapses decking -> patio
+  // for the FILTER only, never for the type icon or bar colour).
+  ev({ job_id: 'j6', assignment_id: 'a6', job_number: 'SWD-27006', client_name: 'Eli Evans',
+       job_type: 'decking', scheduled_date: '2026-09-14', scheduled_end: '2026-09-14' }),
 ];
 
-async function seedAndRender(page) {
-  await page.evaluate((EVENTS) => {
+// The three-horizontal-line decking glyph painted by calTypeIconSvg('decking');
+// the patio glyph is the house outline (M1 9V5L6 1l5 4v4).
+const DECKING_GLYPH_PATH = 'M0 2h12M0 5h12M0 8h12';
+
+async function seedAndRender(page, viewMode) {
+  await page.evaluate(({ EVENTS, viewMode }) => {
     const container = document.getElementById('calendarBody');
     for (let n = container; n && n !== document.body; n = n.parentElement) {
       if (getComputedStyle(n).display === 'none') n.style.display = 'block';
     }
     window._calDate = new Date('2026-09-14T00:00:00');
     window._calRangeMode = '1w';
-    window._calViewMode = 'schedule'; // division filter hard-drops non-matching jobs here
+    window._calViewMode = viewMode || 'schedule'; // division filter hard-drops non-matching jobs here
     window._calEvents = EVENTS;
     window._crewList = [{ id: 'u1', name: 'Hugo', role: 'crew', division: 'patio' }];
     window._calLeaveByDate = {};
@@ -58,7 +67,26 @@ async function seedAndRender(page) {
     window._calDeliveries = [];
     window.syncCalDivCheckboxes(); // normally run from loadCalendar(); reflects stored _calDivFilters onto the checkboxes
     window.renderCalendar();
-  }, EVENTS);
+  }, { EVENTS, viewMode });
+}
+
+function scheduleBarClasses(page) {
+  return page.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll('.cal-schedule-bar')].map((bar) => [
+      (bar.querySelector('strong') || {}).textContent, [...bar.classList],
+    ]))
+  );
+}
+
+// Crew (swimlane) week view paints one .cal-job-block per assignment with the
+// job number in a <strong> and the type icon as the trailing .cal-type-icon svg.
+function crewBlockIconPaths(page) {
+  return page.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll('.cal-job-block')].map((block) => [
+      (block.querySelector('strong') || {}).textContent,
+      [...block.querySelectorAll('.cal-type-icon path')].map((p) => p.getAttribute('d')),
+    ]))
+  );
 }
 
 function visibleJobNumbers(page) {
@@ -102,6 +130,36 @@ test('ticking only Repair shows the repair job and hides patio/makesafe', async 
   const checks = await page.$$eval('[data-caldiv]', (els) =>
     Object.fromEntries(els.map((el) => [el.dataset.caldiv, el.checked])));
   expect(checks).toEqual({ all: false, patio: false, fencing: false, makesafe: false, repair: true });
+});
+
+test('the Schedule bar colour agrees with the Divisions bucket for family-tagged repairs', async ({ page }) => {
+  // Under All: SWMS-27004 (job_type makesafe, job_family repair) and SWR-27003
+  // (job_type repair) both paint with the repair bar class, so a card the filter
+  // files under Repair never wears Make Safes/Fencing colours. Everything without
+  // a repair family keeps its existing class, decking included.
+  const classes = await scheduleBarClasses(page);
+  expect(classes['SWMS-27004']).toContain('repair');
+  expect(classes['SWMS-27004']).not.toContain('patio');
+  expect(classes['SWMS-27004']).not.toContain('fencing');
+  expect(classes['SWR-27003']).toContain('repair');
+  expect(classes['SWD-27006']).toContain('decking');
+  expect(classes['SWD-27006']).not.toContain('repair');
+  expect(classes['SWP-27001']).toContain('patio');
+  expect(classes['SWMS-27005']).not.toContain('repair');
+
+  const repairBar = page.locator('.cal-schedule-bar.repair:has(strong:text-is("SWMS-27004"))');
+  await expect(repairBar).toHaveCSS('border-left-color', 'rgb(13, 148, 136)');
+});
+
+test('a plain decking event keeps its decking type icon in the Crew week view', async ({ page }) => {
+  // Regression guard: the type icon must be driven by the raw job_type, not the
+  // division bucket — collapsing decking into patio there would repaint every
+  // decking event with the patio house glyph when job_family is absent.
+  await seedAndRender(page, 'crew');
+  const icons = await crewBlockIconPaths(page);
+  expect(icons['SWD-27006']).toEqual([DECKING_GLYPH_PATH]);
+  expect(icons['SWP-27001']).not.toEqual([DECKING_GLYPH_PATH]);
+  expect(icons['SWP-27001']).toHaveLength(1);
 });
 
 test('ticking only Make Safes hides repair jobs, including family-tagged ones', async ({ page }) => {

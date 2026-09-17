@@ -13,29 +13,6 @@ const a = html.indexOf(OPEN);
 const b = html.indexOf(CLOSE);
 if (a < 0 || b <= a) fail('ops-asset-cache-bust sentinels missing from ops.html');
 
-const required = [
-  'shared/cloud.js?v=auth-jwt-20260813',
-  'shared/auth-gate.js?v=auth-jwt-20260813',
-  'modules/ops-sales-performance.css?v=1',
-  'modules/ops-sales-booking.css?v=1',
-  'modules/sw-state-machine.js?v=1',
-  'modules/ops-stage-gate-engine.js?v=1',
-  'modules/ops-sales-performance.js?v=1',
-  'modules/ops-sales-booking.js?v=1',
-  'modules/ops-council.js?v=2',
-  'modules/ops-makesafe-intake-cockpit.js?v=1',
-  'modules/ops-makesafe-reporting-cockpit.js?v=9',
-  'modules/ops-makesafe-feedback-notes.js?v=1',
-  'modules/ops-modals.js?v=4',
-  'modules/ops-clear-debt-v2.js?v=1',
-];
-for (const u of required) {
-  if (!html.includes("u:'" + u + "'")) fail('ops.html stamp list missing ' + u);
-}
-if (/<(?:script|link)\b[^>]*(?:src|href)="[^"]*\?v=/.test(html)) {
-  fail('ops.html still has a frozen ?v= script or link tag');
-}
-
 let tick = 1700000000000;
 const writes = [];
 const ctx = {

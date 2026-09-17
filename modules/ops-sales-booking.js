@@ -254,9 +254,7 @@
 
   function isPackOffer(raw) {
     if (!raw || typeof raw !== 'object') return false;
-    if (raw.offer === true || raw.offer === 'offer') return true;
-    var disposition = String(raw.disposition || raw.kind || '').toLowerCase();
-    return disposition === 'offer';
+    return raw.offer === true || raw.disposition === 'offer';
   }
 
   // Pack proposals use {disposition, day, window, draft, offer, name, suburb}
@@ -322,20 +320,16 @@
     var data = state.data;
     var pack = data && data.pack;
     var src = pack && pack.proposals;
-    if (!src) return [];
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return [];
     var entries = [];
-    var push = function (key, raw) {
+    Object.keys(src).forEach(function (key) {
+      var raw = src[key];
       if (!raw || typeof raw !== 'object') return;
       if (!isPackOffer(raw)) return;
       var id = packOpportunityId(raw.opportunity_id || raw.id || key);
       if (!id) return;
       entries.push({ id: id, raw: raw });
-    };
-    if (Array.isArray(src)) {
-      src.forEach(function (raw) { push(null, raw); });
-    } else if (typeof src === 'object') {
-      Object.keys(src).forEach(function (key) { push(key, src[key]); });
-    }
+    });
     return entries;
   }
 
@@ -595,10 +589,11 @@
 
   // Backend PR 858 returns job_type on every case (patio, fencing, or "not given").
   function jobTypeLabel(c) {
-    var raw = c && c.job_type;
-    var s = String(raw == null ? '' : raw).replace(/^\s+|\s+$/g, '');
-    if (!s) return 'not given';
-    return s;
+    var type = String(c && c.job_type != null ? c.job_type : '').replace(/^\s+|\s+$/g, '');
+    if (type) return type;
+    var job = String(c && c.job != null ? c.job : '').replace(/^\s+|\s+$/g, '');
+    if (job) return job;
+    return 'not given';
   }
 
   function proposalSlotLabel(c) {

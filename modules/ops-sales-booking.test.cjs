@@ -2125,6 +2125,102 @@ test('job_type sits next to suburb on the queue row and in the detail header', (
   api.state.selectedId = null;
 });
 
+test('a job-only pack row shows the job on the queue, detail, and stamp board', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.selectedId = 'TelAKHzhxnCjKrExxQxE';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: {
+      present: true,
+      week_start: '2026-09-14',
+      proposals: {
+        TelAKHzhxnCjKrExxQxE: {
+          offer: true,
+          day: '2026-09-18',
+          window: { start: '08:00', end: '09:30' },
+          draft: 'Hi Lawrence, Friday 18 September between 08:00 and 09:30.',
+          name: 'Lawrence Guo',
+          suburb: 'Woodlands',
+          job: 'Colorbond fence'
+        }
+      }
+    },
+    diary: [],
+    cases: []
+  };
+  const row = api.cases()[0];
+  assert.equal(row.job, 'Colorbond fence');
+  assert.equal(row.job_type == null, true);
+  assert.equal(api.jobTypeLabel(row), 'Colorbond fence');
+  const html = api.renderHTML();
+  assert.match(html, /Lawrence Guo · Woodlands · Colorbond fence/);
+  assert.match(html, /Woodlands · Colorbond fence/);
+  assert.match(html, /<div class="why">Colorbond fence · Ready to contact<\/div>/);
+  assert.doesNotMatch(html, /Lawrence Guo · Woodlands · not given/);
+  api.state.resourceId = 'nithin';
+  api.state.selectedId = null;
+});
+
+test('pack offers accept only offer true or disposition offer on a keyed object', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.selectedId = null;
+  const body = {
+    day: '2026-09-18',
+    window: { start: '08:00', end: '09:30' },
+    draft: 'Hi Lawrence, Friday 18 September between 08:00 and 09:30.',
+    name: 'Lawrence Guo',
+    suburb: 'Woodlands'
+  };
+  const read = (proposals) => ({
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, week_start: '2026-09-14', proposals },
+    diary: [],
+    cases: []
+  });
+
+  api.state.data = read({ flagged: Object.assign({}, body, { offer: true }) });
+  assert.equal(api.stampableOfferList().length, 1);
+  assert.equal(api.isPackOfferCase(api.cases()[0]), true);
+
+  api.state.data = read({ flagged: Object.assign({}, body, { disposition: 'offer' }) });
+  assert.equal(api.stampableOfferList().length, 1);
+  assert.equal(api.isPackOfferCase(api.cases()[0]), true);
+
+  api.state.data = read({ flagged: Object.assign({}, body, { offer: 'offer' }) });
+  assert.equal(api.cases().length, 0);
+  assert.equal(api.stampableOfferList().length, 0);
+
+  api.state.data = read({ flagged: Object.assign({}, body, { kind: 'offer' }) });
+  assert.equal(api.cases().length, 0);
+  assert.equal(api.stampableOfferList().length, 0);
+
+  api.state.data = read([Object.assign({}, body, { offer: true, opportunity_id: 'array-1' })]);
+  assert.equal(api.cases().length, 0);
+  assert.equal(api.stampableOfferList().length, 0);
+
+  api.state.resourceId = 'nithin';
+});
+
 test('Booked tile names an empty GHL calendar and keeps diary not read for a failed read', () => {
   api.state.resourceId = 'marnin';
   api.state.weekStart = '2026-09-14';

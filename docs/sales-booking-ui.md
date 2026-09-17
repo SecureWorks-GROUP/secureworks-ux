@@ -9,12 +9,17 @@ send a customer text, write a diary or move a GHL stage.
 `SEND_HOLD` stays on for Approve, Confirm, calendar writes and any customer send.
 `attemptApprove()` still refuses those. **Send message** is the captain stamp: it POSTs
 `sales_booking_stamp_write` with `{resource, week_start, stamp: {captain, approved, rejected,
-decisions, stage_moves: []}}` (opportunity ids) and re-reads. Cut posts the same body with
-the id under `rejected`. Approve/Confirm stay disabled.
+decisions, stage_moves: []}}` (opportunity ids) and re-reads. `week_start` is the pack week
+(`pack.week_start` from the `sales_booking_read` that supplied the proposals, the same value
+that read was made with), not the Monday on the grid. After Next week the grid can show
+2026-09-21 while Send still writes 2026-09-14 for the live marnin pack. `applyServerStamp`
+reads the stamp for that same pack week. Cut posts the same body with the id under
+`rejected`. Approve/Confirm stay disabled.
 
-On load, `pack: {present, as_of}` and `stamp: {present, as_of, approved, rejected, decisions,
-stage_moves}` plus per-case `proposal` / `stamp_state` / `drafts` are consumed. Absent pack
-renders as "No proposals published yet for this week", never as empty free capacity.
+On load, `pack: {present, as_of, week_start}` and `stamp: {present, as_of, week_start,
+approved, rejected, decisions, stage_moves}` plus per-case `proposal` / `stamp_state` /
+`drafts` are consumed. Absent pack renders as "No proposals published yet for this week",
+never as empty free capacity.
 
 ## Diary paint
 
@@ -118,9 +123,10 @@ Five layers, each with a stage tag on the card: Confirmed booking, Proposed (not
 Offered (waiting on reply), Cancelled (still in diary), Personal. Cards read stage, then
 time and name, then address and suburb, then job. Previous / Next week (`data-booking-week`)
 re-reads that week's diary and keeps the requested Monday on the grid, even when the pack's
-own `week_start` is an earlier week. Proposals whose windows fall outside the shown week
+own `week_start` is an earlier week. Dated pack windows that fall outside the shown week
 stay off the grid until that week is opened, but they stay listed on the queue and stamp
-board with their calendar day and arrival window.
+board with their calendar day and arrival window. A clock-only weekday (day `Fri` with no
+ISO date) stays undated: it lists without a date and does not attach to the week on screen.
 
 GHL cases in the live read may carry `suburb: null`. Display, search, drafts and
 name-and-suburb diary matching take suburb from the proposal when the case has none.

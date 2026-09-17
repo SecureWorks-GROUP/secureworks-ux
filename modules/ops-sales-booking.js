@@ -928,8 +928,9 @@
   }
 
   // ---------------------------------------------------------------------------
-  // The captain stamp. KEEP or CUT records a local stamp.json-shaped decision.
-  // It is not a send: nothing here calls a provider, a diary or ops-api.
+  // The captain stamp. KEEP or CUT records a local decision. Send POSTs
+  // sales_booking_stamp_write keyed to the pack week, not the Monday on screen.
+  // Approve, Confirm, diary writes and any customer send stay held.
   // ---------------------------------------------------------------------------
   function stampListHas(list, c) {
     if (!c || !Array.isArray(list)) return false;

@@ -133,6 +133,14 @@
       position: fixed; top: 56px; left: 0; right: 0; bottom: var(--jarvis-bar-height); z-index: 50;
       background: var(--sw-bg); /* opaque — fixed overlay must fully cover other tabs' DOM behind it */
     }
+    /* Approvals used to carry inline display:flex, which beat .view { display:none }
+       and leaked Council / MakeSafe Intake above Sales. Layout lives on .active only. */
+    #viewApprovals.active {
+      display: flex !important;
+      flex-direction: column;
+      height: calc(100vh - var(--jarvis-bar-height) - 56px);
+      overflow: hidden;
+    }
     /* Calendar loading state — fills the body so it never reads as a frozen/old page while data fetches */
     .cal-loading {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -5048,7 +5056,7 @@
       <div id="inboxList"></div>
     </div>
 
-    <div id="viewApprovals" class="view" style="height:calc(100vh - var(--jarvis-bar-height) - 56px);overflow:hidden;display:flex;flex-direction:column;">
+    <div id="viewApprovals" class="view">
       <!-- Tab switcher -->
       <div id="approvalsTabBar" style="display:flex;gap:0;border-bottom:2px solid var(--sw-border);background:#fff;flex-shrink:0;">
         <button id="approvalsTabCouncil" onclick="switchApprovalsTab('council')" style="padding:10px 20px;font-size:13px;font-weight:600;border:none;background:none;border-bottom:2px solid #F15A29;color:#F15A29;cursor:pointer;margin-bottom:-2px;">Council</button>
@@ -7222,11 +7230,17 @@ function showView(view) {
   }
   document.body.classList.toggle('performance-view-active', view === 'sales' && salesTab === 'performance');
   document.body.classList.toggle('sales-booking-view-active', view === 'sales' && salesTab === 'booking');
+  document.body.classList.toggle('approvals-view-active', view === 'approvals');
   // Close full-page job detail if open
   if (jobDetailIsOpen()) {
     closeJobDetail(true);
   }
-  document.querySelectorAll('.view').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.view').forEach(function(el) {
+    el.classList.remove('active');
+    // Inline display on a .view (Approvals used to ship display:flex) beats the
+    // stylesheet hide rule. Clear it so inactive views actually leave the screen.
+    if (el.style) el.style.display = '';
+  });
   document.querySelectorAll('.header-nav button').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.mobile-nav button').forEach(function(el) { el.classList.remove('active'); });
 

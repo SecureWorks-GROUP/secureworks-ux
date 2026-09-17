@@ -230,6 +230,11 @@
 .sales-workspace-hold{margin-left:auto;color:#C4481F;font-size:11px;font-weight:650}
 body:not(.sales-booking-view-active) #salesBookingRoot{display:none}
 body:not(.performance-view-active) #salesPerformanceRoot{display:none}
+/* Approvals used to leak above Sales because of an inline display:flex. Hide it
+   whenever Booking is the active Sales subtab, and hide Booking when Approvals is on. */
+body.sales-booking-view-active #viewApprovals:not(.active){display:none!important}
+body.approvals-view-active #viewSales:not(.active),
+body.approvals-view-active #salesBookingRoot{display:none!important}
 
 @media(max-width:1280px){
   #salesBookingRoot .workspace{grid-template-columns:220px minmax(0,1fr)}

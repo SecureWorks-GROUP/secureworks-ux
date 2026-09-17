@@ -245,11 +245,37 @@
     return raw ? mondayIso(raw) : state.weekStart;
   }
 
-  // Pack proposals use {disposition, day, window_start, window_end, draft, why[]}.
-  // The week grid still paints from start_iso/end_iso, so fill those when the
-  // pack shape arrives and leave an already-normalised proposal untouched.
+  function packOpportunityId(raw) {
+    var id = String(raw == null ? '' : raw).replace(/^\s+|\s+$/g, '');
+    if (!id) return '';
+    if (id.indexOf('opp:') === 0) return id.slice(4);
+    return id;
+  }
+
+  function isPackOffer(raw) {
+    if (!raw || typeof raw !== 'object') return false;
+    return raw.offer === true || raw.disposition === 'offer';
+  }
+
+  // Pack proposals use {disposition, day, window, draft, offer, name, suburb}
+  // or the flattened {window_start, window_end} shape. The week grid still
+  // paints from start_iso/end_iso, so fill those when the pack shape arrives
+  // and leave an already-normalised proposal untouched.
+  function flattenPackWindow(p) {
+    if (!p || typeof p !== 'object') return p;
+    var window = p.window;
+    if (window && typeof window === 'object') {
+      if (!isoDateOf(p.day) && (window.date || window.day)) p.day = window.date || window.day;
+      if (!p.window_start && window.start) p.window_start = window.start;
+      if (!p.window_end && window.end) p.window_end = window.end;
+      if (!p.window_label && window.label) p.window_label = window.label;
+    }
+    return p;
+  }
+
   function normaliseProposal(p) {
     if (!p || typeof p !== 'object') return p;
+    flattenPackWindow(p);
     var day = proposalDayIso(p);
     var start = p.start_iso || clockToIso(day, p.window_start) || p.window_start_iso || null;
     var end = p.end_iso || clockToIso(day, p.window_end) || p.window_end_iso || null;
@@ -263,7 +289,114 @@
       var we = clockToIso(day, p.window_end);
       if (we) p.window_end_iso = we;
     }
+    if (isPackOffer(p) && p.disposition == null) p.disposition = 'offer';
     return p;
+  }
+
+  function proposalFromPackRaw(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var p = {
+      disposition: raw.disposition || (isPackOffer(raw) ? 'offer' : null),
+      offer: isPackOffer(raw),
+      day: raw.day || null,
+      window: raw.window,
+      window_start: raw.window_start,
+      window_end: raw.window_end,
+      window_start_iso: raw.window_start_iso,
+      window_end_iso: raw.window_end_iso,
+      window_label: raw.window_label,
+      start_iso: raw.start_iso,
+      end_iso: raw.end_iso,
+      draft: raw.draft || null,
+      why: [].concat(raw.why || [], raw.failures || []),
+      suburb: raw.suburb || null,
+      name: raw.name || raw.display_name || null,
+      job: raw.job || raw.job_type || null
+    };
+    return normaliseProposal(p);
+  }
+
+  function packOfferEntries() {
+    var data = state.data;
+    var pack = data && data.pack;
+    var src = pack && pack.proposals;
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return [];
+    var entries = [];
+    Object.keys(src).forEach(function (key) {
+      var raw = src[key];
+      if (!raw || typeof raw !== 'object') return;
+      if (!isPackOffer(raw)) return;
+      var id = packOpportunityId(raw.opportunity_id || raw.id || key);
+      if (!id) return;
+      entries.push({ id: id, raw: raw });
+    });
+    return entries;
+  }
+
+  function overlayPackOnCase(c, raw, opts) {
+    opts = opts || {};
+    var next = proposalFromPackRaw(raw);
+    if (!next) return c;
+    c.proposal = Object.assign({}, c.proposal || {}, next);
+    normaliseProposal(c.proposal);
+    if (!blankPlace(c.display_name)) {
+      // Keep the roster name when the opportunity was in this read.
+    } else {
+      c.display_name = raw.name || raw.display_name || c.display_name;
+    }
+    if (!caseSuburb(c) && (raw.suburb || next.suburb)) c.suburb = raw.suburb || next.suburb;
+    if (!c.job && (raw.job || raw.job_type || next.job)) c.job = raw.job || raw.job_type || next.job;
+    if (!c.contact_id && raw.contact_id) c.contact_id = raw.contact_id;
+    if (!c.opportunity_id) c.opportunity_id = packOpportunityId(raw.opportunity_id || raw.id || c.id);
+    c.not_in_this_read = !!opts.notInThisRead;
+    return c;
+  }
+
+  function synthesisePackOfferCase(entry) {
+    var raw = entry.raw || {};
+    var row = {
+      id: entry.id,
+      opportunity_id: entry.id,
+      contact_id: raw.contact_id || null,
+      display_name: raw.name || raw.display_name || 'Enquiry',
+      suburb: raw.suburb || null,
+      job: raw.job || raw.job_type || null,
+      status: 'ready',
+      reason: 'Pack offer. This opportunity was not among the enumerated cases in this read.',
+      proposal: null,
+      stamp_state: 'none',
+      not_in_this_read: true
+    };
+    overlayPackOnCase(row, raw, { notInThisRead: true });
+    return row;
+  }
+
+  function mergePackOffers(list, data) {
+    var entries = packOfferEntries();
+    if (!entries.length) return list;
+    if (!data._packOnlyById || typeof data._packOnlyById !== 'object') data._packOnlyById = {};
+    var seen = {};
+    list.forEach(function (c) {
+      var id = packOpportunityId(c.opportunity_id || c.id);
+      if (id) seen[id] = c;
+    });
+    entries.forEach(function (entry) {
+      var existing = seen[entry.id];
+      if (existing) {
+        overlayPackOnCase(existing, entry.raw, { notInThisRead: false });
+        return;
+      }
+      var row = data._packOnlyById[entry.id];
+      if (!row) {
+        row = synthesisePackOfferCase(entry);
+        data._packOnlyById[entry.id] = row;
+      } else {
+        overlayPackOnCase(row, entry.raw, { notInThisRead: true });
+      }
+      list.push(row);
+      seen[entry.id] = row;
+    });
+    return list;
   }
 
   function cases() {
@@ -273,10 +406,29 @@
     if (!Array.isArray(raw)) {
       throw new TypeError('Booking read cases must be an array');
     }
-    return raw.filter(function (c) { return c && typeof c === 'object'; }).map(function (c) {
+    var list = raw.filter(function (c) { return c && typeof c === 'object'; }).map(function (c) {
       if (c.proposal) normaliseProposal(c.proposal);
       return c;
     });
+    return mergePackOffers(list, data);
+  }
+
+  function isPackOfferCase(c) {
+    if (!c) return false;
+    if (c.not_in_this_read && c.proposal) return true;
+    var id = packOpportunityId(c.opportunity_id || c.id);
+    if (!id) return isPackOffer(c.proposal);
+    return packOfferEntries().some(function (entry) { return entry.id === id; });
+  }
+
+  function stampableOfferList() {
+    var live = cases().filter(function (c) {
+      return !isArchived(c) && !isCompleted(c) && !isFoldedStage(c);
+    });
+    if (packOfferEntries().length) {
+      return live.filter(function (c) { return isPackOfferCase(c) && !stampBlockReason(c); });
+    }
+    return live.filter(function (c) { return isAssessed(c) && !stampBlockReason(c); });
   }
 
   function events() {
@@ -433,6 +585,15 @@
   // GHL cases in the live read carry suburb: null. The pack proposal has it.
   function caseSuburb(c) {
     return blankPlace(c && c.suburb) || blankPlace(c && c.proposal && c.proposal.suburb);
+  }
+
+  // Backend PR 858 returns job_type on every case (patio, fencing, or "not given").
+  function jobTypeLabel(c) {
+    var type = String(c && c.job_type != null ? c.job_type : '').replace(/^\s+|\s+$/g, '');
+    if (type) return type;
+    var job = String(c && c.job != null ? c.job : '').replace(/^\s+|\s+$/g, '');
+    if (job) return job;
+    return 'not given';
   }
 
   function proposalSlotLabel(c) {
@@ -792,6 +953,10 @@
 
   function bookedTileReason() {
     if (bookedCount() > 0) return 'diary events matched to a case';
+    var data = state.data;
+    if (data && data.diary_read && data.diary_read.read_ok === true && diary().length === 0) {
+      return 'GHL calendar empty this week';
+    }
     return 'diary not read';
   }
 
@@ -1142,6 +1307,7 @@
     }
     if (c && c.send_evidence === 'sent') chips.push(['warn', 'Offer already out']);
     if (blockingDiaryEvent(c)) chips.push(['bad', 'Slot still held']);
+    if (c && c.not_in_this_read) chips.push(['warn', 'not in this read']);
     return chips;
   }
 
@@ -1164,9 +1330,9 @@
       ? ' · thread not read'
       : (facts && facts.quiet_window ? ' · quiet ' + esc(typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window') : '');
     return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
-      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + '</span>' +
+      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + ' · ' + esc(jobTypeLabel(c)) + '</span>' +
       '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
-      '<div class="sub">' + esc(c.job || 'No job details yet') + '</div>' +
+      '<div class="sub">' + esc(c.job || jobTypeLabel(c)) + '</div>' +
       '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div></button>';
   }
 
@@ -1214,10 +1380,13 @@
     var lane = block.lane || 0;
     var width = 100 / lanes;
     var geom = 'left:calc(' + (lane * width) + '% + 3px);width:calc(' + width + '% - 6px);right:auto;';
-    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '" style="' + geom + 'top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
+    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '"' +
+      (block.not_in_this_read ? ' data-not-in-read="1"' : '') +
+      ' style="' + geom + 'top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
       '<span class="stage">' + esc(stageTag(kind, stamped)) + '</span>' +
       '<span class="t evtime">' + esc(clockLabel(hour)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
       '<span class="n evname">' + esc(place || 'Address not given yet') + '</span>' +
+      (block.not_in_this_read ? '<span class="readtag">not in this read</span>' : '') +
       '<span class="j evplace">' + esc(block.job || '') + '</span></button>';
   }
 
@@ -1371,7 +1540,8 @@
             display_name: c.display_name,
             address: c.address || '',
             suburb: caseSuburb(c),
-            job: c.job || ''
+            job: c.job || '',
+            not_in_this_read: !!c.not_in_this_read
           },
           kind: caseLayer(c)
         });
@@ -1490,8 +1660,9 @@
     var sendDisabled = !!blockReason;
     return '<div class="detailhead"><div class="row">' + pill + '</div>' +
       '<h2>' + esc(c.display_name || 'Enquiry') + '</h2>' +
-      '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + (c.contact_id ? '' : ' · no GHL contact') + '</p>' +
-      '<p class="sub muted"><b>' + esc(c.job || 'No job details yet') + '</b> · ' + esc(enquiryLine(c)) + ' · ' + esc(slot) + '</p></div>' +
+      '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + ' · ' + esc(jobTypeLabel(c)) + (c.contact_id ? '' : ' · no GHL contact') +
+      (c.not_in_this_read ? ' · <span class="readtag">not in this read</span>' : '') + '</p>' +
+      '<p class="sub muted"><b>' + esc(c.job || jobTypeLabel(c)) + '</b> · ' + esc(enquiryLine(c)) + ' · ' + esc(slot) + '</p></div>' +
       '<div class="thread big" id="salesBookingThread">' + renderMessages() + '</div>' +
       compose +
       '<div class="actionzone">' +
@@ -1528,10 +1699,11 @@
     var data = state.data;
     if (!data) return '';
     var list = cases();
+    var offers = stampableOfferList();
     var bits = [];
     bits.push('<span class="ok">' + bookedCount() + ' booked</span>');
     bits.push(list.filter(function (c) { return caseLayer(c) === 'blocked'; }).length + ' cancelled still in diary');
-    bits.push(list.filter(function (c) { return c.proposal && caseLayer(c) === 'proposal'; }).length + ' proposals unsent');
+    bits.push(offers.length + ' proposals unsent');
     bits.push(list.filter(isWaiting).length + ' texts out with no reply');
     var cov = data.coverage || {};
     if (cov.full_population !== true) bits.push('<strong>' + esc(cov.total == null ? 'CRM rows' : cov.total + ' CRM rows') + '</strong> are not visit demand');
@@ -1547,14 +1719,20 @@
     });
     // A cancelled job whose diary event is still there is not a line to offer; the slot
     // is blocked until the delete reads back. Everything else with a proposed time is
-    // stampable, cautions and all.
-    var list = live.filter(function (c) { return isAssessed(c) && !stampBlockReason(c); });
+    // stampable, cautions and all. When the pack published offers, that list is the
+    // board, not the enumerated roster.
+    var list = stampableOfferList();
+    var listed = {};
+    list.forEach(function (c) { listed[c.id] = true; });
     // Every line this board does not offer says WHY, grouped by the reason and naming
     // the people. A withheld row must never just vanish into a count.
     var withheldGroups = {};
     live.forEach(function (c) {
-      if (isAssessed(c) && !stampBlockReason(c)) return;
-      var why = isAssessed(c) ? stampBlockReason(c) : 'Enumerated CRM row the engine has not assessed yet.';
+      if (listed[c.id]) return;
+      var why = isPackOfferCase(c) && stampBlockReason(c)
+        ? stampBlockReason(c)
+        : (isAssessed(c) ? stampBlockReason(c) || 'Enumerated CRM row the engine has not assessed yet.' : 'Enumerated CRM row the engine has not assessed yet.');
+      if (!why) why = 'Enumerated CRM row the engine has not assessed yet.';
       if (!withheldGroups[why]) withheldGroups[why] = [];
       withheldGroups[why].push(c.display_name || c.id);
     });
@@ -1570,9 +1748,11 @@
       var checklist = stampChecklist(c).map(function (item) {
         return '<li class="' + esc(item.level) + '">' + esc(item.text) + '</li>';
       }).join('');
-      return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '">' +
+      return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '"' +
+        (c.not_in_this_read ? ' data-not-in-read="1"' : '') + '>' +
         '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(caseSuburb(c) || '') + '</b></button>' +
-        '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div>' +
+        (c.not_in_this_read ? '<div class="readtag">not in this read</div>' : '') +
+        '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || jobTypeLabel(c)) + ' · ' + esc(statusLabel(c.status)) + '</div>' +
         '<div class="chips">' + chips + '</div></div>' +
         '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div>' +
         '<ul class="whylist">' + checklist + '</ul></div>' +
@@ -2027,6 +2207,8 @@
     diaryEventMatchesCase: diaryEventMatchesCase,
     diaryOccupiesDay: diaryOccupiesDay,
     bookedCount: bookedCount,
+    bookedTileReason: bookedTileReason,
+    jobTypeLabel: jobTypeLabel,
     normaliseProposal: normaliseProposal,
     caseLayer: caseLayer,
     diaryLayerFor: diaryLayerFor,
@@ -2046,7 +2228,10 @@
     checklistTopic: checklistTopic,
     blockingDiaryEvent: blockingDiaryEvent,
     stampBlockReason: stampBlockReason,
-    evidenceChips: evidenceChips
+    evidenceChips: evidenceChips,
+    stampableOfferList: stampableOfferList,
+    isPackOfferCase: isPackOfferCase,
+    packOpportunityId: packOpportunityId
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

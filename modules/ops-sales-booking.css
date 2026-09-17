@@ -144,6 +144,7 @@
 #salesBookingRoot .ev .t{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #salesBookingRoot .ev .n{display:block;font-weight:650;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #salesBookingRoot .ev .j{font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
+#salesBookingRoot .readtag{display:inline-block;font-size:9.5px;font-weight:650;letter-spacing:.02em;color:var(--muted);background:#F4F1EA;border:1px solid #E2DAC8;border-radius:3px;padding:1px 6px;margin-top:2px;width:fit-content}
 #salesBookingRoot .ev:hover{z-index:4;background:#DAE6ED}
 #salesBookingRoot .ev.proposal{background:#FFF6F0;border:1.5px dashed var(--accent);color:#A43411}
 #salesBookingRoot .ev.proposal .stage{background:var(--accent)}

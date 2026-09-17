@@ -49,6 +49,7 @@
 #salesBookingRoot .small{font-size:11px}
 #salesBookingRoot .fine{color:var(--muted);font-size:10.5px}
 #salesBookingRoot .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#salesBookingRoot .grow{flex:1}
 #salesBookingRoot .page{padding:18px 20px 40px;max-width:1900px;margin:auto}
 
 /* ---- pills, tags ---- */
@@ -110,6 +111,8 @@
 /* ---- the week grid ---- */
 #salesBookingRoot .calhead{padding:13px 14px 10px;border-bottom:1px solid var(--line)}
 #salesBookingRoot .calhead .date{font-size:11px;color:var(--muted);margin-top:3px}
+#salesBookingRoot .weeknav{display:flex;gap:4px}
+#salesBookingRoot .weeknav button{font-size:11px;padding:5px 9px}
 #salesBookingRoot .layers{display:flex;flex-wrap:wrap;align-items:center;gap:11px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--muted)}
 #salesBookingRoot .layer{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
 #salesBookingRoot .layer input{width:11px;height:11px;margin:0;accent-color:var(--dark)}

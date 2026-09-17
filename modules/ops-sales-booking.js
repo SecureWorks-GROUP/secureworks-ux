@@ -232,14 +232,30 @@
     return addDays(weekStart, idx);
   }
 
+  function isoDateOf(value) {
+    var s = String(value || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (/T/.test(s) && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    return null;
+  }
+
+  // Live pack windows are ISO datetimes (day may only say "Fri"). Prefer that
+  // date over mapping the weekday onto the week currently shown.
+  function proposalDayIso(p) {
+    if (!p) return null;
+    return isoDateOf(p.day)
+      || isoDateOf(p.start_iso)
+      || isoDateOf(p.window_start)
+      || isoDateOf(p.window_start_iso)
+      || weekdayToIso(state.weekStart, p.day);
+  }
+
   // Pack proposals use {disposition, day, window_start, window_end, draft, why[]}.
   // The week grid still paints from start_iso/end_iso, so fill those when the
   // pack shape arrives and leave an already-normalised proposal untouched.
   function normaliseProposal(p) {
     if (!p || typeof p !== 'object') return p;
-    var day = weekdayToIso(state.weekStart, p.day)
-      || (p.start_iso && String(p.start_iso).slice(0, 10))
-      || null;
+    var day = proposalDayIso(p);
     var start = p.start_iso || clockToIso(day, p.window_start) || p.window_start_iso || null;
     var end = p.end_iso || clockToIso(day, p.window_end) || p.window_end_iso || null;
     if (start && !p.start_iso) p.start_iso = start;
@@ -413,6 +429,25 @@
     return names[day] + ' ' + parts[2] + ' ' + MONTHS[parts[1] - 1];
   }
 
+  function blankPlace(value) {
+    var s = String(value == null ? '' : value).replace(/^\s+|\s+$/g, '');
+    if (!s || /^not given$/i.test(s)) return '';
+    return s;
+  }
+
+  // GHL cases in the live read carry suburb: null. The pack proposal has it.
+  function caseSuburb(c) {
+    return blankPlace(c && c.suburb) || blankPlace(c && c.proposal && c.proposal.suburb);
+  }
+
+  function proposalSlotLabel(c) {
+    var p = c && c.proposal;
+    if (!p || !p.start_iso) return '';
+    var when = longDate(p.start_iso);
+    var window = arrivalWindow(p.start_iso, p.end_iso);
+    return window ? when + ' · arrive ' + window : when;
+  }
+
   // SMS hours are 08:00 to 18:00 Perth. A draft outside them is still drafted; the
   // surface says so rather than silently holding a text the captain cannot see.
   function outsideSmsHours() {
@@ -427,7 +462,7 @@
     var iso = c.proposal.start_iso;
     var who = resource().name;
     var lane = resource().lane === 'patio' ? 'SecureWorks Patios' : 'SecureWorks Fencing';
-    var suburb = c.suburb || 'your place';
+    var suburb = caseSuburb(c) || 'your place';
     var first = String(c.display_name || '').trim().split(/\s+/)[0] || 'there';
     return 'Hi ' + first + ', it is ' + who + ' from ' + lane + '. I can come out to ' + suburb +
       ' on ' + longDate(iso) + ' between ' + arrivalWindow(iso, c.proposal.end_iso, 'and') +
@@ -526,7 +561,7 @@
   function matchesSearch(c) {
     var q = (state.search || '').trim().toLowerCase();
     if (!q) return true;
-    return [c.display_name, c.suburb, c.contact_id, c.reason].join(' ').toLowerCase().indexOf(q) >= 0;
+    return [c.display_name, caseSuburb(c), c.contact_id, c.reason].join(' ').toLowerCase().indexOf(q) >= 0;
   }
 
   function visibleCases() {
@@ -667,7 +702,7 @@
     var suburb = String(ev.suburb || '').replace(/^\s+|\s+$/g, '').toLowerCase();
     if (!name || !suburb) return false;
     return name === String(c.display_name || '').replace(/^\s+|\s+$/g, '').toLowerCase()
-      && suburb === String(c.suburb || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+      && suburb === caseSuburb(c).toLowerCase();
   }
 
   // CONFIRMED only when the event is a booked scope: it matches a queue case
@@ -1127,16 +1162,13 @@
   function renderQueueRow(c) {
     var u = urgency(c);
     var stamped = stampStateOf(c);
-    var when = c.proposal && c.proposal.start_iso
-      ? DAYS[dayIndexFromIso(c.proposal.start_iso, state.weekStart)] || ''
-      : '';
-    var slot = when ? when.slice(0, 3) + ' ' + clockLabel(hourFromIso(c.proposal.start_iso)) : '';
+    var slot = proposalSlotLabel(c);
     var facts = threadFacts(c);
     var quiet = facts && facts.read_ok === false
       ? ' · thread not read'
       : (facts && facts.quiet_window ? ' · quiet ' + esc(typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window') : '');
     return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
-      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(c.suburb || 'Suburb unknown') + '</span>' +
+      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + '</span>' +
       '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
       '<div class="sub">' + esc(c.job || 'No job details yet') + '</div>' +
       '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div></button>';
@@ -1342,7 +1374,7 @@
             end_iso: c.proposal.end_iso,
             display_name: c.display_name,
             address: c.address || '',
-            suburb: c.suburb,
+            suburb: caseSuburb(c),
             job: c.job || ''
           },
           kind: caseLayer(c)
@@ -1382,8 +1414,10 @@
   }
 
   function renderAgenda() {
-    var items = diary().concat(cases().filter(function (c) { return c.proposal; }).map(function (c) {
-      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: c.suburb, id: c.id, layer: caseLayer(c) };
+    var items = diary().concat(cases().filter(function (c) {
+      return c.proposal && dayIndexFromIso(c.proposal.start_iso, state.weekStart) != null;
+    }).map(function (c) {
+      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: caseSuburb(c), id: c.id, layer: caseLayer(c) };
     }));
     items.sort(function (a, b) { return String(a.start_iso) < String(b.start_iso) ? -1 : 1; });
     if (!items.length) return '<div class="emptyqueue qempty">No provider events or proposals in this week.</div>';
@@ -1430,10 +1464,8 @@
     var pill = stamped === 'keep' ? '<span class="pill ok">Stamped KEEP · not sent</span>'
       : stamped === 'cut' ? '<span class="pill bad">Stamped CUT</span>'
       : '<span class="pill ' + esc(u[0]) + '">' + esc(u[1]) + '</span>';
-    var place = (c.address ? c.address + ', ' : '') + (c.suburb || '');
-    var slot = c.proposal && c.proposal.start_iso
-      ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
-      : 'No proposed time yet';
+    var place = (c.address ? c.address + ', ' : '') + (caseSuburb(c) || '');
+    var slot = proposalSlotLabel(c) || 'No proposed time yet';
     var conflict = d.conflict
       ? '<div class="notice error">Time changed. Your edited draft was kept. Suggested text is ready for review, not applied.</div>'
       : '';
@@ -1535,9 +1567,7 @@
       var st = stampStateOf(c);
       bindDraft(c);
       var d = draftKey(c) ? draftFor(c) : { text: '' };
-      var slot = c.proposal && c.proposal.start_iso
-        ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
-        : 'No proposed time';
+      var slot = proposalSlotLabel(c) || 'No proposed time';
       var chips = evidenceChips(c).map(function (ch) {
         return '<span class="chip ' + esc(ch[0]) + '">' + esc(ch[1]) + '</span>';
       }).join('');
@@ -1545,7 +1575,7 @@
         return '<li class="' + esc(item.level) + '">' + esc(item.text) + '</li>';
       }).join('');
       return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '">' +
-        '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(c.suburb || '') + '</b></button>' +
+        '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(caseSuburb(c) || '') + '</b></button>' +
         '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div>' +
         '<div class="chips">' + chips + '</div></div>' +
         '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div>' +
@@ -1606,7 +1636,7 @@
       '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div></div>' +
       '<div class="queuelist">' + renderQueue() + '</div>' +
       '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>Quoted, won, lost and archived stages are folded. Stages copied from ' + esc(res.pipeline_stages_source || 'the live GHL profile') + '.</div></section>' +
-      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2></div>' +
+      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2><div class="grow"></div><div class="weeknav" role="group" aria-label="Week"><button type="button" data-booking-week="-7">Previous week</button><button type="button" data-booking-week="7">Next week</button></div></div>' +
       '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
       '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
       renderStampBoard() +
@@ -1670,6 +1700,11 @@
     return load(id, state.weekStart);
   }
 
+  function switchWeek(deltaDays) {
+    var next = mondayIso(addDays(state.weekStart, Number(deltaDays) || 0));
+    return load(state.resourceId, next);
+  }
+
   async function bookingRead(params) {
     var preview = global.SALES_BOOKING_PREVIEW_URL;
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -1711,7 +1746,6 @@
       if (!data || data.ok === false) throw new Error((data && data.error) || 'Booking read was incomplete.');
       if (data.fixture) throw new Error('Fixture fallback is refused. Provider read required.');
       state.data = data;
-      if (data.week_start) state.weekStart = data.week_start;
       applyServerStamp(data);
       applyServerDrafts(data);
     } catch (e) {
@@ -1864,6 +1898,12 @@
         render();
         return;
       }
+      var weekNav = e.target.closest && e.target.closest('[data-booking-week]');
+      if (weekNav) {
+        e.preventDefault();
+        switchWeek(Number(weekNav.getAttribute('data-booking-week')));
+        return;
+      }
       var stampSend = e.target.closest && e.target.closest('[data-booking-stamp-send]');
       if (stampSend) {
         e.preventDefault();
@@ -1938,6 +1978,10 @@
     state: state,
     esc: esc,
     mondayIso: mondayIso,
+    addDays: addDays,
+    switchWeek: switchWeek,
+    caseSuburb: caseSuburb,
+    proposalSlotLabel: proposalSlotLabel,
     hourFromIso: hourFromIso,
     durationHours: durationHours,
     load: load,

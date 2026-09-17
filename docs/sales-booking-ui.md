@@ -116,7 +116,14 @@ case or resource switch.
 
 Five layers, each with a stage tag on the card: Confirmed booking, Proposed (not sent),
 Offered (waiting on reply), Cancelled (still in diary), Personal. Cards read stage, then
-time and name, then address and suburb, then job.
+time and name, then address and suburb, then job. Previous / Next week (`data-booking-week`)
+re-reads that week's diary and keeps the requested Monday on the grid, even when the pack's
+own `week_start` is an earlier week. Proposals whose windows fall outside the shown week
+stay off the grid until that week is opened, but they stay listed on the queue and stamp
+board with their calendar day and arrival window.
+
+GHL cases in the live read may carry `suburb: null`. Display, search, drafts and
+name-and-suburb diary matching take suburb from the proposal when the case has none.
 
 ## Queue
 
@@ -137,11 +144,15 @@ queue and thread facts. Coverage gaps render verbatim.
 ## Preview
 
 `node scripts/sales-booking-preview.mjs` then `http://127.0.0.1:4174/ops.html#booking`.
-Reads the live Microsoft calendar through `sw-mcp` and live GHL threads; customer send
-stays held. Sign-in is required for the in-page GHL thread only. The preview attaches
-only the cancelled GHL enquiry (`status: repair`) to the diary event whose subject
-already matches `/jason|marangaroo/i` (`sales-booking-repair-event.cjs`). Other open
-enquiries keep `event_id` null, so a booked same-suburb visit cannot become their diary.
+Reads the live Microsoft calendar through `sw-mcp` and live GHL threads, then overlays
+the published engine pack when `SALES_BOOKING_PACK_PATH` or a live `sales_booking_read`
+is available, so proposal suburbs and later-week windows match production. Customer send
+stays held. `node scripts/sales-booking-preview.mjs --verify` prints the marnin pack
+census (proposals / offers / slot labels) and exits. Sign-in is required for the in-page
+GHL thread only. The preview attaches only the cancelled GHL enquiry (`status: repair`)
+to the diary event whose subject already matches `/jason|marangaroo/i`
+(`sales-booking-repair-event.cjs`). Other open enquiries keep `event_id` null, so a
+booked same-suburb visit cannot become their diary.
 
 Design source: the captain-approved end-state prototype after three rounds of feedback
 (`data/booking-endstate-prototype-20260916/`). Evidence:

@@ -1614,7 +1614,7 @@ test('a pack proposal paints the day, window and draft on the card and in the de
   };
   const html = api.renderHTML();
   assert.doesNotMatch(html, /No proposals published yet for this week/);
-  assert.match(html, /Fri 11:15am/);
+  assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
   assert.match(html, /Hi Sam, Friday 18 September between 11:15 and 12:45pm/);
   assert.match(html, /Proposed text/);
   assert.match(html, /Colorbond fence/);
@@ -1707,4 +1707,101 @@ test('Send message posts the stamp and Cut rejects, then a re-read keeps the pai
   assert.match(html, /Stamped CUT/);
   assert.match(html, /stampcard weak/);
   assert.equal(posts.every((p) => p.action === 'sales_booking_stamp_write'), true);
+});
+
+function liveMarninPackRead() {
+  const days = [
+    { iso: '2026-09-18', weekday: 'Fri', suburb: 'Byford' },
+    { iso: '2026-09-22', weekday: 'Tue', suburb: 'Canning Vale' },
+    { iso: '2026-09-25', weekday: 'Fri', suburb: 'Harrisdale' },
+    { iso: '2026-09-29', weekday: 'Tue', suburb: 'Piara Waters' }
+  ];
+  const cases = [];
+  for (let i = 0; i < 31; i++) {
+    const slot = days[i % 4];
+    const disposition = i === 0 ? 'booked' : (i <= 11 ? 'offer' : 'capacity');
+    cases.push({
+      id: 'opp-' + i,
+      opportunity_id: 'opp-' + i,
+      contact_id: 'ct-' + i,
+      display_name: 'Lead ' + i,
+      suburb: null,
+      job: 'Colorbond fence',
+      status: 'needs_decision',
+      stage_name: 'Presentation Made (scope not booked)',
+      proposal: {
+        disposition,
+        day: slot.weekday,
+        window_start: slot.iso + 'T11:15:00+08:00',
+        window_end: slot.iso + 'T12:45:00+08:00',
+        suburb: slot.suburb,
+        draft: disposition === 'offer' ? 'Hi Lead ' + i + ', draft for ' + slot.iso : null,
+        why: []
+      },
+      stamp_state: 'none'
+    });
+  }
+  return {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, as_of: '2026-09-16T07:48:00Z' },
+    stamp: { present: false },
+    diary: [],
+    cases
+  };
+}
+
+test('live pack windows keep their own day, not the weekday of the week on screen', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  const p = api.normaliseProposal({
+    disposition: 'capacity',
+    day: 'Fri',
+    window_start: '2026-09-25T11:15:00+08:00',
+    window_end: '2026-09-25T12:45:00+08:00',
+    suburb: 'Harrisdale',
+    draft: null,
+    why: []
+  });
+  assert.equal(p.start_iso.slice(0, 10), '2026-09-25');
+  assert.equal(p.end_iso.slice(0, 10), '2026-09-25');
+});
+
+test('published marnin pack: 31 proposals, 11 offers, other-week slots listed, suburb from proposal', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.data = liveMarninPackRead();
+  const list = api.cases();
+  const proposals = list.filter((c) => c.proposal);
+  const offers = proposals.filter((c) => c.proposal.disposition === 'offer');
+  assert.equal(proposals.length, 31);
+  assert.equal(offers.length, 11);
+  assert.equal(api.caseSuburb(list[1]), 'Canning Vale');
+  assert.equal(api.proposalSlotLabel(list[1]), 'Tuesday 22 September · arrive 11:15am to 12:45pm');
+
+  let html = api.renderHTML();
+  assert.match(html, /data-booking-week="-7"/);
+  assert.match(html, /data-booking-week="7"/);
+  assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /Friday 25 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /Tuesday 29 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /Lead 1 · Canning Vale/);
+  assert.match(html, /Lead 2 · Harrisdale/);
+  assert.doesNotMatch(html, /Lead 1 · Suburb unknown/);
+  assert.match(html, /data-booking-case="opp-1"/);
+  assert.match(html, /Friday 18 September/);
+  assert.doesNotMatch(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
+
+  api.state.weekStart = '2026-09-21';
+  html = api.renderHTML();
+  assert.match(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
+  assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
+  api.state.weekStart = '2026-09-14';
+  api.state.resourceId = 'nithin';
 });

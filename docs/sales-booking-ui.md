@@ -16,10 +16,13 @@ that read was made with), not the Monday on the grid. After Next week the grid c
 reads the stamp for that same pack week. Cut posts the same body with the id under
 `rejected`. Approve/Confirm stay disabled.
 
-On load, `pack: {present, as_of, week_start}` and `stamp: {present, as_of, week_start,
-approved, rejected, decisions, stage_moves}` plus per-case `proposal` / `stamp_state` /
-`drafts` are consumed. Absent pack renders as "No proposals published yet for this week",
-never as empty free capacity.
+On load, `pack: {present, as_of, week_start, proposals}` and `stamp: {present, as_of,
+week_start, approved, rejected, decisions, stage_moves}` plus per-case `proposal` /
+`stamp_state` / `drafts` are consumed. `pack.proposals` is an object keyed by opportunity
+id. An entry is an offer only when `offer === true` or `disposition === 'offer'`. Those
+offers overlay the matching roster row, or become a synthesised case tagged **not in this
+read** when the opportunity was not among the enumerated cases. Absent pack renders as
+"No proposals published yet for this week", never as empty free capacity.
 
 ## Diary paint
 
@@ -31,8 +34,10 @@ week" or Scope booked. Company titles such as Payday SecureWorks, Outback Agreem
 SecureWorks are Busy.
 
 **Tiles:** "Booked to quote this week" counts only diary events matched to a case, never GHL
-stage rows. No matched diary reads 0 with "diary not read". "Quotes to send" is the quote-stage
-count, labelled as that stage. Enquiries and Waiting stay stage-based and say so.
+stage rows. Zero booked with `diary_read.read_ok:true` and an empty `diary[]` reads
+"GHL calendar empty this week". Zero booked otherwise (unread, failed, or unmatched events)
+reads "diary not read". "Quotes to send" is the quote-stage count, labelled as that stage.
+Enquiries and Waiting stay stage-based and say so.
 
 Switching scoper still drops the in-memory stamp; the next read supplies that scoper's
 stored stamp.
@@ -42,10 +47,14 @@ stored stamp.
 Captain ruling 2026-09-16. **Execution-ready** means exact acceptance bound to a sent offer
 id and slot revision. It gates **Confirm booking alone**, never the stamp board.
 
-The stamp board is the captain's KEEP or CUT over **AI proposals**. A slot the engine labels
-"AI-proposed date, customer date unspecified" is precisely what he stamps, so the engine's
-refusal reason is shown on the card as the **why-stamp checklist**, never used to hide the
-row. Coverage gaps (leave and travel unread) are warning chips, not a bar to stamping.
+The stamp board is the captain's KEEP or CUT over **AI proposals**. When the pack published
+any offers, that offer list is the board (including synthesised **not in this read** rows),
+not every assessed CRM row. The week-truth "proposals unsent" count is that same list. With
+no pack offers the board stays the assessed cases that already have a proposed time. A slot
+the engine labels "AI-proposed date, customer date unspecified" is precisely what he stamps,
+so the engine's refusal reason is shown on the card as the **why-stamp checklist**, never
+used to hide the row. Coverage gaps (leave and travel unread) are warning chips, not a bar
+to stamping.
 `sales-booking-assess.cjs` therefore keeps the candidate slot and records
 `execution_ready:false, stampable:true, coverage_gaps[], warnings[]` instead of nulling the
 proposal.
@@ -98,7 +107,9 @@ case or resource switch.
   reason/proposal is already on the row. Live `sales_booking_read` cases carry `stage_name`
   and placeholder `status: needs_decision` only; they have no `stage_id`, reason, or
   proposal today. Unmapped rows stay findable under **Enumerated, not yet assessed**, tagged
-  "Not assessed", and stay off the demand tiles and the stamp board.
+  "Not assessed", and stay off the demand tiles and the stamp board. A pack offer whose
+  opportunity was missing from that roster is not this case: it is painted and stampable,
+  tagged **not in this read**.
 - **`needs_decision` is not Act today.** Urgency is booked, quote outstanding, waiting, then
   the wait-based labels. Act today comes only from a proposal or a repair status. A later
   backend proposal field will affect cards and urgency only, never grouping.
@@ -123,13 +134,14 @@ Five layers, each with a stage tag on the card: Confirmed booking, Proposed (not
 Offered (waiting on reply), Cancelled (still in diary), Personal. Cards read stage, then
 time and name, then address and suburb, then job. Previous / Next week (`data-booking-week`)
 re-reads that week's diary and keeps the requested Monday on the grid, even when the pack's
-own `week_start` is an earlier week. Dated pack windows that fall outside the shown week
+own `week_start` is an earlier week. Dated pack offer windows that fall outside the shown week
 stay off the grid until that week is opened, but they stay listed on the queue and stamp
 board with their calendar day and arrival window. A clock-only weekday (day `Fri` with no
 ISO date) stays undated: it lists without a date and does not attach to the week on screen.
 
 GHL cases in the live read may carry `suburb: null`. Display, search, drafts and
 name-and-suburb diary matching take suburb from the proposal when the case has none.
+A pack offer missing from the roster takes name, suburb and job from the pack entry.
 
 ## Queue
 
@@ -140,6 +152,8 @@ stages and booked-not-yet-visited stages render first. Quoted, won, lost and
 archived stages fold under **Show quoted and archived**. Rows with no matching
 stage stay in **Enumerated, not yet assessed**. Tiles count follow-through from
 those stages (still to book, waiting, booked, quotes), not the whole CRM.
+Each queue row, the detail header and the stamp-board line show job type:
+`job_type`, else `job`, else "not given".
 Waiting-on-reply is the patio stage **Contacted Waiting on Response** by exact
 name (and the id when present). Fencing waiting is `thread_facts.classification`
 only, so a fencing row with no proved text is never Waiting.

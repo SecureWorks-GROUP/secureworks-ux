@@ -759,7 +759,7 @@ test('follow-through tiles count the queue and name the captain window', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
   const f = api.followThrough();
-  assert.equal(f.to_book, 1);
+  assert.equal(f.to_book, 0);
   assert.equal(f.booked, 1);
   const html = api.renderHTML();
   assert.match(html, /Enquiries still to book/);
@@ -837,12 +837,14 @@ test('an enumerated CRM row is findable but is never counted or ranked as demand
   assert.equal(api.isAssessed(api.state.data.cases[0]), true);
   const f = api.followThrough();
   assert.equal(f.unassessed, 1);
-  assert.equal(f.to_book, 1, 'the raw row must not inflate the demand tile');
+  assert.equal(f.to_book, 0, 'the raw row must not inflate the demand tile');
   const groups = api.queueGroups();
   const toBook = groups.find((g) => g[0] === 'Client Needs To Be Contacted')[1].map((c) => c.id);
   const raw = groups.find((g) => g[0] === 'Enumerated, not yet assessed')[1].map((c) => c.id);
   assert.ok(!toBook.includes('raw-1'));
-  assert.deepEqual(raw, ['raw-1']);
+  assert.ok(!toBook.includes('case-a'));
+  assert.ok(raw.includes('raw-1'));
+  assert.ok(raw.includes('case-a'));
   const html = api.renderHTML();
   // Still findable, never dressed up as urgent, and the tile says why it is not counted.
   assert.match(html, /Raw CRM row/);
@@ -1074,8 +1076,91 @@ test('two proposals at the same time both render on the week', () => {
   assert.match(html, /Clashing enquiry/);
 });
 
-test('booking read timeout is at least 60 seconds', () => {
-  assert.equal(api.BOOKING_READ_TIMEOUT_MS >= 60000, true);
+function withFakeTimers(run) {
+  const realSet = global.setTimeout;
+  const realClear = global.clearTimeout;
+  const timers = [];
+  let now = 0;
+  let nextId = 1;
+  global.setTimeout = (cb, ms) => {
+    const handle = { id: nextId++, at: now + Number(ms || 0), cb };
+    timers.push(handle);
+    return handle.id;
+  };
+  global.clearTimeout = (tid) => {
+    const i = timers.findIndex((t) => t.id === tid);
+    if (i >= 0) timers.splice(i, 1);
+  };
+  const tick = (ms) => {
+    now += ms;
+    timers
+      .filter((t) => t.at <= now)
+      .sort((a, b) => a.at - b.at)
+      .forEach((t) => {
+        const i = timers.indexOf(t);
+        if (i < 0) return;
+        timers.splice(i, 1);
+        t.cb();
+      });
+  };
+  return Promise.resolve()
+    .then(() => run(tick))
+    .finally(() => {
+      global.setTimeout = realSet;
+      global.clearTimeout = realClear;
+    });
+}
+
+function delayedOpsFetch(delayMs, payload) {
+  return (_action, _params, opts) => new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      fn(value);
+    };
+    const failAbort = () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      finish(reject, err);
+    };
+    const timer = setTimeout(() => finish(resolve, payload), delayMs);
+    const signal = opts && opts.signal;
+    if (!signal) return;
+    if (signal.aborted) {
+      clearTimeout(timer);
+      failAbort();
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      failAbort();
+    });
+  });
+}
+
+test('a 20 second booking read completes and a 61 second read times out', async () => {
+  await withFakeTimers(async (tick) => {
+    global.SALES_BOOKING_PREVIEW_URL = null;
+    api.state.request = 0;
+    api.state.resourceId = 'nithin';
+    api.state.error = null;
+    api.state.data = null;
+    global.opsFetch = delayedOpsFetch(20000, doorRead());
+    const fast = api.load('nithin', '2026-09-14');
+    tick(20000);
+    await fast;
+    assert.equal(api.state.error, null);
+    assert.equal(api.state.data.ok, true);
+    assert.match(api.renderHTML(), /Sample A/);
+
+    global.opsFetch = delayedOpsFetch(61000, doorRead());
+    const slow = api.load('nithin', '2026-09-14');
+    tick(61000);
+    await slow;
+    assert.match(api.state.error, /timed out after 60 seconds/);
+    assert.equal(api.state.data, null);
+  });
 });
 
 test('a 20s live shape with failed calendar still paints the queue and tiles', () => {
@@ -1163,6 +1248,11 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.equal(tiles.to_book > 0, true);
   assert.equal(tiles.booked, 50);
   assert.equal(tiles.quotes, 20);
+  assert.equal(tiles.waiting, 20);
+  assert.equal(api.urgency(cases.find((c) => c.id === 'booked-0'))[1], 'Booked');
+  assert.notEqual(api.urgency(cases.find((c) => c.id === 'new-0'))[1], 'Act today');
+  assert.equal(api.urgency(cases.find((c) => c.id === 'pres-0'))[1], 'Waiting');
+  assert.notEqual(api.urgency(cases.find((c) => c.id === 'pres-20'))[1], 'Waiting');
   assert.match(html, /New Lead \(Call \+ Qualify\)/);
   assert.match(html, /Scope Scheduled/);
   assert.match(html, /Calendar not connected/);
@@ -1215,6 +1305,9 @@ test('Nithin queue groups by the 11 patio stages and folds quoted work', () => {
   assert.equal(tiles.waiting, 1);
   assert.equal(tiles.booked, 1);
   assert.equal(tiles.quotes, 1);
+  assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'n3'))[1], 'Booked');
+  assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'n2'))[1], 'Waiting');
+  assert.notEqual(api.urgency(api.state.data.cases.find((c) => c.id === 'n1'))[1], 'Act today');
 });
 
 test('Marnin queue groups by the 14 fencing stages and folds quoted work', () => {
@@ -1235,7 +1328,8 @@ test('Marnin queue groups by the 14 fencing stages and folds quoted work', () =>
       { id: 'm1', display_name: 'New stratco', suburb: 'Southern River', status: 'needs_decision', stage_id: stages[0].id, stage_name: stages[0].name },
       { id: 'm2', display_name: 'Urgent scope', suburb: 'Piara Waters', status: 'needs_decision', stage_id: stages[6].id, stage_name: stages[6].name },
       { id: 'm3', display_name: 'Closed booked', suburb: 'Canning Vale', status: 'needs_decision', stage_id: stages[7].id, stage_name: stages[7].name },
-      { id: 'm4', display_name: 'Complete quote', suburb: 'Harrisdale', status: 'needs_decision', stage_id: stages[9].id, stage_name: stages[9].name }
+      { id: 'm4', display_name: 'Complete quote', suburb: 'Harrisdale', status: 'needs_decision', stage_id: stages[9].id, stage_name: stages[9].name },
+      { id: 'm5', display_name: 'Replied no thread', suburb: 'Byford', status: 'needs_decision', stage_id: stages[1].id, stage_name: stages[1].name }
     ]
   };
   const names = api.queueGroups().map((g) => g[0]);
@@ -1244,44 +1338,36 @@ test('Marnin queue groups by the 14 fencing stages and folds quoted work', () =>
   assert.equal(names[7], 'Lead Closed (scope booked)');
   assert.equal(names[8], 'Scope Scheduled');
   assert.deepEqual(api.queueGroups()[0][1].map((c) => c.id), ['m1']);
+  assert.deepEqual(api.queueGroups()[1][1].map((c) => c.id), ['m5']);
   assert.deepEqual(api.queueGroups()[6][1].map((c) => c.id), ['m2']);
   assert.deepEqual(api.queueGroups()[7][1].map((c) => c.id), ['m3']);
   assert.equal(api.queueGroups().some((g) => g[1].some((c) => c.id === 'm4')), false);
   assert.match(api.renderHTML(), /leave unread/);
   const tiles = api.followThrough();
-  assert.equal(tiles.to_book, 2);
+  assert.equal(tiles.to_book, 3);
+  assert.equal(tiles.waiting, 0);
   assert.equal(tiles.booked, 1);
   assert.equal(tiles.quotes, 1);
+  assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'm3'))[1], 'Booked');
+  assert.notEqual(api.urgency(api.state.data.cases.find((c) => c.id === 'm5'))[1], 'Waiting');
+  assert.notEqual(api.urgency(api.state.data.cases.find((c) => c.id === 'm1'))[1], 'Act today');
 });
 
-test('ok true with cases as a count still renders thread facts and does not throw', () => {
+test('a non-array cases roster fails honestly instead of inventing people', () => {
   api.state.resourceId = 'marnin';
   api.state.filter = 'all';
   api.state.search = '';
-  const facts = {};
-  for (let i = 0; i < 80; i++) {
-    facts['tf-' + i] = {
-      case_id: 'tf-' + i,
-      contact_id: 'c-' + i,
-      read_ok: true,
-      classification: i < 5 ? 'waiting_reply' : 'ready_to_contact',
-      quiet_window: false
-    };
-  }
   api.state.data = {
     ok: true,
     fixture: false,
     cases: 1010,
     coverage: { full_population: true, enumerated: 1010, diary_read_ok: false, gaps: ['row budget reached'] },
     diary_read: { read_ok: false, reason: 'calendar_http_403', source: 'outlook_primary' },
-    thread_facts: facts,
+    thread_facts: { 'tf-0': { case_id: 'tf-0', read_ok: true, classification: 'ready_to_contact' } },
     diary: []
   };
-  const html = api.renderHTML();
-  assert.equal(api.cases().length, 80);
-  assert.equal(api.followThrough().to_book > 0, true);
-  assert.match(html, /Calendar not connected/);
-  assert.match(html, /row budget reached/);
+  assert.throws(() => api.cases(), /cases must be an array/);
+  assert.throws(() => api.renderHTML(), /cases must be an array/);
 });
 
 test('loading state does not paint a fake empty week', () => {

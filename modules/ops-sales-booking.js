@@ -203,23 +203,10 @@
     var data = state.data;
     if (!data) return [];
     var raw = data.cases;
-    if (Array.isArray(raw)) {
-      return raw.filter(function (c) { return c && typeof c === 'object'; });
+    if (!Array.isArray(raw)) {
+      throw new TypeError('Booking read cases must be an array');
     }
-    // Live ops-api may summarise the roster as a count. Thread facts still carry
-    // the rows that were actually read; render those rather than crashing to zeros.
-    var facts = data.thread_facts || {};
-    return Object.keys(facts).map(function (id) {
-      var f = facts[id] || {};
-      return {
-        id: id,
-        contact_id: f.contact_id || null,
-        display_name: 'Enquiry',
-        suburb: null,
-        status: 'needs_decision',
-        reason: 'Thread fact from the bounded booking read.'
-      };
-    });
+    return raw.filter(function (c) { return c && typeof c === 'object'; });
   }
 
   function events() {
@@ -619,7 +606,6 @@
     if (isArchived(c) || (isCompleted(c) && c.quote_sent)) return 'fold';
     if (c && isCompleted(c) && !c.quote_sent) return 'quote';
     if (c && (c.status === 'booked' || c.status === 'confirmed')) return 'booked';
-    if (c && (c.reason || c.proposal)) return 'need';
     return 'unmapped';
   }
 
@@ -653,9 +639,9 @@
 
   function isWaiting(c) {
     var status = derivedStatus(c);
-    if (!!c && (status === 'waiting' || status === 'offer')) return true;
-    var stage = stageOf(c);
-    return !!(stage && /waiting on response|replied\/ contacted/i.test(stage.name));
+    if (c && (status === 'waiting' || status === 'offer')) return true;
+    var id = c && (c.stage_id || c.pipeline_stage_id || c.pipelineStageId);
+    return id === '4d3bcf9a-185d-4a90-98e0-e0805fdf4a02';
   }
 
   // A row in a known pipeline stage is visit/reply/quote demand. Engine
@@ -703,10 +689,12 @@
     if (isArchived(c)) return ['', 'Archived'];
     if (!isAssessed(c)) return ['', 'Not assessed'];
     if (isCompleted(c)) return c.quote_sent ? ['ok', 'Quoted'] : ['warn', 'Quote to send'];
-    if (needsDecision(c)) return ['bad', 'Act today'];
-    if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Overdue'];
-    if (isWaiting(c)) return ['q', 'Waiting'];
     if (isBooked(c)) return ['ok', 'Booked'];
+    if (quoteOutstanding(c)) return ['warn', 'Quote to send'];
+    if (isWaiting(c)) return ['q', 'Waiting'];
+    if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Overdue'];
+    if (c && (c.proposal || c.status === 'repair')) return ['bad', 'Act today'];
+    if (needsDecision(c) && stageBucket(c) !== 'need') return ['bad', 'Act today'];
     var days = daysWaiting(c);
     if (days == null) return ['q', 'Wait unknown'];
     if (days >= 5) return ['warn', 'Waited ' + days + ' days'];
@@ -733,20 +721,8 @@
     grouped.forEach(function (g) {
       g[1].forEach(function (c) { placed[c.id] = true; });
     });
-    ['need', 'booked'].forEach(function (bucket) {
-      var leftover = list.filter(function (c) { return !placed[c.id] && stageBucket(c) === bucket; });
-      if (!leftover.length) return;
-      var target = null;
-      stages.forEach(function (stage, i) {
-        if (!target && stage.bucket === bucket) target = grouped[i];
-      });
-      if (target) {
-        target[1] = target[1].concat(leftover);
-        leftover.forEach(function (c) { placed[c.id] = true; });
-      }
-    });
     grouped.push(['Enumerated, not yet assessed', list.filter(function (c) {
-      return !placed[c.id] && stageBucket(c) === 'unmapped';
+      return !placed[c.id];
     })]);
     return grouped;
   }
@@ -1473,7 +1449,7 @@
         return resp.json();
       }
       if (typeof global.opsFetch !== 'function') throw new Error('Authenticated Ops read is not available.');
-      return global.opsFetch('sales_booking_read', params, controller ? { signal: controller.signal } : undefined);
+      return await global.opsFetch('sales_booking_read', params, controller ? { signal: controller.signal } : undefined);
     } catch (e) {
       if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))) {
         throw new Error('Booking read timed out after ' + Math.round(BOOKING_READ_TIMEOUT_MS / 1000) + ' seconds.');

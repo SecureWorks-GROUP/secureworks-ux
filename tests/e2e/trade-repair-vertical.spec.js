@@ -63,6 +63,39 @@ test.describe('Trade repair vertical', () => {
     await expect(page.locator('#jobDetailContent')).toContainText('Repair-notes.pdf');
   });
 
+  test('My Jobs repair cards carry the builder WO, claim and PO refs, and a claim ref equal to the WO is drawn once', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="myJobs"]').click();
+    await expect(page.locator('#viewMyJobs')).toHaveClass(/active/);
+
+    // Plain repair: WO, then a claim ref that differs from it, then the PO.
+    const plainCard = page.locator('#myJobsList .jc.rp').filter({ hasText: 'REP-51002' });
+    await expect(plainCard).toBeVisible();
+    await expect(plainCard).toContainText('Repair');
+    await expect(plainCard.locator('.jc-refs')).toHaveText(/REP-51002.*WO WO-8891.*CLM-2026-0017.*PO-556701/);
+    await expect(plainCard).toContainText('Plain Repair Builders');
+
+    // Repair-family make-safe (MLB rapid repair): the claim ref equals the WO
+    // number (case aside), so the WO chip stands alone — no duplicate chip,
+    // and no make-safe external-ref chip either.
+    const familyCard = page.locator('#myJobsList .jc.rp').filter({ hasText: 'SWMS-261319' });
+    await expect(familyCard).toBeVisible();
+    await expect(familyCard).toContainText('Repair');
+    await expect(familyCard.locator('.jc-refs')).toHaveText(/SWMS-261319.*WO MLB-RR-27649.*PO-540001/);
+    const familyRefs = await familyCard.locator('.jc-refs').innerText();
+    expect(familyRefs.toLowerCase().split('mlb-rr-27649').length - 1).toBe(1);
+    await expect(familyCard).toContainText('MLB Builders');
+
+    // The pre-existing patio card is untouched by the repair rows.
+    await expect(page.locator('#myJobsList .jc.pt').filter({ hasText: 'E2E-JOB-001' })).toBeVisible();
+
+    // A repair-family make-safe opens the normal job detail from the list too.
+    await familyCard.click();
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('#viewReport')).not.toHaveClass(/active/);
+    await expect(page.locator('#jobDetailContent')).toContainText('SWMS-261319');
+  });
+
   test('a plain make-safe still files under Make-safe, not Repair, and behaves as today', async ({ appPage: page }) => {
     await signIn(page, PERSONAS.installer);
     await expect(page.locator('#viewSchedule')).toHaveClass(/active/);

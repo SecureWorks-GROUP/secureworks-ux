@@ -426,7 +426,13 @@ const test = base.extend({
       user_id: PERSONAS.installer.profile.id,
       site_suburb: 'Duncraig',
       site_address: '1 Repair Street, Duncraig',
-      client_name: 'Simon Davey'
+      client_name: 'Simon Davey',
+      // MLB rapid repairs carry a claim ref equal to the WO number (case
+      // aside) — the card must not draw it twice.
+      builder_work_order_number: 'MLB-RR-27649',
+      builder_claim_ref: 'mlb-rr-27649',
+      builder_po_number: 'PO-540001',
+      builder_company_name: 'MLB Builders'
     };
     const plainRepairEvent = {
       assignment_id: 'e2e-plain-repair-assignment',
@@ -441,14 +447,46 @@ const test = base.extend({
       user_id: PERSONAS.installer.profile.id,
       site_suburb: 'Wanneroo',
       site_address: '2 Repair Avenue, Wanneroo',
-      client_name: 'Repair Client'
+      client_name: 'Repair Client',
+      builder_work_order_number: 'WO-8891',
+      builder_claim_ref: 'CLM-2026-0017',
+      builder_po_number: 'PO-556701',
+      builder_company_name: 'Plain Repair Builders'
     };
+    const REPAIR_BUILDER_FIELDS = ['builder_work_order_number', 'builder_claim_ref', 'builder_po_number', 'builder_company_name'];
+    const repairBuilderFields = (event) => Object.fromEntries(REPAIR_BUILDER_FIELDS.map((k) => [k, event[k]]));
+    // The same two repair jobs as installer My Jobs rows (my_jobs shape:
+    // assignment row with a nested `jobs` record), so the list-card grammar
+    // is exercised alongside the calendar.
+    const repairMyJobsRows = [repairFamilyEvent, plainRepairEvent].map((event) => ({
+      id: event.assignment_id,
+      user_id: event.user_id,
+      status: 'confirmed',
+      scheduled_date: event.scheduled_date,
+      start_time: event.start_time.slice(0, 5),
+      crew_name: event.assigned_to,
+      jobs: {
+        id: event.job_id,
+        job_number: event.job_number,
+        type: event.job_type,
+        job_family: event.job_family,
+        status: 'scheduled',
+        client_name: event.client_name,
+        site_address: event.site_address,
+        site_suburb: event.site_suburb,
+        scope_summary: '',
+        scope_json: {},
+        po_info: null,
+        ...repairBuilderFields(event)
+      }
+    }));
     const REPAIR_VERTICAL_JOBS = {
       [repairFamilyEvent.job_id]: {
         job: {
           id: repairFamilyEvent.job_id, job_number: repairFamilyEvent.job_number,
           type: 'makesafe', job_family: 'repair', client_name: repairFamilyEvent.client_name,
-          site_suburb: repairFamilyEvent.site_suburb, site_address: repairFamilyEvent.site_address
+          site_suburb: repairFamilyEvent.site_suburb, site_address: repairFamilyEvent.site_address,
+          ...repairBuilderFields(repairFamilyEvent)
         },
         crew: [{
           id: repairFamilyEvent.assignment_id, user_id: repairFamilyEvent.user_id,
@@ -463,7 +501,8 @@ const test = base.extend({
         job: {
           id: plainRepairEvent.job_id, job_number: plainRepairEvent.job_number,
           type: 'repair', client_name: plainRepairEvent.client_name,
-          site_suburb: plainRepairEvent.site_suburb, site_address: plainRepairEvent.site_address
+          site_suburb: plainRepairEvent.site_suburb, site_address: plainRepairEvent.site_address,
+          ...repairBuilderFields(plainRepairEvent)
         },
         crew: [{
           id: plainRepairEvent.assignment_id, user_id: plainRepairEvent.user_id,
@@ -675,6 +714,10 @@ const test = base.extend({
               }))
             },
         my_jobs: ({ url }) => {
+          if (feedScenario === 'trade-repair-vertical' && persona !== 'fencing_manager') {
+            const base = loadJsonFixture('my-jobs.json');
+            return { ...base, today: [...(base.today || []), ...repairMyJobsRows] };
+          }
           if (persona !== 'fencing_manager') return loadJsonFixture('my-jobs.json');
           return url.searchParams.get('mode') === 'mine' ? fencingMine : fencingAll;
         },

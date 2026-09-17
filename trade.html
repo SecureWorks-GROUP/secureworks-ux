@@ -8625,6 +8625,9 @@
       var repairRefs = isRepair && typeof tradeRepairRefs === 'function' ? tradeRepairRefs(job) : null;
       if (repairRefs) {
         if (repairRefs.workOrder) refs.push({ text: 'WO ' + repairRefs.workOrder });
+        if (repairRefs.claimRef && repairRefs.claimRef.toLowerCase() !== String(repairRefs.workOrder || '').toLowerCase()) {
+          refs.push({ text: repairRefs.claimRef });
+        }
         if (repairRefs.po) refs.push({ text: repairRefs.po });
       }
       var parties;

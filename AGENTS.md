@@ -654,6 +654,7 @@ cycles in `ops-dashboard.md`; keep those documents authoritative rather than
 duplicating the contracts here.
 
 Gotchas:
+- `ops.html` module tags used frozen `?v=` queries. GitHub Pages deploys from `main` with no rewrite step (`build_type: legacy`), so a merge that only changed a module left the captain on the cached copy. `__swOpsStampAssets` (`// <ops-asset-cache-bust>`) restamps those tags at load with `Date.now()`; keep new `?v=` assets on that helper, do not go back to a fixed query.
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global —
   an inline `onclick="fn(...)"` on a rendered string reaches ONLY `window.fn`.
   `generatePOPdf` shipped as a dead button this way; expose the fn or the

@@ -16,8 +16,29 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- Shared modules -->
   <script src="shared/brand.js"></script>
-  <script src="shared/cloud.js?v=auth-jwt-20260813"></script>
-  <script src="shared/auth-gate.js?v=auth-jwt-20260813"></script>
+  <script>
+  // <ops-asset-cache-bust>
+  // GitHub Pages deploys ops.html from main with no rewrite step, so a frozen
+  // ?v= token on these tags leaves a signed-in browser on the previous module
+  // after a merge. Restamp on every load so a normal reload fetches the new file.
+  window.__swOpsStampAssets = function (assets) {
+    var v = String(Date.now());
+    for (var i = 0; i < assets.length; i++) {
+      var a = assets[i];
+      var url = String(a.u).replace(/\?v=[^&]+/, '?v=' + encodeURIComponent(v));
+      if (a.t === 'css') {
+        document.write('<link rel="stylesheet" href="' + url + '">');
+      } else {
+        document.write('<script src="' + url + '"><\/script>');
+      }
+    }
+  };
+  // </ops-asset-cache-bust>
+  __swOpsStampAssets([
+    {t:'js', u:'shared/cloud.js?v=auth-jwt-20260813'},
+    {t:'js', u:'shared/auth-gate.js?v=auth-jwt-20260813'}
+  ]);
+  </script>
   <style>
     :root {
       /* ── Architectural Assurance — Brand Colour Families ── */
@@ -4520,8 +4541,12 @@
     .msr-fb-btn.brand { background: var(--sw-orange); color: #fff; font-weight: 800; }
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
   </style>
-<link rel="stylesheet" href="modules/ops-sales-performance.css?v=1">
-<link rel="stylesheet" href="modules/ops-sales-booking.css?v=1">
+<script>
+__swOpsStampAssets([
+  {t:'css', u:'modules/ops-sales-performance.css?v=1'},
+  {t:'css', u:'modules/ops-sales-booking.css?v=1'}
+]);
+</script>
 </head>
 <body>
 
@@ -6180,20 +6205,22 @@
 
 <!-- Cap 1A canonical state-machine source — MUST load before inline script. -->
 <!-- Mirrors secureworks-site/shared/job-state-machine.ts. -->
-<script src="modules/sw-state-machine.js?v=1"></script>
-
 <!-- Cap 1B stage-gate engine — pure read-only module; never writes status. -->
 <!-- Display-only UX is feature-flagged: enable via ?cap1b=1 query param. -->
-<script src="modules/ops-stage-gate-engine.js?v=1"></script>
-
 <!-- Council modules: loaded BEFORE inline script so inline functions override any conflicts -->
-<script src="modules/ops-sales-performance.js?v=1"></script>
-<script src="modules/ops-sales-booking.js?v=1"></script>
-<script src="modules/ops-council.js?v=2"></script>
-<script src="modules/ops-makesafe-intake-cockpit.js?v=1"></script>
-<script src="modules/ops-makesafe-reporting-cockpit.js?v=9"></script>
-<script src="modules/ops-makesafe-feedback-notes.js?v=1"></script>
-<script src="modules/ops-modals.js?v=4"></script>
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/sw-state-machine.js?v=1'},
+  {t:'js', u:'modules/ops-stage-gate-engine.js?v=1'},
+  {t:'js', u:'modules/ops-sales-performance.js?v=1'},
+  {t:'js', u:'modules/ops-sales-booking.js?v=1'},
+  {t:'js', u:'modules/ops-council.js?v=2'},
+  {t:'js', u:'modules/ops-makesafe-intake-cockpit.js?v=1'},
+  {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
+  {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
+  {t:'js', u:'modules/ops-modals.js?v=4'}
+]);
+</script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -27906,6 +27933,10 @@ if (document.readyState === 'loading') {
 </script>
 
 <!-- Clear Debt: payment chase & collection -->
-<script src="modules/ops-clear-debt-v2.js?v=1"></script>
+<script>
+__swOpsStampAssets([
+  {t:'js', u:'modules/ops-clear-debt-v2.js?v=1'}
+]);
+</script>
 </body>
 </html>

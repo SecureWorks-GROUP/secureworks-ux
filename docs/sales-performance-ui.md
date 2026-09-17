@@ -1,6 +1,6 @@
 # Performance view integration
 
-`ops.html` routes desktop/mobile Performance beside Materials and restores `#performance` / `sw_ops_tab`. `modules/ops-sales-performance.js` calls the existing authenticated `opsFetch('sales_performance_read', {week_start})` once per selection; default omits week_start. No direct provider calls or writes occur in this module.
+Performance lives under Ops > Sales beside Booking. The workspace shape, `#booking` / `#sales` restore, and `sw_ops_sales_tab` are owned by `docs/sales-booking-ui.md`. `#performance` still opens this tab. `modules/ops-sales-performance.js` calls the existing authenticated `opsFetch('sales_performance_read', {week_start})` once per selection; default omits week_start. No direct provider calls or writes occur in this module.
 
 The adapter reads current desk payloads verbatim. Patio reads the conversation artifacts (`enquiries_in`, elapsed median/worst, unanswered_no_reply, queues.answered). Fencing reads opportunity creations, substantive_non_template response clocks, unanswered text counts and document-evidenced quote sends. CRM closed-won is never displayed as the accepted-job measure. Each empty stage retains its reason and collector gaps are available under Coverage map. Source calculations and retrieval times are separate. Missing lane rows are checked independently of the latest-calendar-week flag.
 
@@ -17,11 +17,11 @@ Rolling counts sum A1/C1 over returned calendar slots and show n of 4. The Patio
 
 ## Verification
 
-`node --test modules/ops-sales-performance.test.cjs`: eleven tests covering empty/partial/stale states, missing vs zero, rolling sums and denominator requirements, week isolation, XSS escaping, request race, authenticated host fetch, and nav/restore wiring.
+`node --test modules/ops-sales-performance.test.cjs` covers empty/partial/stale states, missing vs zero, rolling sums and denominator requirements, week isolation, XSS escaping, request race, and authenticated host fetch. Sales workspace restore (Booking beside Performance) is owned by `modules/ops-sales-booking.test.cjs`.
 
 Synthetic-only browser fixture and captures: `.impeccable/review/`. Captured at 1440×1000 and 390×844 using the installed Chrome and cached Playwright-core after the preferred chrome-devtools-axi bridge failed before launch. No installs. View title, width, section position and document overflow were read before capture. No page-level horizontal overflow in either size. Response plots fit the phone width; the shared ticks, two-hour target and median/worst values remain visible without chart scrolling.
 
-The current host-* screenshots and host-proof.json verify the actual ops.html host with every network request intercepted, a synthetic signed-in cloud object, and fictional report queues. They cover hash restore, saved-tab restore, desktop/mobile Performance button activation, selected-week GET parameters, 503 display and Retry recovery. They assert no page/plot overflow and an opening heading within the first 200 pixels at both sizes. The real login exchange, live role enforcement, provider response correctness and other Ops routes were not exercised. Parent owns independent approved-mockup review. Detector returned no findings. No backend deployment, report publication, notes write, commit or push was performed.
+The current host-* screenshots and host-proof.json verify the actual ops.html host with every network request intercepted, a synthetic signed-in cloud object, and fictional report queues. They covered hash restore, saved-tab restore, and the then-standalone desktop/mobile Performance route, plus selected-week GET parameters, 503 display and Retry recovery. They assert no page/plot overflow and an opening heading within the first 200 pixels at both sizes. The real login exchange, live role enforcement, provider response correctness and other Ops routes were not exercised. Parent owns independent approved-mockup review. Detector returned no findings. No backend deployment, report publication, notes write, commit or push was performed.
 
 ## Finish-review fixes
 

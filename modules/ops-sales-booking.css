@@ -1,0 +1,244 @@
+/* Sales Booking — the door design.
+   Tokens and grammar are ported from the captain-approved end-state prototype
+   (data/booking-endstate-prototype-20260916/booking-endstate.html, three rounds of
+   feedback) onto the Ops warm canvas. Everything is scoped to #salesBookingRoot so
+   this cannot leak into ops.html's own chrome. */
+#salesBookingRoot{
+  --canvas:#F8F6F3;
+  --surface:#FCFBFA;
+  --ink:#1A272E;
+  --ink-2:#52616A;
+  --dark:#293C46;
+  --mid:#4C6A7C;
+  --muted:#52616A;
+  --line:#D4DEE4;
+  --accent:#F15A29;
+  --accent-text:#C4481F;
+  --wash:#FDEFE9;
+  --soft:#F8F6F3;
+  --green:#285A4B;
+  --red:#A53326;
+  --warn:#785015;
+  --font:'Helvetica Neue',Helvetica,Arial,-apple-system,BlinkMacSystemFont,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --radius:3px;
+  background:var(--canvas);
+  color:var(--ink);
+  font:13px/1.45 var(--font);
+  min-height:calc(100vh - 56px - 48px);
+  -webkit-font-smoothing:antialiased;
+}
+#salesBookingRoot *{box-sizing:border-box;min-width:0}
+#salesBookingRoot [hidden]{display:none!important}
+#salesBookingRoot button,#salesBookingRoot input,#salesBookingRoot select,#salesBookingRoot textarea{font:inherit;color:inherit}
+#salesBookingRoot button{cursor:pointer;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
+#salesBookingRoot button:hover:not(:disabled){background:#F0F4F6}
+#salesBookingRoot button:disabled{cursor:not-allowed;color:#637582;background:#EDF1F3}
+#salesBookingRoot button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:650}
+#salesBookingRoot button.primary:hover:not(:disabled){background:var(--accent-text)}
+#salesBookingRoot button.primary:disabled{background:#E6EBEE;border-color:#E6EBEE;color:#637582}
+#salesBookingRoot button.linklike{border:0;background:none;padding:0;color:var(--accent-text);text-align:left;font:inherit}
+#salesBookingRoot button.linklike:hover{background:none;text-decoration:underline}
+#salesBookingRoot :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#salesBookingRoot input,#salesBookingRoot textarea,#salesBookingRoot select{border:1px solid var(--line);border-radius:var(--radius);background:#fff}
+#salesBookingRoot h1,#salesBookingRoot h2,#salesBookingRoot h3,#salesBookingRoot p{margin:0}
+#salesBookingRoot h1{font-size:24px;letter-spacing:-.02em;font-weight:650;line-height:1.15}
+#salesBookingRoot h2{font-size:15px;letter-spacing:-.01em;font-weight:650}
+#salesBookingRoot h3{font-size:12px;font-weight:650}
+#salesBookingRoot .muted{color:var(--muted)}
+#salesBookingRoot .small{font-size:11px}
+#salesBookingRoot .fine{color:var(--muted);font-size:10.5px}
+#salesBookingRoot .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#salesBookingRoot .page{padding:18px 20px 40px;max-width:1900px;margin:auto}
+
+/* ---- pills, tags ---- */
+#salesBookingRoot .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border:1px solid var(--line);font-size:11px;background:var(--surface);border-radius:3px;white-space:nowrap}
+#salesBookingRoot .pill.ok{color:var(--green);border-color:#B8D6C8;background:#EDF7F1}
+#salesBookingRoot .pill.warn{color:var(--warn);background:#fbf3e6;border-color:#e8d2a8}
+#salesBookingRoot .pill.bad{color:var(--red);background:#FFF2F1;border-color:#D88F8C}
+#salesBookingRoot .pill.ai{color:var(--accent-text);border-color:#F3C1AE;background:#FFF6F0}
+#salesBookingRoot .pill.q{color:var(--mid);border-color:#B7C8D2;background:#EEF3F6}
+#salesBookingRoot .lane{font-size:11px;padding:3px 8px;border-radius:3px;font-weight:650}
+#salesBookingRoot .lane.patio{background:#FDEFE9;color:var(--accent-text)}
+#salesBookingRoot .lane.fencing{background:#EEF3F6;color:var(--mid)}
+
+/* ---- page head, scoper switcher ---- */
+#salesBookingRoot .pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px;flex-wrap:wrap}
+#salesBookingRoot .pagehead p{font-size:12px;margin-top:4px;color:var(--muted)}
+#salesBookingRoot .scopers{display:flex;border:1px solid var(--line);border-radius:var(--radius);padding:2px;gap:1px;background:#fff}
+#salesBookingRoot .scopers button{border:0;background:none;padding:6px 12px;font-size:12px;border-radius:2px}
+#salesBookingRoot .scopers button[aria-pressed=true]{background:var(--dark);color:#fff;font-weight:650}
+
+/* ---- notices, week truth, tiles ---- */
+#salesBookingRoot .notice{margin:0 0 12px;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);font-size:11.5px;color:var(--muted)}
+#salesBookingRoot .notice.error{background:#FFF2F1;border-color:#D88F8C;color:var(--red)}
+#salesBookingRoot .notice ul{margin:6px 0 0;padding-left:18px}
+#salesBookingRoot .notice summary{cursor:pointer}
+#salesBookingRoot .weektruth{margin:0 0 14px;padding:10px 14px;background:#FFF7F2;border:1px solid #F3C9B8;border-radius:6px;font-size:12px;color:#973F30;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+#salesBookingRoot .weektruth strong{color:var(--ink)}
+#salesBookingRoot .weektruth .ok{color:var(--green)}
+#salesBookingRoot .scopesdone{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+#salesBookingRoot .tile{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+#salesBookingRoot .tile .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+#salesBookingRoot .tile .v{font-size:22px;font-weight:650;letter-spacing:-.02em;margin-top:2px;line-height:1.1}
+#salesBookingRoot .tile .s{font-size:11px;color:var(--muted);margin-top:4px}
+#salesBookingRoot .tile.sales{background:var(--dark);color:#fff;border-color:var(--dark)}
+#salesBookingRoot .tile.sales .k,#salesBookingRoot .tile.sales .s{color:#c8d3d9}
+#salesBookingRoot .tile.sales button.linklike{color:#fff;font-weight:650}
+
+/* ---- three column workspace ---- */
+#salesBookingRoot .workspace{display:grid;grid-template-columns:240px minmax(0,1fr) 400px;gap:14px;align-items:start}
+#salesBookingRoot .panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+#salesBookingRoot .panelhead{padding:13px 14px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+#salesBookingRoot .count{font-size:11px;color:var(--muted);background:#F0F4F6;padding:2px 6px;border-radius:4px;white-space:nowrap}
+
+/* ---- queue, grouped by stage ---- */
+#salesBookingRoot .queuefilters{padding:0 12px 10px}
+#salesBookingRoot .searchwrap input{width:100%;padding:6px 8px;font-size:12px}
+#salesBookingRoot .queuelist{max-height:760px;overflow:auto}
+#salesBookingRoot .qgroup{padding:8px 13px;background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:8px}
+#salesBookingRoot button.qtoggle{width:100%;border-left:0;border-right:0;border-radius:0;text-align:left}
+#salesBookingRoot .qempty{padding:8px 13px;font-size:11px;color:var(--muted)}
+#salesBookingRoot .lead{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #EDF1F3;border-radius:0;padding:10px 13px;background:#fff}
+#salesBookingRoot .lead[aria-pressed=true]{background:var(--wash);box-shadow:inset 0 0 0 1px #F3C1AE}
+#salesBookingRoot .lead .top{display:flex;justify-content:space-between;gap:6px;align-items:center}
+#salesBookingRoot .lead .name{font-size:12px;font-weight:650}
+#salesBookingRoot .lead .sub{font-size:11px;color:var(--muted);margin-top:2px}
+#salesBookingRoot .lead .pill{font-size:10px;padding:1px 6px}
+#salesBookingRoot .queuefoot{padding:10px 13px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;background:var(--soft);line-height:1.5}
+
+/* ---- the week grid ---- */
+#salesBookingRoot .calhead{padding:13px 14px 10px;border-bottom:1px solid var(--line)}
+#salesBookingRoot .calhead .date{font-size:11px;color:var(--muted);margin-top:3px}
+#salesBookingRoot .layers{display:flex;flex-wrap:wrap;align-items:center;gap:11px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--muted)}
+#salesBookingRoot .layer{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+#salesBookingRoot .layer input{width:11px;height:11px;margin:0;accent-color:var(--dark)}
+#salesBookingRoot .legendline{width:14px;height:0;border-top:2px solid var(--dark)}
+#salesBookingRoot .legendline.proposal{border-top:2px dashed var(--accent)}
+#salesBookingRoot .legendline.offer{border-top:2px dotted var(--mid)}
+#salesBookingRoot .legendline.blocked{border-top:2px solid #D88F8C}
+#salesBookingRoot .legendline.personal{border-top:2px solid #9BADB7}
+#salesBookingRoot .calendarinfo{display:flex;gap:12px;flex-wrap:wrap;padding:6px 14px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+#salesBookingRoot .calendarinfo .repairtext{color:var(--accent-text)}
+#salesBookingRoot .dayheaders{display:grid;grid-template-columns:44px repeat(5,minmax(0,1fr));border-bottom:1px solid var(--line)}
+#salesBookingRoot .dayheader{border:0;border-left:1px solid var(--line);border-radius:0;padding:9px 4px;background:#fff;color:var(--muted);font-size:10px;text-align:center}
+#salesBookingRoot .dayheader b{display:block;font-size:17px;color:var(--ink);font-weight:550}
+#salesBookingRoot .dayheader.off{background:#F4F6F7}
+#salesBookingRoot .calbody{display:grid;grid-template-columns:44px repeat(5,minmax(0,1fr));position:relative;min-height:680px}
+#salesBookingRoot .timeaxis{position:relative;background:#fff}
+#salesBookingRoot .time{font-size:10px;color:#607785;font-variant-numeric:tabular-nums}
+#salesBookingRoot .daycol{position:relative;border-left:1px solid var(--line);background:repeating-linear-gradient(to bottom,transparent 0,transparent 67px,#EDF1F3 67px,#EDF1F3 68px)}
+#salesBookingRoot .block{position:absolute;left:0;right:0;background:#F0F3F5;color:#6A7E8A;padding:9px 6px;font-size:10px;text-align:center;z-index:0}
+#salesBookingRoot .block strong{display:block;font-weight:600}
+#salesBookingRoot .block span{display:block;margin-top:3px;font-size:9px}
+#salesBookingRoot .block.off{top:0;height:100%;padding-top:26px;background:repeating-linear-gradient(135deg,#F2F5F6,#F2F5F6 7px,#EDF1F3 7px,#EDF1F3 8px)}
+#salesBookingRoot .block.rulebanner{background:repeating-linear-gradient(135deg,#F2F5F6,#F2F5F6 7px,#EDF1F3 7px,#EDF1F3 8px);border-bottom:1px solid var(--line);padding:5px 6px;font-size:9.5px}
+#salesBookingRoot .block.band{background:repeating-linear-gradient(135deg,#EEF3F6,#EEF3F6 7px,#E4EBEF 7px,#E4EBEF 8px);color:var(--mid)}
+#salesBookingRoot .window{position:absolute;left:3px;right:3px;z-index:1;border:1px dashed #C7D5DD;background:rgba(255,255,255,.55);border-radius:4px;padding:3px 5px;font-size:9px;color:var(--mid)}
+#salesBookingRoot .window b{display:block;font-weight:650}
+#salesBookingRoot .ev{position:absolute;left:3px;right:3px;z-index:2;border-radius:5px;padding:4px 6px 5px;text-align:left;font-size:10px;line-height:1.25;overflow:hidden;background:#E9EFF2;border:1px solid #AABCC6;color:#304D5E;display:flex;flex-direction:column;gap:1px}
+#salesBookingRoot .ev .stage{font-size:8.5px;font-weight:700;letter-spacing:.03em;padding:1px 5px;border-radius:3px;align-self:flex-start;background:#304D5E;color:#fff}
+#salesBookingRoot .ev .t{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#salesBookingRoot .ev .n{display:block;font-weight:650;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#salesBookingRoot .ev .j{font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
+#salesBookingRoot .ev:hover{z-index:4;background:#DAE6ED}
+#salesBookingRoot .ev.proposal{background:#FFF6F0;border:1.5px dashed var(--accent);color:#A43411}
+#salesBookingRoot .ev.proposal .stage{background:var(--accent)}
+#salesBookingRoot .ev.offer{background:#fff;border:1.5px dotted #6A8FA3;color:#496878}
+#salesBookingRoot .ev.offer .stage{background:var(--mid)}
+#salesBookingRoot .ev.blocked{background:#FFF2F1;border:1px solid #D88F8C;color:#9C3633}
+#salesBookingRoot .ev.blocked .stage{background:var(--red)}
+#salesBookingRoot .ev.blocked .n{text-decoration:line-through}
+#salesBookingRoot .ev.personal,#salesBookingRoot .ev.leave{background:#F1F3F4;border:1px solid #C9D2D8;color:#5b6b75}
+#salesBookingRoot .ev.personal .stage,#salesBookingRoot .ev.leave .stage{background:#8a99a3}
+#salesBookingRoot .ev.stamped{background:#F3FAF5;border:1.5px solid var(--green);color:#1f4a3c}
+#salesBookingRoot .ev.stamped .stage{background:var(--green)}
+#salesBookingRoot .ev.sel{outline:2px solid var(--accent);outline-offset:2px;z-index:5}
+#salesBookingRoot .calfoot{padding:9px 14px;background:var(--soft);border-top:1px solid var(--line);font-size:10.5px;color:var(--muted)}
+#salesBookingRoot .unknown{padding:36px 24px;min-height:420px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--soft)}
+#salesBookingRoot .unknown h3{font-size:16px;margin:8px 0 6px}
+#salesBookingRoot .unknown p{max-width:380px;color:var(--muted);font-size:12px}
+#salesBookingRoot .dayselect,#salesBookingRoot .dayagenda{display:none}
+
+/* ---- detail panel ---- */
+#salesBookingRoot .detailhead{padding:14px 15px 12px;border-bottom:1px solid var(--line)}
+#salesBookingRoot .detailhead h2{font-size:19px;margin-top:5px}
+#salesBookingRoot .detailhead .sub{font-size:12px;color:var(--muted);margin-top:2px}
+#salesBookingRoot .detailbody{padding:13px 15px;display:grid;gap:14px}
+#salesBookingRoot .thread{display:grid;gap:7px;border:1px solid var(--line);border-radius:6px;padding:9px;background:var(--soft);max-height:260px;overflow:auto}
+#salesBookingRoot .thread.big{border:0;border-radius:0;border-bottom:1px solid var(--line);min-height:380px;max-height:56vh;padding:14px 15px;gap:10px;align-content:start;overflow:auto}
+#salesBookingRoot .msg{display:grid;gap:2px;max-width:88%;padding:9px 11px;border-radius:7px;font-size:12.5px;line-height:1.45;background:#fff;border:1px solid var(--line)}
+#salesBookingRoot .msg small{font-size:10px;color:var(--muted)}
+#salesBookingRoot .msg.in{justify-self:start;border-bottom-left-radius:2px}
+#salesBookingRoot .msg.out{justify-self:end;background:#E9EFF2;border-color:#C7D5DD;border-bottom-right-radius:2px}
+#salesBookingRoot .msg.sys{justify-self:center;background:transparent;border:0;color:var(--muted);font-size:10.5px;text-align:center;max-width:100%}
+#salesBookingRoot .compose{padding:12px 15px 0}
+#salesBookingRoot .compose h3{margin:0}
+#salesBookingRoot .compose textarea{width:100%;min-height:120px;resize:vertical;font-size:12.5px;padding:10px;line-height:1.5;background:#fff;border:1.5px solid var(--accent);border-radius:6px;margin-top:6px}
+#salesBookingRoot .actionzone{background:#FCFCFD;border-top:1px solid var(--line);padding:12px 15px;display:grid;gap:7px;margin-top:12px}
+#salesBookingRoot .actionzone button{width:100%;font-size:12px}
+#salesBookingRoot .holdnote{display:flex;gap:7px;font-size:11px;color:var(--accent-text);align-items:center;font-weight:650}
+#salesBookingRoot .senderline{font-size:10.5px}
+#salesBookingRoot .stamprow{display:flex;gap:6px}
+#salesBookingRoot .stamprow button{width:auto;flex:1}
+#salesBookingRoot button.keep{border-color:#B8D6C8;background:#EDF7F1;color:var(--green);font-weight:650}
+#salesBookingRoot button.keep[aria-pressed=true]{background:var(--green);border-color:var(--green);color:#fff}
+#salesBookingRoot button.cut{border-color:#D88F8C;background:#FFF2F1;color:var(--red);font-weight:650}
+#salesBookingRoot button.cut[aria-pressed=true]{background:var(--red);border-color:var(--red);color:#fff}
+#salesBookingRoot .archive-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:4px}
+#salesBookingRoot .archive-row select{padding:5px 6px;font-size:11px}
+#salesBookingRoot .archive-row button{width:auto}
+#salesBookingRoot .inline-details summary{font-size:11px;color:var(--muted);cursor:pointer}
+#salesBookingRoot .actionzone label.small{display:grid;gap:3px}
+#salesBookingRoot .actionzone input[data-booking-time]{padding:6px 8px;font-size:11.5px;font-family:var(--mono)}
+
+/* ---- captain stamp board ---- */
+#salesBookingRoot .stampboard{margin:16px 0 8px;background:#fff;border:1px solid var(--line);border-radius:var(--radius)}
+#salesBookingRoot .sbhead{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
+#salesBookingRoot .sbhead p{font-size:12px;color:var(--muted);margin-top:4px;max-width:70ch}
+#salesBookingRoot .stampcard{padding:12px 16px;border-bottom:1px solid #EDF1F3;display:grid;grid-template-columns:minmax(150px,240px) minmax(0,1fr) 170px;gap:14px;align-items:start}
+#salesBookingRoot .stampcard.conflict{background:#FFF7F2}
+#salesBookingRoot .stampcard.weak{background:#F8F6F3}
+#salesBookingRoot .stampcard.stamped{background:#F3FAF5}
+#salesBookingRoot .stampcard .slot{font-size:12px;color:var(--accent-text);font-weight:650;margin-top:2px}
+#salesBookingRoot .stampcard .why{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}
+#salesBookingRoot .stampcard .actions{display:grid;gap:6px}
+#salesBookingRoot .stampcard .actions button{width:100%;font-size:11px}
+#salesBookingRoot .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+#salesBookingRoot .chip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;padding:2px 7px;border-radius:3px;border:1px solid var(--line);background:#fff;white-space:nowrap;color:var(--muted)}
+#salesBookingRoot .chip:before{content:'';width:7px;height:7px;border-radius:50%;background:#9BADB7}
+#salesBookingRoot .chip.ok{color:var(--green);border-color:#B8D6C8;background:#EDF7F1}
+#salesBookingRoot .chip.ok:before{background:var(--green)}
+#salesBookingRoot .chip.warn{color:var(--warn);border-color:#e8d2a8;background:#fbf3e6}
+#salesBookingRoot .chip.warn:before{background:#C9962B}
+#salesBookingRoot .chip.bad{color:var(--red);border-color:#D88F8C;background:#FFF2F1}
+#salesBookingRoot .chip.bad:before{background:var(--red)}
+#salesBookingRoot .whylist{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+#salesBookingRoot .whylist li{display:flex;gap:7px;font-size:11px;color:var(--muted);align-items:flex-start;line-height:1.45}
+#salesBookingRoot .whylist li:before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:#9BADB7;margin-top:5px}
+#salesBookingRoot .whylist li.ok:before{background:var(--green)}
+#salesBookingRoot .whylist li.warn:before{background:#C9962B}
+#salesBookingRoot .whylist li.bad:before{background:var(--red)}
+#salesBookingRoot .filedetails summary{padding:10px 16px;font-size:11.5px;color:var(--muted);cursor:pointer;background:var(--soft);border-top:1px solid var(--line)}
+#salesBookingRoot .stampfile{padding:14px 16px;background:var(--dark);color:#d9e0e3;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;line-height:1.5}
+
+/* ---- Sales subnav (host chrome, lives outside the booking root) ---- */
+.sales-workspace-subnav{display:flex;align-items:center;gap:18px;border-bottom:1px solid #D4DEE4;padding:0 20px;height:44px;background:#FCFBFA}
+.sales-workspace-label{font-weight:650;font-size:13px;color:#293C46}
+.sales-workspace-subnav button{height:44px;border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:0 2px;font-size:12px;color:#4C6A7C;cursor:pointer}
+.sales-workspace-subnav button[aria-selected=true]{color:#1A272E;border-bottom-color:#F15A29;font-weight:650}
+.sales-workspace-hold{margin-left:auto;color:#C4481F;font-size:11px;font-weight:650}
+body:not(.sales-booking-view-active) #salesBookingRoot{display:none}
+body:not(.performance-view-active) #salesPerformanceRoot{display:none}
+
+@media(max-width:1280px){
+  #salesBookingRoot .workspace{grid-template-columns:220px minmax(0,1fr)}
+  #salesBookingRoot .detail{grid-column:1/-1}
+}
+@media(max-width:860px){
+  #salesBookingRoot .workspace{grid-template-columns:1fr}
+  #salesBookingRoot .stampcard{grid-template-columns:1fr}
+  #salesBookingRoot .calbody{min-height:520px}
+  #salesBookingRoot .page{padding:14px 16px 40px}
+  .sales-workspace-subnav{padding:0 16px;gap:12px}
+}

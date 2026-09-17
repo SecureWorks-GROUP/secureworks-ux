@@ -511,7 +511,7 @@ live capture), evidence in `docs/evidence/ses-portal-live-thumb-2026-08-13/`.
 
 ## Trade App job cards (`trade.html`)
 
-All job types (make-safe, fencing, patio, decking, reno) render through ONE card
+All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card
 grammar: the `UnifiedJobCard` module (search `// <unified-jobcard>`) → `.jc-*`
 CSS. `.ql-*` is the shared quick-look sheet, `.dh-*` the full-view detail header.
 `.jc.<type>` sets `--jc-a` (job-type accent from the `--jt-*` tokens); the
@@ -551,9 +551,10 @@ matcher, which would otherwise misfile a repair-family make-safe like
 SWMS-261319 as make-safe purely from its `/^SWMS-/` job-number prefix).
 Mirrors ops.html's `calDivisionOf` (PR #316). `getTradeJobType(job, assignment)`
 is a thin wrapper over it and remains the call every renderer uses — never call
-`isTradeMakesafeJob` directly to decide routing (three such bypasses,
-including `window.openJob`'s cached-job check and both `loadServiceReport`
-branches, caused exactly this misfile before being fixed).
+`isTradeMakesafeJob` directly to decide routing (four such bypasses —
+`window.openJob`'s cached-job check, `loadMakesafeReport`'s offline fallback
+and both `loadServiceReport` branches — caused exactly this misfile before
+being fixed).
 The new calendar's type filter (`NC.type`) gained a `repair` chip (unconditional,
 like Make-safe) alongside Make-safe/Fencing. Repair mode is fed by
 `caFetchRepairCalendarModel`, which reads `api('calendar')` directly — never the

@@ -539,6 +539,37 @@ make-safe that still owes the trade's report remains visible even after the
 attendance assignment is complete. All and History keep their historical scope.
 Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
 
+## Repair vertical (`trade.html`)
+
+Repair is a first-class job vertical alongside make-safe/fencing/patio
+(Captain Shaun, 2026-09-17). ONE helper decides it everywhere:
+`tradeJobVertical(job, assignment, ev)` (search `// <trade-repair-vertical>`,
+wraps `isTradeRepairJob`/`tradeJobFamily`) — a job/calendar-event is Repair
+when its own `type`/`job_type` says `repair`, OR its `job_family`/`ses_family`
+metadata says `repair` (checked BEFORE `isTradeMakesafeJob`'s fuzzy text
+matcher, which would otherwise misfile a repair-family make-safe like
+SWMS-261319 as make-safe purely from its `/^SWMS-/` job-number prefix).
+Mirrors ops.html's `calDivisionOf` (PR #316). `getTradeJobType(job, assignment)`
+is a thin wrapper over it and remains the call every renderer uses — never call
+`isTradeMakesafeJob` directly to decide routing (three such bypasses,
+including `window.openJob`'s cached-job check and both `loadServiceReport`
+branches, caused exactly this misfile before being fixed).
+The new calendar's type filter (`NC.type`) gained a `repair` chip (unconditional,
+like Make-safe) alongside Make-safe/Fencing. Repair mode is fed by
+`caFetchRepairCalendarModel`, which reads `api('calendar')` directly — never the
+make-safe board (`MakesafeTradeV5.calendarBlocks`/`makesafe_board` deliberately
+excludes repair-family jobs, same as the Insurance Repairs board above) — and
+classifies each row via `CalAdapterCore.mapVertical(ev)` before building blocks,
+so a repair-family row renders Repair even though `eventToBlock`'s `type` field
+otherwise comes straight from `job_type`. Badge/accent: `--jt-rp`/`.rp` (teal
+`#0D9488`, matching ops.html's Repair division colour) — added to every place
+that already had `.ms/.fc/.pt/.dk/.rn/.nt` variants (`.jc`, `.jcsr`, `.ql`,
+`.dh`, `.alloc-sheet`, and the `.ncal` component's own `--ms/--fc/--pt/--nt`
+token family). Job detail: because `getTradeJobType` returns `repair` not
+`makesafe`, a repair job always lands on the normal job detail (Documents tab
+under Files) — it never branches into the make-safe report flow. Guard:
+`tests/e2e/trade-repair-vertical.spec.js`.
+
 ## Crew roster & lead installer (`trade.html`)
 
 The authoritative crew and lead-installer contract, including absence semantics,

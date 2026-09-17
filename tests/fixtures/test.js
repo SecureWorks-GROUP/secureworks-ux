@@ -407,6 +407,74 @@ const test = base.extend({
         makesafe_type: 'Storm damage roof report'
       }
     };
+    // ── Repair vertical (trade-repair-vertical-ux): a repair-family make-safe
+    // (job_type still 'makesafe', job_family 'repair' — SWMS-261319/Duncraig,
+    // the Hugo motivating case) and a plain type=repair job. Both are assigned
+    // to the installer persona today so the calendar's default 'mine' scope
+    // shows them without switching Everyone.
+    const repairFamilyEvent = {
+      assignment_id: 'e2e-repair-family-assignment',
+      job_id: 'e2e-repair-family-job',
+      job_number: 'SWMS-261319',
+      job_type: 'makesafe',
+      job_family: 'repair',
+      scheduled_date: perthDate(),
+      start_time: '09:00:00',
+      end_time: null,
+      assignment_status: 'scheduled',
+      assigned_to: PERSONAS.installer.profile.name,
+      user_id: PERSONAS.installer.profile.id,
+      site_suburb: 'Duncraig',
+      site_address: '1 Repair Street, Duncraig',
+      client_name: 'Simon Davey'
+    };
+    const plainRepairEvent = {
+      assignment_id: 'e2e-plain-repair-assignment',
+      job_id: 'e2e-plain-repair-job',
+      job_number: 'REP-51002',
+      job_type: 'repair',
+      scheduled_date: perthDate(),
+      start_time: '10:00:00',
+      end_time: null,
+      assignment_status: 'scheduled',
+      assigned_to: PERSONAS.installer.profile.name,
+      user_id: PERSONAS.installer.profile.id,
+      site_suburb: 'Wanneroo',
+      site_address: '2 Repair Avenue, Wanneroo',
+      client_name: 'Repair Client'
+    };
+    const REPAIR_VERTICAL_JOBS = {
+      [repairFamilyEvent.job_id]: {
+        job: {
+          id: repairFamilyEvent.job_id, job_number: repairFamilyEvent.job_number,
+          type: 'makesafe', job_family: 'repair', client_name: repairFamilyEvent.client_name,
+          site_suburb: repairFamilyEvent.site_suburb, site_address: repairFamilyEvent.site_address
+        },
+        crew: [{
+          id: repairFamilyEvent.assignment_id, user_id: repairFamilyEvent.user_id,
+          name: repairFamilyEvent.assigned_to, status: 'confirmed', scheduled_date: repairFamilyEvent.scheduled_date
+        }],
+        documents: [
+          { type: 'swms', file_name: 'Repair-family-swms.pdf', visible_to_trades: true, url: 'https://example.test/repair-family-swms.pdf' },
+          { type: 'general', file_name: 'Repair-family-notes.pdf', visible_to_trades: true, url: 'https://example.test/repair-family-notes.pdf' }
+        ]
+      },
+      [plainRepairEvent.job_id]: {
+        job: {
+          id: plainRepairEvent.job_id, job_number: plainRepairEvent.job_number,
+          type: 'repair', client_name: plainRepairEvent.client_name,
+          site_suburb: plainRepairEvent.site_suburb, site_address: plainRepairEvent.site_address
+        },
+        crew: [{
+          id: plainRepairEvent.assignment_id, user_id: plainRepairEvent.user_id,
+          name: plainRepairEvent.assigned_to, status: 'confirmed', scheduled_date: plainRepairEvent.scheduled_date
+        }],
+        documents: [
+          { type: 'swms', file_name: 'Repair-swms.pdf', visible_to_trades: true, url: 'https://example.test/repair-swms.pdf' },
+          { type: 'general', file_name: 'Repair-notes.pdf', visible_to_trades: true, url: 'https://example.test/repair-notes.pdf' }
+        ]
+      }
+    };
     // ── Crew roster + lead installer (secureworks-backend PR #513) ──
     // Its own rows rather than the shared fencing fixture, so spec 11 keeps the
     // exact assignment set it recorded. Deliberately shaped like production:
@@ -496,6 +564,19 @@ const test = base.extend({
       requestLog: feedRequests,
       actions: {
         makesafe_board: makesafeResponse,
+        // Repair vertical (trade-repair-vertical-ux): fed from the raw
+        // api('calendar') feed, never the make-safe board — see caFetchRepairCalendarModel
+        // in trade.html. Every other scenario keeps the prior unregistered-action 404.
+        calendar: ({ url }) => {
+          if (feedScenario !== 'trade-repair-vertical') {
+            return { status: 404, body: { error: 'No E2E fixture registered for calendar' } };
+          }
+          const from = url.searchParams.get('from') || '0000-01-01';
+          const to = url.searchParams.get('to') || '9999-12-31';
+          const events = [repairFamilyEvent, plainRepairEvent].filter((event) =>
+            event.scheduled_date >= from && event.scheduled_date <= to);
+          return { events, orgEvents: [] };
+        },
         search_all_jobs: ({ url }) => {
           if (!['all-jobs-feed', 'all-jobs-feed-denied', 'trade-makesafe-search'].includes(feedScenario)) {
             if (persona === 'fencing_manager') {
@@ -665,6 +746,17 @@ const test = base.extend({
               notes: [],
               serviceReport: null,
               makesafe_details: searchableMakesafeJob.makesafe_details
+            };
+          }
+          if (feedScenario === 'trade-repair-vertical' && REPAIR_VERTICAL_JOBS[jobId]) {
+            const fixture = REPAIR_VERTICAL_JOBS[jobId];
+            return {
+              job: fixture.job,
+              crew: fixture.crew,
+              purchaseOrders: [],
+              documents: fixture.documents,
+              media: [],
+              notes: []
             };
           }
           if (CREW_LEAD_SCENARIOS.includes(feedScenario)) return crewLeadDetail(jobId);

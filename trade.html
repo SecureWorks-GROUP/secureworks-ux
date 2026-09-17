@@ -2800,6 +2800,7 @@
       --ms:oklch(0.575 0.125 41); --ms-ink:oklch(0.5 0.13 40);
       --fc:oklch(0.50 0.062 235); --fc-tint:oklch(0.93 0.022 235); --fc-ink:oklch(0.46 0.06 235);
       --pt:oklch(0.52 0.088 155); --pt-ink:oklch(0.46 0.085 155);
+      --rp:oklch(0.56 0.09 182); --rp-ink:oklch(0.46 0.09 182);
       --quiet:oklch(0.86 0.012 236);
       --nt:oklch(0.60 0.012 236); --nt-ink:oklch(0.46 0.012 236);
       display:flex; flex-direction:column; height:calc(100dvh - 132px); min-height:460px;
@@ -2876,13 +2877,13 @@
     .ncal .blk{position:absolute;left:4px;right:4px;border-radius:10px;padding:6px 8px;overflow:hidden;color:var(--on)}
     .ncal .blk .bs{font-family:var(--head);font-size:13px;font-weight:600;line-height:1.1}
     .ncal .blk .bm{font-size:10px;font-weight:600;color:oklch(0.985 0.008 60 / .82);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .ncal .blk.ms{background:var(--ms)} .ncal .blk.fc{background:var(--fc)} .ncal .blk.pt{background:var(--pt)} .ncal .blk.nt{background:var(--nt)}
+    .ncal .blk.ms{background:var(--ms)} .ncal .blk.fc{background:var(--fc)} .ncal .blk.pt{background:var(--pt)} .ncal .blk.rp{background:var(--rp)} .ncal .blk.nt{background:var(--nt)}
     .ncal .blk.onsite{box-shadow:inset 0 0 0 2px var(--orange)}
     .ncal .blk.done{background:var(--quiet);color:var(--ink-2)}
     .ncal .blk.done .bm{color:var(--ink-3)}
     .ncal .blk.done .bs .tk{color:var(--pt-ink);font-weight:900}
     .ncal .blk .typedot{position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%}
-    .ncal .blk.done.ms .typedot{background:var(--ms)} .ncal .blk.done.fc .typedot{background:var(--fc)} .ncal .blk.done.pt .typedot{background:var(--pt)} .ncal .blk.done.nt .typedot{background:var(--nt)}
+    .ncal .blk.done.ms .typedot{background:var(--ms)} .ncal .blk.done.fc .typedot{background:var(--fc)} .ncal .blk.done.pt .typedot{background:var(--pt)} .ncal .blk.done.rp .typedot{background:var(--rp)} .ncal .blk.done.nt .typedot{background:var(--nt)}
     .ncal .nowline{position:absolute;height:2px;background:var(--orange);z-index:2;pointer-events:none}
     .ncal .nowline::before{content:"";position:absolute;left:-2px;top:-4px;width:9px;height:9px;border-radius:50%;background:var(--orange)}
     /* week × jobs */
@@ -2893,7 +2894,7 @@
     .ncal .wkb{position:absolute;border-radius:9px;padding:5px 6px;overflow:hidden;color:var(--on)}
     .ncal .wkb .bs{font-family:var(--head);font-size:11px;font-weight:600;line-height:1.15;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
     .ncal .wkb .bm{font-size:9px;font-weight:600;color:oklch(0.985 0.008 60 / .82);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .ncal .wkb.ms{background:var(--ms)} .ncal .wkb.fc{background:var(--fc)} .ncal .wkb.pt{background:var(--pt)} .ncal .wkb.nt{background:var(--nt)}
+    .ncal .wkb.ms{background:var(--ms)} .ncal .wkb.fc{background:var(--fc)} .ncal .wkb.pt{background:var(--pt)} .ncal .wkb.rp{background:var(--rp)} .ncal .wkb.nt{background:var(--nt)}
     .ncal .wkb.onsite{box-shadow:inset 0 0 0 2px var(--orange)}
     .ncal .wkb.done{background:var(--quiet);color:var(--ink-2)}
     .ncal .wkb .bav{position:absolute;bottom:4px;right:4px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;color:var(--on);box-shadow:0 0 0 1.5px oklch(0.99 0.005 236 / .6)}
@@ -2913,7 +2914,7 @@
     .ncal .agrow .sub{font-family:var(--head);font-size:17.5px;font-weight:600;line-height:1.12;letter-spacing:-.01em}
     .ncal .agrow .m{font-size:12px;color:var(--ink-2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ncal .tico{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:baseline}
-    .ncal .tico.ms{background:var(--ms)} .ncal .tico.fc{background:var(--fc)} .ncal .tico.pt{background:var(--pt)} .ncal .tico.nt{background:var(--nt)}
+    .ncal .tico.ms{background:var(--ms)} .ncal .tico.fc{background:var(--fc)} .ncal .tico.pt{background:var(--pt)} .ncal .tico.rp{background:var(--rp)} .ncal .tico.nt{background:var(--nt)}
     .ncal .agrow .av{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--on)}
     .ncal .agrow .nocrew{flex:0 0 auto;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-deep);background:var(--orange-tint);border-radius:var(--r-chip);padding:5px 8px}
     .ncal .aghint{font-size:12.5px;color:var(--ink-3);padding:6px 2px 0}
@@ -2968,7 +2969,7 @@
     .ncal .wkrow.unrow .wkcrew .nm{color:var(--orange-deep)}
     .ncal .wkcell.un{background:var(--orange-tint);border-color:var(--orange-line)}
     .ncal .wkcell.un .wn{color:var(--orange-deep)}
-    .ncal .seg-ms{background:var(--ms)} .ncal .seg-fc{background:var(--fc)} .ncal .seg-pt{background:var(--pt)} .ncal .seg-nt{background:var(--nt)}
+    .ncal .seg-ms{background:var(--ms)} .ncal .seg-fc{background:var(--fc)} .ncal .seg-pt{background:var(--pt)} .ncal .seg-rp{background:var(--rp)} .ncal .seg-nt{background:var(--nt)}
     .ncal .wkcrew .av[data-un]{background:var(--orange)}
     /* month × crew load board */
     .ncal .monthscroll{padding:4px 12px 16px}
@@ -2993,7 +2994,7 @@
     .ncal .monthkey .undotk{width:auto;height:auto;background:var(--orange);color:var(--on);border-radius:7px;font-size:9.5px;font-weight:800;padding:1px 5px}
     /* inline month (jobs axis) */
     .ncal .igbar{flex:0 0 auto;padding:0 12px 6px}
-    .ncal .dcell .load i.t-ms{background:var(--ms)} .ncal .dcell .load i.t-fc{background:var(--fc)} .ncal .dcell .load i.t-pt{background:var(--pt)} .ncal .dcell .load i.t-nt{background:var(--nt)}
+    .ncal .dcell .load i.t-ms{background:var(--ms)} .ncal .dcell .load i.t-fc{background:var(--fc)} .ncal .dcell .load i.t-pt{background:var(--pt)} .ncal .dcell .load i.t-rp{background:var(--rp)} .ncal .dcell .load i.t-nt{background:var(--nt)}
     .ncal .dcell .load i.t-un{background:var(--orange)}
     .ncal .ighead{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
     .ncal .ighead div{text-align:center;font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
@@ -3002,7 +3003,7 @@
     .ncal .igcell b{display:block;font-family:var(--mono);font-size:14px;font-weight:600;line-height:1.2;color:var(--ink)}
     .ncal .igcell .igdots{display:flex;gap:2.5px;justify-content:center;margin-top:2px;min-height:5px}
     .ncal .igcell .igdots i{width:4.5px;height:4.5px;border-radius:50%}
-    .ncal .igcell .igdots i.t-ms{background:var(--ms)} .ncal .igcell .igdots i.t-fc{background:var(--fc)} .ncal .igcell .igdots i.t-pt{background:var(--pt)} .ncal .igcell .igdots i.t-nt{background:var(--nt)}
+    .ncal .igcell .igdots i.t-ms{background:var(--ms)} .ncal .igcell .igdots i.t-fc{background:var(--fc)} .ncal .igcell .igdots i.t-pt{background:var(--pt)} .ncal .igcell .igdots i.t-rp{background:var(--rp)} .ncal .igcell .igdots i.t-nt{background:var(--nt)}
     .ncal .igcell .igdots i.t-un{background:var(--orange);width:5.5px;height:5.5px}
     .ncal .igcell.out{opacity:.35;pointer-events:none}
     .ncal .igcell.today{box-shadow:inset 0 0 0 1.6px var(--ink-3)}
@@ -3034,7 +3035,7 @@
     .ncal .ujob{display:flex;align-items:center;gap:11px;padding:12px 2px;border-bottom:1px solid var(--line);width:100%}
     .ncal .ujob:last-child{border-bottom:0}
     .ncal .ujob .utico{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
-    .ncal .utico.ms{background:var(--ms)} .ncal .utico.fc{background:var(--fc)} .ncal .utico.pt{background:var(--pt)} .ncal .utico.nt{background:var(--nt)}
+    .ncal .utico.ms{background:var(--ms)} .ncal .utico.fc{background:var(--fc)} .ncal .utico.pt{background:var(--pt)} .ncal .utico.rp{background:var(--rp)} .ncal .utico.nt{background:var(--nt)}
     .ncal .ujob .uw{min-width:0}
     .ncal .ujob .usub{font-family:var(--head);font-size:17px;font-weight:600;line-height:1.1}
     .ncal .ujob .umeta{font-size:12px;color:var(--ink-2);margin-top:1px}
@@ -3056,12 +3057,13 @@
     .ncal .fchips{display:flex;gap:7px;flex-wrap:wrap}
     .ncal .chip{font-size:13px;font-weight:750;color:var(--ink-2);border:1.4px solid var(--line-2);background:var(--card);border-radius:11px;padding:10px 14px;transition:background-color 150ms,color 150ms,border-color 150ms}
     .ncal .chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:baseline}
-    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)}
+    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)} .ncal .chip.dot-rp .dot{background:var(--rp)}
     .ncal .chip.on{color:var(--on);border-color:transparent}
     .ncal .chip.on.all{background:var(--ink)}
     .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
     .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
     .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
+    .ncal .chip.on.rp{background:var(--rp)} .ncal .chip.on.rp .dot{background:var(--on)}
     /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
     .ncal .nc-stack{padding:6px 14px 14px}
     .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
@@ -3077,13 +3079,13 @@
     .ncal .nc-col-empty{font-size:12.5px;color:var(--ink-3);padding:10px 6px;font-style:italic}
     .ncal .ncard{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--nt);border-radius:12px;padding:10px 12px;margin-bottom:9px}
     .ncal .ncard:active{background:oklch(0.968 0.008 236)}
-    .ncal .ncard.ms{border-left-color:var(--ms)} .ncal .ncard.fc{border-left-color:var(--fc)} .ncal .ncard.pt{border-left-color:var(--pt)} .ncal .ncard.nt{border-left-color:var(--nt)}
+    .ncal .ncard.ms{border-left-color:var(--ms)} .ncal .ncard.fc{border-left-color:var(--fc)} .ncal .ncard.pt{border-left-color:var(--pt)} .ncal .ncard.rp{border-left-color:var(--rp)} .ncal .ncard.nt{border-left-color:var(--nt)}
     .ncal .ncard.onsite{border-color:var(--orange);box-shadow:inset 0 0 0 1px var(--orange)}
     .ncal .ncard.done{opacity:.6}
     .ncal .nc-c-top{display:flex;align-items:center;gap:6px;margin-bottom:4px}
     .ncal .nc-c-top .tico{margin-right:0}
     .ncal .nc-c-type{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
-    .ncal .nc-c-type.ms{color:var(--ms-ink)} .ncal .nc-c-type.fc{color:var(--fc-ink)} .ncal .nc-c-type.pt{color:var(--pt-ink)} .ncal .nc-c-type.nt{color:var(--nt-ink)}
+    .ncal .nc-c-type.ms{color:var(--ms-ink)} .ncal .nc-c-type.fc{color:var(--fc-ink)} .ncal .nc-c-type.pt{color:var(--pt-ink)} .ncal .nc-c-type.rp{color:var(--rp-ink)} .ncal .nc-c-type.nt{color:var(--nt-ink)}
     .ncal .nc-c-stag{margin-left:auto}
     /* U-T2 multi-day span chip ("Day 2 of 3") */
     .ncal .nc-c-span{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);background:var(--line);border-radius:999px;padding:2px 7px;white-space:nowrap}
@@ -3244,6 +3246,7 @@
     .alloc-sheet.pt{--jc-a:var(--jt-pt)}
     .alloc-sheet.dk{--jc-a:var(--jt-dk)}
     .alloc-sheet.rn{--jc-a:var(--jt-rn)}
+    .alloc-sheet.rp{--jc-a:var(--jt-rp)}
     .alloc-sheet.nt{--jc-a:var(--jt-nt)}
     .alloc-ok{background:var(--jc-a,var(--sw-orange));color:#fff}
     .alloc-ok:disabled{opacity:.45}
@@ -3282,6 +3285,7 @@
       --jt-pt:#2E7D5B; --jt-pt-ink:#256A4C; --jt-pt-tint:#EAF4EF;
       --jt-dk:#8F6A2A; --jt-dk-ink:#77571E; --jt-dk-tint:#F7F2E7;
       --jt-rn:#83588B; --jt-rn-ink:#6C4674; --jt-rn-tint:#F5EFF6;
+      --jt-rp:#0D9488; --jt-rp-ink:#0B7A6E; --jt-rp-tint:#E7F5F3;
       --jt-nt:#5C7683; --jt-nt-ink:#4C6A7C; --jt-nt-tint:#EEF1F3;
       /* status chips — the only four status words a trade sees (+ live On site) */
       --jst-new-bg:#FDEDE6; --jst-new-ink:#C7431B;
@@ -3297,6 +3301,7 @@
     .jc.pt{--jc-a:var(--jt-pt);--jc-ink:var(--jt-pt-ink);--jc-tint:var(--jt-pt-tint)}
     .jc.dk{--jc-a:var(--jt-dk);--jc-ink:var(--jt-dk-ink);--jc-tint:var(--jt-dk-tint)}
     .jc.rn{--jc-a:var(--jt-rn);--jc-ink:var(--jt-rn-ink);--jc-tint:var(--jt-rn-tint)}
+    .jc.rp{--jc-a:var(--jt-rp);--jc-ink:var(--jt-rp-ink);--jc-tint:var(--jt-rp-tint)}
     .jc.nt{--jc-a:var(--jt-nt);--jc-ink:var(--jt-nt-ink);--jc-tint:var(--jt-nt-tint)}
     .jc-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-bottom:10px;min-width:0}
     .jc-stamp{flex:0 0 auto;font:600 10px var(--sw-mono);letter-spacing:.09em;text-transform:uppercase;color:#fff;background:var(--jc-a,#98A6AD);border-radius:5px;padding:3.5px 8px}
@@ -3343,7 +3348,7 @@
 
     /* Search identity rows (.jcsr) — one line per result, type edge + chip */
     .jcsr{display:flex;align-items:center;gap:10px;background:var(--sw-card);border:1px solid var(--sw-border);border-left:3px solid var(--jc-a,#98A6AD);border-radius:12px;padding:11px 12px;margin-bottom:7px;min-width:0;width:100%;text-align:left;cursor:pointer;font-family:var(--sw-font)}
-    .jcsr.ms{--jc-a:var(--jt-ms)} .jcsr.fc{--jc-a:var(--jt-fc)} .jcsr.pt{--jc-a:var(--jt-pt)} .jcsr.dk{--jc-a:var(--jt-dk)} .jcsr.rn{--jc-a:var(--jt-rn)} .jcsr.nt{--jc-a:var(--jt-nt)}
+    .jcsr.ms{--jc-a:var(--jt-ms)} .jcsr.fc{--jc-a:var(--jt-fc)} .jcsr.pt{--jc-a:var(--jt-pt)} .jcsr.dk{--jc-a:var(--jt-dk)} .jcsr.rn{--jc-a:var(--jt-rn)} .jcsr.rp{--jc-a:var(--jt-rp)} .jcsr.nt{--jc-a:var(--jt-nt)}
     .jcsr .inf{flex:1;min-width:0}
     .jcsr .s{font-size:14.5px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .jcsr .m{font:500 11px var(--sw-mono);color:var(--sw-ink-3);margin-top:2px;min-width:0;overflow-wrap:anywhere}
@@ -3351,7 +3356,7 @@
 
     /* Quick-look sheet (.ql-) — the shared detail entry for every card */
     .ql{font-family:var(--sw-font)}
-    .ql.ms{--jc-a:var(--jt-ms)} .ql.fc{--jc-a:var(--jt-fc)} .ql.pt{--jc-a:var(--jt-pt)} .ql.dk{--jc-a:var(--jt-dk)} .ql.rn{--jc-a:var(--jt-rn)} .ql.nt{--jc-a:var(--jt-nt)}
+    .ql.ms{--jc-a:var(--jt-ms)} .ql.fc{--jc-a:var(--jt-fc)} .ql.pt{--jc-a:var(--jt-pt)} .ql.dk{--jc-a:var(--jt-dk)} .ql.rn{--jc-a:var(--jt-rn)} .ql.rp{--jc-a:var(--jt-rp)} .ql.nt{--jc-a:var(--jt-nt)}
     .ql-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
     .ql-head .ql-id{flex:1;min-width:0}
     .ql-head .row1{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;min-width:0}
@@ -3384,7 +3389,7 @@
 
     /* Detail header (.dh-) — the full job view identity band */
     .dh{background:var(--sw-dark);color:#F5F7F8;padding:16px 16px 15px;border-radius:14px;border-bottom:3px solid var(--jc-a,#98A6AD)}
-    .dh.ms{--jc-a:var(--jt-ms)} .dh.fc{--jc-a:var(--jt-fc)} .dh.pt{--jc-a:var(--jt-pt)} .dh.dk{--jc-a:var(--jt-dk)} .dh.rn{--jc-a:var(--jt-rn)} .dh.nt{--jc-a:var(--jt-nt)}
+    .dh.ms{--jc-a:var(--jt-ms)} .dh.fc{--jc-a:var(--jt-fc)} .dh.pt{--jc-a:var(--jt-pt)} .dh.dk{--jc-a:var(--jt-dk)} .dh.rn{--jc-a:var(--jt-rn)} .dh.rp{--jc-a:var(--jt-rp)} .dh.nt{--jc-a:var(--jt-nt)}
     .dh-top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 9px;min-width:0}
     .dh .jc-stamp{background:var(--jc-a)}
     .dh-num{font:600 12px var(--sw-mono);letter-spacing:.04em;color:#9DB2BD}
@@ -7661,7 +7666,7 @@
       else scls = 'alloc';
     }
     var chip = UnifiedJobCard.STATUS[scls] || UnifiedJobCard.STATUS.alloc;
-    var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair' };
     var typeLabel = TYPE_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     var place = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim() || 'Suburb TBC';
     var client = String(job.client_name || '').trim();
@@ -8159,7 +8164,7 @@
 
   window.openJob = function(jobId, assignmentId) {
     var cached = getCachedTradeJob(jobId);
-    if (cached && isTradeMakesafeJob(cached.job, cached.assignment)) {
+    if (cached && getTradeJobType(cached.job, cached.assignment) === 'makesafe') {
       openJobReport(jobId, assignmentId || (cached.assignment && cached.assignment.id) || '');
       return;
     }
@@ -8433,6 +8438,7 @@
       if (k === 'patio') return 'pt';
       if (k === 'decking' || k === 'deck') return 'dk';
       if (k === 'reno' || k === 'renovation' || k === 'renovations') return 'rn';
+      if (k === 'repair') return 'rp';
       return 'nt';
     }
     // The four user-facing statuses (+ live On site). One vocabulary everywhere.
@@ -8578,7 +8584,7 @@
     }
 
     // ── Normaliser B: My Jobs / history / search (job + assignment) ──
-    var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation' };
+    var STD_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair' };
     function liveCrewNames(assignments) {
       var seen = {};
       return (assignments || []).filter(function (x) {
@@ -8598,6 +8604,7 @@
       job = job || {}; a = a || {}; opts = opts || {};
       var cls = typeCls(type);
       var isMs = cls === 'ms';
+      var isRepair = cls === 'rp';
       var isPool = !!a._makesafePool || String(a.status || '').toLowerCase() === 'available';
       var stamp = isMs ? (typeof getTradeMakesafeTypeLabel === 'function' ? getTradeMakesafeTypeLabel(job) : 'Make safe')
         : (STD_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); }));
@@ -8611,6 +8618,15 @@
         var xref = md.external_ref || job.external_ref || job.claim_number;
         if (xref) refs.push({ text: String(xref) });
       }
+      // Repair cards carry the builder's own instruction numbers alongside our
+      // job number — same fields the OpsDash repair card shows (ruling
+      // 2026-08-31): work order ref, then purchase order. Absent fields are
+      // simply not drawn, never fabricated.
+      var repairRefs = isRepair && typeof tradeRepairRefs === 'function' ? tradeRepairRefs(job) : null;
+      if (repairRefs) {
+        if (repairRefs.workOrder) refs.push({ text: 'WO ' + repairRefs.workOrder });
+        if (repairRefs.po) refs.push({ text: repairRefs.po });
+      }
       var parties;
       if (isMs) {
         // Feed-first make-safe builder (PR #208): reads the makesafe-board.v1
@@ -8623,6 +8639,11 @@
           { k: 'Builder', v: builder || 'Not on file', miss: !builder },
           { k: 'Client', v: client || 'Not on the work order', miss: !client }
         ];
+      } else if (isRepair) {
+        var repairClient = String(job.client_name || '').trim();
+        var repairBuilder = (repairRefs && repairRefs.company) || '';
+        parties = [{ k: 'Builder', v: repairBuilder || 'Not on file', miss: !repairBuilder }];
+        if (repairClient) parties.push({ k: 'Client', v: repairClient });
       } else {
         var cli = String(job.client_name || '').trim();
         var scope = String(opts.desc || (typeof buildScopeSummary === 'function' ? buildScopeSummary(job.scope_json, type) : '') || '').trim();
@@ -8821,6 +8842,37 @@
   })();
   // </trade-crew-roster-core>
 
+  // <trade-repair-vertical>
+  // Repair is a first-class job vertical alongside make-safe/fencing/patio
+  // (Captain Shaun, 2026-09-17: "there's fencing, there's patio, and now
+  // there's repair. It's the same theory."). A job/calendar-event is a repair
+  // when its own type says so, OR its job_family/ses_family metadata says so —
+  // mirrors ops.html's calDivisionOf (PR #316). The family check MUST run
+  // before isTradeMakesafeJob's text-matcher below: a repair-family make-safe
+  // like SWMS-261319 would otherwise match the /^SWMS-/ job-number regex and
+  // get misfiled as make-safe forever. `ev` is an optional calendar_events row
+  // (job_type/job_family), for callers that only have a calendar feed row.
+  function tradeJobFamily(job, assignment, ev) {
+    job = job || {}; assignment = assignment || {}; ev = ev || {};
+    var md = job.metadata || job.makesafe_details || {};
+    var candidates = [
+      job.job_family, job.jobFamily, ev.job_family, ev.jobFamily, assignment.job_family,
+      md.ses_family, md.makesafe_job_family, md.makesafeJobFamily,
+      job.ses_family, job.makesafe_job_family, job.makesafeJobFamily
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var v = String(candidates[i] == null ? '' : candidates[i]).toLowerCase().trim();
+      if (v) return v;
+    }
+    return '';
+  }
+  function isTradeRepairJob(job, assignment, ev) {
+    job = job || {}; ev = ev || {};
+    if (String(job.type || '').toLowerCase().trim() === 'repair') return true;
+    if (String(ev.job_type || '').toLowerCase().trim() === 'repair') return true;
+    return tradeJobFamily(job, assignment, ev) === 'repair';
+  }
+
   function isTradeMakesafeJob(job, assignment) {
     if (!job && !assignment) return false;
     job = job || {};
@@ -8842,9 +8894,42 @@
       /waiting[-_\s]*on[-_\s]*trade[-_\s]*report|admin[-_\s]*to[-_\s]*send[-_\s]*report/.test(text);
   }
 
-  function getTradeJobType(job, assignment) {
+  // THE ONE PLACE a job's vertical is decided. Every caller in this file goes
+  // through here (directly or via getTradeJobType) so a repair-family job is
+  // never independently misclassified by a second check somewhere else.
+  function tradeJobVertical(job, assignment, ev) {
+    if (isTradeRepairJob(job, assignment, ev)) return 'repair';
     if (isTradeMakesafeJob(job, assignment)) return 'makesafe';
-    return String((job && job.type) || 'patio').toLowerCase();
+    return String((job && job.type) || (ev && ev.job_type) || 'patio').toLowerCase();
+  }
+
+  // Builder work-order / PO / claim refs for a repair job (the same fields the
+  // OpsDash repair card shows: builder_work_order_number, builder_po_number,
+  // builder_claim_ref — ops.html's live projection also carries
+  // builder_work_order_ref/builder_company_name; both spellings are read here
+  // since the backend companion (trade-repair-vertical-backend) may land either
+  // shape on trade_job_detail/metadata). Absent fields are simply not drawn.
+  function tradeRepairRefs(job) {
+    job = job || {};
+    var md = job.metadata || job.makesafe_details || {};
+    function pick() {
+      for (var i = 0; i < arguments.length; i++) {
+        var v = arguments[i];
+        if (v != null && String(v).trim()) return String(v).trim();
+      }
+      return '';
+    }
+    return {
+      workOrder: pick(job.builder_work_order_ref, job.builder_work_order_number, md.builder_work_order_ref, md.builder_work_order_number),
+      po: pick(job.builder_po_number, md.builder_po_number),
+      claimRef: pick(job.builder_claim_ref, md.builder_claim_ref, job.external_ref, job.claim_number),
+      company: pick(job.builder_company_name, md.builder_company_name, job.builder && job.builder.name, typeof job.builder === 'string' ? job.builder : '')
+    };
+  }
+  // </trade-repair-vertical>
+
+  function getTradeJobType(job, assignment) {
+    return tradeJobVertical(job, assignment);
   }
 
   function getCachedTradeJob(jobId) {
@@ -9104,7 +9189,8 @@
     decking: '#27AE60',
     makesafe: '#E74C3C',
     insurance: '#E74C3C',
-    renovation: '#8E44AD'
+    renovation: '#8E44AD',
+    repair: '#0D9488'
   };
 
   var HUMANISE_MAP = {
@@ -15475,7 +15561,7 @@
       renderMakesafeReportDirect(data, false);
     }).catch(function(err) {
       var cached = getCachedTradeJob(jobId);
-      if (cached && isTradeMakesafeJob(cached.job, cached.assignment)) {
+      if (cached && getTradeJobType(cached.job, cached.assignment) === 'makesafe') {
         var fallback = { job: cached.job, crew: [], media: [], notes: [], purchaseOrders: [], serviceReport: null, makesafe_details: cached.job.makesafe_details || cached.job.metadata || {} };
         _currentJob = fallback;
         _currentJobLoaded = jobId;
@@ -15490,7 +15576,7 @@
 
   window.loadServiceReport = function loadServiceReport(jobId) {
     var cached = getCachedTradeJob(jobId);
-    if ((_reportMode === 'makesafe') || (cached && isTradeMakesafeJob(cached.job, cached.assignment))) {
+    if ((_reportMode === 'makesafe') || (cached && getTradeJobType(cached.job, cached.assignment) === 'makesafe')) {
       _reportMode = 'makesafe';
       return loadMakesafeReport(jobId);
     }
@@ -15500,8 +15586,9 @@
 
     api('get_service_report', { jobId: jobId }).then(function(data) {
       // Defensive final guard: if the server/report payload identifies the job
-      // as MakeSafe, never render the generic checklist.
-      if (data && data.job && isTradeMakesafeJob(data.job, null)) {
+      // as MakeSafe (and not a repair-family make-safe — <trade-repair-vertical>
+      // wins first), never render the generic checklist.
+      if (data && data.job && getTradeJobType(data.job, null) === 'makesafe') {
         _reportMode = 'makesafe';
         return loadMakesafeReport(jobId);
       }
@@ -16663,6 +16750,7 @@
       if (k === 'makesafe') return 'makesafe';
       if (k === 'fencing') return 'fencing';
       if (k === 'patio') return 'patio';
+      if (k === 'repair') return 'repair';
       return 'other';
     }
     function isMakesafe(jobType) {
@@ -16672,7 +16760,17 @@
       if (mappedType === 'makesafe') return 'Make-safe';
       if (mappedType === 'fencing') return 'Fencing';
       if (mappedType === 'patio') return 'Patio';
+      if (mappedType === 'repair') return 'Repair';
       return 'Job';
+    }
+    // Repair-family classifier for a calendar_events row. The family check
+    // (job_family/ses_family, mirrors ops.html's calDivisionOf) wins over the
+    // raw job_type, so a repair-family make-safe (job_type still 'makesafe')
+    // renders as Repair here, never Make-safe — see <trade-repair-vertical>.
+    function mapVertical(ev) {
+      ev = ev || {};
+      if (typeof isTradeRepairJob === 'function' && isTradeRepairJob(null, null, ev)) return 'repair';
+      return mapType(ev.job_type);
     }
 
     // "HH:MM[:SS]" → decimal hours (7.5 === 07:30). null when absent/unparseable.
@@ -16741,7 +16839,7 @@
 
     // One calendar_events row → one per-assignment render block.
     function eventToBlock(ev) {
-      var mt = mapType(ev.job_type);
+      var mt = mapVertical(ev);
       var startH = parseTime(ev.start_time);
       var blk = deriveBlock(startH, ev.end_time, ev.job_type);
       var crewName = ev.assigned_to || ev.crew_name || null; // display name (u.name join, else free-text)
@@ -16928,7 +17026,7 @@
     }
 
     return {
-      STATUS_MAP: STATUS_MAP, mapStatus: mapStatus, mapType: mapType, isMakesafe: isMakesafe,
+      STATUS_MAP: STATUS_MAP, mapStatus: mapStatus, mapType: mapType, mapVertical: mapVertical, isMakesafe: isMakesafe,
       typeLabel: typeLabel, parseTime: parseTime, deriveBlock: deriveBlock, crewHue: crewHue,
       crewColour: crewColour, initials: initials, scopeSummary: scopeSummary, desc: desc,
       eventToBlock: eventToBlock, adaptEvents: adaptEvents, filterLens: filterLens,
@@ -17374,9 +17472,39 @@
     }).catch(function (err) { toast('Could not open job: ' + friendlyError(err), true); });
   };
 
+  // Repair vertical: fed directly from api('calendar') rows, never the
+  // make-safe board (which deliberately excludes repair-family jobs — see
+  // AGENTS.md's Insurance Repairs board section). TradeCalendarSource's one
+  // registered adapter is fencing-only, so repair fetches and adapts the raw
+  // feed itself, keeping only repair-vertical rows (isTradeRepairJob — the
+  // same family-first rule as <trade-repair-vertical>, so a repair-family
+  // job (job_type makesafe, job_family repair) shows here, never on Make-safe).
+  var _repairCalCache = {};
+  async function caFetchRepairCalendarModel(fromStr, toStr, force) {
+    var key = fromStr + '|' + toStr;
+    if (!force && _repairCalCache[key]) return _repairCalCache[key];
+    var data = await api('calendar', { from: fromStr, to: toStr });
+    var events = (data.events || []).filter(function (ev) { return isTradeRepairJob(null, null, ev); });
+    var adapted = CalAdapterCore.adaptEvents(events);
+    var model = {
+      blocks: adapted.blocks,
+      people: CalAdapterCore.buildPeople([], adapted.blocks),
+      availability: [], roster: [], unmappedStatuses: adapted.unmappedStatuses,
+      inputCount: adapted.inputCount, outputCount: adapted.outputCount,
+      permissions: {}, generated_at: null,
+      feedRows: [], unscheduledRows: []
+    };
+    _repairCalCache[key] = model;
+    return model;
+  }
+
   // Calendar source router. Make-safe remains on its canonical projection;
-  // fencing crosses only the strict trade-calendar.v1 adapter above.
+  // fencing crosses only the strict trade-calendar.v1 adapter above; repair
+  // reads the raw calendar feed directly (never the make-safe board).
   async function caFetchCalendarModel(fromStr, toStr, force) {
+    if (NC.type === 'repair') {
+      return caFetchRepairCalendarModel(fromStr, toStr, force);
+    }
     if (NC.type !== 'makesafe') {
       return TradeCalendarSource.load({
         from: fromStr,
@@ -17425,7 +17553,7 @@
     var MOF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     var TYPE = {
       makesafe: { cls: 'ms', label: 'Make-safe' }, fencing: { cls: 'fc', label: 'Fencing' },
-      patio: { cls: 'pt', label: 'Patio' }, other: { cls: 'nt', label: 'Other' }
+      patio: { cls: 'pt', label: 'Patio' }, repair: { cls: 'rp', label: 'Repair' }, other: { cls: 'nt', label: 'Other' }
     };
     function TY(t) { return TYPE[t] || TYPE.other; }
 
@@ -17483,7 +17611,7 @@
     // When the adapter gains j.builder, this picks it up with no renderer change.
     var NO_PARTY = '—'; // em-dash sentinel for a not-yet-known party (builder pending)
     function partyLabel(j) {
-      if (j.type === 'makesafe') return { k: 'Builder', v: j.builder || NO_PARTY };
+      if (j.type === 'makesafe' || j.type === 'repair') return { k: 'Builder', v: j.builder || NO_PARTY };
       return { k: 'Client', v: j.client || NO_PARTY };
     }
     function partyValHTML(p) { return p.v === NO_PARTY ? '<span class="nc-c-pending">&mdash;</span>' : esc(p.v); }
@@ -18054,7 +18182,7 @@
       renderNewCalendar();
     }
     function content() {
-      var trades = [['makesafe', 'Make-safe', 'ms dot-ms']];
+      var trades = [['makesafe', 'Make-safe', 'ms dot-ms'], ['repair', 'Repair', 'rp dot-rp']];
       if (managesTradeVertical('fencing')) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
       var scope = '<div class="seg lite" style="max-width:240px">'
@@ -18107,6 +18235,7 @@
     var _rb = document.getElementById('ncRefreshBtn');
     if (_rb) _rb.addEventListener('click', function () {
       if (NC.type === 'makesafe') invalidateMakesafeV5Feed();
+      else if (NC.type === 'repair') _repairCalCache = {};
       else TradeCalendarSource.clear();
       NC.model = null; NC.modelKey = null; NC.loadedAt = 0; NC.dirty = false;
       renderNewCalendar();
@@ -18290,9 +18419,12 @@
           var labourDays = ev.scope_json?.labour_days || ev.scope_json?.install_days || ev.scope_json?.config?.labour_days;
           if (labourDays && parseInt(labourDays) > dayY) dayY = parseInt(labourDays);
 
-          // Type badge
-          var typeBadge = { patio: 'Patio', fencing: 'Fencing', decking: 'Decking' };
-          var typeLabel = typeBadge[(ev.job_type || '').toLowerCase()] || ev.job_type || '';
+          // Type badge. Repair-family rows (job_family/ses_family 'repair', see
+          // <trade-repair-vertical>) badge as Repair even when the raw job_type
+          // still says makesafe — same family-first rule as the new calendar.
+          var typeBadge = { patio: 'Patio', fencing: 'Fencing', decking: 'Decking', repair: 'Repair' };
+          var evVertical = isTradeRepairJob(null, null, ev) ? 'repair' : (ev.job_type || '').toLowerCase();
+          var typeLabel = typeBadge[evVertical] || ev.job_type || '';
 
           // Crew names for this job on this date
           var crewOnThisJob = dayEvents.filter(function(e) { return e.job_id === ev.job_id; }).map(function(e) { return e.crew_name || e.assigned_to || ''; });
@@ -18540,7 +18672,7 @@
       });
 
       var isMyJob = crewNames.some(function(n) { return n.toLowerCase() === (_user?.name || '').toLowerCase(); });
-      var typeBadge = { patio: 'PATIO', fencing: 'FENCING', decking: 'DECKING' };
+      var typeBadge = { patio: 'PATIO', fencing: 'FENCING', decking: 'DECKING', repair: 'REPAIR', makesafe: 'MAKE-SAFE' };
 
       var html = '<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:flex-end;justify-content:center;">';
       html += '<div style="background:#fff;border-radius:16px 16px 0 0;padding:20px 16px 28px;width:100%;max-width:500px;max-height:80vh;overflow-y:auto;">';
@@ -18554,7 +18686,7 @@
       html += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);">' + (job.job_number || 'Draft') + '</div>';
       html += '<div style="font-size:14px;color:var(--sw-text-sec);">' + (job.client_name || '') + '</div>';
       html += '</div>';
-      html += '<span style="font-size:11px;padding:3px 10px;border-radius:6px;background:var(--sw-light);color:var(--sw-mid);font-weight:700;">' + (typeBadge[(job.type || '').toLowerCase()] || job.type || '') + '</span>';
+      html += '<span style="font-size:11px;padding:3px 10px;border-radius:6px;background:var(--sw-light);color:var(--sw-mid);font-weight:700;">' + (typeBadge[getTradeJobType(job)] || job.type || '') + '</span>';
       html += '</div>';
 
       // Address

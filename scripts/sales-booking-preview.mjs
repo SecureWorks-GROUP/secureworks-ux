@@ -236,6 +236,125 @@ async function salesBookingRead(query) {
   };
 }
 
+function packOpportunityId(raw) {
+  const id = String(raw || '').trim();
+  if (!id) return null;
+  if (id.startsWith('opp:')) return id.slice(4) || null;
+  return id;
+}
+
+function loadPackFile() {
+  const file = process.env.SALES_BOOKING_PACK_PATH;
+  if (!file || !fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function applyPublishedPack(body, packPayload) {
+  if (!body || !packPayload) return body;
+  if (Array.isArray(packPayload.cases) && packPayload.pack) {
+    return Object.assign({}, body, packPayload, {
+      events: packPayload.events || body.events,
+      diary: packPayload.diary || body.diary,
+      fixture: false
+    });
+  }
+  const proposalsSrc = packPayload.proposals || packPayload;
+  const leads = Array.isArray(proposalsSrc)
+    ? proposalsSrc
+    : (proposalsSrc && Array.isArray(proposalsSrc.leads) ? proposalsSrc.leads : []);
+  const drafts = (packPayload.drafts && typeof packPayload.drafts === 'object') ? packPayload.drafts : {};
+  const byOpp = new Map();
+  for (const lead of leads) {
+    if (!lead || typeof lead !== 'object') continue;
+    const id = packOpportunityId(lead.id) || packOpportunityId(lead.opportunity_id);
+    if (!id) continue;
+    const window = lead.window && typeof lead.window === 'object' ? lead.window : {};
+    const draft = (typeof lead.draft === 'string' && lead.draft)
+      || drafts[id]
+      || drafts['opp:' + id]
+      || null;
+    byOpp.set(id, {
+      disposition: lead.disposition || 'needs_info',
+      day: window.day || lead.day || null,
+      window_start: window.start || lead.window_start || null,
+      window_end: window.end || lead.window_end || null,
+      draft,
+      why: [].concat(lead.why || [], lead.failures || []),
+      suburb: lead.suburb || null
+    });
+  }
+  const cases = (body.cases || []).map((c) => {
+    const proposal = byOpp.get(c.opportunity_id) || byOpp.get(c.id);
+    return proposal ? Object.assign({}, c, { proposal }) : c;
+  });
+  const seen = new Set(cases.map((c) => c.opportunity_id || c.id));
+  for (const lead of leads) {
+    const id = packOpportunityId(lead.id) || packOpportunityId(lead.opportunity_id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    cases.push({
+      id,
+      opportunity_id: id,
+      contact_id: lead.contact_id || null,
+      display_name: lead.name || lead.display_name || 'Enquiry',
+      suburb: null,
+      status: 'needs_decision',
+      proposal: byOpp.get(id)
+    });
+  }
+  return Object.assign({}, body, {
+    cases,
+    pack: {
+      present: leads.length > 0,
+      as_of: packPayload.as_of || (proposalsSrc && proposalsSrc.as_of) || null
+    }
+  });
+}
+
+async function fetchLiveBookingRead(resource, weekStart) {
+  const base = process.env.SALES_BOOKING_LIVE_OPS
+    || (process.env.SUPABASE_URL ? process.env.SUPABASE_URL + '/functions/v1/ops-api' : '');
+  const key = process.env.SALES_BOOKING_LIVE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_ANON_KEY
+    || '';
+  if (!base || !key) return null;
+  const endpoint = new URL(base.includes('?') || /ops-api/.test(base) ? base : base.replace(/\/$/, '') + '/functions/v1/ops-api');
+  endpoint.searchParams.set('action', 'sales_booking_read');
+  endpoint.searchParams.set('resource', resource);
+  endpoint.searchParams.set('week_start', weekStart);
+  const resp = await fetch(endpoint, {
+    headers: { apikey: key, Authorization: 'Bearer ' + key }
+  });
+  if (!resp.ok) return null;
+  const body = await resp.json();
+  if (!body || body.ok === false || body.fixture) return null;
+  return body;
+}
+
+async function previewBookingRead(query) {
+  const resourceId = query.get('resource') || 'nithin';
+  const weekStart = query.get('week_start') || '2026-09-14';
+  const live = await fetchLiveBookingRead(resourceId, weekStart);
+  if (live && live.pack && live.pack.present === true) return live;
+  const enumerated = await handleLocal('sales_booking_read', Object.fromEntries(query.entries()), {}, mcpCall, path.join(ROOT, '.sales-booking-preview-store.json'));
+  const calBody = await salesBookingRead(query);
+  const assessed = calBody.cases || [];
+  const assessedContacts = new Set(assessed.map((c) => c.contact_id).filter(Boolean));
+  const base = (enumerated.cases || []).filter((c) => !c.contact_id || !assessedContacts.has(c.contact_id));
+  let body = Object.assign({}, calBody, enumerated, {
+    events: calBody.events,
+    cases: [].concat(base, assessed),
+    fixture: false
+  });
+  const pack = loadPackFile();
+  if (pack) body = applyPublishedPack(body, pack);
+  if (live && live.pack && live.pack.present !== true && live.cases) {
+    body = applyPublishedPack(body, live);
+  }
+  return body;
+}
+
 function inject(html) {
   const tag = '<script>window.SALES_BOOKING_PREVIEW_URL="http://' + HOST + ':' + PORT + '/sales-booking-read";window.SALES_BOOKING_PREVIEW_API="http://' + HOST + ':' + PORT + '/booking-api";</script>';
   if (html.includes('</head>')) return html.replace('</head>', tag + '</head>');
@@ -260,21 +379,7 @@ const server = http.createServer(async (req, res) => {
       const params = Object.fromEntries(url.searchParams.entries());
       let body;
       if (action === 'sales_booking_read') {
-        const enumerated = await handleLocal('sales_booking_read', params, payload, mcpCall, STORE);
-        const calBody = await salesBookingRead(url.searchParams);
-        // The assessed rows are the only ones carrying a proposal, a draft and a
-        // status the engine actually derived, so they must survive the merge. Filtering
-        // on event_id alone dropped every open enquiry and left the week with nothing
-        // to stamp. One person is still one card: an assessed row supersedes the bare
-        // enumerated row for the same contact.
-        const assessed = calBody.cases || [];
-        const assessedContacts = new Set(assessed.map((c) => c.contact_id).filter(Boolean));
-        const base = (enumerated.cases || []).filter((c) => !c.contact_id || !assessedContacts.has(c.contact_id));
-        body = Object.assign({}, calBody, enumerated, {
-          events: calBody.events,
-          cases: [].concat(base, assessed),
-          fixture: false
-        });
+        body = await previewBookingRead(url.searchParams);
       } else {
         body = await handleLocal(action, params, payload, mcpCall, STORE);
       }
@@ -303,6 +408,70 @@ const server = http.createServer(async (req, res) => {
   res.end(buf);
 });
 
-server.listen(PORT, HOST, () => {
-  process.stdout.write('Sales Booking preview http://' + HOST + ':' + PORT + '/ops.html#booking\n');
-});
+async function verifyMarninPack() {
+  const weekStart = '2026-09-14';
+  const live = await fetchLiveBookingRead('marnin', weekStart);
+  const pack = loadPackFile();
+  let body = live && live.pack && live.pack.present === true ? live : null;
+  let source = 'live sales_booking_read';
+  if (!body && pack) {
+    body = applyPublishedPack({
+      ok: true,
+      fixture: false,
+      resource: { id: 'marnin', calendar: { ok: true, mailbox: 'preview' } },
+      week_start: weekStart,
+      coverage: { gaps: [] },
+      diary: [],
+      cases: []
+    }, pack);
+    source = 'pack file';
+  }
+  if (!body) {
+    process.stdout.write(JSON.stringify({
+      source: 'no live sales_booking_read and no SALES_BOOKING_PACK_PATH',
+      pack_present: false,
+      proposals: 0,
+      offers: 0
+    }, null, 2) + '\n');
+    process.exit(1);
+  }
+  const api = require('../modules/ops-sales-booking.js');
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = weekStart;
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.data = body;
+  const list = api.cases();
+  const proposals = list.filter((c) => c.proposal);
+  const offers = proposals.filter((c) => c.proposal.disposition === 'offer');
+  const html = api.renderHTML();
+  const slots = ['Friday 18 September', 'Tuesday 22 September', 'Friday 25 September', 'Tuesday 29 September'];
+  const census = {
+    source,
+    pack_present: !!(body && body.pack && body.pack.present === true),
+    as_of: body && body.pack && body.pack.as_of || null,
+    proposals: proposals.length,
+    offers: offers.length,
+    missing_slots: slots.filter((label) => html.indexOf(label) === -1),
+    proposals_without_suburb: proposals.filter((c) => !api.caseSuburb(c)).length,
+    week_switcher: /data-booking-week="-7"/.test(html) && /data-booking-week="7"/.test(html)
+  };
+  process.stdout.write(JSON.stringify(census, null, 2) + '\n');
+  const ok = census.pack_present
+    && census.proposals === 31
+    && census.offers === 11
+    && census.missing_slots.length === 0
+    && census.week_switcher;
+  process.exit(ok ? 0 : 1);
+}
+
+if (process.argv.includes('--verify')) {
+  verifyMarninPack().catch((e) => {
+    process.stderr.write(String(e && e.stack || e) + '\n');
+    process.exit(1);
+  });
+} else {
+  server.listen(PORT, HOST, () => {
+    process.stdout.write('Sales Booking preview http://' + HOST + ':' + PORT + '/ops.html#booking\n');
+  });
+}

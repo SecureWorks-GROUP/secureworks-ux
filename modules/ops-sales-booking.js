@@ -122,6 +122,7 @@
     archives: {},
     sendAttempted: false,
     lastSendCall: null,
+    lastStampCall: null,
     lastArchiveCall: null
   };
   var convoAbort = null;
@@ -199,6 +200,72 @@
     return (hour - DAY_START) * PX_PER_HOUR;
   }
 
+  function pad2(n) {
+    n = Number(n);
+    return (n < 10 ? '0' : '') + n;
+  }
+
+  function clockToIso(day, clock) {
+    var raw = String(clock || '').trim();
+    if (!raw || !day) return null;
+    if (/T/.test(raw)) return raw;
+    var m = raw.match(/^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (!m) return null;
+    var h = Number(m[1]);
+    var min = m[2] != null ? Number(m[2]) : 0;
+    var ap = (m[4] || '').toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    var date = String(day).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    return date + 'T' + pad2(h) + ':' + pad2(min) + ':00';
+  }
+
+  function isoDateOf(value) {
+    var s = String(value || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (/T/.test(s) && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    return null;
+  }
+
+  // Live pack windows are ISO datetimes (day may only say "Fri"). An undated
+  // weekday stays undated; it is never mapped onto the week on screen.
+  function proposalDayIso(p) {
+    if (!p) return null;
+    return isoDateOf(p.day)
+      || isoDateOf(p.start_iso)
+      || isoDateOf(p.window_start)
+      || isoDateOf(p.window_start_iso);
+  }
+
+  function packWeekStart(data) {
+    data = data || state.data;
+    var pack = data && data.pack;
+    var raw = (pack && pack.week_start) || (data && data.week_start);
+    return raw ? mondayIso(raw) : state.weekStart;
+  }
+
+  // Pack proposals use {disposition, day, window_start, window_end, draft, why[]}.
+  // The week grid still paints from start_iso/end_iso, so fill those when the
+  // pack shape arrives and leave an already-normalised proposal untouched.
+  function normaliseProposal(p) {
+    if (!p || typeof p !== 'object') return p;
+    var day = proposalDayIso(p);
+    var start = p.start_iso || clockToIso(day, p.window_start) || p.window_start_iso || null;
+    var end = p.end_iso || clockToIso(day, p.window_end) || p.window_end_iso || null;
+    if (start && !p.start_iso) p.start_iso = start;
+    if (end && !p.end_iso) p.end_iso = end;
+    if (p.window_start && !p.window_start_iso) {
+      var ws = clockToIso(day, p.window_start);
+      if (ws) p.window_start_iso = ws;
+    }
+    if (p.window_end && !p.window_end_iso) {
+      var we = clockToIso(day, p.window_end);
+      if (we) p.window_end_iso = we;
+    }
+    return p;
+  }
+
   function cases() {
     var data = state.data;
     if (!data) return [];
@@ -206,7 +273,10 @@
     if (!Array.isArray(raw)) {
       throw new TypeError('Booking read cases must be an array');
     }
-    return raw.filter(function (c) { return c && typeof c === 'object'; });
+    return raw.filter(function (c) { return c && typeof c === 'object'; }).map(function (c) {
+      if (c.proposal) normaliseProposal(c.proposal);
+      return c;
+    });
   }
 
   function events() {
@@ -354,6 +424,25 @@
     return names[day] + ' ' + parts[2] + ' ' + MONTHS[parts[1] - 1];
   }
 
+  function blankPlace(value) {
+    var s = String(value == null ? '' : value).replace(/^\s+|\s+$/g, '');
+    if (!s || /^not given$/i.test(s)) return '';
+    return s;
+  }
+
+  // GHL cases in the live read carry suburb: null. The pack proposal has it.
+  function caseSuburb(c) {
+    return blankPlace(c && c.suburb) || blankPlace(c && c.proposal && c.proposal.suburb);
+  }
+
+  function proposalSlotLabel(c) {
+    var p = c && c.proposal;
+    if (!p || !p.start_iso) return '';
+    var when = longDate(p.start_iso);
+    var window = arrivalWindow(p.start_iso, p.end_iso);
+    return window ? when + ' · arrive ' + window : when;
+  }
+
   // SMS hours are 08:00 to 18:00 Perth. A draft outside them is still drafted; the
   // surface says so rather than silently holding a text the captain cannot see.
   function outsideSmsHours() {
@@ -368,7 +457,7 @@
     var iso = c.proposal.start_iso;
     var who = resource().name;
     var lane = resource().lane === 'patio' ? 'SecureWorks Patios' : 'SecureWorks Fencing';
-    var suburb = c.suburb || 'your place';
+    var suburb = caseSuburb(c) || 'your place';
     var first = String(c.display_name || '').trim().split(/\s+/)[0] || 'there';
     return 'Hi ' + first + ', it is ' + who + ' from ' + lane + '. I can come out to ' + suburb +
       ' on ' + longDate(iso) + ' between ' + arrivalWindow(iso, c.proposal.end_iso, 'and') +
@@ -467,7 +556,7 @@
   function matchesSearch(c) {
     var q = (state.search || '').trim().toLowerCase();
     if (!q) return true;
-    return [c.display_name, c.suburb, c.contact_id, c.reason].join(' ').toLowerCase().indexOf(q) >= 0;
+    return [c.display_name, caseSuburb(c), c.contact_id, c.reason].join(' ').toLowerCase().indexOf(q) >= 0;
   }
 
   function visibleCases() {
@@ -508,6 +597,9 @@
     var cov = data.coverage || {};
     var gaps = [];
     (cov.gaps || []).forEach(function (g) { gaps.push(String(g)); });
+    if (!data.pack || data.pack.present !== true) {
+      gaps.push('No proposals published yet for this week');
+    }
     return gaps;
   }
 
@@ -539,42 +631,87 @@
     var k = String(kind || '').toLowerCase();
     if (k === 'personal') return 'personal';
     if (k === 'leave') return 'leave';
-    return 'confirmed';
+    if (k === 'confirmed') return 'confirmed';
+    return 'busy';
   }
 
   function diary() {
     var data = state.data;
     if (!data) return [];
     var out = [];
-    (data.events || []).forEach(function (ev) {
-      out.push({
-        id: ev.case_id || ev.event_id,
-        start_iso: ev.start_iso,
-        end_iso: ev.end_iso,
-        display_name: ev.display_name || ev.subject,
-        address: ev.address || '',
-        suburb: ev.suburb || '',
-        job: ev.job || ev.job_type || '',
-        layer: ev.layer || layerForKind(ev.kind),
-        source: ev.source || 'events'
-      });
-    });
-    (data.diary || []).forEach(function (ev) {
+    var push = function (ev, source) {
       var id = ev.case_id || ev.event_id || ev.id || null;
       if (id && out.some(function (o) { return o.id === id; })) return;
+      var title = ev.title || ev.subject || ev.display_name || '';
       out.push({
         id: id,
+        event_id: ev.event_id || ev.id || null,
+        case_id: ev.case_id || null,
+        opportunity_id: ev.opportunity_id || null,
+        contact_id: ev.contact_id || null,
         start_iso: ev.start || ev.start_iso,
         end_iso: ev.end || ev.end_iso,
-        display_name: ev.title || ev.subject || ev.display_name,
-        address: ev.address || '',
+        title: title,
+        display_name: ev.display_name || title,
+        address: ev.address || ev.location || '',
         suburb: ev.suburb || '',
-        job: ev.job || '',
-        layer: layerForKind(ev.kind),
-        source: ev.source || 'diary'
+        job: ev.job || ev.job_type || '',
+        kind: ev.kind || null,
+        show_as: ev.show_as || null,
+        blocks_capacity: ev.blocks_capacity,
+        is_all_day: !!ev.is_all_day,
+        title_withheld: !!ev.title_withheld,
+        layer: ev.layer || layerForKind(ev.kind),
+        source: ev.source || source
       });
-    });
+    };
+    (data.events || []).forEach(function (ev) { push(ev, 'events'); });
+    (data.diary || []).forEach(function (ev) { push(ev, 'diary'); });
     return out;
+  }
+
+  function diaryTitle(ev) {
+    return String((ev && (ev.title || ev.subject || ev.display_name)) || '').replace(/^\s+|\s+$/g, '');
+  }
+
+  function titleStartsWithScope(ev) {
+    if (ev && ev.title_withheld) return false;
+    return /^scope:\s*/i.test(diaryTitle(ev));
+  }
+
+  function isQueueRow(c) {
+    if (!c) return false;
+    return !!(c.opportunity_id || c.contact_id || c.stage_id || c.stage_name
+      || c.pipeline_stage || c.pipelineStage);
+  }
+
+  function diaryEventMatchesCase(ev, c) {
+    if (!ev || !c) return false;
+    var evOpp = ev.opportunity_id || ev.case_id || null;
+    if (evOpp && (c.id === evOpp || c.opportunity_id === evOpp)) return true;
+    if (ev.contact_id && c.contact_id && String(ev.contact_id) === String(c.contact_id)) return true;
+    if (ev.id && c.event_id && String(c.event_id) === String(ev.id)) return true;
+    if (ev.event_id && c.event_id && String(c.event_id) === String(ev.event_id)) return true;
+    if (!isQueueRow(c)) return false;
+    var name = String(ev.display_name || ev.title || ev.subject || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+    var suburb = String(ev.suburb || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+    if (!name || !suburb) return false;
+    return name === String(c.display_name || '').replace(/^\s+|\s+$/g, '').toLowerCase()
+      && suburb === caseSuburb(c).toLowerCase();
+  }
+
+  // CONFIRMED only when the event is a booked scope: it matches a queue case
+  // (opportunity/contact id, else exact name and suburb) or the title starts
+  // with "Scope:". Company diary (Payday, Outback Agreements, SecureWorks) is
+  // not a booked visit.
+  function diaryEventIsScopeBooking(ev) {
+    if (!ev) return false;
+    if (titleStartsWithScope(ev)) return true;
+    var list = cases();
+    for (var i = 0; i < list.length; i++) {
+      if (diaryEventMatchesCase(ev, list[i])) return true;
+    }
+    return false;
   }
 
   function threadFacts(c) {
@@ -618,8 +755,51 @@
   // Queue grouping, urgency and the follow-through counts.
   // ---------------------------------------------------------------------------
   function isBooked(c) {
+    if (!c || isNonScopeDiaryMirror(c)) return false;
     if (stageBucket(c) === 'booked') return true;
-    return !!c && (c.status === 'booked' || c.status === 'confirmed');
+    return c.status === 'booked' || c.status === 'confirmed';
+  }
+
+  function isNonScopeDiaryMirror(c) {
+    if (!c) return false;
+    var found = null;
+    diary().forEach(function (ev) {
+      if (found) return;
+      if (ev.id && (String(ev.id) === String(c.id) || String(ev.id) === String(c.event_id))) found = ev;
+    });
+    if (!found) return false;
+    return !diaryEventIsScopeBooking(found);
+  }
+
+  function bookedCount() {
+    var seen = {};
+    var n = 0;
+    diary().forEach(function (ev) {
+      if (diaryLayerFor(ev) !== 'confirmed') return;
+      var matched = false;
+      cases().forEach(function (c) {
+        if (matched || isArchived(c)) return;
+        if (diaryEventMatchesCase(ev, c)) matched = true;
+      });
+      if (!matched) return;
+      var key = ev.id || ev.opportunity_id || (String(ev.start_iso) + String(ev.display_name));
+      if (seen[key]) return;
+      seen[key] = true;
+      n += 1;
+    });
+    return n;
+  }
+
+  function bookedTileReason() {
+    if (bookedCount() > 0) return 'diary events matched to a case';
+    return 'diary not read';
+  }
+
+  function quoteStageLabel() {
+    var names = (resource().pipeline_stages || []).filter(function (s) {
+      return s.bucket === 'quote';
+    }).map(function (s) { return String(s.name || '').replace(/^\s+/, ''); }).filter(Boolean);
+    return names.length ? 'in ' + names.join(', ') : 'in the quote stage';
   }
 
   function derivedStatus(c) {
@@ -741,20 +921,29 @@
     return {
       to_book: all.filter(function (c) { return isToBook(c) && !isWaiting(c); }).length,
       waiting: all.filter(isWaiting).length,
-      booked: all.filter(isBooked).length,
+      booked: bookedCount(),
       quotes: all.filter(quoteOutstanding).length,
       unassessed: all.filter(function (c) { return stageBucket(c) === 'unmapped' && !(c.reason || c.proposal); }).length
     };
   }
 
   // ---------------------------------------------------------------------------
-  // The captain stamp. KEEP or CUT records a local stamp.json-shaped decision.
-  // It is not a send: nothing here calls a provider, a diary or ops-api.
+  // The captain stamp. KEEP or CUT records a local decision. Send POSTs
+  // sales_booking_stamp_write keyed to the pack week, not the Monday on screen.
+  // Approve, Confirm, diary writes and any customer send stay held.
   // ---------------------------------------------------------------------------
+  function stampListHas(list, c) {
+    if (!c || !Array.isArray(list)) return false;
+    var ids = [c.id, c.opportunity_id].filter(Boolean).map(String);
+    return list.some(function (x) { return ids.indexOf(String(x)) !== -1; });
+  }
+
   function stampStateOf(c) {
     if (!c) return 'none';
-    if (state.stamp.rejected.indexOf(c.id) !== -1) return 'cut';
-    if (state.stamp.approved.indexOf(c.id) !== -1) return 'keep';
+    if (c.stamp_state === 'approved') return 'keep';
+    if (c.stamp_state === 'rejected') return 'cut';
+    if (stampListHas(state.stamp.rejected, c)) return 'cut';
+    if (stampListHas(state.stamp.approved, c)) return 'keep';
     if (isBooked(c)) return 'booked';
     return 'none';
   }
@@ -795,6 +984,59 @@
       sent: false,
       calendar_written: false
     };
+  }
+
+  function stampWriteBody() {
+    var idOf = function (id) {
+      var list = cases();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id || list[i].opportunity_id === id) return list[i].opportunity_id || list[i].id;
+      }
+      return id;
+    };
+    var mine = function (id) {
+      return cases().some(function (c) { return c.id === id || c.opportunity_id === id; });
+    };
+    var decisions = {};
+    Object.keys(state.stamp.decisions || {}).forEach(function (id) {
+      var val = state.stamp.decisions[id];
+      if (val === 'hold' || val === 'replace') decisions[idOf(id)] = val;
+    });
+    return {
+      captain: 'marnin',
+      approved: state.stamp.approved.filter(mine).map(idOf),
+      rejected: state.stamp.rejected.filter(mine).map(idOf),
+      decisions: decisions,
+      stage_moves: []
+    };
+  }
+
+  async function writeStamp(id, decision) {
+    var local = stampCase(id, decision);
+    if (!local.ok) return local;
+    local.sent = false;
+    local.wrote_calendar = false;
+    if (typeof global.opsPost !== 'function') {
+      local.posted = false;
+      return local;
+    }
+    var body = {
+      resource: state.resourceId,
+      week_start: packWeekStart(),
+      stamp: stampWriteBody()
+    };
+    state.lastStampCall = { action: 'sales_booking_stamp_write', body: body };
+    try {
+      await global.opsPost('sales_booking_stamp_write', body);
+      local.posted = true;
+      await load(state.resourceId, state.weekStart);
+    } catch (e) {
+      local.ok = false;
+      local.posted = false;
+      local.reason = e && e.message ? e.message : 'stamp_write_failed';
+      state.error = local.reason;
+    }
+    return local;
   }
 
   // Standing rule: cancelled in the thread with the event still in the diary is a
@@ -870,7 +1112,11 @@
       }
     }
     // Anything the engine said that is not already covered above still gets through.
-    (c && c.review_reasons ? c.review_reasons : (c && c.reason ? [c.reason] : [])).forEach(function (r) {
+    (c && c.review_reasons
+      ? c.review_reasons
+      : (c && c.proposal && Array.isArray(c.proposal.why)
+        ? c.proposal.why
+        : (c && c.reason ? [c.reason] : []))).forEach(function (r) {
       push('warn', r);
     });
     push(c && c.exact_acceptance ? 'ok' : 'warn',
@@ -912,16 +1158,13 @@
   function renderQueueRow(c) {
     var u = urgency(c);
     var stamped = stampStateOf(c);
-    var when = c.proposal && c.proposal.start_iso
-      ? DAYS[dayIndexFromIso(c.proposal.start_iso, state.weekStart)] || ''
-      : '';
-    var slot = when ? when.slice(0, 3) + ' ' + clockLabel(hourFromIso(c.proposal.start_iso)) : '';
+    var slot = proposalSlotLabel(c);
     var facts = threadFacts(c);
     var quiet = facts && facts.read_ok === false
       ? ' · thread not read'
       : (facts && facts.quiet_window ? ' · quiet ' + esc(typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window') : '');
     return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
-      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(c.suburb || 'Suburb unknown') + '</span>' +
+      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + '</span>' +
       '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
       '<div class="sub">' + esc(c.job || 'No job details yet') + '</div>' +
       '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div></button>';
@@ -950,13 +1193,14 @@
     if (layer === 'blocked') return 'CANCELLED';
     if (layer === 'offer') return 'OFFERED · NO REPLY';
     if (layer === 'personal') return 'PERSONAL';
+    if (layer === 'busy') return 'Busy';
     if (layer === 'leave') return 'LEAVE';
     return stamped === 'keep' ? 'STAMPED KEEP' : 'PROPOSED';
   }
 
   // One calendar card: stage tag, then time and name, then address and suburb, then job.
   function renderEvent(block, kind) {
-    if (!state.layers[kind]) return '';
+    if (!layerEnabled(kind)) return '';
     var hour = hourFromIso(block.start_iso);
     var day = dayIndexFromIso(block.start_iso, state.weekStart);
     if (hour == null || day == null) return '';
@@ -997,27 +1241,46 @@
     return 'proposal';
   }
 
+  function layerEnabled(kind) {
+    if (kind === 'busy') return !!state.layers.personal;
+    return !!state.layers[kind];
+  }
+
   // A busy diary block whose case has been cancelled in the thread is NOT a confirmed
   // booking. The slot stays occupied until the delete reads back, but it must read as
-  // cancelled, or the week shows a visit nobody is attending. The case's derived layer
-  // wins over the raw provider kind; personal and leave are the provider's to state.
+  // cancelled, or the week shows a visit nobody is attending. Company and personal
+  // events never become CONFIRMED unless they are a booked scope.
   function diaryLayerFor(ev) {
-    if (ev.layer === 'personal' || ev.layer === 'leave') return ev.layer;
-    var list = cases();
-    for (var i = 0; i < list.length; i++) {
-      var c = list[i];
-      if (c.id !== ev.id && c.event_id !== ev.id) continue;
-      var derived = caseLayer(c);
-      if (derived === 'blocked') return 'blocked';
+    if (!ev) return 'personal';
+    var kind = String(ev.kind || '').toLowerCase();
+    if (kind === 'leave' || ev.layer === 'leave') return 'leave';
+    if (kind === 'personal' || ev.layer === 'personal') return 'personal';
+    if (diaryEventIsScopeBooking(ev)) {
+      var list = cases();
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        if (!diaryEventMatchesCase(ev, c) && c.id !== ev.id && c.event_id !== ev.id) continue;
+        if (caseLayer(c) === 'blocked') return 'blocked';
+      }
+      return 'confirmed';
     }
-    return ev.layer;
+    if (kind === 'busy' || String(ev.show_as || '').toLowerCase() === 'busy' || ev.layer === 'busy') return 'busy';
+    return 'personal';
+  }
+
+  function diaryOccupiesDay(ev) {
+    if (!ev) return false;
+    if (ev.blocks_capacity === false) return false;
+    if (ev.blocks_capacity === true) return true;
+    var layer = diaryLayerFor(ev);
+    return layer === 'confirmed' || layer === 'blocked' || layer === 'leave' || layer === 'busy';
   }
 
   // Assign each card a lane so overlapping cards sit side by side. Cards that clash
   // share the column width; a card alone on its minutes keeps the full width.
   function packLanes(cards) {
     var visible = cards.filter(function (card) {
-      return state.layers[card.kind] && hourFromIso(card.block.start_iso) != null;
+      return layerEnabled(card.kind) && hourFromIso(card.block.start_iso) != null;
     });
     visible.sort(function (a, b) { return String(a.block.start_iso) < String(b.block.start_iso) ? -1 : 1; });
     var spanOf = function (card) {
@@ -1080,7 +1343,7 @@
         // hatch would paint real bookings as an impossible day, so the rule is stated
         // as a banner instead and the events keep the column.
         var busy = diary().some(function (ev) {
-          return dayIndexFromIso(ev.start_iso, state.weekStart) === d && diaryLayerFor(ev) !== 'personal';
+          return dayIndexFromIso(ev.start_iso, state.weekStart) === d && diaryOccupiesDay(ev);
         });
         body += busy
           ? '<div class="block rulebanner" style="top:0;height:' + Math.round(PX_PER_HOUR * 0.55) + 'px"><strong>Outside the ' + esc(res.name) + ' lane</strong><span>' + esc(res.desk_rules.lane_note || 'No new scopes offered here') + '</span></div>'
@@ -1107,7 +1370,7 @@
             end_iso: c.proposal.end_iso,
             display_name: c.display_name,
             address: c.address || '',
-            suburb: c.suburb,
+            suburb: caseSuburb(c),
             job: c.job || ''
           },
           kind: caseLayer(c)
@@ -1147,8 +1410,10 @@
   }
 
   function renderAgenda() {
-    var items = diary().concat(cases().filter(function (c) { return c.proposal; }).map(function (c) {
-      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: c.suburb, id: c.id, layer: caseLayer(c) };
+    var items = diary().concat(cases().filter(function (c) {
+      return c.proposal && dayIndexFromIso(c.proposal.start_iso, state.weekStart) != null;
+    }).map(function (c) {
+      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: caseSuburb(c), id: c.id, layer: caseLayer(c) };
     }));
     items.sort(function (a, b) { return String(a.start_iso) < String(b.start_iso) ? -1 : 1; });
     if (!items.length) return '<div class="emptyqueue qempty">No provider events or proposals in this week.</div>';
@@ -1195,10 +1460,8 @@
     var pill = stamped === 'keep' ? '<span class="pill ok">Stamped KEEP · not sent</span>'
       : stamped === 'cut' ? '<span class="pill bad">Stamped CUT</span>'
       : '<span class="pill ' + esc(u[0]) + '">' + esc(u[1]) + '</span>';
-    var place = (c.address ? c.address + ', ' : '') + (c.suburb || '');
-    var slot = c.proposal && c.proposal.start_iso
-      ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
-      : 'No proposed time yet';
+    var place = (c.address ? c.address + ', ' : '') + (caseSuburb(c) || '');
+    var slot = proposalSlotLabel(c) || 'No proposed time yet';
     var conflict = d.conflict
       ? '<div class="notice error">Time changed. Your edited draft was kept. Suggested text is ready for review, not applied.</div>'
       : '';
@@ -1220,10 +1483,11 @@
       stampRow = '<p class="fine">' + esc(blockReason) + '</p>';
     } else {
       stampRow = '<div class="stamprow"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '">Stamp KEEP</button>' +
-        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '">Stamp CUT</button>' +
+        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '">Cut</button>' +
         (stamped === 'keep' || stamped === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div>' +
-        '<p class="fine">A stamp is not a send. KEEP records the captain decision in stamp.json; ops auto-book performs the text and the diary write on a separate authorised run.</p>';
+        '<p class="fine">Send message writes the captain stamp. It does not send a customer text, approve an offer, confirm a visit or write the diary.</p>';
     }
+    var sendDisabled = !!blockReason;
     return '<div class="detailhead"><div class="row">' + pill + '</div>' +
       '<h2>' + esc(c.display_name || 'Enquiry') + '</h2>' +
       '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + (c.contact_id ? '' : ' · no GHL contact') + '</p>' +
@@ -1233,7 +1497,9 @@
       '<div class="actionzone">' +
       '<div class="holdnote">' + esc(HOLD_REASON) + '</div>' + conflict +
       '<div class="senderline small muted">' + senderLine(res) + ' · To this case only · Draft revision ' + esc(d.revision || 0) + (outsideSmsHours() ? ' · outside 08:00 to 18:00 Perth' : '') + '</div>' +
-      '<button type="button" class="primary" data-booking-approve="1" disabled title="' + esc(HOLD_REASON) + '">Send message (held)</button>' +
+      '<button type="button" class="primary" data-booking-stamp-send="1" data-booking-stamp-id="' + esc(c.id) + '"' +
+      (sendDisabled ? ' disabled title="' + esc(blockReason || HOLD_REASON) + '"' : '') +
+      '>Send message</button>' +
       '<button type="button" data-booking-confirm="1" disabled title="' + esc(HOLD_REASON) + '">' + esc(actionLabel) + ' (held)</button>' +
       stampRow +
       timeInput +
@@ -1243,14 +1509,13 @@
 
   function renderTiles() {
     var f = followThrough();
-    var win = CAPTAIN_DEFAULTS.scopes_done_window;
     return [
       ['Enquiries still to book', f.to_book, f.unassessed
-        ? 'assessed, came in ' + win + '. ' + f.unassessed + ' more CRM rows are enumerated but not assessed, so they are not counted here'
-        : 'came in ' + win + ', need a text or a decision'],
-      ['Waiting on a reply', f.waiting, 'text out, nothing back yet'],
-      ['Booked to quote this week', f.booked, 'in the diary with a customer yes'],
-      ['Quotes to send', f.quotes, 'visited ' + win + ', quote not out yet']
+        ? 'GHL stages that still need a booking. ' + f.unassessed + ' more CRM rows are enumerated but not assessed, so they are not counted here'
+        : 'GHL stages that still need a booking'],
+      ['Waiting on a reply', f.waiting, 'GHL stage or thread classified as waiting'],
+      ['Booked to quote this week', f.booked, bookedTileReason()],
+      ['Quotes to send', f.quotes, quoteStageLabel()]
     ].map(function (t) {
       return '<div class="tile"><div class="k">' + esc(t[0]) + '</div><div class="v">' + t[1] + '</div><div class="s">' + esc(t[2]) + '</div></div>';
     }).join('') +
@@ -1264,7 +1529,7 @@
     if (!data) return '';
     var list = cases();
     var bits = [];
-    bits.push('<span class="ok">' + list.filter(isBooked).length + ' booked</span>');
+    bits.push('<span class="ok">' + bookedCount() + ' booked</span>');
     bits.push(list.filter(function (c) { return caseLayer(c) === 'blocked'; }).length + ' cancelled still in diary');
     bits.push(list.filter(function (c) { return c.proposal && caseLayer(c) === 'proposal'; }).length + ' proposals unsent');
     bits.push(list.filter(isWaiting).length + ' texts out with no reply');
@@ -1298,9 +1563,7 @@
       var st = stampStateOf(c);
       bindDraft(c);
       var d = draftKey(c) ? draftFor(c) : { text: '' };
-      var slot = c.proposal && c.proposal.start_iso
-        ? longDate(c.proposal.start_iso) + ' · arrive ' + arrivalWindow(c.proposal.start_iso, c.proposal.end_iso)
-        : 'No proposed time';
+      var slot = proposalSlotLabel(c) || 'No proposed time';
       var chips = evidenceChips(c).map(function (ch) {
         return '<span class="chip ' + esc(ch[0]) + '">' + esc(ch[1]) + '</span>';
       }).join('');
@@ -1308,13 +1571,13 @@
         return '<li class="' + esc(item.level) + '">' + esc(item.text) + '</li>';
       }).join('');
       return '<div class="stampcard' + (st === 'keep' ? ' stamped' : st === 'cut' ? ' weak' : needsDecision(c) ? ' conflict' : '') + '">' +
-        '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(c.suburb || '') + '</b></button>' +
+        '<div><button type="button" class="linklike" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + ' · ' + esc(caseSuburb(c) || '') + '</b></button>' +
         '<div class="slot">' + esc(slot) + '</div><div class="why">' + esc(c.job || 'No job details yet') + ' · ' + esc(statusLabel(c.status)) + '</div>' +
         '<div class="chips">' + chips + '</div></div>' +
         '<div><div class="small muted">' + esc(d.text ? d.text : 'No draft for this case.') + '</div>' +
         '<ul class="whylist">' + checklist + '</ul></div>' +
         '<div class="actions"><button type="button" class="keep" data-booking-stamp="keep" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'keep' ? ' aria-pressed="true"' : '') + '>KEEP</button>' +
-        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'cut' ? ' aria-pressed="true"' : '') + '>CUT</button>' +
+        '<button type="button" class="cut" data-booking-stamp="cut" data-booking-stamp-id="' + esc(c.id) + '"' + (st === 'cut' ? ' aria-pressed="true"' : '') + '>Cut</button>' +
         (st === 'keep' || st === 'cut' ? '<button type="button" data-booking-stamp="clear" data-booking-stamp-id="' + esc(c.id) + '">Undo</button>' : '') + '</div></div>';
     }).join('');
     return '<section class="stampboard"><div class="sbhead">' +
@@ -1369,7 +1632,7 @@
       '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div></div>' +
       '<div class="queuelist">' + renderQueue() + '</div>' +
       '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>Quoted, won, lost and archived stages are folded. Stages copied from ' + esc(res.pipeline_stages_source || 'the live GHL profile') + '.</div></section>' +
-      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2></div>' +
+      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2><div class="grow"></div><div class="weeknav" role="group" aria-label="Week"><button type="button" data-booking-week="-7">Previous week</button><button type="button" data-booking-week="7">Next week</button></div></div>' +
       '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
       '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
       renderStampBoard() +
@@ -1433,6 +1696,11 @@
     return load(id, state.weekStart);
   }
 
+  function switchWeek(deltaDays) {
+    var next = mondayIso(addDays(state.weekStart, Number(deltaDays) || 0));
+    return load(state.resourceId, next);
+  }
+
   async function bookingRead(params) {
     var preview = global.SALES_BOOKING_PREVIEW_URL;
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -1473,8 +1741,13 @@
       if (request !== state.request) return;
       if (!data || data.ok === false) throw new Error((data && data.error) || 'Booking read was incomplete.');
       if (data.fixture) throw new Error('Fixture fallback is refused. Provider read required.');
+      if (data.pack && data.pack.present === true && !data.pack.week_start) {
+        var priorPack = state.data && state.data.pack;
+        data.pack.week_start = (priorPack && priorPack.present === true && priorPack.week_start) || data.week_start;
+      }
       state.data = data;
-      if (data.week_start) state.weekStart = data.week_start;
+      applyServerStamp(data);
+      applyServerDrafts(data);
     } catch (e) {
       if (request !== state.request) return;
       state.error = e.message || 'Request failed';
@@ -1485,6 +1758,44 @@
         render();
       }
     }
+  }
+
+  function applyServerStamp(data) {
+    if (!data) return;
+    var packWeek = packWeekStart(data);
+    var stampWeek = (data.stamp && data.stamp.week_start) || data.week_start;
+    if (stampWeek && mondayIso(stampWeek) !== packWeek) return;
+    var s = data.stamp;
+    if (s && s.present === true) {
+      state.stamp.approved = Array.isArray(s.approved) ? s.approved.slice() : [];
+      state.stamp.rejected = Array.isArray(s.rejected) ? s.rejected.slice() : [];
+      state.stamp.decisions = s.decisions && typeof s.decisions === 'object' ? Object.assign({}, s.decisions) : {};
+      state.stamp.stage_moves = Array.isArray(s.stage_moves) ? s.stage_moves.slice() : [];
+    }
+    (data.cases || []).forEach(function (c) {
+      if (!c) return;
+      var id = c.opportunity_id || c.id;
+      if (!id) return;
+      if (c.stamp_state === 'approved' && state.stamp.approved.indexOf(id) === -1) state.stamp.approved.push(id);
+      if (c.stamp_state === 'rejected' && state.stamp.rejected.indexOf(id) === -1) state.stamp.rejected.push(id);
+    });
+  }
+
+  function applyServerDrafts(data) {
+    var drafts = data && data.drafts;
+    if (!drafts || typeof drafts !== 'object') return;
+    Object.keys(drafts).forEach(function (id) {
+      var raw = drafts[id];
+      var text = typeof raw === 'string' ? raw : (raw && raw.text) || '';
+      if (!text) return;
+      var d = draftFor(id);
+      if (d.humanEdited) return;
+      d.text = text;
+      d.case_id = id;
+    });
+    (data.cases || []).forEach(function (c) {
+      if (c && c.proposal && c.proposal.draft) bindDraft(c);
+    });
   }
 
   async function loadConversation(contactId, caseId) {
@@ -1590,11 +1901,23 @@
         render();
         return;
       }
+      var weekNav = e.target.closest && e.target.closest('[data-booking-week]');
+      if (weekNav) {
+        e.preventDefault();
+        switchWeek(Number(weekNav.getAttribute('data-booking-week')));
+        return;
+      }
+      var stampSend = e.target.closest && e.target.closest('[data-booking-stamp-send]');
+      if (stampSend) {
+        e.preventDefault();
+        if (stampSend.disabled || stampSend.hasAttribute('disabled')) return;
+        writeStamp(stampSend.getAttribute('data-booking-stamp-id') || state.selectedId, 'keep');
+        return;
+      }
       var stampBtn = e.target.closest && e.target.closest('[data-booking-stamp]');
       if (stampBtn) {
         e.preventDefault();
-        stampCase(stampBtn.getAttribute('data-booking-stamp-id'), stampBtn.getAttribute('data-booking-stamp'));
-        render();
+        writeStamp(stampBtn.getAttribute('data-booking-stamp-id'), stampBtn.getAttribute('data-booking-stamp'));
         return;
       }
       var fold = e.target.closest && e.target.closest('[data-booking-fold]');
@@ -1658,6 +1981,10 @@
     state: state,
     esc: esc,
     mondayIso: mondayIso,
+    addDays: addDays,
+    switchWeek: switchWeek,
+    caseSuburb: caseSuburb,
+    proposalSlotLabel: proposalSlotLabel,
     hourFromIso: hourFromIso,
     durationHours: durationHours,
     load: load,
@@ -1696,6 +2023,11 @@
     clockLabel: clockLabel,
     longDate: longDate,
     diary: diary,
+    diaryEventIsScopeBooking: diaryEventIsScopeBooking,
+    diaryEventMatchesCase: diaryEventMatchesCase,
+    diaryOccupiesDay: diaryOccupiesDay,
+    bookedCount: bookedCount,
+    normaliseProposal: normaliseProposal,
     caseLayer: caseLayer,
     diaryLayerFor: diaryLayerFor,
     packLanes: packLanes,
@@ -1707,6 +2039,8 @@
     followThrough: followThrough,
     stampCase: stampCase,
     stampRecord: stampRecord,
+    stampWriteBody: stampWriteBody,
+    writeStamp: writeStamp,
     stampStateOf: stampStateOf,
     stampChecklist: stampChecklist,
     checklistTopic: checklistTopic,

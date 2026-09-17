@@ -49,6 +49,7 @@
 #salesBookingRoot .small{font-size:11px}
 #salesBookingRoot .fine{color:var(--muted);font-size:10.5px}
 #salesBookingRoot .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#salesBookingRoot .grow{flex:1}
 #salesBookingRoot .page{padding:18px 20px 40px;max-width:1900px;margin:auto}
 
 /* ---- pills, tags ---- */
@@ -110,6 +111,8 @@
 /* ---- the week grid ---- */
 #salesBookingRoot .calhead{padding:13px 14px 10px;border-bottom:1px solid var(--line)}
 #salesBookingRoot .calhead .date{font-size:11px;color:var(--muted);margin-top:3px}
+#salesBookingRoot .weeknav{display:flex;gap:4px}
+#salesBookingRoot .weeknav button{font-size:11px;padding:5px 9px}
 #salesBookingRoot .layers{display:flex;flex-wrap:wrap;align-items:center;gap:11px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--muted)}
 #salesBookingRoot .layer{display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
 #salesBookingRoot .layer input{width:11px;height:11px;margin:0;accent-color:var(--dark)}
@@ -149,8 +152,8 @@
 #salesBookingRoot .ev.blocked{background:#FFF2F1;border:1px solid #D88F8C;color:#9C3633}
 #salesBookingRoot .ev.blocked .stage{background:var(--red)}
 #salesBookingRoot .ev.blocked .n{text-decoration:line-through}
-#salesBookingRoot .ev.personal,#salesBookingRoot .ev.leave{background:#F1F3F4;border:1px solid #C9D2D8;color:#5b6b75}
-#salesBookingRoot .ev.personal .stage,#salesBookingRoot .ev.leave .stage{background:#8a99a3}
+#salesBookingRoot .ev.personal,#salesBookingRoot .ev.leave,#salesBookingRoot .ev.busy{background:#F1F3F4;border:1px solid #C9D2D8;color:#5b6b75}
+#salesBookingRoot .ev.personal .stage,#salesBookingRoot .ev.leave .stage,#salesBookingRoot .ev.busy .stage{background:#8a99a3}
 #salesBookingRoot .ev.stamped{background:#F3FAF5;border:1.5px solid var(--green);color:#1f4a3c}
 #salesBookingRoot .ev.stamped .stage{background:var(--green)}
 #salesBookingRoot .ev.sel{outline:2px solid var(--accent);outline-offset:2px;z-index:5}

@@ -1,18 +1,41 @@
 # Sales Booking view
 
 Ops > **Sales > Performance | Booking**. Booking is the captain's door: it reads the week,
-shows what is proposed and what is out, and records a KEEP or CUT decision. It sends
-nothing.
+shows what is proposed and what is out, and records a KEEP or Cut decision. It does not
+send a customer text, write a diary or move a GHL stage.
 
-## Nothing here writes
+## Send is the stamp, nothing else
 
-`SEND_HOLD` is on. Opening a case is a thread read only: `selectCase` loads
-`ghl-proxy?action=get_conversation` and posts nothing. Send message, Approve offer,
-Confirm booking and every calendar write render **disabled** carrying `HOLD_REASON`,
-and `attemptApprove()` refuses on the hold even if a click reaches it. A **stamp is not a send**: KEEP and CUT write a local
-`stamp.json`-shaped record (`captain, profile, week_start, approved, rejected, decisions,
-sent:false, calendar_written:false`) that ops auto-book reads on a separate authorised run.
-Switching scoper drops the stamp so one scoper's decisions cannot be carried onto another.
+`SEND_HOLD` stays on for Approve, Confirm, calendar writes and any customer send.
+`attemptApprove()` still refuses those. **Send message** is the captain stamp: it POSTs
+`sales_booking_stamp_write` with `{resource, week_start, stamp: {captain, approved, rejected,
+decisions, stage_moves: []}}` (opportunity ids) and re-reads. `week_start` is the pack week
+(`pack.week_start` from the `sales_booking_read` that supplied the proposals, the same value
+that read was made with), not the Monday on the grid. After Next week the grid can show
+2026-09-21 while Send still writes 2026-09-14 for the live marnin pack. `applyServerStamp`
+reads the stamp for that same pack week. Cut posts the same body with the id under
+`rejected`. Approve/Confirm stay disabled.
+
+On load, `pack: {present, as_of, week_start}` and `stamp: {present, as_of, week_start,
+approved, rejected, decisions, stage_moves}` plus per-case `proposal` / `stamp_state` /
+`drafts` are consumed. Absent pack renders as "No proposals published yet for this week",
+never as empty free capacity.
+
+## Diary paint
+
+`diary[]` from GHL calendars (`kind` busy|leave|personal, `blocks_capacity`, `title`).
+CONFIRMED only when the event matches a case (opportunity or contact id, else exact
+name and suburb on a queue row) or the title starts with `Scope:`. Everything else paints
+PERSONAL or Busy, honours `blocks_capacity`, and counts nowhere in "Booked to quote this
+week" or Scope booked. Company titles such as Payday SecureWorks, Outback Agreements and
+SecureWorks are Busy.
+
+**Tiles:** "Booked to quote this week" counts only diary events matched to a case, never GHL
+stage rows. No matched diary reads 0 with "diary not read". "Quotes to send" is the quote-stage
+count, labelled as that stage. Enquiries and Waiting stay stage-based and say so.
+
+Switching scoper still drops the in-memory stamp; the next read supplies that scoper's
+stored stamp.
 
 ## Stampable and execution-ready are different gates
 
@@ -98,7 +121,15 @@ case or resource switch.
 
 Five layers, each with a stage tag on the card: Confirmed booking, Proposed (not sent),
 Offered (waiting on reply), Cancelled (still in diary), Personal. Cards read stage, then
-time and name, then address and suburb, then job.
+time and name, then address and suburb, then job. Previous / Next week (`data-booking-week`)
+re-reads that week's diary and keeps the requested Monday on the grid, even when the pack's
+own `week_start` is an earlier week. Dated pack windows that fall outside the shown week
+stay off the grid until that week is opened, but they stay listed on the queue and stamp
+board with their calendar day and arrival window. A clock-only weekday (day `Fri` with no
+ISO date) stays undated: it lists without a date and does not attach to the week on screen.
+
+GHL cases in the live read may carry `suburb: null`. Display, search, drafts and
+name-and-suburb diary matching take suburb from the proposal when the case has none.
 
 ## Queue
 
@@ -119,11 +150,15 @@ queue and thread facts. Coverage gaps render verbatim.
 ## Preview
 
 `node scripts/sales-booking-preview.mjs` then `http://127.0.0.1:4174/ops.html#booking`.
-Reads the live Microsoft calendar through `sw-mcp` and live GHL threads; customer send
-stays held. Sign-in is required for the in-page GHL thread only. The preview attaches
-only the cancelled GHL enquiry (`status: repair`) to the diary event whose subject
-already matches `/jason|marangaroo/i` (`sales-booking-repair-event.cjs`). Other open
-enquiries keep `event_id` null, so a booked same-suburb visit cannot become their diary.
+Reads the live Microsoft calendar through `sw-mcp` and live GHL threads, then overlays
+the published engine pack when `SALES_BOOKING_PACK_PATH` or a live `sales_booking_read`
+is available, so proposal suburbs and later-week windows match production. Customer send
+stays held. `node scripts/sales-booking-preview.mjs --verify` prints the marnin pack
+census (proposals / offers / slot labels) and exits. Sign-in is required for the in-page
+GHL thread only. The preview attaches only the cancelled GHL enquiry (`status: repair`)
+to the diary event whose subject already matches `/jason|marangaroo/i`
+(`sales-booking-repair-event.cjs`). Other open enquiries keep `event_id` null, so a
+booked same-suburb visit cannot become their diary.
 
 Design source: the captain-approved end-state prototype after three rounds of feedback
 (`data/booking-endstate-prototype-20260916/`). Evidence:

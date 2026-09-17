@@ -68,11 +68,11 @@ test.describe('Trade repair vertical', () => {
     await page.locator('[data-view="myJobs"]').click();
     await expect(page.locator('#viewMyJobs')).toHaveClass(/active/);
 
-    // Plain repair: WO, then a claim ref that differs from it, then the PO.
+    // Plain repair: WO, then the PO, then a claim ref that differs from the WO.
     const plainCard = page.locator('#myJobsList .jc.rp').filter({ hasText: 'REP-51002' });
     await expect(plainCard).toBeVisible();
     await expect(plainCard).toContainText('Repair');
-    await expect(plainCard.locator('.jc-refs')).toHaveText(/REP-51002.*WO WO-8891.*CLM-2026-0017.*PO-556701/);
+    await expect(plainCard.locator('.jc-refs')).toHaveText(/REP-51002.*WO WO-8891.*PO-556701.*CLM-2026-0017/);
     await expect(plainCard).toContainText('Plain Repair Builders');
 
     // Repair-family make-safe (MLB rapid repair): the claim ref equals the WO
@@ -88,6 +88,30 @@ test.describe('Trade repair vertical', () => {
 
     // The pre-existing patio card is untouched by the repair rows.
     await expect(page.locator('#myJobsList .jc.pt').filter({ hasText: 'E2E-JOB-001' })).toBeVisible();
+
+    // On a 360px phone the four-ref line wraps rather than clipping: every
+    // ref, PO and claim included, is painted inside the refs box.
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect(plainCard).toBeVisible();
+    const refsFit = await plainCard.locator('.jc-refs').evaluate((el, wanted) => {
+      const box = el.getBoundingClientRect();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const result = {};
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        wanted.forEach((ref) => {
+          const at = node.textContent.indexOf(ref);
+          if (at < 0) return;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + ref.length);
+          const r = range.getBoundingClientRect();
+          result[ref] = r.width > 0 && r.right <= box.right + 1 && r.bottom <= box.bottom + 1;
+        });
+      }
+      return { fits: result, clipped: el.scrollWidth > el.clientWidth + 1 };
+    }, ['REP-51002', 'WO WO-8891', 'PO-556701', 'CLM-2026-0017']);
+    expect(refsFit.clipped).toBe(false);
+    expect(refsFit.fits).toEqual({ 'REP-51002': true, 'WO WO-8891': true, 'PO-556701': true, 'CLM-2026-0017': true });
 
     // A repair-family make-safe opens the normal job detail from the list too.
     await familyCard.click();

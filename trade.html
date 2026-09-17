@@ -3319,6 +3319,7 @@
     .jc-place{font-size:21px;font-weight:750;letter-spacing:-.015em;line-height:1.1;color:var(--sw-dark)}
     .jc-addr{font-size:13px;color:var(--sw-mid);margin-top:3px}
     .jc-refs{font:500 12px var(--sw-mono);color:var(--sw-ink-3);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .jc.rp .jc-refs{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.5}
     .jc-refs .ours{color:var(--sw-mid);font-weight:600}
     .jc-refs .sep{opacity:.45;margin:0 6px}
     .jc-parties{display:grid;grid-template-columns:64px 1fr;row-gap:5px;margin-top:11px;align-items:baseline}
@@ -8625,10 +8626,10 @@
       var repairRefs = isRepair && typeof tradeRepairRefs === 'function' ? tradeRepairRefs(job) : null;
       if (repairRefs) {
         if (repairRefs.workOrder) refs.push({ text: 'WO ' + repairRefs.workOrder });
+        if (repairRefs.po) refs.push({ text: repairRefs.po });
         if (repairRefs.claimRef && repairRefs.claimRef.toLowerCase() !== String(repairRefs.workOrder || '').toLowerCase()) {
           refs.push({ text: repairRefs.claimRef });
         }
-        if (repairRefs.po) refs.push({ text: repairRefs.po });
       }
       var parties;
       if (isMs) {
@@ -18675,7 +18676,7 @@
       });
 
       var isMyJob = crewNames.some(function(n) { return n.toLowerCase() === (_user?.name || '').toLowerCase(); });
-      var typeBadge = { patio: 'PATIO', fencing: 'FENCING', decking: 'DECKING', repair: 'REPAIR', makesafe: 'MAKE-SAFE' };
+      var typeBadge = { patio: 'PATIO', fencing: 'FENCING', decking: 'DECKING', repair: 'REPAIR' };
 
       var html = '<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:flex-end;justify-content:center;">';
       html += '<div style="background:#fff;border-radius:16px 16px 0 0;padding:20px 16px 28px;width:100%;max-width:500px;max-height:80vh;overflow-y:auto;">';

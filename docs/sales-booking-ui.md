@@ -1,18 +1,36 @@
 # Sales Booking view
 
 Ops > **Sales > Performance | Booking**. Booking is the captain's door: it reads the week,
-shows what is proposed and what is out, and records a KEEP or CUT decision. It sends
-nothing.
+shows what is proposed and what is out, and records a KEEP or Cut decision. It does not
+send a customer text, write a diary or move a GHL stage.
 
-## Nothing here writes
+## Send is the stamp, nothing else
 
-`SEND_HOLD` is on. Opening a case is a thread read only: `selectCase` loads
-`ghl-proxy?action=get_conversation` and posts nothing. Send message, Approve offer,
-Confirm booking and every calendar write render **disabled** carrying `HOLD_REASON`,
-and `attemptApprove()` refuses on the hold even if a click reaches it. A **stamp is not a send**: KEEP and CUT write a local
-`stamp.json`-shaped record (`captain, profile, week_start, approved, rejected, decisions,
-sent:false, calendar_written:false`) that ops auto-book reads on a separate authorised run.
-Switching scoper drops the stamp so one scoper's decisions cannot be carried onto another.
+`SEND_HOLD` stays on for Approve, Confirm, calendar writes and any customer send.
+`attemptApprove()` still refuses those. **Send message** is the captain stamp: it POSTs
+`sales_booking_stamp_write` with `{resource, week_start, stamp: {captain, approved, rejected,
+decisions, stage_moves: []}}` (opportunity ids) and re-reads. Cut posts the same body with
+the id under `rejected`. Approve/Confirm stay disabled.
+
+On load, `pack: {present, as_of}` and `stamp: {present, as_of, approved, rejected, decisions,
+stage_moves}` plus per-case `proposal` / `stamp_state` / `drafts` are consumed. Absent pack
+renders as "No proposals published yet for this week", never as empty free capacity.
+
+## Diary paint
+
+`diary[]` from GHL calendars (`kind` busy|leave|personal, `blocks_capacity`, `title`).
+CONFIRMED only when the event matches a case (opportunity or contact id, else exact
+name and suburb on a queue row) or the title starts with `Scope:`. Everything else paints
+PERSONAL or Busy, honours `blocks_capacity`, and counts nowhere in "Booked to quote this
+week" or Scope booked. Company titles such as Payday SecureWorks, Outback Agreements and
+SecureWorks are Busy.
+
+**Tiles:** "Booked to quote this week" counts only diary events matched to a case, never GHL
+stage rows. No matched diary reads 0 with "diary not read". "Quotes to send" is the quote-stage
+count, labelled as that stage. Enquiries and Waiting stay stage-based and say so.
+
+Switching scoper still drops the in-memory stamp; the next read supplies that scoper's
+stored stamp.
 
 ## Stampable and execution-ready are different gates
 

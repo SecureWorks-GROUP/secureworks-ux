@@ -149,8 +149,8 @@
 #salesBookingRoot .ev.blocked{background:#FFF2F1;border:1px solid #D88F8C;color:#9C3633}
 #salesBookingRoot .ev.blocked .stage{background:var(--red)}
 #salesBookingRoot .ev.blocked .n{text-decoration:line-through}
-#salesBookingRoot .ev.personal,#salesBookingRoot .ev.leave{background:#F1F3F4;border:1px solid #C9D2D8;color:#5b6b75}
-#salesBookingRoot .ev.personal .stage,#salesBookingRoot .ev.leave .stage{background:#8a99a3}
+#salesBookingRoot .ev.personal,#salesBookingRoot .ev.leave,#salesBookingRoot .ev.busy{background:#F1F3F4;border:1px solid #C9D2D8;color:#5b6b75}
+#salesBookingRoot .ev.personal .stage,#salesBookingRoot .ev.leave .stage,#salesBookingRoot .ev.busy .stage{background:#8a99a3}
 #salesBookingRoot .ev.stamped{background:#F3FAF5;border:1.5px solid var(--green);color:#1f4a3c}
 #salesBookingRoot .ev.stamped .stage{background:var(--green)}
 #salesBookingRoot .ev.sel{outline:2px solid var(--accent);outline-offset:2px;z-index:5}

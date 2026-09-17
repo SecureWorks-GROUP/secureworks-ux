@@ -666,13 +666,13 @@ test('every customer send, approval, confirmation and diary write renders held',
   api.state.data = doorRead();
   api.state.selectedId = 'case-a';
   const html = api.renderHTML();
-  assert.match(html, /Send message \(held\)/);
+  assert.match(html, />Send message</);
+  assert.doesNotMatch(html, /Send message \(held\)/);
   assert.match(html, /Approve offer \(held\)/);
   assert.match(html, /does not send, approve, confirm or write a diary/);
-  // No enabled path to a provider write exists on the surface.
-  assert.doesNotMatch(html, /data-booking-approve="1"(?![^>]*disabled)/);
+  // Send message is the stamp write. Approve/Confirm stay hard-held.
+  assert.match(html, /data-booking-stamp-send="1"/);
   assert.doesNotMatch(html, /data-booking-confirm="1"(?![^>]*disabled)/);
-  // And the held handler still refuses if a click reaches it anyway.
   const result = api.attemptApprove();
   assert.equal(result.sent, false);
   assert.equal(result.held, true);
@@ -766,7 +766,11 @@ test('follow-through tiles count the queue and name the captain window', () => {
   assert.match(html, /Waiting on a reply/);
   assert.match(html, /Booked to quote this week/);
   assert.match(html, /Quotes to send/);
-  assert.match(html, new RegExp(api.CAPTAIN_DEFAULTS.scopes_done_window));
+  assert.match(html, /GHL stages that still need a booking/);
+  assert.match(html, /diary events matched to a case/);
+  assert.match(html, /in Scope Complete \/ Quote to be Sent/);
+  assert.doesNotMatch(html, /in the diary with a customer yes/);
+  assert.doesNotMatch(html, /visited this week plus last/);
 });
 
 test('v1 shows two scopers while Khairo stays configured for the flip', () => {
@@ -856,7 +860,7 @@ test('an enumerated CRM row is findable but is never counted or ranked as demand
 test('a cancelled case does not leave its diary block reading as a confirmed booking', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
-  const ev = { id: 'evt-1', layer: 'confirmed', start_iso: '2026-09-15T11:30:00' };
+  const ev = { id: 'evt-1', case_id: 'evt-1', layer: 'confirmed', start_iso: '2026-09-15T11:30:00' };
   assert.equal(api.diaryLayerFor(ev), 'confirmed');
   // Customer cancelled in the thread; Outlook still holds the slot.
   api.state.data.cases[1].status = 'repair';
@@ -880,7 +884,7 @@ test('a desk rule states where work is offered and never overprints a real booki
   let html = api.renderHTML();
   assert.match(html, /Not a Marnin day/, 'an empty off-lane day is hatched closed');
   // Now the provider actually has a visit booked on that off-lane day.
-  api.state.data.events = [{ event_id: 'e9', display_name: 'Real visit', suburb: 'Alkimos', start_iso: '2026-09-17T09:00:00', end_iso: '2026-09-17T10:00:00', layer: 'confirmed' }];
+  api.state.data.events = [{ event_id: 'e9', subject: 'Scope: Real visit', display_name: 'Real visit', suburb: 'Alkimos', start_iso: '2026-09-17T09:00:00', end_iso: '2026-09-17T10:00:00', layer: 'confirmed' }];
   html = api.renderHTML();
   assert.match(html, /Outside the Marnin lane/);
   assert.match(html, /Stratco scopes are offered Tue and Fri/);
@@ -1245,7 +1249,7 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   const html = api.renderHTML();
   const tiles = api.followThrough();
   assert.equal(tiles.to_book > 0, true);
-  assert.equal(tiles.booked, 50);
+  assert.equal(tiles.booked, 0);
   assert.equal(tiles.quotes, 20);
   assert.equal(tiles.waiting, 20);
   assert.equal(api.urgency(cases.find((c) => c.id === 'booked-0'))[1], 'Booked');
@@ -1263,6 +1267,8 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.match(html, /17 thread read\(s\) failed/);
   assert.doesNotMatch(html, /Source not retrieved/);
   assert.match(html, /outlook_primary/);
+  assert.match(html, /diary not read/);
+  assert.doesNotMatch(html, /in the diary with a customer yes/);
   assert.match(html, /<span class="count">[1-9][0-9]* people/);
 });
 
@@ -1304,7 +1310,7 @@ test('Nithin queue groups by the 11 patio stages and folds quoted work', () => {
   const tiles = api.followThrough();
   assert.equal(tiles.to_book, 1);
   assert.equal(tiles.waiting, 1);
-  assert.equal(tiles.booked, 1);
+  assert.equal(tiles.booked, 0);
   assert.equal(tiles.quotes, 1);
   assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'n3'))[1], 'Booked');
   assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'n2'))[1], 'Waiting');
@@ -1347,7 +1353,7 @@ test('Marnin queue groups by the 14 fencing stages and folds quoted work', () =>
   const tiles = api.followThrough();
   assert.equal(tiles.to_book, 3);
   assert.equal(tiles.waiting, 0);
-  assert.equal(tiles.booked, 1);
+  assert.equal(tiles.booked, 0);
   assert.equal(tiles.quotes, 1);
   assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'm3'))[1], 'Booked');
   assert.notEqual(api.urgency(api.state.data.cases.find((c) => c.id === 'm5'))[1], 'Waiting');
@@ -1382,4 +1388,323 @@ test('loading state does not paint a fake empty week', () => {
   assert.doesNotMatch(html, /0 people/);
   assert.doesNotMatch(html, /Source not retrieved/);
   api.state.loading = false;
+});
+
+function marninWeekRead() {
+  const bookedStage = api.RESOURCES.marnin.pipeline_stages.find((s) => s.name === 'Scope Scheduled');
+  const cases = [];
+  const diary = [
+    { event_id: 'pay', title: 'Payday SecureWorks', kind: 'busy', start: '2026-09-15T09:00:00', end: '2026-09-15T09:30:00', blocks_capacity: true, source: 'ghl_calendar' },
+    { event_id: 'outback', title: 'Outback Agreements', kind: 'busy', start: '2026-09-15T10:00:00', end: '2026-09-15T11:00:00', blocks_capacity: true, source: 'ghl_calendar' },
+    { event_id: 'sw-1', title: 'SecureWorks', kind: 'busy', start: '2026-09-15T11:00:00', end: '2026-09-15T11:30:00', blocks_capacity: true, source: 'ghl_calendar' },
+    { event_id: 'sw-2', title: 'SecureWorks', kind: 'busy', start: '2026-09-18T09:00:00', end: '2026-09-18T09:30:00', blocks_capacity: true, source: 'ghl_calendar' },
+    { event_id: 'scope-evt', opportunity_id: 'opp-scope', title: 'Scope: Pat, Canning Vale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00', blocks_capacity: true, source: 'ghl_calendar' }
+  ];
+  cases.push({
+    id: 'opp-scope',
+    opportunity_id: 'opp-scope',
+    contact_id: 'c-opp-scope',
+    display_name: 'Pat',
+    suburb: 'Canning Vale',
+    status: 'needs_decision',
+    stage_name: bookedStage.name,
+    stage_id: bookedStage.id
+  });
+  const suburbs = ['Canning Vale', 'Harrisdale', 'Piara Waters', 'Southern River', 'Byford', 'Alkimos'];
+  for (let i = 0; i < 6; i++) {
+    const id = 'opp-booked-' + i;
+    cases.push({
+      id,
+      opportunity_id: id,
+      contact_id: 'c-' + id,
+      display_name: 'Customer ' + i,
+      suburb: suburbs[i],
+      status: 'needs_decision',
+      stage_name: bookedStage.name,
+      stage_id: bookedStage.id
+    });
+    diary.push({
+      event_id: 'visit-' + i,
+      opportunity_id: id,
+      title: 'Customer ' + i,
+      suburb: suburbs[i],
+      kind: 'busy',
+      start: '2026-09-18T1' + i + ':00:00',
+      end: '2026-09-18T1' + i + ':45:00',
+      blocks_capacity: true,
+      source: 'ghl_calendar'
+    });
+  }
+  return {
+    ok: true,
+    fixture: false,
+    send_hold: true,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary,
+    events: [],
+    cases,
+    pack: { present: false },
+    stamp: { present: false }
+  };
+}
+
+test('Marnin company diary paints Busy and does not count as booked scopes', () => {
+  api.state.resourceId = 'marnin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.layers = { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true };
+  api.state.data = marninWeekRead();
+  const rows = api.diary();
+  const payday = rows.find((r) => r.title === 'Payday SecureWorks');
+  const outback = rows.find((r) => r.title === 'Outback Agreements');
+  const company = rows.filter((r) => r.title === 'SecureWorks');
+  const scoped = rows.find((r) => /^Scope:/i.test(r.title));
+  assert.equal(api.diaryLayerFor(payday), 'busy');
+  assert.equal(api.diaryLayerFor(outback), 'busy');
+  assert.equal(company.length, 2);
+  company.forEach((ev) => assert.equal(api.diaryLayerFor(ev), 'busy'));
+  assert.equal(api.diaryEventIsScopeBooking(scoped), true);
+  assert.equal(api.diaryLayerFor(scoped), 'confirmed');
+  assert.equal(api.diaryEventIsScopeBooking(payday), false);
+  const html = api.renderHTML();
+  assert.match(html, />Busy</);
+  assert.match(html, /Payday SecureWorks/);
+  assert.match(html, /Outback Agreements/);
+  assert.match(html, /CONFIRMED/);
+  assert.match(html, /Scope: Pat, Canning Vale/);
+  const tiles = api.followThrough();
+  assert.equal(tiles.booked, 7);
+  assert.equal(api.bookedCount(), 7);
+  assert.match(html, />7</);
+  assert.match(html, /class="ev busy event busy"[^>]*data-booking-case="pay"/);
+  assert.match(html, /class="ev confirmed event confirmed"[^>]*data-booking-case="scope-evt"/);
+  assert.doesNotMatch(html, /class="ev confirmed event confirmed"[^>]*data-booking-case="pay"/);
+});
+
+test('GHL booked-stage rows with an empty diary do not count as booked visits', () => {
+  api.state.resourceId = 'marnin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  const booked = api.RESOURCES.marnin.pipeline_stages.find((s) => s.name === 'Scope Scheduled');
+  const cases = [];
+  for (let i = 0; i < 172; i++) {
+    cases.push({
+      id: 'stage-booked-' + i,
+      opportunity_id: 'stage-booked-' + i,
+      contact_id: 'c-stage-' + i,
+      display_name: 'Stage row ' + i,
+      suburb: 'Canning Vale',
+      status: 'needs_decision',
+      stage_name: booked.name,
+      stage_id: booked.id
+    });
+  }
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { full_population: true, enumerated: 172, gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary: [],
+    events: [],
+    cases
+  };
+  const tiles = api.followThrough();
+  assert.equal(cases.length, 172);
+  assert.equal(tiles.booked, 0);
+  assert.equal(api.bookedCount(), 0);
+  const html = api.renderHTML();
+  assert.match(html, /diary not read/);
+  assert.doesNotMatch(html, /in the diary with a customer yes/);
+  assert.match(html, /<div class="v">0<\/div>/);
+});
+
+test('a diary event matches a queue row by opportunity, contact, or exact name and suburb', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary: [
+      { event_id: 'e-opp', opportunity_id: 'opp-1', title: 'Linked by opportunity', kind: 'busy', start: '2026-09-15T09:00:00', end: '2026-09-15T10:00:00' },
+      { event_id: 'e-contact', contact_id: 'ct-2', title: 'Linked by contact', kind: 'busy', start: '2026-09-15T10:00:00', end: '2026-09-15T11:00:00' },
+      { event_id: 'e-name', title: 'Sam Ferry', suburb: 'Byford', kind: 'busy', start: '2026-09-15T11:00:00', end: '2026-09-15T12:00:00' },
+      { event_id: 'e-close', title: 'Sam Ferry', suburb: 'Harrisdale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00' }
+    ],
+    cases: [
+      { id: 'opp-1', opportunity_id: 'opp-1', contact_id: 'ct-1', display_name: 'Opportunity match', suburb: 'Canning Vale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+      { id: 'opp-2', opportunity_id: 'opp-2', contact_id: 'ct-2', display_name: 'Contact match', suburb: 'Piara Waters', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+      { id: 'opp-3', opportunity_id: 'opp-3', contact_id: 'ct-3', display_name: 'Sam Ferry', suburb: 'Byford', status: 'needs_decision', stage_name: 'New Lead (Call + Qualify)' }
+    ]
+  };
+  const rows = api.diary();
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-opp')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-contact')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-name')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-close')), 'busy');
+});
+
+test('blocks_capacity false does not occupy an off-lane day', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = doorRead();
+  api.state.data.resource.id = 'marnin';
+  api.state.data.events = [];
+  api.state.data.diary = [{
+    event_id: 'free', title: 'Hint only', kind: 'busy', start: '2026-09-17T09:00:00', end: '2026-09-17T10:00:00',
+    blocks_capacity: false, source: 'ghl_calendar'
+  }];
+  const ev = api.diary()[0];
+  assert.equal(api.diaryOccupiesDay(ev), false);
+  const html = api.renderHTML();
+  assert.match(html, /Not a Marnin day/);
+  assert.match(html, /Hint only/);
+  api.state.resourceId = 'nithin';
+});
+
+test('absent pack is named in the coverage strip, never shown as free capacity', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = marninWeekRead();
+  const html = api.renderHTML();
+  assert.match(html, /No proposals published yet for this week/);
+  assert.match(html, /Empty diary is not spare capacity|11 provider events/);
+});
+
+test('a pack proposal paints the day, window and draft on the card and in the detail', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.drafts = {};
+  api.state.selectedId = 'opp-offer';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, as_of: '2026-09-17T04:00:00Z' },
+    stamp: { present: false },
+    diary: [],
+    cases: [{
+      id: 'opp-offer',
+      opportunity_id: 'opp-offer',
+      contact_id: 'c-offer',
+      display_name: 'Sam Ferry',
+      suburb: 'Byford',
+      job: 'Colorbond fence',
+      status: 'needs_decision',
+      stage_name: 'Presentation Made (scope not booked)',
+      proposal: {
+        disposition: 'offer',
+        day: '2026-09-18',
+        window_start: '11:15',
+        window_end: '12:45',
+        draft: 'Hi Sam, Friday 18 September between 11:15 and 12:45pm to measure and quote. Does that suit?',
+        why: ['Friday is a Stratco day.']
+      },
+      stamp_state: 'none'
+    }],
+    drafts: { 'opp-offer': 'Hi Sam, Friday 18 September between 11:15 and 12:45pm to measure and quote. Does that suit?' }
+  };
+  const html = api.renderHTML();
+  assert.doesNotMatch(html, /No proposals published yet for this week/);
+  assert.match(html, /Fri 11:15am/);
+  assert.match(html, /Hi Sam, Friday 18 September between 11:15 and 12:45pm/);
+  assert.match(html, /Proposed text/);
+  assert.match(html, /Colorbond fence/);
+  const p = api.cases()[0].proposal;
+  assert.equal(p.start_iso, '2026-09-18T11:15:00');
+  assert.equal(p.end_iso, '2026-09-18T12:45:00');
+});
+
+test('Send message posts the stamp and Cut rejects, then a re-read keeps the paint', async () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.drafts = {};
+  const proposal = {
+    disposition: 'offer',
+    day: '2026-09-18',
+    window_start: '11:15',
+    window_end: '12:45',
+    draft: 'Hi Sam, Friday 18 September between 11:15 and 12:45pm. Does that suit?',
+    why: []
+  };
+  const base = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, as_of: '2026-09-17T04:00:00Z' },
+    stamp: { present: false, approved: [], rejected: [], decisions: {}, stage_moves: [] },
+    diary: [],
+    cases: [{
+      id: 'opp-offer',
+      opportunity_id: 'opp-offer',
+      contact_id: 'c-offer',
+      display_name: 'Sam Ferry',
+      suburb: 'Byford',
+      status: 'needs_decision',
+      stage_name: 'Presentation Made (scope not booked)',
+      proposal,
+      stamp_state: 'none'
+    }]
+  };
+  api.state.data = JSON.parse(JSON.stringify(base));
+  api.state.selectedId = 'opp-offer';
+  const posts = [];
+  global.SALES_BOOKING_PREVIEW_URL = null;
+  global.opsPost = async (action, body) => {
+    posts.push({ action, body });
+    return { ok: true };
+  };
+  global.opsFetch = async () => {
+    const next = JSON.parse(JSON.stringify(base));
+    const last = posts[posts.length - 1];
+    next.stamp = {
+      present: true,
+      as_of: '2026-09-17T05:00:00Z',
+      approved: (last && last.body.stamp.approved) || [],
+      rejected: (last && last.body.stamp.rejected) || [],
+      decisions: {},
+      stage_moves: []
+    };
+    const st = next.stamp.rejected.length ? 'rejected' : (next.stamp.approved.length ? 'approved' : 'none');
+    next.cases[0].stamp_state = st;
+    return next;
+  };
+  const sent = await api.writeStamp('opp-offer', 'keep');
+  assert.equal(sent.sent, false);
+  assert.equal(sent.wrote_calendar, false);
+  assert.equal(sent.posted, true);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, 'sales_booking_stamp_write');
+  assert.deepEqual(posts[0].body.stamp.approved, ['opp-offer']);
+  assert.deepEqual(posts[0].body.stamp.rejected, []);
+  assert.deepEqual(posts[0].body.stamp.stage_moves, []);
+  assert.equal(posts[0].body.resource, 'marnin');
+  assert.equal(posts[0].body.week_start, '2026-09-14');
+  assert.equal(api.state.data.cases[0].stamp_state, 'approved');
+  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'keep');
+  let html = api.renderHTML();
+  assert.match(html, /Stamped KEEP/);
+  assert.match(html, /stampcard stamped/);
+
+  const cut = await api.writeStamp('opp-offer', 'cut');
+  assert.equal(cut.posted, true);
+  assert.deepEqual(posts[1].body.stamp.approved, []);
+  assert.deepEqual(posts[1].body.stamp.rejected, ['opp-offer']);
+  assert.equal(api.state.data.cases[0].stamp_state, 'rejected');
+  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'cut');
+  html = api.renderHTML();
+  assert.match(html, /Stamped CUT/);
+  assert.match(html, /stampcard weak/);
+  assert.equal(posts.every((p) => p.action === 'sales_booking_stamp_write'), true);
 });

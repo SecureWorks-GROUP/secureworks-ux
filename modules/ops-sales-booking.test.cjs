@@ -1520,7 +1520,8 @@ test('GHL booked-stage rows with an empty diary do not count as booked visits', 
   assert.equal(tiles.booked, 0);
   assert.equal(api.bookedCount(), 0);
   const html = api.renderHTML();
-  assert.match(html, /diary not read/);
+  assert.match(html, /GHL calendar empty this week/);
+  assert.doesNotMatch(html, /diary not read/);
   assert.doesNotMatch(html, /in the diary with a customer yes/);
   assert.match(html, /<div class="v">0<\/div>/);
 });
@@ -1897,5 +1898,254 @@ test('a clock-only Fri row stays undated and does not attach to the week on scre
   assert.doesNotMatch(html, /Friday 18 September/);
   assert.doesNotMatch(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-clock"/);
   api.state.weekStart = '2026-09-14';
+  api.state.resourceId = 'nithin';
+});
+
+function degradedRosterPackRead() {
+  const offers = [
+    { id: 'TelAKHzhxnCjKrExxQxE', name: 'Lawrence Guo', suburb: 'Woodlands', day: '2026-09-18', start: '08:00', end: '09:30', draft: 'Hi Lawrence, Friday 18 September between 08:00 and 09:30.' },
+    { id: '2ELupAoaJJfij4orMa8h', name: 'Bruce Reidy-Crofts', suburb: 'Greenwood', day: '2026-09-18', start: '11:15', end: '12:45', draft: 'Hi Bruce, Friday 18 September between 11:15 and 12:45.' },
+    { id: 'wdi52oA5Lnh19ZdXWjmY', name: 'Greg Holland', suburb: 'Leederville', day: '2026-09-18', start: '15:00', end: '16:30', draft: 'Hi Greg, Friday 18 September between 15:00 and 16:30.' },
+    { id: '9XZmlVHcsQ0F8ExT3Smz', name: 'Aubin Grove enquiry', suburb: 'Aubin Grove', day: '2026-09-22', start: '08:00', end: '09:30', draft: 'Hi there, Tuesday 22 September between 08:00 and 09:30.' },
+    { id: '9kreNjMoK8wu6hENvECe', name: 'Balga enquiry', suburb: 'Balga', day: '2026-09-22', start: '10:00', end: '11:30', draft: 'Hi there, Tuesday 22 September between 10:00 and 11:30.' },
+    { id: 'jksTxrbNpEKcmpayYHqI', name: 'Sonia Stratco', suburb: 'Noranda', day: '2026-09-25', start: '08:00', end: '09:30', draft: 'Hi Sonia, Friday 25 September between 08:00 and 09:30.' },
+    { id: 'zFg2alBIMAxTMdHigrjT', name: 'Sinagra enquiry', suburb: 'Sinagra', day: '2026-09-25', start: '10:00', end: '11:30', draft: 'Hi there, Friday 25 September between 10:00 and 11:30.' },
+    { id: '4WkOLh61XUwX9aSWy8Pf', name: 'Clarkson enquiry', suburb: 'Clarkson', day: '2026-09-25', start: '12:00', end: '13:30', draft: 'Hi there, Friday 25 September between 12:00 and 13:30.' },
+    { id: 'JtUWsD27EkSMWtqxGMHs', name: 'Andrew Allen', suburb: 'Jindalee', day: '2026-09-25', start: '14:00', end: '15:30', draft: 'Hi Andrew, Friday 25 September between 14:00 and 15:30.' },
+    { id: 'wr2YBmIyAI1ygiru5zwc', name: 'Kim Douglas', suburb: 'Sorrento', day: '2026-09-29', start: '08:00', end: '09:30', draft: 'Hi Kim, Tuesday 29 September between 08:00 and 09:30.' },
+    { id: 'yLb0XYAiIZb7jmYiFWAM', name: 'Mark Thomas', suburb: 'Redcliffe', day: '2026-09-29', start: '10:00', end: '11:30', draft: 'Hi Mark, Tuesday 29 September between 10:00 and 11:30.' }
+  ];
+  const inRoster = new Set(['JtUWsD27EkSMWtqxGMHs', 'wr2YBmIyAI1ygiru5zwc']);
+  const proposals = {};
+  offers.forEach((row) => {
+    proposals[row.id] = {
+      offer: true,
+      day: row.day,
+      window: { start: row.start, end: row.end },
+      draft: row.draft,
+      name: row.name,
+      suburb: row.suburb
+    };
+  });
+  const cases = offers.filter((row) => inRoster.has(row.id)).map((row) => ({
+    id: row.id,
+    opportunity_id: row.id,
+    contact_id: 'ct-' + row.id.slice(0, 6),
+    display_name: row.name,
+    suburb: row.suburb,
+    job: 'Colorbond fence',
+    status: 'needs_decision',
+    stage_name: 'Presentation Made (scope not booked)',
+    stamp_state: 'none'
+  }));
+  for (let i = 0; i < 3; i++) {
+    cases.push({
+      id: 'roster-filler-' + i,
+      opportunity_id: 'roster-filler-' + i,
+      display_name: 'Filler ' + i,
+      suburb: 'Perth',
+      status: 'needs_decision',
+      stage_name: 'New Lead (Call + Qualify)'
+    });
+  }
+  return {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { full_population: false, enumerated: 5, total: 1012, gaps: ['roster read degraded by GHL 429'] },
+    pack: {
+      present: true,
+      as_of: '2026-09-16T07:48:00Z',
+      week_start: '2026-09-14',
+      proposals
+    },
+    stamp: { present: false },
+    diary: [],
+    cases,
+    _offers: offers
+  };
+}
+
+function proposalCardIds(html) {
+  const ids = [];
+  const re = /class="ev proposal[^"]*"[^>]*data-booking-case="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) ids.push(m[1]);
+  return ids;
+}
+
+test('pack offers paint and stamp even when the roster missed them', async () => {
+  const payload = degradedRosterPackRead();
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.layers = { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true };
+  api.state.data = JSON.parse(JSON.stringify(payload));
+  api.state.selectedId = null;
+
+  const list = api.cases();
+  const offers = list.filter((c) => api.isPackOfferCase(c));
+  assert.equal(offers.length, 11);
+  assert.equal(offers.filter((c) => c.not_in_this_read).length, 9);
+  assert.equal(api.stampableOfferList().length, 11);
+
+  const weekCards = {};
+  ['2026-09-14', '2026-09-21', '2026-09-28'].forEach((week) => {
+    api.state.weekStart = week;
+    weekCards[week] = proposalCardIds(api.renderHTML());
+  });
+  api.state.weekStart = '2026-09-14';
+  assert.deepEqual(weekCards['2026-09-14'].sort(), [
+    '2ELupAoaJJfij4orMa8h',
+    'TelAKHzhxnCjKrExxQxE',
+    'wdi52oA5Lnh19ZdXWjmY'
+  ].sort());
+  assert.deepEqual(weekCards['2026-09-21'].sort(), [
+    '4WkOLh61XUwX9aSWy8Pf',
+    '9XZmlVHcsQ0F8ExT3Smz',
+    '9kreNjMoK8wu6hENvECe',
+    'JtUWsD27EkSMWtqxGMHs',
+    'jksTxrbNpEKcmpayYHqI',
+    'zFg2alBIMAxTMdHigrjT'
+  ].sort());
+  assert.deepEqual(weekCards['2026-09-28'].sort(), [
+    'wr2YBmIyAI1ygiru5zwc',
+    'yLb0XYAiIZb7jmYiFWAM'
+  ].sort());
+  const allCards = [].concat(weekCards['2026-09-14'], weekCards['2026-09-21'], weekCards['2026-09-28']);
+  assert.equal(allCards.length, 11);
+  assert.equal(new Set(allCards).size, 11);
+
+  let html = api.renderHTML();
+  assert.match(html, /11 proposals unsent/);
+  assert.match(html, /11 lines/);
+  assert.equal((html.match(/class="stampcard/g) || []).length, 11);
+  assert.equal((html.match(/<div class="stampcard[^>]*data-not-in-read="1"/g) || []).length, 9);
+  assert.match(html, /Lawrence Guo · Woodlands/);
+  assert.match(html, /Bruce Reidy-Crofts · Greenwood/);
+  assert.match(html, /Andrew Allen · Jindalee/);
+  assert.match(html, /Kim Douglas · Sorrento/);
+  payload._offers.filter((row) => !['JtUWsD27EkSMWtqxGMHs', 'wr2YBmIyAI1ygiru5zwc'].includes(row.id)).forEach((row) => {
+    assert.match(html, new RegExp(row.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]{0,400}not in this read'));
+  });
+
+  const posts = [];
+  global.SALES_BOOKING_PREVIEW_URL = null;
+  global.opsPost = async (action, body) => {
+    posts.push({ action, body });
+    return { ok: true };
+  };
+  global.opsFetch = async () => JSON.parse(JSON.stringify(payload));
+
+  for (const row of payload._offers) {
+    api.state.selectedId = row.id;
+    html = api.renderHTML();
+    assert.match(html, new RegExp('data-booking-stamp-send="1" data-booking-stamp-id="' + row.id + '"'));
+    assert.doesNotMatch(html, new RegExp('data-booking-stamp-send="1" data-booking-stamp-id="' + row.id + '" disabled'));
+    assert.match(html, /Proposed text/);
+    assert.match(html, new RegExp(row.draft.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    if (row.id !== 'JtUWsD27EkSMWtqxGMHs' && row.id !== 'wr2YBmIyAI1ygiru5zwc') {
+      assert.match(html, /not in this read/);
+    }
+  }
+
+  const sent = await api.writeStamp('TelAKHzhxnCjKrExxQxE', 'keep');
+  assert.equal(sent.posted, true);
+  assert.equal(posts[0].action, 'sales_booking_stamp_write');
+  assert.equal(posts[0].body.week_start, '2026-09-14');
+  assert.deepEqual(posts[0].body.stamp.approved, ['TelAKHzhxnCjKrExxQxE']);
+  assert.equal(posts[0].body.resource, 'marnin');
+
+  api.state.weekStart = '2026-09-14';
+  api.state.resourceId = 'nithin';
+  api.state.selectedId = null;
+});
+
+test('job_type sits next to suburb on the queue row and in the detail header', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.selectedId = 'opp-fence';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary: [],
+    cases: [{
+      id: 'opp-fence',
+      opportunity_id: 'opp-fence',
+      contact_id: 'ct-fence',
+      display_name: 'Sam Ferry',
+      suburb: 'Byford',
+      job_type: 'fencing',
+      status: 'needs_decision',
+      stage_name: 'New Lead (Call + Qualify)'
+    }, {
+      id: 'opp-blank',
+      opportunity_id: 'opp-blank',
+      contact_id: 'ct-blank',
+      display_name: 'No Type Yet',
+      suburb: 'Carlisle',
+      job_type: 'not given',
+      status: 'needs_decision',
+      stage_name: 'New Lead (Call + Qualify)'
+    }, {
+      id: 'opp-missing',
+      opportunity_id: 'opp-missing',
+      contact_id: 'ct-missing',
+      display_name: 'Missing Type',
+      suburb: 'Balga',
+      status: 'needs_decision',
+      stage_name: 'New Lead (Call + Qualify)'
+    }]
+  };
+  assert.equal(api.jobTypeLabel(api.state.data.cases[0]), 'fencing');
+  assert.equal(api.jobTypeLabel(api.state.data.cases[1]), 'not given');
+  assert.equal(api.jobTypeLabel(api.state.data.cases[2]), 'not given');
+  let html = api.renderHTML();
+  assert.match(html, /Sam Ferry · Byford · fencing/);
+  assert.match(html, /No Type Yet · Carlisle · not given/);
+  assert.match(html, /Missing Type · Balga · not given/);
+  assert.match(html, /Byford · fencing/);
+  assert.doesNotMatch(html, /No job details yet/);
+  api.state.selectedId = 'opp-blank';
+  html = api.renderHTML();
+  assert.match(html, /Carlisle · not given/);
+  api.state.resourceId = 'nithin';
+  api.state.selectedId = null;
+});
+
+test('Booked tile names an empty GHL calendar and keeps diary not read for a failed read', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary: [],
+    events: [],
+    cases: []
+  };
+  assert.equal(api.bookedTileReason(), 'GHL calendar empty this week');
+  assert.match(api.renderHTML(), /GHL calendar empty this week/);
+  assert.doesNotMatch(api.renderHTML(), /diary not read/);
+
+  api.state.data.diary_read = { read_ok: false, reason: 'calendar_http_403', source: 'ghl_calendar' };
+  assert.equal(api.bookedTileReason(), 'diary not read');
+  assert.match(api.renderHTML(), /diary not read/);
+  assert.doesNotMatch(api.renderHTML(), /GHL calendar empty this week/);
   api.state.resourceId = 'nithin';
 });

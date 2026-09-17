@@ -641,7 +641,9 @@
     var status = derivedStatus(c);
     if (c && (status === 'waiting' || status === 'offer')) return true;
     var id = c && (c.stage_id || c.pipeline_stage_id || c.pipelineStageId);
-    return id === '4d3bcf9a-185d-4a90-98e0-e0805fdf4a02';
+    if (id === '4d3bcf9a-185d-4a90-98e0-e0805fdf4a02') return true;
+    var name = normaliseStageName(c && (c.stage_name || c.pipeline_stage || c.pipelineStage));
+    return name === normaliseStageName('Contacted Waiting on Response');
   }
 
   // A row in a known pipeline stage is visit/reply/quote demand. Engine
@@ -694,7 +696,6 @@
     if (isWaiting(c)) return ['q', 'Waiting'];
     if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Overdue'];
     if (c && (c.proposal || c.status === 'repair')) return ['bad', 'Act today'];
-    if (needsDecision(c) && stageBucket(c) !== 'need') return ['bad', 'Act today'];
     var days = daysWaiting(c);
     if (days == null) return ['q', 'Wait unknown'];
     if (days >= 5) return ['warn', 'Waited ' + days + ' days'];

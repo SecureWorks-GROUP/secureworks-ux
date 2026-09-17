@@ -1190,8 +1190,7 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
         suburb: 'Canning Vale',
         status: 'needs_decision',
         tags: ['stratco'],
-        stage_name: stage.name,
-        stage_id: stage.id
+        stage_name: stage.name
       }, extra || {}));
     }
   }
@@ -1251,6 +1250,8 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.equal(tiles.waiting, 20);
   assert.equal(api.urgency(cases.find((c) => c.id === 'booked-0'))[1], 'Booked');
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'new-0'))[1], 'Act today');
+  assert.notEqual(api.urgency(cases.find((c) => c.id === 'lost-0'))[1], 'Act today');
+  assert.notEqual(api.urgency(cases.find((c) => c.id === 'quote-0'))[1], 'Act today');
   assert.equal(api.urgency(cases.find((c) => c.id === 'pres-0'))[1], 'Waiting');
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'pres-20'))[1], 'Waiting');
   assert.match(html, /New Lead \(Call \+ Qualify\)/);
@@ -1280,10 +1281,10 @@ test('Nithin queue groups by the 11 patio stages and folds quoted work', () => {
     coverage: { gaps: [] },
     diary: [],
     cases: [
-      { id: 'n1', display_name: 'Need contact', suburb: 'Carlisle', status: 'needs_decision', stage_id: stages[0].id, stage_name: stages[0].name },
-      { id: 'n2', display_name: 'Waiting reply', suburb: 'Merriwa', status: 'needs_decision', stage_id: stages[1].id, stage_name: stages[1].name },
+      { id: 'n1', display_name: 'Need contact', suburb: 'Carlisle', status: 'needs_decision', stage_name: stages[0].name },
+      { id: 'n2', display_name: 'Waiting reply', suburb: 'Merriwa', status: 'needs_decision', stage_name: 'Contacted Waiting on Response' },
       { id: 'n3', display_name: 'Booked visit', suburb: 'City Beach', status: 'needs_decision', stage_id: stages[3].id, stage_name: stages[3].name },
-      { id: 'n4', display_name: 'Quote owed', suburb: 'Balga', status: 'needs_decision', stage_id: stages[4].id, stage_name: stages[4].name }
+      { id: 'n4', display_name: 'Quote owed', suburb: 'Balga', status: 'needs_decision', stage_name: stages[4].name }
     ]
   };
   const names = api.queueGroups().map((g) => g[0]);
@@ -1325,11 +1326,11 @@ test('Marnin queue groups by the 14 fencing stages and folds quoted work', () =>
     diary_read: { read_ok: true, calendar_email: 'marnin@secureworkswa.com.au' },
     diary: [],
     cases: [
-      { id: 'm1', display_name: 'New stratco', suburb: 'Southern River', status: 'needs_decision', stage_id: stages[0].id, stage_name: stages[0].name },
-      { id: 'm2', display_name: 'Urgent scope', suburb: 'Piara Waters', status: 'needs_decision', stage_id: stages[6].id, stage_name: stages[6].name },
-      { id: 'm3', display_name: 'Closed booked', suburb: 'Canning Vale', status: 'needs_decision', stage_id: stages[7].id, stage_name: stages[7].name },
-      { id: 'm4', display_name: 'Complete quote', suburb: 'Harrisdale', status: 'needs_decision', stage_id: stages[9].id, stage_name: stages[9].name },
-      { id: 'm5', display_name: 'Replied no thread', suburb: 'Byford', status: 'needs_decision', stage_id: stages[1].id, stage_name: stages[1].name }
+      { id: 'm1', display_name: 'New stratco', suburb: 'Southern River', status: 'needs_decision', stage_name: stages[0].name },
+      { id: 'm2', display_name: 'Urgent scope', suburb: 'Piara Waters', status: 'needs_decision', stage_name: stages[6].name },
+      { id: 'm3', display_name: 'Closed booked', suburb: 'Canning Vale', status: 'needs_decision', stage_name: stages[7].name },
+      { id: 'm4', display_name: 'Complete quote', suburb: 'Harrisdale', status: 'needs_decision', stage_name: stages[9].name },
+      { id: 'm5', display_name: 'Replied no thread', suburb: 'Byford', status: 'needs_decision', stage_name: stages[1].name }
     ]
   };
   const names = api.queueGroups().map((g) => g[0]);

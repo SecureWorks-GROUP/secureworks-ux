@@ -6,6 +6,40 @@
   var DAY_START = 8;
   var DAY_END = 17;
   var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  var BOOKING_READ_TIMEOUT_MS = 60000;
+  // Live GHL stage ids copied from wiki origin/main
+  // harness/ops/skills/secureworks-scope-booking/profiles/{patio-nithin,fencing-stratco-marnin}.json
+  // pinned by https://github.com/SecureWorks-GROUP/secureworks-wiki/pull/438
+  var PIPELINE_STAGE_SOURCE = 'wiki origin/main harness/ops/skills/secureworks-scope-booking/profiles (https://github.com/SecureWorks-GROUP/secureworks-wiki/pull/438)';
+  var PATIO_PIPELINE_STAGES = [
+    { id: '09759a42-f80a-4947-bca4-71df5dd770da', name: 'Client Needs To Be Contacted', bucket: 'need' },
+    { id: '4d3bcf9a-185d-4a90-98e0-e0805fdf4a02', name: 'Contacted Waiting on Response', bucket: 'need' },
+    { id: '637c165f-93a3-496b-8e86-970eb8935044', name: 'Needs Scope / Quote', bucket: 'need' },
+    { id: '1c312cc2-b6f6-4aad-b3c0-a4b14784a5c5', name: 'Scope Booked', bucket: 'booked' },
+    { id: '9b9e5313-8e0e-4ed6-8654-d50413b99885', name: 'Scope Complete / Quote to be Sent', bucket: 'quote' },
+    { id: 'd2fb3af7-91e5-4317-b778-2be117341f07', name: 'Quote Sent / Follow up', bucket: 'fold' },
+    { id: 'a0f3002f-db71-4b69-842a-12930bdd7591', name: 'Job Won / Move to Execution', bucket: 'fold' },
+    { id: '2d3a57e2-3869-46f4-af10-ba2b53be802a', name: 'Nurture / On Hold (Nithin)', bucket: 'fold' },
+    { id: '52b35bd6-34fa-4bbb-8b43-67f4cc0f1029', name: 'Outside Service Area (Too Small)', bucket: 'fold' },
+    { id: '0f3c9b6b-2701-4fda-9cec-4da4a3530278', name: ' Job Lost/Archive', bucket: 'fold' },
+    { id: 'f9d4f3a3-f6bd-42c8-827d-340983ce0c87', name: 'Not Relevant /Archive', bucket: 'fold' }
+  ];
+  var FENCING_PIPELINE_STAGES = [
+    { id: 'cc401467-4743-4dbd-a7d7-e8f2ff023dd2', name: 'New Lead (Call + Qualify)', bucket: 'need' },
+    { id: '7f863a14-1d9f-4a18-b73c-0e1780390bd7', name: 'New Lead (Replied/ Contacted)', bucket: 'need' },
+    { id: '8c43212e-5e58-4f0d-b7f7-96c6ee644d6e', name: 'Stale Lead', bucket: 'need' },
+    { id: '341d6a77-6a35-4338-b2b0-09236c7c80f9', name: 'Called, No Answer', bucket: 'need' },
+    { id: '52c70bff-5cf3-447b-b891-03c30486aed8', name: 'Call Answered (presentation not made)', bucket: 'need' },
+    { id: '6b101809-a4f9-440d-ac4c-0be669b8173e', name: 'Presentation Made (scope not booked)', bucket: 'need' },
+    { id: 'bfdba902-0a92-4a90-95a5-af27d7502a90', name: 'Needs On Site Scope Urgently', bucket: 'need' },
+    { id: '09eeb872-fa46-41fc-a96b-8a8d2bc12215', name: 'Lead Closed (scope booked)', bucket: 'booked' },
+    { id: '4dc3da8f-d713-4bd4-851c-8e89b6682a4e', name: 'Scope Scheduled', bucket: 'booked' },
+    { id: '418534d4-6356-4c20-a274-51fbb892c2fa', name: 'Scope Complete', bucket: 'quote' },
+    { id: '02476ea1-6ef4-4b73-80fa-7d685c016bf7', name: 'Following up Quote Sent (Site visit)', bucket: 'fold' },
+    { id: '338b7dd7-7220-4abc-bc0b-b8d9ea44f40e', name: 'Job Accepted -> Move to Execution', bucket: 'fold' },
+    { id: '9cae7ae3-142a-4864-9a2e-bb04a3fb94fb', name: 'On Hold', bucket: 'fold' },
+    { id: '005d078d-047d-436f-abdf-584a3b794584', name: 'Job Lost', bucket: 'fold' }
+  ];
   var RESOURCES = {
     nithin: {
       id: 'nithin',
@@ -16,7 +50,9 @@
       sender_label: 'SecureWorks Patios 774',
       sender_resolved: true,
       sender_sources: ['secureworks-patio-scope-booking/SKILL.md'],
-      desk_rules: { monday_from: 12, no_wednesday: true, last_start: 15.5, hours: '08:00-16:30 except Monday from 12:00, no Wednesday' }
+      desk_rules: { monday_from: 12, no_wednesday: true, last_start: 15.5, hours: '08:00-16:30 except Monday from 12:00, no Wednesday' },
+      pipeline_stages: PATIO_PIPELINE_STAGES,
+      pipeline_stages_source: PIPELINE_STAGE_SOURCE
     },
     marnin: {
       id: 'marnin',
@@ -35,7 +71,9 @@
         { number: '+61489267772', label: 'SecureWorks Fencing Sales 772', source: 'CIO-to-FENCING_SALES-marnin-calendar-2026-09-11.md' },
         { number: '+61489267776', label: 'SecureWorks Group Ops 776', source: 'SALES-booking-page-audit.md; OPS.md automated booking-path exemption' }
       ],
-      desk_rules: { monday_from: 8, no_wednesday: false, days: [1, 4], lane_note: 'Stratco scopes are offered Tue and Fri', last_start: 15.5, protected_band: { day: 1, from: 13, to: 15.5, label: 'Canning Vale band', note: '13:00 to 15:30 protected' }, hours: 'Stratco lane is Tuesday and Friday; Canning Vale band Tue 13:00 to 15:30 protected' }
+      desk_rules: { monday_from: 8, no_wednesday: false, days: [1, 4], lane_note: 'Stratco scopes are offered Tue and Fri', last_start: 15.5, protected_band: { day: 1, from: 13, to: 15.5, label: 'Canning Vale band', note: '13:00 to 15:30 protected' }, hours: 'Stratco lane is Tuesday and Friday; Canning Vale band Tue 13:00 to 15:30 protected' },
+      pipeline_stages: FENCING_PIPELINE_STAGES,
+      pipeline_stages_source: PIPELINE_STAGE_SOURCE
     },
     khairo: {
       id: 'khairo',
@@ -46,7 +84,9 @@
       sender_label: 'SecureWorks Fencing Sales 772',
       sender_resolved: true,
       sender_sources: ['OPS.md fencing sales line'],
-      desk_rules: { monday_from: 8, no_wednesday: false, last_start: 15.5, hours: '08:00-16:30 Mon-Fri; Calendly is not this calendar' }
+      desk_rules: { monday_from: 8, no_wednesday: false, last_start: 15.5, hours: '08:00-16:30 Mon-Fri; Calendly is not this calendar' },
+      pipeline_stages: FENCING_PIPELINE_STAGES,
+      pipeline_stages_source: PIPELINE_STAGE_SOURCE
     }
   };
 
@@ -160,7 +200,26 @@
   }
 
   function cases() {
-    return (state.data && state.data.cases) || [];
+    var data = state.data;
+    if (!data) return [];
+    var raw = data.cases;
+    if (Array.isArray(raw)) {
+      return raw.filter(function (c) { return c && typeof c === 'object'; });
+    }
+    // Live ops-api may summarise the roster as a count. Thread facts still carry
+    // the rows that were actually read; render those rather than crashing to zeros.
+    var facts = data.thread_facts || {};
+    return Object.keys(facts).map(function (id) {
+      var f = facts[id] || {};
+      return {
+        id: id,
+        contact_id: f.contact_id || null,
+        display_name: 'Enquiry',
+        suburb: null,
+        status: 'needs_decision',
+        reason: 'Thread fact from the bounded booking read.'
+      };
+    });
   }
 
   function events() {
@@ -425,7 +484,11 @@
   }
 
   function visibleCases() {
-    return cases().filter(function (c) { return matchesFilter(c) && matchesSearch(c); });
+    return cases().filter(function (c) {
+      if (!matchesFilter(c) || !matchesSearch(c)) return false;
+      if (isFoldedStage(c)) return false;
+      return true;
+    });
   }
 
   function root() {
@@ -454,17 +517,29 @@
   }
 
   function coverageGaps(data) {
-    var gaps = [];
     if (!data) return ['No booking workspace read yet.'];
     var cov = data.coverage || {};
-    (cov.gaps || []).forEach(function (g) { gaps.push(g); });
-    if (cov.operational_leave === 'not_read' || (data.resource && data.resource.calendar && data.resource.calendar.leave === 'not_read')) {
-      gaps.push('Operational leave was not read.');
-    }
-    if (cov.non_primary_calendars === 'not_read') gaps.push('Other calendars were not read.');
-    if (cov.full_population !== true) gaps.push('This queue is not the full enquiry population.');
-    if (!diary().length) gaps.push('No provider events in this response.');
+    var gaps = [];
+    (cov.gaps || []).forEach(function (g) { gaps.push(String(g)); });
     return gaps;
+  }
+
+  function calendarUnread(data) {
+    if (!data) return false;
+    if (data.diary_read && data.diary_read.read_ok === false) return true;
+    if (data.coverage && data.coverage.diary_read_ok === false) return true;
+    var cal = data.resource && data.resource.calendar;
+    if (cal && cal.ok === false) return true;
+    return false;
+  }
+
+  function calendarMailbox(data) {
+    var diary = data && data.diary_read;
+    if (diary && diary.calendar_email) return diary.calendar_email;
+    var cal = data && data.resource && data.resource.calendar;
+    if (cal && cal.mailbox) return cal.mailbox;
+    if (diary && diary.source) return diary.source;
+    return 'not retrieved';
   }
 
   // ---------------------------------------------------------------------------
@@ -520,36 +595,85 @@
     return (c && facts[c.id]) || null;
   }
 
+  function normaliseStageName(name) {
+    return String(name || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+  }
+
+  function stageOf(c) {
+    if (!c) return null;
+    var stages = (resource().pipeline_stages || []);
+    var id = c.stage_id || c.pipeline_stage_id || c.pipelineStageId || '';
+    var name = normaliseStageName(c.stage_name || c.pipeline_stage || c.pipelineStage);
+    var found = null;
+    stages.forEach(function (stage) {
+      if (found) return;
+      if (id && stage.id === id) found = stage;
+      else if (name && normaliseStageName(stage.name) === name) found = stage;
+    });
+    return found;
+  }
+
+  function stageBucket(c) {
+    var stage = stageOf(c);
+    if (stage) return stage.bucket;
+    if (isArchived(c) || (isCompleted(c) && c.quote_sent)) return 'fold';
+    if (c && isCompleted(c) && !c.quote_sent) return 'quote';
+    if (c && (c.status === 'booked' || c.status === 'confirmed')) return 'booked';
+    if (c && (c.reason || c.proposal)) return 'need';
+    return 'unmapped';
+  }
+
+  function isFoldedStage(c) {
+    var bucket = stageBucket(c);
+    return bucket === 'fold' || bucket === 'quote';
+  }
+
   // ---------------------------------------------------------------------------
   // Queue grouping, urgency and the follow-through counts.
   // ---------------------------------------------------------------------------
   function isBooked(c) {
+    if (stageBucket(c) === 'booked') return true;
     return !!c && (c.status === 'booked' || c.status === 'confirmed');
   }
 
+  function derivedStatus(c) {
+    var facts = threadFacts(c);
+    if (facts && facts.read_ok) {
+      if (facts.classification === 'waiting_reply') return 'waiting';
+      if (facts.classification === 'follow_up_due') return 'follow_up';
+      if (facts.classification === 'ready_to_contact') return 'ready';
+    }
+    return (c && c.status) || 'needs_decision';
+  }
+
   function needsDecision(c) {
-    return !!c && (c.status === 'needs_decision' || c.status === 'repair');
+    var status = derivedStatus(c);
+    return !!c && (status === 'needs_decision' || status === 'repair');
   }
 
   function isWaiting(c) {
-    return !!c && (c.status === 'waiting' || c.status === 'offer');
+    var status = derivedStatus(c);
+    if (!!c && (status === 'waiting' || status === 'offer')) return true;
+    var stage = stageOf(c);
+    return !!(stage && /waiting on response|replied\/ contacted/i.test(stage.name));
   }
 
-  // An enumerated CRM row is not an assessed enquiry. Until the engine has derived a
-  // status for a case, it may not be counted as demand, ranked for urgency, or offered
-  // as stampable. It stays visible and findable in its own queue group instead.
+  // A row in a known pipeline stage is visit/reply/quote demand. Engine
+  // reason/proposal still marks a row assessed when the stage map missed it.
   function isAssessed(c) {
     if (!c) return false;
     if (typeof c.assessed === 'boolean') return c.assessed;
+    if (stageOf(c)) return true;
     return !!(c.reason || c.proposal);
   }
 
   function isToBook(c) {
-    if (!c || isArchived(c) || isCompleted(c) || isBooked(c)) return false;
-    return true;
+    if (!c || isArchived(c) || isCompleted(c) || isBooked(c) || isFoldedStage(c)) return false;
+    return stageBucket(c) === 'need';
   }
 
   function quoteOutstanding(c) {
+    if (stageBucket(c) === 'quote') return true;
     return !!c && isCompleted(c) && !c.quote_sent;
   }
 
@@ -580,7 +704,7 @@
     if (!isAssessed(c)) return ['', 'Not assessed'];
     if (isCompleted(c)) return c.quote_sent ? ['ok', 'Quoted'] : ['warn', 'Quote to send'];
     if (needsDecision(c)) return ['bad', 'Act today'];
-    if (c.status === 'follow_up') return ['bad', 'Overdue'];
+    if (c.status === 'follow_up' || derivedStatus(c) === 'follow_up') return ['bad', 'Overdue'];
     if (isWaiting(c)) return ['q', 'Waiting'];
     if (isBooked(c)) return ['ok', 'Booked'];
     var days = daysWaiting(c);
@@ -591,36 +715,58 @@
 
   function queueGroups() {
     var list = visibleCases();
-    return [
-      ['Scope to be booked', list.filter(function (c) { return isToBook(c) && isAssessed(c); }).sort(function (a, b) {
-        var rank = function (c) { return needsDecision(c) ? 0 : c.status === 'follow_up' ? 1 : isWaiting(c) ? 3 : 2; };
+    var stages = (resource().pipeline_stages || []).filter(function (stage) {
+      return stage.bucket === 'need' || stage.bucket === 'booked';
+    });
+    var grouped = stages.map(function (stage) {
+      return [stage.name, list.filter(function (c) {
+        var found = stageOf(c);
+        return !!(found && found.id === stage.id);
+      }).sort(function (a, b) {
+        var rank = function (c) { return needsDecision(c) ? 0 : derivedStatus(c) === 'follow_up' ? 1 : isWaiting(c) ? 3 : 2; };
         var d = rank(a) - rank(b);
         if (d) return d;
         return (daysWaiting(b) || 0) - (daysWaiting(a) || 0);
-      })],
-      ['Scope booked', list.filter(isBooked).sort(function (a, b) {
-        return String((a.proposal && a.proposal.start_iso) || '') < String((b.proposal && b.proposal.start_iso) || '') ? -1 : 1;
-      })],
-      ['Visited, quote to send', list.filter(quoteOutstanding)],
-      ['Enumerated, not yet assessed', list.filter(function (c) { return isToBook(c) && !isAssessed(c); })]
-    ];
+      })];
+    });
+    var placed = {};
+    grouped.forEach(function (g) {
+      g[1].forEach(function (c) { placed[c.id] = true; });
+    });
+    ['need', 'booked'].forEach(function (bucket) {
+      var leftover = list.filter(function (c) { return !placed[c.id] && stageBucket(c) === bucket; });
+      if (!leftover.length) return;
+      var target = null;
+      stages.forEach(function (stage, i) {
+        if (!target && stage.bucket === bucket) target = grouped[i];
+      });
+      if (target) {
+        target[1] = target[1].concat(leftover);
+        leftover.forEach(function (c) { placed[c.id] = true; });
+      }
+    });
+    grouped.push(['Enumerated, not yet assessed', list.filter(function (c) {
+      return !placed[c.id] && stageBucket(c) === 'unmapped';
+    })]);
+    return grouped;
   }
 
   function foldedCases() {
-    return cases().filter(function (c) { return isArchived(c) || (isCompleted(c) && c.quote_sent); });
+    return cases().filter(function (c) {
+      return isArchived(c) || (isCompleted(c) && c.quote_sent) || isFoldedStage(c);
+    });
   }
 
   // Follow-through counts. Captain default for v1 is the "this week plus last" window;
   // it is the window the backend was asked for, so the tiles count what came back.
   function followThrough() {
     var all = cases().filter(function (c) { return !isArchived(c); });
-    var list = all.filter(isAssessed);
     return {
-      to_book: list.filter(function (c) { return isToBook(c) && !isWaiting(c); }).length,
-      waiting: list.filter(isWaiting).length,
-      booked: list.filter(isBooked).length,
-      quotes: list.filter(quoteOutstanding).length,
-      unassessed: all.filter(function (c) { return !isAssessed(c); }).length
+      to_book: all.filter(function (c) { return isToBook(c) && !isWaiting(c); }).length,
+      waiting: all.filter(isWaiting).length,
+      booked: all.filter(isBooked).length,
+      quotes: all.filter(quoteOutstanding).length,
+      unassessed: all.filter(function (c) { return stageBucket(c) === 'unmapped' && !(c.reason || c.proposal); }).length
     };
   }
 
@@ -768,7 +914,9 @@
       p && p.customer_date_specified ? 'Customer date' : 'AI date']);
     chips.push([c && c.exact_acceptance ? 'ok' : '', c && c.exact_acceptance ? 'Acceptance bound' : 'No acceptance']);
     if (facts && facts.read_ok === false) chips.push(['bad', 'Thread not read']);
-    else if (facts && facts.quiet_window) chips.push(['warn', 'Quiet ' + facts.quiet_window]);
+    else if (facts && facts.quiet_window) {
+      chips.push(['warn', 'Quiet ' + (typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window')]);
+    }
     if (c && c.send_evidence === 'sent') chips.push(['warn', 'Offer already out']);
     if (blockingDiaryEvent(c)) chips.push(['bad', 'Slot still held']);
     return chips;
@@ -794,7 +942,7 @@
     var facts = threadFacts(c);
     var quiet = facts && facts.read_ok === false
       ? ' · thread not read'
-      : (facts && facts.quiet_window ? ' · quiet ' + esc(facts.quiet_window) : '');
+      : (facts && facts.quiet_window ? ' · quiet ' + esc(typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window') : '');
     return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
       '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(c.suburb || 'Suburb unknown') + '</span>' +
       '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
@@ -930,6 +1078,12 @@
     var data = state.data;
     var res = resource();
     var cal = data && data.resource && data.resource.calendar;
+    if (calendarUnread(data)) {
+      var reason = (data.diary_read && (data.diary_read.reason || data.diary_read.source))
+        || (cal && cal.error)
+        || 'This resource has no verified provider calendar.';
+      return '<div class="unknown unknownstaff"><h3>Calendar not connected</h3><p>' + esc(reason) + '</p><p class="small">Missing coverage is not a free week.</p></div>';
+    }
     if (data && cal && cal.ok === false) {
       return '<div class="unknown unknownstaff"><h3>Calendar not connected</h3><p>' + esc(cal.error || 'This resource has no verified provider calendar.') + '</p><p class="small">Missing coverage is not a free week.</p></div>';
     }
@@ -1146,7 +1300,9 @@
     // Only lines that carry a proposed time are stampable: a KEEP on a case with no
     // proposal would decide nothing. The count of live cases held back is stated so a
     // short board never reads as a short week.
-    var live = cases().filter(function (c) { return !isArchived(c) && !isCompleted(c); });
+    var live = cases().filter(function (c) {
+      return !isArchived(c) && !isCompleted(c) && !isFoldedStage(c);
+    });
     // A cancelled job whose diary event is still there is not a line to offer; the slot
     // is blocked until the delete reads back. Everything else with a proposed time is
     // stampable, cautions and all.
@@ -1201,12 +1357,20 @@
   function renderHTML() {
     var res = resource();
     var data = state.data;
-    var cal = data && data.resource && data.resource.calendar;
-    var mailbox = cal && cal.mailbox ? cal.mailbox : 'not retrieved';
+    var mailbox = calendarMailbox(data);
     var notice = state.error
       ? '<div class="notice error" role="alert">' + esc(state.error) + '</div>'
-      : (state.loading ? '<div class="notice" role="status">Reading the provider calendar…</div>' : '');
-    var gaps = coverageGaps(data).map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('');
+      : (state.loading ? '<div class="notice" role="status">Reading the provider calendar and GHL enquiries. This can take up to a minute.</div>' : '');
+    if (state.loading && !data) {
+      return '<div class="page"><div class="pagehead">' +
+        '<div><h1>Build the week</h1><p>' + esc(state.weekStart) + ' week · ' + esc(res.name) + ' · ' + esc(res.lane) + '</p></div></div>' +
+        notice +
+        '<div class="unknown"><h3>Reading this week</h3><p>Live booking read is in flight. Tiles stay blank until that read returns, so an empty week is not shown as a finished one.</p></div></div>';
+    }
+    var gaps = coverageGaps(data);
+    var gapStrip = gaps.length
+      ? '<div class="notice" role="status"><strong>Coverage</strong><ul>' + gaps.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul></div>'
+      : '';
     var route = resolveSender(res);
     var scopers = V1_SCOPERS.map(function (id) {
       return '<button type="button" data-booking-resource-btn="' + id + '" aria-pressed="' + (id === state.resourceId) + '">' + esc(RESOURCES[id].name) + '</button>';
@@ -1219,7 +1383,7 @@
       '<div class="scopers" role="group" aria-label="Scoper">' + scopers + '</div>' +
       '<span class="lane ' + esc(res.lane) + '">' + esc(res.lane === 'patio' ? 'Patio' : 'Fencing') + ' · ' + esc(route.resolved ? route.number.slice(-3) : 'line unresolved') + '</span>' +
       (hidden.length ? '<span class="pill q" title="Captain default for v1. Flip V1_SCOPERS to add them.">v1: ' + esc(CAPTAIN_DEFAULTS.scopers) + ' · ' + esc(hidden.join(', ')) + ' later</span>' : '') +
-      '</div></div>' + notice +
+      '</div></div>' + notice + gapStrip +
       '<div class="notice">Source ' + esc(mailbox) + ' · week of ' + esc(state.weekStart) + ' · Australia/Perth · rules: ' + esc(res.desk_rules.hours) + '</div>' +
       renderWeekTruth() +
       '<div class="scopesdone">' + renderTiles() + '</div>' +
@@ -1227,19 +1391,22 @@
       '<section class="panel queue"><div class="panelhead"><h2>Work queue</h2><span class="count">' + visibleCases().length + ' people</span></div>' +
       '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div></div>' +
       '<div class="queuelist">' + renderQueue() + '</div>' +
-      '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>CRM stage does not remove a row. Archive and completion are deliberate.</div></section>' +
+      '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>Quoted, won, lost and archived stages are folded. Stages copied from ' + esc(res.pipeline_stages_source || 'the live GHL profile') + '.</div></section>' +
       '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2></div>' +
       '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
       '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
       renderStampBoard() +
-      '<details class="notice" style="margin-top:16px"><summary>Coverage</summary><ul>' + gaps + '</ul>' +
-      '<p class="small">An enumeration of opportunity rows is not qualified visit demand. Stage-only unresolved cases stay on the audit queue.</p></details></div>';
+      '</div>';
   }
 
   function render() {
     var el = root();
     if (!el) return;
-    el.innerHTML = renderHTML();
+    try {
+      el.innerHTML = renderHTML();
+    } catch (err) {
+      el.innerHTML = '<div class="notice error" role="alert">Booking door failed to render: ' + esc(err && err.message ? err.message : err) + '</div>';
+    }
     var view = global.document.getElementById('viewSales');
     if (view) {
       view.classList.toggle('sales-sub-booking', state.subtab === 'booking');
@@ -1291,14 +1458,30 @@
 
   async function bookingRead(params) {
     var preview = global.SALES_BOOKING_PREVIEW_URL;
-    if (preview) {
-      var url = preview + '?resource=' + encodeURIComponent(params.resource) + '&week_start=' + encodeURIComponent(params.week_start);
-      var resp = await global.fetch(url, { cache: 'no-store' });
-      if (!resp.ok) throw new Error('Preview calendar read failed (' + resp.status + ')');
-      return resp.json();
+    var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = null;
+    if (controller && typeof global.setTimeout === 'function') {
+      timer = global.setTimeout(function () {
+        controller.abort();
+      }, BOOKING_READ_TIMEOUT_MS);
     }
-    if (typeof global.opsFetch !== 'function') throw new Error('Authenticated Ops read is not available.');
-    return global.opsFetch('sales_booking_read', params);
+    try {
+      if (preview) {
+        var url = preview + '?resource=' + encodeURIComponent(params.resource) + '&week_start=' + encodeURIComponent(params.week_start);
+        var resp = await global.fetch(url, { cache: 'no-store', signal: controller && controller.signal });
+        if (!resp.ok) throw new Error('Preview calendar read failed (' + resp.status + ')');
+        return resp.json();
+      }
+      if (typeof global.opsFetch !== 'function') throw new Error('Authenticated Ops read is not available.');
+      return global.opsFetch('sales_booking_read', params, controller ? { signal: controller.signal } : undefined);
+    } catch (e) {
+      if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))) {
+        throw new Error('Booking read timed out after ' + Math.round(BOOKING_READ_TIMEOUT_MS / 1000) + ' seconds.');
+      }
+      throw e;
+    } finally {
+      if (timer && typeof global.clearTimeout === 'function') global.clearTimeout(timer);
+    }
   }
 
   async function load(resourceId, weekStart) {
@@ -1522,7 +1705,13 @@
     hasBlockingCommitment: hasBlockingCommitment,
     show: showSales,
     coverageGaps: coverageGaps,
+    calendarUnread: calendarUnread,
     bookingRead: bookingRead,
+    BOOKING_READ_TIMEOUT_MS: BOOKING_READ_TIMEOUT_MS,
+    PIPELINE_STAGE_SOURCE: PIPELINE_STAGE_SOURCE,
+    stageOf: stageOf,
+    stageBucket: stageBucket,
+    cases: cases,
     V1_SCOPERS: V1_SCOPERS,
     CAPTAIN_DEFAULTS: CAPTAIN_DEFAULTS,
     HOLD_REASON: HOLD_REASON,
@@ -1537,6 +1726,7 @@
     isAssessed: isAssessed,
     daysWaiting: daysWaiting,
     queueGroups: queueGroups,
+    foldedCases: foldedCases,
     followThrough: followThrough,
     stampCase: stampCase,
     stampRecord: stampRecord,

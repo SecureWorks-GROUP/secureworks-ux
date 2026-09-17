@@ -97,9 +97,15 @@ time and name, then address and suburb, then job.
 
 ## Queue
 
-Grouped by stage: Scope to be booked, Scope booked, Visited quote to send, Enumerated not
-yet assessed, plus a fold for quoted and archived. Each row carries name and suburb, job,
-enquiry date with days waited, and an urgency tag.
+Grouped by the live GHL pipeline stages copied into `RESOURCES.*.pipeline_stages`
+from wiki `harness/ops/skills/secureworks-scope-booking/profiles/{patio-nithin,fencing-stratco-marnin}.json`
+(PR https://github.com/SecureWorks-GROUP/secureworks-wiki/pull/438). Scope-needing
+stages and booked-not-yet-visited stages render first. Quoted, won, lost and
+archived stages fold under **Show quoted and archived**. Rows with no matching
+stage stay in **Enumerated, not yet assessed**. Tiles count those groups.
+`sales_booking_read` may take ~20s; the client waits 60s. A failed calendar
+(`diary_read.read_ok:false`) shows "Calendar not connected" and still paints the
+queue and thread facts. Coverage gaps render verbatim.
 
 ## Preview
 

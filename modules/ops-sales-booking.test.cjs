@@ -248,16 +248,20 @@ function hostElement(id, attrs) {
 function salesHost() {
   const viewSales = hostElement('viewSales');
   const viewToday = hostElement('viewToday');
+  const viewApprovals = hostElement('viewApprovals');
+  viewApprovals.style.display = 'flex';
   const bookingRoot = hostElement('salesBookingRoot');
   const performanceRoot = hostElement('salesPerformanceRoot');
   const desktopSales = hostElement('', { 'data-view': 'sales' });
   const mobileSales = hostElement('', { 'data-view': 'sales' });
+  const desktopApprovals = hostElement('', { 'data-view': 'approvals' });
   const perfTab = hostElement('', { 'data-sales-tab': 'performance' });
   const bookTab = hostElement('', { 'data-sales-tab': 'booking' });
   const body = hostElement('body');
   const byId = {
     viewSales,
     viewToday,
+    viewApprovals,
     salesBookingRoot: bookingRoot,
     salesPerformanceRoot: performanceRoot,
     salesWorkspaceSubnav: hostElement('salesWorkspaceSubnav'),
@@ -266,10 +270,12 @@ function salesHost() {
   return {
     viewSales,
     viewToday,
+    viewApprovals,
     bookingRoot,
     performanceRoot,
     desktopSales,
     mobileSales,
+    desktopApprovals,
     perfTab,
     bookTab,
     body,
@@ -277,10 +283,11 @@ function salesHost() {
       body,
       getElementById: (id) => byId[id] || null,
       querySelectorAll: (sel) => {
-        if (sel === '.view') return [viewSales, viewToday];
-        if (sel === '.header-nav button') return [desktopSales];
+        if (sel === '.view') return [viewSales, viewToday, viewApprovals];
+        if (sel === '.header-nav button') return [desktopSales, desktopApprovals];
         if (sel === '.mobile-nav button') return [mobileSales];
         if (sel === '[data-view="sales"]') return [desktopSales, mobileSales];
+        if (sel === '[data-view="approvals"]') return [desktopApprovals];
         if (sel === '#salesWorkspaceSubnav [data-sales-tab]') return [perfTab, bookTab];
         return [];
       },
@@ -347,6 +354,15 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
     assert.equal(host.bookTab.getAttribute('aria-selected'), 'true');
     assert.match(host.bookingRoot.innerHTML, /Sample A/);
     assert.equal(store.sw_ops_sales_tab, 'booking');
+    assert.equal(host.viewApprovals.classList.contains('active'), false);
+    assert.equal(host.viewApprovals.style.display, '');
+    assert.ok(host.body.classList.contains('sales-booking-view-active'));
+
+    ctx.showView('approvals');
+    assert.ok(host.viewApprovals.classList.contains('active'));
+    assert.equal(host.viewSales.classList.contains('active'), false);
+    assert.ok(host.body.classList.contains('approvals-view-active'));
+    assert.equal(host.body.classList.contains('sales-booking-view-active'), false);
 
     ctx.showView('performance');
     await waitUntil(() => performance.state.data && !performance.state.loading);
@@ -720,11 +736,17 @@ test('a cancelled thread whose diary event survives keeps the slot blocked, not 
   assert.notEqual(api.caseLayer({ id: 'x', status: 'repair', proposal: c.proposal }), 'blocked');
 });
 
-test('the queue groups by stage and states an unread enquiry date rather than faking one', () => {
+test('the queue groups by real GHL pipeline stages and states an unread enquiry date rather than faking one', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
   const groups = api.queueGroups().map((g) => g[0]);
-  assert.deepEqual(groups, ['Scope to be booked', 'Scope booked', 'Visited, quote to send', 'Enumerated, not yet assessed']);
+  assert.deepEqual(groups, [
+    'Client Needs To Be Contacted',
+    'Contacted Waiting on Response',
+    'Needs Scope / Quote',
+    'Scope Booked',
+    'Enumerated, not yet assessed'
+  ]);
   const html = api.renderHTML();
   assert.match(html, /Came in Monday 7 September/);
   assert.match(html, /Flat patio, 6 x 4/);
@@ -817,7 +839,7 @@ test('an enumerated CRM row is findable but is never counted or ranked as demand
   assert.equal(f.unassessed, 1);
   assert.equal(f.to_book, 1, 'the raw row must not inflate the demand tile');
   const groups = api.queueGroups();
-  const toBook = groups.find((g) => g[0] === 'Scope to be booked')[1].map((c) => c.id);
+  const toBook = groups.find((g) => g[0] === 'Client Needs To Be Contacted')[1].map((c) => c.id);
   const raw = groups.find((g) => g[0] === 'Enumerated, not yet assessed')[1].map((c) => c.id);
   assert.ok(!toBook.includes('raw-1'));
   assert.deepEqual(raw, ['raw-1']);
@@ -1050,4 +1072,227 @@ test('two proposals at the same time both render on the week', () => {
   assert.match(html, /data-booking-case="case-a"[^>]*style="left:calc\(0%/);
   assert.match(html, /data-booking-case="case-c"[^>]*style="left:calc\(50%/);
   assert.match(html, /Clashing enquiry/);
+});
+
+test('booking read timeout is at least 60 seconds', () => {
+  assert.equal(api.BOOKING_READ_TIMEOUT_MS >= 60000, true);
+});
+
+test('a 20s live shape with failed calendar still paints the queue and tiles', () => {
+  api.state.resourceId = 'marnin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  api.state.error = null;
+  api.state.loading = false;
+  const stages = api.RESOURCES.marnin.pipeline_stages;
+  const need = stages.find((s) => s.name === 'New Lead (Call + Qualify)');
+  const waitStage = stages.find((s) => s.name === 'Presentation Made (scope not booked)');
+  const booked = stages.find((s) => s.name === 'Scope Scheduled');
+  const quote = stages.find((s) => s.name === 'Scope Complete');
+  const lost = stages.find((s) => s.name === 'Job Lost');
+  const cases = [];
+  const thread_facts = {};
+  function push(count, stage, prefix, extra) {
+    for (let i = 0; i < count; i++) {
+      const id = prefix + '-' + i;
+      cases.push(Object.assign({
+        id,
+        resource_id: 'marnin',
+        opportunity_id: id,
+        contact_id: 'c-' + id,
+        display_name: prefix + ' ' + i,
+        suburb: 'Canning Vale',
+        status: 'needs_decision',
+        tags: ['stratco'],
+        stage_name: stage.name,
+        stage_id: stage.id
+      }, extra || {}));
+    }
+  }
+  push(400, need, 'new');
+  push(80, waitStage, 'pres');
+  push(50, booked, 'booked');
+  push(20, quote, 'quote');
+  push(460, lost, 'lost');
+  assert.equal(cases.length, 1010);
+  for (let i = 0; i < 80; i++) {
+    const id = 'pres-' + i;
+    thread_facts[id] = {
+      case_id: id,
+      contact_id: 'c-' + id,
+      read_ok: i < 63,
+      reason: i < 63 ? null : 'thread_http_500',
+      quiet_window: i < 10,
+      classification: i < 20 && i < 63 ? 'waiting_reply' : 'needs_decision',
+      message_count: 2,
+      template_outbound_count: 0
+    };
+  }
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    send_hold: true,
+    resource: {
+      resource_id: 'marnin',
+      lane: 'fencing',
+      pipeline_id: 'I9t8njpuR0Dm7B2NDcvI',
+      scoper_user_id: '706c5258-70dd-483a-b36c-af6864b24498',
+      sender_line: '776'
+    },
+    week_start: '2026-09-14',
+    coverage: {
+      full_population: true,
+      enumerated: 1010,
+      threads_attempted: 80,
+      threads_read: 63,
+      diary_read_ok: false,
+      gaps: [
+        '930 case(s) had no thread read (row budget reached)',
+        '17 thread read(s) failed'
+      ]
+    },
+    diary_read: { read_ok: false, reason: 'calendar_http_403', source: 'outlook_primary' },
+    thread_facts,
+    diary: [],
+    cases
+  };
+  assert.equal(api.calendarUnread(api.state.data), true);
+  const html = api.renderHTML();
+  const tiles = api.followThrough();
+  assert.equal(tiles.to_book > 0, true);
+  assert.equal(tiles.booked, 50);
+  assert.equal(tiles.quotes, 20);
+  assert.match(html, /New Lead \(Call \+ Qualify\)/);
+  assert.match(html, /Scope Scheduled/);
+  assert.match(html, /Calendar not connected/);
+  assert.match(html, /calendar_http_403/);
+  assert.match(html, /Missing coverage is not a free week/);
+  assert.match(html, /930 case\(s\) had no thread read \(row budget reached\)/);
+  assert.match(html, /17 thread read\(s\) failed/);
+  assert.doesNotMatch(html, /Source not retrieved/);
+  assert.match(html, /outlook_primary/);
+  assert.match(html, /<span class="count">[1-9][0-9]* people/);
+});
+
+test('Nithin queue groups by the 11 patio stages and folds quoted work', () => {
+  api.state.resourceId = 'nithin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  const stages = api.RESOURCES.nithin.pipeline_stages;
+  assert.equal(stages.length, 11);
+  assert.match(api.RESOURCES.nithin.pipeline_stages_source, /secureworks-wiki\/pull\/438/);
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'nithin', calendar: { ok: true, mailbox: 'nithin@secureworkswa.com.au' } },
+    coverage: { gaps: [] },
+    diary: [],
+    cases: [
+      { id: 'n1', display_name: 'Need contact', suburb: 'Carlisle', status: 'needs_decision', stage_id: stages[0].id, stage_name: stages[0].name },
+      { id: 'n2', display_name: 'Waiting reply', suburb: 'Merriwa', status: 'needs_decision', stage_id: stages[1].id, stage_name: stages[1].name },
+      { id: 'n3', display_name: 'Booked visit', suburb: 'City Beach', status: 'needs_decision', stage_id: stages[3].id, stage_name: stages[3].name },
+      { id: 'n4', display_name: 'Quote owed', suburb: 'Balga', status: 'needs_decision', stage_id: stages[4].id, stage_name: stages[4].name }
+    ]
+  };
+  const names = api.queueGroups().map((g) => g[0]);
+  assert.deepEqual(names, [
+    'Client Needs To Be Contacted',
+    'Contacted Waiting on Response',
+    'Needs Scope / Quote',
+    'Scope Booked',
+    'Enumerated, not yet assessed'
+  ]);
+  assert.deepEqual(api.queueGroups()[0][1].map((c) => c.id), ['n1']);
+  assert.deepEqual(api.queueGroups()[1][1].map((c) => c.id), ['n2']);
+  assert.deepEqual(api.queueGroups()[3][1].map((c) => c.id), ['n3']);
+  assert.equal(api.queueGroups().some((g) => g[1].some((c) => c.id === 'n4')), false);
+  api.state.showArchived = true;
+  assert.equal(api.foldedCases().some((c) => c.id === 'n4'), true);
+  const tiles = api.followThrough();
+  assert.equal(tiles.to_book, 1);
+  assert.equal(tiles.waiting, 1);
+  assert.equal(tiles.booked, 1);
+  assert.equal(tiles.quotes, 1);
+});
+
+test('Marnin queue groups by the 14 fencing stages and folds quoted work', () => {
+  api.state.resourceId = 'marnin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.showArchived = false;
+  const stages = api.RESOURCES.marnin.pipeline_stages;
+  assert.equal(stages.length, 14);
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin' },
+    coverage: { gaps: ['leave unread'] },
+    diary_read: { read_ok: true, calendar_email: 'marnin@secureworkswa.com.au' },
+    diary: [],
+    cases: [
+      { id: 'm1', display_name: 'New stratco', suburb: 'Southern River', status: 'needs_decision', stage_id: stages[0].id, stage_name: stages[0].name },
+      { id: 'm2', display_name: 'Urgent scope', suburb: 'Piara Waters', status: 'needs_decision', stage_id: stages[6].id, stage_name: stages[6].name },
+      { id: 'm3', display_name: 'Closed booked', suburb: 'Canning Vale', status: 'needs_decision', stage_id: stages[7].id, stage_name: stages[7].name },
+      { id: 'm4', display_name: 'Complete quote', suburb: 'Harrisdale', status: 'needs_decision', stage_id: stages[9].id, stage_name: stages[9].name }
+    ]
+  };
+  const names = api.queueGroups().map((g) => g[0]);
+  assert.equal(names[0], 'New Lead (Call + Qualify)');
+  assert.equal(names[6], 'Needs On Site Scope Urgently');
+  assert.equal(names[7], 'Lead Closed (scope booked)');
+  assert.equal(names[8], 'Scope Scheduled');
+  assert.deepEqual(api.queueGroups()[0][1].map((c) => c.id), ['m1']);
+  assert.deepEqual(api.queueGroups()[6][1].map((c) => c.id), ['m2']);
+  assert.deepEqual(api.queueGroups()[7][1].map((c) => c.id), ['m3']);
+  assert.equal(api.queueGroups().some((g) => g[1].some((c) => c.id === 'm4')), false);
+  assert.match(api.renderHTML(), /leave unread/);
+  const tiles = api.followThrough();
+  assert.equal(tiles.to_book, 2);
+  assert.equal(tiles.booked, 1);
+  assert.equal(tiles.quotes, 1);
+});
+
+test('ok true with cases as a count still renders thread facts and does not throw', () => {
+  api.state.resourceId = 'marnin';
+  api.state.filter = 'all';
+  api.state.search = '';
+  const facts = {};
+  for (let i = 0; i < 80; i++) {
+    facts['tf-' + i] = {
+      case_id: 'tf-' + i,
+      contact_id: 'c-' + i,
+      read_ok: true,
+      classification: i < 5 ? 'waiting_reply' : 'ready_to_contact',
+      quiet_window: false
+    };
+  }
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    cases: 1010,
+    coverage: { full_population: true, enumerated: 1010, diary_read_ok: false, gaps: ['row budget reached'] },
+    diary_read: { read_ok: false, reason: 'calendar_http_403', source: 'outlook_primary' },
+    thread_facts: facts,
+    diary: []
+  };
+  const html = api.renderHTML();
+  assert.equal(api.cases().length, 80);
+  assert.equal(api.followThrough().to_book > 0, true);
+  assert.match(html, /Calendar not connected/);
+  assert.match(html, /row budget reached/);
+});
+
+test('loading state does not paint a fake empty week', () => {
+  api.state.resourceId = 'marnin';
+  api.state.data = null;
+  api.state.error = null;
+  api.state.loading = true;
+  const html = api.renderHTML();
+  assert.match(html, /Reading the provider calendar and GHL enquiries/);
+  assert.match(html, /Reading this week/);
+  assert.doesNotMatch(html, /0 people/);
+  assert.doesNotMatch(html, /Source not retrieved/);
+  api.state.loading = false;
 });

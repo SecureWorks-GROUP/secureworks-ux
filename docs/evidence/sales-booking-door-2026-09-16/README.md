@@ -33,7 +33,8 @@ Withheld and named on the board, never dropped:
   present. Blocked until the delete reads back. No KEEP / CUT.
 - **Arlette Bruggeman, Eva Suh, Aaron Koh, Jennifer** (4): booked visits with no proposed
   time, so there is nothing to stamp.
-- **493 enumerated CRM rows**: the engine has not assessed them yet.
+- Unmapped CRM rows that day's capture treated as unassessed. Current demand
+  rule: `docs/sales-booking-ui.md`.
 
 Confirm booking is unavailable on every line, which is correct: execution-ready means exact
 acceptance bound to a sent offer, and none of these have it. That gate is separate from the

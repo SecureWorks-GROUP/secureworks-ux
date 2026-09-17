@@ -70,10 +70,15 @@ case or resource switch.
 
 ## What the surface refuses to claim
 
-- **An enumerated CRM row is not demand.** `isAssessed()` is false until the engine has
-  derived a status. Unassessed rows are still findable, in their own queue group, tagged
-  "Not assessed", and excluded from the tiles and the stamp board. On the live week that is
-  493 of 500 rows for Nithin: a tile reading 500 was the lie this rule removes.
+- **An enumerated CRM row is not demand.** `isAssessed()` is true when the row matches a
+  pinned GHL stage (exact `stage_id` if present, else exact `stage_name`), or when a
+  reason/proposal is already on the row. Live `sales_booking_read` cases carry `stage_name`
+  and placeholder `status: needs_decision` only; they have no `stage_id`, reason, or
+  proposal today. Unmapped rows stay findable under **Enumerated, not yet assessed**, tagged
+  "Not assessed", and stay off the demand tiles and the stamp board.
+- **`needs_decision` is not Act today.** Urgency is booked, quote outstanding, waiting, then
+  the wait-based labels. Act today comes only from a proposal or a repair status. A later
+  backend proposal field will affect cards and urgency only, never grouping.
 - **An unread enquiry date is not today.** `daysWaiting()` returns null and the row says
   "Enquiry date not read".
 - **A cancelled visit is not a confirmed booking.** `diaryLayerFor()` lets the case's
@@ -102,7 +107,11 @@ from wiki `harness/ops/skills/secureworks-scope-booking/profiles/{patio-nithin,f
 (PR https://github.com/SecureWorks-GROUP/secureworks-wiki/pull/438). Scope-needing
 stages and booked-not-yet-visited stages render first. Quoted, won, lost and
 archived stages fold under **Show quoted and archived**. Rows with no matching
-stage stay in **Enumerated, not yet assessed**. Tiles count those groups.
+stage stay in **Enumerated, not yet assessed**. Tiles count follow-through from
+those stages (still to book, waiting, booked, quotes), not the whole CRM.
+Waiting-on-reply is the patio stage **Contacted Waiting on Response** by exact
+name (and the id when present). Fencing waiting is `thread_facts.classification`
+only, so a fencing row with no proved text is never Waiting.
 `sales_booking_read` may take ~20s; the client waits 60s. A failed calendar
 (`diary_read.read_ok:false`) shows "Calendar not connected" and still paints the
 queue and thread facts. Coverage gaps render verbatim.
@@ -118,4 +127,5 @@ enquiries keep `event_id` null, so a booked same-suburb visit cannot become thei
 
 Design source: the captain-approved end-state prototype after three rounds of feedback
 (`data/booking-endstate-prototype-20260916/`). Evidence:
-`docs/evidence/sales-booking-door-2026-09-16/`.
+`docs/evidence/sales-booking-door-2026-09-16/`. Live-door fix:
+`docs/evidence/booking-door-live-fix-2026-09-17/`.

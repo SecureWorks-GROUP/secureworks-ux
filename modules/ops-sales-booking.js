@@ -221,17 +221,6 @@
     return date + 'T' + pad2(h) + ':' + pad2(min) + ':00';
   }
 
-  function weekdayToIso(weekStart, day) {
-    var s = String(day || '').trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    var idx = DAYS.findIndex(function (name) {
-      return name.toLowerCase() === s.toLowerCase()
-        || name.slice(0, 3).toLowerCase() === s.slice(0, 3).toLowerCase();
-    });
-    if (idx < 0) return null;
-    return addDays(weekStart, idx);
-  }
-
   function isoDateOf(value) {
     var s = String(value || '');
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -239,15 +228,21 @@
     return null;
   }
 
-  // Live pack windows are ISO datetimes (day may only say "Fri"). Prefer that
-  // date over mapping the weekday onto the week currently shown.
+  // Live pack windows are ISO datetimes (day may only say "Fri"). An undated
+  // weekday stays undated; it is never mapped onto the week on screen.
   function proposalDayIso(p) {
     if (!p) return null;
     return isoDateOf(p.day)
       || isoDateOf(p.start_iso)
       || isoDateOf(p.window_start)
-      || isoDateOf(p.window_start_iso)
-      || weekdayToIso(state.weekStart, p.day);
+      || isoDateOf(p.window_start_iso);
+  }
+
+  function packWeekStart(data) {
+    data = data || state.data;
+    var pack = data && data.pack;
+    var raw = (pack && pack.week_start) || (data && data.week_start);
+    return raw ? mondayIso(raw) : state.weekStart;
   }
 
   // Pack proposals use {disposition, day, window_start, window_end, draft, why[]}.
@@ -1026,7 +1021,7 @@
     }
     var body = {
       resource: state.resourceId,
-      week_start: state.weekStart,
+      week_start: packWeekStart(),
       stamp: stampWriteBody()
     };
     state.lastStampCall = { action: 'sales_booking_stamp_write', body: body };
@@ -1745,6 +1740,10 @@
       if (request !== state.request) return;
       if (!data || data.ok === false) throw new Error((data && data.error) || 'Booking read was incomplete.');
       if (data.fixture) throw new Error('Fixture fallback is refused. Provider read required.');
+      if (data.pack && data.pack.present === true && !data.pack.week_start) {
+        var priorPack = state.data && state.data.pack;
+        data.pack.week_start = (priorPack && priorPack.present === true && priorPack.week_start) || data.week_start;
+      }
       state.data = data;
       applyServerStamp(data);
       applyServerDrafts(data);
@@ -1762,6 +1761,9 @@
 
   function applyServerStamp(data) {
     if (!data) return;
+    var packWeek = packWeekStart(data);
+    var stampWeek = (data.stamp && data.stamp.week_start) || data.week_start;
+    if (stampWeek && mondayIso(stampWeek) !== packWeek) return;
     var s = data.stamp;
     if (s && s.present === true) {
       state.stamp.approved = Array.isArray(s.approved) ? s.approved.slice() : [];

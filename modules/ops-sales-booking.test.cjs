@@ -1747,7 +1747,7 @@ function liveMarninPackRead() {
     resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
     week_start: '2026-09-14',
     coverage: { gaps: [] },
-    pack: { present: true, as_of: '2026-09-16T07:48:00Z' },
+    pack: { present: true, as_of: '2026-09-16T07:48:00Z', week_start: '2026-09-14' },
     stamp: { present: false },
     diary: [],
     cases
@@ -1802,6 +1802,100 @@ test('published marnin pack: 31 proposals, 11 offers, other-week slots listed, s
   assert.match(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
   assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
   assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
+  api.state.weekStart = '2026-09-14';
+  api.state.resourceId = 'nithin';
+});
+
+test('Send after Next week still writes the live marnin pack week', async () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.drafts = {};
+  const pack = liveMarninPackRead();
+  api.state.data = JSON.parse(JSON.stringify(pack));
+  api.state.selectedId = 'opp-1';
+  const posts = [];
+  global.SALES_BOOKING_PREVIEW_URL = null;
+  global.opsPost = async (action, body) => {
+    posts.push({ action, body });
+    return { ok: true };
+  };
+  global.opsFetch = async (_action, params) => {
+    const next = JSON.parse(JSON.stringify(pack));
+    if (params && params.week_start) next.week_start = params.week_start;
+    const last = posts[posts.length - 1];
+    if (last && last.body && last.body.stamp) {
+      next.stamp = {
+        present: true,
+        week_start: last.body.week_start,
+        approved: last.body.stamp.approved || [],
+        rejected: last.body.stamp.rejected || [],
+        decisions: {},
+        stage_moves: []
+      };
+      const st = next.stamp.rejected.length ? 'rejected' : (next.stamp.approved.length ? 'approved' : 'none');
+      const hit = next.cases.find((c) => c.id === 'opp-1');
+      if (hit) hit.stamp_state = st;
+    }
+    return next;
+  };
+  await api.switchWeek(7);
+  assert.equal(api.state.weekStart, '2026-09-21');
+  assert.equal(api.state.data.pack.week_start, '2026-09-14');
+  const sent = await api.writeStamp('opp-1', 'keep');
+  assert.equal(sent.posted, true);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, 'sales_booking_stamp_write');
+  assert.equal(posts[0].body.week_start, '2026-09-14');
+  assert.equal(posts[0].body.resource, 'marnin');
+  assert.deepEqual(posts[0].body.stamp.approved, ['opp-1']);
+  assert.equal(api.stampStateOf(api.cases().find((c) => c.id === 'opp-1')), 'keep');
+  api.state.weekStart = '2026-09-14';
+  api.state.resourceId = 'nithin';
+});
+
+test('a clock-only Fri row stays undated and does not attach to the week on screen', () => {
+  api.state.resourceId = 'marnin';
+  api.state.weekStart = '2026-09-14';
+  api.state.drafts = {};
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.selectedId = 'opp-clock';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, week_start: '2026-09-14' },
+    stamp: { present: false },
+    diary: [],
+    cases: [{
+      id: 'opp-clock',
+      opportunity_id: 'opp-clock',
+      contact_id: 'ct-clock',
+      display_name: 'Clock Fri',
+      suburb: 'Byford',
+      job: 'Colorbond fence',
+      status: 'needs_decision',
+      stage_name: 'Presentation Made (scope not booked)',
+      proposal: {
+        disposition: 'offer',
+        day: 'Fri',
+        window_start: '11:15',
+        window_end: '12:45',
+        draft: null,
+        why: []
+      }
+    }]
+  };
+  const p = api.cases()[0].proposal;
+  assert.equal(p.start_iso == null, true);
+  assert.equal(p.end_iso == null, true);
+  assert.equal(api.proposalSlotLabel(api.cases()[0]), '');
+  const html = api.renderHTML();
+  assert.match(html, /Clock Fri · Byford/);
+  assert.doesNotMatch(html, /Friday 18 September/);
+  assert.doesNotMatch(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-clock"/);
   api.state.weekStart = '2026-09-14';
   api.state.resourceId = 'nithin';
 });

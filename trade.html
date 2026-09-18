@@ -11384,10 +11384,34 @@
     }
     h += '</div>';
 
-    // Client notes from scope
+    // Client notes from scope (patio shape)
     var client = job.scope_json.client || {};
     if (client.notes) {
       h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px"><strong>Notes:</strong> ' + escSowText(client.notes) + '</div>';
+    }
+
+    // Scoper's notes from the fencing scoping tool (scope_json.job) — siteNotes,
+    // checklist.finalNotes and removal.notes only. supplierNotes is withheld from
+    // trades: it is a commercial/supplier instruction that may carry pricing
+    // language (firstmate ruling, fence-scoping-notes-surface). Never route this
+    // block through the quote-pack stripper — escSowText's redactTradePriceText
+    // already leaves bare dimension numbers (2100, 2.1, 65x65) intact and only
+    // strips explicit currency amounts for allocated (money-redacted) viewers.
+    if (type === 'fencing') {
+      var scoperFenceJob = job.scope_json.job || {};
+      var scoperNotes = [
+        { label: 'Site notes', text: scoperFenceJob.siteNotes },
+        { label: 'Final notes', text: scoperFenceJob.checklist && scoperFenceJob.checklist.finalNotes },
+        { label: 'Removal notes', text: scoperFenceJob.removal && scoperFenceJob.removal.notes }
+      ].filter(function (n) { return n.text && String(n.text).trim(); });
+      if (scoperNotes.length) {
+        h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px">';
+        h += '<strong>Scoper\'s notes:</strong>';
+        scoperNotes.forEach(function (n) {
+          h += '<div style="margin-top:6px"><span style="color:var(--sw-text-sec)">' + esc(n.label) + '</span><br>' + escSowText(n.text).replace(/\n/g, '<br>') + '</div>';
+        });
+        h += '</div>';
+      }
     }
 
     // Labour budget — office only. Allocated trades never see $/rates on SOW.

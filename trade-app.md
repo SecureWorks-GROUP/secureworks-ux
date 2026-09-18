@@ -102,7 +102,9 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   `special_instructions` + estimated hours, else the scoping tool's installer
   note) → **Scope of works** (the sent quote's writing and quantities, accepted
   quote open, older quotes collapsed, `notes` shown) → **Build spec**
-  (dimensions/colours) → work order lines → job videos → Materials & Receipts.
+  (dimensions/colours; on fencing jobs also the scoping tool's "Scoper's
+  notes" — contract in `AGENTS.md` → "Fencing scoping-tool notes") → work
+  order lines → job videos → Materials & Receipts.
   The crew line under the tabs is gone; the roster panel above the tabs is the
   crew. Guard: `tests/e2e/trade-job-scope-clarity.spec.js`.
 - **Open quote (no prices)**: when `trade_job_detail` carries a

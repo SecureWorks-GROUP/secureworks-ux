@@ -642,11 +642,10 @@ THE NEW CALENDAR'S NON-MAKESAFE, NON-REPAIR VERTICALS (fencing, patio, decking,
 `TradeCalendarSource` (`trade.html`, `<trade-calendar-source-all>`), whose single
 registered loader calls `trade_calendar` with `type` set to the requested
 vertical, or OMITTED for `all` (the backend's documented shape for "every
-vertical this viewer may see"). Until 2026-09 this loader/its `adaptV1` hardcoded
-the fencing vertical and rejected everything else, so Patio and All silently
-fetched nothing for every viewer since the M2 cutover — not a regression from any
-one PR, just never wired up beyond fencing. `adaptV1`/`validateModel` check each
-row against the RAW `job_type` (`block._rawType`), never the family-aware
+vertical this viewer may see"); never hardcode one vertical into that loader or
+its `adaptV1` — Patio and All then fetch nothing for every viewer, silently.
+`adaptV1`/`validateModel` check each row against the RAW `job_type`
+(`block._rawType`), never the family-aware
 `mapVertical` bucket (Captain ruling 2026-09-18): a `job_type: patio` row carrying
 `job_family: repair` legitimately comes back under `type=patio`, files as Repair
 downstream and simply drops out of the Patio view via `passType` — it must never

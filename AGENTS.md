@@ -637,6 +637,24 @@ agree. This matters because the Board's one-card-per-job dedupe ranks by
 `scheduled_date`-ascending order then hands the tie to the staler date. Guard:
 `scripts/test-fencing-board-ghost-rows.js` (runs in `pr-check.yml`).
 
+THE NEW CALENDAR'S NON-MAKESAFE, NON-REPAIR VERTICALS (fencing, patio, decking,
+… and `all` for every one of them at once) ALL CROSS ONE SHARED CONTRACT:
+`TradeCalendarSource` (`trade.html`, `<trade-calendar-source-all>`), whose single
+registered loader calls `trade_calendar` with `type` set to the requested
+vertical, or OMITTED for `all` (the backend's documented shape for "every
+vertical this viewer may see"); never hardcode one vertical into that loader or
+its `adaptV1` — Patio and All then fetch nothing for every viewer, silently.
+`adaptV1`/`validateModel` check each row against the RAW `job_type`
+(`block._rawType`), never the family-aware
+`mapVertical` bucket (Captain ruling 2026-09-18): a `job_type: patio` row carrying
+`job_family: repair` legitimately comes back under `type=patio`, files as Repair
+downstream and simply drops out of the Patio view via `passType` — it must never
+throw away the whole payload. `NC.type`'s Patio/All filter chips are
+gated by `managesTradeVertical(vertical) || _isAdmin` (Fencing stays
+`managesTradeVertical('fencing')` only, unchanged) so a dispatcher (admin/
+ops_manager) always sees every vertical while a managed-vertical lead only sees
+their own. Guard: `tests/e2e/trade-calendar-patio-missing.spec.js`.
+
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`

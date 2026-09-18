@@ -673,7 +673,25 @@ assert(/api\('trade_calendar', params, null, \{ preserveSessionOnAuthFailure: tr
   'calendar uses the authenticated api helper');
 assert(/mode: request\.lens === 'everyone' \? 'all' : 'mine'/.test(html),
   'calendar sends only the published mine or all modes');
-assert(/type: 'fencing'/.test(html), 'calendar sends the published fencing type');
+const loaderCalls = [];
+context.api = function (action, params) {
+  loaderCalls.push({ action, params });
+  return Promise.resolve({ ...payload, type: params.type == null ? null : params.type });
+};
+const registeredLoaderChecks = () => Promise.resolve()
+  .then(() => calendar.load({ from: '2026-07-20', to: '2026-08-10', vertical: 'fencing', lens: 'everyone', cacheKey: 'k1' }, true))
+  .then((model) => {
+    assert.strictEqual(loaderCalls[0].action, 'trade_calendar');
+    assert.strictEqual(loaderCalls[0].params.type, 'fencing', 'a fencing request sends the published fencing type');
+    assert.strictEqual(loaderCalls[0].params.mode, 'all');
+    assert.strictEqual(model.blocks[0].type, 'fencing');
+  })
+  .then(() => calendar.load({ from: '2026-07-20', to: '2026-08-10', vertical: 'all', lens: 'everyone', cacheKey: 'k2' }, true))
+  .then((model) => {
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(loaderCalls[1].params, 'type'), false,
+      'an all-verticals request omits type entirely');
+    assert.strictEqual(model.blocks.length, 1);
+  });
 assert(/from: request\.from,[\s\S]*to: request\.to/.test(html), 'calendar sends the published inclusive date fields');
 assert(/crewNone: isPool \? \(isMs \? 'All make-safe trades' : 'Nobody allocated'\)/.test(html),
   'generic fencing pool cards do not inherit make-safe-only crew copy');
@@ -693,6 +711,7 @@ assert(/function _refreshBoardSilent\(\) \{[\s\S]*?_invalidateAssignmentLifecycl
   'a Board write uses the shared lifecycle cache invalidation seam');
 
 (async function freshness() {
+  await registeredLoaderChecks();
   const cacheRequest = { from: '2026-07-20', to: '2026-08-10', vertical: 'fencing', lens: 'everyone', cacheKey: allKey };
   let loads = 0;
   calendar.register(() => { loads++; return adapted; });

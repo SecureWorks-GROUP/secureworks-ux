@@ -17348,7 +17348,7 @@
       if (!Array.isArray(payload.events)) throw new Error('Trade calendar response is missing events[]');
       if (typeof payload.truncated !== 'boolean') throw new Error('Trade calendar response is missing truncated');
       payload.events.forEach(function (event) {
-        var eventVertical = event ? tradeJobVertical(null, null, event) : '';
+        var eventVertical = event ? CalAdapterCore.mapVertical(event) : '';
         if (!event || (expectedType && eventVertical !== expectedType)) {
           throw new Error('Trade calendar returned an event outside ' + (expectedType || 'the requested scope'));
         }

@@ -18795,6 +18795,33 @@ function renderDocumentLinks(documents, types, heading) {
   return html;
 }
 
+// Renders the fencing scoping tool's internal notes (siteNotes, checklist.finalNotes,
+// removal.notes, supplierNotes) — these are saved into jobs.scope_json.job but until now
+// had no reader anywhere on the OpsDash. See fence-scoping-notes-surface.
+function renderFenceScopingNotes(scope_json) {
+  var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
+  if (!scope || !scope.job) return '';
+  var job = scope.job;
+  var fields = [
+    { label: 'Site notes', text: job.siteNotes },
+    { label: 'Final notes', text: job.checklist && job.checklist.finalNotes },
+    { label: 'Removal notes', text: job.removal && job.removal.notes },
+    { label: 'Supplier notes', text: job.supplierNotes }
+  ].filter(function (f) { return f.text && String(f.text).trim(); });
+  if (!fields.length) return '';
+
+  var html = '<div class="fence-scoping-notes" style="font-size:12px;padding:6px 0;line-height:1.6;">';
+  fields.forEach(function (f) {
+    html += '<div style="margin-bottom:8px;">';
+    html += '<div style="font-weight:600;color:var(--sw-dark);">' + escapeHtml(f.label) + '</div>';
+    html += '<div style="color:var(--sw-text);">' + escapeHtml(String(f.text)).replace(/\n/g, '<br>') + '</div>';
+    html += '</div>';
+  });
+  html += '<div style="font-size:11px;color:var(--sw-text-sec);">from the scoping tool</div>';
+  html += '</div>';
+  return html;
+}
+
 function renderScopeSummary(scope_json, jobType, jobId) {
   var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
   if (!scope) return '<div style="font-size:12px; color:var(--sw-text-sec); padding:4px 0;">No scope data</div>';
@@ -18836,6 +18863,7 @@ function renderScopeSummary(scope_json, jobType, jobId) {
     if (removal && (removal.length > 0 || removal.totalMetres > 0)) {
       html += '<div><strong>Removal:</strong> ' + (removal.totalMetres || removal.length || 0) + 'm old fence</div>';
     }
+    html += renderFenceScopingNotes(scope);
   } else {
     // Patio scope summary
     if (config.length || config.projection) {
@@ -20886,6 +20914,19 @@ function renderOverviewView(data) {
   if (j.ghl_opportunity_id) html += '<a href="https://app.maxlead.com.au/v2/location/' + GHL_LOCATION_ID + '/opportunities/' + j.ghl_opportunity_id + '" target="_blank" style="color:var(--sw-mid);">View in GHL &#8599;</a>';
   html += '</div></div>';
 
+  // Fencing scoping tool notes (Site/Final/Removal/Supplier) — the Overview tab is
+  // the drawer's default tab and does not go through renderScopeSummary, so this
+  // must be wired here separately. See fence-scoping-notes-surface.
+  if (j.type === 'fencing' && j.scope_json) {
+    var fenceScopingNotesHtml = renderFenceScopingNotes(j.scope_json);
+    if (fenceScopingNotesHtml) {
+      html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
+      html += '<div style="font-size:11px;font-weight:700;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Scoping notes</div>';
+      html += fenceScopingNotesHtml;
+      html += '</div>';
+    }
+  }
+
   // Section 3: Next Actions
   var alerts = evaluateJobAlerts(data);
   html += '<div style="margin-bottom:12px;">';
@@ -22453,6 +22494,20 @@ function matchMaterialStatus(category, purchaseOrders) {
 function buildNotesHTML(data) {
   var noteEvents = (data.events || []).filter(isOpsCommsNote);
   var h = '<div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--sw-border);">';
+
+  // Fencing scoping tool notes — pinned, read-only (no delete control), and
+  // visually distinct from the deletable two-way job_events notes below: those
+  // come from the scoping tool's own scope_json.job, not from job_events.
+  if (data.job && data.job.type === 'fencing' && data.job.scope_json) {
+    var pinnedScopingNotesHtml = renderFenceScopingNotes(data.job.scope_json);
+    if (pinnedScopingNotesHtml) {
+      h += '<div style="margin-bottom:14px;padding:10px 12px;background:var(--sw-light);border-left:3px solid var(--sw-mid);">';
+      h += '<div style="font-size:12px;font-weight:700;color:var(--sw-mid);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Scoping notes</div>';
+      h += pinnedScopingNotesHtml;
+      h += '</div>';
+    }
+  }
+
   h += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">Notes</div>';
   if (noteEvents.length > 0) {
     h += '<div class="jd-notes-feed">';

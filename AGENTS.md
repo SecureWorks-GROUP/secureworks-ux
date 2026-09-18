@@ -539,6 +539,28 @@ make-safe that still owes the trade's report remains visible even after the
 attendance assignment is complete. All and History keep their historical scope.
 Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
 
+## Fencing scoping-tool notes (`ops.html`, `trade.html`)
+
+The fence-designer scoping tool writes every internal note into
+`jobs.scope_json.job` (`siteNotes`, `checklist.finalNotes`, `removal.notes`,
+`supplierNotes`) — `job_detail`/`trade_job_detail` already deliver that blob to
+both apps. `renderFenceScopingNotes(scope_json)` (`ops.html`, next to
+`renderScopeSummary`) is the ONE reader for all four fields; it is called from
+the job detail drawer's Overview tab (default tab, does not go through
+`renderScopeSummary`), the pinned read-only header of the Notes rail
+(`buildNotesHTML` — distinct from the deletable two-way `job_events` notes
+below it), and the fencing branch of `renderScopeSummary` (Peek/Money/Build/WO
+panels). All four fields show on the OpsDash. In `trade.html`,
+`renderEnhancedScope`'s "Scoper's notes" block renders `siteNotes`,
+`checklist.finalNotes` and `removal.notes` only — `supplierNotes` is withheld
+from every trade surface (commercial/supplier instruction, may carry pricing
+language). It renders through the existing `escSowText`/`redactTradePriceText`
+(never the backend `pack_trade_quote.ts` quote-pack stripper), which strips
+explicit currency amounts for allocated crews but leaves bare dimension
+numbers (`2100`, `2.1`, `65x65`) intact — do not route this block through a
+different stripper. Guards: `tests/e2e/ops-fence-scoping-notes.spec.js`,
+`tests/e2e/trade-fence-scoping-notes.spec.js`.
+
 ## Repair vertical (`trade.html`)
 
 Repair is a first-class job vertical alongside make-safe/fencing/patio

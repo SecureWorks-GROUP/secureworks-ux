@@ -24,6 +24,29 @@ function check(name, cond) { assert(cond, name); passed += 1; }
 check('money formats thousands and cents', M.money(2420.6) === '$2,420.60' && M.money(0) === '$0.00' && M.money(-15) === '-$15.00' && M.money('nope') === '$0.00');
 check('dateShort is day Mon year', M.dateShort('2026-08-10') === '10 Aug 2026' && M.dateShort('') === '');
 
+const captain = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12 });
+check('captain $1000: fund still 12%', captain.super_amount === 120);
+check('captain $1000: worker share is half the rate', captain.super_worker_share === 60);
+check('captain $1000: company covers the remainder', captain.super_company_share === 60);
+check('captain $1000: cash is $940', captain.cash_payable === 940);
+
+const unmigrated = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 880 });
+check('unmigrated net_pay (gross minus full super) is not cash', unmigrated.cash_payable === 940 && unmigrated.net_pay === 880);
+check('unmigrated still shows 12% to the fund', unmigrated.super_amount === 120 && unmigrated.super_worker_share === 60 && unmigrated.super_company_share === 60);
+
+const supplied = M.resolveSuperSplit({
+  gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 880,
+  super_worker_share: 60, super_company_share: 60, cash_payable: 940
+});
+check('backend cash_payable wins over old net_pay', supplied.cash_payable === 940);
+check('backend worker/company shares are used when present', supplied.super_worker_share === 60 && supplied.super_company_share === 60);
+
+const migratedNet = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 940 });
+check('migrated net_pay already at cash is kept', migratedNet.cash_payable === 940);
+
+const noRate = M.resolveSuperSplit({ gross_earned: 1000, super_amount: 120, net_pay: 880 });
+check('missing rate still halves the fund amount', noRate.super_worker_share === 60 && noRate.cash_payable === 940);
+
 check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-10' }).label === 'Paid 10 Aug 2026');
 check('status: PAID bill without our flag is still paid', M.statusOf({ xero_bill_status: 'PAID' }).cls === 'paid');
 check('status: authorised bill is approved awaiting payment', M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED' }).label === 'Approved, awaiting payment');
@@ -40,11 +63,14 @@ const t = { invoices: 2, gross_earned: 3470, super_amount: 416.4, gst: 347, paya
 const card = M.periodHTML('FY 2026/27 to date', t, { key: 'fytd' });
 check('period card shows earned, paid, owed', card.indexOf('$3,470.00') !== -1 && card.indexOf('$2,420.60') !== -1 && card.indexOf('$980.00') !== -1);
 check('period card shows super and GST', card.indexOf('Super $416.40') !== -1 && card.indexOf('GST $347.00') !== -1);
+check('period card names the 6/6 split and cash', card.indexOf('$208.20 from you') !== -1 && card.indexOf('company covers $208.20') !== -1 && card.indexOf('You get $3,261.80') !== -1);
+check('period card does not show the old full-super payable as cash', card.indexOf('$3,400.60') === -1);
 check('period card flags incomplete legacy rows', card.indexOf('1 older invoice without a super split') !== -1);
 check('period card without GST omits it', M.periodHTML('x', { gst: 0 }, {}).indexOf('GST') === -1);
 
 const months = M.monthsHTML([{ month: '2026-09', label: 'Sep 2026', gross_earned: 1000, super_amount: 120, paid_total: 0, outstanding: 980 }, { month: '2026-08', label: 'Aug 2026', gross_earned: 2470, super_amount: 296.4, paid_total: 2420.6, outstanding: 0 }]);
 check('months table has one row per month with owed highlighted', (months.match(/data-mm-month=/g) || []).length === 2 && /class="owed">\$980\.00/.test(months));
+check('months super column is the fund amount, not the worker deduction', months.indexOf('Super to fund') !== -1);
 check('no months means no table', M.monthsHTML([]) === '');
 
 const row = M.invoiceRowHTML({ id: 'i1', invoice_number: 'SW-INV-H-260801-020', week_end: '2026-08-02', status: 'paid', paid: true, paid_at: '2026-08-10', payable: 2420.6, figures_ok: true });
@@ -56,6 +82,8 @@ check('invoice row: not counted marker', M.invoiceRowHTML({ id: 'v', counts: fal
 const view = M.viewHTML({ profile: { name: 'Hugo', abn: '1', gst_registered: true }, fy_label: 'FY 2026/27', month: { label: 'Sep 2026', invoices: 1, gross_earned: 1000, super_amount: 120, gst: 100, payable: 980, paid_total: 0, outstanding: 980 }, fytd: t, months: [], invoices: [{ id: 'i1', status: 'paid', paid: true, payable: 10 }] });
 check('view has header, both period cards and the list', view.indexOf('My money') !== -1 && /data-mm-period="month"/.test(view) && /data-mm-period="fytd"/.test(view) && /data-mm-invoice="i1"/.test(view));
 check('view explains where paid comes from', view.indexOf('comes from Xero') !== -1);
+check('footer names the half-super ruling', view.indexOf('Half of that comes out of what you earned') !== -1 && view.indexOf('the company covers the other half') !== -1);
+check('footer no longer says super comes out in full', view.indexOf('Super is paid to your fund separately and is shown so the numbers add up') === -1);
 check('empty view is honest', M.viewHTML({ invoices: [] }).indexOf('No invoices yet') !== -1);
 check('no em dash, no old brand', view.indexOf('—') === -1 && view.indexOf('SecureWorks WA') === -1);
 

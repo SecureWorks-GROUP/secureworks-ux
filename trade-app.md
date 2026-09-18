@@ -146,6 +146,12 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   ("Paid 10 Aug 2026", "Approved, awaiting payment", "With the office",
   "Voided"). Pure `MyMoneyCore` in `// <trade-my-money>`, pinned by
   `scripts/test-trade-my-money.js`; guard `tests/e2e/trade-my-money.spec.js`.
+  Super split (2026-09-18): the fund and the books still see 12%. Only half
+  of that comes off the trade; the company covers the other half. On a $1000
+  gross invoice that is $120 to the fund and $940 cash. `MyMoneyCore.resolveSuperSplit`
+  is the one worker-share helper; invoice preview/persisted money and the PDF
+  use it. An unmigrated `net_pay` equal to gross minus the full super amount is
+  never shown as cash payable.
 - **GST from the profile (2026-09-08)**: the Profile "My Details" form has a
   "GST registered" toggle (`#tdGst`) saved explicitly through
   `update_trade_profile` (server merges, so other phones cannot wipe it). The

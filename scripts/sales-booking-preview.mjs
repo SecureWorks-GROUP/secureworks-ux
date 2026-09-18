@@ -12,7 +12,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { handleLocal } from './sales-booking-local-api.mjs';
+import { handleLocal, createLocalStore } from './sales-booking-local-api.mjs';
 
 const require = createRequire(import.meta.url);
 const assess = require('../modules/sales-booking-assess.cjs');
@@ -332,11 +332,19 @@ async function fetchLiveBookingRead(resource, weekStart) {
   return body;
 }
 
+function overlayStoredStamp(body, resourceId, weekStart) {
+  if (!body) return body;
+  const store = createLocalStore(path.join(ROOT, '.sales-booking-preview-store.json')).load();
+  const stamp = store.stamps && store.stamps[resourceId + '|' + weekStart];
+  if (stamp) body.stamp = stamp;
+  return body;
+}
+
 async function previewBookingRead(query) {
   const resourceId = query.get('resource') || 'nithin';
   const weekStart = query.get('week_start') || '2026-09-14';
   const live = await fetchLiveBookingRead(resourceId, weekStart);
-  if (live && live.pack && live.pack.present === true) return live;
+  if (live && live.pack && live.pack.present === true) return overlayStoredStamp(live, resourceId, weekStart);
   const enumerated = await handleLocal('sales_booking_read', Object.fromEntries(query.entries()), {}, mcpCall, path.join(ROOT, '.sales-booking-preview-store.json'));
   const calBody = await salesBookingRead(query);
   const assessed = calBody.cases || [];
@@ -352,7 +360,7 @@ async function previewBookingRead(query) {
   if (live && live.pack && live.pack.present !== true && live.cases) {
     body = applyPublishedPack(body, live);
   }
-  return body;
+  return overlayStoredStamp(body, resourceId, weekStart);
 }
 
 function inject(html) {

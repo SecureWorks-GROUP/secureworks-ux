@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Booking door — hardening shot</title>
+  <link rel="stylesheet" href="../../../modules/ops-sales-booking.css">
+  <style>
+    html,body{margin:0;background:#F8F6F3;color:#1A272E;font:13px/1.45 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  </style>
+</head>
+<body class="sales-booking-view-active">
+  <nav class="sales-workspace-subnav" aria-label="Sales">
+    <span class="sales-workspace-label">Sales</span>
+    <button type="button">Performance</button>
+    <button type="button" aria-selected="true">Booking</button>
+    <span class="sales-workspace-hold">Send held · Move held</span>
+  </nav>
+  <div id="viewSales" class="active sales-sub-booking"></div>
+  <div id="salesBookingRoot"></div>
+  <script src="../../../modules/ops-sales-booking.js"></script>
+  <script>
+    (function () {
+      var view = new URLSearchParams(location.search).get('view') || 'nithin';
+      var api = window.SalesBooking;
+      api.state.loading = false;
+      api.state.error = null;
+      api.state.filter = 'all';
+      api.state.search = '';
+      api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+      if (view === 'marnin') {
+        api.state.resourceId = 'marnin';
+        api.state.weekStart = '2026-09-14';
+        api.state.selectedId = 'opp-offer';
+        var proposals = {};
+        var cases = [];
+        var names = [
+          ['opp-alpha', 'Alex W', 'Byford', 'Presentation Made (scope not booked)'],
+          ['opp-bravo', 'Sam F', 'Balga', 'Presentation Made (scope not booked)'],
+          ['opp-charlie', 'Pat H', 'Ellenbrook', 'New Lead (Call + Qualify)']
+        ];
+        names.forEach(function (row, i) {
+          proposals[row[0]] = {
+            offer: true,
+            day: '2026-09-18',
+            window: { start: i === 0 ? '08:00' : i === 1 ? '11:15' : '15:00', end: i === 0 ? '09:30' : i === 1 ? '12:45' : '16:30' },
+            draft: 'Hi ' + row[1].split(' ')[0] + ', Friday 18 September between that window to measure and quote. Does that suit?',
+            name: row[1],
+            suburb: row[2]
+          };
+          cases.push({
+            id: row[0],
+            opportunity_id: row[0],
+            contact_id: 'ct-' + i,
+            display_name: row[1],
+            suburb: row[2],
+            job_type: 'fencing',
+            status: 'needs_decision',
+            stage_name: row[3],
+            enquiry_date: '2026-09-10',
+            not_in_this_read: i === 0
+          });
+        });
+        for (var n = 0; n < 8; n++) {
+          cases.push({
+            id: 'roster-' + n,
+            opportunity_id: 'roster-' + n,
+            contact_id: 'ct-r' + n,
+            display_name: 'Enquiry ' + (n + 1),
+            suburb: n % 2 ? 'Byford' : 'Balga',
+            job_type: 'fencing',
+            status: 'needs_decision',
+            stage_name: n < 3 ? 'New Lead (Call + Qualify)' : 'New Lead (Replied/ Contacted)',
+            enquiry_date: '2026-09-08'
+          });
+        }
+        api.state.data = {
+          ok: true, fixture: false, send_hold: true,
+          resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+          week_start: '2026-09-14',
+          coverage: {
+            full_population: false, enumerated: 11, total: 1012,
+            gaps: ['roster read degraded by GHL 429', '186 threads unread on this pass']
+          },
+          pack: { present: true, as_of: '2026-09-16T07:48:00Z', week_start: '2026-09-14', proposals: proposals },
+          stamp: { present: false },
+          diary_read: { read_ok: true, source: 'ghl_calendar', calendar_email: 'marnin@secureworkswa.com.au' },
+          diary: [],
+          cases: cases
+        };
+      } else {
+        api.state.resourceId = 'nithin';
+        api.state.weekStart = '2026-09-14';
+        api.state.selectedId = 'opp-wait';
+        api.state.data = {
+          ok: true, fixture: false, send_hold: true,
+          resource: { id: 'nithin', calendar: { ok: true, mailbox: 'nithin@secureworkswa.com.au' } },
+          week_start: '2026-09-14',
+          coverage: { full_population: true, enumerated: 4, total: 4, gaps: [] },
+          pack: { present: true, as_of: '2026-09-17T09:18:00Z', week_start: '2026-09-14' },
+          stamp: { present: false },
+          diary_read: { read_ok: true, source: 'ghl_calendar', calendar_email: 'nithinsilas@outlook.com' },
+          diary: [{
+            event_id: 'evt-booked', opportunity_id: 'opp-booked', contact_id: 'ct-booked',
+            display_name: 'Pat', suburb: 'Carlisle', start_iso: '2026-09-16T10:00:00',
+            end_iso: '2026-09-16T11:00:00', kind: 'confirmed', layer: 'confirmed', title: 'Scope: Pat'
+          }],
+          thread_facts: { 'opp-wait': { read_ok: true, classification: 'waiting_reply' } },
+          cases: [{
+            id: 'opp-wait', opportunity_id: 'opp-wait', contact_id: 'ct-wait',
+            display_name: 'Waiter', suburb: 'Merriwa', job_type: 'patio',
+            status: 'needs_decision', stage_id: '09759a42-f80a-4947-bca4-71df5dd770da',
+            stage_name: 'Client Needs To Be Contacted', enquiry_date: '2026-09-10',
+            proposal: { disposition: 'needs_info', draft: 'Hi there, before I lock a visit I need the suburb. Reply with that and I will send a 60 to 90 minute arrival window.' }
+          }, {
+            id: 'opp-booked', opportunity_id: 'opp-booked', contact_id: 'ct-booked',
+            display_name: 'Pat', suburb: 'Carlisle', job_type: 'patio',
+            status: 'needs_decision', stage_id: '09759a42-f80a-4947-bca4-71df5dd770da',
+            stage_name: 'Client Needs To Be Contacted', enquiry_date: '2026-09-08'
+          }, {
+            id: 'opp-new', opportunity_id: 'opp-new', contact_id: 'ct-new',
+            display_name: 'Efi', suburb: 'Dianella', job_type: 'patio',
+            status: 'needs_decision', stage_id: '09759a42-f80a-4947-bca4-71df5dd770da',
+            stage_name: 'Client Needs To Be Contacted', enquiry_date: '2026-09-12'
+          }, {
+            id: 'opp-quote', opportunity_id: 'opp-quote', contact_id: 'ct-quote',
+            display_name: 'Quoted job', suburb: 'Subiaco', job_type: 'patio',
+            status: 'needs_decision', stage_id: '9b9e5313-8e0e-4ed6-8654-d50413b99885',
+            stage_name: 'Scope Complete / Quote to be Sent', enquiry_date: '2026-09-01',
+            completed: true
+          }]
+        };
+      }
+      api.render();
+    }());
+  </script>
+</body>
+</html>

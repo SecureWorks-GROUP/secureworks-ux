@@ -17,6 +17,7 @@ drafts/
 
 # Local browser/test audit output
 .gstack/
+.impeccable/
 node_modules/
 playwright-report/
 test-results/

@@ -514,6 +514,103 @@ const test = base.extend({
         ]
       }
     };
+    // ── Patio-missing regression guard (fm/trade-calendar-patio-missing):
+    // TradeCalendarSource's only registered loader/adaptV1 hardcoded the
+    // fencing vertical, so the new calendar's Patio and All filters never
+    // fetched a model for ANY viewer — not a #321 regression, but #321's
+    // Repair chip is what surfaced it. Modelled on the live dispatcher facts
+    // from the regression report: a same-day patio job, a Mon->Tue spanning
+    // patio job, a fencing job, and a repair-family make-safe, all in the ONE
+    // merged payload the office trade_calendar action emits for an unscoped
+    // (ops_manager) dispatcher when no `type` is requested ('all').
+    const dispatchWeekMonday = perthWeekMonday();
+    // SWP-261046 (Theunnis/The Vines): the multi-crew, multi-day live row —
+    // simplified here to one crew row so the span fixture stays legible; the
+    // scheduled_date..scheduled_end span (Mon->Tue) is what matters for U-T2.
+    const dispatchPatioSpanningEvent = {
+      assignment_id: 'e2e-dispatch-patio-span-assignment',
+      job_id: 'e2e-dispatch-patio-span-job',
+      user_id: 'e2e-isaac',
+      job_number: 'SWP-261046',
+      job_type: 'patio',
+      job_family: null,
+      scheduled_date: dispatchWeekMonday,
+      scheduled_end: addIsoDays(dispatchWeekMonday, 1),
+      start_time: '07:00',
+      end_time: '15:00',
+      crew_name: 'Isaac',
+      assigned_to: 'Isaac',
+      assignment_status: 'scheduled',
+      confirmation_status: 'confirmed',
+      job_status: 'scheduled',
+      client_name: 'Theunnis',
+      site_suburb: 'The Vines',
+      site_address: '1 The Vines Ave, The Vines'
+    };
+    // SWP-261183 (Emma Clarke/Landsdale): single day, start_time null — the
+    // ~36% of live rows that are crewed-but-untimed (CP1 finding).
+    const dispatchPatioUntimedEvent = {
+      assignment_id: 'e2e-dispatch-patio-untimed-assignment',
+      job_id: 'e2e-dispatch-patio-untimed-job',
+      user_id: 'e2e-isaac',
+      job_number: 'SWP-261183',
+      job_type: 'patio',
+      job_family: null,
+      scheduled_date: perthDate(),
+      scheduled_end: perthDate(),
+      start_time: null,
+      end_time: null,
+      crew_name: 'Isaac',
+      assigned_to: 'Isaac',
+      assignment_status: 'scheduled',
+      confirmation_status: 'confirmed',
+      job_status: 'scheduled',
+      client_name: 'Emma Clarke',
+      site_suburb: 'Landsdale',
+      site_address: '2 Landsdale Rd, Landsdale'
+    };
+    const dispatchFencingTodayEvent = {
+      assignment_id: 'e2e-dispatch-fencing-assignment',
+      job_id: 'e2e-dispatch-fencing-job',
+      user_id: 'e2e-israel',
+      job_number: 'SWF-261098',
+      job_type: 'fencing',
+      scheduled_date: perthDate(),
+      scheduled_end: perthDate(),
+      start_time: '07:00',
+      end_time: '15:00',
+      crew_name: 'Israel',
+      assigned_to: 'Israel',
+      assignment_status: 'scheduled',
+      confirmation_status: 'confirmed',
+      job_status: 'scheduled',
+      client_name: 'Tuan Tran',
+      site_suburb: 'Tapping',
+      site_address: '3 Tapping Way, Tapping'
+    };
+    const dispatchRepairFamilyEvent = {
+      assignment_id: 'e2e-dispatch-repair-assignment',
+      job_id: 'e2e-dispatch-repair-job',
+      user_id: 'e2e-hugo',
+      job_number: 'SWMS-261319',
+      job_type: 'makesafe',
+      job_family: 'repair',
+      scheduled_date: perthDate(),
+      scheduled_end: perthDate(),
+      start_time: '07:00',
+      end_time: '15:00',
+      crew_name: 'Hugo',
+      assigned_to: 'Hugo',
+      assignment_status: 'scheduled',
+      confirmation_status: 'confirmed',
+      job_status: 'scheduled',
+      client_name: 'Simon Davey',
+      site_suburb: 'Duncraig',
+      site_address: '4 Repair Street, Duncraig'
+    };
+    const DISPATCH_CALENDAR_EVENTS = [
+      dispatchPatioSpanningEvent, dispatchPatioUntimedEvent, dispatchFencingTodayEvent, dispatchRepairFamilyEvent
+    ];
     // ── Crew roster + lead installer (secureworks-backend PR #513) ──
     // Its own rows rather than the shared fencing fixture, so spec 11 keeps the
     // exact assignment set it recorded. Deliberately shaped like production:
@@ -722,6 +819,21 @@ const test = base.extend({
           return url.searchParams.get('mode') === 'mine' ? fencingMine : fencingAll;
         },
         trade_calendar: ({ url }) => {
+          if (feedScenario === 'trade-calendar-patio-missing' && persona === 'allocator') {
+            // No `type` param models the dispatcher-lens 'all' request — the
+            // backend's documented contract for "every vertical", not a single
+            // filtered one (see trade.html's <trade-calendar-source-all>).
+            const type = url.searchParams.get('type');
+            const mode = url.searchParams.get('mode') === 'mine' ? 'mine' : 'all';
+            const from = url.searchParams.get('from') || '0000-01-01';
+            const to = url.searchParams.get('to') || '9999-12-31';
+            const events = DISPATCH_CALENDAR_EVENTS.filter((event) => {
+              const overlaps = event.scheduled_date <= to && (event.scheduled_end || event.scheduled_date) >= from;
+              if (!overlaps) return false;
+              return !type || event.job_type === type;
+            });
+            return { schema: 'trade-calendar.v1', mode, type: type || null, events, truncated: false };
+          }
           if (persona !== 'fencing_manager') {
             return { status: 403, body: { error: 'Trade calendar fixture is fencing-manager only' } };
           }

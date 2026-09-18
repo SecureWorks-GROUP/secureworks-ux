@@ -17284,10 +17284,12 @@
       if (!model || typeof model !== 'object' || !Array.isArray(model.blocks)) {
         throw new Error('Field calendar adapter must return a normalized model with blocks[]');
       }
+      // 'all' is every vertical at once — the per-block type check below is
+      // meaningless for it (there is no single vertical to compare against).
       var vertical = String(request.vertical || '').toLowerCase();
       model.blocks.forEach(function (block) {
         if (!block || typeof block !== 'object') throw new Error('Field calendar block is invalid');
-        if (String(block.type || '').toLowerCase() !== vertical) {
+        if (vertical && vertical !== 'all' && String(block.type || '').toLowerCase() !== vertical) {
           throw new Error('Field calendar adapter returned a row outside the requested vertical');
         }
       });
@@ -17331,16 +17333,24 @@
     function adaptV1(payload, request) {
       payload = payload || {};
       request = request || {};
+      // A specific vertical (fencing, patio, ...) asks the backend to filter to
+      // that job_type and must get exactly that type back; 'all' asks for every
+      // vertical at once and the backend returns payload.type: null for it — see
+      // <trade-calendar-source-all>.
+      var vertical = String(request.vertical || '').toLowerCase();
+      var expectedType = vertical === 'all' ? null : vertical;
+      var payloadType = payload.type == null ? null : String(payload.type).toLowerCase();
       if (payload.schema !== 'trade-calendar.v1') throw new Error('Unsupported trade calendar schema');
       if (payload.mode !== 'mine' && payload.mode !== 'all') throw new Error('Trade calendar returned an invalid effective mode');
-      if (String(request.vertical || '').toLowerCase() !== 'fencing' || payload.type !== 'fencing') {
-        throw new Error('Trade calendar returned a vertical outside the fencing request');
+      if (payloadType !== expectedType) {
+        throw new Error('Trade calendar returned a vertical outside the ' + (expectedType || 'all') + ' request');
       }
       if (!Array.isArray(payload.events)) throw new Error('Trade calendar response is missing events[]');
       if (typeof payload.truncated !== 'boolean') throw new Error('Trade calendar response is missing truncated');
       payload.events.forEach(function (event) {
-        if (!event || String(event.job_type || '').toLowerCase() !== 'fencing') {
-          throw new Error('Trade calendar returned an event outside fencing');
+        var eventVertical = event ? tradeJobVertical(null, null, event) : '';
+        if (!event || (expectedType && eventVertical !== expectedType)) {
+          throw new Error('Trade calendar returned an event outside ' + (expectedType || 'the requested scope'));
         }
       });
       var adapted = CalAdapterCore.adaptEvents(payload.events);
@@ -17364,20 +17374,24 @@
       validateModel: validateModel, requestKey: requestKey, adaptV1: adaptV1
     };
   })();
+  // <trade-calendar-source-all>
+  // Every non-makesafe, non-repair vertical (fencing, patio, decking, ... and
+  // 'all' for every one of them at once) crosses the same trade_calendar.v1
+  // contract. 'all' omits `type` — the backend's documented contract for
+  // "every vertical this viewer may see" — rather than picking one.
   TradeCalendarSource.register(function (request) {
-    if (String(request.vertical || '').toLowerCase() !== 'fencing') {
-      return Promise.reject(new Error('Only the published fencing calendar contract is available'));
-    }
+    var vertical = String(request.vertical || '').toLowerCase();
     var params = {
       from: request.from,
       to: request.to,
-      mode: request.lens === 'everyone' ? 'all' : 'mine',
-      type: 'fencing'
+      mode: request.lens === 'everyone' ? 'all' : 'mine'
     };
+    if (vertical && vertical !== 'all') params.type = vertical;
     return api('trade_calendar', params, null, { preserveSessionOnAuthFailure: true }).then(function (payload) {
       return TradeCalendarSource.adaptV1(payload, request);
     });
   });
+  // </trade-calendar-source-all>
   window.registerTradeCalendarSource = function (loader) {
     TradeCalendarSource.register(loader);
     if (typeof NC !== 'undefined' && NC) {
@@ -18186,7 +18200,15 @@
       renderNewCalendar();
     }
     function content() {
-      var trades = [['makesafe', 'Make-safe', 'ms dot-ms'], ['repair', 'Repair', 'rp dot-rp']];
+      // Patio and All are gated the same way Fencing already is for a managed
+      // vertical (managesTradeVertical), plus an unconditional OR for a
+      // dispatcher (_isAdmin: admin/ops_manager) — a dispatcher's whole point
+      // is seeing every vertical, not just the ones they personally manage.
+      var trades = [];
+      if (_isAdmin || managesTradeVertical('all')) trades.push(['all', 'All', 'all']);
+      trades.push(['makesafe', 'Make-safe', 'ms dot-ms']);
+      if (_isAdmin || managesTradeVertical('patio')) trades.push(['patio', 'Patio', 'pt dot-pt']);
+      trades.push(['repair', 'Repair', 'rp dot-rp']);
       if (managesTradeVertical('fencing')) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
       var scope = '<div class="seg lite" style="max-width:240px">'

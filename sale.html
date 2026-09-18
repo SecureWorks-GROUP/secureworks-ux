@@ -753,8 +753,151 @@
       line-height: 1.3;
     }
     .calendar-undated {
-      margin-top: 16px;
+      margin-top: 0;
+      margin-bottom: 16px;
     }
+    .calendar-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px;
+    }
+    .calendar-nav button {
+      font-size: 11px;
+      padding: 6px 10px;
+    }
+    .calendar-nav .cal-week-label {
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+    }
+    .calendar-week.weekdays {
+      grid-template-columns: 58px repeat(5, minmax(130px, 1fr));
+    }
+    .calendar-day-col {
+      position: relative;
+      min-height: 484px;
+      border-right: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+      background: var(--bg);
+    }
+    .calendar-hour-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 0;
+      border-top: 1px solid var(--rule);
+      pointer-events: none;
+    }
+    .calendar-event {
+      min-height: 28px;
+    }
+    .booking-box {
+      margin: 8px 0;
+      padding: 8px 10px;
+      background: rgba(92,143,184,0.08);
+      border-left: 2px solid var(--blue);
+      font-size: 10px;
+      line-height: 1.5;
+      color: var(--text-sec);
+    }
+    .booking-box-head {
+      color: var(--text-muted);
+      font-size: 9px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .booking-box-meta { color: var(--text); }
+    .booking-kicker {
+      margin-top: 7px;
+      color: var(--text-muted);
+      font-size: 9px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+    .booking-row { color: var(--text); }
+    .booking-row.gap { margin-top: 7px; color: var(--amber); }
+    .booking-m2 { margin-top: 7px; color: var(--text); }
+    .booking-m2 .booking-kicker { margin-top: 0; display: block; }
+    .booking-why {
+      margin-top: 8px;
+      color: var(--text-muted);
+    }
+    .booking-why summary { cursor: pointer; }
+    .slot-chip {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 4px 0;
+      padding: 8px 10px;
+      border: 1px solid var(--rule-strong);
+      background: var(--surface-1);
+      color: var(--text);
+      font-size: 11px;
+    }
+    .slot-chip[aria-pressed="true"] {
+      border-color: var(--blue);
+      background: rgba(92,143,184,0.16);
+      font-weight: 650;
+    }
+    .slot-chip .slot-why {
+      display: block;
+      margin-top: 3px;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 400;
+    }
+    .sale-drawer {
+      position: fixed;
+      inset: 0;
+      z-index: 240;
+      background: rgba(5,7,9,0.55);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .sale-drawer-panel {
+      width: min(520px, 100%);
+      max-height: 88vh;
+      overflow: auto;
+      background: var(--surface-1);
+      border: 1px solid var(--rule-strong);
+      padding: 18px 16px 22px;
+    }
+    .sale-drawer-panel h2 { margin: 0 0 6px; font-size: 16px; }
+    .sale-drawer-panel p { margin: 0 0 12px; color: var(--text-sec); font-size: 12px; }
+    .sale-drawer-panel label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 10px 0 4px;
+    }
+    .sale-drawer-panel select,
+    .sale-drawer-panel textarea,
+    .sale-drawer-panel input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--rule-strong);
+    }
+    .sale-drawer-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .sale-drawer-status {
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      font-size: 11px;
+    }
+    .sale-drawer-status.ok { background: rgba(76,175,142,0.14); color: var(--green); }
+    .sale-drawer-status.warn { background: rgba(255,181,84,0.14); color: var(--amber); }
+    .sale-drawer-status.bad { background: rgba(231,76,60,0.14); color: #E74C3C; }
+    .sale-drawer-status.held { background: rgba(92,143,184,0.14); color: var(--blue); }
     .signout-btn {
       background: transparent;
       border: 1px solid var(--rule-strong);
@@ -2072,10 +2215,10 @@ function renderCard(card, lane) {
       bookingBtn.className = 'primary';
       bookingBtn.type = 'button';
       bookingBtn.textContent = 'Review slot';
-      bookingBtn.title = 'Dry-run first, then approve. Uses JARVIS calendar recheck and booking approval path.';
+      bookingBtn.title = 'Opens the confirm sheet. Send and calendar write stay held.';
       bookingBtn.addEventListener('click', function (e) {
         e.stopPropagation();
-        approveBookingProposal(prop, card, bookingBtn);
+        openBookingConfirmSheet(prop, card, bookingBtn);
       });
       actions.appendChild(bookingBtn);
     } else if (dispatchKind === 'call') {
@@ -2129,17 +2272,39 @@ function renderCard(card, lane) {
     });
     actions.appendChild(snoozeBtn);
 
-    // Book Scope — wired (Slice 1). Only on booking-loop proposals.
-    if (prop.metadata && prop.metadata.loop === 'booking_scope') {
+    // Book Scope — also added for every BOOK-lane card below, including
+    // GHL mirrors with no JARVIS proposal.
+    if (lane !== 'book' && prop.metadata && prop.metadata.loop === 'booking_scope') {
       var bookBtn = document.createElement('button');
+      bookBtn.className = 'primary';
       bookBtn.type = 'button';
-      bookBtn.textContent = 'Book Scope';
-      bookBtn.title = 'Lock in a scope window — generates customer confirmation SMS for your approval';
+      bookBtn.textContent = 'Book scope';
+      bookBtn.title = 'Pick a slot. Send and calendar write stay held.';
       bookBtn.addEventListener('click', function (e) {
         e.stopPropagation();
         openBookScopeDrawer(prop, card);
       });
       actions.appendChild(bookBtn);
+    }
+  }
+
+  if (lane === 'book') {
+    var alreadyBook = Array.from(actions.querySelectorAll('button')).some(function (b) {
+      return /book scope/i.test(b.textContent || '');
+    });
+    if (!alreadyBook) {
+      var bookLaneBtn = document.createElement('button');
+      bookLaneBtn.className = 'primary';
+      bookLaneBtn.type = 'button';
+      bookLaneBtn.textContent = 'Book scope';
+      bookLaneBtn.title = card.no_job_link
+        ? 'Creates the job stub if missing, then opens the slot picker. Send and calendar write stay held.'
+        : 'Pick a slot. Send and calendar write stay held.';
+      bookLaneBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openBookScopeDrawer(primaryProposal || null, card);
+      });
+      actions.insertBefore(bookLaneBtn, actions.firstChild);
     }
   }
 
@@ -2159,11 +2324,16 @@ function renderCard(card, lane) {
     var moveStageBtn = document.createElement('button');
     moveStageBtn.type = 'button';
     moveStageBtn.textContent = 'Move stage';
-    moveStageBtn.title = 'Move the Supabase stage, then let the backend sync the matching GHL stage.';
-    moveStageBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      openMoveStageDrawer(card);
-    });
+    if (lane === 'book') {
+      moveStageBtn.disabled = true;
+      moveStageBtn.title = 'Move stage stays held. Captain call: this surface does not write GHL.';
+    } else {
+      moveStageBtn.title = 'Move the Supabase stage, then let the backend sync the matching GHL stage.';
+      moveStageBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openMoveStageDrawer(card);
+      });
+    }
     actions.appendChild(moveStageBtn);
   }
 
@@ -2172,8 +2342,6 @@ function renderCard(card, lane) {
   //    they don't fire customer-facing sends.
   if (lane === 'call' && (!card.pending_proposals || !card.pending_proposals.length)) {
     actions.appendChild(makeStubBtn('No AI draft', null, 'JARVIS has not queued a draft for this lead — extractor / proposal-writer pending'));
-  } else if (lane === 'book') {
-    actions.appendChild(makeStubBtn('Move stage', null, 'Create/link the Supabase job first, then stage movement can sync from cockpit to GHL.'));
   } else if (lane === 'followup' && (!card.pending_proposals || !card.pending_proposals.length)) {
     actions.appendChild(makeStubBtn('No AI draft', null, 'JARVIS has not queued a draft for this lead'));
   }
@@ -2545,10 +2713,10 @@ function renderProposalDetailPanel(p, card) {
   // ── Booking handshake approval — scoper-facing M2/customer confirmation review ──
   if (p.action_type === 'propose_scoper_booking_approval') {
     var bookingBox = document.createElement('div');
-    bookingBox.style.cssText = 'margin:8px 0;padding:8px 10px;background:rgba(92,143,184,0.08);border-left:2px solid var(--blue);font-size:10px;line-height:1.5;color:var(--text-sec);';
+    bookingBox.className = 'booking-box';
 
     var bookingHead = document.createElement('div');
-    bookingHead.style.cssText = 'color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px;';
+    bookingHead.className = 'booking-box-head';
     bookingHead.textContent = 'Booking approval';
     bookingBox.appendChild(bookingHead);
 
@@ -2576,7 +2744,7 @@ function renderProposalDetailPanel(p, card) {
     if (payload.jarvis_presentation) meta.push('presentation: ' + String(payload.jarvis_presentation));
     if (meta.length) {
       var bookingMeta = document.createElement('div');
-      bookingMeta.style.cssText = 'color:var(--text);';
+      bookingMeta.className = 'booking-box-meta';
       bookingMeta.textContent = meta.join(' · ');
       bookingBox.appendChild(bookingMeta);
     }
@@ -2593,33 +2761,55 @@ function renderProposalDetailPanel(p, card) {
       if (rr.cluster_bonus_applied) rrLines.push('cluster bonus: ' + String(rr.cluster_bonus_applied));
       if (rr.evidence_gap) rrLines.push('evidence gap: ' + String(rr.evidence_gap));
       if (rrLines.length) {
+        var why = document.createElement('details');
+        why.className = 'booking-why';
+        var whySum = document.createElement('summary');
+        whySum.textContent = 'Why this slot';
+        why.appendChild(whySum);
         var rrLabel = document.createElement('div');
-        rrLabel.style.cssText = 'margin-top:7px;color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;';
+        rrLabel.className = 'booking-kicker';
         rrLabel.textContent = 'Route reasoning';
-        bookingBox.appendChild(rrLabel);
+        why.appendChild(rrLabel);
         rrLines.forEach(function (line) {
           var row = document.createElement('div');
-          row.style.cssText = 'color:var(--text);';
+          row.className = 'booking-row';
           row.textContent = '· ' + line;
-          bookingBox.appendChild(row);
+          why.appendChild(row);
         });
+        bookingBox.appendChild(why);
       }
     }
 
-    // Ranked slots — multi-option enumeration when JARVIS returned > 1 candidate.
+    // Ranked slots are the control. Rank 1 starts selected; tap to switch.
     var ranked = Array.isArray(payload.ranked_slots) ? payload.ranked_slots : [];
-    if (ranked.length > 1) {
+    if (!ranked.length && (picked.start_iso || picked.start || picked.human)) ranked = [picked];
+    if (ranked.length) {
+      if (p._selectedSlotIndex == null) p._selectedSlotIndex = 0;
       var rankedLabel = document.createElement('div');
-      rankedLabel.style.cssText = 'margin-top:7px;color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;';
-      rankedLabel.textContent = 'Ranked slots (' + ranked.length + ')';
+      rankedLabel.className = 'booking-kicker';
+      rankedLabel.textContent = 'Choose a slot';
       bookingBox.appendChild(rankedLabel);
       ranked.slice(0, 3).forEach(function (slot, idx) {
         var slotHuman = formatBookingSlotForDisplay(slot, payload.scoper_timezone || 'Australia/Perth');
-        var scoreStr = (typeof slot.score === 'number') ? slot.score.toFixed(2) : '?';
-        var row = document.createElement('div');
-        row.style.cssText = 'color:var(--text);';
-        row.textContent = (idx + 1) + '. ' + (slotHuman || (slot.start_iso || 'unknown slot')) + ' · score ' + scoreStr;
-        bookingBox.appendChild(row);
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'slot-chip';
+        chip.setAttribute('aria-pressed', idx === p._selectedSlotIndex ? 'true' : 'false');
+        chip.textContent = slotHuman || (slot.start_iso || 'unknown slot');
+        var reason = slot.reason || slot.why || (idx === 0 ? 'Closest to this scoper\'s run' : 'Alternative');
+        var whyLine = document.createElement('span');
+        whyLine.className = 'slot-why';
+        whyLine.textContent = reason;
+        chip.appendChild(whyLine);
+        chip.addEventListener('click', function (e) {
+          e.stopPropagation();
+          p._selectedSlotIndex = idx;
+          p._selectedSlot = slot;
+          bookingBox.querySelectorAll('.slot-chip').forEach(function (el) {
+            el.setAttribute('aria-pressed', el === chip ? 'true' : 'false');
+          });
+        });
+        bookingBox.appendChild(chip);
       });
     }
 
@@ -2629,10 +2819,18 @@ function renderProposalDetailPanel(p, card) {
       return /_window_skipped$/.test(k) && payload[k] && typeof payload[k] === 'object';
     });
     if (skippedKeys.length) {
+      var skipFold = bookingBox.querySelector('.booking-why') || document.createElement('details');
+      if (!skipFold.parentNode) {
+        skipFold.className = 'booking-why';
+        var skipSum = document.createElement('summary');
+        skipSum.textContent = 'Why this slot';
+        skipFold.appendChild(skipSum);
+        bookingBox.appendChild(skipFold);
+      }
       var skipLabel = document.createElement('div');
-      skipLabel.style.cssText = 'margin-top:7px;color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;';
+      skipLabel.className = 'booking-kicker';
       skipLabel.textContent = 'Windows skipped';
-      bookingBox.appendChild(skipLabel);
+      skipFold.appendChild(skipLabel);
       skippedKeys.forEach(function (key) {
         var info = payload[key];
         var dayName = key.replace(/_window_skipped$/, '');
@@ -2640,43 +2838,51 @@ function renderProposalDetailPanel(p, card) {
           ? String(info.detail || info.reason || info.message)
           : 'no detail';
         var row = document.createElement('div');
-        row.style.cssText = 'color:var(--text);';
+        row.className = 'booking-row';
         row.textContent = '· ' + dayName + ': ' + detail;
-        bookingBox.appendChild(row);
+        skipFold.appendChild(row);
       });
     }
 
-    // Slot-level evidence_gaps from the picked slot — e.g. routes_layer.
     if (Array.isArray(picked.evidence_gaps) && picked.evidence_gaps.length) {
-      var gapsRow = document.createElement('div');
-      gapsRow.style.cssText = 'margin-top:7px;color:var(--amber);';
-      gapsRow.textContent = 'slot gaps: ' + picked.evidence_gaps.map(String).join(' · ');
-      bookingBox.appendChild(gapsRow);
+      var gapsFold = bookingBox.querySelector('.booking-why');
+      if (gapsFold) {
+        var gapsRow = document.createElement('div');
+        gapsRow.className = 'booking-row gap';
+        gapsRow.textContent = 'slot gaps: ' + picked.evidence_gaps.map(String).join(' · ');
+        gapsFold.appendChild(gapsRow);
+      }
     }
 
-    // M2 SMS preview — what gets texted to the customer on commit=true.
     var m2 = payload.m2_drafted_message || (p.metadata && p.metadata.m2_drafted_message);
     if (m2) {
       var m2Box = document.createElement('div');
-      m2Box.style.cssText = 'margin-top:7px;color:var(--text);';
-      m2Box.innerHTML = '<span style="color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;">Customer confirmation draft (M2 SMS)</span><br>' + escapeHtml(String(m2));
+      m2Box.className = 'booking-m2';
+      var m2Head = document.createElement('span');
+      m2Head.className = 'booking-kicker';
+      m2Head.textContent = 'Customer confirmation draft';
+      m2Box.appendChild(m2Head);
+      m2Box.appendChild(document.createElement('br'));
+      m2Box.appendChild(document.createTextNode(String(m2)));
       bookingBox.appendChild(m2Box);
     }
 
-    // Evidence refs — what data JARVIS consulted.
     var bookingRefs = Array.isArray(payload.evidence_refs) ? payload.evidence_refs : [];
     if (bookingRefs.length) {
-      var refLine = document.createElement('div');
-      refLine.style.cssText = 'margin-top:7px;color:var(--text-muted);';
-      refLine.textContent = 'evidence: ' + bookingRefs.map(function (r) {
-        return r && r.source ? String(r.source) : 'source';
-      }).slice(0, 5).join(' · ');
-      bookingBox.appendChild(refLine);
+      var refFold = bookingBox.querySelector('.booking-why');
+      if (refFold) {
+        var refLine = document.createElement('div');
+        refLine.className = 'booking-row';
+        refLine.textContent = 'evidence: ' + bookingRefs.map(function (r) {
+          return r && r.source ? String(r.source) : 'source';
+        }).slice(0, 5).join(' · ');
+        refFold.appendChild(refLine);
+      }
     }
 
     var approvalGap = document.createElement('div');
-    approvalGap.style.cssText = 'margin-top:7px;color:var(--amber);';
-    approvalGap.textContent = 'Browser approval is live: JARVIS dry-runs the slot, rechecks calendar availability, then writes only after confirmation.';
+    approvalGap.className = 'booking-row gap';
+    approvalGap.textContent = 'Send and calendar write stay held. Choosing a slot records the pick on this card only.';
     bookingBox.appendChild(approvalGap);
 
     wrap.appendChild(bookingBox);
@@ -2923,7 +3129,7 @@ function openProposalConfirm(proposal, card) {
   showActionToast('Sending…', 'info');
   opsApiPost(_lastCloud, 'send_proposed_sms', { action_id: pid }).then(function () {
     showActionToast('Sent ✓ — proposal ' + pid.slice(0, 8) + '… dispatched', 'sent');
-    setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 700);
+    setTimeout(function () { reloadCardsKeepScroll(); }, 700);
   }).catch(function (err) {
     showActionToast('Send failed: ' + err.message + (err.message && /not\s*found/i.test(err.message) ? ' (Backend ticket SECURE-SALE-OPS-API-PK-FIX)' : ''), 'error');
     console.error('[sale] send_proposed_sms failed:', err);
@@ -2955,7 +3161,7 @@ function handleRejectWithReason(proposal, card) {
   var userId = (_profileCache && _profileCache.id) || null;
   opsApiPost(_lastCloud, 'dismiss_proposed_action', { action_id: pid, user_id: userId, reason: reason || null }).then(function () {
     showActionToast('Rejected' + (reason ? ' · reason captured (server may discard until SECURE-SALE-DISMISS-WITH-REASON ships)' : ''), 'info');
-    setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 500);
+    setTimeout(function () { reloadCardsKeepScroll(); }, 500);
   }).catch(function (err) {
     showActionToast('Reject failed: ' + err.message + (err.message && /not\s*found/i.test(err.message) ? ' (SECURE-SALE-OPS-API-PK-FIX)' : ''), 'error');
   });
@@ -3055,7 +3261,7 @@ function openMoveStageDrawer(card) {
   }).then(function (res) {
     var suffix = res && res.ghl_sync_failed ? ' · GHL sync needs review' : '';
     showActionToast('Stage moved to ' + stageOptionLabel(next) + suffix, 'sent');
-    setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 800);
+    setTimeout(function () { reloadCardsKeepScroll(); }, 800);
   }).catch(function (err) {
     showActionToast('Stage move failed: ' + err.message, 'error');
   });
@@ -3121,7 +3327,7 @@ function approveScoperCallTask(proposal, card, anchorBtn) {
   var userId = (_profileCache && _profileCache.id) || null;
   opsApiPost(_lastCloud, 'approve_scoper_call_task', { action_id: pid, user_id: userId, outcome: 'called' }).then(function () {
     showActionToast('Call marked called ✓', 'sent');
-    setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 700);
+    setTimeout(function () { reloadCardsKeepScroll(); }, 700);
   }).catch(function (err) {
     showActionToast('Approve failed: ' + err.message, 'error');
     if (anchorBtn) { anchorBtn.disabled = false; anchorBtn.textContent = 'Mark Called / Approve call task'; }
@@ -3130,75 +3336,7 @@ function approveScoperCallTask(proposal, card, anchorBtn) {
 }
 
 function approveBookingProposal(proposal, card, anchorBtn) {
-  var pid = proposalId(proposal);
-  if (!pid) { showActionToast('Proposal id missing', 'error'); return; }
-  var customer = card.customer_name || 'this customer';
-  var payload = proposal.action_payload || {};
-  var picked = payload.jarvis_picked_slot || payload.picked_slot || payload.recommended_slot || payload.slot || {};
-  var scoperName = payload.scoper_first_name
-    || (proposal.metadata && proposal.metadata.scoper_first_name)
-    || payload.scoper
-    || payload.assigned_scoper
-    || 'the scoper';
-  var calendarTarget = payload.calendar_target || payload.calendar || '';
-  var pickedHuman = formatBookingSlotForDisplay(picked, payload.scoper_timezone || (proposal.metadata && proposal.metadata.scoper_timezone) || 'Australia/Perth')
-    || picked.human || picked.label || picked.start_iso || picked.start
-    || payload.picked_slot_human || payload.recommended_time
-    || 'the proposed slot';
-  var m2Preview = payload.m2_drafted_message || (proposal.metadata && proposal.metadata.m2_drafted_message) || proposal.drafted_message || '';
-  var userId = (_profileCache && _profileCache.id) || null;
-
-  showActionToast('Dry-running booking approval for ' + customer + '…', 'info');
-  if (anchorBtn) { anchorBtn.disabled = true; anchorBtn.textContent = 'Checking…'; }
-
-  opsApiPost(_lastCloud, 'approve_booking_proposal', {
-    proposal_id: pid,
-    approver_user_id: userId,
-    m2_drafted_message: m2Preview,
-    commit: false,
-  }).then(function (dry) {
-    var lines = ['Booking dry-run passed for ' + customer + '.'];
-    lines.push('');
-    lines.push('Scoper: ' + scoperName + (calendarTarget ? ' (' + calendarTarget + ')' : ''));
-    lines.push('Proposed time: ' + pickedHuman);
-    var rr = payload.route_reasoning;
-    if (rr && typeof rr === 'object') {
-      if (rr.cluster_bonus_applied) lines.push('Cluster bonus: ' + String(rr.cluster_bonus_applied));
-      if (rr.evidence_gap) lines.push('Route evidence gap: ' + String(rr.evidence_gap));
-    }
-    if (Array.isArray(picked.evidence_gaps) && picked.evidence_gaps.length) {
-      lines.push('Slot evidence gaps: ' + picked.evidence_gaps.map(String).join(', '));
-    }
-    if (m2Preview) {
-      lines.push('');
-      lines.push('Customer SMS (M2) preview:');
-      lines.push(m2Preview);
-    }
-    lines.push('');
-    lines.push('Approving for real will recheck calendar availability, write the scoper calendar event, advance booking state, and queue the customer confirmation SMS for a separate human approval.');
-    var summary = lines.join('\n');
-    var result = dry && dry.result;
-    if (result && result.reason) summary += '\n\nDry-run note: ' + result.reason;
-    if (!window.confirm(summary + '\n\nApprove this booking now?')) {
-      showActionToast('Booking approval cancelled after dry-run', 'info');
-      if (anchorBtn) { anchorBtn.disabled = false; anchorBtn.textContent = 'Review slot'; }
-      return null;
-    }
-    if (anchorBtn) anchorBtn.textContent = 'Approving…';
-    return opsApiPost(_lastCloud, 'approve_booking_proposal', {
-      proposal_id: pid,
-      approver_user_id: userId,
-      m2_drafted_message: payload.m2_drafted_message || proposal.drafted_message || '',
-      commit: true,
-    }).then(function () {
-      showActionToast('Booking approved ✓ calendar/customer handoff complete', 'sent');
-      setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 900);
-    });
-  }).catch(function (err) {
-    showActionToast('Booking approval failed: ' + err.message, 'error');
-    if (anchorBtn) { anchorBtn.disabled = false; anchorBtn.textContent = 'Review slot'; }
-    console.error('[sale] approve_booking_proposal failed:', err);
-  });
+  openBookingConfirmSheet(proposal, card, anchorBtn);
 }
 
 function openQuoteReviewTaskMenu(proposal, card, anchorBtn) {
@@ -3232,7 +3370,7 @@ function openQuoteReviewTaskMenu(proposal, card, anchorBtn) {
                 subAction === 'refresh_price' ? 'Marked for re-quote ✓' :
                 'Marked for reactivation ✓';
     showActionToast(label, 'sent');
-    setTimeout(function () { if (_lastCloud) loadAndRender(_lastCloud); }, 700);
+    setTimeout(function () { reloadCardsKeepScroll(); }, 700);
   }).catch(function (err) {
     showActionToast('Approve failed: ' + err.message, 'error');
     if (anchorBtn) { anchorBtn.disabled = false; anchorBtn.textContent = 'Approve review'; }
@@ -3310,32 +3448,244 @@ function openSnoozeMenu(proposal, card, anchorBtn) {
 // Verb: Book Scope — finalize a booking proposal. Locks crew_availability +
 // emits a confirmation_sms proposal for the customer (still pending → rep
 // approves the confirmation send).
-function openBookScopeDrawer(proposal, card) {
-  var dt = window.prompt(
-    'Book scope window for ' + (card.customer_name || 'this lead') +
-    '\n\nEnter date+time (YYYY-MM-DD HH:MM, local):'
-  );
-  if (!dt) return;
-  var when = new Date(dt);
-  if (isNaN(when.getTime())) { showActionToast('Invalid datetime', 'error'); return; }
-  if (when.getTime() <= Date.now()) { showActionToast('Pick a future time', 'error'); return; }
-  var pid = proposal.proposal_id || proposal.id;
-  var userId = (_profileCache && _profileCache.id) || null;
-  // Default: assign to the rep who's logged in (caller).
-  var scoperId = userId;
-  opsApiPost(_lastCloud, 'book_scope', {
-    action_id: pid,
-    scope_window_iso: when.toISOString(),
-    scoper_user_id: scoperId,
-    user_id: userId,
-  }).then(function (res) {
-    var msg = 'Scope booked ✓';
-    if (res && res.confirmation_proposal_id) msg += ' — confirmation SMS drafted, pending your approval';
-    showActionToast(msg, 'sent');
-    setTimeout(function () { reloadCardsKeepScroll(); }, 800);
-  }).catch(function (err) {
-    showActionToast('Book Scope failed: ' + err.message, 'error');
+var SALE_SCOPERS = [
+  { id: '5862cf1d-0a3b-4836-8fd1-d69f95aa2f73', name: 'Nithin' },
+  { id: '706c5258-70dd-483a-b36c-af6864b24498', name: 'Marnin' },
+  { id: 'be6c2188-2b7b-49c7-b6e4-5b0d0deb6415', name: 'Khairo' }
+];
+var BOOK_WRITE_HOLD = 'Held. This surface does not send a customer text or write a calendar.';
+
+function closeSaleDrawer() {
+  var existing = document.getElementById('saleDrawer');
+  if (existing) existing.remove();
+}
+
+function openSaleDrawer(title, bodyHtml, footerHtml) {
+  closeSaleDrawer();
+  var overlay = document.createElement('div');
+  overlay.id = 'saleDrawer';
+  overlay.className = 'sale-drawer';
+  overlay.innerHTML = '<div class="sale-drawer-panel" role="dialog" aria-modal="true"><h2></h2><div class="sale-drawer-body"></div><div class="sale-drawer-actions"></div></div>';
+  overlay.querySelector('h2').textContent = title;
+  overlay.querySelector('.sale-drawer-body').innerHTML = bodyHtml || '';
+  if (footerHtml) overlay.querySelector('.sale-drawer-actions').innerHTML = footerHtml;
+  overlay.addEventListener('click', function (e) {
+    if (e.target === overlay) closeSaleDrawer();
   });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function workingHourSlots(count) {
+  var slots = [];
+  var d = new Date();
+  d.setSeconds(0, 0);
+  d.setMinutes(0);
+  d.setHours(d.getHours() + 1);
+  var guard = 0;
+  while (slots.length < (count || 10) && guard < 400) {
+    guard += 1;
+    var day = d.getDay();
+    var hour = d.getHours();
+    if (day >= 1 && day <= 5 && hour >= 8 && hour <= 16) {
+      slots.push(new Date(d.getTime()));
+    }
+    d.setHours(d.getHours() + 1);
+  }
+  return slots;
+}
+
+function defaultScoperId() {
+  var userId = (_profileCache && _profileCache.id) || '';
+  if (SALE_SCOPERS.some(function (s) { return s.id === userId; })) return userId;
+  return SALE_SCOPERS[1].id;
+}
+
+function openBookScopeDrawer(proposal, card) {
+  if (card && card.no_job_link && !card.job_id) {
+    createJobThenOpenSlots(card, proposal);
+    return;
+  }
+  openBookingSlotDrawer(card, proposal);
+}
+
+function createJobThenOpenSlots(card, proposal) {
+  if (!card.opportunity_id) {
+    showActionToast('No GHL opportunity id on this card', 'error');
+    return;
+  }
+  var lane = card.pipeline_lane;
+  if (!lane && card.pending_proposals && card.pending_proposals[0]) {
+    lane = (card.pending_proposals[0].action_payload || {}).pipeline_lane;
+  }
+  if (!lane) {
+    showActionToast('Cannot infer pipeline lane; refresh the page', 'error');
+    return;
+  }
+  showActionToast('Creating the job stub…', 'info');
+  var userId = (_profileCache && _profileCache.id) || null;
+  var firstProp = (card.pending_proposals && card.pending_proposals[0]) || proposal || {};
+  opsApiPost(_lastCloud, 'create_job_for_opportunity', {
+    action_id: firstProp.proposal_id || firstProp.id || null,
+    ghl_opportunity_id: card.opportunity_id,
+    ghl_contact_id: card.contact_id || null,
+    pipeline_lane: lane,
+    contact_name: card.customer_name || null,
+    contact_phone: card.phone || null,
+    contact_email: card._raw && card._raw.contactEmail || null,
+    site_address: card._raw && card._raw.contactAddress || null,
+    site_suburb: card._raw && card._raw.contactCity || null,
+    monetary_value: card._raw && card._raw.monetaryValue || null,
+    user_id: userId
+  }).then(function (res) {
+    if (res && res.job_id) card.job_id = res.job_id;
+    card.no_job_link = false;
+    showActionToast(res && res.created ? 'Job stub created. Pick a slot.' : 'Existing job linked. Pick a slot.', 'info');
+    openBookingSlotDrawer(card, proposal || firstProp);
+  }).catch(function (err) {
+    showActionToast('Create job failed: ' + err.message, 'error');
+  });
+}
+
+function rankedOrWorkingSlots(proposal) {
+  var payload = (proposal && proposal.action_payload) || {};
+  var ranked = Array.isArray(payload.ranked_slots) ? payload.ranked_slots.slice(0, 3) : [];
+  if (ranked.length) return ranked.map(function (slot) {
+    return {
+      start: slot.start_iso || slot.start,
+      end: slot.end_iso || slot.end,
+      human: formatBookingSlotForDisplay(slot, payload.scoper_timezone || 'Australia/Perth'),
+      reason: slot.reason || slot.why || 'Ranked by JARVIS',
+      raw: slot
+    };
+  });
+  return workingHourSlots(10).map(function (d) {
+    var end = new Date(d.getTime() + 90 * 60000);
+    return {
+      start: d.toISOString(),
+      end: end.toISOString(),
+      human: formatBookingSlotForDisplay({ start_iso: d.toISOString() }, 'Australia/Perth'),
+      reason: 'Next working-hour window',
+      raw: { start_iso: d.toISOString(), end_iso: end.toISOString() }
+    };
+  });
+}
+
+function openBookingSlotDrawer(card, proposal) {
+  var slots = rankedOrWorkingSlots(proposal);
+  var selected = 0;
+  var scoperId = defaultScoperId();
+  var options = SALE_SCOPERS.map(function (s) {
+    return '<option value="' + s.id + '"' + (s.id === scoperId ? ' selected' : '') + '>' + s.name + '</option>';
+  }).join('');
+  var chips = slots.map(function (slot, idx) {
+    return '<button type="button" class="slot-chip" data-slot-idx="' + idx + '" aria-pressed="' + (idx === 0 ? 'true' : 'false') + '">' +
+      (slot.human || slot.start) + '<span class="slot-why">' + (slot.reason || '') + '</span></button>';
+  }).join('');
+  var overlay = openSaleDrawer(
+    'Book scope · ' + (card && card.customer_name || 'this lead'),
+    '<p>Pick a scoper and a slot. Send and calendar write stay held.</p>' +
+      '<label for="saleScoper">Scoper</label><select id="saleScoper">' + options + '</select>' +
+      '<label>Slots</label><div id="saleSlotList">' + chips + '</div>' +
+      '<label for="saleSlotCustom">Or type a time (escape hatch)</label>' +
+      '<input id="saleSlotCustom" type="text" placeholder="YYYY-MM-DD HH:MM">',
+    '<button type="button" class="primary" id="saleSlotContinue">Continue</button>' +
+      '<button type="button" id="saleSlotCancel">Cancel</button>'
+  );
+  overlay.querySelector('#saleSlotList').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-slot-idx]');
+    if (!chip) return;
+    selected = Number(chip.getAttribute('data-slot-idx'));
+    overlay.querySelectorAll('.slot-chip').forEach(function (el) {
+      el.setAttribute('aria-pressed', el === chip ? 'true' : 'false');
+    });
+  });
+  overlay.querySelector('#saleSlotCancel').addEventListener('click', closeSaleDrawer);
+  overlay.querySelector('#saleSlotContinue').addEventListener('click', function () {
+    var custom = overlay.querySelector('#saleSlotCustom').value.trim();
+    var slot = slots[selected];
+    if (custom) {
+      var parsed = new Date(custom.replace(' ', 'T'));
+      if (isNaN(parsed.getTime())) { showActionToast('Invalid datetime', 'error'); return; }
+      slot = {
+        start: parsed.toISOString(),
+        end: new Date(parsed.getTime() + 90 * 60000).toISOString(),
+        human: formatBookingSlotForDisplay({ start_iso: parsed.toISOString() }, 'Australia/Perth'),
+        reason: 'Typed time',
+        raw: { start_iso: parsed.toISOString() }
+      };
+    }
+    var scoper = overlay.querySelector('#saleScoper').value;
+    if (proposal) {
+      proposal._selectedSlot = slot.raw || slot;
+      proposal._selectedSlotIndex = selected;
+    }
+    closeSaleDrawer();
+    openBookingConfirmSheet(proposal, card, null, { slot: slot, scoperId: scoper });
+  });
+}
+
+function openBookingConfirmSheet(proposal, card, anchorBtn, picked) {
+  picked = picked || {};
+  var payload = (proposal && proposal.action_payload) || {};
+  var slot = picked.slot;
+  if (!slot && proposal) {
+    var ranked = rankedOrWorkingSlots(proposal);
+    var idx = proposal._selectedSlotIndex || 0;
+    slot = ranked[idx] || ranked[0];
+  }
+  if (!slot) {
+    openBookingSlotDrawer(card, proposal);
+    return;
+  }
+  var scoper = SALE_SCOPERS.filter(function (s) { return s.id === (picked.scoperId || defaultScoperId()); })[0] || SALE_SCOPERS[1];
+  var first = String((card && card.customer_name) || 'the customer').split(' ')[0];
+  var sms = (payload.m2_drafted_message || (proposal && proposal.metadata && proposal.metadata.m2_drafted_message) || proposal && proposal.drafted_message || '')
+    || ('Hi ' + first + ', it\'s ' + scoper.name + ' from SecureWorks. I can come out ' + (slot.human || '') + ' to measure and quote. Does that suit?');
+  var overlay = openSaleDrawer(
+    'Book and text ' + first,
+    '<div class="sale-drawer-status held">' + BOOK_WRITE_HOLD + '</div>' +
+      '<p><strong>' + scoper.name + '</strong> · ' + (slot.human || '') + '</p>' +
+      '<label for="saleSmsDraft">Customer text</label>' +
+      '<textarea id="saleSmsDraft" rows="6"></textarea>',
+    '<button type="button" class="primary" id="saleBookHeld" disabled title="' + BOOK_WRITE_HOLD + '">Book and text ' + first + ' (held)</button>' +
+      '<button type="button" id="saleBookCancel">Cancel</button>'
+  );
+  overlay.querySelector('#saleSmsDraft').value = sms;
+  overlay.querySelector('#saleBookCancel').addEventListener('click', closeSaleDrawer);
+  overlay.querySelector('#saleBookHeld').addEventListener('click', function (e) {
+    e.preventDefault();
+    showActionToast(BOOK_WRITE_HOLD, 'info');
+  });
+  if (anchorBtn) { anchorBtn.disabled = false; anchorBtn.textContent = 'Review slot'; }
+  if (proposal && typeof opsApiPost === 'function' && _lastCloud && proposalId(proposal)) {
+    opsApiPost(_lastCloud, 'approve_booking_proposal', {
+      proposal_id: proposalId(proposal),
+      approver_user_id: (_profileCache && _profileCache.id) || null,
+      m2_drafted_message: sms,
+      commit: false
+    }).then(function (dry) {
+      var status = overlay.querySelector('.sale-drawer-status');
+      if (!status) return;
+      var result = dry && dry.result;
+      if (result && result.conflict) {
+        status.className = 'sale-drawer-status bad';
+        status.textContent = 'Dry-run conflict: ' + (result.reason || 'slot no longer free');
+      } else if (result && result.reason) {
+        status.className = 'sale-drawer-status warn';
+        status.textContent = 'Dry-run note: ' + result.reason + ' · ' + BOOK_WRITE_HOLD;
+      } else {
+        status.className = 'sale-drawer-status ok';
+        status.textContent = 'Dry-run passed. ' + BOOK_WRITE_HOLD;
+      }
+    }).catch(function () {
+      var status = overlay.querySelector('.sale-drawer-status');
+      if (status) {
+        status.className = 'sale-drawer-status held';
+        status.textContent = BOOK_WRITE_HOLD;
+      }
+    });
+  }
 }
 
 // Verb: Create Job for Opportunity — backfills a Supabase jobs stub for
@@ -3728,6 +4078,7 @@ function renderHero(allCards, buckets) {
 
 var _activeSaleSection = 'actions';
 var _sectionCache = { allCards: [], booking: [], followup: [], proposals: null, approvedBooking: [] };
+var _saleCalMonday = null;
 
 function shortDateLabel(ts) {
   if (!ts) return 'No time';
@@ -3932,21 +4283,81 @@ function renderCalendarSection(allCards, approvedBooking) {
 
   var timed = items.filter(function (i) { return i.start && !isNaN(new Date(i.start).getTime()); });
   var undated = items.filter(function (i) { return !i.start || isNaN(new Date(i.start).getTime()); });
-  var baseDate = timed.length ? new Date(timed[0].start) : new Date();
-  var monday = new Date(baseDate);
-  var day = monday.getDay() || 7;
-  monday.setDate(monday.getDate() - day + 1);
-  monday.setHours(0, 0, 0, 0);
-  var days = Array.from({ length: 7 }, function (_, idx) {
+  if (!_saleCalMonday) {
+    var today = new Date();
+    var day = today.getDay() || 7;
+    _saleCalMonday = new Date(today);
+    _saleCalMonday.setDate(today.getDate() - day + 1);
+    _saleCalMonday.setHours(0, 0, 0, 0);
+  }
+  var monday = new Date(_saleCalMonday);
+  var days = Array.from({ length: 5 }, function (_, idx) {
     var d = new Date(monday);
     d.setDate(monday.getDate() + idx);
     return d;
   });
   var hours = [];
   for (var h = 7; h <= 17; h++) hours.push(h);
+  var PX = 44;
+
+  if (undated.length) {
+    var panel = document.createElement('section');
+    panel.className = 'calendar-undated section-panel';
+    panel.innerHTML = '<div class="section-panel-title">Needs time attached (' + undated.length + ')</div><div class="micro-list"></div>';
+    var list = $('.micro-list', panel);
+    undated.forEach(function (item) {
+      var card = item.card || {};
+      var p = item.proposal || {};
+      var payload = p.action_payload || {};
+      var name = card.customer_name || p.contact_name || p.job_number || 'Booking';
+      var row = renderMicroCard({
+        name: name,
+        meta: item.status,
+        line1: cardRepLabel(card),
+        line2: payload.route_status || 'Calendar stage exists but no exact appointment time was available to this view.',
+        tone: item.tone,
+      });
+      var attach = document.createElement('button');
+      attach.type = 'button';
+      attach.textContent = 'Attach time';
+      attach.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openBookingSlotDrawer(card, p);
+      });
+      row.appendChild(attach);
+      list.appendChild(row);
+    });
+    root.appendChild(panel);
+  }
+
+  var nav = document.createElement('div');
+  nav.className = 'calendar-nav';
+  nav.innerHTML = '<button type="button" data-cal-week="-7">Previous week</button>' +
+    '<span class="cal-week-label"></span>' +
+    '<button type="button" data-cal-week="0">This week</button>' +
+    '<button type="button" data-cal-week="7">Next week</button>';
+  nav.querySelector('.cal-week-label').textContent = monday.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) +
+    ' – ' + days[4].toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  nav.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-cal-week]');
+    if (!btn) return;
+    var delta = Number(btn.getAttribute('data-cal-week'));
+    if (delta === 0) {
+      var now = new Date();
+      var nd = now.getDay() || 7;
+      _saleCalMonday = new Date(now);
+      _saleCalMonday.setDate(now.getDate() - nd + 1);
+      _saleCalMonday.setHours(0, 0, 0, 0);
+    } else {
+      _saleCalMonday = new Date(monday);
+      _saleCalMonday.setDate(monday.getDate() + delta);
+    }
+    renderCalendarSection(_sectionCache.allCards, _sectionCache.approvedBooking);
+  });
+  root.appendChild(nav);
 
   var week = document.createElement('div');
-  week.className = 'calendar-week';
+  week.className = 'calendar-week weekdays';
   week.appendChild(document.createElement('div'));
   days.forEach(function (d) {
     var head = document.createElement('div');
@@ -3955,59 +4366,58 @@ function renderCalendarSection(allCards, approvedBooking) {
     week.appendChild(head);
   });
 
+  var timeCol = document.createElement('div');
+  timeCol.style.position = 'relative';
+  timeCol.style.minHeight = (hours.length * PX) + 'px';
   hours.forEach(function (hour) {
     var time = document.createElement('div');
     time.className = 'calendar-time';
+    time.style.position = 'absolute';
+    time.style.top = ((hour - 7) * PX) + 'px';
+    time.style.right = '6px';
     time.textContent = (hour > 12 ? hour - 12 : hour) + (hour >= 12 ? 'pm' : 'am');
-    week.appendChild(time);
-    days.forEach(function (d) {
-      var cell = document.createElement('div');
-      cell.className = 'calendar-cell';
-      var dayEvents = timed.filter(function (item) {
-        var start = new Date(item.start);
-        return start.toDateString() === d.toDateString() && start.getHours() === hour;
-      });
-      dayEvents.forEach(function (item, idx) {
-        var card = item.card || {};
-        var p = item.proposal || {};
-        var payload = p.action_payload || {};
-        var meta = p.metadata || {};
-        var name = card.customer_name || p.contact_name || p.job_number || 'Booking';
-        var addr = cardAddress(card) || payload.address || payload.site_address || meta.address || '';
-        var ev = document.createElement('div');
-        ev.className = 'calendar-event';
-        ev.dataset.tone = item.tone;
-        ev.style.top = (4 + idx * 42) + 'px';
-        ev.innerHTML = '<div class="calendar-event-title"></div><div class="calendar-event-meta"></div>';
-        $('.calendar-event-title', ev).textContent = name;
-        $('.calendar-event-meta', ev).textContent = item.status + ' · ' + shortTimeLabel(item.start) + (addr ? ' · ' + addr : '');
-        cell.appendChild(ev);
-      });
-      week.appendChild(cell);
-    });
+    timeCol.appendChild(time);
   });
-  root.appendChild(week);
+  week.appendChild(timeCol);
 
-  if (undated.length) {
-    var panel = document.createElement('section');
-    panel.className = 'calendar-undated section-panel';
-    panel.innerHTML = '<div class="section-panel-title">Needs time attached</div><div class="micro-list"></div>';
-    var list = $('.micro-list', panel);
-    undated.slice(0, 12).forEach(function (item) {
+  days.forEach(function (d) {
+    var col = document.createElement('div');
+    col.className = 'calendar-day-col';
+    col.style.minHeight = (hours.length * PX) + 'px';
+    hours.forEach(function (hour) {
+      var line = document.createElement('div');
+      line.className = 'calendar-hour-line';
+      line.style.top = ((hour - 7) * PX) + 'px';
+      col.appendChild(line);
+    });
+    timed.forEach(function (item) {
+      var start = new Date(item.start);
+      if (start.toDateString() !== d.toDateString()) return;
+      var end = item.end ? new Date(item.end) : new Date(start.getTime() + 60 * 60000);
+      if (isNaN(end.getTime()) || end <= start) end = new Date(start.getTime() + 60 * 60000);
+      var startH = start.getHours() + start.getMinutes() / 60;
+      var endH = end.getHours() + end.getMinutes() / 60;
+      var top = (startH - 7) * PX;
+      var height = Math.max(28, (endH - startH) * PX);
       var card = item.card || {};
       var p = item.proposal || {};
       var payload = p.action_payload || {};
+      var meta = p.metadata || {};
       var name = card.customer_name || p.contact_name || p.job_number || 'Booking';
-      list.appendChild(renderMicroCard({
-        name: name,
-        meta: item.status,
-        line1: cardRepLabel(card),
-        line2: payload.route_status || 'Calendar stage exists but no exact appointment time was available to this view.',
-        tone: item.tone,
-      }));
+      var addr = cardAddress(card) || payload.address || payload.site_address || meta.address || '';
+      var ev = document.createElement('div');
+      ev.className = 'calendar-event';
+      ev.dataset.tone = item.tone;
+      ev.style.top = top + 'px';
+      ev.style.height = height + 'px';
+      ev.innerHTML = '<div class="calendar-event-title"></div><div class="calendar-event-meta"></div>';
+      $('.calendar-event-title', ev).textContent = name;
+      $('.calendar-event-meta', ev).textContent = item.status + ' · ' + shortTimeLabel(item.start) + (addr ? ' · ' + addr : '');
+      col.appendChild(ev);
     });
-    root.appendChild(panel);
-  }
+    week.appendChild(col);
+  });
+  root.appendChild(week);
 }
 
 function boardColumnFor(card) {

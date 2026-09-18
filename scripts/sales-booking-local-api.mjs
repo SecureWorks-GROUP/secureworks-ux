@@ -12,7 +12,7 @@ const PIPELINES = {
 };
 
 export function createLocalStore(filePath) {
-  const empty = { cases: {}, drafts: {}, offers: {}, actions: [], archives: {}, assessments: {}, cursors: {}, seenEvents: [] };
+  const empty = { cases: {}, drafts: {}, offers: {}, actions: [], archives: {}, assessments: {}, cursors: {}, seenEvents: [], stamps: {} };
   function load() {
     try { return Object.assign(empty, JSON.parse(fs.readFileSync(filePath, 'utf8'))); } catch { return structuredClone(empty); }
   }
@@ -79,6 +79,8 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
     }
     db.save(store);
     const cases = Object.values(store.cases).filter((c) => c.resource_id === resource);
+    const stampKey = resource + '|' + weekStart;
+    const storedStamp = (store.stamps && store.stamps[stampKey]) || { present: false, approved: [], rejected: [], decisions: {}, stage_moves: [] };
     return {
       ok: true,
       fixture: false,
@@ -97,8 +99,29 @@ export async function handleLocal(action, params, body, mcpCall, storeFile) {
       },
       cases,
       drafts: store.drafts,
+      stamp: storedStamp,
       policy: { activation: 'held' }
     };
+  }
+  if (action === 'sales_booking_stamp_write') {
+    const resource = body.resource || params.resource || 'nithin';
+    const weekStart = body.week_start || params.week_start;
+    const incoming = body.stamp || {};
+    store.stamps = store.stamps || {};
+    const key = resource + '|' + weekStart;
+    store.stamps[key] = {
+      present: true,
+      as_of: new Date().toISOString(),
+      week_start: weekStart,
+      captain: incoming.captain || 'marnin',
+      approved: Array.isArray(incoming.approved) ? incoming.approved.slice() : [],
+      rejected: Array.isArray(incoming.rejected) ? incoming.rejected.slice() : [],
+      decisions: incoming.decisions && typeof incoming.decisions === 'object' ? incoming.decisions : {},
+      // Move is held: a stamp write never queues a GHL stage change.
+      stage_moves: []
+    };
+    db.save(store);
+    return { ok: true, posted: true, sent: false, wrote_calendar: false, stamp: store.stamps[key] };
   }
   if (action === 'sales_booking_draft') {
     const id = body.case_id;

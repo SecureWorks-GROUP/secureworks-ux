@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sale cockpit — booking shot</title>
+  <style>
+    :root {
+      --amber:#FFB554; --green:#4CAF8E; --blue:#5C8FB8;
+      --bg:#050709; --surface-1:#0A0F12; --surface-2:#14202A; --surface-3:#1F2A30;
+      --rule:rgba(242,239,235,0.08); --rule-strong:rgba(242,239,235,0.16);
+      --text:rgba(242,239,235,0.95); --text-sec:rgba(242,239,235,0.55); --text-muted:rgba(242,239,235,0.30);
+      --font:'Helvetica Neue',Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 var(--font);padding:20px}
+    h1{font-size:18px;margin:0 0 6px}
+    .sub{color:var(--text-sec);margin:0 0 18px;font-size:12px}
+    .lcard{background:var(--surface-1);border:1px solid var(--rule-strong);padding:14px;margin-bottom:16px;max-width:420px}
+    .lcard-name{font-weight:650}
+    .lcard-meta{color:var(--text-sec);font-size:11px;margin:4px 0 10px}
+    .lcard-actions button{margin-right:6px;padding:8px 12px;border:1px solid var(--rule-strong);background:var(--surface-2);color:var(--text)}
+    .lcard-actions button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:650}
+    .lcard-actions button:disabled{opacity:.45;cursor:not-allowed}
+    .booking-box{margin:8px 0;padding:8px 10px;background:rgba(92,143,184,0.08);border-left:2px solid var(--blue);font-size:12px}
+    .booking-box-head,.booking-kicker{color:var(--text-muted);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px}
+    .slot-chip{display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid var(--rule-strong);background:var(--surface-1);color:var(--text)}
+    .slot-chip[aria-pressed="true"]{border-color:var(--blue);background:rgba(92,143,184,0.16);font-weight:650}
+    .slot-why{display:block;margin-top:3px;color:var(--text-muted);font-size:10px;font-weight:400}
+    .sale-drawer-panel{width:min(480px,100%);background:var(--surface-1);border:1px solid var(--rule-strong);padding:18px 16px}
+    .sale-drawer-status.held{background:rgba(92,143,184,0.14);color:var(--blue);padding:8px 10px;margin-bottom:10px;font-size:11px}
+    .calendar-undated{margin-bottom:16px;border:1px solid var(--rule-strong);padding:12px}
+    .calendar-nav{display:flex;gap:8px;align-items:center;margin:0 0 12px}
+    .calendar-week{display:grid;grid-template-columns:58px repeat(5,minmax(90px,1fr));border-top:1px solid var(--rule);border-left:1px solid var(--rule)}
+    .calendar-day-head,.calendar-day-col{min-height:48px;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:8px}
+    .calendar-event{background:rgba(92,143,184,0.13);border-left:2px solid var(--blue);padding:6px 8px;font-size:11px}
+    button{font:inherit;cursor:pointer;background:var(--surface-2);color:var(--text);border:1px solid var(--rule-strong);padding:6px 10px}
+    textarea{width:100%;min-height:90px;background:var(--bg);color:var(--text);border:1px solid var(--rule-strong);padding:8px}
+  </style>
+</head>
+<body>
+  <h1>BOOK lane</h1>
+  <p class="sub">Primary action is Book scope. Move stage is held. Send does not fire.</p>
+  <article class="lcard">
+    <div class="lcard-name">Scope Scheduled lead</div>
+    <div class="lcard-meta">GHL · fencing · 3 days</div>
+    <div class="lcard-actions">
+      <button class="primary" type="button">Book scope</button>
+      <button type="button" disabled title="Move stage stays held.">Move stage</button>
+    </div>
+  </article>
+
+  <h1>Ranked slots</h1>
+  <div class="booking-box">
+    <div class="booking-box-head">Booking approval</div>
+    <div class="booking-kicker">Choose a slot</div>
+    <button class="slot-chip" aria-pressed="true">Tue 22 Sep at 09:00 Perth<span class="slot-why">Closest to this scoper's run</span></button>
+    <button class="slot-chip" aria-pressed="false">Tue 22 Sep at 11:15 Perth<span class="slot-why">Alternative</span></button>
+    <button class="slot-chip" aria-pressed="false">Fri 25 Sep at 08:00 Perth<span class="slot-why">Alternative</span></button>
+  </div>
+
+  <h1>Confirm sheet</h1>
+  <div class="sale-drawer-panel">
+    <div class="sale-drawer-status held">Held. This surface does not send a customer text or write a calendar.</div>
+    <p><strong>Nithin</strong> · Tue 22 Sep at 09:00 Perth</p>
+    <label>Customer text</label>
+    <textarea>Hi Sam, it's Nithin from SecureWorks. I can come out Tuesday 22 September between 9:00 and 10:30 to measure and quote. Does that suit?</textarea>
+    <p><button class="primary" disabled>Book and text Sam (held)</button> <button type="button">Cancel</button></p>
+  </div>
+
+  <h1>Calendar</h1>
+  <section class="calendar-undated">
+    <div>Needs time attached (2)</div>
+    <p>Visible in GHL stage · <button type="button">Attach time</button></p>
+  </section>
+  <div class="calendar-nav">
+    <button type="button">Previous week</button>
+    <span>14 – 18 Sep</span>
+    <button type="button">This week</button>
+    <button type="button">Next week</button>
+  </div>
+  <div class="calendar-week">
+    <div></div>
+    <div class="calendar-day-head">Mon 14</div>
+    <div class="calendar-day-head">Tue 15</div>
+    <div class="calendar-day-head">Wed 16</div>
+    <div class="calendar-day-head">Thu 17</div>
+    <div class="calendar-day-head">Fri 18</div>
+    <div></div>
+    <div class="calendar-day-col"><div class="calendar-event">Proposed · 9:00</div></div>
+    <div class="calendar-day-col"></div>
+    <div class="calendar-day-col"></div>
+    <div class="calendar-day-col"></div>
+    <div class="calendar-day-col"></div>
+  </div>
+</body>
+</html>

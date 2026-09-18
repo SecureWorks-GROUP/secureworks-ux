@@ -73,6 +73,7 @@
 /* ---- notices, week truth, tiles ---- */
 #salesBookingRoot .notice{margin:0 0 12px;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);font-size:11.5px;color:var(--muted)}
 #salesBookingRoot .notice.error{background:#FFF2F1;border-color:#D88F8C;color:var(--red)}
+#salesBookingRoot .notice.warn{background:#fbf3e6;border-color:#e8d2a8;color:var(--warn)}
 #salesBookingRoot .notice ul{margin:6px 0 0;padding-left:18px}
 #salesBookingRoot .notice summary{cursor:pointer}
 #salesBookingRoot .weektruth{margin:0 0 14px;padding:10px 14px;background:#FFF7F2;border:1px solid #F3C9B8;border-radius:6px;font-size:12px;color:#973F30;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
@@ -225,6 +226,24 @@
 #salesBookingRoot .whylist li.bad:before{background:var(--red)}
 #salesBookingRoot .filedetails summary{padding:10px 16px;font-size:11.5px;color:var(--muted);cursor:pointer;background:var(--soft);border-top:1px solid var(--line)}
 #salesBookingRoot .stampfile{padding:14px 16px;background:var(--dark);color:#d9e0e3;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;line-height:1.5}
+
+/* GHL pipeline board — two-way read, Move held */
+#salesBookingRoot .pipeboard{margin-top:18px}
+#salesBookingRoot .pipe{display:grid;gap:0;overflow-x:auto;background:var(--soft)}
+#salesBookingRoot .pcol{border-right:1px solid #EDF1F3;min-height:220px;background:var(--soft)}
+#salesBookingRoot .pcol:last-child{border-right:0}
+#salesBookingRoot .pcolhead{padding:9px 10px;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fff;border-bottom:1px solid var(--line)}
+#salesBookingRoot .pcard{margin:8px;background:#fff;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+#salesBookingRoot .pcard.off{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+#salesBookingRoot .pcard.sel{outline:2px solid var(--accent);outline-offset:1px}
+#salesBookingRoot .pcard-open{display:grid;gap:2px;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:0;min-width:0}
+#salesBookingRoot .pcard-open b{font-size:12px}
+#salesBookingRoot .pcard-open:hover{background:var(--wash)}
+#salesBookingRoot .drift{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;padding:6px 10px;background:#FFF6F0;border-top:1px solid #F3C9B8;font-size:10.5px;color:var(--accent-text);line-height:1.35}
+#salesBookingRoot .drift button{font-size:10.5px;padding:3px 8px;white-space:nowrap;flex:none}
+@media(max-width:1100px){
+  #salesBookingRoot .pipe{grid-template-columns:repeat(6,220px)}
+}
 
 /* ---- Sales subnav (host chrome, lives outside the booking root) ---- */
 .sales-workspace-subnav{display:flex;align-items:center;gap:18px;border-bottom:1px solid #D4DEE4;padding:0 20px;height:44px;background:#FCFBFA}

@@ -7,9 +7,10 @@ send a customer text, write a diary or move a GHL stage.
 ## Send is the stamp, nothing else
 
 `SEND_HOLD` stays on for Approve, Confirm, calendar writes and any customer send.
-`attemptApprove()` still refuses those. **Send message** is the captain stamp: it POSTs
+`MOVE_HOLD` stays on for GHL stage moves. `attemptApprove()` still refuses those. **Send message** is the captain stamp: it POSTs
 `sales_booking_stamp_write` with `{resource, week_start, stamp: {captain, approved, rejected,
-decisions, stage_moves: []}}` (opportunity ids) and re-reads. `week_start` is the pack week
+decisions, stage_moves: []}}` (opportunity ids) and re-reads. A Move press on the pipeline
+board is rendered disabled and never writes `stage_moves`. `week_start` is the pack week
 (`pack.week_start` from the `sales_booking_read` that supplied the proposals, the same value
 that read was made with), not the Monday on the grid. After Next week the grid can show
 2026-09-21 while Send still writes 2026-09-14 for the live marnin pack. `applyServerStamp`
@@ -159,7 +160,19 @@ name (and the id when present). Fencing waiting is `thread_facts.classification`
 only, so a fencing row with no proved text is never Waiting.
 `sales_booking_read` may take ~20s; the client waits 60s. A failed calendar
 (`diary_read.read_ok:false`) shows "Calendar not connected" and still paints the
-queue and thread facts. Coverage gaps render verbatim.
+queue and thread facts. Coverage gaps render verbatim. A GHL 429, including a
+provider 429 that arrives as HTTP 500, is named as rate-limited and keeps the last
+complete week on screen; it is never painted as an empty book. Switching scoper
+paints the cached week immediately, then refreshes.
+
+## GHL pipeline board
+
+Below the stamp board is the live GHL pipeline, two-way on the read. Columns are the
+real stage names from `RESOURCES.*.pipeline_stages` (wiki profiles). Fold stages share
+one **Quoted and archived** column, so patio is six columns. Every card is the same
+client as the queue. Orange means thread facts or a confirmed diary visit say the
+card belongs in a different column; Move is held. The board is a review surface, not
+a GHL write.
 
 ## Preview
 

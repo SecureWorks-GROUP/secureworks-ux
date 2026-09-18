@@ -2,6 +2,7 @@
   'use strict';
 
   var SEND_HOLD = true;
+  var MOVE_HOLD = true;
   var PX_PER_HOUR = 68;
   var DAY_START = 8;
   var DAY_END = 17;
@@ -123,7 +124,11 @@
     sendAttempted: false,
     lastSendCall: null,
     lastStampCall: null,
-    lastArchiveCall: null
+    lastArchiveCall: null,
+    cache: {},
+    stale: false,
+    lastReadMs: 0,
+    readKind: null
   };
   var convoAbort = null;
 
@@ -764,6 +769,48 @@
     return gaps;
   }
 
+  function coverageLooksRateLimited(data) {
+    return coverageGaps(data).some(function (g) {
+      return /429|too many requests|rate.?limit/i.test(String(g));
+    });
+  }
+
+  function cacheKey(resourceId, weekStart) {
+    return String(resourceId || state.resourceId) + '|' + mondayIso(weekStart || state.weekStart);
+  }
+
+  function classifyReadError(err) {
+    var status = err && err.status;
+    var kind = err && err.kind;
+    var msg = String((err && err.message) || err || 'Request failed');
+    if (kind === 'fixture' || /fixture fallback is refused/i.test(msg)) {
+      return { kind: 'fixture', keepLastGood: false, message: msg };
+    }
+    if (kind === 'incomplete' || /was incomplete/i.test(msg)) {
+      return { kind: 'incomplete', keepLastGood: false, message: msg };
+    }
+    var rateLimited = status === 429
+      || /429|too many requests|rate.?limit/i.test(msg)
+      || (status === 500 && /429|too many requests|rate.?limit/i.test(msg));
+    if (rateLimited) {
+      return {
+        kind: 'rate_limited',
+        keepLastGood: true,
+        message: status === 500
+          ? 'GHL rate limited this read (provider 429 returned as HTTP 500). Showing the last complete week, not an empty one.'
+          : 'GHL rate limited this read (HTTP ' + (status || 429) + '). Showing the last complete week, not an empty one.'
+      };
+    }
+    if (/timed out/i.test(msg)) {
+      return {
+        kind: 'timeout',
+        keepLastGood: true,
+        message: msg + (state.data ? ' Showing the last complete week.' : '')
+      };
+    }
+    return { kind: 'error', keepLastGood: true, message: msg };
+  }
+
   function calendarUnread(data) {
     if (!data) return false;
     if (data.diary_read && data.diary_read.read_ok === false) return true;
@@ -910,6 +957,103 @@
   function isFoldedStage(c) {
     var bucket = stageBucket(c);
     return bucket === 'fold' || bucket === 'quote';
+  }
+
+  function firstStageInBucket(bucket, nameHint) {
+    var stages = resource().pipeline_stages || [];
+    var named = null;
+    if (nameHint) {
+      stages.forEach(function (s) {
+        if (named) return;
+        if (normaliseStageName(s.name) === normaliseStageName(nameHint)) named = s;
+      });
+      if (named) return named;
+    }
+    var found = null;
+    stages.forEach(function (s) {
+      if (found) return;
+      if (s.bucket === bucket) found = s;
+    });
+    return found;
+  }
+
+  function pipelineBoardColumns() {
+    var stages = resource().pipeline_stages || [];
+    var cols = [];
+    stages.forEach(function (s) {
+      if (s.bucket === 'fold') return;
+      cols.push({ id: s.id, name: String(s.name || '').replace(/^\s+/, ''), bucket: s.bucket, stageIds: [s.id] });
+    });
+    var fold = stages.filter(function (s) { return s.bucket === 'fold'; });
+    if (fold.length) {
+      cols.push({
+        id: 'fold',
+        name: 'Quoted and archived',
+        bucket: 'fold',
+        stageIds: fold.map(function (s) { return s.id; })
+      });
+    }
+    return cols;
+  }
+
+  function pipelineColumnOf(c) {
+    var stage = stageOf(c);
+    var cols = pipelineBoardColumns();
+    var found = null;
+    cols.forEach(function (col) {
+      if (found) return;
+      if (stage && col.stageIds.indexOf(stage.id) !== -1) found = col;
+    });
+    return found || { id: 'unmapped', name: 'Unmapped', bucket: 'unmapped', stageIds: [] };
+  }
+
+  function caseHasConfirmedDiary(c) {
+    if (!c) return false;
+    var found = false;
+    diary().forEach(function (ev) {
+      if (found) return;
+      if (diaryLayerFor(ev) !== 'confirmed') return;
+      if (diaryEventMatchesCase(ev, c)) found = true;
+    });
+    return found;
+  }
+
+  // Thread and diary say where the card belongs. Null means we do not have
+  // enough evidence to contradict the GHL stage, so the card stays in step.
+  function impliedStage(c) {
+    if (!c) return null;
+    var res = resource();
+    if (caseHasConfirmedDiary(c)) {
+      return firstStageInBucket('booked', res.lane === 'patio' ? 'Scope Booked' : 'Lead Closed (scope booked)');
+    }
+    if (quoteOutstanding(c) || isCompleted(c)) return firstStageInBucket('quote');
+    if (isWaiting(c)) {
+      return firstStageInBucket('need', res.lane === 'patio'
+        ? 'Contacted Waiting on Response'
+        : 'New Lead (Replied/ Contacted)');
+    }
+    var facts = threadFacts(c);
+    if (facts && facts.read_ok && facts.classification === 'ready_to_contact') {
+      return firstStageInBucket('need', res.lane === 'patio'
+        ? 'Client Needs To Be Contacted'
+        : 'New Lead (Call + Qualify)');
+    }
+    return null;
+  }
+
+  function stageDrift(c) {
+    var have = stageOf(c);
+    var want = impliedStage(c);
+    if (!have || !want) return null;
+    if (have.id === want.id) return null;
+    return { have: have, want: want };
+  }
+
+  function pipelineBoardCases() {
+    return cases().filter(function (c) {
+      if (isNonScopeDiaryMirror(c)) return false;
+      return !!(stageOf(c) || c.opportunity_id || c.contact_id);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1176,15 +1320,43 @@
     };
   }
 
+  async function postStamp(body) {
+    var previewApi = global.SALES_BOOKING_PREVIEW_API;
+    if (previewApi && typeof global.fetch === 'function') {
+      var join = String(previewApi).indexOf('?') >= 0 ? '&' : '?';
+      var resp = await global.fetch(String(previewApi) + join + 'action=sales_booking_stamp_write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sales_booking_stamp_write',
+          resource: body.resource,
+          week_start: body.week_start,
+          stamp: body.stamp
+        }),
+        cache: 'no-store'
+      });
+      var json = {};
+      try { json = await resp.json(); } catch (readErr) { json = {}; }
+      if (!resp.ok || json.ok === false) {
+        var previewFail = new Error((json && json.error) || ('stamp_write_failed (' + resp.status + ')'));
+        previewFail.status = resp.status;
+        throw previewFail;
+      }
+      return json;
+    }
+    if (typeof global.opsPost === 'function') {
+      return global.opsPost('sales_booking_stamp_write', body);
+    }
+    var missing = new Error('no_stamp_transport');
+    missing.kind = 'no_transport';
+    throw missing;
+  }
+
   async function writeStamp(id, decision) {
     var local = stampCase(id, decision);
     if (!local.ok) return local;
     local.sent = false;
     local.wrote_calendar = false;
-    if (typeof global.opsPost !== 'function') {
-      local.posted = false;
-      return local;
-    }
     var body = {
       resource: state.resourceId,
       week_start: packWeekStart(),
@@ -1192,10 +1364,14 @@
     };
     state.lastStampCall = { action: 'sales_booking_stamp_write', body: body };
     try {
-      await global.opsPost('sales_booking_stamp_write', body);
+      await postStamp(body);
       local.posted = true;
       await load(state.resourceId, state.weekStart);
     } catch (e) {
+      if (e && e.kind === 'no_transport') {
+        local.posted = false;
+        return local;
+      }
       local.ok = false;
       local.posted = false;
       local.reason = e && e.message ? e.message : 'stamp_write_failed';
@@ -1332,7 +1508,6 @@
     return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
       '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + ' · ' + esc(jobTypeLabel(c)) + '</span>' +
       '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
-      '<div class="sub">' + esc(c.job || jobTypeLabel(c)) + '</div>' +
       '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div></button>';
   }
 
@@ -1662,7 +1837,7 @@
       '<h2>' + esc(c.display_name || 'Enquiry') + '</h2>' +
       '<p class="sub muted">' + esc(place || '') + (c.address ? '' : (place ? '' : 'Address not given yet')) + ' · ' + esc(jobTypeLabel(c)) + (c.contact_id ? '' : ' · no GHL contact') +
       (c.not_in_this_read ? ' · <span class="readtag">not in this read</span>' : '') + '</p>' +
-      '<p class="sub muted"><b>' + esc(c.job || jobTypeLabel(c)) + '</b> · ' + esc(enquiryLine(c)) + ' · ' + esc(slot) + '</p></div>' +
+      '<p class="sub muted">' + esc(enquiryLine(c)) + ' · ' + esc(slot) + '</p></div>' +
       '<div class="thread big" id="salesBookingThread">' + renderMessages() + '</div>' +
       compose +
       '<div class="actionzone">' +
@@ -1774,13 +1949,61 @@
       '<div class="stampfile">' + esc(JSON.stringify(rec, null, 1)) + '</div></details></section>';
   }
 
+  function renderPipelineBoard() {
+    var list = pipelineBoardCases();
+    var cols = pipelineBoardColumns();
+    var byCol = {};
+    cols.forEach(function (col) { byCol[col.id] = []; });
+    var unmapped = [];
+    list.forEach(function (c) {
+      var col = pipelineColumnOf(c);
+      if (!byCol[col.id]) unmapped.push(c);
+      else byCol[col.id].push(c);
+    });
+    if (unmapped.length) {
+      cols = cols.concat([{ id: 'unmapped', name: 'Unmapped', bucket: 'unmapped', stageIds: [] }]);
+      byCol.unmapped = unmapped;
+    }
+    var driftN = 0;
+    list.forEach(function (c) { if (stageDrift(c)) driftN += 1; });
+    var html = '<section class="stampboard pipeboard" data-booking-pipeline="1">' +
+      '<div class="sbhead"><div><h2>GHL sales pipeline · two way</h2>' +
+      '<p>Left to right is the GHL pipeline as it reads right now, using the live stage names. Orange means the thread and the diary say the card belongs somewhere else. Move is held: it does not write GHL.</p></div>' +
+      '<span class="count">' + list.length + ' cards · ' + driftN + ' out of step · Move held</span></div>' +
+      '<div class="pipe" style="grid-template-columns:repeat(' + cols.length + ',220px)">';
+    cols.forEach(function (col) {
+      var cards = byCol[col.id] || [];
+      html += '<div class="pcol"><div class="pcolhead">' + esc(col.name) + '<span class="count">' + cards.length + '</span></div>';
+      cards.forEach(function (c) {
+        var drift = stageDrift(c);
+        html += '<div class="pcard' + (drift ? ' off' : '') + (c.id === state.selectedId ? ' sel' : '') + '">' +
+          '<button type="button" class="pcard-open" data-booking-case="' + esc(c.id) + '"><b>' +
+          esc(c.display_name || 'Enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + '</b>' +
+          '<span class="small muted">' + esc(jobTypeLabel(c)) + (c.not_in_this_read ? ' · not in this read' : '') + '</span></button>';
+        if (drift) {
+          html += '<div class="drift">Thread and diary say <b>' + esc(String(drift.want.name || '').replace(/^\s+/, '')) + '</b>' +
+            '<button type="button" class="primary" disabled title="' + esc(HOLD_REASON) + '" data-booking-move-held="1">Move (held)</button></div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    html += '</div></section>';
+    return html;
+  }
+
   function renderHTML() {
     var res = resource();
     var data = state.data;
     var mailbox = calendarMailbox(data);
-    var notice = state.error
-      ? '<div class="notice error" role="alert">' + esc(state.error) + '</div>'
-      : (state.loading ? '<div class="notice" role="status">Reading the provider calendar and GHL enquiries. This can take up to a minute.</div>' : '');
+    var notice = '';
+    if (state.error) {
+      notice = '<div class="notice error" role="alert">' + esc(state.error) + '</div>';
+    } else if (state.loading && data && state.stale) {
+      notice = '<div class="notice" role="status">Refreshing this week. The last complete read stays on screen so a slow or rate-limited day is not painted as empty.</div>';
+    } else if (state.loading) {
+      notice = '<div class="notice" role="status">Reading the provider calendar and GHL enquiries. This can take up to a minute.</div>';
+    }
     if (state.loading && !data) {
       return '<div class="page"><div class="pagehead">' +
         '<div><h1>Build the week</h1><p>' + esc(state.weekStart) + ' week · ' + esc(res.name) + ' · ' + esc(res.lane) + '</p></div></div>' +
@@ -1789,7 +2012,9 @@
     }
     var gaps = coverageGaps(data);
     var gapStrip = gaps.length
-      ? '<div class="notice" role="status"><strong>Coverage</strong><ul>' + gaps.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul></div>'
+      ? '<div class="notice' + (coverageLooksRateLimited(data) ? ' warn' : '') + '" role="status"><strong>Coverage</strong>' +
+        (coverageLooksRateLimited(data) ? ' <span class="pill warn">GHL rate limited</span>' : '') +
+        '<ul>' + gaps.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul></div>'
       : '';
     var route = resolveSender(res);
     var scopers = V1_SCOPERS.map(function (id) {
@@ -1816,6 +2041,7 @@
       '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
       '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
       renderStampBoard() +
+      renderPipelineBoard() +
       '</div>';
   }
 
@@ -1871,7 +2097,17 @@
     state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
     state.resourceId = id;
     state.selectedId = null;
-    state.data = null;
+    var cached = state.cache[cacheKey(id, state.weekStart)];
+    if (cached) {
+      state.data = cached;
+      state.stale = true;
+      state.readKind = 'cache';
+      applyServerStamp(cached);
+      applyServerDrafts(cached);
+    } else {
+      state.data = null;
+      state.stale = false;
+    }
     clearConversation();
     return load(id, state.weekStart);
   }
@@ -1894,14 +2130,20 @@
       if (preview) {
         var url = preview + '?resource=' + encodeURIComponent(params.resource) + '&week_start=' + encodeURIComponent(params.week_start);
         var resp = await global.fetch(url, { cache: 'no-store', signal: controller && controller.signal });
-        if (!resp.ok) throw new Error('Preview calendar read failed (' + resp.status + ')');
+        if (!resp.ok) {
+          var previewErr = new Error('Preview calendar read failed (' + resp.status + ')');
+          previewErr.status = resp.status;
+          throw previewErr;
+        }
         return resp.json();
       }
       if (typeof global.opsFetch !== 'function') throw new Error('Authenticated Ops read is not available.');
       return await global.opsFetch('sales_booking_read', params, controller ? { signal: controller.signal } : undefined);
     } catch (e) {
       if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))) {
-        throw new Error('Booking read timed out after ' + Math.round(BOOKING_READ_TIMEOUT_MS / 1000) + ' seconds.');
+        var timeout = new Error('Booking read timed out after ' + Math.round(BOOKING_READ_TIMEOUT_MS / 1000) + ' seconds.');
+        timeout.kind = 'timeout';
+        throw timeout;
       }
       throw e;
     } finally {
@@ -1913,25 +2155,56 @@
     if (resourceId) state.resourceId = resourceId;
     if (weekStart) state.weekStart = mondayIso(weekStart);
     var request = ++state.request;
+    var key = cacheKey(state.resourceId, state.weekStart);
+    var cached = state.cache[key];
     state.loading = true;
     state.error = null;
+    if (cached && !state.data) {
+      state.data = cached;
+      state.stale = true;
+      state.readKind = 'cache';
+      applyServerStamp(cached);
+      applyServerDrafts(cached);
+    }
     render();
     try {
+      var t0 = Date.now();
       var data = await bookingRead({ resource: state.resourceId, week_start: state.weekStart, scoper_user_id: resource().scoper_user_id });
+      var ms = Date.now() - t0;
       if (request !== state.request) return;
-      if (!data || data.ok === false) throw new Error((data && data.error) || 'Booking read was incomplete.');
-      if (data.fixture) throw new Error('Fixture fallback is refused. Provider read required.');
+      if (!data || data.ok === false) {
+        var incomplete = new Error((data && data.error) || 'Booking read was incomplete.');
+        incomplete.kind = 'incomplete';
+        throw incomplete;
+      }
+      if (data.fixture) {
+        var fixture = new Error('Fixture fallback is refused. Provider read required.');
+        fixture.kind = 'fixture';
+        throw fixture;
+      }
       if (data.pack && data.pack.present === true && !data.pack.week_start) {
         var priorPack = state.data && state.data.pack;
         data.pack.week_start = (priorPack && priorPack.present === true && priorPack.week_start) || data.week_start;
       }
       state.data = data;
+      state.cache[key] = data;
+      state.stale = false;
+      state.lastReadMs = ms;
+      state.readKind = 'fresh';
       applyServerStamp(data);
       applyServerDrafts(data);
     } catch (e) {
       if (request !== state.request) return;
-      state.error = e.message || 'Request failed';
-      state.data = null;
+      var info = classifyReadError(e);
+      state.error = info.message;
+      if (info.keepLastGood && state.data) {
+        state.stale = true;
+        state.readKind = 'stale';
+      } else {
+        state.data = null;
+        state.stale = false;
+        state.readKind = null;
+      }
     } finally {
       if (request === state.request) {
         state.loading = false;
@@ -2094,6 +2367,11 @@
         writeStamp(stampSend.getAttribute('data-booking-stamp-id') || state.selectedId, 'keep');
         return;
       }
+      var moveHeld = e.target.closest && e.target.closest('[data-booking-move-held]');
+      if (moveHeld) {
+        e.preventDefault();
+        return;
+      }
       var stampBtn = e.target.closest && e.target.closest('[data-booking-stamp]');
       if (stampBtn) {
         e.preventDefault();
@@ -2157,6 +2435,7 @@
 
   var api = {
     SEND_HOLD: SEND_HOLD,
+    MOVE_HOLD: MOVE_HOLD,
     RESOURCES: RESOURCES,
     state: state,
     esc: esc,
@@ -2231,7 +2510,16 @@
     evidenceChips: evidenceChips,
     stampableOfferList: stampableOfferList,
     isPackOfferCase: isPackOfferCase,
-    packOpportunityId: packOpportunityId
+    packOpportunityId: packOpportunityId,
+    classifyReadError: classifyReadError,
+    cacheKey: cacheKey,
+    pipelineBoardColumns: pipelineBoardColumns,
+    pipelineColumnOf: pipelineColumnOf,
+    impliedStage: impliedStage,
+    stageDrift: stageDrift,
+    pipelineBoardCases: pipelineBoardCases,
+    renderPipelineBoard: renderPipelineBoard,
+    postStamp: postStamp
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

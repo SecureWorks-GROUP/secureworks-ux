@@ -47,6 +47,11 @@ test.describe('Trade app: My money + GST from profile', () => {
     await expect(view.locator('[data-mm-months] tbody tr')).toHaveCount(2);
     await expect(view.locator('[data-mm-invoice="i-paid"]')).toContainText('Paid 10 Aug 2026');
     await expect(view.locator('[data-mm-invoice="i-owed"]')).toContainText('Approved, awaiting payment');
+    await expect(fy).toContainText('$208.20 from you');
+    await expect(fy).toContainText('company covers $208.20');
+    await expect(fy).toContainText('You get $3,261.80');
+    await expect(view).toContainText('Half of that comes out of what you earned');
+    await expect(view.locator('[data-mm-months]')).toContainText('Super to fund');
   });
 
   test('GST registered toggle saves explicitly and the server profile wins over browser storage', async ({ appPage: page }) => {

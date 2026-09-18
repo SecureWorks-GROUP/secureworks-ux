@@ -55,8 +55,10 @@ test('Henry Financial invoices jobs with WO-trade deducts and a 12% super previe
 
   const money = page.locator('[data-invoice-money-summary]');
   await expect(money).toContainText('Earned$50.00');
-  await expect(money).toContainText('Super (12%) paid into your super fund−$6.00');
-  await expect(money).toContainText('You get paid$44.00');
+  await expect(money).toContainText('Super (12%) paid into your super fund$6.00');
+  await expect(money).toContainText('Your share of super (6%)−$3.00');
+  await expect(money).toContainText('Company covers the other 6%$3.00');
+  await expect(money).toContainText('You get paid$47.00');
 
   await page.getByRole('button', { name: 'Back' }).click();
   await expect(page.locator('[data-financial-hub]')).toBeVisible();

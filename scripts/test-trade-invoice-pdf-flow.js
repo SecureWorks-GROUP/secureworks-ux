@@ -36,6 +36,7 @@ async function runDynamicHelperCheck() {
   const context = {
     window: { jspdf: { jsPDF: FakeJsPdf } },
     console,
+    MyMoneyCore: undefined,
     _user: { name: 'Test Trade' },
     loadTradeDetails: () => ({
       fullName: 'Test Trade',
@@ -54,10 +55,25 @@ async function runDynamicHelperCheck() {
       apiCalls.push({ action, params, body })
       return { success: true }
     },
+    _invoiceApiContext: () => ({ gen: 1, userId: 'user-1' }),
+    _invoiceApiCurrent: () => true,
+    _beginFinancialWrite: () => true,
+    _endFinancialWrite: () => {},
+    _financialInvoiceApi: async (action, params, body) => {
+      apiCalls.push({ action, params, body })
+      return { success: true }
+    },
   }
   context.global = context
 
+  const startMark = '// <trade-my-money>'
+  const endMark = '// </trade-my-money>'
+  const start = html.indexOf(startMark)
+  const end = html.indexOf(endMark, start + startMark.length)
+  assert(start !== -1 && end !== -1 && end > start, 'trade-my-money sentinels exist for super split')
+
   const dynamicSource = [
+    html.slice(start, end + endMark.length),
     extractFunction('_invoiceHasPersistedNumber'),
     extractFunction('_invoiceSubmitSucceeded'),
     extractFunction('_invoiceXeroPushPending'),
@@ -136,6 +152,33 @@ async function runDynamicHelperCheck() {
     'Invoice submitted to Xero — DRAFT-123',
     'a confirmed Xero success keeps the success label and persisted bill number',
   )
+  const unmigratedMoney = context._invoicePersistedMoney({
+    gross_earned: 1000,
+    super_rate: 0.12,
+    super_amount: 120,
+    net_pay: 880,
+    gst_on: false,
+  })
+  assert.strictEqual(unmigratedMoney.complete, true, 'unmigrated GST-off money is still complete')
+  assert.strictEqual(unmigratedMoney.super_amount, 120, 'unmigrated fund total stays 12%')
+  assert.strictEqual(unmigratedMoney.super_worker_share, 60, 'unmigrated worker share is half the rate')
+  assert.strictEqual(unmigratedMoney.super_company_share, 60, 'unmigrated company share is the remainder')
+  assert.strictEqual(unmigratedMoney.cash_payable, 940, 'unmigrated cash is gross minus worker share')
+  assert.strictEqual(unmigratedMoney.net_pay, 880, 'unmigrated net_pay is kept but not used as cash')
+  assert.strictEqual(unmigratedMoney.total_inc, 940, 'GST-off total uses cash payable, not old net_pay')
+
+  const backendSplitMoney = context._invoicePersistedMoney({
+    gross_earned: 1000,
+    super_rate: 0.12,
+    super_amount: 120,
+    net_pay: 880,
+    super_worker_share: 60,
+    super_company_share: 60,
+    cash_payable: 940,
+    gst_on: false,
+  })
+  assert.strictEqual(backendSplitMoney.cash_payable, 940, 'backend cash_payable is preferred')
+
   const gstOnLegacyTotal = context._invoicePersistedMoney({
     gross_earned: 100,
     super_rate: 0.12,
@@ -200,8 +243,14 @@ async function runDynamicHelperCheck() {
     },
   })
   assert(pdfText.includes('Earned'), 'PDF labels the persisted gross amount as earned')
-  assert(pdfText.includes('Less super (12%)'), 'PDF shows super as its own deduction line')
-  assert(pdfText.includes('Net pay'), 'PDF shows persisted net pay')
+  assert(pdfText.includes('Super (12%) paid into your super fund'), 'PDF shows the 12% fund total')
+  assert(pdfText.includes('Your share of super (6%)'), 'PDF shows the worker share')
+  assert(pdfText.includes('Company covers the other 6%'), 'PDF shows the company share')
+  assert(pdfText.includes('You get paid'), 'PDF shows cash payable, not Net pay')
+  assert(!pdfText.includes('Net pay'), 'PDF never uses the old Net pay label')
+  assert(!pdfText.includes('Less super'), 'PDF never uses the old Less super label')
+  assert(pdfText.includes('$61.80'), 'PDF worker share is half of $123.60')
+  assert(pdfText.includes('$968.20'), 'PDF cash is gross minus worker share, not old net_pay')
   assert(pdfText.includes('GST'), 'PDF shows the persisted GST line')
   assert(pdfText.includes('$997.92'), 'PDF total uses the backend-persisted invoice total')
   assert(pdfText.includes('0.00'), 'PDF renders persisted zero hours instead of a blank')

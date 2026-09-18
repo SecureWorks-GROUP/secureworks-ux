@@ -2297,9 +2297,7 @@ function renderCard(card, lane) {
       bookLaneBtn.className = 'primary';
       bookLaneBtn.type = 'button';
       bookLaneBtn.textContent = 'Book scope';
-      bookLaneBtn.title = card.no_job_link
-        ? 'Creates the job stub if missing, then opens the slot picker. Send and calendar write stay held.'
-        : 'Pick a slot. Send and calendar write stay held.';
+      bookLaneBtn.title = 'Pick a slot. Send and calendar write stay held.';
       bookLaneBtn.addEventListener('click', function (e) {
         e.stopPropagation();
         openBookScopeDrawer(primaryProposal || null, card);
@@ -3502,49 +3500,7 @@ function defaultScoperId() {
 }
 
 function openBookScopeDrawer(proposal, card) {
-  if (card && card.no_job_link && !card.job_id) {
-    createJobThenOpenSlots(card, proposal);
-    return;
-  }
   openBookingSlotDrawer(card, proposal);
-}
-
-function createJobThenOpenSlots(card, proposal) {
-  if (!card.opportunity_id) {
-    showActionToast('No GHL opportunity id on this card', 'error');
-    return;
-  }
-  var lane = card.pipeline_lane;
-  if (!lane && card.pending_proposals && card.pending_proposals[0]) {
-    lane = (card.pending_proposals[0].action_payload || {}).pipeline_lane;
-  }
-  if (!lane) {
-    showActionToast('Cannot infer pipeline lane; refresh the page', 'error');
-    return;
-  }
-  showActionToast('Creating the job stub…', 'info');
-  var userId = (_profileCache && _profileCache.id) || null;
-  var firstProp = (card.pending_proposals && card.pending_proposals[0]) || proposal || {};
-  opsApiPost(_lastCloud, 'create_job_for_opportunity', {
-    action_id: firstProp.proposal_id || firstProp.id || null,
-    ghl_opportunity_id: card.opportunity_id,
-    ghl_contact_id: card.contact_id || null,
-    pipeline_lane: lane,
-    contact_name: card.customer_name || null,
-    contact_phone: card.phone || null,
-    contact_email: card._raw && card._raw.contactEmail || null,
-    site_address: card._raw && card._raw.contactAddress || null,
-    site_suburb: card._raw && card._raw.contactCity || null,
-    monetary_value: card._raw && card._raw.monetaryValue || null,
-    user_id: userId
-  }).then(function (res) {
-    if (res && res.job_id) card.job_id = res.job_id;
-    card.no_job_link = false;
-    showActionToast(res && res.created ? 'Job stub created. Pick a slot.' : 'Existing job linked. Pick a slot.', 'info');
-    openBookingSlotDrawer(card, proposal || firstProp);
-  }).catch(function (err) {
-    showActionToast('Create job failed: ' + err.message, 'error');
-  });
 }
 
 function rankedOrWorkingSlots(proposal) {
@@ -3559,6 +3515,20 @@ function rankedOrWorkingSlots(proposal) {
       raw: slot
     };
   });
+  var picked = payload.jarvis_picked_slot || payload.picked_slot || payload.recommended_slot || payload.slot || null;
+  if (picked && typeof picked === 'object') {
+    var pickedHuman = formatBookingSlotForDisplay(picked, payload.scoper_timezone || 'Australia/Perth');
+    var pickedStart = picked.start_iso || picked.start;
+    if (pickedHuman || pickedStart) {
+      return [{
+        start: pickedStart,
+        end: picked.end_iso || picked.end,
+        human: pickedHuman || pickedStart,
+        reason: picked.reason || picked.why || 'Picked slot',
+        raw: picked
+      }];
+    }
+  }
   return workingHourSlots(10).map(function (d) {
     var end = new Date(d.getTime() + 90 * 60000);
     return {
@@ -3580,7 +3550,7 @@ function openBookingSlotDrawer(card, proposal) {
   }).join('');
   var chips = slots.map(function (slot, idx) {
     return '<button type="button" class="slot-chip" data-slot-idx="' + idx + '" aria-pressed="' + (idx === 0 ? 'true' : 'false') + '">' +
-      (slot.human || slot.start) + '<span class="slot-why">' + (slot.reason || '') + '</span></button>';
+      escapeHtml(slot.human || slot.start) + '<span class="slot-why">' + escapeHtml(slot.reason || '') + '</span></button>';
   }).join('');
   var overlay = openSaleDrawer(
     'Book scope · ' + (card && card.customer_name || 'this lead'),
@@ -3645,10 +3615,10 @@ function openBookingConfirmSheet(proposal, card, anchorBtn, picked) {
   var overlay = openSaleDrawer(
     'Book and text ' + first,
     '<div class="sale-drawer-status held">' + BOOK_WRITE_HOLD + '</div>' +
-      '<p><strong>' + scoper.name + '</strong> · ' + (slot.human || '') + '</p>' +
+      '<p><strong>' + escapeHtml(scoper.name) + '</strong> · ' + escapeHtml(slot.human || '') + '</p>' +
       '<label for="saleSmsDraft">Customer text</label>' +
       '<textarea id="saleSmsDraft" rows="6"></textarea>',
-    '<button type="button" class="primary" id="saleBookHeld" disabled title="' + BOOK_WRITE_HOLD + '">Book and text ' + first + ' (held)</button>' +
+    '<button type="button" class="primary" id="saleBookHeld" disabled title="' + escapeHtml(BOOK_WRITE_HOLD) + '">Book and text ' + escapeHtml(first) + ' (held)</button>' +
       '<button type="button" id="saleBookCancel">Cancel</button>'
   );
   overlay.querySelector('#saleSmsDraft').value = sms;

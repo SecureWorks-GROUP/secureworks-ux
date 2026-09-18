@@ -779,6 +779,15 @@
     return String(resourceId || state.resourceId) + '|' + mondayIso(weekStart || state.weekStart);
   }
 
+  function payloadMatchesRequest(data, resourceId, weekStart) {
+    if (!data) return false;
+    var key = cacheKey(resourceId, weekStart);
+    if (state.cache[key] === data) return true;
+    var rid = data.resource && data.resource.id;
+    if (!rid || !data.week_start) return false;
+    return cacheKey(rid, data.week_start) === key;
+  }
+
   function classifyReadError(err) {
     var status = err && err.status;
     var kind = err && err.kind;
@@ -1023,10 +1032,13 @@
   function impliedStage(c) {
     if (!c) return null;
     var res = resource();
+    if (quoteOutstanding(c) || isCompleted(c)) return firstStageInBucket('quote');
+    var have = stageOf(c);
+    if (have && have.bucket === 'fold') return have;
     if (caseHasConfirmedDiary(c)) {
+      if (have && have.bucket === 'booked') return have;
       return firstStageInBucket('booked', res.lane === 'patio' ? 'Scope Booked' : 'Lead Closed (scope booked)');
     }
-    if (quoteOutstanding(c) || isCompleted(c)) return firstStageInBucket('quote');
     if (isWaiting(c)) {
       return firstStageInBucket('need', res.lane === 'patio'
         ? 'Contacted Waiting on Response'
@@ -2159,12 +2171,15 @@
     var cached = state.cache[key];
     state.loading = true;
     state.error = null;
-    if (cached && !state.data) {
+    if (cached) {
       state.data = cached;
       state.stale = true;
       state.readKind = 'cache';
       applyServerStamp(cached);
       applyServerDrafts(cached);
+    } else {
+      state.data = null;
+      state.stale = false;
     }
     render();
     try {
@@ -2197,7 +2212,7 @@
       if (request !== state.request) return;
       var info = classifyReadError(e);
       state.error = info.message;
-      if (info.keepLastGood && state.data) {
+      if (info.keepLastGood && payloadMatchesRequest(state.data, state.resourceId, state.weekStart)) {
         state.stale = true;
         state.readKind = 'stale';
       } else {

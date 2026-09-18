@@ -2509,3 +2509,162 @@ test('a queue row with no job type prints not given once', () => {
   assert.doesNotMatch(html, /not given · not given/);
   assert.doesNotMatch(html, /<b>not given<\/b>/);
 });
+
+test('a week-nav 429 does not keep the previous week book', async () => {
+  api.state.cache = {};
+  api.state.data = null;
+  api.state.error = null;
+  api.state.stale = false;
+  api.state.resourceId = 'nithin';
+  api.state.weekStart = '2026-09-14';
+  global.SALES_BOOKING_PREVIEW_URL = null;
+  global.SALES_BOOKING_PREVIEW_API = null;
+  const weekA = sampleRead('nithin');
+  weekA.week_start = '2026-09-14';
+  weekA.cases[0].display_name = 'Week A Lead';
+  global.opsFetch = async (_action, params) => {
+    if (params && params.week_start === '2026-09-14') return JSON.parse(JSON.stringify(weekA));
+    const err = new Error('Too Many Requests');
+    err.status = 429;
+    throw err;
+  };
+  await api.load('nithin', '2026-09-14');
+  assert.match(api.renderHTML(), /Week A Lead/);
+  await api.switchWeek(7);
+  assert.equal(api.state.weekStart, '2026-09-21');
+  assert.equal(api.state.data, null);
+  assert.doesNotMatch(api.renderHTML(), /Week A Lead/);
+  api.state.cache = {};
+  api.state.data = null;
+  api.state.error = null;
+  api.state.stale = false;
+  api.state.weekStart = '2026-09-14';
+});
+
+test('week-nav 429 keeps only the requested week cache', async () => {
+  api.state.cache = {};
+  api.state.data = null;
+  api.state.error = null;
+  api.state.stale = false;
+  api.state.resourceId = 'nithin';
+  global.SALES_BOOKING_PREVIEW_URL = null;
+  global.SALES_BOOKING_PREVIEW_API = null;
+  const weekA = sampleRead('nithin');
+  weekA.week_start = '2026-09-14';
+  weekA.cases[0].display_name = 'Week A Lead';
+  const weekB = sampleRead('nithin');
+  weekB.week_start = '2026-09-21';
+  weekB.cases[0].display_name = 'Week B Lead';
+  let failB = false;
+  global.opsFetch = async (_action, params) => {
+    if (params && params.week_start === '2026-09-14') return JSON.parse(JSON.stringify(weekA));
+    if (failB) {
+      const err = new Error('Too Many Requests');
+      err.status = 429;
+      throw err;
+    }
+    return JSON.parse(JSON.stringify(weekB));
+  };
+  await api.load('nithin', '2026-09-14');
+  await api.load('nithin', '2026-09-21');
+  assert.match(api.renderHTML(), /Week B Lead/);
+  failB = true;
+  await api.load('nithin', '2026-09-14');
+  assert.match(api.renderHTML(), /Week A Lead/);
+  await api.load('nithin', '2026-09-21');
+  assert.ok(api.state.data);
+  assert.equal(api.state.data.week_start, '2026-09-21');
+  assert.equal(api.state.stale, true);
+  assert.match(api.renderHTML(), /Week B Lead/);
+  assert.doesNotMatch(api.renderHTML(), /Week A Lead/);
+  api.state.cache = {};
+  api.state.data = null;
+  api.state.error = null;
+  api.state.stale = false;
+  api.state.weekStart = '2026-09-14';
+});
+
+test('diary evidence leaves quoted, folded, and already-booked cards in their stage', () => {
+  function diaryFor(id, name, suburb) {
+    return [{
+      event_id: 'evt-' + id,
+      opportunity_id: id,
+      contact_id: 'ct-' + id,
+      display_name: name,
+      suburb: suburb,
+      start_iso: '2026-09-16T10:00:00',
+      end_iso: '2026-09-16T11:00:00',
+      kind: 'confirmed',
+      layer: 'confirmed',
+      title: 'Scope: ' + name
+    }];
+  }
+
+  api.state.resourceId = 'nithin';
+  api.state.weekStart = '2026-09-14';
+  api.state.filter = 'all';
+  api.state.search = '';
+  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'nithin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary: diaryFor('opp-quoted', 'Quoted Pat', 'Carlisle').concat(diaryFor('opp-complete', 'Done Pat', 'Merriwa')),
+    cases: [{
+      id: 'opp-quoted',
+      opportunity_id: 'opp-quoted',
+      contact_id: 'ct-opp-quoted',
+      display_name: 'Quoted Pat',
+      suburb: 'Carlisle',
+      job_type: 'patio',
+      status: 'needs_decision',
+      stage_id: 'd2fb3af7-91e5-4317-b778-2be117341f07',
+      stage_name: 'Quote Sent / Follow up'
+    }, {
+      id: 'opp-complete',
+      opportunity_id: 'opp-complete',
+      contact_id: 'ct-opp-complete',
+      display_name: 'Done Pat',
+      suburb: 'Merriwa',
+      job_type: 'patio',
+      status: 'needs_decision',
+      stage_id: '9b9e5313-8e0e-4ed6-8654-d50413b99885',
+      stage_name: 'Scope Complete / Quote to be Sent'
+    }]
+  };
+  const quoted = api.cases().find((c) => c.id === 'opp-quoted');
+  const complete = api.cases().find((c) => c.id === 'opp-complete');
+  assert.equal(api.impliedStage(quoted).name, 'Quote Sent / Follow up');
+  assert.equal(api.stageDrift(quoted), null);
+  assert.equal(api.impliedStage(complete).name, 'Scope Complete / Quote to be Sent');
+  assert.equal(api.stageDrift(complete), null);
+
+  api.state.resourceId = 'marnin';
+  api.state.data = {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    diary_read: { read_ok: true, source: 'ghl_calendar' },
+    diary: diaryFor('opp-scheduled', 'Scheduled Fen', 'Byford'),
+    cases: [{
+      id: 'opp-scheduled',
+      opportunity_id: 'opp-scheduled',
+      contact_id: 'ct-opp-scheduled',
+      display_name: 'Scheduled Fen',
+      suburb: 'Byford',
+      job_type: 'fencing',
+      status: 'needs_decision',
+      stage_id: '4dc3da8f-d713-4bd4-851c-8e89b6682a4e',
+      stage_name: 'Scope Scheduled'
+    }]
+  };
+  const scheduled = api.cases().find((c) => c.id === 'opp-scheduled');
+  assert.equal(api.impliedStage(scheduled).name, 'Scope Scheduled');
+  assert.equal(api.stageDrift(scheduled), null);
+  api.state.resourceId = 'nithin';
+});

@@ -608,8 +608,32 @@ const test = base.extend({
       site_suburb: 'Duncraig',
       site_address: '4 Repair Street, Duncraig'
     };
+    // SWP-261207: jobs.type still patio but moved onto the Repairs pipeline by
+    // family metadata alone — the backend's `type=patio` filter returns it, so
+    // a family-aware per-event check would reject the WHOLE patio payload.
+    const dispatchPatioRepairFamilyEvent = {
+      assignment_id: 'e2e-dispatch-patio-repair-assignment',
+      job_id: 'e2e-dispatch-patio-repair-job',
+      user_id: 'e2e-hugo',
+      job_number: 'SWP-261207',
+      job_type: 'patio',
+      job_family: 'repair',
+      scheduled_date: perthDate(),
+      scheduled_end: perthDate(),
+      start_time: '09:00',
+      end_time: '12:00',
+      crew_name: 'Hugo',
+      assigned_to: 'Hugo',
+      assignment_status: 'scheduled',
+      confirmation_status: 'confirmed',
+      job_status: 'scheduled',
+      client_name: 'Priya Nair',
+      site_suburb: 'Joondalup',
+      site_address: '5 Patio Repair Ct, Joondalup'
+    };
     const DISPATCH_CALENDAR_EVENTS = [
-      dispatchPatioSpanningEvent, dispatchPatioUntimedEvent, dispatchFencingTodayEvent, dispatchRepairFamilyEvent
+      dispatchPatioSpanningEvent, dispatchPatioUntimedEvent, dispatchFencingTodayEvent, dispatchRepairFamilyEvent,
+      dispatchPatioRepairFamilyEvent
     ];
     // ── Crew roster + lead installer (secureworks-backend PR #513) ──
     // Its own rows rather than the shared fencing fixture, so spec 11 keeps the

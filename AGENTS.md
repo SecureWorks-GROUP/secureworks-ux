@@ -645,7 +645,12 @@ vertical, or OMITTED for `all` (the backend's documented shape for "every
 vertical this viewer may see"). Until 2026-09 this loader/its `adaptV1` hardcoded
 the fencing vertical and rejected everything else, so Patio and All silently
 fetched nothing for every viewer since the M2 cutover — not a regression from any
-one PR, just never wired up beyond fencing. `NC.type`'s Patio/All filter chips are
+one PR, just never wired up beyond fencing. `adaptV1`/`validateModel` check each
+row against the RAW `job_type` (`block._rawType`), never the family-aware
+`mapVertical` bucket (Captain ruling 2026-09-18): a `job_type: patio` row carrying
+`job_family: repair` legitimately comes back under `type=patio`, files as Repair
+downstream and simply drops out of the Patio view via `passType` — it must never
+throw away the whole payload. `NC.type`'s Patio/All filter chips are
 gated by `managesTradeVertical(vertical) || _isAdmin` (Fencing stays
 `managesTradeVertical('fencing')` only, unchanged) so a dispatcher (admin/
 ops_manager) always sees every vertical while a managed-vertical lead only sees

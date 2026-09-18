@@ -33,6 +33,7 @@ test.describe('Trade calendar Patio and All filters (dispatcher lens)', () => {
     await expect(page.locator('#ncCalhost')).not.toContainText('SWP-261183');
     await expect(page.locator('#ncCalhost')).not.toContainText('SWF-261098');
     await expect(page.locator('#ncCalhost')).not.toContainText('SWMS-261319');
+    await expect(page.locator('#ncCalhost')).not.toContainText('SWP-261207');
 
     // Switch to Patio — the filter that was silently broken for every viewer.
     await page.locator('#ncFbtn').click();
@@ -46,6 +47,11 @@ test.describe('Trade calendar Patio and All filters (dispatcher lens)', () => {
     await expect(page.locator('#ncCalhost')).toContainText('Emma Clarke');
     await expect(page.locator('#ncCalhost')).not.toContainText('SWF-261098');
     await expect(page.locator('#ncCalhost')).not.toContainText('SWMS-261319');
+    // A patio-typed row carrying repair family metadata comes back under the
+    // backend's `type=patio` filter: it files as Repair, so it is absent here,
+    // and it must never make the whole Patio calendar fail to load.
+    await expect(page.locator('#ncCalhost')).not.toContainText('SWP-261207');
+    await expect(page.locator('#ncCalhost [data-feed-failure]')).toHaveCount(0);
 
     // The spanning patio job (Mon->Tue of the current week) renders on BOTH
     // its days — never just the day the assignment row was created on.
@@ -82,5 +88,8 @@ test.describe('Trade calendar Patio and All filters (dispatcher lens)', () => {
     await expect(allRepairCard).toBeVisible();
     await expect(allRepairCard).toContainText('Repair');
     await expect(page.locator('#ncCalhost .ncard.ms').filter({ hasText: 'SWMS-261319' })).toHaveCount(0);
+    const allPatioRepairCard = page.locator('#ncCalhost .ncard.rp').filter({ hasText: 'SWP-261207' });
+    await expect(allPatioRepairCard).toBeVisible();
+    await expect(page.locator('#ncCalhost .ncard.pt').filter({ hasText: 'SWP-261207' })).toHaveCount(0);
   });
 });

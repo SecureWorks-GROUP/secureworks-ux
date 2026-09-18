@@ -17289,7 +17289,7 @@
       var vertical = String(request.vertical || '').toLowerCase();
       model.blocks.forEach(function (block) {
         if (!block || typeof block !== 'object') throw new Error('Field calendar block is invalid');
-        if (vertical && vertical !== 'all' && String(block.type || '').toLowerCase() !== vertical) {
+        if (vertical && vertical !== 'all' && String(block._rawType || block.type || '').toLowerCase() !== vertical) {
           throw new Error('Field calendar adapter returned a row outside the requested vertical');
         }
       });
@@ -17348,7 +17348,7 @@
       if (!Array.isArray(payload.events)) throw new Error('Trade calendar response is missing events[]');
       if (typeof payload.truncated !== 'boolean') throw new Error('Trade calendar response is missing truncated');
       payload.events.forEach(function (event) {
-        var eventVertical = event ? CalAdapterCore.mapVertical(event) : '';
+        var eventVertical = event ? String(event.job_type || '').toLowerCase() : '';
         if (!event || (expectedType && eventVertical !== expectedType)) {
           throw new Error('Trade calendar returned an event outside ' + (expectedType || 'the requested scope'));
         }
@@ -17493,7 +17493,8 @@
   // Repair vertical: fed directly from api('calendar') rows, never the
   // make-safe board (which deliberately excludes repair-family jobs — see
   // AGENTS.md's Insurance Repairs board section). TradeCalendarSource's one
-  // registered adapter is fencing-only, so repair fetches and adapts the raw
+  // registered adapter serves every non-makesafe, non-repair vertical (fencing,
+  // patio, all) over trade_calendar, so repair fetches and adapts the raw
   // feed itself, keeping only repair-vertical rows (isTradeRepairJob — the
   // same family-first rule as <trade-repair-vertical>, so a repair-family
   // job (job_type makesafe, job_family repair) shows here, never on Make-safe).
@@ -17517,7 +17518,8 @@
   }
 
   // Calendar source router. Make-safe remains on its canonical projection;
-  // fencing crosses only the strict trade-calendar.v1 adapter above; repair
+  // every other vertical (fencing, patio, ... and 'all') crosses the strict
+  // trade-calendar.v1 adapter above (<trade-calendar-source-all>); repair
   // reads the raw calendar feed directly (never the make-safe board).
   async function caFetchCalendarModel(fromStr, toStr, force) {
     if (NC.type === 'repair') {

@@ -20814,11 +20814,11 @@
       var fund = pickNum(source, ['super_amount']);
       if (fund == null && gross != null && rate != null && rate > 0) fund = round2(gross * rate);
 
-      var worker = pickNum(source, ['super_worker_share', 'worker_super_share']);
+      var worker = pickNum(source, ['super_worker_share']);
       if (worker == null && gross != null && rate != null && rate > 0) worker = round2(gross * rate / 2);
       if (worker == null && fund != null) worker = round2(fund / 2);
 
-      var company = pickNum(source, ['super_company_share', 'company_super_share']);
+      var company = pickNum(source, ['super_company_share']);
       var remainder = (fund != null && worker != null) ? round2(fund - worker) : null;
       if (company == null || (fund != null && worker != null && !sameMoney(round2(Number(worker) + Number(company)), fund))) {
         company = remainder;
@@ -21123,9 +21123,7 @@
       super_amount: superAmount,
       net_pay: netPay,
       super_worker_share: source.super_worker_share,
-      worker_super_share: source.worker_super_share,
       super_company_share: source.super_company_share,
-      company_super_share: source.company_super_share,
       cash_payable: source.cash_payable
     });
     // GST-on invoices require the backend's authoritative inclusive total.
@@ -21171,7 +21169,7 @@
     var submitted = Object.assign({}, previous || {}, response, { already_submitted: true });
     [
       'gross_earned', 'super_rate', 'super_amount', 'net_pay',
-      'super_worker_share', 'worker_super_share', 'super_company_share', 'company_super_share',
+      'super_worker_share', 'super_company_share',
       'cash_payable',
       'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
       'total_inc', 'total', 'items', 'invoice_items'

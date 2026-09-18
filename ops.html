@@ -13775,17 +13775,15 @@ function makesafeAssignmentName(v) {
     || (v.users && (v.users.name || v.users.email))
     || (v.user && (v.user.name || v.user.email)) || '';
 }
-// A "ghost" is the ops manager (Shaun), attached to make-safes for oversight but not
-// actually on-site crew. They are kept on the job (so they still see it) but excluded
-// from the crew label so it shows only the people doing the work.
-function isGhostCrewName(name) {
-  if (!name) return false;
-  var clean = cleanCrewName(String(name).trim()).toLowerCase();
-  if (!clean) return false;
-  var u = (_crewList || []).find(function(c) { return String(c.name || '').toLowerCase() === clean; });
-  if (u && u.role === 'ops_manager') return true;
-  if (clean.indexOf('shaun') !== -1) return true; // backstop if the crew list isn't loaded yet
-  return false;
+// A ghost is an oversight copy (observer / is_ghost row), not on-site crew.
+// Hugo is the make-safe trade and must stay on the chip even though his staff
+// role is ops_manager. Do not treat ops_manager as a ghost.
+function isGhostAssignment(a) {
+  if (!a || typeof a !== 'object') return false;
+  if (a.is_ghost === true) return true;
+  var role = String(a.role || '').toLowerCase();
+  var aType = String(a.assignment_type || '').toLowerCase();
+  return role === 'observer' || aType === 'observer' || aType === 'ghost';
 }
 
 function getMakesafeCrewLabel(j) {
@@ -13794,14 +13792,17 @@ function getMakesafeCrewLabel(j) {
   if (Array.isArray(j.trade_names)) names = names.concat(j.trade_names);
   if (Array.isArray(j.user_names)) names = names.concat(j.user_names);
   if (Array.isArray(j.crew_members)) names = names.concat(j.crew_members.map(makesafeAssignmentName));
-  getMakesafeAssignmentRows(j).forEach(function(a) { names.push(makesafeAssignmentName(a)); });
+  getMakesafeAssignmentRows(j).forEach(function(a) {
+    if (isGhostAssignment(a)) return;
+    names.push(makesafeAssignmentName(a));
+  });
   if (j.crew_label) names.push(j.crew_label);
   if (j.assigned_trade) names.push(j.assigned_trade);
   if (j.crew_name) names.push(j.crew_name);
   if (j.assigned_crew) names.push(j.assigned_crew);
   // The label is stitched from several overlapping crew fields, some joined with "+",
   // some with commas, in mixed casing. Split on every separator, canonicalise each name,
-  // drop ghosts, and dedupe by name so a person can only appear once.
+  // and dedupe by name so a person can only appear once.
   var flat = [];
   var seen = {};
   names.filter(Boolean).forEach(function(v) {
@@ -13810,7 +13811,7 @@ function getMakesafeCrewLabel(j) {
       // Strip from the first separator that is followed by a digit, so it dedupes by name.
       var raw = String(p).replace(/\s*[—–·\-]\s*\d.*$/, '').trim();
       var name = cleanCrewName(raw);
-      if (!name || isGhostCrewName(name)) return;
+      if (!name) return;
       var key = name.toLowerCase();
       if (seen[key]) return;
       seen[key] = true;
@@ -13820,9 +13821,9 @@ function getMakesafeCrewLabel(j) {
   return flat.join(' + ');
 }
 function getMakesafeAssignmentCount(j) {
+  var liveRows = getMakesafeAssignmentRows(j).filter(function(a) { return !isGhostAssignment(a); });
+  if (liveRows.length) return liveRows.length;
   var count = Number(j.assignment_count || j.assignments_count || 0);
-  if (!count && Array.isArray(j.assignments)) count = j.assignments.length;
-  if (!count && Array.isArray(j.job_assignments)) count = j.job_assignments.length;
   if (!count && Array.isArray(j.crew_members)) count = j.crew_members.length;
   if (!count && getMakesafeCrewLabel(j)) count = 1;
   return count;

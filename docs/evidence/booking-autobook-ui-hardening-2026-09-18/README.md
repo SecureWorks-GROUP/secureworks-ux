@@ -24,6 +24,10 @@ Measured in this worktree on 18 Sep.
 The 28 s first load is a backend bound (25 s server cap + render). This change does not
 claim to cut that. It cuts the *repeat* wait and stops a 429/500 from wiping the week.
 
+## Captain boundaries on this change
+
+Send is still held. Nothing in the new confirm sheet or the editable SMS can actually send. No calendar write path was added. Move stage is still disabled.
+
 ## Round trip
 
 `scripts/sales-booking-local-api.test.mjs`: `sales_booking_stamp_write` then

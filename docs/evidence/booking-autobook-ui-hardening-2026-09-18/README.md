@@ -22,7 +22,8 @@ Measured in this worktree on 18 Sep.
 | Scoper / week already read once | waits the full read; door goes blank | paints the cached week immediately, then refreshes. Node proof: cache is on screen before the in-flight `opsFetch` resolves. |
 
 The 28 s first load is a backend bound (25 s server cap + render). This change does not
-claim to cut that. It cuts the *repeat* wait and stops a 429/500 from wiping the week.
+claim to cut that. Repeat waits paint the requested week's cache first. Last-good on
+429/timeout is same-week only — see `docs/sales-booking-ui.md`.
 
 ## Captain boundaries on this change
 

@@ -160,10 +160,12 @@ name (and the id when present). Fencing waiting is `thread_facts.classification`
 only, so a fencing row with no proved text is never Waiting.
 `sales_booking_read` may take ~20s; the client waits 60s. A failed calendar
 (`diary_read.read_ok:false`) shows "Calendar not connected" and still paints the
-queue and thread facts. Coverage gaps render verbatim. A GHL 429, including a
-provider 429 that arrives as HTTP 500, is named as rate-limited and keeps the last
-complete week on screen; it is never painted as an empty book. Switching scoper
-paints the cached week immediately, then refreshes.
+queue and thread facts. Coverage gaps render verbatim. Week nav, scoper switch,
+and a reload while a book is already on screen first paint `cache[resource|week]`
+or go empty; they never keep another week's book under the new week chrome. A
+GHL 429, including a provider 429 that arrives as HTTP 500, is named as
+rate-limited and keeps last-good only when that payload's cache key is the
+requested scoper+week. Same-week rate-limit is never painted as an empty book.
 
 ## GHL pipeline board
 
@@ -171,8 +173,10 @@ Below the stamp board is the live GHL pipeline, two-way on the read. Columns are
 real stage names from `RESOURCES.*.pipeline_stages` (wiki profiles). Fold stages share
 one **Quoted and archived** column, so patio is six columns. Every card is the same
 client as the queue. Orange means thread facts or a confirmed diary visit say the
-card belongs in a different column; Move is held. The board is a review surface, not
-a GHL write.
+card belongs in a different column; Move is held. Diary evidence means the card
+belongs in booked unless it is already at or past booked: quote, complete, and
+fold win first, and a card already in a booked stage stays on that stage. The
+board is a review surface, not a GHL write.
 
 ## Preview
 
@@ -190,4 +194,5 @@ booked same-suburb visit cannot become their diary.
 Design source: the captain-approved end-state prototype after three rounds of feedback
 (`data/booking-endstate-prototype-20260916/`). Evidence:
 `docs/evidence/sales-booking-door-2026-09-16/`. Live-door fix:
-`docs/evidence/booking-door-live-fix-2026-09-17/`.
+`docs/evidence/booking-door-live-fix-2026-09-17/`. Pipeline board and held Sale
+Book scope drawer: `docs/evidence/booking-autobook-ui-hardening-2026-09-18/`.

@@ -3443,9 +3443,11 @@ function openSnoozeMenu(proposal, card, anchorBtn) {
   });
 }
 
-// Verb: Book Scope — finalize a booking proposal. Locks crew_availability +
-// emits a confirmation_sms proposal for the customer (still pending → rep
-// approves the confirmation send).
+// Verb: Book Scope — held slot drawer, then a held confirm sheet.
+// No customer send, no calendar write, and no create_job_for_opportunity
+// on this press. Create Job stays on its own confirm() path. Slots prefer
+// ranked_slots, else the picked-slot keys the detail panel already uses,
+// else the next working-hour windows.
 var SALE_SCOPERS = [
   { id: '5862cf1d-0a3b-4836-8fd1-d69f95aa2f73', name: 'Nithin' },
   { id: '706c5258-70dd-483a-b36c-af6864b24498', name: 'Marnin' },

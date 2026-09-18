@@ -11408,7 +11408,8 @@
         h += '<div style="padding:8px 10px;background:var(--sw-light);border-radius:6px;font-size:13px;margin-bottom:12px">';
         h += '<strong>Scoper\'s notes:</strong>';
         scoperNotes.forEach(function (n) {
-          h += '<div style="margin-top:6px"><span style="color:var(--sw-text-sec)">' + esc(n.label) + '</span><br>' + escSowText(n.text).replace(/\n/g, '<br>') + '</div>';
+          var scoperNoteLines = String(n.text).split(/\r?\n/).map(function (line) { return escSowText(line); });
+          h += '<div style="margin-top:6px"><span style="color:var(--sw-text-sec)">' + esc(n.label) + '</span><br>' + scoperNoteLines.join('<br>') + '</div>';
         });
         h += '</div>';
       }

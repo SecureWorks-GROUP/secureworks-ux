@@ -65,18 +65,48 @@ test.describe('Fencing scoping-tool notes on the OpsDash job detail', () => {
 
   test('Notes rail pins the scoping notes above the deletable job_events notes', async ({ page }) => {
     await page.goto('/ops.html');
-    const html = await page.evaluate((data) => buildNotesHTML(data), detailPayload(fencingJob({
-      // A real, deletable two-way ops note must still render below the pinned block.
-    })));
+    const payload = detailPayload(fencingJob());
+    // A real, deletable two-way ops note must still render below the pinned block.
+    payload.events = [{
+      id: 'evt-note-1',
+      event_type: 'note',
+      created_at: '2026-09-17T02:00:00.000Z',
+      detail_json: { text: 'Office rang the client about the gate swing', from_ops: true },
+    }];
+    const result = await page.evaluate((data) => {
+      const host = document.createElement('div');
+      host.innerHTML = buildNotesHTML(data);
+      const pinned = host.querySelector('.fence-scoping-notes');
+      const pinnedWrap = pinned && pinned.parentElement;
+      const feed = host.querySelector('.jd-notes-feed');
+      const deleteButtons = Array.from(host.querySelectorAll('button[onclick*="deleteJobNote"]'));
+      return {
+        html: host.innerHTML,
+        pinnedText: pinnedWrap ? pinnedWrap.textContent : null,
+        pinnedHasDelete: pinnedWrap ? pinnedWrap.querySelectorAll('button').length : null,
+        pinnedBeforeFeed: !!(pinnedWrap && feed && (pinnedWrap.compareDocumentPosition(feed) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        feedText: feed ? feed.textContent : null,
+        deleteCount: deleteButtons.length,
+        deleteOnclick: deleteButtons.map((b) => b.getAttribute('onclick')),
+        deleteInsideFeed: deleteButtons.every((b) => feed && feed.contains(b)),
+      };
+    }, payload);
 
-    const pinnedIdx = html.indexOf('Scoping notes');
-    const notesHeadingIdx = html.indexOf('>Notes<');
+    const pinnedIdx = result.html.indexOf('Scoping notes');
+    const notesHeadingIdx = result.html.indexOf('>Notes<');
     expect(pinnedIdx).toBeGreaterThan(-1);
     expect(notesHeadingIdx).toBeGreaterThan(-1);
     expect(pinnedIdx).toBeLessThan(notesHeadingIdx);
-    expect(html).toContain('CHECK PROFILE CHECK PROFILE NOT HARMONY');
-    // No delete control on the pinned block — deleteJobNote only appears for real job_events rows.
-    expect(html).not.toMatch(/deleteJobNote[^)]*\)[^<]*<\/button>\s*<\/div>\s*<div class="fence-scoping-notes"/);
+    expect(result.pinnedText).toContain('Scoping notes');
+    expect(result.pinnedText).toContain('CHECK PROFILE CHECK PROFILE NOT HARMONY');
+    // The pinned scoping block is read-only: no button of any kind inside it.
+    expect(result.pinnedHasDelete).toBe(0);
+    // The real job_events note renders below it WITH its delete control.
+    expect(result.pinnedBeforeFeed).toBe(true);
+    expect(result.feedText).toContain('Office rang the client about the gate swing');
+    expect(result.deleteCount).toBe(1);
+    expect(result.deleteOnclick[0]).toContain("deleteJobNote('evt-note-1')");
+    expect(result.deleteInsideFeed).toBe(true);
   });
 
   test('renderScopeSummary fencing branch carries the scoping notes into peek/Money/Build/WO panels', async ({ page }) => {

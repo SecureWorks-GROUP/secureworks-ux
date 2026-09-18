@@ -27,7 +27,7 @@ function fencingDetail(overrides) {
         job: {
           siteNotes: 'Order 1 sheet as 2100 surfmist',
           checklist: { finalNotes: 'CHECK PROFILE CHECK PROFILE NOT HARMONY' },
-          removal: { notes: 'Removal is $450 extra' },
+          removal: { notes: 'Removal is $450 extra\n\nRun A: order steel posts\n\nRun B: use timber posts instead' },
           supplierNotes: 'Less sheets needed do not approve till calculating 1 sheet at 2.1 then rest at 1.8',
           runs: [{ length: 12 }],
         },
@@ -100,6 +100,20 @@ test.describe('Fencing scoping-tool notes on the trade app job detail', () => {
     // supplierNotes never reaches the trade app.
     await expect(scope).not.toContainText('Less sheets needed');
     await expect(scope).not.toContainText('calculating 1 sheet at 2.1');
+
+    // Paragraph breaks survive for the money-redacted viewer: each paragraph
+    // sits on its own line, never collapsed onto one by the whitespace squeeze
+    // inside the per-viewer redaction.
+    const removalLines = await scope.locator('[data-build-spec] div').filter({ hasText: 'Run A: order steel posts' }).last().evaluate((el) => {
+      const html = el.innerHTML;
+      const a = html.indexOf('Run A: order steel posts');
+      const b = html.indexOf('Run B: use timber posts instead');
+      return { a, b, between: a > -1 && b > a ? html.slice(a, b) : null, text: el.textContent };
+    });
+    expect(removalLines.a).toBeGreaterThan(-1);
+    expect(removalLines.b).toBeGreaterThan(removalLines.a);
+    expect(removalLines.between).toMatch(/<br>\s*<br>/);
+    expect(removalLines.text).not.toContain('Run A: order steel posts Run B: use timber posts instead');
   });
 
   test('a patio job still renders its client.notes and no Scoper\'s notes label', async ({ appPage: page }) => {

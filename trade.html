@@ -8181,6 +8181,11 @@
 
   // Makesafes are field-report jobs: open the MakeSafe report template, not the generic checklist.
   window.openJobReport = function(jobId, assignmentId) {
+    var cached = getCachedTradeJob(jobId);
+    if (cached && getTradeJobType(cached.job, cached.assignment) === 'repair') {
+      openJob(jobId, assignmentId || (cached.assignment && cached.assignment.id) || '');
+      return;
+    }
     _currentJobId = jobId;
     _currentJobLoaded = null; // keep job detail clean if user later opens full job
     _reportLoadedForJob = null; // force report reload for this job
@@ -8861,7 +8866,7 @@
     var md = job.metadata || job.makesafe_details || {};
     var candidates = [
       job.job_family, job.jobFamily, ev.job_family, ev.jobFamily, assignment.job_family,
-      md.ses_family, md.makesafe_job_family, md.makesafeJobFamily,
+      md.job_family, md.jobFamily, md.ses_family, md.makesafe_job_family, md.makesafeJobFamily,
       job.ses_family, job.makesafe_job_family, job.makesafeJobFamily
     ];
     for (var i = 0; i < candidates.length; i++) {
@@ -8875,6 +8880,24 @@
     if (String(job.type || '').toLowerCase().trim() === 'repair') return true;
     if (String(ev.job_type || '').toLowerCase().trim() === 'repair') return true;
     return tradeJobFamily(job, assignment, ev) === 'repair';
+  }
+  // trade_job_detail publishes the resolved family beside `job` (top-level
+  // `job_family` / `vertical`, repair taking precedence over jobs.type) and the
+  // make-safe overlay under `makesafe_details`, whereas every renderer here
+  // classifies the job record itself. Fold those signals onto the job record
+  // before any type decision so a deep link or a cold reload (no card cache)
+  // classifies exactly like a card click. Returns the cached card context.
+  function adoptTradeJobDetailFamily(data, jobId) {
+    var cached = getCachedTradeJob(jobId);
+    if (!data || !data.job) return cached;
+    var job = data.job;
+    if (data.makesafe_details) job.makesafe_details = data.makesafe_details;
+    var vertical = String(data.vertical == null ? '' : data.vertical).toLowerCase().trim();
+    var family = String(data.job_family == null ? '' : data.job_family).toLowerCase().trim();
+    if (vertical === 'repair') job.job_family = 'repair';
+    else if (family && !String(job.job_family || '').trim()) job.job_family = family;
+    if (cached && getTradeJobType(cached.job, cached.assignment) === 'repair') job.job_family = 'repair';
+    return cached;
   }
 
   function isTradeMakesafeJob(job, assignment) {
@@ -9167,6 +9190,7 @@
 
     api('trade_job_detail', { jobId: jobId }).then(function(data) {
       clearTimeout(slowTimer);
+      adoptTradeJobDetailFamily(data, jobId);
       _currentJob = data;
       _currentJobLoaded = jobId;
       if (data && data.job && getTradeJobType(data.job) === 'makesafe') {
@@ -15573,7 +15597,7 @@
       // Backend returns MakeSafe overlay details at top level. Copy enough of
       // that signal onto the job before type detection so SWMS/detail-backed
       // MakeSafes cannot fall back to the old generic service checklist.
-      if (data.makesafe_details && data.job) data.job.makesafe_details = data.makesafe_details;
+      var cached = adoptTradeJobDetailFamily(data, jobId);
       if (data.job && data.makesafe_details && !data.job.type) data.job.type = 'makesafe';
       cacheTradeJob(data.job, null);
       _currentJob = data;
@@ -15581,6 +15605,11 @@
       _reportLoadedForJob = _currentJobId;
       _reportDirty = false;
       var type = getTradeJobType(data.job);
+      if (type === 'repair') {
+        _reportMode = null;
+        openJob(jobId, _currentAssignment || (cached && cached.assignment && cached.assignment.id) || '');
+        return;
+      }
       if (type !== 'makesafe') {
         _reportMode = null;
         renderServiceReport({ report: data.serviceReport || null, checklistTemplate: data.checklistTemplate || [] });

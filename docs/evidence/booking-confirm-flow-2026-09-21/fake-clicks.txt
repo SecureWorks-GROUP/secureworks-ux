@@ -1,0 +1,3 @@
+result: "{\"actions\":[{\"action\":\"sales_booking_visit_outcome_insert\"},{\"action\":\"sales_booking_approval_write\",\"step\":\"calendar\"},{\"action\":\"sales_booking_approval_write\",\"step\":\"message\"}],\"calendar\":\"approved\",\"message\":\"approved\",\"sendHold\":true}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

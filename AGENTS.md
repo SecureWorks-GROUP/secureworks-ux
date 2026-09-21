@@ -588,10 +588,19 @@ otherwise comes straight from `job_type`. Badge/accent: `--jt-rp`/`.rp` (teal
 `#0D9488`, matching ops.html's Repair division colour) — added to every place
 that already had `.ms/.fc/.pt/.dk/.rn/.nt` variants (`.jc`, `.jcsr`, `.ql`,
 `.dh`, `.alloc-sheet`, and the `.ncal` component's own `--ms/--fc/--pt/--nt`
-token family). Job detail: because `getTradeJobType` returns `repair` not
-`makesafe`, a repair job always lands on the normal job detail (Documents tab
-under Files) — it never branches into the make-safe report flow. Guard:
-`tests/e2e/trade-repair-vertical.spec.js`.
+token family). Job detail: a repair job always lands on the normal job detail
+(Work/Scope/Files/Photos/Comms/Log, documents under Files) and never the
+make-safe report flow — including through the two REPORT entry points,
+`openJobReport` and `loadMakesafeReport`, which used to set MakeSafe mode
+unconditionally and now hand a repair-vertical job back to `openJob`. The
+classifier needs the detail feed's own signal for that: `trade_job_detail`
+publishes the resolved family BESIDE the job (top-level `job_family` /
+`vertical`, plus the overlay under `makesafe_details`) while the jobs row can
+still say `type: 'makesafe'`, so `adoptTradeJobDetailFamily` folds those onto
+the job record before any type decision — that is what makes a `?jobId=` deep
+link or cold reload (no card cache) classify exactly like a card click. Guards:
+`tests/e2e/trade-repair-vertical.spec.js`,
+`tests/e2e/trade-repair-job-screen.spec.js`.
 
 ## Crew roster & lead installer (`trade.html`)
 

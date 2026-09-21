@@ -10914,6 +10914,21 @@ function makesafeBoardCanRepaint() {
     && !!_pipelineData && !jobDetailIsOpen();
 }
 
+// <load-does-not-stack> True while a board/pipeline read is in flight.
+//
+// The 5-minute background tick, every tab switch and every Retry press all land
+// on loadJobs(), and nothing used to stop them overlapping. A slow make-safe
+// board read (the ops board has run 5-11s for weeks) could be joined by a dozen
+// more from the same browser, each holding an edge worker until the 150s
+// wall-clock limit killed it with a 504. Every other read from that browser,
+// including a plain Fencing-to-Patio switch, then queued behind them: on
+// 2026-09-21 one operator saw 16s tab switches while everyone else saw under 1s.
+//
+// A load nobody pressed now stands down while one is already running. A load the
+// operator DID press still goes through, because a tab switch asks for a
+// different vertical and must not be answered with the in-flight one's data.
+var _loadJobsInFlight = false;
+
 /**
  * Load the pipeline/board for the active tab.
  *
@@ -10927,6 +10942,12 @@ function makesafeBoardCanRepaint() {
 async function loadJobs(opts) {
   opts = opts || {};
   if (opts.background && (makesafeReviewOverlayIsOpen() || jobDetailIsOpen())) return;
+  // <load-does-not-stack>. `retried` is the in-flight load's OWN silent retry
+  // continuing, so it keeps the claim that load already holds rather than
+  // standing down against itself and skipping the retry entirely.
+  if (_loadJobsInFlight && opts.background && !opts.retried) return;
+  var ownsInFlight = !opts.retried;
+  if (ownsInFlight) _loadJobsInFlight = true;
   updateJobsDate();
   try {
     var data;
@@ -10974,9 +10995,28 @@ async function loadJobs(opts) {
     // Archive column stuck on "loading" with no way back.
     if (_pipelineTab === 'makesafes') failMakesafeArchiveLoadIfPending(e);
     showToast('Failed to load jobs: ' + ((e && e.message) || 'unknown error'), 'warning', [
-      { label: 'Retry', primary: true, onclick: 'loadJobs()' }
+      { label: 'Retry', primary: true, onclick: 'retryLoadJobs()' }
     ]);
+  } finally {
+    // Released on every path out of the try, including the mid-flight returns
+    // (superseded board read, detail opened under a background load), so a load
+    // that bails early can never strand the claim and silently kill the
+    // 5-minute refresh for the rest of the session. The two guards above this
+    // try stand down BEFORE the claim is taken, so they have nothing to release.
+    if (ownsInFlight) _loadJobsInFlight = false;
   }
+}
+
+// <load-does-not-stack> The toast's Retry is the easiest way to stack reads: the
+// board looks stuck, so it gets pressed repeatedly, and each press used to fire
+// another read alongside the ones already running. While a load is in flight,
+// pressing it now says what is happening instead of adding to the queue.
+function retryLoadJobs() {
+  if (_loadJobsInFlight) {
+    showToast('Still loading the board. Give it a moment.', 'warning');
+    return;
+  }
+  return loadJobs();
 }
 
 // Hydrate the review affordance from the same current SES needs_review queue
@@ -25725,6 +25765,15 @@ setInterval(function() { if (_opsAppStarted) updateJarvisSummary(); }, 30000);
 // Auto-refresh active tab data every 5 minutes (keeps dashboard live all day)
 setInterval(function() {
   if (!_opsAppStarted) return;
+  // <load-does-not-stack> A background tab is not being read, so polling it only
+  // spends the same edge capacity the visible tab is waiting on. On 2026-09-21
+  // one operator had ~6 windows parked on the make-safe board; each kept
+  // re-fetching that 767KB feed every 5 minutes, and their own foreground tab
+  // then queued behind reads nobody was looking at. document.hidden is false for
+  // a second-monitor window that is simply unfocused, so a dashboard left up on
+  // another screen keeps refreshing. A tab refreshes on its next tick after the
+  // operator returns to it; switching views already loads on demand.
+  if (typeof document !== 'undefined' && document.hidden) return;
   var view = localStorage.getItem('sw_ops_tab') || 'today';
   if (view === 'today') { loadToday(); }
   else if (view === 'calendar') loadCalendar();

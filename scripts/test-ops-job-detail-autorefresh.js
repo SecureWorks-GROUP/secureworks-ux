@@ -10,7 +10,9 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 const root = path.join(__dirname, '..');
-const ops = fs.readFileSync(path.join(root, 'ops.html'), 'utf8');
+// Normalise EOLs: the working tree is CRLF on Windows and LF in CI, and the
+// source markers below contain newlines, so they must match in both.
+const ops = fs.readFileSync(path.join(root, 'ops.html'), 'utf8').replace(/\r\n/g, '\n');
 
 function extractFunction(src, signature) {
   const start = src.indexOf(signature);
@@ -259,6 +261,11 @@ const enricherNames = [
 // the early return, the post-fetch in-flight re-check, and the enricher fan-out.
 
 const source = [
+  // loadJobs() reads and writes the module-scope no-stack claim that ships
+  // immediately above it in ops.html (<load-does-not-stack>). The harness must
+  // provide it like any other module-scope global it stubs, or the extracted
+  // function throws ReferenceError before it reaches the behaviour under test.
+  'var _loadJobsInFlight = false;',
   extractFunction(ops, 'function jobDetailIsOpen()'),
   extractFunction(ops, 'function makesafeReviewOverlayIsOpen()'),
   extractFunction(ops, 'function makesafeBoardCanRepaint()'),

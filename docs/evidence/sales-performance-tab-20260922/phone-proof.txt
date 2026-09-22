@@ -1,0 +1,6 @@
+result: "{\"width\":390,\"scroll\":390,\"fencing\":[\"Khairo 3 $11,037 18 2 – not in store yet – not in store yet\",\"Marnin 0 $0 2 0 – not in store yet – not in store yet\",\"Nithin 0 $0 0 0 – not in store yet – not in store yet\"],\"patio\":[\"Nithin – – 10 0 – not in store yet – not in store yet\",\"Khairo – – 0 0 – not in store yet – not in store yet\",\"Marnin – – 0 0 – not in store yet – not in store yet\"]}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state
+result: "{\"width\":390,\"scroll\":390}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

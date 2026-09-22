@@ -8772,6 +8772,128 @@ var CalOpsCore = (function () {
       duration_days: workingSpanDays(newStart, newEnd)
     };
   }
+  // Order a set of assignment date writes against the live calendar snapshot
+  // without ever stepping on job_assignments_job_user_date_key
+  // (job_id,user_id,scheduled_date). Schedule view can paint several physical
+  // rows as ONE bar — commonly one row per person/day. Moving Mon..Wed to
+  // Tue..Thu must therefore free Wed before Tue, and Tue before Mon. A target
+  // held by a row outside this move is a genuine separate visit: skip that
+  // candidate and leave BOTH visits intact instead of deleting one or letting
+  // Postgres fail the whole drag. Ghost observer rows are backend-owned and
+  // excluded from calendar_events; ops-api releases the ops manager's own
+  // mirror off (job,user,date) before it writes a real crew row there, so a
+  // key held ONLY by a ghost is free here and a ghost is never a holder,
+  // blocker or count. A real row on that same key still blocks as usual.
+  function stageCollisionSafeMoves(events, moves) {
+    function isGhost(ev) {
+      var role = String((ev && ev.role) || '').toLowerCase();
+      var aType = String((ev && ev.assignment_type) || '').toLowerCase();
+      return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
+    }
+    function key(jobId, userId, date) {
+      if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
+      return String(jobId) + '|' + String(userId) + '|' + String(date);
+    }
+    var occupancy = {};
+    (events || []).forEach(function(ev) {
+      if (!ev || isGhost(ev)) return;
+      var k = key(ev.job_id, ev.user_id, ev.scheduled_date);
+      if (k) occupancy[k] = ev.assignment_id;
+    });
+    var pending = (moves || []).map(function(move, index) {
+      return {
+        move: move,
+        index: index,
+        assignmentId: move.assignmentId,
+        sourceKey: key(move.jobId, move.sourceUserId || move.userId, move.fromDate),
+        targetKey: key(move.jobId, move.targetUserId || move.userId, move.toDate)
+      };
+    });
+    var movingIds = {};
+    pending.forEach(function(item) { movingIds[item.assignmentId] = true; });
+    var ordered = [], skipped = [];
+
+    while (pending.length) {
+      var progressed = false;
+      for (var i = 0; i < pending.length;) {
+        var item = pending[i];
+        var holder = item.targetKey ? occupancy[item.targetKey] : null;
+        if (!holder || holder === item.assignmentId) {
+          if (item.sourceKey && occupancy[item.sourceKey] === item.assignmentId) delete occupancy[item.sourceKey];
+          if (item.targetKey) occupancy[item.targetKey] = item.assignmentId;
+          ordered.push(item.move);
+          pending.splice(i, 1);
+          progressed = true;
+          continue;
+        }
+        if (!movingIds[holder]) {
+          skipped.push({ move: item.move, conflictAssignmentId: holder, reason: 'existing' });
+          pending.splice(i, 1);
+          progressed = true;
+          continue;
+        }
+        i++;
+      }
+      if (progressed) continue;
+
+      // A cycle (or two candidates collapsing onto one target) cannot be
+      // resolved with safe ordinary updates. Preserve every source visit and
+      // report the candidates as skipped; never park live rows on fake dates.
+      pending.forEach(function(item) {
+        skipped.push({ move: item.move, conflictAssignmentId: item.targetKey ? occupancy[item.targetKey] || null : null, reason: 'collapse' });
+      });
+      pending = [];
+    }
+    // Genuine blockers are the holders that are NOT part of this move — the
+    // real existing visits. Cascaded candidates (a chain waiting on a skipped
+    // row of its own move) never count as an existing visit.
+    var blockers = [], seenBlocker = {};
+    skipped.forEach(function(item) {
+      var holder = item.conflictAssignmentId;
+      if (!holder || movingIds[holder] || seenBlocker[holder]) return;
+      seenBlocker[holder] = true;
+      var holderEv = (events || []).find(function(ev) { return ev && !isGhost(ev) && ev.assignment_id === holder; }) || null;
+      blockers.push({ assignmentId: holder, event: holderEv });
+    });
+    var collapseOnly = skipped.length > 0 && skipped.every(function(item) { return item.reason === 'collapse'; });
+    return { ordered: ordered, skipped: skipped, blockers: blockers, collapseOnly: collapseOnly };
+  }
+  // The occupancy staging sees must cover the dragged job's WHOLE assignment
+  // set, not just the loaded calendar window: a row shifted past the window
+  // edge, or one dropped by the feed's row cap, is still bound by the unique
+  // key. job_detail rows (id / user_id / scheduled_date) are folded into the
+  // calendar-event shape and win over the window copy of the same row.
+  function assignmentRowsToEvents(rows, jobId) {
+    return (rows || []).map(function(a) {
+      if (!a) return null;
+      var id = a.id || a.assignment_id;
+      var date = String(a.scheduled_date || '').slice(0, 10);
+      if (!id || !date) return null;
+      return {
+        assignment_id: id,
+        job_id: a.job_id || jobId || null,
+        user_id: a.user_id || (a.users && a.users.id) || null,
+        crew_name: a.crew_name || (a.users && a.users.name) || null,
+        scheduled_date: date,
+        scheduled_end: a.scheduled_end ? String(a.scheduled_end).slice(0, 10) : null,
+        status: a.status || null,
+        role: a.role || null,
+        assignment_type: a.assignment_type || null,
+        is_ghost: a.is_ghost === true
+      };
+    }).filter(Boolean);
+  }
+  function mergeOccupancyEvents(windowEvents, jobEvents) {
+    var byId = {};
+    (jobEvents || []).forEach(function(ev) { if (ev && ev.assignment_id) byId[ev.assignment_id] = true; });
+    var merged = (jobEvents || []).slice();
+    (windowEvents || []).forEach(function(ev) {
+      if (!ev) return;
+      if (ev.assignment_id && byId[ev.assignment_id]) return;
+      merged.push(ev);
+    });
+    return merged;
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
@@ -8780,7 +8902,10 @@ var CalOpsCore = (function () {
     isWeekendStr: isWeekendStr, layWorkingDays: layWorkingDays,
     paintedSpanDates: paintedSpanDates, workingSpanDays: workingSpanDays,
     movedSpanV2: movedSpanV2, buildMovePayloadV2: buildMovePayloadV2,
-    buildResizePayload: buildResizePayload
+    buildResizePayload: buildResizePayload,
+    stageCollisionSafeMoves: stageCollisionSafeMoves,
+    assignmentRowsToEvents: assignmentRowsToEvents,
+    mergeOccupancyEvents: mergeOccupancyEvents
   };
 })();
 // </calendar-ops-core>
@@ -9962,6 +10087,59 @@ function confirmIfCrewUnavailable(crew, dateStr, proceed) {
   );
 }
 
+// CP1 (dragv2): the occupancy a move/resize is staged against. The loaded
+// window alone is blind to rows past its edge and to rows the feed's cap
+// dropped, so the dragged job's full assignment set is read through the
+// existing job_detail action and merged over the window. A failed read falls
+// back to the window snapshot rather than blocking the drag.
+async function calStagingOccupancy(jobId) {
+  var jobRows = [];
+  if (jobId) {
+    try {
+      var detail = await opsFetch('job_detail', { jobId: jobId });
+      jobRows = CalOpsCore.assignmentRowsToEvents(detail && detail.assignments, jobId);
+    } catch (e) {
+      console.warn('calendar staging: job_detail read failed, staging against the loaded window only:', e && e.message);
+    }
+  }
+  return CalOpsCore.mergeOccupancyEvents(_calEvents, jobRows);
+}
+
+// One warning for a Schedule-bar drag that could not move as a whole. A
+// single-crew bar keeps the single-visit wording; a multi-crew bar names the
+// genuine existing visits that block it, counted as real holders only.
+function blockingVisitStatus(blocker) {
+  var ev = blocker && blocker.event;
+  var status = String((ev && (ev.status || ev.assignment_status)) || '').toLowerCase();
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'complete' || status === 'completed') return 'completed';
+  return null;
+}
+
+function describeBlockingVisit(blocker) {
+  var ev = blocker && blocker.event;
+  if (!ev) return 'an existing visit';
+  var text = crewDisplayName(ev) + ' on ' + fmtDate(ev.scheduled_date);
+  var held = blockingVisitStatus(blocker);
+  if (held) text += ' (' + held + ' visit still holds that date)';
+  return text;
+}
+
+function describeSkippedSingleMove(staged) {
+  var blocker = (staged && staged.blockers || [])[0];
+  if (blocker && blockingVisitStatus(blocker)) return 'Already scheduled there — ' + describeBlockingVisit(blocker);
+  return 'Already scheduled there — existing visit kept';
+}
+
+function describeBlockedSegmentMove(staged, crewCount) {
+  if (staged.collapseOnly) return 'Not moved - two days of this job would land on the same date';
+  var blockers = staged.blockers || [];
+  if (crewCount <= 1 || !blockers.length) return describeSkippedSingleMove(staged);
+  var names = blockers.map(describeBlockingVisit);
+  return 'Not moved — ' + blockers.length + ' existing visit' + (blockers.length === 1 ? '' : 's') +
+    ' kept: ' + names.join(', ');
+}
+
 // CP1 (dragv2): Schedule-view bar move. The drop day is the segment's new
 // START. A single-assignment segment routes through moveAssignment with its
 // OWN crew — identical guards to the Crew view (confirmed lock, availability
@@ -10003,10 +10181,30 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
     if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
     plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
   }
+  var occupancy = await calStagingOccupancy(jobId);
+  var stagedMoves = CalOpsCore.stageCollisionSafeMoves(occupancy, plans.map(function(p) {
+    return {
+      assignmentId: p.ev.assignment_id,
+      jobId: p.ev.job_id,
+      userId: p.ev.user_id || null,
+      fromDate: p.ev.scheduled_date,
+      toDate: p.plan.update.scheduled_date,
+      entry: p
+    };
+  }));
+  // A job-level drag is all-or-nothing: one crew chain blocked by a genuine
+  // separate visit means nothing is written and every row stays put, so the
+  // job is never torn across crews on different days.
+  if (stagedMoves.skipped.length) {
+    var crewIds = {};
+    evs.forEach(function(e) { crewIds[e.user_id || crewDisplayName(e)] = true; });
+    showToast(describeBlockedSegmentMove(stagedMoves, Object.keys(crewIds).length), 'warning');
+    return;
+  }
   async function applyMoves() {
     try {
-      for (var pi = 0; pi < plans.length; pi++) {
-        await opsPost('update_assignment', plans[pi].plan.update);
+      for (var pi = 0; pi < stagedMoves.ordered.length; pi++) {
+        await opsPost('update_assignment', stagedMoves.ordered[pi].entry.plan.update);
       }
       showToast('Rescheduled', 'success');
       maybeOfferRescheduleSms(evs[0], newDate);
@@ -10016,7 +10214,8 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
   // ONE combined availability check across all affected crew over their moved
   // working-day spans — a single confirm, never one modal per crew member.
   var clashes = [];
-  plans.forEach(function(p) {
+  stagedMoves.ordered.forEach(function(move) {
+    var p = move.entry;
     clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
   });
   confirmClashesOrProceed(clashes, applyMoves);
@@ -10063,6 +10262,17 @@ async function doResizeAssignment(ev, edge, targetDate) {
   // A clamped or no-change edge drop leaves the span as-is — skip the write.
   if (payload.scheduled_date === ev.scheduled_date &&
       payload.scheduled_end === (ev.scheduled_end || ev.scheduled_date)) return;
+  var stagedResize = CalOpsCore.stageCollisionSafeMoves(await calStagingOccupancy(ev.job_id), [{
+    assignmentId: ev.assignment_id,
+    jobId: ev.job_id,
+    userId: ev.user_id || null,
+    fromDate: ev.scheduled_date,
+    toDate: payload.scheduled_date
+  }]);
+  if (stagedResize.skipped.length) {
+    showToast(describeSkippedSingleMove(stagedResize), 'warning');
+    return;
+  }
   try {
     await opsPost('update_assignment', payload);
     showToast('Duration updated', 'success');
@@ -10287,6 +10497,21 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   var plan = window.__SW_CAL_DRAGV2_ENABLED
     ? CalOpsCore.buildMovePayloadV2(ev, newCrew, newUserId, newDate)
     : CalOpsCore.buildMovePayload(ev, newCrew, newUserId, newDate);
+  if (window.__SW_CAL_DRAGV2_ENABLED) {
+    var moveTargetUserId = plan.mode === 'reassign' ? plan.create.userId : (newUserId || ev.user_id || null);
+    var stagedMove = CalOpsCore.stageCollisionSafeMoves(await calStagingOccupancy(ev.job_id), [{
+      assignmentId: ev.assignment_id,
+      jobId: ev.job_id,
+      sourceUserId: ev.user_id || null,
+      targetUserId: moveTargetUserId,
+      fromDate: ev.scheduled_date,
+      toDate: plan.mode === 'reassign' ? plan.create.scheduledDate : plan.update.scheduled_date
+    }]);
+    if (stagedMove.skipped.length) {
+      showToast(describeSkippedSingleMove(stagedMove), 'warning');
+      return;
+    }
+  }
   try {
     if (plan.mode === 'reassign') {
       // Crew change = an allocation act (G2): delete the old row and create the

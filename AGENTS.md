@@ -85,6 +85,33 @@ Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
 ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
+Schedule bars may be backed by several same-person day rows; every V2
+move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
+writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
+safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
+window PLUS the dragged job's full assignment set from the existing
+`job_detail` read — because the window alone is blind past its edge and when
+the feed is truncated. A job-level Schedule-bar drag is all-or-nothing: if any
+crew chain would collide with a genuine separate visit, nothing is written,
+every row stays where it is, and one warning toast names the blocking existing
+visits counted as real holders (`staged.blockers`), never cascaded candidates.
+A single-row move/resize onto a held date is skipped with both visits kept,
+never deleted or allowed to abort the drag; a skip with no genuine holder (two
+rows of one bar collapsing onto one date, e.g. deliberately scheduled Sat+Sun
+rows) says so instead of blaming an existing visit. Ghost observer rows remain
+backend-owned and absent from the calendar feed; the `job_detail` read supplies
+them, but a key held ONLY by a ghost does not block, because ops-api releases
+the manager's own mirror off `(job_id,user_id,scheduled_date)` before writing a
+real crew row there. Staging drops ghosts from occupancy, so they are never a
+holder, a named blocker or a count; a real row on that same key still blocks
+exactly as before. Known residual: the backend releases only the RESOLVED ops
+manager's own ghost mirror on `(job, user, date)`, so a stale ghost belonging
+to a former or second ops manager can still surface the duplicate-key toast
+for that user's own real row; widening the release is backend follow-up
+`opsapi-ghost-release-any-manager`. That read also carries
+cancelled/completed rows the feed hides; they block too, and a toast names them
+as "(cancelled|completed visit still holds that date)". Guard:
+`tests/e2e/ops-calendar-move-collision.spec.js`.
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 `data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`

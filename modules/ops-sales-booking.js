@@ -2026,11 +2026,28 @@
     var cloud = global.SECUREWORKS_CLOUD;
     var user = cloud && cloud.auth && cloud.auth.getUser();
     if (!user || !user.id) return 'Sign in to record a visit outcome.';
-    if (!global.crypto || !global.crypto.randomUUID) return 'Secure record IDs are unavailable.';
     if (state.visitUncertain[visitKey(v)]) return 'Outcome not verified. Refresh before recording another outcome.';
     if (visitOutcomeRecords().some(function (r) { return r.booking_key === v.booking_key; }) && !latestVisitOutcome(v.booking_key)) return 'Outcome history is ambiguous. Reconcile it before adding a correction.';
     if (state.visitPending[visitKey(v)]) return 'Recording outcome…';
     return '';
+  }
+
+  // The outcome API owns identity/provenance and normalizes text/timestamptz.
+  // Verify the submitted facts, then retain its actual row for corrections.
+  function verifiedVisitOutcome(result, submitted, actorId) {
+    var row = result && result.visit_outcome;
+    if (!result || result.ok === false || result.error || !row) return null;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.id || '') || row.id === submitted.supersedes) return null;
+    if (row.recorded_by_user_id !== actorId || row.source !== 'booking_screen' ||
+        !/(Z|[+-]\d{2}:\d{2})$/.test(row.recorded_at || '') || !Number.isFinite(Date.parse(row.recorded_at))) return null;
+    var matches = Object.keys(submitted).every(function (field) {
+      var expected = submitted[field];
+      if (field === 'visit_start') return /(Z|[+-]\d{2}:\d{2})$/.test(row[field] || '') && Date.parse(row[field]) === Date.parse(expected);
+      if (typeof expected === 'string') expected = expected.trim();
+      if (field === 'note' && !expected) expected = null;
+      return row[field] === expected;
+    });
+    return matches ? row : null;
   }
 
   async function recordVisitOutcome(bookingKey, outcome, reason, note, quoteOwed) {
@@ -2044,22 +2061,24 @@
     if (!blocked && ['happened','did_not_happen'].indexOf(outcome) < 0) blocked = 'Choose a visit outcome.';
     if (!blocked && outcome === 'did_not_happen' && ['customer_not_home','we_did_not_attend','rescheduled'].indexOf(reason) < 0) blocked = 'Choose why the visit did not happen.';
     note = String(note || '');
-    if (!blocked && (note.length > 200 || /[\r\n]/.test(note))) blocked = 'Keep the note to one line, at most 200 characters.';
+    if (!blocked && (Array.from(note.trim()).length > 200 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(note))) blocked = 'Keep the note to one line, at most 200 characters.';
     if (blocked) { state.visitErrors[key] = blocked; render(); return {ok:false,reason:blocked}; }
+    // Live record_visit_outcome 400s on whitespace-only; same empty-note rule as verifiedVisitOutcome.
+    note = note.trim() || null;
     var user = global.SECUREWORKS_CLOUD.auth.getUser();
-    var record = {
-      id: global.crypto.randomUUID(), booking_key: v.booking_key, appointment_id: v.appointment_id || null,
+    var submitted = {
+      booking_key: v.booking_key, appointment_id: v.appointment_id || null,
       contact_id: v.contact_id, opportunity_id: v.opportunity_id || null, job_id: v.job_id || null,
       scoper_user_id: v.scoper_user_id, scoper_name: resource().name, visit_start: v.visit_start,
       outcome: outcome, reason: outcome === 'happened' ? null : reason, note: note,
-      quote_owed: outcome === 'happened' && quoteOwed !== false, recorded_by_user_id: user.id,
-      recorded_at: new Date().toISOString(), source: 'booking_screen', supersedes: previous && previous.id || null
+      quote_owed: outcome === 'happened' && quoteOwed !== false, supersedes: previous && previous.id || null
     };
     state.visitPending[key] = true; delete state.visitErrors[key]; render();
     try {
       if (typeof global.opsPost !== 'function') throw new Error('Visit outcome service unavailable. Nothing recorded.');
-      var result = await global.opsPost('sales_booking_visit_outcome_insert', {visit_outcome:record});
-      if (!result || result.ok !== true || !sameContent(result.visit_outcome, record)) throw new Error('Outcome not verified. Refresh before trying again.');
+      var result = await global.opsPost('record_visit_outcome', submitted);
+      var record = verifiedVisitOutcome(result, submitted, user.id);
+      if (!record) throw new Error('Outcome not verified. Refresh before trying again.');
       state.visitRecorded[key] = record;
       var current = state.data;
       var present = current && (current.booked_visits || []).some(function (visit) { return visit && visit.booking_key === record.booking_key; });

@@ -16,6 +16,7 @@ beforeEach((t) => {
   api.state.error = null;
   api.state.stale = false;
   api.state.loading = false;
+  api.state.visitRecorded = {};
 });
 
 function sampleRead(resource) {
@@ -1425,8 +1426,14 @@ test('GHL booked-stage rows with an empty diary do not count as booked visits', 
   assert.match(html, /<div class="v">0<\/div>/);
 });
 
-test('only a GHL contact id matches a diary event to a queue row', () => {
+test('GHL contact, opportunity or event id matches a diary event to a queue row', () => {
   api.state.resourceId = 'marnin';
+  const cases = [
+    { id: 'opp-1', opportunity_id: 'opp-1', contact_id: 'ct-1', display_name: 'Opportunity match', suburb: 'Canning Vale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-2', opportunity_id: 'opp-2', contact_id: 'ct-2', display_name: 'Contact match', suburb: 'Piara Waters', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-4', opportunity_id: 'opp-4', contact_id: 'ct-4', event_id: 'e-evt', display_name: 'Event match', suburb: 'Harrisdale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-3', opportunity_id: 'opp-3', contact_id: 'ct-3', display_name: 'Sam Ferry', suburb: 'Byford', status: 'needs_decision', stage_name: 'New Lead (Call + Qualify)' }
+  ];
   api.state.data = {
     ok: true,
     fixture: false,
@@ -1436,20 +1443,22 @@ test('only a GHL contact id matches a diary event to a queue row', () => {
     diary: [
       { event_id: 'e-opp', opportunity_id: 'opp-1', title: 'Linked by opportunity', kind: 'busy', start: '2026-09-15T09:00:00', end: '2026-09-15T10:00:00' },
       { event_id: 'e-contact', contact_id: 'ct-2', title: 'Linked by contact', kind: 'busy', start: '2026-09-15T10:00:00', end: '2026-09-15T11:00:00' },
+      { event_id: 'e-evt', title: 'Linked by event', kind: 'busy', start: '2026-09-15T10:30:00', end: '2026-09-15T11:00:00' },
       { event_id: 'e-name', title: 'Sam Ferry', suburb: 'Byford', kind: 'busy', start: '2026-09-15T11:00:00', end: '2026-09-15T12:00:00' },
       { event_id: 'e-close', title: 'Sam Ferry', suburb: 'Harrisdale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00' }
     ],
-    cases: [
-      { id: 'opp-1', opportunity_id: 'opp-1', contact_id: 'ct-1', display_name: 'Opportunity match', suburb: 'Canning Vale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
-      { id: 'opp-2', opportunity_id: 'opp-2', contact_id: 'ct-2', display_name: 'Contact match', suburb: 'Piara Waters', status: 'needs_decision', stage_name: 'Scope Scheduled' },
-      { id: 'opp-3', opportunity_id: 'opp-3', contact_id: 'ct-3', display_name: 'Sam Ferry', suburb: 'Byford', status: 'needs_decision', stage_name: 'New Lead (Call + Qualify)' }
-    ]
+    cases
   };
   const rows = api.diary();
-  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-opp')), 'busy');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-opp')), 'confirmed');
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-contact')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-evt')), 'confirmed');
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-name')), 'busy');
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-close')), 'busy');
+  assert.equal(api.diaryEventMatchesCase({ opportunity_id: 'opp-1', event_id: 'e-opp' }, cases[0]), true);
+  assert.equal(api.diaryEventMatchesCase({ event_id: 'e-evt' }, cases[2]), true);
+  assert.equal(api.diaryEventMatchesCase({ display_name: 'Sam Ferry', suburb: 'Byford' }, cases[3]), false);
+  assert.equal(api.bookedCount(), 3);
 });
 
 test('blocks_capacity false does not occupy an off-lane day', () => {

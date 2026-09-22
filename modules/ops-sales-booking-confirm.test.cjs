@@ -7,7 +7,7 @@ beforeEach(() => {
   data = fixture(api); row = data.cases[0]; writes = [];
   Object.assign(api.state, { resourceId: 'marnin', weekStart: data.week_start, data, selectedId: row.id,
     loading: false, stale: false, error: null, filter: 'all', search: '', cache: {}, textChoices: {},
-    visitForms: {}, visitPending: {}, visitUncertain: {}, visitErrors: {}, shownVisits: {}, approvalPending: {}, approvalErrors: {}, shownApprovals: {}, opened: true });
+    visitForms: {}, visitPending: {}, visitUncertain: {}, visitRecorded: {}, visitErrors: {}, shownVisits: {}, approvalPending: {}, approvalErrors: {}, shownApprovals: {}, opened: true });
   global.SECUREWORKS_CLOUD = {auth:{getUser:()=>({id:api.RESOURCES.marnin.scoper_user_id})}};
   global.opsPost = async (action, body) => {
     writes.push(structuredClone({action, body}));
@@ -238,6 +238,60 @@ test('only last-seven-day unresolved visits enter the amber list', () => {
   data.booked_visits[0].visit_start = new Date(Date.now()+86400000).toISOString();
   assert.doesNotMatch(api.renderHTML(),/aria-label="Visits missing an outcome"/);
   assert.match(api.renderHTML(),/This visit has not started/);
+});
+test('missing visit outcome support stays a calm line in its section', () => {
+  delete data.booking_flow;
+  const html = api.renderHTML();
+  assert.match(html, /<section class="visit-outcomes"[^>]*>[\s\S]*Visit outcomes are not connected yet/);
+  assert.doesNotMatch(html, /Visit outcomes have not been read|Missing outcomes cannot be checked yet/);
+  assert.doesNotMatch(html, /class="notice warn"[^>]*>[\s\S]*Visit outcomes/);
+  data.booking_flow = { version: 'booking-confirm.v1', approval_write: 'separate-v1', visit_outcomes_read: 'missing' };
+  const incomplete = api.renderHTML();
+  assert.match(incomplete, /<section class="visit-outcomes"[^>]*>[\s\S]*Visit outcomes are not connected yet/);
+  assert.doesNotMatch(incomplete, /Visit outcomes have not been read|class="notice warn"[^>]*>[\s\S]*Visit outcomes/);
+});
+test('verified visit insert after load replaces state cannot root-insert on reopen', async () => {
+  let finish;
+  global.opsPost = async (action, body) => {
+    writes.push({action, body});
+    return new Promise((resolve) => { finish = () => resolve({ok:true, visit_outcome: structuredClone(body.visit_outcome)}); });
+  };
+  const inflight = api.recordVisitOutcome('demo-booking-completed','happened',null,'Measured both sides');
+  const pendingHtml = api.renderHTML();
+  assert.match(pendingHtml, /Recording outcome/);
+  assert.match(pendingHtml, /data-visit-outcome="happened"[^>]* disabled/);
+  const emptyOutcomes = () => {
+    const next = structuredClone(data);
+    next.visit_outcomes = [];
+    return next;
+  };
+  global.opsFetch = async () => emptyOutcomes();
+  await api.load('marnin', api.state.weekStart);
+  assert.equal((api.state.data.visit_outcomes || []).length, 0);
+  finish();
+  const result = await inflight;
+  assert.equal(result.ok, true);
+  assert.equal(api.latestVisitOutcome('demo-booking-completed').id, result.visit_outcome.id);
+  assert.equal(api.state.data.visit_outcomes.some((row) => row.id === result.visit_outcome.id), true);
+  global.opsPost = async (action, body) => {
+    writes.push({action, body});
+    return {ok:true, visit_outcome: body.visit_outcome};
+  };
+  assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'again')).ok, false);
+  assert.match(api.renderHTML(), /Correct outcome/);
+  assert.doesNotMatch(api.renderHTML(), /data-visit-outcome="happened"/);
+  await api.load('marnin', api.state.weekStart);
+  assert.equal((api.state.data.visit_outcomes || []).length, 0);
+  assert.equal(api.latestVisitOutcome('demo-booking-completed').id, result.visit_outcome.id);
+  assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'reopen')).ok, false);
+  assert.match(api.renderHTML(), /Correct outcome/);
+  assert.doesNotMatch(api.renderHTML(), /data-visit-outcome="happened"/);
+  api.state.visitForms['marnin|demo-booking-completed'] = {};
+  api.renderHTML();
+  const correction = await api.recordVisitOutcome('demo-booking-completed','did_not_happen','rescheduled','Moved',false);
+  assert.equal(correction.ok, true);
+  assert.equal(correction.visit_outcome.supersedes, result.visit_outcome.id);
+  assert.equal(writes.filter((w) => w.action === 'sales_booking_visit_outcome_insert').length, 2);
 });
 test('outcome note validation, unknown persistence and stale booking prevent extra inserts', async () => {
   global.opsPost = async () => { writes.push(1); throw Error('Connection lost'); };

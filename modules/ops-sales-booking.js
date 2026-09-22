@@ -111,6 +111,7 @@
     visitForms: {},
     visitPending: {},
     visitUncertain: {},
+    visitRecorded: {},
     visitErrors: {},
     shownVisits: {},
     approvalPending: {},
@@ -949,8 +950,15 @@
       || c.pipeline_stage || c.pipelineStage);
   }
 
+  function sameGhlId(a, b) {
+    return a != null && b != null && String(a) !== '' && String(a) === String(b);
+  }
+
   function diaryEventMatchesCase(ev, c) {
-    return !!(ev && c && ev.contact_id && c.contact_id && String(ev.contact_id) === String(c.contact_id));
+    if (!ev || !c) return false;
+    if (sameGhlId(ev.contact_id, c.contact_id)) return true;
+    if (sameGhlId(ev.opportunity_id, c.opportunity_id) || sameGhlId(ev.opportunity_id, c.id)) return true;
+    return sameGhlId(ev.event_id || ev.id, c.event_id);
   }
 
   // CONFIRMED only when the event is a booked scope: it matches a queue case
@@ -1988,8 +1996,18 @@
     });
   }
 
+  function visitOutcomeRecords() {
+    var live = state.data && Array.isArray(state.data.visit_outcomes) ? state.data.visit_outcomes.slice() : [];
+    Object.keys(state.visitRecorded || {}).forEach(function (k) {
+      var rec = state.visitRecorded[k];
+      if (!rec || !rec.id || live.some(function (r) { return r && r.id === rec.id; })) return;
+      live.push(rec);
+    });
+    return live;
+  }
+
   function latestVisitOutcome(bookingKey) {
-    var records = state.data && state.data.visit_outcomes || [];
+    var records = visitOutcomeRecords();
     var mine = records.filter(function (r) { return r.booking_key === bookingKey && r.scoper_user_id === resource().scoper_user_id; });
     var superseded = mine.map(function (r) { return r.supersedes; }).filter(Boolean);
     var current = mine.filter(function (r) { return superseded.indexOf(r.id) < 0; });
@@ -2010,7 +2028,7 @@
     if (!user || !user.id) return 'Sign in to record a visit outcome.';
     if (!global.crypto || !global.crypto.randomUUID) return 'Secure record IDs are unavailable.';
     if (state.visitUncertain[visitKey(v)]) return 'Outcome not verified. Refresh before recording another outcome.';
-    if ((state.data.visit_outcomes || []).some(function (r) { return r.booking_key === v.booking_key; }) && !latestVisitOutcome(v.booking_key)) return 'Outcome history is ambiguous. Reconcile it before adding a correction.';
+    if (visitOutcomeRecords().some(function (r) { return r.booking_key === v.booking_key; }) && !latestVisitOutcome(v.booking_key)) return 'Outcome history is ambiguous. Reconcile it before adding a correction.';
     if (state.visitPending[visitKey(v)]) return 'Recording outcome…';
     return '';
   }
@@ -2037,14 +2055,18 @@
       quote_owed: outcome === 'happened' && quoteOwed !== false, recorded_by_user_id: user.id,
       recorded_at: new Date().toISOString(), source: 'booking_screen', supersedes: previous && previous.id || null
     };
-    var data = state.data;
     state.visitPending[key] = true; delete state.visitErrors[key]; render();
     try {
       if (typeof global.opsPost !== 'function') throw new Error('Visit outcome service unavailable. Nothing recorded.');
       var result = await global.opsPost('sales_booking_visit_outcome_insert', {visit_outcome:record});
       if (!result || result.ok !== true || !sameContent(result.visit_outcome, record)) throw new Error('Outcome not verified. Refresh before trying again.');
-      data.visit_outcomes = data.visit_outcomes || [];
-      data.visit_outcomes.push(record);
+      state.visitRecorded[key] = record;
+      var current = state.data;
+      var present = current && (current.booked_visits || []).some(function (visit) { return visit && visit.booking_key === record.booking_key; });
+      if (present) {
+        current.visit_outcomes = current.visit_outcomes || [];
+        if (!current.visit_outcomes.some(function (row) { return row && row.id === record.id; })) current.visit_outcomes.push(record);
+      }
       delete state.visitForms[key];
       return {ok:true,visit_outcome:record,sent:false};
     } catch (err) {
@@ -2071,7 +2093,7 @@
 
   function renderVisitOutcomes() {
     var flow = state.data && state.data.booking_flow;
-    if (!flow || flow.visit_outcomes_read !== 'complete') return '<div class="notice warn">Visit outcomes have not been read. Missing outcomes cannot be checked yet.</div>';
+    if (!flow || flow.visit_outcomes_read !== 'complete') return '<section class="visit-outcomes" aria-label="Visit outcomes"><p>Visit outcomes are not connected yet</p></section>';
     var visits = bookedVisits(), now = Date.now();
     var missing = visits.filter(function (v) { var at = Date.parse(v.visit_start); return at <= now && at >= now - 7 * 86400000 && !latestVisitOutcome(v.booking_key); });
     var others = visits.filter(function (v) { return missing.indexOf(v) < 0; });

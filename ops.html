@@ -8780,7 +8780,9 @@ var CalOpsCore = (function () {
   // held by a row outside this move is a genuine separate visit: skip that
   // candidate and leave BOTH visits intact instead of deleting one or letting
   // Postgres fail the whole drag. Ghost observer rows are backend-owned and
-  // excluded from calendar_events, but ignore one defensively if supplied.
+  // excluded from calendar_events, but the unique key binds them too, so one
+  // supplied by the job-scoped read still occupies its date — it is only ever
+  // left out of blocker naming and user-facing counts.
   function stageCollisionSafeMoves(events, moves) {
     function isGhost(ev) {
       var role = String((ev && ev.role) || '').toLowerCase();
@@ -8791,11 +8793,13 @@ var CalOpsCore = (function () {
       if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
       return String(jobId) + '|' + String(userId) + '|' + String(date);
     }
-    var occupancy = {};
+    var occupancy = {}, ghostIds = {};
     (events || []).forEach(function(ev) {
-      if (!ev || isGhost(ev)) return;
+      if (!ev) return;
+      var ghost = isGhost(ev);
+      if (ghost && ev.assignment_id) ghostIds[ev.assignment_id] = true;
       var k = key(ev.job_id, ev.user_id, ev.scheduled_date);
-      if (k) occupancy[k] = ev.assignment_id;
+      if (k && (!occupancy[k] || !ghost)) occupancy[k] = ev.assignment_id;
     });
     var pending = (moves || []).map(function(move, index) {
       return {
@@ -8824,7 +8828,7 @@ var CalOpsCore = (function () {
           continue;
         }
         if (!movingIds[holder]) {
-          skipped.push({ move: item.move, conflictAssignmentId: holder });
+          skipped.push({ move: item.move, conflictAssignmentId: holder, reason: ghostIds[holder] ? 'ghost' : 'existing' });
           pending.splice(i, 1);
           progressed = true;
           continue;
@@ -8837,7 +8841,7 @@ var CalOpsCore = (function () {
       // resolved with safe ordinary updates. Preserve every source visit and
       // report the candidates as skipped; never park live rows on fake dates.
       pending.forEach(function(item) {
-        skipped.push({ move: item.move, conflictAssignmentId: item.targetKey ? occupancy[item.targetKey] || null : null });
+        skipped.push({ move: item.move, conflictAssignmentId: item.targetKey ? occupancy[item.targetKey] || null : null, reason: 'collapse' });
       });
       pending = [];
     }
@@ -8847,12 +8851,13 @@ var CalOpsCore = (function () {
     var blockers = [], seenBlocker = {};
     skipped.forEach(function(item) {
       var holder = item.conflictAssignmentId;
-      if (!holder || movingIds[holder] || seenBlocker[holder]) return;
+      if (!holder || movingIds[holder] || ghostIds[holder] || seenBlocker[holder]) return;
       seenBlocker[holder] = true;
       var holderEv = (events || []).find(function(ev) { return ev && !isGhost(ev) && ev.assignment_id === holder; }) || null;
       blockers.push({ assignmentId: holder, event: holderEv });
     });
-    return { ordered: ordered, skipped: skipped, blockers: blockers };
+    var collapseOnly = skipped.length > 0 && skipped.every(function(item) { return item.reason === 'collapse'; });
+    return { ordered: ordered, skipped: skipped, blockers: blockers, collapseOnly: collapseOnly };
   }
   // The occupancy staging sees must cover the dragged job's WHOLE assignment
   // set, not just the loaded calendar window: a row shifted past the window
@@ -10105,6 +10110,7 @@ async function calStagingOccupancy(jobId) {
 // single-crew bar keeps the single-visit wording; a multi-crew bar names the
 // genuine existing visits that block it, counted as real holders only.
 function describeBlockedSegmentMove(staged, crewCount) {
+  if (staged.collapseOnly) return 'Not moved - two days of this job would land on the same date';
   var blockers = staged.blockers || [];
   if (crewCount <= 1 || !blockers.length) return 'Already scheduled there — existing visit kept';
   var names = blockers.map(function(b) {

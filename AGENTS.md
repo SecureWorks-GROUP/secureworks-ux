@@ -96,8 +96,12 @@ crew chain would collide with a genuine separate visit, nothing is written,
 every row stays where it is, and one warning toast names the blocking existing
 visits counted as real holders (`staged.blockers`), never cascaded candidates.
 A single-row move/resize onto a held date is skipped with both visits kept,
-never deleted or allowed to abort the drag. Ghost observer rows remain
-backend-owned and absent from the calendar feed. Guard:
+never deleted or allowed to abort the drag; a skip with no genuine holder (two
+rows of one bar collapsing onto one date, e.g. deliberately scheduled Sat+Sun
+rows) says so instead of blaming an existing visit. Ghost observer rows remain
+backend-owned and absent from the calendar feed, but the unique key binds them
+too: the `job_detail` read supplies them, they occupy their date in staging,
+and they are never named or counted in a toast. Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with

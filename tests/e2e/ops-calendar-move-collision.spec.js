@@ -31,6 +31,8 @@ const D = {
   WED: addIsoDays(MON, 2),
   THU: addIsoDays(MON, 3),
   FRI: addIsoDays(MON, 4),
+  SAT: addIsoDays(MON, 5),
+  SUN: addIsoDays(MON, 6),
 };
 
 function fmtDate(iso) {
@@ -347,5 +349,52 @@ test('a multi-crew bar is all-or-nothing: one blocked crew chain moves nobody an
   const byId = Object.fromEntries(rows.map((row) => [row.id, row.scheduled_date]));
   expect([byId['h-0'], byId['h-1'], byId['i-0'], byId['i-1'], byId['i-existing']])
     .toEqual([D.MON, D.TUE, D.MON, D.TUE, D.FRI]);
+  assertUnique(rows);
+});
+
+test('an ops user who is both crew and observer mirror on a job cannot be moved onto their own mirror date', async ({ page }) => {
+  // The mirror is invisible on the calendar but bound by the same unique key;
+  // the job-scoped read supplies it, so the drag is refused before Postgres
+  // can, and the toast never names or counts the hidden mirror.
+  const rows = [
+    assignment('s-crew', 'u-shaun', 'Shaun', D.MON, { role: 'lead_installer' }),
+    assignment('h-mon', 'u-hugo', 'Hugo', D.MON, { role: 'installer' }),
+    assignment('h-wed', 'u-hugo', 'Hugo', D.WED, { role: 'installer' }),
+    assignment('g-wed', 'u-shaun', null, D.WED, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Shaun"] .cal-job-block`);
+  await realDrag(page, source, page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Shaun"]`));
+
+  await expect(page.getByText('Already scheduled there — existing visit kept')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  expect(writes).toHaveLength(0);
+  expect(rows.find((row) => row.id === 's-crew').scheduled_date).toBe(D.MON);
+  assertUnique(rows);
+});
+
+test('a bar with deliberately scheduled Sat and Sun rows says its days would collapse, not that a visit exists', async ({ page }) => {
+  // Fri, Sat and Sun rows share one bar. Working-day offsets give Sat and Sun
+  // the same offset, so a drop on Thu lands both on Fri: no existing visit is
+  // involved and the toast must not claim one.
+  const rows = [
+    assignment('h-fri', 'u-hugo', 'Hugo', D.FRI, { role: 'lead_installer' }),
+    assignment('h-sat', 'u-hugo', 'Hugo', D.SAT, { role: 'lead_installer' }),
+    assignment('h-sun', 'u-hugo', 'Hugo', D.SUN, { role: 'lead_installer' }),
+    assignment('g-fri', 'u-shaun', null, D.FRI, { role: 'observer', is_ghost: true }),
+    assignment('g-sat', 'u-shaun', null, D.SAT, { role: 'observer', is_ghost: true }),
+    assignment('g-sun', 'u-shaun', null, D.SUN, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  await page.locator('#btnViewSchedule').click();
+  await expect(page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]')).toHaveCount(1);
+  const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
+  await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
+
+  await expect(page.getByText('Not moved - two days of this job would land on the same date')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  expect(writes).toHaveLength(0);
+  expect(rows.filter((row) => !row.is_ghost).map((row) => row.scheduled_date).sort())
+    .toEqual([D.FRI, D.SAT, D.SUN]);
   assertUnique(rows);
 });

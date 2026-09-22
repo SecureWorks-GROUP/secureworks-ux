@@ -172,8 +172,8 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
   test('a one-day forward shift frees the newest row first', () => {
     const events = [
       ev('a1', 'u1', MON), ev('a2', 'u1', TUE), ev('a3', 'u1', WED),
-      // Ghosts are backend-owned and excluded from calendar_events; a defensive
-      // copy must not participate in the real crew move graph.
+      // A ghost mirror for a different person holds its own key only; it
+      // never joins the real crew's move graph.
       ev('ghost', 'shaun', TUE, { role: 'observer', is_ghost: true }),
     ];
     const staged = C.stageCollisionSafeMoves(events, [
@@ -191,7 +191,7 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
       [move('source', 'u1', MON, WED)],
     );
     expect(staged.ordered).toEqual([]);
-    expect(staged.skipped).toEqual([{ move: move('source', 'u1', MON, WED), conflictAssignmentId: 'existing' }]);
+    expect(staged.skipped).toEqual([{ move: move('source', 'u1', MON, WED), conflictAssignmentId: 'existing', reason: 'existing' }]);
   });
 
   test('a reassignment checks the target user while freeing the source user key', () => {
@@ -202,6 +202,31 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
     expect(staged.ordered).toEqual([]);
     expect(staged.skipped[0].conflictAssignmentId).toBe('existing');
     expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['existing']);
+  });
+
+  test('a ghost observer mirror on the target still occupies the unique key but is never a named blocker', () => {
+    // The ops user is mirrored as an observer on Wed AND holds a real crew row
+    // on Mon for the same job; the plain UNIQUE(job_id,user_id,scheduled_date)
+    // binds the mirror too, so Mon -> Wed must not reach Postgres.
+    const staged = C.stageCollisionSafeMoves(
+      [ev('crew', 'shaun', MON), ev('mirror', 'shaun', WED, { role: 'observer', is_ghost: true })],
+      [move('crew', 'shaun', MON, WED)],
+    );
+    expect(staged.ordered).toEqual([]);
+    expect(staged.skipped).toEqual([{ move: move('crew', 'shaun', MON, WED), conflictAssignmentId: 'mirror', reason: 'ghost' }]);
+    expect(staged.blockers).toEqual([]);
+    expect(staged.collapseOnly).toBe(false);
+  });
+
+  test('two rows of one bar collapsing onto one date is reported as a collapse, not an existing visit', () => {
+    const staged = C.stageCollisionSafeMoves(
+      [ev('sat', 'u1', SAT), ev('sun', 'u1', SUN)],
+      [move('sat', 'u1', SAT, FRI), move('sun', 'u1', SUN, FRI)],
+    );
+    expect(staged.ordered.map((item) => item.assignmentId)).toEqual(['sat']);
+    expect(staged.skipped.map((item) => [item.move.assignmentId, item.reason])).toEqual([['sun', 'collapse']]);
+    expect(staged.blockers).toEqual([]);
+    expect(staged.collapseOnly).toBe(true);
   });
 
   test('a blocked crew chain reports the one genuine holder, never its cascaded candidates', () => {
@@ -226,6 +251,7 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
       .toBeLessThan(staged.ordered.map((item) => item.assignmentId).indexOf('h0'));
     expect(staged.skipped.map((item) => item.move.assignmentId).sort()).toEqual(['i0', 'i2']);
     expect(staged.blockers).toEqual([{ assignmentId: 'i-existing', event: events[6] }]);
+    expect(staged.collapseOnly, 'a cascade behind a real visit is never reported as a collapse').toBe(false);
   });
 });
 

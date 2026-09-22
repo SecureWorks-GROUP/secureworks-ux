@@ -8780,9 +8780,10 @@ var CalOpsCore = (function () {
   // held by a row outside this move is a genuine separate visit: skip that
   // candidate and leave BOTH visits intact instead of deleting one or letting
   // Postgres fail the whole drag. Ghost observer rows are backend-owned and
-  // excluded from calendar_events, but the unique key binds them too, so one
-  // supplied by the job-scoped read still occupies its date — it is only ever
-  // left out of blocker naming and user-facing counts.
+  // excluded from calendar_events; ops-api releases the ops manager's own
+  // mirror off (job,user,date) before it writes a real crew row there, so a
+  // key held ONLY by a ghost is free here and a ghost is never a holder,
+  // blocker or count. A real row on that same key still blocks as usual.
   function stageCollisionSafeMoves(events, moves) {
     function isGhost(ev) {
       var role = String((ev && ev.role) || '').toLowerCase();
@@ -8793,13 +8794,11 @@ var CalOpsCore = (function () {
       if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
       return String(jobId) + '|' + String(userId) + '|' + String(date);
     }
-    var occupancy = {}, ghostIds = {};
+    var occupancy = {};
     (events || []).forEach(function(ev) {
-      if (!ev) return;
-      var ghost = isGhost(ev);
-      if (ghost && ev.assignment_id) ghostIds[ev.assignment_id] = true;
+      if (!ev || isGhost(ev)) return;
       var k = key(ev.job_id, ev.user_id, ev.scheduled_date);
-      if (k && (!occupancy[k] || !ghost)) occupancy[k] = ev.assignment_id;
+      if (k) occupancy[k] = ev.assignment_id;
     });
     var pending = (moves || []).map(function(move, index) {
       return {
@@ -8828,7 +8827,7 @@ var CalOpsCore = (function () {
           continue;
         }
         if (!movingIds[holder]) {
-          skipped.push({ move: item.move, conflictAssignmentId: holder, reason: ghostIds[holder] ? 'ghost' : 'existing' });
+          skipped.push({ move: item.move, conflictAssignmentId: holder, reason: 'existing' });
           pending.splice(i, 1);
           progressed = true;
           continue;
@@ -8851,7 +8850,7 @@ var CalOpsCore = (function () {
     var blockers = [], seenBlocker = {};
     skipped.forEach(function(item) {
       var holder = item.conflictAssignmentId;
-      if (!holder || movingIds[holder] || ghostIds[holder] || seenBlocker[holder]) return;
+      if (!holder || movingIds[holder] || seenBlocker[holder]) return;
       seenBlocker[holder] = true;
       var holderEv = (events || []).find(function(ev) { return ev && !isGhost(ev) && ev.assignment_id === holder; }) || null;
       blockers.push({ assignmentId: holder, event: holderEv });

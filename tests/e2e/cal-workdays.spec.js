@@ -204,18 +204,32 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
     expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['existing']);
   });
 
-  test('a ghost observer mirror on the target still occupies the unique key but is never a named blocker', () => {
+  test('a target held only by a ghost observer mirror is free and the mirror is never a blocker', () => {
     // The ops user is mirrored as an observer on Wed AND holds a real crew row
-    // on Mon for the same job; the plain UNIQUE(job_id,user_id,scheduled_date)
-    // binds the mirror too, so Mon -> Wed must not reach Postgres.
+    // on Mon for the same job. ops-api releases his own mirror off
+    // (job,user,date) before writing the real row, so Mon -> Wed proceeds.
     const staged = C.stageCollisionSafeMoves(
       [ev('crew', 'shaun', MON), ev('mirror', 'shaun', WED, { role: 'observer', is_ghost: true })],
       [move('crew', 'shaun', MON, WED)],
     );
-    expect(staged.ordered).toEqual([]);
-    expect(staged.skipped).toEqual([{ move: move('crew', 'shaun', MON, WED), conflictAssignmentId: 'mirror', reason: 'ghost' }]);
+    expect(staged.ordered).toEqual([move('crew', 'shaun', MON, WED)]);
+    expect(staged.skipped).toEqual([]);
     expect(staged.blockers).toEqual([]);
     expect(staged.collapseOnly).toBe(false);
+  });
+
+  test('a real row sharing a key with a ghost mirror still blocks and is the only named holder', () => {
+    const staged = C.stageCollisionSafeMoves(
+      [
+        ev('crew', 'shaun', MON),
+        ev('mirror', 'shaun', WED, { role: 'observer', is_ghost: true }),
+        ev('existing', 'shaun', WED),
+      ],
+      [move('crew', 'shaun', MON, WED)],
+    );
+    expect(staged.ordered).toEqual([]);
+    expect(staged.skipped).toEqual([{ move: move('crew', 'shaun', MON, WED), conflictAssignmentId: 'existing', reason: 'existing' }]);
+    expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['existing']);
   });
 
   test('two rows of one bar collapsing onto one date is reported as a collapse, not an existing visit', () => {

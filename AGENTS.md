@@ -99,9 +99,12 @@ A single-row move/resize onto a held date is skipped with both visits kept,
 never deleted or allowed to abort the drag; a skip with no genuine holder (two
 rows of one bar collapsing onto one date, e.g. deliberately scheduled Sat+Sun
 rows) says so instead of blaming an existing visit. Ghost observer rows remain
-backend-owned and absent from the calendar feed, but the unique key binds them
-too: the `job_detail` read supplies them, they occupy their date in staging,
-and they are never named or counted in a toast. That read also carries
+backend-owned and absent from the calendar feed; the `job_detail` read supplies
+them, but a key held ONLY by a ghost does not block, because ops-api releases
+the manager's own mirror off `(job_id,user_id,scheduled_date)` before writing a
+real crew row there. Staging drops ghosts from occupancy, so they are never a
+holder, a named blocker or a count; a real row on that same key still blocks
+exactly as before. That read also carries
 cancelled/completed rows the feed hides; they block too, and a toast names them
 as "(cancelled|completed visit still holds that date)". Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.

@@ -98,13 +98,23 @@ function assertUnique(rows) {
   expect(new Set(keys).size, 'fixture database must obey the production unique key').toBe(keys.length);
 }
 
+// ops-api's releaseGhostObserverMirrorForRealAssignee: a genuine crew row
+// landing on (job, user, date) first clears that user's own ghost mirror off
+// the key, so the unique constraint never fires against a mirror.
+function releaseGhostMirrorForRealRow(rows, candidate) {
+  if (candidate.is_ghost || !candidate.user_id || !candidate.scheduled_date) return;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    if (rows[index].is_ghost && tupleKey(rows[index]) === tupleKey(candidate)) rows.splice(index, 1);
+  }
+}
+
 function reconcileGhosts(rows) {
   const realDates = new Set(rows.filter((row) => !row.is_ghost).map((row) => row.scheduled_date));
   for (let index = rows.length - 1; index >= 0; index--) {
     if (rows[index].is_ghost && !realDates.has(rows[index].scheduled_date)) rows.splice(index, 1);
   }
   for (const date of realDates) {
-    if (rows.some((row) => row.is_ghost && row.scheduled_date === date)) continue;
+    if (rows.some((row) => row.user_id === 'u-shaun' && row.scheduled_date === date)) continue;
     rows.push(assignment(`g-${date}`, 'u-shaun', null, date, {
       role: 'observer', is_ghost: true, notes: 'ghost_auto_mirror',
     }));
@@ -171,6 +181,7 @@ async function bootCalendar(page, options = {}) {
         scheduled_end: body.scheduled_end ?? row.scheduled_end,
         duration_days: body.duration_days ?? row.duration_days,
       };
+      releaseGhostMirrorForRealRow(rows, candidate);
       if (rows.some((other) => other.id !== row.id && tupleKey(other) === tupleKey(candidate))) {
         return json({ error: UNIQUE_ERROR }, 409);
       }
@@ -352,15 +363,36 @@ test('a multi-crew bar is all-or-nothing: one blocked crew chain moves nobody an
   assertUnique(rows);
 });
 
-test('an ops user who is both crew and observer mirror on a job cannot be moved onto their own mirror date', async ({ page }) => {
-  // The mirror is invisible on the calendar but bound by the same unique key;
-  // the job-scoped read supplies it, so the drag is refused before Postgres
-  // can, and the toast never names or counts the hidden mirror.
+test('an ops user who is both crew and observer mirror on a job can be moved onto their own mirror date', async ({ page }) => {
+  // The mirror is invisible on the calendar and the job-scoped read supplies
+  // it, but ops-api releases the manager's own mirror off (job, user, date)
+  // before writing the real row, so a ghost-only holder must not refuse the
+  // drag or surface in any toast.
   const rows = [
     assignment('s-crew', 'u-shaun', 'Shaun', D.MON, { role: 'lead_installer' }),
     assignment('h-mon', 'u-hugo', 'Hugo', D.MON, { role: 'installer' }),
     assignment('h-wed', 'u-hugo', 'Hugo', D.WED, { role: 'installer' }),
     assignment('g-wed', 'u-shaun', null, D.WED, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Shaun"] .cal-job-block`);
+  await realDrag(page, source, page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Shaun"]`));
+
+  await expect(page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Shaun"] .cal-job-block`)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  await expect(page.locator('body')).not.toContainText('Already scheduled there');
+  expect(writes.map((w) => [w.action, w.body.assignmentId])).toEqual([['update_assignment', 's-crew']]);
+  expect(rows.find((row) => row.id === 's-crew').scheduled_date).toBe(D.WED);
+  expect(rows.some((row) => row.is_ghost && row.user_id === 'u-shaun' && row.scheduled_date === D.WED)).toBe(false);
+  assertUnique(rows);
+});
+
+test('a real visit sharing its key with the mirror still refuses the move without naming the mirror', async ({ page }) => {
+  const rows = [
+    assignment('s-crew', 'u-shaun', 'Shaun', D.MON, { role: 'lead_installer' }),
+    assignment('s-wed', 'u-shaun', 'Shaun', D.WED, { role: 'lead_installer' }),
+    assignment('h-mon', 'u-hugo', 'Hugo', D.MON, { role: 'installer' }),
+    assignment('h-wed', 'u-hugo', 'Hugo', D.WED, { role: 'installer' }),
   ];
   const { writes } = await bootCalendar(page, { rows });
   const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Shaun"] .cal-job-block`);

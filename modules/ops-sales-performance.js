@@ -3,6 +3,7 @@
   'use strict';
   const state = {data:null, week:null, lane:'all', source:'all', showAllQuotes:false, loading:false, error:null, request:0};
   const LANES = ['fencing','patio'];
+  const REPS = ['Khairo','Nithin','Marnin'];
   const title = s => s ? s[0].toUpperCase()+s.slice(1) : '';
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -42,27 +43,54 @@
     const scoped=lane==='all'?LANES:[lane];
     const fencing=rows[0],patio=rows[1];
     const actions=active.every(r=>list(r,'actions')!==null) ? active.flatMap(r=>selected(list(r,'actions').filter(a=>!a.lane||a.lane===r.lane),source).map(a=>({...a,lane:r.lane}))) : null;
-    const wins=active.every(r=>list(r,'wins')!==null) ? active.flatMap(r=>selected(list(r,'wins'),source)) : null;
-    // Published wins are the weekly accepted-with-proof population. No CRM/deposit inference.
+    const measured=(fromRow)=>{
+      const parts=[];
+      for(const r of active){
+        if(!r)continue;
+        const value=fromRow(r);
+        if(value===null)continue;
+        parts.push({lane:r.lane,value});
+      }
+      return {parts,items:parts.flatMap(p=>Array.isArray(p.value)?p.value:[]),coverLane:lane==='all'&&parts.length===1?parts[0].lane:null,none:!parts.length};
+    };
+    const lists=path=>measured(r=>{
+      const items=list(r,path);
+      if(items===null)return null;
+      return selected(path==='actions'?items.filter(a=>!a.lane||a.lane===r.lane):items,source);
+    });
+    const winLists=lists('wins');
+    const quoteLists=lists('quote_rows');
+    const wins=winLists.none?null:winLists.items;
     const proven=wins?.every(w=>typeof w.proof==='string' && w.proof.trim()) ? wins : null;
-    const quoteRows=active.every(r=>list(r,'quote_rows')!==null) ? active.flatMap(r=>selected(list(r,'quote_rows'),source)) : null;
+    const quoteRows=active.every(r=>list(r,'quote_rows')!==null) ? quoteLists.items : null;
+    const sourced=path=>measured(r=>{
+      if(hasGap(r,path))return null;
+      const items=list(r,'quote_rows');
+      return items===null?null:selected(items,source);
+    });
+    const quotedJobMeasure=source==='all'?measured(r=>num(read(r,'quoted_jobs'))):sourced('quoted_jobs');
+    const quotedValueMeasure=source==='all'?measured(r=>num(read(r,'quoted_value'))):sourced('quoted_value');
+    const quotedJobs=quotedJobMeasure.none?null:source==='all'?sum(quotedJobMeasure.parts.map(p=>p.value)):quotedJobMeasure.items.length;
+    const quotedValue=quotedValueMeasure.none?null:source==='all'?sum(quotedValueMeasure.parts.map(p=>p.value)):quotedValueMeasure.items.length?sum(quotedValueMeasure.items.map(q=>q.value)):0;
     const scalar=path=>source==='all'?sum(active.map(r=>num(read(r,path)))):null;
     const previous=path=>source==='all'?sum(active.map(r=>{
       const prior=read(r,'prior');
-      if(!prior)return null;
-      const direct=num(get(prior,path));if(direct!==null)return direct;
-      if(path==='enquiries')return sum(daily({...r,metrics:prior},'all')||[]);
-      if(path==='customers_waiting')return Array.isArray(prior.actions)?prior.actions.length:null;
-      if(path==='won')return Array.isArray(prior.wins)&&prior.wins.every(w=>typeof w.proof==='string'&&w.proof.trim())?prior.wins.length:null;
-      return null;
+      return prior?num(get(prior,path)):null;
     })):null;
     const enquirySeries=Array.from({length:7},(_,i)=>sum(active.map(r=>daily(r,source)?.[i] ?? null)));
-    const quotedJobs=active.some(r=>hasGap(r,'quoted_jobs'))?null:source==='all'?scalar('quoted_jobs'):quoteRows?.length ?? null;
-    const quotedValue=active.some(r=>hasGap(r,'quoted_value'))?null:source==='all'?scalar('quoted_value'):quoteRows?quoteRows.length?sum(quoteRows.map(q=>q.value)):0:null;
     const replyLane=lane==='patio'?'patio':'fencing',replyRow=replyLane==='patio'?patio:fencing;
     const elapsed=source==='all'?num(read(replyRow,replyLane==='patio'?'reply.patio.elapsed':'reply.fencing_elapsed.median')):null;
     const staffed=source==='all'?num(read(replyRow,'reply.'+replyLane+'.median')):null;
-    return {lane,source,week,rows,active,scoped,fencing,patio,actions,wins:proven,quoteRows,scalar,previous,enquirySeries,quotedJobs,quotedValue,elapsed,staffed,replyLane,
+    const namedQuotes=quoteLists.none?null:quoteLists.items.some(q=>typeof q.rep==='string'&&q.rep.trim())?quoteLists.items:null;
+    const reps=REPS.map(name=>{
+      const mine=proven?.filter(w=>w.rep===name)??null;
+      const waiting=actions?.filter(a=>(a.owner||'Unassigned')===name)??null;
+      const quotes=namedQuotes?namedQuotes.filter(q=>q.rep===name):null;
+      return {name,won:mine?mine.length:null,wonValue:mine?mine.length?sum(mine.map(w=>w.value)):0:null,waiting:waiting?waiting.length:null,overWeek:waiting?waiting.filter(a=>age(a.since,week)>=7).length:null,quotes:quotes?quotes.length:null,quotedValue:quotes?quotes.length?sum(quotes.map(q=>q.value)):0:null};
+    }).sort((a,b)=>(num(b.wonValue)??-1)-(num(a.wonValue)??-1)||(num(b.waiting)??-1)-(num(a.waiting)??-1)||a.name.localeCompare(b.name));
+    return {lane,source,week,rows,active,scoped,fencing,patio,actions,wins:proven,quoteRows,reps,scalar,previous,enquirySeries,quotedJobs,quotedValue,
+      quotedLane:quotedJobMeasure.none?null:quotedJobMeasure.coverLane,quotedValueLane:quotedValueMeasure.none?null:quotedValueMeasure.coverLane,
+      winLane:proven?winLists.coverLane:null,elapsed,staffed,replyLane,
       enquiries:sum(enquirySeries),winCount:proven?.length ?? null,winValue:proven?proven.length?sum(proven.map(w=>w.value)):0:null,
       replyPrior:source==='all'?num(read(replyRow,'prior.reply_elapsed')):null};
   }
@@ -91,24 +119,33 @@
     const fv=p=>fe&&unfiltered?num(read(f,p)):null;
     const urgent=m.actions?.filter(a=>a.source==='Stratco'&&age(a.since,m.week)>=30) || [];
     const known=m.winCount!==null&&m.quotedValue!==null;
-    const fencingModel=m.lane==='all'?model({rows:m.rows.filter(Boolean),week_start:m.week},{lane:'fencing',source:m.source}):null;
-    const published=known?m:fencingModel?.winCount!==null&&fencingModel?.quotedValue!==null?fencingModel:null;
-    const opening=published?'<b>'+(published!==m?'Fencing: ':'')+fmt(published.winCount)+' jobs won for '+money(published.winValue)+'</b> against '+compact(published.quotedValue)+' quoted; '+fmt(published.scalar('lost_week'))+' lost; '+fmt(published.scalar('tracked.accepted'))+' of '+fmt(published.scalar('tracked.count'))+' tracked quotes accepted online.'+(published!==m?' Patio quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
+    const partial=m.winLane||m.quotedLane||m.quotedValueLane;
+    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+'</b> against '+compact(m.quotedValue)+' quoted; '+fmt(m.scalar('lost_week'))+' lost; '+fmt(m.scalar('tracked.accepted'))+' of '+fmt(m.scalar('tracked.count'))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
     const middle=m.lane==='patio'?'<b>'+fmt(m.actions?.length??null)+' patio customers waiting on us</b>; reply time is '+hours(m.elapsed)+' on the customer’s clock.':m.source!=='all'?'<b>'+fmt(m.actions?.length??null)+' customers waiting through '+esc(m.source)+'</b>; follow through on the oldest commitments first.':'<b>'+fmt(fv('stratco_week.in_crm'))+' of '+fmt(fv('stratco_week.allocated'))+' Stratco allocations entered in the CRM</b>'+(urgent.length?', and '+urgent.length+' customers have waited '+fmt(age(urgent[0].since,m.week))+' days for a promised price.':'.');
     const closing=m.lane==='patio'?'<b>'+fmt(m.source==='all'?num(read(m.patio,'patio_uncontacted')):null)+' patio clients not yet contacted</b>; review the queue before adding more work.':m.source!=='all'?'Pipeline ageing and cash for this lead source are <b>not published (–)</b>.':'<b>'+fmt(fv('followup.count'))+' fencing quotes worth '+compact(fv('followup.value_sum_crm'))+' have no decision</b>; '+fmt(fv('followup.touched_last_14d'))+' were touched in the last fortnight.';
     return '<ul class="story">'+[['quotes',opening],['do',middle],['stuck',closing]].map(([id,text])=>'<li><a href="#sp-'+id+'" data-performance-jump="sp-'+id+'">'+text+'</a></li>').join('')+'</ul>';
   }
 
   function kpisHTML(m) {
+    const tagged=(label,lane)=>label+(lane?' ('+lane+')':'');
     const K=[
       [fmt(m.enquiries),'New enquiries','First enquiries through each lead source',delta(m.enquiries,m.previous('enquiries'))],
       [hours(m.elapsed),'Reply time'+(m.lane==='all'?' (fencing)':''),"Customer’s clock · "+hours(m.staffed)+' working hours',delta(m.elapsed,m.replyPrior,hours)],
-      [fmt(m.quotedJobs),'Quotes sent',m.lane==='all'?'Both lanes, when fully published':'Jobs with quote evidence',delta(m.quotedJobs,m.previous('quoted_jobs'))],
-      [compact(m.quotedValue),'Quoted value','Including GST',delta(m.quotedValue,m.previous('quoted_value'),money)],
-      [fmt(m.winCount),'Won',money(m.winValue)+' · accepted with proof',delta(m.winCount,m.previous('won'))],
+      [fmt(m.quotedJobs),tagged('Quotes sent',m.quotedLane),m.quotedLane?'Measured '+m.quotedLane+' only':m.lane==='all'?'Both published lanes':'Jobs with quote evidence',delta(m.quotedJobs,m.previous('quoted_jobs'))],
+      [compact(m.quotedValue),tagged('Quoted value',m.quotedValueLane),'Including GST',delta(m.quotedValue,m.previous('quoted_value'),money)],
+      [fmt(m.winCount),tagged('Won',m.winLane),money(m.winValue)+' · accepted with proof',delta(m.winCount,m.previous('won'))],
       [fmt(m.actions?.length ?? null),'Customers waiting','Actions grouped by person below',delta(m.actions?.length ?? null,m.previous('customers_waiting'))]
     ];
     return '<section class="card kpis" aria-label="Last seven days">'+K.map(([v,l,s,d])=>'<div class="kpi"><div class="v">'+esc(v)+'</div><div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div>'+d+'</div>').join('')+'</section>';
+  }
+  function repsHTML(m) {
+    const cell=(v,format,label,empty)=>{
+      const value=num(v)===null?'<span class="gap">–</span>'+(empty?'<span class="hint">'+esc(empty)+'</span>':''):esc(format(v));
+      return '<td data-label="'+esc(label)+'">'+value+'</td>';
+    };
+    return '<section class="card reps" aria-label="Per rep"><h2>Per rep</h2><p class="sub">Won from accepted proof; waiting from open actions. Quotes only when the store names the salesperson.</p><table><thead><tr><th>Rep</th><th>Won</th><th>Won value</th><th>Waiting</th><th>Over a week</th><th>Quotes sent</th><th>Quoted value</th></tr></thead><tbody>'+
+      m.reps.map(r=>'<tr><th scope="row">'+esc(r.name)+'</th>'+cell(r.won,fmt,'Won')+cell(r.wonValue,money,'Won value')+cell(r.waiting,fmt,'Waiting')+cell(r.overWeek,fmt,'Over a week')+cell(r.quotes,fmt,'Quotes sent','not in store yet')+cell(r.quotedValue,money,'Quoted value','not in store yet')+'</tr>').join('')+
+      '</tbody></table></section>';
   }
   function stuckHTML(m) {
     const f=m.fencing,all=m.source==='all',v=p=>all?num(read(f,p)):null,p=k=>all?num(read(f,'prior.'+k)):null;
@@ -159,7 +196,8 @@
       ['Reply time','Median elapsed time on the customer’s clock; working hours are separate. All shows fencing explicitly because lane medians cannot be combined.'],
       ['Comparisons','Only like-for-like prior measures are compared. CRM creations are not first enquiries; tracked documents are not all quotes. Missing priors stay as a dash.'],
       ['Lead sources','The filter applies to enquiries, actions, quote rows and wins. Measures without a published source breakdown become a dash.'],
-      ['Missing measures','A dash means absent or unreconciled, including a missing lane in All. A published zero remains zero.'],
+      ['Missing measures','A dash means absent or unreconciled, or both lanes missing in All. A labelled fencing or patio figure is the measured lane when the other is a gap. A published zero remains zero.'],
+      ['Per rep','One row each for Khairo, Nithin and Marnin. Won uses wins.rep; waiting uses actions.owner. Quotes sent and quoted value need quote_rows.rep; otherwise they stay a dash labelled not in store yet.'],
       ['Cash landed','Bank receipts matched to jobs, separate from acceptance and deposit invoices.'],
       ['Visits completed',fmt(m.scalar('visits_completed'))+' · requires calendar evidence, not an offer or agreement in text.'],
       ['Action ages','Days waiting at the Monday after the selected week, so historic reports stay reproducible.'],
@@ -176,7 +214,7 @@
     const sources=[...new Set(['Stratco','Web','Phone',...m.active.flatMap(r=>Object.keys(read(r,'daily')?.[r?.lane] || {})),...m.active.flatMap(r=>(list(r,'quote_rows')||[]).map(q=>q.source)),...m.active.flatMap(r=>(list(r,'actions')||[]).map(a=>a.source))])].filter(Boolean);
     const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week. Combined measures stay unavailable.</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
     const card=(id,h,sub,content)=>'<section class="card list" id="sp-'+id+'"><h2>'+h+'</h2><p class="sub">'+sub+'</p>'+content+'</section>';
-    return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+'<div class="grid">'+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data))+'<div class="right-column">'+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div></div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
+    return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+repsHTML(m)+'<div class="grid">'+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data))+'<div class="right-column">'+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div></div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
   }
   function root(){return global.document?.getElementById('salesPerformanceRoot');}
   function render(){

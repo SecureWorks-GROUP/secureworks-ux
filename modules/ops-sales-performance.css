@@ -22,6 +22,15 @@ html[data-theme=dark] #salesPerformanceRoot{--bg:#0F1518;--card:#151D21;--ink:#F
 #salesPerformanceRoot .story b{font-weight:700}
 #salesPerformanceRoot .card{background:var(--card);border-radius:14px;border:1px solid var(--rule);min-width:0}
 #salesPerformanceRoot .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));padding:26px 8px}
+#salesPerformanceRoot .reps{padding:18px 8px 12px;margin-top:10px;overflow-x:auto}
+#salesPerformanceRoot .reps h2{font-size:15px;margin:0 18px 4px}
+#salesPerformanceRoot .reps table{width:100%;border-collapse:collapse;font-size:13px}
+#salesPerformanceRoot .reps th,#salesPerformanceRoot .reps td{padding:8px 12px;text-align:right;border-top:1px solid var(--rule);vertical-align:top}
+#salesPerformanceRoot .reps thead th{border-top:0;font-size:12px;font-weight:600;color:var(--ink2)}
+#salesPerformanceRoot .reps th:first-child,#salesPerformanceRoot .reps thead th:first-child,#salesPerformanceRoot .reps th[scope=row]{text-align:left;color:var(--ink)}
+#salesPerformanceRoot .reps th[scope=row]{font-weight:600}
+#salesPerformanceRoot .reps .gap{font-weight:400;color:var(--ink3)}
+#salesPerformanceRoot .reps .hint{display:block;font-size:11px;font-weight:400;color:var(--ink3)}
 #salesPerformanceRoot .kpi{padding:0 20px;border-left:1px solid var(--rule);min-width:0}
 #salesPerformanceRoot .kpi:first-child{border-left:0}
 #salesPerformanceRoot .kpi .v{font-size:40px;line-height:1;font-weight:300;letter-spacing:-0.035em;white-space:nowrap}
@@ -84,7 +93,11 @@ html[data-theme=dark] #salesPerformanceRoot{--bg:#0F1518;--card:#151D21;--ink:#F
 #salesPerformanceRoot .kpi{padding:0 12px}
 #salesPerformanceRoot details td{display:block;padding:6px 16px}
 #salesPerformanceRoot details td:first-child{padding-top:12px;border-top:1px solid var(--rule)}
-#salesPerformanceRoot details td+td{border-top:0}}
+#salesPerformanceRoot details td+td{border-top:0}
+#salesPerformanceRoot .reps thead{display:none}
+#salesPerformanceRoot .reps tr{display:block;padding:10px 18px;border-top:1px solid var(--rule)}
+#salesPerformanceRoot .reps th,#salesPerformanceRoot .reps td{display:flex;justify-content:space-between;gap:12px;border:0;padding:3px 0;text-align:left}
+#salesPerformanceRoot .reps td::before{content:attr(data-label);color:var(--ink2);font-weight:600}}
 
 /* Host integration and responsive HTML chart labels. */
 #salesPerformanceRoot{min-width:0;min-height:80vh;--ink3:#5F6D75}

@@ -104,7 +104,11 @@ them, but a key held ONLY by a ghost does not block, because ops-api releases
 the manager's own mirror off `(job_id,user_id,scheduled_date)` before writing a
 real crew row there. Staging drops ghosts from occupancy, so they are never a
 holder, a named blocker or a count; a real row on that same key still blocks
-exactly as before. That read also carries
+exactly as before. Known residual: the backend releases only the RESOLVED ops
+manager's own ghost mirror on `(job, user, date)`, so a stale ghost belonging
+to a former or second ops manager can still surface the duplicate-key toast
+for that user's own real row; widening the release is backend follow-up
+`opsapi-ghost-release-any-manager`. That read also carries
 cancelled/completed rows the feed hides; they block too, and a toast names them
 as "(cancelled|completed visit still holds that date)". Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.

@@ -1,0 +1,3 @@
+result: "{\"width\":1320,\"scroll\":1320,\"minText\":11,\"active\":\"viewSales\",\"requests\":[{\"action\":\"list_users\",\"week\":null,\"authorization\":\"Bearer offline-fixture-token\"},{\"action\":\"sales_performance_read\",\"week\":null,\"authorization\":\"Bearer offline-fixture-token\"}]}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

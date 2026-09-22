@@ -1,0 +1,619 @@
+{
+  "week_start": "2026-09-14",
+  "week_starts": [
+    "2026-09-14"
+  ],
+  "available_weeks": [
+    "2026-09-14"
+  ],
+  "fetched_at": "2026-09-21T01:00:00Z",
+  "rows": [
+    {
+      "week_start": "2026-09-14",
+      "lane": "fencing",
+      "computed_at": "2026-09-21T00:30:00Z",
+      "definition_version": "sales-performance-v1",
+      "run_id": "offline-example-fencing",
+      "metrics": {
+        "days": [
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-19",
+          "2026-09-20"
+        ],
+        "daily": {
+          "fencing": {
+            "Stratco": [
+              1,
+              3,
+              0,
+              2,
+              1,
+              0,
+              0
+            ],
+            "Web": [
+              1,
+              0,
+              0,
+              2,
+              0,
+              1,
+              2
+            ],
+            "Phone": [
+              1,
+              1,
+              1,
+              1,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "unclear": {
+          "fencing": 6,
+          "patio": 3
+        },
+        "quoted_value": 170907.55,
+        "quoted_jobs": 18,
+        "quote_docs": 25,
+        "quote_rows": [
+          {
+            "job": "SWF-261424",
+            "value": 36685.0,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261308",
+            "value": 26972.0,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261273",
+            "value": 17025.25,
+            "source": "Unknown"
+          },
+          {
+            "job": "SWF-261418",
+            "value": 12878.25,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-26545",
+            "value": 10406.0,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-26838",
+            "value": 10389.5,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261334",
+            "value": 9644.8,
+            "source": "Unknown"
+          },
+          {
+            "job": "SWF-261438",
+            "value": 9358.25,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261443",
+            "value": 7972.25,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261387",
+            "value": 7142.85,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261423",
+            "value": 4763.0,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261422",
+            "value": 3575.0,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261439",
+            "value": 3561.25,
+            "source": "Unknown"
+          },
+          {
+            "job": "SWF-261419",
+            "value": 3064.05,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261397",
+            "value": 3034.9,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261421",
+            "value": 2728.0,
+            "source": "Web"
+          },
+          {
+            "job": "SWF-261435",
+            "value": 1104.4,
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261434",
+            "value": 602.8,
+            "source": "Phone"
+          }
+        ],
+        "wins": [
+          {
+            "job": "SWF-261383",
+            "value": 1457.5,
+            "proof": "staff stamp",
+            "rep": "Khairo",
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261413",
+            "value": 6545,
+            "proof": "customer text",
+            "rep": "Khairo",
+            "source": "Phone"
+          },
+          {
+            "job": "SWF-261397",
+            "value": 3034.9,
+            "proof": "customer click",
+            "rep": "Khairo",
+            "source": "Phone"
+          }
+        ],
+        "reply": {
+          "fencing": {
+            "max": 75.6,
+            "median": 3.8,
+            "n": 39
+          },
+          "fencing_elapsed": {
+            "max": 315.6,
+            "median": 18.1,
+            "n": 39
+          },
+          "patio": {
+            "median": 3.75,
+            "n": 8,
+            "elapsed": 27.83
+          }
+        },
+        "promises": {
+          "detected": 40,
+          "kept_or_followed": 29,
+          "missed_in_thread": 11,
+          "note": "marker-based detection on outbound text; 'kept' means a later outbound before the deadline, not proof the artefact arrived",
+          "open": 0
+        },
+        "followup": {
+          "count": 224,
+          "value_sum_crm": 796027.13,
+          "touched_last_14d": 17,
+          "age_buckets": {
+            "0-7": 9,
+            "181+": 122,
+            "31-90": 27,
+            "8-30": 13,
+            "91-180": 53
+          },
+          "median_days": 246
+        },
+        "lost_week": 5,
+        "overdue": {
+          "count": 25,
+          "total": 65621.9
+        },
+        "deposit_unpaid": [
+          "SWF-26545",
+          "SWF-261012",
+          "SWF-261227",
+          "SWF-261308"
+        ],
+        "stratco_weeks": {
+          "2026-08-03": {
+            "allocated": 1,
+            "in_ghl": 1,
+            "not_in_ghl": 0
+          },
+          "2026-08-10": {
+            "allocated": 11,
+            "in_ghl": 8,
+            "not_in_ghl": 3
+          },
+          "2026-08-17": {
+            "allocated": 7,
+            "in_ghl": 7,
+            "not_in_ghl": 0
+          },
+          "2026-08-24": {
+            "allocated": 11,
+            "in_ghl": 11,
+            "not_in_ghl": 0
+          },
+          "2026-08-31": {
+            "allocated": 7,
+            "in_ghl": 7,
+            "not_in_ghl": 0
+          },
+          "2026-09-07": {
+            "allocated": 3,
+            "in_ghl": 2,
+            "not_in_ghl": 1
+          },
+          "2026-09-14": {
+            "allocated": 8,
+            "in_ghl": 0,
+            "not_in_ghl": 8
+          }
+        },
+        "viewed": {
+          "accepted": 0,
+          "amount_inc_sum": 103317.5,
+          "count": 12,
+          "viewed": 8
+        },
+        "actions": [
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Deliver the gate price offered on 11 August.",
+            "since": "2026-08-11"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Deliver the promised side-gate price.",
+            "since": "2026-08-11"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Verify correct-recipient quote delivery and receipt, then resolve the neighbour split.",
+            "since": "2026-09-15"
+          },
+          {
+            "owner": "Marnin",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Finish the Stratco visit-to-quote handover and get the quote delivered.",
+            "since": "2026-09-15"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Review the supplied gate information and photos, then confirm a price or next step.",
+            "since": "2026-09-15"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Answer the site-quote request and agree the next step.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Web",
+            "owed": "Acknowledge supplied scope and the follow-up asking whether it was received.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Respect the customer gate decision; confirm the formal separate quote if she proceeds.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Verify supplier pricing and deliver the quote promised that night.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Verify visit outcome and complete the draft quote.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Deliver two promised fence prices and answer the ETA chase.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Marnin",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Repair the missed Friday visit, agree a new slot and confirm the next commitment.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Clarify whether the indicative price includes the fence and the complete scope.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Web",
+            "owed": "Confirm the revised quote is for 2.1m fencing.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Web",
+            "owed": "Answer the visit and price-match request against the insurance allowance.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Confirm the changed Friday/Saturday visit arrangement and its outcome.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Phone",
+            "owed": "Verify the revised quote reaches the customer at the address she supplied.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Stratco",
+            "owed": "Confirm one authoritative price and GST basis after the conflicting texts.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Web",
+            "owed": "Respond to the weekend gate specification.",
+            "since": "2026-09-19"
+          },
+          {
+            "owner": "Khairo",
+            "lane": "fencing",
+            "source": "Web",
+            "owed": "Respond to the web enquiry and keep the later Stratco allocation on the same case.",
+            "since": "2026-09-20"
+          }
+        ],
+        "prior": {
+          "week": "7 to 13 Sep",
+          "reply_elapsed": 18.1,
+          "reply_staffed": 3.3,
+          "promises_missed": 11,
+          "promises_detected": 34,
+          "followup_count": 215,
+          "followup_value": 745743.98,
+          "followup_median": 242,
+          "followup_touched": 10,
+          "tracked_quotes": 10,
+          "tracked_value": 55453.42,
+          "lost": 4,
+          "overdue_count": 27,
+          "overdue_total": 50315.24,
+          "stale": 233,
+          "crm_created": 33
+        },
+        "tracked": {
+          "count": 12,
+          "value": 103317.5,
+          "viewed": 8,
+          "accepted": 0
+        },
+        "crm_created": 19,
+        "stale": 249,
+        "patio_uncontacted": 196,
+        "stratco_not_in_crm_28d": 9,
+        "stratco_week": {
+          "allocated": 8,
+          "in_crm": 0
+        },
+        "deposit_jobs": [
+          {
+            "job": "SWF-261308",
+            "value": 26972,
+            "accepted": "31 Aug"
+          },
+          {
+            "job": "SWF-26545",
+            "value": 10406,
+            "accepted": null
+          }
+        ]
+      },
+      "coverage": {
+        "collection_complete": true,
+        "gaps": [
+          "cash_landed",
+          "visits_completed"
+        ]
+      }
+    },
+    {
+      "week_start": "2026-09-14",
+      "lane": "patio",
+      "computed_at": "2026-09-21T00:30:00Z",
+      "definition_version": "sales-performance-v1",
+      "run_id": "offline-example-patio",
+      "metrics": {
+        "days": [
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-19",
+          "2026-09-20"
+        ],
+        "daily": {
+          "patio": {
+            "Stratco": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "Web": [
+              0,
+              0,
+              2,
+              0,
+              2,
+              1,
+              0
+            ],
+            "Phone": [
+              0,
+              0,
+              2,
+              1,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "reply": {
+          "fencing": {
+            "max": 75.6,
+            "median": 3.8,
+            "n": 39
+          },
+          "fencing_elapsed": {
+            "max": 315.6,
+            "median": 18.1,
+            "n": 39
+          },
+          "patio": {
+            "median": 3.75,
+            "n": 8,
+            "elapsed": 27.83
+          }
+        },
+        "unclear": {
+          "fencing": 6,
+          "patio": 3
+        },
+        "patio_uncontacted": 196,
+        "actions": [
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Verify call outcome and purpose before treating this as an unanswered lead.",
+            "since": "2026-09-15"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Verify the visit outcome and answer the post-style and ceiling-height questions.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Record the budget pause and agree a suitable future follow-up.",
+            "since": "2026-09-17"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Resolve the missed Friday arrangement and confirm Monday 5pm or Thursday availability.",
+            "since": "2026-09-18"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Verify call outcome and purpose at the next working opportunity.",
+            "since": "2026-09-19"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Web",
+            "owed": "Confirm the requested Monday 5:15pm visit against a real calendar event.",
+            "since": "2026-09-20"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Web",
+            "owed": "Confirm an exact Monday visit time after the customer accepted the window.",
+            "since": "2026-09-20"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Web",
+            "owed": "Verify the agreed visit against the provider calendar and attendance after it is due.",
+            "since": "2026-09-20"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Phone",
+            "owed": "Respect the customer dog-care pause; recover the visit and price when he is ready.",
+            "since": "2026-09-20"
+          },
+          {
+            "owner": "Nithin",
+            "lane": "patio",
+            "source": "Web",
+            "owed": "Follow through on the offered visit windows when the customer chooses.",
+            "since": "2026-09-20"
+          }
+        ]
+      },
+      "coverage": {
+        "collection_complete": true,
+        "gaps": [
+          "cash_landed",
+          "visits_completed",
+          "patio_quote_total",
+          "patio_wins"
+        ]
+      }
+    }
+  ]
+}

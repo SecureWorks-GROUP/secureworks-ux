@@ -1,0 +1,6 @@
+result: "{\"width\":390,\"scroll\":390,\"minText\":11}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state
+result: "{\"width\":390,\"scroll\":390}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

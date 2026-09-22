@@ -89,10 +89,16 @@
       const quotes=namedQuotes?namedQuotes.filter(q=>q.rep===name):null;
       return {name,won:mine?mine.length:null,wonValue:mine?mine.length?sum(mine.map(w=>w.value)):0:null,waiting:waiting?waiting.length:null,overWeek:waiting?waiting.filter(a=>age(a.since,week)>=7).length:null,quotes:quotes?quotes.length:null,quotedValue:quotes?quotes.length?sum(quotes.map(q=>q.value)):0:null};
     }).sort((a,b)=>(num(b.wonValue)??-1)-(num(a.wonValue)??-1)||(num(b.waiting)??-1)-(num(a.waiting)??-1)||a.name.localeCompare(b.name));
+    const quotedLane=quotedJobMeasure.none?null:quotedJobMeasure.coverLane;
+    const quotedValueLane=quotedValueMeasure.none?null:quotedValueMeasure.coverLane;
+    const winLane=proven?winLists.coverLane:null;
+    const winCount=proven?.length ?? null;
+    const quoteWinCovers=[quotedLane,quotedValueLane,winLane].filter(Boolean);
+    const quoteWinCombined=(quotedJobs!==null&&!quotedLane)||(quotedValue!==null&&!quotedValueLane)||(winCount!==null&&!winLane);
+    const storyLane=quoteWinCovers.length&&quoteWinCovers.every(l=>l===quoteWinCovers[0])&&!quoteWinCombined?quoteWinCovers[0]:null;
     return {lane,source,week,rows,active,scoped,fencing,patio,actions,wins:proven,quoteRows,reps,scalar,previous,enquirySeries,quotedJobs,quotedValue,
-      quotedLane:quotedJobMeasure.none?null:quotedJobMeasure.coverLane,quotedValueLane:quotedValueMeasure.none?null:quotedValueMeasure.coverLane,
-      winLane:proven?winLists.coverLane:null,elapsed,staffed,replyLane,
-      enquiries:sum(enquirySeries),winCount:proven?.length ?? null,winValue:proven?proven.length?sum(proven.map(w=>w.value)):0:null,
+      quotedLane,quotedValueLane,winLane,storyLane,elapsed,staffed,replyLane,
+      enquiries:sum(enquirySeries),winCount,winValue:proven?proven.length?sum(proven.map(w=>w.value)):0:null,
       replyPrior:source==='all'?num(read(replyRow,'prior.reply_elapsed')):null};
   }
   function delta(now,prior,format=fmt) {
@@ -120,8 +126,10 @@
     const fv=p=>fe&&unfiltered?num(read(f,p)):null;
     const urgent=m.actions?.filter(a=>a.source==='Stratco'&&age(a.since,m.week)>=30) || [];
     const known=m.winCount!==null&&m.quotedValue!==null;
-    const partial=m.winLane||m.quotedLane||m.quotedValueLane;
-    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+'</b> against '+compact(m.quotedValue)+' quoted; '+fmt(m.scalar('lost_week',partial))+' lost; '+fmt(m.scalar('tracked.accepted',partial))+' of '+fmt(m.scalar('tracked.count',partial))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
+    const partial=m.storyLane;
+    const winTag=!partial&&m.winLane?' ('+m.winLane+')':'';
+    const quoteTag=!partial&&m.quotedValueLane?' ('+m.quotedValueLane+')':'';
+    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+winTag+'</b> against '+compact(m.quotedValue)+' quoted'+quoteTag+'; '+fmt(m.scalar('lost_week',partial))+' lost; '+fmt(m.scalar('tracked.accepted',partial))+' of '+fmt(m.scalar('tracked.count',partial))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
     const middle=m.lane==='patio'?'<b>'+fmt(m.actions?.length??null)+' patio customers waiting on us</b>; reply time is '+hours(m.elapsed)+' on the customer’s clock.':m.source!=='all'?'<b>'+fmt(m.actions?.length??null)+' customers waiting through '+esc(m.source)+'</b>; follow through on the oldest commitments first.':'<b>'+fmt(fv('stratco_week.in_crm'))+' of '+fmt(fv('stratco_week.allocated'))+' Stratco allocations entered in the CRM</b>'+(urgent.length?', and '+urgent.length+' customers have waited '+fmt(age(urgent[0].since,m.week))+' days for a promised price.':'.');
     const closing=m.lane==='patio'?'<b>'+fmt(m.source==='all'?num(read(m.patio,'patio_uncontacted')):null)+' patio clients not yet contacted</b>; review the queue before adding more work.':m.source!=='all'?'Pipeline ageing and cash for this lead source are <b>not published (–)</b>.':'<b>'+fmt(fv('followup.count'))+' fencing quotes worth '+compact(fv('followup.value_sum_crm'))+' have no decision</b>; '+fmt(fv('followup.touched_last_14d'))+' were touched in the last fortnight.';
     return '<ul class="story">'+[['quotes',opening],['do',middle],['stuck',closing]].map(([id,text])=>'<li><a href="#sp-'+id+'" data-performance-jump="sp-'+id+'">'+text+'</a></li>').join('')+'</ul>';
@@ -213,8 +221,7 @@
     if(!data?.rows?.length)return '<div class="wrap"><h1>Sales performance</h1><p role="status">No week published yet</p></div>';
     const m=model(data,options),weeks=[...new Set([data.week_start,...(data.available_weeks || [])])].filter(Boolean).sort().reverse();
     const sources=[...new Set(['Stratco','Web','Phone',...m.active.flatMap(r=>Object.keys(read(r,'daily')?.[r?.lane] || {})),...m.active.flatMap(r=>(list(r,'quote_rows')||[]).map(q=>q.source)),...m.active.flatMap(r=>(list(r,'actions')||[]).map(a=>a.source))])].filter(Boolean);
-    const cover=m.quotedLane||m.winLane||m.quotedValueLane;
-    const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week.'+(cover?' Showing '+cover+' quotes and wins.':' Combined measures stay unavailable.')+'</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
+    const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week.'+(m.storyLane?' Showing '+m.storyLane+' quotes and wins.':' Combined measures stay unavailable.')+'</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
     const card=(id,h,sub,content)=>'<section class="card list" id="sp-'+id+'"><h2>'+h+'</h2><p class="sub">'+sub+'</p>'+content+'</section>';
     return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+repsHTML(m)+'<div class="grid">'+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data))+'<div class="right-column">'+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div></div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
   }

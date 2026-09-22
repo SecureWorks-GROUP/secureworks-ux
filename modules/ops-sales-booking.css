@@ -270,3 +270,39 @@ body.approvals-view-active #salesBookingRoot{display:none!important}
   #salesBookingRoot .page{padding:14px 16px 40px}
   .sales-workspace-subnav{padding:0 16px;gap:12px}
 }
+
+/* Separate booking and exact-text approvals. Same Ops palette and compact rhythm. */
+#salesBookingRoot .proposal-facts{display:grid;gap:7px;margin-top:8px;text-align:left;overflow-wrap:anywhere}
+#salesBookingRoot .proposal-text{white-space:pre-wrap;overflow-wrap:anywhere}
+#salesBookingRoot .proposal-quotes blockquote{margin:0;padding:5px 0;color:var(--ink-2);font-style:italic}
+#salesBookingRoot .proposal-checks{margin:0;padding-left:17px;font-size:11px;color:var(--ink-2)}
+#salesBookingRoot .booking-approval{border-top:1px solid var(--line);padding-top:14px;display:grid;gap:8px;overflow-wrap:anywhere}
+#salesBookingRoot .booking-approval h3{font-size:14px}
+#salesBookingRoot .booking-approval button{min-height:42px;text-align:left;font-weight:600}
+#salesBookingRoot .booking-approval button:not(:disabled){color:var(--dark);border-color:var(--mid)}
+#salesBookingRoot .booking-approval dl{margin:0;font-size:12px}
+#salesBookingRoot .booking-approval dt{font-weight:600}
+#salesBookingRoot .booking-approval dd{margin:0 0 5px}
+#salesBookingRoot .booking-approval details{font-size:12px}
+#salesBookingRoot .booking-approval summary,#salesBookingRoot .booking-thread summary{cursor:pointer;padding:8px 0}
+#salesBookingRoot .booking-approval label{display:grid;gap:5px;margin:8px 0}
+#salesBookingRoot .booking-approval input{padding:8px;width:100%}
+#salesBookingRoot .booking-thread{padding:0 15px 12px}
+#salesBookingRoot .lead .proposal-text{font-size:12px}
+#salesBookingRoot .lead .proposal-facts strong{font-size:12px}
+@media(max-width:600px){
+  #salesBookingRoot .dayheaders,#salesBookingRoot .calbody,#salesBookingRoot .dayselect{display:none}
+  #salesBookingRoot .dayagenda{display:block;padding:10px}
+  #salesBookingRoot .pagehead{align-items:flex-start;gap:12px}
+  #salesBookingRoot .weeknav{flex-wrap:wrap}
+}
+#salesBookingRoot .visit-outcomes{margin:12px 0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+#salesBookingRoot .visit-outcomes.notice.warn{background:#FBF3E6;border-color:#E8D2A8;color:#684313}
+#salesBookingRoot .visit-outcomes summary{cursor:pointer;font-weight:600}
+#salesBookingRoot .visit-row{padding:10px 0;display:grid;gap:6px;border-top:1px solid var(--line);margin-top:8px}
+#salesBookingRoot .visit-row button{min-height:40px}
+#salesBookingRoot .visit-inputs{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#salesBookingRoot .visit-inputs label{display:flex;gap:7px;align-items:center}
+#salesBookingRoot .visit-inputs input:not([type=checkbox]){padding:7px;width:min(280px,100%)}
+#salesBookingRoot .visit-reasons{padding-top:5px}
+@media(max-width:600px){#salesBookingRoot .visit-inputs label{flex-wrap:wrap}#salesBookingRoot .visit-inputs input:not([type=checkbox]){width:100%}}

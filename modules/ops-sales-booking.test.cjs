@@ -1,10 +1,23 @@
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const api = require('./ops-sales-booking.js');
 const performance = require('./ops-sales-performance.js');
 const repairEvent = require('./sales-booking-repair-event.cjs');
+
+// Historical read fixtures have an explicit historical clock. New confirmation
+// coverage uses a rolling Perth-week fixture in ops-sales-booking-confirm.test.cjs.
+beforeEach((t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-09-14T08:00:00+08:00') });
+  api.state.resourceId = 'nithin';
+  api.state.weekStart = '2026-09-14';
+  api.state.opened = true;
+  api.state.error = null;
+  api.state.stale = false;
+  api.state.loading = false;
+  api.state.visitRecorded = {};
+});
 
 function sampleRead(resource) {
   return {
@@ -21,6 +34,7 @@ function sampleRead(resource) {
     coverage: { operational_leave: 'not_read', non_primary_calendars: 'not_read', full_population: false, gaps: [] },
     events: [{
       event_id: 'evt-1',
+      contact_id: 'contact-visit',
       case_id: 'evt-1',
       subject: 'Scope visit',
       display_name: 'Sample visit',
@@ -47,7 +61,7 @@ function sampleRead(resource) {
       }
     }, {
       id: 'evt-1',
-      contact_id: null,
+      contact_id: 'contact-visit',
       display_name: 'Sample visit',
       suburb: 'City Beach',
       status: 'booked',
@@ -406,21 +420,6 @@ test('booked cases stay on the default unscoped list; archived and completed do 
   assert.match(html, /Quoted and archived/);
 });
 
-test('selected case shows chat, draft and proposed time together', () => {
-  api.state.data = sampleRead();
-  api.state.selectedId = 'case-a';
-  api.state.drafts = {};
-  const html = api.renderHTML();
-  assert.match(html, /Draft SMS/);
-  assert.match(html, /GHL conversation/);
-  assert.match(html, /Proposed time/);
-  assert.match(html, /Approve offer \(held\)/);
-  assert.match(html, /2026-09-17T13:00:00/);
-  assert.doesNotMatch(html, /data-booking-archive/);
-  assert.doesNotMatch(html, /data-booking-restore/);
-  assert.doesNotMatch(html, />Archive</);
-});
-
 test('confirm booking is not offered without exact acceptance', () => {
   api.state.data = sampleRead();
   api.state.selectedId = 'case-a';
@@ -453,17 +452,6 @@ test('time change revises an unedited draft and keeps a human edit with a confli
   assert.equal(second.conflict, true);
   assert.equal(api.state.drafts['case-a'].text, 'Keep my wording');
   assert.match(second.suggested, /between 3:00 and 4:30pm/);
-});
-
-test('render after unedited time change keeps the revised draft, not the old proposal text', () => {
-  api.state.resourceId = 'nithin';
-  api.state.data = sampleRead();
-  api.state.selectedId = 'case-a';
-  api.state.drafts = {};
-  api.reviseProposedTime('2026-09-17T14:00:00');
-  const html = api.renderHTML();
-  assert.match(html, /between 2:00 and 3:30pm/);
-  assert.doesNotMatch(html, /Thursday 1:00pm works/);
 });
 
 test('changing an accepted slot invalidates Confirm booking', () => {
@@ -515,6 +503,7 @@ test('accepted offer stays on the calendar and cannot be archived before an even
 test('selecting a provider event with no contact clears the previous thread', () => {
   api.state.conversation = { contactId: 'contact-a', caseId: 'case-a', loading: false, error: null, messages: [{ body: 'previous customer', direction: 'inbound', timestamp: '1' }], generation: 3 };
   api.state.data = sampleRead();
+  api.state.data.cases[1].contact_id = null;
   api.state.selectedId = 'evt-1';
   api.selectCase('evt-1');
   assert.equal(api.state.conversation.contactId, null);
@@ -663,23 +652,6 @@ function doorRead() {
   return d;
 }
 
-test('every customer send, approval, confirmation and diary write renders held', () => {
-  api.state.resourceId = 'nithin';
-  api.state.data = doorRead();
-  api.state.selectedId = 'case-a';
-  const html = api.renderHTML();
-  assert.match(html, />Send message</);
-  assert.doesNotMatch(html, /Send message \(held\)/);
-  assert.match(html, /Approve offer \(held\)/);
-  assert.match(html, /does not send, approve, confirm or write a diary/);
-  // Send message is the stamp write. Approve/Confirm stay hard-held.
-  assert.match(html, /data-booking-stamp-send="1"/);
-  assert.doesNotMatch(html, /data-booking-confirm="1"(?![^>]*disabled)/);
-  const result = api.attemptApprove();
-  assert.equal(result.sent, false);
-  assert.equal(result.held, true);
-});
-
 test('a stamp records a captain decision and is never a send or a calendar write', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
@@ -775,16 +747,16 @@ test('follow-through tiles count the queue and name the captain window', () => {
   assert.doesNotMatch(html, /visited this week plus last/);
 });
 
-test('v1 shows two scopers while Khairo stays configured for the flip', () => {
-  assert.deepEqual(api.V1_SCOPERS, ['nithin', 'marnin']);
+test('all configured scopers are available for signed-in profile selection', () => {
+  assert.deepEqual(api.V1_SCOPERS, ['nithin', 'marnin', 'khairo']);
   assert.ok(api.RESOURCES.khairo);
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
   const html = api.renderHTML();
   assert.match(html, /data-booking-resource-btn="nithin"/);
   assert.match(html, /data-booking-resource-btn="marnin"/);
-  assert.doesNotMatch(html, /data-booking-resource-btn="khairo"/);
-  assert.match(html, /Khairo later/);
+  assert.match(html, /data-booking-resource-btn="khairo"/);
+  assert.doesNotMatch(html, /Khairo later/);
 });
 
 test('the Stratco lane paints Tue and Fri only with the Canning Vale band protected', () => {
@@ -807,31 +779,6 @@ test('the backend diary[] contract and the preview events[] shape both paint', (
   // The same event arriving on both keys is one card, not two.
   api.state.data.diary.push({ event_id: 'evt-1', start: '2026-09-15T11:30:00', end: '2026-09-15T12:30:00', title: 'Sample visit', kind: 'busy' });
   assert.equal(api.diary().filter((r) => r.id === 'evt-1').length, 1);
-});
-
-test('the stamp file the terminal reads is shown verbatim and escaped', () => {
-  api.state.resourceId = 'nithin';
-  api.state.data = doorRead();
-  api.state.data.cases[0].display_name = '<img src=x onerror=alert(1)>';
-  api.state.stamp = { approved: ['case-a'], rejected: [], decisions: {}, stage_moves: {} };
-  const html = api.renderHTML();
-  assert.match(html, /stamp\.json/);
-  assert.match(html, /&quot;approved&quot;/);
-  assert.doesNotMatch(html, /<img src=x/);
-});
-
-test('the stamp board holds back cases with nothing to stamp and says how many', () => {
-  api.state.resourceId = 'nithin';
-  api.state.data = doorRead();
-  api.state.data.cases.push({ id: 'no-slot', display_name: 'No slot yet', suburb: 'Bayswater', status: 'ready', proposal: null });
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  const html = api.renderHTML();
-  // 'evt-1' is booked with no proposal and 'no-slot' has none either. Each withheld
-  // line names its reason and its people rather than vanishing into a count.
-  assert.match(html, /No proposed time on this case, so there is nothing to stamp/);
-  assert.match(html, /They stay in the work queue/);
-  assert.match(html, /No slot yet/);
-  assert.match(html, /Sample visit/);
 });
 
 test('an enumerated CRM row is findable but is never counted or ranked as demand', () => {
@@ -862,7 +809,7 @@ test('an enumerated CRM row is findable but is never counted or ranked as demand
 test('a cancelled case does not leave its diary block reading as a confirmed booking', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
-  const ev = { id: 'evt-1', case_id: 'evt-1', layer: 'confirmed', start_iso: '2026-09-15T11:30:00' };
+  const ev = { contact_id: 'contact-visit', id: 'evt-1', case_id: 'evt-1', layer: 'confirmed', start_iso: '2026-09-15T11:30:00' };
   assert.equal(api.diaryLayerFor(ev), 'confirmed');
   // Customer cancelled in the thread; Outlook still holds the slot.
   api.state.data.cases[1].status = 'repair';
@@ -894,42 +841,6 @@ test('a desk rule states where work is offered and never overprints a real booki
   api.state.resourceId = 'nithin';
 });
 
-test('an AI proposal with a coverage gap is stampable and shows the reason, not hidden', () => {
-  // Captain ruling 2026-09-16: execution-ready gates Confirm booking alone. The stamp
-  // board is KEEP/CUT over AI proposals, and the engine's refusal reason belongs on the
-  // card as the why-stamp checklist.
-  api.state.resourceId = 'nithin';
-  api.state.data = doorRead();
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  const c = api.state.data.cases[0];
-  c.exact_acceptance = false;
-  c.proposal.date_source = 'ai_proposed';
-  c.proposal.customer_date_specified = false;
-  c.proposal.coverage_gaps = ['leave_unobserved', 'travel_unobserved'];
-  c.proposal.warnings = ['AI-proposed date, customer date unspecified.'];
-  c.proposal.execution_ready = false;
-  c.proposal.stampable = true;
-  c.review_reasons = ['Customer date unspecified. Any chosen day is an AI proposal, not a customer-stated date.'];
-
-  const html = api.renderHTML();
-  // The row is on the board, with KEEP and CUT live.
-  assert.match(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
-  assert.match(html, /data-booking-stamp="cut" data-booking-stamp-id="case-a"/);
-  // The refusal is shown as the checklist, not used to hide the row. Each fact appears
-  // once, in its shortest wording; see the dedupe-by-topic test below.
-  assert.match(html, /Coverage not read: leave_unobserved, travel_unobserved/);
-  assert.match(html, /AI-proposed date\. The customer did not name this day\./);
-  // Evidence chips carry the same facts in short form.
-  assert.match(html, /class="chip warn">Coverage partial/);
-  assert.match(html, /class="chip warn">AI date/);
-  // A stamp still offers a time; it never claims a confirmation.
-  assert.match(html, /this stamp offers a time\. It does not confirm one/);
-  // And the stamp itself is still not a send.
-  const res = api.stampCase('case-a', 'keep');
-  assert.equal(res.sent, false);
-  assert.equal(res.wrote_calendar, false);
-});
-
 test('a cancelled case with its diary event still present is never offered for stamping', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
@@ -939,8 +850,8 @@ test('a cancelled case with its diary event still present is never offered for s
   assert.equal(api.caseLayer(c), 'blocked');
   const html = api.renderHTML();
   assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
-  assert.match(html, /Cancelled in the thread with the diary event still present/);
-  assert.match(html, /blocked until the delete reads back/);
+  assert.match(html, /Needs a person/);
+  assert.doesNotMatch(html, /data-booking-stamp=/);
   // It is named, not silently dropped.
   assert.match(html, /Sample A/);
 });
@@ -986,7 +897,7 @@ test('a cancelled booking still in the diary blocks that time for anyone, not ju
   assert.deepEqual(api.stampRecord().approved, []);
   const html = api.renderHTML();
   // Withheld from the board with the reason named, never silently dropped.
-  assert.match(html, /still held by a cancelled booking/);
+  assert.doesNotMatch(html, /data-booking-stamp=/);
   assert.match(html, /Sample A/);
   assert.doesNotMatch(html, /data-booking-stamp="keep" data-booking-stamp-id="case-a"/);
   // Moving off the held minutes makes it stampable again.
@@ -1025,22 +936,6 @@ test('the why-stamp checklist states each fact once, in its shortest wording', (
   assert.match(list.find((i) => api.checklistTopic(i.text) === 'coverage').text, /^Coverage not read:/);
   // A fact the derived lines do not cover still gets through verbatim.
   assert.ok(list.some((i) => /Already quoted/.test(i.text)));
-});
-
-test('every stamped line shows the text it would approve, not just the selected one', () => {
-  api.state.resourceId = 'nithin';
-  api.state.data = doorRead();
-  api.state.drafts = {};
-  // Two stampable cases; neither is the selected one.
-  api.state.data.cases.push({
-    id: 'case-b', contact_id: 'contact-b', display_name: 'Second enquiry', suburb: 'Merriwa',
-    status: 'ready', reason: 'Candidate slot for approval.',
-    proposal: { start_iso: '2026-09-18T08:00:00', end_iso: '2026-09-18T09:00:00', offer_id: 'off-b', draft: 'Hi Second, Friday 18 September between 8:00 and 9:30am. Does that suit?' }
-  });
-  api.state.selectedId = null;
-  const html = api.renderHTML();
-  assert.match(html, /Hi Second, Friday 18 September between 8:00 and 9:30am/);
-  assert.doesNotMatch(html, /No draft for this case/);
 });
 
 test('overlapping cards share the column so no proposal is hidden under another', () => {
@@ -1264,7 +1159,7 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'pres-20'))[1], 'Waiting');
   assert.match(html, /New Lead \(Call \+ Qualify\)/);
   assert.match(html, /Scope Scheduled/);
-  assert.match(html, /Calendar not connected/);
+  assert.match(html, /Could not read calendar/);
   assert.match(html, /calendar_http_403/);
   assert.match(html, /Missing coverage is not a free week/);
   assert.match(html, /930 case\(s\) had no thread read \(row budget reached\)/);
@@ -1402,7 +1297,7 @@ function marninWeekRead() {
     { event_id: 'outback', title: 'Outback Agreements', kind: 'busy', start: '2026-09-15T10:00:00', end: '2026-09-15T11:00:00', blocks_capacity: true, source: 'ghl_calendar' },
     { event_id: 'sw-1', title: 'SecureWorks', kind: 'busy', start: '2026-09-15T11:00:00', end: '2026-09-15T11:30:00', blocks_capacity: true, source: 'ghl_calendar' },
     { event_id: 'sw-2', title: 'SecureWorks', kind: 'busy', start: '2026-09-18T09:00:00', end: '2026-09-18T09:30:00', blocks_capacity: true, source: 'ghl_calendar' },
-    { event_id: 'scope-evt', opportunity_id: 'opp-scope', title: 'Scope: Pat, Canning Vale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00', blocks_capacity: true, source: 'ghl_calendar' }
+    { event_id: 'scope-evt', contact_id: 'c-opp-scope', opportunity_id: 'opp-scope', title: 'Scope: Pat, Canning Vale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00', blocks_capacity: true, source: 'ghl_calendar' }
   ];
   cases.push({
     id: 'opp-scope',
@@ -1429,6 +1324,7 @@ function marninWeekRead() {
     });
     diary.push({
       event_id: 'visit-' + i,
+      contact_id: 'c-' + id,
       opportunity_id: id,
       title: 'Customer ' + i,
       suburb: suburbs[i],
@@ -1530,8 +1426,14 @@ test('GHL booked-stage rows with an empty diary do not count as booked visits', 
   assert.match(html, /<div class="v">0<\/div>/);
 });
 
-test('a diary event matches a queue row by opportunity, contact, or exact name and suburb', () => {
+test('GHL contact, opportunity or event id matches a diary event to a queue row', () => {
   api.state.resourceId = 'marnin';
+  const cases = [
+    { id: 'opp-1', opportunity_id: 'opp-1', contact_id: 'ct-1', display_name: 'Opportunity match', suburb: 'Canning Vale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-2', opportunity_id: 'opp-2', contact_id: 'ct-2', display_name: 'Contact match', suburb: 'Piara Waters', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-4', opportunity_id: 'opp-4', contact_id: 'ct-4', event_id: 'e-evt', display_name: 'Event match', suburb: 'Harrisdale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
+    { id: 'opp-3', opportunity_id: 'opp-3', contact_id: 'ct-3', display_name: 'Sam Ferry', suburb: 'Byford', status: 'needs_decision', stage_name: 'New Lead (Call + Qualify)' }
+  ];
   api.state.data = {
     ok: true,
     fixture: false,
@@ -1541,20 +1443,22 @@ test('a diary event matches a queue row by opportunity, contact, or exact name a
     diary: [
       { event_id: 'e-opp', opportunity_id: 'opp-1', title: 'Linked by opportunity', kind: 'busy', start: '2026-09-15T09:00:00', end: '2026-09-15T10:00:00' },
       { event_id: 'e-contact', contact_id: 'ct-2', title: 'Linked by contact', kind: 'busy', start: '2026-09-15T10:00:00', end: '2026-09-15T11:00:00' },
+      { event_id: 'e-evt', title: 'Linked by event', kind: 'busy', start: '2026-09-15T10:30:00', end: '2026-09-15T11:00:00' },
       { event_id: 'e-name', title: 'Sam Ferry', suburb: 'Byford', kind: 'busy', start: '2026-09-15T11:00:00', end: '2026-09-15T12:00:00' },
       { event_id: 'e-close', title: 'Sam Ferry', suburb: 'Harrisdale', kind: 'busy', start: '2026-09-15T13:00:00', end: '2026-09-15T14:00:00' }
     ],
-    cases: [
-      { id: 'opp-1', opportunity_id: 'opp-1', contact_id: 'ct-1', display_name: 'Opportunity match', suburb: 'Canning Vale', status: 'needs_decision', stage_name: 'Scope Scheduled' },
-      { id: 'opp-2', opportunity_id: 'opp-2', contact_id: 'ct-2', display_name: 'Contact match', suburb: 'Piara Waters', status: 'needs_decision', stage_name: 'Scope Scheduled' },
-      { id: 'opp-3', opportunity_id: 'opp-3', contact_id: 'ct-3', display_name: 'Sam Ferry', suburb: 'Byford', status: 'needs_decision', stage_name: 'New Lead (Call + Qualify)' }
-    ]
+    cases
   };
   const rows = api.diary();
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-opp')), 'confirmed');
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-contact')), 'confirmed');
-  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-name')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-evt')), 'confirmed');
+  assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-name')), 'busy');
   assert.equal(api.diaryLayerFor(rows.find((r) => r.id === 'e-close')), 'busy');
+  assert.equal(api.diaryEventMatchesCase({ opportunity_id: 'opp-1', event_id: 'e-opp' }, cases[0]), true);
+  assert.equal(api.diaryEventMatchesCase({ event_id: 'e-evt' }, cases[2]), true);
+  assert.equal(api.diaryEventMatchesCase({ display_name: 'Sam Ferry', suburb: 'Byford' }, cases[3]), false);
+  assert.equal(api.bookedCount(), 3);
 });
 
 test('blocks_capacity false does not occupy an off-lane day', () => {
@@ -1620,144 +1524,13 @@ test('a pack proposal paints the day, window and draft on the card and in the de
   const html = api.renderHTML();
   assert.doesNotMatch(html, /No proposals published yet for this week/);
   assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
-  assert.match(html, /Hi Sam, Friday 18 September between 11:15 and 12:45pm/);
-  assert.match(html, /Proposed text/);
+  assert.match(html, /Needs a person/);
+  assert.match(html, /Separate approvals are not connected yet/);
   assert.match(html, /Colorbond fence/);
   const p = api.cases()[0].proposal;
   assert.equal(p.start_iso, '2026-09-18T11:15:00');
   assert.equal(p.end_iso, '2026-09-18T12:45:00');
 });
-
-test('Send message posts the stamp and Cut rejects, then a re-read keeps the paint', async () => {
-  api.state.resourceId = 'marnin';
-  api.state.weekStart = '2026-09-14';
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  api.state.drafts = {};
-  const proposal = {
-    disposition: 'offer',
-    day: '2026-09-18',
-    window_start: '11:15',
-    window_end: '12:45',
-    draft: 'Hi Sam, Friday 18 September between 11:15 and 12:45pm. Does that suit?',
-    why: []
-  };
-  const base = {
-    ok: true,
-    fixture: false,
-    resource: { id: 'marnin', calendar: { ok: true } },
-    week_start: '2026-09-14',
-    coverage: { gaps: [] },
-    pack: { present: true, as_of: '2026-09-17T04:00:00Z' },
-    stamp: { present: false, approved: [], rejected: [], decisions: {}, stage_moves: [] },
-    diary: [],
-    cases: [{
-      id: 'opp-offer',
-      opportunity_id: 'opp-offer',
-      contact_id: 'c-offer',
-      display_name: 'Sam Ferry',
-      suburb: 'Byford',
-      status: 'needs_decision',
-      stage_name: 'Presentation Made (scope not booked)',
-      proposal,
-      stamp_state: 'none'
-    }]
-  };
-  api.state.data = JSON.parse(JSON.stringify(base));
-  api.state.selectedId = 'opp-offer';
-  const posts = [];
-  global.SALES_BOOKING_PREVIEW_URL = null;
-  global.opsPost = async (action, body) => {
-    posts.push({ action, body });
-    return { ok: true };
-  };
-  global.opsFetch = async () => {
-    const next = JSON.parse(JSON.stringify(base));
-    const last = posts[posts.length - 1];
-    next.stamp = {
-      present: true,
-      as_of: '2026-09-17T05:00:00Z',
-      approved: (last && last.body.stamp.approved) || [],
-      rejected: (last && last.body.stamp.rejected) || [],
-      decisions: {},
-      stage_moves: []
-    };
-    const st = next.stamp.rejected.length ? 'rejected' : (next.stamp.approved.length ? 'approved' : 'none');
-    next.cases[0].stamp_state = st;
-    return next;
-  };
-  const sent = await api.writeStamp('opp-offer', 'keep');
-  assert.equal(sent.sent, false);
-  assert.equal(sent.wrote_calendar, false);
-  assert.equal(sent.posted, true);
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].action, 'sales_booking_stamp_write');
-  assert.deepEqual(posts[0].body.stamp.approved, ['opp-offer']);
-  assert.deepEqual(posts[0].body.stamp.rejected, []);
-  assert.deepEqual(posts[0].body.stamp.stage_moves, []);
-  assert.equal(posts[0].body.resource, 'marnin');
-  assert.equal(posts[0].body.week_start, '2026-09-14');
-  assert.equal(api.state.data.cases[0].stamp_state, 'approved');
-  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'keep');
-  let html = api.renderHTML();
-  assert.match(html, /Stamped KEEP/);
-  assert.match(html, /stampcard stamped/);
-
-  const cut = await api.writeStamp('opp-offer', 'cut');
-  assert.equal(cut.posted, true);
-  assert.deepEqual(posts[1].body.stamp.approved, []);
-  assert.deepEqual(posts[1].body.stamp.rejected, ['opp-offer']);
-  assert.equal(api.state.data.cases[0].stamp_state, 'rejected');
-  assert.equal(api.stampStateOf(api.state.data.cases[0]), 'cut');
-  html = api.renderHTML();
-  assert.match(html, /Stamped CUT/);
-  assert.match(html, /stampcard weak/);
-  assert.equal(posts.every((p) => p.action === 'sales_booking_stamp_write'), true);
-});
-
-function liveMarninPackRead() {
-  const days = [
-    { iso: '2026-09-18', weekday: 'Fri', suburb: 'Byford' },
-    { iso: '2026-09-22', weekday: 'Tue', suburb: 'Canning Vale' },
-    { iso: '2026-09-25', weekday: 'Fri', suburb: 'Harrisdale' },
-    { iso: '2026-09-29', weekday: 'Tue', suburb: 'Piara Waters' }
-  ];
-  const cases = [];
-  for (let i = 0; i < 31; i++) {
-    const slot = days[i % 4];
-    const disposition = i === 0 ? 'booked' : (i <= 11 ? 'offer' : 'capacity');
-    cases.push({
-      id: 'opp-' + i,
-      opportunity_id: 'opp-' + i,
-      contact_id: 'ct-' + i,
-      display_name: 'Lead ' + i,
-      suburb: null,
-      job: 'Colorbond fence',
-      status: 'needs_decision',
-      stage_name: 'Presentation Made (scope not booked)',
-      proposal: {
-        disposition,
-        day: slot.weekday,
-        window_start: slot.iso + 'T11:15:00+08:00',
-        window_end: slot.iso + 'T12:45:00+08:00',
-        suburb: slot.suburb,
-        draft: disposition === 'offer' ? 'Hi Lead ' + i + ', draft for ' + slot.iso : null,
-        why: []
-      },
-      stamp_state: 'none'
-    });
-  }
-  return {
-    ok: true,
-    fixture: false,
-    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
-    week_start: '2026-09-14',
-    coverage: { gaps: [] },
-    pack: { present: true, as_of: '2026-09-16T07:48:00Z', week_start: '2026-09-14' },
-    stamp: { present: false },
-    diary: [],
-    cases
-  };
-}
 
 test('live pack windows keep their own day, not the weekday of the week on screen', () => {
   api.state.resourceId = 'marnin';
@@ -1807,54 +1580,6 @@ test('published marnin pack: 31 proposals, 11 offers, other-week slots listed, s
   assert.match(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
   assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
   assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
-  api.state.weekStart = '2026-09-14';
-  api.state.resourceId = 'nithin';
-});
-
-test('Send after Next week still writes the live marnin pack week', async () => {
-  api.state.resourceId = 'marnin';
-  api.state.weekStart = '2026-09-14';
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  api.state.drafts = {};
-  const pack = liveMarninPackRead();
-  api.state.data = JSON.parse(JSON.stringify(pack));
-  api.state.selectedId = 'opp-1';
-  const posts = [];
-  global.SALES_BOOKING_PREVIEW_URL = null;
-  global.opsPost = async (action, body) => {
-    posts.push({ action, body });
-    return { ok: true };
-  };
-  global.opsFetch = async (_action, params) => {
-    const next = JSON.parse(JSON.stringify(pack));
-    if (params && params.week_start) next.week_start = params.week_start;
-    const last = posts[posts.length - 1];
-    if (last && last.body && last.body.stamp) {
-      next.stamp = {
-        present: true,
-        week_start: last.body.week_start,
-        approved: last.body.stamp.approved || [],
-        rejected: last.body.stamp.rejected || [],
-        decisions: {},
-        stage_moves: []
-      };
-      const st = next.stamp.rejected.length ? 'rejected' : (next.stamp.approved.length ? 'approved' : 'none');
-      const hit = next.cases.find((c) => c.id === 'opp-1');
-      if (hit) hit.stamp_state = st;
-    }
-    return next;
-  };
-  await api.switchWeek(7);
-  assert.equal(api.state.weekStart, '2026-09-21');
-  assert.equal(api.state.data.pack.week_start, '2026-09-14');
-  const sent = await api.writeStamp('opp-1', 'keep');
-  assert.equal(sent.posted, true);
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].action, 'sales_booking_stamp_write');
-  assert.equal(posts[0].body.week_start, '2026-09-14');
-  assert.equal(posts[0].body.resource, 'marnin');
-  assert.deepEqual(posts[0].body.stamp.approved, ['opp-1']);
-  assert.equal(api.stampStateOf(api.cases().find((c) => c.id === 'opp-1')), 'keep');
   api.state.weekStart = '2026-09-14';
   api.state.resourceId = 'nithin';
 });
@@ -1979,7 +1704,7 @@ function proposalCardIds(html) {
   return ids;
 }
 
-test('pack offers paint and stamp even when the roster missed them', async () => {
+test('pack offers remain visible when roster missed them, but legacy stamps cannot write', async () => {
   const payload = degradedRosterPackRead();
   api.state.resourceId = 'marnin';
   api.state.weekStart = '2026-09-14';
@@ -2027,15 +1752,11 @@ test('pack offers paint and stamp even when the roster missed them', async () =>
 
   let html = api.renderHTML();
   assert.match(html, /11 proposals unsent/);
-  assert.match(html, /11 lines/);
-  assert.equal((html.match(/class="stampcard/g) || []).length, 11);
-  assert.equal((html.match(/<div class="stampcard[^>]*data-not-in-read="1"/g) || []).length, 9);
   assert.match(html, /Lawrence Guo · Woodlands/);
   assert.match(html, /Bruce Reidy-Crofts · Greenwood/);
   assert.match(html, /Andrew Allen · Jindalee/);
   assert.match(html, /Kim Douglas · Sorrento/);
   payload._offers.filter((row) => !['JtUWsD27EkSMWtqxGMHs', 'wr2YBmIyAI1ygiru5zwc'].includes(row.id)).forEach((row) => {
-    assert.match(html, new RegExp(row.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]{0,400}not in this read'));
   });
 
   const posts = [];
@@ -2049,23 +1770,17 @@ test('pack offers paint and stamp even when the roster missed them', async () =>
   for (const row of payload._offers) {
     api.state.selectedId = row.id;
     html = api.renderHTML();
-    assert.match(html, new RegExp('data-booking-stamp-send="1" data-booking-stamp-id="' + row.id + '"'));
-    assert.doesNotMatch(html, new RegExp('data-booking-stamp-send="1" data-booking-stamp-id="' + row.id + '" disabled'));
-    assert.match(html, /Proposed text/);
-    assert.match(html, new RegExp(row.draft.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(html, /Separate approvals are not connected yet/);
     if (row.id !== 'JtUWsD27EkSMWtqxGMHs' && row.id !== 'wr2YBmIyAI1ygiru5zwc') {
       assert.match(html, /not in this read/);
     }
   }
 
   const sent = await api.writeStamp('TelAKHzhxnCjKrExxQxE', 'keep');
-  assert.equal(sent.posted, true);
-  assert.equal(posts[0].action, 'sales_booking_stamp_write');
-  assert.equal(posts[0].body.week_start, '2026-09-14');
-  assert.deepEqual(posts[0].body.stamp.approved, ['TelAKHzhxnCjKrExxQxE']);
-  assert.equal(posts[0].body.resource, 'marnin');
 
   api.state.weekStart = '2026-09-14';
+  assert.equal(sent.ok, false);
+  assert.equal(posts.length, 0);
   api.state.resourceId = 'nithin';
   api.state.selectedId = null;
 });
@@ -2169,7 +1884,7 @@ test('a job-only pack row shows the job on the queue, detail, and stamp board', 
   const html = api.renderHTML();
   assert.match(html, /Lawrence Guo · Woodlands · Colorbond fence/);
   assert.match(html, /Woodlands · Colorbond fence/);
-  assert.match(html, /<div class="why">Colorbond fence · Ready to contact<\/div>/);
+  assert.match(html, /Needs a person/);
   assert.doesNotMatch(html, /Lawrence Guo · Woodlands · not given/);
   api.state.resourceId = 'nithin';
   api.state.selectedId = null;
@@ -2331,83 +2046,6 @@ test('GHL pipeline board uses real stage names, flags thread/diary drift, and ho
   assert.match(html, /Move \(held\)/);
   assert.doesNotMatch(html, /data-booking-move="/);
   assert.deepEqual(api.stampWriteBody().stage_moves, []);
-});
-
-test('KEEP round-trips through a stamp store: wipe local state, re-read, KEEP and the board card remain', async () => {
-  const store = { stamp: { present: false, approved: [], rejected: [], decisions: {}, stage_moves: [] } };
-  const base = {
-    ok: true,
-    fixture: false,
-    resource: { id: 'marnin', calendar: { ok: true } },
-    week_start: '2026-09-14',
-    coverage: { gaps: [] },
-    pack: { present: true, as_of: '2026-09-17T04:00:00Z', week_start: '2026-09-14' },
-    stamp: store.stamp,
-    diary: [],
-    cases: [{
-      id: 'opp-offer',
-      opportunity_id: 'opp-offer',
-      contact_id: 'c-offer',
-      display_name: 'Sam Ferry',
-      suburb: 'Byford',
-      job_type: 'fencing',
-      status: 'needs_decision',
-      stage_name: 'Presentation Made (scope not booked)',
-      proposal: {
-        disposition: 'offer',
-        start_iso: '2026-09-18T11:15:00',
-        end_iso: '2026-09-18T12:45:00',
-        draft: 'Hi Sam, Friday 18 September between 11:15 and 12:45pm. Does that suit?'
-      },
-      stamp_state: 'none'
-    }]
-  };
-  api.state.resourceId = 'marnin';
-  api.state.weekStart = '2026-09-14';
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  api.state.drafts = {};
-  api.state.cache = {};
-  api.state.data = JSON.parse(JSON.stringify(base));
-  api.state.selectedId = 'opp-offer';
-  global.SALES_BOOKING_PREVIEW_URL = null;
-  global.SALES_BOOKING_PREVIEW_API = null;
-  global.opsPost = async (action, body) => {
-    assert.equal(action, 'sales_booking_stamp_write');
-    store.stamp = {
-      present: true,
-      week_start: body.week_start,
-      approved: (body.stamp && body.stamp.approved) || [],
-      rejected: (body.stamp && body.stamp.rejected) || [],
-      decisions: (body.stamp && body.stamp.decisions) || {},
-      stage_moves: []
-    };
-    return { ok: true, stamp: store.stamp };
-  };
-  global.opsFetch = async () => {
-    const next = JSON.parse(JSON.stringify(base));
-    next.stamp = JSON.parse(JSON.stringify(store.stamp));
-    if (next.stamp.present) {
-      const st = next.stamp.rejected.length ? 'rejected' : (next.stamp.approved.length ? 'approved' : 'none');
-      next.cases[0].stamp_state = st;
-    }
-    return next;
-  };
-  const sent = await api.writeStamp('opp-offer', 'keep');
-  assert.equal(sent.posted, true);
-  assert.deepEqual(store.stamp.approved, ['opp-offer']);
-  assert.deepEqual(store.stamp.stage_moves, []);
-
-  api.state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
-  api.state.data = null;
-  api.state.cache = {};
-  await api.load('marnin', '2026-09-14');
-  assert.equal(api.stampStateOf(api.cases()[0]), 'keep');
-  const html = api.renderHTML();
-  assert.match(html, /stampcard stamped/);
-  assert.match(html, /GHL sales pipeline · two way/);
-  assert.match(html, /Sam Ferry · Byford/);
-  assert.match(html, /Presentation Made \(scope not booked\)/);
-  api.state.resourceId = 'nithin';
 });
 
 test('a GHL 429 mapped to HTTP 500 keeps the last complete week on screen', async () => {
@@ -2668,3 +2306,48 @@ test('diary evidence leaves quoted, folded, and already-booked cards in their st
   assert.equal(api.stageDrift(scheduled), null);
   api.state.resourceId = 'nithin';
 });
+
+function liveMarninPackRead() {
+  const days = [
+    { iso: '2026-09-18', weekday: 'Fri', suburb: 'Byford' },
+    { iso: '2026-09-22', weekday: 'Tue', suburb: 'Canning Vale' },
+    { iso: '2026-09-25', weekday: 'Fri', suburb: 'Harrisdale' },
+    { iso: '2026-09-29', weekday: 'Tue', suburb: 'Piara Waters' }
+  ];
+  const cases = [];
+  for (let i = 0; i < 31; i++) {
+    const slot = days[i % 4];
+    const disposition = i === 0 ? 'booked' : (i <= 11 ? 'offer' : 'capacity');
+    cases.push({
+      id: 'opp-' + i,
+      opportunity_id: 'opp-' + i,
+      contact_id: 'ct-' + i,
+      display_name: 'Lead ' + i,
+      suburb: null,
+      job: 'Colorbond fence',
+      status: 'needs_decision',
+      stage_name: 'Presentation Made (scope not booked)',
+      proposal: {
+        disposition,
+        day: slot.weekday,
+        window_start: slot.iso + 'T11:15:00+08:00',
+        window_end: slot.iso + 'T12:45:00+08:00',
+        suburb: slot.suburb,
+        draft: disposition === 'offer' ? 'Hi Lead ' + i + ', draft for ' + slot.iso : null,
+        why: []
+      },
+      stamp_state: 'none'
+    });
+  }
+  return {
+    ok: true,
+    fixture: false,
+    resource: { id: 'marnin', calendar: { ok: true, mailbox: 'marnin@secureworkswa.com.au' } },
+    week_start: '2026-09-14',
+    coverage: { gaps: [] },
+    pack: { present: true, as_of: '2026-09-16T07:48:00Z', week_start: '2026-09-14' },
+    stamp: { present: false },
+    diary: [],
+    cases
+  };
+}

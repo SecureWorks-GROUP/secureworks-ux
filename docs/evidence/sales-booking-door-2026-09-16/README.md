@@ -8,7 +8,7 @@ calendars (via `sw-mcp`) and **live** GHL threads. No fixtures: the module refus
 |---|---|
 | `nithin-week-14sep.png` | Nithin, week of 14 Sep. 5 real provider events plus AI proposals. The Jason diary slot at Mon 8:30 reads CANCELLED. This capture still also paints the open Marangaroo enquiry as a Mon 12:00 proposal. Four Monday proposals share the column rather than hiding each other. 7 assessed enquiries; 493 enumerated CRM rows named and excluded from the tile. The detail panel carries the real arrival-window draft. |
 | `marnin-week-14sep.png` | Marnin, week of 14 Sep. 11 real provider events, 776 line, Stratco lane stated as an offering rule over real off-lane bookings. |
-| `stamp-board-nithin.png` | Capture still shows six KEEP / CUT lines, including Marangaroo. Current board withholds Marangaroo after the cancelled enquiry is attached to that diary event; see `docs/sales-booking-ui.md`. The five other AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough) carry evidence chips and the why-stamp checklist. |
+| `stamp-board-nithin.png` | Historical capture of six KEEP / CUT lines, including Marangaroo. The live Booking screen has retired that stamp write; current confirm/fail-closed contract: `docs/sales-booking-ui.md`. The five other AI proposals (Carlisle, Merriwa, Mt Hawthorn, Fremantle, Scarborough) carry evidence chips and the why-stamp checklist. |
 
 ## How the stamp board reads on the real week
 
@@ -33,12 +33,11 @@ Withheld and named on the board, never dropped:
   present. Blocked until the delete reads back. No KEEP / CUT.
 - **Arlette Bruggeman, Eva Suh, Aaron Koh, Jennifer** (4): booked visits with no proposed
   time, so there is nothing to stamp.
-- Unmapped CRM rows that day's capture treated as unassessed. Current demand
-  rule: `docs/sales-booking-ui.md`.
+- Unmapped CRM rows that day's capture treated as unassessed.
 
-Confirm booking is unavailable on every line, which is correct: execution-ready means exact
-acceptance bound to a sent offer, and none of these have it. That gate is separate from the
-stamp, and both are hard-held in any case.
+On this capture, Confirm booking is unavailable on every line: execution-ready meant exact
+acceptance bound to a sent offer, and none of these have it. That stamp-era gate is
+superseded by the separate fail-closed approvals in `docs/sales-booking-ui.md`.
 
 ## Capture method
 

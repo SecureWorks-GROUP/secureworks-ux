@@ -1,0 +1,3 @@
+result: "{\"state\":{\"state\":\"could_not_read\",\"reason\":\"Synthetic provider state\"},\"calendarColumns\":0,\"confirmButtons\":[{\"label\":\"Confirm calendar booking\",\"disabled\":true},{\"label\":\"Approve this exact text\",\"disabled\":true}],\"writes\":0}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

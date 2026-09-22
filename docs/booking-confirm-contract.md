@@ -22,29 +22,34 @@ These fields are **not yet supplied by the wiki producer**. Until they exist, co
 
 ## Separate approval write required
 
-`opsPost('sales_booking_approval_write', {snapshot, decision:"approved"|"refused", reason})` records exactly **one** named step. Return `{ok:true,approval:{state,reason,snapshot}}`. No optimistic success, no UI provider call, and no translation to the retired `sales_booking_stamp_write` combined authority. Refusal requires a reason. Choosing/confirming one step never authorizes the other.
+`opsPost('sales_booking_approval_write', {snapshot, decision:"approved"|"refused", reason})` records exactly **one** named step. Calendar uses `snapshot.step:"calendar"`; message uses `snapshot.step:"message"`. These are two independent requests to the same exact action, never one combined approval and never invented calendar/message action suffixes. Return `{ok:true,approval:{state,reason,snapshot}}`. No optimistic success, no UI provider call, and no translation to the retired `sales_booking_stamp_write` combined authority. Refusal requires a reason. Choosing/confirming one step never authorizes the other.
 
 Authenticate and authorize the actor server-side. Validate current profile, model identity, complete pack revision, hashes, exact content, expiry and current availability before creating the independent stamp. Bind retries idempotently by step and content. Calendar execution must use `notify:false` and no SMS; message execution requires its own exact-text approval and matching successful calendar receipt (except information-only messages handled outside this slot-confirmation UI). Revalidate at execution and respect the send hold. UI approval is not evidence of execution; only producer receipts can mark Done. Unknown outcomes must be reconciled, not retried blindly.
 
 ## Visit outcomes: one insert and one list
 
-The screen now also captures visit outcomes. No live outcome write exists yet.
+The screen calls the existing backend outcome actions. The authoritative contract is [backend `docs/visit-outcomes-api.md`](https://github.com/SecureWorks-GROUP/secureworks-backend/blob/main/docs/visit-outcomes-api.md), read from GitHub main on 2026-09-22. This wiring does not establish deployment status or a complete booked-visit source.
 
-**Insert:** `sales_booking_visit_outcome_insert`, body `{visit_outcome:record}`, response `{ok:true,visit_outcome:record}`. The exact record fields are:
+**Insert:** `opsPost('record_visit_outcome', record)` sends a **flat** body:
 
 ```text
-id (uuid), booking_key, appointment_id (nullable), contact_id (required GHL),
+booking_key, appointment_id (nullable), contact_id (required GHL),
 opportunity_id (nullable), job_id (nullable), scoper_user_id, scoper_name,
-visit_start (ISO with offset), outcome (happened | did_not_happen),
+visit_start (ISO with seconds and offset), outcome (happened | did_not_happen),
 reason (null | customer_not_home | we_did_not_attend | rescheduled),
-note (one line, max 200 characters), quote_owed (boolean),
-recorded_by_user_id, recorded_at (ISO), source (booking_screen),
+note (one line, max 200 Unicode characters), quote_owed (boolean),
 supersedes (uuid or null)
 ```
 
-Happened sets quote_owed true unless the scoper unticks it; reason is null. Did-not-happen requires one of the three reasons and defaults quote_owed false. Corrections insert a new UUID with supersedes pointing to the current record. Never update/delete prior rows. Authenticate the actor and verify scoper/booking/contact associations, validate dates/enums/note server-side, deduplicate by record UUID, and atomically enforce one current outcome per booking: a root insert requires no existing root; a correction must supersede the current same-booking record. Reject conflicting concurrent inserts. No messages, notifications, calendar or pipeline writes may be triggered by this insert.
+Response: `{visit_outcome:record}` with **no required `ok` field**. The returned record adds `id`, `recorded_by_user_id`, `recorded_at`, and `source:"booking_screen"`. The database generates the UUID/time; the verified signed-in user JWT supplies the actor. These four fields are not sent by the screen. Existing `opsPost`/`opsFetch` use the user JWT; no new key or client-owned actor authority is introduced. The backend requires an admin, owner or ops_manager.
 
-**List:** add `sales_booking_visit_outcome_list` with `scoper_user_id`, inclusive `start`, exclusive `end` offset-bearing timestamps. Return all records including correction chains for booked visits in that range. The existing workspace read can call this list internally. The UI adds `visit_outcomes_from` / `visit_outcomes_to` to `sales_booking_read` so the last seven days are always read regardless of which future week is displayed.
+Happened sets quote_owed true unless the scoper unticks it; reason is null. Did-not-happen requires one of the three reasons and defaults quote_owed false. Backend strings are trimmed, an empty note becomes null, and dates may be normalized to UTC. The UI verifies returned facts using those normalizations plus the server provenance, then retains the **returned** row, including its ID/time, rather than manufacturing an echoed client record.
+
+Corrections send a complete flat request with `supersedes` pointing to the current server record ID. Never update/delete prior rows. The backend serializes by booking key and deduplicates identical normalized requests from the same actor within a 30-second sliding window, including correction retries. A stale/cross-booking correction, second root, or root retry outside the window returns HTTP 409. Refresh and reconcile before another attempt. No messages, notifications, calendar or pipeline writes are triggered by this insert.
+
+**List:** `list_visit_outcomes` is a GET with `scoper_user_id`, inclusive `since`, exclusive `until` (offset-bearing timestamps, maximum 366-day span), `include_history:true`, `limit` (1–500), and `offset`. Response: `{outcomes:[currentRecords...],history:[allRecordsForThoseBookings...],limit,offset,has_more}`; no required `ok`. Advance `offset` by `limit` until `has_more:false`, deduplicating history by record ID. A page counts current bookings, not history rows. History includes the current rows and their complete correction chains, including old dates/scopers. Missing/failed/truncated history cannot be advertised as complete.
+
+The existing `sales_booking_read` remains the browser's single workspace GET. Its producer joins `list_visit_outcomes` internally into `visit_outcomes`, preserving all correction chains. The browser passes `visit_outcomes_from` / `visit_outcomes_to` to this workspace read for the last seven days; the producer maps them to the list's `since` / `until` and also covers the displayed week. They are **not** parameters of `list_visit_outcomes` itself. Neither `sales_booking_visit_outcome_insert` nor `sales_booking_visit_outcome_list` exists.
 
 **Read envelope additions:** `booked_visits:[{booking_key,appointment_id,contact_id,opportunity_id,job_id,scoper_user_id,visit_start,display_name}]`, `visit_outcomes:[record...]`, and `booking_flow.visit_outcomes_read:"complete"`, `visit_outcome_write:"append-only-v1"`. The booked visit census must include the displayed week **and** the preceding seven days through now. A complete read includes all relevant correction chains and cannot be inferred from an empty response. If it fails, advertise neither completeness nor a fake zero missing count.
 
@@ -52,6 +57,8 @@ Until `visit_outcomes_read` is `complete`, the Visit outcomes section shows only
 
 ## Offline verification
 
-`tests/fixtures/booking-confirm/index.html` uses synthetic identities, fake `opsPost` and CSP `connect-src 'none'`. Dates derive from the current Perth week. The fixture shows a future Tuesday for actionable approvals and a recent visit for outcomes; live initial navigation opens the current week.
+`tests/fixtures/booking-confirm/index.html` uses synthetic identities, the contract double in `api.js` for flat outcome requests/server-owned responses, independent `sales_booking_approval_write` steps and composed `list_visit_outcomes` reads, fake `opsPost` and CSP `connect-src 'none'`. Dates derive from the current Perth week. The fixture shows a future Tuesday for actionable approvals and a recent visit for outcomes; live initial navigation opens the current week.
 
 Run `npm run test:sales-booking`. Browser evidence in `docs/evidence/booking-confirm-flow-2026-09-21/` covers desktop/phone and independent fake clicks. No backend code, production write, send or deployment is included.
+
+Contract-fix evidence: `docs/evidence/booking-screen-contract-fix-2026-09-22/`. Browser and automated checks use only synthetic fixtures. Backend migration/deployment is a separate authorized lane (ops-api requires `--no-verify-jwt`); no deploy, live append, booking or customer send is performed here. A booked-visit census remains a producer requirement, never inferred from diary occupancy.

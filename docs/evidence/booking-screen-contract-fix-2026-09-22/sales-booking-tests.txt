@@ -1,0 +1,879 @@
+
+> test:sales-booking
+> node --test modules/ops-sales-booking-confirm.test.cjs modules/ops-sales-booking.test.cjs modules/ops-sales-performance.test.cjs modules/sales-booking-assess.test.cjs scripts/sales-booking-local-api.test.mjs
+
+(node:94561) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:94562) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Perth Monday switches at local midnight, regardless of UTC day
+ok 1 - Perth Monday switches at local midnight, regardless of UTC day
+  ---
+  duration_ms: 4.475792
+  type: 'test'
+  ...
+# Subtest: signed-in scoper UUID selects their profile; names never guess identity
+ok 2 - signed-in scoper UUID selects their profile; names never guess identity
+  ---
+  duration_ms: 0.658125
+  type: 'test'
+  ...
+# Subtest: first open resets stale week and stale scoper to signed-in profile
+ok 3 - first open resets stale week and stale scoper to signed-in profile
+  ---
+  duration_ms: 4.021833
+  type: 'test'
+  ...
+# Subtest: previous week cannot navigate into the past
+ok 4 - previous week cannot navigate into the past
+  ---
+  duration_ms: 0.797167
+  type: 'test'
+  ...
+# Subtest: calendar approval records only exact GHL calendar snapshot, never text approval
+ok 5 - calendar approval records only exact GHL calendar snapshot, never text approval
+  ---
+  duration_ms: 1.54525
+  type: 'test'
+  ...
+# Subtest: exact template approval persists independently during send hold
+ok 6 - exact template approval persists independently during send hold
+  ---
+  duration_ms: 1.702125
+  type: 'test'
+  ...
+# Subtest: changed displayed text, recipient, slot or revision needs a fresh review
+ok 7 - changed displayed text, recipient, slot or revision needs a fresh review
+  ---
+  duration_ms: 1.408125
+  type: 'test'
+  ...
+# Subtest: repeat clicks while pending and after approval cannot duplicate approval
+ok 8 - repeat clicks while pending and after approval cannot duplicate approval
+  ---
+  duration_ms: 0.4725
+  type: 'test'
+  ...
+# Subtest: failed, missing and not-configured calendars never permit confirmation
+ok 9 - failed, missing and not-configured calendars never permit confirmation
+  ---
+  duration_ms: 1.303375
+  type: 'test'
+  ...
+# Subtest: legacy data and stamps cannot become separate authority
+ok 10 - legacy data and stamps cannot become separate authority
+  ---
+  duration_ms: 1.378167
+  type: 'test'
+  ...
+# Subtest: expired, unvalidated, uncertain or mismatched evidence fails closed
+ok 11 - expired, unvalidated, uncertain or mismatched evidence fails closed
+  ---
+  duration_ms: 1.932917
+  type: 'test'
+  ...
+# Subtest: prior offers and agreements reserve slots by contact id
+ok 12 - prior offers and agreements reserve slots by contact id
+  ---
+  duration_ms: 1.023334
+  type: 'test'
+  ...
+# Subtest: busy diary and protected band block a proposal even if validation claims pass
+ok 13 - busy diary and protected band block a proposal even if validation claims pass
+  ---
+  duration_ms: 0.372459
+  type: 'test'
+  ...
+# Subtest: refusal requires a reason and records only that channel
+ok 14 - refusal requires a reason and records only that channel
+  ---
+  duration_ms: 0.769625
+  type: 'test'
+  ...
+# Subtest: bad receipt and transport errors never paint success
+ok 15 - bad receipt and transport errors never paint success
+  ---
+  duration_ms: 0.796208
+  type: 'test'
+  ...
+# Subtest: read-back approval survives reload only for its bound content, done stays producer-owned
+ok 16 - read-back approval survives reload only for its bound content, done stays producer-owned
+  ---
+  duration_ms: 1.188459
+  type: 'test'
+  ...
+# Subtest: launch schema never selects AI wording or unrecognized approved bytes
+ok 17 - launch schema never selects AI wording or unrecognized approved bytes
+  ---
+  duration_ms: 0.645291
+  type: 'test'
+  ...
+# Subtest: proposal, exact quotes, checks and needs-a-person reason are visible and escaped
+ok 18 - proposal, exact quotes, checks and needs-a-person reason are visible and escaped
+  ---
+  duration_ms: 0.455167
+  type: 'test'
+  ...
+# Subtest: visit happened records exact append-only fields with quote owed and no message
+ok 19 - visit happened records exact append-only fields with quote owed and no message
+  ---
+  duration_ms: 1.944042
+  type: 'test'
+  ...
+# Subtest: did-not-happen requires one of three reasons and records no quote obligation
+ok 20 - did-not-happen requires one of three reasons and records no quote obligation
+  ---
+  duration_ms: 0.570917
+  type: 'test'
+  ...
+# Subtest: outcome correction appends with supersedes, quote owed can be unticked
+ok 21 - outcome correction appends with supersedes, quote owed can be unticked
+  ---
+  duration_ms: 0.952042
+  type: 'test'
+  ...
+# Subtest: only last-seven-day unresolved visits enter the amber list
+ok 22 - only last-seven-day unresolved visits enter the amber list
+  ---
+  duration_ms: 2.095084
+  type: 'test'
+  ...
+# Subtest: missing visit outcome support stays a calm line in its section
+ok 23 - missing visit outcome support stays a calm line in its section
+  ---
+  duration_ms: 0.679125
+  type: 'test'
+  ...
+# Subtest: verified visit insert after load replaces state cannot root-insert on reopen
+ok 24 - verified visit insert after load replaces state cannot root-insert on reopen
+  ---
+  duration_ms: 2.137709
+  type: 'test'
+  ...
+# Subtest: outcome note validation, unknown persistence and stale booking prevent extra inserts
+ok 25 - outcome note validation, unknown persistence and stale booking prevent extra inserts
+  ---
+  duration_ms: 0.429833
+  type: 'test'
+  ...
+# Subtest: the producer schema maps checks, unknown receipts and missing additions honestly
+ok 26 - the producer schema maps checks, unknown receipts and missing additions honestly
+  ---
+  duration_ms: 1.512333
+  type: 'test'
+  ...
+# Subtest: arrival label uses the promised window, not the longer calendar occupancy
+ok 27 - arrival label uses the promised window, not the longer calendar occupancy
+  ---
+  duration_ms: 0.312208
+  type: 'test'
+  ...
+# Subtest: read-back JSON key ordering does not invalidate an exact approval
+ok 28 - read-back JSON key ordering does not invalidate an exact approval
+  ---
+  duration_ms: 0.564833
+  type: 'test'
+  ...
+# Subtest: backend fixture accepts flat outcome body and server-normalized response without ok
+ok 29 - backend fixture accepts flat outcome body and server-normalized response without ok
+  ---
+  duration_ms: 0.563084
+  type: 'test'
+  ...
+# Subtest: wrong facts or missing server provenance never verify an outcome or enable a retry
+ok 30 - wrong facts or missing server provenance never verify an outcome or enable a retry
+  ---
+  duration_ms: 0.790375
+  type: 'test'
+  ...
+# Subtest: fixture composes canonical list history and keeps both approval calls independent
+ok 31 - fixture composes canonical list history and keeps both approval calls independent
+  ---
+  duration_ms: 1.055625
+  type: 'test'
+  ...
+# (node:94563) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:94563) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: monday of the proof week stays 14 Sep 2026
+ok 32 - monday of the proof week stays 14 Sep 2026
+  ---
+  duration_ms: 1.084958
+  type: 'test'
+  ...
+# Subtest: real durations drive block height math
+ok 33 - real durations drive block height math
+  ---
+  duration_ms: 0.135334
+  type: 'test'
+  ...
+# Subtest: send hold refuses the provider send and records the intended recipient
+ok 34 - send hold refuses the provider send and records the intended recipient
+  ---
+  duration_ms: 0.412167
+  type: 'test'
+  ...
+# Subtest: resource switch uses configured scoper ids, not fictional calendars
+ok 35 - resource switch uses configured scoper ids, not fictional calendars
+  ---
+  duration_ms: 0.092042
+  type: 'test'
+  ...
+# Subtest: fixture envelopes are refused
+ok 36 - fixture envelopes are refused
+  ---
+  duration_ms: 0.568708
+  type: 'test'
+  ...
+# Subtest: slower previous resource cannot replace the current workspace
+ok 37 - slower previous resource cannot replace the current workspace
+  ---
+  duration_ms: 0.277167
+  type: 'test'
+  ...
+# Subtest: opening a conversation is read-only and never posts a booking event
+ok 38 - opening a conversation is read-only and never posts a booking event
+  ---
+  duration_ms: 0.181125
+  type: 'test'
+  ...
+# Subtest: a Jason-only diary subject still blocks the cancelled Marangaroo enquiry
+ok 39 - a Jason-only diary subject still blocks the cancelled Marangaroo enquiry
+  ---
+  duration_ms: 3.099083
+  type: 'test'
+  ...
+# Subtest: stale conversation response is ignored after a case switch
+ok 40 - stale conversation response is ignored after a case switch
+  ---
+  duration_ms: 0.37725
+  type: 'test'
+  ...
+# Subtest: empty khairo week is coverage, not a fake free diary
+ok 41 - empty khairo week is coverage, not a fake free diary
+  ---
+  duration_ms: 0.494083
+  type: 'test'
+  ...
+# Subtest: XSS in provider subjects is escaped
+ok 42 - XSS in provider subjects is escaped
+  ---
+  duration_ms: 0.476125
+  type: 'test'
+  ...
+# Subtest: showView loads Booking beside Performance and restores the last Sales tab
+ok 43 - showView loads Booking beside Performance and restores the last Sales tab
+  ---
+  duration_ms: 24.077333
+  type: 'test'
+  ...
+# Subtest: booked cases stay on the default unscoped list; archived and completed do not
+ok 44 - booked cases stay on the default unscoped list; archived and completed do not
+  ---
+  duration_ms: 1.48125
+  type: 'test'
+  ...
+# Subtest: confirm booking is not offered without exact acceptance
+ok 45 - confirm booking is not offered without exact acceptance
+  ---
+  duration_ms: 0.137833
+  type: 'test'
+  ...
+# Subtest: time change revises an unedited draft and keeps a human edit with a conflict flag
+ok 46 - time change revises an unedited draft and keeps a human edit with a conflict flag
+  ---
+  duration_ms: 0.275958
+  type: 'test'
+  ...
+# Subtest: changing an accepted slot invalidates Confirm booking
+ok 47 - changing an accepted slot invalidates Confirm booking
+  ---
+  duration_ms: 0.127209
+  type: 'test'
+  ...
+# Subtest: two requests for one contact keep separate human drafts
+ok 48 - two requests for one contact keep separate human drafts
+  ---
+  duration_ms: 0.081291
+  type: 'test'
+  ...
+# Subtest: accepted offer stays on the calendar and cannot be archived before an event exists
+ok 49 - accepted offer stays on the calendar and cannot be archived before an event exists
+  ---
+  duration_ms: 0.467792
+  type: 'test'
+  ...
+# Subtest: selecting a provider event with no contact clears the previous thread
+ok 50 - selecting a provider event with no contact clears the previous thread
+  ---
+  duration_ms: 0.303625
+  type: 'test'
+  ...
+# Subtest: follow_up with a sent offer still occupies the calendar and cannot be archived
+ok 51 - follow_up with a sent offer still occupies the calendar and cannot be archived
+  ---
+  duration_ms: 0.93775
+  type: 'test'
+  ...
+# Subtest: accepted duration change invalidates confirm booking
+ok 52 - accepted duration change invalidates confirm booking
+  ---
+  duration_ms: 0.134959
+  type: 'test'
+  ...
+# Subtest: Marnin Stratco line is a captain default of 776 that still names both sources
+ok 53 - Marnin Stratco line is a captain default of 776 that still names both sources
+  ---
+  duration_ms: 0.086
+  type: 'test'
+  ...
+# Subtest: inbound replies leave waiting and pick the matching simple action
+ok 54 - inbound replies leave waiting and pick the matching simple action
+  ---
+  duration_ms: 0.068125
+  type: 'test'
+  ...
+# Subtest: held or uncertain approve does not become Waiting for reply
+ok 55 - held or uncertain approve does not become Waiting for reply
+  ---
+  duration_ms: 0.05975
+  type: 'test'
+  ...
+# Subtest: archive does not delete the GHL contact and cannot hide an outstanding offer
+ok 56 - archive does not delete the GHL contact and cannot hide an outstanding offer
+  ---
+  duration_ms: 0.088042
+  type: 'test'
+  ...
+# Subtest: opsFetch for the workspace uses the signed-in token
+ok 57 - opsFetch for the workspace uses the signed-in token
+  ---
+  duration_ms: 2.461417
+  type: 'test'
+  ...
+# Subtest: a stamp records a captain decision and is never a send or a calendar write
+ok 58 - a stamp records a captain decision and is never a send or a calendar write
+  ---
+  duration_ms: 0.591167
+  type: 'test'
+  ...
+# Subtest: switching scoper drops the stamp, so one scoper cannot be stamped into another
+ok 59 - switching scoper drops the stamp, so one scoper cannot be stamped into another
+  ---
+  duration_ms: 0.148416
+  type: 'test'
+  ...
+# Subtest: the five week layers each own a stage tag and can be switched off
+ok 60 - the five week layers each own a stage tag and can be switched off
+  ---
+  duration_ms: 2.304041
+  type: 'test'
+  ...
+# Subtest: a cancelled thread whose diary event survives keeps the slot blocked, not free
+ok 61 - a cancelled thread whose diary event survives keeps the slot blocked, not free
+  ---
+  duration_ms: 0.215083
+  type: 'test'
+  ...
+# Subtest: the queue groups by real GHL pipeline stages and states an unread enquiry date rather than faking one
+ok 62 - the queue groups by real GHL pipeline stages and states an unread enquiry date rather than faking one
+  ---
+  duration_ms: 1.502292
+  type: 'test'
+  ...
+# Subtest: follow-through tiles count the queue and name the captain window
+ok 63 - follow-through tiles count the queue and name the captain window
+  ---
+  duration_ms: 0.433333
+  type: 'test'
+  ...
+# Subtest: all configured scopers are available for signed-in profile selection
+ok 64 - all configured scopers are available for signed-in profile selection
+  ---
+  duration_ms: 0.360958
+  type: 'test'
+  ...
+# Subtest: the Stratco lane paints Tue and Fri only with the Canning Vale band protected
+ok 65 - the Stratco lane paints Tue and Fri only with the Canning Vale band protected
+  ---
+  duration_ms: 0.347167
+  type: 'test'
+  ...
+# Subtest: the backend diary[] contract and the preview events[] shape both paint
+ok 66 - the backend diary[] contract and the preview events[] shape both paint
+  ---
+  duration_ms: 0.081875
+  type: 'test'
+  ...
+# Subtest: an enumerated CRM row is findable but is never counted or ranked as demand
+ok 67 - an enumerated CRM row is findable but is never counted or ranked as demand
+  ---
+  duration_ms: 0.365875
+  type: 'test'
+  ...
+# Subtest: a cancelled case does not leave its diary block reading as a confirmed booking
+ok 68 - a cancelled case does not leave its diary block reading as a confirmed booking
+  ---
+  duration_ms: 0.328125
+  type: 'test'
+  ...
+# Subtest: a desk rule states where work is offered and never overprints a real booking
+ok 69 - a desk rule states where work is offered and never overprints a real booking
+  ---
+  duration_ms: 0.385209
+  type: 'test'
+  ...
+# Subtest: a cancelled case with its diary event still present is never offered for stamping
+ok 70 - a cancelled case with its diary event still present is never offered for stamping
+  ---
+  duration_ms: 1.097416
+  type: 'test'
+  ...
+# Subtest: the stamp refuses a blocked or undated case in the handler, not only in the markup
+ok 71 - the stamp refuses a blocked or undated case in the handler, not only in the markup
+  ---
+  duration_ms: 0.175959
+  type: 'test'
+  ...
+# Subtest: a cancelled booking still in the diary blocks that time for anyone, not just its own case
+ok 72 - a cancelled booking still in the diary blocks that time for anyone, not just its own case
+  ---
+  duration_ms: 0.346708
+  type: 'test'
+  ...
+# Subtest: the why-stamp checklist states each fact once, in its shortest wording
+ok 73 - the why-stamp checklist states each fact once, in its shortest wording
+  ---
+  duration_ms: 0.342375
+  type: 'test'
+  ...
+# Subtest: overlapping cards share the column so no proposal is hidden under another
+ok 74 - overlapping cards share the column so no proposal is hidden under another
+  ---
+  duration_ms: 0.106958
+  type: 'test'
+  ...
+# Subtest: two proposals at the same time both render on the week
+ok 75 - two proposals at the same time both render on the week
+  ---
+  duration_ms: 0.4025
+  type: 'test'
+  ...
+# Subtest: a 20 second booking read completes and a 61 second read times out
+ok 76 - a 20 second booking read completes and a 61 second read times out
+  ---
+  duration_ms: 0.91075
+  type: 'test'
+  ...
+# Subtest: a 20s live shape with failed calendar still paints the queue and tiles
+ok 77 - a 20s live shape with failed calendar still paints the queue and tiles
+  ---
+  duration_ms: 20.503042
+  type: 'test'
+  ...
+# Subtest: Nithin queue groups by the 11 patio stages and folds quoted work
+ok 78 - Nithin queue groups by the 11 patio stages and folds quoted work
+  ---
+  duration_ms: 0.330417
+  type: 'test'
+  ...
+# Subtest: Marnin queue groups by the 14 fencing stages and folds quoted work
+ok 79 - Marnin queue groups by the 14 fencing stages and folds quoted work
+  ---
+  duration_ms: 0.470458
+  type: 'test'
+  ...
+# Subtest: a non-array cases roster fails honestly instead of inventing people
+ok 80 - a non-array cases roster fails honestly instead of inventing people
+  ---
+  duration_ms: 0.197167
+  type: 'test'
+  ...
+# Subtest: loading state does not paint a fake empty week
+ok 81 - loading state does not paint a fake empty week
+  ---
+  duration_ms: 0.049333
+  type: 'test'
+  ...
+# Subtest: Marnin company diary paints Busy and does not count as booked scopes
+ok 82 - Marnin company diary paints Busy and does not count as booked scopes
+  ---
+  duration_ms: 2.347833
+  type: 'test'
+  ...
+# Subtest: GHL booked-stage rows with an empty diary do not count as booked visits
+ok 83 - GHL booked-stage rows with an empty diary do not count as booked visits
+  ---
+  duration_ms: 4.257334
+  type: 'test'
+  ...
+# Subtest: GHL contact, opportunity or event id matches a diary event to a queue row
+ok 84 - GHL contact, opportunity or event id matches a diary event to a queue row
+  ---
+  duration_ms: 0.175834
+  type: 'test'
+  ...
+# Subtest: blocks_capacity false does not occupy an off-lane day
+ok 85 - blocks_capacity false does not occupy an off-lane day
+  ---
+  duration_ms: 0.242667
+  type: 'test'
+  ...
+# Subtest: absent pack is named in the coverage strip, never shown as free capacity
+ok 86 - absent pack is named in the coverage strip, never shown as free capacity
+  ---
+  duration_ms: 1.173708
+  type: 'test'
+  ...
+# Subtest: a pack proposal paints the day, window and draft on the card and in the detail
+ok 87 - a pack proposal paints the day, window and draft on the card and in the detail
+  ---
+  duration_ms: 0.348458
+  type: 'test'
+  ...
+# Subtest: live pack windows keep their own day, not the weekday of the week on screen
+ok 88 - live pack windows keep their own day, not the weekday of the week on screen
+  ---
+  duration_ms: 0.06225
+  type: 'test'
+  ...
+# Subtest: published marnin pack: 31 proposals, 11 offers, other-week slots listed, suburb from proposal
+ok 89 - published marnin pack: 31 proposals, 11 offers, other-week slots listed, suburb from proposal
+  ---
+  duration_ms: 3.136542
+  type: 'test'
+  ...
+# Subtest: a clock-only Fri row stays undated and does not attach to the week on screen
+ok 90 - a clock-only Fri row stays undated and does not attach to the week on screen
+  ---
+  duration_ms: 0.180167
+  type: 'test'
+  ...
+# Subtest: pack offers remain visible when roster missed them, but legacy stamps cannot write
+ok 91 - pack offers remain visible when roster missed them, but legacy stamps cannot write
+  ---
+  duration_ms: 12.0845
+  type: 'test'
+  ...
+# Subtest: job_type sits next to suburb on the queue row and in the detail header
+ok 92 - job_type sits next to suburb on the queue row and in the detail header
+  ---
+  duration_ms: 0.308958
+  type: 'test'
+  ...
+# Subtest: a job-only pack row shows the job on the queue, detail, and stamp board
+ok 93 - a job-only pack row shows the job on the queue, detail, and stamp board
+  ---
+  duration_ms: 0.243375
+  type: 'test'
+  ...
+# Subtest: pack offers accept only offer true or disposition offer on a keyed object
+ok 94 - pack offers accept only offer true or disposition offer on a keyed object
+  ---
+  duration_ms: 0.150083
+  type: 'test'
+  ...
+# Subtest: Booked tile names an empty GHL calendar and keeps diary not read for a failed read
+ok 95 - Booked tile names an empty GHL calendar and keeps diary not read for a failed read
+  ---
+  duration_ms: 0.163042
+  type: 'test'
+  ...
+# Subtest: GHL pipeline board uses real stage names, flags thread/diary drift, and holds Move
+ok 96 - GHL pipeline board uses real stage names, flags thread/diary drift, and holds Move
+  ---
+  duration_ms: 0.320625
+  type: 'test'
+  ...
+# Subtest: a GHL 429 mapped to HTTP 500 keeps the last complete week on screen
+ok 97 - a GHL 429 mapped to HTTP 500 keeps the last complete week on screen
+  ---
+  duration_ms: 0.893125
+  type: 'test'
+  ...
+# Subtest: fixture refusal still wipes the workspace even when a cache exists
+ok 98 - fixture refusal still wipes the workspace even when a cache exists
+  ---
+  duration_ms: 0.169375
+  type: 'test'
+  ...
+# Subtest: a cached scoper week paints before the next read returns
+ok 99 - a cached scoper week paints before the next read returns
+  ---
+  duration_ms: 0.316542
+  type: 'test'
+  ...
+# Subtest: a queue row with no job type prints not given once
+ok 100 - a queue row with no job type prints not given once
+  ---
+  duration_ms: 0.140667
+  type: 'test'
+  ...
+# Subtest: a week-nav 429 does not keep the previous week book
+ok 101 - a week-nav 429 does not keep the previous week book
+  ---
+  duration_ms: 0.30525
+  type: 'test'
+  ...
+# Subtest: week-nav 429 keeps only the requested week cache
+ok 102 - week-nav 429 keeps only the requested week cache
+  ---
+  duration_ms: 0.593917
+  type: 'test'
+  ...
+# Subtest: diary evidence leaves quoted, folded, and already-booked cards in their stage
+ok 103 - diary evidence leaves quoted, folded, and already-booked cards in their stage
+  ---
+  duration_ms: 0.127125
+  type: 'test'
+  ...
+# (node:94564) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: empty rows name both missing lanes and never create zero readings
+ok 104 - empty rows name both missing lanes and never create zero readings
+  ---
+  duration_ms: 37.296625
+  type: 'test'
+  ...
+# Subtest: partial lane and stale calendar expectation are independent
+ok 105 - partial lane and stale calendar expectation are independent
+  ---
+  duration_ms: 1.49525
+  type: 'test'
+  ...
+# Subtest: null and zero remain different; CRM wins never become accepted jobs
+ok 106 - null and zero remain different; CRM wins never become accepted jobs
+  ---
+  duration_ms: 0.083
+  type: 'test'
+  ...
+# Subtest: rolling counts sum available weeks; rates use summed parts and require four
+ok 107 - rolling counts sum available weeks; rates use summed parts and require four
+  ---
+  duration_ms: 0.403167
+  type: 'test'
+  ...
+# Subtest: selected week isolates lanes and coverage escapes source text
+ok 108 - selected week isolates lanes and coverage escapes source text
+  ---
+  duration_ms: 2.81375
+  type: 'test'
+  ...
+# Subtest: one authenticated opsFetch per requested week and recoverable errors
+ok 109 - one authenticated opsFetch per requested week and recoverable errors
+  ---
+  duration_ms: 0.192125
+  type: 'test'
+  ...
+# Subtest: slower old response cannot overwrite selected week
+ok 110 - slower old response cannot overwrite selected week
+  ---
+  duration_ms: 0.1155
+  type: 'test'
+  ...
+# Subtest: host request uses signed-in token and no shared browser key
+ok 111 - host request uses signed-in token and no shared browser key
+  ---
+  duration_ms: 2.666916
+  type: 'test'
+  ...
+# Subtest: opening synthesises available measures with distinct population wording
+ok 112 - opening synthesises available measures with distinct population wording
+  ---
+  duration_ms: 1.661625
+  type: 'test'
+  ...
+# Subtest: unanswered distributions require retained ages, and threshold cannot be inferred from count
+ok 113 - unanswered distributions require retained ages, and threshold cannot be inferred from count
+  ---
+  duration_ms: 3.183542
+  type: 'test'
+  ...
+# (node:94565) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: explicit 22 September is not mapped onto Tuesday 15
+ok 114 - explicit 22 September is not mapped onto Tuesday 15
+  ---
+  duration_ms: 32.529917
+  type: 'test'
+  ...
+# Subtest: afternoons without a day may get an AI-proposed afternoon, not a customer Monday fact
+ok 115 - afternoons without a day may get an AI-proposed afternoon, not a customer Monday fact
+  ---
+  duration_ms: 0.909917
+  type: 'test'
+  ...
+# Subtest: please do not cancel is not cancellation
+ok 116 - please do not cancel is not cancellation
+  ---
+  duration_ms: 0.374166
+  type: 'test'
+  ...
+# Subtest: yes but only after 4pm does not accept a 1pm offer
+ok 117 - yes but only after 4pm does not accept a 1pm offer
+  ---
+  duration_ms: 0.2775
+  type: 'test'
+  ...
+# Subtest: an earlier yes does not accept a later outbound offer
+ok 118 - an earlier yes does not accept a later outbound offer
+  ---
+  duration_ms: 0.829584
+  type: 'test'
+  ...
+# Subtest: outbound-only text is not customer availability; outreach may still propose a slot
+ok 119 - outbound-only text is not customer availability; outreach may still propose a slot
+  ---
+  duration_ms: 1.969875
+  type: 'test'
+  ...
+# Subtest: 02:00Z busy collides with 10:00 Perth
+ok 120 - 02:00Z busy collides with 10:00 Perth
+  ---
+  duration_ms: 0.421292
+  type: 'test'
+  ...
+# Subtest: missing coverage is a warning carried on the proposal, not a withheld row
+ok 121 - missing coverage is a warning carried on the proposal, not a withheld row
+  ---
+  duration_ms: 0.146583
+  type: 'test'
+  ...
+# Subtest: missing calendar, leave or travel cannot be ready, but stays stampable
+ok 122 - missing calendar, leave or travel cannot be ready, but stays stampable
+  ---
+  duration_ms: 0.503208
+  type: 'test'
+  ...
+# Subtest: no feasible slot is review, not ready
+ok 123 - no feasible slot is review, not ready
+  ---
+  duration_ms: 0.686167
+  type: 'test'
+  ...
+# Subtest: unqualified yes binds the preceding sent offer only
+ok 124 - unqualified yes binds the preceding sent offer only
+  ---
+  duration_ms: 0.166
+  type: 'test'
+  ...
+# Subtest: dated inbound window can be ready only with coverage and a free slot
+ok 125 - dated inbound window can be ready only with coverage and a free slot
+  ---
+  duration_ms: 0.1435
+  type: 'test'
+  ...
+# Subtest: fencing tag on a patio resource is a decision, not a Patio offer
+ok 126 - fencing tag on a patio resource is a decision, not a Patio offer
+  ---
+  duration_ms: 0.103
+  type: 'test'
+  ...
+# Subtest: held send evidence cannot classify as waiting
+ok 127 - held send evidence cannot classify as waiting
+  ---
+  duration_ms: 0.53775
+  type: 'test'
+  ...
+# Subtest: validator rejects an invented slot from a reason adapter
+ok 128 - validator rejects an invented slot from a reason adapter
+  ---
+  duration_ms: 0.154125
+  type: 'test'
+  ...
+# Subtest: fallback never claims intelligent automation
+ok 129 - fallback never claims intelligent automation
+  ---
+  duration_ms: 0.490542
+  type: 'test'
+  ...
+# Subtest: ops-ai structured result is still rejected when it invents a date
+ok 130 - ops-ai structured result is still rejected when it invents a date
+  ---
+  duration_ms: 0.835708
+  type: 'test'
+  ...
+# Subtest: reply mapper requires a bound offer for confirm-booking
+ok 131 - reply mapper requires a bound offer for confirm-booking
+  ---
+  duration_ms: 0.055541
+  type: 'test'
+  ...
+# Subtest: fabricated offer_id cannot create exact acceptance against inbound No
+ok 132 - fabricated offer_id cannot create exact acceptance against inbound No
+  ---
+  duration_ms: 0.557541
+  type: 'test'
+  ...
+# Subtest: model cancellation cannot override please do not cancel
+ok 133 - model cancellation cannot override please do not cancel
+  ---
+  duration_ms: 0.544917
+  type: 'test'
+  ...
+# Subtest: model customer_facts cannot move 22 Sep 10am to 15 Sep
+ok 134 - model customer_facts cannot move 22 Sep 10am to 15 Sep
+  ---
+  duration_ms: 0.156958
+  type: 'test'
+  ...
+# Subtest: outbound message id cannot be customer evidence for a window
+ok 135 - outbound message id cannot be customer evidence for a window
+  ---
+  duration_ms: 0.17125
+  type: 'test'
+  ...
+# Subtest: past slots are not ready
+ok 136 - past slots are not ready
+  ---
+  duration_ms: 0.141167
+  type: 'test'
+  ...
+# Subtest: malformed busy occupancy is a gap, not a free slot
+ok 137 - malformed busy occupancy is a gap, not a free slot
+  ---
+  duration_ms: 0.127417
+  type: 'test'
+  ...
+# Subtest: leave intervals block the candidate
+ok 138 - leave intervals block the candidate
+  ---
+  duration_ms: 0.122458
+  type: 'test'
+  ...
+# Subtest: travel from a previous visit blocks an immediate next suburb
+ok 139 - travel from a previous visit blocks an immediate next suburb
+  ---
+  duration_ms: 0.809041
+  type: 'test'
+  ...
+# Subtest: sent_offers array order does not bind an older offer
+ok 140 - sent_offers array order does not bind an older offer
+  ---
+  duration_ms: 0.228541
+  type: 'test'
+  ...
+# Subtest: a proposed text promises an arrival window, never an exact minute or an ISO date
+ok 141 - a proposed text promises an arrival window, never an exact minute or an ISO date
+  ---
+  duration_ms: 0.245667
+  type: 'test'
+  ...
+# (node:94566) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: stamp write then read is a store round trip, and stage_moves stay empty
+ok 142 - stamp write then read is a store round trip, and stage_moves stay empty
+  ---
+  duration_ms: 3.0925
+  type: 'test'
+  ...
+1..142
+# tests 142
+# suites 0
+# pass 142
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 152.718541

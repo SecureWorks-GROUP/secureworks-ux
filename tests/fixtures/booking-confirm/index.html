@@ -6,20 +6,17 @@
 <header>Secure Ops · Booking · Synthetic fixture, all writes are fake
 <button onclick="setReadState('read')">Read calendar</button><button onclick="setReadState('could_not_read')">Failed read</button><button onclick="setReadState('not_configured')">Not configured</button></header>
 <div id="viewSales"><div id="salesBookingRoot"></div></div>
-<script src="../../../modules/ops-sales-booking.js"></script><script src="read.js"></script>
+<script src="../../../modules/ops-sales-booking.js"></script><script src="read.js"></script><script src="api.js"></script>
 <script>
 document.body.classList.add('sales-booking-view-active');
 const api = SalesBooking;
 const data = makeBookingConfirmRead(api);
-window.fakeWrites = [];
+const backend = BookingConfirmFixtureAPI.create(api, data);
+window.fakeWrites = backend.writes;
+window.fakeReads = backend.reads;
 window.SECUREWORKS_CLOUD = {auth:{getUser:()=>({id:api.RESOURCES.marnin.scoper_user_id})}};
-window.opsPost = async (action, body) => {
-  if(action === 'sales_booking_visit_outcome_insert') { fakeWrites.push(JSON.parse(JSON.stringify({action,body}))); return {ok:true,visit_outcome:body.visit_outcome}; }
-  if(action !== 'sales_booking_approval_write') throw Error('Unexpected write refused');
-  fakeWrites.push(JSON.parse(JSON.stringify({action,body})));
-  return {ok:true, approval:{snapshot:body.snapshot,state:body.decision,reason:body.reason}};
-};
-window.opsFetch = async () => data;
+window.opsPost = backend.post;
+window.opsFetch = backend.read;
 Object.assign(api.state, {resourceId:'marnin',weekStart:data.week_start,data,selectedId:'lead-a',opened:true});
 window.setReadState = state => { data.booking_flow.calendar_read = {state,provider:'ghl',reason:state === 'read' ? '' : 'Synthetic provider state'}; api.render(); };
 api.render();

@@ -2,6 +2,8 @@ const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const api = require('./ops-sales-booking.js');
 const fixture = require('../tests/fixtures/booking-confirm/read.js');
+const backendFixture = require('../tests/fixtures/booking-confirm/api.js');
+const outcomeResponse = body => backendFixture.outcomeResponse(body, api.RESOURCES.marnin.scoper_user_id);
 let data, row, writes;
 beforeEach(() => {
   data = fixture(api); row = data.cases[0]; writes = [];
@@ -191,11 +193,11 @@ test('proposal, exact quotes, checks and needs-a-person reason are visible and e
   assert.match(html,/This is when the AI thinks we should book/);
 });
 test('visit happened records exact append-only fields with quote owed and no message', async () => {
-  global.opsPost = async (action, body) => { writes.push({action,body}); return {ok:true,visit_outcome:body.visit_outcome}; };
+  global.opsPost = async (action, body) => { writes.push({action,body}); return outcomeResponse(body); };
   const result = await api.recordVisitOutcome('demo-booking-completed','happened',null,'Measured both sides');
   assert.equal(result.ok,true);
   assert.equal(result.sent,false);
-  assert.equal(writes[0].action,'sales_booking_visit_outcome_insert');
+  assert.equal(writes[0].action,'record_visit_outcome');
   const r = result.visit_outcome;
   assert.deepEqual(Object.keys(r).sort(), ['id','booking_key','appointment_id','contact_id','opportunity_id','job_id','scoper_user_id','scoper_name','visit_start','outcome','reason','note','quote_owed','recorded_by_user_id','recorded_at','source','supersedes'].sort());
   assert.match(r.id,/^[0-9a-f-]{36}$/);
@@ -207,7 +209,7 @@ test('visit happened records exact append-only fields with quote owed and no mes
   assert.doesNotMatch(api.renderHTML(),/visit needs an outcome/);
 });
 test('did-not-happen requires one of three reasons and records no quote obligation', async () => {
-  global.opsPost = async (action,body) => { writes.push({action,body}); return {ok:true,visit_outcome:body.visit_outcome}; };
+  global.opsPost = async (action,body) => { writes.push({action,body}); return outcomeResponse(body); };
   assert.equal((await api.recordVisitOutcome('demo-booking-completed','did_not_happen',null,'')).ok,false);
   assert.equal((await api.recordVisitOutcome('demo-booking-completed','did_not_happen','wrong','')).ok,false);
   const result = await api.recordVisitOutcome('demo-booking-completed','did_not_happen','customer_not_home','Gate locked');
@@ -217,7 +219,7 @@ test('did-not-happen requires one of three reasons and records no quote obligati
   assert.equal(writes.length,1);
 });
 test('outcome correction appends with supersedes, quote owed can be unticked', async () => {
-  global.opsPost = async (_,body) => ({ok:true,visit_outcome:body.visit_outcome});
+  global.opsPost = async (_,body) => (outcomeResponse(body));
   const first = await api.recordVisitOutcome('demo-booking-completed','happened',null,'',true);
   assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'',false)).ok,false);
   api.state.visitForms['marnin|demo-booking-completed'] = {};
@@ -254,7 +256,7 @@ test('verified visit insert after load replaces state cannot root-insert on reop
   let finish;
   global.opsPost = async (action, body) => {
     writes.push({action, body});
-    return new Promise((resolve) => { finish = () => resolve({ok:true, visit_outcome: structuredClone(body.visit_outcome)}); });
+    return new Promise((resolve) => { finish = () => resolve(outcomeResponse(structuredClone(body))); });
   };
   const inflight = api.recordVisitOutcome('demo-booking-completed','happened',null,'Measured both sides');
   const pendingHtml = api.renderHTML();
@@ -275,7 +277,7 @@ test('verified visit insert after load replaces state cannot root-insert on reop
   assert.equal(api.state.data.visit_outcomes.some((row) => row.id === result.visit_outcome.id), true);
   global.opsPost = async (action, body) => {
     writes.push({action, body});
-    return {ok:true, visit_outcome: body.visit_outcome};
+    return outcomeResponse(body);
   };
   assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'again')).ok, false);
   assert.match(api.renderHTML(), /Correct outcome/);
@@ -291,7 +293,7 @@ test('verified visit insert after load replaces state cannot root-insert on reop
   const correction = await api.recordVisitOutcome('demo-booking-completed','did_not_happen','rescheduled','Moved',false);
   assert.equal(correction.ok, true);
   assert.equal(correction.visit_outcome.supersedes, result.visit_outcome.id);
-  assert.equal(writes.filter((w) => w.action === 'sales_booking_visit_outcome_insert').length, 2);
+  assert.equal(writes.filter((w) => w.action === 'record_visit_outcome').length, 2);
 });
 test('outcome note validation, unknown persistence and stale booking prevent extra inserts', async () => {
   global.opsPost = async () => { writes.push(1); throw Error('Connection lost'); };
@@ -325,4 +327,65 @@ test('read-back JSON key ordering does not invalidate an exact approval', async 
   assert.equal((await api.recordApproval(row.id,'calendar','approved')).ok,true);
   row.booking_read_model.calendar_write.approval.ui_snapshot.content = Object.fromEntries(Object.entries(row.booking_read_model.calendar_write.approval.ui_snapshot.content).reverse());
   assert.match(api.renderHTML(), /<strong>Approved<\/strong>/);
+});
+test('backend fixture accepts flat outcome body and server-normalized response without ok', async () => {
+  const backend = backendFixture.create(api, data);
+  global.opsPost = backend.post;
+  data.booked_visits[0].visit_start = new Date(Date.now()-86400000).toISOString().replace('Z', '+00:00');
+  api.renderHTML();
+  const result = await api.recordVisitOutcome('demo-booking-completed','happened',null,'  Measured both sides  ');
+  assert.equal(result.ok,true);
+  assert.equal(result.visit_outcome.note,'Measured both sides');
+  assert.equal(result.visit_outcome.visit_start,new Date(data.booked_visits[0].visit_start).toISOString());
+  const request = backend.writes[0];
+  assert.equal(request.action,'record_visit_outcome');
+  for (const field of ['visit_outcome','id','recorded_by_user_id','recorded_at','source']) assert.equal(Object.hasOwn(request.body,field),false);
+  assert.equal(api.latestVisitOutcome('demo-booking-completed').id,result.visit_outcome.id);
+});
+test('wrong facts or missing server provenance never verify an outcome or enable a retry', async () => {
+  for (const patch of [
+    {id:undefined}, {id:'not-a-uuid'}, {recorded_by_user_id:'someone-else'},
+    {recorded_at:'yesterday'}, {source:'other'}, {booking_key:'another-booking'},
+    {contact_id:'another-contact'}, {visit_start:new Date().toISOString()},
+    {outcome:'did_not_happen'}, {quote_owed:false}, {note:'Changed'}, {supersedes:'another-record'}
+  ]) {
+    api.state.visitUncertain = {}; api.state.visitErrors = {};
+    global.opsPost = async (action,body) => {
+      writes.push({action,body});
+      const result = outcomeResponse(body);
+      Object.assign(result.visit_outcome,patch);
+      return result;
+    };
+    const count = writes.length;
+    assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'')).ok,false);
+    assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'')).ok,false);
+    assert.equal(writes.length,count+1);
+    assert.equal(api.latestVisitOutcome('demo-booking-completed'),null);
+  }
+});
+test('fixture composes canonical list history and keeps both approval calls independent', async () => {
+  const backend = backendFixture.create(api,data);
+  global.opsPost = backend.post;
+  global.opsFetch = backend.read;
+  assert.equal((await api.recordApproval(row.id,'calendar','approved')).ok,true);
+  assert.equal(row.booking_read_model.message.state,'awaiting_approval');
+  assert.equal((await api.recordApproval(row.id,'message','approved')).ok,true);
+  assert.deepEqual(backend.writes.map(w => [w.action,w.body.snapshot.step]), [
+    ['sales_booking_approval_write','calendar'],['sales_booking_approval_write','message']
+  ]);
+  const first = await api.recordVisitOutcome('demo-booking-completed','happened',null,'');
+  api.state.visitForms['marnin|demo-booking-completed'] = {};
+  api.renderHTML();
+  const correction = await api.recordVisitOutcome('demo-booking-completed','did_not_happen','rescheduled','Moved',false);
+  await api.load('marnin',api.state.weekStart);
+  api.state.visitRecorded = {}; // Fresh-session truth must come from the read.
+  assert.equal(api.latestVisitOutcome('demo-booking-completed').id,correction.visit_outcome.id);
+  assert.equal(api.state.data.visit_outcomes.length,2);
+  assert.equal(api.state.data.visit_outcomes[0].id,first.visit_outcome.id);
+  const list = backend.reads.find(r => r.action === 'list_visit_outcomes');
+  assert.equal(list.params.include_history,true);
+  assert.ok(list.params.since && list.params.until);
+  assert.equal(Object.hasOwn(list.params,'start'),false);
+  assert.equal(Object.hasOwn(list.params,'end'),false);
+  assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'')).ok,false);
 });

@@ -23,7 +23,7 @@ Measured in this worktree on 18 Sep.
 
 The 28 s first load is a backend bound (25 s server cap + render). This change does not
 claim to cut that. Repeat waits paint the requested week's cache first. Last-good on
-429/timeout is same-week only — see `docs/sales-booking-ui.md`.
+429/timeout is same-week only; owner: `docs/sales-booking-ui.md`.
 
 ## Captain boundaries on this change
 
@@ -31,6 +31,6 @@ Send is still held. Nothing in the new confirm sheet or the editable SMS can act
 
 ## Round trip
 
-`scripts/sales-booking-local-api.test.mjs`: `sales_booking_stamp_write` then
-`sales_booking_read` against the same store file returns the KEEP and empty `stage_moves`.
-Door test: KEEP, wipe local stamp, `load()`, KEEP and the GHL card are still there.
+`scripts/sales-booking-local-api.test.mjs` still round-trips the retired
+`sales_booking_stamp_write` store. The live Booking screen no longer posts that stamp;
+current confirm/fail-closed contract: `docs/sales-booking-ui.md`.

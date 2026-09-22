@@ -962,9 +962,9 @@
   }
 
   // CONFIRMED only when the event is a booked scope: it matches a queue case
-  // by GHL contact id or the title starts
-  // with "Scope:". Company diary (Payday, Outback Agreements, SecureWorks) is
-  // not a booked visit.
+  // by exact GHL contact_id, opportunity_id or event_id, or the title starts
+  // with "Scope:". Name and suburb never match. Company diary (Payday,
+  // Outback Agreements, SecureWorks) is not a booked visit.
   function diaryEventIsScopeBooking(ev) {
     if (!ev) return false;
     if (titleStartsWithScope(ev)) return true;

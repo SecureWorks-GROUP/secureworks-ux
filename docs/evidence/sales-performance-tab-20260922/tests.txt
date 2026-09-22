@@ -1,104 +1,110 @@
-(node:86444) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(node:83752) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 (Use `node --trace-warnings ...` to show where the warning was created)
 TAP version 13
-# (node:86467) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+# (node:83774) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
 # (Use `node --trace-warnings ...` to show where the warning was created)
 # Subtest: empty store has one calm state, no fabricated figures
 ok 1 - empty store has one calm state, no fabricated figures
   ---
-  duration_ms: 0.8085
+  duration_ms: 0.586583
   type: 'test'
   ...
 # Subtest: example maps row-owned enquiries, proof-backed wins and unknown patio money
 ok 2 - example maps row-owned enquiries, proof-backed wins and unknown patio money
   ---
-  duration_ms: 8.942375
+  duration_ms: 7.681792
   type: 'test'
   ...
 # Subtest: zero, null, gaps, nested gaps and missing lane remain distinct
 ok 3 - zero, null, gaps, nested gaps and missing lane remain distinct
   ---
-  duration_ms: 8.697583
+  duration_ms: 8.492208
   type: 'test'
   ...
 # Subtest: source filter changes all attributable populations and withholds unsegmented values
 ok 4 - source filter changes all attributable populations and withholds unsegmented values
   ---
-  duration_ms: 0.204458
+  duration_ms: 0.186625
   type: 'test'
   ...
 # Subtest: customer names only resolve via contact id on authenticated read; escape all dynamic copy
 ok 5 - customer names only resolve via contact id on authenticated read; escape all dynamic copy
   ---
-  duration_ms: 2.53975
+  duration_ms: 2.694375
   type: 'test'
   ...
 # Subtest: action groups include urgent cases in owner totals, age frozen to report week
 ok 6 - action groups include urgent cases in owner totals, age frozen to report week
   ---
-  duration_ms: 1.259333
+  duration_ms: 1.299041
   type: 'test'
   ...
 # Subtest: unpaid deposit or bare CRM won never supplies accepted weekly jobs
 ok 7 - unpaid deposit or bare CRM won never supplies accepted weekly jobs
   ---
-  duration_ms: 0.248917
+  duration_ms: 0.26425
   type: 'test'
   ...
 # Subtest: quotes sort by value and expansion is real; prior null never becomes a zero comparison
 ok 8 - quotes sort by value and expansion is real; prior null never becomes a zero comparison
   ---
-  duration_ms: 1.245166
+  duration_ms: 1.317834
   type: 'test'
   ...
 # Subtest: older weekly rows cannot leak into selected week
 ok 9 - older weekly rows cannot leak into selected week
   ---
-  duration_ms: 0.502583
+  duration_ms: 0.539292
   type: 'test'
   ...
 # Subtest: authenticated reader makes one request, supports empty envelope and recoverable errors
 ok 10 - authenticated reader makes one request, supports empty envelope and recoverable errors
   ---
-  duration_ms: 0.628042
+  duration_ms: 0.65625
   type: 'test'
   ...
 # Subtest: late response never replaces more recently requested week
 ok 11 - late response never replaces more recently requested week
   ---
-  duration_ms: 0.154084
+  duration_ms: 0.156292
   type: 'test'
   ...
 # Subtest: coverage gaps override derived source totals and preserve unrelated lane readings
 ok 12 - coverage gaps override derived source totals and preserve unrelated lane readings
   ---
-  duration_ms: 0.155541
+  duration_ms: 0.16775
   type: 'test'
   ...
 # Subtest: prior comparisons use flattened keys only
 ok 13 - prior comparisons use flattened keys only
   ---
-  duration_ms: 0.672125
+  duration_ms: 0.694416
   type: 'test'
   ...
 # Subtest: All quotes and wins keep the measured lane when the other is a gap
 ok 14 - All quotes and wins keep the measured lane when the other is a gap
   ---
-  duration_ms: 4.242416
+  duration_ms: 5.2415
+  type: 'test'
+  ...
+# Subtest: All story extras, last-week priors and missing-row notice follow the measured lane
+ok 15 - All story extras, last-week priors and missing-row notice follow the measured lane
+  ---
+  duration_ms: 6.284625
   type: 'test'
   ...
 # Subtest: per-rep table uses three Khairo wins and withholds unnamed quotes
-ok 15 - per-rep table uses three Khairo wins and withholds unnamed quotes
+ok 16 - per-rep table uses three Khairo wins and withholds unnamed quotes
   ---
-  duration_ms: 2.625125
+  duration_ms: 2.692833
   type: 'test'
   ...
-1..15
-# tests 15
+1..16
+# tests 16
 # suites 0
-# pass 15
+# pass 16
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 70.480958
+# duration_ms 78.200791

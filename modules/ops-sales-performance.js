@@ -72,8 +72,9 @@
     const quotedValueMeasure=source==='all'?measured(r=>num(read(r,'quoted_value'))):sourced('quoted_value');
     const quotedJobs=quotedJobMeasure.none?null:source==='all'?sum(quotedJobMeasure.parts.map(p=>p.value)):quotedJobMeasure.items.length;
     const quotedValue=quotedValueMeasure.none?null:source==='all'?sum(quotedValueMeasure.parts.map(p=>p.value)):quotedValueMeasure.items.length?sum(quotedValueMeasure.items.map(q=>q.value)):0;
-    const scalar=path=>source==='all'?sum(active.map(r=>num(read(r,path)))):null;
-    const previous=path=>source==='all'?sum(active.map(r=>{
+    const rowsOf=cover=>cover?active.filter(r=>r&&r.lane===cover):active;
+    const scalar=(path,cover)=>source==='all'?sum(rowsOf(cover).map(r=>num(read(r,path)))):null;
+    const previous=(path,cover)=>source==='all'?sum(rowsOf(cover).map(r=>{
       const prior=read(r,'prior');
       return prior?num(get(prior,path)):null;
     })):null;
@@ -120,7 +121,7 @@
     const urgent=m.actions?.filter(a=>a.source==='Stratco'&&age(a.since,m.week)>=30) || [];
     const known=m.winCount!==null&&m.quotedValue!==null;
     const partial=m.winLane||m.quotedLane||m.quotedValueLane;
-    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+'</b> against '+compact(m.quotedValue)+' quoted; '+fmt(m.scalar('lost_week'))+' lost; '+fmt(m.scalar('tracked.accepted'))+' of '+fmt(m.scalar('tracked.count'))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
+    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+'</b> against '+compact(m.quotedValue)+' quoted; '+fmt(m.scalar('lost_week',partial))+' lost; '+fmt(m.scalar('tracked.accepted',partial))+' of '+fmt(m.scalar('tracked.count',partial))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
     const middle=m.lane==='patio'?'<b>'+fmt(m.actions?.length??null)+' patio customers waiting on us</b>; reply time is '+hours(m.elapsed)+' on the customer’s clock.':m.source!=='all'?'<b>'+fmt(m.actions?.length??null)+' customers waiting through '+esc(m.source)+'</b>; follow through on the oldest commitments first.':'<b>'+fmt(fv('stratco_week.in_crm'))+' of '+fmt(fv('stratco_week.allocated'))+' Stratco allocations entered in the CRM</b>'+(urgent.length?', and '+urgent.length+' customers have waited '+fmt(age(urgent[0].since,m.week))+' days for a promised price.':'.');
     const closing=m.lane==='patio'?'<b>'+fmt(m.source==='all'?num(read(m.patio,'patio_uncontacted')):null)+' patio clients not yet contacted</b>; review the queue before adding more work.':m.source!=='all'?'Pipeline ageing and cash for this lead source are <b>not published (–)</b>.':'<b>'+fmt(fv('followup.count'))+' fencing quotes worth '+compact(fv('followup.value_sum_crm'))+' have no decision</b>; '+fmt(fv('followup.touched_last_14d'))+' were touched in the last fortnight.';
     return '<ul class="story">'+[['quotes',opening],['do',middle],['stuck',closing]].map(([id,text])=>'<li><a href="#sp-'+id+'" data-performance-jump="sp-'+id+'">'+text+'</a></li>').join('')+'</ul>';
@@ -131,9 +132,9 @@
     const K=[
       [fmt(m.enquiries),'New enquiries','First enquiries through each lead source',delta(m.enquiries,m.previous('enquiries'))],
       [hours(m.elapsed),'Reply time'+(m.lane==='all'?' (fencing)':''),"Customer’s clock · "+hours(m.staffed)+' working hours',delta(m.elapsed,m.replyPrior,hours)],
-      [fmt(m.quotedJobs),tagged('Quotes sent',m.quotedLane),m.quotedLane?'Measured '+m.quotedLane+' only':m.lane==='all'?'Both published lanes':'Jobs with quote evidence',delta(m.quotedJobs,m.previous('quoted_jobs'))],
-      [compact(m.quotedValue),tagged('Quoted value',m.quotedValueLane),'Including GST',delta(m.quotedValue,m.previous('quoted_value'),money)],
-      [fmt(m.winCount),tagged('Won',m.winLane),money(m.winValue)+' · accepted with proof',delta(m.winCount,m.previous('won'))],
+      [fmt(m.quotedJobs),tagged('Quotes sent',m.quotedLane),m.quotedLane?'Measured '+m.quotedLane+' only':m.lane==='all'?'Both published lanes':'Jobs with quote evidence',delta(m.quotedJobs,m.previous('quoted_jobs',m.quotedLane))],
+      [compact(m.quotedValue),tagged('Quoted value',m.quotedValueLane),'Including GST',delta(m.quotedValue,m.previous('quoted_value',m.quotedValueLane),money)],
+      [fmt(m.winCount),tagged('Won',m.winLane),money(m.winValue)+' · accepted with proof',delta(m.winCount,m.previous('won',m.winLane))],
       [fmt(m.actions?.length ?? null),'Customers waiting','Actions grouped by person below',delta(m.actions?.length ?? null,m.previous('customers_waiting'))]
     ];
     return '<section class="card kpis" aria-label="Last seven days">'+K.map(([v,l,s,d])=>'<div class="kpi"><div class="v">'+esc(v)+'</div><div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div>'+d+'</div>').join('')+'</section>';
@@ -194,7 +195,7 @@
     const definitions=[
       ['Won','Customer acceptance with retained proof, dated inside the reporting week. A CRM stage or an unpaid deposit is not added to weekly wins.'],
       ['Reply time','Median elapsed time on the customer’s clock; working hours are separate. All shows fencing explicitly because lane medians cannot be combined.'],
-      ['Comparisons','Only like-for-like prior measures are compared. CRM creations are not first enquiries; tracked documents are not all quotes. Missing priors stay as a dash.'],
+      ['Comparisons','Only like-for-like prior measures are compared. In All, a labelled single-lane KPI compares that lane’s prior. CRM creations are not first enquiries; tracked documents are not all quotes. Missing priors stay as a dash.'],
       ['Lead sources','The filter applies to enquiries, actions, quote rows and wins. Measures without a published source breakdown become a dash.'],
       ['Missing measures','A dash means absent or unreconciled, or both lanes missing in All. A labelled fencing or patio figure is the measured lane when the other is a gap. A published zero remains zero.'],
       ['Per rep','One row each for Khairo, Nithin and Marnin. Won uses wins.rep; waiting uses actions.owner. Quotes sent and quoted value need quote_rows.rep; otherwise they stay a dash labelled not in store yet.'],
@@ -212,7 +213,8 @@
     if(!data?.rows?.length)return '<div class="wrap"><h1>Sales performance</h1><p role="status">No week published yet</p></div>';
     const m=model(data,options),weeks=[...new Set([data.week_start,...(data.available_weeks || [])])].filter(Boolean).sort().reverse();
     const sources=[...new Set(['Stratco','Web','Phone',...m.active.flatMap(r=>Object.keys(read(r,'daily')?.[r?.lane] || {})),...m.active.flatMap(r=>(list(r,'quote_rows')||[]).map(q=>q.source)),...m.active.flatMap(r=>(list(r,'actions')||[]).map(a=>a.source))])].filter(Boolean);
-    const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week. Combined measures stay unavailable.</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
+    const cover=m.quotedLane||m.winLane||m.quotedValueLane;
+    const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week.'+(cover?' Showing '+cover+' quotes and wins.':' Combined measures stay unavailable.')+'</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
     const card=(id,h,sub,content)=>'<section class="card list" id="sp-'+id+'"><h2>'+h+'</h2><p class="sub">'+sub+'</p>'+content+'</section>';
     return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+repsHTML(m)+'<div class="grid">'+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data))+'<div class="right-column">'+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div></div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
   }

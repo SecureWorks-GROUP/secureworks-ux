@@ -8,6 +8,7 @@ Captured with `chrome-devtools-axi` against the real `ops.html#performance` host
 | Phone, light and dark | 390px viewport, 390px document width |
 | Smallest visible report text | 11px |
 | Host | Sales active, Performance selected, actual module and authenticated opsFetch |
+| All story | Fencing: 3 jobs won for $11,037 against $171k quoted; 5 lost; 0 of 12 tracked. Patio quotes and wins stay a dash. |
 | All KPIs | Quotes sent, Quoted value and Won show the fencing figures with `(fencing)` because patio is a gap |
 | Per-rep table | Khairo 3 / $11,037 / 18 waiting / 2 over a week; Nithin 0 / 10; Marnin 0 / 2; quotes “not in store yet” |
 | Lane filter | Fencing keeps Khairo’s three wins; patio waiting stays with Nithin and won stays a dash |

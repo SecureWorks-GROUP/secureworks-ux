@@ -88,8 +88,15 @@ is exactly the masking that hid the Schedule-view gap. Keep it that way.
 Schedule bars may be backed by several same-person day rows; every V2
 move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
 writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
-safe order. A destination held by a separate visit is skipped (both visits
-stay), never deleted or allowed to abort the drag. Ghost observer rows remain
+safe order, and it stages against `calStagingOccupancy(jobId)` — the loaded
+window PLUS the dragged job's full assignment set from the existing
+`job_detail` read — because the window alone is blind past its edge and when
+the feed is truncated. A job-level Schedule-bar drag is all-or-nothing: if any
+crew chain would collide with a genuine separate visit, nothing is written,
+every row stays where it is, and one warning toast names the blocking existing
+visits counted as real holders (`staged.blockers`), never cascaded candidates.
+A single-row move/resize onto a held date is skipped with both visits kept,
+never deleted or allowed to abort the drag. Ghost observer rows remain
 backend-owned and absent from the calendar feed. Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.
 

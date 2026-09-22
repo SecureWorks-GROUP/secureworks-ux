@@ -201,5 +201,58 @@ test.describe('CP1 assignment date staging — unique-key collision safety', () 
     );
     expect(staged.ordered).toEqual([]);
     expect(staged.skipped[0].conflictAssignmentId).toBe('existing');
+    expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['existing']);
+  });
+
+  test('a blocked crew chain reports the one genuine holder, never its cascaded candidates', () => {
+    // Hugo (u1) and Isaac (u2) both hold Mon..Wed; Isaac also has a separate
+    // visit on Fri. Shifting the bar to Wed..Fri blocks Isaac's Wed -> Fri row
+    // outright, his Mon -> Wed row then waits on it forever (a cascaded
+    // candidate), while his Tue -> Thu row is uncontested. The staging pass
+    // therefore reports a PARTIAL ordered set — the caller's all-or-nothing
+    // rule is what keeps the job from being torn — and exactly one blocker.
+    const events = [
+      ev('h0', 'u1', MON), ev('h1', 'u1', TUE), ev('h2', 'u1', WED),
+      ev('i0', 'u2', MON), ev('i1', 'u2', TUE), ev('i2', 'u2', WED),
+      ev('i-existing', 'u2', FRI),
+    ];
+    const staged = C.stageCollisionSafeMoves(events, [
+      move('h0', 'u1', MON, WED), move('h1', 'u1', TUE, THU), move('h2', 'u1', WED, FRI),
+      move('i0', 'u2', MON, WED), move('i1', 'u2', TUE, THU), move('i2', 'u2', WED, FRI),
+    ]);
+    const ordered = staged.ordered.map((item) => item.assignmentId);
+    expect(ordered.sort()).toEqual(['h0', 'h1', 'h2', 'i1']);
+    expect(staged.ordered.map((item) => item.assignmentId).indexOf('h2'))
+      .toBeLessThan(staged.ordered.map((item) => item.assignmentId).indexOf('h0'));
+    expect(staged.skipped.map((item) => item.move.assignmentId).sort()).toEqual(['i0', 'i2']);
+    expect(staged.blockers).toEqual([{ assignmentId: 'i-existing', event: events[6] }]);
+  });
+});
+
+test.describe('CP1 staging occupancy — job-scoped assignment rows over the loaded window', () => {
+  test('job_detail rows fold into the calendar-event shape and win over the window copy', () => {
+    const jobRows = C.assignmentRowsToEvents([
+      { id: 'a1', user_id: 'u1', scheduled_date: WED + 'T00:00:00+08:00', status: 'scheduled', role: 'installer' },
+      { id: 'a9', users: { id: 'u1', name: 'Hugo' }, scheduled_date: FRI },
+      { id: 'a-nodate', user_id: 'u1' },
+      null,
+    ], 'j1');
+    expect(jobRows.map((r) => [r.assignment_id, r.job_id, r.user_id, r.scheduled_date, r.crew_name]))
+      .toEqual([['a1', 'j1', 'u1', WED, null], ['a9', 'j1', 'u1', FRI, 'Hugo']]);
+
+    const windowEvents = [
+      { assignment_id: 'a1', job_id: 'j1', user_id: 'u1', scheduled_date: MON },
+      { assignment_id: 'other', job_id: 'j2', user_id: 'u1', scheduled_date: MON },
+    ];
+    const merged = C.mergeOccupancyEvents(windowEvents, jobRows);
+    expect(merged.map((r) => [r.assignment_id, r.scheduled_date]))
+      .toEqual([['a1', WED], ['a9', FRI], ['other', MON]]);
+
+    // The fresher job-scoped date is what staging must see: a row the window
+    // still shows on Mon has really moved to Wed and blocks a Wed drop.
+    const staged = C.stageCollisionSafeMoves(merged, [
+      { assignmentId: 'other', jobId: 'j1', userId: 'u1', fromDate: MON, toDate: WED },
+    ]);
+    expect(staged.blockers.map((b) => b.assignmentId)).toEqual(['a1']);
   });
 });

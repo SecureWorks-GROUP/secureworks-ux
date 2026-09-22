@@ -159,3 +159,47 @@ test.describe('CP1 buildResizePayload — edge drag with weekend-skip duration a
     expect(C.buildResizePayload(multi, 'start', MON2).scheduled_date).toBe(FRI);
   });
 });
+
+test.describe('CP1 assignment date staging — unique-key collision safety', () => {
+  const ev = (id, userId, date, extra = {}) => ({
+    assignment_id: id, job_id: 'j1', user_id: userId,
+    scheduled_date: date, assignment_type: 'install', ...extra,
+  });
+  const move = (id, userId, fromDate, toDate, extra = {}) => ({
+    assignmentId: id, jobId: 'j1', userId, fromDate, toDate, ...extra,
+  });
+
+  test('a one-day forward shift frees the newest row first', () => {
+    const events = [
+      ev('a1', 'u1', MON), ev('a2', 'u1', TUE), ev('a3', 'u1', WED),
+      // Ghosts are backend-owned and excluded from calendar_events; a defensive
+      // copy must not participate in the real crew move graph.
+      ev('ghost', 'shaun', TUE, { role: 'observer', is_ghost: true }),
+    ];
+    const staged = C.stageCollisionSafeMoves(events, [
+      move('a1', 'u1', MON, TUE),
+      move('a2', 'u1', TUE, WED),
+      move('a3', 'u1', WED, THU),
+    ]);
+    expect(staged.ordered.map((item) => item.assignmentId)).toEqual(['a3', 'a2', 'a1']);
+    expect(staged.skipped).toEqual([]);
+  });
+
+  test('an unaffected visit already on the target date is preserved and skipped', () => {
+    const staged = C.stageCollisionSafeMoves(
+      [ev('source', 'u1', MON), ev('existing', 'u1', WED)],
+      [move('source', 'u1', MON, WED)],
+    );
+    expect(staged.ordered).toEqual([]);
+    expect(staged.skipped).toEqual([{ move: move('source', 'u1', MON, WED), conflictAssignmentId: 'existing' }]);
+  });
+
+  test('a reassignment checks the target user while freeing the source user key', () => {
+    const staged = C.stageCollisionSafeMoves(
+      [ev('source', 'u1', MON), ev('existing', 'u2', MON)],
+      [move('source', null, MON, MON, { sourceUserId: 'u1', targetUserId: 'u2' })],
+    );
+    expect(staged.ordered).toEqual([]);
+    expect(staged.skipped[0].conflictAssignmentId).toBe('existing');
+  });
+});

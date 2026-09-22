@@ -85,6 +85,13 @@ Drag regression checks live in `tests/e2e/cal-drag-real-input.spec.js` and use
 ONLY trusted pointer input (Playwright `page.mouse` press-move-release) —
 synthetic `dispatchEvent` checks pass even when a real user cannot drag, which
 is exactly the masking that hid the Schedule-view gap. Keep it that way.
+Schedule bars may be backed by several same-person day rows; every V2
+move/resize must stage through `CalOpsCore.stageCollisionSafeMoves` before
+writing so `(job_id,user_id,scheduled_date)` chains free destination dates in
+safe order. A destination held by a separate visit is skipped (both visits
+stay), never deleted or allowed to abort the drag. Ghost observer rows remain
+backend-owned and absent from the calendar feed. Guard:
+`tests/e2e/ops-calendar-move-collision.spec.js`.
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with
 `data-caldiv`, `toggleCalDivision`, `syncCalDivCheckboxes`, `_calDivFilters`

@@ -8772,6 +8772,77 @@ var CalOpsCore = (function () {
       duration_days: workingSpanDays(newStart, newEnd)
     };
   }
+  // Order a set of assignment date writes against the live calendar snapshot
+  // without ever stepping on job_assignments_job_user_date_key
+  // (job_id,user_id,scheduled_date). Schedule view can paint several physical
+  // rows as ONE bar — commonly one row per person/day. Moving Mon..Wed to
+  // Tue..Thu must therefore free Wed before Tue, and Tue before Mon. A target
+  // held by a row outside this move is a genuine separate visit: skip that
+  // candidate and leave BOTH visits intact instead of deleting one or letting
+  // Postgres fail the whole drag. Ghost observer rows are backend-owned and
+  // excluded from calendar_events, but ignore one defensively if supplied.
+  function stageCollisionSafeMoves(events, moves) {
+    function isGhost(ev) {
+      var role = String((ev && ev.role) || '').toLowerCase();
+      var aType = String((ev && ev.assignment_type) || '').toLowerCase();
+      return !!(ev && ev.is_ghost === true) || role === 'observer' || role === 'ghost' || aType === 'observer' || aType === 'ghost';
+    }
+    function key(jobId, userId, date) {
+      if (!jobId || !userId || !date) return null; // NULL user_id is not constrained by the SQL unique key
+      return String(jobId) + '|' + String(userId) + '|' + String(date);
+    }
+    var occupancy = {};
+    (events || []).forEach(function(ev) {
+      if (!ev || isGhost(ev)) return;
+      var k = key(ev.job_id, ev.user_id, ev.scheduled_date);
+      if (k) occupancy[k] = ev.assignment_id;
+    });
+    var pending = (moves || []).map(function(move, index) {
+      return {
+        move: move,
+        index: index,
+        assignmentId: move.assignmentId,
+        sourceKey: key(move.jobId, move.sourceUserId || move.userId, move.fromDate),
+        targetKey: key(move.jobId, move.targetUserId || move.userId, move.toDate)
+      };
+    });
+    var movingIds = {};
+    pending.forEach(function(item) { movingIds[item.assignmentId] = true; });
+    var ordered = [], skipped = [];
+
+    while (pending.length) {
+      var progressed = false;
+      for (var i = 0; i < pending.length;) {
+        var item = pending[i];
+        var holder = item.targetKey ? occupancy[item.targetKey] : null;
+        if (!holder || holder === item.assignmentId) {
+          if (item.sourceKey && occupancy[item.sourceKey] === item.assignmentId) delete occupancy[item.sourceKey];
+          if (item.targetKey) occupancy[item.targetKey] = item.assignmentId;
+          ordered.push(item.move);
+          pending.splice(i, 1);
+          progressed = true;
+          continue;
+        }
+        if (!movingIds[holder]) {
+          skipped.push({ move: item.move, conflictAssignmentId: holder });
+          pending.splice(i, 1);
+          progressed = true;
+          continue;
+        }
+        i++;
+      }
+      if (progressed) continue;
+
+      // A cycle (or two candidates collapsing onto one target) cannot be
+      // resolved with safe ordinary updates. Preserve every source visit and
+      // report the candidates as skipped; never park live rows on fake dates.
+      pending.forEach(function(item) {
+        skipped.push({ move: item.move, conflictAssignmentId: item.targetKey ? occupancy[item.targetKey] || null : null });
+      });
+      pending = [];
+    }
+    return { ordered: ordered, skipped: skipped };
+  }
   return {
     pad2: pad2, fmt: fmt, addDaysStr: addDaysStr, dateDeltaDays: dateDeltaDays,
     calWindowRange: calWindowRange, buildMovePayload: buildMovePayload,
@@ -8780,7 +8851,8 @@ var CalOpsCore = (function () {
     isWeekendStr: isWeekendStr, layWorkingDays: layWorkingDays,
     paintedSpanDates: paintedSpanDates, workingSpanDays: workingSpanDays,
     movedSpanV2: movedSpanV2, buildMovePayloadV2: buildMovePayloadV2,
-    buildResizePayload: buildResizePayload
+    buildResizePayload: buildResizePayload,
+    stageCollisionSafeMoves: stageCollisionSafeMoves
   };
 })();
 // </calendar-ops-core>
@@ -10003,20 +10075,40 @@ async function moveSchedSegment(jobId, segStart, segEnd, newDate) {
     if (plan.mode !== 'move') { showToast('Error: Schedule-view move produced a ' + plan.mode + ' plan — refusing to reassign', 'warning'); return; }
     plans.push({ ev: ev, crew: crewDisplayName(ev), plan: plan });
   }
+  var stagedMoves = CalOpsCore.stageCollisionSafeMoves(_calEvents, plans.map(function(p) {
+    return {
+      assignmentId: p.ev.assignment_id,
+      jobId: p.ev.job_id,
+      userId: p.ev.user_id || null,
+      fromDate: p.ev.scheduled_date,
+      toDate: p.plan.update.scheduled_date,
+      entry: p
+    };
+  }));
   async function applyMoves() {
     try {
-      for (var pi = 0; pi < plans.length; pi++) {
-        await opsPost('update_assignment', plans[pi].plan.update);
+      for (var pi = 0; pi < stagedMoves.ordered.length; pi++) {
+        await opsPost('update_assignment', stagedMoves.ordered[pi].entry.plan.update);
       }
-      showToast('Rescheduled', 'success');
-      maybeOfferRescheduleSms(evs[0], newDate);
+      if (stagedMoves.skipped.length) {
+        var kept = stagedMoves.skipped.length;
+        showToast(stagedMoves.ordered.length
+          ? 'Rescheduled — ' + kept + ' existing visit' + (kept === 1 ? '' : 's') + ' kept'
+          : 'Already scheduled there — existing visit kept', 'warning');
+      } else {
+        showToast('Rescheduled', 'success');
+      }
+      // A partially skipped segment no longer has one trustworthy new START;
+      // never offer a client SMS for a date the complete job did not reach.
+      if (stagedMoves.ordered.length && !stagedMoves.skipped.length) maybeOfferRescheduleSms(evs[0], newDate);
       loadCalendar();
     } catch (e) { showToast('Error: ' + e.message, 'warning'); loadCalendar(); }
   }
   // ONE combined availability check across all affected crew over their moved
   // working-day spans — a single confirm, never one modal per crew member.
   var clashes = [];
-  plans.forEach(function(p) {
+  stagedMoves.ordered.forEach(function(move) {
+    var p = move.entry;
     clashes = clashes.concat(collectSpanClashes(p.crew, p.plan.update.scheduled_date, p.plan.update.scheduled_end));
   });
   confirmClashesOrProceed(clashes, applyMoves);
@@ -10063,6 +10155,17 @@ async function doResizeAssignment(ev, edge, targetDate) {
   // A clamped or no-change edge drop leaves the span as-is — skip the write.
   if (payload.scheduled_date === ev.scheduled_date &&
       payload.scheduled_end === (ev.scheduled_end || ev.scheduled_date)) return;
+  var stagedResize = CalOpsCore.stageCollisionSafeMoves(_calEvents, [{
+    assignmentId: ev.assignment_id,
+    jobId: ev.job_id,
+    userId: ev.user_id || null,
+    fromDate: ev.scheduled_date,
+    toDate: payload.scheduled_date
+  }]);
+  if (stagedResize.skipped.length) {
+    showToast('Already scheduled there — existing visit kept', 'warning');
+    return;
+  }
   try {
     await opsPost('update_assignment', payload);
     showToast('Duration updated', 'success');
@@ -10287,6 +10390,21 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
   var plan = window.__SW_CAL_DRAGV2_ENABLED
     ? CalOpsCore.buildMovePayloadV2(ev, newCrew, newUserId, newDate)
     : CalOpsCore.buildMovePayload(ev, newCrew, newUserId, newDate);
+  if (window.__SW_CAL_DRAGV2_ENABLED) {
+    var moveTargetUserId = plan.mode === 'reassign' ? plan.create.userId : (newUserId || ev.user_id || null);
+    var stagedMove = CalOpsCore.stageCollisionSafeMoves(_calEvents, [{
+      assignmentId: ev.assignment_id,
+      jobId: ev.job_id,
+      sourceUserId: ev.user_id || null,
+      targetUserId: moveTargetUserId,
+      fromDate: ev.scheduled_date,
+      toDate: plan.mode === 'reassign' ? plan.create.scheduledDate : plan.update.scheduled_date
+    }]);
+    if (stagedMove.skipped.length) {
+      showToast('Already scheduled there — existing visit kept', 'warning');
+      return;
+    }
+  }
   try {
     if (plan.mode === 'reassign') {
       // Crew change = an allocation act (G2): delete the old row and create the

@@ -101,7 +101,9 @@ rows of one bar collapsing onto one date, e.g. deliberately scheduled Sat+Sun
 rows) says so instead of blaming an existing visit. Ghost observer rows remain
 backend-owned and absent from the calendar feed, but the unique key binds them
 too: the `job_detail` read supplies them, they occupy their date in staging,
-and they are never named or counted in a toast. Guard:
+and they are never named or counted in a toast. That read also carries
+cancelled/completed rows the feed hides; they block too, and a toast names them
+as "(cancelled|completed visit still holds that date)". Guard:
 `tests/e2e/ops-calendar-move-collision.spec.js`.
 
 The sidebar "Divisions" filter (`cal-sidebar-item` checkboxes with

@@ -398,3 +398,50 @@ test('a bar with deliberately scheduled Sat and Sun rows says its days would col
     .toEqual([D.FRI, D.SAT, D.SUN]);
   assertUnique(rows);
 });
+
+test('a cancelled row that still holds the target date is named as cancelled, not as a visit on the calendar', async ({ page }) => {
+  // The feed never shows a cancelled row, but the unique key still binds it;
+  // the job-scoped read supplies it and the toast must say why nothing is
+  // visible where the Captain is being told a visit exists.
+  const rows = [
+    assignment('h-source', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
+    assignment('h-cancelled', 'u-hugo', 'Hugo', D.WED, {
+      role: 'lead_installer', status: 'cancelled', assignment_status: 'cancelled', feed_hidden: true,
+    }),
+    assignment('g-mon', 'u-shaun', null, D.MON, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  const source = page.locator(`.cal-swim-cell[data-date="${D.MON}"][data-crew="Hugo"] .cal-job-block`);
+  await realDrag(page, source, page.locator(`.cal-swim-cell[data-date="${D.WED}"][data-crew="Hugo"]`));
+
+  await expect(page.getByText(`Already scheduled there — Hugo on ${fmtDate(D.WED)} (cancelled visit still holds that date)`)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  expect(writes).toHaveLength(0);
+  expect(rows.find((row) => row.id === 'h-source').scheduled_date).toBe(D.MON);
+  assertUnique(rows);
+});
+
+test('a multi-crew bar blocked by a completed row names it as completed in the combined toast', async ({ page }) => {
+  const rows = [
+    assignment('h-0', 'u-hugo', 'Hugo', D.MON, { role: 'lead_installer' }),
+    assignment('h-1', 'u-hugo', 'Hugo', D.TUE, { role: 'lead_installer' }),
+    assignment('i-0', 'u-isaac', 'Isaac', D.MON),
+    assignment('i-1', 'u-isaac', 'Isaac', D.TUE),
+    assignment('i-done', 'u-isaac', 'Isaac', D.FRI, {
+      status: 'complete', assignment_status: 'complete', feed_hidden: true,
+    }),
+    assignment('g-mon', 'u-shaun', null, D.MON, { role: 'observer', is_ghost: true }),
+    assignment('g-tue', 'u-shaun', null, D.TUE, { role: 'observer', is_ghost: true }),
+    assignment('g-fri', 'u-shaun', null, D.FRI, { role: 'observer', is_ghost: true }),
+  ];
+  const { writes } = await bootCalendar(page, { rows });
+  await page.locator('#btnViewSchedule').click();
+  const bar = page.locator('.cal-schedule-bar[data-job-id="job-consecutive"]').first();
+  await expect(bar.locator('.bar-crew .crew-initial')).toHaveCount(2);
+  await realDrag(page, bar, page.locator(`.cal-schedule-cell[data-date="${D.THU}"]`));
+
+  await expect(page.getByText(`Not moved — 1 existing visit kept: Isaac on ${fmtDate(D.FRI)} (completed visit still holds that date)`)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(UNIQUE_ERROR);
+  expect(writes).toHaveLength(0);
+  assertUnique(rows);
+});

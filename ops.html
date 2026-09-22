@@ -10109,14 +10109,34 @@ async function calStagingOccupancy(jobId) {
 // One warning for a Schedule-bar drag that could not move as a whole. A
 // single-crew bar keeps the single-visit wording; a multi-crew bar names the
 // genuine existing visits that block it, counted as real holders only.
+function blockingVisitStatus(blocker) {
+  var ev = blocker && blocker.event;
+  var status = String((ev && (ev.status || ev.assignment_status)) || '').toLowerCase();
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'complete' || status === 'completed') return 'completed';
+  return null;
+}
+
+function describeBlockingVisit(blocker) {
+  var ev = blocker && blocker.event;
+  if (!ev) return 'an existing visit';
+  var text = crewDisplayName(ev) + ' on ' + fmtDate(ev.scheduled_date);
+  var held = blockingVisitStatus(blocker);
+  if (held) text += ' (' + held + ' visit still holds that date)';
+  return text;
+}
+
+function describeSkippedSingleMove(staged) {
+  var blocker = (staged && staged.blockers || [])[0];
+  if (blocker && blockingVisitStatus(blocker)) return 'Already scheduled there — ' + describeBlockingVisit(blocker);
+  return 'Already scheduled there — existing visit kept';
+}
+
 function describeBlockedSegmentMove(staged, crewCount) {
   if (staged.collapseOnly) return 'Not moved - two days of this job would land on the same date';
   var blockers = staged.blockers || [];
-  if (crewCount <= 1 || !blockers.length) return 'Already scheduled there — existing visit kept';
-  var names = blockers.map(function(b) {
-    var ev = b.event;
-    return ev ? crewDisplayName(ev) + ' on ' + fmtDate(ev.scheduled_date) : 'an existing visit';
-  });
+  if (crewCount <= 1 || !blockers.length) return describeSkippedSingleMove(staged);
+  var names = blockers.map(describeBlockingVisit);
   return 'Not moved — ' + blockers.length + ' existing visit' + (blockers.length === 1 ? '' : 's') +
     ' kept: ' + names.join(', ');
 }
@@ -10251,7 +10271,7 @@ async function doResizeAssignment(ev, edge, targetDate) {
     toDate: payload.scheduled_date
   }]);
   if (stagedResize.skipped.length) {
-    showToast('Already scheduled there — existing visit kept', 'warning');
+    showToast(describeSkippedSingleMove(stagedResize), 'warning');
     return;
   }
   try {
@@ -10489,7 +10509,7 @@ async function doMoveAssignment(assignmentId, newCrew, newDate, opts) {
       toDate: plan.mode === 'reassign' ? plan.create.scheduledDate : plan.update.scheduled_date
     }]);
     if (stagedMove.skipped.length) {
-      showToast('Already scheduled there — existing visit kept', 'warning');
+      showToast(describeSkippedSingleMove(stagedMove), 'warning');
       return;
     }
   }

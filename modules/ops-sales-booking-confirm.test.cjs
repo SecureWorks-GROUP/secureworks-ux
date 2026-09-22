@@ -342,6 +342,31 @@ test('backend fixture accepts flat outcome body and server-normalized response w
   for (const field of ['visit_outcome','id','recorded_by_user_id','recorded_at','source']) assert.equal(Object.hasOwn(request.body,field),false);
   assert.equal(api.latestVisitOutcome('demo-booking-completed').id,result.visit_outcome.id);
 });
+test('whitespace-only optional note records as null against the live empty-note rule', async () => {
+  const backend = backendFixture.create(api, data);
+  const visit = data.booked_visits[0];
+  await assert.rejects(() => backend.post('record_visit_outcome', {
+    booking_key:visit.booking_key, appointment_id:visit.appointment_id, contact_id:visit.contact_id,
+    opportunity_id:visit.opportunity_id, job_id:visit.job_id, scoper_user_id:visit.scoper_user_id,
+    scoper_name:api.RESOURCES.marnin.name, visit_start:visit.visit_start, outcome:'happened',
+    reason:null, note:'   ', quote_owed:true, supersedes:null
+  }), /400/);
+  assert.equal(backend.writes.length,0);
+  global.opsPost = backend.post;
+  const result = await api.recordVisitOutcome('demo-booking-completed','happened',null,'   ');
+  assert.equal(result.ok,true);
+  assert.equal(result.sent,false);
+  assert.equal(result.visit_outcome.note,null);
+  assert.equal(backend.writes[0].body.note,null);
+  assert.match(result.visit_outcome.id,/^[0-9a-f-]{36}$/);
+  assert.equal(result.visit_outcome.source,'booking_screen');
+  assert.equal(result.visit_outcome.recorded_by_user_id,api.RESOURCES.marnin.scoper_user_id);
+  assert.equal(data.visit_outcomes.length,1);
+  assert.equal(api.latestVisitOutcome('demo-booking-completed').id,result.visit_outcome.id);
+  assert.equal(api.state.visitUncertain['marnin|demo-booking-completed'],undefined);
+  assert.equal((await api.recordVisitOutcome('demo-booking-completed','happened',null,'   ')).ok,false);
+  assert.equal(backend.writes.length,1);
+});
 test('wrong facts or missing server provenance never verify an outcome or enable a retry', async () => {
   for (const patch of [
     {id:undefined}, {id:'not-a-uuid'}, {recorded_by_user_id:'someone-else'},

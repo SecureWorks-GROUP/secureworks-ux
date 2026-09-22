@@ -1,9 +1,15 @@
 /* Offline backend contract double. No network, calendar writer or send adapter. */
 (function (root) {
+  function optionalNote(note) {
+    if (note === '' || note == null) return null;
+    var trimmed = String(note).trim();
+    if (!trimmed) throw new Error('400: note must not be empty');
+    return trimmed;
+  }
   function outcomeResponse(body, actorId) {
     return {visit_outcome: Object.assign({}, body, {
       id: root.crypto.randomUUID(),
-      note: String(body.note || '').trim() || null,
+      note: optionalNote(body.note),
       visit_start: new Date(body.visit_start).toISOString(),
       recorded_by_user_id: actorId,
       recorded_at: new Date().toISOString(),
@@ -17,6 +23,7 @@
       if (action === 'record_visit_outcome') {
         var fields = ['booking_key','appointment_id','contact_id','opportunity_id','job_id','scoper_user_id','scoper_name','visit_start','outcome','reason','note','quote_owed','supersedes'];
         if (JSON.stringify(Object.keys(body).sort()) !== JSON.stringify(fields.sort())) throw Error('Flat outcome request required');
+        optionalNote(body.note);
         var current = records.filter(function (r) {
           return r.booking_key === body.booking_key && !records.some(function (next) { return next.supersedes === r.id; });
         })[0];

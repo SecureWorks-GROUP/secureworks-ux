@@ -2063,6 +2063,7 @@
     note = String(note || '');
     if (!blocked && (Array.from(note.trim()).length > 200 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(note))) blocked = 'Keep the note to one line, at most 200 characters.';
     if (blocked) { state.visitErrors[key] = blocked; render(); return {ok:false,reason:blocked}; }
+    note = note.trim() || null;
     var user = global.SECUREWORKS_CLOUD.auth.getUser();
     var submitted = {
       booking_key: v.booking_key, appointment_id: v.appointment_id || null,

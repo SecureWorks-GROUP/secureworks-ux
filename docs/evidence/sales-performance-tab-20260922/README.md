@@ -1,6 +1,6 @@
 # Sales Performance integration evidence
 
-Captured with `chrome-devtools-axi` against the real `ops.html#performance` host through `scripts/sales-performance-preview.py` on this worktree (port 4188; 4187 was another checkout). The offline envelope is derived from the supplied 14 September example, with all customer names removed. No live systems or credentials were used.
+Captured with `chrome-devtools-axi` against the real `ops.html#performance` host through `scripts/sales-performance-preview.py` on this worktree (port 4190). The offline envelope is derived from the supplied 14 September example, with all customer names removed. No live systems or credentials were used.
 
 | Check | Result |
 | --- | --- |
@@ -8,19 +8,23 @@ Captured with `chrome-devtools-axi` against the real `ops.html#performance` host
 | Phone, light and dark | 390px viewport, 390px document width |
 | Smallest visible report text | 11px |
 | Host | Sales active, Performance selected, actual module and authenticated opsFetch |
-| All story | Fencing: 3 jobs won for $11,037 against $171k quoted; 5 lost; 0 of 12 tracked. Patio quotes and wins stay a dash. |
+| All story | Fencing: 3 jobs won for $11,037 against $171k quoted; 5 lost; 0 of 12 tracked. Patio quotes and wins are not recorded yet. |
 | All KPIs | Quotes sent, Quoted value and Won show the fencing figures with `(fencing)` because patio is a gap |
-| Per-rep table | Khairo 3 / $11,037 / 18 waiting / 2 over a week; Nithin 0 / 10; Marnin 0 / 2; quotes “not in store yet” |
+| Per-rep table | Khairo 3 / $11,037 / 18 waiting / 2 over a week; Nithin – / – / 10 waiting; Marnin 0 / $0 / 2 waiting; quotes “not in store yet” |
 | Lane filter | Fencing keeps Khairo’s three wins; patio waiting stays with Nithin and won stays a dash |
 | Fencing figures | 17 enquiries, 18.1h elapsed reply, 18 quotes, $171k quoted, 3 won, 20 waiting |
 | Patio figures | 8 enquiries, 27.8h elapsed reply, unavailable quote/win measures, 10 waiting |
 | Stratco filter, fencing | 7 enquiries, 0 quotes and wins, 7 waiting; unsegmented measures unavailable |
 | Quote expansion | Six visible rows expanded to all 18 |
+| Phone order | Six numbers → What is stuck → Per rep → Do this week |
+| Phone actions | Khairo: two urgent + one normal; Nithin: three; Marnin: two. Show all expands, Show fewer collapses. |
+| Phone rep columns | Unavailable Quotes sent and Quoted value columns hidden below 600px |
+| Theme | OS dark with no explicit theme stays light; html data-theme=dark selects the dark report palette |
 | Section link | Scrolls to section while preserving `#performance` |
 | Error and recovery | Synthetic failure shown, empty store shown, selected-week read recovered |
 | Read authentication | Synthetic bearer token passed by the real opsFetch; selected week `2026-09-14` |
 
-Screenshots: [desktop light](desktop-light.png), [desktop dark](desktop-dark.png), [phone light](phone-light.png), [phone dark](phone-dark.png). These are viewport captures: the host's offscreen translated SMS drawer appears spuriously in full-page captures, so those were replaced with viewport captures. Phone shots are scrolled to the per-rep table. The drawer was not opened or changed.
+Screenshots: [desktop light](desktop-light.png), [desktop dark](desktop-dark.png), [phone light](phone-light.png), [phone dark](phone-dark.png). These are viewport captures: the host's offscreen translated SMS drawer appears spuriously in full-page captures, so those were replaced with viewport captures. Phone shots are scrolled to the per-rep table. The drawer was not opened or changed. Additional phone detail captures show [pipeline placement](phone-pipeline-light.png) and [collapsed action lists](phone-actions-light.png).
 
 The Impeccable detector found one warning: the red left border on the urgent strip. It is deliberately retained from the reviewed source design and its explicit urgent-strip requirement. All other reporting sections use neutral borders.
 

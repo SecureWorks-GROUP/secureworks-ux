@@ -85,7 +85,7 @@ test('All story names mixed quote and win covers on their own phrases',()=>{
   const publishedHtml=api.renderHTML(published);
   assert.match(publishedHtml,/Fencing: 3 jobs won for \$11,037/);
   assert.match(publishedHtml,/against \$171k quoted; 5 lost; 0 of 12 tracked quotes accepted online/);
-  assert.match(publishedHtml,/Patio quotes and wins: –\./);
+  assert.match(publishedHtml,/Patio quotes and wins are not recorded yet\./);
   assert.doesNotMatch(publishedHtml,/\$11,037 \(fencing\)|quoted \(fencing\)/);
   const patioQuotes=fresh();
   patioQuotes.rows[1].coverage.gaps=patioQuotes.rows[1].coverage.gaps.filter(g=>g!=='patio_quote_total');
@@ -128,4 +128,24 @@ test('All story names mixed quote and win covers on their own phrases',()=>{
   assert.doesNotMatch(winsHtml,/Won \(fencing\)/);
 });
 
-test('per-rep table uses three Khairo wins and withholds unnamed quotes',()=>{const d=fresh(),all=api.model(d),fencing=api.model(d,{lane:'fencing'}),patio=api.model(d,{lane:'patio'}),stratco=api.model(d,{lane:'fencing',source:'Stratco'});const khairo=all.reps.find(r=>r.name==='Khairo'),nithin=all.reps.find(r=>r.name==='Nithin'),marnin=all.reps.find(r=>r.name==='Marnin');assert.deepEqual(all.reps.map(r=>r.name),['Khairo','Nithin','Marnin']);assert.equal(khairo.won,3);assert.equal(khairo.wonValue,11037.4);assert.deepEqual(all.wins.filter(w=>w.rep==='Khairo').map(w=>w.job).sort(),['SWF-261383','SWF-261397','SWF-261413']);assert.equal(khairo.waiting,18);assert.equal(khairo.overWeek,2);assert.equal(nithin.waiting,10);assert.equal(nithin.won,0);assert.equal(marnin.waiting,2);assert.equal(khairo.quotes,null);assert.equal(nithin.quotedValue,null);assert.equal(fencing.reps.find(r=>r.name==='Khairo').won,3);assert.equal(fencing.reps.find(r=>r.name==='Nithin').waiting,0);assert.equal(patio.reps.find(r=>r.name==='Khairo').won,null);assert.equal(patio.reps.find(r=>r.name==='Nithin').waiting,10);assert.equal(stratco.reps.find(r=>r.name==='Khairo').won,0);assert.equal(stratco.reps.find(r=>r.name==='Khairo').waiting,5);const html=api.renderHTML(d),block=html.slice(html.indexOf('class="card reps"'),html.indexOf('class="grid"'));assert.match(block,/Khairo/);assert.match(block,/not in store yet/);assert.doesNotMatch(block,/fill|bar-space|general-bar/);d.rows[0].metrics.quote_rows[0].rep='Khairo';const named=api.model(d,{lane:'fencing'});assert.equal(named.reps.find(r=>r.name==='Khairo').quotes,1);assert.equal(named.reps.find(r=>r.name==='Khairo').quotedValue,36685);assert.equal(named.reps.find(r=>r.name==='Nithin').quotes,0);assert.doesNotMatch(api.renderHTML(d,{lane:'fencing'}).slice(0,api.renderHTML(d,{lane:'fencing'}).indexOf('class="grid"')),/not in store yet/);});
+test('per-rep table uses three Khairo wins and withholds unnamed quotes',()=>{const d=fresh(),all=api.model(d),fencing=api.model(d,{lane:'fencing'}),patio=api.model(d,{lane:'patio'}),stratco=api.model(d,{lane:'fencing',source:'Stratco'});const khairo=all.reps.find(r=>r.name==='Khairo'),nithin=all.reps.find(r=>r.name==='Nithin'),marnin=all.reps.find(r=>r.name==='Marnin');assert.deepEqual(all.reps.map(r=>r.name),['Khairo','Marnin','Nithin']);assert.equal(khairo.won,3);assert.equal(khairo.wonValue,11037.4);assert.deepEqual(all.wins.filter(w=>w.rep==='Khairo').map(w=>w.job).sort(),['SWF-261383','SWF-261397','SWF-261413']);assert.equal(khairo.waiting,18);assert.equal(khairo.overWeek,2);assert.equal(nithin.waiting,10);assert.equal(nithin.won,null);assert.equal(nithin.wonValue,null);assert.equal(marnin.waiting,2);assert.equal(khairo.quotes,null);assert.equal(nithin.quotedValue,null);assert.equal(fencing.reps.find(r=>r.name==='Khairo').won,3);assert.equal(fencing.reps.find(r=>r.name==='Nithin').waiting,0);assert.equal(patio.reps.find(r=>r.name==='Khairo').won,null);assert.equal(patio.reps.find(r=>r.name==='Nithin').waiting,10);assert.equal(stratco.reps.find(r=>r.name==='Khairo').won,0);assert.equal(stratco.reps.find(r=>r.name==='Khairo').waiting,5);const html=api.renderHTML(d),block=html.slice(html.indexOf('class="card reps"'),html.indexOf('</section>',html.indexOf('class="card reps"')));assert.match(block,/Khairo/);assert.match(block,/not in store yet/);assert.doesNotMatch(block,/fill|bar-space|general-bar/);d.rows[0].metrics.quote_rows[0].rep='Khairo';const named=api.model(d,{lane:'fencing'});assert.equal(named.reps.find(r=>r.name==='Khairo').quotes,1);assert.equal(named.reps.find(r=>r.name==='Khairo').quotedValue,36685);assert.equal(named.reps.find(r=>r.name==='Nithin').quotes,0);assert.doesNotMatch(api.renderHTML(d,{lane:'fencing'}).slice(0,api.renderHTML(d,{lane:'fencing'}).indexOf('class="grid"')),/not in store yet/);});
+
+
+test('rep wins distinguish an unpublished patio lane from a published zero',()=>{
+  const d=fresh(),rep=()=>api.model(d).reps.find(r=>r.name==='Nithin');
+  assert.equal(rep().won,null);
+  assert.equal(rep().wonValue,null);
+  const html=api.renderHTML(d);
+  assert.match(html,/Nithin<\/th><td[^>]*data-label="Won"[^>]*><span class="gap">–<\/span><\/td><td[^>]*data-label="Won value"[^>]*><span class="gap">–/);
+  const patio=d.rows[1];
+  patio.coverage.gaps=patio.coverage.gaps.filter(g=>g!=='patio_wins');
+  patio.metrics.wins=[];
+  assert.equal(rep().won,0);
+  assert.equal(rep().wonValue,0);
+  patio.metrics.wins=[{job:'SWP-1',value:22000,proof:'accepted and verified',rep:'Nithin',source:'Web'}];
+  assert.equal(rep().won,1);
+  assert.equal(rep().wonValue,22000);
+  assert.equal(api.model(d,{source:'Stratco'}).reps.find(r=>r.name==='Nithin').won,0);
+  patio.coverage.gaps.push('wins');
+  assert.equal(rep().won,null);
+});

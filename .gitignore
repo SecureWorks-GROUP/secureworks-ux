@@ -24,3 +24,7 @@ test-results/
 
 # Supabase CLI local temp files
 supabase/.temp/
+
+# Python interpreter cache
+__pycache__/
+*.py[cod]

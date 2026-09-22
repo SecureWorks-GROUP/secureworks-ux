@@ -1,7 +1,6 @@
 
 #salesPerformanceRoot{--bg:#F6F5F2;--card:#FFFFFF;--ink:#16222A;--ink2:#52616B;--ink3:#7D8990;--rule:#E7E4DE;--soft:#F1EFEA;--orange:#F15A29;--general:#2B7FB8;--good:#2F7D55;--bad:#B3361B;--badbg:#FBEDE9;--bar:#E9EEF1;
 --font:'Helvetica Neue',Helvetica,Arial,-apple-system,BlinkMacSystemFont,sans-serif}
-@media (prefers-color-scheme:dark){html:not([data-theme=light]) #salesPerformanceRoot{--bg:#0F1518;--card:#151D21;--ink:#F2F5F6;--ink2:#A9B6BD;--ink3:#7F8D95;--rule:#232E34;--soft:#1B252A;--bar:#22303A;--general:#4A9BD1;--bad:#E8775C;--badbg:#2A1A16;--good:#5DB98A}}
 html[data-theme=dark] #salesPerformanceRoot{--bg:#0F1518;--card:#151D21;--ink:#F2F5F6;--ink2:#A9B6BD;--ink3:#7F8D95;--rule:#232E34;--soft:#1B252A;--bar:#22303A;--general:#4A9BD1;--bad:#E8775C;--badbg:#2A1A16;--good:#5DB98A}
 #salesPerformanceRoot *{box-sizing:border-box}
 #salesPerformanceRoot{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
@@ -129,7 +128,6 @@ html[data-theme=dark] #salesPerformanceRoot{--bg:#0F1518;--card:#151D21;--ink:#F
 #salesPerformanceRoot .weekly-strip>p{grid-column:1/-1;font-size:13px}
 #salesPerformanceRoot details td{white-space:pre-line}
 html[data-theme=dark] #salesPerformanceRoot{--ink3:#A9B6BD}
-@media(prefers-color-scheme:dark){html:not([data-theme=light]) #salesPerformanceRoot{--ink3:#A9B6BD}}
 body.performance-view-active #viewApprovals:not(.active){display:none!important}
 @media(max-width:640px){body.performance-view-active .header-left>div[style]:not(.header-brand){display:none!important}}
 @media(max-width:600px){#salesPerformanceRoot .top{gap:12px}
@@ -139,3 +137,20 @@ body.performance-view-active #viewApprovals:not(.active){display:none!important}
 #salesPerformanceRoot .source{display:flex;gap:8px;align-items:center}
 #salesPerformanceRoot .source select{min-width:0}
 #salesPerformanceRoot .kpi .v{font-size:32px}}
+
+/* Responsive reading order; each report section has one DOM instance. */
+#salesPerformanceRoot .grid{grid-template-areas:"reps reps" "actions stuck" "actions stratco" "actions chart" "actions quotes"}
+#salesPerformanceRoot .reps{grid-area:reps;margin-top:0}
+#salesPerformanceRoot #sp-do{grid-area:actions}
+#salesPerformanceRoot #sp-stuck{grid-area:stuck}
+#salesPerformanceRoot #sp-stratco{grid-area:stratco}
+#salesPerformanceRoot .chart{grid-area:chart}
+#salesPerformanceRoot #sp-quotes{grid-area:quotes}
+#salesPerformanceRoot .actions-more{display:none}
+@media(max-width:900px){#salesPerformanceRoot .grid{grid-template-areas:"reps" "actions" "stuck" "stratco" "chart" "quotes"}}
+@media(max-width:599px){
+  #salesPerformanceRoot .grid{grid-template-areas:"stuck" "reps" "actions" "stratco" "chart" "quotes"}
+  #salesPerformanceRoot .person-actions:not([data-expanded=true]) .act-mobile-extra{display:none}
+  #salesPerformanceRoot .actions-more{display:block;min-height:36px}
+  #salesPerformanceRoot .reps .rep-phone-gap{display:none}
+}

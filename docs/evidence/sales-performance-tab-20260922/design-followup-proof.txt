@@ -1,0 +1,10 @@
+Design follow-up checked through chrome-devtools-axi, real offline ops.html#performance, port 4190.
+Desktop 1320x1000: document width 1320, minimum visible report font 11px. All 28 normal actions plus 2 urgent commitments visible; owner expansion buttons hidden.
+Phone 390x844: document width 390, minimum visible report font 11px.
+Phone document order measured by top coordinates before scrolling: KPIs 624.30, What is stuck 1121.19, Per rep 1813.91, Do this week 2381.48.
+Phone collapsed tasks: Khairo 1 normal + 2 urgent; Nithin 3 normal; Marnin 2 normal. All 8 unavailable quote header/cells display:none.
+Khairo Show all: 16 normal + 2 urgent, aria-expanded=true; trusted Show fewer click restores 1 normal + 2 urgent, aria-expanded=false.
+OS dark without data-theme: --bg #F6F5F2. Explicit data-theme=dark: --bg #0F1518.
+Per-rep fixture: Nithin won and won value both dashes; Khairo 3 and $11,037; Marnin 0 and $0.
+151 Sales tests pass, including missing/gapped patio wins versus a published empty list and populated proof-backed wins.
+Python cache removed from index; git check-ignore confirms replacement cache path is ignored.

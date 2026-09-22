@@ -1,7 +1,7 @@
 /* Sales > Performance. Published weekly rows only; no provider calls or writes. */
 (function (global) {
   'use strict';
-  const state = {data:null, week:null, lane:'all', source:'all', showAllQuotes:false, loading:false, error:null, request:0};
+  const state = {data:null, week:null, lane:'all', source:'all', showAllQuotes:false, expandedOwners:[], loading:false, error:null, request:0};
   const LANES = ['fencing','patio'];
   const REPS = ['Khairo','Nithin','Marnin'];
   const title = s => s ? s[0].toUpperCase()+s.slice(1) : '';
@@ -84,7 +84,15 @@
     const staffed=source==='all'?num(read(replyRow,'reply.'+replyLane+'.median')):null;
     const namedQuotes=quoteLists.none?null:quoteLists.items.some(q=>typeof q.rep==='string'&&q.rep.trim())?quoteLists.items:null;
     const reps=REPS.map(name=>{
-      const mine=proven?.filter(w=>w.rep===name)??null;
+      // Rep coverage comes from their lane membership before source filtering.
+      // A published fencing zero says nothing about a patio salesperson.
+      const repRows=active.filter(r=>r&&['actions','wins','quote_rows'].some(key=>
+        Array.isArray(r.metrics?.[key])&&r.metrics[key].some(item=>(key==='actions'?item.owner:item.rep)===name)));
+      const covered=repRows.length&&repRows.every(r=>{
+        const items=list(r,'wins');
+        return items!==null&&items.every(w=>typeof w.proof==='string'&&w.proof.trim());
+      });
+      const mine=covered?repRows.flatMap(r=>selected(list(r,'wins'),source)).filter(w=>w.rep===name):null;
       const waiting=actions?.filter(a=>(a.owner||'Unassigned')===name)??null;
       const quotes=namedQuotes?namedQuotes.filter(q=>q.rep===name):null;
       return {name,won:mine?mine.length:null,wonValue:mine?mine.length?sum(mine.map(w=>w.value)):0:null,waiting:waiting?waiting.length:null,overWeek:waiting?waiting.filter(a=>age(a.since,week)>=7).length:null,quotes:quotes?quotes.length:null,quotedValue:quotes?quotes.length?sum(quotes.map(q=>q.value)):0:null};
@@ -112,14 +120,17 @@
     const contact=action.contact_id && data.contacts_by_id?.[action.contact_id];
     return contact?.name || action.suburb || 'Customer';
   }
-  function actionsHTML(m,data) {
+  function actionsHTML(m,data,options={}) {
     if(m.actions===null)return '<p class="sub">– Customer follow-ups not published for this selection.</p>';
     if(!m.actions.length)return '<p class="sub">No customers waiting in this published selection.</p>';
     const sorted=[...m.actions].sort((a,b)=>(age(b.since,m.week)??-1)-(age(a.since,m.week)??-1));
     const urgent=sorted.filter(a=>a.source==='Stratco' && age(a.since,m.week)>=30);
     const groups=new Map();sorted.forEach(a=>{const owner=a.owner || 'Unassigned';if(!groups.has(owner))groups.set(owner,[]);groups.get(owner).push(a);});
     const warning=urgent.length?'<div class="urgent"><h3>Promised '+fmt(age(urgent[0].since,m.week))+' days ago</h3>'+urgent.map(a=>'<p><b>'+esc(identity(a,data))+'</b> · '+esc(a.owed)+' <span>'+esc(a.owner)+'</span></p>').join('')+'</div>':'';
-    return warning+[...groups].sort((a,b)=>b[1].length-a[1].length).map(([owner,items])=>'<h3 class="person">'+esc(owner)+'<span>'+items.length+' waiting · '+items.filter(a=>age(a.since,m.week)>=7).length+' over a week</span></h3>'+items.filter(a=>!urgent.includes(a)).map(a=>'<div class="act"><span class="age">'+fmt(age(a.since,m.week))+'d</span><span><b>'+esc(identity(a,data))+'</b> · '+esc(a.owed)+'</span></div>').join('')).join('');
+    return warning+[...groups].sort((a,b)=>b[1].length-a[1].length).map(([owner,items])=>{
+      const expanded=(options.expandedOwners||[]).includes(owner),id='sp-actions-'+encodeURIComponent(owner);
+      return '<div class="person-actions" data-expanded="'+expanded+'"><h3 class="person">'+esc(owner)+'<span>'+items.length+' waiting · '+items.filter(a=>age(a.since,m.week)>=7).length+' over a week</span></h3><div id="'+esc(id)+'">'+items.filter(a=>!urgent.includes(a)).map(a=>'<div class="act'+(items.indexOf(a)>=3?' act-mobile-extra':'')+'"><span class="age">'+fmt(age(a.since,m.week))+'d</span><span><b>'+esc(identity(a,data))+'</b> · '+esc(a.owed)+'</span></div>').join('')+'</div>'+(items.length>3?'<button class="more actions-more" data-performance-actions="'+esc(owner)+'" aria-expanded="'+expanded+'" aria-controls="'+esc(id)+'">'+(expanded?'Show fewer':'Show all '+items.length)+'</button>':'')+'</div>';
+    }).join('');
   }
   function storyHTML(m) {
     const f=m.fencing,unfiltered=m.source==='all',fe=m.scoped.includes('fencing');
@@ -129,7 +140,7 @@
     const partial=m.storyLane;
     const winTag=!partial&&m.winLane?' ('+m.winLane+')':'';
     const quoteTag=!partial&&m.quotedValueLane?' ('+m.quotedValueLane+')':'';
-    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+winTag+'</b> against '+compact(m.quotedValue)+' quoted'+quoteTag+'; '+fmt(m.scalar('lost_week',partial))+' lost; '+fmt(m.scalar('tracked.accepted',partial))+' of '+fmt(m.scalar('tracked.count',partial))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins: –.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
+    const opening=known?'<b>'+(partial?title(partial)+': ':'')+fmt(m.winCount)+' jobs won for '+money(m.winValue)+winTag+'</b> against '+compact(m.quotedValue)+' quoted'+quoteTag+'; '+fmt(m.scalar('lost_week',partial))+' lost; '+fmt(m.scalar('tracked.accepted',partial))+' of '+fmt(m.scalar('tracked.count',partial))+' tracked quotes accepted online.'+(partial?' '+title(partial==='fencing'?'patio':'fencing')+' quotes and wins are not recorded yet.':''):'<b>'+fmt(m.enquiries)+' new enquiries</b>; quotes and accepted work are not fully published for this selection (–).';
     const middle=m.lane==='patio'?'<b>'+fmt(m.actions?.length??null)+' patio customers waiting on us</b>; reply time is '+hours(m.elapsed)+' on the customer’s clock.':m.source!=='all'?'<b>'+fmt(m.actions?.length??null)+' customers waiting through '+esc(m.source)+'</b>; follow through on the oldest commitments first.':'<b>'+fmt(fv('stratco_week.in_crm'))+' of '+fmt(fv('stratco_week.allocated'))+' Stratco allocations entered in the CRM</b>'+(urgent.length?', and '+urgent.length+' customers have waited '+fmt(age(urgent[0].since,m.week))+' days for a promised price.':'.');
     const closing=m.lane==='patio'?'<b>'+fmt(m.source==='all'?num(read(m.patio,'patio_uncontacted')):null)+' patio clients not yet contacted</b>; review the queue before adding more work.':m.source!=='all'?'Pipeline ageing and cash for this lead source are <b>not published (–)</b>.':'<b>'+fmt(fv('followup.count'))+' fencing quotes worth '+compact(fv('followup.value_sum_crm'))+' have no decision</b>; '+fmt(fv('followup.touched_last_14d'))+' were touched in the last fortnight.';
     return '<ul class="story">'+[['quotes',opening],['do',middle],['stuck',closing]].map(([id,text])=>'<li><a href="#sp-'+id+'" data-performance-jump="sp-'+id+'">'+text+'</a></li>').join('')+'</ul>';
@@ -148,12 +159,13 @@
     return '<section class="card kpis" aria-label="Last seven days">'+K.map(([v,l,s,d])=>'<div class="kpi"><div class="v">'+esc(v)+'</div><div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div>'+d+'</div>').join('')+'</section>';
   }
   function repsHTML(m) {
-    const cell=(v,format,label,empty)=>{
+    const noQuotes=m.reps.every(r=>r.quotes===null),noQuotedValue=m.reps.every(r=>r.quotedValue===null);
+    const cell=(v,format,label,empty,phoneGap)=>{
       const value=num(v)===null?'<span class="gap">–</span>'+(empty?'<span class="hint">'+esc(empty)+'</span>':''):esc(format(v));
-      return '<td data-label="'+esc(label)+'">'+value+'</td>';
+      return '<td'+(phoneGap?' class="rep-phone-gap"':'')+' data-label="'+esc(label)+'">'+value+'</td>';
     };
-    return '<section class="card reps" aria-label="Per rep"><h2>Per rep</h2><p class="sub">Won from accepted proof; waiting from open actions. Quotes only when the store names the salesperson.</p><table><thead><tr><th>Rep</th><th>Won</th><th>Won value</th><th>Waiting</th><th>Over a week</th><th>Quotes sent</th><th>Quoted value</th></tr></thead><tbody>'+
-      m.reps.map(r=>'<tr><th scope="row">'+esc(r.name)+'</th>'+cell(r.won,fmt,'Won')+cell(r.wonValue,money,'Won value')+cell(r.waiting,fmt,'Waiting')+cell(r.overWeek,fmt,'Over a week')+cell(r.quotes,fmt,'Quotes sent','not in store yet')+cell(r.quotedValue,money,'Quoted value','not in store yet')+'</tr>').join('')+
+    return '<section class="card reps" aria-label="Per rep"><h2>Per rep</h2><p class="sub">Won from accepted proof; waiting from open actions. Quotes only when the store names the salesperson.</p><table><thead><tr><th>Rep</th><th>Won</th><th>Won value</th><th>Waiting</th><th>Over a week</th><th'+(noQuotes?' class="rep-phone-gap"':'')+'>Quotes sent</th><th'+(noQuotedValue?' class="rep-phone-gap"':'')+'>Quoted value</th></tr></thead><tbody>'+
+      m.reps.map(r=>'<tr><th scope="row">'+esc(r.name)+'</th>'+cell(r.won,fmt,'Won')+cell(r.wonValue,money,'Won value')+cell(r.waiting,fmt,'Waiting')+cell(r.overWeek,fmt,'Over a week')+cell(r.quotes,fmt,'Quotes sent','not in store yet',noQuotes)+cell(r.quotedValue,money,'Quoted value','not in store yet',noQuotedValue)+'</tr>').join('')+
       '</tbody></table></section>';
   }
   function stuckHTML(m) {
@@ -223,7 +235,7 @@
     const sources=[...new Set(['Stratco','Web','Phone',...m.active.flatMap(r=>Object.keys(read(r,'daily')?.[r?.lane] || {})),...m.active.flatMap(r=>(list(r,'quote_rows')||[]).map(q=>q.source)),...m.active.flatMap(r=>(list(r,'actions')||[]).map(a=>a.source))])].filter(Boolean);
     const notice=(m.active.some(r=>!r)?'<p class="notice">'+m.scoped.filter((_,i)=>!m.active[i]).map(title).join(' and ')+' has no report for this week.'+(m.storyLane?' Showing '+m.storyLane+' quotes and wins.':' Combined measures stay unavailable.')+'</p>':'')+(data.missing_latest_closed_week?'<p class="notice">Latest closed week '+esc(date(data.latest_closed_week))+' has not been published. Showing '+esc(date(m.week))+'.</p>':'')+(m.active.some(r=>r?.coverage?.period_kind==='partial'||read(r,'partial_week')===true)?'<p class="notice">This week is partial. Counts can still move.</p>':'')+(m.source!=='all'?'<p class="notice">'+esc(m.source)+' only. Measures without a source breakdown are shown as a dash.</p>':'');
     const card=(id,h,sub,content)=>'<section class="card list" id="sp-'+id+'"><h2>'+h+'</h2><p class="sub">'+sub+'</p>'+content+'</section>';
-    return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+repsHTML(m)+'<div class="grid">'+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data))+'<div class="right-column">'+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div></div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
+    return '<div class="wrap"><div class="top"><h1>Sales performance</h1><label class="period">Week <select data-performance-week aria-label="Report week">'+weeks.map(w=>'<option value="'+esc(w)+'"'+(w===m.week?' selected':'')+'>'+esc(date(w))+'</option>').join('')+'</select></label><div class="seg" role="group" aria-label="Business line">'+['all',...LANES].map(l=>'<button data-performance-lane="'+l+'" aria-pressed="'+(l===m.lane)+'">'+title(l)+'</button>').join('')+'</div><label class="source">Lead source <select data-performance-source><option value="all">All sources</option>'+sources.map(s=>'<option value="'+esc(s)+'"'+(s===m.source?' selected':'')+'>'+esc(s)+'</option>').join('')+'</select></label></div><p class="period-note">'+esc(date(m.week))+' to '+esc(date(plusDays(m.week,6)))+' · Australia/Perth</p>'+notice+storyHTML(m)+kpisHTML(m)+'<div class="grid">'+repsHTML(m)+card('do','Do this week','Customers waiting on us, by person, oldest first',actionsHTML(m,data,options))+card('stuck','What is stuck','Against the week before',stuckHTML(m))+card('stratco','Stratco versus general','Fencing',stratcoHTML(m))+'<section class="card chart"><div class="chead"><h2>New enquiries by day</h2><div class="legend"><span><i class="stratco-bar"></i>Stratco</span><span><i class="general-bar"></i>General</span></div></div>'+chartHTML(m)+'</section>'+card('quotes','Quotes sent in the week','By value including GST',quotesHTML(m,options.showAllQuotes))+'</div>'+detailHTML(m,data)+'<div id="salesPerformanceNotes" data-performance-notes></div></div>';
   }
   function root(){return global.document?.getElementById('salesPerformanceRoot');}
   function render(){
@@ -235,13 +247,13 @@
   async function load(week){
     if(state.loading&&(week||null)===(state.week||null))return;
     const request=++state.request;state.week=week||null;state.loading=true;state.error=null;render();
-    try {const data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});if(request!==state.request)return;if(!data||!Array.isArray(data.rows))throw new Error('Report response was incomplete. Retry the report.');state.data=data;state.week=data.week_start;state.showAllQuotes=false;}
+    try {const data=await global.opsFetch('sales_performance_read',week?{week_start:week}:{});if(request!==state.request)return;if(!data||!Array.isArray(data.rows))throw new Error('Report response was incomplete. Retry the report.');state.data=data;state.week=data.week_start;state.showAllQuotes=false;state.expandedOwners=[];}
     catch(e){if(request!==state.request)return;state.error=e.message||'Request failed';}
     finally{if(request===state.request){state.loading=false;render();}}
   }
   if(global.document){
     global.document.addEventListener('change',e=>{if(!root()?.contains(e.target))return;if(e.target.matches('[data-performance-week]'))load(e.target.value);if(e.target.matches('[data-performance-source]')){state.source=e.target.value;render();root()?.querySelector('[data-performance-source]')?.focus();}});
-    global.document.addEventListener('click',e=>{const el=e.target.closest('[data-performance-lane],[data-performance-more],[data-performance-retry],[data-performance-jump]');if(!el||!root()?.contains(el))return;if(el.hasAttribute('data-performance-jump')){e.preventDefault();global.document.getElementById(el.dataset.performanceJump)?.scrollIntoView({block:'start'});return;}if(el.hasAttribute('data-performance-retry')){load(state.week);return;}if(el.hasAttribute('data-performance-lane')){state.lane=el.dataset.performanceLane;state.source='all';state.showAllQuotes=false;}else state.showAllQuotes=!state.showAllQuotes;render();root()?.querySelector(el.hasAttribute('data-performance-lane')?'[data-performance-lane="'+state.lane+'"]':'[data-performance-more]')?.focus();});
+    global.document.addEventListener('click',e=>{const el=e.target.closest('[data-performance-lane],[data-performance-more],[data-performance-retry],[data-performance-jump],[data-performance-actions]');if(!el||!root()?.contains(el))return;if(el.hasAttribute('data-performance-jump')){e.preventDefault();global.document.getElementById(el.dataset.performanceJump)?.scrollIntoView({block:'start'});return;}if(el.hasAttribute('data-performance-retry')){load(state.week);return;}if(el.hasAttribute('data-performance-actions')){const owner=el.dataset.performanceActions;state.expandedOwners=state.expandedOwners.includes(owner)?state.expandedOwners.filter(x=>x!==owner):[...state.expandedOwners,owner];render();Array.from(root().querySelectorAll('[data-performance-actions]')).find(button=>button.dataset.performanceActions===owner)?.focus();return;}if(el.hasAttribute('data-performance-lane')){state.expandedOwners=[];state.lane=el.dataset.performanceLane;state.source='all';state.showAllQuotes=false;}else state.showAllQuotes=!state.showAllQuotes;render();root()?.querySelector(el.hasAttribute('data-performance-lane')?'[data-performance-lane="'+state.lane+'"]':'[data-performance-more]')?.focus();});
   }
   const api={state,load,render,renderHTML,model,read,hasGap,escape:esc};global.SalesPerformance=api;
   if(typeof module!=='undefined'&&module.exports)module.exports=api;

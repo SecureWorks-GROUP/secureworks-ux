@@ -12008,10 +12008,15 @@
     if (['in_progress', 'confirmed'].indexOf(myAssignment.status) < 0) return '';
     var job = data.job;
 
-    var h = '<div class="detail-section">';
-    h += '  <button class="btn btn-secondary" style="width:100%;border-color:var(--sw-yellow);color:var(--sw-yellow);font-weight:700" onclick="showVariationForm(\'' + esc(job.id) + '\', \'' + esc(job.type || 'patio') + '\')">';
+    // <trade-variation-request>
+    // A trade REQUESTS; the office APPROVES. Nothing on this form may read as
+    // approved: ops-api files every trade request pending office approval
+    // (secureworks-backend#906), whatever the amount.
+    var h = '<div class="detail-section" id="variationSection">';
+    h += '  <button class="btn btn-secondary" id="variationOpenBtn" style="width:100%;border-color:var(--sw-yellow);color:var(--sw-yellow);font-weight:700" onclick="showVariationForm(\'' + esc(job.id) + '\', \'' + esc(job.type || 'patio') + '\')">';
     h += '    &#9888; Request Variation';
     h += '  </button>';
+    h += '  <div id="variationResult" role="status" aria-live="polite" style="display:none;margin-top:12px"></div>';
     h += '  <div id="variationForm" style="display:none;margin-top:12px;">';
     h += '    <div style="font-size:13px;font-weight:600;margin-bottom:8px">What changed on site?</div>';
     // Quick tap presets
@@ -12021,15 +12026,17 @@
       h += '<button class="variation-preset-btn" onclick="selectVariationPreset(this, \'' + esc(p) + '\')">' + esc(p) + '</button>';
     });
     h += '    </div>';
-    h += '    <textarea id="variationDesc" placeholder="Describe the variation..." style="width:100%;min-height:60px;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);resize:vertical;margin-bottom:8px"></textarea>';
+    h += '    <textarea id="variationDesc" placeholder="Describe what changed and what extra work it needs..." style="width:100%;min-height:60px;padding:10px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);resize:vertical;margin-bottom:8px"></textarea>';
     h += '    <div style="display:flex;gap:8px;margin-bottom:8px">';
-    h += '      <div style="flex:1"><label style="font-size:11px;color:var(--sw-text-sec)">Extra cost ($)</label><input type="number" id="variationCost" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px"></div>';
-    h += '      <div style="flex:1"><label style="font-size:11px;color:var(--sw-text-sec)">Photo (optional)</label><input type="file" id="variationPhoto" accept="image/*" capture="environment" style="width:100%;padding:6px;font-size:12px"></div>';
+    h += '      <div style="flex:1"><label for="variationCost" style="font-size:11px;color:var(--sw-text-sec)">Your estimate of extra cost ($, optional)</label><input type="number" id="variationCost" min="0" step="any" inputmode="decimal" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--sw-border);border-radius:8px;font-size:16px"></div>';
+    h += '      <div style="flex:1"><label for="variationPhoto" style="font-size:11px;color:var(--sw-text-sec)">Photo (optional)</label><input type="file" id="variationPhoto" accept="image/*" capture="environment" style="width:100%;padding:6px;font-size:12px"></div>';
     h += '    </div>';
-    h += '    <div style="font-size:11px;color:var(--sw-text-sec);margin-bottom:8px">Under $200: auto-approved. Over $200: ' + (job.type === 'fencing' ? 'Khairo' : 'Nathan') + ' will be notified.</div>';
-    h += '    <button class="btn btn-primary" style="width:100%" onclick="submitVariation(\'' + esc(job.id) + '\')">Submit Variation</button>';
+    h += '    <div id="variationNote" style="font-size:11px;color:var(--sw-text-sec);margin-bottom:8px">This is a request. The office reviews every variation and decides whether to approve it. Nothing is approved until they do.</div>';
+    h += '    <div id="variationError" role="alert" style="display:none;font-size:12px;color:#c0392b;background:#fdecea;border-radius:8px;padding:8px 10px;margin-bottom:8px"></div>';
+    h += '    <button class="btn btn-primary" id="variationSubmitBtn" style="width:100%" onclick="submitVariation(\'' + esc(job.id) + '\')">Send request to office</button>';
     h += '  </div>';
     h += '</div>';
+    // </trade-variation-request>
     return h;
   }
 
@@ -29173,42 +29180,136 @@
   var _msgClientName = '';
 
   // ── Variation Flow ──
+  // <trade-variation-request>
   window.showVariationForm = function(jobId, jobType) {
     var form = document.getElementById('variationForm');
-    if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    // The form lives on the Scope tab, which renders lazily. An entry point
+    // outside that tab switches to it first instead of silently doing nothing.
+    if (!form && typeof window.switchJobTab === 'function') {
+      window.switchJobTab('scope');
+      form = document.getElementById('variationForm');
+    }
+    if (!form) { toast('Open the Scope tab to request a variation', true); return; }
+    var open = form.style.display === 'none';
+    form.style.display = open ? 'block' : 'none';
+    if (open && form.scrollIntoView) form.scrollIntoView({ block: 'nearest' });
   };
 
+  var _variationSubmitting = false;
+
+  // The trade response never carries the customer share link (backend withholds
+  // share_token for trades). Drop it here too so no copy of this page can ever
+  // render, store or use one.
+  function tradeVariationResult(result) {
+    var out = {};
+    Object.keys(result || {}).forEach(function(k) {
+      if (k === 'share_token' || k === 'share_url' || k === 'share_link') return;
+      out[k] = result[k];
+    });
+    return out;
+  }
+
+  function tradeVariationFailure(err) {
+    var body = (err && err.body) || {};
+    // A 403 keeps the generic access_denied on err.code; the server's own
+    // reason code travels on the body.
+    var code = body.code || (err && err.code) || '';
+    if (code === 'variation_photo_failed') return err.message;
+    if (code === 'variation_requires_assignment') {
+      return 'Not sent. Only crew assigned to this job can request a variation. Ask the office to check your assignment.';
+    }
+    if (code === 'view_only') return 'Not sent. This job belongs to another crew, so it is view only.';
+    if (err && err.status === 401) return 'Not sent. Your sign-in has expired. Sign in again and resend.';
+    // No status means the request never got an answer (offline, timeout).
+    // Nothing is queued: an unsent request must not look saved.
+    if (!err || !err.status) {
+      return 'Not sent. Could not reach the office. Check your signal and press Send again.';
+    }
+    var msg = (err && err.message) || 'Request failed';
+    return 'Not sent. ' + msg;
+  }
+
+  function showVariationError(text) {
+    var box = document.getElementById('variationError');
+    if (box) { box.textContent = text; box.style.display = text ? 'block' : 'none'; }
+  }
+
+  function uploadVariationPhoto(file, jobId) {
+    if (!file) return Promise.resolve(null);
+    return uploadOnePhoto(file, jobId, 'in_progress', 'Variation request photo').then(function(res) {
+      var url = res && (res.url || res.publicUrl);
+      if (!url) throw _apiError(502, 'the photo upload did not return a link');
+      return url;
+    }).catch(function(err) {
+      var e = new Error('Not sent. The photo did not upload (' + (err ? friendlyError(err) : 'unknown error') + '). Press Send again, or clear the photo to send without it.');
+      e.code = 'variation_photo_failed';
+      throw e;
+    });
+  }
+
   window.submitVariation = function(jobId) {
+    if (_variationSubmitting) return;
     var desc = document.getElementById('variationDesc');
     var cost = document.getElementById('variationCost');
     var photo = document.getElementById('variationPhoto');
+    var btn = document.getElementById('variationSubmitBtn');
     var description = (desc ? desc.value.trim() : '');
-    var estimatedCost = cost ? parseFloat(cost.value) || 0 : 0;
+    var costText = cost ? String(cost.value || '').trim() : '';
+    var estimatedCost = costText === '' ? null : Number(costText);
 
-    if (!description) { toast('Please describe what changed'); return; }
+    showVariationError('');
+    if (!description) { showVariationError('Describe what changed before sending.'); return; }
+    if (estimatedCost !== null && (!isFinite(estimatedCost) || estimatedCost < 0)) {
+      showVariationError('The estimate must be a dollar amount of 0 or more, or left blank.');
+      return;
+    }
 
-    var btn = event.target;
-    btn.disabled = true;
-    btn.textContent = 'Submitting...';
+    _variationSubmitting = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+    var file = photo && photo.files && photo.files[0] ? photo.files[0] : null;
 
-    api('create_variation', null, {
-      job_id: jobId,
-      description: description,
-      estimated_cost: estimatedCost,
-      user_id: _user ? _user.id : null,
-    }).then(function(result) {
-      toast(result.message || 'Variation submitted', 'success');
-      desc.value = '';
-      cost.value = '';
-      document.getElementById('variationForm').style.display = 'none';
-      btn.disabled = false;
-      btn.textContent = 'Submit Variation';
+    uploadVariationPhoto(file, jobId).then(function(photoUrl) {
+      // Identity comes from the sign-in; the backend ignores any user_id.
+      var body = { job_id: jobId, description: description };
+      if (estimatedCost !== null) body.estimated_cost = estimatedCost;
+      if (photoUrl) body.photo_url = photoUrl;
+      return api('create_variation', null, body);
+    }).then(function(raw) {
+      var result = tradeVariationResult(raw);
+      if (!result || result.success !== true) {
+        throw _apiError(500, (result && (result.error || result.message)) || 'the office did not confirm the request');
+      }
+      var pending = result.auto_approved !== true;
+      var heading = pending ? 'Sent to the office for approval' : 'Logged by the office';
+      var detail = result.message || (result.variation_number ? 'Variation #' + result.variation_number + (pending ? ' is waiting for office approval.' : '.') : '');
+      var box = document.getElementById('variationResult');
+      if (box) {
+        box.innerHTML = '<div style="border:1px solid var(--sw-border);border-left:4px solid var(--sw-yellow);border-radius:8px;padding:10px 12px;background:#fffbea">'
+          + '<div style="font-size:13px;font-weight:700">' + esc(heading) + '</div>'
+          + (detail ? '<div style="font-size:12px;margin-top:2px">' + esc(detail) + '</div>' : '')
+          + (pending ? '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">Not approved yet. Do not start the extra work until the office approves it.</div>' : '')
+          + '</div>';
+        box.style.display = 'block';
+      }
+      toast(heading);
+      if (desc) desc.value = '';
+      if (cost) cost.value = '';
+      if (photo) photo.value = '';
+      document.querySelectorAll('#variationForm .variation-preset-btn.selected').forEach(function(b) { b.classList.remove('selected'); });
+      var form = document.getElementById('variationForm');
+      if (form) form.style.display = 'none';
     }).catch(function(err) {
-      toast('Failed: ' + (err.message || err), 'error');
-      btn.disabled = false;
-      btn.textContent = 'Submit Variation';
+      // A refusal or a failed send keeps everything the trade typed on screen
+      // and is never queued offline as if it were saved.
+      var text = tradeVariationFailure(err);
+      showVariationError(text);
+      if (!(err && err.code === 'view_only')) toast(text, true);
+    }).then(function() {
+      _variationSubmitting = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'Send request to office'; }
     });
   };
+  // </trade-variation-request>
 
   // Message overlay removed — all messaging now lives in the Comms tab
 

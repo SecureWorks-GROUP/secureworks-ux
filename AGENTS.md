@@ -780,10 +780,8 @@ repeated. A managed lead's Everyone read covers only their managed verticals, so
 `fetchMyJobsForActiveLens` also reads `mode=mine` and merges own rows
 (`// <lead-own-rows-merge>`); a failed personal read keeps the previously shown
 own rows and still names the miss; merged today rows sort by date/time before
-the run list freezes. Everyone-toggle wording is ACCESS IS NAMED. Job
-`metadata` money keys are stripped from
-`my_jobs`/`search_all_jobs` at the office money door
-(`// <trade-office-money-door>`). Guard:
+the run list freezes. Everyone-toggle wording is ACCESS IS NAMED. List
+money is MONEY IS OFFICE-ONLY. Guard:
 `tests/e2e/trade-all-search-truth.spec.js`.
 
 A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A

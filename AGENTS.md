@@ -695,16 +695,20 @@ paged own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity
 
 ## Trade clock recovery (`trade.html`)
 
-`checkServerClockRecovery` runs after every `my_jobs` load and may adopt a
-server clock as this device's running timer ONLY when the row is the signed-in
-trade's own (`user.id`/`user_id`; an unowned row only on the personal feed,
-never `mode=all`, which carries every crew's rows), on a live job, clocked on
-today or yesterday (Perth). An own clock that fails those gets the "ask the
-office to close it" notice, never adoption. A clock_event the server refuses
-('Not your assignment', any non-transient 4xx, `success:false`) is a refusal
+`checkServerClockRecovery` runs after every `my_jobs` load. The Everyone-feed
+flag is `canUseEveryoneLens() && _adminViewAll`, the same derivation
+`fetchMyJobsForActiveLens` uses. It may adopt a server clock as this device's
+running timer ONLY when the row is the signed-in trade's own (`user.id`/
+`user_id`; an unowned row only on the personal feed, never Everyone, which
+carries every crew's rows), on a live job, clocked on today or yesterday
+(Perth). Merged own rows are stamped with the viewer's id, so they still pass
+that check. An own clock that fails those gets the "ask the office to close
+it" notice, never adoption. A clock_event the server refuses ('Not your
+assignment', any non-transient 4xx, `success:false`) is a refusal
 (`isClockEventRefusal`): never queued offline, never "Saved locally", and a
-queued one is dropped on replay. Search `// <trade-clock-recovery>`; guard
-`tests/e2e/trade-clock-recovery.spec.js`.
+queued one is dropped on replay. Search `// <trade-clock-recovery>`; guards
+`tests/e2e/trade-clock-recovery.spec.js` and the load-without-crash cases in
+`tests/e2e/trade-all-search-truth.spec.js`.
 
 ## Crew roster & lead installer (`trade.html`)
 
@@ -769,7 +773,9 @@ view-only with a hint; a numbered delivery-stage job opens and the server's
 access check decides (403/404 renders "not on your jobs", no retry). Search hits
 already rendered as the viewer's own cards are not repeated. A managed lead's
 Everyone read covers only their managed verticals, so `fetchMyJobsForActiveLens`
-also reads `mode=mine` and merges own rows (`// <lead-own-rows-merge>`); the
+also reads `mode=mine` and merges own rows (`// <lead-own-rows-merge>`); a
+failed personal read keeps the previously shown own rows and still names the
+miss; merged today rows sort by date/time before the run list freezes; the
 toggle reads `Everyone (fencing)`. Job `metadata` money keys are stripped from
 `my_jobs`/`search_all_jobs` at the `api()` door
 (`// <trade-job-list-money-strip>`). Guard:

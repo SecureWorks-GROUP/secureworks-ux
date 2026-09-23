@@ -16,6 +16,7 @@ const ORG = '00000000-0000-0000-0000-000000000001';
 
 const PERSONAS = {
   ryan: { email: 'ryan@example.test', password: 'x', profile: { id: 'e2e-ryan', email: 'ryan@example.test', name: 'Ryan', role: 'crew', trade_tier: 2, managed_verticals: ['makesafe'], invoice_type: 'hourly', org_id: ORG } },
+  henry: { email: 'henry@example.test', password: 'x', profile: { id: 'e2e-henry', email: 'henry@example.test', name: 'Henry', role: 'lead_installer', trade_tier: 2, managed_verticals: ['fencing'], invoice_type: 'hourly', org_id: ORG } },
   crew: { email: 'crew@example.test', password: 'x', profile: { id: 'e2e-crew', email: 'crew@example.test', name: 'Crew Member', role: 'crew', trade_tier: 1, managed_verticals: [], invoice_type: 'hourly', org_id: ORG } }
 };
 
@@ -128,7 +129,10 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
       other('90004', 'complete'),
       other('90005', 'cancelled'),
       other('90006', 'quoted', { archived: true }),
-      other('90007', 'in_progress', { assigned_to_me: true })
+      other('90007', 'in_progress', { assigned_to_me: true }),
+      { id: 'ms-90011', job_number: 'SWMS-90011', client_name: 'Michael Johnson', type: 'makesafe', status: 'scheduled', site_suburb: 'Morley', archived: false },
+      { id: 'ms-90012', job_number: 'SWMS-90012', client_name: 'Michael Johnson', type: 'makesafe', status: 'accepted', site_suburb: 'Morley', archived: false },
+      { id: 'ms-90013', job_number: 'SWMS-90013', client_name: 'Michael Johnson', type: 'makesafe', status: 'scheduled', site_suburb: 'Morley', archived: false, allocated: true }
     ];
     await boot(page, 'crew', {
       my_jobs: EMPTY,
@@ -137,6 +141,7 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
     await openJobsTab(page, 'all');
     await page.locator('#jobSearchInput').fill('Michael');
     const card = (num) => page.locator('#myJobsList .jcsr').filter({ hasText: `SWP-${num}` });
+    const ms = (num) => page.locator('#myJobsList .jcsr').filter({ hasText: `SWMS-${num}` });
     await expect(card('90001').locator('.jc-status')).toHaveText('Draft');
     await expect(card('90002').locator('.jc-status')).toHaveText('Lead');
     await expect(card('90003').locator('.jc-status')).toHaveText('Not scheduled');
@@ -144,7 +149,11 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
     await expect(card('90005').locator('.jc-status')).toHaveText('Cancelled');
     await expect(card('90006').locator('.jc-status')).toHaveText('Archived');
     await expect(card('90007').locator('.jc-status')).toHaveText('Allocated');
-    await expect(page.locator('#myJobsList .jcsr .jc-status', { hasText: 'Allocated' })).toHaveCount(1);
+    await expect(ms('90011').locator('.jc-status')).toHaveText('Scheduled');
+    await expect(ms('90012').locator('.jc-status')).toHaveText('Not scheduled');
+    await expect(ms('90013').locator('.jc-status')).toHaveText('Allocated');
+    await expect(page.locator('#myJobsList .jcsr .jc-status', { hasText: 'New' })).toHaveCount(0);
+    await expect(page.locator('#myJobsList .jcsr .jc-status', { hasText: 'Allocated' })).toHaveCount(2);
     // Pre-sale and dead records are reference only; delivery-stage jobs open.
     for (const num of ['90001', '90002', '90003', '90005', '90006']) {
       await expect(card(num)).toHaveAttribute('data-view-only', '1');
@@ -152,6 +161,32 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
     for (const num of ['90004', '90007']) {
       await expect(card(num)).toHaveAttribute('onclick', /openJob\(/);
     }
+  });
+
+  test('a fencing lead cannot open a quote in their vertical', async ({ page }) => {
+    const fenceQuote = {
+      id: 'fence-quote-1', job_number: 'SWF-88001', client_name: 'Michael Johnson',
+      type: 'fencing', status: 'quoted', site_suburb: 'Balcatta', archived: false
+    };
+    const fenceLive = {
+      id: 'fence-live-1', job_number: 'SWF-88002', client_name: 'Michael Johnson',
+      type: 'fencing', status: 'scheduled', site_suburb: 'Balcatta', archived: false
+    };
+    await boot(page, 'henry', {
+      my_jobs: ({ url }) => (url.searchParams.get('mode') === 'all' ? { ...EMPTY, _adminView: true } : EMPTY),
+      search_all_jobs: ({ url }) => (url.searchParams.get('q')
+        ? { lens: 'search', jobs: [fenceQuote, fenceLive], total: 2, next_offset: null }
+        : { lens: 'company', jobs: [], total: 0 })
+    });
+    await openJobsTab(page, 'all');
+    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone (fencing)');
+    await page.locator('#jobSearchInput').fill('Michael');
+    const quote = page.locator('#myJobsList .jcsr').filter({ hasText: 'SWF-88001' });
+    const live = page.locator('#myJobsList .jcsr').filter({ hasText: 'SWF-88002' });
+    await expect(quote.locator('.jc-status')).toHaveText('Quote');
+    await expect(quote).toHaveAttribute('data-view-only', '1');
+    await expect(quote).not.toHaveAttribute('onclick', /.*/);
+    await expect(live).toHaveAttribute('onclick', /openJob\(/);
   });
 
   test('a numbered job outside the personal feed opens and the server decides access', async ({ page }) => {
@@ -197,6 +232,47 @@ test.describe('Managed lead keeps own jobs on Everyone (audit finding 4)', () =>
     await openJobsTab(page, 'thisWeek');
     await expect(page.locator('#myJobsList')).toContainText('Could not load your own jobs outside make-safe. Switch to Mine to see them.');
     await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWMS-260001' })).toHaveCount(1);
+  });
+
+  test('a failed own-jobs refresh keeps previously shown own rows', async ({ page }) => {
+    let mineFails = false;
+    await boot(page, 'ryan', {
+      my_jobs: ({ url }) => {
+        if (url.searchParams.get('mode') === 'all') {
+          return { ...EMPTY, thisWeek: [OTHER_MAKESAFE], _adminView: true };
+        }
+        if (mineFails) return { status: 500, body: { error: 'boom' } };
+        return { ...EMPTY, thisWeek: [RYAN_OWN_PATIO] };
+      },
+      search_all_jobs: { lens: 'company', jobs: [], total: 0 }
+    });
+    await openJobsTab(page, 'thisWeek');
+    await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
+    mineFails = true;
+    await page.evaluate(() => window.loadMyJobs());
+    await expect(page.locator('#myJobsList')).toContainText('Could not load your own jobs outside make-safe. Switch to Mine to see them.');
+    await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
+    await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWMS-260001' })).toHaveCount(1);
+  });
+
+  test('merged own today rows sort by start time before the run list freezes', async ({ page }) => {
+    const today = perthDate();
+    const ownEarly = row('asg-ryan-today', EMBLETON_JOB, { scheduled_date: today, start_time: '07:00' });
+    const otherLate = row('asg-other-ms-today', {
+      id: 'ms-job-today', job_number: 'SWMS-260099', client_name: 'Other Client', type: 'makesafe',
+      status: 'scheduled', site_suburb: 'Morley', site_address: 'Morley WA'
+    }, { scheduled_date: today, start_time: '10:00', user: { id: 'u-other', name: 'Anthony' }, crew_name: 'Anthony' });
+    await boot(page, 'ryan', {
+      my_jobs: ({ url }) => (url.searchParams.get('mode') === 'all'
+        ? { ...EMPTY, today: [otherLate], _adminView: true }
+        : { ...EMPTY, today: [ownEarly] }),
+      search_all_jobs: { lens: 'company', jobs: [], total: 0 }
+    });
+    await openJobsTab(page, 'today');
+    const cards = page.locator('#myJobsList .jc');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0)).toContainText('SWP-26183');
+    await expect(cards.nth(1)).toContainText('SWMS-260099');
   });
 });
 

@@ -7180,11 +7180,26 @@
   // the bucket the personal feed put it in. Personal rows carry no `user`, so
   // they are stamped with the viewer — anything reading row ownership in the
   // merged payload sees them as the viewer's own.
-  function mergeOwnMyJobsRows(everyone, mine) {
+  function ownRowsFromPreviousMyJobs(previous) {
+    if (!previous || typeof previous !== 'object') return null;
+    var mine = {};
+    var any = false;
+    MY_JOBS_ROW_GROUPS.forEach(function(g) {
+      var rows = (previous[g] || []).filter(isOwnAssignmentRow);
+      if (rows.length) {
+        mine[g] = rows;
+        any = true;
+      }
+    });
+    return any ? mine : null;
+  }
+
+  function mergeOwnMyJobsRows(everyone, mine, previous) {
     if (!everyone || typeof everyone !== 'object') return everyone;
     if (!mine || typeof mine !== 'object') {
       everyone._ownRowsUnavailable = true;
-      return everyone;
+      mine = ownRowsFromPreviousMyJobs(previous);
+      if (!mine) return everyone;
     }
     var seen = {};
     MY_JOBS_ROW_GROUPS.concat(['makesafePool']).forEach(function(g) {
@@ -7200,7 +7215,7 @@
         everyone[g].push(a);
         added = true;
       });
-      if (added && g !== 'today') {
+      if (added) {
         everyone[g].sort(function(x, y) {
           return String(x.scheduled_date || '').localeCompare(String(y.scheduled_date || '')) ||
             String(x.start_time || '').localeCompare(String(y.start_time || ''));
@@ -7221,7 +7236,7 @@
       console.warn('[trade] own-jobs read for the Everyone lens failed:', err && (err.message || err));
       return null;
     });
-    return Promise.all([everyone, mine]).then(function(r) { return mergeOwnMyJobsRows(r[0], r[1]); });
+    return Promise.all([everyone, mine]).then(function(r) { return mergeOwnMyJobsRows(r[0], r[1], _lastJobData); });
   }
   // </lead-own-rows-merge>
 
@@ -8238,31 +8253,29 @@
     var done = !!job.completed_at || ['complete', 'completed', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1;
     var gone = ['cancelled', 'canceled', 'lost', 'void', 'voided', 'deleted', 'duplicate', 'duplicated'].indexOf(raw) !== -1;
     var archived = job.archived === true || raw === 'archived';
-    // Make-safe surfaces keep their four-word vocabulary.
     if (type === 'makesafe') {
       if (archived || gone) return S.arch;
       if (done) return S.done;
       if (job.assigned_to_me === true || job.allocated === true) return S.alloc;
-      return isOpenMakesafePoolJob(job) ? S.new : S.done;
+    } else {
+      if (archived) return { cls: 'arch', label: 'Archived' };
+      if (done) return S.done;
+      if (raw === 'lost') return { cls: 'arch', label: 'Lost' };
+      if (gone) return { cls: 'arch', label: 'Cancelled' };
+      if (job.assigned_to_me === true || job.allocated === true) return S.alloc;
     }
-    if (archived) return { cls: 'arch', label: 'Archived' };
-    if (done) return S.done;
-    if (raw === 'lost') return { cls: 'arch', label: 'Lost' };
-    if (gone) return { cls: 'arch', label: 'Cancelled' };
-    if (job.assigned_to_me === true || job.allocated === true) return S.alloc;
     if (!raw) return { cls: 'pipe', label: 'Status unknown' };
     var word = GLOBAL_JOB_PIPELINE_WORD[raw] ||
       raw.replace(/_/g, ' ').replace(/^\w/, function(c) { return c.toUpperCase(); });
     return { cls: 'pipe', label: word };
   }
 
-  // Who may open a search hit. Dispatchers open any job (office access) and a
-  // division manager opens their own vertical; a crew member opens a job their
-  // own feed carries, or one the server flags as theirs. Make-safes keep their
-  // report door. A numbered job past the sale may still be the trade's own
-  // older work (the personal feed only keeps a recent window), so it opens and
-  // the server's access check decides. Leads, quotes, drafts and dead records
-  // never had crew: they are reference only and say so.
+  // Who may open a search hit. Dispatchers open any job (office access). A crew
+  // member opens a job their own feed carries, or one the server flags as
+  // theirs. Make-safes keep their report door. A numbered job past the sale may
+  // still be the trade's own older work (the personal feed only keeps a recent
+  // window), so it opens and the server's access check decides. Leads, quotes,
+  // drafts and dead records never had crew: they are reference only and say so.
   var GLOBAL_JOB_DELIVERY_STATUS = ['scheduled', 'in_progress', 'on_hold', 'complete', 'completed', 'invoiced', 'paid', 'closed', 'archived'];
   function globalJobSearchOpenable(job, assignment, type) {
     job = job || {};
@@ -8270,7 +8283,6 @@
     if (assignment) return true;
     if (job.assigned_to_me === true) return true;
     if (_isAdmin) return true;
-    if (managesTradeVertical(type)) return true;
     if (job.assigned_to_me === false) return false;
     return !!job.job_number && GLOBAL_JOB_DELIVERY_STATUS.indexOf(String(job.status || '').toLowerCase().trim()) !== -1;
   }

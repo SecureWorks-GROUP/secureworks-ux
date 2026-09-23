@@ -174,7 +174,12 @@ for (const vp of viewports) {
       await page.getByRole('button', { name: 'Book it' }).click();
       await page.getByRole('button', { name: 'Approve and book' }).click();
       await expect(page.locator('.visit .result')).toContainText('Booked');
-      await expect(page.locator('.bk-day .ev', { hasText: 'Priya S' })).toBeVisible();
+      // The column defaults to a day that already has a proposal (Tuesday in
+      // this fixture). Open Friday, the day that was just booked, before
+      // asserting the new occupancy is painted.
+      await page.locator('[data-booking-day="4"]').click();
+      await expect(page.locator('.bk-day h2')).toContainText('Friday');
+      await expect(page.locator('.bk-day .ev.is-confirmed', { hasText: 'Priya S' })).toBeVisible();
       if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
       await choose(page, 'Basil L');
       await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeVisible();
@@ -182,6 +187,34 @@ for (const vp of viewports) {
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
       await expect(page.locator('.visit .clash')).toContainText('Priya');
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+    });
+
+    test('a sent offer does not block that same lead booking the held visit', async ({ page }) => {
+      await open(page);
+      await page.evaluate(() => { window.fixtureActionMode = 'sent'; });
+      const thisFri = await page.evaluate(() => SalesBooking.addDays(SalesBooking.state.data.week_start, 4));
+      await choose(page, 'Priya S');
+      await page.getByRole('combobox', { name: 'Visit day' }).selectOption(thisFri);
+      await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
+      await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
+      await expect(page.locator('.compose .fine', { hasText: 'This text holds' })).toBeVisible();
+      await expect(page.locator('[data-owner-offer]')).toHaveCount(0);
+      await expect(page.getByText('Hold this', { exact: false })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Send this text' }).click();
+      await page.getByRole('button', { name: 'Approve and send' }).click();
+      await expect(page.locator('.compose .result')).toContainText('Text sent');
+      await expect(page.locator('.visit .clash')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
+      await page.getByRole('button', { name: 'Book it' }).click();
+      await page.getByRole('button', { name: 'Approve and book' }).click();
+      await expect(page.locator('.visit .result')).toContainText('Booked');
+      if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
+      await choose(page, 'Basil L');
+      await page.getByRole('combobox', { name: 'Visit day' }).selectOption(thisFri);
+      await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
+      await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
+      await expect(page.locator('.visit .clash')).toContainText(/Priya|offered/i);
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
     });
 

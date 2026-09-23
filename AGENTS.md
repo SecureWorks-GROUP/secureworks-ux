@@ -544,8 +544,8 @@ text / Book it press records `sales_booking_approval_write` for the exact
 content on screen, then calls `sales_booking_send` / `sales_booking_book` with
 `{approval_id}` and states the result in words; an unknown action reads "not
 connected yet", never success. When the read advertises `owner-authored-v1`,
-the owner's own or edited text and every picked visit take two
-presses instead: an `owner_input` `dry_run` check shown back exactly, then
+Book it and any edited or owner-written text take two
+presses: an `owner_input` `dry_run` check shown back exactly, then
 Approve with that check's `prepared_at` + `content_hash`, then the executor; an
 unedited engine text keeps the one-press engine path until a time is picked.
 Every card has a visit picker. A successful book or offer updates occupancy.

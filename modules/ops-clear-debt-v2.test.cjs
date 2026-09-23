@@ -3,17 +3,20 @@
 // tests/e2e/ops-clear-debt.spec.js covers trusted clicks and the request log.
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const makeWorklist = require('../tests/fixtures/clear-debt/worklist.js');
-
-const SRC = fs.readFileSync(path.join(__dirname, 'ops-clear-debt-v2.js'), 'utf8');
 
 // A tiny page: one root whose innerHTML the module writes. Nothing else.
 const root = { innerHTML: '', addEventListener() {}, querySelector() { return null; }, contains() { return true; } };
 globalThis.document = { getElementById: (id) => (id === 'clearDebtRoot' ? root : null), activeElement: null };
+// Every way the module could reach the network or write is a recording spy.
 const calls = [];
+const outbound = [];
 globalThis.opsFetch = async (action, params) => { calls.push({ action, params }); return globalThis.__answer(); };
+globalThis.opsPost = async (action, body) => { outbound.push({ via: 'opsPost', action, body }); throw new Error('write attempted'); };
+globalThis.opsPostJwt = async (action, body) => { outbound.push({ via: 'opsPostJwt', action, body }); throw new Error('write attempted'); };
+globalThis.fetch = async (url, init) => { outbound.push({ via: 'fetch', url, init }); throw new Error('network attempted'); };
+globalThis.XMLHttpRequest = function () { outbound.push({ via: 'XMLHttpRequest' }); throw new Error('network attempted'); };
+globalThis.confirm = () => { outbound.push({ via: 'confirm' }); return false; };
 const CD = require('./ops-clear-debt-v2.js');
 
 function freshState() {
@@ -34,32 +37,57 @@ function html() { CD.render(); return root.innerHTML; }
 function text() { return html().replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' '); }
 function pick(name) { const d = CD.state.data.debtors.find((x) => x.identity.name === name); CD.state.selectedKey = d.key; return d; }
 
-beforeEach(() => { freshState(); calls.length = 0; root.innerHTML = ''; });
+beforeEach(() => { freshState(); calls.length = 0; outbound.length = 0; root.innerHTML = ''; });
 
-test('the tab makes exactly one read: GET debt_worklist with the recent timeline', async () => {
-  await loaded();
-  assert.deepEqual(calls, [{ action: 'debt_worklist', params: { timeline: 'recent' } }]);
-  // Choosing a debtor, an invoice, a channel and timeline filters renders from memory.
-  const d = pick('Debtor 001');
-  html();
-  CD.state.invoiceId = d.invoices[1].xero_invoice_id; html();
-  for (const c of CD.TL_CHIPS) { CD.state.tlFilter = c.key; html(); }
-  CD.state.onlyInvoice = true; html();
-  CD.state.channel = 'email'; html();
-  CD.state.search = 'INV-S1003'; html();
-  assert.equal(calls.length, 1);
-});
-
-test('the module has no write, send, note, proposal or provider path', () => {
-  for (const banned of ['opsPost', 'send_chase_sms', 'send_invoice_email', 'add_debt_note', "'debt_note'", 'debt_proposal_mark', 'get_invoice_pdf', 'invoice_context', 'debt_notes', 'list_debt_picture', 'fetch(', 'XMLHttpRequest', 'sendBeacon']) {
-    assert.equal(SRC.includes(banned), false, 'found ' + banned);
+// Walk every state a person can reach from the one payload: each debtor, each
+// invoice, each channel with and without an edit, each timeline chip and scope,
+// each list filter and owner, search, details. Returns every rendered page.
+function walkEveryState(data) {
+  const pages = [];
+  const snap = () => { pages.push(html()); };
+  CD.state.showDetails = true; snap(); CD.state.showDetails = false;
+  for (const f of CD.FILTERS) { CD.state.filter = f.key; snap(); }
+  CD.state.filter = 'all';
+  for (const o of CD.ownersOf(data.debtors)) { CD.state.owner = o.owner; snap(); }
+  CD.state.owner = '';
+  CD.state.search = 'INV-S1003'; snap(); CD.state.search = '';
+  for (const d of data.debtors) {
+    CD.state.selectedKey = d.key; CD.state.invoiceId = null; CD.state.channel = null; CD.state.onlyInvoice = false;
+    for (const c of CD.TL_CHIPS) { CD.state.tlFilter = c.key; snap(); }
+    CD.state.tlFilter = 'all';
+    for (const inv of d.invoices) {
+      CD.state.invoiceId = inv.xero_invoice_id;
+      for (const ch of ['text', 'email', 'note']) {
+        CD.state.channel = ch; snap();
+        CD.state.drafts[inv.xero_invoice_id + '|' + ch] = 'Edited words.'; snap();
+      }
+      CD.state.onlyInvoice = true; snap(); CD.state.onlyInvoice = false;
+    }
   }
-  const reads = SRC.match(/opsFetch\(/g) || [];
-  assert.equal(reads.length, 1, 'one read call site');
+  return pages;
+}
+
+test('the tab makes exactly one read, and nothing a person can do on the screen reads or writes again', async () => {
+  const data = await loaded();
+  assert.deepEqual(calls, [{ action: 'debt_worklist', params: { timeline: 'recent' } }]);
+  const pages = walkEveryState(data);
+  assert.ok(pages.length > 1000);
+  assert.equal(calls.length, 1, 'no further read');
+  assert.deepEqual(outbound, [], 'no write, send, network call or confirm prompt');
+  // The one action on every draft is disabled and says why; no enabled send exists.
+  for (const h of pages) {
+    assert.equal(/<button[^>]*class="primary"(?![^>]*disabled)/.test(h), false);
+  }
 });
 
-test('no em dash in any user-facing text', () => {
-  assert.equal(/—/.test(SRC), false);
+test('no em dash in any rendered text, in any state', async () => {
+  const data = await loaded();
+  for (const h of walkEveryState(data)) assert.equal(h.includes('\u2014'), false);
+  for (const answer of [() => { throw new Error('Unknown action'); }, () => { throw new Error('timeout'); }, () => ({ version: 'x' })]) {
+    globalThis.__answer = answer;
+    await CD.load();
+    assert.equal(html().includes('\u2014'), false);
+  }
 });
 
 test('counts come from the summary with named denominators and the as-of time', async () => {
@@ -146,7 +174,7 @@ test('every filter answers from fields the read carries, and none drops the coun
     draft: all.filter((d) => d.invoices.some((i) => i.proposal && i.proposal.status === 'pending')).length,
     not_linked: all.filter((d) => d.link_state.none > 0).length,
     facts_missing: all.filter((d) => ['missing', 'partial'].includes(d.sources.facts.status)).length,
-    stale: all.filter((d) => d.faults.length > 0).length,
+    stale: all.filter((d) => d.faults.length > 0 || ['ghl', 'email', 'notes', 'facts'].some((k) => ['stale', 'unreadable'].includes(d.sources[k].status))).length,
     unconfirmed: 1
   };
   for (const [key, n] of Object.entries(expect)) {
@@ -155,6 +183,15 @@ test('every filter answers from fields the read carries, and none drops the coun
     assert.match(text(), /101 open invoices/);
   }
   assert.ok(expect.overdue > 0 && expect.overdue < all.length);
+  // A stale source with fresh Xero and no faults is still "stale or unreadable".
+  CD.state.filter = 'stale';
+  const staleGhl = all.find((d) => d.sources.ghl.status === 'stale');
+  assert.equal(staleGhl.faults.length, 0);
+  assert.equal(staleGhl.freshness.xero_fresh, true);
+  assert.ok(CD.visibleDebtors().some((d) => d.key === staleGhl.key));
+  const unreadableFacts = all.find((d) => d.sources.facts.timeline_read === 'unreadable');
+  assert.ok(CD.visibleDebtors().some((d) => d.key === unreadableFacts.key));
+  assert.equal(CD.staleOrUnreadable(all.find((d) => d.identity.name === 'Debtor 003')), false);
   assert.equal(expect.not_linked, 11);
   CD.state.filter = 'dispute';
   assert.ok(CD.visibleDebtors().every((d) => d.invoices.some((i) => i.classification.class === 'in_dispute')));
@@ -246,8 +283,8 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   assert.equal((h.match(/<li class="tl /g) || []).length, entries.length);
   assert.equal((h.match(/class="src src-/g) || []).length, entries.length);
   const counts = CD.chipCounts(d);
-  const groups = ['text', 'email', 'note', 'call', 'xero'];
-  assert.equal(groups.reduce((a, g) => a + counts[g], 0) + counts.other + counts.facts, counts.all);
+  const groups = ['text', 'email', 'note', 'call', 'xero', 'facts'];
+  assert.equal(groups.reduce((a, g) => a + counts[g], 0) + counts.other, counts.all);
   for (const g of groups) {
     CD.state.tlFilter = g;
     h = html();
@@ -259,12 +296,20 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   const t = text();
   assert.match(t, /GHL Text from them/);
   assert.match(t, /Outlook Email from them/);
-  assert.match(t, /Xero Invoice raised/);
+  assert.match(t, /SecureWorks Invoice emailed/);
+  CD.state.tlFilter = 'xero';
+  const tx = text();
+  CD.state.tlFilter = 'all';
+  assert.ok(/Xero Invoice raised/.test(tx) || /SecureWorks Invoice emailed/.test(tx));
   assert.match(t, /Preview, cut at 500 characters/);
   assert.match(t, /GHL stored copy, also in captured event/);
   assert.match(t, /1 copy of the same message shown once/);
   assert.match(t, /stored copies only: not a live GHL or Outlook read, and Outlook Sent Items are not captured/);
   assert.match(t, /emails read from inbound copies, sent ones not captured/);
+  assert.match(t, /Luna Captured fact: payment promise|Luna Captured fact: [a-z ]+ captured/);
+  assert.match(t, /GHL: bound, last captured 1 hour before this read, stale after 6h, owner CIO\./);
+  assert.match(t, /Email: partial, no capture time published, owner CIO, fix: CIO email capture \(EM1\)/);
+  assert.match(t, /Notes: read live with this read, owner DEBT\./);
 });
 
 test('timeline scope: picking an invoice can narrow the stream to entries touching it', async () => {
@@ -307,35 +352,67 @@ test('truncated, capped and faulted timelines say so; missing sources are named,
   }
 });
 
-test('facts: counted, not invented, until the read carries fact entries; then they are timeline entries', async () => {
-  await loaded();
-  let d = pick('Debtor 001');
+test('facts are kind "fact" entries in the one timeline; anything else is not a fact', async () => {
+  const data = await loaded();
+  const d = pick('Debtor 001');
+  const facts = d.timeline.entries.filter((e) => e.kind === 'fact');
+  assert.ok(facts.length > 0);
+  assert.equal(CD.chipCounts(d).facts, facts.length);
   CD.state.tlFilter = 'facts';
+  let h = html();
+  const shown = [...h.matchAll(/<li class="tl [^"]*" data-group="([a-z]+)"/g)].map((m) => m[1]);
+  assert.equal(shown.length, facts.length);
+  assert.ok(shown.every((g) => g === 'facts'));
   let t = text();
-  assert.match(t, /Facts on 4 of 5 invoices\. This read says whether facts exist, not what they say/);
-  assert.equal(/data-tl="facts"[^>]*>Facts<span class="count">/.test(html()), false, 'no zero badge while facts are not listed');
-  // The CFO desk's later revision: fact entries with value, time, source, state and scope.
-  await loaded((data) => {
-    const x = data.debtors.find((q) => q.identity.name === 'Debtor 001');
-    x.timeline.entries.unshift({ key: 'fact:1', kind: 'fact', channel: null, provider: 'secureworks', at: '2026-09-23T01:00:00.000Z', at_precision: 'time', direction: 'internal', source: 'job_facts', value: 'Synthetic fact value', captured_at: '2026-09-23T01:00:00.000Z', source_id: 'msg-synthetic-1', state: 'stale', job_id: x.invoices[0].link.job_id, invoice_ids: [x.invoices[0].xero_invoice_id], invoice_scope: 'job', seen_in: ['job_facts'], label: 'Promised to pay' },
-      { key: 'fact:2', kind: 'fact', provider: 'secureworks', at: null, source: 'job_facts', read_fault: 'facts read failed', invoice_ids: [], seen_in: ['job_facts'] });
-    x.sources.ghl.last_success_at = '2026-09-24T01:00:00.000Z';
-    x.sources.ghl.stale_after = 6;
-    x.sources.ghl.owner = 'CIO';
-    x.sources.ghl.recovery_action = 'rerun the GHL reconcile';
-  });
-  d = pick('Debtor 001');
-  CD.state.tlFilter = 'facts';
-  t = text();
-  assert.match(t, /Promised to pay/);
-  assert.match(t, /Synthetic fact value/);
-  assert.match(t, /Stale/);
-  assert.match(t, /source msg-synthetic-1/);
-  assert.match(t, /Could not be read: facts read failed/);
-  assert.match(t, /capture time not in the read/);
+  for (const f of facts) {
+    assert.ok(t.includes(f.fact.value), f.key);
+    assert.ok(t.includes('source ' + f.fact.source_id), f.key);
+  }
+  assert.match(t, /Captured fact: [a-z ]+ captured \w{3} \d+ Sept?, \d+:\d\dam|pm/);
+  assert.match(h, /class="pill ok">Current<\/span>/);
+  assert.match(t, /Stale captured facts|Stale/);
+  // The facts are in the All stream too, not a separate panel.
   CD.state.tlFilter = 'all';
-  assert.match(text(), /GHL: bound, last captured 1 hour before this read, stale after 6 hours, owner CIO, fix: rerun the GHL reconcile\./);
-  assert.equal(CD.sourceHealthRows(d).length, 1);
+  h = html();
+  assert.ok((h.match(/data-group="facts"/g) || []).length === facts.length);
+  assert.equal(/This read says whether facts exist/.test(text()), false);
+  // Only kind "fact" is a fact: look-alikes land in their own groups.
+  assert.equal(CD.isFactEntry({ kind: 'captured_fact' }), false);
+  assert.equal(CD.isFactEntry({ kind: 'note', channel: 'fact' }), false);
+  assert.equal(CD.entryGroup({ kind: 'captured_fact', channel: null, provider: 'luna' }), 'other');
+  assert.equal(CD.isFactEntry({ kind: 'fact' }), true);
+  // An unreadable fact read is one honest line in the timeline, never a zero.
+  const bad = data.debtors.find((x) => x.sources.facts.timeline_read === 'unreadable');
+  CD.state.selectedKey = bad.key;
+  CD.state.tlFilter = 'all';
+  t = text();
+  assert.match(t, /Captured facts could not be read for this timeline, so none are shown\. This does not mean there are none\./);
+  assert.equal(/data-tl="facts"[^>]*>Facts<span class="count">/.test(html()), false, 'no count while facts were not read');
+  CD.state.tlFilter = 'facts';
+  assert.equal((text().match(/Captured facts could not be read/g) || []).length, 2);
+  // A debtor with no job names that; one with no facts yet says so.
+  const noJob = data.debtors.find((x) => x.sources.facts.status === 'no_job');
+  CD.state.selectedKey = noJob.key;
+  assert.match(text(), /No invoice on this debtor is linked to a job, so there are no captured facts to read\./);
+  // A read that only counts facts (the first debt-worklist/v1 shape) says it does not list them.
+  await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); delete q.sources.facts.timeline_read; q.timeline.entries = q.timeline.entries.filter((e) => e.kind !== 'fact'); });
+  pick('Debtor 001');
+  assert.match(text(), /This read does not list captured facts; it only says facts on 4 of 5 invoices\./);
+  // A capped fact read names the job.
+  await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); q.timeline.facts_cap_reached = ['SWF-90001']; });
+  pick('Debtor 001');
+  assert.match(text(), /Job SWF-90001 has more than 10 captured facts; only the newest 10 per job were read\./);
+});
+
+test('source health from the read shows on the timeline, including a stale GHL capture', async () => {
+  const data = await loaded();
+  const d = data.debtors.find((x) => x.sources.ghl.status === 'stale');
+  CD.state.selectedKey = d.key;
+  const t = text();
+  assert.match(t, /GHL texts capture stale/);
+  assert.match(t, /GHL texts stale, not captured recently/);
+  assert.match(t, /GHL: stale, last captured 30 hours before this read, stale after 6h, owner CIO, fix: CIO: run the GHL message reconcile for the stale contact\(s\)\./);
+  assert.equal(CD.sourceHealthRows(d).find((r) => r.key === 'ghl').bad, true);
 });
 
 test('an undeployed action shows one honest not-connected line, never a zero', async () => {

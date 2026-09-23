@@ -567,7 +567,8 @@ request; the module carries no `opsPost`, send, note or proposal call, and its
 draft button stays disabled until the separate approval/executor work. Nothing
 is picked until the operator picks one invoice, and the draft is bound to it.
 Missing or faulted sources are named, never shown as "no messages" or a zero;
-email is never complete (Sent Items are not captured). Contract, copy and
+email is never complete (Sent Items are not captured). Captured facts are
+`kind: "fact"` timeline entries in the same stream, never a separate panel. Contract, copy and
 filters: `docs/clear-debt-ui.md`. Guards: `npm run test:clear-debt-v2` and
 `tests/e2e/ops-clear-debt.spec.js` against `tests/fixtures/clear-debt/`.
 

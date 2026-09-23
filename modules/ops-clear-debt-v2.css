@@ -181,7 +181,6 @@
 #clearDebtRoot .health .is-bad{color:var(--bad)}
 #clearDebtRoot .thread-note{color:var(--muted);font-size:13.5px}
 #clearDebtRoot .thread-note.is-bad{color:var(--bad);font-weight:600}
-#clearDebtRoot .factlist{padding-left:18px;margin-top:4px;display:grid;gap:2px}
 #clearDebtRoot .thread{list-style:none;padding:0;display:grid;gap:8px;margin-top:4px}
 #clearDebtRoot .tl{display:grid;gap:3px;max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;border:1px solid var(--line);background:var(--surface-2)}
 #clearDebtRoot .tl.is-in{justify-self:start;border-bottom-left-radius:4px}
@@ -202,6 +201,7 @@
 #clearDebtRoot .src-outlook{background:var(--surface);color:var(--brand);border:1px solid var(--brand-2)}
 #clearDebtRoot .src-xero{background:var(--ok-wash);color:var(--ok);border:1px solid #CFE3D8}
 #clearDebtRoot .src-secureworks,#clearDebtRoot .src-unknown{background:var(--line-2);color:var(--ink-2)}
+#clearDebtRoot .src-luna{background:var(--brand-wash);color:var(--brand);border:1px solid #C5D4DC}
 
 /* ---- the one draft ---- */
 #clearDebtRoot .compose{display:grid;gap:8px;padding-top:18px;border-top:1px solid var(--line-2)}

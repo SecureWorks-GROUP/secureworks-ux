@@ -9,7 +9,7 @@
 // request is logged too, so a provider call or a write cannot hide.
 const { test, expect } = require('@playwright/test');
 
-const URL = '/tests/fixtures/clear-debt/index.html';
+const PAGE = '/tests/fixtures/clear-debt/index.html';
 const STATIC = /\/(tests\/fixtures\/clear-debt\/(index\.html|worklist\.js)|modules\/ops-clear-debt-v2\.(js|css))(\?.*)?$/;
 
 const viewports = [
@@ -20,7 +20,7 @@ const viewports = [
 async function open(page, query) {
   const requests = [];
   page.on('request', (r) => requests.push({ method: r.method(), url: r.url() }));
-  await page.goto(URL + (query || ''));
+  await page.goto(PAGE + (query || ''));
   return requests;
 }
 async function ledger(page) {
@@ -114,13 +114,13 @@ for (const vp of viewports) {
       const card = page.locator('.db-card');
       const entries = card.locator('.thread > li.tl');
       await expect(entries).toHaveCount(12);
-      await expect(card.locator('.tl-status')).toContainText('Showing the newest 12 of 23 stored entries.');
+      await expect(card.locator('.tl-status')).toContainText('Showing the newest 12 of 32 stored entries.');
       await expect(card.locator('.tl-status')).toContainText('Outlook Sent Items are not captured');
       await expect(card.locator('.tl .src').first()).toBeVisible();
       await expect(card.locator('.tl-foot', { hasText: 'Preview, cut at 500 characters' })).toHaveCount(1);
       await expect(card.locator('.tl-foot', { hasText: 'also in captured event' })).toHaveCount(1);
 
-      for (const [label, group] of [['Texts', 'text'], ['Emails', 'email'], ['Notes', 'note'], ['Calls', 'call'], ['Invoices and Xero', 'xero']]) {
+      for (const [label, group] of [['Texts', 'text'], ['Emails', 'email'], ['Notes', 'note'], ['Calls', 'call'], ['Invoices and Xero', 'xero'], ['Facts', 'facts']]) {
         const chip = card.locator('[data-cd="tl"][data-tl="' + group + '"]');
         await expect(chip).toContainText(label);
         await chip.click();
@@ -129,9 +129,15 @@ for (const vp of viewports) {
         await expect(entries).toHaveCount(n);
         for (const g of await entries.evaluateAll((els) => els.map((e) => e.dataset.group))) expect(g).toBe(group);
       }
+      // Captured facts are entries in the same stream, each with its value, state and source.
       await card.locator('[data-tl="facts"]').click();
-      await expect(card.locator('#cd-tl-body')).toContainText('Facts on 4 of 5 invoices. This read says whether facts exist, not what they say');
+      const facts = card.locator('.thread > li.tl.is-fact');
+      expect(await facts.count()).toBeGreaterThan(0);
+      await expect(facts.first().locator('.src')).toHaveText('Luna');
+      await expect(facts.first().locator('.tl-kind')).toContainText('Captured fact:');
+      await expect(facts.first().locator('.tl-foot')).toContainText(/(Current|Stale) captured facts · source fact-001-/);
       await card.locator('[data-tl="all"]').click();
+      expect(await card.locator('.thread > li.tl.is-fact').count()).toBe(await facts.count());
       await expect(entries).toHaveCount(12);
 
       await card.locator('label.inv', { hasText: 'INV-S1003' }).click();
@@ -163,6 +169,9 @@ for (const vp of viewports) {
       await expect(page.locator('.db-list .lead')).toHaveCount(78);
       await page.getByLabel('Show').selectOption('not_linked');
       await expect(page.locator('.db-list .lead')).toHaveCount(11);
+      await page.getByLabel('Show').selectOption('stale');
+      await expect(page.locator('.db-list .lead')).toHaveCount(3);
+      await expect(page.locator('.db-list .lead', { hasText: 'Debtor 008' })).toHaveCount(1);
       await page.getByLabel('Show').selectOption('unconfirmed');
       await expect(page.locator('.db-list .lead')).toHaveCount(1);
       await expect(page.locator('.db-list .lead')).toContainText('Contact not confirmed');
@@ -180,6 +189,14 @@ for (const vp of viewports) {
       if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
       await page.locator('.db-list .lead', { hasText: 'Debtor 002' }).first().click();
       await expect(card.locator('.tl-status')).toContainText('only the newest 10 per job were read');
+      if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
+      await page.locator('.db-list .lead', { hasText: 'Debtor 006' }).first().click();
+      await expect(card).toContainText('Captured facts could not be read for this timeline, so none are shown. This does not mean there are none.');
+      await expect(card.locator('[data-tl="facts"] .count')).toHaveCount(0);
+      if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
+      await page.locator('.db-list .lead', { hasText: 'Debtor 008' }).first().click();
+      await expect(card.locator('.badge.bad')).toHaveText('GHL texts capture stale');
+      await expect(card.locator('.health')).toContainText('GHL: stale, last captured 30 hours before this read, stale after 6h, owner CIO, fix: CIO: run the GHL message reconcile for the stale contact(s).');
       expect((await ledger(page)).reads).toHaveLength(1);
     });
 
@@ -189,7 +206,7 @@ for (const vp of viewports) {
       await expect(page.locator('.counts')).toHaveCount(0);
       await expect(page.locator('.lead')).toHaveCount(0);
       expect(onlyStatic(requests)).toEqual([]);
-      await page.goto(URL + '?mode=fail');
+      await page.goto(PAGE + '?mode=fail');
       await expect(page.locator('[data-cd-state="failed"]')).toContainText('could not be read (timeout)');
     });
 
@@ -211,3 +228,35 @@ for (const vp of viewports) {
     }
   });
 }
+
+// The real page: ops.html hosts the screen, loads its module and stylesheet
+// with a fresh cache-bust, and the Financials tab makes the one read.
+test('ops.html hosts Clear Debt, loads it fresh, and the tab makes one read', async ({ page }) => {
+  const assets = {};
+  page.on('request', (r) => {
+    let u;
+    try { u = new URL(r.url()); } catch { return; }
+    const m = u.pathname.match(/\/modules\/ops-clear-debt-v2\.(js|css)$/);
+    if (m) assets[m[1]] = u.searchParams.get('v');
+  });
+  await page.goto('/ops.html');
+  await expect(page.locator('#swAuthGate')).toBeVisible();
+  await page.waitForFunction(() => typeof window.loadClearDebt === 'function' && Boolean(window.ClearDebt));
+  expect(assets.js, 'clear debt js must load').toBeTruthy();
+  expect(assets.css, 'clear debt css must load').toBeTruthy();
+  expect(assets.js).not.toBe('1');
+  await expect(page.locator('#subCleardebt > #clearDebtRoot')).toHaveCount(1);
+  await page.addScriptTag({ url: '/tests/fixtures/clear-debt/worklist.js' });
+  await page.evaluate(() => {
+    window.fakeReads = [];
+    window.fakeWrites = [];
+    window.opsFetch = async (action, params) => { window.fakeReads.push({ action, params }); return makeClearDebtWorklist(); };
+    window.opsPost = async (action, body) => { window.fakeWrites.push({ action, body }); throw new Error('writes are not allowed'); };
+    showSubTab('cleardebt');
+  });
+  await expect(page.locator('#clearDebtRoot .counts')).toContainText('101 open invoices');
+  await expect(page.locator('#clearDebtRoot .db-list .lead')).toHaveCount(78);
+  const ledger = await page.evaluate(() => ({ reads: window.fakeReads, writes: window.fakeWrites }));
+  expect(ledger.reads).toEqual([{ action: 'debt_worklist', params: { timeline: 'recent' } }]);
+  expect(ledger.writes).toEqual([]);
+});

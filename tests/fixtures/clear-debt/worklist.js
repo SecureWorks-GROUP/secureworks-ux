@@ -15,7 +15,9 @@
  * with several invoices, two different contacts that share a display name,
  * one contact whose invoices carry two name spellings, a debtor whose stored
  * GHL copies could not be read, a truncated timeline that hit the per-job cap,
- * a preview cut at 500 characters and a message seen by two sources.
+ * a preview cut at 500 characters, a message seen by two sources, captured
+ * facts as timeline entries (kind "fact", current and stale), a debtor whose
+ * facts could not be read and one whose GHL copies are stale.
  *
  * The response is built by code so the totals stay exact; the summary is
  * computed the way the backend read model computes it
@@ -266,6 +268,24 @@
       }
       if (r.sent_to_contact) raw.push(entry({ key: 'bev:emailed-' + r.xero_invoice_id, kind: 'invoice_event', channel: 'email', provider: 'secureworks', at: r.invoice_date + 'T01:30:00.000Z', direction: 'outbound', author: 'accounts@example.invalid', source: 'business_events', source_ref: 'emailed-' + r.xero_invoice_id, subject: 'invoice.emailed', preview: 'invoice.emailed to debtor' + pad(debtorNo, 3) + '@example.invalid', job_id: r.link.job_id, invoice_ids: [r.xero_invoice_id], invoice_scope: 'invoice' }));
     });
+    // Captured facts, shaped like the read model's entryFromFact: one entry per
+    // fact on each linked job whose invoice has facts present.
+    var factJobs = {};
+    rows.forEach(function (r) { if (r.context.facts === 'present' && r.link.job_id) factJobs[r.link.job_id] = Math.max(factJobs[r.link.job_id] || 0, r.context.facts_count); });
+    if (debtorNo !== FACTS_UNREADABLE) {
+      Object.keys(factJobs).forEach(function (jobId, j) {
+        for (var k = 0; k < factJobs[jobId]; k++) {
+          var kind = FACT_KINDS[(debtorNo + j + k) % FACT_KINDS.length];
+          var captured = hoursBefore(24 * (2 + k * 5) + j * 11 + (debtorNo % 4));
+          var stateWord = (debtorNo + k) % 3 === 2 ? 'stale' : 'current';
+          var value = 'Synthetic ' + kind.replace(/_/g, ' ') + ' fact ' + (k + 1) + '.';
+          var id = 'fact-' + pad(debtorNo, 3) + '-' + j + '-' + k;
+          raw.push(Object.assign(entry({ key: 'fact:' + id, kind: 'fact', channel: null, provider: 'luna', provider_id: id, at: captured, direction: 'system', source: 'current_job_context_facts', source_ref: id, subject: kind, preview: value, job_id: jobId, invoice_ids: jobs[jobId].invoices.slice(), invoice_scope: 'job', label: stateWord === 'stale' ? 'stale fact' : null }), {
+            fact: { kind: kind, value: value, captured_at: captured, source_id: id, state: stateWord }
+          }));
+        }
+      });
+    }
     var perJob = debtorNo === 2 ? 10 : null;
     var capped = [];
     Object.keys(jobs).forEach(function (jobId, j) {
@@ -293,19 +313,28 @@
       return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
     });
     var faulted = debtorNo === 4;
+    var factsFaulted = debtorNo === FACTS_UNREADABLE;
     var shown = raw.slice(0, 12);
     var faults = faulted ? [(rows[0].link.job_number || 'job') + ': ghl_cache: permission denied for table ghl_conversation_cache'] : [];
     return {
       faults: faults,
+      factsFaulted: factsFaulted,
       timeline: {
         mode: 'recent', order: 'newest_first', entries: shown, entries_read: raw.length,
         truncated: shown.length < raw.length, duplicates_merged: debtorNo === 1 ? 1 : 0,
         per_job_cap: 10, per_job_cap_reached: capped,
-        complete: !faulted && capped.length === 0 && shown.length === raw.length,
+        facts_per_job_cap: 10, facts_cap_reached: [],
+        complete: !faulted && !factsFaulted && capped.length === 0 && shown.length === raw.length,
         note: STORED_COPIES_NOTE
       }
     };
   }
+
+  var FACT_KINDS = ['payment_promise', 'dispute_reason', 'contact_preference', 'site_issue'];
+  // Debtor 006's captured facts could not be read for its timeline.
+  var FACTS_UNREADABLE = 6;
+  // Debtor 008's stored GHL copies have not been captured recently.
+  var GHL_STALE = 8;
 
   function longPreview() {
     var s = 'Synthetic long reply from the debtor. ';
@@ -336,6 +365,7 @@
     var tl = timelineFor(debtorNo, rows);
     var timeline = tl.timeline;
     var debtorFaults = tl.faults.map(function (f) { return { source: 'timeline', detail: f }; });
+    if (tl.factsFaulted) debtorFaults.push({ source: 'facts', detail: 'captured facts could not be read for the timeline' });
     var contactEntries = timeline.entries.filter(function (e) {
       return e.kind === 'call' || ((e.direction === 'inbound' || e.direction === 'outbound') && (e.channel === 'sms' || e.channel === 'email') && e.kind !== 'invoice_event');
     });
@@ -401,19 +431,39 @@
       sources: {
         xero: { status: 'current', oldest_synced_at: syncs[0], stale_invoice_ids: [], stale_after_hours: 24 },
         ghl: {
-          status: tl.faults.length ? 'unreadable' : !linkedRows.length ? 'no_job' : ghlCount === 0 ? 'no_contact' : ghlCount === 1 ? 'bound' : 'several',
+          status: tl.faults.length ? 'unreadable' : !linkedRows.length ? 'no_job' : ghlCount === 0 ? 'no_contact' : debtorNo === GHL_STALE ? 'stale' : ghlCount === 1 ? 'bound' : 'several',
+          last_success_at: tl.faults.length || !ghlCount ? null : hoursBefore(debtorNo === GHL_STALE ? 30 : 1),
+          stale_after: '6h',
+          stale: tl.faults.length ? null : debtorNo === GHL_STALE,
+          owner: 'CIO',
+          recovery_action: tl.faults.length
+            ? 'Retry the read; if it keeps failing, CIO checks the job link, contact_matches and GHL cache reads'
+            : debtorNo === GHL_STALE ? 'CIO: run the GHL message reconcile for the stale contact(s)'
+            : linkedRows.length && !ghlCount ? "CIO: bind the job's GHL contact" : null,
           contact_ids: Object.keys(ghlIds).map(function (id) { return { ghl_contact_id: id, via_job_ids: ghlIds[id].sort() }; }),
           messages_shown: countIn(function (e) { return e.provider === 'ghl'; }),
           read: 'stored GHL cache and captured business events'
         },
-        email: { status: !linkedRows.length ? 'no_job' : 'read', messages_shown: countIn(function (e) { return e.channel === 'email' && e.kind !== 'invoice_event'; }), note: STORED_COPIES_NOTE },
+        email: {
+          status: !linkedRows.length ? 'no_job' : 'partial',
+          last_success_at: null, stale_after: null, owner: 'CIO',
+          recovery_action: 'CIO email capture (EM1): capture Outlook Sent Items and inbound mail as stored events',
+          messages_shown: countIn(function (e) { return e.channel === 'email' && e.kind !== 'invoice_event'; }),
+          note: STORED_COPIES_NOTE + '; no email capture health is published, so there is no last success time'
+        },
         notes: {
-          status: 'read',
+          status: 'read', last_success_at: AS_OF, stale_after: null, owner: 'DEBT', recovery_action: null,
           debt_notes: timeline.entries.filter(function (e) { return e.kind === 'debt_note'; }).length,
           chase_log_rows: rows.reduce(function (a, r) { return a + r.chase.count; }, 0),
           job_notes_shown: countIn(function (e) { return e.kind === 'job_note'; })
         },
-        facts: { status: factsStatus, invoices_with_facts: rows.filter(function (r) { return r.context.facts === 'present'; }).length, of_invoices: rows.length }
+        facts: {
+          status: factsStatus,
+          invoices_with_facts: rows.filter(function (r) { return r.context.facts === 'present'; }).length,
+          of_invoices: rows.length,
+          timeline_read: tl.factsFaulted ? 'unreadable' : 'read',
+          facts_shown: countIn(function (e) { return e.kind === 'fact'; })
+        }
       },
       faults: debtorFaults,
       invoices: rows,

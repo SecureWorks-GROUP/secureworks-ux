@@ -197,7 +197,7 @@
     { key: 'ours_last', label: 'Our message was last', test: function (d) { var l = d.last_contact && d.last_contact.last; return Boolean(l && l.direction === 'outbound'); } },
     { key: 'not_linked', label: 'Invoice not linked to a job', test: function (d) { var s = d.link_state || {}; return (s.none || 0) + (s.ambiguous || 0) + (s.unknown || 0) > 0; } },
     { key: 'facts_missing', label: 'Facts missing', test: function (d) { var f = d.sources && d.sources.facts && d.sources.facts.status; return f === 'missing' || f === 'partial'; } },
-    { key: 'stale', label: 'Stale or unreadable source', test: function (d) { return !(d.freshness && d.freshness.xero_fresh) || (d.faults || []).length > 0; } },
+    { key: 'stale', label: 'Stale or unreadable source', test: function (d) { return staleOrUnreadable(d); } },
     { key: 'unconfirmed', label: 'Contact not confirmed', test: function (d) { return !d.identity || d.identity.status !== 'verified'; } },
     { key: 'dispute', label: 'In dispute', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'in_dispute'; }); } },
     { key: 'blocked', label: 'Blocked by us', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'blocked_by_us' && !/paid_unallocated|payment_claimed/.test(blockerOf(i) || ''); }); } },
@@ -205,6 +205,14 @@
     { key: 'not_owed', label: 'Not owed or bad debt', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'not_owed' || classOf(i) === 'bad_debt'; }); } },
     { key: 'unclassified', label: 'Not yet classified', test: function (d) { return anyInvoice(d, function (i) { return !classOf(i) || classOf(i) === 'unclassified'; }); } }
   ];
+  // Any source the read marks stale or unreadable, plus stale Xero and faults.
+  var STALE_SOURCES = ['ghl', 'email', 'notes', 'facts'];
+  function staleOrUnreadable(d) {
+    if (!(d.freshness && d.freshness.xero_fresh) || (d.faults || []).length > 0) return true;
+    var s = d.sources || {};
+    if (s.facts && s.facts.timeline_read === 'unreadable') return true;
+    return STALE_SOURCES.some(function (k) { return /^(stale|unreadable)$/.test(String((s[k] && s[k].status) || '')); });
+  }
   function filterByKey(key) {
     for (var i = 0; i < FILTERS.length; i++) if (FILTERS[i].key === key) return FILTERS[i];
     return FILTERS[0];
@@ -234,10 +242,9 @@
     { key: 'xero', label: 'Invoices and Xero' },
     { key: 'facts', label: 'Facts' }
   ];
-  // Fact entries arrive from the CFO desk's later work-list revision (value,
-  // captured_at, source_id, current or stale, scope, read fault). Until the
-  // read carries them the Facts chip falls back to the per-invoice counts.
-  function isFactEntry(e) { return e && (e.kind === 'fact' || e.kind === 'captured_fact' || e.channel === 'fact'); }
+  // Captured facts are ordinary timeline entries with kind "fact" and a fact
+  // block {kind, value, captured_at, source_id, state}; nothing else is a fact.
+  function isFactEntry(e) { return Boolean(e) && e.kind === 'fact'; }
   function entryGroup(e) {
     if (isFactEntry(e)) return 'facts';
     if (e.provider === 'xero' || e.kind === 'invoice_event' || /^xero_/.test(e.kind || '')) return 'xero';
@@ -259,23 +266,25 @@
   function chipCounts(d) {
     var counts = { all: 0, text: 0, email: 0, note: 0, call: 0, xero: 0, other: 0, facts: 0, factsListed: false };
     ((d && d.timeline && d.timeline.entries) || []).forEach(function (e) { counts.all += 1; counts[entryGroup(e)] += 1; });
-    counts.factsListed = counts.facts > 0;
+    var f = d && d.sources && d.sources.facts;
+    counts.factsListed = Boolean(f && f.timeline_read === 'read');
     return counts;
   }
-  var PROVIDER_LABEL = { ghl: 'GHL', outlook: 'Outlook', xero: 'Xero', secureworks: 'SecureWorks' };
+  var PROVIDER_LABEL = { ghl: 'GHL', outlook: 'Outlook', xero: 'Xero', secureworks: 'SecureWorks', luna: 'Luna' };
   var SOURCE_LABEL = {
     ghl_cache: 'GHL stored copy',
     inbox: 'Inbox copy',
     business_events: 'captured event',
     job_events: 'job record',
     payment_chase_logs: 'debt desk log',
-    xero_mirror: 'Xero copy'
+    xero_mirror: 'Xero copy',
+    current_job_context_facts: 'captured facts'
   };
   var KIND_LABEL = {
     sms: 'Text', email: 'Email', ghl_note: 'GHL note', job_note: 'Job note', debt_note: 'Desk note',
     debt_log: 'Desk log', call: 'Call', invoice_event: 'Invoice event',
     xero_invoice_raised: 'Invoice raised', xero_payment: 'Payment', message: 'Message',
-    fact: 'Captured fact', captured_fact: 'Captured fact'
+    fact: 'Captured fact'
   };
   function providerLabel(p) { return PROVIDER_LABEL[p] || (p ? String(p) : 'Unknown source'); }
   function sourceLabel(s) { return SOURCE_LABEL[s] || words(s || 'unknown'); }
@@ -485,12 +494,15 @@
       '<div><h3>Not in this read yet</h3><ul>' +
       '<li>Promised payment dates, so there is no promise-date filter.</li>' +
       '<li>A ready-for-Captain verdict, so no row is marked ready.</li>' +
-      '<li>What the captured facts say (only whether they exist).</li>' +
+      (factsListedAnywhere(d) ? '' : '<li>What the captured facts say (only whether they exist).</li>') +
       '<li>Links to each message in GHL or Outlook.</li>' +
       '<li>The phone line, mailbox, subject and attachment a draft would use.</li>' +
       '</ul></div>' +
       ((d.warnings || []).length ? '<div><h3>Warnings from the read</h3><ul>' + d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>' : '') +
       '</div></section>';
+  }
+  function factsListedAnywhere(data) {
+    return (data.debtors || []).some(function (x) { return x.sources && x.sources.facts && x.sources.facts.timeline_read === 'read'; });
   }
   var STORED_NOTE = 'stored copies only: not a live GHL or Outlook read, and Outlook Sent Items are not captured';
 
@@ -687,7 +699,7 @@
     }
     var counts = chipCounts(d);
     var chips = TL_CHIPS.map(function (c) {
-      // Facts not carried as entries get no number: a zero would read as "none".
+      // Facts the read did not list get no number: a zero would read as "none".
       var n = c.key === 'facts' && !counts.factsListed ? null : counts[c.key];
       return '<button type="button" class="chip" data-cd="tl" data-tl="' + c.key + '" aria-pressed="' + (state.tlFilter === c.key) + '">' + esc(c.label) + (n == null ? '' : '<span class="count">' + n + '</span>') + '</button>';
     }).join('');
@@ -696,12 +708,10 @@
       : '';
     var status = timelineStatus(d);
     var body;
-    if (state.tlFilter === 'facts' && !counts.factsListed) {
-      body = factsPanel(d);
-    } else {
+    {
       var list = timelineEntries(d);
       if (!list.length) {
-        var gaps = sourceGaps(d, state.tlFilter);
+        var gaps = state.tlFilter === 'facts' ? factLines(d) : sourceGaps(d, state.tlFilter);
         var which = state.tlFilter === 'all' ? 'entries' : (TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase());
         body = '<p class="thread-note">No ' + esc(which) + (state.onlyInvoice ? ' about ' + esc(invoiceNumber(d, state.invoiceId)) : '') + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>' +
           gaps.map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
@@ -732,7 +742,8 @@
     ];
     lines.push('<span>Sources: ' + esc(src.join('; ')) + '.</span>');
     lines.push('<span>These are ' + esc(STORED_NOTE) + '.</span>');
-    var health = sourceHealth(d);
+    var facts = factLines(d).filter(function (g) { return g.always; });
+    var health = sourceHealth(d) + facts.map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
     var incomplete = tl.complete ? '' : '<p class="thread-note' + ((d.faults || []).length ? ' is-bad' : '') + '">This timeline is incomplete' + ((d.faults || []).length ? ': a source could not be read.' : ': older or capped entries are not in this read.') + '</p>';
     return '<p class="tl-status fine">' + lines.join(' ') + '</p>' + health + incomplete;
   }
@@ -749,13 +760,16 @@
     }).map(function (x) {
       var v = s[x[0]];
       var bits = [];
-      if (v.last_success_at) bits.push('last captured ' + (ageBetween(v.last_success_at, d.freshness.as_of) || 'at an unknown time') + ' before this read');
-      else bits.push('no successful capture recorded');
+      var age = v.last_success_at ? ageBetween(v.last_success_at, d.freshness.as_of) : null;
+      var live = Boolean(v.last_success_at) && v.last_success_at === d.freshness.as_of;
+      if (live) bits.push('read live with this read');
+      else if (v.last_success_at) bits.push('last captured ' + (age || 'at an unknown time') + ' before this read');
+      else bits.push('no capture time published');
       if (v.stale_after) bits.push('stale after ' + (typeof v.stale_after === 'number' ? plural(v.stale_after, 'hour') : v.stale_after));
       if (v.owner) bits.push('owner ' + v.owner);
       if (v.recovery_action) bits.push('fix: ' + v.recovery_action);
       if (x[0] === 'email') bits.push('sent emails not captured');
-      return { key: x[0], label: x[1], bad: /stale|unreadable|fail|missing/.test(String(v.status || '')), text: x[1] + ': ' + words(v.status || 'status not stated') + ', ' + bits.join(', ') };
+      return { key: x[0], label: x[1], bad: /stale|unreadable|fail|missing/.test(String(v.status || '')), text: x[1] + ': ' + (live && v.status === 'read' ? '' : words(v.status || 'status not stated') + ', ') + bits.join(', ') };
     });
   }
   function sourceHealth(d) {
@@ -764,29 +778,40 @@
     return '<ul class="health fine">' + rows.map(function (r) { return '<li' + (r.bad ? ' class="is-bad"' : '') + '>' + esc(r.text) + '.</li>'; }).join('') + '</ul>';
   }
   function ghlWords(s) {
-    return { bound: 'read', several: 'read (several GHL contacts)', no_contact: 'no contact on the job', no_job: 'no job to read', unreadable: 'could not be read', not_read: 'not read' }[s] || 'unknown';
+    return { bound: 'read', several: 'read (several GHL contacts)', stale: 'stale, not captured recently', no_contact: 'no contact on the job', no_job: 'no job to read', unreadable: 'could not be read', not_read: 'not read' }[s] || 'unknown';
   }
   // Email is never called complete while Outlook Sent Items are not captured.
   function emailWords(s) {
-    if (s === 'read' || s === 'current') return 'read from inbound copies, sent ones not captured';
+    if (s === 'read' || s === 'current' || s === 'partial') return 'read from inbound copies, sent ones not captured';
     return readWords(s);
   }
   function readWords(s) {
     return { read: 'read', no_job: 'no job to read', unreadable: 'could not be read', not_read: 'not read' }[s] || 'unknown';
   }
 
-  function factsPanel(d) {
-    var f = d.sources.facts;
-    var perInvoice = d.invoices.map(function (inv) {
-      var c = inv.context || {};
-      var what = c.facts === 'present' ? plural(c.facts_count || 0, 'fact') + ' captured'
-        : c.facts === 'missing' ? 'none captured yet'
-        : c.facts === 'no_job' ? 'no job, so nothing to capture from'
-        : c.facts === 'unreadable' ? 'could not be read'
-        : 'unknown';
-      return '<li><b>' + esc(inv.invoice_number || 'Invoice') + '</b>: ' + esc(what) + '</li>';
-    }).join('');
-    return '<div class="thread-note"><p>' + esc(factsWords(f)) + '. This read says whether facts exist, not what they say, so they cannot be listed in the timeline yet.</p><ul class="factlist">' + perInvoice + '</ul></div>';
+  // What the timeline can honestly say about captured facts. Lines marked
+  // always show under the status line; the rest explain an empty Facts view.
+  function factLines(d) {
+    var f = (d.sources && d.sources.facts) || {};
+    var tl = d.timeline || {};
+    var out = [];
+    if (f.timeline_read === 'unreadable') {
+      out.push({ always: true, bad: true, text: 'Captured facts could not be read for this timeline, so none are shown. This does not mean there are none.' });
+    } else if (f.timeline_read === 'not_read') {
+      out.push({ always: true, bad: false, text: 'Captured facts were not read for this view.' });
+    } else if (f.timeline_read !== 'read') {
+      out.push({ always: true, bad: false, text: 'This read does not list captured facts; it only says ' + factsWords(f).toLowerCase() + '.' });
+    } else if (f.status === 'no_job') {
+      out.push({ always: false, bad: false, text: 'No invoice on this debtor is linked to a job, so there are no captured facts to read.' });
+    } else if (f.status === 'missing') {
+      out.push({ always: false, bad: false, text: 'No facts have been captured from the linked jobs yet.' });
+    } else {
+      out.push({ always: false, bad: false, text: 'None of the captured facts are among the newest ' + (tl.entries || []).length + ' entries in this view.' });
+    }
+    if ((tl.facts_cap_reached || []).length) {
+      out.push({ always: true, bad: false, text: 'Job ' + tl.facts_cap_reached.join(', ') + ' has more than ' + tl.facts_per_job_cap + ' captured facts; only the newest ' + tl.facts_per_job_cap + ' per job were read.' });
+    }
+    return out;
   }
 
   function factValue(v) {
@@ -795,26 +820,24 @@
     if (typeof v === 'object' && typeof v.text === 'string') return v.text;
     try { return JSON.stringify(v); } catch (err) { return String(v); }
   }
-  function factState(e) {
-    if (e.read_fault) return '<span class="pill bad">Could not be read: ' + esc(typeof e.read_fault === 'string' ? e.read_fault : 'read fault') + '</span>';
-    var st = e.state || e.freshness || (e.current === true ? 'current' : e.current === false ? 'stale' : null);
-    if (st === 'current') return '<span class="pill ok">Current</span>';
-    if (st === 'stale') return '<span class="pill bad">Stale</span>';
-    return '<span class="pill">Current or stale not stated</span>';
-  }
   function renderFactEntry(d, e) {
+    var f = e.fact || {};
     var scope = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); });
     var mine = state.invoiceId && (e.invoice_ids || []).indexOf(state.invoiceId) >= 0;
-    var at = e.captured_at || e.at;
+    var at = f.captured_at || e.at;
+    var what = f.kind || e.subject;
+    var st = f.state === 'current' ? '<span class="pill ok">Current</span>'
+      : f.state === 'stale' ? '<span class="pill bad">Stale</span>'
+      : '<span class="pill">Current or stale not stated</span>';
     return '<li class="tl is-fact' + (mine ? ' is-scope' : '') + '" data-group="facts">' +
-      '<div class="tl-meta"><span class="src src-' + esc(e.provider || 'secureworks') + '">' + esc(providerLabel(e.provider || 'secureworks')) + '</span>' +
-      '<span class="tl-kind">' + esc(e.label || e.subject || 'Captured fact') + '</span>' +
+      '<div class="tl-meta"><span class="src src-' + esc(e.provider || 'unknown') + '">' + esc(providerLabel(e.provider)) + '</span>' +
+      '<span class="tl-kind">Captured fact' + (what ? ': ' + esc(words(what)) : '') + '</span>' +
       '<time datetime="' + esc(at || '') + '">' + (at ? 'captured ' + esc(whenLabel(at, e.at_precision)) : 'capture time not in the read') + '</time></div>' +
-      '<div class="tl-body">' + esc(e.read_fault ? '' : factValue(e.value != null ? e.value : e.preview)) + '</div>' +
-      '<div class="tl-foot">' + factState(e) + ' ' + esc(sourceLabel(e.source || 'facts')) +
-      (e.source_id ? ' · source ' + esc(e.source_id) : '') +
+      '<div class="tl-body">' + esc(factValue(Object.prototype.hasOwnProperty.call(f, 'value') ? f.value : e.preview)) + '</div>' +
+      '<div class="tl-foot">' + st + ' ' + esc(sourceLabel(e.source)) +
+      (f.source_id || e.source_ref ? ' · source ' + esc(f.source_id || e.source_ref) : '') +
       (e.job_id ? ' · Job ' + esc(jobNumberFor(d, e.job_id) || 'record') : '') +
-      (scope.length ? ' · ' + esc(scope.join(', ')) : '') + '</div></li>';
+      (scope.length ? ' (' + esc(scope.join(', ')) + ')' : '') + '</div></li>';
   }
 
   function renderEntry(d, e) {
@@ -824,6 +847,8 @@
     var scope = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); });
     var scopeWords = e.invoice_scope === 'job'
       ? 'Job ' + (jobNumberFor(d, e.job_id) || 'record') + (scope.length ? ' (' + scope.join(', ') + ')' : '')
+      : e.invoice_scope === 'debtor'
+      ? 'Whole account' + (scope.length ? ' (' + scope.join(', ') + ')' : '')
       : scope.join(', ');
     var also = (e.seen_in || []).filter(function (s) { return s !== e.source; });
     var author = e.author ? esc(e.author) + ' · ' : '';
@@ -1033,6 +1058,8 @@
     chipCounts: chipCounts,
     sourceGaps: sourceGaps,
     sourceHealthRows: sourceHealthRows,
+    factLines: factLines,
+    staleOrUnreadable: staleOrUnreadable,
     isFactEntry: isFactEntry,
     composerModel: composerModel,
     providerLabel: providerLabel,

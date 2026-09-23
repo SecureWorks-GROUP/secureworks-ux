@@ -16433,6 +16433,11 @@ function renderKanbanCard(j, status) {
   if (j.type !== tabImpliedType) {
     html += '<span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
   }
+  // Schedule chip: the NEXT visit not yet happened, else the most recent past visit,
+  // start date only. Both fields come precomputed from the pipeline read model
+  // (ghost/observer and cancelled rows already excluded). `first_scheduled_date` is
+  // deliberately NOT used: it is frozen as the historical MIN over every row, ghosts
+  // included, and reads as a stale date on a rebooked job.
   var cardScheduleDate = j.next_scheduled_date ?? j.last_scheduled_date;
   if (cardScheduleDate && (status === 'scheduled' || status === 'in_progress' || status === 'on_site')) {
     var sdParts = cardScheduleDate.split('-');

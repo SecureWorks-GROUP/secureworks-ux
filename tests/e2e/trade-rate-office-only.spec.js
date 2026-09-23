@@ -162,6 +162,12 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     await extraAmt.evaluate((el) => { el.value = '15'; });
     await notes.fill('Side gate access');
     await desc.fill('Replaced palings on the street side');
+    await page.getByRole('button', { name: '+ Add extra / adjustment' }).click();
+    const adjDesc = page.locator('#ir_desc_0');
+    const adjType = page.locator('#ir_div_0');
+    await expect(adjDesc).toBeVisible();
+    await adjDesc.evaluate((el) => { el.value = 'Travel to second site'; });
+    await adjType.evaluate((el) => { el.value = 'Fencing'; });
 
     releaseHours();
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$50.00/hr');
@@ -169,6 +175,8 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     await expect(notes).toHaveValue('Side gate access');
     await expect(extraDesc).toHaveValue('Tool hire');
     await expect(extraAmt).toHaveValue('15');
+    await expect(adjDesc).toHaveValue('Travel to second site');
+    await expect(adjType).toHaveValue('Fencing');
 
     await page.locator('#invSubmitBtn').click();
     await page.locator('#confirmAck').check();
@@ -190,5 +198,12 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     expect(writes[0].body.final_deductions).toEqual([
       { description: 'Tool hire', quantity: 1, unit: 'ea', unit_rate: 15 }
     ]);
+    expect(writes[0].body.extra_items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        description: 'Travel to second site',
+        division: 'Fencing',
+        source: 'manual'
+      })
+    ]));
   });
 });

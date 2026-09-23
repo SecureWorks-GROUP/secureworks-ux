@@ -608,3 +608,163 @@ test('a proposed slot on the day names the booking it clashes with, in full', ()
   assert.match(html, /class="ev is-proposal is-proposal is-clash[^"]*"[^>]*data-booking-case="lead-a"[\s\S]*?<span class="ev-clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am<\/span>/);
   assert.match(html, /<span class="ev-title">Scope: Melanie N, Piara Waters<\/span>/);
 });
+
+// ---- The owner's own text or picked visit (owner-authored-v1) ----
+// Runs against the Friday fixture, whose read offers owner-authored-v1, and the
+// offline backend double (tests/fixtures/booking-confirm/api.js).
+const makeFridayRead = require('../tests/fixtures/booking-confirm/friday.js');
+function ownerSetup(actionMode) {
+  data = makeFridayRead(api, fixture);
+  const backend = backendFixture.create(api, data);
+  globalThis.fixtureActionMode = actionMode || 'unknown';
+  delete globalThis.fixtureOwnerMode; delete globalThis.fixtureOwnerRefusal;
+  global.opsPost = backend.post;
+  Object.assign(api.state, { data, weekStart: data.week_start, drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {} });
+  return backend;
+}
+function fridayOf(d) {
+  return d.booking_flow.owner_rulebook.bookable_dates.filter((x) => new Date(x + 'T12:00:00Z').getUTCDay() === 5).pop();
+}
+function pickVisit(c, start, minutes) {
+  api.state.selectedId = c.id;
+  Object.assign(api.ownerPick(c), { date: fridayOf(data), start, minutes });
+}
+const caseById = (id) => data.cases.find((c) => c.id === id);
+
+test('an edited text is checked by the server, shown exactly, then approved and sent', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-basil'); api.state.selectedId = row.id; api.renderHTML();
+  editDraft(row.booking_read_model.message.template_text + ' Marnin');
+  assert.equal(api.messagePath(row), 'owner');
+  const checked = await api.press(row.id, 'message');
+  assert.equal(checked.ok, true);
+  assert.equal(backend.writes.length, 1);
+  assert.deepEqual(backend.writes[0].body, { owner_input: { step: 'message', case_id: 'lead-basil', contact_id: 'ghl-basil', week_start: data.week_start, resource: 'marnin', text: api.draftFor(row).text }, dry_run: true });
+  let html = api.renderCard();
+  assert.match(html, /<strong>Checked\.<\/strong> This exact text goes from SecureWorks Group Ops 776 to the phone ending 418\./);
+  assert.match(html, /class="oc-text">Hi Basil,[^<]*Marnin<\/blockquote>/);
+  assert.match(html, /Not already in this conversation \(4 messages read\)\./);
+  assert.match(html, /Texts sent by hand outside this system cannot be checked/);
+  assert.match(html, /<textarea id="bk-draft"[^>]* disabled/);
+  assert.doesNotMatch(html, /data-booking-press="message"/);
+  const sent = await api.ownerApprove(row.id, 'message');
+  assert.equal(sent.ok, true);
+  const decide = backend.writes[1];
+  assert.equal(decide.action, 'sales_booking_approval_write');
+  assert.equal(decide.body.decision, 'approved');
+  assert.equal(decide.body.owner_input.prepared_at, checked.preview.snapshot.prepared_at);
+  assert.equal(decide.body.content_hash, checked.preview.content_hash);
+  assert.equal(decide.body.snapshot, undefined);
+  assert.equal(backend.writes[2].action, 'sales_booking_send');
+  assert.match(backend.writes[2].body.approval_id, /^[0-9a-f]{64}$/);
+  html = api.renderCard();
+  assert.match(html, /Text sent at [0-9:]+[ap]m from SecureWorks Group Ops 776 to the phone ending 418\./);
+  assert.match(html, /data-booking-press="message"[^>]* disabled/);
+});
+
+test('a lead with no proposed time gets a day and window picker that books through the check', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-priya');
+  api.state.selectedId = row.id;
+  assert.equal(api.calendarPath(row), 'owner');
+  let html = api.renderCard();
+  assert.match(html, /Pick a visit/);
+  assert.match(html, /aria-label="Visit day"/);
+  assert.match(html, /Pick a day and an arrival time first\./);
+  pickVisit(row, '12:30', 60);
+  const fri = fridayOf(data);
+  assert.deepEqual(api.ownerVisit(row), { window_start_iso: fri + 'T12:30:00+08:00', window_end_iso: fri + 'T13:30:00+08:00', end_iso: fri + 'T14:30:00+08:00' });
+  html = api.renderCard();
+  assert.match(html, /Book it writes: <b>GHL Stratco Fencing calendar<\/b> and <b>Marnin's Outlook<\/b>/);
+  assert.match(html, /Hold Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them with this text/);
+  const checked = await api.press(row.id, 'calendar');
+  assert.equal(checked.ok, true);
+  assert.deepEqual(backend.writes[0].body.owner_input.visit, api.ownerVisit(row));
+  html = api.renderCard();
+  assert.match(html, /This exact visit goes in GHL Stratco Fencing calendar and Marnin's Outlook\./);
+  assert.match(html, /Scope visit: Priya S · 8 Example Street, Southern River · on site until 2:30pm/);
+  assert.match(html, /GHL is clear, with 30 minutes travel either side/);
+  assert.match(html, /Outlook is clear/);
+  assert.match(html, /data-owner-visit="date"[^>]* disabled/);
+  const booked = await api.ownerApprove(row.id, 'calendar');
+  assert.equal(booked.ok, true);
+  assert.equal(backend.writes[2].action, 'sales_booking_book');
+  assert.match(api.renderCard(), /Booked Friday [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm in GHL Stratco Fencing calendar and Marnin's Outlook at /);
+});
+
+test('a text sent with a picked time carries it as the offer, unless unticked', async () => {
+  const backend = ownerSetup();
+  row = caseById('lead-priya');
+  pickVisit(row, '12:30', 60);
+  assert.deepEqual(api.ownerInput(row, 'message').offer, api.ownerVisit(row));
+  await api.press(row.id, 'message');
+  assert.deepEqual(backend.writes[0].body.owner_input.offer, api.ownerVisit(row));
+  assert.match(api.renderCard(), /It holds Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them\./);
+  api.state.ownerPreviews = {};
+  api.ownerPick(row).offer = false;
+  assert.equal(api.ownerInput(row, 'message').offer, undefined);
+});
+
+test('a named server refusal shows as one plain sentence and nothing is approved or booked', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-priya');
+  // Clear on screen, but Melanie's Outlook visit ends 11:45, inside the 30 minutes travel.
+  pickVisit(row, '12:00', 60);
+  assert.equal(api.ownerBlock(row, 'calendar'), '');
+  const r = await api.press(row.id, 'calendar');
+  assert.equal(r.ok, false);
+  const html = api.renderCard();
+  assert.match(html, /class="result is-bad" role="alert">Not booked: that time clashes with Scope: Melanie N, Piara Waters at 10:45am in Outlook, counting 30 minutes travel either side\.<\/p>/);
+  assert.doesNotMatch(html, /Checked\.|Booked /);
+  assert.deepEqual(backend.writes.map((w) => w.action), ['sales_booking_approval_write']);
+  globalThis.fixtureOwnerRefusal = 'text_already_in_thread';
+  await api.press(row.id, 'message');
+  assert.match(api.renderCard(), /Not sent: this exact text is already in the conversation\./);
+  assert.equal(api.refusalWords('owner_visit_day_not_permitted'), 'Stratco visits are Tuesday and Friday only.');
+  delete globalThis.fixtureOwnerRefusal;
+});
+
+test('the unedited engine proposal still takes the engine path when the owner path is on', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-basil'); api.state.selectedId = row.id; api.renderHTML();
+  assert.equal(api.messagePath(row), 'engine');
+  assert.equal(api.calendarPath(row), 'engine');
+  const r = await api.press(row.id, 'message');
+  assert.equal(r.ok, true);
+  assert.equal(backend.writes[0].body.owner_input, undefined);
+  assert.equal(backend.writes[0].body.snapshot.content.variant, 'template');
+  assert.equal(backend.writes[1].action, 'sales_booking_send');
+  assert.doesNotMatch(api.renderCard(), /Pick a visit/);
+});
+
+test('an owner path the server does not have yet says not connected and sends nothing', async () => {
+  const backend = ownerSetup('sent');
+  globalThis.fixtureOwnerMode = 'unknown';
+  row = caseById('lead-priya'); api.state.selectedId = row.id;
+  await api.press(row.id, 'message');
+  assert.match(api.renderCard(), /Sending your own text is not connected on the server yet, so nothing was sent\./);
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  delete globalThis.fixtureOwnerMode;
+  delete data.booking_flow.owner_approval_write;
+  assert.equal(api.messagePath(row), 'engine');
+  assert.match(api.renderCard(), /No checked proposal for this lead yet, so nothing can be sent from here\./);
+});
+
+test('the owner path blocks long dashes, respects the protected band and stops on a changed text', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-priya'); api.state.selectedId = row.id;
+  const d = api.draftFor(row); d.text = 'Hi Priya — Friday?'; d.humanEdited = true;
+  assert.equal(api.ownerBlock(row, 'message'), 'Take out the long dash. Texts to clients never use one.');
+  const rb = data.booking_flow.owner_rulebook;
+  const tue = '2026-09-29';
+  assert.ok(!api.ownerStarts(rb, tue, 60).some((t) => t >= '11:30' && t <= '15:30'));
+  assert.ok(api.ownerStarts(rb, tue, 60).includes('10:00'));
+  assert.equal(api.ownerStarts(rb, fridayOf(data), 90).pop(), '14:00');
+  d.text = 'Hi Priya, would Friday suit?';
+  await api.press(row.id, 'message');
+  d.text = 'Different words now';
+  const r = await api.ownerApprove(row.id, 'message');
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'This changed after it was checked. Check it again.');
+  assert.equal(backend.writes.length, 1);
+});

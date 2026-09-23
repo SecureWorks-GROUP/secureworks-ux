@@ -15,8 +15,12 @@ test.describe('Trade repair vertical', () => {
     await signIn(page, PERSONAS.installer);
     await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
 
-    // Default filter is Make-safe: the plain make-safe board job renders here,
-    // and neither repair job leaks onto the make-safe board/calendar.
+    // This trade's own work is mostly repair, so the calendar opens on Repair
+    // (it follows the trade's own work). Pick Make-safe: the plain make-safe
+    // board job renders there, and neither repair job leaks onto it.
+    await page.locator('#ncFbtn').click();
+    await page.locator('#ncSheetBody [data-ftype="makesafe"]').click();
+    await page.locator('#ncDoneBtn').click();
     await expect(page.locator('#ncCalhost')).toContainText('E2E-MS-002');
     await expect(page.locator('#ncCalhost')).not.toContainText('SWMS-261319');
     await expect(page.locator('#ncCalhost')).not.toContainText('REP-51002');
@@ -123,6 +127,9 @@ test.describe('Trade repair vertical', () => {
   test('a plain make-safe still files under Make-safe, not Repair, and behaves as today', async ({ appPage: page }) => {
     await signIn(page, PERSONAS.installer);
     await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
+    await page.locator('#ncFbtn').click();
+    await page.locator('#ncSheetBody [data-ftype="makesafe"]').click();
+    await page.locator('#ncDoneBtn').click();
     await expect(page.locator('#ncCalhost .ncard.ms').filter({ hasText: 'E2E-MS-002' })).toBeVisible();
 
     await page.locator('#ncFbtn').click();

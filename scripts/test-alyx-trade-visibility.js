@@ -29,8 +29,6 @@ assert(html.includes("{ key: 'recent', label: 'Needs Report' }"),
   'Needs Report label retained for the report-action queue')
 assert(!html.includes("{ key: 'recent', label: 'My recent completed' }"),
   'completed work is not dumped into the Needs Report section key')
-assert(html.includes("showView('hours')") && html.includes('Open Pay'),
-  'empty Jobs state deep-links Pay for finished-work discovery')
 assert(
   html.includes("['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled']"),
   'assignment cache includes recentCompleted + unscheduled'

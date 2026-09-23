@@ -6,7 +6,7 @@ const vm = require('vm')
 const html = fs.readFileSync('trade.html', 'utf8')
 
 function extractFunction(name) {
-  const marker = `function ${name}`
+  const marker = `function ${name}(`
   const start = html.indexOf(marker)
   assert(start !== -1, `${name} exists`)
   const next = html.indexOf('\n  function ', start + marker.length)
@@ -88,6 +88,7 @@ async function runDynamicHelperCheck() {
     extractFunction('_invoicePdfDataFromResponse'),
     extractFunction('_attachInvoicePdfToXero'),
     extractFunction('_invoiceRateLabel'),
+    extractFunction('_invoiceMoneySummaryHtml'),
     extractFunction('_generateInvoicePDF'),
   ].join('\n')
   vm.runInNewContext(dynamicSource, context)
@@ -161,23 +162,48 @@ async function runDynamicHelperCheck() {
   })
   assert.strictEqual(unmigratedMoney.complete, true, 'unmigrated GST-off money is still complete')
   assert.strictEqual(unmigratedMoney.super_amount, 120, 'unmigrated fund total stays 12%')
-  assert.strictEqual(unmigratedMoney.super_worker_share, 60, 'unmigrated worker share is half the rate')
-  assert.strictEqual(unmigratedMoney.super_company_share, 60, 'unmigrated company share is the remainder')
-  assert.strictEqual(unmigratedMoney.cash_payable, 940, 'unmigrated cash is gross minus worker share')
+  assert.strictEqual(unmigratedMoney.worker_withhold, 60, 'unmigrated worker withhold is half the rate')
+  assert.strictEqual(unmigratedMoney.company_contribution, 60, 'unmigrated company contribution is the remainder')
+  assert.strictEqual(unmigratedMoney.amount_payable, 940, 'legacy full-carve-out net_pay is refused as cash')
   assert.strictEqual(unmigratedMoney.net_pay, 880, 'unmigrated net_pay is kept but not used as cash')
   assert.strictEqual(unmigratedMoney.total_inc, 940, 'GST-off total uses cash payable, not old net_pay')
 
+  // Submit/generate responses carry the secureworks-backend #865 money shape.
   const backendSplitMoney = context._invoicePersistedMoney({
     gross_earned: 1000,
     super_rate: 0.12,
     super_amount: 120,
-    net_pay: 880,
-    super_worker_share: 60,
-    super_company_share: 60,
-    cash_payable: 940,
+    net_pay: 940,
+    amount_payable: 940,
+    worker_withhold: 60,
+    company_contribution: 60,
+    company_total_out: 1060,
+    trade_payable: 940,
+    gst: 0,
+    total_inc: 1000,
     gst_on: false,
   })
-  assert.strictEqual(backendSplitMoney.cash_payable, 940, 'backend cash_payable is preferred')
+  assert.strictEqual(backendSplitMoney.complete, true, 'backend #865 GST-off money is complete')
+  assert.strictEqual(backendSplitMoney.worker_withhold, 60, 'backend worker_withhold reaches the screen')
+  assert.strictEqual(backendSplitMoney.company_contribution, 60, 'backend company_contribution reaches the screen')
+  assert.strictEqual(backendSplitMoney.amount_payable, 940, 'backend amount_payable is cash')
+  assert.strictEqual(backendSplitMoney.total_inc, 940, 'GST-off total is the backend cash figure')
+
+  const backendOtherMoney = context._invoicePersistedMoney({
+    gross_earned: 1000,
+    super_rate: 0.12,
+    super_amount: 120,
+    net_pay: 950,
+    amount_payable: 950,
+    worker_withhold: 50,
+    company_contribution: 70,
+    gst_on: false,
+  })
+  assert.strictEqual(backendOtherMoney.worker_withhold, 50, 'a backend withhold that differs from gross*rate/2 wins')
+  assert.strictEqual(backendOtherMoney.company_contribution, 70, 'a backend company contribution that differs wins')
+  assert.strictEqual(backendOtherMoney.amount_payable, 950, 'a backend cash figure that differs wins')
+  const backendOtherHtml = context._invoiceMoneySummaryHtml(backendOtherMoney)
+  assert(backendOtherHtml.includes('$950.00') && backendOtherHtml.includes('$50.00') && backendOtherHtml.includes('$70.00'), 'summary renders the backend figures, not the derivation')
 
   const gstOnLegacyTotal = context._invoicePersistedMoney({
     gross_earned: 100,
@@ -255,6 +281,17 @@ async function runDynamicHelperCheck() {
   assert(pdfText.includes('$997.92'), 'PDF total uses the backend-persisted invoice total')
   assert(pdfText.includes('0.00'), 'PDF renders persisted zero hours instead of a blank')
   assert(pdfText.includes('$0.00'), 'PDF renders persisted zero rates instead of a blank')
+
+  pdfText.length = 0
+  context._generateInvoicePDF({
+    invoiceNumber: 'SW-INV-TT-260618-003',
+    rows,
+    notes: '',
+    money: backendOtherMoney,
+  })
+  assert(pdfText.includes('-$50.00'), 'PDF worker line is the backend worker_withhold')
+  assert(pdfText.includes('$70.00'), 'PDF company line is the backend company_contribution')
+  assert(pdfText.includes('$950.00'), 'PDF cash is the backend amount_payable')
 }
 
 runDynamicHelperCheck().then(() => {

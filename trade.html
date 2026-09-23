@@ -21124,10 +21124,13 @@
       return null;
     }
     // 2026-09-18: fund still gets the full super rate (12%). Only half of that
-    // comes off the trade; the company covers the other half. Prefer backend
-    // worker/company/cash fields when present. A persisted net_pay equal to
-    // gross minus the FULL super amount is the old contract — never show it
-    // as cash payable.
+    // comes off the trade; the company covers the other half. Field names
+    // match ops-api trade_invoice_money.ts (secureworks-backend #865):
+    // worker_withhold, company_contribution, and amount_payable / net_pay as
+    // the trade's cash. Backend figures win; gross * rate / 2 is the last
+    // fallback. A persisted net_pay equal to gross minus the FULL super amount
+    // is the old contract (still accepted upstream on settled invoices) and is
+    // never shown as cash, nor is a worker_withhold equal to the full fund.
     function resolveSuperSplit(source) {
       source = source || {};
       var gross = pickNum(source, ['gross_earned']);
@@ -21136,36 +21139,52 @@
       var fund = pickNum(source, ['super_amount']);
       if (fund == null && gross != null && rate != null && rate > 0) fund = round2(gross * rate);
 
-      var worker = pickNum(source, ['super_worker_share']);
-      if (worker == null && gross != null && rate != null && rate > 0) worker = round2(gross * rate / 2);
-      if (worker == null && fund != null) worker = round2(fund / 2);
+      var halfWorker = null;
+      if (gross != null && rate != null && rate > 0) halfWorker = round2(gross * rate / 2);
+      else if (fund != null) halfWorker = round2(fund / 2);
+      var halfCash = (gross != null && halfWorker != null) ? round2(gross - halfWorker) : null;
+      var oldNet = (gross != null && fund != null) ? round2(gross - fund) : null;
 
-      var company = pickNum(source, ['super_company_share']);
+      var netPay = pickNum(source, ['net_pay']);
+      var backendCash = pickNum(source, ['amount_payable', 'net_pay']);
+      var backendWorker = pickNum(source, ['worker_withhold']);
+      var backendCompany = pickNum(source, ['company_contribution']);
+      // Full-carve-out signature: only meaningful when it differs from the
+      // half split (a zero fund makes the two contracts identical).
+      var fullCarve = oldNet != null && halfCash != null && !sameMoney(oldNet, halfCash);
+      var legacy = fullCarve && (
+        (backendCash != null && sameMoney(backendCash, oldNet)) ||
+        (backendWorker != null && fund != null && sameMoney(backendWorker, fund))
+      );
+      if (legacy) {
+        backendCash = null;
+        backendWorker = null;
+        backendCompany = null;
+      }
+
+      var worker = backendWorker;
+      if (worker == null && backendCash != null && gross != null) {
+        var impliedWorker = round2(gross - backendCash);
+        if (impliedWorker >= 0 && (fund == null || impliedWorker <= fund)) worker = impliedWorker;
+      }
+      if (worker == null) worker = halfWorker;
+
+      var company = backendCompany;
       var remainder = (fund != null && worker != null) ? round2(fund - worker) : null;
       if (company == null || (fund != null && worker != null && !sameMoney(round2(Number(worker) + Number(company)), fund))) {
         company = remainder;
       }
 
-      var oldNet = (gross != null && fund != null) ? round2(gross - fund) : null;
-      var newCash = (gross != null && worker != null) ? round2(gross - worker) : null;
-      var netPay = pickNum(source, ['net_pay']);
-      var cash = pickNum(source, ['cash_payable']);
-      if (cash == null) {
-        if (netPay != null && oldNet != null && sameMoney(netPay, oldNet) && (newCash == null || !sameMoney(netPay, newCash))) {
-          cash = newCash;
-        } else if (netPay != null) {
-          cash = netPay;
-        } else {
-          cash = newCash;
-        }
-      }
+      var cash = backendCash;
+      if (cash == null && gross != null && worker != null) cash = round2(gross - worker);
       return {
         super_rate: rate,
         super_amount: fund,
-        super_worker_share: worker,
-        super_company_share: company,
-        cash_payable: cash,
-        net_pay: netPay
+        worker_withhold: worker,
+        company_contribution: company,
+        amount_payable: cash,
+        net_pay: netPay,
+        legacy_full_carve_out: !!legacy
       };
     }
     function dateShort(iso) {
@@ -21244,9 +21263,9 @@
       h += statHTML('Still owed', money(t.outstanding), Number(t.outstanding || 0) > 0 ? 'owed' : '');
       h += '</div>';
       var split = resolveSuperSplit(t);
-      h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.super_worker_share) + ' from you &middot; company covers ' + money(split.super_company_share);
+      h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.worker_withhold) + ' from you &middot; company covers ' + money(split.company_contribution);
       if (Number(t.gst || 0) > 0) h += ' &middot; GST ' + money(t.gst);
-      h += ' &middot; You get ' + money(split.cash_payable) + '</div>';
+      h += ' &middot; You get ' + money(split.amount_payable) + '</div>';
       // Live audit 2026-09-23: most invoices before the super split carry no
       // gross_earned, so Earned and Super leave them out while Paid and Still
       // owed count them. Say exactly that rather than let Paid look bigger
@@ -21466,9 +21485,9 @@
       gross_earned: gross,
       super_rate: rate,
       super_amount: split.super_amount,
-      super_worker_share: split.super_worker_share,
-      super_company_share: split.super_company_share,
-      cash_payable: split.cash_payable,
+      worker_withhold: split.worker_withhold,
+      company_contribution: split.company_contribution,
+      amount_payable: split.amount_payable,
       gst_on: _invGst
     };
   }
@@ -21486,15 +21505,15 @@
       super_rate: superRate,
       super_amount: superAmount,
       net_pay: netPay,
-      super_worker_share: source.super_worker_share,
-      super_company_share: source.super_company_share,
-      cash_payable: source.cash_payable
+      amount_payable: source.amount_payable,
+      worker_withhold: source.worker_withhold,
+      company_contribution: source.company_contribution
     });
     // GST-on invoices require the backend's authoritative inclusive total.
     // GST-off invoices are payable at the cash figure (worker share deducted,
     // not the old full-super net). Legacy `total` can be a gross/line
     // subtotal, so it is never money authority here.
-    var cash = split.cash_payable;
+    var cash = split.amount_payable;
     var total = gstOn === false ? cash : source.total_inc;
     var hasCoreMoney = _invoiceHasPersistedNumber(gross)
       && _invoiceHasPersistedNumber(superRate)
@@ -21511,9 +21530,9 @@
       super_rate: superRate == null ? null : _invoiceSuperRate(superRate),
       super_amount: superAmount == null ? null : Number(superAmount),
       net_pay: netPay == null ? null : Number(netPay),
-      super_worker_share: split.super_worker_share,
-      super_company_share: split.super_company_share,
-      cash_payable: cash == null ? null : Number(cash),
+      worker_withhold: split.worker_withhold,
+      company_contribution: split.company_contribution,
+      amount_payable: cash == null ? null : Number(cash),
       gst_on: gstOn == null ? Number(gstAmount || 0) > 0 : gstOn,
       gst_amount: gstAmount == null ? null : Number(gstAmount),
       total_inc: total == null ? null : Number(total)
@@ -21538,8 +21557,8 @@
       payable = Number(inv.to_be_paid);
     } else if (hasSplit) {
       var money = _invoicePersistedMoney(Object.assign({}, inv, { gst_amount: inv.gst_amount != null ? inv.gst_amount : inv.gst }));
-      if (money.complete && _invoiceHasPersistedNumber(money.cash_payable)) {
-        payable = Number(money.cash_payable) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
+      if (money.complete && _invoiceHasPersistedNumber(money.amount_payable)) {
+        payable = Number(money.amount_payable) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
       }
     } else if (!inv.figures_error && _invoiceHasPersistedNumber(inv.total_inc)) {
       payable = Number(inv.total_inc);
@@ -21580,8 +21599,7 @@
     var submitted = Object.assign({}, previous || {}, response, { already_submitted: true });
     [
       'gross_earned', 'super_rate', 'super_amount', 'net_pay',
-      'super_worker_share', 'super_company_share',
-      'cash_payable',
+      'amount_payable', 'worker_withhold', 'company_contribution',
       'gst_on', 'gst_registered', 'gstRegistered', 'gst_amount', 'gst',
       'total_inc', 'total', 'items', 'invoice_items'
     ].forEach(function(field) {
@@ -21619,9 +21637,9 @@
     opts = opts || {};
     money = money || {};
     var split = MyMoneyCore.resolveSuperSplit(money);
-    var worker = money.super_worker_share != null ? money.super_worker_share : split.super_worker_share;
-    var company = money.super_company_share != null ? money.super_company_share : split.super_company_share;
-    var cash = money.cash_payable != null ? money.cash_payable : split.cash_payable;
+    var worker = split.worker_withhold;
+    var company = split.company_contribution;
+    var cash = split.amount_payable;
     var workerRate = money.super_rate != null ? Number(money.super_rate) / 2 : null;
     var attrs = ' class="inv-money-summary" data-invoice-money-summary';
     if (opts.id) attrs += ' id="' + opts.id + '"';
@@ -25409,17 +25427,17 @@
       doc.setTextColor(80, 90, 100);
       doc.text('Your share of super (' + _invoiceRateLabel(workerRate) + ')', margin + 105, y);
       doc.setTextColor(41, 60, 70);
-      doc.text('-$' + Number(persistedMoney.super_worker_share).toFixed(2), colAmt, y, { align: 'right' });
+      doc.text('-$' + Number(persistedMoney.worker_withhold).toFixed(2), colAmt, y, { align: 'right' });
       y += 5;
       doc.setTextColor(80, 90, 100);
       doc.text('Company covers the other ' + _invoiceRateLabel(workerRate), margin + 105, y);
       doc.setTextColor(41, 60, 70);
-      doc.text('$' + Number(persistedMoney.super_company_share).toFixed(2), colAmt, y, { align: 'right' });
+      doc.text('$' + Number(persistedMoney.company_contribution).toFixed(2), colAmt, y, { align: 'right' });
       y += 5;
       doc.setTextColor(80, 90, 100);
       doc.text('You get paid', margin + 105, y);
       doc.setTextColor(41, 60, 70);
-      doc.text('$' + Number(persistedMoney.cash_payable).toFixed(2), colAmt, y, { align: 'right' });
+      doc.text('$' + Number(persistedMoney.amount_payable).toFixed(2), colAmt, y, { align: 'right' });
       y += 5;
       doc.setTextColor(80, 90, 100);
       doc.text('GST', margin + 105, y);

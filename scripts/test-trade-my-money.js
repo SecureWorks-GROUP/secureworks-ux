@@ -26,26 +26,49 @@ check('dateShort is day Mon year', M.dateShort('2026-08-10') === '10 Aug 2026' &
 
 const captain = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12 });
 check('captain $1000: fund still 12%', captain.super_amount === 120);
-check('captain $1000: worker share is half the rate', captain.super_worker_share === 60);
-check('captain $1000: company covers the remainder', captain.super_company_share === 60);
-check('captain $1000: cash is $940', captain.cash_payable === 940);
+check('captain $1000: worker withhold is half the rate', captain.worker_withhold === 60);
+check('captain $1000: company contribution is the remainder', captain.company_contribution === 60);
+check('captain $1000: cash is $940', captain.amount_payable === 940);
+
+// Exact money shape ops-api returns since secureworks-backend #865
+// (trade_invoice_money.ts tradeInvoiceMoneyResponse).
+const backend865 = M.resolveSuperSplit({
+  gst_on: false, super_rate: 0.12, super_amount: 120, gross_earned: 1000, net_pay: 940,
+  gst: 0, trade_payable: 940, total_inc: 1000, submitted_total: 1000, amount_payable: 940,
+  worker_withhold: 60, company_contribution: 60, company_total_out: 1060
+});
+check('backend #865 shape: 1000 -> 120/60/60/940',
+  backend865.super_amount === 120 && backend865.worker_withhold === 60 &&
+  backend865.company_contribution === 60 && backend865.amount_payable === 940 &&
+  backend865.legacy_full_carve_out === false);
+
+// A backend that computes a different split must reach the screen, not the
+// gross * rate / 2 derivation.
+const backendOther = M.resolveSuperSplit({
+  gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 950,
+  amount_payable: 950, worker_withhold: 50, company_contribution: 70
+});
+check('backend worker_withhold wins over derivation', backendOther.worker_withhold === 50);
+check('backend company_contribution wins over derivation', backendOther.company_contribution === 70);
+check('backend amount_payable wins over derivation', backendOther.amount_payable === 950);
+const netOnly = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 950 });
+check('persisted new-contract net_pay alone is cash, withhold follows it', netOnly.amount_payable === 950 && netOnly.worker_withhold === 50 && netOnly.company_contribution === 70);
 
 const unmigrated = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 880 });
-check('unmigrated net_pay (gross minus full super) is not cash', unmigrated.cash_payable === 940 && unmigrated.net_pay === 880);
-check('unmigrated still shows 12% to the fund', unmigrated.super_amount === 120 && unmigrated.super_worker_share === 60 && unmigrated.super_company_share === 60);
-
-const supplied = M.resolveSuperSplit({
-  gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 880,
-  super_worker_share: 60, super_company_share: 60, cash_payable: 940
-});
-check('backend cash_payable wins over old net_pay', supplied.cash_payable === 940);
-check('backend worker/company shares are used when present', supplied.super_worker_share === 60 && supplied.super_company_share === 60);
+check('legacy net_pay (gross minus full super) is refused as cash', unmigrated.amount_payable === 940 && unmigrated.net_pay === 880 && unmigrated.legacy_full_carve_out === true);
+check('legacy row still shows 12% to the fund, 6/6 split', unmigrated.super_amount === 120 && unmigrated.worker_withhold === 60 && unmigrated.company_contribution === 60);
+const legacyDerived = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 880, worker_withhold: 120, company_contribution: 0 });
+check('legacy full-fund worker_withhold is refused too', legacyDerived.worker_withhold === 60 && legacyDerived.company_contribution === 60 && legacyDerived.amount_payable === 940);
+const legacyNoRate = M.resolveSuperSplit({ gross_earned: 1000, super_amount: 120, net_pay: 880 });
+check('legacy guard fires without a rate (halves the fund)', legacyNoRate.worker_withhold === 60 && legacyNoRate.amount_payable === 940);
 
 const migratedNet = M.resolveSuperSplit({ gross_earned: 1000, super_rate: 0.12, super_amount: 120, net_pay: 940 });
-check('migrated net_pay already at cash is kept', migratedNet.cash_payable === 940);
+check('new-contract net_pay at gross minus 6% is kept as cash', migratedNet.amount_payable === 940 && migratedNet.legacy_full_carve_out === false);
+const zeroFund = M.resolveSuperSplit({ gross_earned: 1000, super_amount: 0, net_pay: 1000 });
+check('guard does not misfire when fund is zero', zeroFund.legacy_full_carve_out === false && zeroFund.amount_payable === 1000);
 
-const noRate = M.resolveSuperSplit({ gross_earned: 1000, super_amount: 120, net_pay: 880 });
-check('missing rate still halves the fund amount', noRate.super_worker_share === 60 && noRate.cash_payable === 940);
+const period = M.periodHTML('This month', { invoices: 1, gross_earned: 1000, super_amount: 120, paid_total: 0, outstanding: 940 });
+check('My money period line reads 120 / 60 / 60 / 940', period.indexOf('Super $120.00 to your fund &middot; $60.00 from you &middot; company covers $60.00') !== -1 && period.indexOf('You get $940.00') !== -1);
 
 check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-10' }).label === 'Paid 10 Aug 2026');
 check('status: PAID bill without our flag is still paid', M.statusOf({ xero_bill_status: 'PAID' }).cls === 'paid');

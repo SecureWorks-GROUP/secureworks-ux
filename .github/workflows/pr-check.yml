@@ -75,3 +75,6 @@ jobs:
 
       - name: Test trade scope videos and SOW price redaction
         run: node scripts/test-trade-scope-media.js
+
+      - name: Test trade invoice money split and PDF flow
+        run: node scripts/test-trade-invoice-pdf-flow.js

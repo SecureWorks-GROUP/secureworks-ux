@@ -164,8 +164,15 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   of that comes off the trade; the company covers the other half. On a $1000
   gross invoice that is $120 to the fund and $940 cash. `MyMoneyCore.resolveSuperSplit`
   is the one worker-share helper; invoice preview/persisted money and the PDF
-  use it. An unmigrated `net_pay` equal to gross minus the full super amount is
-  never shown as cash payable.
+  use it. It reads the ops-api field names from `trade_invoice_money.ts`
+  (secureworks-backend #865): `worker_withhold`, `company_contribution`, and
+  `amount_payable` / `net_pay` as cash, and derives gross x rate / 2 only when
+  they are absent. Submit/generate/draft/`my_hours` responses carry all of
+  them; `get_trade_invoice` / `my_invoices` carry only the persisted columns
+  (`net_pay`, no withhold); `my_money` totals carry neither, so My money
+  derives. A persisted `net_pay` equal to gross minus the full super amount
+  (the old contract, still valid upstream on settled invoices) is never shown
+  as cash payable.
 - **GST from the profile (2026-09-08)**: the Profile "My Details" form has a
   "GST registered" toggle (`#tdGst`) saved explicitly through
   `update_trade_profile` (server merges, so other phones cannot wipe it). The

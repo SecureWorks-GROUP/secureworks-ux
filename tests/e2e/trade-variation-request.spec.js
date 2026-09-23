@@ -13,7 +13,7 @@ const { signIn } = require('../helpers/auth');
 const OPS_API = 'https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api';
 const JOB_ID = 'e2e-job-1';
 
-function detail() {
+function detail(userId) {
   return {
     access_tier: 'allocated',
     quote_visible: false,
@@ -23,13 +23,14 @@ function detail() {
       site_address: '30 Fixture Road', site_suburb: 'Joondalup',
       scope_json: { job: { runs: [{ length: 12 }] } },
     },
-    crew: [{ id: 'e2e-var-assignment', job_id: JOB_ID, user_id: 'e2e-installer', status: 'confirmed', role: 'lead', scheduled_date: '2026-09-24' }],
+    crew: [{ id: 'e2e-var-assignment', job_id: JOB_ID, user_id: userId || PERSONAS.installer.profile.id, status: 'confirmed', role: 'lead', scheduled_date: '2026-09-24' }],
     purchaseOrders: [], documents: [], notes: [], media: [],
   };
 }
 
 // createVariation answers each create_variation POST; every ops-api call is logged.
-async function stub(page, createVariation) {
+async function stub(page, createVariation, opts) {
+  opts = opts || {};
   const calls = [];
   await page.route(`${OPS_API}**`, async (route) => {
     const req = route.request();
@@ -38,7 +39,7 @@ async function stub(page, createVariation) {
     try { body = req.postDataJSON(); } catch (e) { body = null; }
     calls.push({ action, method: req.method(), body });
     if (action === 'trade_job_detail') {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail()) });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail(opts.userId)) });
     }
     if (action === 'create_variation') return createVariation(route, body);
     if (action === 'get_upload_url') {
@@ -58,8 +59,8 @@ async function stub(page, createVariation) {
   return calls;
 }
 
-async function openVariationForm(page) {
-  await signIn(page, PERSONAS.installer);
+async function openVariationForm(page, persona) {
+  await signIn(page, persona || PERSONAS.installer);
   await page.locator('[data-view="myJobs"]').click();
   await page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' }).click();
   await expect(page.locator('#viewJob')).toHaveClass(/active/);
@@ -212,6 +213,82 @@ test.describe('Trade Request Variation', () => {
     });
     const order = calls.map((c) => c.action).filter((a) => ['get_upload_url', 'confirm_upload', 'create_variation'].includes(a));
     expect(order).toEqual(['get_upload_url', 'confirm_upload', 'create_variation']);
+    assertNoClientSendOrShare(calls);
+  });
+
+  test('a later failed send hides the previous success banner', async ({ appPage: page }) => {
+    let n = 0;
+    const calls = await stub(page, (route) => {
+      n += 1;
+      if (n === 1) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true, variation_number: 3,
+            needs_approval: true, auto_approved: false,
+            message: 'Variation #3 sent to the office for approval.',
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Only crew assigned to this job can request a variation', code: 'variation_requires_assignment' }),
+      });
+    });
+    await openVariationForm(page);
+    await page.locator('#variationDesc').fill('First extra: limestone');
+    await page.locator('#variationSubmitBtn').click();
+    const result = page.locator('#variationResult');
+    await expect(result).toContainText('Sent to the office for approval');
+
+    await page.getByRole('button', { name: /Request Variation/ }).click();
+    await expect(page.locator('#variationForm')).toBeVisible();
+    await page.locator('#variationDesc').fill('Second extra: gate moved');
+    await page.locator('#variationSubmitBtn').click();
+
+    await expect(page.locator('#variationError')).toContainText('Not sent');
+    await expect(result).toBeHidden();
+    await expect(result).toHaveText('');
+    expect(calls.filter((c) => c.action === 'create_variation')).toHaveLength(2);
+    assertNoClientSendOrShare(calls);
+  });
+});
+
+test.describe('Staff Request Variation', () => {
+  test.use({ persona: 'allocator' });
+
+  test('an office auto-approved request shows the server message as approved', async ({ appPage: page }) => {
+    const message = 'Variation #5 auto-approved (under $200).';
+    const calls = await stub(page, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true, variation_id: 'var-5', variation_number: 5,
+        needs_approval: false, auto_approved: true, message,
+      }),
+    }), { userId: PERSONAS.allocator.profile.id });
+    await openVariationForm(page, PERSONAS.allocator);
+    await page.locator('#variationDesc').fill('Extra metre of plinth after the retaining wall');
+    await page.locator('#variationCost').fill('180');
+    await page.locator('#variationSubmitBtn').click();
+
+    const result = page.locator('#variationResult');
+    await expect(result).toBeVisible();
+    await expect(result).toContainText('Approved');
+    await expect(result).toContainText(message);
+    await expect(result).not.toContainText('Not approved yet');
+    await expect(result).not.toContainText('Sent to the office for approval');
+    await expect(page.locator('#variationForm')).toBeHidden();
+
+    const creates = calls.filter((c) => c.action === 'create_variation');
+    expect(creates).toHaveLength(1);
+    expect(creates[0].body).toEqual({
+      job_id: JOB_ID,
+      description: 'Extra metre of plinth after the retaining wall',
+      estimated_cost: 180,
+    });
     assertNoClientSendOrShare(calls);
   });
 });

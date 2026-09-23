@@ -29229,9 +29229,15 @@
     return 'Not sent. ' + msg;
   }
 
+  function hideVariationResult() {
+    var box = document.getElementById('variationResult');
+    if (box) { box.textContent = ''; box.style.display = 'none'; }
+  }
+
   function showVariationError(text) {
     var box = document.getElementById('variationError');
     if (box) { box.textContent = text; box.style.display = text ? 'block' : 'none'; }
+    if (text) hideVariationResult();
   }
 
   function uploadVariationPhoto(file, jobId) {
@@ -29257,6 +29263,7 @@
     var costText = cost ? String(cost.value || '').trim() : '';
     var estimatedCost = costText === '' ? null : Number(costText);
 
+    hideVariationResult();
     showVariationError('');
     if (!description) { showVariationError('Describe what changed before sending.'); return; }
     if (estimatedCost !== null && (!isFinite(estimatedCost) || estimatedCost < 0)) {
@@ -29280,8 +29287,8 @@
         throw _apiError(500, (result && (result.error || result.message)) || 'the office did not confirm the request');
       }
       var pending = result.auto_approved !== true;
-      var heading = pending ? 'Sent to the office for approval' : 'Logged by the office';
-      var detail = result.message || (result.variation_number ? 'Variation #' + result.variation_number + (pending ? ' is waiting for office approval.' : '.') : '');
+      var heading = pending ? 'Sent to the office for approval' : 'Approved';
+      var detail = result.message || (result.variation_number ? 'Variation #' + result.variation_number + (pending ? ' is waiting for office approval.' : ' is approved.') : '');
       var box = document.getElementById('variationResult');
       if (box) {
         box.innerHTML = '<div style="border:1px solid var(--sw-border);border-left:4px solid var(--sw-yellow);border-radius:8px;padding:10px 12px;background:#fffbea">'

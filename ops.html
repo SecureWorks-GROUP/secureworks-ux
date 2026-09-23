@@ -6619,6 +6619,9 @@ async function opsPost(action, body) {
         var e = new Error(em || 'API error: ' + resp.status);
         e.status = resp.status;
         e.refusal = err.refusal || null;
+        // Named refusals ({error, reason, detail}) say what is in the way, e.g.
+        // the clashing calendar entry for a booking the owner picked.
+        e.detail = err.detail || null;
         throw e;
       });
     }

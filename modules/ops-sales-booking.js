@@ -120,6 +120,10 @@
     approvalIds: {},
     pressPending: {},
     pressResults: {},
+    ownerVisits: {},
+    ownerPreviews: {},
+    ownerPickOpen: {},
+    ownerOccupancy: [],
     threads: {},
     dayIndex: null,
     showConversation: false,
@@ -1776,13 +1780,21 @@
     var m = decisionModel(c);
     var p = m && m.proposal;
     if (!p || !p.start_iso || !p.end_iso) return null;
-    var a = Date.parse(p.start_iso), b = Date.parse(p.end_iso);
+    return clashForSpan(c, p.start_iso, p.end_iso, m.commitment_id);
+  }
+
+  // The same check for any span: the engine's proposal or a time the owner picked.
+  function clashForSpan(c, startIso, endIso, commitmentId, skipOwnHold) {
+    var a = Date.parse(startIso), b = Date.parse(endIso);
+    if (!(b > a)) return null;
     var ev = diary().filter(function (row) {
-      return row.kind !== 'reservation' && diaryOccupiesDay(row) && Date.parse(row.start_iso) < b && Date.parse(row.end_iso) > a;
+      if (row.kind === 'reservation' || !diaryOccupiesDay(row)) return false;
+      if (c && ((row.contact_id && row.contact_id === c.contact_id) || diaryEventMatchesCase(row, c))) return false;
+      return Date.parse(row.start_iso) < b && Date.parse(row.end_iso) > a;
     })[0];
     if (ev) return { kind: 'calendar', label: eventTitle(ev), at: clockLabel(hourFromIso(ev.start_iso)), source: sourceLabel(ev) };
     var hold = commitmentSlots().filter(function (s) {
-      if (s.id === m.commitment_id && s.contact_id === c.contact_id && s.start_iso === p.start_iso && s.end_iso === p.end_iso) return false;
+      if (c && s.contact_id === c.contact_id && (skipOwnHold || (s.id === commitmentId && s.start_iso === startIso && s.end_iso === endIso))) return false;
       return Date.parse(s.start_iso) < b && Date.parse(s.end_iso) > a;
     })[0];
     if (hold) {
@@ -1801,12 +1813,14 @@
   // Shared fail-closed gates. Calendar unread, expiry, hours, the protected
   // band and a clash apply to Book it only; Send this text stays pressable
   // with the clash named beside the text.
-  function approvalBlock(c, kind, refusing) {
+  // steady: the lasting answer only (no loading, stale or in-flight notes), so
+  // choosing between the engine and the owner's own path cannot flip mid-press.
+  function approvalBlock(c, kind, refusing, steady) {
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
     var verb = kind === 'calendar' ? 'booked' : 'sent';
-    if (state.loading) return 'Reading the latest list. Wait a moment.';
-    if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
+    if (!steady && state.loading) return 'Reading the latest list. Wait a moment.';
+    if (!steady && (state.stale || state.error)) return 'This list may be out of date. Press Refresh first.';
     if (!flow || flow.version !== 'booking-confirm.v1' || flow.approval_write !== 'separate-v1') return 'Approvals are not connected for this list yet, so nothing can be ' + verb + ' from here.';
     if (!m || !m.proposal_id || m.revision == null || !c.contact_id || m.contact_id !== c.contact_id) return 'No checked proposal for this lead yet, so nothing can be ' + verb + ' from here.';
     if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This list belongs to another person or week. Press Refresh.';
@@ -1814,9 +1828,10 @@
     if (m.profile !== 'fencing-stratco-marnin' || state.resourceId !== 'marnin') return 'Only Marnin\'s Stratco leads can be approved here for now.';
     var snap = approvalSnapshot(c, kind);
     if (!snap || !snap.content_hash) return 'The exact ' + (kind === 'calendar' ? 'booking' : 'text') + ' could not be pinned down. Press Refresh.';
-    if (state.approvalPending[approvalKey(c, kind)]) return 'Recording your approval…';
+    if (!steady && state.approvalPending[approvalKey(c, kind)]) return 'Recording your approval…';
     if (refusing) return '';
     var status = approvalState(c, kind);
+    if (steady && status.state !== 'not_approved') return '';
     if (status.state === 'done') return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
     if (status.state === 'pending') return 'Still in progress. Press Refresh to see the result.';
     if (status.state === 'unknown') return 'The last result is unknown. Check GHL before trying again.';
@@ -2435,6 +2450,7 @@
   // not return to it, and Use the proposed text is omitted and ignored.
   function composeBusy(c) {
     if (!c) return false;
+    if (state.ownerPreviews[approvalKey(c, 'message')]) return true;
     return ['message', 'calendar'].some(function (kind) {
       var key = approvalKey(c, kind);
       return !!(state.approvalPending[key] || state.pressPending[key]);
@@ -2485,6 +2501,7 @@
   }
 
   function renderComposeFoot(c) {
+    if (messagePath(c) === 'owner') return renderOwnerComposeFoot(c);
     var m = decisionModel(c);
     var msg = selectedMessage(c);
     var route = resolveSender();
@@ -2519,15 +2536,16 @@
 
   function renderVisit(c) {
     var m = decisionModel(c);
-    if (!m) {
+    if (!m && !ownerFlow()) {
       if (c.proposal && c.proposal.start_iso) {
         return '<section class="visit"><h3>' + icon('calendar') + 'Proposed visit</h3><p class="when">' + esc(proposalSlotLabel(c).replace(' · arrive ', ', arrive ')) + '</p>' +
           '<p class="why">No checked proposal for this lead yet, so it cannot be booked from here.</p></section>';
       }
       return '';
     }
+    if (calendarPath(c) === 'owner') return renderOwnerVisit(c);
     if (!m.proposal || !m.confident) {
-      return '<section class="visit is-needs"><h3>' + icon('calendar') + 'Needs a person</h3><p>' + esc(m.reason || c.reason || 'No confident proposal in this read.') + '</p>' + renderChecks(m, true) + '</section>';
+      return '<section class="visit is-needs"><h3>' + icon('calendar') + 'Needs a person</h3><p>' + esc(m.reason || c.reason || 'No confident proposal in this read.') + '</p>' + renderChecks(m, true) + renderPickOther(c) + '</section>';
     }
     var p = m.proposal;
     var when = longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso);
@@ -2543,7 +2561,7 @@
       '<p class="targets">Book it writes: <b>' + bookTargets(m).map(esc).join('</b> and <b>') + '</b></p>' +
       '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
       (block && !state.pressPending[key] && !clash && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '') +
-      channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + '</section>';
+      channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + renderPickOther(c) + '</section>';
   }
 
   function renderChecks(m, open) {
@@ -2568,13 +2586,14 @@
     if (m) state.shownApprovals[key] = approvalSnapshot(c, 'message');
     if (m) state.shownApprovals[approvalKey(c, 'calendar')] = approvalSnapshot(c, 'calendar');
     var text = composeText(c);
+    var writable = (m && m.message && m.message.template_locked) || (messagePath(c) === 'owner' && ownerFlow() && ownerBooking(c));
     var bits = [c.address || caseSuburb(c) || 'Address not given yet', jobTypeLabel(c) === 'not given' ? 'job not given' : jobTypeLabel(c)];
     return '<section class="bk-card" aria-label="Selected lead"><button type="button" class="back" data-booking-back>' + icon('left') + 'All leads</button>' +
       '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
       '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
       '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
-      '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (m && m.message && m.message.template_locked ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
+      '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (writable || m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (writable ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
       '<div data-booking-compose-foot>' + renderComposeFoot(c) + '</div></section>' +
       renderVisit(c) + '</section>';
   }
@@ -2820,6 +2839,522 @@
     foot.innerHTML = renderComposeFoot(c);
   }
 
+  // ---- the owner's own text or visit (owner-authored-v1) --------------------------
+  // What the owner wrote, or the day and arrival window he picked, is checked on
+  // the server first (dry_run), shown back exactly as the server built it, then
+  // approved with that check's prepared_at and content_hash, then sent or booked.
+  // Contract: backend docs/sales-booking-confirmation-api.md "Owner-authored
+  // approvals". The engine path above is unchanged and still takes its own
+  // unedited proposal.
+  var OWNER_VERSION = 'owner-authored-v1';
+  var OWNER_PREVIEW_MS = 15 * 60000;
+  var OWNER_TEXT_MAX = 1600;
+  var WEEKDAY_NAMES = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
+
+  function ownerFlow() {
+    var flow = state.data && state.data.booking_flow;
+    return flow && flow.owner_approval_write === OWNER_VERSION ? flow : null;
+  }
+
+  function ownerBooking(c) {
+    var ob = c && c.owner_booking;
+    return ob && ob.version === OWNER_VERSION ? ob : null;
+  }
+
+  function ownerRulebook(c) {
+    var ob = ownerBooking(c), flow = ownerFlow();
+    return (ob && ob.rulebook) || (flow && flow.owner_rulebook) || null;
+  }
+
+  // The engine's own template, unedited and pressable, stays on the engine path
+  // exactly as before. A picked time, or anything else the owner writes, goes
+  // the owner's way so a sent text can hold that slot. A read that does not
+  // offer the owner's way leaves the screen as it was.
+  function messagePath(c) {
+    if (!ownerFlow()) return 'engine';
+    if (ownerVisit(c)) return 'owner';
+    var m = decisionModel(c);
+    if (m && editedText(c) == null && m.message && m.message.template_locked && m.message.text && approvalBlock(c, 'message', false, true) === '') return 'engine';
+    return 'owner';
+  }
+
+  function hasEngineProposal(c) {
+    var m = decisionModel(c);
+    return !!(m && m.proposal);
+  }
+
+  function ownerCanPick(c) {
+    var ob = ownerBooking(c);
+    return !!(ownerFlow() && ob && ob.eligible === true && ownerRulebook(c));
+  }
+
+  // A proposed time stays the default shown first, on the engine path exactly
+  // as before. Every Stratco card also offers Pick a different time, so a
+  // blocked or unwanted proposal is never the only time on that card.
+  function calendarPath(c) {
+    if (!ownerFlow()) return 'engine';
+    return hasEngineProposal(c) && !state.ownerPickOpen[draftKey(c)] ? 'engine' : 'owner';
+  }
+
+  function renderPickOther(c) {
+    if (!ownerCanPick(c) || composeBusy(c)) return '';
+    return '<p class="pickother"><button type="button" class="linklike" data-owner-pick-open data-case-id="' + esc(c.id) + '">Pick a different time</button></p>';
+  }
+
+  function minutesOf(clock) {
+    var m = String(clock || '').match(/^(\d{1,2}):(\d{2})$/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  }
+
+  function clockOf(minutes) {
+    return pad2(Math.floor(minutes / 60)) + ':' + pad2(minutes % 60);
+  }
+
+  function weekdayOf(date) {
+    var p = String(date || '').split('-').map(Number);
+    if (p.length !== 3 || !p[0]) return null;
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()];
+  }
+
+  // Arrival times the rulebook allows on that day, every 30 minutes: from the
+  // day start, the visit over by the day end, clear of a protected band with
+  // travel either side. The server checks the same rules again at the press.
+  function ownerStarts(rb, date, minutes) {
+    var from = minutesOf(rb.day_start), to = minutesOf(rb.day_end);
+    var visit = Number(rb.visit_minutes), gap = Number(rb.travel_buffer_minutes) || 0;
+    if (from == null || to == null || !(visit > 0) || !(minutes > 0)) return [];
+    var day = date ? weekdayOf(date) : null, out = [];
+    for (var t = from; t + minutes + visit <= to; t += 30) {
+      var end = t + minutes + visit;
+      var banned = day && (rb.protected_bands || []).some(function (b) {
+        var bs = minutesOf(b.start), be = minutesOf(b.end);
+        return b.weekday === day && bs != null && be != null && t - gap < be && bs < end + gap;
+      });
+      if (!banned) out.push(clockOf(t));
+    }
+    return out;
+  }
+
+  function ownerWindows(rb) {
+    var out = [], lo = Number(rb.window_min_minutes), hi = Number(rb.window_max_minutes);
+    for (var n = lo; n > 0 && n <= hi; n += 30) out.push(n);
+    return out;
+  }
+
+  function ownerPick(c) {
+    var key = draftKey(c), rb = ownerRulebook(c);
+    if (!state.ownerVisits[key]) state.ownerVisits[key] = { date: '', start: '', minutes: rb ? Number(rb.window_max_minutes) : 90 };
+    return state.ownerVisits[key];
+  }
+
+  // The picked visit as the contract's {window_start_iso, window_end_iso,
+  // end_iso} in Perth time, or null until a day and an arrival time are chosen
+  // that the rulebook allows. The visit runs visit_minutes past the latest arrival.
+  function ownerVisit(c) {
+    var rb = ownerRulebook(c), pick = rb && state.ownerVisits[draftKey(c)];
+    if (!pick || !pick.date || !pick.start || rb.utc_offset !== '+08:00') return null;
+    var minutes = Number(pick.minutes);
+    if ((rb.bookable_dates || []).indexOf(pick.date) < 0 || ownerWindows(rb).indexOf(minutes) < 0 || ownerStarts(rb, pick.date, minutes).indexOf(pick.start) < 0) return null;
+    var s = minutesOf(pick.start);
+    function at(mins) { return pick.date + 'T' + clockOf(mins) + ':00+08:00'; }
+    return { window_start_iso: at(s), window_end_iso: at(s + minutes), end_iso: at(s + minutes + Number(rb.visit_minutes)) };
+  }
+
+  function ownerInput(c, kind) {
+    var input = { step: kind, case_id: c.id, contact_id: c.contact_id, week_start: state.weekStart, resource: 'marnin' };
+    if (kind === 'message') {
+      input.text = composeText(c);
+      var offer = ownerVisit(c);
+      if (offer) input.offer = offer;
+    } else {
+      input.visit = ownerVisit(c);
+    }
+    return input;
+  }
+
+  function visitWords(v, long) {
+    if (!v || !v.window_start_iso) return '';
+    return (long ? longDate(v.window_start_iso) : shortDate(v.window_start_iso)) + ', arrive ' + timeRange(v.window_start_iso, v.window_end_iso);
+  }
+
+  function ownerTargets(content) {
+    return [CALENDAR_NAMES[content && content.calendar_id] || 'GHL calendar', 'Marnin\'s Outlook'];
+  }
+
+  function ownerBlock(c, kind) {
+    var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (state.loading) return 'Reading the latest list. Wait a moment.';
+    if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
+    var ob = ownerBooking(c);
+    if (!ownerFlow() || !ob) return kind === 'calendar' ? 'Booking a time you pick is not connected yet, so nothing can be booked from here.' : 'Sending your own text is not connected yet, so nothing can be sent from here.';
+    if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This list belongs to another person or week. Press Refresh.';
+    if (state.resourceId !== 'marnin' || ob.reason === 'stratco_profile_required') return 'Only Marnin\'s Stratco leads can be approved here for now.';
+    if (!c.contact_id) return 'This lead has no GHL contact, so nothing can be ' + verb + ' from here.';
+    if (ob.eligible !== true) return 'This GHL contact appears more than once. Sort it out in GHL first.';
+    if (kind === 'message') {
+      var text = composeText(c);
+      if (!String(text || '').trim()) return 'Write the text first.';
+      if (/[\u2013\u2014]/.test(text)) return 'Take out the long dash. Texts to clients never use one.';
+      if (text.length > OWNER_TEXT_MAX) return 'The text is too long. Keep it to ' + OWNER_TEXT_MAX + ' characters.';
+      return '';
+    }
+    if (!ownerRulebook(c)) return 'The booking rules did not come with this list. Press Refresh.';
+    var v = ownerVisit(c);
+    if (!v) return 'Pick a day and an arrival time first.';
+    var clash = clashForSpan(c, v.window_start_iso, v.end_iso, null, true);
+    return clash ? clashSentence(clash) : '';
+  }
+
+  function ownerPressBlock(c, kind) {
+    var key = approvalKey(c, kind);
+    if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
+    if (state.approvalPending[key]) return 'Checking with the server…';
+    var last = state.pressResults[key];
+    if (last && last.uncertain) return 'The last press has no confirmed result. Check GHL, then press Refresh.';
+    if (last && last.done && last.input && sameContent(last.input, ownerInput(c, kind))) return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
+    return ownerBlock(c, kind);
+  }
+
+  // The server's snapshot must be the exact thing the owner asked for, bound by
+  // the same content hash the browser computes, before it is shown as checked.
+  function ownerSnapshotMatches(snap, input, kind) {
+    if (!snap || typeof snap !== 'object' || snap.source !== 'owner' || snap.version !== OWNER_VERSION || snap.step !== kind) return false;
+    if (snap.case_id !== input.case_id || snap.contact_id !== input.contact_id || typeof snap.prepared_at !== 'string' || !isFinite(Date.parse(snap.prepared_at))) return false;
+    var ct = snap.content;
+    if (!ct || typeof ct !== 'object') return false;
+    if (kind === 'message') {
+      return ct.text === input.text && typeof ct.sender === 'string' && !!ct.sender && typeof ct.recipient === 'string' && !!ct.recipient && sameContent(ct.offer || null, input.offer || null);
+    }
+    var v = input.visit || {};
+    return ct.start_iso === v.window_start_iso && ct.window_start_iso === v.window_start_iso && ct.window_end_iso === v.window_end_iso && ct.end_iso === v.end_iso && !!ct.title && !!ct.address && !!ct.calendar_id;
+  }
+
+  function ownerErrorWords(kind, err) {
+    var code = String((err && err.message) || err || '');
+    var none = 'nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '.';
+    if (isUnknownAction(err) || code === 'owner_approval_unavailable' || code === 'owner_input_requires_owner_path') {
+      return (kind === 'calendar' ? 'Booking a time you pick' : 'Sending your own text') + ' is not connected on the server yet, so ' + none;
+    }
+    if (/^[a-z0-9_:]+$/.test(code)) return (kind === 'calendar' ? 'Not booked: ' : 'Not sent: ') + refusalWords(code, err && err.detail);
+    return code || 'The check did not go through, so ' + none + ' Press Refresh before trying again.';
+  }
+
+  // Press one: the server checks the exact text or visit and builds what would
+  // be approved. Nothing is recorded, sent or booked.
+  async function ownerCheck(id, kind) {
+    var c = cases().filter(function (row) { return row.id === id; })[0];
+    if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
+    var key = approvalKey(c, kind);
+    var block = ownerPressBlock(c, kind);
+    if (block) { state.approvalErrors[key] = block; render(); return { ok: false, reason: block }; }
+    var input = ownerInput(c, kind);
+    var verb = kind === 'calendar' ? 'booked' : 'sent';
+    state.approvalPending[key] = true;
+    delete state.approvalErrors[key];
+    delete state.pressResults[key];
+    delete state.ownerPreviews[key];
+    render();
+    try {
+      if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
+      var res = await global.opsPost('sales_booking_approval_write', { owner_input: input, dry_run: true });
+      var snap = res && res.snapshot;
+      if (!res || res.ok !== true || res.dry_run !== true || !ownerSnapshotMatches(snap, input, kind) || typeof res.content_hash !== 'string' || snap.content_hash !== res.content_hash || bookingContentHash(snap) !== res.content_hash) {
+        throw new Error('The server did not confirm the check, so ' + 'nothing was ' + verb + '. Press Refresh before trying again.');
+      }
+      if (!sameContent(ownerInput(c, kind), input)) throw new Error('This changed while it was being checked. Check it again.');
+      state.ownerPreviews[key] = { input: input, snapshot: snap, content_hash: res.content_hash, checks: res.checks || {} };
+      return { ok: true, preview: state.ownerPreviews[key] };
+    } catch (err) {
+      state.approvalErrors[key] = ownerErrorWords(kind, err);
+      return { ok: false, reason: state.approvalErrors[key] };
+    } finally {
+      delete state.approvalPending[key];
+      render();
+    }
+  }
+
+  // Press two: approve exactly what the check showed (its prepared_at and
+  // content_hash), then send or book with that approval, then say what happened.
+  async function ownerApprove(id, kind) {
+    var c = cases().filter(function (row) { return row.id === id; })[0];
+    var key = c && approvalKey(c, kind);
+    var preview = key && state.ownerPreviews[key];
+    if (!c || !preview || !ACTIONS[kind]) return { ok: false, reason: 'no_check' };
+    if (state.approvalPending[key] || state.pressPending[key]) return { ok: false, reason: 'pending' };
+    var verb = kind === 'calendar' ? 'booked' : 'sent';
+    var stop = state.loading ? 'Reading the latest list. Wait a moment.'
+      : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
+      : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
+      : !(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.'
+      : '';
+    if (stop) {
+      if (!state.loading && !state.stale && !state.error) delete state.ownerPreviews[key];
+      state.approvalErrors[key] = stop;
+      render();
+      return { ok: false, reason: stop };
+    }
+    state.approvalPending[key] = true;
+    delete state.approvalErrors[key];
+    render();
+    var approvalId = null;
+    try {
+      if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
+      var res = await global.opsPost('sales_booking_approval_write', {
+        owner_input: Object.assign({}, preview.input, { prepared_at: preview.snapshot.prepared_at }),
+        decision: 'approved', reason: null, content_hash: preview.content_hash
+      });
+      var a = res && res.approval;
+      if (!res || res.ok !== true || !a || a.state !== 'approved' || !sameContent(a.snapshot, preview.snapshot)) throw new Error('The server did not confirm your approval, so nothing was ' + verb + '. Press Refresh before trying again.');
+      approvalId = res.approval_id || a.binding_hash || a.id || null;
+      if (!approvalId) throw new Error('Your approval is recorded, but the server gave it no reference, so nothing was ' + verb + '.');
+      if (!sameContent(ownerInput(c, kind), preview.input)) throw new Error('This changed after it was checked. Check it again.');
+    } catch (err) {
+      delete state.ownerPreviews[key];
+      delete state.approvalPending[key];
+      state.approvalErrors[key] = ownerErrorWords(kind, err);
+      render();
+      return { ok: false, reason: state.approvalErrors[key] };
+    }
+    delete state.approvalPending[key];
+    state.approvalIds[key] = { id: approvalId, snapshot: preview.snapshot };
+    state.pressPending[key] = true;
+    render();
+    var result;
+    try {
+      var out = await global.opsPost(ACTIONS[kind], { approval_id: approvalId });
+      result = describeResult(kind, out, c, preview.snapshot);
+    } catch (err) {
+      result = isUnknownAction(err)
+        ? { tone: 'info', snapshot: preview.snapshot, notConnected: true, text: (kind === 'calendar' ? 'Booking' : 'Sending') + ' from this screen is not connected yet. Your approval is recorded; nothing was ' + verb + '.' }
+        : { tone: 'bad', uncertain: true, snapshot: preview.snapshot, text: 'No confirmed result: ' + String((err && err.message) || err) + '. Check GHL before pressing again.' };
+    } finally {
+      delete state.pressPending[key];
+    }
+    result.input = preview.input;
+    delete state.ownerPreviews[key];
+    state.pressResults[key] = result;
+    if (result.done) rememberOccupancy(c, result);
+    render();
+    return { ok: !!result.done, result: result };
+  }
+
+  function occupancyVisit(result) {
+    var ct = result && result.snapshot && result.snapshot.content || {};
+    var offer = ct.offer;
+    if (offer && offer.window_start_iso && offer.end_iso) return { start: offer.window_start_iso, end: offer.end_iso, title: null, book: false };
+    if (ct.window_start_iso && ct.end_iso) return { start: ct.window_start_iso, end: ct.end_iso, title: ct.title || null, book: result.snapshot.step === 'calendar' };
+    if (ct.start_iso && ct.end_iso) return { start: ct.start_iso, end: ct.end_iso, title: ct.title || null, book: result.snapshot.step === 'calendar' };
+    return null;
+  }
+
+  function rememberOccupancy(c, result) {
+    if (!result || !result.done || !c || !state.data) return;
+    var visit = occupancyVisit(result);
+    if (!visit || !(Date.parse(visit.end) > Date.parse(visit.start))) return;
+    if (visit.book) rememberBookedVisit(c, visit);
+    else rememberOfferedVisit(c, visit);
+    state.ownerOccupancy.push({ resource: state.resourceId, at: Date.now(), visit: visit,
+      c: { id: c.id, contact_id: c.contact_id, opportunity_id: c.opportunity_id, display_name: c.display_name, suburb: c.suburb } });
+    quietReload();
+  }
+
+  // A fresh read may not show a booking or offer made seconds ago yet, so what
+  // this screen just did stays on the day and in the clash checks until the
+  // read carries it (at most 30 minutes). The slot never reads as free.
+  function reapplyOwnerOccupancy() {
+    var now = Date.now();
+    state.ownerOccupancy = state.ownerOccupancy.filter(function (o) { return now - o.at < 30 * 60000; });
+    if (!state.data) return;
+    state.ownerOccupancy.forEach(function (o) {
+      if (o.resource !== state.resourceId) return;
+      if (o.visit.book) rememberBookedVisit(o.c, o.visit);
+      else rememberOfferedVisit(o.c, o.visit);
+    });
+  }
+
+  function readParams() {
+    return { resource: state.resourceId, week_start: state.weekStart, scoper_user_id: resource().scoper_user_id, visit_outcomes_from: new Date(Date.now() - 7 * 86400000).toISOString(), visit_outcomes_to: new Date().toISOString() };
+  }
+
+  // After a book or an offer: read again with no spinner and no locked
+  // buttons. A failed or overtaken quiet read changes nothing on screen.
+  async function quietReload() {
+    var request = state.request, resourceId = state.resourceId, weekStart = state.weekStart;
+    if (!resourceId || state.loading) return;
+    try {
+      var data = await bookingRead(readParams());
+      if (request !== state.request || resourceId !== state.resourceId || weekStart !== state.weekStart || state.loading) return;
+      if (!data || data.ok === false || data.fixture || !payloadMatchesRequest(data, resourceId, weekStart)) return;
+      if (Object.keys(state.approvalPending).length || Object.keys(state.pressPending).length) return;
+      state.data = data;
+      state.cache[cacheKey(resourceId, weekStart)] = data;
+      state.stale = false;
+      state.error = null;
+      state.lastFreshAt = Date.now();
+      state.readKind = 'fresh';
+      reapplyOwnerOccupancy();
+      applyServerStamp(data);
+      applyServerDrafts(data);
+      render();
+    } catch (e) { /* quiet: the remembered occupancy stays on screen */ }
+  }
+
+  function rememberBookedVisit(c, visit) {
+    var data = state.data;
+    if (!Array.isArray(data.diary)) data.diary = [];
+    var title = visit.title && /^scope:\s*/i.test(visit.title) ? visit.title
+      : ('Scope: ' + (c.display_name || 'visit') + (c.suburb ? ', ' + c.suburb : ''));
+    if (data.diary.some(function (ev) {
+      return (ev.contact_id && ev.contact_id === c.contact_id && (ev.start === visit.start || ev.start_iso === visit.start))
+        || (ev.start === visit.start && ev.end === visit.end && ev.title === title);
+    })) return;
+    data.diary.push({
+      event_id: 'owner-booked-' + (c.contact_id || c.id) + '-' + visit.start,
+      contact_id: c.contact_id,
+      opportunity_id: c.opportunity_id || c.id,
+      start: visit.start,
+      end: visit.end,
+      title: title,
+      kind: 'busy',
+      source: 'ghl_calendar',
+      blocks_capacity: true
+    });
+  }
+
+  function rememberOfferedVisit(c, visit) {
+    var flow = state.data.booking_flow;
+    if (!flow) return;
+    if (!Array.isArray(flow.commitments)) flow.commitments = [];
+    if (flow.commitments.some(function (s) {
+      return s.contact_id === c.contact_id && s.start_iso === visit.start && s.end_iso === visit.end;
+    })) return;
+    flow.commitments.push({
+      id: 'owner-offer-' + (c.contact_id || c.id) + '-' + visit.start,
+      contact_id: c.contact_id,
+      state: 'offered',
+      start_iso: visit.start,
+      end_iso: visit.end
+    });
+  }
+
+  // Busy while a check is open or anything is in flight, so the words and the
+  // picked time on screen stay the ones that were checked.
+  function pickerBusy(c) {
+    return composeBusy(c) || !!state.ownerPreviews[approvalKey(c, 'calendar')];
+  }
+
+  function ownerCheckList(kind, checks, rb) {
+    checks = checks || {};
+    var ok = [], warn = [];
+    if (checks.thread && checks.thread.read) ok.push('Not already in this conversation (' + plural(Number(checks.thread.messages) || 0, 'message') + ' read).');
+    if (checks.ghl) ok.push('GHL is clear, with ' + ((checks.occupied && checks.occupied.travel_buffer_minutes) || (rb && rb.travel_buffer_minutes) || 30) + ' minutes travel either side' + (checks.ghl.events_that_day != null ? ' (' + plural(Number(checks.ghl.events_that_day), 'other booking') + ' that day)' : '') + '.');
+    if (checks.outlook) ok.push('Outlook is clear' + (checks.outlook.mailbox ? ' (' + checks.outlook.mailbox + ')' : '') + '.');
+    if (checks.offer_clashes === 0) ok.push('No other lead has been offered this time.');
+    if (checks.day_count_with_this_visit != null) ok.push(checks.day_count_with_this_visit + (rb && rb.max_per_day ? ' of ' + rb.max_per_day : '') + ' visits that day, counting this one.');
+    if (checks.address_street_source) ok.push(checks.address_street_source === 'job_site' ? 'Street address taken from the job site on record.' : 'Street address taken from the GHL contact.');
+    if (checks.contact_prior_system_bookings) warn.push('This lead already has a visit booked from this screen.');
+    var unverified = checks.system_offers && Array.isArray(checks.system_offers.unverified_texts) ? checks.system_offers.unverified_texts.length : 0;
+    if (unverified) warn.push(plural(unverified, 'earlier text') + ' from this screen named no time, so ' + (unverified === 1 ? 'its time' : 'their times') + ' could not be checked.');
+    var note = checks.hand_sent_texts === 'not_machine_checked' ? (checks.hand_sent_texts_note || 'Texts sent by hand cannot be checked. Read the conversation first.') : '';
+    if (!ok.length && !warn.length && !note) return '';
+    return '<ul class="oc-checks">' + ok.map(function (t) { return '<li class="is-ok">' + esc(t) + '</li>'; }).join('') +
+      warn.map(function (t) { return '<li class="is-warn">' + esc(t) + '</li>'; }).join('') + '</ul>' +
+      (note ? '<p class="fine">' + esc(note) + '</p>' : '');
+  }
+
+  function renderOwnerPreview(c, kind, preview) {
+    var key = approvalKey(c, kind), ct = preview.snapshot.content || {};
+    var approving = !!state.approvalPending[key], pressing = !!state.pressPending[key];
+    var head, body, label;
+    if (kind === 'message') {
+      head = 'This exact text goes from ' + senderShort(ct.sender) + ' to the phone ending ' + phoneEnding(ct.recipient) + '.';
+      body = '<blockquote class="oc-text">' + esc(ct.text) + '</blockquote>' +
+        (ct.offer ? '<p class="oc-line">It holds ' + esc(visitWords(ct.offer)) + ' for them.</p>' : '');
+      label = approving ? 'Approving…' : pressing ? 'Sending…' : 'Approve and send';
+    } else {
+      head = 'This exact visit goes in ' + ownerTargets(ct).join(' and ') + '.';
+      body = '<p class="when">' + esc(visitWords(ct, true)) + '</p>' +
+        '<p class="oc-line">' + esc(ct.title) + ' · ' + esc(ct.address) + ' · on site until ' + esc(clockLabel(hourFromIso(ct.end_iso))) + '</p>';
+      label = approving ? 'Approving…' : pressing ? 'Booking…' : 'Approve and book';
+    }
+    var busy = approving || pressing ? ' disabled' : '';
+    return '<div class="ownercheck" data-owner-preview="' + kind + '"><p class="oc-head"><strong>Checked.</strong> ' + esc(head) + '</p>' + body +
+      ownerCheckList(kind, preview.checks, ownerRulebook(c)) +
+      '<div class="actions"><button type="button" class="' + (kind === 'calendar' ? 'secondary' : 'primary') + '" data-owner-approve="' + kind + '" data-case-id="' + esc(c.id) + '"' + busy + '>' + icon(kind === 'calendar' ? 'calendar' : 'send') + esc(label) + '</button>' +
+      '<button type="button" class="quiet" data-owner-cancel="' + kind + '" data-case-id="' + esc(c.id) + '"' + busy + '>Change it</button></div></div>';
+  }
+
+  function renderOwnerComposeFoot(c) {
+    var m = decisionModel(c);
+    var key = approvalKey(c, 'message');
+    var preview = state.ownerPreviews[key];
+    var rb = ownerRulebook(c);
+    var sender = (rb && rb.sender) || resolveSender().number;
+    var recipient = m && m.message && m.message.recipient;
+    var block = ownerPressBlock(c, 'message');
+    var last = state.pressResults[key];
+    var held = ownerVisit(c);
+    var clash = held ? clashForSpan(c, held.window_start_iso, held.end_iso, null, true) : clashFor(c);
+    var out = '<p class="route">From <b>' + esc(senderShort(sender)) + '</b>' +
+      (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' to the customer\'s mobile in GHL') + '</p>';
+    if (m && editedText(c) != null) out += '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>';
+    if (held) out += '<p class="fine">This text holds ' + esc(visitWords(held)) + ' for them.</p>';
+    if (clash) out += '<p class="clash">' + esc(clashSentence(clash)) + '</p>';
+    if (preview) {
+      out += renderOwnerPreview(c, 'message', preview);
+    } else {
+      out += '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
+        (block && !state.pressPending[key] && !state.approvalPending[key] && !(last && last.done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '');
+    }
+    return out + (m ? channelLine(c, 'message') : '') + renderResult(c, 'message');
+  }
+
+  function renderOwnerVisit(c) {
+    var m = decisionModel(c);
+    var head = '<h3>' + icon('calendar') + 'Pick a visit</h3>';
+    var rb = ownerRulebook(c);
+    if (!ownerFlow() || !ownerBooking(c)) return '<section class="visit is-pick">' + head + '<p class="why">Booking a time you pick is not connected yet, so nothing can be booked from here.</p></section>';
+    if (!rb) return '<section class="visit is-pick">' + head + '<p class="why">The booking rules did not come with this list. Press Refresh.</p></section>';
+    var key = approvalKey(c, 'calendar');
+    var pick = ownerPick(c);
+    var dis = pickerBusy(c) || ownerBooking(c).eligible !== true ? ' disabled' : '';
+    var dates = rb.bookable_dates || [];
+    var minutes = Number(pick.minutes);
+    var starts = ownerStarts(rb, pick.date, minutes);
+    var v = ownerVisit(c);
+    var preview = state.ownerPreviews[key];
+    var block = ownerPressBlock(c, 'calendar');
+    var last = state.pressResults[key];
+    var clash = v && clashForSpan(c, v.window_start_iso, v.end_iso, null, true);
+    var days = (rb.days || []).map(function (d) { return WEEKDAY_NAMES[d] || d; });
+    var lead = m && m.proposal
+      ? 'Pick a different time. Proposed: ' + longDate(String(m.proposal.window_start_iso || m.proposal.start_iso).slice(0, 10)) + ', arrive ' + timeRange(m.proposal.window_start_iso, m.proposal.window_end_iso) + '.'
+      : (m && m.reason && m.reason !== 'No validated AI proposal in this read.'
+        ? 'No confident proposed time: ' + m.reason
+        : 'No proposed time for this lead, so pick one.');
+    var rules = days.length ? ' Stratco visits are ' + days.join(' or ') + ', ' + clockLabel(minutesOf(rb.day_start) / 60) + ' to ' + clockLabel(minutesOf(rb.day_end) / 60) + '.' : '';
+    function option(value, label, on) { return '<option value="' + esc(value) + '"' + (on ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+    var picker = '<div class="pick">' +
+      '<label><span>Day</span><select data-owner-visit="date" aria-label="Visit day" data-focus-key="pick-date-' + esc(c.id) + '"' + dis + '>' + option('', 'Pick a day', !pick.date) +
+        dates.map(function (d) { return option(d, shortDate(d), pick.date === d); }).join('') + '</select></label>' +
+      '<label><span>Arrive from</span><select data-owner-visit="start" aria-label="Arrive from" data-focus-key="pick-start-' + esc(c.id) + '"' + dis + '>' + option('', 'Pick a time', !pick.start) +
+        starts.map(function (t) { return option(t, clockLabel(minutesOf(t) / 60), pick.start === t); }).join('') + '</select></label>' +
+      '<label><span>Arrival window</span><select data-owner-visit="minutes" aria-label="Arrival window" data-focus-key="pick-minutes-' + esc(c.id) + '"' + dis + '>' +
+        ownerWindows(rb).map(function (n) { return option(String(n), n + ' minutes', minutes === n); }).join('') + '</select></label></div>';
+    var back = hasEngineProposal(c) && !pickerBusy(c) ? '<p class="pickother"><button type="button" class="linklike" data-owner-pick-close data-case-id="' + esc(c.id) + '">Use the proposed time</button></p>' : '';
+    var out = '<section class="visit is-pick">' + head + '<p class="fine">' + esc(lead + rules) + '</p>' + back + picker;
+    if (v) out += '<p class="when">' + esc(visitWords(v, true)) + '</p><p class="fine">On site until ' + esc(clockLabel(hourFromIso(v.end_iso))) + '. The server checks GHL, Outlook and other leads\' offers before anything is booked.</p>';
+    if (clash) out += '<p class="clash">' + esc(clashSentence(clash)) + '</p>';
+    out += '<p class="targets">Book it writes: <b>' + ownerTargets(rb.calendar).map(esc).join('</b> and <b>') + '</b></p>';
+    if (preview) {
+      out += renderOwnerPreview(c, 'calendar', preview);
+    } else {
+      out += '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
+        (block && !clash && !state.pressPending[key] && !state.approvalPending[key] && !(last && last.done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '');
+    }
+    return out + renderResult(c, 'calendar') + '</section>';
+  }
+
   // ---- presses -------------------------------------------------------------------
   function isUnknownAction(err) {
     var msg = String((err && err.message) || err || '');
@@ -2838,12 +3373,78 @@
       prior_offer_conflict: 'that time is already offered to someone else.',
       slot_taken: 'that time is no longer free.',
       send_hold: 'sending is switched off on the server.',
-      calendar_write_disabled: 'calendar writing is switched off on the server.'
+      calendar_write_disabled: 'calendar writing is switched off on the server.',
+      // Owner-authored checks (owner-authored-v1) and the executor's press checks.
+      owner_visit_not_future: 'that time has already passed.',
+      owner_visit_day_not_permitted: 'Stratco visits are Tuesday and Friday only.',
+      owner_visit_window_length: 'the arrival window must be 60 to 90 minutes.',
+      owner_visit_outside_hours: 'the visit must start at 8:00am or later and finish by 4:30pm.',
+      owner_visit_protected_band: 'Tuesday 1:00 to 3:30pm is kept for Stratco in Canning Vale, with 30 minutes travel either side.',
+      owner_visit_too_short: 'the visit must run at least an hour past the latest arrival.',
+      owner_visit_window_not_inside_visit: 'the visit times do not fit together. Pick the time again.',
+      owner_visit_spans_days: 'the visit must start and finish on the same day.',
+      owner_visit_times_invalid: 'the visit times could not be read. Pick the time again.',
+      owner_visit_required: 'no visit time was picked.',
+      contact_already_booked_that_day: 'this customer is already booked that day.',
+      ghl_calendar_clash: 'that time clashes with another booking in GHL, counting 30 minutes travel either side.',
+      outlook_calendar_clash: 'that time clashes with an Outlook entry, counting 30 minutes travel either side.',
+      system_offer_clash: 'that time is already offered to another lead.',
+      daily_capacity_reached: 'that day is already full.',
+      ghl_calendar_unreadable: 'the GHL calendar could not be read, so the time cannot be checked.',
+      outlook_unreadable: 'Outlook could not be read, so the time cannot be checked.',
+      owner_calendar_unreadable: 'the Stratco Fencing calendar in GHL could not be read.',
+      owner_calendar_unknown: 'the Stratco Fencing calendar in GHL is not set up as expected.',
+      system_offers_unreadable: 'earlier offers could not be read, so a double booking cannot be ruled out.',
+      booking_step_requires_reconciliation: 'an earlier press for this lead has no settled result. Check GHL, then press Refresh.',
+      text_already_in_thread: 'this exact text is already in the conversation.',
+      thread_unreadable: 'the conversation could not be read, so a double text cannot be ruled out.',
+      owner_message_text_has_dash: 'the text has a long dash. Texts to clients never use one.',
+      owner_message_text_required: 'the text is empty or longer than 1600 characters.',
+      contact_phone_missing: 'the customer has no mobile number in GHL.',
+      contact_name_missing: 'the customer has no name in GHL.',
+      contact_street_missing: 'the customer has no street number in GHL, only a suburb. Add it in GHL first.',
+      contact_suburb_missing: 'the customer\'s suburb is missing.',
+      contact_unreadable: 'the GHL contact could not be read.',
+      owner_snapshot_changed: 'the customer\'s phone, name or address changed since the check. Check it again.',
+      owner_preview_expired: 'that check is more than 15 minutes old. Check it again.',
+      booking_case_identity_ambiguous: 'this GHL contact appears more than once. Sort it out in GHL first.',
+      stamp_write_requires_captain: 'only Marnin can approve texts and bookings.',
+      approval_actor_required: 'only Marnin can approve texts and bookings.',
+      press_requires_captain: 'only Marnin can send or book from here.',
+      stratco_profile_required: 'only Marnin\'s Stratco leads can be approved here.',
+      approval_decision_already_recorded: 'a different answer is already recorded for this exact content.',
+      approval_expired: 'the approval ran out. Check it again.',
+      customer_replied_since_approval: 'the customer wrote since you approved. Read their reply first.',
+      recipient_changed: 'the customer\'s phone number changed in GHL. Check it again.',
+      execution_outcome_unknown: 'an earlier attempt has no clear result, so it is not repeated. Check GHL.',
+      send_outcome_unknown: 'the text may or may not have gone, so it is not sent again. Check GHL.'
     };
     if (known[raw]) return known[raw];
     if (/^[a-z0-9_:.-]+$/.test(raw)) raw = raw.replace(/[_:.-]+/g, ' ');
     raw = raw.charAt(0).toLowerCase() + raw.slice(1);
     return /[.!?]$/.test(raw) ? raw : raw + '.';
+  }
+
+  // One plain sentence for a named refusal. Where the server names what is in
+  // the way, the sentence names it too.
+  function refusalWords(reason, detail) {
+    var code = String(reason || '').trim();
+    detail = detail && typeof detail === 'object' ? detail : null;
+    var events = detail && Array.isArray(detail.events) ? detail.events : [];
+    var first = events[0];
+    var at = function (iso) { return iso ? ' at ' + clockLabel(hourFromIso(iso)) : ''; };
+    if (first && code === 'ghl_calendar_clash') return 'that time clashes with ' + (first.title || 'a GHL booking') + at(first.start) + ' in GHL, counting ' + (detail.travel_buffer_minutes || 30) + ' minutes travel either side.';
+    if (first && code === 'outlook_calendar_clash') return 'that time clashes with ' + (first.subject || 'an Outlook entry') + at(first.start && (first.start.dateTime || first.start)) + ' in Outlook, counting ' + (detail.travel_buffer_minutes || 30) + ' minutes travel either side.';
+    if (first && code === 'contact_already_booked_that_day') return 'this customer is already booked that day' + at(first.start) + '.';
+    if (code === 'system_offer_clash' && detail && Array.isArray(detail.offers) && detail.offers[0]) {
+      var offer = detail.offers[0];
+      var who = cases().filter(function (row) { return row.contact_id === offer.contact_id; })[0];
+      return 'that time is already offered to ' + (who && who.display_name ? who.display_name : 'another lead') + at(offer.start_iso) + '.';
+    }
+    if (code === 'daily_capacity_reached' && detail && detail.max_per_day) return 'that day already has ' + detail.max_per_day + ' visits.';
+    if (code === 'booking_step_requires_reconciliation' && detail && detail.reason === 'a_text_to_this_lead_may_or_may_not_have_been_sent') return 'an earlier text to this lead may or may not have gone. Check the conversation in GHL first.';
+    if (code === 'booking_step_requires_reconciliation' && detail && detail.reason === 'a_booking_for_this_lead_is_mid_press') return 'a booking for this lead is still going through. Press Refresh in a minute.';
+    return reasonWords(code);
   }
 
   function wouldWords(kind, would) {
@@ -2863,17 +3464,19 @@
       var tail = phoneEnding(snap.content.recipient);
       if (status === 'sent') return { tone: 'ok', done: true, snapshot: snap, text: 'Text sent at ' + at + ' from ' + line + ' to the phone ending ' + tail + '.', ref: res.message_id ? 'GHL message ' + res.message_id : '' };
       if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was sent. The server is in trial mode.' + wouldWords(kind, res.would_write) };
-      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not sent: ' + reasonWords(res.reason) };
+      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not sent: ' + refusalWords(res.reason, res.detail) };
     } else {
+      var content = snap && snap.content || {};
       var p = decisionModel(c) && decisionModel(c).proposal;
-      var when = p ? longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso) : 'the proposed time';
+      var when = content.window_start_iso ? visitWords(content, true)
+        : p ? longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso) : 'the proposed time';
       var named = Array.isArray(res && res.written) && res.written.length
         ? res.written.map(function (t) { return typeof t === 'string' ? t : t && (t.label || t.provider) || ''; }).filter(Boolean)
         : [];
-      var targets = named.length ? named.join(' and ') : bookTargets(decisionModel(c)).join(' and ');
+      var targets = named.length ? named.join(' and ') : (snap && snap.source === 'owner' ? ownerTargets(content) : bookTargets(decisionModel(c))).join(' and ');
       if (status === 'booked') return { tone: 'ok', done: true, snapshot: snap, text: 'Booked ' + when + ' in ' + targets + ' at ' + at + '.', ref: res.appointment_id ? 'GHL appointment ' + res.appointment_id : '', url: res.appointment_url && /^https:\/\//.test(res.appointment_url) ? res.appointment_url : '' };
       if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was booked. The server is in trial mode.' + wouldWords(kind, res.would_write) };
-      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not booked: ' + reasonWords(res.reason) };
+      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not booked: ' + refusalWords(res.reason, res.detail) };
     }
     return { tone: 'bad', uncertain: true, snapshot: snap, text: 'The server answered without a clear result. Check GHL before pressing again.' };
   }
@@ -2883,6 +3486,8 @@
   async function press(id, kind) {
     var c = cases().filter(function (row) { return row.id === id; })[0];
     if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
+    // The owner's own words or picked time go through the check first.
+    if ((kind === 'message' ? messagePath(c) : calendarPath(c)) === 'owner') return ownerCheck(id, kind);
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return { ok: false, reason: 'pending' };
     var block = pressBlock(c, kind);
@@ -2923,6 +3528,7 @@
       delete state.pressPending[key];
     }
     state.pressResults[key] = result;
+    if (result.done) rememberOccupancy(c, result);
     if (result.done && sameContent(approvalSnapshot(c, kind), snap)) {
       var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
       channel.state = 'succeeded';
@@ -2972,6 +3578,8 @@
     state.selectedId = null;
     state.dayIndex = null;
     state.pressResults = {};
+    state.ownerPreviews = {};
+    state.ownerPickOpen = {};
     var cached = state.cache[cacheKey(id, state.weekStart)];
     if (cached) {
       state.data = cached;
@@ -3048,7 +3656,7 @@
     render();
     try {
       var t0 = Date.now();
-      var data = await bookingRead({ resource: state.resourceId, week_start: state.weekStart, scoper_user_id: resource().scoper_user_id, visit_outcomes_from: new Date(Date.now() - 7 * 86400000).toISOString(), visit_outcomes_to: new Date().toISOString() });
+      var data = await bookingRead(readParams());
       var ms = Date.now() - t0;
       if (request !== state.request) return;
       if (!data || data.ok === false) {
@@ -3066,6 +3674,7 @@
         data.pack.week_start = (priorPack && priorPack.present === true && priorPack.week_start) || data.week_start;
       }
       state.data = data;
+      reapplyOwnerOccupancy();
       state.visitUncertain = {};
       state.cache[key] = data;
       state.stale = false;
@@ -3328,6 +3937,40 @@
         press(pressBtn.getAttribute('data-case-id'), pressBtn.getAttribute('data-booking-press'));
         return;
       }
+      var ownerYes = closest('[data-owner-approve]');
+      if (ownerYes) {
+        e.preventDefault();
+        if (ownerYes.disabled) return;
+        ownerApprove(ownerYes.getAttribute('data-case-id'), ownerYes.getAttribute('data-owner-approve'));
+        return;
+      }
+      var pickOpen = closest('[data-owner-pick-open], [data-owner-pick-close]');
+      if (pickOpen) {
+        e.preventDefault();
+        var pcase = cases().filter(function (row) { return row.id === pickOpen.getAttribute('data-case-id'); })[0];
+        if (!pcase || pickOpen.disabled || pickerBusy(pcase)) return;
+        var pkey = draftKey(pcase);
+        if (pickOpen.hasAttribute('data-owner-pick-open')) state.ownerPickOpen[pkey] = true;
+        else {
+          delete state.ownerPickOpen[pkey];
+          delete state.ownerVisits[pkey];
+          delete state.approvalErrors[approvalKey(pcase, 'calendar')];
+        }
+        render();
+        return;
+      }
+      var ownerNo = closest('[data-owner-cancel]');
+      if (ownerNo) {
+        e.preventDefault();
+        var oc = cases().filter(function (row) { return row.id === ownerNo.getAttribute('data-case-id'); })[0];
+        var okind = ownerNo.getAttribute('data-owner-cancel');
+        if (ownerNo.disabled || !oc) return;
+        var okey = approvalKey(oc, okind);
+        if (state.approvalPending[okey] || state.pressPending[okey]) return;
+        delete state.ownerPreviews[okey];
+        render();
+        return;
+      }
       var decision = closest('[data-booking-decision]');
       if (decision) {
         e.preventDefault();
@@ -3377,6 +4020,19 @@
       }
       if (e.target.matches && e.target.matches('[data-booking-time]')) {
         reviseProposedTime(e.target.value);
+        render();
+      }
+      if (e.target.matches && e.target.matches('[data-owner-visit]')) {
+        var pc = selectedCase();
+        if (!pc || pickerBusy(pc) || !ownerRulebook(pc)) return render();
+        var pick = ownerPick(pc);
+        var field = e.target.getAttribute('data-owner-visit');
+        if (field === 'minutes') pick.minutes = Number(e.target.value);
+        else if (field) pick[field] = e.target.value;
+        // A start the new day or window no longer allows is cleared, never kept.
+        if (pick.start && ownerStarts(ownerRulebook(pc), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
+        delete state.approvalErrors[approvalKey(pc, 'calendar')];
+        delete state.approvalErrors[approvalKey(pc, 'message')];
         render();
       }
     });
@@ -3501,6 +4157,17 @@
     postStamp: postStamp,
     press: press,
     pressBlock: pressBlock,
+    ownerCheck: ownerCheck,
+    ownerApprove: ownerApprove,
+    ownerInput: ownerInput,
+    ownerVisit: ownerVisit,
+    ownerPick: ownerPick,
+    ownerStarts: ownerStarts,
+    ownerBlock: ownerBlock,
+    messagePath: messagePath,
+    calendarPath: calendarPath,
+    quietReload: quietReload,
+    refusalWords: refusalWords,
     describeResult: describeResult,
     editedText: editedText,
     bookingContentHash: bookingContentHash,

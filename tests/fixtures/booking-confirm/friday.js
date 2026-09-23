@@ -70,6 +70,29 @@
         { direction: 'inbound', body: 'Friday late morning is best for me.', timestamp: hoursAgo(20) }
       ]
     };
+    // Owner-authored approvals (owner-authored-v1): the read offers the owner's
+    // own words and his own picked visit, with the Stratco rulebook.
+    const bookable = [];
+    for (let i = 0; i < 14; i++) {
+      const date = new Date(Date.now() + 8 * 3600000 + i * 86400000).toISOString().slice(0, 10);
+      const weekday = new Date(date + 'T12:00:00Z').getUTCDay();
+      if ((weekday === 2 || weekday === 5) && Date.parse(date + 'T15:30:00+08:00') > Date.now()) bookable.push(date);
+    }
+    const rulebook = {
+      profile: 'fencing-stratco-marnin', source: 'fixture', timezone: 'Australia/Perth', utc_offset: '+08:00',
+      days: ['Tue', 'Fri'], bookable_dates: bookable, day_start: '08:00', day_end: '16:30',
+      window_min_minutes: 60, window_max_minutes: 90, visit_minutes: 60, travel_buffer_minutes: 30, max_per_day: 6,
+      protected_bands: [{ weekday: 'Tue', start: '13:00', end: '15:30', label: 'Stratco / Canning Vale' }],
+      sender: '+61489267776',
+      calendar: { provider: 'ghl', calendar_id: 'dEQKVKHthsjSYaen1fiE', calendar_name: 'STRATCO FENCING', assigned_user_id: '3S20LGVTjsVYy9vTJ9wM', scoper_email: 'marnin@secureworkswa.com.au' }
+    };
+    Object.assign(data.booking_flow, { owner_approval_write: 'owner-authored-v1', owner_rulebook: rulebook, hand_sent_texts: 'not_machine_checked' });
+    data.cases.forEach(c => {
+      const m = c.booking_read_model;
+      const engine = !!(m && m.pack_revision && m.proposal);
+      c.owner_booking = { version: 'owner-authored-v1', eligible: !!c.contact_id, reason: null, engine_proposal: engine,
+        engine_window: engine ? { start: m.proposal.window.start, end: m.proposal.window.end } : null, rulebook, approvals: [] };
+    });
     return data;
   }
   if (typeof module !== 'undefined') module.exports = makeFridayRead;

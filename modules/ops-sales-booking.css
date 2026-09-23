@@ -219,6 +219,28 @@
 #salesBookingRoot .checks .is-ok{color:var(--ink-2)}
 #salesBookingRoot .checks .is-bad{color:var(--bad)}
 
+/* ---- the owner's own visit and the server's check (owner-authored-v1) ---- */
+#salesBookingRoot select{font:inherit;color:var(--ink)}
+#salesBookingRoot .pick{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:2px}
+#salesBookingRoot .pick label{display:grid;gap:4px;font-size:12.5px;font-weight:600;color:var(--muted)}
+#salesBookingRoot .pick select{appearance:none;-webkit-appearance:none;width:100%;height:44px;padding:0 34px 0 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%233F4F58' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;transition:border-color .15s ease-out}
+#salesBookingRoot .pick select:hover:not(:disabled){border-color:#C9D3D9}
+#salesBookingRoot .pick select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
+#salesBookingRoot .pick select:disabled{background-color:var(--surface-2);color:var(--ink-2);cursor:not-allowed}
+#salesBookingRoot .ownercheck{display:grid;gap:10px;margin-top:4px;padding:14px 16px 16px;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;background:var(--surface-2);animation:bk-in .25s cubic-bezier(.2,.8,.2,1)}
+#salesBookingRoot .oc-head{font-size:14px;color:var(--ink-2)}
+#salesBookingRoot .oc-head strong{color:var(--ok);font-weight:650}
+#salesBookingRoot .oc-text{padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);font-size:15px;line-height:1.5;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+#salesBookingRoot .oc-line{font-size:13.5px;color:var(--ink-2);overflow-wrap:anywhere}
+#salesBookingRoot .oc-checks{list-style:none;padding:0;display:grid;gap:3px;font-size:13px}
+#salesBookingRoot .oc-checks li{position:relative;padding-left:20px;color:var(--ink-2)}
+#salesBookingRoot .oc-checks li::before{content:"";position:absolute;left:3px;top:5px;width:9px;height:5px;border-left:2px solid var(--ok);border-bottom:2px solid var(--ok);transform:rotate(-45deg)}
+#salesBookingRoot .oc-checks li.is-warn{color:var(--accent-ink)}
+#salesBookingRoot .oc-checks li.is-warn::before{top:7px;left:4px;width:7px;height:7px;border:0;border-radius:50%;background:var(--accent);transform:none}
+#salesBookingRoot .pickother{font-size:13.5px}
+#salesBookingRoot .actions button.quiet{background:var(--surface);border-color:var(--line);color:var(--ink-2)}
+#salesBookingRoot .actions button.quiet:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
+
 /* ---- the day ---- */
 #salesBookingRoot .bk-day{padding:16px 14px 14px;display:grid;gap:10px}
 #salesBookingRoot .dayhead{display:grid;gap:10px}
@@ -280,6 +302,9 @@
   #salesBookingRoot .bk-card{padding:16px 16px 20px;gap:18px}
   #salesBookingRoot .compose textarea{font-size:16px}
   #salesBookingRoot .actions button{flex:1 1 100%}
+  #salesBookingRoot .pick{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  #salesBookingRoot .pick label:first-child{grid-column:1 / -1}
+  #salesBookingRoot .pick select{font-size:16px}
   #salesBookingRoot .bk-counts{padding:10px 14px}
   #salesBookingRoot .counts{font-size:14px;gap:4px 14px}
   #salesBookingRoot .counts i{display:none}

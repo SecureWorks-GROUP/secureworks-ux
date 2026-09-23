@@ -536,6 +536,20 @@ visual proof `scripts/ses-portal-thumb-shot.js` +
 `tests/e2e/fixtures/ses-portal-thumb-glendalough.js` (drawn facsimile, never the
 live capture), evidence in `docs/evidence/ses-portal-live-thumb-2026-08-13/`.
 
+## Sales Booking screen (`modules/ops-sales-booking.js`)
+
+Live module (loaded by `ops.html`), not dead code. A phone-first work list:
+counts, To contact (loudest first), one card, the day column. Every Send this
+text / Book it press records `sales_booking_approval_write` for the exact
+content on screen, then calls `sales_booking_send` / `sales_booking_book` with
+`{approval_id}` and states the result in words; an unknown action reads "not
+connected yet", never success. An edited text is bound by the browser's copy of
+ops-api `bookingContentHash` (`sha256Hex` + `canonicalJson`), so keep the two in
+step. Contract and copy: `docs/sales-booking-ui.md`,
+`docs/booking-confirm-contract.md`. Guards: `npm run test:sales-booking` (runs in
+`test:e2e`) and `tests/e2e/sales-booking-redesign.spec.js` against
+`tests/fixtures/booking-confirm/friday.html`.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card

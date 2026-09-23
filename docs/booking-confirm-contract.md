@@ -26,6 +26,10 @@ These fields are **not yet supplied by the wiki producer**. Until they exist, co
 
 Authenticate and authorize the actor server-side. Validate current profile, model identity, complete pack revision, hashes, exact content, expiry and current availability before creating the independent stamp. Bind retries idempotently by step and content. Calendar execution must use `notify:false` and no SMS; message execution requires its own exact-text approval and matching successful calendar receipt (except information-only messages handled outside this slot-confirmation UI). Revalidate at execution and respect the send hold. UI approval is not evidence of execution; only producer receipts can mark Done. Unknown outcomes must be reconciled, not retried blindly.
 
+## Executor actions after an approval
+
+The screen's Send this text and Book it presses record the approval above, then call `opsPost('sales_booking_send' | 'sales_booking_book', {approval_id})` with the approval's `id` (else `binding_hash`). Expected answer: `{status:"sent"|"booked"|"dry_run"|"refused", reason, message_id | appointment_id | would_write}`; `written` (list of calendar names) and `appointment_url` are read when present. An unknown-action or 404 answer is shown as "not connected yet"; any other unclear answer blocks another press until a fresh read. The message snapshot may carry `content.variant:"edited"` with the owner's edited words; its `content_hash` is `bookingContentHash` of that snapshot, computed in the browser with the same canonical JSON. Today's `sales_booking_approval_write` rebuilds the template snapshot and so refuses an edited text (`approval_snapshot_changed`); the screen shows that refusal rather than sending anything. Accepting edited text is a backend change.
+
 ## Visit outcomes: one insert and one list
 
 The screen calls the existing backend outcome actions. The authoritative contract is [backend `docs/visit-outcomes-api.md`](https://github.com/SecureWorks-GROUP/secureworks-backend/blob/main/docs/visit-outcomes-api.md), read from GitHub main on 2026-09-22. This wiring does not establish deployment status or a complete booked-visit source.

@@ -117,6 +117,13 @@
     approvalPending: {},
     approvalErrors: {},
     shownApprovals: {},
+    approvalIds: {},
+    pressPending: {},
+    pressResults: {},
+    threads: {},
+    dayIndex: null,
+    showConversation: false,
+    lastFreshAt: 0,
     loading: false,
     error: null,
     data: null,
@@ -156,6 +163,86 @@
       return value;
     }
     return JSON.stringify(ordered(left)) === JSON.stringify(ordered(right));
+  }
+
+  // Mirrors backend canonicalBookingJson + bookingHash (ops-api
+  // sales_booking_confirmation.ts): key-sorted JSON, string bytes untouched,
+  // SHA-256 hex. An edited text is bound by the same hash the server computes,
+  // so an approval covers the edited words and nothing else.
+  function canonicalJson(value) {
+    if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value).sort().map(function (key) {
+        return JSON.stringify(key) + ':' + canonicalJson(value[key]);
+      }).join(',') + '}';
+    }
+    var s = JSON.stringify(value);
+    return s === undefined ? 'null' : s;
+  }
+
+  var SHA_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  function utf8Bytes(str) {
+    var out = [];
+    for (var i = 0; i < str.length; i++) {
+      var code = str.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+        var low = str.charCodeAt(i + 1);
+        if (low >= 0xdc00 && low <= 0xdfff) { code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00); i += 1; }
+        else code = 0xfffd;
+      } else if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+      if (code < 0x80) out.push(code);
+      else if (code < 0x800) out.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+      else if (code < 0x10000) out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+      else out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 63), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    }
+    return out;
+  }
+
+  function sha256Hex(str) {
+    var bytes = utf8Bytes(String(str));
+    var bitLen = bytes.length * 8;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    var hi = Math.floor(bitLen / 0x100000000), lo = bitLen >>> 0;
+    bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    var h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var w = new Array(64);
+    for (var off = 0; off < bytes.length; off += 64) {
+      for (var t = 0; t < 16; t++) w[t] = (bytes[off + t * 4] << 24) | (bytes[off + t * 4 + 1] << 16) | (bytes[off + t * 4 + 2] << 8) | bytes[off + t * 4 + 3];
+      for (t = 16; t < 64; t++) {
+        var x = w[t - 15], y = w[t - 2];
+        var s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+        var s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+        w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+      }
+      var a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
+      for (t = 0; t < 64; t++) {
+        var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        var t1 = (k + S1 + ((e & f) ^ (~e & g)) + SHA_K[t] + w[t]) | 0;
+        var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        var t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + k) | 0;
+    }
+    return h.map(function (n) { return ('00000000' + (n >>> 0).toString(16)).slice(-8); }).join('');
+  }
+
+  function bookingContentHash(snapshot) {
+    var binding = {};
+    Object.keys(snapshot || {}).forEach(function (key) { if (key !== 'content_hash') binding[key] = snapshot[key]; });
+    return sha256Hex(canonicalJson(binding));
   }
 
   function resource() {
@@ -396,7 +483,7 @@
       suburb: raw.suburb || null,
       job: raw.job || raw.job_type || null,
       status: 'ready',
-      reason: 'Pack offer. This opportunity was not among the enumerated cases in this read.',
+      reason: 'Proposal only. This lead was not in the GHL list for this read.',
       proposal: null,
       stamp_state: 'none',
       not_in_this_read: true
@@ -1500,85 +1587,6 @@
     for (var i = 0; i < 5; i++) if (!(res.desk_rules.no_wednesday && i === 2)) out.push(i);
     return out;
   }
-
-  function renderQueueRow(c) {
-    var u = urgency(c);
-    var stamped = 'none';
-    var slot = proposalSlotLabel(c);
-    var facts = threadFacts(c);
-    var quiet = facts && facts.read_ok === false
-      ? ' · thread not read'
-      : (facts && facts.quiet_window ? ' · quiet ' + esc(typeof facts.quiet_window === 'string' ? facts.quiet_window : 'window') : '');
-    return '<button type="button" class="lead" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
-      '<span class="top"><span class="name">' + esc(c.display_name || 'Unnamed enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + ' · ' + esc(jobTypeLabel(c)) + '</span>' +
-      '<span class="pill ' + esc(u[0]) + '">' + esc(stamped === 'keep' ? 'KEEP' : stamped === 'cut' ? 'CUT' : u[1]) + '</span></span>' +
-      '<div class="sub">' + esc(enquiryLine(c)) + (slot ? ' · ' + esc(slot) : '') + quiet + '</div>' + renderProposalFacts(c, true) + '</button>';
-  }
-
-  function renderQueue() {
-    var groups = queueGroups();
-    var html = '';
-    groups.forEach(function (g) {
-      if (state.data && state.data.booking_flow && !g[1].length) return;
-      html += '<div class="qgroup">' + esc(g[0]) + '<span class="count">' + g[1].length + '</span></div>';
-      html += g[1].length
-        ? g[1].map(renderQueueRow).join('')
-        : '<div class="qempty">Nobody here. Empty is not a completed audit.</div>';
-    });
-    var fold = foldedCases();
-    html += '<button type="button" class="qgroup qtoggle" data-booking-fold="1">' +
-      (state.showArchived ? 'Hide' : 'Show') + ' quoted and archived<span class="count">' + fold.length + '</span></button>';
-    if (state.showArchived) {
-      html += fold.length ? fold.map(renderQueueRow).join('') : '<div class="qempty">Nothing quoted or archived in this read.</div>';
-    }
-    return html;
-  }
-
-  function stageTag(layer, stamped) {
-    if (layer === 'confirmed') return 'CONFIRMED';
-    if (layer === 'blocked') return 'CANCELLED';
-    if (layer === 'offer') return 'OFFERED · NO REPLY';
-    if (layer === 'personal') return 'PERSONAL';
-    if (layer === 'busy') return 'Busy';
-    if (layer === 'leave') return 'LEAVE';
-    return stamped === 'keep' ? 'STAMPED KEEP' : 'PROPOSED';
-  }
-
-  // One calendar card: stage tag, then time and name, then address and suburb, then job.
-  function renderEvent(block, kind) {
-    if (!layerEnabled(kind)) return '';
-    var hour = hourFromIso(block.start_iso);
-    var day = dayIndexFromIso(block.start_iso, state.weekStart);
-    if (hour == null || day == null) return '';
-    var h = durationHours(block.start_iso, block.end_iso);
-    var stamped = 'none';
-    var cls = 'ev ' + kind + (kind === 'proposal' && stamped === 'keep' ? ' stamped' : '') + (block.id && block.id === state.selectedId ? ' sel' : '');
-    var place = (block.address ? block.address + ', ' : '') + (block.suburb || '');
-    // Overlapping cards share the column rather than stacking: a proposal hidden under
-    // another proposal is a line the captain never gets to stamp.
-    var lanes = Math.max(1, block.lanes || 1);
-    var lane = block.lane || 0;
-    var width = 100 / lanes;
-    var geom = 'left:calc(' + (lane * width) + '% + 3px);width:calc(' + width + '% - 6px);right:auto;';
-    return '<button type="button" class="' + cls + ' event ' + kind + '" data-booking-case="' + esc(block.id || '') + '"' +
-      (block.not_in_this_read ? ' data-not-in-read="1"' : '') +
-      ' style="' + geom + 'top:' + topPx(hour) + 'px;height:' + Math.max(44, h * PX_PER_HOUR) + 'px">' +
-      '<span class="stage">' + esc(block.reservation_state ? 'TAKEN · ' + (block.reservation_state === 'agreed' ? 'AGREED' : 'OFFERED') : stageTag(kind, stamped)) + '</span>' +
-      '<span class="t evtime">' + esc(block.window_label || clockLabel(hour)) + ' · ' + esc(block.display_name || 'Diary') + '</span>' +
-      '<span class="n evname">' + esc(block.reservation_state ? 'Reserved for this GHL contact' : place || 'Address not given yet') + '</span>' +
-      (block.not_in_this_read ? '<span class="readtag">not in this read</span>' : '') +
-      '<span class="j evplace">' + esc(block.job || '') + '</span></button>';
-  }
-
-  function renderWindows(c) {
-    if (!state.layers.proposal || !c.proposal || !c.proposal.window_start_iso) return '';
-    var hour = hourFromIso(c.proposal.window_start_iso);
-    var day = dayIndexFromIso(c.proposal.window_start_iso, state.weekStart);
-    if (hour == null || day == null) return '';
-    var h = durationHours(c.proposal.window_start_iso, c.proposal.window_end_iso || c.proposal.window_start_iso);
-    return '<div class="window" style="top:' + topPx(hour) + 'px;height:' + Math.max(24, h * PX_PER_HOUR) + 'px"><b>Window</b>' + esc(c.proposal.window_label || '') + '</div>';
-  }
-
   // Which layer a case paints on. A cancelled thread whose diary event is still there
   // is 'blocked': the slot stays occupied until the delete reads back.
   function caseLayer(c) {
@@ -1664,132 +1672,6 @@
     return visible;
   }
 
-  function renderCalendar() {
-    var data = state.data;
-    var res = resource();
-    var cal = data && data.resource && data.resource.calendar;
-    if (calendarUnread(data)) {
-      var read = calendarReadState(data);
-      return '<div class="unknown unknownstaff"><h3>' + (read.state === 'not_configured' ? 'Calendar not configured' : 'Could not read calendar') + '</h3><p>' + esc(read.reason) + '</p><p>Every slot is unconfirmable until the calendar is read. Missing coverage is not a free week.</p></div>';
-    }
-    var days = deskDays(res);
-    var headers = '<span></span>' + DAYS.map(function (name, i) {
-      var iso = addDays(state.weekStart, i);
-      var off = days.indexOf(i) === -1;
-      return '<div class="dayheader' + (off ? ' off' : '') + '">' + name.slice(0, 3) + '<b>' + iso.slice(8, 10) + '</b></div>';
-    }).join('');
-    var cols = '';
-    for (var d = 0; d < 5; d++) {
-      var off = days.indexOf(d) === -1;
-      var body = '';
-      if (off) {
-        // A desk rule says where new work may be OFFERED. It does not overrule the
-        // diary: when the provider already has events on an off-lane day, the full
-        // hatch would paint real bookings as an impossible day, so the rule is stated
-        // as a banner instead and the events keep the column.
-        var busy = diary().some(function (ev) {
-          return dayIndexFromIso(ev.start_iso, state.weekStart) === d && diaryOccupiesDay(ev);
-        });
-        body += busy
-          ? '<div class="block rulebanner" style="top:0;height:' + Math.round(PX_PER_HOUR * 0.55) + 'px"><strong>Outside the ' + esc(res.name) + ' lane</strong><span>' + esc(res.desk_rules.lane_note || 'No new scopes offered here') + '</span></div>'
-          : '<div class="block off"><strong>' + (res.desk_rules.days ? 'Not a ' + esc(res.name) + ' day' : 'Unavailable') + '</strong><span>' + esc(res.desk_rules.days ? 'Tue and Fri only' : 'Desk rule') + '</span></div>';
-      } else if (res.desk_rules.monday_from > DAY_START && d === 0) {
-        body += '<div class="block" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR) + 'px"><strong>Not available</strong><span>Monday before ' + res.desk_rules.monday_from + ':00</span></div>';
-      }
-      var band = res.desk_rules.protected_band;
-      if (band && band.day === d) {
-        body += '<div class="block band" style="top:' + topPx(band.from) + 'px;height:' + ((band.to - band.from) * PX_PER_HOUR) + 'px"><strong>' + esc(band.label) + '</strong><span>' + esc(band.note) + '</span></div>';
-      }
-      var dayCards = [];
-      diary().forEach(function (ev) {
-        if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
-        dayCards.push({ block: ev, kind: diaryLayerFor(ev) });
-      });
-      cases().forEach(function (c) {
-        if (!c.proposal || dayIndexFromIso(c.proposal.start_iso, state.weekStart) !== d) return;
-        body += renderWindows(c);
-        dayCards.push({
-          block: {
-            id: c.id,
-            start_iso: c.proposal.start_iso,
-            end_iso: c.proposal.end_iso,
-            display_name: c.display_name,
-            address: c.address || '',
-            suburb: caseSuburb(c),
-            job: c.job || '',
-            not_in_this_read: !!c.not_in_this_read,
-            window_label: c.booking_read_model ? String(c.proposal.window_start_iso || '').slice(11, 16) + '–' + String(c.proposal.window_end_iso || '').slice(11, 16) : null
-          },
-          kind: caseLayer(c)
-        });
-      });
-      packLanes(dayCards).forEach(function (card) {
-        body += renderEvent(card.block, card.kind);
-      });
-      cols += '<div class="daycol daycolumn">' + body + '</div>';
-    }
-    var times = '';
-    for (var h = DAY_START; h <= DAY_END; h++) {
-      times += '<div class="time small" style="position:absolute;right:6px;top:' + topPx(h) + 'px;transform:translateY(-50%)">' + (h < 10 ? '0' : '') + h + ':00</div>';
-    }
-    var evCount = diary().filter(function (ev) { return ev.kind !== 'reservation'; }).length;
-    var info = '<span>' + evCount + ' provider event' + (evCount === 1 ? '' : 's') + '</span>';
-    if (data && data.booking_flow) info += '<span>' + commitmentSlots().length + ' prior offers or agreements held</span>';
-    else if (evCount === 0) info += '<span class="repairtext">Empty diary is not spare capacity. Leave unread.</span>';
-    var legend = [
-      ['confirmed', '', 'Confirmed booking'],
-      ['proposal', 'proposal', 'Proposed, not sent'],
-      ['offer', 'offer', 'Offered, waiting on reply'],
-      ['blocked', 'blocked', 'Cancelled, still in diary'],
-      ['personal', 'personal', 'Personal']
-    ].map(function (l) {
-      return '<label class="layer"><input type="checkbox" data-booking-layer="' + l[0] + '"' + (state.layers[l[0]] ? ' checked' : '') + '>' +
-        '<span class="legendline ' + l[1] + '"></span>' + l[2] + '</label>';
-    }).join('');
-    return '<div class="layers">' + legend + '</div>' +
-      '<div class="calendarinfo">' + info + '</div>' +
-      '<div class="dayheaders">' + headers + '</div>' +
-      '<div class="calbody calendarbody"><div class="timeaxis" style="position:relative">' + times + '</div>' + cols + '</div>' +
-      '<div class="dayselect">' + DAYS.map(function (name, i) {
-        return '<button type="button" data-booking-day="' + i + '">' + name.slice(0, 3) + '<b>' + addDays(state.weekStart, i).slice(8, 10) + '</b></button>';
-      }).join('') + '</div>' +
-      '<div class="dayagenda">' + renderAgenda() + '</div>' +
-      '<div class="calfoot calendarfoot">' + (data && data.booking_flow ? 'Taken includes prior offers and customer agreements. Confirmations require a fresh server check.' : 'The customer is promised the window, never the minute. A window is not acceptance. Leave and other calendars are not in this read.') + '</div>';
-  }
-
-  function renderAgenda() {
-    var items = diary().filter(function (ev) { return dayIndexFromIso(ev.start_iso, state.weekStart) != null; }).concat(cases().filter(function (c) {
-      return c.proposal && dayIndexFromIso(c.proposal.start_iso, state.weekStart) != null;
-    }).map(function (c) {
-      return { start_iso: c.proposal.start_iso, display_name: c.display_name, suburb: caseSuburb(c), id: c.id, layer: caseLayer(c) };
-    }));
-    items.sort(function (a, b) { return String(a.start_iso) < String(b.start_iso) ? -1 : 1; });
-    if (!items.length) return '<div class="emptyqueue qempty">No provider events or proposals in this week.</div>';
-    return items.map(function (it) {
-      return '<button type="button" class="lead" data-booking-case="' + esc(it.id || '') + '"><strong>' + esc(longDate(String(it.start_iso || '').slice(0, 10)) + ' · ' + String(it.start_iso || '').slice(11, 16)) + '</strong> ' + esc(it.display_name || '') + ' · ' + esc(it.suburb || '') + '</button>';
-    }).join('');
-  }
-
-  function renderMessages() {
-    var conv = state.conversation;
-    var selected = selectedCase();
-    if (!selected || !selected.contact_id) return '<div class="comms-empty msg sys">No GHL contact on this case. Thread is not shown.</div>';
-    if (conv.contactId && conv.contactId !== selected.contact_id) return '<div class="comms-empty msg sys">Thread belongs to another case; it is not shown.</div>';
-    if (conv.loading) return '<div class="comms-empty msg sys">Loading conversation…</div>';
-    if (conv.error) return '<div class="comms-empty msg sys">Conversation failed: ' + esc(conv.error) + '</div>';
-    if (!conv.contactId) return '<div class="comms-empty msg sys">Select a case with a GHL contact to open the thread.</div>';
-    if (!conv.messages || !conv.messages.length) return '<div class="comms-empty msg sys">No messages in this bounded read. Pagination limits still apply.</div>';
-    return conv.messages.map(function (msg) {
-      var dir = msg.direction === 'outbound' ? 'out' : 'in';
-      var ts = msg.timestamp ? String(msg.timestamp) : '';
-      var type = String(msg.type || 'SMS');
-      var who = dir === 'in' ? (selected.display_name || 'Customer') : (msg.sender_name || resource().name);
-      return '<div class="msg comms-msg ' + dir + ' ' + (dir === 'out' ? 'outbound' : 'inbound') + '">' +
-        '<small class="comms-msg-meta">' + esc(who) + ' · ' + esc(ts) + ' · ' + esc(type) + '</small>' +
-        esc(msg.body || msg.subject || type) + '</div>';
-    }).join('');
-  }
-
   // booking-confirm.v1 adapter. See docs/booking-confirm-contract.md and the
   // offline fixture. No legacy stamp is translated into either approval channel.
   function decisionModel(c) {
@@ -1814,7 +1696,8 @@
       evidence: (raw.evidence_quotes || []).map(function (e) { return { message_id: e.message_id, contact_id: raw.contact_id, quote: e.quote }; }),
       validation: Array.isArray(checks) ? checks : reasons.map(function (reason) { return {label:'Validation',passed:false,reason:reason}; }),
       calendar: { provider: preview.provider, calendar_id: preview.calendar_id, assigned_user_id: preview.assigned_user_id,
-        title: preview.title, address: preview.site_address, content_hash: preview.content_hash },
+        title: preview.title, address: preview.site_address, content_hash: preview.content_hash,
+        targets: preview.targets || cal.targets || null },
       message: { template_locked: typeof msg.template_text === 'string', text: msg.template_text,
         sender: routing.from_number, recipient: routing.to_number, content_hash: routing.message_sha256 },
       commitment_id: p && p.commitment_id
@@ -1828,9 +1711,27 @@
     });
   }
 
+  // The owner's edit, when there is one, is the text. Typing the proposed words
+  // back exactly returns to the producer's own template and its own hash.
+  function editedText(c) {
+    var d = c && state.drafts[draftKey(c)];
+    if (!d || !d.humanEdited || typeof d.text !== 'string') return null;
+    var m = decisionModel(c);
+    if (m && m.message && d.text === m.message.text) return null;
+    return d.text;
+  }
+
   function selectedMessage(c) {
     var m = decisionModel(c);
-    return m && Object.assign({}, m.message, { variant: 'template' });
+    if (!m) return null;
+    var msg = Object.assign({}, m.message, { variant: 'template' });
+    var edited = editedText(c);
+    if (edited != null) {
+      msg.text = edited;
+      msg.variant = 'edited';
+      msg.content_hash = null;
+    }
+    return msg;
   }
 
   function approvalSnapshot(c, kind) {
@@ -1838,7 +1739,7 @@
     if (!m) return null;
     var target = kind === 'calendar' ? m.calendar : kind === 'message' ? selectedMessage(c) : null;
     if (!target) return null;
-    return {
+    var snap = {
       schema: 'scope-booking-approval.v1', step: kind, case_id: c.id, contact_id: c.contact_id,
       resource: state.resourceId, scoper_user_id: resource().scoper_user_id,
       week_start: state.weekStart, id: m.proposal_id, profile: m.profile, pack_revision: m.revision,
@@ -1851,6 +1752,8 @@
         title: target.title, address: target.address
       } : { text: target.text, sender: target.sender, recipient: target.recipient, variant: target.variant }
     };
+    if (kind === 'message' && target.variant === 'edited') snap.content_hash = bookingContentHash(snap);
+    return snap;
   }
 
   function approvalKey(c, kind) {
@@ -1867,51 +1770,79 @@
     return { state: ({ succeeded:'done', approved:'approved', refused:'refused', held:'held', pending:'pending', failed:'failed', unknown:'unknown' })[channel.state] || 'not_approved', reason: channel.reason || channel.receipt && (channel.receipt.error || channel.receipt.reason) || '' };
   }
 
+  // What a proposed visit runs into, named. Occupied calendar time first, then a
+  // hold for another GHL contact. Null when the time is clear.
+  function clashFor(c) {
+    var m = decisionModel(c);
+    var p = m && m.proposal;
+    if (!p || !p.start_iso || !p.end_iso) return null;
+    var a = Date.parse(p.start_iso), b = Date.parse(p.end_iso);
+    var ev = diary().filter(function (row) {
+      return row.kind !== 'reservation' && diaryOccupiesDay(row) && Date.parse(row.start_iso) < b && Date.parse(row.end_iso) > a;
+    })[0];
+    if (ev) return { kind: 'calendar', label: eventTitle(ev), at: clockLabel(hourFromIso(ev.start_iso)), source: sourceLabel(ev) };
+    var hold = commitmentSlots().filter(function (s) {
+      if (s.id === m.commitment_id && s.contact_id === c.contact_id && s.start_iso === p.start_iso && s.end_iso === p.end_iso) return false;
+      return Date.parse(s.start_iso) < b && Date.parse(s.end_iso) > a;
+    })[0];
+    if (hold) {
+      var who = cases().filter(function (row) { return row.contact_id === hold.contact_id; })[0];
+      return { kind: 'hold', label: (who && who.display_name ? who.display_name + ', ' : '') + (hold.state === 'agreed' ? 'customer agreed this time' : 'time already offered'), at: clockLabel(hourFromIso(hold.start_iso)) };
+    }
+    return null;
+  }
+
+  function clashSentence(clash) {
+    if (!clash) return '';
+    if (clash.kind === 'hold') return 'Slot taken by a prior offer: ' + clash.label + ' at ' + clash.at + '.';
+    return 'Clashes with ' + clash.label + ' at ' + clash.at + (clash.source ? ' (' + clash.source + ')' : '') + '.';
+  }
+
   function approvalBlock(c, kind, refusing) {
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
-    if (state.loading || state.stale || state.error) return 'Refresh the booking read before confirming.';
-    if (!flow || flow.version !== 'booking-confirm.v1' || flow.approval_write !== 'separate-v1') return 'Separate approvals are not connected yet. Nothing will be booked or sent here.';
-    if (!m || !m.proposal_id || m.revision == null || !c.contact_id || m.contact_id !== c.contact_id) return 'Needs a person: proposal or GHL contact identity is missing.';
-    if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This read belongs to another scoper or week.';
-    if (packOpportunityId(m.proposal_id) !== packOpportunityId(c.opportunity_id || c.id) || cases().filter(function (row) { return row.contact_id === c.contact_id; }).length !== 1) return 'GHL contact or proposal is ambiguous in this read.';
-    if (m.profile !== 'fencing-stratco-marnin' || state.resourceId !== 'marnin') return 'Separate GHL approvals are available for the Stratco profile only.';
+    var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (state.loading) return 'Reading the latest list. Wait a moment.';
+    if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
+    if (!flow || flow.version !== 'booking-confirm.v1' || flow.approval_write !== 'separate-v1') return 'Approvals are not connected for this list yet, so nothing can be ' + verb + ' from here.';
+    if (!m || !m.proposal_id || m.revision == null || !c.contact_id || m.contact_id !== c.contact_id) return 'No checked proposal for this lead yet, so nothing can be ' + verb + ' from here.';
+    if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This list belongs to another person or week. Press Refresh.';
+    if (packOpportunityId(m.proposal_id) !== packOpportunityId(c.opportunity_id || c.id) || cases().filter(function (row) { return row.contact_id === c.contact_id; }).length !== 1) return 'This GHL contact appears more than once. Sort it out in GHL first.';
+    if (m.profile !== 'fencing-stratco-marnin' || state.resourceId !== 'marnin') return 'Only Marnin\'s Stratco leads can be approved here for now.';
     var snap = approvalSnapshot(c, kind);
-    if (!snap || !snap.content_hash) return 'Exact content binding is missing.';
-    if (state.approvalPending[approvalKey(c, kind)]) return 'Recording decision…';
+    if (!snap || !snap.content_hash) return 'The exact ' + (kind === 'calendar' ? 'booking' : 'text') + ' could not be pinned down. Press Refresh.';
+    if (state.approvalPending[approvalKey(c, kind)]) return 'Recording your approval…';
     if (refusing) return '';
     var status = approvalState(c, kind);
-    if (['approved', 'done', 'held', 'pending', 'unknown'].indexOf(status.state) >= 0) return 'Already ' + status.state + ' for this exact content.';
-    if (status.state === 'refused') return 'Refused. Ask for a revised proposal.';
-    if (calendarUnread(state.data)) return calendarReadState(state.data).state === 'not_configured' ? 'Calendar not configured. No slot can be confirmed.' : 'Could not read calendar. No slot can be confirmed.';
-    if (!flow.calendar_read || flow.calendar_read.provider !== 'ghl') return 'GHL calendar availability has not been read.';
-    if (!Array.isArray(flow.commitments) || flow.commitments.some(function (slot) { return !slot.contact_id || !slot.id || ['offered', 'agreed'].indexOf(slot.state) < 0 || !(Date.parse(slot.end_iso) > Date.parse(slot.start_iso)); })) return 'Prior offers and agreements have not been read completely.';
-    if (!m.expires_at || !(Date.parse(m.expires_at) > Date.now())) return 'Proposal expired. Refresh for a new proposal.';
-    if (!m.proposal || m.confident !== true) return 'Needs a person: ' + (m.reason || 'No confident booking proposal.');
-    if (!Array.isArray(m.validation) || !m.validation.length || m.validation.some(function (v) { return v.passed !== true; })) return 'Validation has not passed. Review the checks below.';
-    if (!Array.isArray(m.evidence) || !m.evidence.length || m.evidence.some(function (e) { return !e.quote || !e.message_id || e.contact_id !== c.contact_id; })) return 'Customer evidence is missing or belongs to another GHL contact.';
+    if (status.state === 'done') return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
+    if (status.state === 'pending') return 'Still in progress. Press Refresh to see the result.';
+    if (status.state === 'unknown') return 'The last result is unknown. Check GHL before trying again.';
+    if (status.state === 'approved' || status.state === 'held') return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
+    if (status.state === 'refused') return 'You said no to this. Ask for a new proposal.';
+    if (calendarUnread(state.data)) return calendarReadState(state.data).state === 'not_configured' ? 'The calendar is not set up, so no time can be confirmed.' : 'The calendar could not be read, so no time can be confirmed.';
+    if (!flow.calendar_read || flow.calendar_read.provider !== 'ghl') return 'The GHL calendar has not been read, so no time can be confirmed.';
+    if (!Array.isArray(flow.commitments) || flow.commitments.some(function (slot) { return !slot.contact_id || !slot.id || ['offered', 'agreed'].indexOf(slot.state) < 0 || !(Date.parse(slot.end_iso) > Date.parse(slot.start_iso)); })) return 'Earlier offers could not all be read, so no time can be confirmed.';
+    if (!m.expires_at || !(Date.parse(m.expires_at) > Date.now())) return 'This proposal has expired. Press Refresh for a new one.';
+    if (!m.proposal || m.confident !== true) return 'Needs a person: ' + (m.reason || 'no confident proposal.');
+    if (!Array.isArray(m.validation) || !m.validation.length || m.validation.some(function (v) { return v.passed !== true; })) return 'A check did not pass. See the checks below.';
+    if (!Array.isArray(m.evidence) || !m.evidence.length || m.evidence.some(function (e) { return !e.quote || !e.message_id || e.contact_id !== c.contact_id; })) return 'The customer\'s own words are missing, or belong to another contact.';
     var p = m.proposal;
-    if (!/\+08:00$/.test(p.start_iso || '') || !/\+08:00$/.test(p.end_iso || '') || !(Date.parse(p.start_iso) > Date.now()) || !(Date.parse(p.end_iso) > Date.parse(p.start_iso))) return 'The proposed visit must be a future Perth time with a valid end.';
-    if (!p.window_start_iso || !p.window_end_iso || !(Date.parse(p.window_end_iso) > Date.parse(p.window_start_iso))) return 'Arrival window is missing or invalid.';
+    if (!/\+08:00$/.test(p.start_iso || '') || !/\+08:00$/.test(p.end_iso || '') || !(Date.parse(p.start_iso) > Date.now()) || !(Date.parse(p.end_iso) > Date.parse(p.start_iso))) return 'The proposed visit must be a future Perth time.';
+    if (!p.window_start_iso || !p.window_end_iso || !(Date.parse(p.window_end_iso) > Date.parse(p.window_start_iso))) return 'The arrival window is missing.';
     var index = dayIndexFromIso(p.start_iso, state.weekStart);
     var startHour = hourFromIso(p.start_iso), endHour = hourFromIso(p.end_iso);
     var rules = resource().desk_rules;
-    if (index == null || deskDays(resource()).indexOf(index) < 0 || startHour < (index === 0 ? rules.monday_from : 8) || startHour > rules.last_start || endHour > 16.5 || p.start_iso.slice(0, 10) !== p.end_iso.slice(0, 10)) return 'Proposed visit is outside this scoper week or working hours.';
-    if (rules.protected_band && rules.protected_band.day === index && startHour < rules.protected_band.to && endHour > rules.protected_band.from) return 'Proposed visit overlaps the protected Canning Vale band.';
-    var busy = diary().some(function (ev) {
-      return ev.kind !== 'reservation' && diaryOccupiesDay(ev) && Date.parse(ev.start_iso) < Date.parse(p.end_iso) && Date.parse(ev.end_iso) > Date.parse(p.start_iso);
-    });
-    if (busy) return 'Proposed visit overlaps an occupied calendar slot.';
-    var conflict = commitmentSlots().some(function (s) {
-      // The same contact's explicitly bound commitment is fulfilled by this booking,
-      // never silently treated as a new free slot. Other holds remain occupied.
-      if (s.id === m.commitment_id && s.contact_id === c.contact_id && s.start_iso === p.start_iso && s.end_iso === p.end_iso) return false;
-      return Date.parse(s.start_iso) < Date.parse(p.end_iso) && Date.parse(s.end_iso) > Date.parse(p.start_iso);
-    });
-    if (conflict) return 'Slot taken by a prior offer or customer agreement.';
-    if (kind === 'calendar' && (!m.calendar || m.calendar.provider !== 'ghl' || !m.calendar.calendar_id || !m.calendar.assigned_user_id || !m.calendar.title || !m.calendar.address)) return 'GHL calendar destination or booking details are missing.';
-    if (kind === 'message' && m.message.template_locked !== true) return 'Locked booking template is missing.';
-    if (kind === 'message' && (!m.message.text || !m.message.sender || !m.message.recipient)) return 'Exact text, sender or recipient is missing.';
+    if (index == null || deskDays(resource()).indexOf(index) < 0 || startHour < (index === 0 ? rules.monday_from : 8) || startHour > rules.last_start || endHour > 16.5 || p.start_iso.slice(0, 10) !== p.end_iso.slice(0, 10)) return 'The proposed visit is outside ' + resource().name + '\'s days or hours.';
+    if (rules.protected_band && rules.protected_band.day === index && startHour < rules.protected_band.to && endHour > rules.protected_band.from) return 'The proposed visit overlaps the protected Canning Vale band.';
+    var clash = clashFor(c);
+    if (clash) return clashSentence(clash);
+    if (kind === 'calendar' && (!m.calendar || m.calendar.provider !== 'ghl' || !m.calendar.calendar_id || !m.calendar.assigned_user_id || !m.calendar.title || !m.calendar.address)) return 'The GHL calendar or the site address is missing.';
+    if (kind === 'message') {
+      var msg = selectedMessage(c);
+      if (m.message.template_locked !== true) return 'There is no proposed text for this lead yet.';
+      if (!msg.text || !String(msg.text).trim()) return 'The text is empty.';
+      if (!msg.sender || !msg.recipient) return 'The sending line or the customer\'s phone is missing.';
+    }
     return '';
   }
 
@@ -1921,8 +1852,8 @@
     var key = approvalKey(c, kind);
     var blocked = approvalBlock(c, kind, decision === 'refused');
     var snap = approvalSnapshot(c, kind);
-    if (!blocked && decision === 'refused' && !String(reason || '').trim()) blocked = 'Give a reason for refusing this action.';
-    if (!blocked && !sameContent(state.shownApprovals[key], snap)) blocked = 'The proposal changed after it was shown. Review it again.';
+    if (!blocked && decision === 'refused' && !String(reason || '').trim()) blocked = 'Say why, in a few words.';
+    if (!blocked && !sameContent(state.shownApprovals[key], snap)) blocked = 'This changed after it was shown. Check it again before pressing.';
     if (blocked) {
       state.approvalErrors[key] = blocked;
       render();
@@ -1933,61 +1864,31 @@
     delete state.approvalErrors[key];
     render();
     try {
-      if (typeof global.opsPost !== 'function') throw new Error('Separate approval service is unavailable. Nothing recorded.');
+      if (typeof global.opsPost !== 'function') throw new Error('Approvals are not reachable from this page. Nothing was recorded.');
       var result = await global.opsPost('sales_booking_approval_write', body);
-      if (!result || result.ok !== true || !result.approval || !sameContent(result.approval.snapshot, snap) || result.approval.state !== decision || (decision === 'refused' && result.approval.reason !== body.reason)) throw new Error('Approval not verified. Refresh before trying again.');
+      if (!result || result.ok !== true || !result.approval || !sameContent(result.approval.snapshot, snap) || result.approval.state !== decision || (decision === 'refused' && result.approval.reason !== body.reason)) throw new Error('The server did not confirm your approval. Nothing was sent. Press Refresh before trying again.');
       // A late response cannot approve a replacement proposal or different resource.
       if (sameContent(approvalSnapshot(c, kind), snap)) {
         var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
         channel.state = decision;
         channel.reason = result.approval.reason || null;
         channel.approval = { ui_snapshot: result.approval.snapshot };
-        if (kind === 'message' && decision === 'approved') { channel.chosen = 'template'; channel.approved_text = snap.content.text; }
+        if (kind === 'message' && decision === 'approved') { channel.chosen = snap.content.variant; channel.approved_text = snap.content.text; }
       }
-      return { ok: true, state: decision, sent: false, booked: false };
+      var approvalId = result.approval.id || result.approval.binding_hash || null;
+      if (decision === 'approved' && approvalId) state.approvalIds[key] = { id: approvalId, snapshot: snap };
+      return { ok: true, state: decision, sent: false, booked: false, approval_id: approvalId, approval: result.approval };
     } catch (err) {
-      state.approvalErrors[key] = err.message || 'Approval failed. Refresh before trying again.';
+      var code = String((err && err.message) || '');
+      state.approvalErrors[key] = snap.content && snap.content.variant === 'edited' && /approval_snapshot_changed/.test(code)
+        ? 'The server only accepts the proposed text for now, so your edited text was not approved. Nothing was sent.'
+        : /^[a-z0-9_:]+$/.test(code) ? 'Not approved: ' + reasonWords(code) + ' Nothing was sent or booked.'
+        : code || 'Approval failed. Press Refresh before trying again.';
       return { ok: false, reason: state.approvalErrors[key] };
     } finally {
       delete state.approvalPending[key];
       render();
     }
-  }
-
-  function renderProposalFacts(c, compact) {
-    var m = decisionModel(c);
-    if (!m || !m.proposal || !m.confident) return '<div class="proposal-facts"><strong>Needs a person</strong><p>' + esc(m && m.reason || c.reason || 'No confident AI proposal in this read.') + '</p>' + (m && m.validation || []).map(function (v) { return '<p>' + (v.passed === true ? 'Passed: ' : 'Failed: ') + esc(v.label) + (v.passed === true ? '' : ' · ' + esc(v.reason || 'No reason supplied')) + '</p>'; }).join('') + '</div>';
-    var p = m.proposal;
-    var slot = longDate(String(p.start_iso).slice(0, 10)) + ' · arrival ' + String(p.window_start_iso || '').slice(11, 16) + '–' + String(p.window_end_iso || '').slice(11, 16) + ' Perth';
-    return '<div class="proposal-facts"><strong>AI proposed · ' + esc(slot) + '</strong>' +
-      (compact ? '' : '<p>This is when the AI thinks we should book, based on the conversation.</p>') +
-      (compact ? '<p class="proposal-text">Locked booking text: ' + esc(m.message && m.message.text || 'No proposed text yet.') + '</p>' : '') +
-      '<div class="proposal-quotes">' + (m.evidence || []).map(function (e) { return '<blockquote>“' + esc(e.quote) + '”</blockquote>'; }).join('') + '</div>' +
-      (!m.validation.length ? '<p>Validation checks were not supplied. Confirmation is unavailable.</p>' : '') + '<ul class="proposal-checks">' + (m.validation || []).map(function (v) { return '<li>' + (v.passed === true ? 'Passed: ' : 'Failed: ') + esc(v.label) + (v.passed === true ? '' : ' · ' + esc(v.reason || 'No reason supplied')) + '</li>'; }).join('') + '</ul></div>';
-  }
-
-  function renderApproval(c, kind) {
-    var snap = approvalSnapshot(c, kind);
-    var m = decisionModel(c);
-    var key = approvalKey(c, kind);
-    state.shownApprovals[key] = snap;
-    var status = approvalState(c, kind);
-    var blocked = approvalBlock(c, kind, false);
-    var refuseBlocked = approvalBlock(c, kind, true);
-    var label = kind === 'calendar' ? 'Confirm calendar booking' : 'Approve this exact text';
-    var description = kind === 'calendar'
-      ? 'Authorizes this visit in GoHighLevel for ' + resource().name + '. This approval does not authorize a text.'
-      : 'Records approval of only the text, sender and recipient shown here.';
-    var detail = !snap ? '' : kind === 'calendar'
-      ? '<dl><dt>Calendar</dt><dd>GoHighLevel · ' + esc(snap.content.calendar_id) + ' · assignee ' + esc(snap.content.assigned_user_id) + '</dd><dt>Visit</dt><dd>' + esc(snap.content.start_iso) + ' to ' + esc(snap.content.end_iso) + '</dd><dt>Booking</dt><dd>' + esc(snap.content.title) + ' · ' + esc(snap.content.address) + '</dd></dl>'
-      : '<p>From ' + esc(snap.content.sender) + ' · To ' + esc(snap.content.recipient) + '</p><p class="proposal-text">' + esc(snap.content.text) + '</p>';
-    var held = SEND_HOLD || !state.data || state.data.send_hold !== false;
-    return '<section class="booking-approval" aria-label="' + label + '"><h3>' + (kind === 'calendar' ? 'Calendar booking' : 'Customer text · ' + (snap && snap.content.variant === 'ai' ? 'AI alternative selected' : 'locked template')) + '</h3><p role="status"><strong>' + esc(({ not_approved: 'Not approved', approved: 'Approved', done: 'Done', refused: 'Refused', held:'Approved · held', pending:'In progress', failed:'Failed', unknown:'Outcome unknown. Reconcile before retrying.' })[status.state]) + '</strong>' + (status.reason ? ' · ' + esc(status.reason) : '') + '</p><p>' + esc(description) + '</p>' + detail +
-      (kind === 'message' && held ? '<p class="holdnote">Send hold is on. ' + (status.state === 'approved' ? 'Your text approval is recorded, but nothing will be sent.' : 'Approving records this exact text. Nothing will be sent.') + '</p>' : '') +
-      (state.approvalErrors[key] ? '<p role="alert">' + esc(state.approvalErrors[key]) + '</p>' : '') +
-      '<button type="button" data-booking-decision="' + kind + '" data-case-id="' + esc(c.id) + '"' + (blocked ? ' disabled' : '') + '>' + label + '</button>' +
-      (blocked ? '<p class="small">' + esc(blocked) + '</p>' : '') +
-      (['done', 'approved', 'held', 'pending', 'unknown'].indexOf(status.state) < 0 ? '<details><summary>Say no to this ' + (kind === 'calendar' ? 'booking' : 'text') + '</summary><label>Reason<input name="refuse-' + kind + '" data-refusal-reason="' + kind + '" aria-label="Reason to refuse ' + kind + '"></label><button type="button" data-booking-decision="' + kind + '" data-refuse="1" data-case-id="' + esc(c.id) + '"' + (refuseBlocked ? ' disabled' : '') + '>Refuse ' + (kind === 'calendar' ? 'booking' : 'text') + '</button></details>' : '') + '</section>';
   }
 
   function bookedVisits() {
@@ -2120,46 +2021,330 @@
       (others.length ? '<details class="visit-outcomes"><summary>Booked visits and outcomes · ' + others.length + '</summary><p>Recording an outcome sends no customer message. Corrections add a record; history is kept.</p>' + others.map(renderVisitRow).join('') + '</details>' : '');
   }
 
-  function renderDetail() {
-    var c = selectedCase();
-    if (!c) return '<div class="detailhead"><h2>Choose an enquiry</h2><p>Review the AI proposal, then confirm each action separately.</p></div>';
-    return '<div class="detailhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(c.address || caseSuburb(c)) + ' · ' + esc(jobTypeLabel(c)) + '</p></div>' +
-      '<div class="detailbody">' + renderProposalFacts(c, false) + renderApproval(c, 'calendar') + renderApproval(c, 'message') + '</div>' +
-      '<details class="booking-thread"><summary>GHL conversation</summary><div class="thread big" id="salesBookingThread">' + renderMessages() + '</div></details>';
+  // ---------------------------------------------------------------------------
+  // Render: a dispatcher's work list, phone first. One line of counts, the
+  // people to contact (loudest first), one card for the chosen person, and the
+  // day as a column. Every press records the owner's approval of the exact
+  // content first, then asks the server to act, then says what happened.
+  // ---------------------------------------------------------------------------
+  var PX_PER_HOUR_DAY = 60;
+  var ACTIONS = { message: 'sales_booking_send', calendar: 'sales_booking_book' };
+  // Live GHL calendar ids (wiki booking review, 23 Sep 2026). Unknown ids are
+  // named as "GHL calendar", never guessed.
+  var CALENDAR_NAMES = {
+    dEQKVKHthsjSYaen1fiE: 'GHL Stratco Fencing calendar',
+    i6j9vaCy6c94n3i93cir: 'GHL SW Fencing Scope calendar',
+    RSQnT8cQdEE8azb5Chlq: 'GHL Nithin Scope calendar'
+  };
+  var ICONS = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+    left: '<path d="M15 5l-7 7 7 7"/>',
+    right: '<path d="M9 5l7 7-7 7"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    send: '<path d="M4 12l16-8-6 17-3-7z"/><path d="M11 14l9-10"/>',
+    calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    chevron: '<path d="M6 9l6 6 6-6"/>'
+  };
+
+  function icon(name) {
+    return '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
   }
 
-  function renderTiles() {
+  function plural(n, one, many) {
+    return n + ' ' + (n === 1 ? one : (many || one + 's'));
+  }
+
+  function shortDate(iso) {
+    var date = String(iso || '').slice(0, 10);
+    var parts = date.split('-').map(Number);
+    if (parts.length !== 3 || !parts[0]) return date;
+    var day = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day] + ' ' + parts[2] + ' ' + MONTHS[parts[1] - 1].slice(0, 3);
+  }
+
+  function timeRange(startIso, endIso) {
+    var s = hourFromIso(startIso), e = hourFromIso(endIso);
+    if (s == null) return '';
+    if (e == null || e <= s) return clockLabel(s);
+    return clockLabel(s, (s >= 12) !== (e >= 12)) + ' to ' + clockLabel(e);
+  }
+
+  function perthClockNow() {
+    var d = new Date(Date.now() + 8 * 3600000);
+    return clockLabel(d.getUTCHours() + d.getUTCMinutes() / 60);
+  }
+
+  // Written from the booking read's instant, so a bubble says "Tue 22 Sep, 2:14pm".
+  function whenWords(raw) {
+    if (raw == null || raw === '') return '';
+    var ms = typeof raw === 'number' ? raw : Date.parse(String(raw));
+    if (!isFinite(ms)) return String(raw);
+    var d = new Date(ms + 8 * 3600000);
+    return shortDate(d.toISOString().slice(0, 10)) + ', ' + clockLabel(d.getUTCHours() + d.getUTCMinutes() / 60);
+  }
+
+  function sourceLabel(ev) {
+    var s = String(ev && (ev.source || ev.provider || '') || '').toLowerCase();
+    return /outlook|graph|microsoft|m365|office365/.test(s) ? 'Outlook' : 'GHL';
+  }
+
+  function eventTitle(ev) {
+    if (ev && ev.title_withheld) return 'Private event';
+    return diaryTitle(ev) || (ev && ev.display_name) || 'Busy';
+  }
+
+  function phoneEnding(number) {
+    var digits = String(number || '').replace(/\D/g, '');
+    return digits ? digits.slice(-3) : '';
+  }
+
+  function senderShort(number, label) {
+    var route = resolveSender();
+    if (!label && route.resolved && route.number === number) label = route.label;
+    var tail = phoneEnding(number);
+    return label ? label : tail ? 'line ' + tail : 'the sales line';
+  }
+
+  // ---- ordering: the loudest customer first --------------------------------
+  function unansweredSince(c) {
+    var f = threadFacts(c);
+    var lastIn = Date.parse((f && f.last_inbound_at) || (c && c.last_inbound_at) || '');
+    if (!isFinite(lastIn)) return null;
+    var lastOut = Date.parse((f && f.last_human_outbound_at) || (c && c.last_human_outbound_at) || '');
+    return (!isFinite(lastOut) || lastIn > lastOut) ? lastIn : null;
+  }
+
+  function loudnessRank(c) {
+    if (unansweredSince(c) != null) return 0;
+    if (needsDecision(c)) return 1;
+    if (derivedStatus(c) === 'follow_up') return 2;
+    if (c && c.proposal && c.proposal.start_iso) return 3;
+    return 4;
+  }
+
+  function byLoudness(a, b) {
+    var d = loudnessRank(a) - loudnessRank(b);
+    if (d) return d;
+    var ua = unansweredSince(a), ub = unansweredSince(b);
+    if (ua != null && ub != null && ua !== ub) return ua - ub;
+    return (daysWaiting(b) || 0) - (daysWaiting(a) || 0);
+  }
+
+  // The customer's own latest words, verbatim. Read field first, then a thread
+  // already opened this session, then the proposal's quoted evidence.
+  function lastWords(c) {
+    if (!c) return null;
+    var f = threadFacts(c) || {};
+    var direct = c.last_inbound_text || c.last_inbound_body || f.last_inbound_text || f.last_inbound_body || f.last_inbound_excerpt;
+    if (direct) return String(direct);
+    var thread = c.contact_id && state.threads[c.contact_id];
+    if (thread && thread.length) {
+      for (var i = thread.length - 1; i >= 0; i--) {
+        var msg = thread[i];
+        if (msg && msg.direction !== 'outbound' && (msg.body || msg.subject)) return String(msg.body || msg.subject);
+      }
+    }
+    var m = decisionModel(c);
+    var quotes = m && m.evidence || [];
+    if (quotes.length && quotes[quotes.length - 1].quote) return String(quotes[quotes.length - 1].quote);
+    return null;
+  }
+
+  function listGroups() {
+    var list = visibleCases();
+    var booked = [], waiting = [], contact = [], unsorted = [];
+    list.forEach(function (c) {
+      if (isNonScopeDiaryMirror(c)) return;
+      if (isBooked(c)) booked.push(c);
+      else if (isWaiting(c)) waiting.push(c);
+      else if (isAssessed(c)) contact.push(c);
+      else unsorted.push(c);
+    });
+    contact.sort(byLoudness);
+    waiting.sort(byLoudness);
+    return { contact: contact, waiting: waiting, booked: booked, unsorted: unsorted };
+  }
+
+  function statusPill(c) {
+    if (isArchived(c)) return ['', 'Archived'];
+    if (quoteOutstanding(c)) return ['', 'Quote to send'];
+    if (isBooked(c)) return ['ok', 'Booked'];
+    if (unansweredSince(c) != null) return ['hot', 'No answer yet'];
+    if (needsDecision(c)) return ['', 'Needs a person'];
+    if (derivedStatus(c) === 'follow_up') return ['hot', 'Follow-up due'];
+    if (isWaiting(c)) return ['', 'Offer out'];
+    if (c.proposal && c.proposal.start_iso) return ['accent', 'Proposed ' + shortDate(c.proposal.start_iso)];
+    if (!isAssessed(c)) return ['', 'Not sorted'];
+    return null;
+  }
+
+  function waitWords(c) {
+    var days = daysWaiting(c);
+    if (days == null) return '';
+    return days === 0 ? 'Today' : plural(days, 'day');
+  }
+
+  function jobWord(job) {
+    return /^(patio|patios|fencing|decking|fence)$/i.test(job) ? job.toLowerCase() : job;
+  }
+
+  function renderLeadRow(c) {
+    var pill = statusPill(c);
+    var words = lastWords(c);
+    var facts = threadFacts(c);
+    var quiet = !words && facts && facts.read_ok && !facts.last_inbound_at;
+    var place = [caseSuburb(c) || 'Suburb not given', jobTypeLabel(c) === 'not given' ? '' : jobWord(jobTypeLabel(c))].filter(Boolean).join(' · ');
+    return '<button type="button" class="lead' + (c.id === state.selectedId ? ' is-on' : '') + '" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
+      '<span class="lead-top"><span class="lead-name">' + esc(c.display_name || 'Unnamed enquiry') + '</span>' +
+      '<span class="lead-wait" title="' + esc(enquiryLine(c)) + '">' + esc(waitWords(c) || 'Date not read') + '</span></span>' +
+      '<span class="lead-place">' + esc(place) + '</span>' +
+      (words ? '<span class="lead-words">“' + esc(words) + '”</span>' : quiet ? '<span class="lead-words is-quiet">No reply from them yet</span>' : '') +
+      (pill ? '<span class="lead-tags"><span class="pill ' + pill[0] + '">' + esc(pill[1]) + '</span>' +
+        (pill[1].indexOf('Proposed') !== 0 && !isBooked(c) && c.proposal && c.proposal.start_iso ? '<span class="pill">Proposed ' + esc(shortDate(c.proposal.start_iso)) + '</span>' : '') +
+        (c.not_in_this_read ? '<span class="pill">Proposal only, not in GHL list</span>' : '') + '</span>' : '') +
+      '</button>';
+  }
+
+  function renderListBody() {
+    if (state.loading && !state.data) {
+      return '<div class="skeleton" aria-hidden="true">' + [0, 1, 2, 3].map(function () { return '<span class="sk-row"><i></i><i></i><i></i></span>'; }).join('') + '</div>';
+    }
+    if (!state.data) return '<p class="empty">Nothing to show until the list is read.</p>';
+    var g = listGroups();
+    var html = '';
+    var section = function (title, rows, open) {
+      if (!rows.length) return '';
+      return '<h3 class="grouphead">' + esc(title) + '<span class="count">' + rows.length + '</span></h3>' + rows.map(renderLeadRow).join('');
+    };
+    html += g.contact.length
+      ? section('To contact', g.contact)
+      : '<h3 class="grouphead">To contact<span class="count">0</span></h3><p class="empty">' + (state.search ? 'Nobody matches that search.' : 'Nobody waiting to be contacted.') + '</p>';
+    html += section('Waiting on a reply', g.waiting);
+    html += section('Booked', g.booked);
+    if (g.unsorted.length) {
+      html += '<details class="fold"' + (state.search ? ' open' : '') + '><summary>Not sorted yet<span class="count">' + g.unsorted.length + '</span></summary>' +
+        '<p class="fine">In GHL but not in a booking stage. They are not counted above.</p>' + g.unsorted.map(renderLeadRow).join('') + '</details>';
+    }
+    var fold = foldedCases().filter(matchesSearch);
+    html += '<button type="button" class="foldtoggle" data-booking-fold="1" aria-expanded="' + state.showArchived + '">' +
+      (state.showArchived ? 'Hide' : 'Show') + ' quoted and archived<span class="count">' + fold.length + '</span></button>';
+    if (state.showArchived) html += fold.length ? fold.map(renderLeadRow).join('') : '<p class="empty">Nothing quoted or archived in this list.</p>';
+    return html;
+  }
+
+  function renderList() {
+    return '<section class="bk-list" aria-label="People to contact">' +
+      '<label class="search">' + icon('search') + '<span class="sr">Search</span>' +
+      '<input type="search" data-booking-search data-focus-key="search" placeholder="Search name or suburb" autocomplete="off" value="' + esc(state.search) + '"></label>' +
+      '<div class="listbody" data-booking-list-body>' + renderListBody() + '</div>' + renderVisitsDue() + '</section>';
+  }
+
+  // ---- counts, alert, details ------------------------------------------------
+  function bookedByDay() {
+    var days = {};
+    var seen = {};
+    diary().forEach(function (ev) {
+      if (diaryLayerFor(ev) !== 'confirmed') return;
+      var d = dayIndexFromIso(ev.start_iso, state.weekStart);
+      if (d == null) return;
+      var key = ev.id || String(ev.start_iso) + String(ev.display_name);
+      if (seen[key]) return;
+      seen[key] = true;
+      days[d] = (days[d] || 0) + 1;
+    });
+    return days;
+  }
+
+  function renderCounts() {
+    if (!state.data) return '';
     var f = followThrough();
-    return [
-      ['Enquiries still to book', f.to_book, f.unassessed
-        ? 'GHL stages that still need a booking. ' + f.unassessed + ' more CRM rows are enumerated but not assessed, so they are not counted here'
-        : 'GHL stages that still need a booking'],
-      ['Waiting on a reply', f.waiting, 'GHL stage or thread classified as waiting'],
-      ['Booked to quote this week', f.booked, bookedTileReason()],
-      ['Quotes to send', f.quotes, quoteStageLabel()]
-    ].map(function (t) {
-      return '<div class="tile"><div class="k">' + esc(t[0]) + '</div><div class="v">' + t[1] + '</div><div class="s">' + esc(t[2]) + '</div></div>';
-    }).join('') +
-      '<div class="tile sales"><div class="k">Sales side</div>' +
-      '<div class="v" style="font-size:15px;margin-top:6px"><button type="button" class="linklike" data-sales-tab="performance">Open Performance</button></div>' +
-      '<div class="s">Weekly numbers live there, not here.</div></div>';
+    var parts = ['<span><b>' + f.to_book + '</b> to contact</span>', '<span><b>' + f.waiting + '</b> waiting on a reply</span>'];
+    if (calendarUnread(state.data)) {
+      parts.push('<span class="is-bad">Booked: calendar not read</span>');
+    } else {
+      var byDay = bookedByDay();
+      var shown = deskDays(resource()).slice();
+      Object.keys(byDay).forEach(function (d) { d = Number(d); if (byDay[d] && shown.indexOf(d) < 0) shown.push(d); });
+      shown.sort();
+      parts.push('<span>Booked ' + shown.map(function (d) {
+        return DAYS[d].slice(0, 3) + ' <b>' + (byDay[d] || 0) + '</b>';
+      }).join(', ') + '</span>');
+    }
+    if (f.quotes) parts.push('<span><b>' + f.quotes + '</b> ' + (f.quotes === 1 ? 'quote' : 'quotes') + ' to send</span>');
+    var notes = coverageGaps(state.data).length;
+    return '<div class="bk-counts"><p class="counts" role="status">' + parts.join('<i aria-hidden="true">·</i>') + '</p>' +
+      '<button type="button" class="detailsbtn" data-booking-details aria-expanded="' + !!state.showDetails + '">Details' +
+      (notes ? '<span class="count">' + notes + '</span>' : '') + icon('chevron') + '</button></div>';
   }
 
-  function renderWeekTruth() {
+  function readProblem() {
+    if (state.error) {
+      return state.stale && state.data
+        ? 'Could not read the latest booking list: ' + state.error.replace(/\s*Showing the last complete week(, not an empty one)?\.?/i, '') + ' This is the last good read.'
+        : 'Could not read the booking list: ' + state.error;
+    }
+    if (state.data && calendarUnread(state.data)) {
+      var read = calendarReadState(state.data);
+      return read.state === 'not_configured'
+        ? resource().name + '\'s calendar is not set up, so free times are unknown and nothing can be booked.'
+        : 'Could not read ' + resource().name + '\'s calendar' + (read.reason ? ' (' + read.reason + ')' : '') + ', so free times are unknown and nothing can be booked.';
+    }
+    return '';
+  }
+
+  function renderDetails() {
+    if (!state.showDetails || !state.data) return '';
     var data = state.data;
-    if (!data) return '';
-    var list = cases();
-    var offers = stampableOfferList();
-    var bits = [];
-    bits.push('<span class="ok">' + bookedCount() + ' booked</span>');
-    bits.push(list.filter(function (c) { return caseLayer(c) === 'blocked'; }).length + ' cancelled still in diary');
-    bits.push(offers.length + ' proposals unsent');
-    bits.push(list.filter(isWaiting).length + ' texts out with no reply');
-    var cov = data.coverage || {};
-    if (cov.full_population !== true) bits.push('<strong>' + esc(cov.total == null ? 'CRM rows' : cov.total + ' CRM rows') + '</strong> are not visit demand');
-    return '<div class="weektruth"><strong>Week truth</strong>' + bits.map(function (b) { return '<span>' + b + '</span>'; }).join('') + '</div>';
+    var res = resource();
+    var route = resolveSender(res);
+    var gaps = coverageGaps(data);
+    var read = calendarReadState(data);
+    return '<section class="bk-details" aria-label="Details">' +
+      '<div class="dgrid">' +
+      '<div><h3>What this read could not see</h3>' + (coverageLooksRateLimited(data) ? '<p><strong>GHL rate limited part of this read.</strong></p>' : '') + (gaps.length ? '<ul>' + gaps.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul>' : '<p>Nothing missing.</p>') + '</div>' +
+      '<div><h3>Where this comes from</h3><ul>' +
+      '<li>Calendar: ' + esc(calendarMailbox(data)) + ' · ' + esc(read.state === 'read' ? 'read' : read.state === 'not_configured' ? 'not set up' : 'could not read') + '</li>' +
+      '<li>Leads: GHL, ' + esc(res.lane) + ' pipeline</li>' +
+      '<li>Texts go from ' + esc(route.resolved ? route.label + ' (' + route.number + ')' : 'an unresolved line') + '</li>' +
+      '<li>' + esc(res.name) + '\'s hours: ' + esc(res.desk_rules.hours) + '</li>' +
+      (state.lastReadMs >= 1000 ? '<li>Last read took ' + plural(Math.round(state.lastReadMs / 1000), 'second') + '</li>' : '') +
+      '</ul><button type="button" class="linklike" data-sales-tab="performance">Weekly numbers are on Performance</button></div>' +
+      '<div>' + renderVisitHistory() + '</div>' +
+      '</div>' + renderPipelineBoard() + '</section>';
   }
 
+  // ---- visits that still owe an outcome ---------------------------------------
+  function visitsDue() {
+    var flow = state.data && state.data.booking_flow;
+    if (!flow || flow.visit_outcomes_read !== 'complete') return [];
+    var now = Date.now();
+    return bookedVisits().filter(function (v) { var at = Date.parse(v.visit_start); return at <= now && at >= now - 7 * 86400000 && !latestVisitOutcome(v.booking_key); });
+  }
+
+  function renderVisitsDue() {
+    var due = visitsDue();
+    if (!due.length) return '';
+    return '<section class="visit-outcomes is-due" aria-label="Visits missing an outcome"><h2>' + plural(due.length, 'visit') + ' to close out</h2>' +
+      '<p class="fine">Did it happen? Recording this sends no message.</p>' + due.map(renderVisitRow).join('') + '</section>';
+  }
+
+  function renderVisitHistory() {
+    var flow = state.data && state.data.booking_flow;
+    if (!flow || flow.visit_outcomes_read !== 'complete') return '<h3>Visit outcomes</h3><p>Visit outcomes are not connected yet</p>';
+    var due = visitsDue();
+    var others = bookedVisits().filter(function (v) { return due.indexOf(v) < 0; });
+    if (!others.length) return '<h3>Visit outcomes</h3><p>No other booked visits in this read.</p>';
+    return '<details class="visit-outcomes"><summary>Booked visits and outcomes · ' + others.length + '</summary><p class="fine">Recording an outcome sends no message. A correction adds a record and keeps the old one.</p>' + others.map(renderVisitRow).join('') + '</details>';
+  }
+
+  // Compatibility: both halves, as the outcome tests read them.
+  function renderVisitOutcomes() {
+    var flow = state.data && state.data.booking_flow;
+    if (!flow || flow.visit_outcomes_read !== 'complete') return '<section class="visit-outcomes" aria-label="Visit outcomes"><p>Visit outcomes are not connected yet</p></section>';
+    return renderVisitsDue() + renderVisitHistory();
+  }
+
+  // ---- the GHL pipeline, read only, inside Details ----------------------------
   function renderPipelineBoard() {
     var list = pipelineBoardCases();
     var cols = pipelineBoardColumns();
@@ -2172,104 +2357,488 @@
       else byCol[col.id].push(c);
     });
     if (unmapped.length) {
-      cols = cols.concat([{ id: 'unmapped', name: 'Unmapped', bucket: 'unmapped', stageIds: [] }]);
+      cols = cols.concat([{ id: 'unmapped', name: 'Stage not recognised', bucket: 'unmapped', stageIds: [] }]);
       byCol.unmapped = unmapped;
     }
-    var driftN = 0;
-    list.forEach(function (c) { if (stageDrift(c)) driftN += 1; });
-    var html = '<section class="stampboard pipeboard" data-booking-pipeline="1">' +
-      '<div class="sbhead"><div><h2>GHL sales pipeline · two way</h2>' +
-      '<p>Left to right is the GHL pipeline as it reads right now, using the live stage names. Orange means the thread and the diary say the card belongs somewhere else. Move is held: it does not write GHL.</p></div>' +
-      '<span class="count">' + list.length + ' cards · ' + driftN + ' out of step · Move held</span></div>' +
-      '<div class="pipe" style="grid-template-columns:repeat(' + cols.length + ',220px)">';
-    cols.forEach(function (col) {
-      var cards = byCol[col.id] || [];
-      html += '<div class="pcol"><div class="pcolhead">' + esc(col.name) + '<span class="count">' + cards.length + '</span></div>';
-      cards.forEach(function (c) {
-        var drift = stageDrift(c);
-        html += '<div class="pcard' + (drift ? ' off' : '') + (c.id === state.selectedId ? ' sel' : '') + '">' +
-          '<button type="button" class="pcard-open" data-booking-case="' + esc(c.id) + '"><b>' +
-          esc(c.display_name || 'Enquiry') + ' · ' + esc(caseSuburb(c) || 'Suburb unknown') + '</b>' +
-          '<span class="small muted">' + esc(jobTypeLabel(c)) + (c.not_in_this_read ? ' · not in this read' : '') + '</span></button>';
-        if (drift) {
-          html += '<div class="drift">Thread and diary say <b>' + esc(String(drift.want.name || '').replace(/^\s+/, '')) + '</b>' +
-            '<button type="button" class="primary" disabled title="' + esc(HOLD_REASON) + '" data-booking-move-held="1">Move (held)</button></div>';
-        }
-        html += '</div>';
-      });
-      html += '</div>';
-    });
-    html += '</div></section>';
-    return html;
+    var drifted = list.filter(function (c) { return !!stageDrift(c); });
+    return '<section class="pipeboard" data-booking-pipeline="1"><h3>GHL pipeline</h3>' +
+      '<p class="fine">Read from GHL as it is now. Stages are not moved from this screen.' + (drifted.length ? ' ' + plural(drifted.length, 'card') + ' may be in the wrong stage.' : '') + '</p>' +
+      '<div class="pipe">' + cols.filter(function (col) { return (byCol[col.id] || []).length; }).map(function (col) {
+        var cards = byCol[col.id] || [];
+        return '<div class="pcol"><h4>' + esc(col.name) + '<span class="count">' + cards.length + '</span></h4>' + cards.map(function (c) {
+          var drift = stageDrift(c);
+          return '<button type="button" class="pcard' + (drift ? ' is-off' : '') + '" data-booking-case="' + esc(c.id) + '"><b>' + esc(c.display_name || 'Enquiry') + '</b><span>' + esc(caseSuburb(c) || 'Suburb not given') + '</span>' +
+            (drift ? '<span class="drift">Thread and calendar say ' + esc(String(drift.want.name || '').replace(/^\s+/, '')) + '</span>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div></section>';
   }
 
-  function renderHTML() {
+  // ---- the card -----------------------------------------------------------------
+  function renderThread(c) {
+    var conv = state.conversation;
+    if (!c.contact_id) return '<p class="thread-note">No GHL contact on this lead, so there are no messages to show.</p>';
+    if (conv.contactId && conv.contactId !== c.contact_id) return '<p class="thread-note">Loading messages…</p>';
+    if (conv.loading) return '<div class="thread-sk" aria-label="Loading messages"><i></i><i></i><i></i></div>';
+    if (conv.error) return '<p class="thread-note is-bad">Could not read the messages: ' + esc(conv.error) + '</p>';
+    if (!conv.contactId) return '<p class="thread-note">Messages open with the lead.</p>';
+    var msgs = conv.messages || [];
+    if (!msgs.length) return '<p class="thread-note">No messages with this person yet.</p>';
+    var shown = state.showConversation ? msgs : msgs.slice(-3);
+    return (msgs.length > 3 ? '<button type="button" class="linklike threadmore" data-booking-thread-all aria-expanded="' + !!state.showConversation + '">' + (state.showConversation ? 'Show the last 3 only' : 'Show all ' + msgs.length + ' messages') + '</button>' : '') +
+      '<ol class="thread">' + shown.map(function (msg) {
+        var out = msg.direction === 'outbound';
+        var who = out ? (msg.sender_name || 'SecureWorks') : (c.display_name || 'Customer');
+        var type = String(msg.type || '').replace(/^TYPE_/, '');
+        return '<li class="bubble ' + (out ? 'is-out' : 'is-in') + '"><small>' + esc(who) + ' · ' + esc(whenWords(msg.timestamp || msg.dateAdded)) + (type && !/sms/i.test(type) ? ' · ' + esc(type.toLowerCase()) : '') + '</small>' +
+          '<span class="body">' + esc(msg.body || msg.subject || '(no text)') + '</span></li>';
+      }).join('') + '</ol>';
+  }
+
+  // What the read says already happened to this exact content, in words.
+  function channelLine(c, kind) {
+    var last = state.pressResults[approvalKey(c, kind)];
+    if (last && last.done) return '';
+    var status = approvalState(c, kind);
+    var what = kind === 'calendar' ? 'booking' : 'text';
+    var notYet = 'Not ' + (kind === 'calendar' ? 'booked' : 'sent') + ' yet.';
+    var line = {
+      approved: ['Approved', 'You approved this exact ' + what + '. ' + notYet],
+      held: ['Approved', 'You approved this exact ' + what + '. ' + notYet],
+      done: ['Done', kind === 'calendar' ? 'This visit is booked.' : 'This text was sent.'],
+      refused: ['Refused', 'You said no' + (status.reason ? ': ' + status.reason : '') + '.'],
+      pending: ['In progress', 'Press Refresh to see the result.'],
+      failed: ['Failed', 'It did not go through' + (status.reason ? ': ' + status.reason : '') + '.'],
+      unknown: ['Result unknown', 'Check GHL before trying again.']
+    }[status.state];
+    if (!line) return '';
+    return '<p class="chanstate is-' + status.state + '" role="status"><strong>' + line[0] + '</strong> ' + esc(line[1]) + '</p>';
+  }
+
+  function pressBlock(c, kind) {
+    var key = approvalKey(c, kind);
+    if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
+    var last = state.pressResults[key];
+    if (last && last.uncertain) return 'The last press has no confirmed result. Check GHL, then press Refresh.';
+    if (last && last.done && sameContent(last.snapshot, approvalSnapshot(c, kind))) return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
+    var status = approvalState(c, kind);
+    var held = state.approvalIds[key];
+    if ((status.state === 'approved' || status.state === 'held') && held && sameContent(held.snapshot, approvalSnapshot(c, kind)) && !state.loading && !state.stale && !state.error) return '';
+    return approvalBlock(c, kind, false);
+  }
+
+  function renderResult(c, kind) {
+    var r = state.pressResults[approvalKey(c, kind)];
+    var err = state.approvalErrors[approvalKey(c, kind)];
+    var out = '';
+    if (err) out += '<p class="result is-bad" role="alert">' + esc(err) + '</p>';
+    if (r) {
+      out += '<p class="result is-' + r.tone + '" role="status">' + esc(r.text) +
+        (r.url ? ' <a href="' + esc(r.url) + '" target="_blank" rel="noopener">Open in GHL</a>' : '') +
+        (r.ref ? '<small>' + esc(r.ref) + '</small>' : '') + '</p>';
+    }
+    return out;
+  }
+
+  function renderSayNo(c, kind) {
+    var status = approvalState(c, kind);
+    if (['done', 'approved', 'held', 'pending', 'unknown', 'refused'].indexOf(status.state) >= 0) return '';
+    var refuseBlocked = approvalBlock(c, kind, true);
+    if (refuseBlocked) return '';
+    var what = kind === 'calendar' ? 'booking' : 'text';
+    return '<details class="sayno"><summary>Say no to this ' + what + '</summary><label>Why not<input name="refuse-' + kind + '" data-refusal-reason="' + kind + '" data-focus-key="refuse-' + kind + '" aria-label="Reason to say no to this ' + what + '"></label>' +
+      '<button type="button" data-booking-decision="' + kind + '" data-refuse="1" data-case-id="' + esc(c.id) + '">Say no</button></details>';
+  }
+
+  function composeText(c) {
+    var d = state.drafts[draftKey(c)];
+    if (d && d.humanEdited && typeof d.text === 'string') return d.text;
+    var m = decisionModel(c);
+    if (m && m.message && typeof m.message.text === 'string') return m.message.text;
+    return (c.proposal && c.proposal.draft) || (d && d.text) || '';
+  }
+
+  function renderComposeFoot(c) {
+    var m = decisionModel(c);
+    var msg = selectedMessage(c);
+    var route = resolveSender();
+    var sender = (msg && msg.sender) || route.number;
+    var recipient = msg && msg.recipient;
+    var block = pressBlock(c, 'message');
+    var edited = editedText(c) != null;
+    var key = approvalKey(c, 'message');
+    return '<p class="route">From <b>' + esc(route.resolved && route.number === sender ? route.label : senderShort(sender)) + '</b>' +
+      (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' · customer phone not in this read') + '</p>' +
+      (edited ? '<p class="edited">Edited. Your approval will cover these exact words. <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button></p>' : '') +
+      '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
+      (block && !state.pressPending[key] && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '') +
+      channelLine(c, 'message') + renderResult(c, 'message') + (m ? renderSayNo(c, 'message') : '');
+  }
+
+  // Which calendars Book it writes. The read names them when it can; otherwise
+  // the GHL calendar on the proposal, plus the owner's Outlook for Stratco
+  // (decided 23 Sep: booking writes GHL and the owner's Outlook).
+  function bookTargets(m) {
+    var preview = m && m.calendar || {};
+    if (Array.isArray(preview.targets) && preview.targets.length) {
+      var named = preview.targets.map(function (t) { return typeof t === 'string' ? t : (t && (t.label || t.name || t.provider)) || ''; }).filter(Boolean);
+      if (named.length) return named;
+    }
+    var out = [CALENDAR_NAMES[preview.calendar_id] || 'GHL calendar'];
+    if (m && m.profile === 'fencing-stratco-marnin') out.push('Marnin\'s Outlook');
+    return out;
+  }
+
+  function renderVisit(c) {
+    var m = decisionModel(c);
+    if (!m) {
+      if (c.proposal && c.proposal.start_iso) {
+        return '<section class="visit"><h3>' + icon('calendar') + 'Proposed visit</h3><p class="when">' + esc(proposalSlotLabel(c).replace(' · arrive ', ', arrive ')) + '</p>' +
+          '<p class="why">No checked proposal for this lead yet, so it cannot be booked from here.</p></section>';
+      }
+      return '';
+    }
+    if (!m.proposal || !m.confident) {
+      return '<section class="visit is-needs"><h3>' + icon('calendar') + 'Needs a person</h3><p>' + esc(m.reason || c.reason || 'No confident proposal in this read.') + '</p>' + renderChecks(m, true) + '</section>';
+    }
+    var p = m.proposal;
+    var when = longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso);
+    var block = pressBlock(c, 'calendar');
+    var key = approvalKey(c, 'calendar');
+    var clash = clashFor(c);
+    return '<section class="visit"><h3>' + icon('calendar') + 'Proposed visit</h3>' +
+      '<p class="when">' + esc(when) + '</p>' +
+      '<p class="fine">This is when the AI thinks we should book, from the conversation. On site until ' + esc(clockLabel(hourFromIso(p.end_iso))) + '.</p>' +
+      (m.evidence.length ? '<div class="quotes">' + m.evidence.map(function (e) { return '<blockquote>“' + esc(e.quote) + '”</blockquote>'; }).join('') + '</div>' : '') +
+      (clash ? '<p class="clash">' + esc(clashSentence(clash)) + '</p>' : '') +
+      renderChecks(m, false) +
+      '<p class="targets">Book it writes: <b>' + bookTargets(m).map(esc).join('</b> and <b>') + '</b></p>' +
+      '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
+      (block && !state.pressPending[key] && !clash && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '') +
+      channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + '</section>';
+  }
+
+  function renderChecks(m, open) {
+    var checks = m && m.validation || [];
+    if (!checks.length) return '<p class="fine">No checks were supplied, so this cannot be booked.</p>';
+    var failed = checks.filter(function (v) { return v.passed !== true; }).length;
+    return '<details class="checks"' + (open || failed ? ' open' : '') + '><summary>' + (failed ? plural(failed, 'check') + ' did not pass' : 'All ' + plural(checks.length, 'check') + ' passed') + '</summary><ul>' +
+      checks.map(function (v) {
+        return '<li class="' + (v.passed === true ? 'is-ok' : 'is-bad') + '">' + (v.passed === true ? 'Passed: ' : 'Failed: ') + esc(v.label) + (v.passed === true ? '' : ' · ' + esc(v.reason || 'No reason supplied')) + '</li>';
+      }).join('') + '</ul></details>';
+  }
+
+  function renderCard() {
+    var c = selectedCase();
+    if (!c) {
+      return '<section class="bk-card is-empty" aria-label="Selected lead"><div class="emptycard"><h2>Pick someone to contact</h2>' +
+        '<p>Their last messages, the proposed text and the proposed visit open here. Nothing is sent or booked until you press.</p></div></section>';
+    }
+    var m = decisionModel(c);
+    var stage = stageOf(c);
+    var key = approvalKey(c, 'message');
+    if (m) state.shownApprovals[key] = approvalSnapshot(c, 'message');
+    if (m) state.shownApprovals[approvalKey(c, 'calendar')] = approvalSnapshot(c, 'calendar');
+    var text = composeText(c);
+    var bits = [c.address || caseSuburb(c) || 'Address not given yet', jobTypeLabel(c) === 'not given' ? 'job not given' : jobTypeLabel(c)];
+    return '<section class="bk-card" aria-label="Selected lead"><button type="button" class="back" data-booking-back>' + icon('left') + 'All leads</button>' +
+      '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
+      '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
+      '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
+      '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
+      '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (m ? 'Write the text to send' : 'No proposed text yet') + '"' + (m && m.message && m.message.template_locked ? '' : ' readonly') + '>' + esc(text) + '</textarea>' +
+      '<div data-booking-compose-foot>' + renderComposeFoot(c) + '</div></section>' +
+      renderVisit(c) + '</section>';
+  }
+
+  // ---- the day -----------------------------------------------------------------
+  function defaultDayIndex() {
+    var days = deskDays(resource());
+    var c = selectedCase();
+    var p = c && (decisionModel(c) && decisionModel(c).proposal || c.proposal);
+    var mine = p && dayIndexFromIso(p.start_iso, state.weekStart);
+    if (mine != null) return mine;
+    var withWork = days.filter(function (d) {
+      return cases().some(function (row) { return row.proposal && dayIndexFromIso(row.proposal.start_iso, state.weekStart) === d; });
+    });
+    if (withWork.length) return withWork[0];
+    var today = state.weekStart === currentPerthWeek() ? dayIndexFromIso(new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10), state.weekStart) : null;
+    var next = days.filter(function (d) { return today == null || d >= today; });
+    return next.length ? next[0] : days[0];
+  }
+
+  function dayIndex() {
+    return state.dayIndex == null ? defaultDayIndex() : state.dayIndex;
+  }
+
+  function dayCards(d) {
+    var list = [];
+    diary().forEach(function (ev) {
+      if (dayIndexFromIso(ev.start_iso, state.weekStart) !== d) return;
+      list.push({ block: ev, kind: diaryLayerFor(ev) });
+    });
+    cases().forEach(function (c) {
+      var p = c.proposal;
+      if (!p || !p.start_iso || dayIndexFromIso(p.start_iso, state.weekStart) !== d) return;
+      var kind = caseLayer(c);
+      if (kind === 'confirmed' && c.event_id) return;
+      list.push({ block: { id: c.id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });
+    });
+    return packLanes(list);
+  }
+
+  function kindWords(kind, block) {
+    if (block.reservation_state) return block.reservation_state === 'agreed' ? 'Customer agreed' : 'Offer out';
+    return ({ confirmed: 'Booked visit', blocked: 'Cancelled, still in calendar', offer: block.proposal ? 'Offer out' : 'Offer out', personal: 'Personal', busy: 'Busy', leave: 'Leave', proposal: 'Proposed' })[kind] || 'Busy';
+  }
+
+  function renderDayEvent(card) {
+    var b = card.block, kind = card.kind;
+    var start = hourFromIso(b.start_iso);
+    if (start == null) return '';
+    var span = Math.max(0.5, durationHours(b.start_iso, b.end_iso));
+    var top = Math.max(0, (start - DAY_START) * PX_PER_HOUR_DAY);
+    var lanes = Math.max(1, b.lanes || 1), lane = b.lane || 0, width = 100 / lanes;
+    var holder = b.reservation_state ? cases().filter(function (row) { return row.contact_id && row.contact_id === b.contact_id; })[0] : null;
+    var title = b.proposal ? b.display_name : b.reservation_state ? (holder && holder.display_name || 'Another customer') : eventTitle(b);
+    var badge = b.proposal || b.reservation_state ? '' : '<span class="src src-' + sourceLabel(b).toLowerCase() + '">' + sourceLabel(b) + '</span>';
+    var selected = b.id && b.id === state.selectedId;
+    return '<button type="button" class="ev is-' + kind + (b.proposal ? ' is-proposal' : '') + (selected ? ' is-sel' : '') + '" data-booking-case="' + esc(b.id || '') + '"' +
+      ' style="left:calc(' + (lane * width) + '% + 2px);width:calc(' + width + '% - 4px);top:' + top + 'px;height:' + Math.max(42, span * PX_PER_HOUR_DAY - 3) + 'px"' +
+      ' title="' + esc(timeRange(b.start_iso, b.end_iso) + ' · ' + (title || 'Busy') + ' · ' + kindWords(kind, b) + (badge ? ' · ' + sourceLabel(b) : '')) + '">' +
+      '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + '</span>' + badge + '</span>' +
+      '<span class="ev-kind"><span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span> · ' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span></button>';
+  }
+
+  function renderDay() {
+    if (!state.data) return '<section class="bk-day" aria-label="The day"><div class="dayhead"><h2>The day</h2></div><div class="day-sk" aria-hidden="true"></div></section>';
     var res = resource();
-    var data = state.data;
-    if (!state.resourceId) return '<div class="page"><h1>Booking</h1><p>Your signed-in account has no matched scoper profile. Choose the scoper to review.</p><div class="scopers">' + V1_SCOPERS.map(function (id) { return '<button data-booking-resource-btn="' + id + '">' + esc(RESOURCES[id].name) + '</button>'; }).join('') + '</div></div>';
-    var mailbox = calendarMailbox(data);
-    var notice = '';
-    if (state.error) {
-      notice = '<div class="notice error" role="alert">' + esc(state.error) + '</div>';
-    } else if (state.loading && data && state.stale) {
-      notice = '<div class="notice" role="status">Refreshing this week. The last complete read stays on screen so a slow or rate-limited day is not painted as empty.</div>';
-    } else if (state.loading) {
-      notice = '<div class="notice" role="status">Reading the provider calendar and GHL enquiries. This can take up to a minute.</div>';
+    var d = dayIndex();
+    var lane = deskDays(res);
+    var iso = addDays(state.weekStart, d);
+    var picker = '<div class="daypick" role="group" aria-label="Choose a day">' + DAYS.map(function (name, i) {
+      var off = lane.indexOf(i) < 0;
+      return '<button type="button" data-booking-day="' + i + '" aria-pressed="' + (i === d) + '"' + (off ? ' class="is-off" title="Not a ' + esc(res.name) + ' day"' : '') + '>' + name.slice(0, 3) + '<b>' + Number(addDays(state.weekStart, i).slice(8, 10)) + '</b></button>';
+    }).join('') + '</div>';
+    var head = '<div class="dayhead"><h2>' + esc(longDate(iso)) + '</h2>' + picker + '</div>';
+    if (calendarUnread(state.data)) {
+      var read = calendarReadState(state.data);
+      return '<section class="bk-day" aria-label="The day">' + head + '<div class="dayunread"><h3>' + (read.state === 'not_configured' ? 'Calendar not set up' : 'Could not read calendar') + '</h3><p>' + esc(read.reason || '') + '</p><p>Free times are unknown. A calendar that could not be read is never shown as free.</p></div></section>';
     }
-    if (state.loading && !data) {
-      return '<div class="page"><div class="pagehead">' +
-        '<div><h1>Build the week</h1><p>' + esc(state.weekStart) + ' week · ' + esc(res.name) + ' · ' + esc(res.lane) + '</p></div></div>' +
-        notice +
-        '<div class="unknown"><h3>Reading this week</h3><p>Live booking read is in flight. Tiles stay blank until that read returns, so an empty week is not shown as a finished one.</p></div></div>';
+    var notes = '';
+    if (lane.indexOf(d) < 0) notes += '<p class="daynote">Not a ' + esc(res.name) + ' day. ' + esc(res.desk_rules.lane_note || 'No new scopes are offered on this day.') + '</p>';
+    var fixed = '';
+    if (d === 0 && res.desk_rules.monday_from > DAY_START) {
+      fixed += '<div class="fixed" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR_DAY) + 'px"><span>Not available before ' + res.desk_rules.monday_from + ':00</span></div>';
     }
-    var gaps = coverageGaps(data);
-    var gapStrip = gaps.length
-      ? '<div class="notice' + (coverageLooksRateLimited(data) ? ' warn' : '') + '" role="status"><strong>Coverage</strong>' +
-        (coverageLooksRateLimited(data) ? ' <span class="pill warn">GHL rate limited</span>' : '') +
-        '<ul>' + gaps.map(function (g) { return '<li>' + esc(g) + '</li>'; }).join('') + '</ul></div>'
-      : '';
+    var band = res.desk_rules.protected_band;
+    if (band && band.day === d) {
+      fixed += '<div class="fixed is-band" style="top:' + ((band.from - DAY_START) * PX_PER_HOUR_DAY) + 'px;height:' + ((band.to - band.from) * PX_PER_HOUR_DAY) + 'px"><span>' + esc(band.label) + ' · ' + esc(band.note) + '</span></div>';
+    }
+    var hours = '';
+    for (var h = DAY_START; h <= DAY_END; h++) {
+      hours += '<div class="hour" style="top:' + ((h - DAY_START) * PX_PER_HOUR_DAY) + 'px"><span>' + clockLabel(h).replace(':00', '') + '</span></div>';
+    }
+    var cards = dayCards(d);
+    var events = cards.map(renderDayEvent).join('');
+    var empty = cards.length ? '' : '<p class="dayempty">Nothing in the calendar this day. Leave is not read, so empty is not the same as free.</p>';
+    return '<section class="bk-day" aria-label="The day">' + head + notes +
+      '<div class="daygrid" style="height:' + ((DAY_END - DAY_START) * PX_PER_HOUR_DAY + 8) + 'px">' + hours + '<div class="lanes">' + fixed + events + '</div>' + empty + '</div>' +
+      '<p class="daykey"><span class="src src-ghl">GHL</span><span class="src src-outlook">Outlook</span> shows where each entry lives. Dashed means proposed, not booked.</p></section>';
+  }
+
+  // ---- page --------------------------------------------------------------------
+  function renderHead() {
+    var res = resource();
     var route = resolveSender(res);
     var scopers = V1_SCOPERS.map(function (id) {
       return '<button type="button" data-booking-resource-btn="' + id + '" aria-pressed="' + (id === state.resourceId) + '">' + esc(RESOURCES[id].name) + '</button>';
     }).join('');
-    var hidden = Object.keys(RESOURCES).filter(function (id) { return V1_SCOPERS.indexOf(id) === -1; })
-      .map(function (id) { return RESOURCES[id].name; });
-    return '<div class="page"><div class="pagehead">' +
-      '<div><h1>Build the week</h1><p>' + esc(state.weekStart) + ' week · ' + esc(res.name) + ' · ' + esc(res.lane) + ' · texts go from ' + esc(route.resolved ? route.label : 'an unresolved line') + '</p></div>' +
-      '<div class="row"><span class="muted small">Scoper</span>' +
-      '<div class="scopers" role="group" aria-label="Scoper">' + scopers + '</div>' +
-      '<span class="lane ' + esc(res.lane) + '">' + esc(res.lane === 'patio' ? 'Patio' : 'Fencing') + ' · ' + esc(route.resolved ? route.number.slice(-3) : 'line unresolved') + '</span>' +
-      (hidden.length ? '<span class="pill q" title="Captain default for v1. Flip V1_SCOPERS to add them.">v1: ' + esc(CAPTAIN_DEFAULTS.scopers) + ' · ' + esc(hidden.join(', ')) + ' later</span>' : '') +
-      '</div></div>' + notice + renderVisitOutcomes() + gapStrip +
-      '<div class="notice">Source ' + esc(mailbox) + ' · week of ' + esc(state.weekStart) + ' · Australia/Perth · rules: ' + esc(res.desk_rules.hours) + '</div>' +
-      renderWeekTruth() +
-      '<div class="scopesdone">' + renderTiles() + '</div>' +
-      '<div class="workspace">' +
-      '<section class="panel queue"><div class="panelhead"><h2>Work queue</h2><span class="count">' + visibleCases().length + ' people</span></div>' +
-      '<div class="queuefilters"><div class="searchwrap"><input data-booking-search placeholder="Search" aria-label="Search enquiries" value="' + esc(state.search) + '"></div></div>' +
-      '<div class="queuelist">' + renderQueue() + '</div>' +
-      '<div class="queuefoot">Only people who need a visit, a reply or a quote. Never the whole CRM.<br>Quoted, won, lost and archived stages are folded. Stages copied from ' + esc(res.pipeline_stages_source || 'the live GHL profile') + '.</div></section>' +
-      '<section class="panel calendar"><div class="calhead calendarhead"><div class="row"><h2>' + esc(state.weekStart) + ' week</h2><div class="grow"></div><div class="weeknav" role="group" aria-label="Week"><button type="button" data-booking-week="-7"' + (state.weekStart <= currentPerthWeek() ? ' disabled' : '') + '>Previous week</button><button type="button" data-booking-week="7">Next week</button></div></div>' +
-      '<p class="date">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p></div>' + renderCalendar() + '</section>' +
-      '<aside class="panel detail" aria-label="Selected enquiry and GHL conversation">' + renderDetail() + '</aside></div>' +
-      renderPipelineBoard() +
-      '</div>';
+    var atStart = state.weekStart <= currentPerthWeek();
+    var refreshed = state.loading ? 'Refreshing…' : state.lastFreshAt ? 'Updated ' + whenWords(state.lastFreshAt).split(', ')[1] : '';
+    return '<header class="bk-head"><div class="bk-title"><h1>Booking</h1>' +
+      '<p>' + esc(res.name) + ' · ' + esc(res.lane === 'patio' ? 'patios' : 'fencing') + (res.desk_rules.days ? ' · ' + esc(res.desk_rules.days.map(function (i) { return DAYS[i].slice(0, 3); }).join(' and ')) : '') +
+      ' · texts from ' + esc(route.resolved ? phoneEnding(route.number) : 'an unresolved line') + '</p></div>' +
+      '<div class="bk-controls"><div class="seg" role="group" aria-label="Whose bookings">' + scopers + '</div>' +
+      '<div class="weeknav" role="group" aria-label="Week"><button type="button" class="iconbtn" data-booking-week="-7" aria-label="Previous week"' + (atStart ? ' disabled' : '') + '>' + icon('left') + '</button>' +
+      '<span>Week of ' + esc(shortDate(state.weekStart).replace(/^\w+ /, '')) + '</span>' +
+      '<button type="button" class="iconbtn" data-booking-week="7" aria-label="Next week">' + icon('right') + '</button></div>' +
+      '<button type="button" class="refresh" data-booking-refresh' + (state.loading ? ' aria-busy="true"' : '') + '>' + icon('refresh') + '<span>' + (state.loading ? 'Refreshing' : 'Refresh') + '</span></button>' +
+      (refreshed && !state.loading ? '<span class="fresh">' + esc(refreshed) + '</span>' : '') + '</div></header>';
+  }
+
+  function renderHTML() {
+    if (!state.resourceId) {
+      return '<div class="bk"><header class="bk-head"><div class="bk-title"><h1>Booking</h1><p>Your account is not matched to a scoper. Choose whose bookings to open.</p></div>' +
+        '<div class="bk-controls"><div class="seg" role="group" aria-label="Whose bookings">' + V1_SCOPERS.map(function (id) { return '<button type="button" data-booking-resource-btn="' + id + '">' + esc(RESOURCES[id].name) + '</button>'; }).join('') + '</div></div></header></div>';
+    }
+    var problem = readProblem();
+    var loadingLine = state.loading && !state.data ? '<p class="bk-loading" role="status">Reading GHL and the calendar. This can take up to a minute.</p>'
+      : state.loading && state.stale ? '<p class="bk-loading" role="status">Refreshing. The last good read stays on screen until the new one lands.</p>' : '';
+    return '<div class="bk' + (state.selectedId ? ' is-open' : '') + '">' + renderHead() + renderCounts() +
+      (problem ? '<p class="bk-alert" role="alert">' + esc(problem) + '</p>' : '') + loadingLine + renderDetails() +
+      '<div class="bk-main">' + renderList() + renderCard() + renderDay() + '</div></div>';
+  }
+
+  function captureFocus(el) {
+    var doc = global.document;
+    var active = doc && doc.activeElement;
+    if (!active || !el.contains(active) || !active.getAttribute) return null;
+    var key = active.getAttribute('data-focus-key');
+    if (!key) return null;
+    var keep = { key: key, scroll: active.scrollTop };
+    try { keep.start = active.selectionStart; keep.end = active.selectionEnd; } catch (e) { /* not a text field */ }
+    return keep;
+  }
+
+  function restoreFocus(el, keep) {
+    if (!keep) return;
+    var next = el.querySelector('[data-focus-key="' + keep.key + '"]');
+    if (!next) return;
+    try { next.focus({ preventScroll: true }); } catch (e) { next.focus(); }
+    try { if (keep.start != null) next.setSelectionRange(keep.start, keep.end); } catch (e) { /* not a text field */ }
+    next.scrollTop = keep.scroll || 0;
   }
 
   function render() {
     var el = root();
     if (!el) return;
+    var keep = captureFocus(el);
     try {
       el.innerHTML = renderHTML();
     } catch (err) {
-      el.innerHTML = '<div class="notice error" role="alert">Booking door failed to render: ' + esc(err && err.message ? err.message : err) + '</div>';
+      el.innerHTML = '<p class="bk-alert" role="alert">The booking screen could not be drawn: ' + esc(err && err.message ? err.message : err) + '</p>';
     }
+    restoreFocus(el, keep);
     var view = global.document.getElementById('viewSales');
     if (view) {
       view.classList.toggle('sales-sub-booking', state.subtab === 'booking');
       view.classList.toggle('sales-sub-performance', state.subtab === 'performance');
     }
   }
+
+  // Search repaints only the list, so the search box keeps focus and caret.
+  function renderListOnly() {
+    var el = root();
+    var body = el && el.querySelector('[data-booking-list-body]');
+    if (!body) return render();
+    body.innerHTML = renderListBody();
+  }
+
+  // Typing in the text box repaints only its footer, so the caret stays put and
+  // the approval on screen always matches the words on screen.
+  function renderComposeOnly() {
+    var el = root();
+    var c = selectedCase();
+    var foot = el && el.querySelector('[data-booking-compose-foot]');
+    if (!foot || !c) return render();
+    if (decisionModel(c)) state.shownApprovals[approvalKey(c, 'message')] = approvalSnapshot(c, 'message');
+    foot.innerHTML = renderComposeFoot(c);
+  }
+
+  // ---- presses -------------------------------------------------------------------
+  function isUnknownAction(err) {
+    var msg = String((err && err.message) || err || '');
+    return (err && err.status === 404) || /unknown action|not found|no such action|unsupported action/i.test(msg);
+  }
+
+  function reasonWords(reason) {
+    var raw = String(reason || '').trim();
+    if (!raw) return 'no reason given.';
+    var known = {
+      approval_expired_requires_new_proposal: 'the approval ran out. Press Refresh, then press again.',
+      approval_not_found: 'the server could not find your approval. Press Refresh, then press again.',
+      approval_snapshot_changed: 'the lead changed since you looked. Check it again.',
+      approval_content_hash_mismatch: 'the words did not match what you approved. Check it again.',
+      current_person_availability_unavailable: 'the calendar could not be checked just now.',
+      prior_offer_conflict: 'that time is already offered to someone else.',
+      slot_taken: 'that time is no longer free.',
+      send_hold: 'sending is switched off on the server.',
+      calendar_write_disabled: 'calendar writing is switched off on the server.'
+    };
+    if (known[raw]) return known[raw];
+    if (/^[a-z0-9_:.-]+$/.test(raw)) raw = raw.replace(/[_:.-]+/g, ' ');
+    raw = raw.charAt(0).toLowerCase() + raw.slice(1);
+    return /[.!?]$/.test(raw) ? raw : raw + '.';
+  }
+
+  function wouldWords(kind, would) {
+    if (!would) return '';
+    if (typeof would === 'string') return ' It would have: ' + would;
+    if (would.summary || would.description) return ' It would have: ' + (would.summary || would.description);
+    if (kind === 'message' && would.text) return ' It would have sent: “' + would.text + '”';
+    if (kind === 'calendar' && (would.start || would.start_iso)) return ' It would have booked ' + timeRange(would.start || would.start_iso, would.end || would.end_iso) + ' on ' + longDate(String(would.start || would.start_iso).slice(0, 10)) + '.';
+    return '';
+  }
+
+  function describeResult(kind, res, c, snap) {
+    var status = res && res.status;
+    var at = perthClockNow();
+    if (kind === 'message') {
+      var line = senderShort(snap.content.sender);
+      var tail = phoneEnding(snap.content.recipient);
+      if (status === 'sent') return { tone: 'ok', done: true, snapshot: snap, text: 'Text sent at ' + at + ' from ' + line + ' to the phone ending ' + tail + '.', ref: res.message_id ? 'GHL message ' + res.message_id : '' };
+      if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was sent. The server is in trial mode.' + wouldWords(kind, res.would_write) };
+      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not sent: ' + reasonWords(res.reason) };
+    } else {
+      var p = decisionModel(c) && decisionModel(c).proposal;
+      var when = p ? longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso) : 'the proposed time';
+      var targets = Array.isArray(res && res.written) && res.written.length
+        ? res.written.map(function (t) { return typeof t === 'string' ? t : t && (t.label || t.provider) || ''; }).filter(Boolean).join(' and ')
+        : 'GHL';
+      if (status === 'booked') return { tone: 'ok', done: true, snapshot: snap, text: 'Booked ' + when + ' in ' + targets + ' at ' + at + '.', ref: res.appointment_id ? 'GHL appointment ' + res.appointment_id : '', url: res.appointment_url && /^https:\/\//.test(res.appointment_url) ? res.appointment_url : '' };
+      if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was booked. The server is in trial mode.' + wouldWords(kind, res.would_write) };
+      if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not booked: ' + reasonWords(res.reason) };
+    }
+    return { tone: 'bad', uncertain: true, snapshot: snap, text: 'The server answered without a clear result. Check GHL before pressing again.' };
+  }
+
+  // One press = the owner's approval of the exact content on screen, then the
+  // matching server action with that approval id, then the result in words.
+  async function press(id, kind) {
+    var c = cases().filter(function (row) { return row.id === id; })[0];
+    if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
+    var key = approvalKey(c, kind);
+    if (state.pressPending[key]) return { ok: false, reason: 'pending' };
+    var block = pressBlock(c, kind);
+    if (block) { state.approvalErrors[key] = block; render(); return { ok: false, reason: block }; }
+    var snap = approvalSnapshot(c, kind);
+    var held = state.approvalIds[key];
+    var approvalId = held && sameContent(held.snapshot, snap) ? held.id : null;
+    delete state.pressResults[key];
+    if (!approvalId) {
+      var rec = await recordApproval(id, kind, 'approved');
+      if (!rec.ok) return rec;
+      approvalId = rec.approval_id;
+      if (!approvalId) {
+        state.pressResults[key] = { tone: 'bad', snapshot: snap, text: 'Your approval is recorded, but the server gave it no reference, so nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '.' };
+        render();
+        return { ok: false, reason: 'no_approval_id' };
+      }
+    }
+    state.pressPending[key] = true;
+    delete state.approvalErrors[key];
+    render();
+    var result;
+    try {
+      if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
+      var res = await global.opsPost(ACTIONS[kind], { approval_id: approvalId });
+      result = describeResult(kind, res, c, snap);
+    } catch (err) {
+      result = isUnknownAction(err)
+        ? { tone: 'info', snapshot: snap, notConnected: true, text: (kind === 'calendar' ? 'Booking' : 'Sending') + ' from this screen is not connected yet. Your approval is recorded; nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '.' }
+        : { tone: 'bad', uncertain: true, snapshot: snap, text: 'No confirmed result: ' + String((err && err.message) || err) + '. Check GHL before pressing again.' };
+    } finally {
+      delete state.pressPending[key];
+    }
+    state.pressResults[key] = result;
+    if (result.done && sameContent(approvalSnapshot(c, kind), snap)) {
+      var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
+      channel.state = 'succeeded';
+    }
+    render();
+    return { ok: !!result.done, result: result };
+  }
+
 
   function clearConversation() {
     state.conversation = { contactId: null, caseId: null, loading: false, error: null, messages: [], generation: state.conversation.generation + 1 };
@@ -2287,6 +2856,7 @@
   }
 
   function selectCase(id) {
+    if (state.selectedId !== id) { state.dayIndex = null; state.showConversation = false; }
     state.selectedId = id;
     var c = selectedCase();
     if (!c || !c.contact_id) {
@@ -2308,6 +2878,8 @@
     state.stamp = { approved: [], rejected: [], decisions: {}, stage_moves: {} };
     state.resourceId = id;
     state.selectedId = null;
+    state.dayIndex = null;
+    state.pressResults = {};
     var cached = state.cache[cacheKey(id, state.weekStart)];
     if (cached) {
       state.data = cached;
@@ -2406,7 +2978,13 @@
       state.cache[key] = data;
       state.stale = false;
       state.lastReadMs = ms;
+      state.lastFreshAt = Date.now();
       state.readKind = 'fresh';
+      // A fresh read carries the server's own receipts; an unconfirmed press no
+      // longer blocks, and the server's approval-keyed idempotency owns retries.
+      Object.keys(state.pressResults).forEach(function (k) {
+        if (state.pressResults[k] && state.pressResults[k].uncertain) delete state.pressResults[k];
+      });
       applyServerStamp(data);
       applyServerDrafts(data);
     } catch (e) {
@@ -2494,6 +3072,7 @@
       var msgs = data.messages || [];
       msgs.sort(function (a, b) { return String(a.timestamp || '') < String(b.timestamp || '') ? -1 : 1; });
       state.conversation.messages = msgs;
+      state.threads[contactId] = msgs;
       state.conversation.loading = false;
     } catch (e) {
       if (generation !== state.conversation.generation) return;
@@ -2564,27 +3143,75 @@
     }
   }
 
+  function closeCard() {
+    state.selectedId = null;
+    state.dayIndex = null;
+    clearConversation();
+    render();
+    var el = root();
+    if (el && el.scrollIntoView && global.innerWidth && global.innerWidth < 900) el.scrollIntoView({ block: 'start' });
+  }
+
   if (global.document) {
     global.document.addEventListener('click', function (e) {
-      var tab = e.target.closest && e.target.closest('[data-sales-tab]');
+      var closest = function (sel) { return e.target.closest ? e.target.closest(sel) : null; };
+      var tab = closest('[data-sales-tab]');
       if (tab) {
         if (typeof global.showView === 'function') global.showView(tab.getAttribute('data-sales-tab'));
         else showSales(tab.getAttribute('data-sales-tab'));
         return;
       }
-      var layer = e.target.closest && e.target.closest('[data-booking-layer]');
-      if (layer && e.target.matches && e.target.matches('input[data-booking-layer]')) {
-        state.layers[e.target.getAttribute('data-booking-layer')] = e.target.checked;
-        render();
-        return;
-      }
-      var weekNav = e.target.closest && e.target.closest('[data-booking-week]');
+      if (!root() || !root().contains(e.target)) return;
+      var weekNav = closest('[data-booking-week]');
       if (weekNav) {
         e.preventDefault();
+        if (weekNav.disabled) return;
+        state.dayIndex = null;
         switchWeek(Number(weekNav.getAttribute('data-booking-week')));
         return;
       }
-      var visitNo = e.target.closest && e.target.closest('[data-visit-no], [data-visit-edit]');
+      if (closest('[data-booking-refresh]')) {
+        e.preventDefault();
+        if (state.resourceId && !state.loading) load(state.resourceId, state.weekStart);
+        return;
+      }
+      if (closest('[data-booking-details]')) {
+        e.preventDefault();
+        state.showDetails = !state.showDetails;
+        render();
+        return;
+      }
+      if (closest('[data-booking-back]')) {
+        e.preventDefault();
+        closeCard();
+        return;
+      }
+      var day = closest('[data-booking-day]');
+      if (day) {
+        e.preventDefault();
+        state.dayIndex = Number(day.getAttribute('data-booking-day'));
+        render();
+        return;
+      }
+      if (closest('[data-booking-thread-all]')) {
+        e.preventDefault();
+        state.showConversation = !state.showConversation;
+        render();
+        return;
+      }
+      if (closest('[data-booking-draft-reset]')) {
+        e.preventDefault();
+        var sel = selectedCase();
+        if (sel && state.drafts[draftKey(sel)]) {
+          var d0 = draftFor(sel);
+          d0.humanEdited = false;
+          d0.text = composeText(sel);
+          d0.revision = (d0.revision || 0) + 1;
+        }
+        render();
+        return;
+      }
+      var visitNo = closest('[data-visit-no], [data-visit-edit]');
       if (visitNo) {
         var bookingKey = visitNo.getAttribute('data-visit-no') || visitNo.getAttribute('data-visit-edit');
         var visit = bookedVisits().find(function (v) { return v.booking_key === bookingKey; });
@@ -2596,14 +3223,21 @@
         }
         return;
       }
-      var visitOutcome = e.target.closest && e.target.closest('[data-visit-outcome]');
+      var visitOutcome = closest('[data-visit-outcome]');
       if (visitOutcome) {
         if (visitOutcome.disabled) return;
         var visitHost = visitOutcome.closest('[data-visit-row]');
         recordVisitOutcome(visitOutcome.getAttribute('data-booking-key'), visitOutcome.getAttribute('data-visit-outcome'), visitOutcome.getAttribute('data-visit-reason'), visitHost.querySelector('[data-visit-note]').value, visitHost.querySelector('[data-visit-quote]').checked);
         return;
       }
-      var decision = e.target.closest && e.target.closest('[data-booking-decision]');
+      var pressBtn = closest('[data-booking-press]');
+      if (pressBtn) {
+        e.preventDefault();
+        if (pressBtn.disabled) return;
+        press(pressBtn.getAttribute('data-case-id'), pressBtn.getAttribute('data-booking-press'));
+        return;
+      }
+      var decision = closest('[data-booking-decision]');
       if (decision) {
         e.preventDefault();
         if (decision.disabled) return;
@@ -2613,36 +3247,35 @@
         recordApproval(decision.getAttribute('data-case-id'), kind, refusal ? 'refused' : 'approved', reasonInput && reasonInput.value);
         return;
       }
-      var moveHeld = e.target.closest && e.target.closest('[data-booking-move-held]');
-      if (moveHeld) {
-        e.preventDefault();
-        return;
-      }
-      var fold = e.target.closest && e.target.closest('[data-booking-fold]');
+      var fold = closest('[data-booking-fold]');
       if (fold) {
         e.preventDefault();
         state.showArchived = !state.showArchived;
         render();
         return;
       }
-      var scoper = e.target.closest && e.target.closest('[data-booking-resource-btn]');
+      var scoper = closest('[data-booking-resource-btn]');
       if (scoper) {
         e.preventDefault();
         switchResource(scoper.getAttribute('data-booking-resource-btn'));
         return;
       }
-      // Approve, Confirm and Send are rendered disabled. If a stale or scripted click
-      // still reaches here, attemptApprove refuses on SEND_HOLD and records the attempt.
-      var approve = e.target.closest && e.target.closest('[data-booking-approve], [data-booking-confirm]');
+      // Legacy approve/confirm hooks are no longer rendered. A stale or scripted
+      // click still reaches attemptApprove, which refuses on SEND_HOLD.
+      var approve = closest('[data-booking-approve], [data-booking-confirm]');
       if (approve) {
         e.preventDefault();
         attemptApprove();
         render();
         return;
       }
-      var lead = e.target.closest && e.target.closest('[data-booking-case]');
-      if (lead && root() && root().contains(lead)) {
-        selectCase(lead.getAttribute('data-booking-case'));
+      var lead = closest('[data-booking-case]');
+      if (lead) {
+        var id = lead.getAttribute('data-booking-case');
+        if (!id) return;
+        selectCase(id);
+        var card = root().querySelector('.bk-card');
+        if (card && card.scrollIntoView && global.innerWidth && global.innerWidth < 900) card.scrollIntoView({ block: 'start' });
       }
     });
     global.document.addEventListener('change', function (e) {
@@ -2659,7 +3292,8 @@
     global.document.addEventListener('input', function (e) {
       if (e.target.matches && e.target.matches('[data-booking-search]')) {
         state.search = e.target.value;
-        render();
+        renderListOnly();
+        return;
       }
       if (e.target.matches && e.target.matches('[data-booking-draft]')) {
         var c = selectedCase();
@@ -2669,9 +3303,12 @@
         d.humanEdited = true;
         d.revision = (d.revision || 0) + 1;
         d.sender = resolveSender().number;
+        delete state.approvalErrors[approvalKey(c, 'message')];
+        renderComposeOnly();
       }
     });
   }
+
 
   var api = {
     recordVisitOutcome: recordVisitOutcome,
@@ -2770,7 +3407,24 @@
     stageDrift: stageDrift,
     pipelineBoardCases: pipelineBoardCases,
     renderPipelineBoard: renderPipelineBoard,
-    postStamp: postStamp
+    postStamp: postStamp,
+    press: press,
+    pressBlock: pressBlock,
+    describeResult: describeResult,
+    editedText: editedText,
+    bookingContentHash: bookingContentHash,
+    canonicalJson: canonicalJson,
+    sha256Hex: sha256Hex,
+    lastWords: lastWords,
+    listGroups: listGroups,
+    unansweredSince: unansweredSince,
+    clashFor: clashFor,
+    sourceLabel: sourceLabel,
+    bookTargets: bookTargets,
+    renderVisitOutcomes: renderVisitOutcomes,
+    renderDay: renderDay,
+    renderCard: renderCard,
+    timeRange: timeRange
   };
   global.SalesBooking = api;
   global.SalesWorkspace = { show: showSales, subtab: function () { return state.subtab; } };

@@ -565,8 +565,8 @@ Two status vocabularies exist, scoped by vertical — they are never merged. On
 every make-safe assignment and board surface the four user-facing statuses are
 the ONLY vocabulary: New / Allocated / Complete / Archive (+ live "On site").
 All-tab and MakeSafe Board database-search cards are jobs, not allocations —
-their chip is the pipeline word (see ALL-TAB SEARCH CARDS below), never a
-default New. The separate fencing
+chip and open rules live in ALL-TAB SEARCH CARDS below, never a default New.
+The separate fencing
 field-work Board vertical has its own six column words: Ready / Scheduled / On
 site / Done / Attention / Cancelled (`FencingBoardCore`, detail in
 `trade-app.md`). Neither set may be renamed onto the other's surfaces.
@@ -771,14 +771,15 @@ Archived). A make-safe hit still opens the report path (unallocated included);
 its chip never says New just because it is live. A hit with no suburb/address
 and no job number uses the client name as the title; Suburb TBC only when
 there is nothing else to name it by. Pre-sale/dead records are
-view-only with a hint; a numbered delivery-stage job opens and the server's
-access check decides (403/404 renders "not on your jobs", no retry). Search hits
-already rendered as the viewer's own cards are not repeated. A managed lead's
-Everyone read covers only their managed verticals, so `fetchMyJobsForActiveLens`
-also reads `mode=mine` and merges own rows (`// <lead-own-rows-merge>`); a
-failed personal read keeps the previously shown own rows and still names the
-miss; merged today rows sort by date/time before the run list freezes; the
-toggle reads `Everyone · fencing`. Job `metadata` money keys are stripped from
+view-only with a hint; Office can still open any hit. A numbered delivery-stage
+job opens and the server's access check decides (403/404 renders "not on your
+jobs", no retry). Search hits already rendered as the viewer's own cards are not
+repeated. A managed lead's Everyone read covers only their managed verticals, so
+`fetchMyJobsForActiveLens` also reads `mode=mine` and merges own rows
+(`// <lead-own-rows-merge>`); a failed personal read keeps the previously shown
+own rows and still names the miss; merged today rows sort by date/time before
+the run list freezes. Everyone-toggle wording is ACCESS IS NAMED. Job
+`metadata` money keys are stripped from
 `my_jobs`/`search_all_jobs` at the `api()` door
 (`// <trade-job-list-money-strip>`). Guard:
 `tests/e2e/trade-all-search-truth.spec.js`.

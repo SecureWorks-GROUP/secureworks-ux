@@ -8315,7 +8315,7 @@
 
   // Renders both All-tab reads through one grammar: a typed search (query given)
   // and the empty-query company feed (query ''). The feed adds the scroll pager
-  // footer; the search block keeps the copy it always had.
+  // footer. Card chips, tap/open rules and titles: AGENTS.md → ALL-TAB SEARCH CARDS.
   // listedIds: jobs already on screen as the viewer's own cards; they are not
   // repeated here and the count line says where they are (listedWhere).
   function renderGlobalJobSearchResults(data, query, listedIds, listedWhere) {
@@ -9140,8 +9140,8 @@
       return 'nt';
     }
     // The four user-facing statuses (+ live On site) on assignment and board
-    // cards. Search-card chips use the pipeline word (AGENTS.md → ALL-TAB
-    // SEARCH CARDS), not this map.
+    // cards. All-tab / database-search chips are owned by AGENTS.md → ALL-TAB
+    // SEARCH CARDS (this map only when the hit has a known assignment).
     var STATUS = {
       new: { cls: 'new', label: 'New' }, alloc: { cls: 'alloc', label: 'Allocated' },
       live: { cls: 'live', label: 'On site' }, done: { cls: 'done', label: 'Complete' },

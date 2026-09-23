@@ -1819,24 +1819,28 @@
     if (status.state === 'unknown') return 'The last result is unknown. Check GHL before trying again.';
     if (status.state === 'approved' || status.state === 'held') return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
     if (status.state === 'refused') return 'You said no to this. Ask for a new proposal.';
-    if (calendarUnread(state.data)) return calendarReadState(state.data).state === 'not_configured' ? 'The calendar is not set up, so no time can be confirmed.' : 'The calendar could not be read, so no time can be confirmed.';
-    if (!flow.calendar_read || flow.calendar_read.provider !== 'ghl') return 'The GHL calendar has not been read, so no time can be confirmed.';
-    if (!Array.isArray(flow.commitments) || flow.commitments.some(function (slot) { return !slot.contact_id || !slot.id || ['offered', 'agreed'].indexOf(slot.state) < 0 || !(Date.parse(slot.end_iso) > Date.parse(slot.start_iso)); })) return 'Earlier offers could not all be read, so no time can be confirmed.';
-    if (!m.expires_at || !(Date.parse(m.expires_at) > Date.now())) return 'This proposal has expired. Press Refresh for a new one.';
+    if (kind === 'calendar') {
+      if (calendarUnread(state.data)) return calendarReadState(state.data).state === 'not_configured' ? 'The calendar is not set up, so no time can be confirmed.' : 'The calendar could not be read, so no time can be confirmed.';
+      if (!flow.calendar_read || flow.calendar_read.provider !== 'ghl') return 'The GHL calendar has not been read, so no time can be confirmed.';
+      if (!Array.isArray(flow.commitments) || flow.commitments.some(function (slot) { return !slot.contact_id || !slot.id || ['offered', 'agreed'].indexOf(slot.state) < 0 || !(Date.parse(slot.end_iso) > Date.parse(slot.start_iso)); })) return 'Earlier offers could not all be read, so no time can be confirmed.';
+      if (!m.expires_at || !(Date.parse(m.expires_at) > Date.now())) return 'This proposal has expired. Press Refresh for a new one.';
+    }
     if (!m.proposal || m.confident !== true) return 'Needs a person: ' + (m.reason || 'no confident proposal.');
     if (!Array.isArray(m.validation) || !m.validation.length || m.validation.some(function (v) { return v.passed !== true; })) return 'A check did not pass. See the checks below.';
     if (!Array.isArray(m.evidence) || !m.evidence.length || m.evidence.some(function (e) { return !e.quote || !e.message_id || e.contact_id !== c.contact_id; })) return 'The customer\'s own words are missing, or belong to another contact.';
-    var p = m.proposal;
-    if (!/\+08:00$/.test(p.start_iso || '') || !/\+08:00$/.test(p.end_iso || '') || !(Date.parse(p.start_iso) > Date.now()) || !(Date.parse(p.end_iso) > Date.parse(p.start_iso))) return 'The proposed visit must be a future Perth time.';
-    if (!p.window_start_iso || !p.window_end_iso || !(Date.parse(p.window_end_iso) > Date.parse(p.window_start_iso))) return 'The arrival window is missing.';
-    var index = dayIndexFromIso(p.start_iso, state.weekStart);
-    var startHour = hourFromIso(p.start_iso), endHour = hourFromIso(p.end_iso);
-    var rules = resource().desk_rules;
-    if (index == null || deskDays(resource()).indexOf(index) < 0 || startHour < (index === 0 ? rules.monday_from : 8) || startHour > rules.last_start || endHour > 16.5 || p.start_iso.slice(0, 10) !== p.end_iso.slice(0, 10)) return 'The proposed visit is outside ' + resource().name + '\'s days or hours.';
-    if (rules.protected_band && rules.protected_band.day === index && startHour < rules.protected_band.to && endHour > rules.protected_band.from) return 'The proposed visit overlaps the protected Canning Vale band.';
-    var clash = clashFor(c);
-    if (clash) return clashSentence(clash);
-    if (kind === 'calendar' && (!m.calendar || m.calendar.provider !== 'ghl' || !m.calendar.calendar_id || !m.calendar.assigned_user_id || !m.calendar.title || !m.calendar.address)) return 'The GHL calendar or the site address is missing.';
+    if (kind === 'calendar') {
+      var p = m.proposal;
+      if (!/\+08:00$/.test(p.start_iso || '') || !/\+08:00$/.test(p.end_iso || '') || !(Date.parse(p.start_iso) > Date.now()) || !(Date.parse(p.end_iso) > Date.parse(p.start_iso))) return 'The proposed visit must be a future Perth time.';
+      if (!p.window_start_iso || !p.window_end_iso || !(Date.parse(p.window_end_iso) > Date.parse(p.window_start_iso))) return 'The arrival window is missing.';
+      var index = dayIndexFromIso(p.start_iso, state.weekStart);
+      var startHour = hourFromIso(p.start_iso), endHour = hourFromIso(p.end_iso);
+      var rules = resource().desk_rules;
+      if (index == null || deskDays(resource()).indexOf(index) < 0 || startHour < (index === 0 ? rules.monday_from : 8) || startHour > rules.last_start || endHour > 16.5 || p.start_iso.slice(0, 10) !== p.end_iso.slice(0, 10)) return 'The proposed visit is outside ' + resource().name + '\'s days or hours.';
+      if (rules.protected_band && rules.protected_band.day === index && startHour < rules.protected_band.to && endHour > rules.protected_band.from) return 'The proposed visit overlaps the protected Canning Vale band.';
+      var clash = clashFor(c);
+      if (clash) return clashSentence(clash);
+      if (!m.calendar || m.calendar.provider !== 'ghl' || !m.calendar.calendar_id || !m.calendar.assigned_user_id || !m.calendar.title || !m.calendar.address) return 'The GHL calendar or the site address is missing.';
+    }
     if (kind === 'message') {
       var msg = selectedMessage(c);
       if (m.message.template_locked !== true) return 'There is no proposed text for this lead yet.';
@@ -1867,14 +1871,15 @@
       if (typeof global.opsPost !== 'function') throw new Error('Approvals are not reachable from this page. Nothing was recorded.');
       var result = await global.opsPost('sales_booking_approval_write', body);
       if (!result || result.ok !== true || !result.approval || !sameContent(result.approval.snapshot, snap) || result.approval.state !== decision || (decision === 'refused' && result.approval.reason !== body.reason)) throw new Error('The server did not confirm your approval. Nothing was sent. Press Refresh before trying again.');
-      // A late response cannot approve a replacement proposal or different resource.
-      if (sameContent(approvalSnapshot(c, kind), snap)) {
-        var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
-        channel.state = decision;
-        channel.reason = result.approval.reason || null;
-        channel.approval = { ui_snapshot: result.approval.snapshot };
-        if (kind === 'message' && decision === 'approved') { channel.chosen = snap.content.variant; channel.approved_text = snap.content.text; }
+      if (!sameContent(approvalSnapshot(c, kind), snap)) {
+        state.approvalErrors[key] = 'This changed after it was shown. Check it again before pressing.';
+        return { ok: false, reason: state.approvalErrors[key] };
       }
+      var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
+      channel.state = decision;
+      channel.reason = result.approval.reason || null;
+      channel.approval = { ui_snapshot: result.approval.snapshot };
+      if (kind === 'message' && decision === 'approved') { channel.chosen = snap.content.variant; channel.approved_text = snap.content.text; }
       var approvalId = result.approval.id || result.approval.binding_hash || null;
       if (decision === 'approved' && approvalId) state.approvalIds[key] = { id: approvalId, snapshot: snap };
       return { ok: true, state: decision, sent: false, booked: false, approval_id: approvalId, approval: result.approval };
@@ -2149,8 +2154,7 @@
     return null;
   }
 
-  function listGroups() {
-    var list = visibleCases();
+  function listGroupsFrom(list) {
     var booked = [], waiting = [], contact = [], unsorted = [];
     list.forEach(function (c) {
       if (isNonScopeDiaryMirror(c)) return;
@@ -2162,6 +2166,16 @@
     contact.sort(byLoudness);
     waiting.sort(byLoudness);
     return { contact: contact, waiting: waiting, booked: booked, unsorted: unsorted };
+  }
+
+  function listGroups() {
+    return listGroupsFrom(visibleCases());
+  }
+
+  function weekListGroups() {
+    return listGroupsFrom(cases().filter(function (c) {
+      return matchesFilter(c) && !isFoldedStage(c);
+    }));
   }
 
   function statusPill(c) {
@@ -2257,7 +2271,7 @@
   function renderCounts() {
     if (!state.data) return '';
     var f = followThrough();
-    var parts = ['<span><b>' + f.to_book + '</b> to contact</span>', '<span><b>' + f.waiting + '</b> waiting on a reply</span>'];
+    var parts = ['<span><b>' + weekListGroups().contact.length + '</b> to contact</span>', '<span><b>' + f.waiting + '</b> waiting on a reply</span>'];
     if (calendarUnread(state.data)) {
       parts.push('<span class="is-bad">Booked: calendar not read</span>');
     } else {
@@ -2413,6 +2427,14 @@
     return '<p class="chanstate is-' + status.state + '" role="status"><strong>' + line[0] + '</strong> ' + esc(line[1]) + '</p>';
   }
 
+  function composeBusy(c) {
+    if (!c) return false;
+    return ['message', 'calendar'].some(function (kind) {
+      var key = approvalKey(c, kind);
+      return !!(state.approvalPending[key] || state.pressPending[key]);
+    });
+  }
+
   function pressBlock(c, kind) {
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
@@ -2465,9 +2487,11 @@
     var block = pressBlock(c, 'message');
     var edited = editedText(c) != null;
     var key = approvalKey(c, 'message');
+    var clash = clashFor(c);
     return '<p class="route">From <b>' + esc(route.resolved && route.number === sender ? route.label : senderShort(sender)) + '</b>' +
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' · customer phone not in this read') + '</p>' +
       (edited ? '<p class="edited">Edited. Your approval will cover these exact words. <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button></p>' : '') +
+      (clash ? '<p class="clash">' + esc(clashSentence(clash)) + '</p>' : '') +
       '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
       (block && !state.pressPending[key] && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '') +
       channelLine(c, 'message') + renderResult(c, 'message') + (m ? renderSayNo(c, 'message') : '');
@@ -2544,7 +2568,7 @@
       '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
       '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
-      '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (m ? 'Write the text to send' : 'No proposed text yet') + '"' + (m && m.message && m.message.template_locked ? '' : ' readonly') + '>' + esc(text) + '</textarea>' +
+      '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (m && m.message && m.message.template_locked ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
       '<div data-booking-compose-foot>' + renderComposeFoot(c) + '</div></section>' +
       renderVisit(c) + '</section>';
   }
@@ -2746,6 +2770,7 @@
 
   function restoreFocus(el, keep) {
     if (!keep) return;
+    if (keep.key && keep.key.indexOf('draft-') === 0 && composeBusy(selectedCase())) return;
     var next = el.querySelector('[data-focus-key="' + keep.key + '"]');
     if (!next) return;
     try { next.focus({ preventScroll: true }); } catch (e) { next.focus(); }
@@ -2836,9 +2861,10 @@
     } else {
       var p = decisionModel(c) && decisionModel(c).proposal;
       var when = p ? longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso) : 'the proposed time';
-      var targets = Array.isArray(res && res.written) && res.written.length
-        ? res.written.map(function (t) { return typeof t === 'string' ? t : t && (t.label || t.provider) || ''; }).filter(Boolean).join(' and ')
-        : 'GHL';
+      var named = Array.isArray(res && res.written) && res.written.length
+        ? res.written.map(function (t) { return typeof t === 'string' ? t : t && (t.label || t.provider) || ''; }).filter(Boolean)
+        : [];
+      var targets = named.length ? named.join(' and ') : bookTargets(decisionModel(c)).join(' and ');
       if (status === 'booked') return { tone: 'ok', done: true, snapshot: snap, text: 'Booked ' + when + ' in ' + targets + ' at ' + at + '.', ref: res.appointment_id ? 'GHL appointment ' + res.appointment_id : '', url: res.appointment_url && /^https:\/\//.test(res.appointment_url) ? res.appointment_url : '' };
       if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was booked. The server is in trial mode.' + wouldWords(kind, res.would_write) };
       if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not booked: ' + reasonWords(res.reason) };
@@ -2872,6 +2898,12 @@
     state.pressPending[key] = true;
     delete state.approvalErrors[key];
     render();
+    if (!sameContent(approvalSnapshot(c, kind), snap)) {
+      delete state.pressPending[key];
+      state.approvalErrors[key] = 'This changed after it was shown. Check it again before pressing.';
+      render();
+      return { ok: false, reason: state.approvalErrors[key] };
+    }
     var result;
     try {
       if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
@@ -3351,7 +3383,7 @@
       }
       if (e.target.matches && e.target.matches('[data-booking-draft]')) {
         var c = selectedCase();
-        if (!c || !draftKey(c)) return;
+        if (!c || !draftKey(c) || composeBusy(c)) return;
         var d = draftFor(c);
         d.text = e.target.value;
         d.humanEdited = true;

@@ -2027,7 +2027,6 @@
   // day as a column. Every press records the owner's approval of the exact
   // content first, then asks the server to act, then says what happened.
   // ---------------------------------------------------------------------------
-  var PX_PER_HOUR_DAY = 60;
   var ACTIONS = { message: 'sales_booking_send', calendar: 'sales_booking_book' };
   // Live GHL calendar ids (wiki booking review, 23 Sep 2026). Unknown ids are
   // named as "GHL calendar", never guessed.
@@ -2581,9 +2580,32 @@
       if (!p || !p.start_iso || dayIndexFromIso(p.start_iso, state.weekStart) !== d) return;
       var kind = caseLayer(c);
       if (kind === 'confirmed' && c.event_id) return;
-      list.push({ block: { id: c.id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });
+      list.push({ block: { id: c.id, contact_id: c.contact_id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });
+    });
+    // A proposed slot that runs into occupied time or another customer's hold
+    // says which booking, in words, on the slot itself.
+    list.forEach(function (card) {
+      var b = card.block;
+      if (!b.proposal) return;
+      var a0 = Date.parse(b.start_iso), a1 = Date.parse(b.end_iso);
+      var hit = list.filter(function (other) {
+        var o = other.block;
+        if (o === b || o.proposal) return false;
+        if (o.reservation_state ? o.contact_id === b.contact_id : !diaryOccupiesDay(o)) return false;
+        return Date.parse(o.start_iso) < a1 && Date.parse(o.end_iso) > a0;
+      })[0];
+      if (hit) b.clash = 'Clashes with ' + dayEventTitle(hit.block) + ' at ' + clockLabel(hourFromIso(hit.block.start_iso));
     });
     return packLanes(list);
+  }
+
+  function dayEventTitle(b) {
+    if (b.proposal) return b.display_name || 'Proposed visit';
+    if (b.reservation_state) {
+      var holder = cases().filter(function (row) { return row.contact_id && row.contact_id === b.contact_id; })[0];
+      return holder && holder.display_name || 'Another customer';
+    }
+    return eventTitle(b);
   }
 
   function kindWords(kind, block) {
@@ -2591,22 +2613,40 @@
     return ({ confirmed: 'Booked visit', blocked: 'Cancelled, still in calendar', offer: block.proposal ? 'Offer out' : 'Offer out', personal: 'Personal', busy: 'Busy', leave: 'Leave', proposal: 'Proposed' })[kind] || 'Busy';
   }
 
-  function renderDayEvent(card) {
+  // The day is a grid of 15-minute rows sized minmax(15px, auto): an entry spans
+  // its rows, and when its words need more room the rows grow instead of the
+  // words being cut off. Overlapping entries share the width in lanes.
+  var SLOTS_PER_HOUR = 4;
+
+  function slotOf(iso, roundUp) {
+    var h = hourFromIso(iso);
+    if (h == null) return null;
+    var slot = (h - DAY_START) * SLOTS_PER_HOUR;
+    slot = roundUp ? Math.ceil(slot - 1e-9) : Math.floor(slot + 1e-9);
+    return Math.max(0, Math.min((DAY_END - DAY_START) * SLOTS_PER_HOUR, slot));
+  }
+
+  function renderDayEvent(card, columns) {
     var b = card.block, kind = card.kind;
-    var start = hourFromIso(b.start_iso);
-    if (start == null) return '';
-    var span = Math.max(0.5, durationHours(b.start_iso, b.end_iso));
-    var top = Math.max(0, (start - DAY_START) * PX_PER_HOUR_DAY);
-    var lanes = Math.max(1, b.lanes || 1), lane = b.lane || 0, width = 100 / lanes;
-    var holder = b.reservation_state ? cases().filter(function (row) { return row.contact_id && row.contact_id === b.contact_id; })[0] : null;
-    var title = b.proposal ? b.display_name : b.reservation_state ? (holder && holder.display_name || 'Another customer') : eventTitle(b);
+    var from = slotOf(b.start_iso, false);
+    if (from == null) return '';
+    var to = Math.max(from + 3, slotOf(b.end_iso, true) || from + 4);
+    to = Math.min(to, (DAY_END - DAY_START) * SLOTS_PER_HOUR);
+    if (to <= from) { from = Math.max(0, to - 3); }
+    var lanes = Math.max(1, b.lanes || 1), lane = b.lane || 0;
+    var per = Math.max(1, Math.floor(columns / lanes));
+    var colStart = 2 + lane * per;
+    var colEnd = lane === lanes - 1 ? -1 : colStart + per;
+    var title = dayEventTitle(b);
     var badge = b.proposal || b.reservation_state ? '' : '<span class="src src-' + sourceLabel(b).toLowerCase() + '">' + sourceLabel(b) + '</span>';
     var selected = b.id && b.id === state.selectedId;
-    return '<button type="button" class="ev is-' + kind + (b.proposal ? ' is-proposal' : '') + (selected ? ' is-sel' : '') + '" data-booking-case="' + esc(b.id || '') + '"' +
-      ' style="left:calc(' + (lane * width) + '% + 2px);width:calc(' + width + '% - 4px);top:' + top + 'px;height:' + Math.max(42, span * PX_PER_HOUR_DAY - 3) + 'px"' +
-      ' title="' + esc(timeRange(b.start_iso, b.end_iso) + ' · ' + (title || 'Busy') + ' · ' + kindWords(kind, b) + (badge ? ' · ' + sourceLabel(b) : '')) + '">' +
-      '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + '</span>' + badge + '</span>' +
-      '<span class="ev-kind"><span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span> · ' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span></button>';
+    var place = b.suburb && !b.reservation_state ? ', ' + b.suburb : '';
+    return '<button type="button" class="ev is-' + kind + (b.proposal ? ' is-proposal' : '') + (b.clash ? ' is-clash' : '') + (selected ? ' is-sel' : '') + '" data-booking-case="' + esc(b.id || '') + '"' +
+      ' style="grid-row:' + (from + 1) + ' / ' + (to + 1) + ';grid-column:' + colStart + ' / ' + colEnd + '">' +
+      '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + esc(place) + '</span>' + badge + '</span>' +
+      '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
+      '<span class="ev-kind">' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span>' +
+      (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
   }
 
   function renderDay() {
@@ -2626,23 +2666,37 @@
     }
     var notes = '';
     if (lane.indexOf(d) < 0) notes += '<p class="daynote">Not a ' + esc(res.name) + ' day. ' + esc(res.desk_rules.lane_note || 'No new scopes are offered on this day.') + '</p>';
+    var slots = (DAY_END - DAY_START) * SLOTS_PER_HOUR;
+    var cards = dayCards(d);
+    var columns = 1;
+    cards.forEach(function (card) { columns = Math.max(columns, card.block.lanes || 1); });
+    if (columns > 1) {
+      // Enough columns that every lane count on this day divides evenly.
+      var want = columns;
+      cards.forEach(function (card) { var l = card.block.lanes || 1; while (want % l) want += columns; });
+      columns = want;
+    }
     var fixed = '';
+    var span = function (fromHour, toHour) {
+      return 'grid-row:' + (Math.round((fromHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ' / ' + (Math.round((toHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ';grid-column:2 / -1';
+    };
     if (d === 0 && res.desk_rules.monday_from > DAY_START) {
-      fixed += '<div class="fixed" style="top:0;height:' + ((res.desk_rules.monday_from - DAY_START) * PX_PER_HOUR_DAY) + 'px"><span>Not available before ' + res.desk_rules.monday_from + ':00</span></div>';
+      fixed += '<div class="fixed" style="' + span(DAY_START, res.desk_rules.monday_from) + '"><span>Not available before ' + res.desk_rules.monday_from + ':00</span></div>';
     }
     var band = res.desk_rules.protected_band;
     if (band && band.day === d) {
-      fixed += '<div class="fixed is-band" style="top:' + ((band.from - DAY_START) * PX_PER_HOUR_DAY) + 'px;height:' + ((band.to - band.from) * PX_PER_HOUR_DAY) + 'px"><span>' + esc(band.label) + ' · ' + esc(band.note) + '</span></div>';
+      fixed += '<div class="fixed is-band" style="' + span(band.from, band.to) + '"><span>' + esc(band.label) + ' · ' + esc(band.note) + '</span></div>';
     }
     var hours = '';
-    for (var h = DAY_START; h <= DAY_END; h++) {
-      hours += '<div class="hour" style="top:' + ((h - DAY_START) * PX_PER_HOUR_DAY) + 'px"><span>' + clockLabel(h).replace(':00', '') + '</span></div>';
+    for (var h = DAY_START; h < DAY_END; h++) {
+      var row = (h - DAY_START) * SLOTS_PER_HOUR + 1;
+      hours += '<div class="hourline" style="grid-row:' + row + ' / ' + (row + SLOTS_PER_HOUR) + '"></div>' +
+        '<div class="hour" style="grid-row:' + row + ' / ' + (row + SLOTS_PER_HOUR) + '"><span>' + clockLabel(h).replace(':00', '') + '</span></div>';
     }
-    var cards = dayCards(d);
-    var events = cards.map(renderDayEvent).join('');
+    var events = cards.map(function (card) { return renderDayEvent(card, columns); }).join('');
     var empty = cards.length ? '' : '<p class="dayempty">Nothing in the calendar this day. Leave is not read, so empty is not the same as free.</p>';
     return '<section class="bk-day" aria-label="The day">' + head + notes +
-      '<div class="daygrid" style="height:' + ((DAY_END - DAY_START) * PX_PER_HOUR_DAY + 8) + 'px">' + hours + '<div class="lanes">' + fixed + events + '</div>' + empty + '</div>' +
+      '<div class="daygrid" style="grid-template-columns:42px repeat(' + columns + ',minmax(0,1fr));grid-template-rows:repeat(' + slots + ',minmax(15px,auto))">' + hours + fixed + events + empty + '</div>' +
       '<p class="daykey"><span class="src src-ghl">GHL</span><span class="src src-outlook">Outlook</span> shows where each entry lives. Dashed means proposed, not booked.</p></section>';
   }
 

@@ -738,7 +738,8 @@ test('follow-through tiles count the queue and name the captain window', () => {
   assert.equal(f.to_book, 0);
   assert.equal(f.booked, 1);
   const html = api.renderHTML();
-  assert.match(html, /<b>0<\/b> to contact/);
+  assert.equal(api.listGroups().contact.length, 1);
+  assert.match(html, /<b>1<\/b> to contact/);
   assert.match(html, /<b>0<\/b> waiting on a reply/);
   assert.match(html, /Booked Mon <b>0<\/b>, Tue <b>1<\/b>, Thu <b>0<\/b>, Fri <b>0<\/b>/);
   assert.doesNotMatch(html, /quotes? to send/);

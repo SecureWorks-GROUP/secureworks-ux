@@ -92,13 +92,13 @@ test('repeat clicks while pending and after approval cannot duplicate approval',
   assert.equal((await api.recordApproval(row.id, 'calendar', 'approved')).ok, false);
   assert.equal(writes.length, 1);
 });
-test('failed, missing and not-configured calendars never permit confirmation', async () => {
+test('failed, missing and not-configured calendars never permit booking', async () => {
   for (const state of ['could_not_read','not_configured',undefined]) {
     data.booking_flow.calendar_read = state ? {state,provider:'ghl',reason:'Provider unavailable'} : null;
     data.resource.calendar = null;
     api.renderHTML();
     assert.equal((await api.recordApproval(row.id, 'calendar', 'approved')).ok, false);
-    assert.equal((await api.recordApproval(row.id, 'message', 'approved')).ok, false);
+    assert.equal(api.approvalBlock(row, 'message'), '');
     assert.doesNotMatch(api.renderHTML(), /class="daycol/);
   }
   assert.equal(writes.length, 0);
@@ -144,9 +144,11 @@ test('busy diary and protected band block a proposal even if validation claims p
   const p = row.booking_read_model.calendar_write.preview;
   data.diary.push({event_id:'busy',start:p.start,end:p.end,kind:'busy',blocks_capacity:true});
   assert.match(api.approvalBlock(row,'calendar'), /Clashes with Busy at 9:00am \(GHL\)/);
+  assert.equal(api.approvalBlock(row,'message'), '');
   data.diary = [];
   p.start = p.start.replace('09:00','13:00'); p.end = p.end.replace('11:30','14:00');
   assert.match(api.approvalBlock(row,'calendar'), /protected Canning Vale/);
+  assert.equal(api.approvalBlock(row,'message'), '');
 });
 test('refusal requires a reason and records only that channel', async () => {
   assert.equal((await api.recordApproval(row.id,'calendar','refused','')).ok, false);
@@ -503,10 +505,52 @@ test('book it names the calendars it writes and a clash names the other booking'
   const p = row.booking_read_model.calendar_write.preview;
   data.diary.push({event_id:'mel',start:p.start.replace('09:00','10:00'),end:p.end,title:'Scope: Melanie N, Piara Waters',kind:'busy',source:'outlook',blocks_capacity:true});
   assert.equal(api.approvalBlock(row,'calendar'), 'Clashes with Scope: Melanie N, Piara Waters at 10:00am (Outlook).');
-  assert.match(api.renderHTML(), /class="clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am \(Outlook\)\./);
+  assert.equal(api.approvalBlock(row,'message'), '');
+  const card = api.renderCard();
+  assert.match(card, /data-booking-compose-foot[\s\S]*?class="clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am \(Outlook\)\./);
+  assert.match(card, /class="visit"[\s\S]*class="clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am \(Outlook\)\./);
   assert.equal(api.sourceLabel({source:'ghl_calendar'}), 'GHL');
   assert.equal(api.sourceLabel({}), 'GHL');
   assert.equal(api.sourceLabel({source:'outlook'}), 'Outlook');
+});
+test('a booked result without a written list names the calendars Book it promised', () => {
+  const snap = api.approvalSnapshot(row, 'calendar');
+  const r = api.describeResult('calendar', {status:'booked', appointment_id:'apt-x'}, row, snap);
+  assert.match(r.text, /in GHL calendar and Marnin's Outlook at /);
+});
+test('an in-flight edit cannot send words that are no longer on screen', async () => {
+  let finishApproval;
+  global.opsPost = async (action, body) => {
+    writes.push(structuredClone({action, body}));
+    if (action === 'sales_booking_approval_write') {
+      return new Promise((resolve) => {
+        finishApproval = () => resolve({ok:true, approval:{id:'appr-late', state:body.decision, snapshot:structuredClone(body.snapshot)}});
+      });
+    }
+    return {status:'sent', message_id:'m-late'};
+  };
+  const pending = api.press(row.id, 'message');
+  assert.match(api.renderHTML(), /<textarea id="bk-draft"[^>]* disabled/);
+  const d = api.draftFor(row);
+  d.text = 'Different words now';
+  d.humanEdited = true;
+  d.revision = (d.revision || 0) + 1;
+  finishApproval();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  assert.match(api.renderHTML(), /This changed after it was shown\. Check it again before pressing\./);
+});
+test('the to-contact count matches the week-wide list, not the search filter', () => {
+  const stray = {id:'stray', contact_id:'ghl-s', display_name:'Stray lead', suburb:'Midland', reason:'Assessed', enquiry_at:'2026-01-01'};
+  data.cases.push(stray);
+  const n = api.listGroups().contact.length;
+  assert.ok(n >= 2);
+  assert.ok(api.listGroups().contact.some((c) => c.id === 'stray'));
+  assert.match(api.renderHTML(), new RegExp('<b>' + n + '</b> to contact'));
+  api.state.search = 'nobody-matches-this';
+  assert.equal(api.listGroups().contact.length, 0);
+  assert.match(api.renderHTML(), new RegExp('<b>' + n + '</b> to contact'));
 });
 test('the list puts the loudest customer first and quotes their last words', () => {
   const quiet = {id:'quiet', contact_id:'ghl-q', display_name:'Quiet lead', suburb:'Bassendean', stage_id:api.RESOURCES.marnin.pipeline_stages[0].id, reason:'Assessed', enquiry_at:'2026-01-01'};
@@ -540,5 +584,4 @@ test('a proposed slot on the day names the booking it clashes with, in full', ()
   const html = api.renderDay();
   assert.match(html, /class="ev is-proposal is-proposal is-clash[^"]*"[^>]*data-booking-case="lead-a"[\s\S]*?<span class="ev-clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am<\/span>/);
   assert.match(html, /<span class="ev-title">Scope: Melanie N, Piara Waters<\/span>/);
-  assert.doesNotMatch(html, /text-overflow|…/);
 });

@@ -181,7 +181,7 @@
 #salesBookingRoot .compose label h3{margin:0}
 #salesBookingRoot .compose textarea{width:100%;min-height:128px;max-height:60vh;field-sizing:content;resize:vertical;padding:12px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);font-size:15px;line-height:1.5;transition:border-color .15s ease-out,box-shadow .15s ease-out}
 #salesBookingRoot .compose textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
-#salesBookingRoot .compose textarea[readonly]{background:var(--surface-2);color:var(--ink-2)}
+#salesBookingRoot .compose textarea[readonly],#salesBookingRoot .compose textarea:disabled{background:var(--surface-2);color:var(--ink-2)}
 #salesBookingRoot .route{font-size:13.5px;color:var(--ink-2)}
 #salesBookingRoot .route b,#salesBookingRoot .targets b{color:var(--ink);font-weight:650}
 #salesBookingRoot .edited{font-size:13px;color:var(--accent-ink);display:flex;gap:4px 10px;flex-wrap:wrap;align-items:baseline}

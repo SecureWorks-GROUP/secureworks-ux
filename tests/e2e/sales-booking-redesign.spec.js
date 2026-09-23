@@ -56,12 +56,13 @@ for (const vp of viewports) {
       }
     });
 
-    test('a clash names the other booking and blocks the press', async ({ page }) => {
+    test('a clash names the other booking and blocks booking, not the text', async ({ page }) => {
       await open(page);
       await choose(page, 'Kerry P');
       await expect(page.locator('.visit .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
+      await expect(page.locator('.compose .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
-      await expect(page.getByRole('button', { name: 'Send this text' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
       const slot = page.locator('.bk-day .ev.is-clash', { hasText: 'Kerry P' });
       await expect(slot.locator('.ev-clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am');
       // Overlapping entries show their whole name and time, never cut off.

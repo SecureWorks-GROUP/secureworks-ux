@@ -757,6 +757,25 @@ test('a sent offer occupies the slot so another lead cannot take it', async () =
   assert.match(api.ownerBlock(basil, 'calendar'), /Priya|offered/i);
 });
 
+test('a lead can book the visit they already held with a sent text', async () => {
+  const backend = ownerSetup('sent');
+  const priya = caseById('lead-priya');
+  const basil = caseById('lead-basil');
+  const thisFri = thisFriday();
+  pickVisit(priya, '12:30', 60, thisFri);
+  assert.equal((await api.press(priya.id, 'message')).ok, true);
+  assert.equal((await api.ownerApprove(priya.id, 'message')).ok, true);
+  assert.equal(api.ownerBlock(priya, 'calendar'), '');
+  assert.doesNotMatch(api.renderCard(), /Slot taken by a prior offer: Priya/);
+  pickVisit(basil, '12:30', 60, thisFri);
+  assert.match(api.ownerBlock(basil, 'calendar'), /Priya|offered/i);
+  pickVisit(priya, '12:30', 60, thisFri);
+  assert.equal((await api.press(priya.id, 'calendar')).ok, true);
+  assert.equal((await api.ownerApprove(priya.id, 'calendar')).ok, true);
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_book').length, 1);
+  assert.match(api.renderCard(), /Booked /);
+});
+
 test('a named server refusal shows as one plain sentence and nothing is approved or booked', async () => {
   const backend = ownerSetup('sent');
   row = caseById('lead-priya');

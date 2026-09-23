@@ -1782,7 +1782,7 @@
   }
 
   // The same check for any span: the engine's proposal or a time the owner picked.
-  function clashForSpan(c, startIso, endIso, commitmentId) {
+  function clashForSpan(c, startIso, endIso, commitmentId, skipOwnHold) {
     var a = Date.parse(startIso), b = Date.parse(endIso);
     if (!(b > a)) return null;
     var ev = diary().filter(function (row) {
@@ -1792,7 +1792,7 @@
     })[0];
     if (ev) return { kind: 'calendar', label: eventTitle(ev), at: clockLabel(hourFromIso(ev.start_iso)), source: sourceLabel(ev) };
     var hold = commitmentSlots().filter(function (s) {
-      if (s.id === commitmentId && s.contact_id === c.contact_id && s.start_iso === startIso && s.end_iso === endIso) return false;
+      if (c && s.contact_id === c.contact_id && (skipOwnHold || (s.id === commitmentId && s.start_iso === startIso && s.end_iso === endIso))) return false;
       return Date.parse(s.start_iso) < b && Date.parse(s.end_iso) > a;
     })[0];
     if (hold) {
@@ -2982,7 +2982,7 @@
     if (!ownerRulebook(c)) return 'The booking rules did not come with this list. Press Refresh.';
     var v = ownerVisit(c);
     if (!v) return 'Pick a day and an arrival time first.';
-    var clash = clashForSpan(c, v.window_start_iso, v.end_iso);
+    var clash = clashForSpan(c, v.window_start_iso, v.end_iso, null, true);
     return clash ? clashSentence(clash) : '';
   }
 
@@ -3231,7 +3231,7 @@
     var block = ownerPressBlock(c, 'message');
     var last = state.pressResults[key];
     var held = ownerVisit(c);
-    var clash = held ? clashForSpan(c, held.window_start_iso, held.end_iso) : clashFor(c);
+    var clash = held ? clashForSpan(c, held.window_start_iso, held.end_iso, null, true) : clashFor(c);
     var out = '<p class="route">From <b>' + esc(senderShort(sender)) + '</b>' +
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' to the customer\'s mobile in GHL') + '</p>';
     if (m && editedText(c) != null) out += '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>';
@@ -3262,7 +3262,7 @@
     var preview = state.ownerPreviews[key];
     var block = ownerPressBlock(c, 'calendar');
     var last = state.pressResults[key];
-    var clash = v && clashForSpan(c, v.window_start_iso, v.end_iso);
+    var clash = v && clashForSpan(c, v.window_start_iso, v.end_iso, null, true);
     var days = (rb.days || []).map(function (d) { return WEEKDAY_NAMES[d] || d; });
     var lead = m && m.proposal
       ? 'Pick a time for this lead. Proposed: ' + longDate(String(m.proposal.window_start_iso || m.proposal.start_iso).slice(0, 10)) + ', arrive ' + timeRange(m.proposal.window_start_iso, m.proposal.window_end_iso) + '.'

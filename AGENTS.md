@@ -562,8 +562,11 @@ card's `--jc-a`, so `openAllocateSheet` stamps the job-type class onto it and
 `.alloc-sheet.<type>` sets the var; keep that stamping or the Allocate button
 silently falls back to orange.
 Two status vocabularies exist, scoped by vertical — they are never merged. On
-every make-safe surface the four user-facing statuses are the ONLY vocabulary:
-New / Allocated / Complete / Archive (+ live "On site"). The separate fencing
+every make-safe assignment and board surface the four user-facing statuses are
+the ONLY vocabulary: New / Allocated / Complete / Archive (+ live "On site").
+All-tab and MakeSafe Board database-search cards are jobs, not allocations —
+their chip is the pipeline word (see ALL-TAB SEARCH CARDS below), never a
+default New. The separate fencing
 field-work Board vertical has its own six column words: Ready / Scheduled / On
 site / Done / Attention / Cancelled (`FencingBoardCore`, detail in
 `trade-app.md`). Neither set may be renamed onto the other's surfaces.
@@ -749,9 +752,10 @@ on the job table instead of the assignment table: an empty query asks
 the Everyone lens, and it is painted only when the server answers
 `lens: 'company'` — scroll paging then follows the server's `next_offset`
 (`// <all-tab-full-feed>`). A typed All query is available to every authenticated
-trade and can open an unallocated make-safe; global results render ONLY on All.
-Today, Assigned, This Week, Active, and History remain assignment/day-scoped.
-Surface-level detail lives in `trade-app.md`.
+trade; global results render ONLY on All. Today, Assigned, This Week, Active, and
+History remain assignment/day-scoped. Search-card chips, open rules and lead
+own-row merge: ALL-TAB SEARCH CARDS below. Surface-level feed/paging detail lives
+in `trade-app.md`.
 
 ALL-TAB SEARCH CARDS ARE JOBS, NOT ALLOCATIONS (`// <all-tab-search-card-truth>`).
 "All means all" (captain, 2026-09-23): leads, quotes, drafts and archived records
@@ -759,14 +763,16 @@ stay in search, so the chip must tell the truth. It says Allocated only from an
 assignment row the viewer's feed carries (own row preferred) or a backend
 `assigned_to_me`/`allocated` flag, never from job status; otherwise the pipeline
 word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
-Archived). Pre-sale/dead records are view-only with a hint; a numbered
-delivery-stage job opens and the server's access check decides (403/404 renders
-"not on your jobs", no retry). Search hits already rendered as the viewer's own
-cards are not repeated. A managed lead's Everyone read covers only their managed
-verticals, so `fetchMyJobsForActiveLens` also reads `mode=mine` and merges own
-rows (`// <lead-own-rows-merge>`); the toggle reads `Everyone (fencing)`. Job
-`metadata` money keys are stripped from `my_jobs`/`search_all_jobs` at the `api()`
-door (`// <trade-job-list-money-strip>`). Guard:
+Archived). A make-safe hit still opens the report path (unallocated included);
+its chip never says New just because it is live. Pre-sale/dead records are
+view-only with a hint; a numbered delivery-stage job opens and the server's
+access check decides (403/404 renders "not on your jobs", no retry). Search hits
+already rendered as the viewer's own cards are not repeated. A managed lead's
+Everyone read covers only their managed verticals, so `fetchMyJobsForActiveLens`
+also reads `mode=mine` and merges own rows (`// <lead-own-rows-merge>`); the
+toggle reads `Everyone (fencing)`. Job `metadata` money keys are stripped from
+`my_jobs`/`search_all_jobs` at the `api()` door
+(`// <trade-job-list-money-strip>`). Guard:
 `tests/e2e/trade-all-search-truth.spec.js`.
 
 A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A

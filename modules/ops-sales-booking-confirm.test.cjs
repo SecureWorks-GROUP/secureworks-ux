@@ -619,15 +619,22 @@ function ownerSetup(actionMode) {
   globalThis.fixtureActionMode = actionMode || 'unknown';
   delete globalThis.fixtureOwnerMode; delete globalThis.fixtureOwnerRefusal;
   global.opsPost = backend.post;
-  Object.assign(api.state, { data, weekStart: data.week_start, drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {} });
+  Object.assign(api.state, { data, weekStart: data.week_start, drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {}, dayIndex: null, selectedId: null });
   return backend;
 }
 function fridayOf(d) {
   return d.booking_flow.owner_rulebook.bookable_dates.filter((x) => new Date(x + 'T12:00:00Z').getUTCDay() === 5).pop();
 }
-function pickVisit(c, start, minutes) {
+function thisFriday() {
+  return api.addDays(data.week_start, 4);
+}
+function nextFriday() {
+  const thisFri = thisFriday();
+  return data.booking_flow.owner_rulebook.bookable_dates.filter((x) => new Date(x + 'T12:00:00Z').getUTCDay() === 5 && x !== thisFri).pop();
+}
+function pickVisit(c, start, minutes, date) {
   api.state.selectedId = c.id;
-  Object.assign(api.ownerPick(c), { date: fridayOf(data), start, minutes });
+  Object.assign(api.ownerPick(c), { date: date || fridayOf(data), start, minutes });
 }
 const caseById = (id) => data.cases.find((c) => c.id === id);
 
@@ -662,6 +669,15 @@ test('an edited text is checked by the server, shown exactly, then approved and 
   assert.match(html, /data-booking-press="message"[^>]* disabled/);
 });
 
+test('every Stratco card can pick a different time when the owner path is on', () => {
+  ownerSetup();
+  data.cases.filter((c) => c.owner_booking && c.owner_booking.eligible).forEach((c) => {
+    api.state.selectedId = c.id;
+    assert.equal(api.calendarPath(c), 'owner');
+    assert.match(api.renderCard(), /Pick a visit/);
+  });
+});
+
 test('a lead with no proposed time gets a day and window picker that books through the check', async () => {
   const backend = ownerSetup('sent');
   row = caseById('lead-priya');
@@ -676,7 +692,8 @@ test('a lead with no proposed time gets a day and window picker that books throu
   assert.deepEqual(api.ownerVisit(row), { window_start_iso: fri + 'T12:30:00+08:00', window_end_iso: fri + 'T13:30:00+08:00', end_iso: fri + 'T14:30:00+08:00' });
   html = api.renderCard();
   assert.match(html, /Book it writes: <b>GHL Stratco Fencing calendar<\/b> and <b>Marnin's Outlook<\/b>/);
-  assert.match(html, /Hold Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them with this text/);
+  assert.match(html, /This text holds Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them\./);
+  assert.doesNotMatch(html, /data-owner-offer|Hold .* with this text/);
   const checked = await api.press(row.id, 'calendar');
   assert.equal(checked.ok, true);
   assert.deepEqual(backend.writes[0].body.owner_input.visit, api.ownerVisit(row));
@@ -692,7 +709,7 @@ test('a lead with no proposed time gets a day and window picker that books throu
   assert.match(api.renderCard(), /Booked Friday [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm in GHL Stratco Fencing calendar and Marnin's Outlook at /);
 });
 
-test('a text sent with a picked time carries it as the offer, unless unticked', async () => {
+test('a text sent with a picked time always holds that visit', async () => {
   const backend = ownerSetup();
   row = caseById('lead-priya');
   pickVisit(row, '12:30', 60);
@@ -700,9 +717,44 @@ test('a text sent with a picked time carries it as the offer, unless unticked', 
   await api.press(row.id, 'message');
   assert.deepEqual(backend.writes[0].body.owner_input.offer, api.ownerVisit(row));
   assert.match(api.renderCard(), /It holds Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them\./);
-  api.state.ownerPreviews = {};
-  api.ownerPick(row).offer = false;
-  assert.equal(api.ownerInput(row, 'message').offer, undefined);
+  assert.doesNotMatch(api.renderCard(), /data-owner-offer/);
+});
+
+test('an owner book occupies the day so the next lead must pick another time', async () => {
+  const backend = ownerSetup('sent');
+  const priya = caseById('lead-priya');
+  const basil = caseById('lead-basil');
+  const thisFri = thisFriday();
+  api.state.dayIndex = 4;
+  pickVisit(priya, '12:30', 60, thisFri);
+  assert.equal((await api.press(priya.id, 'calendar')).ok, true);
+  assert.equal((await api.ownerApprove(priya.id, 'calendar')).ok, true);
+  assert.match(api.renderDay(), /Priya S/);
+  assert.match(api.renderDay(), /12:30/);
+  assert.match(api.clashFor(basil).label, /Priya/);
+  api.state.selectedId = basil.id;
+  assert.equal(api.calendarPath(basil), 'owner');
+  assert.match(api.renderCard(), /Pick a visit/);
+  pickVisit(basil, '12:30', 60, thisFri);
+  assert.match(api.ownerBlock(basil, 'calendar'), /Priya/);
+  const later = nextFriday();
+  assert.ok(later);
+  pickVisit(basil, '12:30', 60, later);
+  assert.equal(api.ownerBlock(basil, 'calendar'), '');
+  assert.equal((await api.press(basil.id, 'calendar')).ok, true);
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_book').length, 1);
+});
+
+test('a sent offer occupies the slot so another lead cannot take it', async () => {
+  ownerSetup('sent');
+  const priya = caseById('lead-priya');
+  const basil = caseById('lead-basil');
+  const thisFri = thisFriday();
+  pickVisit(priya, '12:30', 60, thisFri);
+  assert.equal((await api.press(priya.id, 'message')).ok, true);
+  assert.equal((await api.ownerApprove(priya.id, 'message')).ok, true);
+  pickVisit(basil, '12:30', 60, thisFri);
+  assert.match(api.ownerBlock(basil, 'calendar'), /Priya|offered/i);
 });
 
 test('a named server refusal shows as one plain sentence and nothing is approved or booked', async () => {
@@ -724,17 +776,20 @@ test('a named server refusal shows as one plain sentence and nothing is approved
   delete globalThis.fixtureOwnerRefusal;
 });
 
-test('the unedited engine proposal still takes the engine path when the owner path is on', async () => {
+test('the unedited engine text still takes the engine path until a time is picked', async () => {
   const backend = ownerSetup('sent');
   row = caseById('lead-basil'); api.state.selectedId = row.id; api.renderHTML();
   assert.equal(api.messagePath(row), 'engine');
-  assert.equal(api.calendarPath(row), 'engine');
+  assert.equal(api.calendarPath(row), 'owner');
   const r = await api.press(row.id, 'message');
   assert.equal(r.ok, true);
   assert.equal(backend.writes[0].body.owner_input, undefined);
   assert.equal(backend.writes[0].body.snapshot.content.variant, 'template');
   assert.equal(backend.writes[1].action, 'sales_booking_send');
-  assert.doesNotMatch(api.renderCard(), /Pick a visit/);
+  assert.match(api.renderCard(), /Pick a visit/);
+  pickVisit(row, '12:30', 60);
+  assert.equal(api.messagePath(row), 'owner');
+  assert.deepEqual(api.ownerInput(row, 'message').offer, api.ownerVisit(row));
 });
 
 test('an owner path the server does not have yet says not connected and sends nothing', async () => {

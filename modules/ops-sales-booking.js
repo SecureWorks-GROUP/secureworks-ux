@@ -1786,7 +1786,9 @@
     var a = Date.parse(startIso), b = Date.parse(endIso);
     if (!(b > a)) return null;
     var ev = diary().filter(function (row) {
-      return row.kind !== 'reservation' && diaryOccupiesDay(row) && Date.parse(row.start_iso) < b && Date.parse(row.end_iso) > a;
+      if (row.kind === 'reservation' || !diaryOccupiesDay(row)) return false;
+      if (c && ((row.contact_id && row.contact_id === c.contact_id) || diaryEventMatchesCase(row, c))) return false;
+      return Date.parse(row.start_iso) < b && Date.parse(row.end_iso) > a;
     })[0];
     if (ev) return { kind: 'calendar', label: eventTitle(ev), at: clockLabel(hourFromIso(ev.start_iso)), source: sourceLabel(ev) };
     var hold = commitmentSlots().filter(function (s) {
@@ -2862,25 +2864,22 @@
     return (ob && ob.rulebook) || (flow && flow.owner_rulebook) || null;
   }
 
-  function hasEngineProposal(c) {
-    var m = decisionModel(c);
-    return !!(m && m.proposal);
-  }
-
   // The engine's own template, unedited and pressable, stays on the engine path
-  // exactly as before. Anything else the owner writes goes the owner's way. A
-  // read that does not offer the owner's way leaves the screen as it was.
+  // exactly as before. A picked time, or anything else the owner writes, goes
+  // the owner's way so a sent text can hold that slot. A read that does not
+  // offer the owner's way leaves the screen as it was.
   function messagePath(c) {
     if (!ownerFlow()) return 'engine';
+    if (ownerVisit(c)) return 'owner';
     var m = decisionModel(c);
     if (m && editedText(c) == null && m.message && m.message.template_locked && m.message.text && approvalBlock(c, 'message', false, true) === '') return 'engine';
     return 'owner';
   }
 
-  // A lead with a proposed time keeps Book it for that time. Without one the
-  // owner picks the day and the arrival window himself.
+  // Every Stratco card on the owner's path gets a picker so a blocked or
+  // unwanted proposal is never the only time on that card.
   function calendarPath(c) {
-    return !ownerFlow() || hasEngineProposal(c) ? 'engine' : 'owner';
+    return ownerFlow() ? 'owner' : 'engine';
   }
 
   function minutesOf(clock) {
@@ -2925,7 +2924,7 @@
 
   function ownerPick(c) {
     var key = draftKey(c), rb = ownerRulebook(c);
-    if (!state.ownerVisits[key]) state.ownerVisits[key] = { date: '', start: '', minutes: rb ? Number(rb.window_max_minutes) : 90, offer: true };
+    if (!state.ownerVisits[key]) state.ownerVisits[key] = { date: '', start: '', minutes: rb ? Number(rb.window_max_minutes) : 90 };
     return state.ownerVisits[key];
   }
 
@@ -2942,19 +2941,11 @@
     return { window_start_iso: at(s), window_end_iso: at(s + minutes), end_iso: at(s + minutes + Number(rb.visit_minutes)) };
   }
 
-  // A text sent with a picked time carries it as the offer, so the server holds
-  // that time for this lead and refuses it to anyone else.
-  function ownerOffer(c) {
-    if (hasEngineProposal(c)) return null;
-    var pick = state.ownerVisits[draftKey(c)];
-    return pick && pick.offer !== false ? ownerVisit(c) : null;
-  }
-
   function ownerInput(c, kind) {
     var input = { step: kind, case_id: c.id, contact_id: c.contact_id, week_start: state.weekStart, resource: 'marnin' };
     if (kind === 'message') {
       input.text = composeText(c);
-      var offer = ownerOffer(c);
+      var offer = ownerVisit(c);
       if (offer) input.offer = offer;
     } else {
       input.visit = ownerVisit(c);
@@ -3123,8 +3114,64 @@
     result.input = preview.input;
     delete state.ownerPreviews[key];
     state.pressResults[key] = result;
+    if (result.done) rememberOccupancy(c, result);
     render();
     return { ok: !!result.done, result: result };
+  }
+
+  function occupancyVisit(result) {
+    var ct = result && result.snapshot && result.snapshot.content || {};
+    var offer = ct.offer;
+    if (offer && offer.window_start_iso && offer.end_iso) return { start: offer.window_start_iso, end: offer.end_iso, title: null, book: false };
+    if (ct.window_start_iso && ct.end_iso) return { start: ct.window_start_iso, end: ct.end_iso, title: ct.title || null, book: result.snapshot.step === 'calendar' };
+    if (ct.start_iso && ct.end_iso) return { start: ct.start_iso, end: ct.end_iso, title: ct.title || null, book: result.snapshot.step === 'calendar' };
+    return null;
+  }
+
+  function rememberOccupancy(c, result) {
+    if (!result || !result.done || !c || !state.data) return;
+    var visit = occupancyVisit(result);
+    if (!visit || !(Date.parse(visit.end) > Date.parse(visit.start))) return;
+    if (visit.book) rememberBookedVisit(c, visit);
+    else rememberOfferedVisit(c, visit);
+  }
+
+  function rememberBookedVisit(c, visit) {
+    var data = state.data;
+    if (!Array.isArray(data.diary)) data.diary = [];
+    var title = visit.title && /^scope:\s*/i.test(visit.title) ? visit.title
+      : ('Scope: ' + (c.display_name || 'visit') + (c.suburb ? ', ' + c.suburb : ''));
+    if (data.diary.some(function (ev) {
+      return (ev.contact_id && ev.contact_id === c.contact_id && (ev.start === visit.start || ev.start_iso === visit.start))
+        || (ev.start === visit.start && ev.end === visit.end && ev.title === title);
+    })) return;
+    data.diary.push({
+      event_id: 'owner-booked-' + (c.contact_id || c.id) + '-' + visit.start,
+      contact_id: c.contact_id,
+      opportunity_id: c.opportunity_id || c.id,
+      start: visit.start,
+      end: visit.end,
+      title: title,
+      kind: 'busy',
+      source: 'ghl_calendar',
+      blocks_capacity: true
+    });
+  }
+
+  function rememberOfferedVisit(c, visit) {
+    var flow = state.data.booking_flow;
+    if (!flow) return;
+    if (!Array.isArray(flow.commitments)) flow.commitments = [];
+    if (flow.commitments.some(function (s) {
+      return s.contact_id === c.contact_id && s.start_iso === visit.start && s.end_iso === visit.end;
+    })) return;
+    flow.commitments.push({
+      id: 'owner-offer-' + (c.contact_id || c.id) + '-' + visit.start,
+      contact_id: c.contact_id,
+      state: 'offered',
+      start_iso: visit.start,
+      end_iso: visit.end
+    });
   }
 
   // Busy while a check is open or anything is in flight, so the words and the
@@ -3183,11 +3230,12 @@
     var recipient = m && m.message && m.message.recipient;
     var block = ownerPressBlock(c, 'message');
     var last = state.pressResults[key];
-    var clash = clashFor(c);
+    var held = ownerVisit(c);
+    var clash = held ? clashForSpan(c, held.window_start_iso, held.end_iso) : clashFor(c);
     var out = '<p class="route">From <b>' + esc(senderShort(sender)) + '</b>' +
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' to the customer\'s mobile in GHL') + '</p>';
     if (m && editedText(c) != null) out += '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>';
-    out += renderOfferChoice(c);
+    if (held) out += '<p class="fine">This text holds ' + esc(visitWords(held)) + ' for them.</p>';
     if (clash) out += '<p class="clash">' + esc(clashSentence(clash)) + '</p>';
     if (preview) {
       out += renderOwnerPreview(c, 'message', preview);
@@ -3196,17 +3244,6 @@
         (block && !state.pressPending[key] && !state.approvalPending[key] && !(last && last.done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '');
     }
     return out + (m ? channelLine(c, 'message') : '') + renderResult(c, 'message');
-  }
-
-  // With a picked time and no proposed one, the text carries that time as its
-  // offer unless the owner unticks it.
-  function renderOfferChoice(c) {
-    if (hasEngineProposal(c)) return '';
-    var v = ownerVisit(c);
-    if (!v) return '';
-    var pick = state.ownerVisits[draftKey(c)];
-    return '<label class="offer"><input type="checkbox" data-owner-offer data-focus-key="offer-' + esc(c.id) + '"' + (pick.offer !== false ? ' checked' : '') + (pickerBusy(c) ? ' disabled' : '') + '>' +
-      '<span>Hold ' + esc(visitWords(v)) + ' for them with this text</span></label>';
   }
 
   function renderOwnerVisit(c) {
@@ -3227,9 +3264,11 @@
     var last = state.pressResults[key];
     var clash = v && clashForSpan(c, v.window_start_iso, v.end_iso);
     var days = (rb.days || []).map(function (d) { return WEEKDAY_NAMES[d] || d; });
-    var lead = m && m.reason && m.reason !== 'No validated AI proposal in this read.'
-      ? 'No confident proposed time: ' + m.reason
-      : 'No proposed time for this lead, so pick one.';
+    var lead = m && m.proposal
+      ? 'Pick a time for this lead. Proposed: ' + longDate(String(m.proposal.window_start_iso || m.proposal.start_iso).slice(0, 10)) + ', arrive ' + timeRange(m.proposal.window_start_iso, m.proposal.window_end_iso) + '.'
+      : (m && m.reason && m.reason !== 'No validated AI proposal in this read.'
+        ? 'No confident proposed time: ' + m.reason
+        : 'No proposed time for this lead, so pick one.');
     var rules = days.length ? ' Stratco visits are ' + days.join(' or ') + ', ' + clockLabel(minutesOf(rb.day_start) / 60) + ' to ' + clockLabel(minutesOf(rb.day_end) / 60) + '.' : '';
     function option(value, label, on) { return '<option value="' + esc(value) + '"' + (on ? ' selected' : '') + '>' + esc(label) + '</option>'; }
     var picker = '<div class="pick">' +
@@ -3425,6 +3464,7 @@
       delete state.pressPending[key];
     }
     state.pressResults[key] = result;
+    if (result.done) rememberOccupancy(c, result);
     if (result.done && sameContent(approvalSnapshot(c, kind), snap)) {
       var channel = c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
       channel.state = 'succeeded';
@@ -3901,14 +3941,13 @@
         reviseProposedTime(e.target.value);
         render();
       }
-      if (e.target.matches && e.target.matches('[data-owner-visit], [data-owner-offer]')) {
+      if (e.target.matches && e.target.matches('[data-owner-visit]')) {
         var pc = selectedCase();
         if (!pc || pickerBusy(pc) || !ownerRulebook(pc)) return render();
         var pick = ownerPick(pc);
         var field = e.target.getAttribute('data-owner-visit');
         if (field === 'minutes') pick.minutes = Number(e.target.value);
         else if (field) pick[field] = e.target.value;
-        else pick.offer = !!e.target.checked;
         // A start the new day or window no longer allows is cleared, never kept.
         if (pick.start && ownerStarts(ownerRulebook(pc), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
         delete state.approvalErrors[approvalKey(pc, 'calendar')];

@@ -24,9 +24,16 @@ const URL = base + '/tests/fixtures/booking-confirm/friday.html';
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption(start);
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption(minutes);
     };
+    const choose = async (name) => {
+      const back = page.getByRole('button', { name: 'All leads' });
+      if (await back.isVisible()) await back.click();
+      await page.locator('.bk-list .lead', { hasText: name }).click();
+    };
 
     await page.goto(URL);
-    await page.locator('.bk-list .lead', { hasText: 'Priya S' }).click();
+    await choose('Basil L');
+    await shot('basil-picker');
+    await choose('Priya S');
     await pick('12:30', '60');
     await shot('picker');
     await page.getByRole('button', { name: 'Book it' }).click();

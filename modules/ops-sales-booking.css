@@ -227,8 +227,6 @@
 #salesBookingRoot .pick select:hover:not(:disabled){border-color:#C9D3D9}
 #salesBookingRoot .pick select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
 #salesBookingRoot .pick select:disabled{background-color:var(--surface-2);color:var(--ink-2);cursor:not-allowed}
-#salesBookingRoot .offer{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;color:var(--ink-2);cursor:pointer}
-#salesBookingRoot .offer input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent);flex:none}
 #salesBookingRoot .ownercheck{display:grid;gap:10px;margin-top:4px;padding:14px 16px 16px;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:10px;background:var(--surface-2);animation:bk-in .25s cubic-bezier(.2,.8,.2,1)}
 #salesBookingRoot .oc-head{font-size:14px;color:var(--ink-2)}
 #salesBookingRoot .oc-head strong{color:var(--ok);font-weight:650}

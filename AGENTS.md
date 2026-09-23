@@ -778,7 +778,7 @@ Everyone read covers only their managed verticals, so `fetchMyJobsForActiveLens`
 also reads `mode=mine` and merges own rows (`// <lead-own-rows-merge>`); a
 failed personal read keeps the previously shown own rows and still names the
 miss; merged today rows sort by date/time before the run list freezes; the
-toggle reads `Everyone (fencing)`. Job `metadata` money keys are stripped from
+toggle reads `Everyone · fencing`. Job `metadata` money keys are stripped from
 `my_jobs`/`search_all_jobs` at the `api()` door
 (`// <trade-job-list-money-strip>`). Guard:
 `tests/e2e/trade-all-search-truth.spec.js`.

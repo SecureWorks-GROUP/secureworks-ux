@@ -101,7 +101,7 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
   test('Ryan: own job listed once and tappable, the lost quote reads Quote under the client name', async ({ page }) => {
     const { stub } = await boot(page, 'ryan', ryanActions([EMBLETON_JOB, LOST_QUOTE]));
     await openJobsTab(page, 'all');
-    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone (make-safe)');
+    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone · make-safe');
     await page.locator('#jobSearchInput').fill('Michael Johnson');
 
     const list = page.locator('#myJobsList');
@@ -193,7 +193,7 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
         : { lens: 'company', jobs: [], total: 0 })
     });
     await openJobsTab(page, 'all');
-    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone (fencing)');
+    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone · fencing');
     await page.locator('#jobSearchInput').fill('Michael');
     const quote = page.locator('#myJobsList .jcsr').filter({ hasText: 'SWF-88001' });
     const live = page.locator('#myJobsList .jcsr').filter({ hasText: 'SWF-88002' });

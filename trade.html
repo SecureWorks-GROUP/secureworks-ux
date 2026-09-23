@@ -7167,12 +7167,6 @@
   // manage (Ryan: make-safe, Henry: fencing), so on its own it drops the lead's
   // OWN jobs in every other vertical from Today, Assigned and This Week. The
   // button names that scope, and the lead's own rows are merged back in.
-  var VERTICAL_SCOPE_LABEL = { makesafe: 'make-safe', fencing: 'fencing', patio: 'patio', decking: 'decking', renovation: 'renovation', reno: 'renovation', repair: 'repair' };
-  function everyoneScopeLabel() {
-    if (_isAdmin) return 'Everyone';
-    var names = managedTradeVerticals(_user).map(function(v) { return VERTICAL_SCOPE_LABEL[v] || v; });
-    return names.length ? 'Everyone (' + names.join(', ') + ')' : 'Everyone';
-  }
 
   var MY_JOBS_ROW_GROUPS = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'];
 
@@ -8573,7 +8567,7 @@
     var globalSearchAt = html.length;
     var renderedJobIds = {};
     if (data._ownRowsUnavailable && activeMyJobsLens() === 'everyone') {
-      html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">Could not load your own jobs outside ' + esc(everyoneScopeLabel().replace(/^Everyone \(|\)$/g, '')) + '. Switch to Mine to see them.</div>';
+      html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">Could not load your own jobs outside ' + esc(TradeAccessCore.verticalNames(_user).join(', ')) + '. Switch to Mine to see them.</div>';
     }
 
     var managedPrimary = primaryManagedTradeVertical();

@@ -708,8 +708,7 @@
       if (!list.length) {
         var gaps = state.tlFilter === 'facts' ? factLines(d) : sourceGaps(d, state.tlFilter);
         var which = state.tlFilter === 'all' ? 'entries' : (TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase());
-        var factsExplained = state.tlFilter === 'facts' && gaps.length > 0;
-        body = (factsExplained ? '' : '<p class="thread-note">No ' + esc(which) + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>') +
+        body = (gaps.length ? '' : '<p class="thread-note">No ' + esc(which) + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>') +
           gaps.filter(function (g) { return !g.always; }).map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
       } else {
         body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';

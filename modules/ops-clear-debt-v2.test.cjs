@@ -334,13 +334,20 @@ test('truncated, capped and faulted timelines say so; missing sources are named,
   assert.match(t, /ghl_cache: permission denied/);
   assert.match(t, /GHL texts could not be read/);
   assert.match(t, /This timeline is incomplete: a source could not be read/);
+  const faulted = data.debtors.find((d) => d.identity.name === 'Debtor 004');
+  faulted.timeline.entries = faulted.timeline.entries.filter((e) => CD.entryGroup(e) !== 'text');
+  CD.state.selectedKey = faulted.key;
+  CD.state.tlFilter = 'text';
+  t = text();
+  assert.match(t, /Stored GHL texts could not be read, so this list is not the whole story\./);
+  assert.doesNotMatch(t, /No texts in the .*stored copies/);
   // A debtor with no linked job: empty channels name the missing source.
   const noJob = data.debtors.find((d) => d.link_state.linked === 0);
   CD.state.selectedKey = noJob.key;
   CD.state.tlFilter = 'text';
   t = text();
-  assert.match(t, /No texts in the newest \d+ stored copies for this debtor\./);
   assert.match(t, /No invoice on this debtor is linked to a job, so stored GHL texts cannot be read\./);
+  assert.doesNotMatch(t, /No texts in the .*stored copies/);
   for (const d of data.debtors) {
     CD.state.selectedKey = d.key;
     for (const c of CD.TL_CHIPS) {

@@ -644,6 +644,19 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
+## Trade clock recovery (`trade.html`)
+
+`checkServerClockRecovery` runs after every `my_jobs` load and may adopt a
+server clock as this device's running timer ONLY when the row is the signed-in
+trade's own (`user.id`/`user_id`; an unowned row only on the personal feed,
+never `mode=all`, which carries every crew's rows), on a live job, clocked on
+today or yesterday (Perth). An own clock that fails those gets the "ask the
+office to close it" notice, never adoption. A clock_event the server refuses
+('Not your assignment', any non-transient 4xx, `success:false`) is a refusal
+(`isClockEventRefusal`): never queued offline, never "Saved locally", and a
+queued one is dropped on replay. Search `// <trade-clock-recovery>`; guard
+`tests/e2e/trade-clock-recovery.spec.js`.
+
 ## Crew roster & lead installer (`trade.html`)
 
 The authoritative crew and lead-installer contract, including absence semantics,

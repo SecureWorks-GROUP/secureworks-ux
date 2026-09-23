@@ -22168,7 +22168,7 @@
         _hydratePerMetreWorkOrderCards();
         return;
       }
-      if (isPerMetreUser()) renderInvoiceBuilder();
+      renderInvoiceBuilder();
     }).catch(function() {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;
       if (_invoiceBuilderOpen && isPerMetreUser() && _pmWoHydrateState === 'idle') {
@@ -23263,7 +23263,6 @@
   function _pinAssignedCardRates() {
     var data = _hoursData || {};
     var officeRate = Number(data.rate || _tradeRate || 0);
-    if (!(officeRate > 0) && data.rate_resolved !== false) return;
     _jobCards.forEach(function(c) {
       if (!c || c.manually_added) return;
       c.rate = officeRate > 0 ? officeRate : 0;
@@ -24424,6 +24423,7 @@
         var _lbl = c.job_number || c.site_suburb || c.client_name || 'Job';
         var _noHours = (c.hours == null || c.hours <= 0 || !(Number(c.rate) > 0));
         var _noDesc = c.manually_added && !c.description;
+        if (!c.manually_added && !(Number(c.rate) > 0)) return RATE_NOT_SET_MSG;
         if (_noDesc && _noHours) return _lbl + ': add a description and enter hours and your rate, or add an amount.';
         if (_noDesc) return _lbl + ': add a description of works done.';
         return _lbl + ': enter hours and your rate, or add an amount.';

@@ -22168,6 +22168,8 @@
         _hydratePerMetreWorkOrderCards();
         return;
       }
+      _syncJobCardsFromDOM();
+      _syncInvLumpLinesFromDOM();
       renderInvoiceBuilder();
     }).catch(function() {
       if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx)) return;

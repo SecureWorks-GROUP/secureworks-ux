@@ -112,4 +112,83 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
       expect.objectContaining({ assignment_id: 'e2e-wo-holder-assignment', hours: 3, rate: 50, rate_source: 'server_resolved' })
     ]);
   });
+
+  test('keeps in-progress notes, description and extras when the office rate lands', async ({ appPage: page, feedRequests }) => {
+    const weekStart = perthWeekMonday();
+    const weekEnd = addIsoDays(weekStart, 6);
+    const jobDate = addIsoDays(weekStart, 1);
+    let releaseHours;
+    const holdHours = new Promise((resolve) => { releaseHours = resolve; });
+
+    await signIn(page, PERSONAS.installer);
+    await page.route('https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('action') === 'my_hours') await holdHours;
+      await route.fallback();
+    });
+    await page.evaluate(([start, end, scheduled]) => {
+      sessionStorage.setItem('sw_inv_draft_' + encodeURIComponent('e2e-installer'), JSON.stringify({
+        user_id: 'e2e-installer',
+        jobCentric: true,
+        jobCards: [{
+          assignment_id: 'e2e-wo-holder-assignment',
+          job_id: 'e2e-wo-holder-job',
+          job_number: 'SWF-26767',
+          client_name: 'Kelvin Gillies',
+          site_suburb: 'Joondalup',
+          job_type: 'fencing',
+          scheduled_date: scheduled,
+          included: true,
+          wo_mode: false,
+          hours: 3,
+          rate: 99,
+          rate_source: 'client_entered',
+          manually_added: false
+        }],
+        invLumpLines: [{ id: 'il-e2e-refresh', description: '', amount: 0 }],
+        weekStart: start,
+        weekEnd: end
+      }));
+    }, [weekStart, weekEnd, jobDate]);
+
+    await page.locator('[data-view="hours"]').click();
+    const card = page.locator('.jc-card').filter({ hasText: 'SWF-26767' });
+    const desc = card.locator('input[placeholder="Description of work"]');
+    const notes = page.locator('#invNotes');
+    const extraDesc = page.locator('[data-invlumpdesc="0"]');
+    const extraAmt = page.locator('[data-invlumpamt="0"]');
+    await expect(card.locator('[data-cardhours]')).toHaveValue('3');
+    await extraDesc.evaluate((el) => { el.value = 'Tool hire'; });
+    await extraAmt.evaluate((el) => { el.value = '15'; });
+    await notes.fill('Side gate access');
+    await desc.fill('Replaced palings on the street side');
+
+    releaseHours();
+    await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$50.00/hr');
+    await expect(desc).toHaveValue('Replaced palings on the street side');
+    await expect(notes).toHaveValue('Side gate access');
+    await expect(extraDesc).toHaveValue('Tool hire');
+    await expect(extraAmt).toHaveValue('15');
+
+    await page.locator('#invSubmitBtn').click();
+    await page.locator('#confirmAck').check();
+    await page.locator('#confirmOk').click();
+    await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
+
+    const writes = feedRequests.filter((entry) => entry.action === 'generate_trade_invoice' && entry.method === 'POST');
+    expect(writes.length).toBe(1);
+    expect(writes[0].body.notes).toBe('Side gate access');
+    expect(writes[0].body.manual_assignments).toEqual([
+      expect.objectContaining({
+        assignment_id: 'e2e-wo-holder-assignment',
+        hours: 3,
+        rate: 50,
+        rate_source: 'server_resolved',
+        description: 'Replaced palings on the street side'
+      })
+    ]);
+    expect(writes[0].body.final_deductions).toEqual([
+      { description: 'Tool hire', quantity: 1, unit: 'ea', unit_rate: 15 }
+    ]);
+  });
 });

@@ -4794,7 +4794,7 @@
     tradeStripJobBag(job.makesafe_details);
     if (job.scope_json && typeof job.scope_json === 'object') tradeStripMoneyKeys(job.scope_json);
     else if (typeof job.scope_json === 'string' && job.scope_json) {
-      try { job.scope_json = JSON.stringify(tradeStripMoneyKeys(JSON.parse(job.scope_json)) || {}); }
+      try { job.scope_json = tradeStripMoneyKeys(JSON.parse(job.scope_json)) || {}; }
       catch (e) { job.scope_json = null; }
     }
   }

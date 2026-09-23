@@ -11,7 +11,8 @@ const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
 const PROFILE_API = `${SUPABASE_ORIGIN}/functions/v1/ghl-proxy`;
 const QUOTE_PDF = `${SUPABASE_ORIGIN}/storage/v1/object/sign/docs/e2e-quote.pdf?token=e2e`;
 
-function jobDetail(workOrderId) {
+function jobDetail(workOrderId, extras) {
+  extras = extras || {};
   return {
     access_tier: 'division_manager',
     quote_visible: true,
@@ -25,7 +26,7 @@ function jobDetail(workOrderId) {
       site_suburb: 'Joondalup',
       pricing_json: { total: 8800 },
       metadata: { external_ref: 'REF-1', pricing_correction: { new_total_inc_gst: 8800 } },
-      scope_json: {
+      scope_json: extras.scopeJson !== undefined ? extras.scopeJson : {
         totalMetres: 42,
         pricing: { labour: { days: 2, dayRate: 650 }, extras: [{ sell: 8800 }] },
         _pricing_json: { quoteTotal: 8800 },
@@ -92,7 +93,7 @@ async function stubMoney(page, persona, opts) {
     const url = new URL(route.request().url());
     const action = url.searchParams.get('action');
     let body = null;
-    if (action === 'trade_job_detail') body = jobDetail(opts.workOrderId || 'wo-other');
+    if (action === 'trade_job_detail') body = jobDetail(opts.workOrderId || 'wo-other', opts);
     if (action === 'my_work_orders') {
       woModes.push(url.searchParams.get('mode'));
       const rows = workOrders(profile.id);
@@ -162,6 +163,22 @@ test.describe('vertical manager (non-office) sees hours, never money', () => {
     await page.locator('.jd-tab[data-tab="files"]').click();
     await expect(page.locator('#jdTab_files')).not.toContainText('Quote-Q-4412.pdf');
     await expect(page.locator(`#viewJob a[href="${QUOTE_PDF}"]`)).toHaveCount(0);
+  });
+
+  test('string scope_json still paints Scope after the door strips money', async ({ appPage: page }) => {
+    await stubMoney(page, PERSONAS.fencing_manager, {
+      profile: { trade_tier: 3 },
+      scopeJson: '{"job":{"siteNotes":"Leave access","runs":[{"length":42}]},"pricing":{"labour":{"days":2,"dayRate":650}}}',
+    });
+    await signIn(page, PERSONAS.fencing_manager);
+    await page.evaluate(() => window.openJob('e2e-job-1'));
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await page.locator('.jd-tab[data-tab="scope"]').click();
+    const scope = page.locator('#jdTab_scope');
+    await expect(scope).toContainText('Leave access');
+    await expect(scope).toContainText('42m');
+    await expect(scope).not.toContainText('650');
+    await expect(scope).not.toContainText('$');
   });
 
   test('tier-3 manager keeps their OWN work order pay in the job detail', async ({ appPage: page }) => {

@@ -158,16 +158,16 @@ test.describe('a restored hourly draft cannot keep a trade-typed assigned rate',
     const extraDesc = page.locator('[data-invlumpdesc="0"]');
     const extraAmt = page.locator('[data-invlumpamt="0"]');
     await expect(card.locator('[data-cardhours]')).toHaveValue('3');
-    await extraDesc.evaluate((el) => { el.value = 'Tool hire'; });
-    await extraAmt.evaluate((el) => { el.value = '15'; });
     await notes.fill('Side gate access');
     await desc.fill('Replaced palings on the street side');
     await page.getByRole('button', { name: '+ Add extra / adjustment' }).click();
     const adjDesc = page.locator('#ir_desc_0');
     const adjType = page.locator('#ir_div_0');
     await expect(adjDesc).toBeVisible();
-    await adjDesc.evaluate((el) => { el.value = 'Travel to second site'; });
-    await adjType.evaluate((el) => { el.value = 'Fencing'; });
+    await extraDesc.fill('Tool hire');
+    await extraAmt.fill('15');
+    await adjDesc.fill('Travel to second site');
+    await adjType.selectOption('Fencing');
 
     releaseHours();
     await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$50.00/hr');

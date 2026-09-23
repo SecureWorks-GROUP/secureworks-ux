@@ -60,7 +60,9 @@ in `trade.html` (search `// <all-tab-full-feed>`):
 ### Job Detail View
 - **Client card**: name, phone (tap-to-call), address + Navigate button (Google Maps directions URL: `www.google.com/maps/dir/?api=1&destination=`)
 - **Assignment status buttons**: Confirm → On Site → Complete (with GPS check-in + haptic feedback)
-- **Live timer**: ticks every 30s when status is in_progress
+- **Live timer**: ticks every 30s when status is in_progress. Login
+  adoption and a refused `clock_event` (never queued offline) are owned
+  by `AGENTS.md` → "Trade clock recovery".
 - **Crew roster**: every allocated person is listed once (the detail feed may
   repeat a person once per day); the designated lead carries a **LEAD
   INSTALLER** badge and other people remain plain crew members. An explicit

@@ -753,6 +753,22 @@ trade and can open an unallocated make-safe; global results render ONLY on All.
 Today, Assigned, This Week, Active, and History remain assignment/day-scoped.
 Surface-level detail lives in `trade-app.md`.
 
+ALL-TAB SEARCH CARDS ARE JOBS, NOT ALLOCATIONS (`// <all-tab-search-card-truth>`).
+"All means all" (captain, 2026-09-23): leads, quotes, drafts and archived records
+stay in search, so the chip must tell the truth. It says Allocated only from an
+assignment row the viewer's feed carries (own row preferred) or a backend
+`assigned_to_me`/`allocated` flag, never from job status; otherwise the pipeline
+word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
+Archived). Pre-sale/dead records are view-only with a hint; a numbered
+delivery-stage job opens and the server's access check decides (403/404 renders
+"not on your jobs", no retry). Search hits already rendered as the viewer's own
+cards are not repeated. A managed lead's Everyone read covers only their managed
+verticals, so `fetchMyJobsForActiveLens` also reads `mode=mine` and merges own
+rows (`// <lead-own-rows-merge>`); the toggle reads `Everyone (fencing)`. Job
+`metadata` money keys are stripped from `my_jobs`/`search_all_jobs` at the `api()`
+door (`// <trade-job-list-money-strip>`). Guard:
+`tests/e2e/trade-all-search-truth.spec.js`.
+
 A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A
 JOB'S SCHEDULE. Ops staff are mirrored onto a job so it shows in their own list;
 that row is not moved when the crew's real assignment is rescheduled, so its date

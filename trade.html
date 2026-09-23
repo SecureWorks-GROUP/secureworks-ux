@@ -20904,8 +20904,9 @@
       return Number(m[3]) + ' ' + MON[Number(m[2]) - 1] + ' ' + m[1];
     }
     // One honest line per invoice: what Xero and the office say about it.
-    // Shared by My money, Invoice history, Recent activity and the Profile
-    // list so one invoice never reads two ways. Live audit 2026-09-23: Xero
+    // Shared by My money, Invoice history, Recent activity, the Profile
+    // list and the invoice-detail status pill so one invoice never reads
+    // two ways. Live audit 2026-09-23: Xero
     // leaves a bill AUTHORISED while it is part paid (amount_paid > 0), so
     // part paid is checked before "approved"; and a bill deleted or voided in
     // Xero outranks our own row status (a `pushed_to_xero` / `approved` row
@@ -21250,8 +21251,9 @@
   }
 
   // One `my_trade_invoices` row -> the row shape MyMoneyCore.statusOf /
-  // amountOf read, so Invoice history, Recent activity and the Profile list
-  // say the same thing about an invoice as My money. Live audit 2026-09-23:
+  // amountOf read, so Invoice history, Recent activity, the Profile list
+  // and the invoice-detail status pill say the same thing about an invoice
+  // as My money. Live audit 2026-09-23:
   // 186 of 231 invoices predate the super split (no gross_earned / super /
   // net_pay). Their bill total is the whole amount due, so they show it
   // instead of "Figures unavailable". The API names the GST figure `gst`,

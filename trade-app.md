@@ -148,12 +148,15 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   Xero state ("Paid 10 Aug 2026", "Part paid", "Approved, awaiting payment",
   "Waiting on office", "Voided"). Pre-split invoices carry no gross_earned, so
   Earned and Super leave them out while Paid and Still owed count them; the
-  card says so. `MyMoneyCore.statusOf` / `amountOf` are the ONE wording for an
-  invoice: Invoice history, Recent activity and the Profile list map each
-  `my_trade_invoices` row through `_invoiceHistoryMoneyRow` into them, so a
-  paid row shows what Xero paid (with "Invoiced $X" when different), a part
-  paid AUTHORISED bill shows what is still owed, a DELETED/VOIDED bill reads
-  Voided, and a pre-split row shows its bill total rather than "Figures
+  card says so. Invoice history is the latest 100 (`my_trade_invoices` cap)
+  and says so, pointing the trade at My money. `MyMoneyCore.statusOf` / `amountOf`
+  are the ONE wording for an invoice: Invoice history, Recent activity and
+  the Profile list map each `my_trade_invoices` row through
+  `_invoiceHistoryMoneyRow` into them, and the invoice-detail status pill
+  uses the same `statusOf` (no second map), so a paid row shows what Xero
+  paid (with "Invoiced $X" when different), a part paid AUTHORISED bill
+  shows what is still owed, a DELETED/VOIDED bill reads Voided, and a
+  pre-split row shows its bill total rather than "Figures
   unavailable". Pure `MyMoneyCore` in `// <trade-my-money>`, pinned by
   `scripts/test-trade-my-money.js`; guards `tests/e2e/trade-my-money.spec.js`
   and `tests/e2e/trade-invoice-history-live-audit.spec.js`.

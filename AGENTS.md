@@ -658,6 +658,21 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
+## Trade hourly rate: office only (`trade.html`)
+
+Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes
+no `set_trade_rate` call; Profile and assigned job cards show the office rate
+read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
+or extra line keeps a typed rate, because ops-api flags that client-entered rate
+for office verification and never saves it as the trade's rate. A missing rate
+points the trade to the office, never to Profile. A restored session draft
+cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
+clears it on every builder paint, even when hours data is missing or has no
+positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
+on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
+next trade before that user's `my_hours` lands. Guard:
+`tests/e2e/trade-rate-office-only.spec.js`.
+
 ## Trade clock recovery (`trade.html`)
 
 `checkServerClockRecovery` runs after every `my_jobs` load and may adopt a

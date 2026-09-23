@@ -680,10 +680,10 @@ viewer's own `my_jobs` rows and drops other crews' rows (manager Everyone lens)
 and ghost `role:'observer'` rows. The empty Today state ("No jobs today" + next
 job, never Pay), the calendar default vertical (`ncAdoptOwnWorkDefault`, most
 common of `OWN_WORK_CALENDAR_TYPES` — makesafe/fencing/patio/repair — once
-`my_jobs` and the make-safe feed settle; office keeps the managed default; a
-trade-picked vertical is never overridden; decking is not a calendar vertical
-and falls back because `CalAdapterCore.mapType` still paints it as `other`)
-and the blank-day/week "next job" offer all read it. History only filters what
+`my_jobs` lands; office keeps the managed default; a trade-picked vertical is
+never overridden; decking is not a calendar vertical, so a blank-period next
+job of that type opens via `openJob`) and the blank-day/week "next job" offer
+all read it. History only filters what
 `my_jobs` loaded (about 30 days, make-safe about 180), so its dates are clamped
 to the loaded range and it points to All search for older jobs; a paged
 own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity.spec.js`.

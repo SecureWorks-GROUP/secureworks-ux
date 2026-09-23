@@ -7163,7 +7163,7 @@
     // re-render any list already on screen so builder/type switch from the explicit
     // legacy fallback to server-owned feed facts without changing card markup.
     var activeCacheKey = jobListCacheKey();
-    var feedSettled = fetchMakesafeV5Feed(false).then(function() {
+    fetchMakesafeV5Feed(false).then(function() {
       if (_lastJobData && _lastJobDataKey === activeCacheKey && activeCacheKey === jobListCacheKey() && _currentView === 'myJobs') renderMyJobs(_lastJobData);
     }).catch(function(err) {
       console.warn('[trade] make-safe feed unavailable; using legacy builder/type fallback:', err);
@@ -7213,11 +7213,7 @@
       if (_isAdmin) {
         loadMakesafePoolJobs(data);
       }
-      // Calendar default follows the trade's own work, which needs both my_jobs
-      // and the make-safe feed; the feed promise never rejects past this point.
-      feedSettled.catch(function() {}).then(function() {
-        if (requestToken === _myJobsRequestToken && requestCacheKey === jobListCacheKey()) ncAdoptOwnWorkDefault();
-      });
+      ncAdoptOwnWorkDefault();
       // Check for active server-side clock (survives app reinstall / device switch)
       checkServerClockRecovery(data, params.mode === 'all');
     }).catch(function(err) {
@@ -8305,8 +8301,13 @@
     var next = nextOwnAssignment(own, today);
     var title, sub = '';
     if (query) {
-      title = 'No jobs match “' + query + '”';
-      sub = 'This list only holds your own jobs. To search every job, use All.';
+      if (_jobFilter === 'all') {
+        title = 'Type at least 2 letters to search every job.';
+      } else if (activeMyJobsLens() === 'everyone') {
+        title = 'No match in ' + everyoneLensLabel() + ' jobs.';
+      } else {
+        title = 'No match in your jobs.';
+      }
     } else if (_jobFilter === 'today') {
       title = 'No jobs today';
     } else if (_jobFilter === 'thisWeek') {
@@ -8330,7 +8331,7 @@
     } else {
       if (!query && _jobFilter !== 'assigned') sub = own.length ? 'Nothing else is booked for you yet.' : 'Nothing is booked for you yet.';
       if (sub) h += '  <p style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.4">' + esc(sub) + '</p>';
-      if (query) h += '  <button type="button" onclick="setJobFilter(\'all\')" style="' + btn + 'background:var(--sw-dark);color:#fff;border:none">Search All jobs</button>';
+      if (query && _jobFilter !== 'all') h += '  <button type="button" onclick="setJobFilter(\'all\')" style="' + btn + 'background:var(--sw-dark);color:#fff;border:none">Search every job in All</button>';
     }
     return h + '</div>';
   }
@@ -9510,12 +9511,10 @@
     return { assignment: best, job: best.jobs, date: best.scheduled_date, type: getTradeJobType(best.jobs, best) };
   }
   // Most common calendar vertical across the viewer's own jobs (one vote per
-  // job). extraJobs adds own make-safe allocations from the canonical feed.
-  // Ties go to the earlier entry of preference, so the old default holds.
-  function ownWorkCalendarVertical(rows, extraJobs, preference) {
+  // job). Ties go to the earlier entry of preference, so the old default holds.
+  function ownWorkCalendarVertical(rows, preference) {
     var byJob = {};
     (rows || []).forEach(function(a) { byJob[a.jobs.id] = getTradeJobType(a.jobs, a); });
-    (extraJobs || []).forEach(function(j) { if (j && j.id && !byJob[j.id]) byJob[j.id] = j.type; });
     var counts = {};
     Object.keys(byJob).forEach(function(id) {
       var v = byJob[id];
@@ -18247,9 +18246,14 @@
       if (hint) h += ' ' + esc(hint);
       if (st.next && st.next.date) {
         var other = st.next.type && st.next.type !== st.type && st.type !== 'all';
-        h += '<div><button type="button" class="btn ghost nc-nextjob" style="margin-top:12px" data-ncnext="' + esc(st.next.date) + '" data-ncnext-type="' + esc(st.next.type || '') + '">'
-          + 'Your next job: ' + esc(fmtDay(st.next.date)) + (st.next.ref ? ' &middot; ' + esc(st.next.ref) : '')
-          + (other ? ' (' + esc(st.next.typeLabel || st.next.type) + ')' : '') + '</button></div>';
+        var openNext = !!st.next.openJob;
+        var nextLabel = openNext
+          ? ('Open your next job: ' + (st.next.ref || fmtDay(st.next.date)))
+          : ('Your next job: ' + fmtDay(st.next.date) + (st.next.ref ? ' &middot; ' + st.next.ref : '')
+            + (other ? ' (' + (st.next.typeLabel || st.next.type) + ')' : ''));
+        h += '<div><button type="button" class="btn ghost nc-nextjob" style="margin-top:12px" data-ncnext="' + esc(st.next.date) + '" data-ncnext-type="' + esc(st.next.type || '') + '"'
+          + (openNext && st.next.jobId ? ' data-ncnext-job="' + esc(st.next.jobId) + '" data-ncnext-asg="' + esc(st.next.assignmentId || '') + '"' : '')
+          + '>' + esc(nextLabel) + '</button></div>';
       }
       return h + '</div>';
     }
@@ -18636,19 +18640,10 @@
     return NC.type === 'all' ? whose + ' jobs in every trade' : whose + ' ' + (names[NC.type] || NC.type) + ' jobs';
   }
   function ncRefreshOwnWork() {
-    var uid = _user && _user.id;
-    var extra = [];
-    if (_makesafeV5Feed && uid) {
-      try {
-        MakesafeTradeV5.rows(_makesafeV5Feed).forEach(function (row) {
-          if ((row.assignments || []).some(function (a) { return a && a.user_id === uid; })) extra.push({ id: row.id, type: 'makesafe' });
-        });
-      } catch (e) { /* an invalid feed adds no votes */ }
-    }
-    NC.ownWork = ownWorkCalendarVertical(ownAssignmentRows(_lastJobData, uid), extra, [ncFallbackCalendarType()]);
+    NC.ownWork = ownWorkCalendarVertical(ownAssignmentRows(_lastJobData, _user && _user.id), [ncFallbackCalendarType()]);
   }
-  // Runs once my_jobs and the make-safe feed have both settled. A vertical the
-  // trade picked themselves (typePinned) is never overridden.
+  // Runs once my_jobs has landed. A vertical the trade picked themselves
+  // (typePinned) is never overridden.
   function ncAdoptOwnWorkDefault() {
     if (!_user) return;
     ncRefreshOwnWork();
@@ -18668,13 +18663,26 @@
   function ncNextJob() {
     var n = nextOwnAssignment(ownAssignmentRows(_lastJobData, _user && _user.id), awstDateStr());
     if (!n) return null;
-    return { date: n.date, type: n.type, ref: (n.job && n.job.job_number) || '', typeLabel: CalRender.typeLabel(n.type) };
+    var onCalendar = OWN_WORK_CALENDAR_TYPES.indexOf(n.type) !== -1;
+    return {
+      date: n.date,
+      type: n.type,
+      ref: (n.job && n.job.job_number) || '',
+      typeLabel: CalRender.typeLabel(n.type),
+      jobId: (n.job && n.job.id) || '',
+      assignmentId: (n.assignment && n.assignment.id) || '',
+      openJob: !onCalendar
+    };
   }
   // A blank-period "next job" offer: open that day, switching the calendar to
   // the job's vertical when the viewer can open it.
-  function ncGoToNextJob(date, type) {
+  function ncGoToNextJob(date, type, jobId, assignmentId) {
+    if (type && OWN_WORK_CALENDAR_TYPES.indexOf(type) === -1) {
+      if (jobId) openJob(jobId, assignmentId || '');
+      return;
+    }
     if (!date) return;
-    if (type && type !== NC.type && OWN_WORK_CALENDAR_TYPES.indexOf(type) !== -1) {
+    if (type && type !== NC.type) {
       NC.type = type;
       NC.typePinned = true;
       if (!ncEveryoneAllowed(type)) NC.scope = 'mine';
@@ -19037,7 +19045,7 @@
     });
     document.getElementById('ncUnstrip').addEventListener('click', function () { ncOpenUnassignedSheet(NC.date); });
     document.getElementById('ncCalhost').addEventListener('click', function (e) {
-      var nx = e.target.closest('[data-ncnext]'); if (nx) { ncGoToNextJob(nx.getAttribute('data-ncnext'), nx.getAttribute('data-ncnext-type')); return; }
+      var nx = e.target.closest('[data-ncnext]'); if (nx) { ncGoToNextJob(nx.getAttribute('data-ncnext'), nx.getAttribute('data-ncnext-type'), nx.getAttribute('data-ncnext-job'), nx.getAttribute('data-ncnext-asg')); return; }
       var nu = e.target.closest('[data-unscheduled]'); if (nu) { ncOpenUnscheduledSheet(); return; }
       var jb = e.target.closest('[data-job]'); if (jb) { ncOpenJobSheet(jb.getAttribute('data-job')); return; }
       var ud = e.target.closest('[data-undate]'); if (ud) { ncOpenUnassignedSheet(ud.getAttribute('data-undate')); return; }

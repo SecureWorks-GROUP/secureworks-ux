@@ -65,7 +65,18 @@ function calendarEvent(r) {
   };
 }
 
-async function stubOwnWork(page, { myJobs, calendarRows, log }) {
+const EMPTY_MAKESAFE_BOARD = {
+  contract_version: 'makesafe-board.v1.2',
+  projection: 'trade',
+  generated_at: new Date().toISOString(),
+  columns: { New: [], Allocated: [], Complete: [], Archive: [] },
+  rows: [],
+  permissions: { visibility: 'allocated_only', sees_all_makesafes: false, can_allocate: false },
+  unmapped_stage_job_ids: [],
+  parity: { ok: true, contract_version: 'makesafe-board.v1.2' }
+};
+
+async function stubOwnWork(page, { myJobs, calendarRows, log, makesafeBoard }) {
   const jobs = {};
   Object.values(myJobs).forEach((bucket) => {
     if (Array.isArray(bucket)) bucket.forEach((r) => { jobs[r.jobs.id] = r.jobs; });
@@ -76,6 +87,9 @@ async function stubOwnWork(page, { myJobs, calendarRows, log }) {
     const action = url.searchParams.get('action');
     if (request.method() !== 'GET') return route.fallback();
     const reply = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (action === 'makesafe_board' && makesafeBoard) {
+      return reply(makesafeBoard);
+    }
     if (action === 'my_jobs') {
       log.push({ action, mode: url.searchParams.get('mode') });
       return reply(myJobs);
@@ -213,6 +227,22 @@ test.describe('Jobs and Calendar clarity: hourly fencing crew (Alyx-shaped)', ()
     await expect(page.locator('#ncCalhost')).toContainText('FENCE-ALYX-NEXT');
     await expect(page.locator('#ncCalhost [data-cal-empty]')).toHaveCount(0);
   });
+
+  test('Today search empty-state names her own jobs and All asks for two letters', async ({ appPage: page }) => {
+    await page.locator('[data-view="myJobs"]').click();
+    await page.locator('#jobSearchInput').fill('z');
+    const empty = page.locator('#myJobsList [data-jobs-empty="today"]');
+    await expect(empty).toContainText('No match in your jobs.');
+    await expect(empty.getByRole('button', { name: 'Search every job in All' })).toBeVisible();
+    await expect(empty).not.toContainText('This list only holds your own jobs');
+
+    await empty.getByRole('button', { name: 'Search every job in All' }).click();
+    await expect(page.locator('.filter-chip[data-filter="all"]')).toHaveClass(/active/);
+    await page.locator('#jobSearchInput').fill('z');
+    const allEmpty = page.locator('#myJobsList [data-jobs-empty="all"]');
+    await expect(allEmpty).toContainText('Type at least 2 letters to search every job.');
+    await expect(allEmpty.getByRole('button')).toHaveCount(0);
+  });
 });
 
 test.describe('Jobs and Calendar clarity: work-order fencing manager (Henry-shaped)', () => {
@@ -278,5 +308,100 @@ test.describe('Jobs and Calendar clarity: work-order fencing manager (Henry-shap
 
     await blankDay.locator('[data-ncnext]').click();
     await expect(page.locator('#ncCalhost')).toContainText('FENCE-HENRY-NEXT');
+  });
+
+  test('Today search empty-state names the Everyone lens', async ({ appPage: page }) => {
+    await page.locator('[data-view="myJobs"]').click();
+    await expect(page.locator('#adminToggleAll')).toHaveText('Everyone · fencing');
+    await page.locator('#jobSearchInput').fill('z');
+    const empty = page.locator('#myJobsList [data-jobs-empty="today"]');
+    await expect(empty).toContainText('No match in Everyone · fencing jobs.');
+    await expect(empty.getByRole('button', { name: 'Search every job in All' })).toBeVisible();
+    await expect(empty).not.toContainText('No match in your jobs.');
+  });
+});
+
+test.describe('Jobs and Calendar clarity: decking-only crew', () => {
+  test.use({ persona: 'installer', timezoneId: 'Australia/Perth' });
+
+  const me = PERSONAS.installer.profile.id;
+  const next = row('alyx-deck', me, addIsoDays(TODAY, 3), 'scheduled', {
+    id: 'alyx-job-deck',
+    job_number: 'DECK-ALYX-NEXT',
+    site_suburb: 'Joondalup',
+    type: 'decking'
+  });
+  const myJobs = {
+    today: [],
+    thisWeek: [],
+    upcoming: [next],
+    recent: [],
+    recentCompleted: [],
+    unscheduled: [],
+    makesafePool: [],
+    _adminView: false
+  };
+
+  let log;
+  test.beforeEach(async ({ appPage: page }) => {
+    log = [];
+    log.viewerId = me;
+    await stubOwnWork(page, { myJobs, calendarRows: [next], log, makesafeBoard: EMPTY_MAKESAFE_BOARD });
+    await signIn(page, PERSONAS.installer);
+  });
+
+  test('Blank day opens an unsupported next job instead of staying on a blank calendar', async ({ appPage: page }) => {
+    await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
+    const blankDay = page.locator('#ncCalhost [data-cal-empty]');
+    await expect(blankDay).toContainText('Showing your Make-safe jobs.');
+    expect(log.filter((e) => e.action === 'trade_calendar').every((e) => e.type !== 'decking')).toBe(true);
+    const offer = blankDay.getByRole('button', { name: 'Open your next job: DECK-ALYX-NEXT' });
+    await expect(offer).toHaveText('Open your next job: DECK-ALYX-NEXT');
+
+    await openFilterSheet(page);
+    await expect(page.locator('#ncSheetBody [data-ftype="decking"]')).toHaveCount(0);
+    await page.locator('#ncDoneBtn').click();
+
+    await offer.click();
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('#jobDetailContent')).toContainText('DECK-ALYX-NEXT');
+  });
+});
+
+test.describe('Jobs and Calendar clarity: own my_jobs beats the make-safe board', () => {
+  test.use({ persona: 'installer', timezoneId: 'Australia/Perth' });
+
+  const me = PERSONAS.installer.profile.id;
+  const mine = row('alyx-one-fence', me, addIsoDays(TODAY, 4), 'scheduled', {
+    id: 'alyx-job-one-fence',
+    job_number: 'FENCE-ALYX-ONLY',
+    site_suburb: 'Wanneroo'
+  });
+  const myJobs = {
+    today: [],
+    thisWeek: [],
+    upcoming: [mine],
+    recent: [],
+    recentCompleted: [],
+    unscheduled: [],
+    makesafePool: [],
+    _adminView: false
+  };
+
+  let log;
+  test.beforeEach(async ({ appPage: page }) => {
+    log = [];
+    log.viewerId = me;
+    await stubOwnWork(page, { myJobs, calendarRows: [mine], log });
+    await signIn(page, PERSONAS.installer);
+  });
+
+  test('One own fencing assignment still opens Fencing, even when the board holds her make-safe', async ({ appPage: page }) => {
+    await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
+    await expect.poll(() => log.some((e) => e.action === 'trade_calendar' && e.type === 'fencing')).toBe(true);
+
+    const blankDay = page.locator('#ncCalhost [data-cal-empty]');
+    await expect(blankDay).toContainText('Showing your Fencing jobs.');
+    await expect(blankDay).toContainText('FENCE-ALYX-ONLY');
   });
 });

@@ -20475,7 +20475,7 @@
     html += '<div class="wwi-toolbar"><h2>Invoice Detail</h2><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">Back</button></div>';
     html += '<div class="inv-header"><div class="inv-header-row title">' + esc(inv.invoice_number || 'Weekly Invoice') + '</div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end || _hoursWeekEnd) + '</span></div>';
-    html += '<div style="margin-top:8px"><span class="inv-status ' + esc(String(inv.status || 'draft').replace(/ /g, '_')) + '">' + esc(String(inv.status || 'draft').replace(/_/g, ' ')) + '</span></div></div>';
+    html += _invoiceDetailStatusHtml(inv) + '</div>';
     if (_invoiceXeroPushPending(inv)) html += '<div class="wwi-warning">Invoice saved with exact totals. Xero sync is pending; do not submit it again.</div>';
     html += _weeklyInvoicePreviewHtml(inv);
     if (inv.notes) html += '<div class="wwi-panel"><div class="wwi-panel-title">Notes</div><div class="wwi-count">' + esc(inv.notes) + '</div></div>';
@@ -20723,8 +20723,7 @@
     html += '<div class="inv-header-row"><span>From</span><span style="color:#fff;font-weight:600">' + esc(tradeName) + '</span></div>';
     html += '<div class="inv-header-row"><span>To</span><span style="color:#fff;font-weight:600">SecureWorks Group Pty Ltd</span></div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end) + '</span></div>';
-    var statusCls = (inv.status || 'draft').replace(/ /g, '_');
-    html += '<div style="margin-top:8px"><span class="inv-status ' + statusCls + '">' + (inv.status || 'draft').replace(/_/g, ' ') + '</span></div>';
+    html += _invoiceDetailStatusHtml(inv);
     html += '</div>';
 
     // Labour lines
@@ -21267,9 +21266,8 @@
       payable = Number(inv.to_be_paid);
     } else if (hasSplit) {
       var money = _invoicePersistedMoney(Object.assign({}, inv, { gst_amount: inv.gst_amount != null ? inv.gst_amount : inv.gst }));
-      var cash = money.cash_payable != null ? money.cash_payable : money.amount_payable;
-      if (money.complete && _invoiceHasPersistedNumber(cash)) {
-        payable = Number(cash) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
+      if (money.complete && _invoiceHasPersistedNumber(money.cash_payable)) {
+        payable = Number(money.cash_payable) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
       }
     } else if (!inv.figures_error && _invoiceHasPersistedNumber(inv.total_inc)) {
       payable = Number(inv.total_inc);
@@ -21287,6 +21285,11 @@
       payable: payable,
       figures_ok: payable != null
     };
+  }
+
+  function _invoiceDetailStatusHtml(inv) {
+    var st = MyMoneyCore.statusOf(_invoiceHistoryMoneyRow(inv));
+    return '<div style="margin-top:8px"><span class="mm-status ' + esc(st.cls) + '" data-inv-status="' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
   }
 
   // Right-hand column of an Invoice history / Recent activity row: amount,

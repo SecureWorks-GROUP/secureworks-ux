@@ -128,4 +128,35 @@ check('view shows an all-time card', /data-mm-period="all"/.test(allView) && all
 check('incomplete note says earned/super leave old invoices out, paid/owed count them', allView.indexOf('27 older invoices without a super split. Earned and super leave them out; paid and still owed count them.') !== -1);
 check('view without all_time has no all-time card', !/data-mm-period="all"/.test(M.viewHTML({ invoices: [] })));
 
+function extractFunction(name) {
+  const marker = 'function ' + name;
+  const start = html.indexOf(marker);
+  assert(start !== -1, name + ' exists');
+  const next = html.indexOf('\n  function ', start + marker.length);
+  return html.slice(start, next === -1 ? html.length : next);
+}
+
+context.esc = function (s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+  });
+};
+vm.runInContext([
+  extractFunction('_invoiceBool'),
+  extractFunction('_invoiceSuperRate'),
+  extractFunction('_invoiceHasPersistedNumber'),
+  extractFunction('_invoicePersistedMoney'),
+  extractFunction('_invoiceHistoryMoneyRow'),
+  extractFunction('_invoiceDetailStatusHtml')
+].join('\n'), context);
+
+const detailDeleted = context._invoiceDetailStatusHtml({ status: 'pushed_to_xero', xero_bill_status: 'DELETED' });
+check('detail pill: deleted Xero bill is Voided', detailDeleted.indexOf('Voided') !== -1 && !/pushed to xero/i.test(detailDeleted) && /data-inv-status="void"/.test(detailDeleted));
+const detailApprovedDeleted = context._invoiceDetailStatusHtml({ status: 'approved', xero_bill_status: 'DELETED' });
+check('detail pill: approved row with deleted bill is Voided', detailApprovedDeleted.indexOf('Voided') !== -1 && !/approved/i.test(detailApprovedDeleted));
+const detailPartPaid = context._invoiceDetailStatusHtml({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58 });
+check('detail pill: authorised part-paid bill is Part paid', detailPartPaid.indexOf('Part paid') !== -1 && !/pushed to xero/i.test(detailPartPaid) && /data-inv-status="owed"/.test(detailPartPaid));
+const detailWeeklyDeleted = context._invoiceDetailStatusHtml({ invoice_source: 'weekly_work_order', status: 'pushed_to_xero', xero_bill_status: 'DELETED', to_be_paid: 1916.4 });
+check('detail pill: weekly deleted bill is Voided', detailWeeklyDeleted.indexOf('Voided') !== -1 && !/pushed to xero/i.test(detailWeeklyDeleted));
+
 console.log('trade-my-money: ' + passed + ' checks passed');

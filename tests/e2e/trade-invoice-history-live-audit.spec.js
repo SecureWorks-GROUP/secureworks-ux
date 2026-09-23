@@ -35,18 +35,30 @@ const INVOICES = [
   // Pre-split GST invoice Xero paid ex-GST.
   { id: 'f-legacy-paid', invoice_number: 'SW-INV-T-260411-003', week_end: '2026-04-12', week_ending: '2026-04-12', status: 'paid', xero_bill_status: 'PAID', amount_paid: 1556, paid_at: '2026-04-17', paid: true,
     ...legacy, gst: 155.6, subtotal_ex: 1556, total_inc: 1711.6, total: 1711.6, subtotal: 1556 },
+  // Weekly work-order invoice whose Xero bill was deleted.
+  { id: 'g-weekly-deleted', invoice_number: 'SW-INV-W-260628-001', week_start: '2026-06-22', week_end: '2026-06-28', week_ending: '2026-06-28', invoice_source: 'weekly_work_order', status: 'pushed_to_xero', xero_bill_status: 'DELETED', amount_paid: 0, paid: false, to_be_paid: 1916.4,
+    ...legacy, gst: 0, subtotal_ex: 1916.4, total_inc: 1916.4, total: 1916.4, subtotal: 1916.4, lines: [], job_blocks: [] },
 ];
+
+function stubInvoiceReads(page) {
+  return page.route(`${OPS_API}**`, async (route) => {
+    const url = new URL(route.request().url());
+    const action = url.searchParams.get('action');
+    if (action === 'my_trade_invoices') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invoices: INVOICES }) });
+    }
+    if (action === 'get_trade_invoice') {
+      const invoice = INVOICES.find((row) => row.id === url.searchParams.get('invoice_id'));
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invoice }) });
+    }
+    await route.fallback();
+  });
+}
 
 test.use({ persona: 'installer' });
 
 test('every invoice shows its real amount and Xero state in Invoice history, Recent activity and Profile', async ({ appPage: page }) => {
-  await page.route(`${OPS_API}**`, async (route) => {
-    const action = new URL(route.request().url()).searchParams.get('action');
-    if (action === 'my_trade_invoices') {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invoices: INVOICES }) });
-    }
-    await route.fallback();
-  });
+  await stubInvoiceReads(page);
   await signIn(page, PERSONAS.installer);
   await page.locator('[data-view="hours"]').click();
 
@@ -85,6 +97,29 @@ test('every invoice shows its real amount and Xero state in Invoice history, Rec
   await expect(profile.locator('[data-profile-invoice="f-legacy-paid"]')).toContainText('$1,556.00');
   await expect(profile.locator('[data-profile-invoice="f-legacy-paid"]')).toContainText('Paid 17 Apr 2026');
   await expect(profile.locator('[data-profile-invoice="d-deleted"]')).toContainText('Voided');
+});
+
+test('tapping Invoice history opens the same Xero paid state on detail', async ({ appPage: page }) => {
+  await stubInvoiceReads(page);
+  await signIn(page, PERSONAS.installer);
+  await page.locator('[data-view="hours"]').click();
+  await page.getByRole('button', { name: 'View All' }).click();
+
+  await page.locator('[data-inv-history="c-part-paid"]').click();
+  await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
+  await expect(page.locator('[data-inv-status]')).toHaveText('Part paid');
+  await expect(page.locator('#hoursContent')).not.toContainText(/pushed to xero/i);
+
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.locator('[data-inv-history="d-deleted"]').click();
+  await expect(page.locator('[data-inv-status]')).toHaveText('Voided');
+  await expect(page.locator('#hoursContent')).not.toContainText(/pushed to xero/i);
+
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.locator('[data-inv-history="g-weekly-deleted"]').click();
+  await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
+  await expect(page.locator('[data-inv-status]')).toHaveText('Voided');
+  await expect(page.locator('#hoursContent')).not.toContainText(/pushed to xero/i);
 });
 
 test('a full page of 100 invoices says it is the latest 100, not everything', async ({ appPage: page }) => {

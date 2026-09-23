@@ -66,6 +66,14 @@ async function boot(page, persona, actions) {
   return { log, stub };
 }
 
+function embletonDetail() {
+  return {
+    job: EMBLETON_JOB,
+    crew: [{ id: 'asg-ryan-embleton', user_id: PERSONAS.ryan.profile.id, name: 'Ryan', status: 'scheduled' }],
+    purchaseOrders: [], documents: [], media: [], notes: []
+  };
+}
+
 function ryanActions(searchJobs) {
   return {
     my_jobs: ({ url }) => (url.searchParams.get('mode') === 'all'
@@ -76,7 +84,10 @@ function ryanActions(searchJobs) {
       if (!q) return { lens: 'company', jobs: [], total: 0, next_offset: null };
       const jobs = searchJobs.filter((job) => String(job.client_name || '').toLowerCase().includes(q));
       return { lens: 'search', jobs, total: jobs.length, next_offset: null, truncated: false };
-    }
+    },
+    trade_job_detail: ({ url }) => (url.searchParams.get('jobId') === EMBLETON_JOB.id
+      ? embletonDetail()
+      : { status: 404, body: { error: 'Unknown job' } })
   };
 }
 
@@ -114,9 +125,12 @@ test.describe('All-tab search tells the truth (audit finding 3)', () => {
     await expect(quote).toContainText('View only · not on your jobs');
     await expect(quote).not.toHaveAttribute('onclick', /.*/);
 
-    // A4: Ryan's own job opens as his allocation.
+    // A4: Ryan's own job opens as his allocation, not the search-refusal empty.
     await own.locator('.jc-place').click();
     await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('#jobDetailContent')).toContainText('SWP-26183');
+    await expect(page.locator('#jobDetailContent')).toContainText('Embleton');
+    await expect(page.locator('#jobDetailContent')).not.toContainText('This job is not on your jobs');
     expect(stub.unexpectedWrites).toEqual([]);
   });
 

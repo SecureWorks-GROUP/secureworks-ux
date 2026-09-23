@@ -768,7 +768,9 @@ assignment row the viewer's feed carries (own row preferred) or a backend
 `assigned_to_me`/`allocated` flag, never from job status; otherwise the pipeline
 word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
 Archived). A make-safe hit still opens the report path (unallocated included);
-its chip never says New just because it is live. Pre-sale/dead records are
+its chip never says New just because it is live. A hit with no suburb/address
+and no job number uses the client name as the title; Suburb TBC only when
+there is nothing else to name it by. Pre-sale/dead records are
 view-only with a hint; a numbered delivery-stage job opens and the server's
 access check decides (403/404 renders "not on your jobs", no retry). Search hits
 already rendered as the viewer's own cards are not repeated. A managed lead's

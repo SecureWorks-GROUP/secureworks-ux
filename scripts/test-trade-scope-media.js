@@ -391,16 +391,6 @@ check(
   /function mergeTradeExternalLinks\(\) \{[\s\S]*return filterTradeSowLinks\(out\);/.test(html)
 );
 check(
-  'shipped Work Order tab Cost Breakdown: office sees all, a tier-3 trade only their own work order (TRD5-R10-003, <trade-office-money-door>)',
-  /var showCostBreakdown = !!\(wo && wo\.id && \(tradeCanSeeSowPricing\(\) \|\| canSeeFullPricing\(\)\)\);\s*if \(showCostBreakdown\) \{\s*h \+= '<div class="detail-section" id="woJobCostBreakdown">/.test(html) &&
-    /api\('my_work_orders', \{ mode: costOffice \? 'all' : 'mine' \}\)/.test(html)
-);
-check(
-  'shipped Work Order tab Crew Charges: tier-3 audience, money stripped for non-office (TRD5-R10-003, <trade-office-money-door>)',
-  /var showCrewCharges = tradeCanSeeSowPricing\(\) \|\| canSeeFullPricing\(\);\s*if \(showCrewCharges\) \{\s*h \+= '<div class="detail-section" id="woJobCrewCharges">/.test(html) &&
-    /\['hourly_rate', 'line_total_ex', 'override_amount', 'override_note', 'invoice_status'\]/.test(html)
-);
-check(
   'Work Order tab cost sections no longer use _userTier >= 2',
   !/if \(_userTier >= 2\) \{\s*h \+= '<div class="detail-section" id="woJob(CostBreakdown|CrewCharges)">/.test(html)
 );

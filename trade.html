@@ -22585,7 +22585,9 @@
 
   // ════════════════════════════════════════════════════════════════════════════
   // JOB-CENTRIC INVOICE (cutover path) — one card per whitelisted assignment.
-  // Hours, rate and description are editable; client-entered rates go to ops review.
+  // Hours and description stay editable. Assigned-card rates are office-only
+  // (read-only). Only a searched-in (manually_added) card or extra line keeps a
+  // typed rate, which ops-api flags for office verification.
   // ════════════════════════════════════════════════════════════════════════════
 
   // Typical-hours hint per job type (placeholder only — never auto-applied).

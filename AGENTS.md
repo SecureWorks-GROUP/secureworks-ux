@@ -681,8 +681,9 @@ and ghost `role:'observer'` rows. The empty Today state ("No jobs today" + next
 job, never Pay), the calendar default vertical (`ncAdoptOwnWorkDefault`, most
 common of `OWN_WORK_CALENDAR_TYPES` — makesafe/fencing/patio/repair — after a
 cached or live `my_jobs` list is painted; office keeps the managed default; a
-trade-picked vertical is never overridden; decking is not a calendar vertical,
-so a blank-period next job of that type opens via `openJob`) and the
+trade-picked vertical is never overridden; Reset in the filter sheet returns
+to that default; decking is not a calendar vertical, so a blank-period next
+job of that type opens via `openJob`) and the
 blank-day/week "next job" offer all read it. History only filters what
 `my_jobs` loaded (about 30 days, make-safe about 180): From stays unset until
 that list is on screen (never stamp today on an empty cache), dates are then

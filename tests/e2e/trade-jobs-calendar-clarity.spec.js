@@ -327,6 +327,31 @@ test.describe('Jobs and Calendar clarity: work-order fencing manager (Henry-shap
     await expect(page.locator('#myJobsList')).toContainText('FENCE-HENRY-PAST');
   });
 
+  test('History From waits for the Mine list instead of stamping today', async ({ appPage: page }) => {
+    let releaseMine;
+    const mineHeld = new Promise((resolve) => { releaseMine = resolve; });
+    await page.route(`${OPS_API}**`, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (request.method() === 'GET' && url.searchParams.get('action') === 'my_jobs' && url.searchParams.get('mode') === 'mine') {
+        await mineHeld;
+      }
+      return route.fallback();
+    });
+
+    await page.locator('[data-view="myJobs"]').click();
+    await expect(page.locator('#myJobsList')).toContainText('FENCE-HENRY-NEXT');
+
+    await page.locator('#adminToggleMine').click();
+    await page.locator('.filter-chip[data-filter="history"]').click();
+    await expect(page.locator('#historyFrom')).toHaveValue('');
+
+    releaseMine();
+    await expect(page.locator('#historyFrom')).toHaveValue(addIsoDays(TODAY, -12));
+    await expect(page.locator('#myJobsList')).toContainText('FENCE-HENRY-PAST');
+    await expect(page.locator('#myJobsList')).not.toContainText('No past jobs between');
+  });
+
   test('Calendar opens on the fencing team, names the scope, and Reset returns there', async ({ appPage: page }) => {
     await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
     await expect.poll(() => log.some((e) => e.action === 'trade_calendar' && e.type === 'fencing' && e.mode === 'all')).toBe(true);

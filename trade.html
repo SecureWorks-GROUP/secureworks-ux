@@ -7674,7 +7674,8 @@
       if (f === 'history') {
         var fromEl = document.getElementById('historyFrom');
         var toEl = document.getElementById('historyTo');
-        if (fromEl && !fromEl.value) fromEl.value = historyDefaultFrom();
+        var loadedFrom = historyDefaultFrom();
+        if (fromEl && !fromEl.value && loadedFrom) fromEl.value = loadedFrom;
         if (toEl && !toEl.value) toEl.value = awstDateStr();
       }
     }
@@ -7692,8 +7693,7 @@
   }
   var HISTORY_REACH_TEXT = 'Your job list keeps about the last 30 days (make-safe jobs about 180 days).';
   function historyDefaultFrom() {
-    var today = awstDateStr();
-    return historyLoadedFrom(_cachedMyJobs, today) || today;
+    return historyLoadedFrom(_cachedMyJobs, awstDateStr());
   }
   // Clamps the date inputs to the loaded range and returns the range note.
   function syncHistoryRange() {
@@ -7701,6 +7701,7 @@
     var loadedFrom = historyLoadedFrom(_cachedMyJobs, today);
     var fromEl = document.getElementById('historyFrom');
     var toEl = document.getElementById('historyTo');
+    if (fromEl && !fromEl.value && loadedFrom) fromEl.value = loadedFrom;
     [fromEl, toEl].forEach(function(el) {
       if (!el) return;
       el.min = loadedFrom || today;

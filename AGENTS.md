@@ -668,7 +668,10 @@ for office verification and never saves it as the trade's rate. A missing rate
 points the trade to the office, never to Profile. A restored session draft
 cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
 clears it on every builder paint, even when hours data is missing or has no
-positive rate. Guard: `tests/e2e/trade-rate-office-only.spec.js`.
+positive rate. `_hoursData` and `_tradeRate` clear in `resetInvoiceSession` and
+on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
+next trade before that user's `my_hours` lands. Guard:
+`tests/e2e/trade-rate-office-only.spec.js`.
 
 ## Trade clock recovery (`trade.html`)
 

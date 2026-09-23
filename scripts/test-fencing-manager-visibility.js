@@ -382,7 +382,7 @@ assert(html.includes('_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount') && h
   'offline invoice actions are stamped with account identity');
 assert(/_user = profile;[\s\S]{0,280}_purgeOfflineInvoiceActionsNotOwnedByCurrentAccount\(\)/.test(html),
   'sign-in drops invoice actions that do not belong to the new account');
-assert(html.includes('if (prevOwner && prevOwner !== _invDraftOwnerId()) _invoiceAuthGen++'),
+assert(/if \(prevOwner && prevOwner !== _invDraftOwnerId\(\)\)[\s\S]{0,80}_invoiceAuthGen\+\+/.test(html),
   'an in-page account switch bumps invoice auth generation so in-flight replay aborts');
 assert(html.includes('_isOfflineInvoiceAction(action)') && html.includes('if (!owner) return'),
   'invoice writes are not queued without a signed-in account');

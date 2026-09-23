@@ -6752,7 +6752,11 @@
     var prevOwner = _invDraftOwnerId();
     _user = profile;
     if (!_user) { console.error('[trade] onLogin: profile is null!'); return; }
-    if (prevOwner && prevOwner !== _invDraftOwnerId()) _invoiceAuthGen++;
+    if (prevOwner && prevOwner !== _invDraftOwnerId()) {
+      _invoiceAuthGen++;
+      _hoursData = null;
+      _tradeRate = null;
+    }
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
     _opsApiBase = window.SUPABASE_URL + '/functions/v1/ops-api';
     _userTier = _user.trade_tier || determineTier(_user.email);
@@ -7248,6 +7252,8 @@
 
   function resetInvoiceSession() {
     _invoiceAuthGen++;
+    _hoursData = null;
+    _tradeRate = null;
     _invWeekCollision = null;
     _invoicedWeeks = {};
     _invoicedWeeksLoaded = false;

@@ -669,6 +669,19 @@ stays disabled until `#confirmAck` is ticked, so specs must
 second-invoice, supplementary or redo path without a Captain ruling. Guard:
 `tests/e2e/trade-invoice-week-choice.spec.js`.
 
+## Trade variation request: trade requests, office approves (`trade.html`)
+
+Request Variation (Scope tab, confirmed/in-progress assignment) posts
+`create_variation` with `{job_id, description, estimated_cost?, photo_url?}`
+only; ops-api takes identity from the sign-in, files every trade request
+pending office approval, withholds `share_token`, and answers an unassigned,
+ghost or cancelled caller 403 `variation_requires_assignment`
+(secureworks-backend#906). Staff using the trade app may be auto-approved
+under $200; that success shows the server message and approved wording. A
+trade request never reads as approved. The form never shows or uses a share
+link, and never queues a refused or unsent request offline. Search
+`// <trade-variation-request>`; guard `tests/e2e/trade-variation-request.spec.js`.
+
 ## Trade hourly rate: office only (`trade.html`)
 
 Trades never set their own rate (Captain ruling 2026-09-23). `trade.html` makes

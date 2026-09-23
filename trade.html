@@ -1527,16 +1527,35 @@
     }
 
     /* ══════════════════════════════════════════════════
-       TIER BADGE
+       ACCESS BADGE (TradeAccessCore: office / vertical manager / crew)
        ══════════════════════════════════════════════════ */
-    .tier-badge {
+    .access-badge {
       display: inline-flex; align-items: center; gap: 4px;
       font-size: 11px; font-weight: 700; text-transform: uppercase;
       padding: 3px 10px; border-radius: 20px; letter-spacing: 0.5px;
     }
-    .tier-badge.tier-1 { background: var(--sw-light); color: var(--sw-text-sec); }
-    .tier-badge.tier-2 { background: #E8F4FD; color: #2980B9; }
-    .tier-badge.tier-3 { background: #FDE8E0; color: var(--sw-orange); }
+    .access-badge.crew { background: var(--sw-light); color: var(--sw-text-sec); }
+    .access-badge.manager { background: #E8F4FD; color: #2980B9; }
+    .access-badge.office { background: #FDE8E0; color: var(--sw-orange); }
+    .access-pay { font-size: 12px; color: var(--sw-mid); margin-top: 6px; }
+    .access-scope { font-size: 12px; color: var(--sw-text-sec); line-height: 1.45; margin-top: 6px; }
+    .access-block.profile .access-scope { max-width: 300px; margin-left: auto; margin-right: auto; }
+    .access-intro {
+      margin: 10px 12px 0; padding: 12px 14px; background: var(--sw-card);
+      border: 1px solid var(--sw-border); border-radius: 12px; box-shadow: var(--sw-shadow);
+      font-family: var(--sw-font);
+    }
+    .access-intro .access-hint { font-size: 12px; color: var(--sw-text-sec); margin-top: 6px; }
+    .access-intro button {
+      margin-top: 10px; padding: 8px 14px; border: none; border-radius: 8px;
+      background: var(--sw-dark); color: #fff; font: 600 13px var(--sw-font); cursor: pointer;
+    }
+    .header-user:not(:empty)::after { content: ' \25BE'; }
+    .user-menu-access { padding: 12px 16px; border-bottom: 1px solid var(--sw-border); max-width: 260px; }
+    .user-menu-btn {
+      display: block; width: 100%; padding: 14px 16px; border: none; background: none; text-align: left;
+      font-size: 14px; font-family: var(--sw-font); color: var(--sw-text); cursor: pointer;
+    }
 
     /* ══════════════════════════════════════════════════
        TIMER CARD
@@ -3478,7 +3497,9 @@
 </div>
 <!-- User menu (tap name to show) -->
 <div id="userMenu" style="display:none;position:fixed;top:56px;right:8px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:200;min-width:140px;overflow:hidden">
-  <button onclick="doLogout()" style="display:block;width:100%;padding:14px 16px;border:none;background:none;text-align:left;font-size:14px;font-family:var(--sw-font);color:var(--sw-text);cursor:pointer">Sign out</button>
+  <div class="user-menu-access" id="userMenuAccess"></div>
+  <button class="user-menu-btn" id="userMenuActivity" onclick="openActivityFromMenu()">Activity</button>
+  <button class="user-menu-btn" onclick="doLogout()">Sign out</button>
 </div>
 
 <!-- ══════════════════════════════════════════════════
@@ -3598,6 +3619,9 @@
      SCHEDULE VIEW
      ══════════════════════════════════════════════════ -->
 <div id="viewSchedule" class="view">
+  <!-- First-run access card: who you are signed in as and what Everyone covers
+       (renderAccessIntro, dismissed once per account + access title). -->
+  <div class="access-intro" id="accessIntro" hidden></div>
   <!-- ══════════════════════════════════════════════════
        M2 CALENDAR SYSTEM (U2 renderers + U3 filters/strip).
        The only calendar. Legacy .container below stays in DOM but is
@@ -3954,6 +3978,129 @@
   }
   // </trade-visibility-core>
 
+  // <trade-access-core>
+  // Names what a signed-in person's access actually is, from the same facts the
+  // app gates on: office role (admin / ops_manager), managed_verticals, and
+  // invoice_type. Trade tier is deliberately NOT an access label: tier 3 does
+  // not mean office, and a lead_installer may be tier 1. Pure: no DOM, no _user.
+  var TradeAccessCore = (function () {
+    var VERTICAL_NAMES = { makesafe: 'make-safe', fencing: 'fencing', patio: 'patio', decking: 'decking', renovation: 'renovation', reno: 'renovation', repair: 'repair' };
+
+    function verticalNames(user) {
+      var raw = user && Array.isArray(user.managed_verticals) ? user.managed_verticals : [];
+      var seen = {}, out = [];
+      raw.forEach(function (value) {
+        var key = String(value || '').toLowerCase().trim();
+        var name = VERTICAL_NAMES[key] || key;
+        if (!name || seen[name]) return;
+        seen[name] = true;
+        out.push(name);
+      });
+      return out.sort();
+    }
+    function sentenceList(names) {
+      if (names.length <= 1) return names[0] || '';
+      return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    }
+    function capitalise(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+    function describe(user) {
+      user = user || {};
+      var role = String(user.role || '');
+      var invoiceType = String(user.invoice_type || '');
+      var managed = verticalNames(user);
+      var out = { tone: 'crew', title: '', everyone: '', scope: '', pay: '' };
+      if (role === 'admin' || role === 'ops_manager') {
+        out.tone = 'office';
+        out.title = role === 'admin' ? 'Office admin' : 'Office';
+        out.everyone = 'Everyone · all trades';
+        out.scope = 'Everyone shows every job in every trade. Mine shows the jobs you are on.';
+      } else if (managed.length) {
+        out.tone = 'manager';
+        out.title = capitalise(sentenceList(managed)) + ' manager';
+        out.everyone = 'Everyone · ' + managed.join(', ');
+        out.scope = 'Everyone shows every ' + sentenceList(managed) + ' job. Mine shows the jobs you are on.';
+      } else {
+        out.title = role === 'lead_installer' ? 'Lead installer' : (invoiceType === 'per_metre' ? 'Work-order trade' : 'Crew');
+        out.scope = 'You see the jobs you are on. To find any other job, search All in Jobs.';
+      }
+      if (invoiceType === 'per_metre') out.pay = out.title === 'Work-order trade' ? '' : 'Paid by work order';
+      else if (invoiceType === 'hourly') out.pay = 'Paid by the hour';
+      return out;
+    }
+
+    return { describe: describe, verticalNames: verticalNames };
+  })();
+  // </trade-access-core>
+
+  function tradeAccess() { return TradeAccessCore.describe(_user); }
+  function everyoneLensLabel() { return tradeAccess().everyone || 'Everyone'; }
+
+  // One rendering of the access label, used by Profile, the user menu and the
+  // first-run card so the three can never disagree.
+  function tradeAccessBlockHTML(kind) {
+    var a = tradeAccess();
+    return '<div class="access-block ' + kind + '" data-access-tone="' + a.tone + '" style="margin-top:8px">'
+      + '<span class="access-badge ' + a.tone + '" data-access-title>' + esc(a.title) + '</span>'
+      + (a.pay ? '<div class="access-pay" data-access-pay>' + esc(a.pay) + '</div>' : '')
+      + '<div class="access-scope" data-access-scope>' + esc(a.scope) + '</div>'
+      + '</div>';
+  }
+
+  function accessIntroKey() {
+    return 'sw_trade_access_intro:' + String((_user && (_user.id || _user.email)) || '');
+  }
+
+  // First run: shown on the landing Calendar until dismissed, and again only if
+  // this account's access title changes (e.g. someone becomes a manager).
+  function renderAccessIntro() {
+    var host = document.getElementById('accessIntro');
+    if (!host) return;
+    var seen = null;
+    try { seen = localStorage.getItem(accessIntroKey()); } catch (e) {}
+    if (!_user || seen === tradeAccess().title) { host.hidden = true; host.innerHTML = ''; return; }
+    host.innerHTML = '<div style="font-size:13px;font-weight:700;color:var(--sw-dark)">You are signed in as</div>'
+      + tradeAccessBlockHTML('intro')
+      + '<div class="access-hint">Tap your name at the top for Activity (notes, photos, issues) and to sign out.</div>'
+      + '<button type="button" onclick="dismissAccessIntro()">Got it</button>';
+    host.hidden = false;
+  }
+
+  window.dismissAccessIntro = function () {
+    try { localStorage.setItem(accessIntroKey(), tradeAccess().title); } catch (e) {}
+    var host = document.getElementById('accessIntro');
+    if (host) { host.hidden = true; host.innerHTML = ''; }
+  };
+
+  function syncUserMenuAccess() {
+    var el = document.getElementById('userMenuAccess');
+    if (el) el.innerHTML = _user ? tradeAccessBlockHTML('menu') : '';
+  }
+
+  window.openActivityFromMenu = function () {
+    var menu = document.getElementById('userMenu');
+    if (menu) menu.style.display = 'none';
+    showView('activity');
+  };
+
+  // Board nav. Office staff and managers always get it (it is their allocation
+  // surface). Everyone else gets it only once the make-safe board feed shows
+  // they have make-safe cards, and on a failed read (so its retry state stays
+  // reachable). The server still decides what the board contains.
+  function hasBoardResponsibility(feed) {
+    var perms = (feed && feed.permissions) || {};
+    return canUseEveryoneLens() || perms.can_allocate === true || perms.sees_all_makesafes === true;
+  }
+  function syncBoardNav(feed, failed) {
+    var btn = document.getElementById('navBoard');
+    if (!btn || !_user) return;
+    var show = hasBoardResponsibility(feed) || !!failed;
+    if (!show && feed) {
+      try { show = MakesafeTradeV5.rows(feed).length > 0; } catch (e) { show = true; }
+    }
+    btn.style.display = show ? '' : 'none';
+  }
+
   // ── M-F Cancel a make-safe (W1-D / W2-C) ──────────────────────────────────
   // Fixed reason set shared by the trade cancel form + the cancelled-card labels.
   // Codes are the backend cancel_makesafe allow-list; labels are Marnin's copy.
@@ -3994,12 +4141,6 @@
   function canSeeFullPricing() { return _userTier >= 3; }
   function canSeeConversation() { return _userTier >= 3; }
   function canReassignCrew() { return _userTier >= 3; }
-
-  function tierLabel(t) {
-    if (t === 3) return 'Division Manager';
-    if (t === 2) return 'Senior Installer';
-    return 'Installer';
-  }
 
   // ── Time tracking state machine ──
   // ══════════════════════════════════════════════════
@@ -6628,10 +6769,13 @@
     document.getElementById('bottomNav').style.display = 'flex';
     document.getElementById('viewLogin').classList.remove('active');
 
-    // Every authenticated trade may open the server-filtered make-safe board.
-    // makesafe-board.v1 decides allocated-only vs all-makesafes and can_allocate.
-    var _boardBtn = document.getElementById('navBoard');
-    if (_boardBtn) _boardBtn.style.display = '';
+    // Board nav: managers now; everyone else once the board feed shows they
+    // have make-safe cards (syncBoardNav). makesafe-board.v1 still decides
+    // allocated-only vs all-makesafes and can_allocate.
+    syncBoardNav(null, false);
+    fetchMakesafeV5Feed(false).catch(function () {});
+    syncUserMenuAccess();
+    renderAccessIntro();
 
     // Show Team tab for Tier 2+
     var teamTab = document.getElementById('subTabTeam');
@@ -6838,6 +6982,7 @@
     var btnAll = document.getElementById('adminToggleAll');
     var btnMine = document.getElementById('adminToggleMine');
     if (!btnAll || !btnMine) return;
+    btnAll.textContent = everyoneLensLabel();
     if (_adminViewAll) {
       btnAll.style.background = 'var(--sw-dark)'; btnAll.style.color = '#fff';
       btnMine.style.background = 'transparent'; btnMine.style.color = 'var(--sw-mid)';
@@ -17426,8 +17571,10 @@
     if (!force && _makesafeV5Feed && Date.now() - _makesafeV5FeedAt < 90000) return Promise.resolve(_makesafeV5Feed);
     if (!force && _makesafeV5FeedPromise) return _makesafeV5FeedPromise;
     _makesafeV5FeedPromise = api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true }).then(function (payload) {
-      _makesafeV5Feed = MakesafeTradeV5.validate(payload); _makesafeV5FeedAt = Date.now(); _makesafeV5FeedPromise = null; return _makesafeV5Feed;
-    }).catch(function (err) { _makesafeV5FeedPromise = null; throw err; });
+      _makesafeV5Feed = MakesafeTradeV5.validate(payload); _makesafeV5FeedAt = Date.now(); _makesafeV5FeedPromise = null;
+      syncBoardNav(_makesafeV5Feed, false);
+      return _makesafeV5Feed;
+    }).catch(function (err) { _makesafeV5FeedPromise = null; syncBoardNav(null, true); throw err; });
     return _makesafeV5FeedPromise;
   }
   function invalidateMakesafeV5Feed() { _makesafeV5Feed = null; _makesafeV5FeedAt = 0; }
@@ -18385,9 +18532,9 @@
       trades.push(['repair', 'Repair', 'rp dot-rp']);
       if (managesTradeVertical('fencing')) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
-      var scope = '<div class="seg lite" style="max-width:240px">'
+      var scope = '<div class="seg lite" style="max-width:320px">'
         + '<button class="segbtn' + (NC.scope === 'mine' ? ' on' : '') + '" data-fscope="mine">Mine</button>'
-        + (canUseEveryoneLens() ? '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">Everyone</button>' : '')
+        + (canUseEveryoneLens() ? '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">' + esc(everyoneLensLabel()) + '</button>' : '')
         + '</div>';
       return '<div class="sh-kick">Filter the calendar</div>'
         + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
@@ -19507,7 +19654,7 @@
     var html = '';
 
     html += '<div data-financial-hub style="padding:8px 0 16px;text-align:center">';
-    html += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark)">Financial</div>';
+    html += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark)">Pay</div>';
     html += '<div style="font-size:12px;color:var(--sw-text-sec)">Invoices, expenses & reimbursements</div>';
     html += '</div>';
 
@@ -25674,7 +25821,7 @@
 
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
     html += '<h2 style="font-size:18px;font-weight:700;color:var(--sw-dark);margin:0">Verify Hours</h2>';
-    html += '<button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back to My Hours</button>';
+    html += '<button class="btn btn-secondary btn-small" onclick="loadHoursView()">Back to Pay</button>';
     html += '</div>';
 
     if (entries.length === 0) {
@@ -26351,6 +26498,16 @@
     for (var i = 0; i < board.verticals.length; i++) { if (board.verticals[i].vertical === _boardVert) { active = board.verticals[i]; break; } }
     if (!active) active = board.verticals[0];
     var isFencing = active.vertical === 'fencing';
+    // A trade with no board responsibility and no make-safe cards gets a plain
+    // explanation and a way back, not four empty columns.
+    if (!isFencing && !active.total && board.verticals.length === 1 && !hasBoardResponsibility(_boardCache.feed)) {
+      container.innerHTML = '<div class="empty-state" data-board-empty-own>'
+        + '<p>No make-safe jobs on your board</p>'
+        + '<div style="font-size:13px;color:var(--sw-text-sec);margin-top:6px;line-height:1.45">The Board lists the make-safe jobs you are allocated to. Your other jobs are in Jobs, and All in Jobs searches every job.</div>'
+        + '<button class="btn btn-secondary btn-small" style="margin-top:14px" onclick="showView(\'myJobs\')">Open Jobs</button>'
+        + '</div>';
+      return;
+    }
     if (isFencing) {
       active = FencingBoardCore.forSelection(active, _ensureFencingWeek(), _fencingBoardUnscheduled);
     }
@@ -27248,8 +27405,7 @@
     html += '  <div style="font-size:18px;font-weight:700;color:var(--sw-dark)">' + esc(_user.name || 'Trade User') + '</div>';
     html += '  <div style="font-size:14px;color:var(--sw-text-sec)">' + esc(_user.email || '') + '</div>';
     if (_user.phone) html += '<div style="font-size:14px;color:var(--sw-text-sec)">' + esc(_user.phone) + '</div>';
-    if (_user.role) html += '<div style="font-size:12px;color:var(--sw-mid);text-transform:capitalize;margin-top:4px">' + esc(_user.role.replace(/_/g, ' ')) + '</div>';
-    html += '  <div style="margin-top:8px"><span class="tier-badge tier-' + _userTier + '">Tier ' + _userTier + ' — ' + esc(tierLabel(_userTier)) + '</span></div>';
+    html += tradeAccessBlockHTML('profile');
     html += '</div>';
 
     // ── Activity (off-nav in M1: quick Note/Photo/Issue + daily timeline) ──
@@ -29798,7 +29954,7 @@
     });
     body.innerHTML = h;
 
-    footer.innerHTML = '<button class="wiz-btn wiz-btn-primary" onclick="closeWizard();showView(\'myJobs\')">Back to My Jobs</button>';
+    footer.innerHTML = '<button class="wiz-btn wiz-btn-primary" onclick="closeWizard();showView(\'myJobs\')">Back to Jobs</button>';
     if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
     if (plan.kind === 'weekly') {
       // One at a time: the weekly draft is a single replaceable document.

@@ -224,7 +224,8 @@ assert(!/MS_COLUMN_OVERRIDE|COLUMNS_MAKESAFE/.test(html), 'assignment-derived ma
 assert(/NC = \{ calView: 'cal', scale: 'day', axis: 'jobs'/.test(html), 'job-based Today is the calendar default');
 assert(/function ncBoardAllowed\(\) \{ return !!\(NC\.model && NC\.model\.permissions/.test(html), 'calendar action rights come from feed permissions');
 assert(/_boardCache\.permissions && _boardCache\.permissions\.can_allocate/.test(html), 'board action rights come from feed permissions');
-assert(/_boardBtn\.style\.display = ''/.test(html), 'server-filtered board is visible to ordinary allocated-only trades');
+assert(/show = MakesafeTradeV5\.rows\(feed\)\.length > 0/.test(html), 'server-filtered board stays visible to allocated-only trades who have make-safe cards');
+assert(/syncBoardNav\(null, true\)/.test(html), 'a failed board read keeps the Board reachable for its retry state');
 assert(/MakesafeTradeV5\.failureHTML\(err, 'board', '_loadBoard\(true\)'/.test(html), 'board failures use the shared access/auth/retry state renderer');
 const fetchBody = html.slice(html.indexOf('async function caFetchCalendarModel'), html.indexOf('// ══════════════════════════════════════════════════════════════════════\n  // M2 U2'));
 assert(!/api\('calendar'/.test(fetchBody), 'make-safe calendar no longer reads the legacy calendar feed');

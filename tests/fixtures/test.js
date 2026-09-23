@@ -83,6 +83,13 @@ const test = base.extend({
       };
     }
 
+    if (feedScenario === 'board-empty-own') {
+      // A trade with no make-safe allocations: the feed answers with every
+      // column empty (trade access labels / Board nav).
+      Object.keys(board.columns).forEach((column) => { board.columns[column] = []; });
+      board.rows = [];
+    }
+
     const makesafeResponse = feedScenario === 'access-denied'
       ? { status: 403, body: { error: 'Trade access is not available for this account' } }
       : board;

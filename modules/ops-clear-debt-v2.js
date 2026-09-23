@@ -19,6 +19,7 @@
   var ROOT_ID = 'clearDebtRoot';
   var TZ = 'Australia/Perth';
   var inFlightRead = null;
+  var authOwner = null;
 
   var state = {
     data: null,
@@ -124,6 +125,7 @@
   }
 
   function load() {
+    syncAuthOwner();
     var root = rootEl();
     if (!root) return Promise.resolve();
     if (inFlightRead) return inFlightRead;
@@ -158,14 +160,16 @@
           : { kind: 'failed', message: String((err && err.message) || err || 'no answer') };
         render();
       });
-    inFlightRead = request.then(function (result) {
-      inFlightRead = null;
+    var pendingRead;
+    pendingRead = request.then(function (result) {
+      if (inFlightRead === pendingRead) inFlightRead = null;
       return result;
     }, function (err) {
-      inFlightRead = null;
+      if (inFlightRead === pendingRead) inFlightRead = null;
       throw err;
     });
-    return inFlightRead;
+    inFlightRead = pendingRead;
+    return pendingRead;
   }
 
   // ── lookups ─────────────────────────────────────────────────
@@ -242,6 +246,8 @@
   var STALE_SOURCES = ['ghl', 'email', 'notes', 'facts'];
   function staleOrUnreadable(d) {
     if (!(d.freshness && d.freshness.xero_fresh) || (d.faults || []).length > 0) return true;
+    var readSources = (state.data && state.data.sources) || {};
+    if (readSources.xero_events && readSources.xero_events.ok === false) return true;
     var s = d.sources || {};
     if (s.facts && s.facts.timeline_read === 'unreadable') return true;
     return STALE_SOURCES.some(function (k) { return /^(stale|unreadable)$/.test(String((s[k] && s[k].status) || '')); });
@@ -1099,6 +1105,41 @@
   }
 
   var bound = false;
+  function authUserId() {
+    var cloud = global.SECUREWORKS_CLOUD;
+    var auth = cloud && cloud.auth;
+    var user = auth && typeof auth.getUser === 'function' ? auth.getUser() : null;
+    return user && user.id ? String(user.id) : null;
+  }
+  function clearForAuthChange(nextOwner) {
+    state.requestSeq += 1;
+    inFlightRead = null;
+    state.data = null;
+    state.loading = false;
+    state.error = null;
+    state.search = '';
+    state.filter = 'all';
+    state.owner = '';
+    state.selectedKey = null;
+    state.invoiceId = null;
+    state.tlFilter = 'all';
+    state.channel = null;
+    state.drafts = {};
+    state.showDetails = false;
+    authOwner = nextOwner || null;
+    render();
+  }
+  function syncAuthOwner() {
+    var nextOwner = authUserId();
+    if (!nextOwner) return;
+    if (authOwner && authOwner !== nextOwner) clearForAuthChange(nextOwner);
+    else authOwner = nextOwner;
+  }
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('sw:auth-locked', function () { clearForAuthChange(null); });
+    global.addEventListener('sw:auth-unlocked', syncAuthOwner);
+  }
+
   function bind() {
     var root = rootEl();
     if (!root || bound) return;
@@ -1111,6 +1152,7 @@
   // Financials > Clear Debt calls this (modules/ops-financials.js showSubTab).
   function loadClearDebt() {
     bind();
+    syncAuthOwner();
     if (inFlightRead) return inFlightRead;
     if (state.data || state.error) return Promise.resolve();
     return load();

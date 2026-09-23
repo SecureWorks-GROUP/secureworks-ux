@@ -108,6 +108,120 @@ for (const vp of viewports) {
       expect(onlyStatic(requests)).toEqual([]);
     });
 
+    test('a root invoice-event read failure includes debtors in the stale-source filter', async ({ page }) => {
+      const requests = await open(page);
+      await page.evaluate(() => {
+        window.fixtureWorklist.sources.xero_events = { ok: false, error: 'event store timeout' };
+      });
+      await page.getByRole('button', { name: 'Refresh' }).click();
+      await expect(page.locator('.counts')).toContainText('101 open invoices');
+      await expect(page.locator('select[data-cd="filter"] option[value="stale"]')).toHaveText('Stale or unreadable source (78)');
+      await page.locator('select[data-cd="filter"]').selectOption('stale');
+      await expect(page.locator('.db-list .lead')).toHaveCount(78);
+      await expect(page.locator('.db-list .lead', { hasText: 'Debtor 003' })).toHaveCount(1);
+      const { reads, writes } = await ledger(page);
+      expect(reads).toHaveLength(2);
+      expect(writes).toEqual([]);
+      expect(onlyStatic(requests)).toEqual([]);
+    });
+
+    test('auth lock clears debtor state and tab re-entry reads under the new user', async ({ page }) => {
+      await page.addInitScript(() => {
+        window.fakeAuthUser = { id: 'operator-a' };
+        window.SECUREWORKS_CLOUD = { auth: { getUser: () => window.fakeAuthUser } };
+      });
+      const requests = await open(page);
+      await page.locator('.db-list .lead', { hasText: 'Debtor 001' }).first().click();
+      await page.locator('.db-card label.inv', { hasText: 'INV-S1003' }).click();
+      await page.getByRole('textbox', { name: 'Text' }).fill('Operator A private draft');
+      expect(await page.evaluate(() => Object.keys(window.ClearDebt.state.drafts).length)).toBe(1);
+
+      const cleared = await page.evaluate(() => {
+        window.opsFetch = (action, params) => {
+          window.fakeReads.push({ action, params });
+          return new Promise((resolve) => { window.resolveFreshRead = resolve; });
+        };
+        window.dispatchEvent(new Event('sw:auth-locked'));
+        window.fakeAuthUser = { id: 'operator-b' };
+        window.dispatchEvent(new Event('sw:auth-unlocked'));
+        const s = window.ClearDebt.state;
+        return { data: s.data, loading: s.loading, error: s.error, selectedKey: s.selectedKey, invoiceId: s.invoiceId, channel: s.channel, drafts: s.drafts, search: s.search, owner: s.owner, filter: s.filter };
+      });
+      expect(cleared).toEqual({ data: null, loading: false, error: null, selectedKey: null, invoiceId: null, channel: null, drafts: {}, search: '', owner: '', filter: 'all' });
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Debtor 001');
+
+      await page.evaluate(() => { window.loadClearDebt(); });
+      await expect.poll(async () => (await ledger(page)).reads).toHaveLength(2);
+      await expect(page.locator('.db-loading')).toBeVisible();
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Debtor 001');
+      await page.evaluate(() => {
+        const fresh = makeClearDebtWorklist();
+        fresh.debtors[0].identity.name = 'Operator B debtor';
+        window.resolveFreshRead(fresh);
+      });
+      await expect(page.locator('.db-list .lead-name').first()).toHaveText('Operator B debtor');
+      expect((await ledger(page)).writes).toEqual([]);
+      expect(onlyStatic(requests)).toEqual([]);
+    });
+
+    test('an unlock for a different identity clears the previous worklist', async ({ page }) => {
+      await page.addInitScript(() => {
+        window.fakeAuthUser = { id: 'operator-a' };
+        window.SECUREWORKS_CLOUD = { auth: { getUser: () => window.fakeAuthUser } };
+      });
+      const requests = await open(page);
+      await expect(page.locator('.db-list .lead')).toHaveCount(78);
+      await page.evaluate(() => {
+        window.fakeAuthUser = { id: 'operator-b' };
+        window.dispatchEvent(new Event('sw:auth-unlocked'));
+      });
+      await expect(page.locator('.db-list .lead')).toHaveCount(0);
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Debtor 001');
+      expect(await page.evaluate(() => window.ClearDebt.state.data)).toBeNull();
+      expect((await ledger(page)).reads).toHaveLength(1);
+      expect(onlyStatic(requests)).toEqual([]);
+    });
+
+    test('a late read from a locked identity cannot repaint or clear the new in-flight read', async ({ page }) => {
+      const requests = await open(page);
+      await expect(page.locator('.db-list .lead')).toHaveCount(78);
+      await page.evaluate(() => {
+        window.pendingDebtReads = [];
+        window.opsFetch = (action, params) => {
+          window.fakeReads.push({ action, params });
+          return new Promise((resolve) => { window.pendingDebtReads.push(resolve); });
+        };
+        window.oldRead = window.ClearDebt.load();
+      });
+      await expect.poll(async () => (await ledger(page)).reads).toHaveLength(2);
+      await page.evaluate(() => { window.dispatchEvent(new Event('sw:auth-locked')); });
+      await page.evaluate(() => { window.loadClearDebt(); });
+      await expect.poll(async () => (await ledger(page)).reads).toHaveLength(3);
+      await expect.poll(() => page.evaluate(() => window.pendingDebtReads.length)).toBe(2);
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Debtor 001');
+
+      await page.evaluate(async () => {
+        const stale = makeClearDebtWorklist();
+        stale.debtors[0].identity.name = 'Old operator debtor';
+        window.pendingDebtReads[0](stale);
+        await window.oldRead;
+      });
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Old operator debtor');
+      await expect(page.locator('#clearDebtRoot')).not.toContainText('Debtor 001');
+      expect(await page.evaluate(() => ({ data: window.ClearDebt.state.data, loading: window.ClearDebt.state.loading }))).toEqual({ data: null, loading: true });
+      await page.evaluate(() => { window.loadClearDebt(); });
+      expect((await ledger(page)).reads).toHaveLength(3);
+
+      await page.evaluate(() => {
+        const fresh = makeClearDebtWorklist();
+        fresh.debtors[0].identity.name = 'New operator debtor';
+        window.pendingDebtReads[1](fresh);
+      });
+      await expect(page.locator('.db-list .lead-name').first()).toHaveText('New operator debtor');
+      expect((await ledger(page)).writes).toEqual([]);
+      expect(onlyStatic(requests)).toEqual([]);
+    });
+
     test('one timeline: chips filter the same stream, sources are labelled, scope narrows to the picked invoice', async ({ page }) => {
       const requests = await open(page);
       await page.locator('.db-list .lead', { hasText: 'Debtor 001' }).first().click();

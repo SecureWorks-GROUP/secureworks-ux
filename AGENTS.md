@@ -665,8 +665,10 @@ no `set_trade_rate` call; Profile and assigned job cards show the office rate
 read-only ("Set by the office"). Only a searched-in (`manually_added`) job card
 or extra line keeps a typed rate, because ops-api flags that client-entered rate
 for office verification and never saves it as the trade's rate. A missing rate
-points the trade to the office, never to Profile. Guard:
-`tests/e2e/trade-rate-office-only.spec.js`.
+points the trade to the office, never to Profile. A restored session draft
+cannot keep a trade-typed assigned rate: `_pinAssignedCardRates` overwrites or
+clears it on every builder paint, even when hours data is missing or has no
+positive rate. Guard: `tests/e2e/trade-rate-office-only.spec.js`.
 
 ## Trade clock recovery (`trade.html`)
 

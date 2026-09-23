@@ -7692,6 +7692,8 @@
     return /^(Today|Tomorrow|Yesterday)$/.test(out) ? out.toLowerCase() : out;
   }
   var HISTORY_REACH_TEXT = 'Your job list keeps about the last 30 days (make-safe jobs about 180 days).';
+  // Empty until a past job is actually loaded — never today, or History
+  // paints "no jobs between today and today" over a list still in flight.
   function historyDefaultFrom() {
     return historyLoadedFrom(_cachedMyJobs, awstDateStr());
   }

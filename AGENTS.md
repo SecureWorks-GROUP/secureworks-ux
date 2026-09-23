@@ -684,9 +684,10 @@ cached or live `my_jobs` list is painted; office keeps the managed default; a
 trade-picked vertical is never overridden; decking is not a calendar vertical,
 so a blank-period next job of that type opens via `openJob`) and the
 blank-day/week "next job" offer all read it. History only filters what
-`my_jobs` loaded (about 30 days, make-safe about 180), so its dates are clamped
-to the loaded range and it points to All search for older jobs; a paged
-own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity.spec.js`.
+`my_jobs` loaded (about 30 days, make-safe about 180): From stays unset until
+that list is on screen (never stamp today on an empty cache), dates are then
+clamped to the loaded range, and it points to All search for older jobs; a
+paged own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity.spec.js`.
 
 ## Trade clock recovery (`trade.html`)
 

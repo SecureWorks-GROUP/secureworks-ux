@@ -76,7 +76,7 @@ const EMPTY_MAKESAFE_BOARD = {
   parity: { ok: true, contract_version: 'makesafe-board.v1.2' }
 };
 
-async function stubOwnWork(page, { myJobs, calendarRows, log, makesafeBoard }) {
+async function stubOwnWork(page, { myJobs, calendarRows, log, makesafeBoard, failMyJobs }) {
   const jobs = {};
   Object.values(myJobs).forEach((bucket) => {
     if (Array.isArray(bucket)) bucket.forEach((r) => { jobs[r.jobs.id] = r.jobs; });
@@ -92,6 +92,7 @@ async function stubOwnWork(page, { myJobs, calendarRows, log, makesafeBoard }) {
     }
     if (action === 'my_jobs') {
       log.push({ action, mode: url.searchParams.get('mode') });
+      if (failMyJobs) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'offline' }) });
       return reply(myJobs);
     }
     if (action === 'trade_calendar') {
@@ -204,8 +205,9 @@ test.describe('Jobs and Calendar clarity: hourly fencing crew (Alyx-shaped)', ()
     const blankDay = page.locator('#ncCalhost [data-cal-empty]');
     await expect(blankDay).toContainText('Nothing scheduled for');
     await expect(blankDay).toContainText('Showing your Fencing jobs.');
-    await expect(blankDay).toContainText('Your next job:');
-    await expect(blankDay).toContainText('FENCE-ALYX-NEXT');
+    const nextOffer = blankDay.locator('[data-ncnext]');
+    await expect(nextOffer).toHaveText(/Your next job: .+ · FENCE-ALYX-NEXT/);
+    await expect(nextOffer).not.toHaveText(/&middot;/);
 
     await openFilterSheet(page);
     await expect(page.locator('#ncScopeLabel')).toHaveText('Showing your Fencing jobs');
@@ -242,6 +244,44 @@ test.describe('Jobs and Calendar clarity: hourly fencing crew (Alyx-shaped)', ()
     const allEmpty = page.locator('#myJobsList [data-jobs-empty="all"]');
     await expect(allEmpty).toContainText('Type at least 2 letters to search every job.');
     await expect(allEmpty.getByRole('button')).toHaveCount(0);
+  });
+});
+
+test.describe('Jobs and Calendar clarity: cached own work (Alyx-shaped)', () => {
+  test.use({ persona: 'installer', timezoneId: 'Australia/Perth' });
+
+  const me = PERSONAS.installer.profile.id;
+  const next = row('alyx-next', me, addIsoDays(TODAY, 9), 'scheduled', { id: 'alyx-job-next', job_number: 'FENCE-ALYX-NEXT', site_suburb: 'Wanneroo' });
+  const myJobs = {
+    today: [],
+    thisWeek: [],
+    upcoming: [next],
+    recent: [],
+    recentCompleted: [],
+    unscheduled: [],
+    makesafePool: [],
+    _adminView: false
+  };
+
+  test('Cached fencing jobs open Fencing even when my_jobs cannot refresh', async ({ appPage: page }) => {
+    const log = [];
+    log.viewerId = me;
+    await stubOwnWork(page, { myJobs, calendarRows: [next], log, failMyJobs: true });
+    await page.evaluate(({ key, data }) => {
+      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    }, {
+      key: 'sw_jobs_cache_' + encodeURIComponent(me) + '_' + encodeURIComponent('own') + '_mine',
+      data: myJobs
+    });
+    await signIn(page, PERSONAS.installer);
+
+    await expect(page.locator('#viewSchedule')).toHaveClass(/active/);
+    await expect.poll(() => log.some((e) => e.action === 'trade_calendar' && e.type === 'fencing')).toBe(true);
+    const blankDay = page.locator('#ncCalhost [data-cal-empty]');
+    await expect(blankDay).toContainText('Showing your Fencing jobs.');
+    await expect(blankDay.locator('[data-ncnext]')).toHaveText(/Your next job: .+ · FENCE-ALYX-NEXT/);
+    await openFilterSheet(page);
+    await expect(page.locator('#ncSheetBody [data-ftype="fencing"]')).toHaveClass(/on/);
   });
 });
 

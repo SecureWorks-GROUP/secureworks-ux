@@ -7174,6 +7174,7 @@
     var cached = loadJobListCache();
     if (cached) {
       renderMyJobs(cached);
+      ncAdoptOwnWorkDefault();
     } else {
       // No cache — show skeleton while waiting for network
       container.innerHTML = '<div class="skeleton-card"><div class="skeleton-line long"></div><div class="skeleton-line medium"></div><div class="skeleton-line short"></div></div>' +
@@ -7226,6 +7227,7 @@
         warn.style.cssText = 'text-align:center;font-size:12px;color:#E67E22;padding:8px 0';
         warn.textContent = 'Could not refresh — showing last known jobs';
         container.insertBefore(warn, container.firstChild);
+        ncAdoptOwnWorkDefault();
       } else {
         container.innerHTML = '<div class="empty-state">Error loading jobs: ' + friendlyError(err) + '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="loadMyJobs()">Retry</button></div>';
       }
@@ -18248,12 +18250,12 @@
         var other = st.next.type && st.next.type !== st.type && st.type !== 'all';
         var openNext = !!st.next.openJob;
         var nextLabel = openNext
-          ? ('Open your next job: ' + (st.next.ref || fmtDay(st.next.date)))
-          : ('Your next job: ' + fmtDay(st.next.date) + (st.next.ref ? ' &middot; ' + st.next.ref : '')
-            + (other ? ' (' + (st.next.typeLabel || st.next.type) + ')' : ''));
+          ? esc('Open your next job: ' + (st.next.ref || fmtDay(st.next.date)))
+          : ('Your next job: ' + esc(fmtDay(st.next.date)) + (st.next.ref ? ' &middot; ' + esc(st.next.ref) : '')
+            + (other ? ' (' + esc(st.next.typeLabel || st.next.type) + ')' : ''));
         h += '<div><button type="button" class="btn ghost nc-nextjob" style="margin-top:12px" data-ncnext="' + esc(st.next.date) + '" data-ncnext-type="' + esc(st.next.type || '') + '"'
           + (openNext && st.next.jobId ? ' data-ncnext-job="' + esc(st.next.jobId) + '" data-ncnext-asg="' + esc(st.next.assignmentId || '') + '"' : '')
-          + '>' + esc(nextLabel) + '</button></div>';
+          + '>' + nextLabel + '</button></div>';
       }
       return h + '</div>';
     }
@@ -18642,8 +18644,7 @@
   function ncRefreshOwnWork() {
     NC.ownWork = ownWorkCalendarVertical(ownAssignmentRows(_lastJobData, _user && _user.id), [ncFallbackCalendarType()]);
   }
-  // Runs once my_jobs has landed. A vertical the trade picked themselves
-  // (typePinned) is never overridden.
+  // A vertical the trade picked themselves (typePinned) is never overridden.
   function ncAdoptOwnWorkDefault() {
     if (!_user) return;
     ncRefreshOwnWork();

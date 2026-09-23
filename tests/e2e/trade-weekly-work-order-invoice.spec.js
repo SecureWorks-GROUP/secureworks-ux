@@ -84,6 +84,8 @@ test('builds invoice #31 from source selections and renders only server-calculat
 
   await page.getByRole('button', { name: 'Submit Invoice' }).click();
   await expect(page.locator('#confirmMsg')).toContainText('$4,813.40');
+  // One invoice per week: the submit confirm must be ticked deliberately.
+  await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
   await expect(page.locator('#toast')).toContainText('Invoice submitted to Xero as a draft bill');
   await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
@@ -238,6 +240,8 @@ test.describe('stale weekly submit response', () => {
       return response.request().method() === 'POST' && url.searchParams.get('action') === 'generate_trade_invoice';
     });
     await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await page.getByRole('button', { name: 'Previous invoice week' }).click();
     await expect(page.locator('[data-weekly-work-order="henry-wo-prior"]')).toBeVisible();
@@ -280,6 +284,8 @@ test.describe('weekly save response with invoice identity only', () => {
     await expect(page.getByRole('button', { name: 'Submit Invoice' })).toBeEnabled();
 
     await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.getByRole('heading', { name: 'Invoice Detail' })).toBeVisible();
 
@@ -298,6 +304,8 @@ test.describe('incomplete weekly generate response', () => {
     await expect(page.locator('[data-weekly-invoice-totals]')).toContainText('TO BE PAID$4,813.40');
 
     await page.getByRole('button', { name: 'Submit Invoice' }).click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
 
     await expect(page.locator('#toast')).toContainText('Do not submit again');

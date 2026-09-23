@@ -469,6 +469,8 @@ test.describe('Henry job-centric submit', () => {
     await anyCard.locator('input[placeholder="Description of work"]').press('Tab');
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -511,6 +513,8 @@ test.describe('Henry job-centric submit', () => {
     await expect(card.locator('[data-cardamt]')).toHaveText('$250.00');
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -543,6 +547,8 @@ test.describe('Henry job-centric submit', () => {
     await expect(money).toContainText('Earned$35.00');
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -614,6 +620,8 @@ test.describe('Henry job-centric submit', () => {
 
     exclusive = false;
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#toast')).toContainText('already been invoiced');
     await expect(page.getByRole('heading', { name: 'Invoice' })).toBeVisible();
@@ -668,6 +676,8 @@ test.describe('Henry job-centric submit', () => {
 
     exclusive = false;
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -699,6 +709,8 @@ test.describe('Henry Hours submit after hydrate fail', () => {
     await expect(page.locator('#invSubmitBtn')).toBeEnabled();
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -854,6 +866,8 @@ test.describe('stale restored work-order id', () => {
     await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 
@@ -1089,6 +1103,8 @@ test.describe('hydrate ignores out-of-week work orders', () => {
     await expect(stale.locator('[data-cardhours]')).toHaveValue('2');
 
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.locator('#hoursContent')).toContainText('Invoice Submitted');
 

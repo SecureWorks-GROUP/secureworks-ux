@@ -33,6 +33,8 @@ test('explains WO labour reconciliation and direct crew billing on the invoice p
   await testInfo.attach('WO labour explainer in invoice builder', { path: builderScreenshot, contentType: 'image/png' });
 
   await page.locator('#invSubmitBtn').click();
+  // One invoice per week: the submit confirm must be ticked deliberately.
+  await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
   await expect(page.getByText('Invoice Submitted')).toBeVisible();
   await expect(page.locator('#hoursContent')).toContainText('$287.50 for Tendo was deducted from your invoice and shown to the office. They must bill SecureWorks Group directly.');

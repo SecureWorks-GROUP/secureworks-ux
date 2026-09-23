@@ -629,6 +629,21 @@ link or cold reload (no card cache) classify exactly like a card click. Guards:
 `tests/e2e/trade-repair-vertical.spec.js`,
 `tests/e2e/trade-repair-job-screen.spec.js`.
 
+## Trade weekly invoice: one per week (`trade.html`)
+
+ONE invoice per trade per week, no exceptions (Captain ruling 2026-09-23; ops-api
+also answers 409 `WEEK_ALREADY_INVOICED`). Search `// <invoice-week-choice>`. The
+week picker marks a week holding a live invoice as done and keeps Continue shut
+(`_loadInvoicedWeeks` from `my_trade_invoices`; draft/failed/ops-reject are
+released, as on the server). The builder shows its week at the top and changes it
+in place, carrying searched-in jobs to the same weekday. Every weekly submit goes
+through `_confirmOneInvoiceForWeek`, a `showConfirm` with `opts.ack`: `#confirmOk`
+stays disabled until `#confirmAck` is ticked, so specs must
+`check('#confirmAck')` before clicking OK. After a successful submit
+`_moveToWeekAfter` moves the Pay hub and picker on to the next week. Do not add a
+second-invoice, supplementary or redo path without a Captain ruling. Guard:
+`tests/e2e/trade-invoice-week-choice.spec.js`.
+
 ## Crew roster & lead installer (`trade.html`)
 
 The authoritative crew and lead-installer contract, including absence semantics,

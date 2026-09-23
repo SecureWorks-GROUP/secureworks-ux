@@ -276,6 +276,38 @@ test.describe('Managed lead keeps own jobs on Everyone (audit finding 4)', () =>
   });
 });
 
+test.describe('my_jobs load does not crash after paint', () => {
+  async function assertJobsLoadWithoutErrorCard(page, persona, actions) {
+    const { log } = await boot(page, persona, actions);
+    await expect.poll(() => log.some((entry) => entry.action === 'my_jobs')).toBe(true);
+    await expect.poll(async () => page.locator('#myJobsList').evaluate((el) => {
+      const text = el.textContent || '';
+      if (el.querySelector('.skeleton-card')) return 'loading';
+      if (/Error loading jobs/.test(text)) return 'error';
+      return 'ready';
+    })).toBe('ready');
+    await openJobsTab(page, 'thisWeek');
+    const list = page.locator('#myJobsList');
+    await expect(list.locator('.jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
+    await expect(list).not.toContainText('Error loading jobs');
+    await expect.poll(() => log.filter((entry) => entry.action === 'my_jobs').length)
+      .toBeGreaterThan(persona === 'ryan' ? 2 : 1);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await expect(list).not.toContainText('Could not refresh');
+  }
+
+  test('a managed lead sees This Week without an error card', async ({ page }) => {
+    await assertJobsLoadWithoutErrorCard(page, 'ryan', ryanActions([]));
+  });
+
+  test('a crew member sees This Week without an error card', async ({ page }) => {
+    await assertJobsLoadWithoutErrorCard(page, 'crew', {
+      my_jobs: { ...EMPTY, thisWeek: [row('asg-crew-embleton', EMBLETON_JOB)] },
+      search_all_jobs: { lens: 'assigned', jobs: [], total: 0 }
+    });
+  });
+});
+
 test.describe('No job money reaches a trade through the Jobs lists', () => {
   test('metadata.pricing_correction is dropped before cards and the on-device cache', async ({ page }) => {
     const priced = row('asg-priced', {

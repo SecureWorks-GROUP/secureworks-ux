@@ -7325,7 +7325,7 @@
       }
       ncAdoptOwnWorkDefault();
       // Check for active server-side clock (survives app reinstall / device switch)
-      checkServerClockRecovery(data, params.mode === 'all');
+      checkServerClockRecovery(data, canUseEveryoneLens() && _adminViewAll);
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);

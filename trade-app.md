@@ -334,12 +334,12 @@ The make-safe experience is driven by the canonical `makesafe_board` read model 
 - Roof-report portal links render via `portalHTML()` only when the feed exposes a report portal URL.
 
 ### Permissions
-- Action rights come from `permissions` on the feed: board buttons key off `_boardCache.permissions.can_allocate`, calendar actions off `NC.model.permissions` (`ncBoardAllowed()`). A server-filtered `allocated-only` trade still sees the board.
+- Action rights come from `permissions` on the feed: board buttons key off `_boardCache.permissions.can_allocate`, calendar actions off `NC.model.permissions` (`ncBoardAllowed()`). Board nav visibility is owned by `AGENTS.md` → ACCESS IS NAMED.
 - Visibility (`allocated_only` / `all_makesafes`), `can_allocate`, and view-only flags (e.g. Khairo's fencing view-only, `can_allocate=false`) are honoured as delivered — never recomputed client-side.
 - `allocated_only` limits the canonical board/calendar rows, not findability:
   typed All and MakeSafe Board database search may surface another make-safe for
   read/open. This does not grant Allocate or any write authority.
-- The My Jobs lens (`#adminJobToggle`, labelled **Everyone** / **Mine**) is offered to dispatchers (`admin` / `ops_manager`) and to managed-vertical leads; ops managers and managed leads open on Everyone, global admins still opt in. It only chooses the `mode` sent to `my_jobs` — an authorization request the backend answers with its own tenant/vertical set, never a client-side widening. An ordinary installer gets no toggle and stays own-only. The open MakeSafe pool fallback (`loadMakesafePoolJobs`) remains dispatcher-only, and for a fencing lead the open-pool section is labelled **Fencing Ready for Crew** rather than Open MakeSafe Jobs.
+- The My Jobs lens (`#adminJobToggle`; Everyone label owned by `AGENTS.md` → ACCESS IS NAMED) is offered to dispatchers (`admin` / `ops_manager`) and to managed-vertical leads; ops managers and managed leads open on Everyone, global admins still opt in. It only chooses the `mode` sent to `my_jobs` — an authorization request the backend answers with its own tenant/vertical set, never a client-side widening. An ordinary installer gets no toggle and stays own-only. The open MakeSafe pool fallback (`loadMakesafePoolJobs`) remains dispatcher-only, and for a fencing lead the open-pool section is labelled **Fencing Ready for Crew** rather than Open MakeSafe Jobs.
 - Visibility is not authority: when the crew on a job is somebody else, the detail view renders view-only (`// <foreign-job-readonly>` → `#jobViewOnlyBanner`) with no clock/accept actions and no note, photo, comms, crew-charge or work-order invoice controls, and `blockedForeignJobWrite` rejects such a write inside `api()` before it reaches the network or the offline retry queue. Make-safe detail keeps its own server-driven authority model and is untouched by this gate.
 
 ### Tests

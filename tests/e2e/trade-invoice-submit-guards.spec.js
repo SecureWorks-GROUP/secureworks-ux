@@ -41,6 +41,8 @@ test.describe('server already holds an invoice for the week (409 shape)', () => 
   test('is a hard block naming the existing invoice, never a success screen', async ({ appPage: page, feedRequests }) => {
     await openBuilder(page);
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
 
     await expect(page.locator('#toast')).toContainText('already have an invoice for the week');
@@ -59,6 +61,8 @@ test.describe('server already holds an invoice for the week (pre-fix success sha
   test('already_submitted with success: true is still refused by the app', async ({ appPage: page, feedRequests }) => {
     await openBuilder(page);
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
 
     await expect(page.locator('#toast')).toContainText('already have an invoice for the week');
@@ -121,6 +125,8 @@ test.describe('confirm popup states the exact total and week being posted', () =
     const msg = page.locator('#confirmMsg');
     await expect(msg).toContainText('Submit 1 job for ');
     await expect(msg).toContainText('($400.00 before super)');
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.getByText('Invoice Submitted')).toBeVisible();
 

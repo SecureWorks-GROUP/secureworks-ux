@@ -77,6 +77,8 @@ test('shows the 12/6/6 super split and submits the saved GST choice', async ({ a
 
   await installPdfRecorder(page);
   await page.locator('#invSubmitBtn').click();
+  // One invoice per week: the submit confirm must be ticked deliberately.
+  await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
 
   const submitted = page.locator('[data-invoice-money-summary]');
@@ -138,6 +140,8 @@ test('installer Hours cards can add lump-sum amounts as a peer to hours', async 
   const gstSwitch = page.getByRole('switch', { name: 'Add GST to this invoice' });
   await gstSwitch.click();
   await page.locator('#invSubmitBtn').click();
+  // One invoice per week: the submit confirm must be ticked deliberately.
+  await page.locator('#confirmAck').check();
   await page.locator('#confirmOk').click();
   await expect(page.getByText('Invoice Submitted')).toBeVisible();
 
@@ -170,6 +174,8 @@ test.describe('submitted response has incomplete authoritative money', () => {
 
   async function expectUnavailableWithoutPdf(page, feedRequests) {
     await page.locator('#invSubmitBtn').click();
+    // One invoice per week: the submit confirm must be ticked deliberately.
+    await page.locator('#confirmAck').check();
     await page.locator('#confirmOk').click();
     await expect(page.getByText('Invoice Submitted')).toBeVisible();
     await expect(page.getByText('Submitted invoice totals are unavailable')).toBeVisible();
@@ -200,6 +206,8 @@ test.describe('submitted response has complete money but no persisted lines', ()
       await page.getByRole('button', { name: 'Continue' }).click();
 
       await page.locator('#invSubmitBtn').click();
+      // One invoice per week: the submit confirm must be ticked deliberately.
+      await page.locator('#confirmAck').check();
       await page.locator('#confirmOk').click();
 
       await expect(page.getByText('Invoice Submitted')).toBeVisible();
@@ -222,6 +230,8 @@ test.describe('submitted response has incomplete persisted lines', () => {
       await page.getByRole('button', { name: 'Continue' }).click();
 
       await page.locator('#invSubmitBtn').click();
+      // One invoice per week: the submit confirm must be ticked deliberately.
+      await page.locator('#confirmAck').check();
       await page.locator('#confirmOk').click();
 
       await expect(page.getByText('Invoice Submitted')).toBeVisible();
@@ -244,6 +254,8 @@ test.describe('unknown submit response', () => {
       await page.getByRole('button', { name: 'Continue' }).click();
 
       await page.locator('#invSubmitBtn').click();
+      // One invoice per week: the submit confirm must be ticked deliberately.
+      await page.locator('#confirmAck').check();
       await page.locator('#confirmOk').click();
 
       await expect(page.locator('#toast')).toContainText('Invoice submission failed');
@@ -266,6 +278,8 @@ test.describe('durably saved invoice with failed Xero push', () => {
       await page.getByRole('button', { name: 'Continue' }).click();
 
       await page.locator('#invSubmitBtn').click();
+      // One invoice per week: the submit confirm must be ticked deliberately.
+      await page.locator('#confirmAck').check();
       await page.locator('#confirmOk').click();
 
       await expect(page.getByText('Invoice Saved', { exact: true })).toBeVisible();

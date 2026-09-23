@@ -1307,7 +1307,26 @@
       color: var(--sw-text-sec);
       margin-bottom: 20px;
       line-height: 1.5;
+      white-space: pre-line;
     }
+    .confirm-ack {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--sw-dark);
+      background: rgba(241,90,41,0.08);
+      border: 1px solid var(--sw-orange);
+      border-radius: 10px;
+      padding: 12px;
+      margin: -8px 0 16px;
+      cursor: pointer;
+    }
+    .confirm-ack[hidden] { display: none; }
+    .confirm-ack input { width: 22px; height: 22px; flex: 0 0 22px; margin: 0; accent-color: var(--sw-orange); }
+    .confirm-ok:disabled { opacity: 0.4; cursor: not-allowed; }
     .confirm-actions {
       display: flex;
       gap: 10px;
@@ -3736,6 +3755,7 @@
   <div class="confirm-box">
     <h3 id="confirmTitle">Confirm</h3>
     <p id="confirmMsg"></p>
+    <label class="confirm-ack" id="confirmAckWrap" hidden><input type="checkbox" id="confirmAck"><span id="confirmAckText"></span></label>
     <div class="confirm-actions">
       <button class="confirm-cancel" id="confirmCancel">Cancel</button>
       <button class="confirm-ok" id="confirmOk">Confirm</button>
@@ -6989,6 +7009,10 @@
 
   function resetInvoiceSession() {
     _invoiceAuthGen++;
+    _invWeekCollision = null;
+    _invoicedWeeks = {};
+    _invoicedWeeksLoaded = false;
+    _invoicedWeeksSeq++;
     _clearInvDraft();
     _purgeOfflineInvoiceActionsNotOwnedByCurrentAccount();
   }
@@ -19498,11 +19522,33 @@
     html += '<div class="hours-week-label" id="invoiceWeekLabel">' + formatWeekRange(_hoursWeekEnd) + '</div>';
     html += '<button onclick="shiftInvoiceWeek(1)">&rarr;</button>';
     html += '</div>';
+    html += '<div id="invoiceWeekStatus" data-invoice-week-status style="font-size:13px;margin-top:10px;min-height:18px"></div>';
     html += '</div>';
 
-    html += '<button class="hours-submit-btn" onclick="loadAndOpenInvoice()">Continue</button>';
+    html += '<button class="hours-submit-btn" id="invoiceWeekContinue" onclick="loadAndOpenInvoice()">Continue</button>';
     container.innerHTML = html;
+    _paintInvoiceWeekStatus();
+    _loadInvoicedWeeks(_paintInvoiceWeekStatus);
   };
+
+  // A week holding a live invoice is done: say so and keep Continue shut,
+  // because the server would refuse a second invoice for it. [invoice-week-choice]
+  function _paintInvoiceWeekStatus() {
+    var el = document.getElementById('invoiceWeekStatus');
+    var btn = document.getElementById('invoiceWeekContinue');
+    if (!el || !btn || !_hoursWeekEnd) return;
+    var done = _invoicedWeek(_hoursWeekEnd);
+    if (done) {
+      el.innerHTML = '<span data-invoice-week-invoiced style="display:inline-block;font-weight:700;color:var(--sw-green);background:rgba(39,174,96,0.1);border-radius:6px;padding:4px 10px">&#10003; Invoiced' + (done.invoiceNumber ? ' · ' + esc(done.invoiceNumber) : '') + '</span>' +
+        '<div style="color:var(--sw-text-sec);margin-top:6px">You send one invoice per week. Pick another week with the arrows.</div>';
+      btn.disabled = true;
+      btn.style.opacity = '0.4';
+    } else {
+      el.innerHTML = _invoicedWeeksLoaded ? '<span style="color:var(--sw-text-sec)">Not invoiced yet</span>' : '';
+      btn.disabled = false;
+      btn.style.opacity = '';
+    }
+  }
 
   window.shiftInvoiceWeek = function(dir) {
     if (!_hoursWeekEnd) return;
@@ -19516,9 +19562,11 @@
     _hoursWeekStart = awstDateStr(monDate);
     var label = document.getElementById('invoiceWeekLabel');
     if (label) label.textContent = formatWeekRange(_hoursWeekEnd);
+    _paintInvoiceWeekStatus();
   };
 
   window.loadAndOpenInvoice = function() {
+    if (_invoicedWeek(_hoursWeekEnd)) { _paintInvoiceWeekStatus(); return; }
     var container = document.getElementById('hoursContent');
     container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading hours...</div>';
     // Compute week start
@@ -19539,6 +19587,218 @@
       loadHoursView();
     });
   };
+
+  // <invoice-week-choice>
+  // 2026-09-23 (Nithin; captain's running rule): ONE invoice per trade per
+  // week, no exceptions (ops-api also answers 409 WEEK_ALREADY_INVOICED). So
+  // the trade always sees which week the invoice is for, confirms deliberately
+  // that it is their only invoice for that week, sees invoiced weeks as done in
+  // the picker, and after submitting moves on to next week.
+  var _invWeekCollision = null; // { weekEnd, invoiceNumber, inXero } from a 409
+  // week_end -> { invoiceNumber } for weeks holding a live invoice. Released
+  // rows (draft, failed, ops-reject) do not count, same as the server guard.
+  var _invoicedWeeks = {};
+  var _invoicedWeeksLoaded = false;
+  var _invoicedWeeksSeq = 0;
+  var _INVOICE_RELEASED_STATUSES = { draft: true, failed: true, 'ops-reject': true };
+
+  function _invoiceWeekEndOf(inv) {
+    var we = String((inv && (inv.week_end || inv.week_ending)) || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(we) ? we : '';
+  }
+
+  function _recordInvoicedWeek(weekEnd, invoiceNumber) {
+    if (!weekEnd) return;
+    _invoicedWeeks[weekEnd] = { invoiceNumber: invoiceNumber ? String(invoiceNumber) : '' };
+  }
+
+  function _invoicedWeek(weekEnd) {
+    return weekEnd && Object.prototype.hasOwnProperty.call(_invoicedWeeks, weekEnd) ? _invoicedWeeks[weekEnd] : null;
+  }
+
+  // Reads the trade's own invoices so the picker can mark done weeks. A
+  // failed read leaves the picker open; the server guard still holds.
+  function _loadInvoicedWeeks(onDone) {
+    var req = { ctx: _invoiceApiContext(), seq: ++_invoicedWeeksSeq };
+    api('my_trade_invoices').then(function(res) {
+      if (req.seq !== _invoicedWeeksSeq || !_invoiceApiCurrent(req.ctx)) return;
+      var next = {};
+      (res && res.invoices || []).forEach(function(inv) {
+        if (!inv || _INVOICE_RELEASED_STATUSES[String(inv.status || '')]) return;
+        if (String(inv.invoice_source || '') === 'expense' || inv.week_start === null) return;
+        var we = _invoiceWeekEndOf(inv);
+        if (we) next[we] = { invoiceNumber: String(inv.invoice_number || inv.xero_bill_number || '') };
+      });
+      _invoicedWeeks = next;
+      _invoicedWeeksLoaded = true;
+      if (onDone) onDone();
+    }).catch(function() {});
+  }
+
+  // "Mon 14 Sep to Sun 20 Sep 2026"
+  function _weekSpanLong(weekEnd) {
+    var start = _weeklyDatePlusDays(weekEnd, -6);
+    var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function fmt(iso, withYear) {
+      var p = String(iso).split('-').map(Number);
+      var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+      return days[d.getUTCDay()] + ' ' + p[2] + ' ' + months[p[1] - 1] + (withYear ? ' ' + p[0] : '');
+    }
+    return fmt(start, false) + ' to ' + fmt(weekEnd, true);
+  }
+
+  // The deliberate confirm every weekly invoice goes through: states the one
+  // week, that nothing more can be sent for it, and that the next invoice is
+  // for next week. Submit stays disabled until the trade ticks the statement.
+  function _confirmOneInvoiceForWeek(weekEnd, lead) {
+    var next = _weeklyDatePlusDays(weekEnd, 7);
+    var msg = (lead ? lead + '\n\n' : '') +
+      'This is your ONE invoice for the week of ' + _weekSpanLong(weekEnd) + '. ' +
+      'Once you submit it you cannot add to it or send another invoice for this week. ' +
+      'Your next invoice is for next week (' + formatWeekRange(next) + ').';
+    return showConfirm('Submit your invoice for this week', msg, 'Submit', {
+      ack: 'I have put everything for ' + formatWeekRange(weekEnd) + ' on this invoice.'
+    });
+  }
+
+  // After a successful submit the week is done: the Pay hub, picker and next
+  // builder move on to the following week instead of staying parked on it.
+  function _moveToWeekAfter(weekEnd, invoiceNumber) {
+    _invWeekCollision = null;
+    if (!weekEnd) return;
+    _recordInvoicedWeek(weekEnd, invoiceNumber);
+    _hoursWeekEnd = _weeklyDatePlusDays(weekEnd, 7);
+    _hoursWeekStart = _weeklyDatePlusDays(_hoursWeekEnd, -6);
+  }
+
+  function _weekDoneHtml(weekEnd) {
+    var next = _weeklyDatePlusDays(weekEnd, 7);
+    return '<div data-invoice-week-done style="font-size:13px;font-weight:600;color:var(--sw-green);margin:10px 0">&#10003; ' +
+      esc(formatWeekRange(weekEnd)) + ' is invoiced. Your next invoice is for ' + esc(formatWeekRange(next)) + '.</div>';
+  }
+
+  function _invoiceWeekChangeAllowed() {
+    return _invoiceBuilderOpen && _invoiceBuilderMode === 'weekly' && !_draftInvoiceId && jobCentricEnabled();
+  }
+
+  // The server's own week_end wins; the posted week is the fallback.
+  function _noteWeekAlreadyInvoiced(body, postedWeekEnd) {
+    body = body || {};
+    var weekEnd = String(body.week_end || postedWeekEnd || '').slice(0, 10);
+    var num = body.invoice_number ? String(body.invoice_number) : '';
+    _invWeekCollision = {
+      weekEnd: weekEnd,
+      invoiceNumber: num,
+      inXero: !!(body.xero_bill_id || body.status === 'pushed_to_xero' || body.status === 'paid')
+    };
+    _recordInvoicedWeek(weekEnd, num);
+    return 'You already have an invoice for the week ' + (weekEnd ? formatWeekRange(weekEnd) : 'you picked') +
+      (num ? ' (' + num + ')' : '') + '. This submission was NOT saved. ' +
+      'To invoice a different week, change the week at the top of this invoice.';
+  }
+
+  function _invoiceWeekBarHtml() {
+    var weekEnd = _hoursWeekEnd || _weeklyDatePlusDays(_hoursWeekStart, 6) || getWeekEndSunday(0);
+    var canChange = _invoiceWeekChangeAllowed();
+    var h = '<div data-invoice-week style="background:var(--sw-card);border:1px solid var(--sw-border);border-radius:12px;padding:10px 12px;margin:0 0 12px;text-align:center">';
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--sw-text-sec)">Invoice for the week</div>';
+    h += '<div class="hours-week-nav" style="margin:4px 0 0">';
+    if (canChange) h += '<button type="button" data-invoice-week-prev aria-label="Previous week" onclick="changeInvoiceWeek(-1)">&larr;</button>';
+    h += '<div class="hours-week-label" data-invoice-week-label>' + esc(formatWeekRange(weekEnd)) + '</div>';
+    if (canChange) h += '<button type="button" data-invoice-week-next aria-label="Next week" onclick="changeInvoiceWeek(1)">&rarr;</button>';
+    h += '</div>';
+    if (!canChange && _draftInvoiceId) {
+      h += '<div style="font-size:11px;color:var(--sw-text-sec);margin-top:4px">This saved draft is for this week. To invoice another week, go Back and start a new Weekly Invoice.</div>';
+    }
+    var done = _invoicedWeek(weekEnd);
+    var hit = _invWeekCollision;
+    if (done && !(hit && hit.weekEnd === weekEnd)) {
+      h += '<div data-invoice-week-taken role="alert" style="text-align:left;background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-dark);padding:10px 12px;border-radius:8px;font-size:13px;margin-top:8px">';
+      h += esc(formatWeekRange(weekEnd)) + ' is already invoiced' + (done.invoiceNumber ? ' (<strong>' + esc(done.invoiceNumber) + '</strong>)' : '') + '. You send one invoice per week.';
+      h += ' ' + (canChange ? 'Use the arrows above to pick the week this work belongs to.' : 'Go Back and pick the week this work belongs to.');
+      h += '</div>';
+    }
+    if (hit && hit.weekEnd === weekEnd) {
+      h += '<div data-invoice-week-taken role="alert" style="text-align:left;background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-dark);padding:10px 12px;border-radius:8px;font-size:13px;margin-top:8px">';
+      h += 'You already have ' + (hit.invoiceNumber ? 'invoice <strong>' + esc(hit.invoiceNumber) + '</strong>' : 'an invoice') + ' for ' + esc(formatWeekRange(weekEnd)) + '. Nothing from this form was saved.';
+      h += ' ' + (canChange ? 'Use the arrows above to pick the week this work belongs to.' : 'Go Back and pick the week this work belongs to.');
+      if (hit.inXero) h += ' That invoice is already with the bookkeeper, so it cannot be changed or replaced from the app. If it needs changing, contact the office.';
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // Did the trade type anything on an assigned card? Clocked (prefilled)
+  // hours come back from the server for that week, so they do not count.
+  function _assignedCardHasTradeInput(c) {
+    if (!c || c.manually_added || !c.included) return false;
+    if (c.wo_mode || c.commission_mode) return true;
+    if (String(c.description || '').trim()) return true;
+    if ((c.wo_lump_lines || []).length) return true;
+    return !c.hours_prefilled && Number(c.hours) > 0;
+  }
+
+  // Move the open invoice to another week. Jobs the trade added by search move
+  // to the same weekday of the new week; extras, deductions, notes and the GST
+  // choice stay. Assigned jobs are re-read for the new week.
+  window.changeInvoiceWeek = function(dir) {
+    if (!_invoiceWeekChangeAllowed()) return;
+    _syncJobCardsFromDOM();
+    _syncRowsFromDOM();
+    _syncInvLumpLinesFromDOM();
+    var notesEl = document.getElementById('invNotes');
+    if (notesEl) _invNotes = notesEl.value;
+    var fromEnd = _hoursWeekEnd || getWeekEndSunday(0);
+    var shift = 7 * (dir < 0 ? -1 : 1);
+    var toEnd = _weeklyDatePlusDays(fromEnd, shift);
+    if (!toEnd) return;
+    var typed = _jobCards.filter(_assignedCardHasTradeInput);
+    var ask = typed.length
+      ? showConfirm('Change week', 'What you entered on ' + typed.length + ' assigned job' + (typed.length > 1 ? 's' : '') + ' belongs to ' + formatWeekRange(fromEnd) + ' and will be cleared. Jobs you added, extras and notes move to ' + formatWeekRange(toEnd) + '.', 'Change week')
+      : Promise.resolve(true);
+    ask.then(function(ok) {
+      if (!ok || !_invoiceWeekChangeAllowed()) return;
+      var carried = _jobCards.filter(function(c) { return c && c.manually_added; }).map(function(c) {
+        var moved = Object.assign({}, c);
+        moved.scheduled_date = c.scheduled_date ? (_weeklyDatePlusDays(String(c.scheduled_date).slice(0, 10), shift) || c.scheduled_date) : c.scheduled_date;
+        delete moved._idx;
+        return moved;
+      });
+      _hoursWeekEnd = toEnd;
+      _hoursWeekStart = _weeklyDatePlusDays(toEnd, -6);
+      _invWeekCollision = null;
+      var container = document.getElementById('hoursContent');
+      container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading ' + esc(formatWeekRange(toEnd)) + '...</div>';
+      var hoursReq = { ctx: _invoiceApiContext(), seq: ++_invoiceHoursSeq };
+      api('my_hours', { week_ending: toEnd }).then(function(data) {
+        if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx) || !_invoiceBuilderOpen) return;
+        _hoursData = data;
+        _tradeRate = data.rate;
+        buildJobCards();
+        carried.forEach(function(c) {
+          var dup = _jobCards.some(function(x) { return x.job_id && x.job_id === c.job_id && x.scheduled_date === c.scheduled_date; });
+          if (!dup) _jobCards.push(_newJobCard(c));
+        });
+        if (isPerMetreUser()) {
+          _pmWoHydrateState = 'pending';
+          _pmWoHydrateError = '';
+        }
+        renderInvoiceBuilder();
+        _hydratePerMetreWorkOrderCards();
+        _saveInvDraft();
+      }).catch(function(err) {
+        if (hoursReq.seq !== _invoiceHoursSeq || !_invoiceApiCurrent(hoursReq.ctx) || !_invoiceBuilderOpen) return;
+        // Stay on the week we could not load, but keep everything typed.
+        _hoursWeekEnd = fromEnd;
+        _hoursWeekStart = _weeklyDatePlusDays(fromEnd, -6);
+        toast('Could not load ' + formatWeekRange(toEnd) + ': ' + friendlyError(err), true);
+        renderInvoiceBuilder();
+      });
+    });
+  };
+  // </invoice-week-choice>
 
   // ── Expense Capture (company expense or reimbursement) ──
   window.openExpenseCapture = function(expenseType) {
@@ -20398,7 +20658,7 @@
     var preview = state.preview;
     var payable = _weeklyInvoiceMoney(preview.to_be_paid);
     var ctx = _invoiceApiContext();
-    showConfirm('Submit Weekly Invoice', 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '? A DRAFT bill will be created in Xero.', 'Submit').then(function(ok) {
+    _confirmOneInvoiceForWeek(state.weekEnd, 'Submit ' + payable + ' for ' + formatWeekRange(state.weekEnd) + '. A DRAFT bill will be created in Xero.').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       if (!_weeklyStateCurrent(state, revision)) {
@@ -20449,6 +20709,7 @@
         toast(_invoiceSubmitStatusMessage(res, 'Invoice submitted to Xero as a draft bill'));
         if (_weeklyWoInvoice === state) _weeklyWoInvoice = null;
         renderWeeklyInvoiceDetail(invoice);
+        _moveToWeekAfter(state.weekEnd, res.invoice_number);
       }).catch(function(err) {
         if (!_weeklyStateCurrent(state, null, requestSeq) || !_invoiceApiCurrent(ctx)) return;
         return _handleFinancialWriteFailure('generate_trade_invoice', payload, err, ctx).then(function(result) {
@@ -20503,7 +20764,10 @@
 
     var totalStr = '$' + _hoursData.total.toFixed(2);
     var ctx = _invoiceApiContext();
-    showConfirm('Submit Invoice', 'Submit ' + totalStr + ' for week ending ' + _hoursData.week_ending + ' to Xero?', 'Submit').then(function(ok) {
+    var hoursLead = 'Submit ' + totalStr + ' for week ending ' + _hoursData.week_ending + ' to Xero.';
+    (/^\d{4}-\d{2}-\d{2}$/.test(String(_hoursData.week_ending || ''))
+      ? _confirmOneInvoiceForWeek(String(_hoursData.week_ending), hoursLead)
+      : showConfirm('Submit Invoice', hoursLead, 'Submit')).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
 
@@ -20642,6 +20906,12 @@
         return;
       }
       _draftInvoiceId = inv.id;
+      // A saved draft posts under its OWN week, not whatever week the Pay
+      // hub was last showing. [invoice-week-choice]
+      if (inv.week_start) {
+        _hoursWeekStart = String(inv.week_start).slice(0, 10);
+        _hoursWeekEnd = inv.week_end ? String(inv.week_end).slice(0, 10) : _weeklyDatePlusDays(_hoursWeekStart, 6);
+      }
       _invNotes = inv.notes || '';
       _invRows = [];
       _invExtraLines = [];
@@ -24147,7 +24417,16 @@
       return;
     }
 
-    showConfirm('Submit Invoice', 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super)?\n\nManual hours are verified by the office before payment.', 'Submit').then(function(ok) {
+    // One invoice per week (2026-09-23): a week already holding a live invoice
+    // is done. Say so here rather than build a submit the server refuses.
+    var doneWeek = _invoicedWeek(postWeekEnd);
+    if (doneWeek) {
+      toast(formatWeekRange(postWeekEnd) + ' is already invoiced' + (doneWeek.invoiceNumber ? ' (' + doneWeek.invoiceNumber + ')' : '') + '. You can send one invoice per week. Change the week at the top of this invoice.', true);
+      renderInvoiceBuilder();
+      return;
+    }
+
+    _confirmOneInvoiceForWeek(postWeekEnd, 'Submit ' + built.includedCount + ' job' + (built.includedCount > 1 ? 's' : '') + ' for ' + formatWeekRange(postWeekEnd) + ' ($' + postGross.toFixed(2) + ' before super).\n\nManual hours are verified by the office before payment.').then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
       var finalDeductions = _invFinalDeductions();
@@ -24224,7 +24503,9 @@
         // DIFFERENT, earlier invoice for that week and saved nothing from this
         // form. It must never paint the success screen (Alyx lost a week).
         if (!_invoiceSubmitSucceeded(result) || result.already_submitted === true) {
-          var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
+          var msg = result.already_submitted === true
+            ? _noteWeekAlreadyInvoiced(result, postWeekEnd)
+            : (result.userMessage || result.error || 'Invoice submission failed — please try again');
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
             showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then resubmit.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
@@ -24236,12 +24517,15 @@
         }
         var pdfData = _invoicePdfDataFromResponse(result, _invNotes);
         _lastInvoicePdfData = pdfData;
+        // The week is done the moment the server saved it. [invoice-week-choice]
+        _moveToWeekAfter(postWeekEnd, result.invoice_number);
         return _attachInvoicePdfToXero(result, pdfData).then(function(pdfAttach) {
         if (!_invoiceApiCurrent(ctx)) return;
         var successHtml = '<div style="text-align:center;padding:40px 20px">';
         successHtml += '<div style="font-size:48px;margin-bottom:16px">&#9989;</div>';
         successHtml += '<div style="font-size:20px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">' + (xeroWarn ? 'Invoice Saved' : 'Invoice Submitted') + '</div>';
         if (result.invoice_number) successHtml += '<div style="font-size:14px;font-weight:600;color:var(--sw-mid);margin-bottom:4px">' + esc(result.invoice_number) + '</div>';
+        successHtml += _weekDoneHtml(postWeekEnd);
         if (xeroWarn) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; ' + esc(_invoiceSubmitStatusMessage(result, 'Invoice submitted')) + '</div>';
         } else if (result.pending_ops_review) {
@@ -24293,7 +24577,7 @@
         // Nothing from this form was saved, so this is never "landed" and must
         // not route to Invoice history as if it had been. Say so, keep the form.
         if (err && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
-          toast(err.message || 'You already have an invoice for this week. This submission was NOT saved. Check the week shown at the top of the invoice.', true);
+          toast(_noteWeekAlreadyInvoiced(err.body, postWeekEnd), true);
           renderInvoiceBuilder();
           return;
         }
@@ -24367,6 +24651,9 @@
       html += '<div style="font-size:11px;color:var(--sw-yellow);margin-top:6px">&#9888; ABN not set — <a href="#" onclick="event.preventDefault();showView(\'profile\')" style="color:var(--sw-yellow);text-decoration:underline">update in Profile</a></div>';
     }
     html += '</div>';
+
+    // Which week this invoice posts under, changeable in place. [invoice-week-choice]
+    if (!isExpense) html += _invoiceWeekBarHtml();
 
     // ── Job suggestions datalist (loaded async) ──
     html += '<datalist id="invJobList"></datalist>';
@@ -24680,10 +24967,11 @@
       return;
     }
 
-    showConfirm(
-      'Submit Invoice',
-      'Submit invoice for $' + t.total.toFixed(2) + '?\n\n' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : ''),
-      'Submit'
+    var builderLead = 'Submit invoice for $' + t.total.toFixed(2) + '?\n\n' + validRows.length + ' line item' + (validRows.length > 1 ? 's' : '');
+    var builderWeekEnd = !isExpense && _hoursWeekStart ? _weeklyDatePlusDays(_hoursWeekStart, 6) : '';
+    (builderWeekEnd
+      ? _confirmOneInvoiceForWeek(builderWeekEnd, builderLead)
+      : showConfirm('Submit Invoice', builderLead, 'Submit')
     ).then(function(ok) {
       if (!ok) return;
       if (!_invoiceApiCurrent(ctx)) return;
@@ -24722,7 +25010,9 @@
         // DIFFERENT, earlier invoice for that week and saved nothing from this
         // form. It must never paint the success screen (Alyx lost a week).
         if (!_invoiceSubmitSucceeded(result) || result.already_submitted === true) {
-          var msg = result.userMessage || result.error || 'Invoice submission failed — please try again';
+          var msg = result.already_submitted === true && builderBody.week_start
+            ? _noteWeekAlreadyInvoiced(result, _weeklyDatePlusDays(builderBody.week_start, 6))
+            : (result.userMessage || result.error || 'Invoice submission failed — please try again');
           toast(msg, true);
           if (result.code === 'RATE_NOT_CONFIGURED') {
             // Guide the trade to the Profile view where they can set their hourly rate (manual-rate path).
@@ -24762,6 +25052,7 @@
         if (result.xero_bill_id && pdfAttach && pdfAttach.attached === false && !pdfAttach.skipped) {
           successHtml += '<div style="font-size:12px;color:var(--sw-yellow);margin-bottom:8px">&#9888; Invoice saved, but the PDF attachment needs office follow-up.</div>';
         }
+        if (builderBody.week_start) successHtml += _weekDoneHtml(_weeklyDatePlusDays(builderBody.week_start, 6));
         var submittedMoney = _invoicePersistedMoney(result);
         if (submittedMoney.complete) {
           successHtml += _invoiceMoneySummaryHtml(submittedMoney);
@@ -24779,9 +25070,15 @@
         _invRows = [];
         _invExtraLines = [];
         _clearInvDraft();
+        if (builderBody.week_start) _moveToWeekAfter(_weeklyDatePlusDays(builderBody.week_start, 6), result.invoice_number);
         });
       }).catch(function(err) {
         if (!_invoiceApiCurrent(ctx)) return;
+        if (err && builderBody.week_start && (err.code === 'WEEK_ALREADY_INVOICED' || (err.body && err.body.already_submitted === true))) {
+          toast(_noteWeekAlreadyInvoiced(err.body, _weeklyDatePlusDays(builderBody.week_start, 6)), true);
+          renderInvoiceBuilder();
+          return;
+        }
         return _handleFinancialWriteFailure('generate_trade_invoice', builderBody, err, ctx).then(function(result) {
           if (_financialWriteAborted(result)) {
             renderInvoiceBuilder();
@@ -30501,21 +30798,35 @@
     });
   }
 
-  function showConfirm(title, msg, okLabel) {
+  // opts.ack: a statement the user must tick before OK is enabled. Used where
+  // a tap-through is not enough (one invoice per week, 2026-09-23).
+  function showConfirm(title, msg, okLabel, opts) {
+    opts = opts || {};
     return new Promise(function(resolve) {
       _confirmResolve = resolve;
       document.getElementById('confirmTitle').textContent = title;
       document.getElementById('confirmMsg').textContent = msg;
-      document.getElementById('confirmOk').textContent = okLabel || 'Confirm';
+      var okBtn = document.getElementById('confirmOk');
+      okBtn.textContent = okLabel || 'Confirm';
+      var ackWrap = document.getElementById('confirmAckWrap');
+      var ack = document.getElementById('confirmAck');
+      ack.checked = false;
+      ackWrap.hidden = !opts.ack;
+      document.getElementById('confirmAckText').textContent = opts.ack || '';
+      okBtn.disabled = !!opts.ack;
       document.getElementById('confirmOverlay').classList.add('active');
     });
   }
+  document.getElementById('confirmAck').onchange = function() {
+    if (!document.getElementById('confirmAckWrap').hidden) document.getElementById('confirmOk').disabled = !this.checked;
+  };
   document.getElementById('confirmCancel').onclick = function() {
     document.getElementById('confirmOverlay').classList.remove('active');
     if (_confirmResolve) _confirmResolve(false);
     _confirmResolve = null;
   };
   document.getElementById('confirmOk').onclick = function() {
+    if (this.disabled) return;
     document.getElementById('confirmOverlay').classList.remove('active');
     if (_confirmResolve) _confirmResolve(true);
     _confirmResolve = null;

@@ -93,6 +93,32 @@ const test = base.extend({
       .flatMap((bucket) => fencingAll[bucket] || []);
     const fencingAssignment = (assignmentId) => fencingRows().find((row) => row.id === assignmentId);
     const weekStart = perthWeekMonday();
+    // Nithin, 2026-09-23: an hourly trade whose every line is a searched-in
+    // admin job. Last week already holds his live invoice (in Xero), and the
+    // stub keeps ops-api's one-live-invoice-per-week rule across submits.
+    const multiWeekLive = {
+      [addIsoDays(weekStart, -7)]: {
+        id: 'nithin-inv-017',
+        invoice_number: 'SW-INV-N-260923-017',
+        status: 'pushed_to_xero',
+        xero_bill_id: 'xero-nithin-017'
+      }
+    };
+    const multiWeekHours = {
+      week_start: weekStart,
+      week_ending: addIsoDays(weekStart, 6),
+      assignments: [],
+      rate: 40,
+      rate_resolved: true,
+      total_hours: 0,
+      already_submitted: false,
+      super_rate: 0.12,
+      gst_on: false
+    };
+    const multiWeekJobs = [
+      { id: 'e2e-admin-job-emma', job_number: 'SWP-261183', type: 'patio', status: 'scheduled', client_name: 'Emma Clarke', site_suburb: 'Kinross' },
+      { id: 'e2e-admin-job-graham', job_number: 'SWP-26339', type: 'patio', status: 'in_progress', client_name: 'Graham Rees', site_suburb: 'Duncraig' }
+    ];
     const labourExplainerHours = {
       week_start: weekStart,
       week_ending: addIsoDays(weekStart, 6),
@@ -698,6 +724,7 @@ const test = base.extend({
       'trade-invoice-week-collision-legacy': ['generate_trade_invoice'],
       'trade-invoice-total-drift': [],
       'trade-invoice-stale-week': [],
+      'trade-invoice-multi-week': ['generate_trade_invoice'],
       'trade-invoice-per-metre-gst': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-missing-rate': ['submit_trade_invoice'],
       'trade-invoice-per-metre-response-lines': ['submit_trade_invoice'],
@@ -738,6 +765,13 @@ const test = base.extend({
           return { events, orgEvents: [] };
         },
         search_all_jobs: ({ url }) => {
+          if (feedScenario === 'trade-invoice-multi-week') {
+            const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+            const jobs = q.length >= 2
+              ? multiWeekJobs.filter((job) => [job.job_number, job.client_name, job.site_suburb].join(' ').toLowerCase().includes(q))
+              : [];
+            return { jobs, lens: q ? 'search' : 'assigned', total: jobs.length };
+          }
           if (!['all-jobs-feed', 'all-jobs-feed-denied', 'trade-makesafe-search'].includes(feedScenario)) {
             if (persona === 'fencing_manager') {
               const q = (url.searchParams.get('q') || '').trim().toLowerCase();
@@ -961,7 +995,7 @@ const test = base.extend({
           };
         },
         crew_charges_on_my_jobs: { charges: [] },
-        my_hours: [
+        my_hours: feedScenario === 'trade-invoice-multi-week' ? multiWeekHours : [
           'trade-invoice-per-metre-gst',
           'trade-invoice-per-metre-response-missing-rate',
           'trade-invoice-per-metre-response-lines',
@@ -1076,7 +1110,23 @@ const test = base.extend({
               total_hours: 0,
               already_submitted: false
             },
-        my_trade_invoices: weeklyInvoiceScenarios.includes(feedScenario) && weeklyInvoiceDraftSaved
+        my_trade_invoices: feedScenario === 'trade-invoice-multi-week'
+          ? () => ({
+            invoices: Object.entries(multiWeekLive).map(([monday, inv]) => ({
+              id: inv.id,
+              invoice_number: inv.invoice_number,
+              status: inv.status,
+              week_start: monday,
+              week_ending: addIsoDays(monday, 6),
+              gross_earned: 400,
+              super_rate: 0.12,
+              super_amount: 48,
+              net_pay: 352,
+              gst_on: false,
+              total: 400
+            }))
+          })
+          : weeklyInvoiceScenarios.includes(feedScenario) && weeklyInvoiceDraftSaved
           ? { invoices: [weeklyInvoiceResponse()] }
           : feedScenario === 'trade-invoice-history-money-truth'
           ? {
@@ -1316,6 +1366,47 @@ const test = base.extend({
           return weeklyInvoiceResponse();
         },
         generate_trade_invoice: async ({ request }) => {
+          if (feedScenario === 'trade-invoice-multi-week') {
+            const body = request.postDataJSON();
+            const weekEnd = addIsoDays(body.week_start, 6);
+            const live = multiWeekLive[body.week_start];
+            if (live) {
+              return {
+                status: 409,
+                body: {
+                  ok: false, success: false, code: 'WEEK_ALREADY_INVOICED', already_submitted: true, saved: false,
+                  invoice_id: live.id, invoice_number: live.invoice_number, status: live.status,
+                  week_start: body.week_start, week_end: weekEnd, xero_bill_id: live.xero_bill_id,
+                  userMessage: `You already have an invoice for the week ${body.week_start} to ${weekEnd} (${live.invoice_number}). This submission was NOT saved. Check the week shown at the top of the invoice, or contact the office if that invoice needs changing.`
+                }
+              };
+            }
+            const items = body.extra_items || [];
+            const gross = Math.round(items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0), 0) * 100) / 100;
+            const number = `SW-INV-N-E2E-${Object.keys(multiWeekLive).length + 17}`;
+            multiWeekLive[body.week_start] = { id: `nithin-${body.week_start}`, invoice_number: number, status: 'pending_acknowledgment', xero_bill_id: null };
+            return {
+              ok: true,
+              success: true,
+              invoice_id: `nithin-${body.week_start}`,
+              invoice_number: number,
+              week_start: body.week_start,
+              week_end: weekEnd,
+              gross_earned: gross,
+              super_rate: 0.12,
+              super_amount: Math.round(gross * 0.12 * 100) / 100,
+              net_pay: Math.round(gross * 0.88 * 100) / 100,
+              gst_on: false,
+              gst: 0,
+              total_inc: Math.round(gross * 0.88 * 100) / 100,
+              lines: items.map((item) => ({
+                line_date: item.date, job_number: item.job_number, description: item.description,
+                line_type: 'labour', total_hours: item.quantity, hourly_rate: item.rate,
+                line_total_ex: Math.round(Number(item.quantity) * Number(item.rate) * 100) / 100
+              })),
+              xero_bill_id: null
+            };
+          }
           if (['henry-job-centric-submit', 'henry-wo-hydrate-fail'].includes(feedScenario) && persona === 'fencing_manager') {
             const body = request.postDataJSON();
             if (['super_rate', 'super_amount', 'gross_earned', 'net_pay', 'grand_total', 'to_be_paid', 'subtotal', 'total'].some((field) => Object.hasOwn(body, field))) {

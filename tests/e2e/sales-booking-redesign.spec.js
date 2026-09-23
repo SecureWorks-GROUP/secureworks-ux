@@ -40,11 +40,13 @@ for (const vp of viewports) {
       await expect(page.getByRole('button', { name: 'Show all 4 messages' })).toBeVisible();
       await expect(page.locator('.route')).toContainText('SecureWorks Group Ops 776');
       await expect(page.locator('.route')).toContainText('phone ending 418');
-      await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeVisible();
-      await expect(page.locator('.visit .fine').first()).toContainText('arrive 12:00 to 1:30pm');
+      // The proposed time is the default shown first; a different time is one tap away.
+      await expect(page.locator('.visit .when')).toContainText('arrive 12:00 to 1:30pm');
+      await expect(page.getByRole('combobox', { name: 'Visit day' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
       await expect(page.locator('.targets')).toHaveText("Book it writes: GHL Stratco Fencing calendar and Marnin's Outlook");
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
       const day = page.locator('.bk-day');
       await expect(day.locator('h2')).toContainText('Friday');
       await expect(day.locator('.src-outlook').first()).toBeVisible();
@@ -60,8 +62,9 @@ for (const vp of viewports) {
     test('a clash names the other booking and blocks booking, not the text', async ({ page }) => {
       await open(page);
       await choose(page, 'Kerry P');
+      await expect(page.locator('.visit .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
       await expect(page.locator('.compose .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
-      await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
       const slot = page.locator('.bk-day .ev.is-clash', { hasText: 'Kerry P' });
@@ -154,12 +157,8 @@ for (const vp of viewports) {
       await page.getByRole('button', { name: 'Send this text' }).click();
       await expect(page.locator('.compose .result')).toContainText(/Text sent at \d{1,2}:\d{2}[ap]m from SecureWorks Group Ops 776 to the phone ending 418\./);
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeDisabled();
-      const friday = await page.evaluate(() => SalesBooking.state.data.booking_flow.owner_rulebook.bookable_dates.filter((d) => new Date(d + 'T12:00:00Z').getUTCDay() === 5).pop());
-      await page.getByRole('combobox', { name: 'Visit day' }).selectOption(friday);
-      await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
-      await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
+      // The proposed time books in one press on the engine path, as before.
       await page.getByRole('button', { name: 'Book it' }).click();
-      await page.getByRole('button', { name: 'Approve and book' }).click();
       await expect(page.locator('.visit .result')).toContainText("in GHL Stratco Fencing calendar and Marnin's Outlook");
     });
 
@@ -182,7 +181,11 @@ for (const vp of viewports) {
       await expect(page.locator('.bk-day .ev.is-confirmed', { hasText: 'Priya S' })).toBeVisible();
       if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
       await choose(page, 'Basil L');
-      await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeVisible();
+      // Basil's proposed Friday 12:00 now runs into Priya's booking.
+      await expect(page.locator('.visit .clash')).toContainText('Priya');
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+      await page.getByRole('button', { name: 'Pick a different time' }).click();
+      await expect(page.getByRole('button', { name: 'Use the proposed time' })).toBeVisible();
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(thisFri);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
@@ -211,6 +214,7 @@ for (const vp of viewports) {
       await expect(page.locator('.visit .result')).toContainText('Booked');
       if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
       await choose(page, 'Basil L');
+      await page.getByRole('button', { name: 'Pick a different time' }).click();
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(thisFri);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');

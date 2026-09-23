@@ -619,7 +619,8 @@ function ownerSetup(actionMode) {
   globalThis.fixtureActionMode = actionMode || 'unknown';
   delete globalThis.fixtureOwnerMode; delete globalThis.fixtureOwnerRefusal;
   global.opsPost = backend.post;
-  Object.assign(api.state, { data, weekStart: data.week_start, drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {}, dayIndex: null, selectedId: null });
+  global.opsFetch = backend.read;
+  Object.assign(api.state, { data, weekStart: data.week_start, cache: {}, loading: false, stale: false, error: null, ownerPickOpen: {}, ownerOccupancy: [], drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {}, dayIndex: null, selectedId: null });
   return backend;
 }
 function fridayOf(d) {
@@ -634,6 +635,8 @@ function nextFriday() {
 }
 function pickVisit(c, start, minutes, date) {
   api.state.selectedId = c.id;
+  api.state.ownerPickOpen[c.id] = true; // what Pick a different time does
+
   Object.assign(api.ownerPick(c), { date: date || fridayOf(data), start, minutes });
 }
 const caseById = (id) => data.cases.find((c) => c.id === id);
@@ -669,13 +672,41 @@ test('an edited text is checked by the server, shown exactly, then approved and 
   assert.match(html, /data-booking-press="message"[^>]* disabled/);
 });
 
-test('every Stratco card can pick a different time when the owner path is on', () => {
+test('every Stratco card can pick a different time; a proposed time stays the default shown first', () => {
   ownerSetup();
   data.cases.filter((c) => c.owner_booking && c.owner_booking.eligible).forEach((c) => {
     api.state.selectedId = c.id;
-    assert.equal(api.calendarPath(c), 'owner');
-    assert.match(api.renderCard(), /Pick a visit/);
+    const m = api.decisionModel(c);
+    if (m && m.proposal) {
+      assert.equal(api.calendarPath(c), 'engine');
+      const html = api.renderCard();
+      assert.match(html, m.confident ? /Proposed visit/ : /Needs a person/);
+      assert.doesNotMatch(html, /Pick a visit/);
+      assert.match(html, /data-owner-pick-open[^>]*>Pick a different time<\/button>/);
+      api.state.ownerPickOpen[c.id] = true;
+      assert.equal(api.calendarPath(c), 'owner');
+      assert.match(api.renderCard(), /Pick a visit[\s\S]*data-owner-pick-close[^>]*>Use the proposed time<\/button>/);
+    } else {
+      assert.equal(api.calendarPath(c), 'owner');
+      assert.match(api.renderCard(), /Pick a visit/);
+      assert.doesNotMatch(api.renderCard(), /Use the proposed time/);
+    }
   });
+});
+
+test('the proposed time keeps its one-press Book it, evidence and checks', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-basil'); api.state.selectedId = row.id;
+  const html = api.renderCard();
+  assert.match(html, /Proposed visit[\s\S]*arrive 12:00 to 1:30pm/);
+  assert.match(html, /“Still waiting to hear back\. Are you coming Friday or not\?”/);
+  assert.match(html, /All 5 checks passed/);
+  assert.equal(api.pressBlock(row, 'calendar'), '');
+  const r = await api.press(row.id, 'calendar');
+  assert.equal(r.ok, true);
+  assert.equal(backend.writes[0].body.snapshot.step, 'calendar');
+  assert.equal(backend.writes[0].body.owner_input, undefined);
+  assert.equal(backend.writes[1].action, 'sales_booking_book');
 });
 
 test('a lead with no proposed time gets a day and window picker that books through the check', async () => {
@@ -733,9 +764,11 @@ test('an owner book occupies the day so the next lead must pick another time', a
   assert.match(api.renderDay(), /12:30/);
   assert.match(api.clashFor(basil).label, /Priya/);
   api.state.selectedId = basil.id;
-  assert.equal(api.calendarPath(basil), 'owner');
-  assert.match(api.renderCard(), /Pick a visit/);
+  assert.equal(api.calendarPath(basil), 'engine');
+  assert.match(api.pressBlock(basil, 'calendar'), /Priya/);
+  assert.match(api.renderCard(), /Pick a different time/);
   pickVisit(basil, '12:30', 60, thisFri);
+  assert.equal(api.calendarPath(basil), 'owner');
   assert.match(api.ownerBlock(basil, 'calendar'), /Priya/);
   const later = nextFriday();
   assert.ok(later);
@@ -799,13 +832,13 @@ test('the unedited engine text still takes the engine path until a time is picke
   const backend = ownerSetup('sent');
   row = caseById('lead-basil'); api.state.selectedId = row.id; api.renderHTML();
   assert.equal(api.messagePath(row), 'engine');
-  assert.equal(api.calendarPath(row), 'owner');
+  assert.equal(api.calendarPath(row), 'engine');
   const r = await api.press(row.id, 'message');
   assert.equal(r.ok, true);
   assert.equal(backend.writes[0].body.owner_input, undefined);
   assert.equal(backend.writes[0].body.snapshot.content.variant, 'template');
   assert.equal(backend.writes[1].action, 'sales_booking_send');
-  assert.match(api.renderCard(), /Pick a visit/);
+  assert.match(api.renderCard(), /Pick a different time/);
   pickVisit(row, '12:30', 60);
   assert.equal(api.messagePath(row), 'owner');
   assert.deepEqual(api.ownerInput(row, 'message').offer, api.ownerVisit(row));
@@ -841,4 +874,24 @@ test('the owner path blocks long dashes, respects the protected band and stops o
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'This changed after it was checked. Check it again.');
   assert.equal(backend.writes.length, 1);
+});
+
+test('a quiet re-read after a book keeps the booked visit on the day until the read carries it', async () => {
+  const backend = ownerSetup('sent');
+  const priya = caseById('lead-priya');
+  const thisFri = thisFriday();
+  api.state.dayIndex = 4;
+  pickVisit(priya, '12:30', 60, thisFri);
+  await api.press(priya.id, 'calendar');
+  await api.ownerApprove(priya.id, 'calendar');
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  // The fixture's read does not carry the new booking, as a lagging read would not.
+  assert.equal(backend.reads.filter((r) => r.action === 'sales_booking_read').length, 1);
+  assert.notEqual(api.state.data, data);
+  assert.equal(api.state.loading, false);
+  assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya' && ev.start === thisFri + 'T12:30:00+08:00'));
+  assert.match(api.renderDay(), /Priya S/);
+  await api.load('marnin', api.state.weekStart);
+  assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya'));
 });

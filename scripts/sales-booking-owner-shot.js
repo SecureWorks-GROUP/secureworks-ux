@@ -32,6 +32,8 @@ const URL = base + '/tests/fixtures/booking-confirm/friday.html';
 
     await page.goto(URL);
     await choose('Basil L');
+    await shot('basil-proposal');
+    await page.getByRole('button', { name: 'Pick a different time' }).click();
     await shot('basil-picker');
     await choose('Priya S');
     await pick('12:30', '60');

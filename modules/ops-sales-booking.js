@@ -122,6 +122,8 @@
     pressResults: {},
     ownerVisits: {},
     ownerPreviews: {},
+    ownerPickOpen: {},
+    ownerOccupancy: [],
     threads: {},
     dayIndex: null,
     showConversation: false,
@@ -2543,7 +2545,7 @@
     }
     if (calendarPath(c) === 'owner') return renderOwnerVisit(c);
     if (!m.proposal || !m.confident) {
-      return '<section class="visit is-needs"><h3>' + icon('calendar') + 'Needs a person</h3><p>' + esc(m.reason || c.reason || 'No confident proposal in this read.') + '</p>' + renderChecks(m, true) + '</section>';
+      return '<section class="visit is-needs"><h3>' + icon('calendar') + 'Needs a person</h3><p>' + esc(m.reason || c.reason || 'No confident proposal in this read.') + '</p>' + renderChecks(m, true) + renderPickOther(c) + '</section>';
     }
     var p = m.proposal;
     var when = longDate(String(p.start_iso).slice(0, 10)) + ', arrive ' + timeRange(p.window_start_iso, p.window_end_iso);
@@ -2559,7 +2561,7 @@
       '<p class="targets">Book it writes: <b>' + bookTargets(m).map(esc).join('</b> and <b>') + '</b></p>' +
       '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
       (block && !state.pressPending[key] && !clash && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '') +
-      channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + '</section>';
+      channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + renderPickOther(c) + '</section>';
   }
 
   function renderChecks(m, open) {
@@ -2876,10 +2878,27 @@
     return 'owner';
   }
 
-  // Every Stratco card on the owner's path gets a picker so a blocked or
-  // unwanted proposal is never the only time on that card.
+  function hasEngineProposal(c) {
+    var m = decisionModel(c);
+    return !!(m && m.proposal);
+  }
+
+  function ownerCanPick(c) {
+    var ob = ownerBooking(c);
+    return !!(ownerFlow() && ob && ob.eligible === true && ownerRulebook(c));
+  }
+
+  // A proposed time stays the default shown first, on the engine path exactly
+  // as before. Every Stratco card also offers Pick a different time, so a
+  // blocked or unwanted proposal is never the only time on that card.
   function calendarPath(c) {
-    return ownerFlow() ? 'owner' : 'engine';
+    if (!ownerFlow()) return 'engine';
+    return hasEngineProposal(c) && !state.ownerPickOpen[draftKey(c)] ? 'engine' : 'owner';
+  }
+
+  function renderPickOther(c) {
+    if (!ownerCanPick(c) || composeBusy(c)) return '';
+    return '<p class="pickother"><button type="button" class="linklike" data-owner-pick-open data-case-id="' + esc(c.id) + '">Pick a different time</button></p>';
   }
 
   function minutesOf(clock) {
@@ -3134,6 +3153,50 @@
     if (!visit || !(Date.parse(visit.end) > Date.parse(visit.start))) return;
     if (visit.book) rememberBookedVisit(c, visit);
     else rememberOfferedVisit(c, visit);
+    state.ownerOccupancy.push({ resource: state.resourceId, at: Date.now(), visit: visit,
+      c: { id: c.id, contact_id: c.contact_id, opportunity_id: c.opportunity_id, display_name: c.display_name, suburb: c.suburb } });
+    quietReload();
+  }
+
+  // A fresh read may not show a booking or offer made seconds ago yet, so what
+  // this screen just did stays on the day and in the clash checks until the
+  // read carries it (at most 30 minutes). The slot never reads as free.
+  function reapplyOwnerOccupancy() {
+    var now = Date.now();
+    state.ownerOccupancy = state.ownerOccupancy.filter(function (o) { return now - o.at < 30 * 60000; });
+    if (!state.data) return;
+    state.ownerOccupancy.forEach(function (o) {
+      if (o.resource !== state.resourceId) return;
+      if (o.visit.book) rememberBookedVisit(o.c, o.visit);
+      else rememberOfferedVisit(o.c, o.visit);
+    });
+  }
+
+  function readParams() {
+    return { resource: state.resourceId, week_start: state.weekStart, scoper_user_id: resource().scoper_user_id, visit_outcomes_from: new Date(Date.now() - 7 * 86400000).toISOString(), visit_outcomes_to: new Date().toISOString() };
+  }
+
+  // After a book or an offer: read again with no spinner and no locked
+  // buttons. A failed or overtaken quiet read changes nothing on screen.
+  async function quietReload() {
+    var request = state.request, resourceId = state.resourceId, weekStart = state.weekStart;
+    if (!resourceId || state.loading) return;
+    try {
+      var data = await bookingRead(readParams());
+      if (request !== state.request || resourceId !== state.resourceId || weekStart !== state.weekStart || state.loading) return;
+      if (!data || data.ok === false || data.fixture || !payloadMatchesRequest(data, resourceId, weekStart)) return;
+      if (Object.keys(state.approvalPending).length || Object.keys(state.pressPending).length) return;
+      state.data = data;
+      state.cache[cacheKey(resourceId, weekStart)] = data;
+      state.stale = false;
+      state.error = null;
+      state.lastFreshAt = Date.now();
+      state.readKind = 'fresh';
+      reapplyOwnerOccupancy();
+      applyServerStamp(data);
+      applyServerDrafts(data);
+      render();
+    } catch (e) { /* quiet: the remembered occupancy stays on screen */ }
   }
 
   function rememberBookedVisit(c, visit) {
@@ -3265,7 +3328,7 @@
     var clash = v && clashForSpan(c, v.window_start_iso, v.end_iso, null, true);
     var days = (rb.days || []).map(function (d) { return WEEKDAY_NAMES[d] || d; });
     var lead = m && m.proposal
-      ? 'Pick a time for this lead. Proposed: ' + longDate(String(m.proposal.window_start_iso || m.proposal.start_iso).slice(0, 10)) + ', arrive ' + timeRange(m.proposal.window_start_iso, m.proposal.window_end_iso) + '.'
+      ? 'Pick a different time. Proposed: ' + longDate(String(m.proposal.window_start_iso || m.proposal.start_iso).slice(0, 10)) + ', arrive ' + timeRange(m.proposal.window_start_iso, m.proposal.window_end_iso) + '.'
       : (m && m.reason && m.reason !== 'No validated AI proposal in this read.'
         ? 'No confident proposed time: ' + m.reason
         : 'No proposed time for this lead, so pick one.');
@@ -3278,7 +3341,8 @@
         starts.map(function (t) { return option(t, clockLabel(minutesOf(t) / 60), pick.start === t); }).join('') + '</select></label>' +
       '<label><span>Arrival window</span><select data-owner-visit="minutes" aria-label="Arrival window" data-focus-key="pick-minutes-' + esc(c.id) + '"' + dis + '>' +
         ownerWindows(rb).map(function (n) { return option(String(n), n + ' minutes', minutes === n); }).join('') + '</select></label></div>';
-    var out = '<section class="visit is-pick">' + head + '<p class="fine">' + esc(lead + rules) + '</p>' + picker;
+    var back = hasEngineProposal(c) && !pickerBusy(c) ? '<p class="pickother"><button type="button" class="linklike" data-owner-pick-close data-case-id="' + esc(c.id) + '">Use the proposed time</button></p>' : '';
+    var out = '<section class="visit is-pick">' + head + '<p class="fine">' + esc(lead + rules) + '</p>' + back + picker;
     if (v) out += '<p class="when">' + esc(visitWords(v, true)) + '</p><p class="fine">On site until ' + esc(clockLabel(hourFromIso(v.end_iso))) + '. The server checks GHL, Outlook and other leads\' offers before anything is booked.</p>';
     if (clash) out += '<p class="clash">' + esc(clashSentence(clash)) + '</p>';
     out += '<p class="targets">Book it writes: <b>' + ownerTargets(rb.calendar).map(esc).join('</b> and <b>') + '</b></p>';
@@ -3515,6 +3579,7 @@
     state.dayIndex = null;
     state.pressResults = {};
     state.ownerPreviews = {};
+    state.ownerPickOpen = {};
     var cached = state.cache[cacheKey(id, state.weekStart)];
     if (cached) {
       state.data = cached;
@@ -3591,7 +3656,7 @@
     render();
     try {
       var t0 = Date.now();
-      var data = await bookingRead({ resource: state.resourceId, week_start: state.weekStart, scoper_user_id: resource().scoper_user_id, visit_outcomes_from: new Date(Date.now() - 7 * 86400000).toISOString(), visit_outcomes_to: new Date().toISOString() });
+      var data = await bookingRead(readParams());
       var ms = Date.now() - t0;
       if (request !== state.request) return;
       if (!data || data.ok === false) {
@@ -3609,6 +3674,7 @@
         data.pack.week_start = (priorPack && priorPack.present === true && priorPack.week_start) || data.week_start;
       }
       state.data = data;
+      reapplyOwnerOccupancy();
       state.visitUncertain = {};
       state.cache[key] = data;
       state.stale = false;
@@ -3878,6 +3944,21 @@
         ownerApprove(ownerYes.getAttribute('data-case-id'), ownerYes.getAttribute('data-owner-approve'));
         return;
       }
+      var pickOpen = closest('[data-owner-pick-open], [data-owner-pick-close]');
+      if (pickOpen) {
+        e.preventDefault();
+        var pcase = cases().filter(function (row) { return row.id === pickOpen.getAttribute('data-case-id'); })[0];
+        if (!pcase || pickOpen.disabled || pickerBusy(pcase)) return;
+        var pkey = draftKey(pcase);
+        if (pickOpen.hasAttribute('data-owner-pick-open')) state.ownerPickOpen[pkey] = true;
+        else {
+          delete state.ownerPickOpen[pkey];
+          delete state.ownerVisits[pkey];
+          delete state.approvalErrors[approvalKey(pcase, 'calendar')];
+        }
+        render();
+        return;
+      }
       var ownerNo = closest('[data-owner-cancel]');
       if (ownerNo) {
         e.preventDefault();
@@ -4085,6 +4166,7 @@
     ownerBlock: ownerBlock,
     messagePath: messagePath,
     calendarPath: calendarPath,
+    quietReload: quietReload,
     refusalWords: refusalWords,
     describeResult: describeResult,
     editedText: editedText,

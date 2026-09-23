@@ -701,10 +701,11 @@ flag is `canUseEveryoneLens() && _adminViewAll`, the same derivation
 running timer ONLY when the row is the signed-in trade's own (`user.id`/
 `user_id`; an unowned row only on the personal feed, never Everyone, which
 carries every crew's rows), on a live job, clocked on today or yesterday
-(Perth). Merged own rows are stamped with the viewer's id, so they still pass
-that check. An own clock that fails those gets the "ask the office to close
-it" notice, never adoption. A clock_event the server refuses ('Not your
-assignment', any non-transient 4xx, `success:false`) is a refusal
+(Perth). All-tab own-row preference and the failed-mine rematch use that same
+check (`isOwnClockRow`). Merged own rows are stamped with the viewer's id, so
+they still pass that check. An own clock that fails those gets the "ask the
+office to close it" notice, never adoption. A clock_event the server refuses
+('Not your assignment', any non-transient 4xx, `success:false`) is a refusal
 (`isClockEventRefusal`): never queued offline, never "Saved locally", and a
 queued one is dropped on replay. Search `// <trade-clock-recovery>`; guards
 `tests/e2e/trade-clock-recovery.spec.js` and the load-without-crash cases in
@@ -764,7 +765,8 @@ in `trade-app.md`.
 ALL-TAB SEARCH CARDS ARE JOBS, NOT ALLOCATIONS (`// <all-tab-search-card-truth>`).
 "All means all" (captain, 2026-09-23): leads, quotes, drafts and archived records
 stay in search, so the chip must tell the truth. It says Allocated only from an
-assignment row the viewer's feed carries (own row preferred) or a backend
+assignment row the viewer's feed carries (own row preferred; same ownership
+check as Trade clock recovery) or a backend
 `assigned_to_me`/`allocated` flag, never from job status; otherwise the pipeline
 word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
 Archived). A make-safe hit still opens the report path (unallocated included);

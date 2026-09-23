@@ -8207,6 +8207,8 @@
   // this viewer's own feed carries for the job. Anything else reads its
   // pipeline word, so a lead, quote, draft or archived lost quote never looks
   // like work someone is on.
+  // Live my_jobs rows often carry user_id and no user object. Ownership is
+  // isOwnClockRow (AGENTS.md → Trade clock recovery), never user.id alone.
   function isOwnAssignmentRow(a) {
     if (!a || a._makesafePool) return false;
     return isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll);

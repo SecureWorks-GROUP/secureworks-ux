@@ -259,6 +259,26 @@ test.describe('Trade Request Variation', () => {
 test.describe('Staff Request Variation', () => {
   test.use({ persona: 'allocator' });
 
+  test('showVariationForm returns when the Scope form is not painted', async ({ appPage: page }) => {
+    await stub(page, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, needs_approval: true, auto_approved: false }),
+    }), { userId: PERSONAS.allocator.profile.id });
+    await signIn(page, PERSONAS.allocator);
+    await page.locator('[data-view="myJobs"]').click();
+    await page.locator('#myJobsList .jc').filter({ hasText: 'E2E-JOB-001' }).click();
+    await expect(page.locator('#viewJob')).toHaveClass(/active/);
+    await expect(page.locator('.jd-tab.active')).toHaveAttribute('data-tab', 'workorder');
+    await expect(page.locator('#variationForm')).toHaveCount(0);
+
+    await page.evaluate((id) => window.showVariationForm(id, 'fencing'), JOB_ID);
+
+    await expect(page.locator('#variationForm')).toHaveCount(0);
+    await expect(page.locator('.jd-tab.active')).toHaveAttribute('data-tab', 'workorder');
+    await expect(page.locator('#jdTab_scope')).not.toHaveClass(/active/);
+  });
+
   test('an office auto-approved request shows the server message as approved', async ({ appPage: page }) => {
     const message = 'Variation #5 auto-approved (under $200).';
     const calls = await stub(page, (route) => route.fulfill({

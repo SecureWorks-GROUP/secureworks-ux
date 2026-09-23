@@ -29183,13 +29183,7 @@
   // <trade-variation-request>
   window.showVariationForm = function(jobId, jobType) {
     var form = document.getElementById('variationForm');
-    // The form lives on the Scope tab, which renders lazily. An entry point
-    // outside that tab switches to it first instead of silently doing nothing.
-    if (!form && typeof window.switchJobTab === 'function') {
-      window.switchJobTab('scope');
-      form = document.getElementById('variationForm');
-    }
-    if (!form) { toast('Open the Scope tab to request a variation', true); return; }
+    if (!form) return;
     var open = form.style.display === 'none';
     form.style.display = open ? 'block' : 'none';
     if (open && form.scrollIntoView) form.scrollIntoView({ block: 'nearest' });

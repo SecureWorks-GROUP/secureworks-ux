@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const OPS_API = 'https://kevgrhcjxspbxgovpmfl.supabase.co/functions/v1/ops-api';
-const EVIDENCE = '/Users/marninstobbe/.no-mistakes/evidence/01M36B0F4G4KS47FJQK4BPZBPN';
+const EVIDENCE = path.resolve(__dirname, '../../test-results/trade-super-backend-fields');
 
 function moneyPayload(month, invoices) {
   return {

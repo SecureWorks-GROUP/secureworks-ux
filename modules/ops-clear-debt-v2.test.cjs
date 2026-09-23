@@ -22,7 +22,7 @@ const CD = require('./ops-clear-debt-v2.js');
 function freshState() {
   Object.assign(CD.state, {
     data: null, loading: false, error: null, search: '', filter: 'all', owner: '',
-    selectedKey: null, invoiceId: null, onlyInvoice: false, tlFilter: 'all', channel: null,
+    selectedKey: null, invoiceId: null, tlFilter: 'all', channel: null,
     drafts: {}, showDetails: false
   });
 }
@@ -52,7 +52,7 @@ function walkEveryState(data) {
   CD.state.owner = '';
   CD.state.search = 'INV-S1003'; snap(); CD.state.search = '';
   for (const d of data.debtors) {
-    CD.state.selectedKey = d.key; CD.state.invoiceId = null; CD.state.channel = null; CD.state.onlyInvoice = false;
+    CD.state.selectedKey = d.key; CD.state.invoiceId = null; CD.state.channel = null;
     for (const c of CD.TL_CHIPS) { CD.state.tlFilter = c.key; snap(); }
     CD.state.tlFilter = 'all';
     for (const inv of d.invoices) {
@@ -61,7 +61,6 @@ function walkEveryState(data) {
         CD.state.channel = ch; snap();
         CD.state.drafts[inv.xero_invoice_id + '|' + ch] = 'Edited words.'; snap();
       }
-      CD.state.onlyInvoice = true; snap(); CD.state.onlyInvoice = false;
     }
   }
   return pages;
@@ -297,10 +296,11 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   assert.match(t, /GHL Text from them/);
   assert.match(t, /Outlook Email from them/);
   assert.match(t, /SecureWorks Invoice emailed/);
-  CD.state.tlFilter = 'xero';
-  const tx = text();
-  CD.state.tlFilter = 'all';
-  assert.ok(/Xero Invoice raised/.test(tx) || /SecureWorks Invoice emailed/.test(tx));
+  const emailInvoiceEvent = d.timeline.entries.find((e) => e.kind === 'invoice_event' && e.channel === 'email');
+  assert.ok(emailInvoiceEvent);
+  assert.equal(CD.entryGroup(emailInvoiceEvent), 'email');
+  assert.ok(CD.timelineEntries(d, { tlFilter: 'email' }).includes(emailInvoiceEvent));
+  assert.equal(CD.timelineEntries(d, { tlFilter: 'xero' }).includes(emailInvoiceEvent), false);
   assert.match(t, /Preview, cut at 500 characters/);
   assert.match(t, /GHL stored copy, also in captured event/);
   assert.match(t, /1 copy of the same message shown once/);
@@ -312,16 +312,14 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   assert.match(t, /Notes: read live with this read, owner DEBT\./);
 });
 
-test('timeline scope: picking an invoice can narrow the stream to entries touching it', async () => {
+test('picking an invoice does not narrow the debtor timeline', async () => {
   await loaded();
   const d = pick('Debtor 001');
   const inv = d.invoices[1];
   CD.state.invoiceId = inv.xero_invoice_id;
-  CD.state.onlyInvoice = true;
   const list = CD.timelineEntries(d);
-  assert.ok(list.length > 0);
-  assert.ok(list.every((e) => e.invoice_ids.includes(inv.xero_invoice_id)));
-  assert.ok(list.length < d.timeline.entries.length);
+  assert.deepEqual(list, d.timeline.entries);
+  assert.doesNotMatch(html(), /Only INV-|data-cd="only"/);
 });
 
 test('truncated, capped and faulted timelines say so; missing sources are named, never "no messages"', async () => {
@@ -389,15 +387,17 @@ test('facts are kind "fact" entries in the one timeline; anything else is not a 
   assert.match(t, /Captured facts could not be read for this timeline, so none are shown\. This does not mean there are none\./);
   assert.equal(/data-tl="facts"[^>]*>Facts<span class="count">/.test(html()), false, 'no count while facts were not read');
   CD.state.tlFilter = 'facts';
-  assert.equal((text().match(/Captured facts could not be read/g) || []).length, 2);
+  assert.equal((text().match(/Captured facts could not be read/g) || []).length, 1);
+  assert.doesNotMatch(text(), /No facts in the newest .*stored copies/);
   // A debtor with no job names that; one with no facts yet says so.
   const noJob = data.debtors.find((x) => x.sources.facts.status === 'no_job');
   CD.state.selectedKey = noJob.key;
-  assert.match(text(), /No invoice on this debtor is linked to a job, so there are no captured facts to read\./);
-  // A read that only counts facts (the first debt-worklist/v1 shape) says it does not list them.
+  assert.match(text(), /No invoice on this debtor is linked to a job, so captured facts cannot be read here\./);
+  // Summary counts do not substitute for timeline fact entries.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); delete q.sources.facts.timeline_read; q.timeline.entries = q.timeline.entries.filter((e) => e.kind !== 'fact'); });
   pick('Debtor 001');
-  assert.match(text(), /This read does not list captured facts; it only says facts on 4 of 5 invoices\./);
+  assert.match(text(), /This read did not report whether captured facts were listed\./);
+  assert.doesNotMatch(text(), /only says facts on 4 of 5 invoices/);
   // A capped fact read names the job.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); q.timeline.facts_cap_reached = ['SWF-90001']; });
   pick('Debtor 001');

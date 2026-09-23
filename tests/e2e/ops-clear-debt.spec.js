@@ -141,11 +141,8 @@ for (const vp of viewports) {
       await expect(entries).toHaveCount(12);
 
       await card.locator('label.inv', { hasText: 'INV-S1003' }).click();
-      await card.getByLabel('Only INV-S1003').check();
-      const scoped = await entries.count();
-      expect(scoped).toBeGreaterThan(0);
-      expect(scoped).toBeLessThan(12);
-      await expect(card.locator('.thread > li.tl:not(.is-scope)')).toHaveCount(0);
+      await expect(entries).toHaveCount(12);
+      await expect(card.getByLabel('Only INV-S1003')).toHaveCount(0);
 
       await expect(page.getByText(/no messages/i)).toHaveCount(0);
       const { reads, writes } = await ledger(page);

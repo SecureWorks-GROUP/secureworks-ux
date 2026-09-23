@@ -28,7 +28,6 @@
     owner: '',
     selectedKey: null,
     invoiceId: null,
-    onlyInvoice: false,
     tlFilter: 'all',
     channel: null,
     drafts: {},
@@ -120,7 +119,7 @@
         if (bad) { state.error = { kind: 'contract', message: bad }; state.data = null; render(); return; }
         state.data = resp;
         if (state.selectedKey && !findDebtor(state.selectedKey)) clearSelection();
-        if (state.invoiceId && !findInvoice(currentDebtor(), state.invoiceId)) { state.invoiceId = null; state.onlyInvoice = false; }
+        if (state.invoiceId && !findInvoice(currentDebtor(), state.invoiceId)) state.invoiceId = null;
         render();
       })
       .catch(function (err) {
@@ -157,7 +156,6 @@
   function clearSelection() {
     state.selectedKey = null;
     state.invoiceId = null;
-    state.onlyInvoice = false;
     state.channel = null;
     state.tlFilter = 'all';
   }
@@ -247,11 +245,12 @@
   function isFactEntry(e) { return Boolean(e) && e.kind === 'fact'; }
   function entryGroup(e) {
     if (isFactEntry(e)) return 'facts';
-    if (e.provider === 'xero' || e.kind === 'invoice_event' || /^xero_/.test(e.kind || '')) return 'xero';
+    if (e.provider === 'xero' || /^xero_/.test(e.kind || '')) return 'xero';
     if (e.kind === 'call' || e.channel === 'call') return 'call';
     if (e.channel === 'sms' || e.kind === 'sms') return 'text';
     if (e.channel === 'email' || e.kind === 'email') return 'email';
     if (e.channel === 'note' || /note|debt_log/.test(e.kind || '')) return 'note';
+    if (e.kind === 'invoice_event') return 'xero';
     return 'other';
   }
   function timelineEntries(d, opts) {
@@ -259,7 +258,6 @@
     var entries = (d && d.timeline && d.timeline.entries) || [];
     return entries.filter(function (e) {
       if (opts.tlFilter && opts.tlFilter !== 'all' && entryGroup(e) !== opts.tlFilter) return false;
-      if (opts.onlyInvoice && opts.invoiceId && (e.invoice_ids || []).indexOf(opts.invoiceId) < 0) return false;
       return true;
     });
   }
@@ -703,9 +701,6 @@
       var n = c.key === 'facts' && !counts.factsListed ? null : counts[c.key];
       return '<button type="button" class="chip" data-cd="tl" data-tl="' + c.key + '" aria-pressed="' + (state.tlFilter === c.key) + '">' + esc(c.label) + (n == null ? '' : '<span class="count">' + n + '</span>') + '</button>';
     }).join('');
-    var scopeToggle = state.invoiceId
-      ? '<label class="only"><input type="checkbox" data-cd="only"' + (state.onlyInvoice ? ' checked' : '') + '> Only ' + esc(invoiceNumber(d, state.invoiceId)) + '</label>'
-      : '';
     var status = timelineStatus(d);
     var body;
     {
@@ -713,15 +708,16 @@
       if (!list.length) {
         var gaps = state.tlFilter === 'facts' ? factLines(d) : sourceGaps(d, state.tlFilter);
         var which = state.tlFilter === 'all' ? 'entries' : (TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase());
-        body = '<p class="thread-note">No ' + esc(which) + (state.onlyInvoice ? ' about ' + esc(invoiceNumber(d, state.invoiceId)) : '') + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>' +
-          gaps.map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
+        var factsExplained = state.tlFilter === 'facts' && gaps.length > 0;
+        body = (factsExplained ? '' : '<p class="thread-note">No ' + esc(which) + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>') +
+          gaps.filter(function (g) { return !g.always; }).map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
       } else {
         body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';
       }
     }
     return '<section class="block" aria-labelledby="cd-tl-h">' + head +
       '<div class="chips" role="group" aria-label="Show in the timeline">' + chips + '</div>' +
-      scopeToggle + status +
+      status +
       '<div id="cd-tl-body">' + body + '</div></section>';
   }
 
@@ -800,9 +796,9 @@
     } else if (f.timeline_read === 'not_read') {
       out.push({ always: true, bad: false, text: 'Captured facts were not read for this view.' });
     } else if (f.timeline_read !== 'read') {
-      out.push({ always: true, bad: false, text: 'This read does not list captured facts; it only says ' + factsWords(f).toLowerCase() + '.' });
+      out.push({ always: true, bad: false, text: 'This read did not report whether captured facts were listed.' });
     } else if (f.status === 'no_job') {
-      out.push({ always: false, bad: false, text: 'No invoice on this debtor is linked to a job, so there are no captured facts to read.' });
+      out.push({ always: true, bad: false, text: 'No invoice on this debtor is linked to a job, so captured facts cannot be read here.' });
     } else if (f.status === 'missing') {
       out.push({ always: false, bad: false, text: 'No facts have been captured from the linked jobs yet.' });
     } else {
@@ -986,7 +982,6 @@
       focusSel('input[data-cd="invoice"][value="' + cssEscape(state.invoiceId) + '"]');
       return;
     }
-    if (act === 'only') { state.onlyInvoice = t.checked; render(); focusSel('input[data-cd="only"]'); }
   }
 
   function onInput(ev) {

@@ -174,8 +174,6 @@
 #clearDebtRoot .chip[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff}
 #clearDebtRoot .chip[aria-pressed="true"]:hover{background:var(--brand)}
 #clearDebtRoot .chip[aria-pressed="true"] .count{background:rgba(255,255,255,.18);color:#fff}
-#clearDebtRoot .only{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--ink-2);width:max-content;cursor:pointer}
-#clearDebtRoot .only input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 #clearDebtRoot .tl-status{max-width:90ch}
 #clearDebtRoot .health{list-style:none;padding:0;display:grid;gap:2px}
 #clearDebtRoot .health .is-bad{color:var(--bad)}

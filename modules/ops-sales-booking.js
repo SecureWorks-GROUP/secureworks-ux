@@ -1798,6 +1798,9 @@
     return 'Clashes with ' + clash.label + ' at ' + clash.at + (clash.source ? ' (' + clash.source + ')' : '') + '.';
   }
 
+  // Shared fail-closed gates. Calendar unread, expiry, hours, the protected
+  // band and a clash apply to Book it only; Send this text stays pressable
+  // with the clash named beside the text.
   function approvalBlock(c, kind, refusing) {
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
@@ -2427,6 +2430,8 @@
     return '<p class="chanstate is-' + status.state + '" role="status"><strong>' + line[0] + '</strong> ' + esc(line[1]) + '</p>';
   }
 
+  // Lock the draft while an approval or press is in flight so the words on
+  // screen stay the approved snapshot, and restoreFocus will not return to it.
   function composeBusy(c) {
     if (!c) return false;
     return ['message', 'calendar'].some(function (kind) {

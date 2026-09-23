@@ -679,9 +679,11 @@ next trade before that user's `my_hours` lands. Guard:
 viewer's own `my_jobs` rows and drops other crews' rows (manager Everyone lens)
 and ghost `role:'observer'` rows. The empty Today state ("No jobs today" + next
 job, never Pay), the calendar default vertical (`ncAdoptOwnWorkDefault`, most
-common own vertical once `my_jobs` and the make-safe feed settle; office keeps
-the managed default; a trade-picked vertical is never overridden) and the
-blank-day/week "next job" offer all read it. History only filters what
+common of `OWN_WORK_CALENDAR_TYPES` — makesafe/fencing/patio/repair — once
+`my_jobs` and the make-safe feed settle; office keeps the managed default; a
+trade-picked vertical is never overridden; decking is not a calendar vertical
+and falls back because `CalAdapterCore.mapType` still paints it as `other`)
+and the blank-day/week "next job" offer all read it. History only filters what
 `my_jobs` loaded (about 30 days, make-safe about 180), so its dates are clamped
 to the loaded range and it points to All search for older jobs; a paged
 own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity.spec.js`.
@@ -777,11 +779,13 @@ its `adaptV1` — Patio and All then fetch nothing for every viewer, silently.
 `mapVertical` bucket (Captain ruling 2026-09-18): a `job_type: patio` row carrying
 `job_family: repair` legitimately comes back under `type=patio`, files as Repair
 downstream and simply drops out of the Patio view via `passType` — it must never
-throw away the whole payload. `NC.type`'s Patio/All filter chips are
-gated by `managesTradeVertical(vertical) || _isAdmin` (Fencing stays
-`managesTradeVertical('fencing')` only, unchanged) so a dispatcher (admin/
-ops_manager) always sees every vertical while a managed-vertical lead only sees
-their own. Guard: `tests/e2e/trade-calendar-patio-missing.spec.js`.
+throw away the whole payload. `NC.type`'s All chip stays dispatcher /
+`managesTradeVertical('all')`. Make-safe and Repair stay unconditional. Patio
+and Fencing are also offered when that vertical is in the viewer's own
+assignments (`ncOwnVerticals`). Everyone is per-vertical (`ncEveryoneAllowed`):
+office, or a manager of that vertical; an own-work chip stays Mine. Guard:
+`tests/e2e/trade-calendar-patio-missing.spec.js`,
+`tests/e2e/trade-jobs-calendar-clarity.spec.js`.
 
 MONEY IS OFFICE-ONLY (Captain rule 2026-09-23). Only office (`_isAdmin`:
 admin / ops_manager) sees quote / job values or another trade's pay or rates;

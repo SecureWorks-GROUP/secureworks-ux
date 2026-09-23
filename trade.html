@@ -4699,7 +4699,7 @@
                     return _readApiError(r2, 'Session expired. Please sign in again.');
                   }
                   if (!r2.ok) return _readApiError(r2, r2.statusText || 'Request failed');
-                  return r2.json();
+                  return r2.json().then(function(b2) { return tradeOfficeMoneyDoor(action, b2); });
                 });
               }, function(refreshErr) {
                 console.error('[trade] Token refresh failed:', refreshErr);
@@ -4712,7 +4712,7 @@
           });
         }
         if (!r.ok) return _readApiError(r, r.statusText || 'Request failed');
-        return r.json();
+        return r.json().then(function(body) { return tradeOfficeMoneyDoor(action, body); });
       }).catch(function(err) {
         clearTimeout(timeoutId);
         throw err;
@@ -4720,6 +4720,153 @@
     });
   }
   // </trade-api-helper>
+
+  // <trade-office-money-door>
+  // Captain rule (2026-09-23): trades may see everything in the database
+  // except invoices and money. For every non-office viewer (anyone but admin /
+  // ops_manager, so a tier-3 or managed-vertical lead such as Henry or Ryan
+  // included) the page gets no quote / job values and no other trade's pay or
+  // rates. Other trades' HOURS stay for sign-off, and a trade's OWN pay stays.
+  // The backend projection is the real fence (separate change); this strips
+  // what a response still carries before it reaches the DOM or any cache.
+  function tradeViewerIsOffice() {
+    return _isAdmin === true;
+  }
+
+  // Exact keys, mirroring ops-api TRADE_SCOPE_QUOTE_KEYS / TRADE_SCOPE_MONEY_KEYS
+  // plus the work-order / crew-pay columns. Exact match keeps structural keys
+  // such as totalMetres or totalLength.
+  var TRADE_MONEY_KEYS = {};
+  ['_pricing_json', 'pricing_json', 'pricing_json_public', 'pricingNotes', 'quoteTotal', 'quote_total',
+    'totalSell', 'sell', 'sellPrice', 'sell_price', 'margin', 'marginPct', 'margin_pct', 'totalIncGST',
+    'totalExGST', 'subtotal', 'pricePerMetre', 'price_per_metre', 'job_costs', 'jobCosts',
+    'totalCostEstimate', 'labourCostEstimate', 'materialCostEstimate', 'commissionCostEstimate',
+    'unit_price', 'unitPrice', 'unit_price_ex', 'unitPriceEx', 'line_total', 'lineTotal', 'line_total_ex',
+    'price', 'rate', 'amount', 'amount_ex', 'amountEx', 'total', 'totals', 'gst', 'deposit', 'cost',
+    'cost_price', 'costPrice', 'dayRate', 'day_rate', 'unit_rate', 'hourly_rate', 'override_amount',
+    'trade_cost', 'crew_rates'].forEach(function(k) { TRADE_MONEY_KEYS[k] = true; });
+  // Job-level bags (jobs.metadata, makesafe_details) hold billing and quote
+  // corrections under free-form names.
+  var TRADE_JOB_BAG_MONEY_KEY = /(pric|total|amount|cost|deposit|margin|gst|invoice|billing|sell|_value$|^value$|rate$)/i;
+  var TRADE_LABOUR_KEEP_KEYS = { trades: true, days: true, labourers: true };
+  var TRADE_MONEY_DOC_TYPES = { quote: true, invoice: true, work_order: true, supplier_work_order: true };
+  var TRADE_MONEY_WALK_MAX_DEPTH = 12;
+
+  function tradeStripMoneyKeys(node, depth) {
+    depth = depth || 0;
+    if (!node || typeof node !== 'object') return node;
+    if (depth > TRADE_MONEY_WALK_MAX_DEPTH) return undefined;
+    if (Array.isArray(node)) {
+      for (var i = node.length - 1; i >= 0; i--) {
+        if (tradeStripMoneyKeys(node[i], depth + 1) === undefined) node.splice(i, 1);
+      }
+      return node;
+    }
+    Object.keys(node).forEach(function(k) {
+      if (TRADE_MONEY_KEYS[k]) { delete node[k]; return; }
+      if (k === 'pricing' && node[k] && typeof node[k] === 'object') {
+        var labour = node[k].labour;
+        var kept = {};
+        if (labour && typeof labour === 'object') {
+          Object.keys(labour).forEach(function(lk) { if (TRADE_LABOUR_KEEP_KEYS[lk]) kept[lk] = labour[lk]; });
+        }
+        node[k] = Object.keys(kept).length ? { labour: kept } : {};
+        return;
+      }
+      if (tradeStripMoneyKeys(node[k], depth + 1) === undefined) delete node[k];
+    });
+    return node;
+  }
+
+  function tradeStripJobBag(bag) {
+    if (!bag || typeof bag !== 'object' || Array.isArray(bag)) return;
+    Object.keys(bag).forEach(function(k) {
+      if (TRADE_JOB_BAG_MONEY_KEY.test(k)) delete bag[k];
+    });
+    tradeStripMoneyKeys(bag);
+  }
+
+  function tradeStripJobRowMoney(job) {
+    if (!job || typeof job !== 'object') return;
+    delete job.pricing_json;
+    delete job._pricing_json;
+    tradeStripJobBag(job.metadata);
+    tradeStripJobBag(job.makesafe_details);
+    if (job.scope_json && typeof job.scope_json === 'object') tradeStripMoneyKeys(job.scope_json);
+    else if (typeof job.scope_json === 'string' && job.scope_json) {
+      try { job.scope_json = JSON.stringify(tradeStripMoneyKeys(JSON.parse(job.scope_json)) || {}); }
+      catch (e) { job.scope_json = null; }
+    }
+  }
+
+  // my_jobs groups assignments ({ jobs: {...} }); search_all_jobs lists jobs.
+  function tradeStripJobListMoney(res) {
+    (Array.isArray(res.jobs) ? res.jobs : []).forEach(tradeStripJobRowMoney);
+    Object.keys(res).forEach(function(k) {
+      if (!Array.isArray(res[k])) return;
+      res[k].forEach(function(row) { if (row && row.jobs && typeof row.jobs === 'object') tradeStripJobRowMoney(row.jobs); });
+    });
+  }
+
+  function tradeStripJobDetailMoney(res) {
+    tradeStripJobRowMoney(res.job);
+    tradeStripJobBag(res.makesafe_details);
+    ['workOrder', 'work_order', 'workOrders', 'quote_packs', 'quotePacks', 'purchaseOrders',
+      'serviceReport', 'serviceReports'].forEach(function(k) {
+      if (res[k] && typeof res[k] === 'object') tradeStripMoneyKeys(res[k]);
+    });
+    ['documents', 'workOrderDocuments'].forEach(function(k) {
+      if (!Array.isArray(res[k])) return;
+      res[k] = res[k].filter(function(d) {
+        return !(d && TRADE_MONEY_DOC_TYPES[String(d.type || '').toLowerCase()]);
+      });
+    });
+  }
+
+  // Another trade's work order carries that trade's pay. An order with no
+  // assigned user is not attributable to anyone else and is left as served
+  // (ops-api lets a managed-vertical lead invoice it).
+  function tradeIsOtherTradesWorkOrder(wo) {
+    var owner = wo && wo.assigned_user_id;
+    return !!(owner && _user && String(owner) !== String(_user.id || ''));
+  }
+
+  function tradeStripWorkOrderListMoney(res) {
+    (Array.isArray(res.work_orders) ? res.work_orders : []).forEach(function(wo) {
+      if (!tradeIsOtherTradesWorkOrder(wo)) return;
+      ['subtotal', 'gst', 'total', 'negative_charges', 'available_negative_charge_total_ex'].forEach(function(k) { delete wo[k]; });
+      tradeStripMoneyKeys(wo.scope_items);
+      wo.can_invoice = false;
+      wo.can_add_to_weekly_invoice = false;
+      wo.money_withheld = true;
+    });
+  }
+
+  // crew_charges_on_my_jobs lists OTHER trades' lines on the lead's jobs:
+  // names, dates and hours stay for sign-off; rate, line total, adjustment
+  // and invoice status do not.
+  function tradeStripCrewChargeMoney(res) {
+    (Array.isArray(res.charges) ? res.charges : []).forEach(function(c) {
+      if (!c || typeof c !== 'object') return;
+      ['hourly_rate', 'line_total_ex', 'override_amount', 'override_note', 'invoice_status'].forEach(function(k) { delete c[k]; });
+    });
+  }
+
+  var TRADE_MONEY_DOOR = {
+    my_jobs: tradeStripJobListMoney,
+    search_all_jobs: tradeStripJobListMoney,
+    trade_job_detail: tradeStripJobDetailMoney,
+    my_work_orders: tradeStripWorkOrderListMoney,
+    crew_charges_on_my_jobs: tradeStripCrewChargeMoney
+  };
+
+  function tradeOfficeMoneyDoor(action, body) {
+    if (tradeViewerIsOffice() || !body || typeof body !== 'object') return body;
+    var strip = TRADE_MONEY_DOOR[action];
+    if (strip) strip(body);
+    return body;
+  }
+  // </trade-office-money-door>
 
   // ══════════════════════════════════════════════════
   // OFFLINE ACTION QUEUE
@@ -10976,8 +11123,11 @@
       .trim();
   }
 
+  // Quote / job values and other trades' pay are office-only (admin /
+  // ops_manager). A tier-3 or managed-vertical lead is not office.
+  // See <trade-office-money-door>.
   function tradeCanSeeSowPricing() {
-    return typeof canSeeFullPricing === 'function' && canSeeFullPricing();
+    return typeof tradeViewerIsOffice === 'function' && tradeViewerIsOffice();
   }
 
   function escSowText(text) {
@@ -11991,7 +12141,7 @@
         var estTotal = _tradeRate * wo.estimated_hours;
         h += '<div style="margin-top:10px;padding:10px;background:#E8F4FD;border-radius:8px;font-size:13px;color:#2980B9">Your rate: <strong>$' + _tradeRate.toFixed(2) + '/hr</strong> x est. <strong>' + wo.estimated_hours + ' hours</strong> = <strong>$' + estTotal.toFixed(2) + '</strong></div>';
       }
-      if (canSeeFullPricing()) {
+      if (tradeCanSeeSowPricing()) {
         if (wo.trade_cost != null) {
           h += '<div style="margin-top:6px;padding:10px;background:var(--sw-light);border-radius:8px;font-size:13px;color:var(--sw-dark)">Trade cost: <strong>$' + Number(wo.trade_cost).toFixed(2) + '</strong>';
           if (wo.crew_rates) h += ' · Crew rates: ' + esc(wo.crew_rates);
@@ -13045,16 +13195,19 @@
       h += '</div>';
     }
 
-    // ── 7. COST BREAKDOWN — async, office SOW gate ──
-    if (wo && wo.id && tradeCanSeeSowPricing()) {
+    // ── 7. COST BREAKDOWN — async. Office sees every work order's money; a
+    // tier-3 trade sees only their OWN work order (<trade-office-money-door>).
+    var showCostBreakdown = !!(wo && wo.id && (tradeCanSeeSowPricing() || canSeeFullPricing()));
+    if (showCostBreakdown) {
       h += '<div class="detail-section" id="woJobCostBreakdown">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div>';
       h += '<div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading...</div>';
       h += '</div>';
     }
 
-    // ── 8. CREW CHARGES — async, office SOW gate ──
-    if (tradeCanSeeSowPricing()) {
+    // ── 8. CREW CHARGES — async. Non-office leads get names and hours only.
+    var showCrewCharges = tradeCanSeeSowPricing() || canSeeFullPricing();
+    if (showCrewCharges) {
       h += '<div class="detail-section" id="woJobCrewCharges">';
       h += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Crew Charges</div>';
       h += '<div style="font-size:13px;color:var(--sw-text-sec)"><div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px"></div>Loading...</div>';
@@ -13063,10 +13216,12 @@
 
     container.innerHTML = h;
 
-    // Async: load work order invoice status (office SOW gate)
-    if (wo && wo.id && tradeCanSeeSowPricing()) {
+    // Async: load work order invoice status. A non-office viewer asks only for
+    // their own work orders, so another trade's pay is never requested here.
+    if (showCostBreakdown) {
       var costCtx = _invoiceApiContext();
-      api('my_work_orders', { mode: 'all' }).then(function(res) {
+      var costOffice = tradeCanSeeSowPricing();
+      api('my_work_orders', { mode: costOffice ? 'all' : 'mine' }).then(function(res) {
         if (!_invoiceApiCurrent(costCtx)) return;
         var el = document.getElementById('woJobCostBreakdown');
         if (!el || !el.isConnected) return;
@@ -13074,6 +13229,11 @@
         var match = null;
         for (var i = 0; i < orders.length; i++) {
           if (String(orders[i].id) === String(wo.id)) { match = orders[i]; break; }
+        }
+        if (match && match.money_withheld) match = null;
+        if (!match && !costOffice) {
+          el.parentNode.removeChild(el);
+          return;
         }
         if (!match) {
           el.innerHTML = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--sw-dark);margin-bottom:10px">Cost Breakdown</div><div style="font-size:13px;color:var(--sw-text-sec)">No invoiceable work order found</div>';
@@ -13087,7 +13247,7 @@
             ch += '<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--sw-border);color:var(--sw-dark)">';
             ch += '  <span style="flex:1;min-width:0">' + esc(item.description || item.name || '') + '</span>';
             if (item.rate) ch += '  <span style="color:var(--sw-text-sec);margin:0 8px;white-space:nowrap">@ $' + Number(item.rate).toFixed(0) + '</span>';
-            ch += '  <span style="font-weight:600;white-space:nowrap">$' + Number(item.total || item.amount || 0).toFixed(2) + '</span>';
+            if (item.total != null || item.amount != null) ch += '  <span style="font-weight:600;white-space:nowrap">$' + Number(item.total || item.amount || 0).toFixed(2) + '</span>';
             ch += '</div>';
           });
         }
@@ -13122,8 +13282,9 @@
       });
     }
 
-    // Async: load crew charges for this job (office SOW gate)
-    if (tradeCanSeeSowPricing()) {
+    // Async: load crew charges for this job. The money door leaves a
+    // non-office lead names and hours only.
+    if (showCrewCharges) {
       api('crew_charges_on_my_jobs', { week_start: getWeekStartMonday(-4) }).then(function(res) {
         var el = document.getElementById('woJobCrewCharges');
         if (!el) return;
@@ -13147,7 +13308,7 @@
           ch += '    <div class="crew-charge-name">' + esc(c.trade_name || 'Crew') + '</div>';
           ch += '    <div class="crew-charge-detail">' + esc(dateLabel) + ' · ' + Number(c.total_hours || 0).toFixed(1) + 'hrs</div>';
           ch += '  </div>';
-          ch += '  <div class="crew-charge-amount">$' + Number(c.line_total_ex || 0).toFixed(2) + '</div>';
+          if (c.line_total_ex != null) ch += '  <div class="crew-charge-amount">$' + Number(c.line_total_ex || 0).toFixed(2) + '</div>';
 
           if ((status === 'pending' || status === 'submitted') && !viewOnly) {
             ch += '  <div class="crew-actions">';
@@ -20118,7 +20279,7 @@
             dateLabel = d.getDate() + ' ' + months[d.getMonth()];
           }
           var status = (c.acknowledgment_status || 'pending').toLowerCase();
-          var amountStr = '$' + Number(c.line_total_ex || 0).toFixed(2);
+          var amountStr = c.line_total_ex != null ? '$' + Number(c.line_total_ex || 0).toFixed(2) : '';
           var hoursStr = Number(c.total_hours || 0).toFixed(1) + 'hrs';
 
           html += '<div class="crew-charge-row">';
@@ -20126,7 +20287,7 @@
           html += '    <div class="crew-charge-name">' + esc(c.trade_name || 'Crew') + '</div>';
           html += '    <div class="crew-charge-detail">' + esc(dateLabel) + ' · ' + esc(hoursStr) + '</div>';
           html += '  </div>';
-          html += '  <div class="crew-charge-amount">' + amountStr + '</div>';
+          if (amountStr) html += '  <div class="crew-charge-amount">' + amountStr + '</div>';
 
           if (status === 'pending' || status === 'submitted') {
             html += '  <div class="crew-actions">';
@@ -25207,19 +25368,21 @@
         var approvedTotal = 0;
         charges.forEach(function(c) {
           var statusColor = c.acknowledgment_status === 'acknowledged' ? 'var(--sw-green)' : c.acknowledgment_status === 'queried' ? 'var(--sw-red)' : 'var(--sw-mid)';
-          if (c.acknowledgment_status === 'acknowledged') approvedTotal += (c.override_amount != null ? c.override_amount : c.line_total_ex);
+          if (c.acknowledgment_status === 'acknowledged') approvedTotal += Number(c.override_amount != null ? c.override_amount : c.line_total_ex) || 0;
           ch += '<div class="inv-line" style="padding:10px" id="crew_' + c.line_id + '">';
           ch += '<div style="display:flex;justify-content:space-between;align-items:flex-start">';
           ch += '<div><div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + esc(c.trade_name) + '</div>';
           ch += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(c.job_number || '') + (c.description ? ' — ' + esc(c.description) : '') + '</div></div>';
-          ch += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(c.line_total_ex || 0).toFixed(2) + '</div>';
-          ch += '<div style="font-size:11px;color:' + statusColor + '">' + (c.total_hours || 0) + 'h × $' + (c.hourly_rate || 0) + '</div></div>';
+          var crewMoney = c.line_total_ex != null;
+          ch += '<div style="text-align:right">';
+          if (crewMoney) ch += '<div style="font-size:14px;font-weight:700;color:var(--sw-dark)">$' + Number(c.line_total_ex || 0).toFixed(2) + '</div>';
+          ch += '<div style="font-size:11px;color:' + statusColor + '">' + (c.total_hours || 0) + 'h' + (c.hourly_rate != null ? ' × $' + c.hourly_rate : '') + '</div></div>';
           ch += '</div>';
           // Action buttons
           if (c.acknowledgment_status === 'pending') {
             ch += '<div style="display:flex;gap:6px;margin-top:8px">';
             ch += '<button onclick="reviewCrewCharge(\'' + c.line_id + '\',\'approve\')" style="flex:1;padding:6px;background:var(--sw-green);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Approve</button>';
-            ch += '<button onclick="reviewCrewChargeAdjust(\'' + c.line_id + '\',' + c.line_total_ex + ')" style="flex:1;padding:6px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Adjust</button>';
+            if (crewMoney) ch += '<button onclick="reviewCrewChargeAdjust(\'' + c.line_id + '\',' + c.line_total_ex + ')" style="flex:1;padding:6px;background:var(--sw-orange);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Adjust</button>';
             ch += '<button onclick="reviewCrewCharge(\'' + c.line_id + '\',\'reject\')" style="flex:1;padding:6px;background:var(--sw-red);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Reject</button>';
             ch += '</div>';
           } else {
@@ -27682,7 +27845,7 @@
           html += '<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--sw-dark)">';
           html += '  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(item.description || item.name || '') + '</span>';
           if (item.rate) html += '  <span style="color:var(--sw-text-sec);margin:0 8px;white-space:nowrap">@ $' + Number(item.rate).toFixed(0) + '</span>';
-          html += '  <span style="font-weight:600;white-space:nowrap">$' + Number(item.total || item.amount || 0).toFixed(2) + '</span>';
+          if (item.total != null || item.amount != null) html += '  <span style="font-weight:600;white-space:nowrap">$' + Number(item.total || item.amount || 0).toFixed(2) + '</span>';
           html += '</div>';
         });
       }
@@ -27696,7 +27859,9 @@
       }
 
       // Action button or status indicator
-      if (wo.already_invoiced) {
+      if (wo.money_withheld) {
+        html += '<div data-work-order-money-withheld style="font-size:12px;color:var(--sw-text-sec);margin-top:8px">' + esc(wo.assigned_user_name || 'Another trade') + '\u2019s work order. Pay figures are office only.</div>';
+      } else if (wo.already_invoiced) {
         html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(39,174,96,0.1);color:var(--sw-green);border-radius:8px;padding:10px;font-size:13px;font-weight:600;margin-top:10px">&#10003; Invoiced</div>';
       } else if (isPerMetreUser() && wo.can_add_to_weekly_invoice) {
         html += '<button onclick="openWeeklyWorkOrderInvoice({workOrderId:\'' + _weeklyJsString(wo.id) + '\',workOrderDate:\'' + _weeklyJsString(_weeklyWorkOrderDate(wo)) + '\'})" style="width:100%;padding:12px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);margin-top:10px">Add to Weekly Invoice</button>';

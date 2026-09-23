@@ -770,6 +770,18 @@ gated by `managesTradeVertical(vertical) || _isAdmin` (Fencing stays
 ops_manager) always sees every vertical while a managed-vertical lead only sees
 their own. Guard: `tests/e2e/trade-calendar-patio-missing.spec.js`.
 
+MONEY IS OFFICE-ONLY (Captain rule 2026-09-23). Only office (`_isAdmin`:
+admin / ops_manager) sees quote / job values or another trade's pay or rates;
+a tier-3 or managed-vertical lead is NOT office. `tradeCanSeeSowPricing()` is
+office-only, and `tradeOfficeMoneyDoor` inside `api()`
+(`// <trade-office-money-door>`) strips money from `trade_job_detail`,
+`my_jobs`, `search_all_jobs`, other trades' `my_work_orders` rows and
+`crew_charges_on_my_jobs` before any render or cache. Other trades' names and
+HOURS stay for sign-off; a trade's own pay (Pay, invoices, own work orders)
+stays. The job-detail Cost Breakdown asks non-office viewers for `mode=mine`
+only. Backend enforcement is a separate change. Guard:
+`tests/e2e/trade-office-money-door.spec.js`.
+
 ACCESS IS NAMED, NEVER TIERED. `TradeAccessCore` (`// <trade-access-core>`) is
 the one place that labels a person's access (Office / "<Vertical> manager" /
 Lead installer / Work-order trade / Crew, plus pay basis) from office role,

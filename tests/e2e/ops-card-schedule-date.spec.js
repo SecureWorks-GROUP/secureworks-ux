@@ -52,6 +52,25 @@ test('in-progress card falls back to its most recent past visit', async ({ page 
   await expect(card).not.toContainText('10/07');
 });
 
+test('repair card in the On Site column shows its most recent past visit', async ({ page }) => {
+  const card = await renderCard(page, {
+    id: 'repair-on-site',
+    type: 'repair',
+    status: 'on_site',
+    repair_stage: 'on_site',
+    client_name: 'Repair on-site fixture',
+    first_scheduled_date: '2026-08-13',
+    last_scheduled_date: '2026-09-22',
+    next_scheduled_date: null,
+    assignment_count: 2,
+    days_in_stage: 1,
+  }, 'on_site');
+
+  await expect(card.locator('.kanban-meta-badge', { hasText: '/' })).toHaveText(/22\/09/);
+  await expect(card).toContainText('2 sched');
+  await expect(card).not.toContainText('13/08');
+});
+
 test('card trusts the precomputed real visit over an earlier uppercase observer row', async ({ page }) => {
   const card = await renderCard(page, {
     id: 'swf-26813',

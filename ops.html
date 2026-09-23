@@ -16434,7 +16434,7 @@ function renderKanbanCard(j, status) {
     html += '<span class="type-badge ' + j.type + '">' + typeBadgeLabel(j.type) + '</span>';
   }
   var cardScheduleDate = j.next_scheduled_date ?? j.last_scheduled_date;
-  if (cardScheduleDate && (status === 'scheduled' || status === 'in_progress')) {
+  if (cardScheduleDate && (status === 'scheduled' || status === 'in_progress' || status === 'on_site')) {
     var sdParts = cardScheduleDate.split('-');
     var sdLabel = sdParts[2] + '/' + sdParts[1];
     html += '<span class="kanban-meta-badge" style="background:rgba(52,152,219,0.12);color:var(--sw-blue,#3498DB);font-weight:600;">&#128197; ' + sdLabel + '</span>';

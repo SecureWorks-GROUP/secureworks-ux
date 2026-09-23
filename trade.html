@@ -17568,7 +17568,10 @@
 
   var _makesafeV5Feed = null, _makesafeV5FeedAt = 0, _makesafeV5FeedPromise = null;
   function fetchMakesafeV5Feed(force) {
-    if (!force && _makesafeV5Feed && Date.now() - _makesafeV5FeedAt < 90000) return Promise.resolve(_makesafeV5Feed);
+    if (!force && _makesafeV5Feed && Date.now() - _makesafeV5FeedAt < 90000) {
+      syncBoardNav(_makesafeV5Feed, false);
+      return Promise.resolve(_makesafeV5Feed);
+    }
     if (!force && _makesafeV5FeedPromise) return _makesafeV5FeedPromise;
     _makesafeV5FeedPromise = api('makesafe_board', { projection: 'trade' }, null, { preserveSessionOnAuthFailure: true }).then(function (payload) {
       _makesafeV5Feed = MakesafeTradeV5.validate(payload); _makesafeV5FeedAt = Date.now(); _makesafeV5FeedPromise = null;

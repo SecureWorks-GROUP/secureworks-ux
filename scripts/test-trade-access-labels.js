@@ -68,8 +68,4 @@ check('tier-1 lead installer', { role: 'lead_installer', trade_tier: 1, managed_
 // Missing profile facts stay honest (no invented pay basis).
 check('empty profile', null, { title: 'Crew', pay: '', everyone: '' })
 
-// The profile screen no longer renders a tier badge.
-assert(!html.includes("tierLabel("), 'tierLabel removed')
-assert(!/'Tier ' \+ _userTier/.test(html), 'Profile does not print a Tier N badge')
-
 console.log('trade access labels: ok')

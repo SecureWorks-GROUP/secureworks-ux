@@ -1,263 +1,1192 @@
 // ════════════════════════════════════════════════════════════
-// CLEAR DEBT v2: the debt picture, three levels, one way down.
-// Design accepted by Marnin 11 Sep 2026:
-//   secureworks-wiki lanes/DEBT_COLLECTION/DESIGN-clear-debt-2026-09-11.md
-// Reads: ops-api list_debt_picture (classification rows), debt_context_coverage
-//   (picture flags), invoice_context (one record), debt_notes (thread).
-// Writes: debt_note, debt_proposal_mark, send_chase_sms (GHL text), send_invoice_email.
-// Never voids, never touches Xero, never tags GHL. Every field's origin is in the design page.
+// CLEAR DEBT: one debtor work list, one debtor card, one timeline, one draft.
+// Design: Part B of the CFO desk's debt system review (24 Sep 2026), built to
+// the approved booking screen's standard (modules/ops-sales-booking.*).
+//
+// Read: ONE GET ops-api?action=debt_worklist&timeline=recent when the tab
+//   opens (and on explicit Refresh). Choosing a debtor, picking an invoice,
+//   filtering the timeline and drafting all render from that one payload with
+//   no further request. An auth reset or operator change clears that payload;
+//   the next load reads it under the current operator.
+// Writes: none. This screen sends nothing, saves no note, marks no proposal and
+//   records no approval. Sending arrives with a separate approval step.
+// Contract: secureworks-backend supabase/functions/ops-api/debt_worklist_read_model.ts
+//   (debt-worklist/v1). Styles: modules/ops-clear-debt-v2.css, scoped to #clearDebtRoot.
 // ════════════════════════════════════════════════════════════
+(function (global) {
+  'use strict';
 
-var CD = {
-  rows: [], totals: {}, coverage: {}, asOf: null, pictureAsOf: null,
-  seg: null, open: null, ctx: {}, notes: {}, loading: false,
-  ACTIONS: { text: 'send_chase_sms', email: 'send_invoice_email', call: null, note: 'add_debt_note', mark: 'debt_proposal_mark' },
-};
-var CD_KINDS = [
-  { key: 'chase',    label: 'Chase now',                  color: '#F15A29' },
-  { key: 'due',      label: 'Not yet due',                color: '#8FA4B2' },
-  { key: 'paid',     label: 'Paid, awaiting allocation',  color: '#4F7F60' },
-  { key: 'blocked',  label: 'Blocked by us',              color: '#E08A2E' },
-  { key: 'dispute',  label: 'In dispute',                 color: '#8E44AD' },
-  { key: 'notowed',  label: 'Not owed',                   color: '#C9C1B8' },
-  { key: 'bad',      label: 'Bad debt',                   color: '#B93A2C' },
-  { key: 'unclass',  label: 'Unclassified',               color: '#6B7C88' },
-];
-var CD_TYPE = { deposit: ['Deposits', 'Deposit invoices, work not started or just booked'], final_balance: ['Final balances', 'Balance invoices after completion'], progress_claim: ['Progress claims', 'Staged claims on larger jobs'], variation: ['Variations', 'Extras agreed during the job'], plan_fee: ['Plan and design fees', 'Drawings and approvals'], work_order: ['Make-safe and repair work orders', 'Builder or insurer PO, paid on their statement run'], job_invoice: ['Job invoices', 'Single invoice for the whole job'], no_reference: ['No reference on the invoice', 'Reference missing, job to confirm'] };
-var CD_BLOCKER = { rectification: ['Rectification not done', 'OPERATIONS'], no_job_linked: ['No job linked to the invoice', 'BOOKKEEPING'], job_link_ambiguous: ['More than one job matches', 'BOOKKEEPING'], invoice_wrong: ['Invoice or contact wrong', ''], pack_missing: ['Report or PO pack missing', 'INSURANCE'], paid_unallocated: ['In the bank, awaiting Xero allocation', 'BOOKKEEPING'], payment_claimed: ['Client says paid, bank check pending', 'BOOKKEEPING'], context_pending: ['Context pending from the door', 'CIO'] };
-var CD_CLASS_LABEL = { genuine_debt: 'Genuine debt', blocked_by_us: 'Blocked by us', in_dispute: 'In dispute', bad_debt: 'Bad debt', not_owed: 'Not owed', unclassified: 'Unclassified' };
-var CD_IC = { msg: '<svg class="cd-i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12z"/></svg>', mail: '<svg class="cd-i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 7 9 6 9-6"/></svg>', phone: '<svg class="cd-i" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>', file: '<svg class="cd-i" viewBox="0 0 24 24"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>', bank: '<svg class="cd-i" viewBox="0 0 24 24"><path d="M3 10 12 4l9 6"/><path d="M5 10v9M9 10v9M15 10v9M19 10v9M3 19h18"/></svg>', note: '<svg class="cd-i" viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="m12 8 4 4"/></svg>', chev: '<svg class="cd-i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>' };
+  var CONTRACT = 'debt-worklist/v1';
+  var ROOT_ID = 'clearDebtRoot';
+  var TZ = 'Australia/Perth';
+  var inFlightRead = null;
+  var authOwner = null;
 
-function cdEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-function cdMoney(n) { return '$' + Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function cdMoney0(n) { return '$' + Math.round(Number(n || 0)).toLocaleString('en-AU'); }
-function cdWhen(iso) { if (!iso) return ''; var d = new Date(iso); return d.toLocaleString('en-AU', { timeZone: 'Australia/Perth', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
-function cdAge(days) { var c = days <= 0 ? 'ok' : days <= 30 ? 'n' : days <= 60 ? 'w' : 'b'; return '<span class="cd-pill ' + c + '">' + (days > 0 ? days + ' days' : 'not due') + '</span>'; }
-function cdKindOf(r) {
-  var c = r.debt_classification || 'unclassified';
-  if (c === 'blocked_by_us') return (r.debt_blocker === 'paid_unallocated' || r.debt_blocker === 'payment_claimed') ? 'paid' : 'blocked';
-  if (c === 'genuine_debt') return r.days_overdue > 0 ? 'chase' : 'due';
-  if (c === 'in_dispute') return 'dispute';
-  if (c === 'not_owed') return 'notowed';
-  if (c === 'bad_debt') return 'bad';
-  return 'unclass';
-}
-function cdSubOf(r, kind) {
-  if (kind === 'chase' || kind === 'due') { var t = CD_TYPE[r.debt_type] || CD_TYPE.job_invoice; return { key: r.debt_type || 'job_invoice', label: t[0], desc: t[1], owner: r.debt_owner || 'DEBT' }; }
-  if (kind === 'paid' || kind === 'blocked') { var b = CD_BLOCKER[r.debt_blocker] || ['Blocked', '']; return { key: r.debt_blocker || 'other', label: b[0], desc: '', owner: r.debt_owner || b[1] }; }
-  if (kind === 'notowed') return r.debt_void_proposed ? { key: 'void', label: 'Void proposed', desc: 'test record or cancelled job, Marnin yes/no', owner: 'MARNIN' } : { key: 'other', label: 'Nothing owed', desc: 'residual cents or cancellation to confirm', owner: r.debt_owner || 'BOOKKEEPING' };
-  if (kind === 'dispute') return { key: 'dispute', label: 'Client contests the invoice', desc: '', owner: r.debt_owner || 'INSURANCE' };
-  if (kind === 'bad') return { key: 'bad', label: 'No provable obligation', desc: 'Marnin decides write-off', owner: 'MARNIN' };
-  return { key: 'unclass', label: 'Not yet classified', desc: 'the refresh has not placed this invoice', owner: r.debt_owner || 'CIO' };
-}
+  var state = {
+    data: null,
+    loading: false,
+    error: null,
+    search: '',
+    filter: 'all',
+    owner: '',
+    selectedKey: null,
+    invoiceId: null,
+    tlFilter: 'all',
+    channel: null,
+    drafts: {},
+    showDetails: false,
+    requestSeq: 0
+  };
 
-function cdCss() {
-  if (document.getElementById('cd-css')) return;
-  var s = document.createElement('style'); s.id = 'cd-css';
-  s.textContent = '\
-#subCleardebt{--cdbg:#F5F2EE;--cdcard:#fff;--cdline:#E3E0DA;--cdline2:#EEEBE6;--cddark:#293C46;--cddeep:#1A272E;--cdmid:#5B7385;--cdmidl:#93A4B1;--cdlight:#F1EFEB;--cdor:#F15A29;--cdord:#C4481F;--cdort:#FDF1EC;--cdorl:#F9D3C5;--cdsage:#4F7F60;--cdsaget:#E6F0E8;--cdred:#B93A2C;--cdamber:#B8741C;color:var(--cddeep);font-size:14.5px;line-height:1.5}\
-#subCleardebt *{box-sizing:border-box;min-width:0}#subCleardebt .cd-num{font-variant-numeric:tabular-nums}#subCleardebt button{font:inherit;cursor:pointer;color:inherit}\
-.cd-i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px;flex:none}\
-.cd-k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--cdmidl);font-weight:600}\
-.cd-crumbs{font-size:13px;color:var(--cdmid);margin-bottom:12px;min-height:18px;display:flex;gap:8px;align-items:center}.cd-crumbs button{background:none;border:0;padding:0;color:var(--cdmid)}.cd-crumbs b{color:var(--cddeep);font-weight:600}\
-.cd-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}.cd-h1{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--cdmid);margin:0 0 8px;font-weight:600}\
-.cd-big{font-size:48px;font-weight:700;letter-spacing:-.03em;line-height:.95}.cd-big small{font-size:15px;font-weight:400;letter-spacing:0;color:var(--cdmid);margin-left:12px}\
-.cd-meta{display:flex;gap:22px;font-size:12.5px;color:var(--cdmid)}.cd-meta div b{display:block;font-size:14px;color:var(--cddeep);font-weight:600}\
-.cd-bar{display:flex;height:40px;margin-top:20px;background:#E9E5DF;overflow:hidden}.cd-bar button{border:0;padding:0;min-width:5px;position:relative;transition:filter .2s}.cd-bar button:hover,.cd-bar button.on{filter:brightness(.9)}.cd-bar button.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(0,0,0,.25)}\
-.cd-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--cdline2);border:1px solid var(--cdline2);margin-top:14px}.cd-legend button{background:var(--cdcard);border:0;text-align:left;padding:12px 12px 12px 14px;position:relative}.cd-legend button::before{content:"";position:absolute;left:0;top:0;bottom:0;width:0;background:var(--sw);transition:width .15s}.cd-legend button:hover::before,.cd-legend button.on::before{width:3px}\
-.cd-legend .l{font-size:12.5px;color:var(--cdmid);display:flex;gap:7px;min-height:34px;align-items:flex-start}.cd-legend .l i{width:9px;height:9px;background:var(--sw);flex:none;margin-top:5px}.cd-legend .v{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:2px}.cd-legend .c{font-size:12px;color:var(--cdmidl)}\
-.cd-hint{margin:18px 0 0;color:var(--cdmid);font-size:14px}\
-.cd-panel{margin-top:18px;background:var(--cdcard);border:1px solid var(--cdline);box-shadow:0 1px 2px rgba(41,60,70,.05),0 8px 24px -12px rgba(41,60,70,.18)}\
-.cd-ph{display:flex;justify-content:space-between;align-items:baseline;padding:16px 20px;border-bottom:1px solid var(--cdline)}.cd-ph h2{font-size:18px;margin:0;font-weight:700}.cd-ph span{color:var(--cdmid);font-size:13.5px}\
-.cd-grp{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 20px;background:color-mix(in srgb,var(--sw) 8%,#fff);border-top:1px solid color-mix(in srgb,var(--sw) 22%,#fff);border-bottom:1px solid color-mix(in srgb,var(--sw) 22%,#fff);margin-top:8px}.cd-grp .lab{display:flex;align-items:center;gap:10px}.cd-grp .lab i{width:9px;height:9px;background:var(--sw)}.cd-grp b{font-size:14px;font-weight:600}.cd-grp .o{font-size:12.5px;color:var(--cdmid);margin-left:8px}.cd-grp .t{font-size:13px;font-weight:600;white-space:nowrap}.cd-grp .t small{color:var(--cdmid);font-weight:400;margin-left:6px}\
-.cd-row{display:grid;grid-template-columns:minmax(200px,2fr) 120px 100px minmax(140px,2fr) 20px;gap:14px;align-items:center;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--cdline2);padding:12px 20px}.cd-row:hover{background:#FBF9F6}.cd-row.on{background:#fff;border-top-color:var(--cdline)}\
-.cd-row .nm{font-weight:600;font-size:14.5px}.cd-row .sub{font-size:12px;color:var(--cdmidl)}.cd-row .amt{text-align:right;font-weight:600}.cd-row .old{text-align:right}.cd-row .nx{color:var(--cdmid);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cd-row .nx .pp{display:inline-block;font-size:11px;padding:1px 7px;background:var(--cdort);color:var(--cdord);border-radius:100px;margin-right:6px;font-weight:600}.cd-row .car{color:var(--cdmidl);transition:transform .18s;display:flex;justify-content:center}.cd-row.on .car{transform:rotate(90deg);color:var(--cdor)}\
-.cd-pill{display:inline-block;padding:2px 9px;border-radius:100px;font-size:12px;font-weight:600;white-space:nowrap}.cd-pill.ok{background:var(--cdsaget);color:var(--cdsage)}.cd-pill.n{background:var(--cdlight);color:var(--cdmid)}.cd-pill.w{background:#FBEEDB;color:var(--cdamber)}.cd-pill.b{background:#FBE6E2;color:var(--cdred)}\
-.cd-rec{background:#FBFAF8;border-top:3px solid var(--sw);border-bottom:1px solid var(--cdline);padding:22px 20px 24px}\
-.cd-rh{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:18px;flex-wrap:wrap}.cd-rh h2{margin:0;font-size:24px;font-weight:700;letter-spacing:-.02em}.cd-chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}.cd-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:100px;font-size:12px;font-weight:600;background:var(--cdlight);color:var(--cdmid)}.cd-chip.d{background:var(--cddark);color:#fff}\
-.cd-rh .amt{font-size:30px;font-weight:700;letter-spacing:-.03em;color:var(--cdor);text-align:right}.cd-rh .amt small{display:block;font-size:12px;color:var(--cdmid);font-weight:400;letter-spacing:0}\
-.cd-story{display:grid;grid-template-columns:1.6fr 1fr;gap:16px}.cd-card{background:var(--cdcard);border:1px solid var(--cdline);padding:16px 18px}\
-.cd-brief dl{margin:0;display:grid;grid-template-columns:96px 1fr;gap:9px 14px;font-size:14px}.cd-brief dt{color:var(--cdmid);font-weight:600;font-size:12.5px;padding-top:2px}.cd-brief dd{margin:0}\
-.cd-ev{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--cdline2)}.cd-ev a{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border:1px solid var(--cdline);background:#fff;text-decoration:none;color:var(--cddark)}\
-.cd-next{background:var(--cddark);color:#fff;padding:18px 20px;display:flex;flex-direction:column;gap:12px}.cd-next .cd-k{color:#9FB3C0}.cd-next .big2{font-size:17px;font-weight:600;line-height:1.35}.cd-next .when{display:inline-block;padding:3px 10px;background:var(--cdor);color:#fff;border-radius:100px;font-size:12.5px;font-weight:600;align-self:flex-start}.cd-next .rowk{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;color:#DCE4EA;padding-top:10px;border-top:1px solid rgba(255,255,255,.14)}.cd-next .rowk b{display:block;color:#fff;font-weight:600}\
-.cd-reach{display:grid;grid-template-columns:1.1fr 1.1fr .75fr 1.25fr;gap:14px;margin-top:16px}.cd-rc{background:var(--cdcard);border:1px solid var(--cdline);padding:14px 16px;display:flex;flex-direction:column;gap:8px}.cd-rc .cd-k{display:flex;align-items:center;gap:7px}\
-.cd-rc textarea{width:100%;border:1px solid var(--cdline);padding:9px 11px;font:inherit;font-size:14px;background:#FBFAF8;resize:vertical;line-height:1.45}.cd-rc textarea:focus{background:#fff;border-color:var(--cdor);outline:0}\
-.cd-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cd-acts .st{font-size:12.5px;color:var(--cdmid)}\
-.cd-btn{border:1px solid var(--cddark);background:var(--cddark);color:#fff;padding:8px 14px;font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px}.cd-btn.o{background:var(--cdor);border-color:var(--cdor)}.cd-btn.l{background:#fff;color:var(--cddark)}.cd-btn:disabled{opacity:.55;cursor:default}\
-.cd-tel{font-size:18px;font-weight:700;margin:2px 0}.cd-tel a{color:inherit;text-decoration:none}.cd-via{font-size:12px;color:var(--cdmidl)}\
-.cd-tags{display:flex;gap:4px;flex-wrap:wrap}.cd-tags button{border:1px solid var(--cdline);background:#fff;font-size:12px;padding:4px 9px;border-radius:100px;color:var(--cdmid)}.cd-tags button.on{border-color:var(--cdor);color:var(--cdord);background:var(--cdort)}\
-.cd-nthread{max-height:220px;overflow-y:auto;margin-top:6px;border-top:1px solid var(--cdline2)}.cd-note{padding:8px 0;border-bottom:1px solid var(--cdline2);font-size:13px;line-height:1.4}.cd-note .who{color:var(--cdmid);font-size:12.5px}.cd-note .tag{font-size:11px;padding:1px 8px;border-radius:100px;background:var(--cdlight);color:var(--cdmid);white-space:nowrap;font-weight:600}\
-.cd-three{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:16px;margin-top:16px}.cd-three h3{display:flex;align-items:center;gap:7px;margin:0 0 10px}.cd-three h3 em{font-style:normal;color:var(--cdmidl);font-weight:400;text-transform:none;letter-spacing:0;margin-left:auto;font-size:12px}\
-.cd-il div.r{display:grid;grid-template-columns:1fr auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--cdline2);font-size:14px;align-items:center}.cd-lnk{font-weight:600;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--cdline);color:inherit}.cd-lnk:hover{color:var(--cdord)}\
-.cd-peek{border:0;background:none;font-size:11.5px;color:var(--cdmidl);text-decoration:underline;text-underline-offset:2px;padding:0 4px}.cd-peek:hover{color:var(--cdord)}\
-.cd-prev{margin:4px 0 8px}.cd-prev iframe{width:100%;height:520px;border:1px solid var(--cdline);background:#fff}\
-.cd-led div{display:grid;grid-template-columns:52px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--cdline2);font-size:13.5px}.cd-led .d{color:var(--cdmid);font-size:12.5px}.cd-led .st{color:var(--cdsage);font-size:12.5px}\
-.cd-kv{display:grid;grid-template-columns:64px 1fr;gap:6px 10px;font-size:14px;margin:0}.cd-kv dt{color:var(--cdmid);font-size:12.5px;padding-top:2px}.cd-kv dd{margin:0}\
-.cd-docs{margin-top:10px;border-top:1px solid var(--cdline2)}.cd-docs div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--cdline2);font-size:13.5px;align-items:baseline}.cd-docs .sub{color:var(--cdmidl);font-size:12px;text-align:right}\
-.cd-thread{max-height:360px;overflow-y:auto;padding-right:6px;display:flex;flex-direction:column;gap:6px}.cd-msg{padding:9px 12px;font-size:13.5px;line-height:1.45;max-width:92%}.cd-msg.outbound,.cd-msg.internal{background:var(--cdlight);align-self:flex-end}.cd-msg.inbound{background:var(--cdort);align-self:flex-start}.cd-msg .w{font-size:11.5px;color:var(--cdmid);margin-bottom:2px}.cd-msg.inbound .w{color:var(--cdord)}\
-.cd-facts{margin-top:12px;padding-top:10px;border-top:1px solid var(--cdline2)}.cd-fact{padding:6px 0;font-size:13.5px}.cd-fact b{display:block;font-size:12px;color:var(--cdmid);font-weight:600}\
-.cd-quiet{color:var(--cdmidl);font-size:13px}.cd-pend{padding:12px 14px;background:var(--cdlight);color:var(--cdmid);font-size:13.5px}.cd-pend b{color:var(--cddeep)}.cd-err{padding:14px;background:#FBE6E2;color:var(--cdred)}\
-@media(max-width:900px){.cd-big{font-size:36px}.cd-row{grid-template-columns:1fr 96px 20px}.cd-row .old,.cd-row .nx{display:none}.cd-story,.cd-reach,.cd-three{grid-template-columns:1fr}.cd-rh .amt{text-align:left}}';
-  document.head.appendChild(s);
-}
-
-// ── Load ──
-async function loadClearDebt() {
-  cdCss();
-  var stats = document.getElementById('clearDebtStats'), filt = document.getElementById('clearDebtFilters'), cards = document.getElementById('clearDebtCards');
-  if (!stats) return;
-  stats.style.display = 'block'; filt.style.display = 'block';
-  stats.innerHTML = '<div class="cd-quiet">Loading the debt picture…</div>';
-  try {
-    var pic = await opsFetch('list_debt_picture');
-    CD.rows = pic.rows || []; CD.totals = pic.totals || {}; CD.asOf = pic.as_of; CD.pictureAsOf = pic.picture_as_of;
-  } catch (e) {
-    stats.innerHTML = '<div class="cd-err">The debt picture could not be read: ' + cdEsc(e.message) + '. If this is the first day, the backend action list_debt_picture has not deployed yet.</div>';
-    return;
-  }
-  try {
-    var cov = await opsFetch('debt_context_coverage', { population: 'open' });
-    CD.coverage = {}; (cov.rows || []).forEach(function (r) { CD.coverage[r.xero_invoice_id] = r; });
-    CD.coverageAsOf = cov.as_of; CD.coverageTotals = cov.totals || {};
-  } catch (e) { CD.coverage = {}; CD.coverageAsOf = null; }
-  cdRender();
-}
-
-function cdGroups() {
-  var kinds = {}; CD_KINDS.forEach(function (k) { kinds[k.key] = { key: k.key, label: k.label, color: k.color, amount: 0, n: 0, subs: {} }; });
-  CD.rows.forEach(function (r) {
-    var kind = cdKindOf(r), K = kinds[kind]; K.amount += Number(r.amount_due || 0); K.n += 1;
-    var sub = cdSubOf(r, kind), S = K.subs[sub.key] || (K.subs[sub.key] = { key: sub.key, label: sub.label, desc: sub.desc, owner: sub.owner, amount: 0, n: 0, payers: {} });
-    S.amount += Number(r.amount_due || 0); S.n += 1;
-    var pk = r.xero_contact_id || r.contact_name || 'unknown';
-    var P = S.payers[pk] || (S.payers[pk] = { key: pk, name: r.contact_name || 'Unknown', xero_contact_id: r.xero_contact_id, amount: 0, n: 0, oldest: 0, owner: r.debt_owner || sub.owner, next: '', proposal: false, invoices: [] });
-    P.amount += Number(r.amount_due || 0); P.n += 1; P.oldest = Math.max(P.oldest, r.days_overdue || 0); P.invoices.push(r);
-    if (!P.next && r.debt_next_action) P.next = r.debt_next_action;
-    if (r.debt_proposal_status === 'pending') P.proposal = true;
-  });
-  Object.keys(kinds).forEach(function (k) {
-    var K = kinds[k]; K.subs = Object.keys(K.subs).map(function (s) { var S = K.subs[s]; S.payers = Object.keys(S.payers).map(function (p) { return S.payers[p]; }).sort(function (a, b) { return b.amount - a.amount; }); return S; }).sort(function (a, b) { return b.amount - a.amount; });
-  });
-  return kinds;
-}
-
-function cdRender() {
-  var kinds = cdGroups(), total = 0, count = 0, overdue = 0, overdueN = 0;
-  CD.rows.forEach(function (r) { total += Number(r.amount_due || 0); count += 1; if (r.days_overdue > 0) { overdue += Number(r.amount_due || 0); overdueN += 1; } });
-  var proposals = CD.rows.filter(function (r) { return r.debt_proposal_status === 'pending'; }).length;
-  var incomplete = Object.keys(CD.coverage).filter(function (k) { return CD.coverage[k] && CD.coverage[k].complete === false; }).length;
-  var bar = '', leg = '';
-  CD_KINDS.forEach(function (k) {
-    var K = kinds[k.key]; if (!K.n && k.key === 'unclass') return;
-    var w = total ? (K.amount / total * 100).toFixed(2) : 0; var np = K.subs.reduce(function (a, s) { return a + s.payers.length; }, 0);
-    bar += '<button class="' + (CD.seg === k.key ? 'on' : '') + '" style="width:' + w + '%;background:' + k.color + '" onclick="cdGo(\'' + k.key + '\')" aria-label="' + k.label + '" title="' + k.label + ': ' + cdMoney0(K.amount) + '"></button>';
-    leg += '<button class="' + (CD.seg === k.key ? 'on' : '') + '" style="--sw:' + k.color + '" onclick="cdGo(\'' + k.key + '\')"><div class="l"><i></i>' + k.label + '</div><div class="v cd-num">' + cdMoney0(K.amount) + '</div><div class="c cd-num">' + K.n + ' invoice' + (K.n === 1 ? '' : 's') + ' · ' + np + ' payer' + (np === 1 ? '' : 's') + '</div></button>';
-  });
-  document.getElementById('clearDebtStats').innerHTML =
-    '<div class="cd-crumbs">' + (CD.seg ? '<button onclick="cdGo(null)">Outstanding ' + cdMoney0(total) + '</button>' + CD_IC.chev + '<b>' + kinds[CD.seg].label + '</b>' : '') + '</div>' +
-    '<div class="cd-head"><div><div class="cd-h1">Clear Debt</div><div class="cd-big cd-num">' + cdMoney0(total) + '<small>' + count + ' invoices · ' + overdueN + ' overdue for ' + cdMoney0(overdue) + '</small></div></div>' +
-    '<div class="cd-meta"><div>Picture refreshed<b>' + (CD.pictureAsOf ? cdWhen(CD.pictureAsOf) : 'never') + '</b></div><div>Picture incomplete<b>' + (CD.coverageAsOf ? incomplete + ' of ' + count : 'door unavailable') + '</b></div><div>Texts waiting for Marnin<b>' + proposals + '</b></div></div></div>' +
-    '<div class="cd-bar" role="group" aria-label="Outstanding by kind">' + bar + '</div><div class="cd-legend">' + leg + '</div>' + (CD.seg ? '' : '<p class="cd-hint">Pick a piece of the bar to see who owes it, grouped by the type of debt.</p>');
-  document.getElementById('clearDebtFilters').innerHTML = '';
-  var cards = document.getElementById('clearDebtCards');
-  if (!CD.seg) { cards.innerHTML = ''; return; }
-  var K = kinds[CD.seg], h = '';
-  K.subs.forEach(function (S) {
-    h += '<div class="cd-grp" style="--sw:' + K.color + '"><span class="lab"><i></i><b>' + cdEsc(S.label) + '</b><span class="o">' + cdEsc(S.desc || S.owner) + '</span></span><span class="t cd-num">' + cdMoney0(S.amount) + '<small>' + S.n + ' invoice' + (S.n === 1 ? '' : 's') + '</small></span></div>';
-    S.payers.forEach(function (P) {
-      var key = S.key + '|' + P.key, on = CD.open === key;
-      h += '<button class="cd-row ' + (on ? 'on' : '') + '" onclick="cdToggle(\'' + cdEsc(key).replace(/'/g, "\\'") + '\')" aria-expanded="' + on + '"><span><div class="nm">' + cdEsc(P.name) + '</div><div class="sub">' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + '</div></span><span class="amt cd-num">' + cdMoney(P.amount) + '</span><span class="old">' + cdAge(P.oldest) + '</span><span class="nx">' + (P.proposal ? '<span class="pp">text ready</span>' : '') + cdEsc(P.next.length > 48 ? P.next.slice(0, 46) + '…' : P.next) + '</span><span class="car">' + CD_IC.chev + '</span></button>';
-      if (on) h += '<div class="cd-rec" id="cd-rec" style="--sw:' + K.color + '">' + cdRecordShell(P, S, K) + '</div>';
+  // ── formatting ──────────────────────────────────────────────
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
-  });
-  cards.innerHTML = '<div class="cd-panel"><div class="cd-ph"><h2>' + K.label + '</h2><span class="cd-num">' + cdMoney0(K.amount) + ' · ' + K.n + ' invoices</span></div>' + h + '</div>';
-  if (CD.open) cdLoadRecord();
-}
-function cdGo(seg) { CD.seg = seg; CD.open = null; cdRender(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function cdToggle(key) { CD.open = CD.open === key ? null : key; cdRender(); }
-
-// ── Record ──
-function cdOpenPayer() {
-  var kinds = cdGroups(); var K = kinds[CD.seg]; if (!K || !CD.open) return null;
-  var parts = CD.open.split('|'); for (var i = 0; i < K.subs.length; i++) { var S = K.subs[i]; if (S.key !== parts[0]) continue; for (var j = 0; j < S.payers.length; j++) if (S.payers[j].key === parts[1]) return { P: S.payers[j], S: S, K: K }; }
-  return null;
-}
-function cdRecordShell(P, S, K) {
-  var lead = P.invoices[0];
-  return '<div class="cd-rh"><div><h2>' + cdEsc(P.name) + '</h2><div class="cd-chips"><span class="cd-chip d">' + cdEsc(P.owner) + '</span><span class="cd-chip">' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ' · ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</span>' + cdAge(P.oldest) + '</div></div><div class="amt cd-num">' + cdMoney(P.amount) + '<small>' + P.n + ' invoice' + (P.n === 1 ? '' : 's') + ' · picture refreshed ' + (lead.debt_as_of ? cdWhen(lead.debt_as_of) : 'never') + '</small></div></div>' +
-    '<div id="cd-rec-body"><div class="cd-quiet">Reading the record…</div></div>';
-}
-async function cdLoadRecord() {
-  var o = cdOpenPayer(); if (!o) return; var P = o.P, lead = P.invoices[0], body = document.getElementById('cd-rec-body'); if (!body) return;
-  var ctx = null, notes = null, err = null;
-  try { ctx = CD.ctx[lead.xero_invoice_id] || (CD.ctx[lead.xero_invoice_id] = await opsFetch('invoice_context', { xero_invoice_id: lead.xero_invoice_id, mode: 'card' })); } catch (e) { err = e.message; }
-  try { notes = await opsFetch('debt_notes', { xero_invoice_id: lead.xero_invoice_id }); CD.notes[lead.xero_invoice_id] = notes.thread || []; } catch (e) { CD.notes[lead.xero_invoice_id] = []; }
-  if (!document.getElementById('cd-rec-body')) return;
-  document.getElementById('cd-rec-body').innerHTML = cdRecordHtml(P, o.S, o.K, ctx, err);
-}
-function cdBriefHtml(lead, ctx) {
-  var b = lead.debt_brief;
-  if (b && b.promised) {
-    var ev = (b.evidence || []).map(function (e) { return '<a href="' + cdEsc(e.href || '#') + '" onclick="event.stopPropagation()">' + (CD_IC[e.kind] || CD_IC.file) + cdEsc(e.label) + '</a>'; }).join('');
-    return '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Promised</dt><dd>' + cdEsc(b.promised) + '</dd><dt>Delivered</dt><dd>' + cdEsc(b.delivered) + '</dd><dt>Client says</dt><dd>' + cdEsc(b.client_says) + '</dd><dt>Our side</dt><dd>' + cdEsc(b.our_side) + '</dd></dl>' + (ev ? '<div class="cd-ev">' + ev + '</div>' : '') + '</div>';
   }
-  var blockers = ctx && ctx.blockers ? ctx.blockers.map(function (x) { return '<div class="cd-pend"><b>' + cdEsc(x.code.replace(/_/g, ' ')) + ', ' + cdEsc(x.owner) + '.</b> ' + cdEsc(x.detail) + '</div>'; }).join('') : '';
-  return '<div class="cd-card cd-brief"><div class="cd-k" style="margin-bottom:10px">Where this stands</div><dl><dt>Why unpaid</dt><dd>' + cdEsc(lead.debt_classification_reason || 'not yet written by the refresh') + '</dd></dl><div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">' + (blockers || '<div class="cd-quiet">The four-line brief is written by the refresh once the door has facts for this job.</div>') + '</div></div>';
-}
-function cdRecordHtml(P, S, K, ctx, err) {
-  var lead = P.invoices[0], job = ctx && ctx.job, conv = ctx && ctx.conversation, inv = ctx && ctx.invoice;
-  var next = '<div class="cd-next"><span class="cd-k">What happens from here</span><div class="big2">' + cdEsc(lead.debt_next_action || 'No next step recorded') + '</div>' + (lead.debt_next_action_at ? '<span class="when">' + cdEsc(lead.debt_next_action_at) + '</span>' : '') + '<div class="rowk"><div>Whose move<b>' + cdEsc(P.owner) + '</b></div><div>Kind<b>' + cdEsc(CD_CLASS_LABEL[lead.debt_classification] || 'Unclassified') + (lead.debt_blocker ? ', ' + cdEsc((CD_BLOCKER[lead.debt_blocker] || [lead.debt_blocker])[0]) : '') + '</b></div></div></div>';
-  var ghl = job && job.ghl_contact_id, phone = (job && job.client_phone) || '', email = (job && job.client_email) || '';
-  var draft = lead.debt_proposal_status === 'pending' && lead.debt_proposal_kind === 'sms' ? lead.debt_proposal_text : '';
-  var thread = (CD.notes[lead.xero_invoice_id] || []).map(function (n) { return '<div class="cd-note"><div class="who">' + cdEsc(cdWhen(n.at)) + ' · ' + cdEsc(n.who || n.source) + (n.tag ? ' <span class="tag">' + cdEsc(n.tag) + '</span>' : '') + '</div><div>' + cdEsc(n.text) + '</div></div>'; }).join('') || '<div class="cd-quiet">No notes yet.</div>';
-  var reach = '<div class="cd-reach">' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.msg + 'Text</div><textarea id="cd-sms" rows="' + (draft ? 4 : 2) + '" placeholder="Write a text…">' + cdEsc(draft) + '</textarea><div class="cd-acts"><button class="cd-btn o" ' + (ghl ? '' : 'disabled title="No GHL contact on the job"') + ' onclick="cdSendText(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(ghl || '') + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.msg + 'Send text</button><span class="st">' + (draft ? 'Drafted by the desk. Sending is your approval.' : (ghl ? 'From 771 via GoHighLevel' : 'No GHL contact on the job')) + '</span></div></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.mail + 'Email</div><textarea id="cd-email-subject" rows="1" placeholder="Subject (the invoice PDF is attached)"></textarea><div class="cd-acts"><button class="cd-btn" ' + (email && job ? '' : 'disabled title="No email on the job"') + ' onclick="cdSendEmail(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(email) + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.mail + 'Send invoice email</button><span class="st">' + (email ? 'to ' + cdEsc(email) + ' by Outlook' : 'no email on the job') + '</span></div></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.phone + 'Call</div><div class="cd-tel">' + (phone ? '<a href="tel:' + cdEsc(phone) + '">' + cdEsc(phone) + '</a>' : '<span class="cd-quiet">no phone on the job</span>') + '</div><div class="cd-acts">' + (ghl ? '<a class="cd-btn l" target="_blank" rel="noopener" href="https://app.gohighlevel.com/v2/location/' + cdEsc(window.GHL_LOCATION_ID || '') + '/conversations/conversations/' + cdEsc(ghl) + '">' + CD_IC.phone + 'Open GHL conversation</a>' : '') + '</div><span class="cd-via">Click to call through GoHighLevel arrives with the CIO action.</span></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.note + 'Note</div><textarea id="cd-note" rows="2" placeholder="For whoever opens this next…"></textarea><div class="cd-tags" id="cd-tags">' + ['promised', 'call back', 'waiting on client', 'park until', 'propose void', 'dispute'].map(function (t) { return '<button onclick="cdTag(this)">' + t + '</button>'; }).join('') + '</div><div class="cd-acts"><button class="cd-btn" onclick="cdAddNote(\'' + lead.xero_invoice_id + '\')">' + CD_IC.note + 'Add note</button></div><div class="cd-nthread" id="cd-nthread">' + thread + '</div></div></div>';
-  var invs = P.invoices.map(function (i) { return '<div class="r"><span><a class="cd-lnk" target="_blank" rel="noopener" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + cdEsc(i.xero_invoice_id) + '" onclick="event.stopPropagation()" title="Open in Xero">' + cdEsc(i.invoice_number) + '</a> ' + cdAge(i.days_overdue) + ' <button class="cd-peek" onclick="event.stopPropagation();cdPreview(\'' + cdEsc(i.xero_invoice_id) + '\',this)">preview</button></span><span class="cd-num">' + cdMoney(i.amount_due) + '</span></div><div class="cd-prev" id="cd-prev-' + cdEsc(i.xero_invoice_id) + '" hidden></div>'; }).join('');
-  var pays = ctx && ctx.bank && ctx.bank.xero_payments && ctx.bank.xero_payments.length ? '<div class="cd-led" style="margin-top:8px">' + ctx.bank.xero_payments.map(function (m) { return '<div><span class="d">' + cdEsc(m.date) + '</span><span>' + cdMoney(m.amount) + (m.reference ? ' · ' + cdEsc(m.reference) : '') + '<br><span class="st">Allocated in Xero</span></span></div>'; }).join('') + '</div>' : '<div class="cd-quiet" style="margin-top:10px">No payments allocated on this invoice.</div>';
-  var jobHtml = job ? '<dl class="cd-kv"><dt>Job</dt><dd><a class="cd-lnk" href="#" onclick="event.preventDefault();event.stopPropagation();openJobDetail(\'' + cdEsc(job.id) + '\')">' + cdEsc(job.job_number) + '</a> ' + cdEsc(job.type || '') + '</dd><dt>Site</dt><dd>' + cdEsc(job.site_address || job.site_suburb || '') + '</dd><dt>Status</dt><dd>' + cdEsc(job.status || '') + '</dd><dt>Value</dt><dd>' + (job.promised && job.promised.quote_total ? cdMoney(job.promised.quote_total) : '<span class="cd-quiet">no quote total on the job</span>') + '</dd></dl>' +
-    '<div class="cd-docs">' + (inv ? '<div><a class="cd-lnk" target="_blank" rel="noopener" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + cdEsc(inv.xero_invoice_id) + '">' + CD_IC.file + ' ' + cdEsc(inv.invoice_number) + '</a><span class="sub">' + cdEsc(inv.reference || '') + '</span></div>' : '') + ((job.other_open_invoices || []).map(function (x) { return '<div><span>' + CD_IC.file + ' ' + cdEsc(x.invoice_number) + '</span><span class="sub">' + cdMoney(x.amount_due) + ' due ' + cdEsc(x.due_date) + '</span></div>'; }).join('')) + ((job.promised && job.promised.work_orders || []).map(function (w) { return '<div><span>' + CD_IC.file + ' WO ' + cdEsc(w.wo_number) + '</span><span class="sub">' + cdEsc(w.trade || '') + ' · ' + cdEsc(w.status || '') + '</span></div>'; }).join('')) + '</div>'
-    : '<div class="cd-pend"><b>' + (ctx && ctx.link && ctx.link.status === 'ambiguous' ? 'More than one job matches this contact.' : 'No job linked to this invoice.') + '</b> ' + (ctx && ctx.blockers && ctx.blockers.length ? cdEsc(ctx.blockers[0].detail) : '') + '</div>';
-  var chat = conv && conv.messages && conv.messages.length ? '<div class="cd-thread">' + conv.messages.slice().reverse().map(function (m) { return '<div class="cd-msg ' + cdEsc(m.direction || 'internal') + '"><div class="w">' + cdEsc(cdWhen(m.at)) + ' · ' + cdEsc(m.author || m.channel) + ' · ' + cdEsc(m.channel) + '</div>' + cdEsc(m.preview || '') + '</div>'; }).join('') + '</div>' : '<div class="cd-pend"><b>No stored messages.</b> ' + (ctx && ctx.blockers ? cdEsc((ctx.blockers.filter(function (b) { return /conversation|ghl/.test(b.code); })[0] || {}).detail || '') : '') + '</div>';
-  var facts = ctx && ctx.facts && ctx.facts.length ? '<div class="cd-facts"><div class="cd-k" style="margin-bottom:4px">Facts pulled by Luna</div>' + ctx.facts.map(function (f) { return '<div class="cd-fact"><b>' + cdEsc(f.kind) + '</b>' + cdEsc(typeof f.value === 'string' ? f.value : (f.value && (f.value.text || JSON.stringify(f.value)))) + '</div>'; }).join('') + '</div>' : '';
-  var errHtml = err ? '<div class="cd-err" style="margin-bottom:12px">The door did not answer for this invoice: ' + cdEsc(err) + '</div>' : '';
-  return errHtml + '<div class="cd-story">' + cdBriefHtml(lead, ctx) + next + '</div>' + reach +
-    '<div class="cd-three"><div class="cd-card"><h3 class="cd-k">' + CD_IC.bank + 'Money<em>Xero</em></h3><div class="cd-il">' + invs + '</div>' + pays + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.file + 'Job and files<em>job record</em></h3>' + jobHtml + '</div><div class="cd-card"><h3 class="cd-k">' + CD_IC.msg + 'Conversation<em>' + (conv && conv.sources ? Object.keys(conv.sources).filter(function (k) { return conv.sources[k]; }).length + ' sources' : 'door') + ' · newest first</em></h3>' + chat + facts + '</div></div>';
-}
+  function money(n) {
+    if (n == null || !isFinite(Number(n))) return 'amount not in the read';
+    return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+  function parts(iso, opts) {
+    var d = new Date(iso);
+    if (!isFinite(d.getTime())) return null;
+    return new Intl.DateTimeFormat('en-AU', Object.assign({ timeZone: TZ }, opts)).formatToParts(d)
+      .reduce(function (o, p) { o[p.type] = p.value; return o; }, {});
+  }
+  function dayLabel(iso, withYear) {
+    // A date-only value is a calendar day, not an instant: read it in UTC so
+    // Perth never rolls it to the day before or after.
+    var dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(iso));
+    var p = dateOnly
+      ? new Intl.DateTimeFormat('en-AU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).formatToParts(new Date(iso + 'T12:00:00Z')).reduce(function (o, x) { o[x.type] = x.value; return o; }, {})
+      : parts(iso, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    if (!p) return 'date unknown';
+    return p.weekday + ' ' + p.day + ' ' + p.month + (withYear ? ' ' + p.year : '');
+  }
+  function timeLabel(iso) {
+    var p = parts(iso, { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (!p) return '';
+    return p.hour + ':' + p.minute + String(p.dayPeriod || '').toLowerCase().replace(/\s|\./g, '');
+  }
+  function whenLabel(iso, precision) {
+    if (!iso) return 'time unknown';
+    if (precision === 'date' || /^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return dayLabel(String(iso).slice(0, 10));
+    return dayLabel(iso) + ', ' + timeLabel(iso);
+  }
+  function ageBetween(fromIso, toIso) {
+    var ms = Date.parse(toIso) - Date.parse(fromIso);
+    if (!isFinite(ms)) return null;
+    var min = Math.max(0, Math.round(ms / 60000));
+    if (min < 60) return plural(min, 'min');
+    var h = Math.round(min / 60);
+    if (h < 48) return plural(h, 'hour');
+    return plural(Math.round(h / 24), 'day');
+  }
+  function words(s) { return String(s || '').replace(/_/g, ' '); }
 
-// ── Invoice preview: the real PDF from Xero, rendered in line ──
-async function cdPreview(xid, btn) {
-  var box = document.getElementById('cd-prev-' + xid); if (!box) return;
-  if (!box.hidden) { box.hidden = true; btn.textContent = 'preview'; return; }
-  box.hidden = false; box.innerHTML = '<div class="cd-quiet">Fetching the invoice PDF from Xero…</div>'; btn.textContent = 'hide';
-  try {
-    var res = await opsFetch('get_invoice_pdf', { xero_invoice_id: xid });
-    var bin = atob(res.pdf_base64), arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    var url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
-    box.innerHTML = '<iframe src="' + url + '#toolbar=0" title="' + cdEsc(res.filename || 'invoice') + '"></iframe>';
-  } catch (e) { box.innerHTML = '<div class="cd-err">The PDF could not be fetched: ' + cdEsc(e.message) + '</div>'; }
-}
+  // ── the one read ────────────────────────────────────────────
+  function isUnknownAction(err) {
+    var msg = String((err && err.message) || err || '');
+    return /unknown action|no such action|unsupported action/i.test(msg);
+  }
 
-// ── Actions (every one logs on the client's record; nothing sends by itself) ──
-function cdTag(btn) { var was = btn.classList.contains('on'); btn.parentNode.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); }); if (!was) btn.classList.add('on'); }
-async function cdAddNote(xid) {
-  var ta = document.getElementById('cd-note'), tagEl = document.querySelector('#cd-tags button.on'); var note = ta && ta.value.trim(); if (!note) { showToast('Write the note first', 'warning'); return; }
-  try { var res = await opsPost(CD.ACTIONS.note, { xero_invoice_id: xid, note: note, tag: tagEl ? tagEl.textContent : null }); CD.notes[xid] = res.thread || []; ta.value = ''; showToast('Note added', 'success'); cdRender(); } catch (e) { showToast('Note failed: ' + e.message, 'warning'); }
-}
-async function cdSendText(xid, ghl, jobId) {
-  var ta = document.getElementById('cd-sms'), msg = ta && ta.value.trim(); if (!msg) { showToast('Write the text first', 'warning'); return; }
-  if (/—/.test(msg)) { showToast('Remove the em dash before sending', 'warning'); return; }
-  if (!confirm('Send this text from 771 now?\n\n' + msg)) return;
-  try {
-    var res = await opsPost(CD.ACTIONS.text, { ghl_contact_id: ghl, xero_invoice_id: xid, job_id: jobId || null, message: msg });
-    try { await opsPost(CD.ACTIONS.mark, { xero_invoice_id: xid, status: 'sent', sent_ref: res && (res.messageId || res.message_id) || null, text: msg }); } catch (e2) {}
-    showToast('Text sent', 'success'); CD.ctx[xid] = null; await loadClearDebt();
-  } catch (e) { showToast('Text failed: ' + e.message, 'warning'); }
-}
-async function cdSendEmail(xid, to, jobId) {
-  var subj = document.getElementById('cd-email-subject'), subject = subj && subj.value.trim();
-  if (!confirm('Email the invoice PDF to ' + to + ' now?')) return;
-  try { await opsPost(CD.ACTIONS.email, { xero_invoice_id: xid, to_email: to, job_id: jobId || null, subject_override: subject || undefined }); showToast('Invoice emailed', 'success'); await loadClearDebt(); } catch (e) { showToast('Email failed: ' + e.message, 'warning'); }
-}
+  function isCount(value) {
+    return Boolean(value && typeof value.n === 'number' && isFinite(value.n) &&
+      typeof value.of === 'number' && isFinite(value.of));
+  }
+
+  function checkContract(resp) {
+    if (!resp || typeof resp !== 'object') return 'the read returned nothing';
+    if (resp.version !== CONTRACT) return 'the read answered with contract ' + (resp.version ? '"' + resp.version + '"' : 'with no version') + ', and this screen reads ' + CONTRACT;
+    if (!Array.isArray(resp.debtors)) return 'the read carried no debtor list';
+    var summary = resp.summary;
+    var invoices = summary && summary.invoices;
+    var debtors = summary && summary.debtors;
+    var counts = invoices && invoices.link && invoices.facts && [
+      invoices.overdue, invoices.no_due_date, invoices.link.linked,
+      invoices.link.ambiguous, invoices.link.none, invoices.link.unknown,
+      invoices.facts.present, invoices.facts.missing, invoices.facts.no_job,
+      invoices.facts.unknown, invoices.xero_stale, invoices.with_faults,
+      debtors && debtors.verified, debtors && debtors.standing_alone
+    ];
+    var complete = Boolean(
+      invoices && typeof invoices.denominator === 'string' &&
+      typeof invoices.count === 'number' && isFinite(invoices.count) &&
+      typeof invoices.amount_due === 'number' && isFinite(invoices.amount_due) &&
+      isCount(invoices.overdue) && typeof invoices.overdue.amount_due === 'number' && isFinite(invoices.overdue.amount_due) &&
+      debtors && typeof debtors.denominator === 'string' &&
+      typeof debtors.count === 'number' && isFinite(debtors.count) &&
+      typeof debtors.shown === 'number' && isFinite(debtors.shown) &&
+      counts && counts.every(isCount)
+    );
+    if (!complete) return 'the read carried incomplete summary counts';
+    return null;
+  }
+
+  function load() {
+    syncAuthOwner();
+    var root = rootEl();
+    if (!root) return Promise.resolve();
+    if (inFlightRead) return inFlightRead;
+    var seq = ++state.requestSeq;
+    state.loading = true;
+    state.error = null;
+    render();
+    if (typeof global.opsFetch !== 'function') {
+      state.loading = false;
+      state.error = { kind: 'failed', message: 'the ops API reader is not on this page' };
+      render();
+      return Promise.resolve();
+    }
+    var request = Promise.resolve()
+      .then(function () { return global.opsFetch('debt_worklist', { timeline: 'recent' }); })
+      .then(function (resp) {
+        if (seq !== state.requestSeq) return;
+        var bad = checkContract(resp);
+        state.loading = false;
+        if (bad) { state.error = { kind: 'contract', message: bad }; state.data = null; render(); return; }
+        state.data = resp;
+        if (state.selectedKey && !findDebtor(state.selectedKey)) clearSelection();
+        if (state.invoiceId && !findInvoice(currentDebtor(), state.invoiceId)) state.invoiceId = null;
+        render();
+      })
+      .catch(function (err) {
+        if (seq !== state.requestSeq) return;
+        state.loading = false;
+        state.data = null;
+        state.error = isUnknownAction(err)
+          ? { kind: 'unknown', message: 'debt_worklist' }
+          : { kind: 'failed', message: String((err && err.message) || err || 'no answer') };
+        render();
+      });
+    var pendingRead;
+    pendingRead = request.then(function (result) {
+      if (inFlightRead === pendingRead) inFlightRead = null;
+      return result;
+    }, function (err) {
+      if (inFlightRead === pendingRead) inFlightRead = null;
+      throw err;
+    });
+    inFlightRead = pendingRead;
+    return pendingRead;
+  }
+
+  // ── lookups ─────────────────────────────────────────────────
+  function debtors() { return (state.data && state.data.debtors) || []; }
+  function findDebtor(key) {
+    var list = debtors();
+    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
+    return null;
+  }
+  function currentDebtor() { return state.selectedKey ? findDebtor(state.selectedKey) : null; }
+  function findInvoice(d, id) {
+    if (!d || !id) return null;
+    for (var i = 0; i < d.invoices.length; i++) if (d.invoices[i].xero_invoice_id === id) return d.invoices[i];
+    return null;
+  }
+  function invoiceNumber(d, id) {
+    var inv = findInvoice(d, id);
+    return inv ? (inv.invoice_number || 'an invoice with no number') : 'an invoice not on this debtor';
+  }
+  function debtorName(d) {
+    return (d.identity && d.identity.name) || 'Contact with no name in Xero';
+  }
+  function clearSelection() {
+    state.selectedKey = null;
+    state.invoiceId = null;
+    state.channel = null;
+    state.tlFilter = 'all';
+  }
+
+  // ── search and filters (work list) ──────────────────────────
+  // Each field is searched on its own for the whole query, so "Debtor 020"
+  // finds that name and never every row holding "debtor" and "020" apart.
+  function searchFields(d) {
+    var bits = [].concat((d.identity && d.identity.names) || []);
+    (d.invoices || []).forEach(function (inv) {
+      bits.push(inv.invoice_number, inv.reference);
+      if (inv.link) {
+        bits.push(inv.link.job_number);
+        (inv.link.candidates || []).forEach(function (c) { bits.push(typeof c === 'string' ? c : c && c.job_number); });
+      }
+    });
+    return bits.filter(Boolean).map(function (b) { return String(b).replace(/\s+/g, ' ').toLowerCase(); });
+  }
+  function matchesSearch(d, q) {
+    var needle = String(q || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!needle) return true;
+    return searchFields(d).some(function (f) { return f.indexOf(needle) >= 0; });
+  }
+  function anyInvoice(d, pred) { return (d.invoices || []).some(pred); }
+  function classOf(inv) { return (inv.classification && inv.classification.class) || null; }
+  function blockerOf(inv) { return (inv.classification && inv.classification.blocker) || null; }
+  function hasPendingDraft(inv) { return Boolean(inv.proposal && inv.proposal.status === 'pending'); }
+
+  // Each filter is answered by a field the read actually carries. Promise
+  // dates and a ready-for-Captain verdict are not in debt-worklist/v1, so they
+  // are named in Details as missing rather than guessed from a clean-looking row.
+  var FILTERS = [
+    { key: 'all', label: 'All debtors', test: function () { return true; } },
+    { key: 'overdue', label: 'Overdue', test: function (d) { return d.overdue_count > 0; } },
+    { key: 'over60', label: 'More than 60 days overdue', test: function (d) { return d.max_days_overdue > 60; } },
+    { key: 'draft', label: 'Draft waiting', test: function (d) { return anyInvoice(d, hasPendingDraft); } },
+    { key: 'ours_last', label: 'Our message was last', test: function (d) { var l = d.last_contact && d.last_contact.last; return Boolean(l && l.direction === 'outbound'); } },
+    { key: 'not_linked', label: 'Invoice not linked to a job', test: function (d) { var s = d.link_state || {}; return (s.none || 0) + (s.ambiguous || 0) + (s.unknown || 0) > 0; } },
+    { key: 'facts_missing', label: 'Facts missing', test: function (d) { var f = d.sources && d.sources.facts && d.sources.facts.status; return f === 'missing' || f === 'partial'; } },
+    { key: 'stale', label: 'Stale or unreadable source', test: function (d) { return staleOrUnreadable(d); } },
+    { key: 'unconfirmed', label: 'Contact not confirmed', test: function (d) { return !d.identity || d.identity.status !== 'verified'; } },
+    { key: 'dispute', label: 'In dispute', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'in_dispute'; }); } },
+    { key: 'blocked', label: 'Blocked by us', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'blocked_by_us' && !/paid_unallocated|payment_claimed/.test(blockerOf(i) || ''); }); } },
+    { key: 'allocation', label: 'Paid, awaiting allocation', test: function (d) { return anyInvoice(d, function (i) { return /paid_unallocated|payment_claimed/.test(blockerOf(i) || ''); }); } },
+    { key: 'not_owed', label: 'Not owed or bad debt', test: function (d) { return anyInvoice(d, function (i) { return classOf(i) === 'not_owed' || classOf(i) === 'bad_debt'; }); } },
+    { key: 'unclassified', label: 'Not yet classified', test: function (d) { return anyInvoice(d, function (i) { return !classOf(i) || classOf(i) === 'unclassified'; }); } }
+  ];
+  // Any source the read marks stale or unreadable, plus stale Xero and faults.
+  var STALE_SOURCES = ['ghl', 'email', 'notes', 'facts'];
+  function staleOrUnreadable(d) {
+    if (!(d.freshness && d.freshness.xero_fresh) || (d.faults || []).length > 0) return true;
+    var readSources = (state.data && state.data.sources) || {};
+    if (readSources.xero_events && readSources.xero_events.ok === false) return true;
+    var s = d.sources || {};
+    if (s.facts && s.facts.timeline_read === 'unreadable') return true;
+    return STALE_SOURCES.some(function (k) { return /^(stale|unreadable)$/.test(String((s[k] && s[k].status) || '')); });
+  }
+  function filterByKey(key) {
+    for (var i = 0; i < FILTERS.length; i++) if (FILTERS[i].key === key) return FILTERS[i];
+    return FILTERS[0];
+  }
+  function ownersOf(list) {
+    var seen = {};
+    list.forEach(function (d) { (d.owners || []).forEach(function (o) { seen[o.owner] = (seen[o.owner] || 0) + 1; }); });
+    return Object.keys(seen).sort().map(function (o) { return { owner: o, debtors: seen[o] }; });
+  }
+  function matchesOwner(d, owner) {
+    if (!owner) return true;
+    return (d.owners || []).some(function (o) { return o.owner === owner; });
+  }
+  function visibleDebtors(opts) {
+    opts = opts || state;
+    var f = filterByKey(opts.filter);
+    return debtors().filter(function (d) { return f.test(d) && matchesOwner(d, opts.owner) && matchesSearch(d, opts.search); });
+  }
+
+  // ── timeline ───────────────────────────────────────────────
+  var TL_CHIPS = [
+    { key: 'all', label: 'All' },
+    { key: 'text', label: 'Texts' },
+    { key: 'email', label: 'Emails' },
+    { key: 'note', label: 'Notes' },
+    { key: 'call', label: 'Calls' },
+    { key: 'xero', label: 'Invoices and Xero' },
+    { key: 'facts', label: 'Facts' }
+  ];
+  // Captured facts are ordinary timeline entries with kind "fact" and a fact
+  // block {kind, value, captured_at, source_id, state}; nothing else is a fact.
+  function isFactEntry(e) { return Boolean(e) && e.kind === 'fact'; }
+  function entryGroup(e) {
+    if (isFactEntry(e)) return 'facts';
+    if (e.provider === 'xero' || /^xero_/.test(e.kind || '')) return 'xero';
+    if (e.kind === 'call' || e.channel === 'call') return 'call';
+    if (e.channel === 'sms' || e.kind === 'sms') return 'text';
+    if (e.channel === 'email' || e.kind === 'email') return 'email';
+    if (e.channel === 'note' || /note|debt_log/.test(e.kind || '')) return 'note';
+    if (e.kind === 'invoice_event') return 'xero';
+    return 'other';
+  }
+  function timelineEntries(d, opts) {
+    opts = opts || state;
+    var entries = (d && d.timeline && d.timeline.entries) || [];
+    return entries.filter(function (e) {
+      if (opts.tlFilter && opts.tlFilter !== 'all' && entryGroup(e) !== opts.tlFilter) return false;
+      return true;
+    });
+  }
+  function chipCounts(d) {
+    var counts = { all: 0, text: 0, email: 0, note: 0, call: 0, xero: 0, other: 0, facts: 0, factsListed: false };
+    ((d && d.timeline && d.timeline.entries) || []).forEach(function (e) { counts.all += 1; counts[entryGroup(e)] += 1; });
+    var f = d && d.sources && d.sources.facts;
+    counts.factsListed = Boolean(f && f.timeline_read === 'read');
+    return counts;
+  }
+  var PROVIDER_LABEL = { ghl: 'GHL', outlook: 'Outlook', xero: 'Xero', secureworks: 'SecureWorks', luna: 'Luna' };
+  var SOURCE_LABEL = {
+    ghl_cache: 'GHL stored copy',
+    inbox: 'Inbox copy',
+    business_events: 'captured event',
+    job_events: 'job record',
+    payment_chase_logs: 'debt desk log',
+    xero_mirror: 'Xero copy',
+    current_job_context_facts: 'captured facts'
+  };
+  var KIND_LABEL = {
+    sms: 'Text', email: 'Email', ghl_note: 'GHL note', job_note: 'Job note', debt_note: 'Desk note',
+    debt_log: 'Desk log', call: 'Call', invoice_event: 'Invoice event',
+    xero_invoice_raised: 'Invoice raised', xero_payment: 'Payment', message: 'Message',
+    fact: 'Captured fact'
+  };
+  function providerLabel(p) { return PROVIDER_LABEL[p] || (p ? String(p) : 'Unknown source'); }
+  function sourceLabel(s) { return SOURCE_LABEL[s] || words(s || 'unknown'); }
+  // Only messages have a direction worth saying; notes, calls and records do not.
+  function directionWord(e) {
+    if (e.kind === 'invoice_event' || e.direction === 'internal' || e.direction === 'system') return '';
+    if (e.direction === 'inbound') return 'from them';
+    if (e.direction === 'outbound') return 'from us';
+    return '(direction unknown)';
+  }
+  function kindLabel(e) {
+    var k = KIND_LABEL[e.kind] || words(e.kind || e.channel || 'entry');
+    if (e.kind === 'invoice_event' && e.subject) k = words(e.subject).replace(/\./g, ' ');
+    return k.charAt(0).toUpperCase() + k.slice(1);
+  }
+  function isRecord(e) { return e.direction === 'system' || e.kind === 'invoice_event'; }
+  function previewCut(e) { return String(e.preview || '').length >= 500; }
+
+  // ONE rule for every empty or partial view. A source that was not fully
+  // read (unread, unreadable, partial, stale, capped or truncated) gets one
+  // line naming it and its limit, and no absence claim. Absence is stated only
+  // when every source behind the view was fully read, and then only for what
+  // was read ("among the 7 stored items read"). Each condition is one line.
+  var GROUP_SOURCES = {
+    all: ['ghl', 'email', 'notes', 'xero', 'xero_events', 'facts'],
+    contact: ['ghl', 'email', 'notes'],
+    text: ['ghl'], call: ['ghl', 'notes'], email: ['email'], note: ['notes', 'ghl'],
+    xero: ['xero', 'xero_events'], facts: ['facts'], other: []
+  };
+  var MESSAGE_GROUPS = { all: 1, contact: 1, text: 1, call: 1, email: 1, note: 1 };
+  function withFix(v, text) {
+    var bits = [];
+    if (v && v.owner) bits.push('owner ' + v.owner);
+    if (v && v.recovery_action) bits.push('fix: ' + v.recovery_action);
+    if (!bits.length) return text;
+    return text.replace(/\.$/, '') + ' (' + bits.join('; ') + ').';
+  }
+  function sourceLimit(d, key, readSources) {
+    var s = key === 'xero_events'
+      ? ((readSources && readSources[key]) || {})
+      : ((d.sources && d.sources[key]) || {});
+    var st = s.status;
+    var asOf = d.freshness && d.freshness.as_of;
+    function line(bad, text, short, plain) { return { key: key, bad: bad, text: plain ? text : withFix(s, text), short: short }; }
+    if (key === 'ghl') {
+      if (st === 'bound' || st === 'several') return null;
+      if (st === 'stale') return line(true, 'Stored GHL texts are stale: last captured ' + (s.last_success_at ? (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : 'at a time the read did not give') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'stored GHL texts are stale');
+      if (st === 'unreadable') return line(true, 'Stored GHL texts could not be read.', 'stored GHL texts could not be read');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored GHL texts cannot be read.', 'no job is linked, so GHL texts cannot be read');
+      if (st === 'no_contact') return line(false, 'The linked job has no GHL contact, so stored GHL texts cannot be found.', 'the job has no GHL contact');
+      if (st === 'not_read') return line(false, 'Stored GHL texts were not read for this view.', 'GHL texts were not read');
+      return line(false, 'The read did not say whether stored GHL texts were read.', 'GHL texts may not have been read');
+    }
+    if (key === 'email') {
+      if (st === 'stale') return line(true, 'Stored emails are stale' + (s.last_success_at ? ': last captured ' + (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : ' at a time the read did not give') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'stored emails are stale');
+      if (st === 'partial' || st === 'read' || st === 'current') return line(false, SENT_EMAIL_CAVEAT, 'sent emails are not captured yet', true);
+      if (st === 'unreadable') return line(true, 'Stored emails could not be read.', 'stored emails could not be read');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored emails cannot be read.', 'no job is linked, so emails cannot be read');
+      if (st === 'not_read') return line(false, 'Stored emails were not read for this view.', 'emails were not read');
+      return line(false, 'The read did not say whether stored emails were read.', 'emails may not have been read');
+    }
+    if (key === 'notes') {
+      if (st === 'read') return null;
+      if (st === 'unreadable') return line(true, 'Notes and desk logs could not be read.', 'notes could not be read');
+      if (st === 'not_read') return line(false, 'Notes and desk logs were not read for this view.', 'notes were not read');
+      if (st === 'stale') return line(true, 'Notes and desk logs are stale' + (s.last_success_at ? ': last captured ' + (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : '') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'notes and desk logs are stale');
+      return line(false, 'The read did not say whether notes were read.', 'notes may not have been read');
+    }
+    if (key === 'xero') {
+      if (st === 'current') return null;
+      return line(true, 'The Xero copy is stale' + (s.stale_after_hours ? ' (older than ' + plural(s.stale_after_hours, 'hour') + ')' : '') + '.', 'the Xero copy is stale');
+    }
+    if (key === 'xero_events') {
+      if (s.ok === false) return line(true, 'Xero invoice events could not be read (' + (s.error || 'no reason given') + ').', 'Xero invoice events could not be read');
+      if (s.read === false) return line(false, 'Xero invoice events were not read for this view.', 'Xero invoice events were not read');
+      if (s.ok !== true && s.read !== true) return line(false, 'The read did not report whether Xero invoice events were read.', 'Xero invoice events may not have been read');
+      return null;
+    }
+    if (key === 'facts') {
+      if (s.timeline_read === 'unreadable') return line(true, 'Captured facts could not be read for this timeline.', 'captured facts could not be read');
+      if (s.timeline_read === 'not_read') return line(false, 'Captured facts were not read for this view.', 'captured facts were not read');
+      if (s.timeline_read !== 'read') return line(false, 'This read only counts captured facts (' + factsWords(s).toLowerCase() + '); their details are not in this read yet.', 'captured facts are counted, not listed');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so captured facts cannot be read.', 'no job is linked, so facts cannot be read');
+      if (st === 'unreadable' || st === 'unknown') return line(true, 'Whether facts were captured for these invoices could not be read.', 'captured facts are unknown');
+      return null;
+    }
+    return null;
+  }
+  function timelineLimits(d, group, readSources) {
+    var tl = d.timeline || {};
+    readSources = readSources || {};
+    var out = [];
+    (GROUP_SOURCES[group] || []).forEach(function (k) { var l = sourceLimit(d, k, readSources); if (l) out.push(l); });
+    if (MESSAGE_GROUPS[group] && (tl.per_job_cap_reached || []).length) {
+      out.push({ key: 'cap', bad: false, text: 'Job ' + tl.per_job_cap_reached.join(', ') + ' has more than ' + tl.per_job_cap + ' messages; only the newest ' + tl.per_job_cap + ' per job were read.', short: 'only the newest ' + tl.per_job_cap + ' messages per job were read' });
+    }
+    if ((group === 'facts' || group === 'all') && (tl.facts_cap_reached || []).length) {
+      out.push({ key: 'facts_cap', bad: false, text: 'Job ' + tl.facts_cap_reached.join(', ') + ' has more than ' + tl.facts_per_job_cap + ' captured facts; only the newest ' + tl.facts_per_job_cap + ' per job were read.', short: 'only the newest ' + tl.facts_per_job_cap + ' facts per job were read' });
+    }
+    if (tl.truncated) {
+      out.push({ key: 'truncated', bad: false, text: 'Only the newest ' + (tl.entries || []).length + ' of ' + tl.entries_read + ' stored entries are in this read.', short: 'only the newest ' + (tl.entries || []).length + ' of ' + tl.entries_read + ' stored entries were read' });
+    }
+    var seen = {};
+    return out.filter(function (l) { if (seen[l.text]) return false; seen[l.text] = true; return true; });
+  }
+  // The absence line for an empty view, or null when a limit forbids one.
+  function absenceLine(d, group, what, readSources) {
+    if (timelineLimits(d, group, readSources).length) return null;
+    var n = ((d.timeline && d.timeline.entries) || []).length;
+    return 'No ' + what + ' among the ' + plural(n, 'stored item') + ' read for this debtor.';
+  }
+
+  // ── composer ────────────────────────────────────────────────
+  var CHANNELS = [
+    { key: 'text', label: 'Text' },
+    { key: 'email', label: 'Email' },
+    { key: 'note', label: 'Note' }
+  ];
+  function proposalChannel(p) {
+    if (!p) return null;
+    if (p.kind === 'sms') return 'text';
+    if (p.kind === 'email' || p.kind === 'statement') return 'email';
+    return null;
+  }
+  function looksLikeEmail(s) { return /@/.test(String(s || '')); }
+  function draftKey(invoiceId, channel) { return invoiceId + '|' + channel; }
+
+  // Everything the draft knows and everything it does not, for one invoice.
+  function composerModel(d, invoiceId, channel, drafts) {
+    var inv = findInvoice(d, invoiceId);
+    if (!inv) return null;
+    var p = inv.proposal || null;
+    var pChannel = proposalChannel(p);
+    var ch = channel || (p && p.status === 'pending' && pChannel) || 'text';
+    var proposalFits = Boolean(p && p.status === 'pending' && pChannel === ch);
+    var original = proposalFits ? String(p.text || '') : '';
+    var key = draftKey(invoiceId, ch);
+    var body = drafts && Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : original;
+    var to = null;
+    if (proposalFits && p.to) {
+      if (ch === 'email' && looksLikeEmail(p.to)) to = p.to;
+      if (ch === 'text' && !looksLikeEmail(p.to)) to = p.to;
+    }
+    var missing = [];
+    if (ch === 'text') {
+      if (!to) missing.push('the phone number to text');
+      missing.push('the line the text is sent from');
+    } else if (ch === 'email') {
+      if (!to) missing.push('the email address');
+      missing.push('the subject line');
+      missing.push('which invoice PDF is attached');
+      missing.push('the mailbox it is sent from');
+    }
+    if (proposalFits && !String(p.text || '').trim()) missing.push('the drafted words');
+    return {
+      invoice: inv,
+      channel: ch,
+      proposal: p,
+      proposalFits: proposalFits,
+      original: original,
+      body: body,
+      edited: body !== original,
+      to: to,
+      missing: missing
+    };
+  }
+
+  // ── rendering ───────────────────────────────────────────────
+  function rootEl() { return global.document ? global.document.getElementById(ROOT_ID) : null; }
+
+  var ICON = {
+    search: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
+    back: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>',
+    refresh: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+    chevron: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+    receipt: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
+    stream: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14M5 12h9M5 19h12"/></svg>',
+    pen: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></svg>',
+    lock: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+  };
+
+  function render() {
+    var root = rootEl();
+    if (!root) return;
+    var open = Boolean(currentDebtor());
+    root.innerHTML = '<div class="db' + (open ? ' is-open' : '') + '">' +
+      renderHead() +
+      renderBody() +
+      '</div>';
+  }
+
+  function renderHead() {
+    var data = state.data;
+    var sub = data
+      ? 'Open receivables as of ' + esc(timeLabel(data.as_of)) + ' ' + esc(dayLabel(data.as_of)) + '. Read only: nothing is sent from this screen.'
+      : 'Open receivables, one debtor at a time. Read only: nothing is sent from this screen.';
+    return '<header class="db-head">' +
+      '<div class="db-title"><h1>Clear Debt</h1><p>' + sub + '</p></div>' +
+      '<button type="button" class="refresh" data-cd="refresh"' + (state.loading ? ' aria-busy="true" disabled' : '') + '>' + ICON.refresh + 'Refresh</button>' +
+      '</header>';
+  }
+
+  function renderBody() {
+    if (state.loading && !state.data) {
+      return '<p class="db-loading" role="status">Reading the open invoice book…</p>' + skeleton();
+    }
+    if (state.error) return renderError();
+    if (!state.data) return '';
+    return renderCounts() + (state.showDetails ? renderDetails() : '') + renderAlerts() +
+      '<div class="db-main">' + renderList() + renderCard() + '</div>';
+  }
+
+  function skeleton() {
+    return '<div class="db-main" aria-hidden="true"><div class="db-list"><div class="skeleton">' +
+      '<div class="sk-row"><i></i><i></i><i></i></div><div class="sk-row"><i></i><i></i><i></i></div><div class="sk-row"><i></i><i></i><i></i></div>' +
+      '</div></div><div class="db-card is-empty"></div></div>';
+  }
+
+  function renderError() {
+    var e = state.error;
+    if (e.kind === 'unknown') {
+      return '<p class="db-note" role="status" data-cd-state="not-connected">The debtor work list is not connected yet: the server does not have the debt_worklist read. No debts are shown, and this is not a zero balance.</p>';
+    }
+    if (e.kind === 'contract') {
+      return '<p class="db-alert" role="alert" data-cd-state="contract">The debtor work list could not be shown: ' + esc(e.message) + '. Nothing is shown rather than a partial book.</p>';
+    }
+    return '<p class="db-alert" role="alert" data-cd-state="failed">The open invoice book could not be read: ' + esc(e.message) + '. Nothing is shown rather than an empty book.</p>';
+  }
+
+  function nOf(c) { return c ? '<b>' + c.n + '</b> of ' + c.of : '<b>?</b>'; }
+
+  function renderCounts() {
+    var s = state.data.summary;
+    var inv = s.invoices;
+    var link = inv.link || {};
+    var facts = inv.facts || {};
+    var overdue = inv.overdue || {};
+    var items = [
+      '<span><b>' + inv.count + '</b> open invoices</span>',
+      '<span><b>' + esc(money(inv.amount_due)) + '</b> due</span>',
+      '<span>' + nOf(overdue) + ' overdue' + (overdue.amount_due != null ? ', <b>' + esc(money(overdue.amount_due)) + '</b>' : '') + '</span>',
+      '<span>' + nOf(link.linked) + ' linked to a job</span>',
+      '<span><b>' + ((link.none && link.none.n) || 0) + '</b> not linked</span>',
+      '<span>' + nOf(facts.present) + ' with facts</span>',
+      '<span><b>' + (s.debtors ? s.debtors.count : '?') + '</b> debtors</span>'
+    ];
+    if (link.unknown && link.unknown.n) items.push('<span class="is-bad"><b>' + link.unknown.n + '</b> link unknown</span>');
+    if (inv.with_faults && inv.with_faults.n) items.push('<span class="is-bad">' + nOf(inv.with_faults) + ' with read faults</span>');
+    if (inv.xero_stale && inv.xero_stale.n) items.push('<span class="is-bad">' + nOf(inv.xero_stale) + ' Xero stale</span>');
+    return '<section class="db-counts" aria-label="Counts">' +
+      '<p class="counts">' + items.join('<i aria-hidden="true">·</i>') + '</p>' +
+      '<button type="button" class="detailsbtn" data-cd="details" aria-expanded="' + state.showDetails + '" aria-controls="cd-details">Details' + ICON.chevron + '</button>' +
+      '</section>';
+  }
+
+  function renderDetails() {
+    var d = state.data;
+    var s = d.summary;
+    var inv = s.invoices;
+    var facts = inv.facts || {};
+    var rec = d.reconciliation || {};
+    var src = d.sources || {};
+    function srcLine(name, v) {
+      if (!v) return '<li>' + esc(name) + ': not reported</li>';
+      if (v.ok === false) return '<li class="is-bad">' + esc(name) + ': could not be read (' + esc(v.error || 'no reason given') + ')</li>';
+      if (v.read === false) return '<li>' + esc(name) + ': not read in this view</li>';
+      return '<li>' + esc(name) + ': read' + (v.count != null ? ', ' + v.count + ' rows' : '') + '</li>';
+    }
+    var recLine = rec.exactly_once
+      ? 'Every one of the ' + rec.book_invoice_ids + ' open invoices is shown exactly once.'
+      : 'See the invoice reconciliation warning above and any flagged invoice rows.';
+    return '<section class="db-details" id="cd-details" aria-label="Details">' +
+      '<div class="dgrid">' +
+      '<div><h3>What the counts count</h3><ul>' +
+      '<li>Invoices: ' + esc(inv.denominator) + '.</li>' +
+      '<li>Debtors: ' + esc(String(s.debtors.denominator).replace(/^debtors:\s*/i, '')) + '. ' + s.debtors.verified.n + ' confirmed contacts, ' + s.debtors.standing_alone.n + ' standing alone.</li>' +
+      '<li>Facts: ' + facts.present.n + ' present, ' + facts.missing.n + ' missing, ' + facts.no_job.n + ' with no job to read, ' + facts.unknown.n + ' unknown (of ' + inv.count + ').</li>' +
+      '<li>No due date: ' + inv.no_due_date.n + ' of ' + inv.count + '. Xero stale: ' + inv.xero_stale.n + ' of ' + inv.count + '. Read faults: ' + inv.with_faults.n + ' of ' + inv.count + '.</li>' +
+      '<li class="' + (rec.exactly_once ? '' : 'is-bad') + '">' + esc(recLine) + '</li>' +
+      '</ul></div>' +
+      '<div><h3>What was read</h3><ul>' +
+      srcLine('Open invoice book', src.invoices) + srcLine('Invoice context', src.context) + srcLine('Linked jobs', src.jobs) + srcLine('Debt desk notes', src.notes) + srcLine('Invoice events', src.xero_events) +
+      '<li>Messages are ' + esc(STORED_NOTE) + '.</li>' +
+      '</ul></div>' +
+      '<div><h3>Not in this read yet</h3><ul>' +
+      '<li>Promised payment dates, so there is no promise-date filter.</li>' +
+      '<li>A ready-for-Captain verdict, so no row is marked ready.</li>' +
+      (factsListedAnywhere(d) ? '' : '<li>What the captured facts say (only whether they exist).</li>') +
+      '<li>' + esc(SENT_EMAIL_CAVEAT) + '</li>' +
+      '<li>Links to each message in GHL or Outlook.</li>' +
+      '<li>The phone line, mailbox, subject and attachment a draft would use.</li>' +
+      '</ul></div>' +
+      ((d.warnings || []).length ? '<div><h3>Warnings from the read</h3><ul>' + d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>' : '') +
+      '</div></section>';
+  }
+  function factsListedAnywhere(data) {
+    return (data.debtors || []).some(function (x) { return x.sources && x.sources.facts && x.sources.facts.timeline_read === 'read'; });
+  }
+  // The stored-email caveat, in the words the CFO desk approved: no internal codes, owners or lane names.
+  var SENT_EMAIL_CAVEAT = 'Sent emails are not captured yet; that fix is under way.';
+  var STORED_NOTE = 'stored copies, not a live GHL or Outlook read';
+
+  function renderAlerts() {
+    var d = state.data;
+    var out = '';
+    var faults = d.faults || [];
+    if (faults.length) {
+      out += '<div class="db-alert" role="alert"><p>Parts of the read failed. What they touch is marked unknown below.</p><ul>' +
+        faults.map(function (f) { return '<li>' + esc(words(f.source)) + ': ' + esc(f.detail) + '</li>'; }).join('') + '</ul></div>';
+    }
+    var rec = d.reconciliation || {};
+    if (rec.exactly_once === false) {
+      var notShown = Array.isArray(rec.not_shown) ? rec.not_shown : [];
+      var repeated = Array.isArray(rec.shown_more_than_once) ? rec.shown_more_than_once : [];
+      var details = [];
+      if (notShown.length) details.push('Not returned: ' + notShown.join(', '));
+      if (repeated.length) details.push('Returned more than once: ' + repeated.join(', '));
+      if (!details.length) details.push('The read supplied no affected invoice IDs.');
+      out += '<div class="db-alert" role="alert" data-cd-reconciliation="failed"><p>Invoice reconciliation failed. ' + esc(details.join('. ')) + '. The invoice list is shown as returned; review the flagged invoice rows.</p></div>';
+    }
+    return out;
+  }
+
+  function renderList() {
+    return '<section class="db-list" aria-label="Debtors">' +
+      '<label class="search">' + ICON.search + '<span class="sr">Search debtors</span>' +
+      '<input type="search" data-cd="search" placeholder="Search name, invoice or job" value="' + esc(state.search) + '" autocomplete="off"></label>' +
+      renderFilters() +
+      '<div id="cd-list-body">' + renderListBody() + '</div>' +
+      '</section>';
+  }
+
+  function renderFilters() {
+    var all = debtors();
+    var opts = FILTERS.map(function (f) {
+      var n = all.filter(f.test).length;
+      return '<option value="' + f.key + '"' + (state.filter === f.key ? ' selected' : '') + '>' + esc(f.label) + ' (' + n + ')</option>';
+    }).join('');
+    var owners = ownersOf(all);
+    var ownerOpts = '<option value="">Any owner</option>' + owners.map(function (o) {
+      return '<option value="' + esc(o.owner) + '"' + (state.owner === o.owner ? ' selected' : '') + '>' + esc(o.owner) + ' (' + o.debtors + ')</option>';
+    }).join('');
+    return '<div class="filters">' +
+      '<label><span>Show</span><select data-cd="filter">' + opts + '</select></label>' +
+      '<label><span>Owner</span><select data-cd="owner">' + ownerOpts + '</select></label>' +
+      '</div>';
+  }
+
+  function renderListBody() {
+    var all = debtors();
+    var list = visibleDebtors();
+    var narrowed = state.filter !== 'all' || state.owner || String(state.search).trim();
+    var head = '<div class="grouphead"><span>Debtors</span><span class="count" data-cd-count>' + list.length + (narrowed ? ' of ' + all.length : '') + '</span>' +
+      (narrowed ? '<button type="button" class="linklike clear" data-cd="clear">Show all</button>' : '') + '</div>';
+    if (!all.length) {
+      return head + '<p class="empty">The read returned no open debtors. The book above says ' + state.data.summary.invoices.count + ' open invoices.</p>';
+    }
+    if (!list.length) return head + '<p class="empty">No debtor matches. Counts above are for the whole book.</p>';
+    return head + '<ul class="leads">' + list.map(renderLead).join('') + '</ul>';
+  }
+
+  function renderLead(d) {
+    var on = d.key === state.selectedKey;
+    var tags = [];
+    if (anyInvoice(d, hasPendingDraft)) tags.push('<span class="pill accent">Draft waiting</span>');
+    if (d.identity.status !== 'verified') tags.push('<span class="pill">Contact not confirmed</span>');
+    var notLinked = (d.link_state.none || 0) + (d.link_state.ambiguous || 0) + (d.link_state.unknown || 0);
+    if (notLinked) tags.push('<span class="pill">' + (notLinked === d.invoice_count ? 'Not linked to a job' : notLinked + ' of ' + d.invoice_count + ' not linked') + '</span>');
+    if ((d.faults || []).length) tags.push('<span class="pill bad">Source unreadable</span>');
+    if (!d.freshness.xero_fresh) tags.push('<span class="pill bad">Xero stale</span>');
+    var age = d.max_days_overdue > 0 ? plural(d.max_days_overdue, 'day') + ' overdue' : (d.oldest_due_date ? 'not yet due' : 'no due date');
+    var next = d.next_step
+      ? esc(d.next_step.action) + ' <span class="muted">(' + esc(d.next_step.from_invoice_number || 'invoice') + (d.next_step.owner ? ', ' + esc(d.next_step.owner) : '') + ')</span>'
+      : '<span class="muted">No next step recorded</span>';
+    return '<li><button type="button" class="lead' + (on ? ' is-on' : '') + '" data-cd="debtor" data-key="' + esc(d.key) + '" aria-current="' + (on ? 'true' : 'false') + '">' +
+      '<span class="lead-top"><span class="lead-name">' + esc(debtorName(d)) + '</span><span class="lead-amt">' + esc(money(d.total_due)) + '</span></span>' +
+      '<span class="lead-place">' + plural(d.invoice_count, 'invoice') + ' · ' + esc(age) + '</span>' +
+      '<span class="lead-words">' + next + '</span>' +
+      (tags.length ? '<span class="lead-tags">' + tags.join('') + '</span>' : '') +
+      '</button></li>';
+  }
+
+  function renderCard() {
+    var d = currentDebtor();
+    if (!d) {
+      return '<section class="db-card is-empty" aria-label="Debtor"><div class="emptycard"><h2>Pick a debtor</h2>' +
+        '<p>Their invoices, every stored text, email, note, call and Xero event, and a draft for one invoice appear here.</p></div></section>';
+    }
+    return '<section class="db-card" aria-label="' + esc(debtorName(d)) + '">' +
+      '<button type="button" class="back" data-cd="back">' + ICON.back + 'All debtors</button>' +
+      renderCardHead(d) +
+      renderInvoices(d) +
+      renderTimeline(d) +
+      renderComposer(d) +
+      '</section>';
+  }
+
+  function renderCardHead(d) {
+    var id = d.identity;
+    var badges = [];
+    badges.push(id.status === 'verified'
+      ? '<span class="badge ok">Xero contact confirmed</span>'
+      : '<span class="badge warn">Contact not confirmed</span>');
+    var ls = d.link_state;
+    badges.push('<span class="badge' + (ls.linked === d.invoice_count ? ' ok' : '') + '">' + ls.linked + ' of ' + d.invoice_count + ' linked to a job</span>');
+    var fr = d.freshness;
+    var xeroAge = fr.xero_oldest_synced_at ? ageBetween(fr.xero_oldest_synced_at, fr.as_of) : null;
+    badges.push(fr.xero_fresh
+      ? '<span class="badge ok">Xero synced ' + esc(xeroAge || 'recently') + ' before this read</span>'
+      : '<span class="badge bad">Xero stale' + (xeroAge ? ', oldest sync ' + esc(xeroAge) + ' old' : '') + '</span>');
+    var facts = d.sources.facts;
+    badges.push('<span class="badge">' + factsWords(facts) + '</span>');
+    var s = d.sources || {};
+    ['ghl', 'email', 'notes'].forEach(function (k) {
+      var st = s[k] && s[k].status;
+      var name = { ghl: 'GHL texts', email: 'Emails', notes: 'Notes' }[k];
+      if (st === 'unreadable') badges.push('<span class="badge bad">' + name + ' could not be read</span>');
+      else if (/stale|fail/.test(String(st || ''))) badges.push('<span class="badge bad">' + name + ' capture ' + esc(words(st)) + '</span>');
+    });
+    if (s.ghl && (s.ghl.status === 'bound' || s.ghl.status === 'several') && s.ghl.last_success_at) {
+      badges.push('<span class="badge">GHL captured ' + esc(ageBetween(s.ghl.last_success_at, fr.as_of) || 'recently') + ' before this read</span>');
+    }
+    var names = id.name_variants ? '<p class="fine">Also written as ' + id.names.filter(function (n) { return n !== id.name; }).map(esc).join(', ') + ' on the same Xero contact.</p>' : '';
+    var detail = id.detail ? '<p class="fine warn-text">' + esc(id.detail) + '.</p>' : '';
+    var faults = (d.faults || []).length
+      ? '<div class="db-alert"><p>Some sources for this debtor could not be read:</p><ul>' + d.faults.map(function (f) { return '<li>' + esc(words(f.source)) + ': ' + esc(f.detail) + '</li>'; }).join('') + '</ul></div>'
+      : '';
+    var next = d.next_step
+      ? '<p class="nextstep"><span>Next step</span> ' + esc(d.next_step.action) + ' on ' + esc(d.next_step.from_invoice_number || 'one invoice') +
+        (d.next_step.owner ? ', ' + esc(d.next_step.owner) : '') + nextStepDue(d.next_step.at, state.data.as_of) + '.</p>'
+      : '<p class="nextstep is-quiet"><span>Next step</span> None recorded on any of these invoices.</p>';
+    var last = d.last_contact && d.last_contact.last;
+    var lastLine;
+    if (last) {
+      var direction = last.direction === 'inbound' ? ' from them' : last.direction === 'outbound' ? ' from us' : '';
+      lastLine = 'Last contact in the stored copies: ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + direction + ' (' + esc(providerLabel(last.provider)) + ').';
+    } else {
+      var lim = timelineLimits(d, 'contact');
+      lastLine = lim.length
+        ? 'Last contact unknown: ' + esc(lim.map(function (l) { return l.short; }).join('; ')) + '.'
+        : esc(absenceLine(d, 'contact', 'text, email or call'));
+    }
+    return '<header class="cardhead">' +
+      '<h2>' + esc(debtorName(d)) + '</h2>' +
+      '<p class="figures"><b>' + esc(money(d.total_due)) + '</b> due on ' + plural(d.invoice_count, 'invoice') +
+      (d.overdue_count ? ' · <b>' + esc(money(d.overdue_amount)) + '</b> overdue' : ' · none overdue') +
+      (d.max_days_overdue > 0 ? ' · oldest ' + plural(d.max_days_overdue, 'day') : '') + '</p>' +
+      '<p class="fine">' + lastLine + '</p>' +
+      names + detail +
+      '<div class="badges">' + badges.join('') + '</div>' +
+      next + faults +
+      '</header>';
+  }
+
+  // "by Fri 25 Sept", or, once that day has passed in Perth, "was due Wed 23 Sept, now overdue".
+  function perthDay(iso) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return String(iso);
+    var p = parts(iso, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    return p ? p.year + '-' + p.month + '-' + p.day : null;
+  }
+  function nextStepDue(at, asOf) {
+    if (!at) return '';
+    var due = perthDay(String(at).length > 10 ? at : String(at).slice(0, 10));
+    var today = perthDay(asOf);
+    if (due && today && due < today) return ', was due ' + esc(dayLabel(due)) + ', <b class="bad-text">now overdue</b>';
+    return ', by ' + esc(dayLabel(at));
+  }
+  function factsWords(f) {
+    if (!f) return 'Facts not reported';
+    if (f.status === 'present') return 'Facts captured on every linked invoice';
+    if (f.status === 'partial') return 'Facts on ' + f.invoices_with_facts + ' of ' + f.of_invoices + ' invoices';
+    if (f.status === 'missing') return 'No facts captured yet';
+    if (f.status === 'no_job') return 'No job, so no facts to read';
+    if (f.status === 'unreadable') return 'Facts could not be read';
+    return 'Facts unknown';
+  }
+
+  var CLASS_LABEL = { genuine_debt: 'Genuine debt', blocked_by_us: 'Blocked by us', in_dispute: 'In dispute', bad_debt: 'Bad debt', not_owed: 'Not owed', unclassified: 'Not yet classified' };
+  var BLOCKER_LABEL = { rectification: 'rectification not done', no_job_linked: 'no job linked', job_link_ambiguous: 'more than one job matches', invoice_wrong: 'invoice or contact wrong', pack_missing: 'report or PO pack missing', paid_unallocated: 'paid, awaiting allocation in Xero', payment_claimed: 'client says paid, bank check pending', context_pending: 'context pending' };
+
+  function renderInvoices(d) {
+    var picked = state.invoiceId && findInvoice(d, state.invoiceId);
+    var rows = d.invoices.map(function (inv) {
+      var id = inv.xero_invoice_id;
+      var on = id === state.invoiceId;
+      var reconciliation = state.data && state.data.reconciliation;
+      var repeated = Boolean(reconciliation && reconciliation.exactly_once === false && Array.isArray(reconciliation.shown_more_than_once) && reconciliation.shown_more_than_once.indexOf(id) >= 0);
+      var due = inv.due_date
+        ? (inv.overdue ? plural(inv.days_overdue, 'day') + ' overdue' : 'due ' + dayLabel(inv.due_date))
+        : 'no due date';
+      var link = inv.link.status === 'linked' ? 'Job ' + esc(inv.link.job_number || 'number not in the read')
+        : inv.link.status === 'ambiguous' ? 'More than one job matches'
+        : inv.link.status === 'unknown' ? '<span class="bad-text">Job link unknown</span>'
+        : 'No job linked';
+      var cls = classOf(inv);
+      var clsWords = cls ? (CLASS_LABEL[cls] || words(cls)) + (blockerOf(inv) ? ', ' + (BLOCKER_LABEL[blockerOf(inv)] || words(blockerOf(inv))) : '') : 'Not yet classified';
+      var tags = [];
+      if (hasPendingDraft(inv)) tags.push('<span class="pill accent">Draft waiting</span>');
+      if (inv.status === 'SUBMITTED') tags.push('<span class="pill">Submitted, not yet approved in Xero</span>');
+      if (!inv.xero.fresh) tags.push('<span class="pill bad">Xero stale</span>');
+      (inv.faults || []).forEach(function (f) { tags.push('<span class="pill bad">' + esc(f.detail) + '</span>'); });
+      if (repeated) tags.push('<span class="pill bad">Returned more than once (ID ' + esc(id) + ')</span>');
+      return '<li><label class="inv' + (on ? ' is-on' : '') + '">' +
+        '<input type="radio" name="cd-invoice" data-cd="invoice" value="' + esc(id) + '"' + (on ? ' checked' : '') + '>' +
+        '<span class="inv-main">' +
+        '<span class="inv-top"><span class="inv-no">' + esc(inv.invoice_number || 'No invoice number') + '</span><span class="inv-amt">' + esc(money(inv.amount_due)) + '</span></span>' +
+        '<span class="inv-meta">' + esc(due) + ' · ' + link + (inv.reference ? ' · ' + esc(inv.reference) : '') + '</span>' +
+        '<span class="inv-meta">' + esc(clsWords) + (inv.next_step.owner ? ' · ' + esc(inv.next_step.owner) : '') + (inv.amount_paid ? ' · ' + esc(money(inv.amount_paid)) + ' paid of ' + esc(money(inv.total)) : '') + '</span>' +
+        (tags.length ? '<span class="lead-tags">' + tags.join('') + '</span>' : '') +
+        '</span></label></li>';
+    }).join('');
+    return '<section class="block" aria-labelledby="cd-inv-h">' +
+      '<h3 id="cd-inv-h">' + ICON.receipt + 'Open invoices<span class="count">' + d.invoice_count + '</span></h3>' +
+      '<p class="fine" id="cd-inv-hint">' + (picked ? 'The draft below is about ' + esc(picked.invoice_number || 'this invoice') + ' only.' : 'Pick the invoice a message is about. Nothing is picked until you choose.') + '</p>' +
+      '<ul class="invoices" role="radiogroup" aria-labelledby="cd-inv-h" aria-describedby="cd-inv-hint">' + rows + '</ul>' +
+      '</section>';
+  }
+
+  function renderTimeline(d) {
+    var tl = d.timeline;
+    var readSources = (state.data && state.data.sources) || {};
+    var head = '<h3 id="cd-tl-h">' + ICON.stream + 'Timeline</h3>';
+    if (!tl) {
+      return '<section class="block" aria-labelledby="cd-tl-h">' + head +
+        '<p class="thread-note is-bad">The timeline was not part of this read, so no texts, emails, notes or calls are shown. This does not mean there were none.</p></section>';
+    }
+    var counts = chipCounts(d);
+    var chips = TL_CHIPS.map(function (c) {
+      // Facts the read did not list get no number: a zero would read as "none".
+      var n = c.key === 'facts' && !counts.factsListed ? null : counts[c.key];
+      return '<button type="button" class="chip" data-cd="tl" data-tl="' + c.key + '" aria-pressed="' + (state.tlFilter === c.key) + '">' + esc(c.label) + (n == null ? '' : '<span class="count">' + n + '</span>') + '</button>';
+    }).join('');
+    var list = timelineEntries(d);
+    var body;
+    if (!list.length) {
+      var which = state.tlFilter === 'all' ? 'entries' : TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase();
+      var none = absenceLine(d, state.tlFilter, which, readSources);
+      body = none ? '<p class="thread-note">' + esc(none) + '</p>' : '';
+    } else {
+      body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';
+    }
+    return '<section class="block" aria-labelledby="cd-tl-h">' + head +
+      '<div class="chips" role="group" aria-label="Show in the timeline">' + chips + '</div>' +
+      timelineStatus(d, readSources) +
+      '<div id="cd-tl-body">' + body + '</div></section>';
+  }
+
+  function timelineStatus(d, readSources) {
+    var tl = d.timeline;
+    var lines = ['Newest first.'];
+    if (tl.duplicates_merged) lines.push(plural(tl.duplicates_merged, 'copy', 'copies') + ' of the same message shown once.');
+    lines.push('These are ' + STORED_NOTE + '.');
+    var limits = timelineLimits(d, state.tlFilter, readSources);
+    return '<p class="tl-status fine">' + esc(lines.join(' ')) + '</p>' +
+      (limits.length ? '<ul class="limits" data-cd-limits>' + limits.map(function (l) { return '<li' + (l.bad ? ' class="is-bad"' : '') + '>' + esc(l.text) + '</li>'; }).join('') + '</ul>' : '');
+  }
+
+  function factValue(v) {
+    if (v == null) return 'value not in the read';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && typeof v.text === 'string') return v.text;
+    try { return JSON.stringify(v); } catch (err) { return String(v); }
+  }
+  function renderFactEntry(d, e) {
+    var f = e.fact || {};
+    var scope = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); });
+    var mine = state.invoiceId && (e.invoice_ids || []).indexOf(state.invoiceId) >= 0;
+    var at = f.captured_at || e.at;
+    var what = f.kind || e.subject;
+    var st = f.state === 'current' ? '<span class="pill ok">Current</span>'
+      : f.state === 'stale' ? '<span class="pill bad">Stale</span>'
+      : '<span class="pill">Current or stale not stated</span>';
+    return '<li class="tl is-fact' + (mine ? ' is-scope' : '') + '" data-group="facts">' +
+      '<div class="tl-meta"><span class="src src-' + esc(e.provider || 'unknown') + '">' + esc(providerLabel(e.provider)) + '</span>' +
+      '<span class="tl-kind">Captured fact' + (what ? ': ' + esc(words(what)) : '') + '</span>' +
+      '<time datetime="' + esc(at || '') + '">' + (at ? 'captured ' + esc(whenLabel(at, e.at_precision)) : 'capture time not in the read') + '</time></div>' +
+      '<div class="tl-body">' + esc(factValue(Object.prototype.hasOwnProperty.call(f, 'value') ? f.value : e.preview)) + '</div>' +
+      '<div class="tl-foot">' + st + ' ' + esc(sourceLabel(e.source)) +
+      (f.source_id || e.source_ref ? ' · source ' + esc(f.source_id || e.source_ref) : '') +
+      (e.job_id ? ' · Job ' + esc(jobNumberFor(d, e.job_id) || 'record') : '') +
+      (scope.length ? ' (' + esc(scope.join(', ')) + ')' : '') + '</div></li>';
+  }
+
+  function renderEntry(d, e) {
+    if (isFactEntry(e)) return renderFactEntry(d, e);
+    var dir = e.direction === 'inbound' ? 'is-in' : e.direction === 'outbound' ? 'is-out' : e.direction === 'system' ? 'is-sys' : 'is-note';
+    var mine = state.invoiceId && (e.invoice_ids || []).indexOf(state.invoiceId) >= 0;
+    var scope = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); });
+    var scopeWords = e.invoice_scope === 'job'
+      ? 'Job ' + (jobNumberFor(d, e.job_id) || 'record') + (scope.length ? ' (' + scope.join(', ') + ')' : '')
+      : e.invoice_scope === 'debtor'
+      ? 'Whole account' + (scope.length ? ' (' + scope.join(', ') + ')' : '')
+      : scope.join(', ');
+    var also = (e.seen_in || []).filter(function (s) { return s !== e.source; });
+    var author = e.author ? esc(e.author) + ' · ' : '';
+    return '<li class="tl ' + dir + (mine ? ' is-scope' : '') + '" data-group="' + entryGroup(e) + '">' +
+      '<div class="tl-meta"><span class="src src-' + esc(e.provider || 'unknown') + '">' + esc(providerLabel(e.provider)) + '</span>' +
+      '<span class="tl-kind">' + esc((kindLabel(e) + ' ' + directionWord(e)).trim()) + '</span>' +
+      '<time datetime="' + esc(e.at || '') + '">' + esc(whenLabel(e.at, e.at_precision)) + '</time></div>' +
+      (e.subject && e.kind !== 'invoice_event' ? '<div class="tl-subject">' + esc(e.subject) + '</div>' : '') +
+      '<div class="tl-body">' + esc(e.kind === 'invoice_event' ? invoiceEventText(d, e) : (e.preview || '')) + '</div>' +
+      '<div class="tl-foot">' + author +
+      (isRecord(e) ? '' : '<span class="prev">' + (previewCut(e) ? 'Preview, cut at 500 characters' : 'Preview') + '</span> · ') +
+      esc(sourceLabel(e.source)) + (also.length ? ', also in ' + esc(also.map(sourceLabel).join(', ')) : '') +
+      (scopeWords ? ' · ' + esc(scopeWords) : '') + (e.label ? ' · ' + esc(e.label) : '') +
+      '</div></li>';
+  }
+  // An invoice lifecycle event in words ("Invoice INV-S1004 emailed to ..."),
+  // never the raw event name the read carries in subject and preview.
+  var EVENT_VERB = { 'invoice.emailed': 'emailed', 'invoice.approved_and_sent': 'approved and sent', 'invoice.approved': 'approved', 'invoice.authorised': 'authorised' };
+  function invoiceEventText(d, e) {
+    var type = String(e.subject || '');
+    var preview = String(e.preview || '');
+    var to = type && preview.indexOf(type + ' to ') === 0 ? preview.slice(type.length + 4) : null;
+    var inv = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); }).join(', ') || 'the invoice';
+    if (type === 'payment.reconciled') return 'Payment reconciled against ' + inv + '.';
+    if (type === 'payment.link_sent') return 'Payment link for ' + inv + ' sent' + (to ? ' to ' + to : '') + '.';
+    var verb = EVENT_VERB[type] || words(type.split('.').pop() || 'updated');
+    return 'Invoice ' + inv + ' ' + verb + (to ? ' to ' + to : '') + '.';
+  }
+  function jobNumberFor(d, jobId) {
+    if (!jobId) return null;
+    for (var i = 0; i < d.invoices.length; i++) if (d.invoices[i].link && d.invoices[i].link.job_id === jobId) return d.invoices[i].link.job_number;
+    return null;
+  }
+
+  function renderComposer(d) {
+    var head = '<h3 id="cd-draft-h">' + ICON.pen + 'Draft</h3>';
+    var m = state.invoiceId ? composerModel(d, state.invoiceId, state.channel, state.drafts) : null;
+    if (!m) {
+      return '<section class="compose" aria-labelledby="cd-draft-h">' + head +
+        '<p class="thread-note">Pick an invoice above to draft a message about it. A draft is always about one invoice you chose.</p>' +
+        '</section>';
+    }
+    var inv = m.invoice;
+    var seg = CHANNELS.map(function (c) {
+      return '<button type="button" data-cd="channel" data-channel="' + c.key + '" aria-pressed="' + (m.channel === c.key) + '">' + c.label + '</button>';
+    }).join('');
+    var p = m.proposal;
+    var proposalLine = '';
+    if (p) {
+      var pc = proposalChannel(p);
+      var pWhat = (pc === 'email' ? 'an email' : pc === 'text' ? 'a text' : 'a ' + words(p.kind || 'message'));
+      if (p.status === 'pending') {
+        proposalLine = m.proposalFits
+          ? '<p class="fine">The desk drafted ' + pWhat + ' for this invoice' + (p.at ? ' on ' + esc(whenLabel(p.at)) : '') + '. It is shown below exactly as drafted.</p>'
+          : '<p class="fine">The desk drafted ' + pWhat + ' for this invoice. Switch to ' + (pc === 'email' ? 'Email' : 'Text') + ' to see it.</p>';
+      } else {
+        proposalLine = '<p class="fine">An earlier draft is ' + esc(words(p.status)) + (p.at ? ' (' + esc(whenLabel(p.at)) + ')' : '') + ', so it is not loaded here.</p>';
+      }
+    }
+    var fresh = inv.xero.synced_at ? 'Xero synced ' + (ageBetween(inv.xero.synced_at, state.data.as_of) || 'recently') + ' before this read' + (inv.xero.fresh ? '' : ', and that is stale') : 'Xero sync time not in the read';
+    var scopeLine = '<p class="route">About <b>' + esc(inv.invoice_number || 'this invoice') + '</b> only: <b>' + esc(money(inv.amount_due)) + '</b> due' +
+      (inv.overdue ? ', ' + plural(inv.days_overdue, 'day') + ' overdue' : '') + '. ' + esc(fresh) + '.</p>';
+    var route = m.channel === 'note'
+      ? '<p class="route">A note would sit on ' + esc(inv.invoice_number || 'this invoice') + '’s record for whoever opens it next.</p>'
+      : '<p class="route" data-cd-route>' + (m.channel === 'email' ? 'Email to ' : 'Text to ') + (m.to ? '<b>' + esc(m.to) + '</b>' : '<span class="missing-word">recipient not in this read</span>') + '</p>';
+    var missing = m.missing.length
+      ? '<p class="missing" data-cd-missing>Not in this read yet: ' + esc(m.missing.join(', ')) + '.</p>'
+      : '';
+    var label = m.channel === 'email' ? 'Email body' : m.channel === 'note' ? 'Note' : 'Text';
+    var btn = m.channel === 'note' ? 'Save note' : 'Approve and send';
+    var why = m.channel === 'note'
+      ? 'Saving notes from this screen arrives with the later approval step. Nothing is saved.'
+      : 'Sending arrives with a later approval step. Nothing is sent, saved or approved from this screen.';
+    return '<section class="compose" aria-labelledby="cd-draft-h">' + head +
+      '<div class="seg" role="group" aria-label="Channel">' + seg + '</div>' +
+      proposalLine + scopeLine + route +
+      '<label class="sr" for="cd-draft">' + label + '</label>' +
+      '<textarea id="cd-draft" data-cd="draft" rows="5" placeholder="' + (m.channel === 'note' ? 'For whoever opens this next' : 'Write the ' + (m.channel === 'email' ? 'email' : 'text') + ' here') + '">' + esc(m.body) + '</textarea>' +
+      '<div id="cd-draft-foot">' + draftFoot(m) + '</div>' +
+      missing +
+      '<div class="actions"><button type="button" class="primary" disabled aria-describedby="cd-why">' + ICON.lock + btn + '</button></div>' +
+      '<p class="why" id="cd-why">' + why + '</p>' +
+      '</section>';
+  }
+
+  function draftFoot(m) {
+    var len = String(m.body || '').length;
+    var bits = [];
+    bits.push(len + ' characters');
+    if (m.edited) bits.push('<span class="edited">Edited here. Your changes stay in this tab and are not saved.</span>');
+    if (m.edited && m.proposalFits) bits.push('<button type="button" class="linklike" data-cd="revert">Use the drafted words</button>');
+    return '<p class="draftfoot fine">' + bits.join(' · ') + '</p>';
+  }
+
+  // ── events ──────────────────────────────────────────────────
+  function scrollCardIntoView() {
+    var root = rootEl();
+    var card = root && root.querySelector('.db-card');
+    if (!card || typeof global.matchMedia !== 'function') return;
+    if (global.matchMedia('(max-width: 899px)').matches && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+  }
+
+  function onClick(ev) {
+    var t = ev.target.closest ? ev.target.closest('[data-cd]') : null;
+    if (!t || !rootEl().contains(t)) return;
+    var act = t.getAttribute('data-cd');
+    if (act === 'refresh') { load(); return; }
+    if (act === 'details') { state.showDetails = !state.showDetails; render(); return; }
+    if (act === 'clear') { state.filter = 'all'; state.owner = ''; state.search = ''; render(); return; }
+    if (act === 'debtor') {
+      var key = t.getAttribute('data-key');
+      if (key !== state.selectedKey) {
+        clearSelection();
+        state.selectedKey = key;
+      }
+      render();
+      scrollCardIntoView();
+      return;
+    }
+    if (act === 'back') {
+      var was = state.selectedKey;
+      clearSelection();
+      render();
+      var row = was && rootEl().querySelector('.lead[data-key="' + cssEscape(was) + '"]');
+      if (row) { if (row.scrollIntoView) row.scrollIntoView({ block: 'center' }); row.focus(); }
+      return;
+    }
+    if (act === 'tl') { state.tlFilter = t.getAttribute('data-tl'); render(); focusSel('[data-cd="tl"][data-tl="' + state.tlFilter + '"]'); return; }
+    if (act === 'channel') { state.channel = t.getAttribute('data-channel'); render(); focusSel('[data-cd="channel"][data-channel="' + state.channel + '"]'); return; }
+    if (act === 'revert') {
+      var d = currentDebtor();
+      var m = composerModel(d, state.invoiceId, state.channel, state.drafts);
+      if (m) delete state.drafts[draftKey(state.invoiceId, m.channel)];
+      render();
+      focusSel('#cd-draft');
+    }
+  }
+
+  function onChange(ev) {
+    var t = ev.target;
+    var act = t && t.getAttribute && t.getAttribute('data-cd');
+    if (!act) return;
+    if (act === 'filter') { state.filter = t.value; repaintList(); return; }
+    if (act === 'owner') { state.owner = t.value; repaintList(); return; }
+    if (act === 'invoice') {
+      if (state.invoiceId !== t.value) { state.invoiceId = t.value; state.channel = null; }
+      render();
+      focusSel('input[data-cd="invoice"][value="' + cssEscape(state.invoiceId) + '"]');
+      return;
+    }
+  }
+
+  function onInput(ev) {
+    var t = ev.target;
+    var act = t && t.getAttribute && t.getAttribute('data-cd');
+    if (act === 'search') { state.search = t.value; repaintListBody(); return; }
+    if (act === 'draft') {
+      var d = currentDebtor();
+      var m = composerModel(d, state.invoiceId, state.channel, state.drafts);
+      if (!m) return;
+      state.drafts[draftKey(state.invoiceId, m.channel)] = t.value;
+      var foot = rootEl().querySelector('#cd-draft-foot');
+      if (foot) foot.innerHTML = draftFoot(composerModel(d, state.invoiceId, state.channel, state.drafts));
+    }
+  }
+
+  // Search and filter repaint only the list so the search box keeps its caret.
+  function repaintListBody() {
+    var body = rootEl() && rootEl().querySelector('#cd-list-body');
+    if (body) body.innerHTML = renderListBody();
+  }
+  function repaintList() {
+    var list = rootEl() && rootEl().querySelector('.db-list');
+    var active = global.document.activeElement;
+    var sel = active && active.getAttribute && active.getAttribute('data-cd');
+    if (!list) { render(); return; }
+    list.outerHTML = renderList();
+    if (sel) focusSel('[data-cd="' + sel + '"]');
+  }
+  function focusSel(sel) {
+    var el = rootEl() && rootEl().querySelector(sel);
+    if (el && el.focus) el.focus({ preventScroll: true });
+  }
+  function cssEscape(s) {
+    if (global.CSS && global.CSS.escape) return global.CSS.escape(s);
+    return String(s).replace(/["\\]/g, '\\$&');
+  }
+
+  var bound = false;
+  function authUserId() {
+    var cloud = global.SECUREWORKS_CLOUD;
+    var auth = cloud && cloud.auth;
+    var user = auth && typeof auth.getUser === 'function' ? auth.getUser() : null;
+    return user && user.id ? String(user.id) : null;
+  }
+  function clearForAuthChange(nextOwner) {
+    state.requestSeq += 1;
+    inFlightRead = null;
+    state.data = null;
+    state.loading = false;
+    state.error = null;
+    state.search = '';
+    state.filter = 'all';
+    state.owner = '';
+    state.selectedKey = null;
+    state.invoiceId = null;
+    state.tlFilter = 'all';
+    state.channel = null;
+    state.drafts = {};
+    state.showDetails = false;
+    authOwner = nextOwner || null;
+    render();
+  }
+  function syncAuthOwner() {
+    var nextOwner = authUserId();
+    if (!nextOwner) return;
+    if (authOwner && authOwner !== nextOwner) clearForAuthChange(nextOwner);
+    else authOwner = nextOwner;
+  }
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('sw:auth-locked', function () { clearForAuthChange(null); });
+    global.addEventListener('sw:auth-unlocked', syncAuthOwner);
+  }
+
+  function bind() {
+    var root = rootEl();
+    if (!root || bound) return;
+    root.addEventListener('click', onClick);
+    root.addEventListener('change', onChange);
+    root.addEventListener('input', onInput);
+    bound = true;
+  }
+
+  // Financials > Clear Debt calls this (modules/ops-financials.js showSubTab).
+  function loadClearDebt() {
+    bind();
+    syncAuthOwner();
+    if (inFlightRead) return inFlightRead;
+    if (state.data || state.error) return Promise.resolve();
+    return load();
+  }
+
+  var api = {
+    CONTRACT: CONTRACT,
+    FILTERS: FILTERS,
+    TL_CHIPS: TL_CHIPS,
+    state: state,
+    load: load,
+    render: render,
+    checkContract: checkContract,
+    isUnknownAction: isUnknownAction,
+    matchesSearch: matchesSearch,
+    visibleDebtors: visibleDebtors,
+    ownersOf: ownersOf,
+    entryGroup: entryGroup,
+    timelineEntries: timelineEntries,
+    chipCounts: chipCounts,
+    timelineLimits: timelineLimits,
+    invoiceEventText: invoiceEventText,
+    nextStepDue: nextStepDue,
+    absenceLine: absenceLine,
+    staleOrUnreadable: staleOrUnreadable,
+    isFactEntry: isFactEntry,
+    composerModel: composerModel,
+    providerLabel: providerLabel,
+    sourceLabel: sourceLabel,
+    whenLabel: whenLabel,
+    money: money
+  };
+  global.ClearDebt = api;
+  global.loadClearDebt = loadClearDebt;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : globalThis);

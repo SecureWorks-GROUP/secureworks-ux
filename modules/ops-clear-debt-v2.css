@@ -1,0 +1,250 @@
+/* Clear Debt: a debtor work list, one debtor card, one timeline, one draft.
+   Same world as the approved booking screen (modules/ops-sales-booking.css):
+   warm canvas, SecureWorks dark #293C46, one orange accent #F15A29 kept for
+   the chosen row, the picked invoice and the draft, Helvetica Neue. Everything
+   is scoped to #clearDebtRoot so it cannot leak into ops.html's own chrome. */
+#clearDebtRoot{
+  --canvas:#F6F4F0;
+  --surface:#FFFFFF;
+  --surface-2:#FAF9F7;
+  --ink:#1A272E;
+  --ink-2:#3F4F58;
+  --muted:#5B6972;
+  --line:#DCE3E7;
+  --line-2:#ECEFF1;
+  --brand:#293C46;
+  --brand-2:#4C6A7C;
+  --brand-wash:#EAF0F3;
+  --accent:#F15A29;
+  --accent-ink:#B4421B;
+  --accent-wash:#FEF0EA;
+  --ok:#2C6650;
+  --ok-wash:#E9F3EE;
+  --warn:#8A5A12;
+  --warn-wash:#FBF1DF;
+  --bad:#A3312A;
+  --bad-wash:#FBECEA;
+  --font:'Helvetica Neue',Helvetica,Arial,-apple-system,BlinkMacSystemFont,sans-serif;
+  --r:12px;
+  --r-sm:8px;
+  background:var(--canvas);
+  color:var(--ink);
+  font:14px/1.5 var(--font);
+  min-height:calc(100vh - 56px - 48px);
+  margin:0 -4px;
+  -webkit-font-smoothing:antialiased;
+  caret-color:var(--accent);
+}
+#clearDebtRoot *{box-sizing:border-box;min-width:0}
+#clearDebtRoot ::selection{background:#FBD3C3;color:var(--ink)}
+#clearDebtRoot [hidden]{display:none!important}
+#clearDebtRoot h1,#clearDebtRoot h2,#clearDebtRoot h3,#clearDebtRoot p,#clearDebtRoot ol,#clearDebtRoot ul{margin:0}
+#clearDebtRoot button,#clearDebtRoot input,#clearDebtRoot textarea,#clearDebtRoot select{font:inherit;color:inherit}
+#clearDebtRoot button{cursor:pointer;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 12px;line-height:1.3;transition:background-color .15s ease-out,border-color .15s ease-out,color .15s ease-out}
+#clearDebtRoot button:hover:not(:disabled){background:var(--surface-2);border-color:#C9D3D9}
+#clearDebtRoot button:disabled{cursor:not-allowed}
+#clearDebtRoot :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#clearDebtRoot .ico{width:18px;height:18px;flex:none}
+#clearDebtRoot .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+#clearDebtRoot .fine{font-size:12.5px;color:var(--muted)}
+#clearDebtRoot .muted{color:var(--muted)}
+#clearDebtRoot .count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-left:6px;border-radius:10px;background:var(--line-2);color:var(--ink-2);font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums}
+#clearDebtRoot .linklike{border:0;background:none;padding:0;color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+#clearDebtRoot .linklike:hover:not(:disabled){background:none;color:var(--ink)}
+#clearDebtRoot *{scrollbar-width:thin;scrollbar-color:#C9D3D9 transparent}
+#clearDebtRoot ::-webkit-scrollbar{width:8px;height:8px}
+#clearDebtRoot ::-webkit-scrollbar-thumb{background:#C9D3D9;border-radius:8px}
+
+/* ---- page ---- */
+#clearDebtRoot .db{max-width:1440px;margin:0 auto;padding:20px 24px 48px;display:grid;gap:14px}
+#clearDebtRoot .db-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px 20px;flex-wrap:wrap}
+#clearDebtRoot .db-title h1{font-size:24px;line-height:1.15;font-weight:650;letter-spacing:-.02em}
+#clearDebtRoot .db-title p{margin-top:4px;color:var(--muted);font-size:13.5px;max-width:90ch}
+#clearDebtRoot .refresh{display:inline-flex;align-items:center;gap:7px;height:36px;font-weight:600}
+#clearDebtRoot .refresh[aria-busy="true"] .ico{animation:db-spin 1s linear infinite}
+@keyframes db-spin{to{transform:rotate(360deg)}}
+#clearDebtRoot .db-loading{color:var(--muted)}
+#clearDebtRoot .db-note{padding:12px 16px;border-radius:var(--r);background:var(--surface);border:1px solid var(--line);color:var(--ink-2);font-weight:600}
+#clearDebtRoot .db-alert{padding:10px 14px;border-radius:var(--r-sm);background:var(--bad-wash);color:var(--bad);font-weight:600;border:1px solid #F0CFCB}
+#clearDebtRoot .db-alert ul{margin-top:4px;padding-left:18px;font-weight:400;display:grid;gap:2px;overflow-wrap:anywhere}
+
+/* ---- the one line of counts ---- */
+#clearDebtRoot .db-counts{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+#clearDebtRoot .counts{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:14.5px;color:var(--ink-2)}
+#clearDebtRoot .counts b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+#clearDebtRoot .counts i{font-style:normal;color:#AEB9BF}
+#clearDebtRoot .counts .is-bad,#clearDebtRoot .counts .is-bad b{color:var(--bad)}
+#clearDebtRoot .detailsbtn{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:4px 2px;color:var(--ink-2);font-weight:600}
+#clearDebtRoot .detailsbtn:hover:not(:disabled){background:none;color:var(--ink)}
+#clearDebtRoot .detailsbtn .ico{width:16px;height:16px;transition:transform .2s ease-out}
+#clearDebtRoot .detailsbtn[aria-expanded="true"] .ico{transform:rotate(180deg)}
+#clearDebtRoot .db-details{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);font-size:13.5px;color:var(--ink-2)}
+#clearDebtRoot .db-details h3{font-size:13px;font-weight:650;color:var(--ink);margin-bottom:6px}
+#clearDebtRoot .db-details ul{padding-left:18px;display:grid;gap:3px}
+#clearDebtRoot .db-details .is-bad{color:var(--bad)}
+#clearDebtRoot .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px 28px}
+
+/* ---- two columns: list and card ---- */
+#clearDebtRoot .db-main{display:grid;grid-template-columns:minmax(320px,380px) minmax(0,1fr);gap:16px;align-items:start}
+#clearDebtRoot .db-list,#clearDebtRoot .db-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+
+/* ---- the list ---- */
+#clearDebtRoot .db-list{overflow:hidden;display:flex;flex-direction:column;position:sticky;top:12px;max-height:calc(100vh - 24px)}
+#clearDebtRoot #cd-list-body{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;min-height:0}
+#clearDebtRoot .grouphead{position:sticky;top:0;z-index:1;background:var(--surface)}
+#clearDebtRoot .search{display:flex;align-items:center;gap:8px;margin:12px 12px 8px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--muted);transition:border-color .15s ease-out,background-color .15s ease-out}
+#clearDebtRoot .search:focus-within{border-color:var(--brand-2);background:var(--surface)}
+#clearDebtRoot .search input{flex:1;border:0;background:none;padding:10px 0;outline:none;font-size:14px;color:var(--ink)}
+#clearDebtRoot .search input::placeholder{color:#7C8990}
+#clearDebtRoot .filters{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;padding:0 12px 6px}
+#clearDebtRoot .filters label{display:grid;gap:3px;font-size:12px;font-weight:600;color:var(--muted)}
+#clearDebtRoot select{appearance:none;-webkit-appearance:none;width:100%;height:38px;padding:0 30px 0 10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%233F4F58' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer}
+#clearDebtRoot select:hover{border-color:#C9D3D9}
+#clearDebtRoot select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
+#clearDebtRoot .grouphead{display:flex;align-items:center;gap:0;padding:12px 16px 6px;font-size:13px;font-weight:650;color:var(--ink)}
+#clearDebtRoot .grouphead .clear{margin-left:auto;font-size:12.5px}
+#clearDebtRoot .empty{padding:6px 16px 16px;color:var(--muted)}
+#clearDebtRoot .leads{list-style:none;padding:0}
+#clearDebtRoot .lead{display:grid;gap:3px;width:100%;text-align:left;border:0;border-top:1px solid var(--line-2);border-radius:0;background:var(--surface);padding:12px 16px}
+#clearDebtRoot .lead:hover:not(:disabled){background:var(--surface-2);border-color:var(--line-2)}
+#clearDebtRoot .lead.is-on,#clearDebtRoot .lead.is-on:hover{background:var(--accent-wash)}
+#clearDebtRoot .lead-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+#clearDebtRoot .lead-name{font-size:15px;font-weight:650;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#clearDebtRoot .lead.is-on .lead-name{color:var(--accent-ink)}
+#clearDebtRoot .lead-amt{flex:none;font-size:14px;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+#clearDebtRoot .lead-place{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+#clearDebtRoot .lead-words{font-size:13.5px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+#clearDebtRoot .lead-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+#clearDebtRoot .pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;background:var(--line-2);color:var(--ink-2);font-size:12px;font-weight:600;line-height:1.45;max-width:100%;overflow-wrap:anywhere}
+#clearDebtRoot .pill.accent{background:var(--accent-wash);color:var(--accent-ink)}
+#clearDebtRoot .pill.ok{background:var(--ok-wash);color:var(--ok)}
+#clearDebtRoot .pill.bad{background:var(--bad-wash);color:var(--bad)}
+#clearDebtRoot .skeleton{padding:6px 0}
+#clearDebtRoot .sk-row{display:grid;gap:7px;padding:14px 16px;border-top:1px solid var(--line-2)}
+#clearDebtRoot .sk-row i{display:block;height:11px;border-radius:6px;background:var(--line-2);animation:db-pulse 1.4s ease-in-out infinite}
+#clearDebtRoot .sk-row i:nth-child(1){width:55%;height:13px}
+#clearDebtRoot .sk-row i:nth-child(2){width:35%}
+#clearDebtRoot .sk-row i:nth-child(3){width:80%}
+@keyframes db-pulse{50%{opacity:.45}}
+
+/* ---- the card ---- */
+#clearDebtRoot .db-card{padding:20px 22px 24px;display:grid;gap:22px}
+#clearDebtRoot .db-card.is-empty{place-items:center;min-height:320px;text-align:center;background:var(--surface-2);border-style:dashed}
+#clearDebtRoot .emptycard{max-width:40ch;display:grid;gap:6px;color:var(--muted)}
+#clearDebtRoot .emptycard h2{font-size:17px;font-weight:650;color:var(--ink)}
+#clearDebtRoot .back{display:none;align-items:center;gap:4px;justify-self:start;border:0;background:none;padding:4px 0;color:var(--ink-2);font-weight:600}
+#clearDebtRoot .back:hover:not(:disabled){background:none;color:var(--ink)}
+#clearDebtRoot .cardhead{display:grid;gap:4px}
+#clearDebtRoot .cardhead h2{font-size:22px;line-height:1.2;font-weight:650;letter-spacing:-.015em;overflow-wrap:anywhere}
+#clearDebtRoot .figures{font-size:15px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+#clearDebtRoot .figures b{color:var(--ink);font-weight:650}
+#clearDebtRoot .warn-text{color:var(--warn)}
+#clearDebtRoot .bad-text{color:var(--bad);font-weight:600}
+#clearDebtRoot .badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+#clearDebtRoot .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);font-size:12.5px;font-weight:600}
+#clearDebtRoot .badge.ok{border-color:#CFE3D8;background:var(--ok-wash);color:var(--ok)}
+#clearDebtRoot .badge.warn{border-color:#EFD9B0;background:var(--warn-wash);color:var(--warn)}
+#clearDebtRoot .badge.bad{border-color:#F0CFCB;background:var(--bad-wash);color:var(--bad)}
+#clearDebtRoot .nextstep{margin-top:8px;padding:10px 12px;border-radius:var(--r-sm);background:var(--brand-wash);color:var(--ink);font-size:14px}
+#clearDebtRoot .nextstep span{font-weight:650;color:var(--brand);margin-right:4px}
+#clearDebtRoot .nextstep.is-quiet{background:var(--surface-2);color:var(--muted)}
+#clearDebtRoot .cardhead .db-alert{margin-top:8px}
+#clearDebtRoot .block{display:grid;gap:8px;padding-top:18px;border-top:1px solid var(--line-2)}
+#clearDebtRoot .db-card h3{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--ink)}
+#clearDebtRoot .db-card h3 .ico{width:16px;height:16px;color:var(--brand-2)}
+
+/* ---- invoice picker ---- */
+#clearDebtRoot .invoices{list-style:none;padding:0;display:grid;gap:6px}
+#clearDebtRoot .inv{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;transition:border-color .15s ease-out,background-color .15s ease-out}
+#clearDebtRoot .inv:hover{border-color:#C9D3D9;background:var(--surface-2)}
+#clearDebtRoot .inv.is-on{border-color:var(--accent);background:var(--accent-wash)}
+#clearDebtRoot .inv input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--accent);cursor:pointer}
+#clearDebtRoot .inv-main{display:grid;gap:2px}
+#clearDebtRoot .inv-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+#clearDebtRoot .inv-no{font-weight:650;color:var(--ink)}
+#clearDebtRoot .inv.is-on .inv-no{color:var(--accent-ink)}
+#clearDebtRoot .inv-amt{font-weight:650;font-variant-numeric:tabular-nums}
+#clearDebtRoot .inv-meta{font-size:13px;color:var(--ink-2);overflow-wrap:anywhere}
+#clearDebtRoot .inv-meta + .inv-meta{color:var(--muted)}
+
+/* ---- the timeline: one stream, every source labelled ---- */
+#clearDebtRoot .chips{display:flex;flex-wrap:wrap;gap:6px}
+#clearDebtRoot .chip{display:inline-flex;align-items:center;padding:5px 8px 5px 12px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-2)}
+#clearDebtRoot .chip .count{margin-left:6px;background:var(--line-2)}
+#clearDebtRoot .chip[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff}
+#clearDebtRoot .chip[aria-pressed="true"]:hover{background:var(--brand)}
+#clearDebtRoot .chip[aria-pressed="true"] .count{background:rgba(255,255,255,.18);color:#fff}
+#clearDebtRoot .tl-status{max-width:90ch}
+#clearDebtRoot .limits{list-style:none;padding:0;display:grid;gap:3px;font-size:13px;color:var(--ink-2)}
+#clearDebtRoot .limits li{position:relative;padding-left:14px}
+#clearDebtRoot .limits li::before{content:"";position:absolute;left:2px;top:8px;width:5px;height:5px;border-radius:50%;background:#AEB9BF}
+#clearDebtRoot .limits .is-bad{color:var(--bad);font-weight:600}
+#clearDebtRoot .limits .is-bad::before{background:var(--bad)}
+#clearDebtRoot .thread-note{color:var(--muted);font-size:13.5px}
+#clearDebtRoot .thread-note.is-bad{color:var(--bad);font-weight:600}
+#clearDebtRoot .thread{list-style:none;padding:0;display:grid;gap:8px;margin-top:4px}
+#clearDebtRoot .tl{display:grid;gap:3px;max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;border:1px solid var(--line);background:var(--surface-2)}
+#clearDebtRoot .tl.is-in{justify-self:start;border-bottom-left-radius:4px}
+#clearDebtRoot .tl.is-out{justify-self:end;background:var(--brand-wash);border-color:#D2DEE5;border-bottom-right-radius:4px}
+#clearDebtRoot .tl.is-note{justify-self:stretch;max-width:none;border-radius:10px;background:var(--surface);border-style:dashed}
+#clearDebtRoot .tl.is-sys,#clearDebtRoot .tl.is-fact{justify-self:stretch;max-width:none;border-radius:10px;background:transparent;border-color:var(--line-2)}
+#clearDebtRoot .tl.is-scope{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px #F5B79F}
+#clearDebtRoot .tl-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;color:var(--muted)}
+#clearDebtRoot .tl-kind{font-weight:650;color:var(--ink-2)}
+#clearDebtRoot .tl-meta time{font-variant-numeric:tabular-nums}
+#clearDebtRoot .tl-subject{font-weight:650;color:var(--ink);overflow-wrap:anywhere}
+#clearDebtRoot .tl-body{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+#clearDebtRoot .tl.is-sys .tl-body{color:var(--ink-2)}
+#clearDebtRoot .tl-foot{font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+#clearDebtRoot .tl-foot .prev{font-weight:600}
+#clearDebtRoot .src{display:inline-flex;align-items:center;padding:0 6px;height:17px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.02em;flex:none}
+#clearDebtRoot .src-ghl{background:var(--brand);color:#fff}
+#clearDebtRoot .src-outlook{background:var(--surface);color:var(--brand);border:1px solid var(--brand-2)}
+#clearDebtRoot .src-xero{background:var(--ok-wash);color:var(--ok);border:1px solid #CFE3D8}
+#clearDebtRoot .src-secureworks,#clearDebtRoot .src-unknown{background:var(--line-2);color:var(--ink-2)}
+#clearDebtRoot .src-luna{background:var(--brand-wash);color:var(--brand);border:1px solid #C5D4DC}
+
+/* ---- the one draft ---- */
+#clearDebtRoot .compose{display:grid;gap:8px;padding-top:18px;border-top:1px solid var(--line-2)}
+#clearDebtRoot .seg{display:inline-flex;justify-self:start;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:3px;gap:2px}
+#clearDebtRoot .seg button{border:0;border-radius:7px;padding:6px 16px;background:none;font-weight:600;color:var(--ink-2)}
+#clearDebtRoot .seg button[aria-pressed="true"]{background:var(--brand);color:#fff}
+#clearDebtRoot .seg button[aria-pressed="true"]:hover{background:var(--brand)}
+#clearDebtRoot .route{font-size:13.5px;color:var(--ink-2);overflow-wrap:anywhere}
+#clearDebtRoot .route b{color:var(--ink);font-weight:650}
+#clearDebtRoot .missing-word{color:var(--warn);font-weight:600}
+#clearDebtRoot .missing{font-size:13px;color:var(--warn);padding:8px 10px;border-radius:var(--r-sm);background:var(--warn-wash)}
+#clearDebtRoot .compose textarea{width:100%;min-height:128px;max-height:60vh;field-sizing:content;resize:vertical;padding:12px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);font-size:15px;line-height:1.5;transition:border-color .15s ease-out,box-shadow .15s ease-out}
+#clearDebtRoot .compose textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
+#clearDebtRoot .draftfoot{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-variant-numeric:tabular-nums}
+#clearDebtRoot .edited{color:var(--accent-ink)}
+#clearDebtRoot .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+#clearDebtRoot .actions button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:10px 20px;border-radius:10px;font-size:15px;font-weight:650}
+#clearDebtRoot .actions button:disabled{background:var(--line-2);border-color:var(--line-2);color:#66747C}
+#clearDebtRoot .why{font-size:13px;color:var(--muted)}
+
+/* ---- phone: list, or the chosen debtor ---- */
+@media (max-width:899px){
+  #clearDebtRoot{margin:0}
+  #clearDebtRoot .db{padding:14px 16px 40px;gap:12px}
+  #clearDebtRoot .db-main{grid-template-columns:minmax(0,1fr)}
+  #clearDebtRoot .db-list{position:static;max-height:none}
+  #clearDebtRoot #cd-list-body{overflow:visible}
+  #clearDebtRoot .db.is-open .db-list{display:none}
+  #clearDebtRoot .db:not(.is-open) .db-card{display:none}
+  #clearDebtRoot .back{display:inline-flex}
+  #clearDebtRoot .db-card{padding:16px 16px 20px;gap:18px}
+  #clearDebtRoot .db-counts{padding:10px 14px}
+  #clearDebtRoot .counts{font-size:14px;gap:4px 14px}
+  #clearDebtRoot .counts i{display:none}
+  #clearDebtRoot .filters{grid-template-columns:minmax(0,1fr)}
+  #clearDebtRoot select{height:44px;font-size:16px}
+  #clearDebtRoot .search input{font-size:16px}
+  #clearDebtRoot .compose textarea{font-size:16px}
+  #clearDebtRoot .actions button{flex:1 1 100%}
+  #clearDebtRoot .tl{max-width:94%}
+}
+
+@media (prefers-reduced-motion:reduce){
+  #clearDebtRoot *,#clearDebtRoot *::before{animation:none!important;transition:none!important}
+}

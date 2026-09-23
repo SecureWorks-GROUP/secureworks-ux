@@ -1,0 +1,36 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:">
+<title>Clear Debt · offline fixture</title>
+<link rel="stylesheet" href="../../../modules/ops-clear-debt-v2.css">
+<style>body{margin:0;background:#F6F4F0}</style>
+<body>
+<div id="subCleardebt"><div id="clearDebtRoot"></div></div>
+<script src="worklist.js"></script>
+<script>
+/* Synthetic only. connect-src 'none' blocks every real network call; the one
+   read is answered in page from tests/fixtures/clear-debt/worklist.js and every
+   call is recorded. ?mode=unknown answers like an undeployed action, ?mode=fail
+   like an unreadable book, ?mode=wait holds the read until window.releaseRead().
+   Any opsPost is recorded on window.fakeWrites and refused. */
+(function () {
+  var mode = new URLSearchParams(location.search).get('mode') || 'ok';
+  window.fakeReads = [];
+  window.fakeWrites = [];
+  window.fixtureWorklist = makeClearDebtWorklist();
+  window.opsFetch = function (action, params) {
+    window.fakeReads.push({ action: action, params: Object.assign({}, params || {}) });
+    if (mode === 'unknown') { var e = new Error('Unknown action'); e.status = 400; return Promise.reject(e); }
+    if (mode === 'fail') { var f = new Error('the open invoice book could not be read (timeout); nothing is shown rather than an empty book'); f.status = 503; return Promise.reject(f); }
+    var answer = function () { return structuredClone(window.fixtureWorklist); };
+    if (mode === 'wait') return new Promise(function (resolve) { window.releaseRead = function () { resolve(answer()); }; });
+    return Promise.resolve(answer());
+  };
+  window.opsPost = function (action, body) {
+    window.fakeWrites.push({ action: action, body: body });
+    return Promise.reject(new Error('writes are not allowed on this screen'));
+  };
+})();
+</script>
+<script src="../../../modules/ops-clear-debt-v2.js"></script>
+<script>loadClearDebt();</script>
+</body></html>

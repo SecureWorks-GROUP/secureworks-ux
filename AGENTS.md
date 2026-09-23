@@ -558,6 +558,10 @@ step. Contract and copy: `docs/sales-booking-ui.md`,
 `test:e2e`) and `tests/e2e/sales-booking-redesign.spec.js` against
 `tests/fixtures/booking-confirm/friday.html`.
 
+## Clear Debt screen (`modules/ops-clear-debt-v2.js`)
+
+Clear Debt's read boundary, UI contract and guards: [docs/clear-debt-ui.md](docs/clear-debt-ui.md).
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card

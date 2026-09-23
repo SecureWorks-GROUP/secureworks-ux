@@ -4932,9 +4932,7 @@ __swOpsStampAssets([
 
       <!-- Clear Debt -->
       <div id="subCleardebt" class="sub-view">
-        <div id="clearDebtStats" class="stat-grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); margin-bottom:16px;"></div>
-        <div id="clearDebtFilters" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:16px;"></div>
-        <div id="clearDebtCards" style="display:flex;flex-direction:column;gap:12px;"></div>
+        <div id="clearDebtRoot"></div>
       </div>
 
       <!-- Finance Health (read-only invoice data-quality holes) -->
@@ -28221,9 +28219,10 @@ if (document.readyState === 'loading') {
 }
 </script>
 
-<!-- Clear Debt: payment chase & collection -->
+<!-- Clear Debt: read-only debtor work list (debt_worklist) -->
 <script>
 __swOpsStampAssets([
+  {t:'css', u:'modules/ops-clear-debt-v2.css?v=1'},
   {t:'js', u:'modules/ops-clear-debt-v2.js?v=1'}
 ]);
 </script>

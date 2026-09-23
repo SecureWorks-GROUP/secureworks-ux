@@ -168,11 +168,13 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   (secureworks-backend #865): `worker_withhold`, `company_contribution`, and
   `amount_payable` / `net_pay` as cash, and derives gross x rate / 2 only when
   they are absent. Submit/generate/draft/`my_hours` responses carry all of
-  them; `get_trade_invoice` / `my_invoices` carry only the persisted columns
-  (`net_pay`, no withhold); `my_money` totals carry neither, so My money
-  derives. A persisted `net_pay` equal to gross minus the full super amount
-  (the old contract, still valid upstream on settled invoices) is never shown
-  as cash payable.
+  them; `get_trade_invoice` / `my_trade_invoices` carry only the persisted
+  columns (`net_pay`, no withhold); `my_money` totals carry neither, so My
+  money derives. A persisted `net_pay` equal to gross minus the full super
+  amount (the old contract, still valid upstream on settled invoices) is
+  never shown as cash. Guard:
+  `scripts/test-trade-invoice-pdf-flow.js` (PR sanity) and
+  `tests/e2e/trade-super-backend-fields.spec.js`.
 - **GST from the profile (2026-09-08)**: the Profile "My Details" form has a
   "GST registered" toggle (`#tdGst`) saved explicitly through
   `update_trade_profile` (server merges, so other phones cannot wipe it). The

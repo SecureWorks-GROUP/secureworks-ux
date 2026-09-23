@@ -2,6 +2,7 @@
 // invoice (per-metre: the work order goes onto the weekly draft; hourly: one-tap hours).
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { signOff } = require('../helpers/wizard-signoff');
 const { perthDate, perthWeekMonday, addIsoDays } = require('../helpers/feed-stub');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
@@ -51,7 +52,7 @@ async function runWizardToComplete(page) {
   const [ns] = await Promise.all([page.waitForEvent('filechooser'), page.locator('[data-neighbour-slot="0"] .wiz-photo-btn-lib').click()]);
   await ns.setFiles(shot('sue.png'));
   await page.locator('[data-neighbour-next]').click();
-  await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(4).click();
+  await signOff(page);
   await page.locator('#wizFooter .wiz-btn-primary').click();
   for (const cb of await page.locator('#wizBody input[type="checkbox"]').all()) await cb.check();
   await page.locator('#wizFooter .wiz-btn-primary').click();

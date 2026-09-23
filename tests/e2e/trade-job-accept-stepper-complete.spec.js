@@ -2,6 +2,7 @@
 // fencing completion wizard with neighbour sign-off (Captain 2026-09-08).
 const { test, expect, PERSONAS } = require('../fixtures/test');
 const { signIn } = require('../helpers/auth');
+const { signOff } = require('../helpers/wizard-signoff');
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const OPS_API = `${SUPABASE_ORIGIN}/functions/v1/ops-api`;
@@ -172,7 +173,7 @@ test.describe('Accept gate and job stepper', () => {
 
     // Step 3: client sign-off (rating), Step 4: checklist, Step 5: submit.
     await expect(page.locator('#wizStepLabel')).toHaveText('Step 3 of 5');
-    await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(4).click();
+    await signOff(page);
     await page.locator('#wizFooter .wiz-btn-primary').click();
     await expect(page.locator('#wizStepLabel')).toHaveText('Step 4 of 5');
     for (const cb of await page.locator('#wizBody input[type="checkbox"]').all()) await cb.check();
@@ -210,7 +211,7 @@ test.describe('Accept gate and job stepper', () => {
     await page.locator('[data-neighbour-waiver-reason]').fill('Front boundary fence, no neighbour');
     await expect(page.locator('[data-neighbour-next]')).toBeEnabled();
     await page.locator('[data-neighbour-next]').click();
-    await page.locator('#wizBody button').filter({ hasText: '☆' }).nth(4).click();
+    await signOff(page);
     await page.locator('#wizFooter .wiz-btn-primary').click();
     for (const cb of await page.locator('#wizBody input[type="checkbox"]').all()) await cb.check();
     await page.locator('#wizFooter .wiz-btn-primary').click();

@@ -117,6 +117,8 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   order lines → job videos → Materials & Receipts.
   The crew line under the tabs is gone; the roster panel above the tabs is the
   crew. Guard: `tests/e2e/trade-job-scope-clarity.spec.js`.
+- **Request Variation**: Scope tab, confirmed or in-progress assignment. Contract
+  in `AGENTS.md` → "Trade variation request".
 - **Open quote (no prices)**: when `trade_job_detail` carries a
   `quote_extracts` pointer (frozen pack + client send), the quote card and the
   Files tab offer "Open quote". `openTradeQuoteExtract` fetches

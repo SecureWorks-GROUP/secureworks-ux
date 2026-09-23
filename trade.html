@@ -12009,9 +12009,10 @@
     var job = data.job;
 
     // <trade-variation-request>
-    // A trade REQUESTS; the office APPROVES. Nothing on this form may read as
+    // A trade REQUESTS; the office APPROVES. A trade request never reads as
     // approved: ops-api files every trade request pending office approval
-    // (secureworks-backend#906), whatever the amount.
+    // (secureworks-backend#906). Staff using the trade app may be auto-approved
+    // under $200; that success shows the server message and approved wording.
     var h = '<div class="detail-section" id="variationSection">';
     h += '  <button class="btn btn-secondary" id="variationOpenBtn" style="width:100%;border-color:var(--sw-yellow);color:var(--sw-yellow);font-weight:700" onclick="showVariationForm(\'' + esc(job.id) + '\', \'' + esc(job.type || 'patio') + '\')">';
     h += '    &#9888; Request Variation';

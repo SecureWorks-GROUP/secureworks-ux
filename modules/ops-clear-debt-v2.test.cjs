@@ -327,7 +327,10 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   assert.match(t, /GHL stored copy, also in captured event/);
   assert.match(t, /1 copy of the same message shown once/);
   assert.match(t, /These are stored copies, not a live GHL or Outlook read\./);
-  assert.match(t, /Stored emails are inbound copies only; sent emails are not captured \(owner CIO; fix: CIO email capture \(EM1\): capture Outlook Sent Items and inbound mail as stored events\)\./);
+  assert.ok(t.includes('Sent emails are not captured yet; that fix is under way.'));
+  assert.doesNotMatch(t, /EM1|owner CIO|Sent Items/);
+  assert.doesNotMatch(t, /invoice\.emailed/);
+  assert.match(t, /Invoice INV-S\d+ emailed to debtor001@example\.invalid\./);
   assert.match(t, /Only the newest 12 of 32 stored entries are in this read\./);
   assert.match(t, /Luna Captured fact: [a-z ]+ captured/);
   assert.match(t, /GHL captured 1 hour before this read/);
@@ -377,7 +380,7 @@ test('every empty-state path follows the one rule', async () => {
     ['texts, GHL status missing', 'text', (d) => { delete d.sources.ghl.status; }, ['The read did not say whether stored GHL texts were read.'], null],
     ['texts, truncated', 'text', (d) => { d.timeline.truncated = true; d.timeline.entries_read = 30; }, ['Only the newest 0 of 30 stored entries are in this read.'], null],
     ['texts, per-job cap', 'text', (d) => { d.timeline.per_job_cap_reached = ['SWF-90001']; }, ['Job SWF-90001 has more than 10 messages; only the newest 10 per job were read.'], null],
-    ['emails, inbound only', 'email', () => {}, ['Stored emails are inbound copies only; sent emails are not captured.'], null],
+    ['emails, inbound only', 'email', () => {}, ['Sent emails are not captured yet; that fix is under way.'], null],
     ['emails, unreadable', 'email', (d) => { d.sources.email.status = 'unreadable'; }, ['Stored emails could not be read.'], null],
     ['emails, no job', 'email', (d) => { d.sources.email.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so stored emails cannot be read.'], null],
     ['emails, not read', 'email', (d) => { d.sources.email.status = 'not_read'; }, ['Stored emails were not read for this view.'], null],
@@ -395,9 +398,9 @@ test('every empty-state path follows the one rule', async () => {
     ['facts, counted not listed', 'facts', (d) => { delete d.sources.facts.timeline_read; }, ['This read only counts captured facts (facts on 4 of 5 invoices); their details are not in this read yet.'], null],
     ['facts, no job', 'facts', (d) => { d.sources.facts.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so captured facts cannot be read.'], null],
     ['facts, capped', 'facts', (d) => { d.timeline.facts_cap_reached = ['SWF-90002']; }, ['Job SWF-90002 has more than 10 captured facts; only the newest 10 per job were read.'], null],
-    ['all, sent emails never captured', 'all', () => {}, ['Stored emails are inbound copies only; sent emails are not captured.'], null],
+    ['all, sent emails never captured', 'all', () => {}, ['Sent emails are not captured yet; that fix is under way.'], null],
     ['all, several limits each once', 'all', (d) => { d.sources.ghl.status = 'unreadable'; d.sources.xero.status = 'stale'; d.timeline.truncated = true; d.timeline.entries_read = 5; },
-      ['Stored GHL texts could not be read.', 'Stored emails are inbound copies only; sent emails are not captured.', 'The Xero copy is stale (older than 24 hours).', 'Only the newest 0 of 5 stored entries are in this read.'], null]
+      ['Stored GHL texts could not be read.', 'Sent emails are not captured yet; that fix is under way.', 'The Xero copy is stale (older than 24 hours).', 'Only the newest 0 of 5 stored entries are in this read.'], null]
   ];
   for (const [name, group, mutate, lines, absence] of cases) {
     const d = fullyRead();
@@ -421,11 +424,11 @@ test('every empty-state path follows the one rule', async () => {
   d.sources.xero.status = 'stale';
   d.sources.facts.timeline_read = 'unreadable';
   let lastLine = html().match(/<p class="fine">(Last contact unknown:[^<]+)<\/p>/)[1];
-  assert.equal(lastLine, 'Last contact unknown: sent emails are not captured.');
+  assert.equal(lastLine, 'Last contact unknown: sent emails are not captured yet.');
   d.sources.ghl.status = 'unreadable';
   d.timeline.truncated = true; d.timeline.entries_read = 9;
   lastLine = html().match(/<p class="fine">(Last contact unknown:[^<]+)<\/p>/)[1];
-  assert.equal(lastLine, 'Last contact unknown: stored GHL texts could not be read; sent emails are not captured; only the newest 0 of 9 stored entries were read.');
+  assert.equal(lastLine, 'Last contact unknown: stored GHL texts could not be read; sent emails are not captured yet; only the newest 0 of 9 stored entries were read.');
   assert.doesNotMatch(lastLine, /Xero|fact/i);
   // With a last contact, the line is scoped to the stored copies.
   const withLast = data.debtors.find((x) => x.identity.name === 'Debtor 001');
@@ -579,6 +582,40 @@ test('reconciliation names affected ids and marks repeated returned invoices wit
   h = html();
   assert.equal(h.split('Invoice reconciliation failed.').length - 1, 1);
   assert.match(h, /See the invoice reconciliation warning above and any flagged invoice rows\./);
+});
+
+test('invoice events read in words, never as raw event names', async () => {
+  const data = await loaded();
+  const d = data.debtors.find((x) => x.identity.name === 'Debtor 001');
+  const inv = d.invoices.find((i) => i.invoice_number === 'INV-S1004');
+  const ev = (type, preview) => ({ kind: 'invoice_event', subject: type, preview, invoice_ids: [inv.xero_invoice_id] });
+  assert.equal(CD.invoiceEventText(d, ev('invoice.emailed', 'invoice.emailed to someone@example.invalid')), 'Invoice INV-S1004 emailed to someone@example.invalid.');
+  assert.equal(CD.invoiceEventText(d, ev('invoice.emailed', 'invoice.emailed')), 'Invoice INV-S1004 emailed.');
+  assert.equal(CD.invoiceEventText(d, ev('invoice.approved_and_sent', 'invoice.approved_and_sent to a@example.invalid')), 'Invoice INV-S1004 approved and sent to a@example.invalid.');
+  assert.equal(CD.invoiceEventText(d, ev('invoice.authorised', 'invoice.authorised')), 'Invoice INV-S1004 authorised.');
+  assert.equal(CD.invoiceEventText(d, ev('payment.reconciled', 'payment.reconciled')), 'Payment reconciled against INV-S1004.');
+  assert.equal(CD.invoiceEventText(d, ev('payment.link_sent', 'payment.link_sent to 0491 570 006')), 'Payment link for INV-S1004 sent to 0491 570 006.');
+  for (const x of data.debtors) {
+    CD.state.selectedKey = x.key;
+    CD.state.tlFilter = 'all';
+    assert.doesNotMatch(text(), /\b(invoice|payment)\.[a-z_]+\b/, x.key);
+  }
+});
+
+test('a next step whose day has passed in Perth says it is overdue', async () => {
+  const data = await loaded();
+  const asOf = data.as_of; // 10:00am Thu 24 Sep in Perth
+  assert.equal(CD.nextStepDue('2026-09-23', asOf), ', was due Wed 23 Sept, <b class="bad-text">now overdue</b>'.replace('Sept', CD.whenLabel('2026-09-23').includes('Sept') ? 'Sept' : 'Sep'));
+  assert.equal(CD.nextStepDue('2026-09-24', asOf), ', by ' + CD.whenLabel('2026-09-24'));
+  assert.equal(CD.nextStepDue('2026-09-25', asOf), ', by ' + CD.whenLabel('2026-09-25'));
+  assert.equal(CD.nextStepDue(null, asOf), '');
+  const d = data.debtors.find((x) => x.identity.name === 'Debtor 001');
+  CD.state.selectedKey = d.key;
+  assert.match(text(), /Next step Text a reminder about the balance on INV-S1001, DEBT, was due Wed 23 Sept?, now overdue ?\./);
+  const future = data.debtors.find((x) => x.next_step && x.next_step.at > '2026-09-24');
+  CD.state.selectedKey = future.key;
+  assert.match(text(), /Next step .*, by \w{3} \d+ Sept?\./);
+  assert.doesNotMatch(text(), /now overdue/);
 });
 
 test('times are Perth, and date-only values never roll a day', () => {

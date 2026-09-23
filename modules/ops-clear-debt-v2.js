@@ -359,7 +359,7 @@
     var s = (d.sources && d.sources[key]) || {};
     var st = s.status;
     var asOf = d.freshness && d.freshness.as_of;
-    function line(bad, text, short) { return { key: key, bad: bad, text: withFix(s, text), short: short }; }
+    function line(bad, text, short, plain) { return { key: key, bad: bad, text: plain ? text : withFix(s, text), short: short }; }
     if (key === 'ghl') {
       if (st === 'bound' || st === 'several') return null;
       if (st === 'stale') return line(true, 'Stored GHL texts are stale: last captured ' + (s.last_success_at ? (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : 'at a time the read did not give') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'stored GHL texts are stale');
@@ -370,7 +370,7 @@
       return line(false, 'The read did not say whether stored GHL texts were read.', 'GHL texts may not have been read');
     }
     if (key === 'email') {
-      if (st === 'partial' || st === 'read' || st === 'current') return line(false, 'Stored emails are inbound copies only; sent emails are not captured.', 'sent emails are not captured');
+      if (st === 'partial' || st === 'read' || st === 'current') return line(false, SENT_EMAIL_CAVEAT, 'sent emails are not captured yet', true);
       if (st === 'unreadable') return line(true, 'Stored emails could not be read.', 'stored emails could not be read');
       if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored emails cannot be read.', 'no job is linked, so emails cannot be read');
       if (st === 'not_read') return line(false, 'Stored emails were not read for this view.', 'emails were not read');
@@ -596,7 +596,7 @@
       '<li>Promised payment dates, so there is no promise-date filter.</li>' +
       '<li>A ready-for-Captain verdict, so no row is marked ready.</li>' +
       (factsListedAnywhere(d) ? '' : '<li>What the captured facts say (only whether they exist).</li>') +
-      '<li>Sent emails: Outlook Sent Items are not captured, so stored emails are inbound only.</li>' +
+      '<li>' + esc(SENT_EMAIL_CAVEAT) + '</li>' +
       '<li>Links to each message in GHL or Outlook.</li>' +
       '<li>The phone line, mailbox, subject and attachment a draft would use.</li>' +
       '</ul></div>' +
@@ -606,6 +606,8 @@
   function factsListedAnywhere(data) {
     return (data.debtors || []).some(function (x) { return x.sources && x.sources.facts && x.sources.facts.timeline_read === 'read'; });
   }
+  // The stored-email caveat, in the words the CFO desk approved: no internal codes, owners or lane names.
+  var SENT_EMAIL_CAVEAT = 'Sent emails are not captured yet; that fix is under way.';
   var STORED_NOTE = 'stored copies, not a live GHL or Outlook read';
 
   function renderAlerts() {
@@ -735,7 +737,7 @@
       : '';
     var next = d.next_step
       ? '<p class="nextstep"><span>Next step</span> ' + esc(d.next_step.action) + ' on ' + esc(d.next_step.from_invoice_number || 'one invoice') +
-        (d.next_step.owner ? ', ' + esc(d.next_step.owner) : '') + (d.next_step.at ? ', by ' + esc(dayLabel(d.next_step.at)) : '') + '.</p>'
+        (d.next_step.owner ? ', ' + esc(d.next_step.owner) : '') + nextStepDue(d.next_step.at, state.data.as_of) + '.</p>'
       : '<p class="nextstep is-quiet"><span>Next step</span> None recorded on any of these invoices.</p>';
     var last = d.last_contact && d.last_contact.last;
     var lastLine;
@@ -759,6 +761,19 @@
       '</header>';
   }
 
+  // "by Fri 25 Sept", or, once that day has passed in Perth, "was due Wed 23 Sept, now overdue".
+  function perthDay(iso) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return String(iso);
+    var p = parts(iso, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    return p ? p.year + '-' + p.month + '-' + p.day : null;
+  }
+  function nextStepDue(at, asOf) {
+    if (!at) return '';
+    var due = perthDay(String(at).length > 10 ? at : String(at).slice(0, 10));
+    var today = perthDay(asOf);
+    if (due && today && due < today) return ', was due ' + esc(dayLabel(due)) + ', <b class="bad-text">now overdue</b>';
+    return ', by ' + esc(dayLabel(at));
+  }
   function factsWords(f) {
     if (!f) return 'Facts not reported';
     if (f.status === 'present') return 'Facts captured on every linked invoice';
@@ -892,12 +907,25 @@
       '<span class="tl-kind">' + esc((kindLabel(e) + ' ' + directionWord(e)).trim()) + '</span>' +
       '<time datetime="' + esc(e.at || '') + '">' + esc(whenLabel(e.at, e.at_precision)) + '</time></div>' +
       (e.subject && e.kind !== 'invoice_event' ? '<div class="tl-subject">' + esc(e.subject) + '</div>' : '') +
-      '<div class="tl-body">' + esc(e.preview || '') + '</div>' +
+      '<div class="tl-body">' + esc(e.kind === 'invoice_event' ? invoiceEventText(d, e) : (e.preview || '')) + '</div>' +
       '<div class="tl-foot">' + author +
       (isRecord(e) ? '' : '<span class="prev">' + (previewCut(e) ? 'Preview, cut at 500 characters' : 'Preview') + '</span> · ') +
       esc(sourceLabel(e.source)) + (also.length ? ', also in ' + esc(also.map(sourceLabel).join(', ')) : '') +
       (scopeWords ? ' · ' + esc(scopeWords) : '') + (e.label ? ' · ' + esc(e.label) : '') +
       '</div></li>';
+  }
+  // An invoice lifecycle event in words ("Invoice INV-S1004 emailed to ..."),
+  // never the raw event name the read carries in subject and preview.
+  var EVENT_VERB = { 'invoice.emailed': 'emailed', 'invoice.approved_and_sent': 'approved and sent', 'invoice.approved': 'approved', 'invoice.authorised': 'authorised' };
+  function invoiceEventText(d, e) {
+    var type = String(e.subject || '');
+    var preview = String(e.preview || '');
+    var to = type && preview.indexOf(type + ' to ') === 0 ? preview.slice(type.length + 4) : null;
+    var inv = (e.invoice_ids || []).map(function (id) { return invoiceNumber(d, id); }).join(', ') || 'the invoice';
+    if (type === 'payment.reconciled') return 'Payment reconciled against ' + inv + '.';
+    if (type === 'payment.link_sent') return 'Payment link for ' + inv + ' sent' + (to ? ' to ' + to : '') + '.';
+    var verb = EVENT_VERB[type] || words(type.split('.').pop() || 'updated');
+    return 'Invoice ' + inv + ' ' + verb + (to ? ' to ' + to : '') + '.';
   }
   function jobNumberFor(d, jobId) {
     if (!jobId) return null;
@@ -1093,6 +1121,8 @@
     timelineEntries: timelineEntries,
     chipCounts: chipCounts,
     timelineLimits: timelineLimits,
+    invoiceEventText: invoiceEventText,
+    nextStepDue: nextStepDue,
     absenceLine: absenceLine,
     staleOrUnreadable: staleOrUnreadable,
     isFactEntry: isFactEntry,

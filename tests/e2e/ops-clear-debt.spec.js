@@ -115,7 +115,9 @@ for (const vp of viewports) {
       const entries = card.locator('.thread > li.tl');
       await expect(entries).toHaveCount(12);
       await expect(card.locator('[data-cd-limits]')).toContainText('Only the newest 12 of 32 stored entries are in this read.');
-      await expect(card.locator('[data-cd-limits]')).toContainText('Stored emails are inbound copies only; sent emails are not captured');
+      await expect(card.locator('[data-cd-limits]')).toContainText('Sent emails are not captured yet; that fix is under way.');
+      await expect(card.locator('.tl.is-out', { hasText: 'Invoice emailed' }).first().locator('.tl-body')).toHaveText(/^Invoice INV-S\d+ emailed to debtor001@example\.invalid\.$/);
+      await expect(card.locator('.nextstep')).toContainText('now overdue');
       await expect(card.locator('.tl .src').first()).toBeVisible();
       await expect(card.locator('.tl-foot', { hasText: 'Preview, cut at 500 characters' })).toHaveCount(1);
       await expect(card.locator('.tl-foot', { hasText: 'also in captured event' })).toHaveCount(1);

@@ -544,12 +544,12 @@ text / Book it press records `sales_booking_approval_write` for the exact
 content on screen, then calls `sales_booking_send` / `sales_booking_book` with
 `{approval_id}` and states the result in words; an unknown action reads "not
 connected yet", never success. When the read advertises `owner-authored-v1`,
-A picked visit and any edited or owner-written text take two
+a picked visit and any edited or owner-written text take two
 presses: an `owner_input` `dry_run` check shown back exactly, then
 Approve with that check's `prepared_at` + `content_hash`, then the executor; an
 unedited engine text keeps the one-press engine path until a time is picked.
-A proposed time stays the default shown first; every card offers Pick a
-different time. A successful book or offer updates occupancy, then re-reads
+A proposed time stays the default shown first (one-press Book it); every card
+offers Pick a different time. A successful book or offer updates occupancy, then re-reads
 quietly.
 A picked visit is always held with the text. An edited text is
 bound by the browser's copy of ops-api `bookingContentHash` (`sha256Hex` + `canonicalJson`), so keep the two in

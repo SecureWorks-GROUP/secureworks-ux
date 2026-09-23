@@ -33,7 +33,7 @@ const ALYX_OPEN_CLOCK = {
   jobs: { id: 'e2e-job-swf-261138', type: 'fencing', status: 'invoiced', archived: false, client_name: 'Fence Client', client_phone: null, client_email: null, site_address: 'Dianella WA', site_suburb: 'Dianella', notes: null, job_number: 'SWF-261138', metadata: {} }
 };
 
-async function boot(page, persona, actions, { allowedWriteActions = [], initScript } = {}) {
+async function boot(page, persona, actions, { allowedWriteActions = [], initScript, initArg } = {}) {
   await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
   await installSupabaseAuthStub(page, {
     users: Object.fromEntries(Object.values(P).map((entry) => [entry.email, entry])),
@@ -41,7 +41,7 @@ async function boot(page, persona, actions, { allowedWriteActions = [], initScri
   });
   const requestLog = [];
   const stub = await installFeedStubs(page, { endpoint: OPS_API, actions, allowedWriteActions, requestLog });
-  if (initScript) await page.addInitScript(initScript);
+  if (initScript) await page.addInitScript(initScript, initArg);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/trade.html');
   await signIn(page, P[persona]);
@@ -132,6 +132,7 @@ test('an already-queued clock event the server refuses is dropped, not retried f
     clock_event: { status: 500, body: { error: 'Not your assignment' } }
   }, {
     allowedWriteActions: ['clock_event'],
+    initArg: body,
     initScript: (seed) => {
       if (sessionStorage.getItem('e2e-seeded')) return;
       sessionStorage.setItem('e2e-seeded', '1');

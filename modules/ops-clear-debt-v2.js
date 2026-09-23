@@ -342,10 +342,10 @@
   // when every source behind the view was fully read, and then only for what
   // was read ("among the 7 stored items read"). Each condition is one line.
   var GROUP_SOURCES = {
-    all: ['ghl', 'email', 'notes', 'xero', 'facts'],
+    all: ['ghl', 'email', 'notes', 'xero', 'xero_events', 'facts'],
     contact: ['ghl', 'email', 'notes'],
     text: ['ghl'], call: ['ghl', 'notes'], email: ['email'], note: ['notes', 'ghl'],
-    xero: ['xero'], facts: ['facts'], other: []
+    xero: ['xero', 'xero_events'], facts: ['facts'], other: []
   };
   var MESSAGE_GROUPS = { all: 1, contact: 1, text: 1, call: 1, email: 1, note: 1 };
   function withFix(v, text) {
@@ -355,8 +355,10 @@
     if (!bits.length) return text;
     return text.replace(/\.$/, '') + ' (' + bits.join('; ') + ').';
   }
-  function sourceLimit(d, key) {
-    var s = (d.sources && d.sources[key]) || {};
+  function sourceLimit(d, key, readSources) {
+    var s = key === 'xero_events'
+      ? ((readSources && readSources[key]) || {})
+      : ((d.sources && d.sources[key]) || {});
     var st = s.status;
     var asOf = d.freshness && d.freshness.as_of;
     function line(bad, text, short, plain) { return { key: key, bad: bad, text: plain ? text : withFix(s, text), short: short }; }
@@ -387,6 +389,12 @@
       if (st === 'current') return null;
       return line(true, 'The Xero copy is stale' + (s.stale_after_hours ? ' (older than ' + plural(s.stale_after_hours, 'hour') + ')' : '') + '.', 'the Xero copy is stale');
     }
+    if (key === 'xero_events') {
+      if (s.ok === false) return line(true, 'Xero invoice events could not be read (' + (s.error || 'no reason given') + ').', 'Xero invoice events could not be read');
+      if (s.read === false) return line(false, 'Xero invoice events were not read for this view.', 'Xero invoice events were not read');
+      if (s.ok !== true && s.read !== true) return line(false, 'The read did not report whether Xero invoice events were read.', 'Xero invoice events may not have been read');
+      return null;
+    }
     if (key === 'facts') {
       if (s.timeline_read === 'unreadable') return line(true, 'Captured facts could not be read for this timeline.', 'captured facts could not be read');
       if (s.timeline_read === 'not_read') return line(false, 'Captured facts were not read for this view.', 'captured facts were not read');
@@ -397,10 +405,11 @@
     }
     return null;
   }
-  function timelineLimits(d, group) {
+  function timelineLimits(d, group, readSources) {
     var tl = d.timeline || {};
+    readSources = readSources || {};
     var out = [];
-    (GROUP_SOURCES[group] || []).forEach(function (k) { var l = sourceLimit(d, k); if (l) out.push(l); });
+    (GROUP_SOURCES[group] || []).forEach(function (k) { var l = sourceLimit(d, k, readSources); if (l) out.push(l); });
     if (MESSAGE_GROUPS[group] && (tl.per_job_cap_reached || []).length) {
       out.push({ key: 'cap', bad: false, text: 'Job ' + tl.per_job_cap_reached.join(', ') + ' has more than ' + tl.per_job_cap + ' messages; only the newest ' + tl.per_job_cap + ' per job were read.', short: 'only the newest ' + tl.per_job_cap + ' messages per job were read' });
     }
@@ -414,8 +423,8 @@
     return out.filter(function (l) { if (seen[l.text]) return false; seen[l.text] = true; return true; });
   }
   // The absence line for an empty view, or null when a limit forbids one.
-  function absenceLine(d, group, what) {
-    if (timelineLimits(d, group).length) return null;
+  function absenceLine(d, group, what, readSources) {
+    if (timelineLimits(d, group, readSources).length) return null;
     var n = ((d.timeline && d.timeline.entries) || []).length;
     return 'No ' + what + ' among the ' + plural(n, 'stored item') + ' read for this debtor.';
   }
@@ -827,6 +836,7 @@
 
   function renderTimeline(d) {
     var tl = d.timeline;
+    var readSources = (state.data && state.data.sources) || {};
     var head = '<h3 id="cd-tl-h">' + ICON.stream + 'Timeline</h3>';
     if (!tl) {
       return '<section class="block" aria-labelledby="cd-tl-h">' + head +
@@ -843,23 +853,23 @@
     var body;
     if (!list.length) {
       var which = state.tlFilter === 'all' ? 'entries' : TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase();
-      var none = absenceLine(d, state.tlFilter, which);
+      var none = absenceLine(d, state.tlFilter, which, readSources);
       body = none ? '<p class="thread-note">' + esc(none) + '</p>' : '';
     } else {
       body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';
     }
     return '<section class="block" aria-labelledby="cd-tl-h">' + head +
       '<div class="chips" role="group" aria-label="Show in the timeline">' + chips + '</div>' +
-      status +
+      timelineStatus(d, readSources) +
       '<div id="cd-tl-body">' + body + '</div></section>';
   }
 
-  function timelineStatus(d) {
+  function timelineStatus(d, readSources) {
     var tl = d.timeline;
     var lines = ['Newest first.'];
     if (tl.duplicates_merged) lines.push(plural(tl.duplicates_merged, 'copy', 'copies') + ' of the same message shown once.');
     lines.push('These are ' + STORED_NOTE + '.');
-    var limits = timelineLimits(d, state.tlFilter);
+    var limits = timelineLimits(d, state.tlFilter, readSources);
     return '<p class="tl-status fine">' + esc(lines.join(' ')) + '</p>' +
       (limits.length ? '<ul class="limits" data-cd-limits>' + limits.map(function (l) { return '<li' + (l.bad ? ' class="is-bad"' : '') + '>' + esc(l.text) + '</li>'; }).join('') + '</ul>' : '');
   }

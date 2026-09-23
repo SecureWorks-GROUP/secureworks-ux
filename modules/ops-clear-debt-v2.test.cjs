@@ -392,6 +392,7 @@ test('every empty-state path follows the one rule', async () => {
     ['calls, notes not read', 'call', (d) => { d.sources.notes.status = 'not_read'; }, ['Notes and desk logs were not read for this view.'], null],
     ['Xero, current', 'xero', () => {}, [], NONE('invoices and xero')],
     ['Xero, stale', 'xero', (d) => { d.sources.xero.status = 'stale'; }, ['The Xero copy is stale (older than 24 hours).'], null],
+    ['Xero invoice events, unreadable', 'xero', (d, read) => { read.sources.xero_events = { ok: false, error: 'event store timeout' }; }, ['Xero invoice events could not be read (event store timeout).'], null],
     ['facts, fully read', 'facts', () => {}, [], NONE('facts')],
     ['facts, unreadable', 'facts', (d) => { d.sources.facts.timeline_read = 'unreadable'; }, ['Captured facts could not be read for this timeline.'], null],
     ['facts, not read', 'facts', (d) => { d.sources.facts.timeline_read = 'not_read'; }, ['Captured facts were not read for this view.'], null],
@@ -399,13 +400,14 @@ test('every empty-state path follows the one rule', async () => {
     ['facts, no job', 'facts', (d) => { d.sources.facts.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so captured facts cannot be read.'], null],
     ['facts, capped', 'facts', (d) => { d.timeline.facts_cap_reached = ['SWF-90002']; }, ['Job SWF-90002 has more than 10 captured facts; only the newest 10 per job were read.'], null],
     ['all, sent emails never captured', 'all', () => {}, ['Sent emails are not captured yet; that fix is under way.'], null],
-    ['all, several limits each once', 'all', (d) => { d.sources.ghl.status = 'unreadable'; d.sources.xero.status = 'stale'; d.timeline.truncated = true; d.timeline.entries_read = 5; },
-      ['Stored GHL texts could not be read.', 'Sent emails are not captured yet; that fix is under way.', 'The Xero copy is stale (older than 24 hours).', 'Only the newest 0 of 5 stored entries are in this read.'], null]
+    ['all, several limits each once', 'all', (d, read) => { d.sources.ghl.status = 'unreadable'; d.sources.xero.status = 'stale'; read.sources.xero_events = { ok: false, error: 'event store timeout' }; d.timeline.truncated = true; d.timeline.entries_read = 5; },
+      ['Stored GHL texts could not be read.', 'Sent emails are not captured yet; that fix is under way.', 'The Xero copy is stale (older than 24 hours).', 'Xero invoice events could not be read (event store timeout).', 'Only the newest 0 of 5 stored entries are in this read.'], null]
   ];
   for (const [name, group, mutate, lines, absence] of cases) {
     const d = fullyRead();
-    mutate(d);
-    CD.state.data = { ...data, debtors: [d] };
+    const read = { ...data, sources: { ...data.sources }, debtors: [d] };
+    mutate(d, read);
+    CD.state.data = read;
     CD.state.selectedKey = d.key;
     CD.state.tlFilter = group;
     const h = html();

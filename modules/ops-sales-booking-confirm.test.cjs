@@ -518,6 +518,29 @@ test('a booked result without a written list names the calendars Book it promise
   const r = api.describeResult('calendar', {status:'booked', appointment_id:'apt-x'}, row, snap);
   assert.match(r.text, /in GHL calendar and Marnin's Outlook at /);
 });
+test('use the proposed text cannot change words while a press is in flight', async () => {
+  editDraft('Edited words for Kerry');
+  assert.match(api.renderHTML(), /Use the proposed text/);
+  let finishApproval;
+  global.opsPost = async (action, body) => {
+    writes.push(structuredClone({action, body}));
+    if (action === 'sales_booking_approval_write') {
+      return new Promise((resolve) => {
+        finishApproval = () => resolve({ok:true, approval:{id:'appr-reset', state:body.decision, snapshot:structuredClone(body.snapshot)}});
+      });
+    }
+    return {status:'sent', message_id:'m-reset'};
+  };
+  const pending = api.press(row.id, 'message');
+  const html = api.renderHTML();
+  assert.doesNotMatch(html, /Use the proposed text/);
+  assert.match(html, /Edited words for Kerry/);
+  assert.equal(api.editedText(row), 'Edited words for Kerry');
+  finishApproval();
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.equal(api.editedText(row), 'Edited words for Kerry');
+});
 test('an in-flight edit cannot send words that are no longer on screen', async () => {
   let finishApproval;
   global.opsPost = async (action, body) => {

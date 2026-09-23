@@ -2495,7 +2495,7 @@
     var clash = clashFor(c);
     return '<p class="route">From <b>' + esc(route.resolved && route.number === sender ? route.label : senderShort(sender)) + '</b>' +
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' · customer phone not in this read') + '</p>' +
-      (edited ? '<p class="edited">Edited. Your approval will cover these exact words. <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button></p>' : '') +
+      (edited ? '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>' : '') +
       (clash ? '<p class="clash">' + esc(clashSentence(clash)) + '</p>' : '') +
       '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
       (block && !state.pressPending[key] && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '') +
@@ -3293,12 +3293,11 @@
       if (closest('[data-booking-draft-reset]')) {
         e.preventDefault();
         var sel = selectedCase();
-        if (sel && state.drafts[draftKey(sel)]) {
-          var d0 = draftFor(sel);
-          d0.humanEdited = false;
-          d0.text = composeText(sel);
-          d0.revision = (d0.revision || 0) + 1;
-        }
+        if (!sel || composeBusy(sel) || !state.drafts[draftKey(sel)]) return;
+        var d0 = draftFor(sel);
+        d0.humanEdited = false;
+        d0.text = composeText(sel);
+        d0.revision = (d0.revision || 0) + 1;
         render();
         return;
       }

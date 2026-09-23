@@ -3393,6 +3393,8 @@
     .jcsr .s{font-size:14.5px;font-weight:700;color:var(--sw-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .jcsr .m{font:500 11px var(--sw-mono);color:var(--sw-ink-3);margin-top:2px;min-width:0;overflow-wrap:anywhere}
     .jcsr .jc-status{flex:0 0 auto;margin-left:0}
+    .jcsr .vo{font-size:11px;color:var(--sw-ink-3);margin-top:3px}
+    .jc-status.pipe{background:transparent;color:var(--sw-ink-3);box-shadow:inset 0 0 0 1px var(--sw-border)}
 
     /* Quick-look sheet (.ql-) — the shared detail entry for every card */
     .ql{font-family:var(--sw-font)}
@@ -4222,7 +4224,7 @@
 
   // <trade-clock-recovery>
   // A server clock is adopted ONLY when it is the signed-in trade's own, fresh
-  // and on a live job. Manager feeds (mode=all) carry every crew's rows, so an
+  // and on a live job. Everyone feeds carry every crew's rows, so an
   // unowned row must never become this device's running timer (audit
   // 2026-09-23: every manager adopted Alyx's 322-hour clock at login).
   var CLOSED_CLOCK_JOB_STATUSES = ['complete', 'completed', 'invoiced', 'paid', 'closed', 'archived', 'cancelled', 'lost', 'deleted', 'void', 'voided'];
@@ -7129,6 +7131,78 @@
   // ══════════════════════════════════════════════════
 
   // Manager visibility lens (dispatcher or managed-vertical lead).
+  // <lead-own-rows-merge>
+  // A managed-vertical lead's Everyone read is scoped to the verticals they
+  // manage (Ryan: make-safe, Henry: fencing), so on its own it drops the lead's
+  // OWN jobs in every other vertical from Today, Assigned and This Week. The
+  // button names that scope, and the lead's own rows are merged back in.
+
+  var MY_JOBS_ROW_GROUPS = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'];
+
+  // Adds every own row the Everyone payload lacks (keyed by assignment id), in
+  // the bucket the personal feed put it in. Personal rows carry no `user`, so
+  // they are stamped with the viewer — anything reading row ownership in the
+  // merged payload sees them as the viewer's own.
+  function ownRowsFromPreviousMyJobs(previous) {
+    if (!previous || typeof previous !== 'object') return null;
+    var mine = {};
+    var any = false;
+    MY_JOBS_ROW_GROUPS.forEach(function(g) {
+      var rows = (previous[g] || []).filter(isOwnAssignmentRow);
+      if (rows.length) {
+        mine[g] = rows;
+        any = true;
+      }
+    });
+    return any ? mine : null;
+  }
+
+  function mergeOwnMyJobsRows(everyone, mine, previous) {
+    if (!everyone || typeof everyone !== 'object') return everyone;
+    if (!mine || typeof mine !== 'object') {
+      everyone._ownRowsUnavailable = true;
+      mine = ownRowsFromPreviousMyJobs(previous);
+      if (!mine) return everyone;
+    }
+    var seen = {};
+    MY_JOBS_ROW_GROUPS.concat(['makesafePool']).forEach(function(g) {
+      (everyone[g] || []).forEach(function(a) { if (a && a.id) seen[a.id] = true; });
+    });
+    MY_JOBS_ROW_GROUPS.forEach(function(g) {
+      var added = false;
+      (mine[g] || []).forEach(function(a) {
+        if (!a || !a.id || seen[a.id]) return;
+        seen[a.id] = true;
+        if (!a.user || !a.user.id) a.user = { id: _user.id, name: _user.name || '' };
+        if (!Array.isArray(everyone[g])) everyone[g] = [];
+        everyone[g].push(a);
+        added = true;
+      });
+      if (added) {
+        everyone[g].sort(function(x, y) {
+          return String(x.scheduled_date || '').localeCompare(String(y.scheduled_date || '')) ||
+            String(x.start_time || '').localeCompare(String(y.start_time || ''));
+        });
+      }
+    });
+    return everyone;
+  }
+
+  // The one my_jobs read for the active lens. Dispatchers' Everyone is already
+  // company-wide; only a managed lead needs the second, personal read.
+  function fetchMyJobsForActiveLens() {
+    var params = {};
+    if (canUseEveryoneLens()) params.mode = _adminViewAll ? 'all' : 'mine';
+    var everyone = api('my_jobs', params);
+    if (params.mode !== 'all' || _isAdmin) return everyone;
+    var mine = api('my_jobs', { mode: 'mine' }).then(null, function(err) {
+      console.warn('[trade] own-jobs read for the Everyone lens failed:', err && (err.message || err));
+      return null;
+    });
+    return Promise.all([everyone, mine]).then(function(r) { return mergeOwnMyJobsRows(r[0], r[1], _lastJobData); });
+  }
+  // </lead-own-rows-merge>
+
   function syncManagerJobToggle() {
     var btnAll = document.getElementById('adminToggleAll');
     var btnMine = document.getElementById('adminToggleMine');
@@ -7197,13 +7271,11 @@
 
     // mode=all is an authorization request, not a client-side widening. The
     // backend limits managed leads to their tenant-scoped managed verticals.
-    var params = {};
-    if (canUseEveryoneLens()) params.mode = _adminViewAll ? 'all' : 'mine';
     var requestToken = ++_myJobsRequestToken;
     var requestCacheKey = jobListCacheKey();
 
     // Always fetch fresh data — if cache was shown, this is a background refresh
-    api('my_jobs', params).then(function(data) {
+    fetchMyJobsForActiveLens().then(function(data) {
       clearTimeout(slowTimer);
       if (requestToken !== _myJobsRequestToken || requestCacheKey !== jobListCacheKey()) return;
       renderMyJobs(data);
@@ -7216,7 +7288,7 @@
       }
       ncAdoptOwnWorkDefault();
       // Check for active server-side clock (survives app reinstall / device switch)
-      checkServerClockRecovery(data, params.mode === 'all');
+      checkServerClockRecovery(data, canUseEveryoneLens() && _adminViewAll);
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);
@@ -7294,7 +7366,7 @@
 
   // The pool itself travels with its "may be incomplete" verdict; caching the rows without
   // that caveat would replay a known-truncated pool as a definitive list on the next launch.
-  var TRANSIENT_JOB_FLAGS = ['makesafePool', '_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete'];
+  var TRANSIENT_JOB_FLAGS = ['makesafePool', '_makesafePoolLoaded', '_makesafePoolLoading', '_makesafePoolError', '_makesafePoolErrorMsg', '_makesafePoolIncomplete', '_ownRowsUnavailable'];
 
   // User-facing load-failure hint. Backend detail stays in console.warn — never in the trade UI.
   function loadFailureHint() {
@@ -8098,71 +8170,127 @@
   }
   window.retryGlobalJobSearch = retryGlobalJobSearch;
 
+  // <all-tab-search-card-truth>
+  // A search hit is a JOB, not an allocation. The card may only say
+  // "Allocated" when an allocation is actually known: a backend flag, or a row
+  // this viewer's own feed carries for the job. Anything else reads its
+  // pipeline word, so a lead, quote, draft or archived lost quote never looks
+  // like work someone is on.
+  // Live my_jobs rows often carry user_id and no user object. Ownership is
+  // isOwnClockRow (AGENTS.md → Trade clock recovery), never user.id alone.
+  function isOwnAssignmentRow(a) {
+    if (!a || a._makesafePool) return false;
+    return isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll);
+  }
+
+  // Prefers the viewer's own row, so a job shared with another crew opens as
+  // the viewer's allocation, never theirs.
   function findAssignmentForGlobalJob(data, jobId) {
     if (!data || !jobId) return null;
     var groups = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'];
+    var first = null;
     for (var g = 0; g < groups.length; g++) {
       var items = data[groups[g]] || [];
       for (var i = 0; i < items.length; i++) {
-        if (((items[i].jobs || {}).id) === jobId) return items[i];
+        if (((items[i].jobs || {}).id) !== jobId) continue;
+        if (isOwnAssignmentRow(items[i])) return items[i];
+        if (!first) first = items[i];
       }
     }
-    return null;
+    return first;
   }
 
-  function getGlobalJobDisplayStatus(job) {
-    var raw = String((job && job.status) || '').toLowerCase().trim();
-    if ((job && job.completed_at) || ['complete', 'completed', 'archived', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1) return 'Completed';
-    if (!raw) return 'Status unknown';
-    return raw.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  var GLOBAL_JOB_PIPELINE_WORD = {
+    draft: 'Draft',
+    lead: 'Lead', new: 'Lead', new_lead: 'Lead', enquiry: 'Lead', inquiry: 'Lead', contacted: 'Lead',
+    quote: 'Quote', quoted: 'Quote', quoting: 'Quote', quote_sent: 'Quote', estimate: 'Quote', proposal: 'Quote',
+    accepted: 'Not scheduled', approved: 'Not scheduled', processing: 'Not scheduled', won: 'Not scheduled', deposit_paid: 'Not scheduled', ready: 'Not scheduled',
+    scheduled: 'Scheduled', in_progress: 'In progress', on_hold: 'On hold'
+  };
+
+  // -> { cls, label } for the card's status chip.
+  function globalJobSearchBadge(job, assignment, type) {
+    job = job || {};
+    var S = UnifiedJobCard.STATUS;
+    if (assignment) return S[UnifiedJobCard.statusFromAssignment(assignment.status, !!assignment._makesafePool)] || S.alloc;
+    var raw = String(job.status || '').toLowerCase().trim();
+    var done = !!job.completed_at || ['complete', 'completed', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1;
+    var gone = ['cancelled', 'canceled', 'lost', 'void', 'voided', 'deleted', 'duplicate', 'duplicated'].indexOf(raw) !== -1;
+    var archived = job.archived === true || raw === 'archived';
+    if (type === 'makesafe') {
+      if (archived || gone) return S.arch;
+      if (done) return S.done;
+      if (job.assigned_to_me === true || job.allocated === true) return S.alloc;
+    } else {
+      if (archived) return { cls: 'arch', label: 'Archived' };
+      if (done) return S.done;
+      if (raw === 'lost') return { cls: 'arch', label: 'Lost' };
+      if (gone) return { cls: 'arch', label: 'Cancelled' };
+      if (job.assigned_to_me === true || job.allocated === true) return S.alloc;
+    }
+    if (!raw) return { cls: 'pipe', label: 'Status unknown' };
+    var word = GLOBAL_JOB_PIPELINE_WORD[raw] ||
+      raw.replace(/_/g, ' ').replace(/^\w/, function(c) { return c.toUpperCase(); });
+    return { cls: 'pipe', label: word };
+  }
+
+  // Who may open a search hit. Dispatchers open any job (office access). A crew
+  // member opens a job their own feed carries, or one the server flags as
+  // theirs. Make-safes keep their report door. A numbered job past the sale may
+  // still be the trade's own older work (the personal feed only keeps a recent
+  // window), so it opens and the server's access check decides. Leads, quotes,
+  // drafts and dead records never had crew: they are reference only and say so.
+  var GLOBAL_JOB_DELIVERY_STATUS = ['scheduled', 'in_progress', 'on_hold', 'complete', 'completed', 'invoiced', 'paid', 'closed', 'archived'];
+  function globalJobSearchOpenable(job, assignment, type) {
+    job = job || {};
+    if (type === 'makesafe') return true;
+    if (assignment) return true;
+    if (job.assigned_to_me === true) return true;
+    if (_isAdmin) return true;
+    if (job.assigned_to_me === false) return false;
+    return !!job.job_number && GLOBAL_JOB_DELIVERY_STATUS.indexOf(String(job.status || '').toLowerCase().trim()) !== -1;
   }
 
   function renderGlobalJobSearchCard(job, data, idx) {
     var assignment = findAssignmentForGlobalJob(data, job.id);
     var type = getTradeJobType(job, assignment);
-    var statusLabel = getGlobalJobDisplayStatus(job);
-    var statusClass = String((job.status || statusLabel || 'unknown')).toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
-    var isOpenMakesafe = type === 'makesafe' && isOpenMakesafePoolJob(job);
-    // Make-safe results are always openable (read-only view when not assigned).
-    // Non-makesafe non-assigned jobs remain un-tappable (search reference only).
-    var isMakesafe = type === 'makesafe';
-    var clickable = !!assignment || isMakesafe;
-    var assignmentArg = assignment ? (assignment.id || '') : '';
+    var clickable = globalJobSearchOpenable(job, assignment, type);
+    var assignmentArg = assignment && !assignment._makesafePool ? (assignment.id || '') : '';
     var openAction = type === 'makesafe'
       ? "openJobReport('" + job.id + "', '" + assignmentArg + "')"
       : "openJob('" + job.id + "', '" + assignmentArg + "')";
     var attrs = clickable
       ? ' onclick="' + openAction + '" style="cursor:pointer"'
-      : ' style="cursor:default"';
-    // One vocabulary: map the search hit to the four user-facing statuses.
-    var scls;
-    if (assignment) scls = UnifiedJobCard.statusFromAssignment(assignment.status);
-    else if (isOpenMakesafe) scls = 'new';
-    else {
-      var raw = String(job.status || '').toLowerCase();
-      if (job.completed_at || ['complete', 'completed', 'paid', 'closed', 'invoiced'].indexOf(raw) !== -1) scls = 'done';
-      else if (['cancelled', 'canceled', 'lost', 'void', 'voided', 'archived', 'deleted', 'duplicate', 'duplicated'].indexOf(raw) !== -1) scls = 'arch';
-      else scls = 'alloc';
-    }
-    var chip = UnifiedJobCard.STATUS[scls] || UnifiedJobCard.STATUS.alloc;
+      : ' data-view-only="1" style="cursor:default"';
+    var chip = globalJobSearchBadge(job, assignment, type);
     var TYPE_LABEL = { makesafe: 'Make safe', fencing: 'Fencing', patio: 'Patio', decking: 'Decking', renovation: 'Renovation', reno: 'Renovation', repair: 'Repair' };
     var typeLabel = TYPE_LABEL[String(type).toLowerCase()] || String(type || 'Job').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-    var place = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim() || 'Suburb TBC';
     var client = String(job.client_name || '').trim();
-    var metaBits = [job.job_number, client, typeLabel].filter(Boolean).join(' · ');
+    var place = String(job.site_suburb || '').trim() || String(job.site_address || '').split(',')[0].trim();
+    // No place and no job number: the client's name is the only thing a trade
+    // can recognise the record by, so it becomes the title.
+    var clientIsTitle = !place && !job.job_number && !!client;
+    var title = place || (clientIsTitle ? client : 'Suburb TBC');
+    var metaBits = [job.job_number, clientIsTitle ? '' : client, typeLabel].filter(Boolean).join(' · ');
 
     var h = '<div class="jcsr ' + esc(UnifiedJobCard.typeCls(type)) + '"' + attrs + '>';
-    h += '<div class="inf"><div class="s">' + esc(place) + '</div><div class="m">' + esc(metaBits) + '</div></div>';
-    h += '<span class="jc-status ' + chip.cls + '">' + esc(chip.label) + '</span>';
+    h += '<div class="inf"><div class="s">' + esc(title) + '</div><div class="m">' + esc(metaBits) + '</div>';
+    if (!clickable) h += '<div class="vo">View only · not on your jobs</div>';
+    h += '</div>';
+    h += '<span class="jc-status ' + esc(chip.cls) + '">' + esc(chip.label) + '</span>';
     h += '</div>';
     return h;
   }
+  // </all-tab-search-card-truth>
 
   // Renders both All-tab reads through one grammar: a typed search (query given)
   // and the empty-query company feed (query ''). The feed adds the scroll pager
-  // footer; the search block keeps the copy it always had.
-  function renderGlobalJobSearchResults(data, query) {
+  // footer. Card chips, tap/open rules and titles: AGENTS.md → ALL-TAB SEARCH CARDS.
+  // listedIds: jobs already on screen as the viewer's own cards; they are not
+  // repeated here and the count line says where they are (listedWhere).
+  function renderGlobalJobSearchResults(data, query, listedIds, listedWhere) {
     query = String(query || '');
+    listedIds = listedIds || {};
     var isFeed = !query;
     if (!isFeed && query.length < 2) return '';
     var matched = globalJobStateMatches(query, isFeed);
@@ -8170,8 +8298,8 @@
     var nouns = isFeed ? 'jobs' : 'matches';
     var h = '<div class="section-label">' + (isFeed ? 'All jobs · whole company' : 'All database · all jobs') + '</div>';
     h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-8px 0 10px;line-height:1.4">' + (isFeed
-      ? 'Every job in the database, newest first, across every vertical and crew — including cancelled, completed and archived work. Today and allocated views still show only your live assigned jobs.'
-      : 'All tab search includes old, completed and archived jobs across the board, including jobs allocated to other trades. Today and allocated views still show only your live assigned jobs.') + '</div>';
+      ? 'Every job in the database, newest first, across every vertical and crew, including leads, quotes, cancelled, completed and archived work. The tag on each card says where the job is up to.'
+      : 'Searches every job in the database across every trade, including leads, quotes, old, completed and archived jobs. The tag on each card says where the job is up to. Only jobs you can open are tappable.') + '</div>';
     if (matched && _globalJobSearch.denied) {
       // Not an empty list and not a failure: this account was not granted the
       // company lens, so say which browse it does have.
@@ -8215,7 +8343,13 @@
     } else {
       h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">Showing ' + shown + ' of ' + total + ' ' + nouns + '</div>';
     }
+    var listedHere = 0;
+    results.forEach(function(job) { if (listedIds[job.id]) listedHere++; });
+    if (listedHere) {
+      h += '<div style="font-size:12px;color:var(--sw-text-sec);margin:-4px 0 10px">' + listedHere + ' of these ' + (listedHere === 1 ? 'is' : 'are') + ' on your list ' + (listedWhere === 'above' ? 'above' : 'below') + '.</div>';
+    }
     results.forEach(function(job, idx) {
+      if (listedIds[job.id]) return;
       cacheTradeJob(job, findAssignmentForGlobalJob(data, job.id));
       h += renderGlobalJobSearchCard(job, data, idx);
     });
@@ -8398,7 +8532,13 @@
     // Today/allocated sections remain assignment-based for trades. The separate All-tab search
     // below is the deliberate exception: it reaches the full historical job database across
     // crews/statuses, including old completed/archived jobs.
-    if (_needsGlobalSearch) html += renderGlobalJobSearchResults(data, query);
+    // The typed-search block sits here, but is built after the sections below so
+    // a job already listed as a card there is not listed twice (A5).
+    var globalSearchAt = html.length;
+    var renderedJobIds = {};
+    if (data._ownRowsUnavailable && activeMyJobsLens() === 'everyone') {
+      html += '<div style="font-size:12px;color:#B35309;background:#FFF8F0;border:1px solid #E67E22;border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4">Could not load your own jobs outside ' + esc(TradeAccessCore.verticalNames(_user).join(', ')) + '. Switch to Mine to see them.</div>';
+    }
 
     var managedPrimary = primaryManagedTradeVertical();
     var readyPoolLabel = managedPrimary === 'fencing' ? 'Fencing Ready for Crew' : 'Open MakeSafe Jobs';
@@ -8571,6 +8711,7 @@
         }
 
         cacheTradeJob(job, a);
+        renderedJobIds[job.id] = true;
         var type = getTradeJobType(job, a);
         var openAction = type === 'makesafe' ? 'openJobReport' : 'openJob';
         var assignmentArg = a._makesafePool ? '' : (a.id || '');
@@ -8601,7 +8742,10 @@
 
     // The company feed is appended last: it is an endless list, so the viewer's
     // own sections stay above it and the scroll trigger is the end of the page.
-    if (_needsAllJobsFeed) html += renderGlobalJobSearchResults(data, '');
+    if (_needsGlobalSearch) {
+      html = html.slice(0, globalSearchAt) + renderGlobalJobSearchResults(data, query, renderedJobIds, 'below') + html.slice(globalSearchAt);
+    }
+    if (_needsAllJobsFeed) html += renderGlobalJobSearchResults(data, '', renderedJobIds, 'above');
 
     container.innerHTML = html;
 
@@ -8965,7 +9109,9 @@
       if (k === 'repair') return 'rp';
       return 'nt';
     }
-    // The four user-facing statuses (+ live On site). One vocabulary everywhere.
+    // The four user-facing statuses (+ live On site) on assignment and board
+    // cards. All-tab / database-search chips are owned by AGENTS.md → ALL-TAB
+    // SEARCH CARDS (this map only when the hit has a known assignment).
     var STATUS = {
       new: { cls: 'new', label: 'New' }, alloc: { cls: 'alloc', label: 'Allocated' },
       live: { cls: 'live', label: 'On site' }, done: { cls: 'done', label: 'Complete' },
@@ -9794,6 +9940,12 @@
       resumeStaleClockOff(jobId, data);
     }).catch(function(err) {
       clearTimeout(slowTimer);
+      // A job opened from All-tab search may not be this trade's: the server's
+      // refusal is an answer, not a failure to retry.
+      if (err && (err.status === 403 || err.status === 404)) {
+        container.innerHTML = '<div class="empty-state">This job is not on your jobs, so it can\'t be opened here.<br><span style="font-size:13px;color:var(--sw-text-sec)">If you worked on it, ask the office.</span><br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="goBack()">Back to jobs</button></div>';
+        return;
+      }
       container.innerHTML = '<div class="empty-state">Error: ' + friendlyError(err) + '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="loadJobDetail(\'' + jobId + '\')">Retry</button></div>';
     });
   };
@@ -16999,7 +17151,7 @@
     // Tapping Activity before My Jobs API returns means _cachedMyJobs is empty.
     if (!_lastJobData && _user) {
       container.innerHTML = '<div class="loading-screen"><div class="spinner"></div>Loading activity...</div>';
-      api('my_jobs', canUseEveryoneLens() ? { mode: _adminViewAll ? 'all' : 'mine' } : {}).then(function(data) {
+      fetchMyJobsForActiveLens().then(function(data) {
         renderMyJobs(data);
         renderActivityView();
       }).catch(function(err) {

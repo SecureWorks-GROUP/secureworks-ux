@@ -562,8 +562,11 @@ card's `--jc-a`, so `openAllocateSheet` stamps the job-type class onto it and
 `.alloc-sheet.<type>` sets the var; keep that stamping or the Allocate button
 silently falls back to orange.
 Two status vocabularies exist, scoped by vertical — they are never merged. On
-every make-safe surface the four user-facing statuses are the ONLY vocabulary:
-New / Allocated / Complete / Archive (+ live "On site"). The separate fencing
+every make-safe assignment and board surface the four user-facing statuses are
+the ONLY vocabulary: New / Allocated / Complete / Archive (+ live "On site").
+All-tab and MakeSafe Board database-search cards are jobs, not allocations —
+chip and open rules live in ALL-TAB SEARCH CARDS below, never a default New.
+The separate fencing
 field-work Board vertical has its own six column words: Ready / Scheduled / On
 site / Done / Attention / Cancelled (`FencingBoardCore`, detail in
 `trade-app.md`). Neither set may be renamed onto the other's surfaces.
@@ -692,16 +695,21 @@ paged own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity
 
 ## Trade clock recovery (`trade.html`)
 
-`checkServerClockRecovery` runs after every `my_jobs` load and may adopt a
-server clock as this device's running timer ONLY when the row is the signed-in
-trade's own (`user.id`/`user_id`; an unowned row only on the personal feed,
-never `mode=all`, which carries every crew's rows), on a live job, clocked on
-today or yesterday (Perth). An own clock that fails those gets the "ask the
+`checkServerClockRecovery` runs after every `my_jobs` load. The Everyone-feed
+flag is `canUseEveryoneLens() && _adminViewAll`, the same derivation
+`fetchMyJobsForActiveLens` uses. It may adopt a server clock as this device's
+running timer ONLY when the row is the signed-in trade's own (`user.id`/
+`user_id`; an unowned row only on the personal feed, never Everyone, which
+carries every crew's rows), on a live job, clocked on today or yesterday
+(Perth). All-tab own-row preference and the failed-mine rematch use that same
+check (`isOwnClockRow`). Merged own rows are stamped with the viewer's id, so
+they still pass that check. An own clock that fails those gets the "ask the
 office to close it" notice, never adoption. A clock_event the server refuses
 ('Not your assignment', any non-transient 4xx, `success:false`) is a refusal
 (`isClockEventRefusal`): never queued offline, never "Saved locally", and a
-queued one is dropped on replay. Search `// <trade-clock-recovery>`; guard
-`tests/e2e/trade-clock-recovery.spec.js`.
+queued one is dropped on replay. Search `// <trade-clock-recovery>`; guards
+`tests/e2e/trade-clock-recovery.spec.js` and the load-without-crash cases in
+`tests/e2e/trade-all-search-truth.spec.js`.
 
 ## Crew roster & lead installer (`trade.html`)
 
@@ -749,9 +757,32 @@ on the job table instead of the assignment table: an empty query asks
 the Everyone lens, and it is painted only when the server answers
 `lens: 'company'` — scroll paging then follows the server's `next_offset`
 (`// <all-tab-full-feed>`). A typed All query is available to every authenticated
-trade and can open an unallocated make-safe; global results render ONLY on All.
-Today, Assigned, This Week, Active, and History remain assignment/day-scoped.
-Surface-level detail lives in `trade-app.md`.
+trade; global results render ONLY on All. Today, Assigned, This Week, Active, and
+History remain assignment/day-scoped. Search-card chips, open rules and lead
+own-row merge: ALL-TAB SEARCH CARDS below. Surface-level feed/paging detail lives
+in `trade-app.md`.
+
+ALL-TAB SEARCH CARDS ARE JOBS, NOT ALLOCATIONS (`// <all-tab-search-card-truth>`).
+"All means all" (captain, 2026-09-23): leads, quotes, drafts and archived records
+stay in search, so the chip must tell the truth. It says Allocated only from an
+assignment row the viewer's feed carries (own row preferred; same ownership
+check as Trade clock recovery) or a backend
+`assigned_to_me`/`allocated` flag, never from job status; otherwise the pipeline
+word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
+Archived). A make-safe hit still opens the report path (unallocated included);
+its chip never says New just because it is live. A hit with no suburb/address
+and no job number uses the client name as the title; a missing place otherwise
+still titles Suburb TBC (job number stays on the meta line). Pre-sale/dead records are
+view-only with a hint; Office can still open any hit. A numbered delivery-stage
+job opens and the server's access check decides (403/404 renders "not on your
+jobs", no retry). Search hits already rendered as the viewer's own cards are not
+repeated. A managed lead's Everyone read covers only their managed verticals, so
+`fetchMyJobsForActiveLens` also reads `mode=mine` and merges own rows
+(`// <lead-own-rows-merge>`); a failed personal read keeps the previously shown
+own rows and still names the miss; merged today rows sort by date/time before
+the run list freezes. Everyone-toggle wording is ACCESS IS NAMED. List
+money is MONEY IS OFFICE-ONLY. Guard:
+`tests/e2e/trade-all-search-truth.spec.js`.
 
 A GHOST `role:'observer'` ASSIGNMENT ROW IS A WATCHER AND NEVER SPEAKS FOR A
 JOB'S SCHEDULE. Ops staff are mirrored onto a job so it shows in their own list;

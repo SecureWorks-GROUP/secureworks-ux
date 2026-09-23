@@ -28646,6 +28646,9 @@
   var _wizSigCtx = null;
   var _wizSigDrawing = false;
   var _wizSigName = '';
+  // The drawn signature as a PNG data URL, so a re-render of the sign-off step
+  // (a star tap, going Back from the checklist) repaints it instead of wiping it.
+  var _wizSigSnapshot = null;
   var _wizMediaRecorder = null;
   var _wizRecording = false;
   var _wizRecordingStart = null;
@@ -28715,6 +28718,7 @@
     _wizMarketingPhotos = [];
     _wizAudioBlob = null;
     _wizSigName = '';
+    _wizSigSnapshot = null;
     _wizSigCanvas = null;
     _wizClientSmsSent = false;
     _wizSigCtx = null;
@@ -28784,7 +28788,10 @@
     else renderWizStep4_submit(body, footer);
   };
 
-  window.wizNext = function() { if (_wizStep < _wizStepCount) { _wizStep++; renderWizStep(); } };
+  window.wizNext = function() {
+    if (_wizSteps[_wizStep - 1] === 'signoff' && !wizSignoffCanProceed()) { wizCheckSignoff(); return; }
+    if (_wizStep < _wizStepCount) { _wizStep++; renderWizStep(); }
+  };
 
   // ── STEP (fencing): Neighbour sign-off screenshots ──
   function renderWizStepNeighbours(body, footer) {
@@ -28929,7 +28936,7 @@
     html += '<div style="margin:16px 0;padding:16px;background:var(--sw-light);border-radius:12px">';
     html += '<div style="font-size:14px;font-weight:600;margin-bottom:8px">Client Signature</div>';
     if (!_wizClientNotOnSite) {
-      html += '<input type="text" id="wizSigNameInput" placeholder="Client name" value="' + esc(_wizSigName) + '" oninput="_wizSigName=this.value" style="width:100%;padding:10px;border:1.5px solid var(--sw-border);border-radius:8px;font-size:15px;font-family:var(--sw-font);box-sizing:border-box;margin-bottom:8px">';
+      html += '<input type="text" id="wizSigNameInput" placeholder="Client name" value="' + esc(_wizSigName) + '" oninput="wizSetSigName(this.value)" style="width:100%;padding:10px;border:1.5px solid var(--sw-border);border-radius:8px;font-size:15px;font-family:var(--sw-font);box-sizing:border-box;margin-bottom:8px">';
       html += '<canvas id="wizSigPad" width="320" height="150" style="width:100%;height:150px;border:2px solid var(--sw-border);border-radius:8px;background:#fff;touch-action:none;cursor:crosshair"></canvas>';
       html += '<div style="display:flex;gap:8px;margin-top:8px">';
       html += '<button class="wiz-btn wiz-btn-secondary" style="flex:1;font-size:12px" onclick="wizClearSig()">Clear</button>';
@@ -28952,13 +28959,42 @@
       setTimeout(function() { initWizSigPad(); }, 50);
     }
 
-    var canProceed = _wizSatisfaction > 0 && (_wizClientNotOnSite || (_wizSigCanvas && _wizSigDrawing));
     var fh = '<div style="display:flex;gap:8px">';
     fh += '<button class="wiz-btn wiz-btn-secondary" onclick="wizBack()">Back</button>';
-    fh += '<button class="wiz-btn wiz-btn-primary" onclick="wizNext()">Next — Checklist</button>';
+    fh += '<button class="wiz-btn wiz-btn-primary" id="wizSignoffNext" onclick="wizNext()">Next — Checklist</button>';
     fh += '</div>';
+    fh += '<div id="wizSignoffHint" style="font-size:11px;color:var(--sw-yellow);text-align:center;margin-top:6px"></div>';
     footer.innerHTML = fh;
+    wizCheckSignoff();
   }
+
+  // Sign-off gate: the client on site rates the work, gives their name and
+  // signs; a client not on site is covered by the SMS path instead.
+  function wizSignoffMissing() {
+    if (_wizClientNotOnSite) return [];
+    var missing = [];
+    if (!(_wizSatisfaction > 0)) missing.push('rating');
+    if (!String(_wizSigName || '').trim()) missing.push('name');
+    if (!(_wizSigCanvas && _wizSigCanvas._hasStrokes)) missing.push('signature');
+    return missing;
+  }
+  function wizSignoffCanProceed() { return wizSignoffMissing().length === 0; }
+  function wizCheckSignoff() {
+    var btn = document.getElementById('wizSignoffNext');
+    if (!btn) return;
+    var missing = wizSignoffMissing();
+    btn.disabled = missing.length > 0;
+    btn.style.opacity = missing.length ? '0.5' : '';
+    var hint = document.getElementById('wizSignoffHint');
+    if (hint) hint.textContent = missing.length ? 'Add the client\'s ' + missing.join(', ').replace(/, ([^,]*)$/, ' and $1') + ' to continue' : '';
+  }
+
+  // trade.html's script is IIFE-wrapped, so an inline oninput can only reach
+  // window.*; this setter is how the typed name reaches the wizard's own var.
+  window.wizSetSigName = function(v) {
+    _wizSigName = String(v == null ? '' : v);
+    wizCheckStep4();
+  };
 
   window.wizSetRating = function(n) {
     _wizSatisfaction = n;
@@ -29247,7 +29283,7 @@
     // Name input
     html += '<div style="margin-bottom:12px">';
     html += '  <label style="font-size:12px;color:var(--sw-text-sec);display:block;margin-bottom:4px">Homeowner Name (required)</label>';
-    html += '  <input type="text" id="wizSigNameInput" value="' + esc(_wizSigName) + '" placeholder="Full name" style="width:100%;padding:12px;border:2px solid var(--sw-border);border-radius:10px;font-size:16px;font-family:var(--sw-font);min-height:48px" oninput="_wizSigName=this.value;wizCheckStep4()">';
+    html += '  <input type="text" id="wizSigNameInput" value="' + esc(_wizSigName) + '" placeholder="Full name" style="width:100%;padding:12px;border:2px solid var(--sw-border);border-radius:10px;font-size:16px;font-family:var(--sw-font);min-height:48px" oninput="wizSetSigName(this.value)">';
     html += '</div>';
 
     // Signature pad
@@ -29267,8 +29303,10 @@
   }
 
   function initWizSigPad() {
-    _wizSigCanvas = document.getElementById('wizSigPad');
-    if (!_wizSigCanvas) return;
+    // A late init after the step has moved on must not drop the signature.
+    var pad = document.getElementById('wizSigPad');
+    if (!pad) return;
+    _wizSigCanvas = pad;
     var rect = _wizSigCanvas.getBoundingClientRect();
     _wizSigCanvas.width = rect.width * 2;
     _wizSigCanvas.height = Math.max(rect.height, 200) * 2;
@@ -29279,18 +29317,28 @@
     _wizSigCtx.lineCap = 'round';
     _wizSigCtx.lineJoin = 'round';
 
-    // Placeholder
-    _wizSigCtx.save();
-    _wizSigCtx.fillStyle = '#ccc';
-    _wizSigCtx.font = '14px ' + getComputedStyle(document.body).fontFamily;
-    _wizSigCtx.textAlign = 'center';
-    _wizSigCtx.fillText('Sign here', rect.width / 2, Math.max(rect.height, 200) / 2);
-    _wizSigCtx.restore();
+    if (_wizSigSnapshot) {
+      // Re-rendered step: repaint the signature already drawn.
+      _wizSigCanvas._hasStrokes = true;
+      var sigCanvas = _wizSigCanvas, sigCtx = _wizSigCtx;
+      var img = new Image();
+      img.onload = function() { sigCtx.drawImage(img, 0, 0, sigCanvas.width / 2, sigCanvas.height / 2); };
+      img.src = _wizSigSnapshot;
+    } else {
+      // Placeholder
+      _wizSigCtx.save();
+      _wizSigCtx.fillStyle = '#ccc';
+      _wizSigCtx.font = '14px ' + getComputedStyle(document.body).fontFamily;
+      _wizSigCtx.textAlign = 'center';
+      _wizSigCtx.fillText('Sign here', rect.width / 2, Math.max(rect.height, 200) / 2);
+      _wizSigCtx.restore();
+    }
 
     _wizSigCanvas.addEventListener('pointerdown', wizSigStart);
     _wizSigCanvas.addEventListener('pointermove', wizSigMove);
     _wizSigCanvas.addEventListener('pointerup', wizSigEnd);
     _wizSigCanvas.addEventListener('pointerleave', wizSigEnd);
+    _wizSigCanvas.setAttribute('data-sig-ready', '');
   }
 
   function wizSigStart(e) {
@@ -29314,7 +29362,12 @@
     e.preventDefault();
   }
 
-  function wizSigEnd() { _wizSigDrawing = false; wizCheckStep4(); }
+  function wizSigEnd() {
+    var wasDrawing = _wizSigDrawing;
+    _wizSigDrawing = false;
+    if (wasDrawing && _wizSigCanvas && _wizSigCanvas._hasStrokes) _wizSigSnapshot = _wizSigCanvas.toDataURL('image/png');
+    wizCheckStep4();
+  }
 
   function wizSigPos(e) {
     var rect = _wizSigCanvas.getBoundingClientRect();
@@ -29325,6 +29378,7 @@
     if (!_wizSigCtx) return;
     _wizSigCtx.clearRect(0, 0, _wizSigCanvas.width, _wizSigCanvas.height);
     _wizSigCanvas._hasStrokes = false;
+    _wizSigSnapshot = null;
     // Redraw placeholder
     var rect = _wizSigCanvas.getBoundingClientRect();
     _wizSigCtx.save();
@@ -29337,6 +29391,7 @@
   };
 
   function wizCheckStep4() {
+    wizCheckSignoff();
     var btn = document.getElementById('wizStep4Next');
     if (!btn) return;
     var nameOk = _wizSigName && _wizSigName.trim();
@@ -29513,7 +29568,7 @@
     // 5. Call complete_job
     photoChain = photoChain.then(function() {
       tick('Updating job status...');
-      var completePayload = { jobId: jobId, signatureName: _wizSigName };
+      var completePayload = { jobId: jobId, signatureName: String(_wizSigName || '').trim() };
       if (_wizSatisfaction > 0) completePayload.satisfaction_rating = _wizSatisfaction;
       // complete_my_job is the trade door (assignment / vertical-manager
       // access + fencing evidence gate). Staff accounts keep complete_job.
@@ -29596,8 +29651,9 @@
   }
 
   function wizUploadSignature(jobId) {
-    if (!_wizSigCanvas) return Promise.resolve();
-    var dataUrl = _wizSigCanvas.toDataURL('image/png');
+    // No signature to save when the client was not on site or never signed.
+    if (_wizClientNotOnSite || !(_wizSigSnapshot || (_wizSigCanvas && _wizSigCanvas._hasStrokes))) return Promise.resolve();
+    var dataUrl = _wizSigSnapshot || _wizSigCanvas.toDataURL('image/png');
     // Convert data URL to blob
     var byteStr = atob(dataUrl.split(',')[1]);
     var ab = new ArrayBuffer(byteStr.length);
@@ -29627,7 +29683,7 @@
         jobId: jobId,
         publicUrl: urlData.publicUrl,
         path: urlData.path,
-        label: 'Client signature — ' + _wizSigName,
+        label: 'Client signature — ' + String(_wizSigName || '').trim(),
         phase: 'signature'
       });
     });

@@ -762,7 +762,11 @@ Gotchas:
 - `trade.html`'s body script is IIFE-wrapped: only `window.*` fns are global —
   an inline `onclick="fn(...)"` on a rendered string reaches ONLY `window.fn`.
   `generatePOPdf` shipped as a dead button this way; expose the fn or the
-  button silently throws. To
+  button silently throws. An inline ASSIGNMENT is worse: it throws nothing,
+  `oninput="_wizSigName=this.value"` just wrote `window._wizSigName` and every
+  completion saved a blank client name; route inline input through a
+  `window.*` setter. Completion-wizard specs must sign off through
+  `tests/helpers/wizard-signoff.js` (contract in `trade-app.md`). To
   QA internal renderers, serve over http (the browser extension blocks `file://`)
   and eval the sentinel-delimited modules in a harness.
 - Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.

@@ -92,10 +92,16 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   screenshot slot per named neighbour, min one, or a waiver with a reason that
   `waive_neighbour_signoff` logs on the job). Screenshots upload as
   `phase: neighbour_signoff` BEFORE `complete_my_job`, which is the trade door
-  (staff fall back to `complete_job`). The server refuses completion and every
-  job-invoice path until `completion_evidence` is satisfied. The wizard's
-  "Complete Job" button was a dead inline onclick (`wizExecuteCompletion` was
-  not on `window`) for every trade before 2026-09-08.
+  (staff fall back to `complete_job`). Client on-site sign-off gates Next on a
+  star rating, the client's name, and a drawn signature; a client not on site
+  is the SMS path. `complete_my_job` receives the trimmed name as
+  `signatureName`, and the saved pad is labelled "Client signature — {name}".
+  A re-render of the step (star tap, Back) keeps the name and the drawn pad.
+  The server refuses completion and every job-invoice path until
+  `completion_evidence` is satisfied. The wizard's "Complete Job" button was
+  a dead inline onclick (`wizExecuteCompletion` was not on `window`) for
+  every trade before 2026-09-08. Guard:
+  `tests/e2e/trade-completion-signoff.spec.js`.
 - **Quote lines**: `quote_packs[].quote_lines` (the client quote's own rows,
   price-free) + `quote_notes` render as the scope of works; the derived
   installer lines sit under a collapsed "Install summary". Guard:

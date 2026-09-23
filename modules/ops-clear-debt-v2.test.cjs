@@ -392,7 +392,7 @@ test('every empty-state path follows the one rule', async () => {
     ['facts, fully read', 'facts', () => {}, [], NONE('facts')],
     ['facts, unreadable', 'facts', (d) => { d.sources.facts.timeline_read = 'unreadable'; }, ['Captured facts could not be read for this timeline.'], null],
     ['facts, not read', 'facts', (d) => { d.sources.facts.timeline_read = 'not_read'; }, ['Captured facts were not read for this view.'], null],
-    ['facts, counted not listed', 'facts', (d) => { delete d.sources.facts.timeline_read; }, ['This read does not list captured facts; it only counts them: facts on 4 of 5 invoices.'], null],
+    ['facts, counted not listed', 'facts', (d) => { delete d.sources.facts.timeline_read; }, ['This read only counts captured facts (facts on 4 of 5 invoices); their details are not in this read yet.'], null],
     ['facts, no job', 'facts', (d) => { d.sources.facts.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so captured facts cannot be read.'], null],
     ['facts, capped', 'facts', (d) => { d.timeline.facts_cap_reached = ['SWF-90002']; }, ['Job SWF-90002 has more than 10 captured facts; only the newest 10 per job were read.'], null],
     ['all, sent emails never captured', 'all', () => {}, ['Stored emails are inbound copies only; sent emails are not captured.'], null],
@@ -486,7 +486,7 @@ test('facts are kind "fact" entries in the one timeline; anything else is not a 
   // Summary counts do not substitute for timeline fact entries.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); delete q.sources.facts.timeline_read; q.timeline.entries = q.timeline.entries.filter((e) => e.kind !== 'fact'); });
   pick('Debtor 001');
-  assert.match(text(), /This read does not list captured facts; it only counts them: facts on 4 of 5 invoices\./);
+  assert.match(text(), /This read only counts captured facts \(facts on 4 of 5 invoices\); their details are not in this read yet\./);
   // A capped fact read names the job.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); q.timeline.facts_cap_reached = ['SWF-90001']; });
   pick('Debtor 001');
@@ -548,8 +548,37 @@ test('read faults and a broken exactly-once check are shown, not hidden', async 
   const t = text();
   assert.match(t, /Parts of the read failed/);
   assert.match(t, /notes: payment_chase_logs read failed: timeout/);
-  assert.match(t, /1 invoices are not shown and 0 are shown more than once/);
+  assert.match(t, /Invoice reconciliation failed\. Not returned: x\./);
   assert.match(t, /3 of 101 with read faults/);
+});
+
+test('reconciliation names affected ids and marks repeated returned invoices without deduping', async () => {
+  let missingId;
+  let repeatedId;
+  const data = await loaded((book) => {
+    const d = book.debtors[0];
+    missingId = 'missing-xero-invoice-id';
+    const repeated = d.invoices[1];
+    repeatedId = repeated.xero_invoice_id;
+    d.invoices.push(structuredClone(repeated));
+    d.invoice_count += 1;
+    book.reconciliation.exactly_once = false;
+    book.reconciliation.not_shown = [missingId];
+    book.reconciliation.shown_more_than_once = [repeatedId];
+    book.reconciliation.shown_invoice_ids += 1;
+  });
+  CD.state.selectedKey = data.debtors[0].key;
+  let h = html();
+  assert.match(h, /data-cd-reconciliation="failed"/);
+  assert.ok(h.includes('Not returned: ' + missingId));
+  assert.ok(h.includes('Returned more than once: ' + repeatedId));
+  assert.ok(h.indexOf('data-cd-reconciliation="failed"') < h.indexOf('<div class="db-main">'));
+  assert.equal(h.split('data-cd="invoice" value="' + repeatedId + '"').length - 1, 2);
+  assert.equal(h.split('Returned more than once (ID ' + repeatedId + ')').length - 1, 2);
+  CD.state.showDetails = true;
+  h = html();
+  assert.equal(h.split('Invoice reconciliation failed.').length - 1, 1);
+  assert.match(h, /See the invoice reconciliation warning above and any flagged invoice rows\./);
 });
 
 test('times are Perth, and date-only values never roll a day', () => {

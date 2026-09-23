@@ -390,7 +390,7 @@
     if (key === 'facts') {
       if (s.timeline_read === 'unreadable') return line(true, 'Captured facts could not be read for this timeline.', 'captured facts could not be read');
       if (s.timeline_read === 'not_read') return line(false, 'Captured facts were not read for this view.', 'captured facts were not read');
-      if (s.timeline_read !== 'read') return line(false, 'This read does not list captured facts; it only counts them: ' + factsWords(s).toLowerCase() + '.', 'captured facts are counted, not listed');
+      if (s.timeline_read !== 'read') return line(false, 'This read only counts captured facts (' + factsWords(s).toLowerCase() + '); their details are not in this read yet.', 'captured facts are counted, not listed');
       if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so captured facts cannot be read.', 'no job is linked, so facts cannot be read');
       if (st === 'unreadable' || st === 'unknown') return line(true, 'Whether facts were captured for these invoices could not be read.', 'captured facts are unknown');
       return null;
@@ -578,7 +578,7 @@
     }
     var recLine = rec.exactly_once
       ? 'Every one of the ' + rec.book_invoice_ids + ' open invoices is shown exactly once.'
-      : 'Invoice check failed: ' + (rec.not_shown || []).length + ' not shown, ' + (rec.shown_more_than_once || []).length + ' shown more than once.';
+      : 'See the invoice reconciliation warning above and any flagged invoice rows.';
     return '<section class="db-details" id="cd-details" aria-label="Details">' +
       '<div class="dgrid">' +
       '<div><h3>What the counts count</h3><ul>' +
@@ -618,7 +618,13 @@
     }
     var rec = d.reconciliation || {};
     if (rec.exactly_once === false) {
-      out += '<p class="db-alert" role="alert">The book and this list disagree: ' + (rec.not_shown || []).length + ' invoices are not shown and ' + (rec.shown_more_than_once || []).length + ' are shown more than once.</p>';
+      var notShown = Array.isArray(rec.not_shown) ? rec.not_shown : [];
+      var repeated = Array.isArray(rec.shown_more_than_once) ? rec.shown_more_than_once : [];
+      var details = [];
+      if (notShown.length) details.push('Not returned: ' + notShown.join(', '));
+      if (repeated.length) details.push('Returned more than once: ' + repeated.join(', '));
+      if (!details.length) details.push('The read supplied no affected invoice IDs.');
+      out += '<div class="db-alert" role="alert" data-cd-reconciliation="failed"><p>Invoice reconciliation failed. ' + esc(details.join('. ')) + '. The invoice list is shown as returned; review the flagged invoice rows.</p></div>';
     }
     return out;
   }
@@ -771,6 +777,8 @@
     var rows = d.invoices.map(function (inv) {
       var id = inv.xero_invoice_id;
       var on = id === state.invoiceId;
+      var reconciliation = state.data && state.data.reconciliation;
+      var repeated = Boolean(reconciliation && reconciliation.exactly_once === false && Array.isArray(reconciliation.shown_more_than_once) && reconciliation.shown_more_than_once.indexOf(id) >= 0);
       var due = inv.due_date
         ? (inv.overdue ? plural(inv.days_overdue, 'day') + ' overdue' : 'due ' + dayLabel(inv.due_date))
         : 'no due date';
@@ -785,6 +793,7 @@
       if (inv.status === 'SUBMITTED') tags.push('<span class="pill">Submitted, not yet approved in Xero</span>');
       if (!inv.xero.fresh) tags.push('<span class="pill bad">Xero stale</span>');
       (inv.faults || []).forEach(function (f) { tags.push('<span class="pill bad">' + esc(f.detail) + '</span>'); });
+      if (repeated) tags.push('<span class="pill bad">Returned more than once (ID ' + esc(id) + ')</span>');
       return '<li><label class="inv' + (on ? ' is-on' : '') + '">' +
         '<input type="radio" name="cd-invoice" data-cd="invoice" value="' + esc(id) + '"' + (on ? ' checked' : '') + '>' +
         '<span class="inv-main">' +

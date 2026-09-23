@@ -2534,6 +2534,7 @@
     .mm-inv-num { font-size: 11px; color: var(--sw-text-sec); font-family: var(--sw-mono); margin-top: 2px; }
     .mm-inv-r { text-align: right; flex: 0 0 auto; }
     .mm-inv-amt { font-size: 14px; font-weight: 800; color: var(--sw-dark); }
+    .mm-inv-sub { font-size: 11px; color: var(--sw-text-sec); margin-top: 1px; }
     .mm-status { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; padding: 3px 7px; border-radius: 10px; margin-top: 3px; background: var(--sw-light); color: var(--sw-text-sec); }
     .mm-status.paid { background: #D4EDDA; color: #155724; }
     .mm-status.owed { background: #FFEDD5; color: #9A3412; }
@@ -19461,15 +19462,13 @@
       if (invoices.length === 0) { el.innerHTML = '<div style="font-size:13px;color:var(--sw-text-sec)">No activity yet</div>'; return; }
       var ih = '';
       invoices.forEach(function(inv) {
-        var statusCls = (inv.status || 'draft').replace(/ /g, '_');
-        var label = (inv.status || 'draft').replace(/_/g, ' ');
-        var dateLabel = inv.week_ending ? 'Week ending ' + formatDateShort(inv.week_ending) : (inv.invoice_number || 'Invoice');
+        var row = _invoiceHistoryMoneyRow(inv);
+        var dateLabel = row.week_end ? 'Week ending ' + formatDateShort(row.week_end) : (inv.invoice_number || 'Invoice');
         var onclick = inv.status === 'draft' ? 'openInvoiceDraft(\'' + inv.id + '\')' : 'viewInvoiceDetail(\'' + inv.id + '\')';
-        ih += '<div class="inv-history-item" onclick="' + onclick + '">';
+        ih += '<div class="inv-history-item" data-inv-history="' + esc(inv.id) + '" onclick="' + onclick + '">';
         ih += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
-        ih += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-        ih += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
-        ih += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
+        ih += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
+        ih += _invoiceHistoryRightHtml(row);
         ih += '</div>';
       });
       el.innerHTML = ih;
@@ -20476,7 +20475,7 @@
     html += '<div class="wwi-toolbar"><h2>Invoice Detail</h2><button class="btn btn-secondary btn-small" onclick="openInvoiceHistory()">Back</button></div>';
     html += '<div class="inv-header"><div class="inv-header-row title">' + esc(inv.invoice_number || 'Weekly Invoice') + '</div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end || _hoursWeekEnd) + '</span></div>';
-    html += '<div style="margin-top:8px"><span class="inv-status ' + esc(String(inv.status || 'draft').replace(/ /g, '_')) + '">' + esc(String(inv.status || 'draft').replace(/_/g, ' ')) + '</span></div></div>';
+    html += _invoiceDetailStatusHtml(inv) + '</div>';
     if (_invoiceXeroPushPending(inv)) html += '<div class="wwi-warning">Invoice saved with exact totals. Xero sync is pending; do not submit it again.</div>';
     html += _weeklyInvoicePreviewHtml(inv);
     if (inv.notes) html += '<div class="wwi-panel"><div class="wwi-panel-title">Notes</div><div class="wwi-count">' + esc(inv.notes) + '</div></div>';
@@ -20724,8 +20723,7 @@
     html += '<div class="inv-header-row"><span>From</span><span style="color:#fff;font-weight:600">' + esc(tradeName) + '</span></div>';
     html += '<div class="inv-header-row"><span>To</span><span style="color:#fff;font-weight:600">SecureWorks Group Pty Ltd</span></div>';
     if (inv.week_start) html += '<div class="inv-header-row"><span>Period</span><span>' + formatDateShort(inv.week_start) + ' – ' + formatDateShort(inv.week_end) + '</span></div>';
-    var statusCls = (inv.status || 'draft').replace(/ /g, '_');
-    html += '<div style="margin-top:8px"><span class="inv-status ' + statusCls + '">' + (inv.status || 'draft').replace(/_/g, ' ') + '</span></div>';
+    html += _invoiceDetailStatusHtml(inv);
     html += '</div>';
 
     // Labour lines
@@ -20906,6 +20904,13 @@
       return Number(m[3]) + ' ' + MON[Number(m[2]) - 1] + ' ' + m[1];
     }
     // One honest line per invoice: what Xero and the office say about it.
+    // Shared by My money, Invoice history, Recent activity, the Profile
+    // list and the invoice-detail status pill so one invoice never reads
+    // two ways. Live audit 2026-09-23: Xero
+    // leaves a bill AUTHORISED while it is part paid (amount_paid > 0), so
+    // part paid is checked before "approved"; and a bill deleted or voided in
+    // Xero outranks our own row status (a `pushed_to_xero` / `approved` row
+    // whose bill was DELETED used to read as still in progress).
     function statusOf(row) {
       row = row || {};
       var bill = String(row.xero_bill_status || '').toUpperCase();
@@ -20913,11 +20918,38 @@
       if (row.paid || ours === 'paid' || bill === 'PAID') return { label: 'Paid' + (row.paid_at ? ' ' + dateShort(row.paid_at) : ''), cls: 'paid' };
       if (bill === 'VOIDED' || bill === 'DELETED') return { label: 'Voided', cls: 'void' };
       if (ours === 'draft') return { label: 'Draft', cls: 'draft' };
-      if (ours === 'ops-reject' || ours === 'failed') return { label: 'Not accepted', cls: 'void' };
+      if (ours === 'ops-reject' || ours === 'failed' || ours === 'rejected') return { label: 'Not accepted', cls: 'void' };
       if (ours === 'pending_ops_review' || ours === 'queried') return { label: 'Under review', cls: 'review' };
+      if (Number(row.amount_paid || 0) > 0) return { label: 'Part paid', cls: 'owed' };
       if (bill === 'AUTHORISED') return { label: 'Approved, awaiting payment', cls: 'owed' };
-      if (Number(row.amount_paid || 0) > 0 && Number(row.outstanding || 0) > 0) return { label: 'Part paid', cls: 'owed' };
-      return { label: 'With the office', cls: 'sent' };
+      return { label: 'Waiting on office', cls: 'sent' };
+    }
+    function hasMoney(v) { return v != null && v !== '' && isFinite(Number(v)); }
+    // What the amount column says for one invoice. Paid: what Xero actually
+    // paid (amount_paid), with the invoiced figure beside it when the two
+    // differ. Part paid: what is still owed. Otherwise the payable figure, or
+    // "Figures unavailable" when nothing trustworthy is known. `payable` is
+    // the cash due (my_money row.payable, or the Invoice history row's).
+    function amountOf(row) {
+      row = row || {};
+      var st = statusOf(row);
+      var payable = hasMoney(row.payable) && !(row.figures_ok === false && row.trade_payable == null && row.total_inc == null) ? round2(row.payable) : null;
+      var paidAmt = hasMoney(row.amount_paid) ? round2(row.amount_paid) : 0;
+      if (st.cls === 'paid') {
+        if (paidAmt > 0) {
+          return { main: money(paidAmt), sub: (payable != null && !sameMoney(payable, paidAmt)) ? 'Invoiced ' + money(payable) : '', paid: paidAmt };
+        }
+        return { main: payable != null ? money(payable) : 'Figures unavailable', sub: '', paid: null };
+      }
+      if (st.label === 'Part paid') {
+        var left = payable != null ? round2(Math.max(0, payable - paidAmt)) : null;
+        return {
+          main: left != null ? money(left) + ' owed' : 'Figures unavailable',
+          sub: 'Paid ' + money(paidAmt) + (payable != null ? ' of ' + money(payable) : ''),
+          paid: paidAmt
+        };
+      }
+      return { main: payable != null ? money(payable) : 'Figures unavailable', sub: '', paid: null };
     }
     function profileHTML(p) {
       p = p || {};
@@ -20945,7 +20977,11 @@
       h += '<div class="mm-sub">Super ' + money(split.super_amount != null ? split.super_amount : t.super_amount) + ' to your fund &middot; ' + money(split.super_worker_share) + ' from you &middot; company covers ' + money(split.super_company_share);
       if (Number(t.gst || 0) > 0) h += ' &middot; GST ' + money(t.gst);
       h += ' &middot; You get ' + money(split.cash_payable) + '</div>';
-      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note">' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Cash figures are still counted.</div>';
+      // Live audit 2026-09-23: most invoices before the super split carry no
+      // gross_earned, so Earned and Super leave them out while Paid and Still
+      // owed count them. Say exactly that rather than let Paid look bigger
+      // than Earned for no reason.
+      if (Number(t.figures_incomplete || 0) > 0) h += '<div class="mm-note" data-mm-incomplete>' + Number(t.figures_incomplete) + ' older invoice' + (Number(t.figures_incomplete) === 1 ? '' : 's') + ' without a super split. Earned and super leave ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + ' out; paid and still owed count ' + (Number(t.figures_incomplete) === 1 ? 'it' : 'them') + '.</div>';
       h += '</div>';
       return h;
     }
@@ -20963,11 +20999,11 @@
       row = row || {};
       var st = statusOf(row);
       var when = row.week_end ? 'Week ending ' + dateShort(row.week_end) : (row.created_at ? dateShort(row.created_at) : '');
-      var amount = row.figures_ok === false && row.trade_payable == null && row.total_inc == null ? 'Figures unavailable' : money(row.payable);
+      var amt = amountOf(row);
       var onclick = String(row.status || '') === 'draft' ? "openInvoiceDraft('" + esc(row.id) + "')" : "viewInvoiceDetail('" + esc(row.id) + "')";
       var h = '<div class="mm-inv" data-mm-invoice="' + esc(row.id) + '" data-mm-status="' + esc(st.cls) + '" onclick="' + onclick + '">';
       h += '<div class="mm-inv-l"><div class="mm-inv-when">' + esc(when) + '</div><div class="mm-inv-num">' + esc(row.invoice_number || '') + (row.counts === false ? ' (not counted)' : '') + '</div></div>';
-      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amount) + '</div><span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+      h += '<div class="mm-inv-r"><div class="mm-inv-amt">' + esc(amt.main) + '</div>' + (amt.sub ? '<div class="mm-inv-sub" data-mm-amount-sub>' + esc(amt.sub) + '</div>' : '') + '<span class="mm-status ' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
       h += '</div>';
       return h;
     }
@@ -20978,6 +21014,9 @@
       h += profileHTML(res.profile);
       h += periodHTML((res.month && res.month.label) ? res.month.label : 'This month', res.month, { key: 'month' });
       h += periodHTML((res.fy_label || 'This financial year') + ' to date', res.fytd, { key: 'fytd' });
+      // Invoices from before this financial year only showed up in the month
+      // table; the server already sends all_time, so show it.
+      if (res.all_time) h += periodHTML('All time', res.all_time, { key: 'all' });
       h += monthsHTML(res.months);
       var rows = Array.isArray(res.invoices) ? res.invoices : [];
       h += '<div class="mm-card"><div class="mm-card-t">Every invoice<span class="mm-card-n">' + rows.length + '</span></div>';
@@ -20988,7 +21027,7 @@
       h += '</div>';
       return h;
     }
-    return { money: money, dateShort: dateShort, statusOf: statusOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit };
+    return { money: money, dateShort: dateShort, statusOf: statusOf, amountOf: amountOf, profileHTML: profileHTML, periodHTML: periodHTML, monthsHTML: monthsHTML, invoiceRowHTML: invoiceRowHTML, viewHTML: viewHTML, resolveSuperSplit: resolveSuperSplit };
   })();
   // </trade-my-money>
 
@@ -21026,19 +21065,20 @@
       return;
     }
 
+    // my_trade_invoices returns at most 100 rows (newest first). Say so rather
+    // than let a long history end silently; My money reads up to 400.
+    if (invoices.length >= 100) {
+      html += '<div class="mm-note" data-inv-history-capped style="margin:0 0 10px">Showing your latest ' + invoices.length + ' invoices. My money lists every one.</div>';
+    }
+
     invoices.forEach(function(inv) {
-      var statusCls = (inv.status || 'draft').replace(/ /g, '_');
-      var label = (inv.status || 'draft').replace(/_/g, ' ');
-      // 2026-09-08: Xero paid state on the row (my_money carries the detail).
-      if (inv.paid || inv.status === 'paid') { statusCls = 'paid'; label = 'paid' + (inv.paid_at ? ' ' + MyMoneyCore.dateShort(inv.paid_at) : ''); }
-      else if (String(inv.xero_bill_status || '').toUpperCase() === 'AUTHORISED') { label = 'approved, awaiting payment'; }
-      var dateLabel = inv.week_ending ? 'Week ending ' + formatDateShort(inv.week_ending) : (inv.invoice_number || 'Expense Invoice');
+      var row = _invoiceHistoryMoneyRow(inv);
+      var dateLabel = row.week_end ? 'Week ending ' + formatDateShort(row.week_end) : (inv.invoice_number || 'Expense Invoice');
       var onclick = inv.status === 'draft' ? 'openInvoiceDraft(\'' + inv.id + '\')' : 'viewInvoiceDetail(\'' + inv.id + '\')';
-      html += '<div class="inv-history-item" onclick="' + onclick + '">';
+      html += '<div class="inv-history-item" data-inv-history="' + esc(inv.id) + '" onclick="' + onclick + '">';
       html += '<div><div style="font-size:14px;font-weight:600;color:var(--sw-dark)">' + dateLabel + '</div>';
-      html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + (inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
-      html += '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
-      html += '<span class="inv-status ' + statusCls + '">' + label + '</span></div>';
+      html += '<div style="font-size:12px;color:var(--sw-text-sec)">' + esc(inv.invoice_number || inv.xero_bill_number || '') + '</div></div>';
+      html += _invoiceHistoryRightHtml(row);
       html += '</div>';
     });
 
@@ -21210,12 +21250,59 @@
     };
   }
 
-  function _invoiceSubmittedAmountText(source) {
-    if (String((source || {}).invoice_source || '') === 'weekly_work_order' && _invoiceHasPersistedNumber(source.to_be_paid)) {
-      return _invoiceMoney(source.to_be_paid);
+  // One `my_trade_invoices` row -> the row shape MyMoneyCore.statusOf /
+  // amountOf read, so Invoice history, Recent activity, the Profile list
+  // and the invoice-detail status pill say the same thing about an invoice
+  // as My money. Live audit 2026-09-23:
+  // 186 of 231 invoices predate the super split (no gross_earned / super /
+  // net_pay). Their bill total is the whole amount due, so they show it
+  // instead of "Figures unavailable". The API names the GST figure `gst`,
+  // not `gst_amount`; without that mapping every GST-registered split
+  // invoice also read "Figures unavailable". A row whose split is present
+  // but does not reconcile still shows "Figures unavailable".
+  function _invoiceHistoryMoneyRow(inv) {
+    inv = inv || {};
+    var payable = null;
+    var hasSplit = ['gross_earned', 'super_amount', 'net_pay'].some(function(k) { return inv[k] != null && inv[k] !== ''; });
+    if (String(inv.invoice_source || '') === 'weekly_work_order' && _invoiceHasPersistedNumber(inv.to_be_paid)) {
+      payable = Number(inv.to_be_paid);
+    } else if (hasSplit) {
+      var money = _invoicePersistedMoney(Object.assign({}, inv, { gst_amount: inv.gst_amount != null ? inv.gst_amount : inv.gst }));
+      if (money.complete && _invoiceHasPersistedNumber(money.cash_payable)) {
+        payable = Number(money.cash_payable) + (money.gst_on ? Number(money.gst_amount || 0) : 0);
+      }
+    } else if (!inv.figures_error && _invoiceHasPersistedNumber(inv.total_inc)) {
+      payable = Number(inv.total_inc);
     }
-    var money = _invoicePersistedMoney(source);
-    return money.complete ? _invoiceMoney(money.total_inc) : 'Figures unavailable';
+    return {
+      id: inv.id,
+      invoice_number: inv.invoice_number || inv.xero_bill_number || null,
+      week_end: inv.week_end || inv.week_ending || null,
+      created_at: inv.created_at || null,
+      status: inv.status || 'draft',
+      xero_bill_status: inv.xero_bill_status || null,
+      paid: inv.paid === true,
+      paid_at: inv.paid_at || null,
+      amount_paid: inv.amount_paid,
+      payable: payable,
+      figures_ok: payable != null
+    };
+  }
+
+  function _invoiceDetailStatusHtml(inv) {
+    var st = MyMoneyCore.statusOf(_invoiceHistoryMoneyRow(inv));
+    return '<div style="margin-top:8px"><span class="mm-status ' + esc(st.cls) + '" data-inv-status="' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+  }
+
+  // Right-hand column of an Invoice history / Recent activity row: amount,
+  // the paid detail when there is one, and the shared status pill.
+  function _invoiceHistoryRightHtml(row) {
+    var st = MyMoneyCore.statusOf(row);
+    var amt = MyMoneyCore.amountOf(row);
+    var h = '<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(amt.main) + '</div>';
+    if (amt.sub) h += '<div class="mm-inv-sub" data-inv-amount-sub>' + esc(amt.sub) + '</div>';
+    h += '<span class="mm-status ' + esc(st.cls) + '" data-inv-status="' + esc(st.cls) + '">' + esc(st.label) + '</span></div>';
+    return h;
   }
 
   function _invoiceSubmittedDataFromResponse(previous, response) {
@@ -26868,15 +26955,15 @@
       }
       var html = '';
       invoices.forEach(function(inv) {
-        var weDate = new Date(inv.week_ending + 'T00:00:00');
-        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        var label = 'WE ' + weDate.getDate() + ' ' + months[weDate.getMonth()] + ' ' + weDate.getFullYear();
-        html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sw-border)">';
+        var row = _invoiceHistoryMoneyRow(inv);
+        var label = row.week_end ? 'WE ' + MyMoneyCore.dateShort(row.week_end) : (inv.invoice_number || 'Invoice');
+        var amt = MyMoneyCore.amountOf(row);
+        html += '<div data-profile-invoice="' + esc(inv.id) + '" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sw-border)">';
         html += '  <div>';
-        html += '    <div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + label + '</div>';
-        html += '    <div style="font-size:11px;color:var(--sw-text-sec)">' + esc(inv.xero_bill_number || inv.status || '') + '</div>';
+        html += '    <div style="font-size:13px;font-weight:600;color:var(--sw-dark)">' + esc(label) + '</div>';
+        html += '    <div style="font-size:11px;color:var(--sw-text-sec)">' + esc(MyMoneyCore.statusOf(row).label) + '</div>';
         html += '  </div>';
-        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + _invoiceSubmittedAmountText(inv) + '</div>';
+        html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark)">' + esc(amt.main) + '</div>';
         html += '</div>';
       });
       container.innerHTML = html;

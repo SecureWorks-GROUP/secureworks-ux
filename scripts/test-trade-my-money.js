@@ -51,7 +51,7 @@ check('status: paid names the day', M.statusOf({ paid: true, paid_at: '2026-08-1
 check('status: PAID bill without our flag is still paid', M.statusOf({ xero_bill_status: 'PAID' }).cls === 'paid');
 check('status: authorised bill is approved awaiting payment', M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED' }).label === 'Approved, awaiting payment');
 check('status: voided', M.statusOf({ xero_bill_status: 'VOIDED' }).label === 'Voided');
-check('status: draft / review / with office', M.statusOf({ status: 'draft' }).label === 'Draft' && M.statusOf({ status: 'pending_ops_review' }).label === 'Under review' && M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'DRAFT' }).label === 'With the office');
+check('status: draft / review / waiting on office', M.statusOf({ status: 'draft' }).label === 'Draft' && M.statusOf({ status: 'pending_ops_review' }).label === 'Under review' && M.statusOf({ status: 'pushed_to_xero', xero_bill_status: 'DRAFT' }).label === 'Waiting on office');
 check('status: part paid', M.statusOf({ status: 'pushed_to_xero', amount_paid: 100, outstanding: 50 }).label === 'Part paid');
 
 const profileOn = M.profileHTML({ name: 'Hugo', abn: '36 332 272 781', gst_registered: true });
@@ -86,5 +86,77 @@ check('footer names the half-super ruling', view.indexOf('Half of that comes out
 check('footer no longer says super comes out in full', view.indexOf('Super is paid to your fund separately and is shown so the numbers add up') === -1);
 check('empty view is honest', M.viewHTML({ invoices: [] }).indexOf('No invoices yet') !== -1);
 check('no em dash, no old brand', view.indexOf('—') === -1 && view.indexOf('SecureWorks WA') === -1);
+
+
+// ── Live audit 2026-09-23 (anonymised shapes of real trade_invoices rows) ──
+// Every status combination found in production, and what the trade must see.
+const liveStatuses = [
+  [{ status: 'paid', xero_bill_status: 'PAID', paid: true, paid_at: '2026-09-04T02:00:00Z' }, 'Paid 4 Sep 2026', 'paid'],
+  [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 0 }, 'Approved, awaiting payment', 'owed'],
+  [{ status: 'pushed_to_xero', xero_bill_status: 'DRAFT', amount_paid: 0 }, 'Waiting on office', 'sent'],
+  [{ status: 'pending_acknowledgment', xero_bill_status: null }, 'Waiting on office', 'sent'],
+  [{ status: 'approved', xero_bill_status: null }, 'Waiting on office', 'sent'],
+  [{ status: 'pushed_to_xero', xero_bill_status: 'DELETED' }, 'Voided', 'void'],
+  [{ status: 'pushed_to_xero', xero_bill_status: 'VOIDED' }, 'Voided', 'void'],
+  [{ status: 'approved', xero_bill_status: 'DELETED' }, 'Voided', 'void'],
+  [{ status: 'ops-reject', xero_bill_status: null }, 'Not accepted', 'void'],
+  // Xero keeps a part-paid bill AUTHORISED; 2 live rows had amount_paid > 0.
+  [{ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58 }, 'Part paid', 'owed'],
+];
+liveStatuses.forEach(function (c) {
+  const got = M.statusOf(c[0]);
+  check('live status ' + JSON.stringify(c[0]) + ' -> ' + c[1], got.label === c[1] && got.cls === c[2]);
+});
+
+// Paid: Xero's amount_paid is the headline, the invoiced figure sits beside it
+// when they differ (55 live paid rows: e.g. GST-on bill paid ex-GST).
+const paidEx = M.amountOf({ status: 'paid', xero_bill_status: 'PAID', paid: true, amount_paid: 1556, payable: 1711.6 });
+check('paid row shows what Xero paid, with the invoiced figure', paidEx.main === '$1,556.00' && paidEx.sub === 'Invoiced $1,711.60');
+const paidSame = M.amountOf({ status: 'paid', paid: true, amount_paid: 2420.6, payable: 2420.6 });
+check('paid row with matching figures shows one amount', paidSame.main === '$2,420.60' && paidSame.sub === '');
+const partPaid = M.amountOf({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58, payable: 1916.4 });
+check('part paid shows what is still owed and what was paid', partPaid.main === '$197.82 owed' && partPaid.sub === 'Paid $1,718.58 of $1,916.40');
+check('unpaid shows payable', M.amountOf({ status: 'pushed_to_xero', xero_bill_status: 'DRAFT', payable: 980 }).main === '$980.00');
+check('nothing known stays unavailable', M.amountOf({ status: 'pushed_to_xero', payable: null }).main === 'Figures unavailable');
+const partRow = M.invoiceRowHTML({ id: 'pp', status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58, payable: 1916.4, outstanding: 197.82, figures_ok: false, total_inc: 1916.4 });
+check('part paid row renders owed, paid detail, and part paid pill', partRow.indexOf('$197.82 owed') !== -1 && partRow.indexOf('Paid $1,718.58 of $1,916.40') !== -1 && partRow.indexOf('Part paid') !== -1);
+
+// Totals: all-time card (backend sends all_time; pre-July invoices were only in
+// the month table), and the incomplete-split note names what it leaves out.
+const allView = M.viewHTML({ fy_label: 'FY 2026/27', month: {}, fytd: {}, all_time: { invoices: 30, gross_earned: 2400, super_amount: 288, payable: 30000, paid_total: 27000, outstanding: 1200, figures_incomplete: 27 }, months: [], invoices: [] });
+check('view shows an all-time card', /data-mm-period="all"/.test(allView) && allView.indexOf('All time') !== -1 && allView.indexOf('$27,000.00') !== -1);
+check('incomplete note says earned/super leave old invoices out, paid/owed count them', allView.indexOf('27 older invoices without a super split. Earned and super leave them out; paid and still owed count them.') !== -1);
+check('view without all_time has no all-time card', !/data-mm-period="all"/.test(M.viewHTML({ invoices: [] })));
+
+function extractFunction(name) {
+  const marker = 'function ' + name;
+  const start = html.indexOf(marker);
+  assert(start !== -1, name + ' exists');
+  const next = html.indexOf('\n  function ', start + marker.length);
+  return html.slice(start, next === -1 ? html.length : next);
+}
+
+context.esc = function (s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+  });
+};
+vm.runInContext([
+  extractFunction('_invoiceBool'),
+  extractFunction('_invoiceSuperRate'),
+  extractFunction('_invoiceHasPersistedNumber'),
+  extractFunction('_invoicePersistedMoney'),
+  extractFunction('_invoiceHistoryMoneyRow'),
+  extractFunction('_invoiceDetailStatusHtml')
+].join('\n'), context);
+
+const detailDeleted = context._invoiceDetailStatusHtml({ status: 'pushed_to_xero', xero_bill_status: 'DELETED' });
+check('detail pill: deleted Xero bill is Voided', detailDeleted.indexOf('Voided') !== -1 && !/pushed to xero/i.test(detailDeleted) && /data-inv-status="void"/.test(detailDeleted));
+const detailApprovedDeleted = context._invoiceDetailStatusHtml({ status: 'approved', xero_bill_status: 'DELETED' });
+check('detail pill: approved row with deleted bill is Voided', detailApprovedDeleted.indexOf('Voided') !== -1 && !/approved/i.test(detailApprovedDeleted));
+const detailPartPaid = context._invoiceDetailStatusHtml({ status: 'pushed_to_xero', xero_bill_status: 'AUTHORISED', amount_paid: 1718.58 });
+check('detail pill: authorised part-paid bill is Part paid', detailPartPaid.indexOf('Part paid') !== -1 && !/pushed to xero/i.test(detailPartPaid) && /data-inv-status="owed"/.test(detailPartPaid));
+const detailWeeklyDeleted = context._invoiceDetailStatusHtml({ invoice_source: 'weekly_work_order', status: 'pushed_to_xero', xero_bill_status: 'DELETED', to_be_paid: 1916.4 });
+check('detail pill: weekly deleted bill is Voided', detailWeeklyDeleted.indexOf('Voided') !== -1 && !/pushed to xero/i.test(detailWeeklyDeleted));
 
 console.log('trade-my-money: ' + passed + ' checks passed');

@@ -143,11 +143,23 @@ in `trade.html` (search `// <all-tab-full-feed>`):
   `tests/e2e/trade-makesafe-roof-report-hours.spec.js`.
 - **My money (2026-09-08)**: Hours view and Invoice history carry a "My money"
   button (`openMyMoney` → `my_money`). It shows ABN and GST status, this month
-  and financial-year-to-date cards (Earned, Paid to you, Still owed, with Super
-  and GST underneath), a by-month table, and every invoice with its Xero state
-  ("Paid 10 Aug 2026", "Approved, awaiting payment", "With the office",
-  "Voided"). Pure `MyMoneyCore` in `// <trade-my-money>`, pinned by
-  `scripts/test-trade-my-money.js`; guard `tests/e2e/trade-my-money.spec.js`.
+  financial-year-to-date and all-time cards (Earned, Paid to you, Still owed,
+  with Super and GST underneath), a by-month table, and every invoice with its
+  Xero state ("Paid 10 Aug 2026", "Part paid", "Approved, awaiting payment",
+  "Waiting on office", "Voided"). Pre-split invoices carry no gross_earned, so
+  Earned and Super leave them out while Paid and Still owed count them; the
+  card says so. Invoice history is the latest 100 (`my_trade_invoices` cap)
+  and says so, pointing the trade at My money. `MyMoneyCore.statusOf` / `amountOf`
+  are the ONE wording for an invoice: Invoice history, Recent activity and
+  the Profile list map each `my_trade_invoices` row through
+  `_invoiceHistoryMoneyRow` into them, and the invoice-detail status pill
+  uses the same `statusOf` (no second map), so a paid row shows what Xero
+  paid (with "Invoiced $X" when different), a part paid AUTHORISED bill
+  shows what is still owed, a DELETED/VOIDED bill reads Voided, and a
+  pre-split row shows its bill total rather than "Figures
+  unavailable". Pure `MyMoneyCore` in `// <trade-my-money>`, pinned by
+  `scripts/test-trade-my-money.js`; guards `tests/e2e/trade-my-money.spec.js`
+  and `tests/e2e/trade-invoice-history-live-audit.spec.js`.
   Super split (2026-09-18): the fund and the books still see 12%. Only half
   of that comes off the trade; the company covers the other half. On a $1000
   gross invoice that is $120 to the fund and $940 cash. `MyMoneyCore.resolveSuperSplit`

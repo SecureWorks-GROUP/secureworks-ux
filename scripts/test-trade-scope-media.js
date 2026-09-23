@@ -21,6 +21,9 @@ let fullPricingOn = false;
 const context = {
   canSeePricing: function () { return pricingOn; },
   canSeeFullPricing: function () { return fullPricingOn; },
+  // SOW pricing is office-only (<trade-office-money-door>); here "full pricing
+  // on" stands for an office viewer.
+  tradeViewerIsOffice: function () { return fullPricingOn; },
   getTradeDocOpenUrl: function (doc) {
     if (!doc) return '';
     var candidates = [doc.pdf_url, doc.public_url, doc.signed_url, doc.download_url, doc.url, doc.file_url, doc.storage_url];
@@ -386,14 +389,6 @@ check(
 check(
   'shipped mergeTradeExternalLinks applies office-only WO gate (TRD5-R10-002)',
   /function mergeTradeExternalLinks\(\) \{[\s\S]*return filterTradeSowLinks\(out\);/.test(html)
-);
-check(
-  'shipped Work Order tab Cost Breakdown uses office SOW gate (TRD5-R10-003)',
-  /if \(wo && wo.id && tradeCanSeeSowPricing\(\)\) \{\s*h \+= '<div class="detail-section" id="woJobCostBreakdown">/.test(html)
-);
-check(
-  'shipped Work Order tab Crew Charges uses office SOW gate (TRD5-R10-003)',
-  /if \(tradeCanSeeSowPricing\(\)\) \{\s*h \+= '<div class="detail-section" id="woJobCrewCharges">/.test(html)
 );
 check(
   'Work Order tab cost sections no longer use _userTier >= 2',

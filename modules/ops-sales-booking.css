@@ -231,28 +231,29 @@
 #salesBookingRoot .daypick button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#D7E1E6}
 #salesBookingRoot .daypick button[aria-pressed="true"] b{color:#fff}
 #salesBookingRoot .daynote{font-size:13px;color:var(--ink-2);padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)}
-#salesBookingRoot .daygrid{position:relative;margin-top:6px}
-#salesBookingRoot .hour{position:absolute;left:0;right:0;border-top:1px solid var(--line-2)}
+#salesBookingRoot .daygrid{display:grid;column-gap:4px;margin-top:6px;position:relative}
+#salesBookingRoot .hourline{grid-column:1 / -1;border-top:1px solid var(--line-2);z-index:0}
+#salesBookingRoot .hour{grid-column:1;position:relative;z-index:1}
 #salesBookingRoot .hour span{position:absolute;left:0;top:-8px;width:38px;padding-right:6px;text-align:right;font-size:11px;color:var(--muted);background:var(--surface);font-variant-numeric:tabular-nums}
-#salesBookingRoot .lanes{position:absolute;top:0;bottom:0;left:42px;right:0}
-#salesBookingRoot .fixed{position:absolute;left:0;right:0;background:var(--surface-2);border-radius:6px;padding:4px 8px;font-size:11.5px;color:var(--muted)}
+#salesBookingRoot .fixed{z-index:1;background:var(--surface-2);border-radius:6px;padding:4px 8px;font-size:11.5px;color:var(--muted)}
 #salesBookingRoot .fixed.is-band{background:#F3EFE8;color:var(--ink-2)}
-#salesBookingRoot .ev{position:absolute;display:grid;align-content:start;gap:1px;overflow:hidden;text-align:left;padding:5px 8px;border-radius:8px;font-size:12.5px;line-height:1.3;background:var(--surface-2);border:1px solid var(--line)}
-#salesBookingRoot .ev-top{display:flex;justify-content:space-between;align-items:center;gap:4px}
-#salesBookingRoot .ev-time{font-variant-numeric:tabular-nums}
-#salesBookingRoot .ev-title{font-weight:650;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#salesBookingRoot .ev-kind{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#salesBookingRoot .ev{z-index:2;display:grid;align-content:start;gap:1px;margin:2px 0;text-align:left;padding:5px 8px;border-radius:8px;font-size:12.5px;line-height:1.3;background:var(--surface-2);border:1px solid var(--line);overflow-wrap:anywhere}
+#salesBookingRoot .ev-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:2px 6px}
+#salesBookingRoot .ev-title{font-weight:650;color:var(--ink);flex:1 1 7em}
+#salesBookingRoot .ev-time{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+#salesBookingRoot .ev-kind{font-size:11.5px;color:var(--muted)}
+#salesBookingRoot .ev-clash{font-size:11.5px;font-weight:650;color:var(--bad)}
 #salesBookingRoot .ev.is-confirmed{background:var(--brand-wash);border-color:#C5D4DC}
 #salesBookingRoot .ev.is-blocked{background:var(--bad-wash);border-color:#EDC4BF}
 #salesBookingRoot .ev.is-blocked .ev-title{text-decoration:line-through;color:var(--bad)}
 #salesBookingRoot .ev.is-offer{background:var(--surface);border:1.5px dashed var(--brand-2)}
 #salesBookingRoot .ev.is-proposal{background:var(--accent-wash);border:1.5px dashed var(--accent)}
 #salesBookingRoot .ev.is-proposal .ev-kind{color:var(--accent-ink)}
-#salesBookingRoot .ev.is-sel{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--accent);z-index:2}
+#salesBookingRoot .ev.is-sel{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--accent);z-index:3}
 #salesBookingRoot .src{display:inline-flex;align-items:center;padding:0 6px;height:17px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.02em;flex:none}
 #salesBookingRoot .src-ghl{background:var(--brand);color:#fff}
 #salesBookingRoot .src-outlook{background:var(--surface);color:var(--brand);border:1px solid var(--brand-2)}
-#salesBookingRoot .dayempty{position:absolute;top:40%;left:42px;right:0;text-align:center;color:var(--muted);font-size:13px}
+#salesBookingRoot .dayempty{grid-column:2 / -1;grid-row:14 / 20;align-self:center;z-index:1;text-align:center;color:var(--muted);font-size:13px}
 #salesBookingRoot .daykey{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-top:4px;border-top:1px solid var(--line-2)}
 #salesBookingRoot .dayunread{padding:14px;border-radius:var(--r-sm);background:var(--bad-wash);color:var(--bad);display:grid;gap:4px}
 #salesBookingRoot .dayunread h3{font-size:14px}

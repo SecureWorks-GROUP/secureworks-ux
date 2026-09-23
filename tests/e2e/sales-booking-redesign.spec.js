@@ -62,6 +62,15 @@ for (const vp of viewports) {
       await expect(page.locator('.visit .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeDisabled();
+      const slot = page.locator('.bk-day .ev.is-clash', { hasText: 'Kerry P' });
+      await expect(slot.locator('.ev-clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am');
+      // Overlapping entries show their whole name and time, never cut off.
+      for (const ev of await page.locator('.bk-day .ev').all()) {
+        for (const part of await ev.locator('.ev-title, .ev-time, .ev-clash').all()) {
+          expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+        }
+        expect(await ev.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+      }
     });
 
     test('editing the text changes what is approved, and a missing send action says so', async ({ page }) => {

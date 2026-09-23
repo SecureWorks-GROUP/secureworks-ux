@@ -971,8 +971,8 @@ test('two proposals at the same time both render on the week', () => {
     proposal: { start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T14:00:00', offer_id: 'off-c' }
   });
   const html = api.renderHTML();
-  assert.match(html, /data-booking-case="case-a"[^>]*style="left:calc\(0%/);
-  assert.match(html, /data-booking-case="case-c"[^>]*style="left:calc\(50%/);
+  assert.match(html, /data-booking-case="case-a"[^>]*style="grid-row:[^;]+;grid-column:2 \/ 3"/);
+  assert.match(html, /data-booking-case="case-c"[^>]*style="grid-row:[^;]+;grid-column:3 \/ -1"/);
   assert.match(html, /Clashing enquiry/);
 });
 

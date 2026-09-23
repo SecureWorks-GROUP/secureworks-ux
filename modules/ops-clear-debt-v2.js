@@ -89,11 +89,36 @@
     return /unknown action|no such action|unsupported action/i.test(msg);
   }
 
+  function isCount(value) {
+    return Boolean(value && typeof value.n === 'number' && isFinite(value.n) &&
+      typeof value.of === 'number' && isFinite(value.of));
+  }
+
   function checkContract(resp) {
     if (!resp || typeof resp !== 'object') return 'the read returned nothing';
     if (resp.version !== CONTRACT) return 'the read answered with contract ' + (resp.version ? '"' + resp.version + '"' : 'with no version') + ', and this screen reads ' + CONTRACT;
     if (!Array.isArray(resp.debtors)) return 'the read carried no debtor list';
-    if (!resp.summary || !resp.summary.invoices) return 'the read carried no summary counts';
+    var summary = resp.summary;
+    var invoices = summary && summary.invoices;
+    var debtors = summary && summary.debtors;
+    var counts = invoices && invoices.link && invoices.facts && [
+      invoices.overdue, invoices.no_due_date, invoices.link.linked,
+      invoices.link.ambiguous, invoices.link.none, invoices.link.unknown,
+      invoices.facts.present, invoices.facts.missing, invoices.facts.no_job,
+      invoices.facts.unknown, invoices.xero_stale, invoices.with_faults,
+      debtors && debtors.verified, debtors && debtors.standing_alone
+    ];
+    var complete = Boolean(
+      invoices && typeof invoices.denominator === 'string' &&
+      typeof invoices.count === 'number' && isFinite(invoices.count) &&
+      typeof invoices.amount_due === 'number' && isFinite(invoices.amount_due) &&
+      isCount(invoices.overdue) && typeof invoices.overdue.amount_due === 'number' && isFinite(invoices.overdue.amount_due) &&
+      debtors && typeof debtors.denominator === 'string' &&
+      typeof debtors.count === 'number' && isFinite(debtors.count) &&
+      typeof debtors.shown === 'number' && isFinite(debtors.shown) &&
+      counts && counts.every(isCount)
+    );
+    if (!complete) return 'the read carried incomplete summary counts';
     return null;
   }
 
@@ -308,10 +333,11 @@
   // was read ("among the 7 stored items read"). Each condition is one line.
   var GROUP_SOURCES = {
     all: ['ghl', 'email', 'notes', 'xero', 'facts'],
+    contact: ['ghl', 'email', 'notes'],
     text: ['ghl'], call: ['ghl', 'notes'], email: ['email'], note: ['notes', 'ghl'],
     xero: ['xero'], facts: ['facts'], other: []
   };
-  var MESSAGE_GROUPS = { all: 1, text: 1, call: 1, email: 1, note: 1 };
+  var MESSAGE_GROUPS = { all: 1, contact: 1, text: 1, call: 1, email: 1, note: 1 };
   function withFix(v, text) {
     var bits = [];
     if (v && v.owner) bits.push('owner ' + v.owner);
@@ -699,10 +725,10 @@
     if (last) {
       lastLine = 'Last contact in the stored copies: ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + ' ' + (last.direction === 'inbound' ? 'from them' : 'from us') + ' (' + esc(providerLabel(last.provider)) + ').';
     } else {
-      var lim = timelineLimits(d, 'all');
+      var lim = timelineLimits(d, 'contact');
       lastLine = lim.length
         ? 'Last contact unknown: ' + esc(lim.map(function (l) { return l.short; }).join('; ')) + '.'
-        : esc(absenceLine(d, 'all', 'text, email or call'));
+        : esc(absenceLine(d, 'contact', 'text, email or call'));
     }
     return '<header class="cardhead">' +
       '<h2>' + esc(debtorName(d)) + '</h2>' +

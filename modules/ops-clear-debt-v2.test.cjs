@@ -395,11 +395,15 @@ test('every empty-state path follows the one rule', async () => {
   const d = fullyRead();
   CD.state.data = { ...data, debtors: [d] };
   CD.state.selectedKey = d.key;
-  assert.match(text(), /Last contact unknown: sent emails are not captured\./);
+  d.sources.xero.status = 'stale';
+  d.sources.facts.timeline_read = 'unreadable';
+  let lastLine = html().match(/<p class="fine">(Last contact unknown:[^<]+)<\/p>/)[1];
+  assert.equal(lastLine, 'Last contact unknown: sent emails are not captured.');
   d.sources.ghl.status = 'unreadable';
   d.timeline.truncated = true; d.timeline.entries_read = 9;
-  assert.match(text(), /Last contact unknown: stored GHL texts could not be read; sent emails are not captured; only the newest 0 of 9 stored entries were read\./);
-  assert.doesNotMatch(text(), /No text, email or call/);
+  lastLine = html().match(/<p class="fine">(Last contact unknown:[^<]+)<\/p>/)[1];
+  assert.equal(lastLine, 'Last contact unknown: stored GHL texts could not be read; sent emails are not captured; only the newest 0 of 9 stored entries were read.');
+  assert.doesNotMatch(lastLine, /Xero|fact/i);
   // With a last contact, the line is scoped to the stored copies.
   const withLast = data.debtors.find((x) => x.identity.name === 'Debtor 001');
   CD.state.data = data;
@@ -496,6 +500,19 @@ test('an unreadable book and a wrong contract are named failures, not empty book
   assert.match(html(), /data-cd-state="contract"/);
   assert.match(text(), /contract "debt-worklist\/v2"/);
   assert.equal(CD.checkContract(makeWorklist()), null);
+});
+
+test('an incomplete same-version summary is rejected before it can render counts or Details', async () => {
+  const data = makeWorklist();
+  data.summary.invoices = {};
+  globalThis.__answer = () => structuredClone(data);
+  await CD.load();
+  assert.equal(CD.state.data, null);
+  assert.equal(CD.state.error.kind, 'contract');
+  assert.match(text(), /incomplete summary counts/);
+  CD.state.showDetails = true;
+  assert.doesNotThrow(() => html());
+  assert.match(html(), /data-cd-state="contract"/);
 });
 
 test('read faults and a broken exactly-once check are shown, not hidden', async () => {

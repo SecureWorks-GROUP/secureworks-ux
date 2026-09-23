@@ -705,7 +705,8 @@ test.describe('Henry Hours submit after hydrate fail', () => {
     const card = page.locator('.jc-card').filter({ hasText: 'FENCE-HENRY-001' });
     await expect(card.locator('[data-cardhours]')).toBeVisible();
     await card.locator('[data-cardhours]').fill('3');
-    await card.locator('[data-cardrate]').fill('55');
+    // Assigned job: the office rate is shown read-only, never typed.
+    await expect(card.locator('[data-cardrate-readonly]')).toHaveText('$55.00/hr');
     await expect(page.locator('#invSubmitBtn')).toBeEnabled();
 
     await page.locator('#invSubmitBtn').click();

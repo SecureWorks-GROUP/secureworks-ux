@@ -19555,7 +19555,13 @@
   var _hoursWeekEnd = null; // current week being viewed (Sunday)
   var _hoursWeekStart = null; // Monday of the selected week
   var _hoursData = null;    // cached response
-  var _tradeRate = null;    // cached rate for profile
+  var _tradeRate = null;    // cached office-set rate (read-only; trades never set it)
+  // Rates are office only (captain ruling 2026-09-23): the trade app never
+  // saves a rate from any screen. A missing rate sends the trade to the office.
+  var RATE_NOT_SET_MSG = 'No pay rate is set for you yet. Your rate is set by the office: contact them to have it set.';
+  function showRateNotSetNotice() {
+    showConfirm('Rate not set', RATE_NOT_SET_MSG, 'OK');
+  }
   var _weeklyWoInvoice = null; // Henry's server-owned weekly work-order invoice builder
   var _weeklyWoInvoiceLoadSeq = 0;
   var _invoiceAuthGen = 0; // bumped on account switch so late invoice reads cannot paint
@@ -20137,11 +20143,11 @@
     });
   }
 
-  // Recalculate totals when user edits the rate inline on the hours view
+  // Recalculate totals from the office-set rate. Trades never set their own
+  // rate (captain ruling 2026-09-23): nothing here saves a rate.
   window.recalcHoursTotals = function() {
     if (!_hoursData) return;
-    var input = document.getElementById('hoursRateInput');
-    var rate = parseFloat(input ? input.value : 0) || 0;
+    var rate = Number(_hoursData.rate || _tradeRate || 0) || 0;
 
     var subtotal = rate * _hoursData.total_hours;
     var total = Math.round(subtotal * 100) / 100;
@@ -20164,12 +20170,6 @@
       _hoursData.assignments.forEach(function(a) {
         a.amount = rate * a.hours;
       });
-    }
-
-    // If rate changed and is valid, silently save it to profile too
-    if (rate > 0 && rate !== _tradeRate) {
-      _tradeRate = rate;
-      api('set_trade_rate', null, { hourly_rate: rate }).then(function() { toast('Rate saved'); }).catch(function() { toast('Failed to save rate', true); });
     }
   };
 
@@ -20991,14 +20991,13 @@
   window.submitTradeHours = function() {
     if (!_hoursData || _hoursData.already_submitted) return;
 
-    // Read rate from the inline input in case user edited it
-    var rateInput = document.getElementById('hoursRateInput');
-    var editedRate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+    // The office sets the rate; the trade cannot change it here.
+    var editedRate = Number(_hoursData.rate || _tradeRate || 0) || 0;
     if (editedRate <= 0) {
-      toast('Enter your hourly rate before submitting', true);
+      toast(RATE_NOT_SET_MSG, true);
       return;
     }
-    // Recalc with latest rate
+    // Recalc with the office rate
     _hoursData.rate = editedRate;
     _hoursData.subtotal = editedRate * _hoursData.total_hours;
     _hoursData.gst = 0;
@@ -23259,7 +23258,21 @@
   }
 
   // Returns the job-centric cards HTML (rate display-only, day-grouped, bulk entry).
+  // Assigned cards always carry the office-set rate (a restored draft may hold
+  // an older typed value). Searched-in cards keep their flagged manual rate.
+  function _pinAssignedCardRates() {
+    var data = _hoursData || {};
+    var officeRate = Number(data.rate || _tradeRate || 0);
+    if (!(officeRate > 0) && data.rate_resolved !== false) return;
+    _jobCards.forEach(function(c) {
+      if (!c || c.manually_added) return;
+      c.rate = officeRate > 0 ? officeRate : 0;
+      c.rate_source = 'server_resolved';
+    });
+  }
+
   function renderJobCardsHtml() {
+    _pinAssignedCardRates();
     var data = _hoursData || {};
     var rate = Number(data.rate || _tradeRate || 0);
     var rateResolved = data.rate_resolved !== false && rate > 0;
@@ -23281,7 +23294,7 @@
     }
 
     if (!rateResolved) {
-      html += '<div style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No saved rate found. Enter your hourly rate on each row; the office will verify it before approval.</div>';
+      html += '<div style="background:rgba(241,90,41,0.08);border:1px solid var(--sw-orange);color:var(--sw-mid);padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:10px">No pay rate is set for you yet. Your rate is set by the office: contact them to have it set before you invoice hours on your assigned jobs.</div>';
     }
     if (!_jobCards.length) {
       html += '<div class="hours-no-data">No jobs assigned this week. Use "+ Add job" on a day below to invoice a job, or Extras for anything else.</div>';
@@ -23465,11 +23478,22 @@
             + 'onchange="setJobCardHours(' + c._idx + ',this.value)" '
             + 'style="width:70px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
           html += '<label style="font-size:12px;color:var(--sw-text-sec)">Rate</label>';
-          html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + c._idx + '" '
-            + 'value="' + (rowRate || '') + '" '
-            + 'oninput="setJobCardRate(' + c._idx + ',this.value)" '
-            + 'onchange="setJobCardRate(' + c._idx + ',this.value)" '
-            + 'style="width:78px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+          if (c.manually_added) {
+            // A job the trade searched in is a one-off manual line: ops-api
+            // flags its client-entered rate for office verification and never
+            // saves it as the trade's rate.
+            html += '<input type="number" min="0" step="0.01" inputmode="decimal" data-cardrate="' + c._idx + '" '
+              + 'value="' + (rowRate || '') + '" '
+              + 'oninput="setJobCardRate(' + c._idx + ',this.value)" '
+              + 'onchange="setJobCardRate(' + c._idx + ',this.value)" '
+              + 'style="width:78px;padding:5px 8px;border:1px solid var(--sw-border);border-radius:6px;font-size:14px">';
+          } else {
+            // Assigned job: the office sets the rate. Read-only here.
+            html += '<span data-cardrate-readonly="' + c._idx + '" title="Set by the office" '
+              + 'style="font-size:14px;font-weight:600;color:var(--sw-dark)">'
+              + (rowRate > 0 ? '$' + rowRate.toFixed(2) + '/hr' : 'Not set') + '</span>'
+              + '<span style="font-size:11px;color:var(--sw-text-sec)">Set by the office</span>';
+          }
           html += '<span data-cardamt="' + c._idx + '" style="font-size:13px;font-weight:700;color:var(--sw-dark);margin-left:auto">$' + (_hoursCardNet(c, rowRate)).toFixed(2) + '</span>';
           html += '</div>';
           html += _renderCardLumpLinesHtml(c);
@@ -23699,7 +23723,7 @@
           if (hoursFocused || nextHours !== c.hours) _markJobCardHoursEdited(c);
           c.hours = nextHours;
         }
-        var rateEl = document.querySelector('[data-cardrate="' + idx + '"]');
+        var rateEl = c.manually_added ? document.querySelector('[data-cardrate="' + idx + '"]') : null;
         if (rateEl) {
           var n = parseFloat(rateEl.value);
           if (!isNaN(n) && n >= 0) {
@@ -24025,7 +24049,7 @@
     _refreshJobCardLine(idx);
   };
   window.setJobCardRate = function(idx, val) {
-    var c = _jobCards[idx]; if (!c) return;
+    var c = _jobCards[idx]; if (!c || !c.manually_added) return; // assigned-job rates are office only
     var n = parseFloat(val);
     c.rate = (isNaN(n) || n < 0) ? 0 : n;
     c.rate_source = 'client_entered';
@@ -24696,6 +24720,7 @@
       toast('Every final deduction needs a description and positive amount', true);
       return;
     }
+    _pinAssignedCardRates();
     var built = _buildJobCentricPayload(_jobCards);
     if (built.error) {
       toast(built.error, true);
@@ -24855,9 +24880,7 @@
             ? _noteWeekAlreadyInvoiced(result, postWeekEnd)
             : (result.userMessage || result.error || 'Invoice submission failed — please try again');
           toast(msg, true);
-          if (result.code === 'RATE_NOT_CONFIGURED') {
-            showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then resubmit.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
-          }
+          if (result.code === 'RATE_NOT_CONFIGURED') showRateNotSetNotice();
           // Re-paint from intact _jobCards — do NOT call loadHoursView() which would
           // follow the sessionStorage path and lose in-memory job cards.
           renderInvoiceBuilder();
@@ -25362,14 +25385,7 @@
             ? _noteWeekAlreadyInvoiced(result, _weeklyDatePlusDays(builderBody.week_start, 6))
             : (result.userMessage || result.error || 'Invoice submission failed — please try again');
           toast(msg, true);
-          if (result.code === 'RATE_NOT_CONFIGURED') {
-            // Guide the trade to the Profile view where they can set their hourly rate (manual-rate path).
-            showConfirm(
-              'Set Your Rate',
-              'Your hourly rate is not configured. Go to Profile now to set it, then come back and resubmit.',
-              'Go to Profile'
-            ).then(function(go) { if (go) showView('profile'); });
-          }
+          if (result.code === 'RATE_NOT_CONFIGURED') showRateNotSetNotice();
           // Re-paint from intact _invRows — direct call avoids sessionStorage round-trip.
           renderInvoiceBuilder();
           return;
@@ -25774,9 +25790,8 @@
     var assignments = _hoursData.assignments || [];
     if (assignments.length === 0) { toast('No assignments to submit', true); return; }
 
-    var rateInput = document.getElementById('hoursRateInput');
-    var editedRate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-    if (editedRate <= 0) { toast('Enter your hourly rate first', true); return; }
+    var officeRate = Number(_hoursData.rate || _tradeRate || 0) || 0;
+    if (officeRate <= 0) { toast(RATE_NOT_SET_MSG, true); return; }
 
     showConfirm('Submit for Verification', 'Your work order lead will review and approve these hours before you can invoice.', 'Submit').then(function(ok) {
       if (!ok) return;
@@ -25790,8 +25805,6 @@
           status: 'submitted'
         });
       });
-      // Also persist the edited rate
-      promises.push(api('set_trade_rate', null, { hourly_rate: editedRate }));
 
       Promise.all(promises).then(function() {
         _invalidateAssignmentLifecycleCaches();
@@ -27421,16 +27434,11 @@
     html += '  <span style="flex:0 0 auto;color:var(--sw-ink-3);font-size:22px;line-height:1">&#8250;</span>';
     html += '</button>';
 
-    // ── Hourly Rate ──
-    html += '<div style="margin-top:24px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';
+    // ── Hourly Rate (read-only: rates are set by the office, never by a trade) ──
+    html += '<div id="profileRateCard" style="margin-top:24px;padding:16px;background:var(--sw-card);border-radius:12px;box-shadow:var(--sw-shadow)">';
     html += '  <div style="font-size:14px;font-weight:700;color:var(--sw-dark);margin-bottom:8px">My Hourly Rate</div>';
-    html += '  <div style="display:flex;gap:8px;align-items:center">';
-    html += '    <span style="font-size:18px;font-weight:700;color:var(--sw-mid)">$</span>';
-    html += '    <input type="number" id="inputTradeRate" step="0.01" min="0" placeholder="35.00" style="flex:1;padding:10px 12px;border:2px solid var(--sw-border);border-radius:8px;font-size:16px;font-weight:600;color:var(--sw-dark);font-family:var(--sw-font)" />';
-    html += '    <span style="font-size:14px;color:var(--sw-text-sec)">/hr</span>';
-    html += '    <button onclick="updateTradeRate()" style="padding:10px 16px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Update</button>';
-    html += '  </div>';
-    html += '  <div id="rateStatus" style="font-size:12px;color:var(--sw-text-sec);margin-top:6px"></div>';
+    html += '  <div id="profileRateValue" style="font-size:18px;font-weight:700;color:var(--sw-dark)">&mdash;</div>';
+    html += '  <div id="rateStatus" style="font-size:12px;color:var(--sw-text-sec);margin-top:6px">Set by the office. Contact the office if it looks wrong.</div>';
     html += '</div>';
 
     // ── My Details (for invoices / PDF) ──
@@ -27485,7 +27493,7 @@
 
     container.innerHTML = html;
 
-    // Load rate into input
+    // Load the office-set rate for display
     loadProfileRate();
     // Load invoice history
     loadProfileInvoices();
@@ -27497,14 +27505,18 @@
     api('my_hours', { week_ending: getWeekEndSunday(0) }).then(function(data) {
       if (!_invoiceApiCurrent(ctx)) return;
       _tradeRate = data.rate;
-      var input = document.getElementById('inputTradeRate');
+      var value = document.getElementById('profileRateValue');
       var status = document.getElementById('rateStatus');
-      if (input && data.rate > 0) {
-        input.value = data.rate.toFixed(2);
-        if (status) status.textContent = 'Current active rate';
-      } else if (status) {
-        status.textContent = 'No rate set yet — enter your hourly rate above';
-        status.style.color = 'var(--sw-yellow)';
+      var rate = Number(data.rate);
+      if (value && rate > 0) {
+        value.textContent = '$' + rate.toFixed(2) + '/hr';
+        if (status) status.textContent = 'Set by the office. Contact the office if it looks wrong.';
+      } else {
+        if (value) value.textContent = 'Not set yet';
+        if (status) {
+          status.textContent = 'Set by the office. Contact the office to have your rate set.';
+          status.style.color = 'var(--sw-yellow)';
+        }
       }
     }).catch(function() {});
   }
@@ -27814,9 +27826,7 @@
             }
             var msg = result.userMessage || result.error || 'Invoice failed — please try again';
             toast(msg, true);
-            if (result.code === 'RATE_NOT_CONFIGURED') {
-              showConfirm('Set Your Rate', 'Your hourly rate is not configured. Go to Profile to set it, then try again.', 'Go to Profile').then(function(go) { if (go) showView('profile'); });
-            }
+            if (result.code === 'RATE_NOT_CONFIGURED') showRateNotSetNotice();
             _reEnableBtn();
             return;
           }
@@ -27864,23 +27874,6 @@
         toast('Could not refresh this work order. Invoice was not sent.', true);
         _reEnableBtn();
       }).then(function() { _endFinancialWrite('submit_work_order_invoice'); }, function() { _endFinancialWrite('submit_work_order_invoice'); });
-    });
-  };
-
-  window.updateTradeRate = function() {
-    var input = document.getElementById('inputTradeRate');
-    var rate = parseFloat(input.value);
-    if (!rate || rate <= 0) {
-      toast('Enter a valid hourly rate', true);
-      return;
-    }
-    api('set_trade_rate', null, { hourly_rate: rate }).then(function() {
-      toast('Rate updated to $' + rate.toFixed(2) + '/hr');
-      _tradeRate = rate;
-      var status = document.getElementById('rateStatus');
-      if (status) { status.textContent = 'Updated just now'; status.style.color = 'var(--sw-green)'; }
-    }).catch(function(err) {
-      toast(friendlyError(err), true);
     });
   };
 

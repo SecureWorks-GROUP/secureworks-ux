@@ -372,6 +372,7 @@
       return line(false, 'The read did not say whether stored GHL texts were read.', 'GHL texts may not have been read');
     }
     if (key === 'email') {
+      if (st === 'stale') return line(true, 'Stored emails are stale' + (s.last_success_at ? ': last captured ' + (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : ' at a time the read did not give') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'stored emails are stale');
       if (st === 'partial' || st === 'read' || st === 'current') return line(false, SENT_EMAIL_CAVEAT, 'sent emails are not captured yet', true);
       if (st === 'unreadable') return line(true, 'Stored emails could not be read.', 'stored emails could not be read');
       if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored emails cannot be read.', 'no job is linked, so emails cannot be read');
@@ -751,7 +752,8 @@
     var last = d.last_contact && d.last_contact.last;
     var lastLine;
     if (last) {
-      lastLine = 'Last contact in the stored copies: ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + ' ' + (last.direction === 'inbound' ? 'from them' : 'from us') + ' (' + esc(providerLabel(last.provider)) + ').';
+      var direction = last.direction === 'inbound' ? ' from them' : last.direction === 'outbound' ? ' from us' : '';
+      lastLine = 'Last contact in the stored copies: ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + direction + ' (' + esc(providerLabel(last.provider)) + ').';
     } else {
       var lim = timelineLimits(d, 'contact');
       lastLine = lim.length
@@ -848,7 +850,6 @@
       var n = c.key === 'facts' && !counts.factsListed ? null : counts[c.key];
       return '<button type="button" class="chip" data-cd="tl" data-tl="' + c.key + '" aria-pressed="' + (state.tlFilter === c.key) + '">' + esc(c.label) + (n == null ? '' : '<span class="count">' + n + '</span>') + '</button>';
     }).join('');
-    var status = timelineStatus(d);
     var list = timelineEntries(d);
     var body;
     if (!list.length) {

@@ -381,6 +381,7 @@ test('every empty-state path follows the one rule', async () => {
     ['texts, truncated', 'text', (d) => { d.timeline.truncated = true; d.timeline.entries_read = 30; }, ['Only the newest 0 of 30 stored entries are in this read.'], null],
     ['texts, per-job cap', 'text', (d) => { d.timeline.per_job_cap_reached = ['SWF-90001']; }, ['Job SWF-90001 has more than 10 messages; only the newest 10 per job were read.'], null],
     ['emails, inbound only', 'email', () => {}, ['Sent emails are not captured yet; that fix is under way.'], null],
+    ['emails, stale with recovery details', 'email', (d) => { Object.assign(d.sources.email, { status: 'stale', last_success_at: '2026-09-23T20:00:00.000Z', stale_after: '4h', owner: 'CIO', recovery_action: 'retry email capture' }); }, ['Stored emails are stale: last captured 6 hours before this read, stale after 4h (owner CIO; fix: retry email capture).'], null],
     ['emails, unreadable', 'email', (d) => { d.sources.email.status = 'unreadable'; }, ['Stored emails could not be read.'], null],
     ['emails, no job', 'email', (d) => { d.sources.email.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so stored emails cannot be read.'], null],
     ['emails, not read', 'email', (d) => { d.sources.email.status = 'not_read'; }, ['Stored emails were not read for this view.'], null],
@@ -438,6 +439,14 @@ test('every empty-state path follows the one rule', async () => {
   CD.state.selectedKey = withLast.key;
   CD.state.tlFilter = 'all';
   assert.match(text(), /Last contact in the stored copies: Wed 23 Sept?, 9:00am, a text from them \(GHL\)\./);
+  for (const [direction, from] of [['inbound', ' from them'], ['outbound', ' from us'], ['internal', ''], ['unknown', '']]) {
+    const callDebtor = structuredClone(withLast);
+    callDebtor.last_contact.last = { ...callDebtor.last_contact.last, channel: 'call', direction };
+    CD.state.data = { ...data, debtors: [callDebtor] };
+    CD.state.selectedKey = callDebtor.key;
+    const callLine = html().match(/<p class="fine">(Last contact in the stored copies:[^<]+)<\/p>/)[1];
+    assert.ok(callLine.includes('a call' + from + ' (GHL).'), direction);
+  }
   // Across the whole fixture: no view ever says "no messages".
   for (const x of data.debtors) {
     CD.state.selectedKey = x.key;

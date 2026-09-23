@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:">
+<title>Booking · Friday fixture</title>
+<link rel="stylesheet" href="../../../modules/ops-sales-booking.css">
+<style>body{margin:0;background:#F6F4F0}</style>
+<body class="sales-booking-view-active">
+<div id="viewSales"><div id="salesBookingRoot"></div></div>
+<script src="../../../modules/ops-sales-booking.js"></script><script src="read.js"></script><script src="friday.js"></script><script src="api.js"></script>
+<script>
+/* Synthetic only: every write is a local fake, the thread read is a canned
+   in-page response, and connect-src 'none' blocks any real network call. */
+const api = SalesBooking;
+const data = makeFridayRead(api, makeBookingConfirmRead);
+const backend = BookingConfirmFixtureAPI.create(api, data);
+window.fakeWrites = backend.writes;
+window.fakeReads = backend.reads;
+window.SECUREWORKS_CLOUD = {auth:{getUser:()=>({id:api.RESOURCES.marnin.scoper_user_id})}};
+window.opsPost = backend.post;
+window.opsFetch = backend.read;
+window.opsAuthHeaders = async () => ({});
+window._commsGHLBase = 'fixture://ghl-proxy';
+window.fetch = async (url) => {
+  const contact = decodeURIComponent(String(url).split('contactId=')[1] || '');
+  return { json: async () => ({ messages: structuredClone((data.threads || {})[contact] || []) }) };
+};
+Object.assign(api.state, {resourceId:'marnin',weekStart:data.week_start,opened:true});
+api.load('marnin', data.week_start);
+</script></body></html>

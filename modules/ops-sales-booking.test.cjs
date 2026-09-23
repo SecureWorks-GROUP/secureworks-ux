@@ -17,6 +17,10 @@ beforeEach((t) => {
   api.state.stale = false;
   api.state.loading = false;
   api.state.visitRecorded = {};
+  api.state.dayIndex = null;
+  api.state.selectedId = null;
+  api.state.showDetails = false;
+  api.state.pressResults = {};
 });
 
 function sampleRead(resource) {
@@ -213,9 +217,10 @@ test('empty khairo week is coverage, not a fake free diary', () => {
     };
     api.state.error = null;
     api.state.resourceId = 'khairo';
+    api.state.showDetails = true;
     return api.renderHTML();
   })();
-  assert.match(html, /Empty diary is not spare capacity/);
+  assert.match(html, /empty is not the same as free/);
   assert.match(html, /khairo@secureworkswa.com.au/);
   assert.doesNotMatch(html, /Sample A/);
 });
@@ -224,6 +229,7 @@ test('XSS in provider subjects is escaped', () => {
   api.state.data = sampleRead();
   api.state.data.events[0].subject = '<img src=x onerror=alert(1)>';
   api.state.data.events[0].display_name = '<img src=x onerror=alert(1)>';
+  api.state.dayIndex = 1;
   const html = api.renderHTML();
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(html, /<img src=x/);
@@ -417,7 +423,7 @@ test('booked cases stay on the default unscoped list; archived and completed do 
   assert.match(html, /Booked/);
   assert.doesNotMatch(queue, /Scoped already/);
   assert.doesNotMatch(queue, /Parked/);
-  assert.match(html, /Quoted and archived/);
+  assert.match(html, /quoted and archived/i);
 });
 
 test('confirm booking is not offered without exact acceptance', () => {
@@ -494,7 +500,7 @@ test('accepted offer stays on the calendar and cannot be archived before an even
   api.state.selectedId = 'case-a';
   api.applyInboundReply('acceptance');
   const html = api.renderHTML();
-  assert.match(html, /event offer/);
+  assert.match(html, /class="ev is-offer/);
   const blocked = api.archiveCase('declined', '');
   assert.equal(blocked.ok, false);
   assert.equal(blocked.reason, 'commitment_visible');
@@ -518,7 +524,7 @@ test('follow_up with a sent offer still occupies the calendar and cannot be arch
   api.state.data.cases[0].status = 'follow_up';
   api.state.selectedId = 'case-a';
   const html = api.renderHTML();
-  assert.match(html, /event offer/);
+  assert.match(html, /class="ev is-offer/);
   const blocked = api.archiveCase('declined', '');
   assert.equal(blocked.ok, false);
 });
@@ -686,21 +692,16 @@ test('switching scoper drops the stamp, so one scoper cannot be stamped into ano
   api.state.resourceId = 'nithin';
 });
 
-test('the five week layers each own a stage tag and can be switched off', () => {
+test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
   api.state.selectedId = 'case-a';
-  api.state.layers = { confirmed: true, proposal: true, offer: true, blocked: true, personal: true, availability: true };
-  let html = api.renderHTML();
-  assert.match(html, /data-booking-layer="blocked"/);
-  assert.match(html, /data-booking-layer="personal"/);
-  assert.match(html, /PROPOSED/);
-  assert.match(html, /CONFIRMED/);
-  assert.match(html, /PERSONAL/);
-  api.state.layers.personal = false;
-  html = api.renderHTML();
-  assert.doesNotMatch(html, /PERSONAL/);
-  api.state.layers.personal = true;
+  const days = [1, 3].map((d) => { api.state.dayIndex = d; return api.renderHTML(); }).join('');
+  assert.match(days, /Proposed<\/span>/);
+  assert.match(days, /Booked visit<\/span>/);
+  assert.match(days, /Personal<\/span>/);
+  assert.match(days, /class="src src-outlook">Outlook</);
+  assert.match(days, /class="src src-ghl">GHL</);
 });
 
 test('a cancelled thread whose diary event survives keeps the slot blocked, not free', () => {
@@ -713,6 +714,7 @@ test('a cancelled thread whose diary event survives keeps the slot blocked, not 
 test('the queue groups by real GHL pipeline stages and states an unread enquiry date rather than faking one', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
+  api.state.selectedId = 'case-a';
   const groups = api.queueGroups().map((g) => g[0]);
   assert.deepEqual(groups, [
     'Client Needs To Be Contacted',
@@ -736,15 +738,12 @@ test('follow-through tiles count the queue and name the captain window', () => {
   assert.equal(f.to_book, 0);
   assert.equal(f.booked, 1);
   const html = api.renderHTML();
-  assert.match(html, /Enquiries still to book/);
-  assert.match(html, /Waiting on a reply/);
-  assert.match(html, /Booked to quote this week/);
-  assert.match(html, /Quotes to send/);
-  assert.match(html, /GHL stages that still need a booking/);
-  assert.match(html, /diary events matched to a case/);
-  assert.match(html, /in Scope Complete \/ Quote to be Sent/);
-  assert.doesNotMatch(html, /in the diary with a customer yes/);
-  assert.doesNotMatch(html, /visited this week plus last/);
+  assert.equal(api.listGroups().contact.length, 1);
+  assert.match(html, /<b>1<\/b> to contact/);
+  assert.match(html, /<b>0<\/b> waiting on a reply/);
+  assert.match(html, /Booked Mon <b>0<\/b>, Tue <b>1<\/b>, Thu <b>0<\/b>, Fri <b>0<\/b>/);
+  assert.doesNotMatch(html, /quotes? to send/);
+  assert.doesNotMatch(html, /census|coverage|enumerated|not a completed audit/i);
 });
 
 test('all configured scopers are available for signed-in profile selection', () => {
@@ -801,8 +800,8 @@ test('an enumerated CRM row is findable but is never counted or ranked as demand
   const html = api.renderHTML();
   // Still findable, never dressed up as urgent, and the tile says why it is not counted.
   assert.match(html, /Raw CRM row/);
-  assert.match(html, /Not assessed/);
-  assert.match(html, /1 more CRM rows are enumerated but not assessed/);
+  assert.match(html, /Not sorted yet<span class="count">1<\/span>/);
+  assert.match(html, /They are not counted above/);
   assert.equal(api.urgency(api.state.data.cases.find((c) => c.id === 'raw-1'))[1], 'Not assessed');
 });
 
@@ -815,10 +814,11 @@ test('a cancelled case does not leave its diary block reading as a confirmed boo
   api.state.data.cases[1].status = 'repair';
   api.state.data.cases[1].event_id = 'evt-1';
   assert.equal(api.diaryLayerFor(ev), 'blocked');
+  api.state.dayIndex = 1;
   const html = api.renderHTML();
-  assert.match(html, /CANCELLED/);
+  assert.match(html, /Cancelled, still in calendar/);
   // The slot is still occupied, so the block is drawn rather than freed.
-  assert.match(html, /class="ev blocked/);
+  assert.match(html, /class="ev is-blocked/);
   // A personal block is the provider's own statement and is never overridden.
   assert.equal(api.diaryLayerFor({ id: 'evt-1', layer: 'personal', start_iso: '2026-09-15T11:30:00' }), 'personal');
 });
@@ -830,14 +830,14 @@ test('a desk rule states where work is offered and never overprints a real booki
   // Tuesday 15 Sep is in the Stratco lane; the 17th (Thursday) is not.
   api.state.data.events = [];
   api.state.data.diary = [];
+  api.state.dayIndex = 3;
   let html = api.renderHTML();
-  assert.match(html, /Not a Marnin day/, 'an empty off-lane day is hatched closed');
+  assert.match(html, /Not a Marnin day\. Stratco scopes are offered Tue and Fri/, 'an off-lane day says so');
   // Now the provider actually has a visit booked on that off-lane day.
   api.state.data.events = [{ event_id: 'e9', subject: 'Scope: Real visit', display_name: 'Real visit', suburb: 'Alkimos', start_iso: '2026-09-17T09:00:00', end_iso: '2026-09-17T10:00:00', layer: 'confirmed' }];
   html = api.renderHTML();
-  assert.match(html, /Outside the Marnin lane/);
   assert.match(html, /Stratco scopes are offered Tue and Fri/);
-  assert.match(html, /Real visit/);
+  assert.match(html, /class="ev is-confirmed[^"]*"[\s\S]*Scope: Real visit/, 'the real booking keeps its place on the day');
   api.state.resourceId = 'nithin';
 });
 
@@ -972,8 +972,8 @@ test('two proposals at the same time both render on the week', () => {
     proposal: { start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T14:00:00', offer_id: 'off-c' }
   });
   const html = api.renderHTML();
-  assert.match(html, /data-booking-case="case-a"[^>]*style="left:calc\(0%/);
-  assert.match(html, /data-booking-case="case-c"[^>]*style="left:calc\(50%/);
+  assert.match(html, /data-booking-case="case-a"[^>]*style="grid-row:[^;]+;grid-column:2 \/ 3"/);
+  assert.match(html, /data-booking-case="case-c"[^>]*style="grid-row:[^;]+;grid-column:3 \/ -1"/);
   assert.match(html, /Clashing enquiry/);
 });
 
@@ -1157,18 +1157,18 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'quote-0'))[1], 'Act today');
   assert.equal(api.urgency(cases.find((c) => c.id === 'pres-0'))[1], 'Waiting');
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'pres-20'))[1], 'Waiting');
-  assert.match(html, /New Lead \(Call \+ Qualify\)/);
-  assert.match(html, /Scope Scheduled/);
-  assert.match(html, /Could not read calendar/);
-  assert.match(html, /calendar_http_403/);
-  assert.match(html, /Missing coverage is not a free week/);
-  assert.match(html, /930 case\(s\) had no thread read \(row budget reached\)/);
-  assert.match(html, /17 thread read\(s\) failed/);
-  assert.doesNotMatch(html, /Source not retrieved/);
-  assert.match(html, /outlook_primary/);
-  assert.match(html, /diary not read/);
-  assert.doesNotMatch(html, /in the diary with a customer yes/);
-  assert.match(html, /<span class="count">[1-9][0-9]* people/);
+  assert.match(html, /Could not read Marnin's calendar \(calendar_http_403\), so free times are unknown/);
+  assert.match(html, /never shown as free/);
+  assert.match(html, /Booked: calendar not read/);
+  assert.match(html, /To contact<span class="count">[1-9][0-9]*<\/span>/);
+  api.state.showDetails = true;
+  const details = api.renderHTML();
+  assert.match(details, /New Lead \(Call \+ Qualify\)/);
+  assert.match(details, /Scope Scheduled/);
+  assert.match(details, /930 case\(s\) had no thread read \(row budget reached\)/);
+  assert.match(details, /17 thread read\(s\) failed/);
+  assert.match(details, /outlook_primary/);
+  assert.doesNotMatch(details, /Source not retrieved/);
 });
 
 test('Nithin queue groups by the 11 patio stages and folds quoted work', () => {
@@ -1248,7 +1248,7 @@ test('Marnin queue groups by the 14 fencing stages and folds quoted work', () =>
   assert.deepEqual(api.queueGroups()[6][1].map((c) => c.id), ['m2']);
   assert.deepEqual(api.queueGroups()[7][1].map((c) => c.id), ['m3']);
   assert.equal(api.queueGroups().some((g) => g[1].some((c) => c.id === 'm4')), false);
-  assert.match(api.renderHTML(), /leave unread/);
+  assert.match(api.renderHTML(), /empty is not the same as free/);
   const tiles = api.followThrough();
   assert.equal(tiles.to_book, 3);
   assert.equal(tiles.waiting, 0);
@@ -1282,9 +1282,9 @@ test('loading state does not paint a fake empty week', () => {
   api.state.error = null;
   api.state.loading = true;
   const html = api.renderHTML();
-  assert.match(html, /Reading the provider calendar and GHL enquiries/);
-  assert.match(html, /Reading this week/);
-  assert.doesNotMatch(html, /0 people/);
+  assert.match(html, /Reading GHL and the calendar\. This can take up to a minute\./);
+  assert.match(html, /class="skeleton"/);
+  assert.doesNotMatch(html, /<b>0<\/b> to contact|Nothing in the calendar/);
   assert.doesNotMatch(html, /Source not retrieved/);
   api.state.loading = false;
 });
@@ -1370,19 +1370,18 @@ test('Marnin company diary paints Busy and does not count as booked scopes', () 
   assert.equal(api.diaryEventIsScopeBooking(scoped), true);
   assert.equal(api.diaryLayerFor(scoped), 'confirmed');
   assert.equal(api.diaryEventIsScopeBooking(payday), false);
-  const html = api.renderHTML();
-  assert.match(html, />Busy</);
+  const html = [0, 1, 2, 3, 4].map((d) => { api.state.dayIndex = d; return api.renderHTML(); }).join('');
+  assert.match(html, /Busy<\/span>/);
   assert.match(html, /Payday SecureWorks/);
   assert.match(html, /Outback Agreements/);
-  assert.match(html, /CONFIRMED/);
+  assert.match(html, /Booked visit<\/span>/);
   assert.match(html, /Scope: Pat, Canning Vale/);
   const tiles = api.followThrough();
   assert.equal(tiles.booked, 7);
   assert.equal(api.bookedCount(), 7);
-  assert.match(html, />7</);
-  assert.match(html, /class="ev busy event busy"[^>]*data-booking-case="pay"/);
-  assert.match(html, /class="ev confirmed event confirmed"[^>]*data-booking-case="scope-evt"/);
-  assert.doesNotMatch(html, /class="ev confirmed event confirmed"[^>]*data-booking-case="pay"/);
+  assert.match(html, /class="ev is-busy"[^>]*data-booking-case="pay"/);
+  assert.match(html, /class="ev is-confirmed"[^>]*data-booking-case="scope-evt"/);
+  assert.doesNotMatch(html, /class="ev is-confirmed"[^>]*data-booking-case="pay"/);
 });
 
 test('GHL booked-stage rows with an empty diary do not count as booked visits', () => {
@@ -1420,10 +1419,9 @@ test('GHL booked-stage rows with an empty diary do not count as booked visits', 
   assert.equal(tiles.booked, 0);
   assert.equal(api.bookedCount(), 0);
   const html = api.renderHTML();
-  assert.match(html, /GHL calendar empty this week/);
-  assert.doesNotMatch(html, /diary not read/);
-  assert.doesNotMatch(html, /in the diary with a customer yes/);
-  assert.match(html, /<div class="v">0<\/div>/);
+  assert.match(html, /Booked Tue <b>0<\/b>, Fri <b>0<\/b>/);
+  assert.doesNotMatch(html, /calendar not read/);
+  assert.match(html, /Nothing in the calendar this day/);
 });
 
 test('GHL contact, opportunity or event id matches a diary event to a queue row', () => {
@@ -1472,6 +1470,7 @@ test('blocks_capacity false does not occupy an off-lane day', () => {
   }];
   const ev = api.diary()[0];
   assert.equal(api.diaryOccupiesDay(ev), false);
+  api.state.dayIndex = 3;
   const html = api.renderHTML();
   assert.match(html, /Not a Marnin day/);
   assert.match(html, /Hint only/);
@@ -1482,8 +1481,9 @@ test('absent pack is named in the coverage strip, never shown as free capacity',
   api.state.resourceId = 'marnin';
   api.state.data = marninWeekRead();
   const html = api.renderHTML();
-  assert.match(html, /No proposals published yet for this week/);
-  assert.match(html, /Empty diary is not spare capacity|11 provider events/);
+  assert.match(html, /Details<span class="count">[1-9]/);
+  api.state.showDetails = true;
+  assert.match(api.renderHTML(), /No proposals published yet for this week/);
 });
 
 test('a pack proposal paints the day, window and draft on the card and in the detail', () => {
@@ -1523,9 +1523,10 @@ test('a pack proposal paints the day, window and draft on the card and in the de
   };
   const html = api.renderHTML();
   assert.doesNotMatch(html, /No proposals published yet for this week/);
-  assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /Friday 18 September, arrive 11:15am to 12:45pm/);
   assert.match(html, /Needs a person/);
-  assert.match(html, /Separate approvals are not connected yet/);
+  assert.match(html, /Approvals are not connected for this list yet, so nothing can be sent from here/);
+  assert.match(html, /No checked proposal for this lead yet, so it cannot be booked from here/);
   assert.match(html, /Colorbond fence/);
   const p = api.cases()[0].proposal;
   assert.equal(p.start_iso, '2026-09-18T11:15:00');
@@ -1565,21 +1566,23 @@ test('published marnin pack: 31 proposals, 11 offers, other-week slots listed, s
   let html = api.renderHTML();
   assert.match(html, /data-booking-week="-7"/);
   assert.match(html, /data-booking-week="7"/);
-  assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
-  assert.match(html, /Friday 25 September · arrive 11:15am to 12:45pm/);
-  assert.match(html, /Tuesday 29 September · arrive 11:15am to 12:45pm/);
-  assert.match(html, /Lead 1 · Canning Vale/);
-  assert.match(html, /Lead 2 · Harrisdale/);
-  assert.doesNotMatch(html, /Lead 1 · Suburb unknown/);
+  assert.match(html, /Proposed Tue 22 Sep/);
+  assert.match(html, /Proposed Fri 25 Sep/);
+  assert.match(html, /Proposed Tue 29 Sep/);
+  assert.match(html, /lead-name">Lead 1<\/span>[^]*?lead-place">Canning Vale/);
+  assert.match(html, /lead-name">Lead 2<\/span>[^]*?lead-place">Harrisdale/);
+  assert.doesNotMatch(html, /lead-name">Lead 1<\/span>[^]*?lead-place">Suburb not given/);
   assert.match(html, /data-booking-case="opp-1"/);
-  assert.match(html, /Friday 18 September/);
-  assert.doesNotMatch(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
+  assert.match(html, /Proposed Fri 18 Sep/);
+  api.state.dayIndex = 1;
+  html = api.renderHTML();
+  assert.doesNotMatch(html, /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="opp-1"/);
 
   api.state.weekStart = '2026-09-21';
   html = api.renderHTML();
-  assert.match(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-1"/);
-  assert.match(html, /Tuesday 22 September · arrive 11:15am to 12:45pm/);
-  assert.match(html, /Friday 18 September · arrive 11:15am to 12:45pm/);
+  assert.match(html, /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="opp-1"/);
+  assert.match(html, /Proposed Tue 22 Sep/);
+  assert.match(html, /Proposed Fri 18 Sep/);
   api.state.weekStart = '2026-09-14';
   api.state.resourceId = 'nithin';
 });
@@ -1623,9 +1626,10 @@ test('a clock-only Fri row stays undated and does not attach to the week on scre
   assert.equal(p.end_iso == null, true);
   assert.equal(api.proposalSlotLabel(api.cases()[0]), '');
   const html = api.renderHTML();
-  assert.match(html, /Clock Fri · Byford/);
-  assert.doesNotMatch(html, /Friday 18 September/);
-  assert.doesNotMatch(html, /class="ev proposal event proposal"[^>]*data-booking-case="opp-clock"/);
+  assert.match(html, /lead-name">Clock Fri<\/span>[^]*?lead-place">Byford/);
+  assert.doesNotMatch(html, /Friday 18 September|Fri 18 Sep/);
+  api.state.dayIndex = 4;
+  assert.doesNotMatch(api.renderHTML(), /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="opp-clock"/);
   api.state.weekStart = '2026-09-14';
   api.state.resourceId = 'nithin';
 });
@@ -1696,11 +1700,17 @@ function degradedRosterPackRead() {
   };
 }
 
-function proposalCardIds(html) {
+// The day column shows one day at a time, so a week is its five days.
+function proposalCardIds() {
   const ids = [];
-  const re = /class="ev proposal[^"]*"[^>]*data-booking-case="([^"]+)"/g;
-  let m;
-  while ((m = re.exec(html))) ids.push(m[1]);
+  for (let d = 0; d < 5; d++) {
+    api.state.dayIndex = d;
+    const html = api.renderHTML();
+    const re = /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="([^"]+)"/g;
+    let m;
+    while ((m = re.exec(html))) ids.push(m[1]);
+  }
+  api.state.dayIndex = null;
   return ids;
 }
 
@@ -1726,7 +1736,7 @@ test('pack offers remain visible when roster missed them, but legacy stamps cann
   const weekCards = {};
   ['2026-09-14', '2026-09-21', '2026-09-28'].forEach((week) => {
     api.state.weekStart = week;
-    weekCards[week] = proposalCardIds(api.renderHTML());
+    weekCards[week] = proposalCardIds();
   });
   api.state.weekStart = '2026-09-14';
   assert.deepEqual(weekCards['2026-09-14'].sort(), [
@@ -1751,11 +1761,11 @@ test('pack offers remain visible when roster missed them, but legacy stamps cann
   assert.equal(new Set(allCards).size, 11);
 
   let html = api.renderHTML();
-  assert.match(html, /11 proposals unsent/);
-  assert.match(html, /Lawrence Guo · Woodlands/);
-  assert.match(html, /Bruce Reidy-Crofts · Greenwood/);
-  assert.match(html, /Andrew Allen · Jindalee/);
-  assert.match(html, /Kim Douglas · Sorrento/);
+  assert.equal((html.match(/Proposal only, not in GHL list/g) || []).length, 9);
+  assert.match(html, /lead-name">Lawrence Guo<\/span>[^]*?lead-place">Woodlands/);
+  assert.match(html, /lead-name">Bruce Reidy-Crofts<\/span>[^]*?lead-place">Greenwood/);
+  assert.match(html, /lead-name">Andrew Allen<\/span>[^]*?lead-place">Jindalee/);
+  assert.match(html, /lead-name">Kim Douglas<\/span>[^]*?lead-place">Sorrento/);
   payload._offers.filter((row) => !['JtUWsD27EkSMWtqxGMHs', 'wr2YBmIyAI1ygiru5zwc'].includes(row.id)).forEach((row) => {
   });
 
@@ -1770,9 +1780,9 @@ test('pack offers remain visible when roster missed them, but legacy stamps cann
   for (const row of payload._offers) {
     api.state.selectedId = row.id;
     html = api.renderHTML();
-    assert.match(html, /Separate approvals are not connected yet/);
+    assert.match(html, /Approvals are not connected for this list yet/);
     if (row.id !== 'JtUWsD27EkSMWtqxGMHs' && row.id !== 'wr2YBmIyAI1ygiru5zwc') {
-      assert.match(html, /not in this read/);
+      assert.match(html, /not in GHL list/);
     }
   }
 
@@ -1832,14 +1842,14 @@ test('job_type sits next to suburb on the queue row and in the detail header', (
   assert.equal(api.jobTypeLabel(api.state.data.cases[1]), 'not given');
   assert.equal(api.jobTypeLabel(api.state.data.cases[2]), 'not given');
   let html = api.renderHTML();
-  assert.match(html, /Sam Ferry · Byford · fencing/);
-  assert.match(html, /No Type Yet · Carlisle · not given/);
-  assert.match(html, /Missing Type · Balga · not given/);
-  assert.match(html, /Byford · fencing/);
+  assert.match(html, /lead-name">Sam Ferry<\/span>[^]*?lead-place">Byford · fencing</);
+  assert.match(html, /lead-name">No Type Yet<\/span>[^]*?lead-place">Carlisle</);
+  assert.match(html, /lead-name">Missing Type<\/span>[^]*?lead-place">Balga</);
+  assert.match(html, /cardhead"><h2>Sam Ferry<\/h2><p>Byford · fencing</);
   assert.doesNotMatch(html, /No job details yet/);
   api.state.selectedId = 'opp-blank';
   html = api.renderHTML();
-  assert.match(html, /Carlisle · not given/);
+  assert.match(html, /Carlisle · job not given/);
   api.state.resourceId = 'nithin';
   api.state.selectedId = null;
 });
@@ -1882,10 +1892,9 @@ test('a job-only pack row shows the job on the queue, detail, and stamp board', 
   assert.equal(row.job_type == null, true);
   assert.equal(api.jobTypeLabel(row), 'Colorbond fence');
   const html = api.renderHTML();
-  assert.match(html, /Lawrence Guo · Woodlands · Colorbond fence/);
-  assert.match(html, /Woodlands · Colorbond fence/);
-  assert.match(html, /Needs a person/);
-  assert.doesNotMatch(html, /Lawrence Guo · Woodlands · not given/);
+  assert.match(html, /lead-name">Lawrence Guo<\/span>[^]*?lead-place">Woodlands · Colorbond fence</);
+  assert.match(html, /cardhead"><h2>Lawrence Guo<\/h2><p>Woodlands · Colorbond fence</);
+  assert.doesNotMatch(html, /not given/);
   api.state.resourceId = 'nithin';
   api.state.selectedId = null;
 });
@@ -1955,13 +1964,13 @@ test('Booked tile names an empty GHL calendar and keeps diary not read for a fai
     cases: []
   };
   assert.equal(api.bookedTileReason(), 'GHL calendar empty this week');
-  assert.match(api.renderHTML(), /GHL calendar empty this week/);
-  assert.doesNotMatch(api.renderHTML(), /diary not read/);
+  assert.match(api.renderHTML(), /Booked Tue <b>0<\/b>, Fri <b>0<\/b>/);
+  assert.doesNotMatch(api.renderHTML(), /calendar not read/);
 
   api.state.data.diary_read = { read_ok: false, reason: 'calendar_http_403', source: 'ghl_calendar' };
   assert.equal(api.bookedTileReason(), 'diary not read');
-  assert.match(api.renderHTML(), /diary not read/);
-  assert.doesNotMatch(api.renderHTML(), /GHL calendar empty this week/);
+  assert.match(api.renderHTML(), /Booked: calendar not read/);
+  assert.doesNotMatch(api.renderHTML(), /Booked Tue <b>0/);
   api.state.resourceId = 'nithin';
 });
 
@@ -2034,17 +2043,17 @@ test('GHL pipeline board uses real stage names, flags thread/diary drift, and ho
   assert.equal(api.impliedStage(waiter).name, 'Contacted Waiting on Response');
   assert.equal(api.stageDrift(waiter).want.name, 'Contacted Waiting on Response');
   assert.equal(api.impliedStage(booked).name, 'Scope Booked');
+  assert.doesNotMatch(api.renderHTML(), /data-booking-pipeline/, 'the pipeline lives behind Details');
+  api.state.showDetails = true;
   const html = api.renderHTML();
-  assert.match(html, /GHL sales pipeline · two way/);
+  assert.match(html, /<h3>GHL pipeline<\/h3>/);
   assert.match(html, /Client Needs To Be Contacted/);
-  assert.match(html, /Quoted and archived/);
-  assert.match(html, /2 cards · 2 out of step · Move held/);
-  assert.match(html, /pcard off/);
-  assert.match(html, /Thread and diary say <b>Contacted Waiting on Response<\/b>/);
-  assert.match(html, /Thread and diary say <b>Scope Booked<\/b>/);
-  assert.match(html, /data-booking-move-held="1"/);
-  assert.match(html, /Move \(held\)/);
-  assert.doesNotMatch(html, /data-booking-move="/);
+  assert.doesNotMatch(html, /<h4>Quoted and archived/, 'an empty stage column is not drawn');
+  assert.match(html, /Stages are not moved from this screen\. 2 cards may be in the wrong stage\./);
+  assert.match(html, /pcard is-off/);
+  assert.match(html, /Thread and calendar say Contacted Waiting on Response/);
+  assert.match(html, /Thread and calendar say Scope Booked/);
+  assert.doesNotMatch(html, /data-booking-move/);
   assert.deepEqual(api.stampWriteBody().stage_moves, []);
 });
 
@@ -2061,7 +2070,8 @@ test('a GHL 429 mapped to HTTP 500 keeps the last complete week on screen', asyn
   global.opsFetch = async () => JSON.parse(JSON.stringify(good));
   await api.load('marnin', '2026-09-14');
   assert.equal(api.state.data.ok, true);
-  assert.match(api.renderHTML(), /GHL rate limited/);
+  api.state.showDetails = true;
+  assert.match(api.renderHTML(), /GHL rate limited part of this read/);
   global.opsFetch = async () => {
     const err = new Error('Too Many Requests');
     err.status = 500;
@@ -2072,7 +2082,7 @@ test('a GHL 429 mapped to HTTP 500 keeps the last complete week on screen', asyn
   assert.equal(api.state.stale, true);
   assert.match(api.state.error, /provider 429 returned as HTTP 500/);
   assert.match(api.renderHTML(), /Sample A/);
-  assert.match(api.renderHTML(), /last complete week/);
+  assert.match(api.renderHTML(), /role="alert">Could not read the latest booking list: GHL rate limited this read[^<]*This is the last good read\./);
   api.state.resourceId = 'nithin';
   api.state.cache = {};
   api.state.data = null;
@@ -2112,7 +2122,7 @@ test('a cached scoper week paints before the next read returns', async () => {
   assert.ok(api.state.data, 'cache must paint before the in-flight read resolves');
   assert.equal(api.state.stale, true);
   assert.equal(api.state.readKind, 'cache');
-  assert.match(api.renderHTML(), /last complete read stays on screen/);
+  assert.match(api.renderHTML(), /The last good read stays on screen/);
   resolveSlow(sampleRead('nithin'));
   await pending;
   assert.equal(api.state.stale, false);

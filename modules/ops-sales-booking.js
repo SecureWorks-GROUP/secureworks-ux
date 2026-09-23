@@ -2431,7 +2431,8 @@
   }
 
   // Lock the draft while an approval or press is in flight so the words on
-  // screen stay the approved snapshot, and restoreFocus will not return to it.
+  // screen stay the approved snapshot: the box is disabled, restoreFocus will
+  // not return to it, and Use the proposed text is omitted and ignored.
   function composeBusy(c) {
     if (!c) return false;
     return ['message', 'calendar'].some(function (kind) {

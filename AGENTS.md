@@ -766,7 +766,7 @@ Gotchas:
   `oninput="_wizSigName=this.value"` just wrote `window._wizSigName` and every
   completion saved a blank client name; route inline input through a
   `window.*` setter. Completion-wizard specs must sign off through
-  `tests/helpers/wizard-signoff.js` (Next needs rating, name and signature). To
+  `tests/helpers/wizard-signoff.js` (contract in `trade-app.md`). To
   QA internal renderers, serve over http (the browser extension blocks `file://`)
   and eval the sentinel-delimited modules in a harness.
 - Inside the big `<style>` block, never write `*/` inside a `/* */` comment (e.g.

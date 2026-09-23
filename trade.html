@@ -3096,13 +3096,14 @@
     .ncal .fchips{display:flex;gap:7px;flex-wrap:wrap}
     .ncal .chip{font-size:13px;font-weight:750;color:var(--ink-2);border:1.4px solid var(--line-2);background:var(--card);border-radius:11px;padding:10px 14px;transition:background-color 150ms,color 150ms,border-color 150ms}
     .ncal .chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:baseline}
-    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)} .ncal .chip.dot-rp .dot{background:var(--rp)}
+    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)} .ncal .chip.dot-rp .dot{background:var(--rp)} .ncal .chip.dot-dk .dot{background:var(--nt)}
     .ncal .chip.on{color:var(--on);border-color:transparent}
     .ncal .chip.on.all{background:var(--ink)}
     .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
     .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
     .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
     .ncal .chip.on.rp{background:var(--rp)} .ncal .chip.on.rp .dot{background:var(--on)}
+    .ncal .chip.on.dk{background:var(--nt)} .ncal .chip.on.dk .dot{background:var(--on)}
     /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
     .ncal .nc-stack{padding:6px 14px 14px}
     .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
@@ -7163,7 +7164,7 @@
     // re-render any list already on screen so builder/type switch from the explicit
     // legacy fallback to server-owned feed facts without changing card markup.
     var activeCacheKey = jobListCacheKey();
-    fetchMakesafeV5Feed(false).then(function() {
+    var feedSettled = fetchMakesafeV5Feed(false).then(function() {
       if (_lastJobData && _lastJobDataKey === activeCacheKey && activeCacheKey === jobListCacheKey() && _currentView === 'myJobs') renderMyJobs(_lastJobData);
     }).catch(function(err) {
       console.warn('[trade] make-safe feed unavailable; using legacy builder/type fallback:', err);
@@ -7213,6 +7214,11 @@
       if (_isAdmin) {
         loadMakesafePoolJobs(data);
       }
+      // Calendar default follows the trade's own work, which needs both my_jobs
+      // and the make-safe feed; the feed promise never rejects past this point.
+      feedSettled.catch(function() {}).then(function() {
+        if (requestToken === _myJobsRequestToken && requestCacheKey === jobListCacheKey()) ncAdoptOwnWorkDefault();
+      });
       // Check for active server-side clock (survives app reinstall / device switch)
       checkServerClockRecovery(data, params.mode === 'all');
     }).catch(function(err) {
@@ -7471,9 +7477,10 @@
 
   function applyTradeVisibilityDefaults() {
     if (typeof NC === 'undefined' || !NC) return;
-    var vertical = primaryManagedTradeVertical();
-    NC.type = vertical === 'fencing' ? 'fencing' : 'makesafe';
-    NC.scope = canUseEveryoneLens() ? 'everyone' : 'mine';
+    NC.ownWork = null;
+    NC.typePinned = false;
+    NC.type = ncDefaultCalendarType();
+    NC.scope = ncDefaultCalendarScope(NC.type);
     NC.model = null;
     NC.modelKey = null;
     NC.requestToken = (NC.requestToken || 0) + 1;
@@ -7670,16 +7677,71 @@
       if (f === 'history') {
         var fromEl = document.getElementById('historyFrom');
         var toEl = document.getElementById('historyTo');
-        if (fromEl && !fromEl.value) {
-          var d = new Date(); d.setDate(d.getDate() - 14);
-          fromEl.value = d.toISOString().slice(0, 10);
-        }
-        if (toEl && !toEl.value) {
-          toEl.value = new Date().toISOString().slice(0, 10);
-        }
+        if (fromEl && !fromEl.value) fromEl.value = historyDefaultFrom();
+        if (toEl && !toEl.value) toEl.value = awstDateStr();
       }
     }
     if (_lastJobData) renderMyJobs(_lastJobData);
+  };
+
+  // History filters the jobs already loaded on this phone; it cannot reach
+  // further back than the my_jobs feed does (about 30 days, make-safe about
+  // 180). So the date range opens on, and is bounded by, what is actually
+  // loaded, and the page says where older jobs are found (All-tab search).
+  // formatDate for mid-sentence use: "and today", not "and Today".
+  function formatDateInline(d) {
+    var out = formatDate(d);
+    return /^(Today|Tomorrow|Yesterday)$/.test(out) ? out.toLowerCase() : out;
+  }
+  var HISTORY_REACH_TEXT = 'Your job list keeps about the last 30 days (make-safe jobs about 180 days).';
+  function historyDefaultFrom() {
+    var today = awstDateStr();
+    return historyLoadedFrom(_cachedMyJobs, today) || today;
+  }
+  // Clamps the date inputs to the loaded range and returns the range note.
+  function syncHistoryRange() {
+    var today = awstDateStr();
+    var loadedFrom = historyLoadedFrom(_cachedMyJobs, today);
+    var fromEl = document.getElementById('historyFrom');
+    var toEl = document.getElementById('historyTo');
+    [fromEl, toEl].forEach(function(el) {
+      if (!el) return;
+      el.min = loadedFrom || today;
+      el.max = today;
+      if (el.value && el.value < el.min) el.value = el.min;
+      if (el.value && el.value > el.max) el.value = el.max;
+    });
+    var reach = loadedFrom
+      ? 'Showing jobs loaded on this phone, back to ' + formatDate(loadedFrom) + '. '
+      : 'No past jobs are loaded on this phone yet. ';
+    return '<div id="historyRangeNote" style="font-size:12px;color:var(--sw-text-sec);background:var(--sw-bg,#F4F6F8);border:1px solid var(--sw-border);border-radius:8px;padding:8px 10px;margin:0 0 12px;line-height:1.45">'
+      + esc(reach + HISTORY_REACH_TEXT) + ' For older jobs, '
+      + '<button type="button" onclick="openAllJobsSearch()" style="background:none;border:none;padding:0;color:var(--sw-mid,#4C6A7C);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer">search in All</button>.</div>';
+  }
+  function historyEmptyStateHTML(query) {
+    var fromVal = (document.getElementById('historyFrom') || {}).value || '';
+    var toVal = (document.getElementById('historyTo') || {}).value || '';
+    var title = query
+      ? 'No past jobs match “' + query + '”'
+      : (fromVal && toVal ? 'No past jobs between ' + formatDateInline(fromVal) + ' and ' + formatDateInline(toVal) : 'No past jobs found');
+    var btn = 'margin:12px 4px 0;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);min-height:44px;';
+    return '<div class="empty-state" data-history-empty="1"><p>' + esc(title) + '</p>'
+      + '<button type="button" onclick="resetHistoryRange()" style="' + btn + 'background:#fff;color:var(--sw-text);border:1px solid var(--sw-border)">Reset dates</button>'
+      + '<button type="button" onclick="openAllJobsSearch()" style="' + btn + 'background:var(--sw-dark);color:#fff;border:none">Search All jobs</button></div>';
+  }
+  window.resetHistoryRange = function() {
+    var fromEl = document.getElementById('historyFrom');
+    var toEl = document.getElementById('historyTo');
+    if (fromEl) fromEl.value = historyDefaultFrom();
+    if (toEl) toEl.value = awstDateStr();
+    var search = document.getElementById('jobSearchInput');
+    if (search) search.value = '';
+    if (_lastJobData) renderMyJobs(_lastJobData);
+  };
+  window.openAllJobsSearch = function() {
+    setJobFilter('all');
+    var search = document.getElementById('jobSearchInput');
+    if (search) search.focus();
   };
 
   // Returns true if the query looks like a builder/job reference (e.g. "AJ66934", "AJBR 66934", "SWMS-26438").
@@ -8192,7 +8254,7 @@
     if (filter === 'all') return true;
     if (filter === 'active') return a.status !== 'complete';
     if (filter === 'history') {
-      var today = new Date().toISOString().slice(0, 10);
+      var today = awstDateStr();
       var isPast = a.status === 'complete' || (a.scheduled_date && a.scheduled_date < today);
       if (!isPast) return false;
       // Apply date range
@@ -8233,6 +8295,45 @@
     return (_cachedMyJobs || []).filter(function(a) {
       return a && a.jobs && a.jobs.id === jobId;
     });
+  }
+
+  // The whole-list empty state names the lens that came up empty. "No jobs
+  // assigned to you yet" is only said when the viewer truly has none; Today
+  // points at the next booked job instead, and never sends anyone to Pay.
+  function myJobsEmptyStateHTML(data, query) {
+    var own = ownAssignmentRows(data, _user && _user.id);
+    var today = awstDateStr();
+    var next = nextOwnAssignment(own, today);
+    var title, sub = '';
+    if (query) {
+      title = 'No jobs match “' + query + '”';
+      sub = 'This list only holds your own jobs. To search every job, use All.';
+    } else if (_jobFilter === 'today') {
+      title = 'No jobs today';
+    } else if (_jobFilter === 'thisWeek') {
+      title = 'No jobs this week';
+    } else if (_jobFilter === 'active') {
+      title = 'No active jobs';
+    } else {
+      title = own.length ? 'No jobs in this list' : 'No jobs assigned to you yet';
+    }
+    var btn = 'margin-top:12px;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);min-height:44px;';
+    var h = '<div class="empty-state" data-jobs-empty="' + esc(_jobFilter) + '">';
+    h += '  <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
+    h += '  <p>' + esc(title) + '</p>';
+    if (!query && next) {
+      var nj = next.job || {};
+      var place = [nj.job_number, nj.site_suburb].filter(Boolean).join(' · ');
+      var openFn = next.type === 'makesafe' ? 'openJobReport' : 'openJob';
+      sub = 'Your next job is ' + formatDateInline(next.date) + (place ? ': ' + place : '') + '.';
+      h += '  <p style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.4">' + esc(sub) + '</p>';
+      h += '  <button type="button" data-next-job="' + esc(nj.id) + '" onclick="' + openFn + '(\'' + esc(nj.id) + '\', \'' + esc(next.assignment.id || '') + '\')" style="' + btn + 'background:var(--sw-dark);color:#fff;border:none">Open next job</button>';
+    } else {
+      if (!query && _jobFilter !== 'assigned') sub = own.length ? 'Nothing else is booked for you yet.' : 'Nothing is booked for you yet.';
+      if (sub) h += '  <p style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.4">' + esc(sub) + '</p>';
+      if (query) h += '  <button type="button" onclick="setJobFilter(\'all\')" style="' + btn + 'background:var(--sw-dark);color:#fff;border:none">Search All jobs</button>';
+    }
+    return h + '</div>';
   }
 
   function renderMyJobs(data) {
@@ -8308,6 +8409,7 @@
 
     // History filter: pull from full cache instead of sections
     if (_jobFilter === 'history') {
+      html += syncHistoryRange();
       var histItems = (_cachedMyJobs || []).filter(function(a) {
         return matchesSearch(a, query) && matchesFilter(a, _jobFilter);
       });
@@ -8335,7 +8437,7 @@
           });
         });
       } else {
-        html += '<div style="text-align:center;padding:32px;color:var(--sw-text-sec);font-size:14px;">No past jobs found</div>';
+        html += historyEmptyStateHTML(query);
       }
       container.innerHTML = html;
       return;
@@ -8489,12 +8591,7 @@
     // owes a query or a company viewer — the global block is, and it states its
     // own count (it previously discarded a rendered search result set).
     if (!hasAny && !_needsGlobalSearch && !_needsAllJobsFeed) {
-      html = '<div class="empty-state">';
-      html += '  <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
-      html += '  <p>No jobs assigned to you yet</p>';
-      html += '  <p style="font-size:13px;color:var(--sw-text-sec);margin-top:8px;max-width:280px;margin-left:auto;margin-right:auto;line-height:1.4">Finished work for pay lives under Pay → Weekly Invoice.</p>';
-      html += '  <button type="button" onclick="showView(\'hours\')" style="margin-top:12px;padding:10px 16px;background:var(--sw-orange);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sw-font);min-height:44px">Open Pay</button>';
-      html += '</div>';
+      html = myJobsEmptyStateHTML(data, query);
     }
 
     // The company feed is appended last: it is an endless list, so the viewer's
@@ -9374,6 +9471,82 @@
   function getTradeJobType(job, assignment) {
     return tradeJobVertical(job, assignment);
   }
+
+  // <trade-own-work>
+  // The viewer's OWN assignments, read from the my_jobs buckets. A manager on
+  // the Everyone lens receives other crews' rows too, and ops staff carry ghost
+  // role:'observer' mirror rows; neither is the viewer's work. The Today empty
+  // state, the calendar's default vertical and its "next job" offer all read
+  // this one list, so they never disagree about what "my work" is.
+  var OWN_WORK_BUCKETS = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'];
+  // Verticals the calendar can open: make-safe (canonical feed), repair (raw
+  // feed) and the trade-calendar.v1 types, which Mine serves for any trade.
+  var OWN_WORK_CALENDAR_TYPES = ['makesafe', 'fencing', 'patio', 'repair', 'decking'];
+  function ownAssignmentRows(data, userId) {
+    var out = [];
+    if (!data) return out;
+    OWN_WORK_BUCKETS.forEach(function(k) {
+      (data[k] || []).forEach(function(a) {
+        if (!a || !a.jobs || !a.jobs.id || a._makesafePool) return;
+        if (String(a.role || '').toLowerCase() === 'observer') return;
+        if (a.user_id ? a.user_id !== userId : data._adminView) return;
+        out.push(a);
+      });
+    });
+    return out;
+  }
+  function ownWorkIsOpen(a) {
+    var s = String((a && a.status) || '').toLowerCase();
+    return s !== 'complete' && s !== 'completed' && s !== 'cancelled' && s !== 'declined';
+  }
+  // Earliest open own assignment dated on or after fromDate (YYYY-MM-DD).
+  function nextOwnAssignment(rows, fromDate) {
+    var best = null;
+    (rows || []).forEach(function(a) {
+      var d = a.scheduled_date;
+      if (!d || d < fromDate || !ownWorkIsOpen(a)) return;
+      if (!best || d < best.scheduled_date || (d === best.scheduled_date && String(a.start_time || '') < String(best.start_time || ''))) best = a;
+    });
+    if (!best) return null;
+    return { assignment: best, job: best.jobs, date: best.scheduled_date, type: getTradeJobType(best.jobs, best) };
+  }
+  // Most common calendar vertical across the viewer's own jobs (one vote per
+  // job). extraJobs adds own make-safe allocations from the canonical feed.
+  // Ties go to the earlier entry of preference, so the old default holds.
+  function ownWorkCalendarVertical(rows, extraJobs, preference) {
+    var byJob = {};
+    (rows || []).forEach(function(a) { byJob[a.jobs.id] = getTradeJobType(a.jobs, a); });
+    (extraJobs || []).forEach(function(j) { if (j && j.id && !byJob[j.id]) byJob[j.id] = j.type; });
+    var counts = {};
+    Object.keys(byJob).forEach(function(id) {
+      var v = byJob[id];
+      if (OWN_WORK_CALENDAR_TYPES.indexOf(v) !== -1) counts[v] = (counts[v] || 0) + 1;
+    });
+    var order = (preference || []).concat(OWN_WORK_CALENDAR_TYPES);
+    var present = Object.keys(counts).sort(function(x, y) {
+      return (counts[y] - counts[x]) || (order.indexOf(x) - order.indexOf(y));
+    });
+    return { top: present[0] || '', verticals: present, counts: counts };
+  }
+  // Earliest date a past own job in the loaded list carries: the honest start
+  // of what History can show.
+  function historyLoadedFrom(rows, today) {
+    var min = '';
+    (rows || []).forEach(function(a) {
+      var d = a.scheduled_date || String(a.completed_at || '').slice(0, 10);
+      if (!d) return;
+      var isPast = a.status === 'complete' || d < today;
+      if (isPast && (!min || d < min)) min = d;
+    });
+    return min;
+  }
+  window.__SW_TRADE_OWN_WORK_TESTS = {
+    ownAssignmentRows: ownAssignmentRows,
+    nextOwnAssignment: nextOwnAssignment,
+    ownWorkCalendarVertical: ownWorkCalendarVertical,
+    historyLoadedFrom: historyLoadedFrom
+  };
+  // </trade-own-work>
 
   function getCachedTradeJob(jobId) {
     var cached = _tradeJobCacheById[jobId];
@@ -18065,6 +18238,22 @@
       patio: { cls: 'pt', label: 'Patio' }, repair: { cls: 'rp', label: 'Repair' }, other: { cls: 'nt', label: 'Other' }
     };
     function TY(t) { return TYPE[t] || TYPE.other; }
+    function typeLabel(t) { return t === 'decking' ? 'Decking' : TY(t).label; }
+    // A blank period says what is empty, which jobs the view is showing
+    // (st.scopeLabel) and, when the viewer has one, offers their next job
+    // (st.next) — a blank day must never read as "you have no work".
+    function emptyPeriodHTML(st, title, hint) {
+      var h = '<div class="emptyview fadein" data-cal-empty="1"><b>' + esc(title) + '</b>';
+      if (st.scopeLabel) h += '<span class="nc-empty-scope">Showing ' + esc(st.scopeLabel) + '.</span>';
+      if (hint) h += ' ' + esc(hint);
+      if (st.next && st.next.date) {
+        var other = st.next.type && st.next.type !== st.type && st.type !== 'all';
+        h += '<div><button type="button" class="btn ghost nc-nextjob" style="margin-top:12px" data-ncnext="' + esc(st.next.date) + '" data-ncnext-type="' + esc(st.next.type || '') + '">'
+          + 'Your next job: ' + esc(fmtDay(st.next.date)) + (st.next.ref ? ' &middot; ' + esc(st.next.ref) : '')
+          + (other ? ' (' + esc(st.next.typeLabel || st.next.type) + ')' : '') + '</button></div>';
+      }
+      return h + '</div>';
+    }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
     function parse(d) { var p = String(d).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
@@ -18198,7 +18387,7 @@
     function renderTimeline(M, st) {
       var crews = crewsTimed(M, st, st.date), untimed = untimedForDate(M, st, st.date);
       if (!crews.length && !untimed.length && !unscheduledRows(M, st).length) {
-        return '<div class="emptyview fadein"><b>No one booked</b>' + (st.scope === 'mine' ? 'You have nothing on ' + fmtDay(st.date) + '.' : 'Nothing scheduled for ' + fmtDay(st.date) + '.') + '</div>';
+        return emptyPeriodHTML(st, 'Nothing scheduled for ' + fmtDay(st.date));
       }
       var solo = crews.length === 1;
       var cols = crews.map(function (name) {
@@ -18217,7 +18406,7 @@
       var jobs = deduped.filter(function (j) { return j.start != null; }).sort(function (a, b) { return a.start - b.start; });
       var untimed = deduped.filter(function (j) { return j.start == null; });
       if (!jobs.length && !untimed.length && !unscheduledRows(M, st).length) {
-        return '<div class="emptyview fadein"><b>Nothing on ' + fmtDay(st.date) + '</b>Try another day on the rail.</div>';
+        return emptyPeriodHTML(st, 'Nothing scheduled for ' + fmtDay(st.date), 'Try another day on the rail.');
       }
       var list = jobs.length ? '<div class="nc-stack">' + jobs.map(function (j) { return jcard(M, j); }).join('') + '</div>' : '';
       return '<div class="fadein">' + list + untimedSection(M, untimed) + nobodyNoDateHTML(M, st) + '</div>';
@@ -18244,7 +18433,7 @@
         }).join('');
         if (has) rows += '<div class="wkrow"><div class="wkcrew">' + av(M, name) + '<span class="nm">' + esc(name) + '</span></div>' + cells + '</div>';
       });
-      if (!rows && !unscheduledRows(M, st).length) rows = '<div class="emptyview"><b>Quiet week</b>Nothing matches the filter this week.</div>';
+      if (!rows && !unscheduledRows(M, st).length) rows = emptyPeriodHTML(st, 'Nothing scheduled for ' + weekLabel(st.date));
       return '<div class="wkscroll fadein">' + head + rows + nobodyNoDateHTML(M, st) + '<div class="aghint">Tap a cell to open that day. Counts include jobs still to be timed.</div></div>';
     }
 
@@ -18262,7 +18451,7 @@
         return '<div class="nc-col"><button class="nc-colhead dhead' + (d === M.today ? ' today' : '') + '" data-date="' + d + '"><span class="ddisc">' + dt.getDate() + '</span><div class="cn"><div class="cnm">' + WD[dt.getDay()] + '</div><div class="cc">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</div></div></button>'
           + (jobs.length ? jobs.map(function (j) { return jcard(M, j); }).join('') : '<div class="nc-col-empty">Nothing timed</div>') + '</div>';
       }).join('');
-      if (!any && !untimedAll.length && !unscheduledRows(M, st).length) return '<div class="emptyview fadein"><b>Quiet week</b>Nothing matches the filter this week.</div>';
+      if (!any && !untimedAll.length && !unscheduledRows(M, st).length) return emptyPeriodHTML(st, 'Nothing scheduled for ' + weekLabel(st.date));
       return '<div class="fadein"><div class="nc-cols">' + cols + '</div>' + untimedSection(M, untimedAll) + nobodyNoDateHTML(M, st) + '</div>';
     }
 
@@ -18273,7 +18462,7 @@
     }
     function selectedDayList(M, st) {
       var jobs = jobsForAgenda(M, st, st.date);
-      if (!jobs.length) return '<div class="emptyview"><b>Nothing on ' + fmtDay(st.date) + '</b>Tap another day above.</div>';
+      if (!jobs.length) return emptyPeriodHTML(st, 'Nothing scheduled for ' + fmtDay(st.date), 'Tap another day above.');
       var html = '<div class="aghead' + (st.date === M.today ? ' today' : '') + '"><b>' + fmtDay(st.date) + '</b><span class="agn">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + '</span></div>';
       return html + jobs.map(function (j) { return agRow(M, j); }).join('');
     }
@@ -18327,7 +18516,7 @@
     function renderRun(M, st) {
       var jobs = CalAdapterCore.dedupeByJobDate(assignedForDate(M, st, st.date))
         .sort(function (a, b) { return (a.start == null ? 99 : a.start) - (b.start == null ? 99 : b.start); });
-      if (!jobs.length) return '<div class="emptyview fadein"><b>No runs</b>Nobody is booked on ' + fmtDay(st.date) + '.</div>';
+      if (!jobs.length) return emptyPeriodHTML(st, 'Nothing scheduled for ' + fmtDay(st.date));
       var html = '<div class="runhint">' + fmtDay(st.date) + ', in run order. Status only, no changes here.</div>';
       html += '<div class="runsec"><div class="runsh"><span class="runsn">' + jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + ' today</span></div><div class="run">';
       jobs.forEach(function (j) {
@@ -18394,7 +18583,7 @@
     }
 
     return {
-      render: render, chrome: chrome,
+      render: render, chrome: chrome, typeLabel: typeLabel, emptyPeriodHTML: emptyPeriodHTML,
       renderTimeline: renderTimeline, renderDayJobs: renderDayJobs, renderWeekCrew: renderWeekCrew,
       renderWeekJobs: renderWeekJobs, renderMonthCrew: renderMonthCrew, renderMonthJobs: renderMonthJobs, renderRun: renderRun,
       periodLabel: periodLabel, railHTML: railHTML, unassignedForPeriod: unassignedForPeriod,
@@ -18410,7 +18599,7 @@
   // ── DOM wiring for the .ncal calendar (U2/U3). Uses CalRender (pure) + the U1
   //    adapter fetch. Classic-calendar hatch removed 2026-07-20: .ncal is the
   //    only calendar; any session parked on classic is migrated here on entry. ──
-  var NC = { calView: 'cal', scale: 'day', axis: 'jobs', type: 'makesafe', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, modelKey: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, dirty: false, loadedAt: 0, requestToken: 0 };
+  var NC = { calView: 'cal', scale: 'day', axis: 'jobs', type: 'makesafe', scope: 'everyone', date: null, month: null, me: { id: null, name: null }, model: null, modelKey: null, fetchFrom: null, fetchTo: null, wired: false, loading: false, dirty: false, loadedAt: 0, requestToken: 0, ownWork: null, typePinned: false };
   // U-T3 freshness: dirty = a Board write happened, refetch on next entry;
   // loadedAt = when the model was last fetched (drives the TTL + "Updated" stamp).
   var NC_TTL_MS = 90000;
@@ -18420,6 +18609,81 @@
     return !!(NC.model && NC.model.permissions &&
       (NC.model.permissions.sees_all === true || NC.model.permissions.sees_all_makesafes === true));
   }
+  // Calendar default: the trade's OWN work (most common vertical across their
+  // own jobs, <trade-own-work>), not Make-safe for everyone. Office dispatchers
+  // keep the managed-vertical default, because their calendar is the company's
+  // rather than their own. Reset returns here.
+  function ncFallbackCalendarType() {
+    return primaryManagedTradeVertical() === 'fencing' ? 'fencing' : 'makesafe';
+  }
+  function ncDefaultCalendarType() {
+    if (_isAdmin || !NC.ownWork || !NC.ownWork.top) return ncFallbackCalendarType();
+    return NC.ownWork.top;
+  }
+  function ncOwnVerticals() { return (NC.ownWork && NC.ownWork.verticals) || []; }
+  // Everyone widens past the viewer's own rows, so it needs authority over the
+  // vertical: office, or a manager of it. A vertical reached only through the
+  // viewer's own jobs stays on Mine (the backend refuses Everyone there).
+  function ncEveryoneAllowed(type) {
+    if (!canUseEveryoneLens()) return false;
+    if (_isAdmin) return true;
+    if (type === 'fencing' || type === 'patio' || type === 'decking') return managesTradeVertical(type);
+    return true;
+  }
+  function ncDefaultCalendarScope(type) { return ncEveryoneAllowed(type) ? 'everyone' : 'mine'; }
+  function ncScopeLabel() {
+    var names = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', repair: 'Repair', decking: 'Decking' };
+    var whose = NC.scope === 'everyone' ? 'everyone’s' : 'your';
+    return NC.type === 'all' ? whose + ' jobs in every trade' : whose + ' ' + (names[NC.type] || NC.type) + ' jobs';
+  }
+  function ncRefreshOwnWork() {
+    var uid = _user && _user.id;
+    var extra = [];
+    if (_makesafeV5Feed && uid) {
+      try {
+        MakesafeTradeV5.rows(_makesafeV5Feed).forEach(function (row) {
+          if ((row.assignments || []).some(function (a) { return a && a.user_id === uid; })) extra.push({ id: row.id, type: 'makesafe' });
+        });
+      } catch (e) { /* an invalid feed adds no votes */ }
+    }
+    NC.ownWork = ownWorkCalendarVertical(ownAssignmentRows(_lastJobData, uid), extra, [ncFallbackCalendarType()]);
+  }
+  // Runs once my_jobs and the make-safe feed have both settled. A vertical the
+  // trade picked themselves (typePinned) is never overridden.
+  function ncAdoptOwnWorkDefault() {
+    if (!_user) return;
+    ncRefreshOwnWork();
+    if (NC.typePinned) return;
+    var next = ncDefaultCalendarType();
+    if (next === NC.type) {
+      // Same vertical: repaint so a blank day picks up the next-job offer.
+      if (_currentView === 'schedule' && NC.model) ncPaint();
+      return;
+    }
+    NC.type = next;
+    NC.scope = ncDefaultCalendarScope(next);
+    NC.model = null; NC.modelKey = null; NC.loadedAt = 0;
+    NC.requestToken = (NC.requestToken || 0) + 1;
+    if (_currentView === 'schedule') renderNewCalendar();
+  }
+  function ncNextJob() {
+    var n = nextOwnAssignment(ownAssignmentRows(_lastJobData, _user && _user.id), awstDateStr());
+    if (!n) return null;
+    return { date: n.date, type: n.type, ref: (n.job && n.job.job_number) || '', typeLabel: CalRender.typeLabel(n.type) };
+  }
+  // A blank-period "next job" offer: open that day, switching the calendar to
+  // the job's vertical when the viewer can open it.
+  function ncGoToNextJob(date, type) {
+    if (!date) return;
+    if (type && type !== NC.type && OWN_WORK_CALENDAR_TYPES.indexOf(type) !== -1) {
+      NC.type = type;
+      NC.typePinned = true;
+      if (!ncEveryoneAllowed(type)) NC.scope = 'mine';
+      NC.model = null; NC.modelKey = null; NC.loadedAt = 0;
+    }
+    NC.date = date; NC.month = date.slice(0, 8) + '01'; NC.scale = 'day'; NC.calView = 'cal';
+    if (!NC.model) renderNewCalendar(); else ncRepaintForDate();
+  }
   function ncNowDecimal() { var d = new Date(Date.now() + 8 * 3600 * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; }
   function ncState() {
     // date + month MUST be included: every CalRender view reads st.date (day/week/agenda/run,
@@ -18428,7 +18692,7 @@
     // today/this-month so a direct ncPaint (e.g. before renderNewCalendar's default) is safe.
     var d = NC.date || awstDateStr();
     var mo = NC.month || (d.slice(0, 8) + '01');
-    return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, date: d, month: mo, me: NC.me, boardAllowed: ncSeesAll(), lens: ncSeesAll() ? 'manager' : 'installer' };
+    return { calView: NC.calView, scale: NC.scale, axis: NC.axis, type: NC.type, scope: NC.scope, date: d, month: mo, me: NC.me, boardAllowed: ncSeesAll(), lens: ncSeesAll() ? 'manager' : 'installer', scopeLabel: ncScopeLabel(), next: ncNextJob() };
   }
   function ncSyncSeg(id, attr, val) {
     var seg = document.getElementById(id); if (!seg) return;
@@ -18695,19 +18959,24 @@
       // vertical (managesTradeVertical), plus an unconditional OR for a
       // dispatcher (_isAdmin: admin/ops_manager) — a dispatcher's whole point
       // is seeing every vertical, not just the ones they personally manage.
+      // A trade also gets a chip for every vertical in their OWN jobs: Mine on
+      // trade-calendar.v1 serves any trade's own rows, so a fencing crew member
+      // can open their fencing calendar without managing fencing.
+      var own = ncOwnVerticals();
       var trades = [];
       if (_isAdmin || managesTradeVertical('all')) trades.push(['all', 'All', 'all']);
       trades.push(['makesafe', 'Make-safe', 'ms dot-ms']);
-      if (_isAdmin || managesTradeVertical('patio')) trades.push(['patio', 'Patio', 'pt dot-pt']);
+      if (_isAdmin || managesTradeVertical('patio') || own.indexOf('patio') !== -1) trades.push(['patio', 'Patio', 'pt dot-pt']);
       trades.push(['repair', 'Repair', 'rp dot-rp']);
-      if (managesTradeVertical('fencing')) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
+      if (managesTradeVertical('fencing') || own.indexOf('fencing') !== -1) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
+      if (own.indexOf('decking') !== -1) trades.push(['decking', 'Decking', 'dk dot-dk']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
       var scope = '<div class="seg lite" style="max-width:320px">'
         + '<button class="segbtn' + (NC.scope === 'mine' ? ' on' : '') + '" data-fscope="mine">Mine</button>'
-        + (canUseEveryoneLens() ? '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">' + esc(everyoneLensLabel()) + '</button>' : '')
+        + (ncEveryoneAllowed(NC.type) ? '<button class="segbtn' + (NC.scope === 'everyone' ? ' on' : '') + '" data-fscope="everyone">' + esc(everyoneLensLabel()) + '</button>' : '')
         + '</div>';
       return '<div class="sh-kick">Filter the calendar</div>'
-        + '<div class="sh-sub" style="font-size:22px;margin-bottom:14px">One calendar, cut your way</div>'
+        + '<div class="sh-sub" id="ncScopeLabel" style="font-size:22px;margin-bottom:14px">Showing ' + esc(ncScopeLabel()) + '</div>'
         + '<div class="fgroup"><div class="sh-lab">Trade</div><div class="fchips">' + chips + '</div></div>'
         + '<div class="fgroup"><div class="sh-lab">Whose jobs</div>' + scope + '</div>';
     }
@@ -18716,14 +18985,19 @@
       var c = e.target.closest('[data-ftype]');
       if (c) {
         var nextType = c.getAttribute('data-ftype');
-        if (nextType !== NC.type) { NC.type = nextType; reloadForFilter(); }
+        NC.typePinned = true;
+        if (nextType !== NC.type) {
+          NC.type = nextType;
+          if (!ncEveryoneAllowed(nextType)) NC.scope = 'mine';
+          reloadForFilter();
+        }
         body.innerHTML = content();
         return;
       }
       var sc = e.target.closest('[data-fscope]');
       if (sc) {
         var nextScope = sc.getAttribute('data-fscope');
-        if (nextScope === 'everyone' && !canUseEveryoneLens()) return;
+        if (nextScope === 'everyone' && !ncEveryoneAllowed(NC.type)) return;
         if (nextScope !== NC.scope) { NC.scope = nextScope; reloadForFilter(); }
         body.innerHTML = content();
         return;
@@ -18731,9 +19005,9 @@
     };
     document.getElementById('ncSheetFoot').innerHTML = '<button class="btn ghost" id="ncResetBtn">Reset</button><button class="btn dark" id="ncDoneBtn">Done</button>';
     document.getElementById('ncResetBtn').addEventListener('click', function () {
-      var defaultVertical = primaryManagedTradeVertical();
-      NC.type = defaultVertical === 'fencing' ? 'fencing' : 'makesafe';
-      NC.scope = canUseEveryoneLens() ? 'everyone' : 'mine';
+      NC.typePinned = false;
+      NC.type = ncDefaultCalendarType();
+      NC.scope = ncDefaultCalendarScope(NC.type);
       body.innerHTML = content();
       reloadForFilter();
     });
@@ -18765,6 +19039,7 @@
     });
     document.getElementById('ncUnstrip').addEventListener('click', function () { ncOpenUnassignedSheet(NC.date); });
     document.getElementById('ncCalhost').addEventListener('click', function (e) {
+      var nx = e.target.closest('[data-ncnext]'); if (nx) { ncGoToNextJob(nx.getAttribute('data-ncnext'), nx.getAttribute('data-ncnext-type')); return; }
       var nu = e.target.closest('[data-unscheduled]'); if (nu) { ncOpenUnscheduledSheet(); return; }
       var jb = e.target.closest('[data-job]'); if (jb) { ncOpenJobSheet(jb.getAttribute('data-job')); return; }
       var ud = e.target.closest('[data-undate]'); if (ud) { ncOpenUnassignedSheet(ud.getAttribute('data-undate')); return; }

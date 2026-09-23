@@ -673,6 +673,19 @@ on the `onLogin` owner-change path so a leftover office rate cannot pin onto the
 next trade before that user's `my_hours` lands. Guard:
 `tests/e2e/trade-rate-office-only.spec.js`.
 
+## Trade own work: Today, History, Calendar default (`trade.html`)
+
+"My work" is ONE list: `ownAssignmentRows` (`// <trade-own-work>`) keeps the
+viewer's own `my_jobs` rows and drops other crews' rows (manager Everyone lens)
+and ghost `role:'observer'` rows. The empty Today state ("No jobs today" + next
+job, never Pay), the calendar default vertical (`ncAdoptOwnWorkDefault`, most
+common own vertical once `my_jobs` and the make-safe feed settle; office keeps
+the managed default; a trade-picked vertical is never overridden) and the
+blank-day/week "next job" offer all read it. History only filters what
+`my_jobs` loaded (about 30 days, make-safe about 180), so its dates are clamped
+to the loaded range and it points to All search for older jobs; a paged
+own-history is backend work. Guard: `tests/e2e/trade-jobs-calendar-clarity.spec.js`.
+
 ## Trade clock recovery (`trade.html`)
 
 `checkServerClockRecovery` runs after every `my_jobs` load and may adopt a

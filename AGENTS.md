@@ -741,6 +741,18 @@ gated by `managesTradeVertical(vertical) || _isAdmin` (Fencing stays
 ops_manager) always sees every vertical while a managed-vertical lead only sees
 their own. Guard: `tests/e2e/trade-calendar-patio-missing.spec.js`.
 
+ACCESS IS NAMED, NEVER TIERED. `TradeAccessCore` (`// <trade-access-core>`) is
+the one place that labels a person's access (Office / "<Vertical> manager" /
+Lead installer / Work-order trade / Crew, plus pay basis) from office role,
+`managed_verticals` and `invoice_type`, and the Everyone scope text
+(`everyoneLensLabel()`: "Everyone · all trades" / "Everyone · fencing") used by
+the Jobs toggle and the Calendar filter. Profile, the header user menu and the
+first-run card all render `tradeAccessBlockHTML`; never show `trade_tier` as an
+access label (tier 3 is not office; a lead_installer can be tier 1). The Board
+nav shows for office/managers, and for anyone else only once the make-safe feed
+returns their cards or fails (`syncBoardNav`). Guards:
+`scripts/test-trade-access-labels.js`, `tests/e2e/trade-access-labels.spec.js`.
+
 Regression guards: `tests/e2e/manager-visibility.spec.js` (manager sees
 unallocated+allocated), `installer-board-readonly.spec.js` (non-manager view-only),
 `fencing-manager-visibility.spec.js` + `scripts/test-fencing-manager-visibility.js`

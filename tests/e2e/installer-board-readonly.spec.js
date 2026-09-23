@@ -18,7 +18,7 @@ test('non-manager make-safe board is read-only — no Allocate action', async ({
   await page.locator('#navBoard').click();
   await expect(page.locator('#viewBoard')).toHaveClass(/active/);
 
-  // Board still renders (the nav button is available to every trade), but with
+  // Board still renders (this installer has make-safe cards, so the nav shows), but with
   // can_allocate:false it is view-only: no Allocate action anywhere on the board.
   // The primary Allocate action is `button.act.primary` (the "Add note" action is
   // `button.act`). Target the class directly — a role/name match would also catch

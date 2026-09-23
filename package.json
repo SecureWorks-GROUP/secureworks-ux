@@ -5,6 +5,7 @@
     "test:portal-link-hygiene": "node scripts/test-f5-portal-link-hygiene.js",
     "test:trade-today": "node scripts/test-trade-today-run-list.js",
     "test:alyx-visibility": "node scripts/test-alyx-trade-visibility.js",
+    "test:trade-access-labels": "node scripts/test-trade-access-labels.js",
     "test:crew-lead-core": "node scripts/test-trade-crew-lead-core.js",
     "test:trade-scope-media": "node scripts/test-trade-scope-media.js",
     "test:trade-roof-report": "node scripts/test-trade-roof-report.js",
@@ -16,7 +17,7 @@
     "test:clear-debt-v2": "node scripts/test-clear-debt-v2.js",
     "test:ops-asset-cache-bust": "node scripts/test-ops-asset-cache-bust.js",
     "test:sales-booking": "node --test modules/ops-sales-booking-confirm.test.cjs modules/ops-sales-booking.test.cjs modules/ops-sales-performance.test.cjs modules/sales-booking-assess.test.cjs scripts/sales-booking-local-api.test.mjs",
-    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:alyx-visibility && npm run test:crew-lead-core && npm run test:trade-scope-media && npm run test:trade-roof-report && npm run test:trade-my-money && npm run test:trade-complete-invoice && npm run test:makesafe-intake-sweep && npm run test:ops-job-detail-refresh && npm run test:makesafe-reporting-cockpit && npm run test:clear-debt-v2 && npm run test:ops-asset-cache-bust && playwright test",
+    "test:e2e": "npm run test:portal-confirmation && npm run test:portal-link-hygiene && npm run test:trade-today && npm run test:alyx-visibility && npm run test:trade-access-labels && npm run test:crew-lead-core && npm run test:trade-scope-media && npm run test:trade-roof-report && npm run test:trade-my-money && npm run test:trade-complete-invoice && npm run test:makesafe-intake-sweep && npm run test:ops-job-detail-refresh && npm run test:makesafe-reporting-cockpit && npm run test:clear-debt-v2 && npm run test:ops-asset-cache-bust && playwright test",
     "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {

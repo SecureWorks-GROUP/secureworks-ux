@@ -8209,8 +8209,7 @@
   // like work someone is on.
   function isOwnAssignmentRow(a) {
     if (!a || a._makesafePool) return false;
-    var uid = a.user && a.user.id;
-    return !uid || !_user || uid === _user.id;
+    return isOwnClockRow(a, canUseEveryoneLens() && _adminViewAll);
   }
 
   // Prefers the viewer's own row, so a job shared with another crew opens as

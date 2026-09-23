@@ -51,6 +51,20 @@ const OTHER_MAKESAFE = row('asg-other-ms', {
   id: 'ms-job-1', job_number: 'SWMS-260001', client_name: 'Other Client', type: 'makesafe', status: 'scheduled',
   site_suburb: 'Morley', site_address: 'Morley WA'
 }, { user: { id: 'u-other', name: 'Anthony' }, crew_name: 'Anthony' });
+// Live my_jobs Everyone rows carry user_id and no user object (fencing-manager-jobs.json).
+const OTHER_MAKESAFE_USER_ID = row('asg-other-ms-uid', {
+  id: 'ms-job-uid', job_number: 'SWMS-260002', client_name: 'Alyx Client', type: 'makesafe', status: 'scheduled',
+  site_suburb: 'Osborne Park', site_address: 'Osborne Park WA'
+}, { user_id: 'e2e-alyx', crew_name: 'Alyx' });
+const SHARED_SEARCH_JOB = {
+  id: 'job-shared-search', job_number: 'SWP-26999', client_name: 'Michael Johnson',
+  client_phone: null, client_email: null, site_address: '(street), Noranda WA', site_suburb: 'Noranda',
+  type: 'patio', status: 'scheduled', created_at: '2026-05-07T08:37:26Z', updated_at: '2026-09-23T00:00:00Z',
+  completed_at: null, external_ref: null
+};
+const SHARED_JOB_ON_CARD = { ...SHARED_SEARCH_JOB, client_name: 'Filter Hide Shared' };
+const OTHER_SHARED_USER_ID = row('asg-other-shared', SHARED_JOB_ON_CARD, { user_id: 'e2e-alyx', crew_name: 'Alyx' });
+const RYAN_OWN_SHARED = row('asg-ryan-shared', SHARED_JOB_ON_CARD);
 
 async function boot(page, persona, actions) {
   await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
@@ -267,6 +281,49 @@ test.describe('Managed lead keeps own jobs on Everyone (audit finding 4)', () =>
     await expect(page.locator('#myJobsList')).toContainText('Could not load your own jobs outside make-safe. Switch to Mine to see them.');
     await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
     await expect(page.locator('#myJobsList .jc').filter({ hasText: 'SWMS-260001' })).toHaveCount(1);
+  });
+
+  test('user_id-only Everyone rows are not treated as the lead\'s own', async ({ page }) => {
+    let everyoneWeek = [OTHER_MAKESAFE_USER_ID, OTHER_SHARED_USER_ID];
+    let mineFails = false;
+    await boot(page, 'ryan', {
+      my_jobs: ({ url }) => {
+        if (url.searchParams.get('mode') === 'all') {
+          return { ...EMPTY, thisWeek: everyoneWeek, _adminView: true };
+        }
+        if (mineFails) return { status: 500, body: { error: 'boom' } };
+        return { ...EMPTY, thisWeek: [RYAN_OWN_PATIO, RYAN_OWN_SHARED] };
+      },
+      search_all_jobs: ({ url }) => {
+        const q = (url.searchParams.get('q') || '').toLowerCase();
+        if (!q) return { lens: 'company', jobs: [], total: 0, next_offset: null };
+        const jobs = [EMBLETON_JOB, SHARED_SEARCH_JOB].filter((job) => (
+          String(job.client_name || '').toLowerCase().includes(q) ||
+          String(job.job_number || '').toLowerCase().includes(q)
+        ));
+        return { lens: 'search', jobs, total: jobs.length, next_offset: null, truncated: false };
+      }
+    });
+    await openJobsTab(page, 'thisWeek');
+    const list = page.locator('#myJobsList');
+    await expect(list.locator('.jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
+    await expect(list.locator('.jc').filter({ hasText: 'SWMS-260002' })).toHaveCount(1);
+
+    await openJobsTab(page, 'all');
+    await page.locator('#jobSearchInput').fill('Michael Johnson');
+    const shared = list.locator('.jcsr').filter({ hasText: 'SWP-26999' });
+    await expect(shared).toHaveCount(1);
+    await expect(shared).toHaveAttribute('onclick', /asg-ryan-shared/);
+    await expect(shared).not.toHaveAttribute('onclick', /asg-other-shared/);
+
+    await page.locator('#jobSearchInput').fill('');
+    await openJobsTab(page, 'thisWeek');
+    everyoneWeek = [];
+    mineFails = true;
+    await page.evaluate(() => window.loadMyJobs());
+    await expect(list).toContainText('Could not load your own jobs outside make-safe. Switch to Mine to see them.');
+    await expect(list.locator('.jc').filter({ hasText: 'SWP-26183' })).toHaveCount(1);
+    await expect(list.locator('.jc').filter({ hasText: 'SWMS-260002' })).toHaveCount(0);
   });
 
   test('merged own today rows sort by start time before the run list freezes', async ({ page }) => {

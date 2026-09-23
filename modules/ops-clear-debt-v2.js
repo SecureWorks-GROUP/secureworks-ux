@@ -4,9 +4,10 @@
 // the approved booking screen's standard (modules/ops-sales-booking.*).
 //
 // Read: ONE GET ops-api?action=debt_worklist&timeline=recent when the tab
-//   opens (and again only on an explicit Refresh). Choosing a debtor, picking
-//   an invoice, filtering the timeline and drafting all render from that one
-//   payload with no further request.
+//   opens (and on explicit Refresh). Choosing a debtor, picking an invoice,
+//   filtering the timeline and drafting all render from that one payload with
+//   no further request. An auth reset or operator change clears that payload;
+//   the next load reads it under the current operator.
 // Writes: none. This screen sends nothing, saves no note, marks no proposal and
 //   records no approval. Sending arrives with a separate approval step.
 // Contract: secureworks-backend supabase/functions/ops-api/debt_worklist_read_model.ts

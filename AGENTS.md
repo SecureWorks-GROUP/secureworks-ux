@@ -560,17 +560,7 @@ step. Contract and copy: `docs/sales-booking-ui.md`,
 
 ## Clear Debt screen (`modules/ops-clear-debt-v2.js`)
 
-Financials > Clear Debt is a READ-ONLY debtor work list over ONE read:
-`GET debt_worklist&timeline=recent` (`debt-worklist/v1`). Debtor, invoice,
-timeline and draft interactions render from that payload and must never add a
-request; the module carries no `opsPost`, send, note or proposal call, and its
-draft button stays disabled until the separate approval/executor work. Nothing
-is picked until the operator picks one invoice, and the draft is bound to it.
-Missing or faulted sources are named, never shown as "no messages" or a zero;
-email is never complete (Sent Items are not captured). Captured facts are
-`kind: "fact"` timeline entries in the same stream, never a separate panel. Contract, copy and
-filters: `docs/clear-debt-ui.md`. Guards: `npm run test:clear-debt-v2` and
-`tests/e2e/ops-clear-debt.spec.js` against `tests/fixtures/clear-debt/`.
+Clear Debt's read boundary, UI contract and guards: [docs/clear-debt-ui.md](docs/clear-debt-ui.md).
 
 ## Trade App job cards (`trade.html`)
 

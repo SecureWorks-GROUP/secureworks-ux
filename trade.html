@@ -3096,14 +3096,13 @@
     .ncal .fchips{display:flex;gap:7px;flex-wrap:wrap}
     .ncal .chip{font-size:13px;font-weight:750;color:var(--ink-2);border:1.4px solid var(--line-2);background:var(--card);border-radius:11px;padding:10px 14px;transition:background-color 150ms,color 150ms,border-color 150ms}
     .ncal .chip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:baseline}
-    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)} .ncal .chip.dot-rp .dot{background:var(--rp)} .ncal .chip.dot-dk .dot{background:var(--nt)}
+    .ncal .chip.dot-ms .dot{background:var(--ms)} .ncal .chip.dot-fc .dot{background:var(--fc)} .ncal .chip.dot-pt .dot{background:var(--pt)} .ncal .chip.dot-rp .dot{background:var(--rp)}
     .ncal .chip.on{color:var(--on);border-color:transparent}
     .ncal .chip.on.all{background:var(--ink)}
     .ncal .chip.on.ms{background:var(--ms)} .ncal .chip.on.ms .dot{background:var(--on)}
     .ncal .chip.on.fc{background:var(--fc)} .ncal .chip.on.fc .dot{background:var(--on)}
     .ncal .chip.on.pt{background:var(--pt)} .ncal .chip.on.pt .dot{background:var(--on)}
     .ncal .chip.on.rp{background:var(--rp)} .ncal .chip.on.rp .dot{background:var(--on)}
-    .ncal .chip.on.dk{background:var(--nt)} .ncal .chip.on.dk .dot{background:var(--on)}
     /* CP3 · enriched job cards + stacked grid (replaces the unreadable time-bars) */
     .ncal .nc-stack{padding:6px 14px 14px}
     .ncal .nc-cols{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px 8px 14px;scroll-snap-type:x proximity}
@@ -9481,7 +9480,7 @@
   var OWN_WORK_BUCKETS = ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled'];
   // Verticals the calendar can open: make-safe (canonical feed), repair (raw
   // feed) and the trade-calendar.v1 types, which Mine serves for any trade.
-  var OWN_WORK_CALENDAR_TYPES = ['makesafe', 'fencing', 'patio', 'repair', 'decking'];
+  var OWN_WORK_CALENDAR_TYPES = ['makesafe', 'fencing', 'patio', 'repair'];
   function ownAssignmentRows(data, userId) {
     var out = [];
     if (!data) return out;
@@ -18238,7 +18237,7 @@
       patio: { cls: 'pt', label: 'Patio' }, repair: { cls: 'rp', label: 'Repair' }, other: { cls: 'nt', label: 'Other' }
     };
     function TY(t) { return TYPE[t] || TYPE.other; }
-    function typeLabel(t) { return t === 'decking' ? 'Decking' : TY(t).label; }
+    function typeLabel(t) { return TY(t).label; }
     // A blank period says what is empty, which jobs the view is showing
     // (st.scopeLabel) and, when the viewer has one, offers their next job
     // (st.next) — a blank day must never read as "you have no work".
@@ -18627,12 +18626,12 @@
   function ncEveryoneAllowed(type) {
     if (!canUseEveryoneLens()) return false;
     if (_isAdmin) return true;
-    if (type === 'fencing' || type === 'patio' || type === 'decking') return managesTradeVertical(type);
+    if (type === 'fencing' || type === 'patio') return managesTradeVertical(type);
     return true;
   }
   function ncDefaultCalendarScope(type) { return ncEveryoneAllowed(type) ? 'everyone' : 'mine'; }
   function ncScopeLabel() {
-    var names = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', repair: 'Repair', decking: 'Decking' };
+    var names = { makesafe: 'Make-safe', fencing: 'Fencing', patio: 'Patio', repair: 'Repair' };
     var whose = NC.scope === 'everyone' ? 'everyone’s' : 'your';
     return NC.type === 'all' ? whose + ' jobs in every trade' : whose + ' ' + (names[NC.type] || NC.type) + ' jobs';
   }
@@ -18969,7 +18968,6 @@
       if (_isAdmin || managesTradeVertical('patio') || own.indexOf('patio') !== -1) trades.push(['patio', 'Patio', 'pt dot-pt']);
       trades.push(['repair', 'Repair', 'rp dot-rp']);
       if (managesTradeVertical('fencing') || own.indexOf('fencing') !== -1) trades.push(['fencing', 'Fencing', 'fc dot-fc']);
-      if (own.indexOf('decking') !== -1) trades.push(['decking', 'Decking', 'dk dot-dk']);
       var chips = trades.map(function (t) { var on = NC.type === t[0]; var dot = t[0] === 'all' ? '' : '<span class="dot"></span>'; return '<button class="chip ' + t[2] + (on ? ' on' : '') + '" data-ftype="' + t[0] + '">' + dot + t[1] + '</button>'; }).join('');
       var scope = '<div class="seg lite" style="max-width:320px">'
         + '<button class="segbtn' + (NC.scope === 'mine' ? ' on' : '') + '" data-fscope="mine">Mine</button>'

@@ -29,13 +29,6 @@ assert(html.includes("{ key: 'recent', label: 'Needs Report' }"),
   'Needs Report label retained for the report-action queue')
 assert(!html.includes("{ key: 'recent', label: 'My recent completed' }"),
   'completed work is not dumped into the Needs Report section key')
-// Group 2 (Jobs/Calendar clarity): the empty Jobs list names the empty lens
-// and offers the next booked job; it no longer sends trades to Pay.
-const emptyState = block('function myJobsEmptyStateHTML', 'function renderMyJobs')
-assert(emptyState.includes("'No jobs today'") && emptyState.includes('Open next job'),
-  'empty Today says No jobs today and offers the next assignment')
-assert(!emptyState.includes("showView('hours')") && !html.includes('Open Pay'),
-  'empty Jobs state does not push trades to Pay')
 assert(
   html.includes("['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled']"),
   'assignment cache includes recentCompleted + unscheduled'

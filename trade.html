@@ -4620,38 +4620,7 @@
     });
   }
 
-  // <trade-job-list-money-strip>
-  // my_jobs and search_all_jobs carry each job's raw `metadata`. One live
-  // fencing job holds `metadata.pricing_correction` (old/new total inc GST and
-  // the deposit), and the Jobs lists never show job money to a trade. Drop any
-  // money-shaped metadata key at the door so it never reaches a card, the job
-  // cache or the on-device list cache. The backend projection is the real fix.
-  var TRADE_JOB_LIST_ACTIONS = { my_jobs: true, search_all_jobs: true };
-  var TRADE_JOB_MONEY_KEY = /(pric|total|amount|cost|deposit|margin|gst|invoice_number|_value$|^value|rate$)/i;
-  function stripTradeJobMoney(job) {
-    if (!job || typeof job !== 'object') return;
-    var md = job.metadata;
-    if (!md || typeof md !== 'object' || Array.isArray(md)) return;
-    Object.keys(md).forEach(function(k) {
-      if (TRADE_JOB_MONEY_KEY.test(k)) delete md[k];
-    });
-  }
-  function stripTradeJobListMoney(res) {
-    if (!res || typeof res !== 'object') return res;
-    (res.jobs || []).forEach(stripTradeJobMoney);
-    ['today', 'thisWeek', 'upcoming', 'recent', 'recentCompleted', 'unscheduled', 'makesafePool'].forEach(function(g) {
-      (Array.isArray(res[g]) ? res[g] : []).forEach(function(a) { stripTradeJobMoney(a && a.jobs); });
-    });
-    return res;
-  }
-  // </trade-job-list-money-strip>
-
   function api(action, params, postBody, options) {
-    var req = apiRequest(action, params, postBody, options);
-    return TRADE_JOB_LIST_ACTIONS[action] ? req.then(stripTradeJobListMoney) : req;
-  }
-
-  function apiRequest(action, params, postBody, options) {
     options = options || {};
     var preserveSession = options.preserveSessionOnAuthFailure === true;
     if (blockedForeignJobWrite(action, params, postBody)) {

@@ -8,7 +8,7 @@ const { installFeedStubs, installExternalRequestGuard, perthDate, addIsoDays } =
 // make-safe-only Everyone view did not carry, and an archived lost quote with
 // no number or suburb ("Suburb TBC"). Rows below are shaped from the real
 // read-only rows; no network, no real login. Guards <all-tab-search-card-truth>,
-// <lead-own-rows-merge> and <trade-job-list-money-strip> in trade.html.
+// <lead-own-rows-merge> and <trade-office-money-door> in trade.html.
 
 const SUPABASE_ORIGIN = 'https://kevgrhcjxspbxgovpmfl.supabase.co';
 const APP_ORIGIN = new URL(process.env.E2E_BASE_URL || 'http://127.0.0.1:4173').origin;
@@ -379,7 +379,7 @@ test.describe('my_jobs load does not crash after paint', () => {
   });
 });
 
-test.describe('No job money reaches a trade through the Jobs lists', () => {
+test.describe('Office money door strips Jobs-list metadata', () => {
   test('metadata.pricing_correction is dropped before cards and the on-device cache', async ({ page }) => {
     const priced = row('asg-priced', {
       ...EMBLETON_JOB, id: 'job-priced', job_number: 'SWF-99001', type: 'fencing',

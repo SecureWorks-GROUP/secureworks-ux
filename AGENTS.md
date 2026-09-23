@@ -771,8 +771,8 @@ check as Trade clock recovery) or a backend
 word (Draft, Lead, Quote, Not scheduled, Scheduled, Complete, Cancelled,
 Archived). A make-safe hit still opens the report path (unallocated included);
 its chip never says New just because it is live. A hit with no suburb/address
-and no job number uses the client name as the title; Suburb TBC only when
-there is nothing else to name it by. Pre-sale/dead records are
+and no job number uses the client name as the title; a missing place otherwise
+still titles Suburb TBC (job number stays on the meta line). Pre-sale/dead records are
 view-only with a hint; Office can still open any hit. A numbered delivery-stage
 job opens and the server's access check decides (403/404 renders "not on your
 jobs", no retry). Search hits already rendered as the viewer's own cards are not

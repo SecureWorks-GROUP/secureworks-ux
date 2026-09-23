@@ -304,12 +304,11 @@ test('timeline: one stream, newest first, every entry source-labelled, chips fil
   assert.match(t, /Preview, cut at 500 characters/);
   assert.match(t, /GHL stored copy, also in captured event/);
   assert.match(t, /1 copy of the same message shown once/);
-  assert.match(t, /stored copies only: not a live GHL or Outlook read, and Outlook Sent Items are not captured/);
-  assert.match(t, /emails read from inbound copies, sent ones not captured/);
-  assert.match(t, /Luna Captured fact: payment promise|Luna Captured fact: [a-z ]+ captured/);
-  assert.match(t, /GHL: bound, last captured 1 hour before this read, stale after 6h, owner CIO\./);
-  assert.match(t, /Email: partial, no capture time published, owner CIO, fix: CIO email capture \(EM1\)/);
-  assert.match(t, /Notes: read live with this read, owner DEBT\./);
+  assert.match(t, /These are stored copies, not a live GHL or Outlook read\./);
+  assert.match(t, /Stored emails are inbound copies only; sent emails are not captured \(owner CIO; fix: CIO email capture \(EM1\): capture Outlook Sent Items and inbound mail as stored events\)\./);
+  assert.match(t, /Only the newest 12 of 32 stored entries are in this read\./);
+  assert.match(t, /Luna Captured fact: [a-z ]+ captured/);
+  assert.match(t, /GHL captured 1 hour before this read/);
 });
 
 test('picking an invoice does not narrow the debtor timeline', async () => {
@@ -322,38 +321,95 @@ test('picking an invoice does not narrow the debtor timeline', async () => {
   assert.doesNotMatch(html(), /Only INV-|data-cd="only"/);
 });
 
-test('truncated, capped and faulted timelines say so; missing sources are named, never "no messages"', async () => {
+// One rule for every empty or partial view: a source that was not fully read
+// gets exactly one line naming it and its limit and there is no absence claim;
+// absence is said only when every source behind the view was fully read, and
+// only for what was read. Each row is one path through that rule.
+test('every empty-state path follows the one rule', async () => {
   const data = await loaded();
-  pick('Debtor 002');
-  let t = text();
-  assert.match(t, /Showing the newest 12 of \d+ stored entries/);
-  assert.match(t, /has more than 10 messages; only the newest 10 per job were read/);
-  assert.match(t, /This timeline is incomplete: older or capped entries are not in this read/);
-  pick('Debtor 004');
-  t = text();
-  assert.match(t, /ghl_cache: permission denied/);
-  assert.match(t, /GHL texts could not be read/);
-  assert.match(t, /This timeline is incomplete: a source could not be read/);
-  const faulted = data.debtors.find((d) => d.identity.name === 'Debtor 004');
-  faulted.timeline.entries = faulted.timeline.entries.filter((e) => CD.entryGroup(e) !== 'text');
-  CD.state.selectedKey = faulted.key;
-  CD.state.tlFilter = 'text';
-  t = text();
-  assert.match(t, /Stored GHL texts could not be read, so this list is not the whole story\./);
-  assert.doesNotMatch(t, /No texts in the .*stored copies/);
-  // A debtor with no linked job: empty channels name the missing source.
-  const noJob = data.debtors.find((d) => d.link_state.linked === 0);
-  CD.state.selectedKey = noJob.key;
-  CD.state.tlFilter = 'text';
-  t = text();
-  assert.match(t, /No invoice on this debtor is linked to a job, so stored GHL texts cannot be read\./);
-  assert.doesNotMatch(t, /No texts in the .*stored copies/);
-  for (const d of data.debtors) {
+  const base = data.debtors.find((x) => x.identity.name === 'Debtor 001');
+  function fullyRead() {
+    const d = structuredClone(base);
+    d.key = 'xero:table-case';
+    d.faults = [];
+    d.last_contact = { last: null, last_inbound: null, last_outbound: null, complete: true, basis: 'stored timeline copies' };
+    d.timeline = { ...d.timeline, entries: [], entries_read: 0, truncated: false, per_job_cap: 10, per_job_cap_reached: [], facts_per_job_cap: 10, facts_cap_reached: [], complete: true };
+    d.sources = {
+      xero: { status: 'current', stale_after_hours: 24 },
+      ghl: { status: 'bound' },
+      email: { status: 'partial' },
+      notes: { status: 'read' },
+      facts: { status: 'partial', invoices_with_facts: 4, of_invoices: 5, timeline_read: 'read', facts_shown: 0 }
+    };
+    return d;
+  }
+  const NONE = (what) => 'No ' + what + ' among the 0 stored items read for this debtor.';
+  const cases = [
+    ['texts, GHL fully read', 'text', () => {}, [], NONE('texts')],
+    ['texts, GHL unreadable', 'text', (d) => { d.sources.ghl.status = 'unreadable'; }, ['Stored GHL texts could not be read.'], null],
+    ['texts, GHL unreadable with owner and fix', 'text', (d) => { Object.assign(d.sources.ghl, { status: 'unreadable', owner: 'CIO', recovery_action: 'retry the read' }); }, ['Stored GHL texts could not be read (owner CIO; fix: retry the read).'], null],
+    ['texts, no job linked', 'text', (d) => { d.sources.ghl.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so stored GHL texts cannot be read.'], null],
+    ['texts, job has no GHL contact', 'text', (d) => { d.sources.ghl.status = 'no_contact'; }, ['The linked job has no GHL contact, so stored GHL texts cannot be found.'], null],
+    ['texts, GHL stale', 'text', (d) => { Object.assign(d.sources.ghl, { status: 'stale', last_success_at: '2026-09-23T20:00:00.000Z', stale_after: '6h' }); }, ['Stored GHL texts are stale: last captured 6 hours before this read, stale after 6h.'], null],
+    ['texts, GHL not read', 'text', (d) => { d.sources.ghl.status = 'not_read'; }, ['Stored GHL texts were not read for this view.'], null],
+    ['texts, GHL status missing', 'text', (d) => { delete d.sources.ghl.status; }, ['The read did not say whether stored GHL texts were read.'], null],
+    ['texts, truncated', 'text', (d) => { d.timeline.truncated = true; d.timeline.entries_read = 30; }, ['Only the newest 0 of 30 stored entries are in this read.'], null],
+    ['texts, per-job cap', 'text', (d) => { d.timeline.per_job_cap_reached = ['SWF-90001']; }, ['Job SWF-90001 has more than 10 messages; only the newest 10 per job were read.'], null],
+    ['emails, inbound only', 'email', () => {}, ['Stored emails are inbound copies only; sent emails are not captured.'], null],
+    ['emails, unreadable', 'email', (d) => { d.sources.email.status = 'unreadable'; }, ['Stored emails could not be read.'], null],
+    ['emails, no job', 'email', (d) => { d.sources.email.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so stored emails cannot be read.'], null],
+    ['emails, not read', 'email', (d) => { d.sources.email.status = 'not_read'; }, ['Stored emails were not read for this view.'], null],
+    ['notes, fully read', 'note', () => {}, [], NONE('notes')],
+    ['notes, unreadable', 'note', (d) => { d.sources.notes.status = 'unreadable'; }, ['Notes and desk logs could not be read.'], null],
+    ['notes, GHL half unreadable', 'note', (d) => { d.sources.ghl.status = 'unreadable'; }, ['Stored GHL texts could not be read.'], null],
+    ['calls, fully read', 'call', () => {}, [], NONE('calls')],
+    ['calls, notes not read', 'call', (d) => { d.sources.notes.status = 'not_read'; }, ['Notes and desk logs were not read for this view.'], null],
+    ['Xero, current', 'xero', () => {}, [], NONE('invoices and xero')],
+    ['Xero, stale', 'xero', (d) => { d.sources.xero.status = 'stale'; }, ['The Xero copy is stale (older than 24 hours).'], null],
+    ['facts, fully read', 'facts', () => {}, [], NONE('facts')],
+    ['facts, unreadable', 'facts', (d) => { d.sources.facts.timeline_read = 'unreadable'; }, ['Captured facts could not be read for this timeline.'], null],
+    ['facts, not read', 'facts', (d) => { d.sources.facts.timeline_read = 'not_read'; }, ['Captured facts were not read for this view.'], null],
+    ['facts, counted not listed', 'facts', (d) => { delete d.sources.facts.timeline_read; }, ['This read does not list captured facts; it only counts them: facts on 4 of 5 invoices.'], null],
+    ['facts, no job', 'facts', (d) => { d.sources.facts.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so captured facts cannot be read.'], null],
+    ['facts, capped', 'facts', (d) => { d.timeline.facts_cap_reached = ['SWF-90002']; }, ['Job SWF-90002 has more than 10 captured facts; only the newest 10 per job were read.'], null],
+    ['all, sent emails never captured', 'all', () => {}, ['Stored emails are inbound copies only; sent emails are not captured.'], null],
+    ['all, several limits each once', 'all', (d) => { d.sources.ghl.status = 'unreadable'; d.sources.xero.status = 'stale'; d.timeline.truncated = true; d.timeline.entries_read = 5; },
+      ['Stored GHL texts could not be read.', 'Stored emails are inbound copies only; sent emails are not captured.', 'The Xero copy is stale (older than 24 hours).', 'Only the newest 0 of 5 stored entries are in this read.'], null]
+  ];
+  for (const [name, group, mutate, lines, absence] of cases) {
+    const d = fullyRead();
+    mutate(d);
+    CD.state.data = { ...data, debtors: [d] };
     CD.state.selectedKey = d.key;
-    for (const c of CD.TL_CHIPS) {
-      CD.state.tlFilter = c.key;
-      assert.equal(/no messages/i.test(text()), false, d.key + ' ' + c.key);
-    }
+    CD.state.tlFilter = group;
+    const h = html();
+    const shown = [...(h.match(/<ul class="limits"[^>]*>([\s\S]*?)<\/ul>/) || ['', ''])[1].matchAll(/<li[^>]*>([^<]*)<\/li>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+    assert.deepEqual(shown, lines, name + ': limit lines');
+    const body = (h.match(/<div id="cd-tl-body">([\s\S]*?)<\/div><\/section>/) || ['', ''])[1].replace(/<[^>]+>/g, '').trim();
+    assert.equal(body, absence || '', name + ': absence line');
+    const whole = text();
+    for (const l of lines) assert.equal(whole.split(l).length - 1, 1, name + ': "' + l + '" shown once');
+    if (lines.length) assert.doesNotMatch(body, /\bNo \w+|\bnone\b/i, name + ': no absence claim beside a limit');
+  }
+  // The card's last-contact line obeys the same rule.
+  const d = fullyRead();
+  CD.state.data = { ...data, debtors: [d] };
+  CD.state.selectedKey = d.key;
+  assert.match(text(), /Last contact unknown: sent emails are not captured\./);
+  d.sources.ghl.status = 'unreadable';
+  d.timeline.truncated = true; d.timeline.entries_read = 9;
+  assert.match(text(), /Last contact unknown: stored GHL texts could not be read; sent emails are not captured; only the newest 0 of 9 stored entries were read\./);
+  assert.doesNotMatch(text(), /No text, email or call/);
+  // With a last contact, the line is scoped to the stored copies.
+  const withLast = data.debtors.find((x) => x.identity.name === 'Debtor 001');
+  CD.state.data = data;
+  CD.state.selectedKey = withLast.key;
+  CD.state.tlFilter = 'all';
+  assert.match(text(), /Last contact in the stored copies: Wed 23 Sept?, 9:00am, a text from them \(GHL\)\./);
+  // Across the whole fixture: no view ever says "no messages".
+  for (const x of data.debtors) {
+    CD.state.selectedKey = x.key;
+    for (const c of CD.TL_CHIPS) { CD.state.tlFilter = c.key; assert.equal(/no messages/i.test(text()), false, x.key + ' ' + c.key); }
   }
 });
 
@@ -391,7 +447,7 @@ test('facts are kind "fact" entries in the one timeline; anything else is not a 
   CD.state.selectedKey = bad.key;
   CD.state.tlFilter = 'all';
   t = text();
-  assert.match(t, /Captured facts could not be read for this timeline, so none are shown\. This does not mean there are none\./);
+  assert.match(t, /Captured facts could not be read for this timeline\./);
   assert.equal(/data-tl="facts"[^>]*>Facts<span class="count">/.test(html()), false, 'no count while facts were not read');
   CD.state.tlFilter = 'facts';
   assert.equal((text().match(/Captured facts could not be read/g) || []).length, 1);
@@ -399,27 +455,25 @@ test('facts are kind "fact" entries in the one timeline; anything else is not a 
   // A debtor with no job names that; one with no facts yet says so.
   const noJob = data.debtors.find((x) => x.sources.facts.status === 'no_job');
   CD.state.selectedKey = noJob.key;
-  assert.match(text(), /No invoice on this debtor is linked to a job, so captured facts cannot be read here\./);
+  assert.match(text(), /No invoice on this debtor is linked to a job, so captured facts cannot be read\./);
   // Summary counts do not substitute for timeline fact entries.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); delete q.sources.facts.timeline_read; q.timeline.entries = q.timeline.entries.filter((e) => e.kind !== 'fact'); });
   pick('Debtor 001');
-  assert.match(text(), /This read did not report whether captured facts were listed\./);
-  assert.doesNotMatch(text(), /only says facts on 4 of 5 invoices/);
+  assert.match(text(), /This read does not list captured facts; it only counts them: facts on 4 of 5 invoices\./);
   // A capped fact read names the job.
   await loaded((x) => { const q = x.debtors.find((y) => y.identity.name === 'Debtor 001'); q.timeline.facts_cap_reached = ['SWF-90001']; });
   pick('Debtor 001');
   assert.match(text(), /Job SWF-90001 has more than 10 captured facts; only the newest 10 per job were read\./);
 });
 
-test('source health from the read shows on the timeline, including a stale GHL capture', async () => {
+test('a stale GHL capture shows once in the timeline with its age, owner and fix, and on the card badge', async () => {
   const data = await loaded();
   const d = data.debtors.find((x) => x.sources.ghl.status === 'stale');
   CD.state.selectedKey = d.key;
   const t = text();
   assert.match(t, /GHL texts capture stale/);
-  assert.match(t, /GHL texts stale, not captured recently/);
-  assert.match(t, /GHL: stale, last captured 30 hours before this read, stale after 6h, owner CIO, fix: CIO: run the GHL message reconcile for the stale contact\(s\)\./);
-  assert.equal(CD.sourceHealthRows(d).find((r) => r.key === 'ghl').bad, true);
+  const line = 'Stored GHL texts are stale: last captured 30 hours before this read, stale after 6h (owner CIO; fix: CIO: run the GHL message reconcile for the stale contact(s)).';
+  assert.equal(t.split(line).length - 1, 1);
 });
 
 test('an undeployed action shows one honest not-connected line, never a zero', async () => {

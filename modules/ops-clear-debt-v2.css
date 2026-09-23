@@ -175,8 +175,11 @@
 #clearDebtRoot .chip[aria-pressed="true"]:hover{background:var(--brand)}
 #clearDebtRoot .chip[aria-pressed="true"] .count{background:rgba(255,255,255,.18);color:#fff}
 #clearDebtRoot .tl-status{max-width:90ch}
-#clearDebtRoot .health{list-style:none;padding:0;display:grid;gap:2px}
-#clearDebtRoot .health .is-bad{color:var(--bad)}
+#clearDebtRoot .limits{list-style:none;padding:0;display:grid;gap:3px;font-size:13px;color:var(--ink-2)}
+#clearDebtRoot .limits li{position:relative;padding-left:14px}
+#clearDebtRoot .limits li::before{content:"";position:absolute;left:2px;top:8px;width:5px;height:5px;border-radius:50%;background:#AEB9BF}
+#clearDebtRoot .limits .is-bad{color:var(--bad);font-weight:600}
+#clearDebtRoot .limits .is-bad::before{background:var(--bad)}
 #clearDebtRoot .thread-note{color:var(--muted);font-size:13.5px}
 #clearDebtRoot .thread-note.is-bad{color:var(--bad);font-weight:600}
 #clearDebtRoot .thread{list-style:none;padding:0;display:grid;gap:8px;margin-top:4px}

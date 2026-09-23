@@ -301,20 +301,86 @@
   function isRecord(e) { return e.direction === 'system' || e.kind === 'invoice_event'; }
   function previewCut(e) { return String(e.preview || '').length >= 500; }
 
-  // What the empty or partial view is honestly missing, named by source.
-  function sourceGaps(d, group) {
-    var s = (d && d.sources) || {};
-    var out = [];
-    function say(status, what) {
-      if (status === 'no_job') out.push({ bad: false, text: 'No invoice on this debtor is linked to a job, so ' + what + ' cannot be read.' });
-      else if (status === 'unreadable') out.push({ bad: true, text: what.charAt(0).toUpperCase() + what.slice(1) + ' could not be read, so this list is not the whole story.' });
-      else if (status === 'not_read') out.push({ bad: false, text: what.charAt(0).toUpperCase() + what.slice(1) + ' were not read for this view.' });
-      else if (status === 'no_contact') out.push({ bad: false, text: 'The linked job has no GHL contact, so stored GHL texts cannot be found.' });
+  // ONE rule for every empty or partial view. A source that was not fully
+  // read (unread, unreadable, partial, stale, capped or truncated) gets one
+  // line naming it and its limit, and no absence claim. Absence is stated only
+  // when every source behind the view was fully read, and then only for what
+  // was read ("among the 7 stored items read"). Each condition is one line.
+  var GROUP_SOURCES = {
+    all: ['ghl', 'email', 'notes', 'xero', 'facts'],
+    text: ['ghl'], call: ['ghl', 'notes'], email: ['email'], note: ['notes', 'ghl'],
+    xero: ['xero'], facts: ['facts'], other: []
+  };
+  var MESSAGE_GROUPS = { all: 1, text: 1, call: 1, email: 1, note: 1 };
+  function withFix(v, text) {
+    var bits = [];
+    if (v && v.owner) bits.push('owner ' + v.owner);
+    if (v && v.recovery_action) bits.push('fix: ' + v.recovery_action);
+    if (!bits.length) return text;
+    return text.replace(/\.$/, '') + ' (' + bits.join('; ') + ').';
+  }
+  function sourceLimit(d, key) {
+    var s = (d.sources && d.sources[key]) || {};
+    var st = s.status;
+    var asOf = d.freshness && d.freshness.as_of;
+    function line(bad, text, short) { return { key: key, bad: bad, text: withFix(s, text), short: short }; }
+    if (key === 'ghl') {
+      if (st === 'bound' || st === 'several') return null;
+      if (st === 'stale') return line(true, 'Stored GHL texts are stale: last captured ' + (s.last_success_at ? (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : 'at a time the read did not give') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'stored GHL texts are stale');
+      if (st === 'unreadable') return line(true, 'Stored GHL texts could not be read.', 'stored GHL texts could not be read');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored GHL texts cannot be read.', 'no job is linked, so GHL texts cannot be read');
+      if (st === 'no_contact') return line(false, 'The linked job has no GHL contact, so stored GHL texts cannot be found.', 'the job has no GHL contact');
+      if (st === 'not_read') return line(false, 'Stored GHL texts were not read for this view.', 'GHL texts were not read');
+      return line(false, 'The read did not say whether stored GHL texts were read.', 'GHL texts may not have been read');
     }
-    if (group === 'all' || group === 'text' || group === 'call') say(s.ghl && s.ghl.status, 'stored GHL texts');
-    if (group === 'all' || group === 'email') say(s.email && s.email.status, 'stored emails');
-    if (group === 'all' || group === 'note') say(s.notes && s.notes.status, 'notes');
-    return out;
+    if (key === 'email') {
+      if (st === 'partial' || st === 'read' || st === 'current') return line(false, 'Stored emails are inbound copies only; sent emails are not captured.', 'sent emails are not captured');
+      if (st === 'unreadable') return line(true, 'Stored emails could not be read.', 'stored emails could not be read');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so stored emails cannot be read.', 'no job is linked, so emails cannot be read');
+      if (st === 'not_read') return line(false, 'Stored emails were not read for this view.', 'emails were not read');
+      return line(false, 'The read did not say whether stored emails were read.', 'emails may not have been read');
+    }
+    if (key === 'notes') {
+      if (st === 'read') return null;
+      if (st === 'unreadable') return line(true, 'Notes and desk logs could not be read.', 'notes could not be read');
+      if (st === 'not_read') return line(false, 'Notes and desk logs were not read for this view.', 'notes were not read');
+      return line(false, 'The read did not say whether notes were read.', 'notes may not have been read');
+    }
+    if (key === 'xero') {
+      if (st === 'current') return null;
+      return line(true, 'The Xero copy is stale' + (s.stale_after_hours ? ' (older than ' + plural(s.stale_after_hours, 'hour') + ')' : '') + '.', 'the Xero copy is stale');
+    }
+    if (key === 'facts') {
+      if (s.timeline_read === 'unreadable') return line(true, 'Captured facts could not be read for this timeline.', 'captured facts could not be read');
+      if (s.timeline_read === 'not_read') return line(false, 'Captured facts were not read for this view.', 'captured facts were not read');
+      if (s.timeline_read !== 'read') return line(false, 'This read does not list captured facts; it only counts them: ' + factsWords(s).toLowerCase() + '.', 'captured facts are counted, not listed');
+      if (st === 'no_job') return line(false, 'No invoice on this debtor is linked to a job, so captured facts cannot be read.', 'no job is linked, so facts cannot be read');
+      if (st === 'unreadable' || st === 'unknown') return line(true, 'Whether facts were captured for these invoices could not be read.', 'captured facts are unknown');
+      return null;
+    }
+    return null;
+  }
+  function timelineLimits(d, group) {
+    var tl = d.timeline || {};
+    var out = [];
+    (GROUP_SOURCES[group] || []).forEach(function (k) { var l = sourceLimit(d, k); if (l) out.push(l); });
+    if (MESSAGE_GROUPS[group] && (tl.per_job_cap_reached || []).length) {
+      out.push({ key: 'cap', bad: false, text: 'Job ' + tl.per_job_cap_reached.join(', ') + ' has more than ' + tl.per_job_cap + ' messages; only the newest ' + tl.per_job_cap + ' per job were read.', short: 'only the newest ' + tl.per_job_cap + ' messages per job were read' });
+    }
+    if ((group === 'facts' || group === 'all') && (tl.facts_cap_reached || []).length) {
+      out.push({ key: 'facts_cap', bad: false, text: 'Job ' + tl.facts_cap_reached.join(', ') + ' has more than ' + tl.facts_per_job_cap + ' captured facts; only the newest ' + tl.facts_per_job_cap + ' per job were read.', short: 'only the newest ' + tl.facts_per_job_cap + ' facts per job were read' });
+    }
+    if (tl.truncated) {
+      out.push({ key: 'truncated', bad: false, text: 'Only the newest ' + (tl.entries || []).length + ' of ' + tl.entries_read + ' stored entries are in this read.', short: 'only the newest ' + (tl.entries || []).length + ' of ' + tl.entries_read + ' stored entries were read' });
+    }
+    var seen = {};
+    return out.filter(function (l) { if (seen[l.text]) return false; seen[l.text] = true; return true; });
+  }
+  // The absence line for an empty view, or null when a limit forbids one.
+  function absenceLine(d, group, what) {
+    if (timelineLimits(d, group).length) return null;
+    var n = ((d.timeline && d.timeline.entries) || []).length;
+    return 'No ' + what + ' among the ' + plural(n, 'stored item') + ' read for this debtor.';
   }
 
   // ── composer ────────────────────────────────────────────────
@@ -493,6 +559,7 @@
       '<li>Promised payment dates, so there is no promise-date filter.</li>' +
       '<li>A ready-for-Captain verdict, so no row is marked ready.</li>' +
       (factsListedAnywhere(d) ? '' : '<li>What the captured facts say (only whether they exist).</li>') +
+      '<li>Sent emails: Outlook Sent Items are not captured, so stored emails are inbound only.</li>' +
       '<li>Links to each message in GHL or Outlook.</li>' +
       '<li>The phone line, mailbox, subject and attachment a draft would use.</li>' +
       '</ul></div>' +
@@ -502,7 +569,7 @@
   function factsListedAnywhere(data) {
     return (data.debtors || []).some(function (x) { return x.sources && x.sources.facts && x.sources.facts.timeline_read === 'read'; });
   }
-  var STORED_NOTE = 'stored copies only: not a live GHL or Outlook read, and Outlook Sent Items are not captured';
+  var STORED_NOTE = 'stored copies, not a live GHL or Outlook read';
 
   function renderAlerts() {
     var d = state.data;
@@ -615,6 +682,9 @@
       if (st === 'unreadable') badges.push('<span class="badge bad">' + name + ' could not be read</span>');
       else if (/stale|fail/.test(String(st || ''))) badges.push('<span class="badge bad">' + name + ' capture ' + esc(words(st)) + '</span>');
     });
+    if (s.ghl && (s.ghl.status === 'bound' || s.ghl.status === 'several') && s.ghl.last_success_at) {
+      badges.push('<span class="badge">GHL captured ' + esc(ageBetween(s.ghl.last_success_at, fr.as_of) || 'recently') + ' before this read</span>');
+    }
     var names = id.name_variants ? '<p class="fine">Also written as ' + id.names.filter(function (n) { return n !== id.name; }).map(esc).join(', ') + ' on the same Xero contact.</p>' : '';
     var detail = id.detail ? '<p class="fine warn-text">' + esc(id.detail) + '.</p>' : '';
     var faults = (d.faults || []).length
@@ -625,9 +695,15 @@
         (d.next_step.owner ? ', ' + esc(d.next_step.owner) : '') + (d.next_step.at ? ', by ' + esc(dayLabel(d.next_step.at)) : '') + '.</p>'
       : '<p class="nextstep is-quiet"><span>Next step</span> None recorded on any of these invoices.</p>';
     var last = d.last_contact && d.last_contact.last;
-    var lastLine = last
-      ? 'Last contact ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + ' ' + (last.direction === 'inbound' ? 'from them' : 'from us') + ' (' + esc(providerLabel(last.provider)) + ').'
-      : 'No text, email or call in the stored copies' + (d.last_contact && d.last_contact.complete === false ? ', which are incomplete for this debtor' : '') + '.';
+    var lastLine;
+    if (last) {
+      lastLine = 'Last contact in the stored copies: ' + esc(whenLabel(last.at)) + ', ' + esc(last.channel === 'call' ? 'a call' : (last.channel === 'email' ? 'an email' : 'a text')) + ' ' + (last.direction === 'inbound' ? 'from them' : 'from us') + ' (' + esc(providerLabel(last.provider)) + ').';
+    } else {
+      var lim = timelineLimits(d, 'all');
+      lastLine = lim.length
+        ? 'Last contact unknown: ' + esc(lim.map(function (l) { return l.short; }).join('; ')) + '.'
+        : esc(absenceLine(d, 'all', 'text, email or call'));
+    }
     return '<header class="cardhead">' +
       '<h2>' + esc(debtorName(d)) + '</h2>' +
       '<p class="figures"><b>' + esc(money(d.total_due)) + '</b> due on ' + plural(d.invoice_count, 'invoice') +
@@ -702,17 +778,14 @@
       return '<button type="button" class="chip" data-cd="tl" data-tl="' + c.key + '" aria-pressed="' + (state.tlFilter === c.key) + '">' + esc(c.label) + (n == null ? '' : '<span class="count">' + n + '</span>') + '</button>';
     }).join('');
     var status = timelineStatus(d);
+    var list = timelineEntries(d);
     var body;
-    {
-      var list = timelineEntries(d);
-      if (!list.length) {
-        var gaps = state.tlFilter === 'facts' ? factLines(d) : sourceGaps(d, state.tlFilter);
-        var which = state.tlFilter === 'all' ? 'entries' : (TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase());
-        body = (gaps.length ? '' : '<p class="thread-note">No ' + esc(which) + ' in the ' + (tl.entries.length ? 'newest ' + tl.entries.length + ' ' : '') + 'stored copies for this debtor.</p>') +
-          gaps.filter(function (g) { return !g.always; }).map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
-      } else {
-        body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';
-      }
+    if (!list.length) {
+      var which = state.tlFilter === 'all' ? 'entries' : TL_CHIPS.filter(function (c) { return c.key === state.tlFilter; })[0].label.toLowerCase();
+      var none = absenceLine(d, state.tlFilter, which);
+      body = none ? '<p class="thread-note">' + esc(none) + '</p>' : '';
+    } else {
+      body = '<ol class="thread">' + list.map(function (e) { return renderEntry(d, e); }).join('') + '</ol>';
     }
     return '<section class="block" aria-labelledby="cd-tl-h">' + head +
       '<div class="chips" role="group" aria-label="Show in the timeline">' + chips + '</div>' +
@@ -722,91 +795,12 @@
 
   function timelineStatus(d) {
     var tl = d.timeline;
-    var lines = [];
-    lines.push('<span>Newest first. ' + (tl.truncated ? 'Showing the newest ' + tl.entries.length + ' of ' + tl.entries_read + ' stored entries.' : plural(tl.entries.length, 'stored entry', 'stored entries') + '.') + '</span>');
-    if ((tl.per_job_cap_reached || []).length) {
-      lines.push('<span>Job ' + tl.per_job_cap_reached.map(esc).join(', ') + ' has more than ' + tl.per_job_cap + ' messages; only the newest ' + tl.per_job_cap + ' per job were read.</span>');
-    }
-    if (tl.duplicates_merged) lines.push('<span>' + plural(tl.duplicates_merged, 'copy', 'copies') + ' of the same message shown once.</span>');
-    var s = d.sources;
-    var src = [
-      'GHL texts ' + ghlWords(s.ghl && s.ghl.status),
-      'emails ' + emailWords(s.email && s.email.status),
-      'notes ' + readWords(s.notes && s.notes.status),
-      'Xero ' + (s.xero && s.xero.status === 'current' ? 'current' : 'stale')
-    ];
-    lines.push('<span>Sources: ' + esc(src.join('; ')) + '.</span>');
-    lines.push('<span>These are ' + esc(STORED_NOTE) + '.</span>');
-    var facts = factLines(d).filter(function (g) { return g.always; });
-    var health = sourceHealth(d) + facts.map(function (g) { return '<p class="thread-note' + (g.bad ? ' is-bad' : '') + '">' + esc(g.text) + '</p>'; }).join('');
-    var incomplete = tl.complete ? '' : '<p class="thread-note' + ((d.faults || []).length ? ' is-bad' : '') + '">This timeline is incomplete' + ((d.faults || []).length ? ': a source could not be read.' : ': older or capped entries are not in this read.') + '</p>';
-    return '<p class="tl-status fine">' + lines.join(' ') + '</p>' + health + incomplete;
-  }
-
-  // Per-source capture health, when the read carries it (the CFO desk's
-  // later revision: status, last_success_at, stale_after, owner,
-  // recovery_action). Absent fields are simply not claimed.
-  var HEALTH_SOURCES = [['ghl', 'GHL'], ['email', 'Email'], ['notes', 'Notes'], ['facts', 'Facts'], ['xero', 'Xero']];
-  function sourceHealthRows(d) {
-    var s = (d && d.sources) || {};
-    return HEALTH_SOURCES.filter(function (x) {
-      var v = s[x[0]];
-      return v && (v.last_success_at || v.stale_after || v.owner || v.recovery_action);
-    }).map(function (x) {
-      var v = s[x[0]];
-      var bits = [];
-      var age = v.last_success_at ? ageBetween(v.last_success_at, d.freshness.as_of) : null;
-      var live = Boolean(v.last_success_at) && v.last_success_at === d.freshness.as_of;
-      if (live) bits.push('read live with this read');
-      else if (v.last_success_at) bits.push('last captured ' + (age || 'at an unknown time') + ' before this read');
-      else bits.push('no capture time published');
-      if (v.stale_after) bits.push('stale after ' + (typeof v.stale_after === 'number' ? plural(v.stale_after, 'hour') : v.stale_after));
-      if (v.owner) bits.push('owner ' + v.owner);
-      if (v.recovery_action) bits.push('fix: ' + v.recovery_action);
-      if (x[0] === 'email') bits.push('sent emails not captured');
-      return { key: x[0], label: x[1], bad: /stale|unreadable|fail|missing/.test(String(v.status || '')), text: x[1] + ': ' + (live && v.status === 'read' ? '' : words(v.status || 'status not stated') + ', ') + bits.join(', ') };
-    });
-  }
-  function sourceHealth(d) {
-    var rows = sourceHealthRows(d);
-    if (!rows.length) return '';
-    return '<ul class="health fine">' + rows.map(function (r) { return '<li' + (r.bad ? ' class="is-bad"' : '') + '>' + esc(r.text) + '.</li>'; }).join('') + '</ul>';
-  }
-  function ghlWords(s) {
-    return { bound: 'read', several: 'read (several GHL contacts)', stale: 'stale, not captured recently', no_contact: 'no contact on the job', no_job: 'no job to read', unreadable: 'could not be read', not_read: 'not read' }[s] || 'unknown';
-  }
-  // Email is never called complete while Outlook Sent Items are not captured.
-  function emailWords(s) {
-    if (s === 'read' || s === 'current' || s === 'partial') return 'read from inbound copies, sent ones not captured';
-    return readWords(s);
-  }
-  function readWords(s) {
-    return { read: 'read', no_job: 'no job to read', unreadable: 'could not be read', not_read: 'not read' }[s] || 'unknown';
-  }
-
-  // What the timeline can honestly say about captured facts. Lines marked
-  // always show under the status line; the rest explain an empty Facts view.
-  function factLines(d) {
-    var f = (d.sources && d.sources.facts) || {};
-    var tl = d.timeline || {};
-    var out = [];
-    if (f.timeline_read === 'unreadable') {
-      out.push({ always: true, bad: true, text: 'Captured facts could not be read for this timeline, so none are shown. This does not mean there are none.' });
-    } else if (f.timeline_read === 'not_read') {
-      out.push({ always: true, bad: false, text: 'Captured facts were not read for this view.' });
-    } else if (f.timeline_read !== 'read') {
-      out.push({ always: true, bad: false, text: 'This read did not report whether captured facts were listed.' });
-    } else if (f.status === 'no_job') {
-      out.push({ always: true, bad: false, text: 'No invoice on this debtor is linked to a job, so captured facts cannot be read here.' });
-    } else if (f.status === 'missing') {
-      out.push({ always: false, bad: false, text: 'No facts have been captured from the linked jobs yet.' });
-    } else {
-      out.push({ always: false, bad: false, text: 'None of the captured facts are among the newest ' + (tl.entries || []).length + ' entries in this view.' });
-    }
-    if ((tl.facts_cap_reached || []).length) {
-      out.push({ always: true, bad: false, text: 'Job ' + tl.facts_cap_reached.join(', ') + ' has more than ' + tl.facts_per_job_cap + ' captured facts; only the newest ' + tl.facts_per_job_cap + ' per job were read.' });
-    }
-    return out;
+    var lines = ['Newest first.'];
+    if (tl.duplicates_merged) lines.push(plural(tl.duplicates_merged, 'copy', 'copies') + ' of the same message shown once.');
+    lines.push('These are ' + STORED_NOTE + '.');
+    var limits = timelineLimits(d, state.tlFilter);
+    return '<p class="tl-status fine">' + esc(lines.join(' ')) + '</p>' +
+      (limits.length ? '<ul class="limits" data-cd-limits>' + limits.map(function (l) { return '<li' + (l.bad ? ' class="is-bad"' : '') + '>' + esc(l.text) + '</li>'; }).join('') + '</ul>' : '');
   }
 
   function factValue(v) {
@@ -1050,9 +1044,8 @@
     entryGroup: entryGroup,
     timelineEntries: timelineEntries,
     chipCounts: chipCounts,
-    sourceGaps: sourceGaps,
-    sourceHealthRows: sourceHealthRows,
-    factLines: factLines,
+    timelineLimits: timelineLimits,
+    absenceLine: absenceLine,
     staleOrUnreadable: staleOrUnreadable,
     isFactEntry: isFactEntry,
     composerModel: composerModel,

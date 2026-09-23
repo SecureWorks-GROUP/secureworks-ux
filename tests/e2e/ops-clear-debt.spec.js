@@ -114,8 +114,8 @@ for (const vp of viewports) {
       const card = page.locator('.db-card');
       const entries = card.locator('.thread > li.tl');
       await expect(entries).toHaveCount(12);
-      await expect(card.locator('.tl-status')).toContainText('Showing the newest 12 of 32 stored entries.');
-      await expect(card.locator('.tl-status')).toContainText('Outlook Sent Items are not captured');
+      await expect(card.locator('[data-cd-limits]')).toContainText('Only the newest 12 of 32 stored entries are in this read.');
+      await expect(card.locator('[data-cd-limits]')).toContainText('Stored emails are inbound copies only; sent emails are not captured');
       await expect(card.locator('.tl .src').first()).toBeVisible();
       await expect(card.locator('.tl-foot', { hasText: 'Preview, cut at 500 characters' })).toHaveCount(1);
       await expect(card.locator('.tl-foot', { hasText: 'also in captured event' })).toHaveCount(1);
@@ -182,18 +182,18 @@ for (const vp of viewports) {
       const card = page.locator('.db-card');
       await expect(card.locator('.badge.bad')).toHaveText('GHL texts could not be read');
       await expect(card.locator('.cardhead .db-alert')).toContainText('ghl_cache: permission denied');
-      await expect(card).toContainText('This timeline is incomplete: a source could not be read.');
+      await expect(card.locator('[data-cd-limits] li.is-bad')).toContainText('Stored GHL texts could not be read (owner CIO; fix: Retry the read');
       if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
       await page.locator('.db-list .lead', { hasText: 'Debtor 002' }).first().click();
-      await expect(card.locator('.tl-status')).toContainText('only the newest 10 per job were read');
+      await expect(card.locator('[data-cd-limits]')).toContainText('only the newest 10 per job were read');
       if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
       await page.locator('.db-list .lead', { hasText: 'Debtor 006' }).first().click();
-      await expect(card).toContainText('Captured facts could not be read for this timeline, so none are shown. This does not mean there are none.');
+      await expect(card.locator('[data-cd-limits]')).toContainText('Captured facts could not be read for this timeline.');
       await expect(card.locator('[data-tl="facts"] .count')).toHaveCount(0);
       if (vp.name === 'phone') await card.getByRole('button', { name: 'All debtors' }).click();
       await page.locator('.db-list .lead', { hasText: 'Debtor 008' }).first().click();
       await expect(card.locator('.badge.bad')).toHaveText('GHL texts capture stale');
-      await expect(card.locator('.health')).toContainText('GHL: stale, last captured 30 hours before this read, stale after 6h, owner CIO, fix: CIO: run the GHL message reconcile for the stale contact(s).');
+      await expect(card.locator('[data-cd-limits]')).toContainText('Stored GHL texts are stale: last captured 30 hours before this read, stale after 6h (owner CIO; fix: CIO: run the GHL message reconcile for the stale contact(s)).');
       expect((await ledger(page)).reads).toHaveLength(1);
     });
 

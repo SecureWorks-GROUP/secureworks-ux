@@ -4079,12 +4079,74 @@
     try { localStorage.removeItem('sw_clock_' + _currentJobId); } catch (e) {}
   }
 
-  // Check if clocked on from a previous day (stale clock)
-  function checkStaleClock() {
-    return;
+  // <trade-clock-recovery>
+  // A server clock is adopted ONLY when it is the signed-in trade's own, fresh
+  // and on a live job. Manager feeds (mode=all) carry every crew's rows, so an
+  // unowned row must never become this device's running timer (audit
+  // 2026-09-23: every manager adopted Alyx's 322-hour clock at login).
+  var CLOSED_CLOCK_JOB_STATUSES = ['complete', 'completed', 'invoiced', 'paid', 'closed', 'archived', 'cancelled', 'lost', 'deleted', 'void', 'voided'];
+  var _openClockNoticeShown = {};
+  var _staleClockOffPending = null;
+
+  function clockPerthDay(value) {
+    var d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    var parts = new Intl.DateTimeFormat('en-AU', {
+      timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(d);
+    var byType = {};
+    parts.forEach(function(p) { byType[p.type] = p.value; });
+    return byType.year + '-' + byType.month + '-' + byType.day;
   }
 
-  // Stale clock prompt — shown when clocked on for 14+ hours
+  function isOwnClockRow(asg, requestedAll) {
+    if (!asg || !_user || !_user.id) return false;
+    var owner = (asg.user && asg.user.id) || asg.user_id || null;
+    if (owner) return owner === _user.id;
+    // The personal feed omits the user; an unowned row is only trusted there.
+    return !requestedAll;
+  }
+
+  function isClockRowRecoverable(asg) {
+    var job = asg.jobs || {};
+    if (job.archived === true) return false;
+    if (CLOSED_CLOCK_JOB_STATUSES.indexOf(String(job.status || '').toLowerCase()) !== -1) return false;
+    if (['complete', 'completed', 'cancelled'].indexOf(String(asg.status || '').toLowerCase()) !== -1) return false;
+    var onDay = clockPerthDay(asg.clocked_on_at);
+    var yesterday = clockPerthDay(new Date(Date.now() - 86400000));
+    return Boolean(onDay) && onDay >= yesterday;
+  }
+
+  function showClockNotice(title, msg) {
+    var cancel = document.getElementById('confirmCancel');
+    if (cancel) cancel.style.display = 'none';
+    return showConfirm(title, msg, 'OK').then(function() {
+      if (cancel) cancel.style.display = '';
+    });
+  }
+
+  function showOpenClockOfficeNotice(asg) {
+    if (!asg || _openClockNoticeShown[asg.id]) return;
+    _openClockNoticeShown[asg.id] = true;
+    var job = asg.jobs || {};
+    var label = job.job_number || job.site_suburb || 'a job';
+    var on = new Date(asg.clocked_on_at);
+    var date = Number.isNaN(on.getTime()) ? 'an earlier day'
+      : on.toLocaleDateString('en-AU', { timeZone: 'Australia/Perth', weekday: 'short', day: 'numeric', month: 'short' });
+    showClockNotice('Open clock', 'You have an open clock on ' + label + ' from ' + date + ' - ask the office to close it.');
+  }
+
+  // A clock_event the server answered with a refusal (not ours, not found,
+  // invalid) will never succeed on retry. It is not "offline".
+  function isClockEventRefusal(err) {
+    if (!err) return false;
+    if (err.code === 'view_only' || err.clock_refused === true) return true;
+    if (/not your assignment/i.test(String(err.message || ''))) return true;
+    var status = Number(err.status);
+    return status >= 400 && status < 500 && [401, 408, 425, 429].indexOf(status) === -1;
+  }
+
+  // Stale clock prompt — shown when the trade's own fresh clock is 14+ hours old
   function showStaleClockPrompt(assignment, hours) {
     var hrs = Math.round(hours);
     showConfirm(
@@ -4094,16 +4156,37 @@
     ).then(function(stillGoing) {
       if (stillGoing) {
         toast('Timer continues');
-      } else {
-        if (_currentJobId) {
-          openEOD();
-        }
+        return;
       }
+      // "No": end THIS clock properly. Load its job, then the end-of-day flow
+      // (resumeStaleClockOff), or send the trade to the office.
+      var jobId = assignment && assignment.jobs && assignment.jobs.id;
+      if (!jobId) { showOpenClockOfficeNotice(assignment); return; }
+      _staleClockOffPending = { jobId: jobId, assignmentId: assignment.id, row: assignment };
+      openJob(jobId, assignment.id);
     });
   }
 
-  // Server clock recovery — check cached my_jobs data for active clocks
-  function checkServerClockRecovery(data) {
+  // Called by the job loaders once the pending stale clock's job has loaded.
+  function resumeStaleClockOff(jobId, data) {
+    var pending = _staleClockOffPending;
+    if (!pending || pending.jobId !== jobId) return;
+    _staleClockOffPending = null;
+    var crew = (data && data.crew) || [];
+    var mine = null;
+    for (var i = 0; i < crew.length; i++) {
+      if (crew[i] && crew[i].id === pending.assignmentId && _user && crew[i].user_id === _user.id) { mine = crew[i]; break; }
+    }
+    if (!mine || mine.clocked_off_at) {
+      showOpenClockOfficeNotice(pending.row);
+      return;
+    }
+    _currentAssignment = mine.id;
+    setTimeout(function() { if (_currentJobId === jobId) openEOD(); }, 300);
+  }
+
+  // Server clock recovery — check my_jobs data for this trade's own active clock
+  function checkServerClockRecovery(data, requestedAll) {
     if (_clockState === 'on') return; // already clocked on locally
     try {
       // Each item in these arrays IS an assignment (flat structure from my_jobs)
@@ -4111,35 +4194,40 @@
         data.today || [], data.thisWeek || [], data.upcoming || [], data.recent || [],
         data.recentCompleted || [], data.unscheduled || []
       );
+      var staleOwn = null;
       for (var i = 0; i < allAssignments.length; i++) {
         var asg = allAssignments[i];
-        if (asg.clocked_on_at && !asg.clocked_off_at) {
-          // Active clock found on server — restore timer state
-          console.log('[trade] Restoring active clock from server:', asg.id);
-          _clockState = 'on';
-          _clockedOnAt = asg.clocked_on_at;
-          _travelStartTime = asg.travel_started_at || null;
-          _arrivedAt = asg.arrived_at || null;
-          _totalBreakMins = asg.break_minutes || 0;
-          _isPaused = asg.job_phase === 'paused';
-          _currentAssignment = asg.id;
-          // Also set current job so job detail can render
-          if (asg.jobs) _currentJobId = asg.jobs.id;
-          saveTimerState();
-          // Check if stale (14+ hours)
-          var clockedHours = (Date.now() - new Date(asg.clocked_on_at).getTime()) / 3600000;
-          if (clockedHours > 14) {
-            showStaleClockPrompt(asg, clockedHours);
-          } else if (asg.jobs) {
-            // Auto-navigate to the active job so tradie sees their running timer
-            toast('Resuming active timer...');
-            openJob(asg.jobs.id, asg.id);
-          }
-          return;
+        if (!asg || !asg.clocked_on_at || asg.clocked_off_at) continue;
+        if (!isOwnClockRow(asg, requestedAll)) continue;
+        if (!isClockRowRecoverable(asg)) { staleOwn = staleOwn || asg; continue; }
+        // Active clock found on server — restore timer state
+        console.log('[trade] Restoring active clock from server:', asg.id);
+        _clockState = 'on';
+        _clockedOnAt = asg.clocked_on_at;
+        _travelStartTime = asg.travel_started_at || null;
+        _arrivedAt = asg.arrived_at || null;
+        _totalBreakMins = asg.break_minutes || 0;
+        _isPaused = asg.job_phase === 'paused';
+        _currentAssignment = asg.id;
+        // Also set current job so job detail can render
+        if (asg.jobs) _currentJobId = asg.jobs.id;
+        saveTimerState();
+        // Check if stale (14+ hours)
+        var clockedHours = (Date.now() - new Date(asg.clocked_on_at).getTime()) / 3600000;
+        if (clockedHours > 14) {
+          showStaleClockPrompt(asg, clockedHours);
+        } else if (asg.jobs) {
+          // Auto-navigate to the active job so tradie sees their running timer
+          toast('Resuming active timer...');
+          openJob(asg.jobs.id, asg.id);
         }
+        return;
       }
+      // An old clock or one on a closed job cannot be ended from here.
+      if (staleOwn) showOpenClockOfficeNotice(staleOwn);
     } catch (e) { /* non-blocking */ }
   }
+  // </trade-clock-recovery>
 
   function roundTo15(mins) {
     return Math.round(mins / 15) * 15;
@@ -6225,7 +6313,12 @@
             if (['update_job_phase', 'update_my_assignment', 'clock_event', 'complete_job'].indexOf(item.action) !== -1) {
               _invalidateAssignmentLifecycleCaches();
             }
-          }).catch(function() {
+          }).catch(function(e) {
+            // A refused clock event never succeeds on retry: drop it.
+            if (item.action === 'clock_event' && isClockEventRefusal(e)) {
+              try { localStorage.removeItem('sw_pending_clock_' + ((item.body && item.body.assignment_id) || '')); } catch (x) {}
+              return;
+            }
             remaining.push(item);
           });
         }
@@ -6825,7 +6918,7 @@
         loadMakesafePoolJobs(data);
       }
       // Check for active server-side clock (survives app reinstall / device switch)
-      checkServerClockRecovery(data);
+      checkServerClockRecovery(data, params.mode === 'all');
     }).catch(function(err) {
       clearTimeout(slowTimer);
       console.error('[trade] my_jobs error:', err);
@@ -9224,8 +9317,7 @@
       }
       renderJobDetail(data);
       if (_pendingJobTab) _pendingJobTab = null;
-      // Check for stale clock-on from previous day — debounced to avoid blocking render
-      setTimeout(function() { if (_currentJobId === jobId) checkStaleClock(); }, 1500);
+      resumeStaleClockOff(jobId, data);
     }).catch(function(err) {
       clearTimeout(slowTimer);
       container.innerHTML = '<div class="empty-state">Error: ' + friendlyError(err) + '<br><button class="btn btn-secondary btn-small" style="margin-top:12px;width:auto" onclick="loadJobDetail(\'' + jobId + '\')">Retry</button></div>';
@@ -15630,6 +15722,7 @@
       _reportLoadedForJob = _currentJobId;
       _reportDirty = false;
       var type = getTradeJobType(data.job);
+      if (type !== 'repair') resumeStaleClockOff(jobId, data);
       if (type === 'repair') {
         _reportMode = null;
         openJob(jobId, _currentAssignment || (cached && cached.assignment && cached.assignment.id) || '');
@@ -27701,14 +27794,10 @@
     }
   }
 
-  // When app comes back from background, update the timer (debounced to avoid cascade)
-  var _visChangeTimer = null;
+  // When app comes back from background, update the timer
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'visible' && _clockState === 'on') {
       updateTimerDisplay();
-      // Debounce stale clock check — prevent rapid re-entry from iOS background/foreground flicker
-      clearTimeout(_visChangeTimer);
-      _visChangeTimer = setTimeout(function() { checkStaleClock(); }, 2000);
     }
   });
 
@@ -27729,7 +27818,11 @@
     if (extra) Object.keys(extra).forEach(function(k) { payload[k] = extra[k]; });
 
     return api('clock_event', {}, payload).then(function(result) {
-      if (!result.success) throw new Error(result.error || 'Clock event failed');
+      if (!result.success) {
+        var refused = new Error(result.error || 'Clock event failed');
+        refused.clock_refused = true;
+        throw refused;
+      }
 
       // Update local state FROM SERVER response
       var ass = result.assignment;
@@ -27770,9 +27863,16 @@
       _invalidateAssignmentLifecycleCaches();
       return result;
     }).catch(function(err) {
-      // A view-only block is a refusal, not a lost connection: never stash or
-      // optimistically apply another crew's clock event.
+      // A view-only block or a server refusal ('Not your assignment', any 4xx)
+      // is not a lost connection: never stash, queue or optimistically apply it.
       if (err && err.code === 'view_only') throw err;
+      if (isClockEventRefusal(err)) {
+        err.clock_refused = true;
+        try { localStorage.removeItem('sw_pending_clock_' + assignmentId); } catch (e) {}
+        console.warn('[trade] clock_event refused:', event, err);
+        toast('Not saved: ' + friendlyError(err) + '. Ask the office to fix this clock.', true);
+        throw err;
+      }
       console.error('[trade] clock_event failed:', event, err);
 
       // Save locally + queue for retry — DON'T clear state
@@ -27917,9 +28017,12 @@
             }
           }
           if (_currentJob) renderJobDetail(_currentJob);
-        }).catch(function() {
-          // Clock-off failed — DON'T clear timer state
-          toast('Clock-off saved locally \u2014 will sync when online', false);
+        }).catch(function(err) {
+          // Clock-off failed — DON'T clear timer state. A refusal was already
+          // shown by clockEvent; only a queued offline clock-off is "saved locally".
+          if (!(err && err.clock_refused) && !(err && err.code === 'view_only')) {
+            toast('Clock-off saved locally \u2014 will sync when online', false);
+          }
           if (_currentJob) renderJobDetail(_currentJob);
         });
         break;
@@ -31483,8 +31586,9 @@
             _invalidateAssignmentLifecycleCaches();
             localStorage.removeItem(key);
             console.log('[trade] Synced pending clock event:', payload.event);
-          }).catch(function() {
-            // Keep for next retry
+          }).catch(function(err) {
+            // Keep for next retry, unless the server refused it outright.
+            if (isClockEventRefusal(err)) localStorage.removeItem(key);
           });
         }
       } catch (e) {}

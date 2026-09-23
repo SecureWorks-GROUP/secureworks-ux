@@ -18,6 +18,7 @@
   var CONTRACT = 'debt-worklist/v1';
   var ROOT_ID = 'clearDebtRoot';
   var TZ = 'Australia/Perth';
+  var inFlightRead = null;
 
   var state = {
     data: null,
@@ -125,6 +126,7 @@
   function load() {
     var root = rootEl();
     if (!root) return Promise.resolve();
+    if (inFlightRead) return inFlightRead;
     var seq = ++state.requestSeq;
     state.loading = true;
     state.error = null;
@@ -135,7 +137,7 @@
       render();
       return Promise.resolve();
     }
-    return Promise.resolve()
+    var request = Promise.resolve()
       .then(function () { return global.opsFetch('debt_worklist', { timeline: 'recent' }); })
       .then(function (resp) {
         if (seq !== state.requestSeq) return;
@@ -156,6 +158,14 @@
           : { kind: 'failed', message: String((err && err.message) || err || 'no answer') };
         render();
       });
+    inFlightRead = request.then(function (result) {
+      inFlightRead = null;
+      return result;
+    }, function (err) {
+      inFlightRead = null;
+      throw err;
+    });
+    return inFlightRead;
   }
 
   // ── lookups ─────────────────────────────────────────────────
@@ -370,6 +380,7 @@
       if (st === 'read') return null;
       if (st === 'unreadable') return line(true, 'Notes and desk logs could not be read.', 'notes could not be read');
       if (st === 'not_read') return line(false, 'Notes and desk logs were not read for this view.', 'notes were not read');
+      if (st === 'stale') return line(true, 'Notes and desk logs are stale' + (s.last_success_at ? ': last captured ' + (ageBetween(s.last_success_at, asOf) || 'some time') + ' before this read' : '') + (s.stale_after ? ', stale after ' + s.stale_after : '') + '.', 'notes and desk logs are stale');
       return line(false, 'The read did not say whether notes were read.', 'notes may not have been read');
     }
     if (key === 'xero') {
@@ -1052,6 +1063,8 @@
   // Financials > Clear Debt calls this (modules/ops-financials.js showSubTab).
   function loadClearDebt() {
     bind();
+    if (inFlightRead) return inFlightRead;
+    if (state.data || state.error) return Promise.resolve();
     return load();
   }
 
@@ -1060,7 +1073,7 @@
     FILTERS: FILTERS,
     TL_CHIPS: TL_CHIPS,
     state: state,
-    load: loadClearDebt,
+    load: load,
     render: render,
     checkContract: checkContract,
     isUnknownAction: isUnknownAction,

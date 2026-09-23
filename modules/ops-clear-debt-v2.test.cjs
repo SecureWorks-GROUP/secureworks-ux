@@ -79,6 +79,28 @@ test('the tab makes exactly one read, and nothing a person can do on the screen 
   }
 });
 
+test('tab re-entry shares the pending read and keeps the loaded result', async () => {
+  let resolveRead;
+  const originalFetch = globalThis.opsFetch;
+  globalThis.opsFetch = (action, params) => {
+    calls.push({ action, params });
+    return new Promise((resolve) => { resolveRead = resolve; });
+  };
+  try {
+    const first = globalThis.loadClearDebt();
+    const second = globalThis.loadClearDebt();
+    await Promise.resolve();
+    assert.equal(calls.length, 1);
+    resolveRead(makeWorklist());
+    await Promise.all([first, second]);
+    await globalThis.loadClearDebt();
+    assert.equal(calls.length, 1);
+    assert.equal(CD.state.data.debtors.length, 78);
+  } finally {
+    globalThis.opsFetch = originalFetch;
+  }
+});
+
 test('no em dash in any rendered text, in any state', async () => {
   const data = await loaded();
   for (const h of walkEveryState(data)) assert.equal(h.includes('\u2014'), false);
@@ -360,6 +382,7 @@ test('every empty-state path follows the one rule', async () => {
     ['emails, no job', 'email', (d) => { d.sources.email.status = 'no_job'; }, ['No invoice on this debtor is linked to a job, so stored emails cannot be read.'], null],
     ['emails, not read', 'email', (d) => { d.sources.email.status = 'not_read'; }, ['Stored emails were not read for this view.'], null],
     ['notes, fully read', 'note', () => {}, [], NONE('notes')],
+    ['notes stale with recovery details', 'note', (d) => { Object.assign(d.sources.notes, { status: 'stale', last_success_at: '2026-09-23T20:00:00.000Z', stale_after: '4h', owner: 'CIO', recovery_action: 'retry the notes read' }); }, ['Notes and desk logs are stale: last captured 6 hours before this read, stale after 4h (owner CIO; fix: retry the notes read).'], null],
     ['notes, unreadable', 'note', (d) => { d.sources.notes.status = 'unreadable'; }, ['Notes and desk logs could not be read.'], null],
     ['notes, GHL half unreadable', 'note', (d) => { d.sources.ghl.status = 'unreadable'; }, ['Stored GHL texts could not be read.'], null],
     ['calls, fully read', 'call', () => {}, [], NONE('calls')],

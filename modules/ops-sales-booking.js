@@ -126,7 +126,6 @@
     ownerOccupancy: [],
     threads: {},
     dayIndex: null,
-    showConversation: false,
     lastFreshAt: 0,
     loading: false,
     error: null,
@@ -2301,10 +2300,22 @@
     return null;
   }
 
+  // How long the customer has waited: since their last message nobody has
+  // answered, else since the enquiry came in.
   function waitWords(c) {
+    var since = unansweredSince(c);
+    if (since != null) {
+      var d = perthDaysAgo(since);
+      return d === 0 ? 'Waiting since today' : 'Waiting ' + plural(d, 'day');
+    }
     var days = daysWaiting(c);
     if (days == null) return '';
     return days === 0 ? 'Today' : plural(days, 'day');
+  }
+
+  function perthDaysAgo(ms) {
+    var day = function (t) { var d = new Date(t + 8 * 3600000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
+    return Math.max(0, Math.round((day(Date.now()) - day(ms)) / 86400000));
   }
 
   function jobWord(job) {
@@ -2319,7 +2330,7 @@
     var place = [caseSuburb(c) || 'Suburb not given', jobTypeLabel(c) === 'not given' ? '' : jobWord(jobTypeLabel(c))].filter(Boolean).join(' · ');
     return '<button type="button" class="lead' + (c.id === state.selectedId ? ' is-on' : '') + '" data-booking-case="' + esc(c.id) + '" aria-pressed="' + (c.id === state.selectedId) + '">' +
       '<span class="lead-top"><span class="lead-name">' + esc(c.display_name || 'Unnamed enquiry') + '</span>' +
-      '<span class="lead-wait" title="' + esc(enquiryLine(c)) + '">' + esc(waitWords(c) || 'Date not read') + '</span></span>' +
+      '<span class="lead-wait" title="' + esc(unansweredSince(c) != null ? 'Their last message has no reply yet. ' + enquiryLine(c) : enquiryLine(c)) + '">' + esc(waitWords(c) || 'Date not read') + '</span></span>' +
       '<span class="lead-place">' + esc(place) + '</span>' +
       (words ? '<span class="lead-words">“' + esc(words) + '”</span>' : quiet ? '<span class="lead-words is-quiet">No reply from them yet</span>' : '') +
       (pill ? '<span class="lead-tags"><span class="pill ' + pill[0] + '">' + esc(pill[1]) + '</span>' +
@@ -2552,15 +2563,61 @@
     if (!conv.contactId) return '<p class="thread-note">Messages open with the lead.</p>';
     var msgs = conv.messages || [];
     if (!msgs.length) return '<p class="thread-note">No messages with this person yet.</p>';
-    var shown = state.showConversation ? msgs : msgs.slice(-3);
-    return (msgs.length > 3 ? '<button type="button" class="linklike threadmore" data-booking-thread-all aria-expanded="' + !!state.showConversation + '">' + (state.showConversation ? 'Show the last 3 only' : 'Show all ' + msgs.length + ' messages') + '</button>' : '') +
-      '<ol class="thread">' + shown.map(function (msg) {
+    // ghl-proxy get_conversation returns the latest 30 messages, oldest first.
+    var capped = msgs.length >= THREAD_READ_LIMIT;
+    return '<p class="thread-count">' + plural(msgs.length, 'message') + (capped ? ', the latest ' + THREAD_READ_LIMIT + '. Older ones are in GHL.' : '') + '</p>' +
+      '<ol class="thread" data-thread-scroll>' + threadItems(msgs).map(function (item) {
+        if (item.calls) return '<li class="callline">' + esc(callLineWords(item.calls, c)) + '</li>';
+        var msg = item.msg;
         var out = msg.direction === 'outbound';
         var who = out ? (msg.sender_name || 'SecureWorks') : (c.display_name || 'Customer');
         var type = String(msg.type || '').replace(/^TYPE_/, '');
         return '<li class="bubble ' + (out ? 'is-out' : 'is-in') + '"><small>' + esc(who) + ' · ' + esc(whenWords(msg.timestamp || msg.dateAdded)) + (type && !/sms/i.test(type) ? ' · ' + esc(type.toLowerCase()) : '') + '</small>' +
           '<span class="body">' + esc(msg.body || msg.subject || '(no text)') + '</span></li>';
       }).join('') + '</ol>';
+  }
+
+  var THREAD_READ_LIMIT = 30;
+
+  function isCall(msg) {
+    return /CALL/i.test(String(msg && msg.type || ''));
+  }
+
+  // Calls are one line each; calls in a row, the same way on the same day,
+  // share one line ("2 calls out · 8:39 and 8:41am").
+  function threadItems(msgs) {
+    var out = [];
+    msgs.forEach(function (msg) {
+      var prev = out[out.length - 1];
+      if (isCall(msg)) {
+        var day = perthIsoOf(msg.timestamp || msg.dateAdded).slice(0, 10);
+        if (prev && prev.calls && prev.dir === msg.direction && prev.day === day) prev.calls.push(msg);
+        else out.push({ calls: [msg], dir: msg.direction, day: day });
+      } else {
+        out.push({ msg: msg });
+      }
+    });
+    return out;
+  }
+
+  function callLineWords(calls, c) {
+    var out = calls[0].direction === 'outbound';
+    var n = calls.length;
+    var what = n === 1 ? (out ? 'Call out' : 'Call from ' + (c.display_name || 'the customer')) : n + ' calls ' + (out ? 'out' : 'from ' + (c.display_name || 'the customer'));
+    var times = calls.map(function (m) { return whenWords(m.timestamp || m.dateAdded); });
+    var when = times[0];
+    if (n > 1) {
+      var clocks = calls.map(function (m) { return clockLabel(hourFromIso(perthIsoOf(m.timestamp || m.dateAdded))); });
+      when = String(times[0]).split(', ')[0] + ', ' + clocks.slice(0, -1).join(', ') + ' and ' + clocks[clocks.length - 1];
+    }
+    var secs = n === 1 && Number(calls[0].duration) > 0 ? Number(calls[0].duration) : 0;
+    return what + ' · ' + when + (secs ? ' · ' + (secs >= 60 ? Math.round(secs / 60) + ' min' : secs + ' sec') : '');
+  }
+
+  // A UTC or offset timestamp as Perth wall-clock ISO, for the clock label.
+  function perthIsoOf(raw) {
+    var ms = Date.parse(raw);
+    return isFinite(ms) ? new Date(ms + 8 * 3600000).toISOString().slice(0, 19) : '';
   }
 
   // What the read says already happened to this exact content, in words.
@@ -2841,6 +2898,13 @@
     return packLanes(list);
   }
 
+  // The customer's latest words, one line, on their card on the week.
+  function evWords(b) {
+    var c = cases().filter(function (row) { return b.proposal ? row.id === b.id : row.contact_id && row.contact_id === b.contact_id; })[0];
+    var words = c && lastWords(c);
+    return words ? '<span class="ev-words" title="' + esc(words) + '">“' + esc(words) + '”</span>' : '';
+  }
+
   function dayEventTitle(b) {
     if (b.proposal) return b.display_name || 'Proposed visit';
     if (b.reservation_state) {
@@ -2851,7 +2915,8 @@
   }
 
   function kindWords(kind, block) {
-    if (block.reservation_state) return block.reservation_state === 'agreed' ? 'Customer agreed' : 'Offer out';
+    // A hold from a text lives only in the conversation, never in a calendar.
+    if (block.reservation_state) return block.reservation_state === 'agreed' ? 'Agreed by text, not in a calendar' : 'Offered by text, no reply yet';
     return ({ confirmed: 'Booked visit', blocked: 'Cancelled, still in calendar', offer: block.proposal ? 'Offer out' : 'Offer out', personal: 'Personal', busy: 'Busy', leave: 'Leave', proposal: 'Proposed' })[kind] || 'Busy';
   }
 
@@ -2893,14 +2958,14 @@
         '<span class="ev-chip">' + esc(kindWords(kind, b)) + '</span>' +
         '<span class="ev-title">' + esc(title || 'Proposed visit') + '</span>' +
         (b.suburb ? '<span class="ev-place">' + esc(b.suburb) + '</span>' : '') +
-        '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
+        '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' + evWords(b) +
         (b.not_in_this_read ? '<span class="ev-kind">Not in the GHL list</span>' : '') +
         (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
     }
     return '<button type="button" class="' + cls + '" data-booking-case="' + esc(b.id || '') + '"' + at + '>' +
       '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + esc(place) + '</span>' + badge + '</span>' +
       '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
-      '<span class="ev-kind">' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span>' +
+      '<span class="ev-kind">' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span>' + (b.reservation_state ? evWords(b) : '') +
       (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
   }
 
@@ -3137,6 +3202,12 @@
       el.innerHTML = '<p class="bk-alert" role="alert">The booking screen could not be drawn: ' + esc(err && err.message ? err.message : err) + '</p>';
     }
     restoreFocus(el, keep);
+    // Newest at the bottom: open the thread scrolled to its latest message,
+    // once per thread, so a repaint never yanks a scroll the owner made.
+    var list = typeof el.querySelector === 'function' ? el.querySelector('[data-thread-scroll]') : null;
+    var conv = state.conversation;
+    var mark = conv.contactId + '|' + (conv.messages || []).length;
+    if (list && state.threadScrolled !== mark) { list.scrollTop = list.scrollHeight; state.threadScrolled = mark; }
     var view = global.document.getElementById('viewSales');
     if (view) {
       view.classList.toggle('sales-sub-booking', state.subtab === 'booking');
@@ -4125,7 +4196,7 @@
   }
 
   function selectCase(id) {
-    if (state.selectedId !== id) { state.dayIndex = null; state.showConversation = false; }
+    if (state.selectedId !== id) { state.dayIndex = null; }
     state.selectedId = id;
     var c = selectedCase();
     if (!c || !c.contact_id) {
@@ -4465,12 +4536,6 @@
         render();
         return;
       }
-      if (closest('[data-booking-thread-all]')) {
-        e.preventDefault();
-        state.showConversation = !state.showConversation;
-        render();
-        return;
-      }
       if (closest('[data-booking-draft-reset]')) {
         e.preventDefault();
         var sel = selectedCase();
@@ -4800,6 +4865,8 @@
     pickFreeWindow: pickFreeWindow,
     changeOwnerPick: changeOwnerPick,
     pickedVisitText: pickedVisitText,
+    renderThread: renderThread,
+    waitWords: waitWords,
     renderCard: renderCard,
     timeRange: timeRange
   };

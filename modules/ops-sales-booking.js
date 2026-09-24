@@ -1206,8 +1206,37 @@
   // ---------------------------------------------------------------------------
   // Queue grouping, urgency and the follow-through counts.
   // ---------------------------------------------------------------------------
+  // The server's word that this lead already has a live scope visit in a
+  // scoper's GHL calendar, possibly someone else's (backend lead-owner rule):
+  // case.scope_appointment = { start_iso, end_iso?, owner_name?,
+  // owner_resource_id?, status? }. Read only when the server sends it; the
+  // screen never infers a booking elsewhere from names, stages or threads.
+  function scopeAppointment(c) {
+    var a = c && c.scope_appointment;
+    if (!a || typeof a !== 'object' || !a.start_iso || isNaN(Date.parse(a.start_iso))) return null;
+    if (/cancel|no.?show|invalid|deleted/i.test(String(a.status || ''))) return null;
+    return a;
+  }
+
+  function bookedElsewhere(c) {
+    var a = scopeAppointment(c);
+    return !!(a && a.owner_resource_id && a.owner_resource_id !== state.resourceId) ? a : null;
+  }
+
+  function scopeAppointmentWords(c) {
+    var a = scopeAppointment(c);
+    if (!a) return '';
+    var who = bookedElsewhere(c) ? a.owner_name || 'another scoper' : '';
+    return 'Booked' + (who ? ' with ' + who : '') + ', ' + shortDate(a.start_iso) + ' ' + clockLabel(hourFromIso(a.start_iso), true);
+  }
+
+  function bookedElsewhereBlock(c) {
+    return bookedElsewhere(c) ? scopeAppointmentWords(c) + '. No new time can be offered or booked from here.' : '';
+  }
+
   function isBooked(c) {
     if (!c || isNonScopeDiaryMirror(c)) return false;
+    if (scopeAppointment(c)) return true;
     if (stageBucket(c) === 'booked') return true;
     return c.status === 'booked' || c.status === 'confirmed';
   }
@@ -1819,6 +1848,7 @@
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
     var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (!refusing && bookedElsewhere(c)) return bookedElsewhereBlock(c);
     if (!steady && state.loading) return 'Reading the latest list. Wait a moment.';
     if (!steady && (state.stale || state.error)) return 'This list may be out of date. Press Refresh first.';
     if (!flow || flow.version !== 'booking-confirm.v1' || flow.approval_write !== 'separate-v1') return 'Approvals are not connected for this list yet, so nothing can be ' + verb + ' from here.';
@@ -2199,6 +2229,7 @@
   function statusPill(c) {
     if (isArchived(c)) return ['', 'Archived'];
     if (quoteOutstanding(c)) return ['', 'Quote to send'];
+    if (scopeAppointment(c)) return ['ok', scopeAppointmentWords(c)];
     if (isBooked(c)) return ['ok', 'Booked'];
     if (unansweredSince(c) != null) return ['hot', 'No answer yet'];
     if (needsDecision(c)) return ['', 'Needs a person'];
@@ -2461,6 +2492,7 @@
   }
 
   function pressBlock(c, kind) {
+    if (bookedElsewhere(c)) return bookedElsewhereBlock(c);
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
     var last = state.pressResults[key];
@@ -2538,6 +2570,7 @@
   }
 
   function renderVisit(c) {
+    if (bookedElsewhere(c)) return '<section class="visit"><h3>' + icon('calendar') + 'Booked visit</h3><p class="when">' + esc(scopeAppointmentWords(c)) + '</p></section>';
     var m = decisionModel(c);
     if (!m && !ownerFlow()) {
       if (c.proposal && c.proposal.start_iso) {
@@ -2593,7 +2626,8 @@
     var bits = [c.address || caseSuburb(c) || 'Address not given yet', jobTypeLabel(c) === 'not given' ? 'job not given' : jobTypeLabel(c)];
     return '<section class="bk-card" aria-label="Selected lead">' +
       '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
-      '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
+      '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p>' +
+      (scopeAppointment(c) && !bookedElsewhere(c) ? '<p class="bookednote">' + esc(scopeAppointmentWords(c)) + '</p>' : '') + '</header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
       '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
       '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (writable || m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (writable ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
@@ -2630,6 +2664,7 @@
     cases().forEach(function (c) {
       var p = c.proposal;
       if (!p || !p.start_iso || dayIndexFromIso(p.start_iso, state.weekStart) !== d) return;
+      if (scopeAppointment(c)) return;
       var kind = caseLayer(c);
       if (kind === 'confirmed' && c.event_id) return;
       list.push({ block: { id: c.id, contact_id: c.contact_id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });
@@ -2693,8 +2728,21 @@
     var badge = b.proposal || b.reservation_state ? '' : '<span class="src src-' + sourceLabel(b).toLowerCase() + '">' + sourceLabel(b) + '</span>';
     var selected = b.id && b.id === state.selectedId;
     var place = b.suburb && !b.reservation_state ? ', ' + b.suburb : '';
-    return '<button type="button" class="ev is-' + kind + (b.proposal ? ' is-proposal' : '') + (b.clash ? ' is-clash' : '') + (selected ? ' is-sel' : '') + '" data-booking-case="' + esc(b.id || '') + '"' +
-      ' style="grid-row:' + (from + 1) + ' / ' + (to + 1) + ';grid-column:' + colStart + ' / ' + colEnd + '">' +
+    var cls = 'ev is-' + kind + (b.proposal && kind !== 'proposal' ? ' is-proposal' : '') + (b.clash ? ' is-clash' : '') + (selected ? ' is-sel' : '');
+    var at = ' style="grid-row:' + (from + 1) + ' / ' + (to + 1) + ';grid-column:' + colStart + ' / ' + colEnd + '"';
+    if (b.proposal) {
+      // A lead's proposed visit, as on the 17 Sep week: its stage on a small
+      // chip, then who and where, then when. A clash is red and names the
+      // booking it runs into.
+      return '<button type="button" class="' + cls + '" data-booking-case="' + esc(b.id || '') + '"' + at + (selected ? ' aria-pressed="true"' : '') + '>' +
+        '<span class="ev-chip">' + esc(kindWords(kind, b)) + '</span>' +
+        '<span class="ev-title">' + esc(title || 'Proposed visit') + '</span>' +
+        (b.suburb ? '<span class="ev-place">' + esc(b.suburb) + '</span>' : '') +
+        '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
+        (b.not_in_this_read ? '<span class="ev-kind">Not in the GHL list</span>' : '') +
+        (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
+    }
+    return '<button type="button" class="' + cls + '" data-booking-case="' + esc(b.id || '') + '"' + at + '>' +
       '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + esc(place) + '</span>' + badge + '</span>' +
       '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
       '<span class="ev-kind">' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span>' +
@@ -3026,6 +3074,7 @@
 
   function ownerBlock(c, kind) {
     var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (bookedElsewhere(c)) return bookedElsewhereBlock(c);
     if (state.loading) return 'Reading the latest list. Wait a moment.';
     if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
     var ob = ownerBooking(c);
@@ -3125,7 +3174,8 @@
     if (!c || !preview || !ACTIONS[kind]) return { ok: false, reason: 'no_check' };
     if (state.approvalPending[key] || state.pressPending[key]) return { ok: false, reason: 'pending' };
     var verb = kind === 'calendar' ? 'booked' : 'sent';
-    var stop = state.loading ? 'Reading the latest list. Wait a moment.'
+    var stop = bookedElsewhere(c) ? bookedElsewhereBlock(c)
+      : state.loading ? 'Reading the latest list. Wait a moment.'
       : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
       : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
       : !(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.'

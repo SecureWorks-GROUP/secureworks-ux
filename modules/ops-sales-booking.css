@@ -280,6 +280,22 @@
 #salesBookingRoot .dayunread{padding:14px;border-radius:var(--r-sm);background:var(--bad-wash);color:var(--bad);display:grid;gap:4px}
 #salesBookingRoot .dayunread h3{font-size:14px}
 #salesBookingRoot .day-sk{height:420px;border-radius:var(--r-sm)}
+/* Free times: the server's live GHL availability for the day, painted as sent. */
+#salesBookingRoot .freetimes{display:grid;gap:8px;padding:12px;border:1px solid #CFE3D8;border-radius:var(--r-sm);background:var(--ok-wash)}
+#salesBookingRoot .freetimes.is-none{background:var(--surface-2);border-color:var(--line-2);padding:8px 10px}
+#salesBookingRoot .ft-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 10px}
+#salesBookingRoot .ft-head h3{font-size:14px;font-weight:650;color:var(--ok)}
+#salesBookingRoot .ft-who{color:var(--ink-2)}
+#salesBookingRoot .ft-slots{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
+#salesBookingRoot .ft-slot{display:grid;gap:1px;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r-sm);background:var(--surface);border:1px solid #BFD9CB;font-size:12px;color:var(--muted);line-height:1.35}
+#salesBookingRoot .ft-slot b{font-size:14px;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+#salesBookingRoot button.ft-slot:hover:not(:disabled){background:#F4FAF7;border-color:var(--ok)}
+#salesBookingRoot button.ft-slot[aria-pressed="true"]{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok);background:#F4FAF7}
+#salesBookingRoot button.ft-slot:disabled{opacity:.6}
+#salesBookingRoot .ft-slot.is-static{background:var(--surface);border-style:dashed}
+#salesBookingRoot .ft-short{color:var(--accent-ink)}
+#salesBookingRoot .ft-state{font-size:13px;color:var(--ink-2)}
+#salesBookingRoot .ft-warn{font-size:12.5px;color:var(--ink-2);padding:6px 8px;border-left:3px solid var(--accent);background:var(--surface);border-radius:0 6px 6px 0}
 
 /* ---- tablet: day moves under the card ---- */
 @media (max-width:1239px){
@@ -305,6 +321,8 @@
   #salesBookingRoot .pick{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   #salesBookingRoot .pick label:first-child{grid-column:1 / -1}
   #salesBookingRoot .pick select{font-size:16px}
+  #salesBookingRoot .ft-slots{grid-template-columns:minmax(0,1fr)}
+  #salesBookingRoot .ft-slot{padding:10px 12px}
   #salesBookingRoot .bk-counts{padding:10px 14px}
   #salesBookingRoot .counts{font-size:14px;gap:4px 14px}
   #salesBookingRoot .counts i{display:none}

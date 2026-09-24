@@ -895,3 +895,83 @@ test('a quiet re-read after a book keeps the booked visit on the day until the r
   await api.load('marnin', api.state.weekStart);
   assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya'));
 });
+
+// ---- Live free times (live-availability-v1) ----
+// The server publishes free_times per day and per lead; the screen paints them
+// as sent and never computes its own. Backend docs/sales-booking-live-availability.md.
+test('free times paint the server windows as sent, for the person and for the open lead', () => {
+  ownerSetup();
+  api.state.dayIndex = 4;
+  let html = api.renderFreeTimes(thisFriday());
+  assert.match(html, /30 min on site, travel between visits counted/);
+  assert.match(html, /Arrive 12:15 to 2:00pm/);
+  assert.match(html, /30 min travel from the visit before · 30 min travel to the next visit/);
+  assert.match(html, /2 of 6 visits booked\./);
+  assert.match(html, /Open a lead to pick one of these times\./);
+  assert.doesNotMatch(html, /data-free-slot/);
+  // A server window the client would never derive itself is still painted as sent.
+  data.booking_flow.free_times.days.find((d) => d.date === thisFriday()).arrival_windows[0].to_iso = thisFriday() + 'T12:40:00+08:00';
+  assert.match(api.renderFreeTimes(thisFriday()), /Arrive 12:15 to 12:40pm/);
+  api.state.selectedId = 'lead-kerry';
+  html = api.renderFreeTimes(thisFriday());
+  assert.match(html, /For Kerry P in Harrisdale, with travel from their suburb\./);
+  assert.match(html, /Arrive 12:00 to 2:25pm/);
+  assert.match(html, /15 min travel from the visit before · 5 min travel to the next visit/);
+  assert.match(html, /data-free-slot[^>]*data-date="[^"]+"[^>]*data-start="12:00"[^>]*data-minutes="90"/);
+});
+
+test('a free time too short for any arrival window is shown but cannot be picked', () => {
+  ownerSetup();
+  api.state.selectedId = 'lead-kerry';
+  const tue = api.addDays(data.week_start, 1);
+  const html = api.renderFreeTimes(tue);
+  assert.match(html, /Arrive at 4:00pm/);
+  assert.match(html, /straight after the protected band/);
+  assert.match(html, /Too short for a 60-minute arrival window\./);
+  assert.equal(api.pickInsideFreeTime(caseById('lead-kerry'), tue, tue + 'T16:00:00+08:00', tue + 'T16:00:00+08:00'), null);
+  const fit = api.pickInsideFreeTime(caseById('lead-kerry'), tue, tue + 'T08:00:00+08:00', tue + 'T11:00:00+08:00');
+  assert.deepEqual(fit, { date: tue, start: '08:00', minutes: 90 });
+});
+
+test('full, past and no-time-left days say so and offer no time', () => {
+  ownerSetup();
+  const fri = data.booking_flow.free_times.days.find((d) => d.date === thisFriday());
+  fri.state = 'full'; fri.arrival_windows = []; fri.booked = 6;
+  assert.match(api.renderFreeTimes(thisFriday()), /Full\. 6 of 6 visits booked\./);
+  fri.state = 'past';
+  assert.match(api.renderFreeTimes(thisFriday()), /This day has passed\./);
+  fri.state = 'no_time_left'; fri.booked = 3;
+  assert.match(api.renderFreeTimes(thisFriday()), /No gap left that fits a 30-minute visit plus travel\. 3 of 6 visits booked\./);
+  assert.match(api.renderFreeTimes(api.addDays(data.week_start, 2)), /not one of Marnin's booking days/);
+  delete data.booking_flow.free_times;
+  assert.match(api.renderFreeTimes(thisFriday()), /Free times did not come with this read\./);
+});
+
+test('the Outlook-to-GHL owner step and read caveats are named in plain words', () => {
+  ownerSetup();
+  let html = api.renderFreeTimes(thisFriday());
+  assert.match(html, /GHL does not hold 2 of Marnin's Outlook entries this week\./);
+  assert.match(html, /connect Outlook, and set it as the conflict calendar for STRATCO FENCING\./);
+  data.booking_flow.calendar_read.outlook.not_in_ghl = 0;
+  data.booking_flow.calendar_read.caveats = ['outlook_unread: graph_timeout'];
+  data.booking_flow.commitments_read = { state: 'could_not_read', reason: 'system_offers_unreadable: db_timeout' };
+  html = api.renderFreeTimes(thisFriday());
+  assert.doesNotMatch(html, /conflict calendar/);
+  assert.match(html, /Marnin's Outlook could not be read, so only GHL time is counted here\./);
+  assert.match(html, /Earlier offers could not be read \(db_timeout\), so a free time here may already be offered to someone else\./);
+});
+
+test('each named calendar reason reads as a plain sentence, and nothing is shown free', () => {
+  ownerSetup();
+  const words = (state, reason) => api.calendarReasonWords({ state, reason }, 'Nithin');
+  assert.equal(words('could_not_read', 'ghl_events_unreadable: rate_limited'), "GHL did not return Nithin's bookings for this week (GHL said: rate limited).");
+  assert.equal(words('could_not_read', 'ghl_blocked_slots_unreadable: ghl_blocked_slots_incomplete'), "GHL did not return Nithin's blocked-off time for this week (GHL said: ghl blocked slots incomplete).");
+  assert.equal(words('could_not_read', 'ghl_user_not_confirmed'), "Nithin's GHL login could not be matched to exactly one GHL user, so their calendar was not read.");
+  assert.equal(words('not_configured', 'person_has_no_ghl_calendar'), 'Nithin is not on any GHL calendar yet. Add them to one in GHL, then press Refresh.');
+  assert.equal(words('could_not_read', 'ghl_event_times_malformed'), 'GHL returned a booking for Nithin whose times could not be read.');
+  assert.equal(words('could_not_read', 'something_new'), "Could not read Nithin's calendar (something_new).");
+  data.booking_flow.calendar_read = { provider: 'ghl', state: 'could_not_read', reason: 'ghl_calendar_directory_unreadable: 401' };
+  const html = api.renderHTML();
+  assert.match(html, /GHL did not return its list of calendars \(GHL said: 401\)\. Free times are unknown, so nothing can be booked\./);
+  assert.doesNotMatch(api.renderDay(), /Free times<\/h3>|Arrive 12:15/);
+});

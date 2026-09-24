@@ -93,6 +93,64 @@
       c.owner_booking = { version: 'owner-authored-v1', eligible: !!c.contact_id, reason: null, engine_proposal: engine,
         engine_window: engine ? { start: m.proposal.window.start, end: m.proposal.window.end } : null, rulebook, approvals: [] };
     });
+    // Live availability (live-availability-v1), shaped from backend
+    // docs/sales-booking-live-availability.md and worked by hand from the diary
+    // and commitments above: a 30-minute visit, 30 minutes travel either side
+    // for an unknown place, suburb-to-suburb travel for a lead's own times.
+    const tue = api.addDays(next, 1);
+    const win = (day, from, to, before, beforeBasis, after, afterBasis) => ({
+      from_iso: at(day, from), to_iso: at(day, to),
+      minutes: (Number(to.slice(0, 2)) * 60 + Number(to.slice(3))) - (Number(from.slice(0, 2)) * 60 + Number(from.slice(3))),
+      travel_before_minutes: before, travel_before_basis: beforeBasis,
+      travel_after_minutes: after, travel_after_basis: afterBasis
+    });
+    const personDays = [
+      { date: tue, weekday: 'Tue', state: 'open', day_start: '08:00', day_end: '16:30', booked: 1, max_per_day: 6,
+        busy: [
+          { start_iso: at(tue, '12:00'), end_iso: at(tue, '13:00'), source: 'offer', label: null, location: null },
+          { start_iso: at(tue, '12:30'), end_iso: at(tue, '16:00'), source: 'protected_band', label: 'Stratco / Canning Vale', location: null }
+        ],
+        arrival_windows: [
+          win(tue, '08:00', '11:00', 0, 'day_start', 30, 'unknown_location'),
+          win(tue, '16:00', '16:00', 0, 'protected_band_buffer', null, null)
+        ] },
+      { date: fri, weekday: 'Fri', state: 'open', day_start: '08:00', day_end: '16:30', booked: 2, max_per_day: 6,
+        busy: [
+          { start_iso: at(fri, '08:00'), end_iso: at(fri, '08:45'), source: 'outlook', label: 'School drop-off', location: null },
+          { start_iso: at(fri, '09:00'), end_iso: at(fri, '10:00'), source: 'offer', label: null, location: 'Canning Vale' },
+          { start_iso: at(fri, '10:45'), end_iso: at(fri, '11:45'), source: 'outlook', label: 'Scope: Melanie N, Piara Waters', location: 'Piara Waters' },
+          { start_iso: at(fri, '15:00'), end_iso: at(fri, '16:00'), source: 'ghl', label: 'Scope: Jordan W, Harrisdale', location: 'Harrisdale' }
+        ],
+        arrival_windows: [win(fri, '12:15', '14:00', 30, 'unknown_location', 30, 'unknown_location')] }
+    ];
+    Object.assign(data.booking_flow, {
+      calendar_read: {
+        provider: 'ghl', source: 'server_live_read', version: 'live-availability-v1', as_of: new Date().toISOString(), stale: false,
+        state: 'read', reason: null, person: 'Marnin', ghl_user_id: '3S20LGVTjsVYy9vTJ9wM', calendars: ['dEQKVKHthsjSYaen1fiE'],
+        occupied_intervals: personDays.flatMap(d => d.busy.filter(b => b.source !== 'protected_band')),
+        ghl_events: 1, ghl_blocked_slots: 0, outlook: { state: 'read', events: 2, not_in_ghl: 2 }, caveats: []
+      },
+      commitments_read: { state: 'read', reason: null, as_of: new Date().toISOString(), stale: false, census_days: 21, hand_sent_texts: 'not_machine_checked' },
+      free_times: {
+        version: 'live-availability-v1', as_of: new Date().toISOString(), person: 'Marnin',
+        rule: { on_site_minutes: 30, days: ['Tue', 'Fri'], day_start: '08:00', day_end: '16:30', weekday_start: {}, max_per_day: 6,
+          travel: { model: 'straight-line-v1', unknown_location_minutes: 30 } },
+        days: personDays
+      }
+    });
+    const leadWindows = {
+      'lead-kerry': { suburb: 'Harrisdale', fri: [win(fri, '12:00', '14:25', 15, 'straight_line', 5, 'straight_line')] },
+      'lead-basil': { suburb: 'Aubin Grove', fri: [win(fri, '12:05', '14:05', 20, 'straight_line', 25, 'straight_line')] }
+    };
+    data.cases.forEach(c => {
+      if (!c.contact_id) { c.free_times = null; return; }
+      const own = leadWindows[c.id];
+      c.free_times = {
+        location: { suburb: c.suburb || null, known: !!own },
+        days: personDays.map(d => ({ date: d.date, state: d.state, already_booked_that_day: false,
+          arrival_windows: own && d.date === fri ? own.fri : d.arrival_windows }))
+      };
+    });
     return data;
   }
   if (typeof module !== 'undefined') module.exports = makeFridayRead;

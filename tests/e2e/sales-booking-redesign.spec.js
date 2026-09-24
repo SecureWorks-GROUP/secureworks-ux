@@ -59,6 +59,27 @@ for (const vp of viewports) {
       }
     });
 
+    test('free times come from the live read, and a tap on one fills the visit picker', async ({ page }) => {
+      await open(page);
+      const free = page.locator('.bk-day .freetimes');
+      await page.locator('.daypick button', { hasText: 'Fri' }).click();
+      await expect(free.locator('.ft-slot')).toHaveText([/Arrive 12:15 to 2:00pm/]);
+      await expect(free).toContainText('Open a lead to pick one of these times.');
+      await expect(free).toContainText("GHL does not hold 2 of Marnin's Outlook entries this week.");
+      await choose(page, 'Kerry P');
+      await page.locator('.daypick button', { hasText: 'Fri' }).click();
+      await expect(free).toContainText('For Kerry P in Harrisdale, with travel from their suburb.');
+      const slot = free.getByRole('button', { name: /Arrive 12:00 to 2:25pm/ });
+      await slot.click();
+      await expect(page.getByRole('combobox', { name: 'Arrive from' })).toHaveValue('12:00');
+      await expect(page.getByRole('combobox', { name: 'Arrival window' })).toHaveValue('90');
+      await expect(page.locator('.visit .when')).toContainText('arrive 12:00 to 1:30pm');
+      await expect(free.getByRole('button', { name: /Arrive 12:00 to 2:25pm/ })).toHaveAttribute('aria-pressed', 'true');
+      // Picking fills the picker only: nothing is checked, approved, sent or booked.
+      expect(await page.evaluate(() => window.fakeWrites.length)).toBe(0);
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
+    });
+
     test('a clash names the other booking and blocks booking, not the text', async ({ page }) => {
       await open(page);
       await choose(page, 'Kerry P');

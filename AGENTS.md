@@ -551,6 +551,10 @@ unedited engine text keeps the one-press engine path until a time is picked.
 A proposed time stays the default shown first (one-press Book it); every card
 offers Pick a different time. A successful book or offer updates occupancy, then re-reads
 quietly.
+Free times (`live-availability-v1`) are painted exactly as `sales_booking_read`
+sends them (`booking_flow.free_times`, per-case `free_times`); never compute
+availability, travel or visit length on the client. A tap on one only fills the
+Pick a visit picker. Contract in `docs/sales-booking-ui.md`.
 A picked visit is always held with the text. An edited text is
 bound by the browser's copy of ops-api `bookingContentHash` (`sha256Hex` + `canonicalJson`), so keep the two in
 step. Contract and copy: `docs/sales-booking-ui.md`,

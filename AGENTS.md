@@ -538,10 +538,8 @@ live capture), evidence in `docs/evidence/ses-portal-live-thumb-2026-08-13/`.
 
 ## Sales Booking screen (`modules/ops-sales-booking.js`)
 
-Live module (loaded by `ops.html`), not dead code. Build the week (17 Sep
-layout, restored 24 Sep): To contact list left, Mon-Fri week middle
-(`renderWeek`), conversation and card right; phone is day strip, one day, then
-the card. Every Send this
+Live module (loaded by `ops.html`), not dead code. Layout and responsive
+behavior are owned by [docs/sales-booking-ui.md](docs/sales-booking-ui.md). Every Send this
 text / Book it press records `sales_booking_approval_write` for the exact
 content on screen, then calls `sales_booking_send` / `sales_booking_book` with
 `{approval_id}` and states the result in words; an unknown action reads "not

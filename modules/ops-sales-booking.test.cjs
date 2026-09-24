@@ -762,7 +762,7 @@ test('a lead the server says is booked in another scoper\'s calendar leaves to-c
   const contact = list.slice(list.indexOf('To contact'), list.indexOf('>Booked<'));
   assert.doesNotMatch(contact, /Basil L/);
   assert.match(list, />Booked<span class="count">1<\/span>[\s\S]*Basil L[\s\S]*Booked with Khairo, Tue 29 Sep 10:00am/);
-  assert.match(html, /<p class="bookednote">Booked with Khairo, Tue 29 Sep 10:00am<\/p>/);
+  assert.match(html, /<p class="when">Booked with Khairo, Tue 29 Sep 10:00am<\/p>/);
   // Its visit lives in Khairo's calendar, so Marnin's week paints no card for it.
   const week = html.slice(html.indexOf('class="bk-week"'), html.indexOf('class="bk-card'));
   assert.doesNotMatch(week, /data-booking-case="basil"/);

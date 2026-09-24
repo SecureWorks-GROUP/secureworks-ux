@@ -1230,6 +1230,10 @@
     return 'Booked' + (who ? ' with ' + who : '') + ', ' + shortDate(a.start_iso) + ' ' + clockLabel(hourFromIso(a.start_iso), true);
   }
 
+  function bookedElsewhereBlock(c) {
+    return bookedElsewhere(c) ? scopeAppointmentWords(c) + '. No new time can be offered or booked from here.' : '';
+  }
+
   function isBooked(c) {
     if (!c || isNonScopeDiaryMirror(c)) return false;
     if (scopeAppointment(c)) return true;
@@ -1844,6 +1848,7 @@
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
     var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (!refusing && bookedElsewhere(c)) return bookedElsewhereBlock(c);
     if (!steady && state.loading) return 'Reading the latest list. Wait a moment.';
     if (!steady && (state.stale || state.error)) return 'This list may be out of date. Press Refresh first.';
     if (!flow || flow.version !== 'booking-confirm.v1' || flow.approval_write !== 'separate-v1') return 'Approvals are not connected for this list yet, so nothing can be ' + verb + ' from here.';
@@ -2487,6 +2492,7 @@
   }
 
   function pressBlock(c, kind) {
+    if (bookedElsewhere(c)) return bookedElsewhereBlock(c);
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
     var last = state.pressResults[key];
@@ -2564,6 +2570,7 @@
   }
 
   function renderVisit(c) {
+    if (bookedElsewhere(c)) return '<section class="visit"><h3>' + icon('calendar') + 'Booked visit</h3><p class="when">' + esc(scopeAppointmentWords(c)) + '</p></section>';
     var m = decisionModel(c);
     if (!m && !ownerFlow()) {
       if (c.proposal && c.proposal.start_iso) {
@@ -2620,7 +2627,7 @@
     return '<section class="bk-card" aria-label="Selected lead">' +
       '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
       '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p>' +
-      (scopeAppointment(c) ? '<p class="bookednote">' + esc(scopeAppointmentWords(c)) + '</p>' : '') + '</header>' +
+      (scopeAppointment(c) && !bookedElsewhere(c) ? '<p class="bookednote">' + esc(scopeAppointmentWords(c)) + '</p>' : '') + '</header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
       '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
       '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (writable || m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (writable ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
@@ -2657,7 +2664,7 @@
     cases().forEach(function (c) {
       var p = c.proposal;
       if (!p || !p.start_iso || dayIndexFromIso(p.start_iso, state.weekStart) !== d) return;
-      if (bookedElsewhere(c)) return;
+      if (scopeAppointment(c)) return;
       var kind = caseLayer(c);
       if (kind === 'confirmed' && c.event_id) return;
       list.push({ block: { id: c.id, contact_id: c.contact_id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });
@@ -3067,6 +3074,7 @@
 
   function ownerBlock(c, kind) {
     var verb = kind === 'calendar' ? 'booked' : 'sent';
+    if (bookedElsewhere(c)) return bookedElsewhereBlock(c);
     if (state.loading) return 'Reading the latest list. Wait a moment.';
     if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
     var ob = ownerBooking(c);
@@ -3166,7 +3174,8 @@
     if (!c || !preview || !ACTIONS[kind]) return { ok: false, reason: 'no_check' };
     if (state.approvalPending[key] || state.pressPending[key]) return { ok: false, reason: 'pending' };
     var verb = kind === 'calendar' ? 'booked' : 'sent';
-    var stop = state.loading ? 'Reading the latest list. Wait a moment.'
+    var stop = bookedElsewhere(c) ? bookedElsewhereBlock(c)
+      : state.loading ? 'Reading the latest list. Wait a moment.'
       : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
       : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
       : !(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.'

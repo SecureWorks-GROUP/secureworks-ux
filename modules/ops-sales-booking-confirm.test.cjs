@@ -895,3 +895,23 @@ test('a quiet re-read after a book keeps the booked visit on the day until the r
   await api.load('marnin', api.state.weekStart);
   assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya'));
 });
+test('a lead booked with another scoper offers no new time: Book it and Send this text are both shut', async () => {
+  assert.equal(api.approvalBlock(row, 'calendar'), '');
+  assert.equal(api.approvalBlock(row, 'message'), '');
+  row.scope_appointment = {start_iso:'2026-09-29T10:00:00+08:00', owner_name:'Khairo', owner_resource_id:'khairo', status:'confirmed'};
+  const html = api.renderHTML();
+  const card = html.slice(html.indexOf('class="bk-card"'));
+  assert.match(card, /<section class="visit"><h3>[\s\S]*?Booked visit<\/h3><p class="when">Booked with Khairo, Tue 29 Sep 10:00am<\/p><\/section>/);
+  assert.doesNotMatch(card, /Proposed visit|Book it/);
+  assert.match(card, /data-booking-press="message"[^>]* disabled[^>]*>[\s\S]*?Send this text[\s\S]*?Booked with Khairo, Tue 29 Sep 10:00am\. No new time can be offered or booked from here\./);
+  assert.equal((await api.recordApproval(row.id, 'message', 'approved')).ok, false);
+  assert.equal((await api.recordApproval(row.id, 'calendar', 'approved')).ok, false);
+  assert.equal(writes.length, 0);
+});
+test('a lead with a live visit in this scoper\'s own calendar paints no stale proposal card', () => {
+  assert.match(api.renderWeek(), /data-booking-case="lead-a"/);
+  row.scope_appointment = {start_iso:'2026-09-29T10:00:00+08:00', owner_name:'Marnin', owner_resource_id:'marnin', status:'confirmed'};
+  assert.doesNotMatch(api.renderWeek(), /data-booking-case="lead-a"/);
+  delete row.scope_appointment.owner_resource_id;
+  assert.doesNotMatch(api.renderWeek(), /data-booking-case="lead-a"/);
+});

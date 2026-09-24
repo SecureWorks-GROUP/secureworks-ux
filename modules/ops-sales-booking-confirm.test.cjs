@@ -452,13 +452,14 @@ test('an edited text is approved as the edited words, bound by the backend hash'
   assert.equal(snap.content.variant, 'edited');
   const {content_hash, ...binding} = snap;
   assert.equal(content_hash, nodeCrypto.createHash('sha256').update(backendCanonical(binding)).digest('hex'));
+  assert.equal((await api.approve(row.id, 'message')).ok, true);
   const result = await api.press(row.id, 'message');
   assert.equal(result.ok, true);
   assert.equal(writes[0].action, 'sales_booking_approval_write');
   assert.equal(writes[0].body.snapshot.content.text, snap.content.text);
   assert.deepEqual(writes[1], {action:'sales_booking_send', body:{approval_id:'appr-1'}});
   const html = api.renderHTML();
-  assert.match(html, /Text sent at [0-9:]+[ap]m from line 001 to the phone ending 002\./);
+  assert.match(html, /Sent to Example at [0-9:]+[ap]m from 776\./);
   assert.match(html, /data-booking-press="message"[^>]* disabled/);
   // Typing the proposed words back returns to the producer's own template and hash.
   editDraft(row.booking_read_model.message.template_text);
@@ -468,14 +469,16 @@ test('an edited text is approved as the edited words, bound by the backend hash'
 test('a missing send action says not connected and never claims a send', async () => {
   const missing = new Error('Unknown action'); missing.status = 400;
   actionPost({sales_booking_send: missing, sales_booking_book: missing});
+  await api.approve(row.id, 'message');
   const sent = await api.press(row.id, 'message');
   assert.equal(sent.ok, false);
+  await api.approve(row.id, 'calendar');
   const booked = await api.press(row.id, 'calendar');
   assert.equal(booked.ok, false);
   const html = api.renderHTML();
   assert.match(html, /Sending from this screen is not connected yet\. Your approval is recorded; nothing was sent\./);
   assert.match(html, /Booking from this screen is not connected yet\. Your approval is recorded; nothing was booked\./);
-  assert.doesNotMatch(html, /Text sent|Booked Tuesday/);
+  assert.doesNotMatch(html, /Sent to|Booked Example/);
   // A second press reuses the recorded approval instead of writing another one.
   await api.press(row.id, 'message');
   assert.equal(writes.filter((w) => w.action === 'sales_booking_approval_write').length, 2);
@@ -483,6 +486,7 @@ test('a missing send action says not connected and never claims a send', async (
 });
 test('refused, trial and unclear answers are stated in words; unclear blocks a blind retry', async () => {
   actionPost({sales_booking_book:{status:'refused',reason:'prior_offer_conflict'}});
+  await api.approve(row.id, 'calendar');
   await api.press(row.id, 'calendar');
   assert.match(api.renderHTML(), /Not booked: that time is already offered to someone else\./);
   actionPost({sales_booking_book:{status:'dry_run',would_write:{start:row.booking_read_model.calendar_write.preview.start,end:row.booking_read_model.calendar_write.preview.end}}});
@@ -490,9 +494,10 @@ test('refused, trial and unclear answers are stated in words; unclear blocks a b
   assert.match(api.renderHTML(), /Checked only, nothing was booked\. The server is in trial mode\. It would have booked 9:00 to 11:30am/);
   actionPost({sales_booking_book:{status:'booked',appointment_id:'apt-9',written:['GHL Stratco Fencing calendar',"Marnin's Outlook"]}});
   await api.press(row.id, 'calendar');
-  assert.match(api.renderHTML(), /Booked Tuesday [0-9]+ [A-Z][a-z]+, arrive 9:00 to 10:30am in GHL Stratco Fencing calendar and Marnin&#39;s Outlook|Booked Tuesday [0-9]+ [A-Z][a-z]+, arrive 9:00 to 10:30am in GHL Stratco Fencing calendar and Marnin's Outlook/);
+  assert.match(api.renderHTML(), /Booked Example for Tuesday [0-9]+ [A-Z][a-z]+, arrive 9:00 to 10:30am, in GHL Stratco Fencing calendar and Marnin(&#39;|')s Outlook\./);
   assert.match(api.renderHTML(), /GHL appointment apt-9/);
   actionPost({sales_booking_send:{weird:true}});
+  await api.approve(row.id, 'message');
   await api.press(row.id, 'message');
   assert.match(api.renderHTML(), /The server answered without a clear result\. Check GHL before pressing again\./);
   const before = writes.length;
@@ -516,7 +521,7 @@ test('book it names the calendars it writes and a clash names the other booking'
 test('a booked result without a written list names the calendars Book it promised', () => {
   const snap = api.approvalSnapshot(row, 'calendar');
   const r = api.describeResult('calendar', {status:'booked', appointment_id:'apt-x'}, row, snap);
-  assert.match(r.text, /in GHL calendar and Marnin's Outlook at /);
+  assert.match(r.text, /^Booked Example for Tuesday [0-9]+ [A-Z][a-z]+, arrive 9:00 to 10:30am, in GHL calendar and Marnin's Outlook\.$/);
 });
 test('use the proposed text cannot change words while a press is in flight', async () => {
   editDraft('Edited words for Kerry');
@@ -531,7 +536,7 @@ test('use the proposed text cannot change words while a press is in flight', asy
     }
     return {status:'sent', message_id:'m-reset'};
   };
-  const pending = api.press(row.id, 'message');
+  const pending = api.approve(row.id, 'message');
   const html = api.renderHTML();
   assert.doesNotMatch(html, /Use the proposed text/);
   assert.match(html, /Edited words for Kerry/);
@@ -552,7 +557,7 @@ test('an in-flight edit cannot send words that are no longer on screen', async (
     }
     return {status:'sent', message_id:'m-late'};
   };
-  const pending = api.press(row.id, 'message');
+  const pending = api.approve(row.id, 'message');
   assert.match(api.renderHTML(), /<textarea id="bk-draft"[^>]* disabled/);
   const d = api.draftFor(row);
   d.text = 'Different words now';
@@ -596,7 +601,7 @@ test('the screen keeps its words plain and gives the owner a Refresh button', ()
 test('an edited text the server will not take is said plainly, and nothing is sent', async () => {
   const d = api.draftFor(row); d.text = 'Edited words'; d.humanEdited = true; api.renderHTML();
   global.opsPost = async (action, body) => { writes.push({action, body}); const e = new Error('approval_snapshot_changed'); e.status = 409; throw e; };
-  const r = await api.press(row.id, 'message');
+  const r = await api.approve(row.id, 'message');
   assert.equal(r.ok, false);
   assert.equal(writes.length, 1);
   assert.match(api.renderHTML(), /The server only accepts the proposed text for now, so your edited text was not approved\. Nothing was sent\./);
@@ -657,7 +662,18 @@ test('an edited text is checked by the server, shown exactly, then approved and 
   assert.match(html, /Texts sent by hand outside this system cannot be checked/);
   assert.match(html, /<textarea id="bk-draft"[^>]* disabled/);
   assert.doesNotMatch(html, /data-booking-press="message"/);
-  const sent = await api.ownerApprove(row.id, 'message');
+  assert.match(html, /data-owner-send="message"[^>]* disabled/);
+  assert.equal((await api.ownerSend(row.id, 'message')).ok, false);
+  assert.equal(backend.writes.length, 1);
+  const approved = await api.ownerApprove(row.id, 'message');
+  assert.equal(approved.ok, true);
+  assert.equal(approved.sent, false);
+  assert.equal(backend.writes.length, 2);
+  html = api.renderCard();
+  assert.match(html, /<strong>Approved\.<\/strong> This exact text goes from SecureWorks Group Ops 776 to the phone ending 418\. Not sent yet\./);
+  assert.match(html, /data-owner-approve="message"[^>]* disabled/);
+  assert.doesNotMatch(html, /data-owner-send="message"[^>]* disabled/);
+  const sent = await api.ownerSend(row.id, 'message');
   assert.equal(sent.ok, true);
   const decide = backend.writes[1];
   assert.equal(decide.action, 'sales_booking_approval_write');
@@ -668,7 +684,7 @@ test('an edited text is checked by the server, shown exactly, then approved and 
   assert.equal(backend.writes[2].action, 'sales_booking_send');
   assert.match(backend.writes[2].body.approval_id, /^[0-9a-f]{64}$/);
   html = api.renderCard();
-  assert.match(html, /Text sent at [0-9:]+[ap]m from SecureWorks Group Ops 776 to the phone ending 418\./);
+  assert.match(html, /Sent to Basil at [0-9:]+[ap]m from 776\./);
   assert.match(html, /data-booking-press="message"[^>]* disabled/);
 });
 
@@ -694,13 +710,15 @@ test('every Stratco card can pick a different time; a proposed time stays the de
   });
 });
 
-test('the proposed time keeps its one-press Book it, evidence and checks', async () => {
+test('the proposed time keeps its Approve then Book it, evidence and checks', async () => {
   const backend = ownerSetup('sent');
   row = caseById('lead-basil'); api.state.selectedId = row.id;
   const html = api.renderCard();
   assert.match(html, /Proposed visit[\s\S]*arrive 12:00 to 1:30pm/);
   assert.match(html, /“Still waiting to hear back\. Are you coming Friday or not\?”/);
   assert.match(html, /All 5 checks passed/);
+  assert.equal(api.approveBlock(row, 'calendar'), '');
+  assert.equal((await api.approve(row.id, 'calendar')).ok, true);
   assert.equal(api.pressBlock(row, 'calendar'), '');
   const r = await api.press(row.id, 'calendar');
   assert.equal(r.ok, true);
@@ -742,7 +760,10 @@ test('a Nithin lead\'s text is Nithin\'s, from 774; visits stay Stratco only; a 
   assert.match(api.renderCard(), /This exact text goes from SecureWorks Patios 774 to the phone ending/);
   r = await api.ownerApprove(row.id, 'message');
   assert.equal(r.ok, true);
-  assert.match(api.renderCard(), /Text sent at \d{1,2}:\d{2}[ap]m from SecureWorks Patios 774 to the phone ending \d+\./);
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  r = await api.ownerSend(row.id, 'message');
+  assert.equal(r.ok, true);
+  assert.match(api.renderCard(), /Sent to Priya at \d{1,2}:\d{2}[ap]m from 774\./);
   api.state.resourceId = 'marnin';
 });
 
@@ -1033,10 +1054,12 @@ test('a lead with no proposed time gets a day and window picker that books throu
   assert.match(html, /GHL is clear, with 30 minutes travel either side/);
   assert.match(html, /Outlook is clear/);
   assert.match(html, /data-owner-visit="date"[^>]* disabled/);
-  const booked = await api.ownerApprove(row.id, 'calendar');
+  assert.equal((await api.ownerApprove(row.id, 'calendar')).ok, true);
+  assert.equal(backend.writes.length, 2);
+  const booked = await api.ownerSend(row.id, 'calendar');
   assert.equal(booked.ok, true);
   assert.equal(backend.writes[2].action, 'sales_booking_book');
-  assert.match(api.renderCard(), /Booked Friday [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm in GHL Stratco Fencing calendar and Marnin's Outlook at /);
+  assert.match(api.renderCard(), /Booked Priya for Friday [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm, in GHL Stratco Fencing calendar and Marnin's Outlook\./);
 });
 
 test('a text sent with a picked time always holds that visit', async () => {
@@ -1059,6 +1082,7 @@ test('an owner book occupies the day so the next lead must pick another time', a
   pickVisit(priya, '12:30', 60, thisFri);
   assert.equal((await api.press(priya.id, 'calendar')).ok, true);
   assert.equal((await api.ownerApprove(priya.id, 'calendar')).ok, true);
+  assert.equal((await api.ownerSend(priya.id, 'calendar')).ok, true);
   assert.match(api.renderWeek(), /Priya S/);
   assert.match(api.renderWeek(), /12:30/);
   assert.match(api.clashFor(basil).label, /Priya/);
@@ -1085,6 +1109,7 @@ test('a sent offer occupies the slot so another lead cannot take it', async () =
   pickVisit(priya, '12:30', 60, thisFri);
   assert.equal((await api.press(priya.id, 'message')).ok, true);
   assert.equal((await api.ownerApprove(priya.id, 'message')).ok, true);
+  assert.equal((await api.ownerSend(priya.id, 'message')).ok, true);
   pickVisit(basil, '12:30', 60, thisFri);
   assert.match(api.ownerBlock(basil, 'calendar'), /Priya|offered/i);
 });
@@ -1097,6 +1122,7 @@ test('a lead can book the visit they already held with a sent text', async () =>
   pickVisit(priya, '12:30', 60, thisFri);
   assert.equal((await api.press(priya.id, 'message')).ok, true);
   assert.equal((await api.ownerApprove(priya.id, 'message')).ok, true);
+  assert.equal((await api.ownerSend(priya.id, 'message')).ok, true);
   assert.equal(api.ownerBlock(priya, 'calendar'), '');
   assert.doesNotMatch(api.renderCard(), /Slot taken by a prior offer: Priya/);
   pickVisit(basil, '12:30', 60, thisFri);
@@ -1104,6 +1130,7 @@ test('a lead can book the visit they already held with a sent text', async () =>
   pickVisit(priya, '12:30', 60, thisFri);
   assert.equal((await api.press(priya.id, 'calendar')).ok, true);
   assert.equal((await api.ownerApprove(priya.id, 'calendar')).ok, true);
+  assert.equal((await api.ownerSend(priya.id, 'calendar')).ok, true);
   assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_book').length, 1);
   assert.match(api.renderCard(), /Booked /);
 });
@@ -1132,6 +1159,7 @@ test('the unedited engine text still takes the engine path until a time is picke
   row = caseById('lead-basil'); api.state.selectedId = row.id; api.renderHTML();
   assert.equal(api.messagePath(row), 'engine');
   assert.equal(api.calendarPath(row), 'engine');
+  await api.approve(row.id, 'message');
   const r = await api.press(row.id, 'message');
   assert.equal(r.ok, true);
   assert.equal(backend.writes[0].body.owner_input, undefined);
@@ -1183,6 +1211,7 @@ test('a quiet re-read after a book keeps the booked visit on the day until the r
   pickVisit(priya, '12:30', 60, thisFri);
   await api.press(priya.id, 'calendar');
   await api.ownerApprove(priya.id, 'calendar');
+  await api.ownerSend(priya.id, 'calendar');
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
   // The fixture's read does not carry the new booking, as a lagging read would not.
@@ -1213,4 +1242,79 @@ test('a lead with a live visit in this scoper\'s own calendar paints no stale pr
   assert.doesNotMatch(api.renderWeek(), /data-booking-case="lead-a"/);
   delete row.scope_appointment.owner_resource_id;
   assert.doesNotMatch(api.renderWeek(), /data-booking-case="lead-a"/);
+});
+
+// ---- Approve and Send are separate presses (step 7) ----
+test('engine path: approve alone sends nothing, send before approve is impossible, an edit relocks', async () => {
+  actionPost({sales_booking_send:{status:'sent',message_id:'m-7'}});
+  let html = api.renderCard();
+  assert.match(html, /data-booking-approve-step="message"[^>]*>Approve</);
+  assert.match(html, /data-booking-press="message"[^>]* disabled/);
+  assert.match(html, /Approve it first\. Nothing is sent until you approve\./);
+  assert.equal((await api.press(row.id, 'message')).ok, false);
+  assert.equal(writes.length, 0);
+  const approved = await api.approve(row.id, 'message');
+  assert.equal(approved.ok, true);
+  assert.equal(approved.sent, false);
+  assert.deepEqual(writes.map((w) => w.action), ['sales_booking_approval_write']);
+  html = api.renderCard();
+  assert.match(html, /data-booking-approve-step="message"[^>]* disabled>Approved</);
+  assert.doesNotMatch(html, /data-booking-press="message"[^>]* disabled/);
+  editDraft('Different words after approval');
+  assert.match(api.pressBlock(row, 'message'), /^Approve it first/);
+  assert.equal((await api.press(row.id, 'message')).ok, false);
+  assert.equal(writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+});
+
+test('engine path: a send after the approval ran out says so and sends nothing', async () => {
+  actionPost({sales_booking_send:{status:'sent',message_id:'m-8'}});
+  assert.equal((await api.approve(row.id, 'message')).ok, true);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 15 * 60000 + 1;
+  try {
+    const r = await api.press(row.id, 'message');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'Your approval ran out after 15 minutes, so nothing was sent. Check it and approve it again.');
+    assert.equal(writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+    assert.equal(api.approveBlock(row, 'message'), '');
+  } finally { Date.now = realNow; }
+});
+
+test('engine path: a text whose sender is not this person\'s own line is shown but never approvable', async () => {
+  actionPost({sales_booking_send:{status:'sent',message_id:'m-9'}});
+  row.booking_read_model.message.routing.from_number = '+61489267774';
+  api.renderHTML();
+  const why = "The server would send this from line 774, not Marnin's own line ending 776, so it cannot be approved here.";
+  assert.equal(api.approvalBlock(row, 'message'), why);
+  const html = api.renderCard();
+  assert.match(html, /data-booking-approve-step="message"[^>]* disabled/);
+  assert.match(html, /data-booking-press="message"[^>]* disabled/);
+  assert.equal((await api.approve(row.id, 'message')).ok, false);
+  assert.equal((await api.press(row.id, 'message')).ok, false);
+  assert.equal(writes.length, 0);
+});
+
+test('owner path: an edit after approval relocks, and an expired approval sends nothing', async () => {
+  const backend = ownerSetup('sent');
+  row = caseById('lead-priya'); api.state.selectedId = row.id;
+  const d = api.draftFor(row); d.text = 'Hi Priya, would Friday suit?'; d.humanEdited = true;
+  await api.press(row.id, 'message');
+  assert.equal((await api.ownerApprove(row.id, 'message')).ok, true);
+  d.text = 'Different words now';
+  let r = await api.ownerSend(row.id, 'message');
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'This changed after it was checked. Check it again.');
+  assert.doesNotMatch(api.renderCard(), /data-owner-send/);
+  d.text = 'Hi Priya, would Friday suit?';
+  await api.press(row.id, 'message');
+  assert.equal((await api.ownerApprove(row.id, 'message')).ok, true);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 15 * 60000 + 1;
+  try {
+    r = await api.ownerSend(row.id, 'message');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'Your approval ran out after 15 minutes, so nothing was sent. Check it and approve it again.');
+  } finally { Date.now = realNow; }
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  assert.match(api.renderCard(), /data-booking-press="message"[^>]*>[\s\S]*?Check this text/);
 });

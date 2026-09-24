@@ -1954,6 +1954,7 @@
       if (m.message.template_locked !== true) return 'There is no proposed text for this lead yet.';
       if (!msg.text || !String(msg.text).trim()) return 'The text is empty.';
       if (!msg.sender || !msg.recipient) return 'The sending line or the customer\'s phone is missing.';
+      if (msg.sender !== ownLine()) return 'The server would send this from ' + senderShort(msg.sender) + ', not ' + resource().name + '\'s own line ending ' + phoneEnding(ownLine()) + ', so it cannot be approved here.';
     }
     return '';
   }
@@ -1989,7 +1990,7 @@
       channel.approval = { ui_snapshot: result.approval.snapshot };
       if (kind === 'message' && decision === 'approved') { channel.chosen = snap.content.variant; channel.approved_text = snap.content.text; }
       var approvalId = result.approval.id || result.approval.binding_hash || null;
-      if (decision === 'approved' && approvalId) state.approvalIds[key] = { id: approvalId, snapshot: snap };
+      if (decision === 'approved' && approvalId) state.approvalIds[key] = { id: approvalId, snapshot: snap, expiresAt: approvalExpiry(result.approval) };
       return { ok: true, state: decision, sent: false, booked: false, approval_id: approvalId, approval: result.approval };
     } catch (err) {
       var code = String((err && err.message) || '');
@@ -2137,8 +2138,8 @@
   // ---------------------------------------------------------------------------
   // Render: a dispatcher's work list, phone first. One line of counts, the
   // people to contact (loudest first), one card for the chosen person, and the
-  // day as a column. Every press records the owner's approval of the exact
-  // content first, then asks the server to act, then says what happened.
+  // day as a column. Approve records the owner's approval of the exact content;
+  // Send or Book it then asks the server to act on it and says what happened.
   // ---------------------------------------------------------------------------
   var ACTIONS = { message: 'sales_booking_send', calendar: 'sales_booking_book' };
   // Live GHL calendar ids (wiki booking review, 23 Sep 2026). Unknown ids are
@@ -2594,6 +2595,43 @@
     });
   }
 
+  // Approve and Send are separate presses. An approval covers the exact words
+  // or visit it was given for and lives 15 minutes; after that nothing goes on it.
+  var APPROVAL_LIFE_MS = 15 * 60000;
+
+  function approvalRanOut(kind) {
+    return 'Your approval ran out after 15 minutes, so nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '. Check it and approve it again.';
+  }
+
+  function approvalExpiry(a) {
+    var cap = Date.now() + APPROVAL_LIFE_MS;
+    var server = Date.parse((a && a.expires_at) || '');
+    return isFinite(server) && server < cap ? server : cap;
+  }
+
+  function heldApproval(c, kind) {
+    var held = state.approvalIds[approvalKey(c, kind)];
+    return held && sameContent(held.snapshot, held.input ? (state.ownerPreviews[approvalKey(c, kind)] || {}).snapshot : approvalSnapshot(c, kind)) ? held : null;
+  }
+
+  function dropExpiredApproval(c, kind) {
+    var key = approvalKey(c, kind), held = state.approvalIds[key];
+    if (!held || Date.now() < held.expiresAt || state.pressPending[key]) return false;
+    delete state.approvalIds[key];
+    var channel = c.booking_read_model && c.booking_read_model[kind === 'calendar' ? 'calendar_write' : 'message'];
+    if (channel && channel.state === 'approved' && channel.approval && sameContent(channel.approval.ui_snapshot, held.snapshot)) channel.state = 'awaiting_approval';
+    if (held.input) delete state.ownerPreviews[key];
+    state.approvalErrors[key] = approvalRanOut(kind);
+    return true;
+  }
+
+  function approveBlock(c, kind) {
+    var key = approvalKey(c, kind);
+    if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
+    if (heldApproval(c, kind)) return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
+    return approvalBlock(c, kind, false);
+  }
+
   function pressBlock(c, kind) {
     if (bookedElsewhere(c)) return bookedElsewhereBlock(c);
     var key = approvalKey(c, kind);
@@ -2602,9 +2640,20 @@
     if (last && last.uncertain) return 'The last press has no confirmed result. Check GHL, then press Refresh.';
     if (last && last.done && sameContent(last.snapshot, approvalSnapshot(c, kind))) return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
     var status = approvalState(c, kind);
-    var held = state.approvalIds[key];
-    if ((status.state === 'approved' || status.state === 'held') && held && sameContent(held.snapshot, approvalSnapshot(c, kind)) && !state.loading && !state.stale && !state.error) return '';
-    return approvalBlock(c, kind, false);
+    var held = heldApproval(c, kind);
+    if ((status.state === 'approved' || status.state === 'held') && held) {
+      if (!(Date.now() < held.expiresAt)) return approvalRanOut(kind);
+      if (state.loading) return 'Reading the latest list. Wait a moment.';
+      if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
+      return '';
+    }
+    return approvalBlock(c, kind, false) || 'Approve it first. Nothing is ' + (kind === 'calendar' ? 'booked' : 'sent') + ' until you approve.';
+  }
+
+  function approveButton(c, kind) {
+    var key = approvalKey(c, kind);
+    var approved = !!heldApproval(c, kind);
+    return '<button type="button" class="quiet" data-booking-approve-step="' + kind + '" data-case-id="' + esc(c.id) + '"' + (approveBlock(c, kind) ? ' disabled' : '') + '>' + (state.approvalPending[key] ? 'Approving…' : approved ? 'Approved' : 'Approve') + '</button>';
   }
 
   function renderResult(c, kind) {
@@ -2653,7 +2702,7 @@
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' · customer phone not in this read') + '</p>' +
       (edited ? '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>' : '') +
       (clash ? '<p class="clash">' + esc(clashSentence(clash)) + '</p>' : '') +
-      '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
+      '<div class="actions">' + approveButton(c, 'message') + '<button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
       (block && !state.pressPending[key] && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '') +
       channelLine(c, 'message') + renderResult(c, 'message') + (m ? renderSayNo(c, 'message') : '');
   }
@@ -2698,7 +2747,7 @@
       (clash ? '<p class="clash">' + esc(clashSentence(clash)) + '</p>' : '') +
       renderChecks(m, false) +
       '<p class="targets">Book it writes: <b>' + bookTargets(m).map(esc).join('</b> and <b>') + '</b></p>' +
-      '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
+      '<div class="actions">' + approveButton(c, 'calendar') + '<button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
       (block && !state.pressPending[key] && !clash && !(state.pressResults[key] && state.pressResults[key].done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '') +
       channelLine(c, 'calendar') + renderResult(c, 'calendar') + renderSayNo(c, 'calendar') + renderPickOther(c) + '</section>';
   }
@@ -2719,6 +2768,8 @@
       return '<section class="bk-card is-empty" aria-label="Selected lead"><div class="emptycard"><h2>Pick someone to contact</h2>' +
         '<p>Their last messages, the proposed text and the proposed visit open here. Nothing is sent or booked until you press.</p></div></section>';
     }
+    dropExpiredApproval(c, 'message');
+    dropExpiredApproval(c, 'calendar');
     var m = decisionModel(c);
     var stage = stageOf(c);
     var key = approvalKey(c, 'message');
@@ -3506,6 +3557,7 @@
     delete state.approvalErrors[key];
     delete state.pressResults[key];
     delete state.ownerPreviews[key];
+    delete state.approvalIds[key];
     render();
     try {
       if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
@@ -3527,31 +3579,21 @@
   }
 
   // Press two: approve exactly what the check showed (its prepared_at and
-  // content_hash), then send or book with that approval, then say what happened.
+  // content_hash). Nothing is sent or booked.
   async function ownerApprove(id, kind) {
     var c = cases().filter(function (row) { return row.id === id; })[0];
     var key = c && approvalKey(c, kind);
     var preview = key && state.ownerPreviews[key];
     if (!c || !preview || !ACTIONS[kind]) return { ok: false, reason: 'no_check' };
     if (state.approvalPending[key] || state.pressPending[key]) return { ok: false, reason: 'pending' };
+    if (heldApproval(c, kind)) return { ok: false, reason: 'already_approved' };
     var verb = kind === 'calendar' ? 'booked' : 'sent';
-    var stop = bookedElsewhere(c) ? bookedElsewhereBlock(c)
-      : state.loading ? 'Reading the latest list. Wait a moment.'
-      : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
-      : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
-      : !(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.'
-      : kind === 'message' && (preview.snapshot.content || {}).sender !== ownLine() ? 'The server would send this from another line. Nothing was sent.'
-      : '';
-    if (stop) {
-      if (!state.loading && !state.stale && !state.error) delete state.ownerPreviews[key];
-      state.approvalErrors[key] = stop;
-      render();
-      return { ok: false, reason: stop };
-    }
+    var stop = ownerStop(c, kind, preview)
+      || (!(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.' : '');
+    if (stop) return ownerRefuse(key, stop);
     state.approvalPending[key] = true;
     delete state.approvalErrors[key];
     render();
-    var approvalId = null;
     try {
       if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
       var res = await global.opsPost('sales_booking_approval_write', {
@@ -3560,33 +3602,72 @@
       });
       var a = res && res.approval;
       if (!res || res.ok !== true || !a || a.state !== 'approved' || !sameContent(a.snapshot, preview.snapshot)) throw new Error('The server did not confirm your approval, so nothing was ' + verb + '. Press Refresh before trying again.');
-      approvalId = res.approval_id || a.binding_hash || a.id || null;
+      var approvalId = res.approval_id || a.binding_hash || a.id || null;
       if (!approvalId) throw new Error('Your approval is recorded, but the server gave it no reference, so nothing was ' + verb + '.');
       if (!sameContent(ownerInput(c, kind), preview.input)) throw new Error('This changed after it was checked. Check it again.');
+      state.approvalIds[key] = { id: approvalId, snapshot: preview.snapshot, input: preview.input, expiresAt: approvalExpiry(a) };
+      return { ok: true, approved: true, sent: false, booked: false, approval_id: approvalId };
     } catch (err) {
       delete state.ownerPreviews[key];
-      delete state.approvalPending[key];
       state.approvalErrors[key] = ownerErrorWords(kind, err);
+      return { ok: false, reason: state.approvalErrors[key] };
+    } finally {
+      delete state.approvalPending[key];
+      render();
+    }
+  }
+
+  function ownerStop(c, kind, preview) {
+    return bookedElsewhere(c) ? bookedElsewhereBlock(c)
+      : state.loading ? 'Reading the latest list. Wait a moment.'
+      : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
+      : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
+      : kind === 'message' && (preview.snapshot.content || {}).sender !== ownLine() ? 'The server would send this from another line. Nothing was sent.'
+      : '';
+  }
+
+  function ownerRefuse(key, stop) {
+    if (!state.loading && !state.stale && !state.error) { delete state.ownerPreviews[key]; delete state.approvalIds[key]; }
+    state.approvalErrors[key] = stop;
+    render();
+    return { ok: false, reason: stop };
+  }
+
+  // Press three: Send or Book it, only on the approval of exactly what the check
+  // showed, still within its 15 minutes. Then say what happened.
+  async function ownerSend(id, kind) {
+    var c = cases().filter(function (row) { return row.id === id; })[0];
+    var key = c && approvalKey(c, kind);
+    var preview = key && state.ownerPreviews[key];
+    if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
+    if (state.approvalPending[key] || state.pressPending[key]) return { ok: false, reason: 'pending' };
+    if (dropExpiredApproval(c, kind)) { render(); return { ok: false, reason: state.approvalErrors[key] }; }
+    var held = preview && heldApproval(c, kind);
+    if (!held) {
+      state.approvalErrors[key] = 'Approve it first. Nothing is ' + (kind === 'calendar' ? 'booked' : 'sent') + ' until you approve.';
       render();
       return { ok: false, reason: state.approvalErrors[key] };
     }
-    delete state.approvalPending[key];
-    state.approvalIds[key] = { id: approvalId, snapshot: preview.snapshot };
+    var stop = ownerStop(c, kind, preview);
+    if (stop) return ownerRefuse(key, stop);
+    delete state.approvalErrors[key];
     state.pressPending[key] = true;
     render();
     var result;
     try {
-      var out = await global.opsPost(ACTIONS[kind], { approval_id: approvalId });
+      if (typeof global.opsPost !== 'function') throw new Error('Unknown action');
+      var out = await global.opsPost(ACTIONS[kind], { approval_id: held.id });
       result = describeResult(kind, out, c, preview.snapshot);
     } catch (err) {
       result = isUnknownAction(err)
-        ? { tone: 'info', snapshot: preview.snapshot, notConnected: true, text: (kind === 'calendar' ? 'Booking' : 'Sending') + ' from this screen is not connected yet. Your approval is recorded; nothing was ' + verb + '.' }
+        ? { tone: 'info', snapshot: preview.snapshot, notConnected: true, text: (kind === 'calendar' ? 'Booking' : 'Sending') + ' from this screen is not connected yet. Your approval is recorded; nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '.' }
         : { tone: 'bad', uncertain: true, snapshot: preview.snapshot, text: 'No confirmed result: ' + String((err && err.message) || err) + '. Check GHL before pressing again.' };
     } finally {
       delete state.pressPending[key];
     }
     result.input = preview.input;
     delete state.ownerPreviews[key];
+    delete state.approvalIds[key];
     state.pressResults[key] = result;
     if (result.done) rememberOccupancy(c, result);
     render();
@@ -3725,21 +3806,23 @@
       return '<div class="ownercheck is-bad" data-owner-preview="message"><p class="oc-head"><strong>Not approvable.</strong> The server would send this from ' + esc(senderShort(ct.sender)) + ', not ' + esc(resource().name) + '\'s own line ending ' + esc(phoneEnding(ownLine())) + '. Nothing was sent.</p>' +
         '<div class="actions"><button type="button" class="quiet" data-owner-cancel="message" data-case-id="' + esc(c.id) + '">Change it</button></div></div>';
     }
+    var approved = !!heldApproval(c, kind);
     if (kind === 'message') {
       head = 'This exact text goes from ' + senderShort(ct.sender) + ' to the phone ending ' + phoneEnding(ct.recipient) + '.';
       body = '<blockquote class="oc-text">' + esc(ct.text) + '</blockquote>' +
         (ct.offer ? '<p class="oc-line">It holds ' + esc(visitWords(ct.offer)) + ' for them.</p>' : '');
-      label = approving ? 'Approving…' : pressing ? 'Sending…' : 'Approve and send';
+      label = pressing ? 'Sending…' : 'Send this text';
     } else {
       head = 'This exact visit goes in ' + ownerTargets(ct).join(' and ') + '.';
       body = '<p class="when">' + esc(visitWords(ct, true)) + '</p>' +
         '<p class="oc-line">' + esc(ct.title) + ' · ' + esc(ct.address) + ' · on site until ' + esc(clockLabel(hourFromIso(ct.end_iso))) + '</p>';
-      label = approving ? 'Approving…' : pressing ? 'Booking…' : 'Approve and book';
+      label = pressing ? 'Booking…' : 'Book it';
     }
     var busy = approving || pressing ? ' disabled' : '';
-    return '<div class="ownercheck" data-owner-preview="' + kind + '"><p class="oc-head"><strong>Checked.</strong> ' + esc(head) + '</p>' + body +
+    return '<div class="ownercheck" data-owner-preview="' + kind + '"><p class="oc-head"><strong>' + (approved ? 'Approved.' : 'Checked.') + '</strong> ' + esc(head) + (approved ? ' Not ' + (kind === 'calendar' ? 'booked' : 'sent') + ' yet.' : '') + '</p>' + body +
       ownerCheckList(kind, preview.checks, ownerRulebook(c)) +
-      '<div class="actions"><button type="button" class="' + (kind === 'calendar' ? 'secondary' : 'primary') + '" data-owner-approve="' + kind + '" data-case-id="' + esc(c.id) + '"' + busy + '>' + icon(kind === 'calendar' ? 'calendar' : 'send') + esc(label) + '</button>' +
+      '<div class="actions"><button type="button" class="quiet" data-owner-approve="' + kind + '" data-case-id="' + esc(c.id) + '"' + (approved || busy ? ' disabled' : '') + '>' + (approving ? 'Approving…' : approved ? 'Approved' : 'Approve') + '</button>' +
+      '<button type="button" class="' + (kind === 'calendar' ? 'secondary' : 'primary') + '" data-owner-send="' + kind + '" data-case-id="' + esc(c.id) + '"' + (approved && !busy ? '' : ' disabled') + '>' + icon(kind === 'calendar' ? 'calendar' : 'send') + esc(label) + '</button>' +
       '<button type="button" class="quiet" data-owner-cancel="' + kind + '" data-case-id="' + esc(c.id) + '"' + busy + '>Change it</button></div></div>';
   }
 
@@ -3772,7 +3855,7 @@
     if (preview) {
       out += renderOwnerPreview(c, 'message', preview);
     } else {
-      out += '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Sending…' : 'Send this text') + '</button></div>' +
+      out += '<div class="actions"><button type="button" class="primary" data-booking-press="message" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-message"' : '') + '>' + icon('send') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Sending…' : 'Check this text') + '</button></div>' +
         (block && !state.pressPending[key] && !state.approvalPending[key] && !(last && last.done) ? '<p class="why" id="why-message">' + esc(block) + '</p>' : '');
     }
     return out + (m ? channelLine(c, 'message') : '') + renderResult(c, 'message');
@@ -3820,7 +3903,7 @@
     if (preview) {
       out += renderOwnerPreview(c, 'calendar', preview);
     } else {
-      out += '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Booking…' : 'Book it') + '</button></div>' +
+      out += '<div class="actions"><button type="button" class="secondary" data-booking-press="calendar" data-case-id="' + esc(c.id) + '"' + (block ? ' disabled aria-describedby="why-calendar"' : '') + '>' + icon('calendar') + (state.approvalPending[key] ? 'Checking…' : state.pressPending[key] ? 'Booking…' : 'Check this visit') + '</button></div>' +
         (block && !clash && !state.pressPending[key] && !state.approvalPending[key] && !(last && last.done) ? '<p class="why" id="why-calendar">' + esc(block) + '</p>' : '');
     }
     return out + renderResult(c, 'calendar') + '</section>';
@@ -3935,10 +4018,10 @@
   function describeResult(kind, res, c, snap) {
     var status = res && res.status;
     var at = perthClockNow();
+    var who = String((c && c.display_name) || '').trim().split(/\s+/)[0] || 'the customer';
     if (kind === 'message') {
-      var line = senderShort(snap.content.sender);
-      var tail = phoneEnding(snap.content.recipient);
-      if (status === 'sent') return { tone: 'ok', done: true, snapshot: snap, text: 'Text sent at ' + at + ' from ' + line + ' to the phone ending ' + tail + '.', ref: res.message_id ? 'GHL message ' + res.message_id : '' };
+      var line = phoneEnding(snap.content.sender) || senderShort(snap.content.sender);
+      if (status === 'sent') return { tone: 'ok', done: true, snapshot: snap, text: 'Sent to ' + who + ' at ' + at + ' from ' + line + '.', ref: res.message_id ? 'GHL message ' + res.message_id : '' };
       if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was sent. The server is in trial mode.' + wouldWords(kind, res.would_write) };
       if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not sent: ' + refusalWords(res.reason, res.detail) };
     } else {
@@ -3950,38 +4033,49 @@
         ? res.written.map(function (t) { return typeof t === 'string' ? t : t && (t.label || t.provider) || ''; }).filter(Boolean)
         : [];
       var targets = named.length ? named.join(' and ') : (snap && snap.source === 'owner' ? ownerTargets(content) : bookTargets(decisionModel(c))).join(' and ');
-      if (status === 'booked') return { tone: 'ok', done: true, snapshot: snap, text: 'Booked ' + when + ' in ' + targets + ' at ' + at + '.', ref: res.appointment_id ? 'GHL appointment ' + res.appointment_id : '', url: res.appointment_url && /^https:\/\//.test(res.appointment_url) ? res.appointment_url : '' };
+      if (status === 'booked') return { tone: 'ok', done: true, snapshot: snap, text: 'Booked ' + who + ' for ' + when + ', in ' + targets + '.', ref: res.appointment_id ? 'GHL appointment ' + res.appointment_id : '', url: res.appointment_url && /^https:\/\//.test(res.appointment_url) ? res.appointment_url : '' };
       if (status === 'dry_run') return { tone: 'info', snapshot: snap, text: 'Checked only, nothing was booked. The server is in trial mode.' + wouldWords(kind, res.would_write) };
       if (status === 'refused') return { tone: 'bad', snapshot: snap, text: 'Not booked: ' + refusalWords(res.reason, res.detail) };
     }
     return { tone: 'bad', uncertain: true, snapshot: snap, text: 'The server answered without a clear result. Check GHL before pressing again.' };
   }
 
-  // One press = the owner's approval of the exact content on screen, then the
-  // matching server action with that approval id, then the result in words.
+  // Approve: record the owner's approval of the exact content on screen.
+  // Nothing is sent or booked.
+  async function approve(id, kind) {
+    var c = cases().filter(function (row) { return row.id === id; })[0];
+    if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
+    if ((kind === 'message' ? messagePath(c) : calendarPath(c)) === 'owner') return ownerApprove(id, kind);
+    var key = approvalKey(c, kind);
+    dropExpiredApproval(c, kind);
+    var block = approveBlock(c, kind);
+    if (block) { state.approvalErrors[key] = block; render(); return { ok: false, reason: block }; }
+    delete state.pressResults[key];
+    var rec = await recordApproval(id, kind, 'approved');
+    if (!rec.ok) return rec;
+    if (!rec.approval_id) {
+      state.approvalErrors[key] = 'Your approval is recorded, but the server gave it no reference, so nothing can be ' + (kind === 'calendar' ? 'booked' : 'sent') + ' on it.';
+      render();
+      return { ok: false, reason: 'no_approval_id' };
+    }
+    return { ok: true, approved: true, sent: false, booked: false, approval_id: rec.approval_id };
+  }
+
+  // Send or Book it: only on an approval of exactly what is on screen, still
+  // within its 15 minutes. Then the result in words. On the owner's path the
+  // first press is the server's check.
   async function press(id, kind) {
     var c = cases().filter(function (row) { return row.id === id; })[0];
     if (!c || !ACTIONS[kind]) return { ok: false, reason: 'no_case' };
-    // The owner's own words or picked time go through the check first.
-    if ((kind === 'message' ? messagePath(c) : calendarPath(c)) === 'owner') return ownerCheck(id, kind);
+    if ((kind === 'message' ? messagePath(c) : calendarPath(c)) === 'owner') return state.ownerPreviews[approvalKey(c, kind)] ? ownerSend(id, kind) : ownerCheck(id, kind);
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return { ok: false, reason: 'pending' };
+    if (dropExpiredApproval(c, kind)) { render(); return { ok: false, reason: state.approvalErrors[key] }; }
     var block = pressBlock(c, kind);
     if (block) { state.approvalErrors[key] = block; render(); return { ok: false, reason: block }; }
     var snap = approvalSnapshot(c, kind);
-    var held = state.approvalIds[key];
-    var approvalId = held && sameContent(held.snapshot, snap) ? held.id : null;
+    var approvalId = heldApproval(c, kind).id;
     delete state.pressResults[key];
-    if (!approvalId) {
-      var rec = await recordApproval(id, kind, 'approved');
-      if (!rec.ok) return rec;
-      approvalId = rec.approval_id;
-      if (!approvalId) {
-        state.pressResults[key] = { tone: 'bad', snapshot: snap, text: 'Your approval is recorded, but the server gave it no reference, so nothing was ' + (kind === 'calendar' ? 'booked' : 'sent') + '.' };
-        render();
-        return { ok: false, reason: 'no_approval_id' };
-      }
-    }
     state.pressPending[key] = true;
     delete state.approvalErrors[key];
     render();
@@ -4413,6 +4507,20 @@
         press(pressBtn.getAttribute('data-case-id'), pressBtn.getAttribute('data-booking-press'));
         return;
       }
+      var approveBtn = closest('[data-booking-approve-step]');
+      if (approveBtn) {
+        e.preventDefault();
+        if (approveBtn.disabled) return;
+        approve(approveBtn.getAttribute('data-case-id'), approveBtn.getAttribute('data-booking-approve-step'));
+        return;
+      }
+      var ownerSendBtn = closest('[data-owner-send]');
+      if (ownerSendBtn) {
+        e.preventDefault();
+        if (ownerSendBtn.disabled) return;
+        ownerSend(ownerSendBtn.getAttribute('data-case-id'), ownerSendBtn.getAttribute('data-owner-send'));
+        return;
+      }
       var ownerYes = closest('[data-owner-approve]');
       if (ownerYes) {
         e.preventDefault();
@@ -4472,6 +4580,7 @@
         var okey = approvalKey(oc, okind);
         if (state.approvalPending[okey] || state.pressPending[okey]) return;
         delete state.ownerPreviews[okey];
+        delete state.approvalIds[okey];
         render();
         return;
       }
@@ -4500,8 +4609,8 @@
       }
       // Legacy approve/confirm hooks are no longer rendered. A stale or scripted
       // click still reaches attemptApprove, which refuses on SEND_HOLD.
-      var approve = closest('[data-booking-approve], [data-booking-confirm]');
-      if (approve) {
+      var legacyApprove = closest('[data-booking-approve], [data-booking-confirm]');
+      if (legacyApprove) {
         e.preventDefault();
         attemptApprove();
         render();
@@ -4652,10 +4761,13 @@
     pipelineBoardCases: pipelineBoardCases,
     renderPipelineBoard: renderPipelineBoard,
     postStamp: postStamp,
+    approve: approve,
+    approveBlock: approveBlock,
     press: press,
     pressBlock: pressBlock,
     ownerCheck: ownerCheck,
     ownerApprove: ownerApprove,
+    ownerSend: ownerSend,
     ownerInput: ownerInput,
     ownerVisit: ownerVisit,
     ownerPick: ownerPick,

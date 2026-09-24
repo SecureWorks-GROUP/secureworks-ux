@@ -45,8 +45,11 @@ for (const vp of viewports) {
       await expect(page.getByRole('combobox', { name: 'Visit day' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
       await expect(page.locator('.targets')).toHaveText("Book it writes: GHL Stratco Fencing calendar and Marnin's Outlook");
-      await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
+      // Approve comes first; Send and Book it stay shut until it is pressed.
+      await expect(page.locator('.compose').getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
+      await expect(page.getByRole('button', { name: 'Send this text' })).toBeDisabled();
+      await expect(page.locator('.visit').getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
       // The week sits in the middle; Basil's proposed Friday is the day a phone opens on.
       const day = page.locator('.bk-week [data-week-day="4"]');
       if (vp.name === 'phone') await expect(page.locator('.bk-week .dayname')).toContainText('Friday');
@@ -98,7 +101,8 @@ for (const vp of viewports) {
       await expect(page.locator('.compose .clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am (Outlook).');
       await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
-      await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
+      await expect(page.locator('.visit').getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
+      await expect(page.locator('.compose').getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
       const slot = page.locator('.bk-week .ev.is-clash', { hasText: 'Kerry P' });
       await expect(slot.locator('.ev-clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am');
       // The chosen lead's proposed card lights up, and a clash is drawn red.
@@ -124,7 +128,7 @@ for (const vp of viewports) {
       await expect(box).toBeFocused();
       await expect(page.locator('.edited')).toContainText('Your approval will cover these exact words');
       const edited = await box.inputValue();
-      await page.getByRole('button', { name: 'Send this text' }).click();
+      await page.getByRole('button', { name: 'Check this text' }).click();
       const check = page.locator('[data-owner-preview="message"]');
       await expect(check.locator('.oc-head')).toHaveText('Checked. This exact text goes from SecureWorks Group Ops 776 to the phone ending 418.');
       await expect(check.locator('.oc-text')).toHaveText(edited);
@@ -134,7 +138,11 @@ for (const vp of viewports) {
       expect(writes).toHaveLength(1);
       expect(writes[0].body.dry_run).toBe(true);
       expect(writes[0].body.owner_input.text).toBe(edited);
-      await page.getByRole('button', { name: 'Approve and send' }).click();
+      await expect(check.getByRole('button', { name: 'Send this text' })).toBeDisabled();
+      await check.getByRole('button', { name: 'Approve', exact: true }).click();
+      await expect(check.locator('.oc-head')).toHaveText('Approved. This exact text goes from SecureWorks Group Ops 776 to the phone ending 418. Not sent yet.');
+      expect((await page.evaluate(() => window.fakeWrites)).map((w) => w.action)).toEqual(['sales_booking_approval_write', 'sales_booking_approval_write']);
+      await check.getByRole('button', { name: 'Send this text' }).click();
       await expect(page.locator('.compose .result')).toHaveText('Sending from this screen is not connected yet. Your approval is recorded; nothing was sent.');
       writes = await page.evaluate(() => window.fakeWrites);
       const decide = writes[1];
@@ -144,28 +152,29 @@ for (const vp of viewports) {
       expect(decide.body.owner_input.text).toBe(edited);
       const send = writes.find((w) => w.action === 'sales_booking_send');
       expect(send.body).toEqual({ approval_id: expect.stringMatching(/^[0-9a-f]{64}$/) });
-      await expect(page.locator('.bk-card')).not.toContainText('Text sent');
+      await expect(page.locator('.bk-card')).not.toContainText('Sent to');
     });
 
     test('a lead with no proposed time is booked from a picked day and window', async ({ page }) => {
       await open(page);
       await page.evaluate(() => { window.fixtureActionMode = 'sent'; });
       await choose(page, 'Priya S');
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Check this visit' })).toBeDisabled();
       await expect(page.locator('#why-calendar')).toHaveText('Pick a day and an arrival time first.');
       const friday = await page.evaluate(() => SalesBooking.state.data.booking_flow.owner_rulebook.bookable_dates.filter((d) => new Date(d + 'T12:00:00Z').getUTCDay() === 5).pop());
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(friday);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
       await expect(page.locator('.visit .when')).toContainText('arrive 12:30 to 1:30pm');
-      await page.getByRole('button', { name: 'Book it' }).click();
+      await page.getByRole('button', { name: 'Check this visit' }).click();
       const check = page.locator('[data-owner-preview="calendar"]');
       await expect(check.locator('.oc-head')).toHaveText("Checked. This exact visit goes in GHL Stratco Fencing calendar and Marnin's Outlook.");
       await expect(check).toContainText('Scope visit: Priya S');
       await expect(check).toContainText('Outlook is clear');
       await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeDisabled();
-      await page.getByRole('button', { name: 'Approve and book' }).click();
-      await expect(page.locator('.visit .result')).toContainText(/Booked Friday \d+ \w+, arrive 12:30 to 1:30pm in GHL Stratco Fencing calendar and Marnin's Outlook/);
+      await check.getByRole('button', { name: 'Approve', exact: true }).click();
+      await check.getByRole('button', { name: 'Book it' }).click();
+      await expect(page.locator('.visit .result')).toContainText(/Booked Priya for Friday \d+ \w+, arrive 12:30 to 1:30pm, in GHL Stratco Fencing calendar and Marnin's Outlook\./);
       const writes = await page.evaluate(() => window.fakeWrites);
       expect(writes.map((w) => w.action)).toEqual(['sales_booking_approval_write', 'sales_booking_approval_write', 'sales_booking_book']);
       expect(writes[0].body.owner_input.visit).toEqual({ window_start_iso: friday + 'T12:30:00+08:00', window_end_iso: friday + 'T13:30:00+08:00', end_iso: friday + 'T14:00:00+08:00' });
@@ -206,7 +215,7 @@ for (const vp of viewports) {
       await expect(page.locator('#bk-draft')).toHaveValue(/on Friday \d+ \w+, arriving between 12:15 and 1:15pm, to measure and quote/);
       await expect(page.locator('.compose .edited')).toHaveText('Rewritten for the time you picked. Your approval will cover these exact words.');
       await expect(page.locator('.visit .when').first()).toContainText('arrive 12:15 to 1:15pm');
-      await page.getByRole('button', { name: 'Book it' }).click();
+      await page.getByRole('button', { name: 'Check this visit' }).click();
       await expect(page.locator('[data-owner-preview="calendar"] .oc-head')).toContainText('Checked.');
       const writes = await page.evaluate(() => window.fakeWrites);
       expect(writes[0].body.dry_run).toBe(true);
@@ -221,7 +230,7 @@ for (const vp of viewports) {
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(friday);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:00');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
-      await page.getByRole('button', { name: 'Book it' }).click();
+      await page.getByRole('button', { name: 'Check this visit' }).click();
       await expect(page.locator('.visit .result')).toHaveText('Not booked: that time clashes with Scope: Melanie N, Piara Waters at 10:45am in Outlook, counting 30 minutes travel either side.');
       await expect(page.locator('[data-owner-preview]')).toHaveCount(0);
       const writes = await page.evaluate(() => window.fakeWrites);
@@ -232,10 +241,13 @@ for (const vp of viewports) {
       await open(page);
       await page.evaluate(() => { window.fixtureActionMode = 'sent'; });
       await choose(page, 'Basil L');
+      await page.locator('.compose').getByRole('button', { name: 'Approve', exact: true }).click();
+      await expect(page.locator('.compose').getByRole('button', { name: 'Approved', exact: true })).toBeDisabled();
       await page.getByRole('button', { name: 'Send this text' }).click();
-      await expect(page.locator('.compose .result')).toContainText(/Text sent at \d{1,2}:\d{2}[ap]m from SecureWorks Group Ops 776 to the phone ending 418\./);
+      await expect(page.locator('.compose .result')).toContainText(/Sent to Basil at \d{1,2}:\d{2}[ap]m from 776\./);
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeDisabled();
-      // The proposed time books in one press on the engine path, as before.
+      // The proposed time: Approve, then Book it.
+      await page.locator('.visit').getByRole('button', { name: 'Approve', exact: true }).click();
       await page.getByRole('button', { name: 'Book it' }).click();
       await expect(page.locator('.visit .result')).toContainText("in GHL Stratco Fencing calendar and Marnin's Outlook");
     });
@@ -248,8 +260,9 @@ for (const vp of viewports) {
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(thisFri);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
+      await page.getByRole('button', { name: 'Check this visit' }).click();
+      await page.locator('[data-owner-preview="calendar"]').getByRole('button', { name: 'Approve', exact: true }).click();
       await page.getByRole('button', { name: 'Book it' }).click();
-      await page.getByRole('button', { name: 'Approve and book' }).click();
       await expect(page.locator('.visit .result')).toContainText('Booked');
       // The column defaults to a day that already has a proposal (Tuesday in
       // this fixture). Open Friday, the day that was just booked, before
@@ -271,7 +284,7 @@ for (const vp of viewports) {
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
       await expect(page.locator('.visit .clash')).toContainText('Priya');
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Check this visit' })).toBeDisabled();
     });
 
     test('a sent offer does not block that same lead booking the held visit', async ({ page }) => {
@@ -285,13 +298,15 @@ for (const vp of viewports) {
       await expect(page.locator('.compose .fine', { hasText: 'This text holds' })).toBeVisible();
       await expect(page.locator('[data-owner-offer]')).toHaveCount(0);
       await expect(page.getByText('Hold this', { exact: false })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Check this text' }).click();
+      await page.locator('[data-owner-preview="message"]').getByRole('button', { name: 'Approve', exact: true }).click();
       await page.getByRole('button', { name: 'Send this text' }).click();
-      await page.getByRole('button', { name: 'Approve and send' }).click();
-      await expect(page.locator('.compose .result')).toContainText('Text sent');
+      await expect(page.locator('.compose .result')).toContainText('Sent to Priya');
       await expect(page.locator('.visit .clash')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
+      await expect(page.getByRole('button', { name: 'Check this visit' })).toBeEnabled();
+      await page.getByRole('button', { name: 'Check this visit' }).click();
+      await page.locator('[data-owner-preview="calendar"]').getByRole('button', { name: 'Approve', exact: true }).click();
       await page.getByRole('button', { name: 'Book it' }).click();
-      await page.getByRole('button', { name: 'Approve and book' }).click();
       await expect(page.locator('.visit .result')).toContainText('Booked');
       if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
       await choose(page, 'Basil L');
@@ -300,7 +315,7 @@ for (const vp of viewports) {
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
       await expect(page.locator('.visit .clash')).toContainText(/Priya|offered/i);
-      await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Check this visit' })).toBeDisabled();
     });
 
     test('search keeps focus while typing and Refresh reads again', async ({ page }) => {

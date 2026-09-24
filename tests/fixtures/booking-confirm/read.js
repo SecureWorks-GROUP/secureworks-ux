@@ -27,7 +27,7 @@
       message: { state: 'awaiting_approval', approval: null, receipt: null,
         template_text: 'Hi Example, your fencing scope is proposed for Tuesday, arriving between 9:00am and 10:30am. Please reply to confirm. SecureWorks Group',
         ai_proposed_text: null, chosen: null, approved_text: null,
-        routing: {from_number:'+61000000001',to_number:'+61000000002',message_sha256:'fixture-text-v1'}
+        routing: {from_number:'+61489267776',to_number:'+61000000002',message_sha256:'fixture-text-v1'}
       }
     };
     return {

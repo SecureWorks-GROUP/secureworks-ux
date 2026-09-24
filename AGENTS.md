@@ -539,16 +539,21 @@ live capture), evidence in `docs/evidence/ses-portal-live-thumb-2026-08-13/`.
 ## Sales Booking screen (`modules/ops-sales-booking.js`)
 
 Live module (loaded by `ops.html`), not dead code. Layout and responsive
-behavior are owned by [docs/sales-booking-ui.md](docs/sales-booking-ui.md). Every Send this
-text / Book it press records `sales_booking_approval_write` for the exact
-content on screen, then calls `sales_booking_send` / `sales_booking_book` with
-`{approval_id}` and states the result in words; an unknown action reads "not
-connected yet", never success. When the read advertises `owner-authored-v1`,
-a picked visit and any edited or owner-written text take two
-presses: an `owner_input` `dry_run` check shown back exactly, then
-Approve with that check's `prepared_at` + `content_hash`, then the executor; an
-unedited engine text keeps the one-press engine path until a time is picked.
-A proposed time stays the default shown first (one-press Book it); every card
+behavior are owned by [docs/sales-booking-ui.md](docs/sales-booking-ui.md). APPROVE AND
+SEND ARE SEPARATE PRESSES (step 7, owner ruling): **Approve** records
+`sales_booking_approval_write` for the exact content on screen and sends
+nothing; **Send this text** / **Book it** stay shut until an approval of exactly
+that content is held, then call `sales_booking_send` / `sales_booking_book`
+with `{approval_id}` and state the result in words ("Sent to Syeda at 1:25pm
+from 772"). Any edit relocks; an approval lives 15 minutes and a later press
+says so and sends nothing. A text whose sender is not the person's own line
+(`ownLine()`, 776/774/772) is never approvable on either path. An unknown action
+reads "not connected yet", never success. When the read advertises
+`owner-authored-v1`, a picked visit and any edited or owner-written text take
+three presses: Check (`owner_input` `dry_run`, shown back exactly), Approve with
+that check's `prepared_at` + `content_hash`, then Send / Book it; an unedited
+engine text keeps the engine path (Approve, then Send) until a time is picked.
+A proposed time stays the default shown first; every card
 offers Pick a different time. A successful book or offer updates occupancy, then re-reads
 quietly.
 A picked visit is always held with the text. An edited text is

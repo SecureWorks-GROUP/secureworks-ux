@@ -692,6 +692,33 @@ test('switching scoper drops the stamp, so one scoper cannot be stamped into ano
   api.state.resourceId = 'nithin';
 });
 
+test('the week is Monday to Friday in the middle and paints every calendar entry once', () => {
+  api.state.resourceId = 'marnin';
+  api.state.selectedId = null;
+  api.state.dayIndex = null;
+  api.state.data = doorRead();
+  api.state.data.resource.id = 'marnin';
+  api.state.data.diary = [
+    { event_id: 'o1', start: '2026-09-14T08:00:00', end: '2026-09-14T16:30:00', title: 'Office day', kind: 'busy', source: 'outlook' },
+    { event_id: 'o2', start: '2026-09-16T08:00:00', end: '2026-09-16T16:30:00', title: 'Office day', kind: 'busy', source: 'outlook' },
+    { event_id: 'g1', start: '2026-09-15T09:00:00', end: '2026-09-15T10:00:00', title: 'Scope: Jo, Byford', kind: 'confirmed', source: 'ghl_calendar' },
+    { event_id: 'g2', start: '2026-09-18T12:00:00', end: '2026-09-18T13:00:00', title: 'Scope: Al, Baldivis', kind: 'confirmed', source: 'ghl_calendar' }
+  ];
+  api.state.data.events = [];
+  const html = api.renderHTML();
+  // List, week, card, in that order.
+  const list = html.indexOf('class="bk-list"'), week = html.indexOf('class="bk-week"'), card = html.indexOf('class="bk-card');
+  assert.ok(list > 0 && week > list && card > week);
+  const cols = html.match(/class="wkcol[^"]*" data-week-day="\d"/g) || [];
+  assert.deepEqual(cols.map((c) => c.slice(-2, -1)), ['0', '1', '2', '3', '4']);
+  assert.equal((html.match(/class="wkday/g) || []).length, 5);
+  const onScreen = (html.match(/class="ev [^"]*"/g) || []).filter((c) => !/is-proposal/.test(c)).length;
+  assert.equal(onScreen, api.diary().length);
+  assert.equal((html.match(/Office day/g) || []).length, 2);
+  assert.equal((html.match(/Scope: Jo, Byford/g) || []).length, 1);
+  api.state.resourceId = 'nithin';
+});
+
 test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();
@@ -832,7 +859,7 @@ test('a desk rule states where work is offered and never overprints a real booki
   api.state.data.diary = [];
   api.state.dayIndex = 3;
   let html = api.renderHTML();
-  assert.match(html, /Not a Marnin day\. Stratco scopes are offered Tue and Fri/, 'an off-lane day says so');
+  assert.match(html, /title="Stratco scopes are offered Tue and Fri"><span>Not a Marnin day<\/span>/, 'an off-lane day says so');
   // Now the provider actually has a visit booked on that off-lane day.
   api.state.data.events = [{ event_id: 'e9', subject: 'Scope: Real visit', display_name: 'Real visit', suburb: 'Alkimos', start_iso: '2026-09-17T09:00:00', end_iso: '2026-09-17T10:00:00', layer: 'confirmed' }];
   html = api.renderHTML();
@@ -972,8 +999,9 @@ test('two proposals at the same time both render on the week', () => {
     proposal: { start_iso: '2026-09-17T13:00:00', end_iso: '2026-09-17T14:00:00', offer_id: 'off-c' }
   });
   const html = api.renderHTML();
-  assert.match(html, /data-booking-case="case-a"[^>]*style="grid-row:[^;]+;grid-column:2 \/ 3"/);
-  assert.match(html, /data-booking-case="case-c"[^>]*style="grid-row:[^;]+;grid-column:3 \/ -1"/);
+  // Each day is its own column of the week, so its lanes start at column 1.
+  assert.match(html, /data-booking-case="case-a"[^>]*style="grid-row:[^;]+;grid-column:1 \/ 2"/);
+  assert.match(html, /data-booking-case="case-c"[^>]*style="grid-row:[^;]+;grid-column:2 \/ -1"/);
   assert.match(html, /Clashing enquiry/);
 });
 
@@ -1421,7 +1449,7 @@ test('GHL booked-stage rows with an empty diary do not count as booked visits', 
   const html = api.renderHTML();
   assert.match(html, /Booked Tue <b>0<\/b>, Fri <b>0<\/b>/);
   assert.doesNotMatch(html, /calendar not read/);
-  assert.match(html, /Nothing in the calendar this day/);
+  assert.match(html, /Nothing in the calendar this week/);
 });
 
 test('GHL contact, opportunity or event id matches a diary event to a queue row', () => {
@@ -1627,7 +1655,8 @@ test('a clock-only Fri row stays undated and does not attach to the week on scre
   assert.equal(api.proposalSlotLabel(api.cases()[0]), '');
   const html = api.renderHTML();
   assert.match(html, /lead-name">Clock Fri<\/span>[^]*?lead-place">Byford/);
-  assert.doesNotMatch(html, /Friday 18 September|Fri 18 Sep/);
+  // The week names its own days; the undated row must not claim one.
+  assert.doesNotMatch(html.replace(/<section class="bk-week"[\s\S]*?<\/section>/, ''), /Friday 18 September|Fri 18 Sep/);
   api.state.dayIndex = 4;
   assert.doesNotMatch(api.renderHTML(), /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="opp-clock"/);
   api.state.weekStart = '2026-09-14';
@@ -1700,17 +1729,13 @@ function degradedRosterPackRead() {
   };
 }
 
-// The day column shows one day at a time, so a week is its five days.
+// The week shows all five days at once.
 function proposalCardIds() {
   const ids = [];
-  for (let d = 0; d < 5; d++) {
-    api.state.dayIndex = d;
-    const html = api.renderHTML();
-    const re = /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="([^"]+)"/g;
-    let m;
-    while ((m = re.exec(html))) ids.push(m[1]);
-  }
-  api.state.dayIndex = null;
+  const html = api.renderHTML();
+  const re = /class="ev [^"]*is-proposal[^"]*"[^>]*data-booking-case="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) ids.push(m[1]);
   return ids;
 }
 

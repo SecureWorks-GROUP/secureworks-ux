@@ -9,6 +9,8 @@
     const at = (day, clock) => day + 'T' + clock + ':00+08:00';
     const hoursAgo = h => new Date(Date.now() - h * 3600000).toISOString();
     const daysAgoDate = d => new Date(Date.now() + 8 * 3600000 - d * 86400000).toISOString().slice(0, 10);
+    // A Perth morning a few days back, before the last inbound message (50h ago).
+    const callAt = (daysBack, clock) => daysAgoDate(daysBack) + 'T' + clock + ':00+08:00';
     const stage = i => api.RESOURCES.marnin.pipeline_stages[i].id;
     const checks = () => [
       { label: 'calendar', passed: true }, { label: 'protected_band', passed: true },
@@ -62,6 +64,8 @@
         { direction: 'inbound', body: 'Hi, is someone still coming to measure the fence on Thursday?', timestamp: hoursAgo(214) },
         { direction: 'outbound', body: 'Hi Basil, yes, Thursday between 1:30 and 3:00pm. Marnin, SecureWorks Group', timestamp: hoursAgo(190), sender_name: 'Marnin' },
         { direction: 'inbound', body: 'Nobody turned up today. I took the afternoon off for this.', timestamp: hoursAgo(120) },
+        { direction: 'outbound', type: 'TYPE_CALL', body: '', timestamp: callAt(3, '08:39'), sender_name: 'Marnin', duration: 0 },
+        { direction: 'outbound', type: 'TYPE_CALL', body: '', timestamp: callAt(3, '08:41'), sender_name: 'Marnin', duration: 0 },
         { direction: 'inbound', body: 'Still waiting to hear back. Are you coming Friday or not?', timestamp: hoursAgo(50) }
       ],
       'ghl-kerry': [

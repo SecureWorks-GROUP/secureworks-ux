@@ -28,16 +28,32 @@ for (const vp of viewports) {
       await expect(page.locator('.cardhead h2')).toHaveText(name);
     }
 
-    test('the list opens loudest first and a tap opens one card with the last three messages', async ({ page }) => {
+    test('the list opens loudest first and a tap opens one card with the whole thread beside the week', async ({ page }) => {
       await open(page);
       await expect(page.locator('.counts')).toContainText('to contact');
       await expect(page.locator('.bk-list .lead .lead-name').first()).toHaveText('Basil L');
       await expect(page.locator('.bk-list .lead').first()).toContainText('“Still waiting to hear back. Are you coming Friday or not?”');
       await choose(page, 'Basil L');
+      // Every message GHL returned, newest at the bottom and scrolled into view;
+      // the two calls out that morning are one line.
       const bubbles = page.locator('.bk-card .bubble');
-      await expect(bubbles).toHaveCount(3);
+      await expect(bubbles).toHaveCount(4);
+      await expect(page.locator('.bk-card .thread-count')).toHaveText('6 messages');
+      await expect(page.locator('.bk-card .callline')).toHaveCount(1);
+      await expect(page.locator('.bk-card .callline')).toHaveText(/^2 calls out · \w{3} \d+ \w{3}, 8:39am and 8:41am$/);
       await expect(bubbles.last()).toContainText('Still waiting to hear back. Are you coming Friday or not?');
-      await expect(page.getByRole('button', { name: 'Show all 4 messages' })).toBeVisible();
+      await expect(page.locator('.bk-card .thread > li').last()).toContainText('Still waiting to hear back.');
+      await expect(bubbles.last()).toBeInViewport();
+      await expect(page.getByRole('button', { name: /Show all/ })).toHaveCount(0);
+      // The list says how long their last message has waited for a reply.
+      await expect(page.locator('.bk-list .lead', { hasText: 'Basil L' }).locator('.lead-wait')).toHaveText('Waiting 2 days');
+      // Cards on the week carry the customer's latest words; a hold agreed by
+      // text says it is not in a calendar.
+      const week = page.locator('.bk-week [data-week-day="4"]');
+      await expect(week.locator('.ev.is-proposal', { hasText: 'Basil L' }).locator('.ev-words')).toHaveText('“Still waiting to hear back. Are you coming Friday or not?”');
+      const michael = week.locator('.ev', { hasText: 'Michael T' });
+      await expect(michael.locator('.ev-kind')).toHaveText('Agreed by text, not in a calendar');
+      await expect(michael.locator('.ev-words')).toHaveText('“Nine on Friday is fine with me.”');
       await expect(page.locator('.route')).toContainText('SecureWorks Group Ops 776');
       await expect(page.locator('.route')).toContainText('phone ending 418');
       // The proposed time is the default shown first; a different time is one tap away.
@@ -128,7 +144,7 @@ for (const vp of viewports) {
       const check = page.locator('[data-owner-preview="message"]');
       await expect(check.locator('.oc-head')).toHaveText('Checked. This exact text goes from SecureWorks Group Ops 776 to the phone ending 418.');
       await expect(check.locator('.oc-text')).toHaveText(edited);
-      await expect(check).toContainText('Not already in this conversation (4 messages read).');
+      await expect(check).toContainText('Not already in this conversation (6 messages read).');
       await expect(box).toBeDisabled();
       let writes = await page.evaluate(() => window.fakeWrites);
       expect(writes).toHaveLength(1);

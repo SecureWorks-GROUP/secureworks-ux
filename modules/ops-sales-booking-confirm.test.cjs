@@ -137,7 +137,7 @@ test('prior offers and agreements reserve slots by contact id', async () => {
   assert.match(api.approvalBlock(row,'calendar'), /Slot taken/);
   data.booking_flow.commitments.at(-1).contact_id = row.contact_id;
   assert.equal(api.approvalBlock(row,'calendar'), '');
-  assert.match(api.renderHTML(), /Customer agreed/);
+  assert.match(api.renderHTML(), /Agreed by text, not in a calendar/);
   assert.equal(api.diaryEventMatchesCase({display_name:row.display_name, suburb:row.suburb}, row), false);
 });
 test('busy diary and protected band block a proposal even if validation claims pass', () => {
@@ -653,7 +653,7 @@ test('an edited text is checked by the server, shown exactly, then approved and 
   let html = api.renderCard();
   assert.match(html, /<strong>Checked\.<\/strong> This exact text goes from SecureWorks Group Ops 776 to the phone ending 418\./);
   assert.match(html, /class="oc-text">Hi Basil,[^<]*Marnin<\/blockquote>/);
-  assert.match(html, /Not already in this conversation \(4 messages read\)\./);
+  assert.match(html, /Not already in this conversation \(6 messages read\)\./);
   assert.match(html, /Texts sent by hand outside this system cannot be checked/);
   assert.match(html, /<textarea id="bk-draft"[^>]* disabled/);
   assert.doesNotMatch(html, /data-booking-press="message"/);

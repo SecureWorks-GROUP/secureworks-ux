@@ -775,6 +775,39 @@ test('a lead the server says is booked in another scoper\'s calendar leaves to-c
   api.state.resourceId = 'nithin';
 });
 
+test('the thread shows every message it read, newest last, calls as one line, and says when GHL holds more', () => {
+  const c = { id: 'k', contact_id: 'ct-k', display_name: 'Katie W' };
+  const at = (d, t) => '2026-09-' + d + 'T' + t + ':00+08:00';
+  api.state.conversation = { contactId: 'ct-k', loading: false, error: null, generation: 1, messages: [
+    { direction: 'inbound', body: 'Can you come Thursday?', timestamp: at(21, '09:00') },
+    { direction: 'outbound', type: 'TYPE_CALL', body: '', timestamp: at(22, '08:39') },
+    { direction: 'outbound', type: 'TYPE_CALL', body: '', timestamp: at(22, '08:41') },
+    { direction: 'inbound', type: 'TYPE_CALL', body: '', timestamp: at(22, '09:10'), duration: 125 },
+    { direction: 'outbound', body: 'Thursday 8:00 works.', timestamp: at(22, '10:00'), sender_name: 'Khairo' },
+    { direction: 'inbound', body: 'Done by 8:30 please, school run.', timestamp: at(22, '19:00') }
+  ] };
+  let html = api.renderThread(c);
+  assert.match(html, /<p class="thread-count">6 messages<\/p>/);
+  const items = html.match(/<li class="(bubble[^"]*|callline)"/g).map((x) => x.slice(11, -1));
+  assert.deepEqual(items, ['bubble is-in', 'callline', 'callline', 'bubble is-out', 'bubble is-in']);
+  assert.match(html, /<li class="callline">2 calls out · Tue 22 Sep, 8:39am and 8:41am<\/li>/);
+  assert.match(html, /<li class="callline">Call from Katie W · Tue 22 Sep, 9:10am · 2 min<\/li>/);
+  assert.ok(html.lastIndexOf('Done by 8:30') > html.lastIndexOf('Thursday 8:00 works.'), 'newest at the bottom');
+  api.state.conversation.messages = Array.from({ length: 30 }, (_, i) => ({ direction: 'inbound', body: 'm' + i, timestamp: at(10 + Math.floor(i / 10), '09:0' + (i % 10)) }));
+  html = api.renderThread(c);
+  assert.match(html, /30 messages, the latest 30\. Older ones are in GHL\./);
+  api.state.conversation = { contactId: null, messages: [], generation: 0 };
+});
+
+test('days waiting count from the customer\'s last unanswered message, else from the enquiry', () => {
+  const now = Date.parse('2026-09-14T08:00:00+08:00');
+  const c = { id: 'w', enquiry_at: '2026-09-01' };
+  api.state.data = { cases: [c], thread_facts: { w: { read_ok: true, last_inbound_at: new Date(now - 50 * 3600000).toISOString(), last_human_outbound_at: new Date(now - 190 * 3600000).toISOString() } } };
+  assert.equal(api.waitWords(c), 'Waiting 2 days');
+  api.state.data.thread_facts.w.last_human_outbound_at = new Date(now - 3600000).toISOString();
+  assert.equal(api.waitWords(c), '13 days');
+});
+
 test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();

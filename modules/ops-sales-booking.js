@@ -1903,7 +1903,7 @@
   // with the clash named beside the text.
   // steady: the lasting answer only (no loading, stale or in-flight notes), so
   // choosing between the engine and the owner's own path cannot flip mid-press.
-  function approvalBlock(c, kind, refusing, steady) {
+  function approvalBlock(c, kind, refusing, steady, reapprove) {
     var flow = state.data && state.data.booking_flow;
     var m = decisionModel(c);
     var verb = kind === 'calendar' ? 'booked' : 'sent';
@@ -1925,7 +1925,7 @@
     if (status.state === 'done') return kind === 'calendar' ? 'Already booked.' : 'Already sent.';
     if (status.state === 'pending') return 'Still in progress. Press Refresh to see the result.';
     if (status.state === 'unknown') return 'The last result is unknown. Check GHL before trying again.';
-    if (status.state === 'approved' || status.state === 'held') return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
+    if ((status.state === 'approved' || status.state === 'held') && !reapprove) return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
     if (status.state === 'refused') return 'You said no to this. Ask for a new proposal.';
     if (kind === 'calendar') {
       if (calendarUnread(state.data)) return calendarReadState(state.data).state === 'not_configured' ? 'The calendar is not set up, so no time can be confirmed.' : 'The calendar could not be read, so no time can be confirmed.';
@@ -1959,11 +1959,11 @@
     return '';
   }
 
-  async function recordApproval(id, kind, decision, reason) {
+  async function recordApproval(id, kind, decision, reason, reapprove) {
     var c = cases().find(function (row) { return row.id === id; });
     if (!c || ['calendar', 'message'].indexOf(kind) < 0 || ['approved', 'refused'].indexOf(decision) < 0) return { ok: false, reason: 'Invalid decision' };
     var key = approvalKey(c, kind);
-    var blocked = approvalBlock(c, kind, decision === 'refused');
+    var blocked = approvalBlock(c, kind, decision === 'refused', false, !!reapprove && decision === 'approved' && !heldApproval(c, kind));
     var snap = approvalSnapshot(c, kind);
     if (!blocked && decision === 'refused' && !String(reason || '').trim()) blocked = 'Say why, in a few words.';
     if (!blocked && !sameContent(state.shownApprovals[key], snap)) blocked = 'This changed after it was shown. Check it again before pressing.';
@@ -2629,7 +2629,7 @@
     var key = approvalKey(c, kind);
     if (state.pressPending[key]) return kind === 'calendar' ? 'Booking…' : 'Sending…';
     if (heldApproval(c, kind)) return 'Already approved for this exact ' + (kind === 'calendar' ? 'booking' : 'text') + '.';
-    return approvalBlock(c, kind, false);
+    return approvalBlock(c, kind, false, false, true);
   }
 
   function pressBlock(c, kind) {
@@ -2647,7 +2647,8 @@
       if (state.stale || state.error) return 'This list may be out of date. Press Refresh first.';
       return '';
     }
-    return approvalBlock(c, kind, false) || 'Approve it first. Nothing is ' + (kind === 'calendar' ? 'booked' : 'sent') + ' until you approve.';
+    var none = 'Nothing is ' + (kind === 'calendar' ? 'booked' : 'sent') + ' until you approve.';
+    return approvalBlock(c, kind, false, false, true) || ((status.state === 'approved' || status.state === 'held') ? 'The earlier approval can no longer be used from here. Approve it again. ' + none : 'Approve it first. ' + none);
   }
 
   function approveButton(c, kind) {
@@ -4051,7 +4052,7 @@
     var block = approveBlock(c, kind);
     if (block) { state.approvalErrors[key] = block; render(); return { ok: false, reason: block }; }
     delete state.pressResults[key];
-    var rec = await recordApproval(id, kind, 'approved');
+    var rec = await recordApproval(id, kind, 'approved', null, true);
     if (!rec.ok) return rec;
     if (!rec.approval_id) {
       state.approvalErrors[key] = 'Your approval is recorded, but the server gave it no reference, so nothing can be ' + (kind === 'calendar' ? 'booked' : 'sent') + ' on it.';

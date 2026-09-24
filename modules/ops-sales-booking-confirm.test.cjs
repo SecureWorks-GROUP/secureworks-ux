@@ -1318,3 +1318,28 @@ test('owner path: an edit after approval relocks, and an expired approval sends 
   assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_send').length, 0);
   assert.match(api.renderCard(), /data-booking-press="message"[^>]*>[\s\S]*?Check this text/);
 });
+
+test('engine path: after a reload or a run-out approval, Approve records a fresh one and only then Send goes', async () => {
+  actionPost({sales_booking_send:{status:'sent',message_id:'m-10'}});
+  assert.equal((await api.approve(row.id, 'message')).ok, true);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 15 * 60000 + 1;
+  try { api.renderCard(); } finally { Date.now = realNow; }
+  // A Refresh still reads the earlier approval as approved; this browser holds no usable id.
+  row.booking_read_model.message.state = 'approved';
+  api.state.approvalIds = {};
+  assert.equal(api.approveBlock(row, 'message'), '');
+  assert.equal(api.pressBlock(row, 'message'), 'The earlier approval can no longer be used from here. Approve it again. Nothing is sent until you approve.');
+  let html = api.renderCard();
+  assert.doesNotMatch(html, /data-booking-approve-step="message"[^>]* disabled/);
+  assert.match(html, /data-booking-press="message"[^>]* disabled/);
+  assert.equal((await api.press(row.id, 'message')).ok, false);
+  assert.equal(writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  const again = await api.approve(row.id, 'message');
+  assert.equal(again.ok, true);
+  assert.equal(writes.filter((w) => w.action === 'sales_booking_approval_write').length, 2);
+  assert.equal((await api.press(row.id, 'message')).ok, true);
+  const sends = writes.filter((w) => w.action === 'sales_booking_send');
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].body.approval_id, again.approval_id);
+});

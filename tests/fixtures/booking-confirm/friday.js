@@ -81,7 +81,7 @@
     const rulebook = {
       profile: 'fencing-stratco-marnin', source: 'fixture', timezone: 'Australia/Perth', utc_offset: '+08:00',
       days: ['Tue', 'Fri'], bookable_dates: bookable, day_start: '08:00', day_end: '16:30',
-      window_min_minutes: 60, window_max_minutes: 90, visit_minutes: 60, travel_buffer_minutes: 30, max_per_day: 6,
+      window_min_minutes: 60, window_max_minutes: 90, visit_minutes: 30, travel_buffer_minutes: 30, max_per_day: 6,
       protected_bands: [{ weekday: 'Tue', start: '13:00', end: '15:30', label: 'Stratco / Canning Vale' }],
       sender: '+61489267776',
       calendar: { provider: 'ghl', calendar_id: 'dEQKVKHthsjSYaen1fiE', calendar_name: 'STRATCO FENCING', assigned_user_id: '3S20LGVTjsVYy9vTJ9wM', scoper_email: 'marnin@secureworkswa.com.au' }
@@ -92,6 +92,33 @@
       const engine = !!(m && m.pack_revision && m.proposal);
       c.owner_booking = { version: 'owner-authored-v1', eligible: !!c.contact_id, reason: null, engine_proposal: engine,
         engine_window: engine ? { start: m.proposal.window.start, end: m.proposal.window.end } : null, rulebook, approvals: [] };
+    });
+    // Each lead's own free times (backend docs/sales-booking-live-availability.md):
+    // 60-minute arrival windows every five minutes, end_iso 30 minutes on site
+    // after the latest arrival. Worked by hand for this synthetic day.
+    const tue = api.addDays(next, 1);
+    const clock = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    const mins = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    const run = (day, first, last, before, after) => {
+      const out = [];
+      for (let m = mins(first); m <= mins(last); m += 5) {
+        out.push({ from_iso: at(day, clock(m)), to_iso: at(day, clock(m + 60)), end_iso: at(day, clock(m + 90)), minutes: 60,
+          travel_before_minutes: before, travel_before_basis: 'straight_line', travel_after_minutes: after, travel_after_basis: 'straight_line' });
+      }
+      return out;
+    };
+    const own = {
+      'lead-basil': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:20', '13:00', 30, 30) },
+      'lead-kerry': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:15', '13:00', 30, 30) },
+      'lead-priya': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:15', '12:55', 30, 30) }
+    };
+    data.cases.forEach(c => {
+      const w = own[c.id];
+      if (!w) return;
+      c.free_times = { location: { suburb: c.suburb, known: true }, days: [
+        { date: tue, state: 'open', already_booked_that_day: false, arrival_windows: w.tue },
+        { date: fri, state: 'open', already_booked_that_day: false, arrival_windows: w.fri }
+      ] };
     });
     return data;
   }

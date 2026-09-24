@@ -2786,7 +2786,31 @@
     }
     return '<div class="wkcol' + (i === selected ? ' is-day' : '') + '" data-week-day="' + i + '" role="group" aria-label="' + esc(longDate(addDays(state.weekStart, i))) + '"' +
       ' style="grid-column:' + (i + 2) + ';grid-template-columns:repeat(' + columns + ',minmax(0,1fr))">' +
-      fixed + cards.map(function (card) { return renderDayEvent(card, columns, 1); }).join('') + '</div>';
+      fixed + renderFreeBands(addDays(state.weekStart, i)) + cards.map(function (card) { return renderDayEvent(card, columns, 1); }).join('') + '</div>';
+  }
+
+  // The chosen lead's free times on one day, as green bands to tap. Only the
+  // server's windows are drawn; a day it sent none for shows none.
+  function renderFreeBands(date) {
+    var c = selectedCase();
+    if (!canTapFreeTime(c)) return '';
+    var pick = state.ownerVisits[draftKey(c)];
+    var picked = freePickWindow(pick);
+    var rows = function (fromIso, toIso) {
+      var a = slotOf(fromIso, false), z = slotOf(toIso, true);
+      return a == null || z == null || z <= a ? null : 'grid-row:' + (a + 1) + ' / ' + (z + 1) + ';grid-column:1 / -1';
+    };
+    return freeBands(c, date).map(function (band, bi) {
+      var at = rows(band[0].from_iso, band[band.length - 1].end_iso);
+      if (!at) return '';
+      var first = band[0], last = band[band.length - 1];
+      var words = band.length === 1 ? 'Free, arrive ' + timeRange(first.from_iso, first.to_iso) : 'Free, arrive from ' + clockLabel(hourFromIso(first.from_iso)) + ' to ' + clockLabel(hourFromIso(last.from_iso));
+      var on = picked && band.some(function (w) { return w.from_iso === picked.from_iso; });
+      var mark = on ? '<span class="ev-freepick">Picked: arrive ' + esc(timeRange(picked.from_iso, picked.to_iso)) + '</span>' : '';
+      return '<button type="button" class="ev-free' + (on ? ' is-on' : '') + '" data-free-band="' + bi + '" data-case-id="' + esc(c.id) + '" data-date="' + esc(date) + '" style="' + at + '"' +
+        ' aria-label="' + esc(words + ' on ' + longDate(date) + '. Tap to pick this time for ' + (c.display_name || 'this lead') + '.') + '">' +
+        '<span class="ev-freewords">' + esc(words) + '</span>' + mark + '</button>';
+    }).join('');
   }
 
   // The week sits in the middle, Monday to Friday. On a phone it is one day at
@@ -3045,10 +3069,116 @@
     var rb = ownerRulebook(c), pick = rb && state.ownerVisits[draftKey(c)];
     if (!pick || !pick.date || !pick.start || rb.utc_offset !== '+08:00') return null;
     var minutes = Number(pick.minutes);
+    // A tapped free time is the server's own arrival window, used exactly as
+    // sent (its end_iso already carries the on-site time). The press checks it again.
+    var free = freePickWindow(pick);
+    if (free) {
+      if ((rb.bookable_dates || []).indexOf(pick.date) < 0 || ownerWindows(rb).indexOf(minutes) < 0) return null;
+      return { window_start_iso: free.from_iso, window_end_iso: free.to_iso, end_iso: free.end_iso };
+    }
     if ((rb.bookable_dates || []).indexOf(pick.date) < 0 || ownerWindows(rb).indexOf(minutes) < 0 || ownerStarts(rb, pick.date, minutes).indexOf(pick.start) < 0) return null;
     var s = minutesOf(pick.start);
     function at(mins) { return pick.date + 'T' + clockOf(mins) + ':00+08:00'; }
     return { window_start_iso: at(s), window_end_iso: at(s + minutes), end_iso: at(s + minutes + Number(rb.visit_minutes)) };
+  }
+
+  // ---- free times: tap one to pick the visit --------------------------------------
+  // The server's arrival windows for this lead (case.free_times, backend
+  // docs/sales-booking-live-availability.md): 60-minute windows starting on a
+  // five-minute grid, each with the end_iso of its 30 minutes on site. The
+  // screen never works a time out itself; a tap only chooses one of these.
+  function leadFreeWindows(c, date) {
+    var ft = c && c.free_times;
+    if (!ft || !Array.isArray(ft.days)) return [];
+    var day = ft.days.filter(function (d) { return d && d.date === date; })[0];
+    if (!day || !Array.isArray(day.arrival_windows)) return [];
+    return day.arrival_windows.filter(function (w) {
+      return w && String(w.from_iso || '').slice(0, 10) === date && !isNaN(Date.parse(w.from_iso)) && !isNaN(Date.parse(w.to_iso)) && !isNaN(Date.parse(w.end_iso));
+    }).sort(function (a, b) { return Date.parse(a.from_iso) - Date.parse(b.from_iso); });
+  }
+
+  // Windows five minutes apart are one run of free time, painted as one band.
+  function freeBands(c, date) {
+    var bands = [], last = null;
+    leadFreeWindows(c, date).forEach(function (w) {
+      var t = Date.parse(w.from_iso);
+      if (last != null && t - last <= 5 * 60000) bands[bands.length - 1].push(w);
+      else bands.push([w]);
+      last = t;
+    });
+    return bands;
+  }
+
+  // The window a tap chose: the latest one whose arrival starts at or before
+  // the tapped point (0 = top of the band, 1 = bottom).
+  function freeWindowAt(band, fraction) {
+    if (!band || !band.length) return null;
+    var a = Date.parse(band[0].from_iso), z = Date.parse(band[band.length - 1].end_iso);
+    var t = a + Math.max(0, Math.min(1, Number(fraction) || 0)) * (z - a);
+    var best = band[0];
+    band.forEach(function (w) { if (Date.parse(w.from_iso) <= t) best = w; });
+    return best;
+  }
+
+  function windowMinutes(w) {
+    return Math.round((Date.parse(w.to_iso) - Date.parse(w.from_iso)) / 60000);
+  }
+
+  function freePickWindow(pick) {
+    var w = pick && pick.free;
+    if (!w) return null;
+    return pick.date === String(w.from_iso).slice(0, 10) && pick.start === String(w.from_iso).slice(11, 16) && Number(pick.minutes) === windowMinutes(w) ? w : null;
+  }
+
+  function canTapFreeTime(c) {
+    return !!(c && ownerCanPick(c) && !pickerBusy(c) && !bookedElsewhere(c));
+  }
+
+  function pickFreeWindow(c, w) {
+    var key = draftKey(c);
+    state.ownerVisits[key] = { date: String(w.from_iso).slice(0, 10), start: String(w.from_iso).slice(11, 16), minutes: windowMinutes(w), free: { from_iso: w.from_iso, to_iso: w.to_iso, end_iso: w.end_iso } };
+    state.ownerPickOpen[key] = true;
+    delete state.approvalErrors[approvalKey(c, 'calendar')];
+    delete state.approvalErrors[approvalKey(c, 'message')];
+    rewriteTextForPick(c);
+  }
+
+  // The text for a picked visit: the day and the arrival window, in words.
+  function pickedVisitText(c, v) {
+    var res = resource();
+    // The business name the text is signed with is the line it goes from
+    // (SecureWorks Group Ops 776 -> SecureWorks Group).
+    var line = String(res.sender_label || '').replace(/\s+\d+$/, '').replace(/\s+(Ops|Sales)$/, '');
+    var lane = /^SecureWorks /.test(line) ? line : res.lane === 'patio' ? 'SecureWorks Patios' : 'SecureWorks Fencing';
+    var first = String(c.display_name || '').trim().split(/\s+/)[0] || 'there';
+    var s = hourFromIso(v.window_start_iso), e = hourFromIso(v.window_end_iso);
+    var sameHalf = (s >= 12) === (e >= 12);
+    return 'Hi ' + first + ', it is ' + res.name + ' from ' + lane + '. I can come out to ' + (caseSuburb(c) || 'your place') +
+      ' on ' + longDate(v.window_start_iso) + ', arriving between ' + clockLabel(s, !sameHalf) + ' and ' + clockLabel(e) + ', to measure and quote. Does that suit?';
+  }
+
+  // Picking a visit rewrites the text's day and time to match. Words the owner
+  // typed himself are never overwritten: he is offered the rewrite instead.
+  function rewriteTextForPick(c) {
+    var v = ownerVisit(c);
+    if (!v) return;
+    var d = draftFor(c);
+    var next = pickedVisitText(c, v);
+    var typed = d.humanEdited && typeof d.text === 'string' && d.text !== d.autoText;
+    if (typed && d.text !== next) { d.rewrite = next; return; }
+    d.text = next;
+    d.autoText = next;
+    d.rewrite = null;
+    d.humanEdited = true;
+    d.revision = (d.revision || 0) + 1;
+    d.sender = resolveSender().number;
+  }
+
+  function pendingRewrite(c) {
+    var d = c && state.drafts[draftKey(c)];
+    var v = ownerVisit(c);
+    if (!d || !d.rewrite || !v || d.rewrite !== pickedVisitText(c, v) || d.text === d.rewrite) return null;
+    return d.rewrite;
   }
 
   function ownerInput(c, kind) {
@@ -3390,7 +3520,15 @@
     var clash = held ? clashForSpan(c, held.window_start_iso, held.end_iso, null, true) : clashFor(c);
     var out = '<p class="route">From <b>' + esc(senderShort(sender)) + '</b>' +
       (recipient ? ' to the phone ending <b>' + esc(phoneEnding(recipient)) + '</b>' : ' to the customer\'s mobile in GHL') + '</p>';
-    if (m && editedText(c) != null) out += '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>';
+    var dft = state.drafts[draftKey(c)];
+    var rewrite = pendingRewrite(c);
+    if (rewrite) {
+      out += '<p class="edited">Your text may not match the time you picked.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-owner-rewrite data-case-id="' + esc(c.id) + '">Rewrite it for ' + esc(visitWords(held)) + '</button>') + '</p>';
+    } else if (dft && held && dft.text === dft.autoText) {
+      out += '<p class="edited">Rewritten for the time you picked. Your approval will cover these exact words.</p>';
+    } else if (m && editedText(c) != null) {
+      out += '<p class="edited">Edited. Your approval will cover these exact words.' + (composeBusy(c) ? '' : ' <button type="button" class="linklike" data-booking-draft-reset>Use the proposed text</button>') + '</p>';
+    }
     if (held) out += '<p class="fine">This text holds ' + esc(visitWords(held)) + ' for them.</p>';
     if (clash) out += '<p class="clash">' + esc(clashSentence(clash)) + '</p>';
     if (preview) {
@@ -3414,6 +3552,7 @@
     var dates = rb.bookable_dates || [];
     var minutes = Number(pick.minutes);
     var starts = ownerStarts(rb, pick.date, minutes);
+    if (freePickWindow(pick) && starts.indexOf(pick.start) < 0) starts = starts.concat([pick.start]).sort();
     var v = ownerVisit(c);
     var preview = state.ownerPreviews[key];
     var block = ownerPressBlock(c, 'calendar');
@@ -4037,6 +4176,36 @@
         ownerApprove(ownerYes.getAttribute('data-case-id'), ownerYes.getAttribute('data-owner-approve'));
         return;
       }
+      var freeBand = closest('[data-free-band]');
+      if (freeBand) {
+        e.preventDefault();
+        var fcase = cases().filter(function (row) { return row.id === freeBand.getAttribute('data-case-id'); })[0];
+        if (!fcase || freeBand.disabled || fcase !== selectedCase() || !canTapFreeTime(fcase)) return;
+        var fdate = freeBand.getAttribute('data-date');
+        var box = freeBand.getBoundingClientRect ? freeBand.getBoundingClientRect() : null;
+        var frac = box && box.height && e.clientY ? (e.clientY - box.top) / box.height : 0;
+        var fw = freeWindowAt(freeBands(fcase, fdate)[Number(freeBand.getAttribute('data-free-band'))], frac);
+        if (!fw) return;
+        pickFreeWindow(fcase, fw);
+        state.dayIndex = dayIndexFromIso(fw.from_iso, state.weekStart);
+        render();
+        return;
+      }
+      var rewriteBtn = closest('[data-owner-rewrite]');
+      if (rewriteBtn) {
+        e.preventDefault();
+        var rc = selectedCase();
+        if (!rc || rewriteBtn.disabled || composeBusy(rc) || !pendingRewrite(rc)) return;
+        var rd = draftFor(rc);
+        rd.text = rd.rewrite;
+        rd.autoText = rd.rewrite;
+        rd.rewrite = null;
+        rd.humanEdited = true;
+        rd.revision = (rd.revision || 0) + 1;
+        rd.sender = resolveSender().number;
+        render();
+        return;
+      }
       var pickOpen = closest('[data-owner-pick-open], [data-owner-pick-close]');
       if (pickOpen) {
         e.preventDefault();
@@ -4047,6 +4216,9 @@
         else {
           delete state.ownerPickOpen[pkey];
           delete state.ownerVisits[pkey];
+          var pd = state.drafts[pkey];
+          if (pd && pd.autoText && pd.text === pd.autoText) delete state.drafts[pkey];
+          else if (pd) pd.rewrite = null;
           delete state.approvalErrors[approvalKey(pcase, 'calendar')];
         }
         render();
@@ -4122,10 +4294,13 @@
         var field = e.target.getAttribute('data-owner-visit');
         if (field === 'minutes') pick.minutes = Number(e.target.value);
         else if (field) pick[field] = e.target.value;
+        // A changed pick is no longer the tapped server window.
+        if (pick.free && !freePickWindow(pick)) delete pick.free;
         // A start the new day or window no longer allows is cleared, never kept.
-        if (pick.start && ownerStarts(ownerRulebook(pc), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
+        if (pick.start && !pick.free && ownerStarts(ownerRulebook(pc), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
         delete state.approvalErrors[approvalKey(pc, 'calendar')];
         delete state.approvalErrors[approvalKey(pc, 'message')];
+        rewriteTextForPick(pc);
         render();
       }
     });
@@ -4183,6 +4358,7 @@
     attemptApprove: attemptApprove,
     draftKey: draftKey,
     draftFor: draftFor,
+    composeText: composeText,
     resolveSender: resolveSender,
     acceptedSlotStillCurrent: acceptedSlotStillCurrent,
     applyInboundReply: applyInboundReply,
@@ -4274,6 +4450,10 @@
     bookTargets: bookTargets,
     renderVisitOutcomes: renderVisitOutcomes,
     renderWeek: renderWeek,
+    freeBands: freeBands,
+    freeWindowAt: freeWindowAt,
+    pickFreeWindow: pickFreeWindow,
+    pickedVisitText: pickedVisitText,
     renderCard: renderCard,
     timeRange: timeRange
   };

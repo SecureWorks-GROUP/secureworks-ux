@@ -709,6 +709,104 @@ test('the proposed time keeps its one-press Book it, evidence and checks', async
   assert.equal(backend.writes[1].action, 'sales_booking_book');
 });
 
+// ---- Tap a free time to pick the visit (step 4) ----
+function tapFree(c, date, bandIndex, fraction) {
+  api.state.selectedId = c.id;
+  const w = api.freeWindowAt(api.freeBands(c, date)[bandIndex], fraction);
+  api.pickFreeWindow(c, w);
+  return w;
+}
+function arrivalWords(w) {
+  const h = (iso) => { const [hh, mm] = iso.slice(11, 16).split(':').map(Number); return hh + mm / 60; };
+  const label = (x, mer) => { const hh = Math.floor(x), mm = Math.round((x - hh) * 60); return (hh % 12 || 12) + ':' + String(mm).padStart(2, '0') + (mer ? (hh >= 12 ? 'pm' : 'am') : ''); };
+  const s = h(w.from_iso), e = h(w.to_iso);
+  return 'arriving between ' + label(s, (s >= 12) !== (e >= 12)) + ' and ' + label(e, true);
+}
+
+test('a tapped free time picks the server window exactly and the text follows it, 20 of 20', async () => {
+  ownerSetup('sent');
+  const tue = api.addDays(data.week_start, 1), fri = thisFriday();
+  assert.ok(data.booking_flow.owner_rulebook.bookable_dates.includes(fri), 'the fixture Friday is bookable');
+  let taps = 0;
+  for (const id of ['lead-basil', 'lead-kerry', 'lead-priya']) {
+    const c = caseById(id);
+    for (const [date, fractions] of [[fri, [0, 0.2, 0.45, 0.7]], [tue, [0, 0.3, 0.6]]]) {
+      if (!data.booking_flow.owner_rulebook.bookable_dates.includes(date)) continue;
+      for (const f of fractions) {
+        if (taps === 20) break;
+        const w = tapFree(c, date, 0, f);
+        taps++;
+        // The visit is the server's window, unchanged: 60-minute arrival, 30 minutes on site.
+        assert.deepEqual(api.ownerVisit(c), { window_start_iso: w.from_iso, window_end_iso: w.to_iso, end_iso: w.end_iso });
+        assert.equal(api.messagePath(c), 'owner');
+        const text = api.composeText(c);
+        assert.ok(text.includes(api.longDate(w.from_iso) + ', ' + arrivalWords(w)), text);
+        assert.deepEqual(api.ownerInput(c, 'message').offer, api.ownerVisit(c));
+        assert.deepEqual(api.ownerInput(c, 'calendar').visit, api.ownerVisit(c));
+      }
+    }
+  }
+  assert.equal(taps, 20);
+  // Top of Basil's Friday band is its first window, the bottom its last.
+  const band = api.freeBands(caseById('lead-basil'), fri)[0];
+  assert.equal(api.freeWindowAt(band, 0).from_iso, fri + 'T12:20:00+08:00');
+  assert.equal(api.freeWindowAt(band, 1).from_iso, fri + 'T13:00:00+08:00');
+});
+
+test('a tapped time goes to the server check, and a refusal is said in words with nothing booked', async () => {
+  const backend = ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const w = tapFree(c, thisFriday(), 0, 0);
+  let r = await api.press(c.id, 'calendar');
+  assert.equal(r.ok, true);
+  assert.deepEqual(backend.writes[0].body.owner_input.visit, { window_start_iso: w.from_iso, window_end_iso: w.to_iso, end_iso: w.end_iso });
+  assert.equal(backend.writes[0].body.dry_run, true);
+  assert.match(api.renderCard(), /Checked\./);
+  api.state.ownerPreviews = {};
+  globalThis.fixtureOwnerRefusal = 'owner_visit_too_short';
+  r = await api.press(c.id, 'calendar');
+  assert.equal(r.ok, false);
+  assert.match(api.renderCard(), /class="result is-bad" role="alert">Not booked: /);
+  assert.ok(backend.writes.every((x) => x.action === 'sales_booking_approval_write'));
+  delete globalThis.fixtureOwnerRefusal;
+});
+
+test('a pick never overwrites words the owner typed; it offers the rewrite instead', () => {
+  ownerSetup('sent');
+  const c = caseById('lead-priya');
+  api.state.selectedId = c.id;
+  const d = api.draftFor(c);
+  d.text = 'Hi Priya, my own words here.'; d.humanEdited = true;
+  const w = tapFree(c, thisFriday(), 0, 0);
+  assert.equal(api.composeText(c), 'Hi Priya, my own words here.');
+  assert.match(api.renderCard(), /Your text may not match the time you picked\. <button type="button" class="linklike" data-owner-rewrite data-case-id="lead-priya">Rewrite it for /);
+  // A second tap after the screen wrote the text simply rewrites it.
+  d.text = d.autoText = 'x'; d.rewrite = null;
+  const w2 = tapFree(c, thisFriday(), 0, 1);
+  assert.ok(api.composeText(c).includes(arrivalWords(w2)));
+  assert.notEqual(w.from_iso, w2.from_iso);
+  assert.match(api.renderCard(), /Rewritten for the time you picked\./);
+});
+
+test('the chosen lead\'s free times are green bands on the week, and only theirs', () => {
+  ownerSetup('sent');
+  const fri = thisFriday();
+  let html = api.renderWeek();
+  assert.doesNotMatch(html, /data-free-band/, 'no lead chosen, no bands');
+  api.state.selectedId = 'lead-basil';
+  html = api.renderWeek();
+  assert.match(html, new RegExp('class="ev-free" data-free-band="0" data-case-id="lead-basil" data-date="' + fri + '"'));
+  assert.match(html, /Free, arrive from 12:20pm to 1:00pm/);
+  assert.doesNotMatch(html, /data-case-id="lead-kerry"[^>]*data-free-band|data-free-band="\d+" data-case-id="lead-kerry"/);
+  tapFree(caseById('lead-basil'), fri, 0, 0.5);
+  html = api.renderWeek();
+  assert.match(html, /class="ev-free is-on"[^>]*>.*Picked: arrive /);
+  // A lead booked with someone else offers no free time to tap.
+  caseById('lead-basil').scope_appointment = { start_iso: fri + 'T09:00:00+08:00', owner_name: 'Khairo', owner_resource_id: 'khairo' };
+  assert.doesNotMatch(api.renderWeek(), /data-free-band/);
+  delete caseById('lead-basil').scope_appointment;
+});
+
 test('a lead with no proposed time gets a day and window picker that books through the check', async () => {
   const backend = ownerSetup('sent');
   row = caseById('lead-priya');
@@ -720,7 +818,7 @@ test('a lead with no proposed time gets a day and window picker that books throu
   assert.match(html, /Pick a day and an arrival time first\./);
   pickVisit(row, '12:30', 60);
   const fri = fridayOf(data);
-  assert.deepEqual(api.ownerVisit(row), { window_start_iso: fri + 'T12:30:00+08:00', window_end_iso: fri + 'T13:30:00+08:00', end_iso: fri + 'T14:30:00+08:00' });
+  assert.deepEqual(api.ownerVisit(row), { window_start_iso: fri + 'T12:30:00+08:00', window_end_iso: fri + 'T13:30:00+08:00', end_iso: fri + 'T14:00:00+08:00' });
   html = api.renderCard();
   assert.match(html, /Book it writes: <b>GHL Stratco Fencing calendar<\/b> and <b>Marnin's Outlook<\/b>/);
   assert.match(html, /This text holds Fri [0-9]+ [A-Z][a-z]+, arrive 12:30 to 1:30pm for them\./);
@@ -730,7 +828,7 @@ test('a lead with no proposed time gets a day and window picker that books throu
   assert.deepEqual(backend.writes[0].body.owner_input.visit, api.ownerVisit(row));
   html = api.renderCard();
   assert.match(html, /This exact visit goes in GHL Stratco Fencing calendar and Marnin's Outlook\./);
-  assert.match(html, /Scope visit: Priya S · 8 Example Street, Southern River · on site until 2:30pm/);
+  assert.match(html, /Scope visit: Priya S · 8 Example Street, Southern River · on site until 2:00pm/);
   assert.match(html, /GHL is clear, with 30 minutes travel either side/);
   assert.match(html, /Outlook is clear/);
   assert.match(html, /data-owner-visit="date"[^>]* disabled/);
@@ -866,7 +964,7 @@ test('the owner path blocks long dashes, respects the protected band and stops o
   const tue = '2026-09-29';
   assert.ok(!api.ownerStarts(rb, tue, 60).some((t) => t >= '11:30' && t <= '15:30'));
   assert.ok(api.ownerStarts(rb, tue, 60).includes('10:00'));
-  assert.equal(api.ownerStarts(rb, fridayOf(data), 90).pop(), '14:00');
+  assert.equal(api.ownerStarts(rb, fridayOf(data), 90).pop(), '14:30');
   d.text = 'Hi Priya, would Friday suit?';
   await api.press(row.id, 'message');
   d.text = 'Different words now';

@@ -842,6 +842,28 @@ test('a tapped time goes to the server check, and a refusal is said in words wit
   delete globalThis.fixtureOwnerRefusal;
 });
 
+test('while a check is showing the chosen lead keeps their own bands and the Picked mark, never the person\'s', async () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const w = tapFree(c, thisFriday(), 0, 0);
+  assert.match(api.renderWeek(), /Free, arrive from 12:15pm to 1:00pm/);
+  const r = await api.press(c.id, 'calendar');
+  assert.equal(r.ok, true);
+  const html = api.renderWeek();
+  assert.doesNotMatch(html, /data-free-band/);
+  assert.match(html, /Free, arrive from 12:15pm to 1:00pm/);
+  assert.doesNotMatch(html, /Free, arrive from 12:15pm to 1:30pm/);
+  assert.match(html, /class="ev-free is-static is-on"[^>]*>.*Picked: arrive /);
+  assert.ok(html.includes('Picked: arrive ' + api.timeRange(w.from_iso, w.to_iso)));
+  assert.doesNotMatch(html, /For a place not yet known/);
+  // A lead with no free times of their own: the person's times, said plainly.
+  delete c.free_times;
+  assert.match(api.renderWeek(), /title="For a place not yet known, with travel allowed both ways\. No free times came for this lead's place, so these cannot be picked\."/);
+  // A lead booked elsewhere shows no bands at all.
+  c.scope_appointment = { start_iso: thisFriday() + 'T09:00:00+08:00', owner_name: 'Khairo', owner_resource_id: 'khairo' };
+  assert.doesNotMatch(api.renderWeek(), /class="ev-free/);
+});
+
 test('a pick never overwrites words the owner typed; it offers the rewrite instead', () => {
   ownerSetup('sent');
   const c = caseById('lead-priya');

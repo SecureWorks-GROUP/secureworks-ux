@@ -2889,14 +2889,17 @@
 
   function renderFreeBands(date) {
     var c = selectedCase();
-    if (!canTapFreeTime(c) || !(c.free_times && Array.isArray(c.free_times.days))) {
+    if (c && bookedElsewhere(c)) return '';
+    if (!(c && c.free_times && Array.isArray(c.free_times.days))) {
       // Nobody chosen (or no times of their own): the person's free times, to read.
+      var tip = 'For a place not yet known, with travel allowed both ways. ' + (c ? 'No free times came for this lead\'s place, so these cannot be picked.' : 'Choose a lead to pick a time for them.');
       return bandsOf(personFreeWindows(date)).map(function (band) {
         var at = freeBandRows(band);
-        return at ? '<div class="ev-free is-static" style="' + at + '" title="For a place not yet known, with travel allowed both ways. Choose a lead to pick a time for them.">' +
+        return at ? '<div class="ev-free is-static" style="' + at + '" title="' + esc(tip) + '">' +
           '<span class="ev-freewords">' + esc(freeBandWords(band)) + '</span></div>' : '';
       }).join('');
     }
+    var tap = canTapFreeTime(c);
     var pick = state.ownerVisits[draftKey(c)];
     var picked = freePickWindow(pick);
     return freeBands(c, date).map(function (band, bi) {
@@ -2905,6 +2908,7 @@
       var words = freeBandWords(band);
       var on = picked && band.some(function (w) { return w.from_iso === picked.from_iso; });
       var mark = on ? '<span class="ev-freepick">Picked: arrive ' + esc(timeRange(picked.from_iso, picked.to_iso)) + '</span>' : '';
+      if (!tap) return '<div class="ev-free is-static' + (on ? ' is-on' : '') + '" style="' + at + '">' + '<span class="ev-freewords">' + esc(words) + '</span>' + mark + '</div>';
       return '<button type="button" class="ev-free' + (on ? ' is-on' : '') + '" data-free-band="' + bi + '" data-case-id="' + esc(c.id) + '" data-date="' + esc(date) + '" style="' + at + '"' +
         ' aria-label="' + esc(words + ' on ' + longDate(date) + '. Tap to pick this time for ' + (c.display_name || 'this lead') + '.') + '">' +
         '<span class="ev-freewords">' + esc(words) + '</span>' + mark + '</button>';

@@ -744,6 +744,37 @@ test('each proposed visit is one dashed card on the week, a clash is red and nam
   api.state.selectedId = null;
 });
 
+test('a lead the server says is booked in another scoper\'s calendar leaves to-contact and says with whom', () => {
+  api.state.resourceId = 'marnin';
+  api.state.selectedId = 'basil';
+  api.state.data = sampleRead('marnin');
+  api.state.data.cases = [{
+    id: 'basil', contact_id: 'c-basil', display_name: 'Basil L', suburb: 'Aubin Grove', status: 'ready',
+    proposal: { start_iso: '2026-09-18T12:00:00', end_iso: '2026-09-18T13:00:00', offer_id: 'off-basil' },
+    scope_appointment: { start_iso: '2026-09-29T10:00:00+08:00', end_iso: '2026-09-29T11:00:00+08:00', owner_name: 'Khairo', owner_resource_id: 'khairo', status: 'confirmed' }
+  }, {
+    id: 'kerry', contact_id: 'c-kerry', display_name: 'Kerry P', suburb: 'Harrisdale', status: 'ready',
+    // A cancelled appointment is not a booking.
+    scope_appointment: { start_iso: '2026-09-18T09:00:00+08:00', owner_name: 'Khairo', owner_resource_id: 'khairo', status: 'cancelled' }
+  }];
+  const html = api.renderHTML();
+  const list = html.slice(html.indexOf('class="bk-list"'), html.indexOf('class="bk-week"'));
+  const contact = list.slice(list.indexOf('To contact'), list.indexOf('>Booked<'));
+  assert.doesNotMatch(contact, /Basil L/);
+  assert.match(list, />Booked<span class="count">1<\/span>[\s\S]*Basil L[\s\S]*Booked with Khairo, Tue 29 Sep 10:00am/);
+  assert.match(html, /<p class="bookednote">Booked with Khairo, Tue 29 Sep 10:00am<\/p>/);
+  // Its visit lives in Khairo's calendar, so Marnin's week paints no card for it.
+  const week = html.slice(html.indexOf('class="bk-week"'), html.indexOf('class="bk-card'));
+  assert.doesNotMatch(week, /data-booking-case="basil"/);
+  // Without the server's flag nothing is inferred: Basil stays to contact.
+  delete api.state.data.cases[0].scope_appointment;
+  const plain = api.renderHTML();
+  const plainContact = plain.slice(plain.indexOf('To contact'), plain.indexOf('class="bk-week"'));
+  assert.match(plainContact, /Basil L/);
+  api.state.selectedId = null;
+  api.state.resourceId = 'nithin';
+});
+
 test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();

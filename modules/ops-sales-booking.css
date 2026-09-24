@@ -167,6 +167,7 @@
 #salesBookingRoot .cardhead h2{font-size:22px;line-height:1.2;font-weight:650;letter-spacing:-.015em}
 #salesBookingRoot .cardhead p{color:var(--ink-2)}
 #salesBookingRoot .cardhead .fine{color:var(--muted)}
+#salesBookingRoot .bookednote{margin-top:6px;justify-self:start;padding:3px 10px;border-radius:999px;background:var(--ok-wash);color:var(--ok);font-size:13px;font-weight:650}
 #salesBookingRoot .bk-card h3{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--ink);margin-bottom:8px}
 #salesBookingRoot .bk-card h3 .ico{width:16px;height:16px;color:var(--brand-2)}
 #salesBookingRoot .msgs{display:grid;margin:0 -22px;padding:14px 22px 16px;background:#F1F3F4;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}

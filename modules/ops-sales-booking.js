@@ -1206,8 +1206,33 @@
   // ---------------------------------------------------------------------------
   // Queue grouping, urgency and the follow-through counts.
   // ---------------------------------------------------------------------------
+  // The server's word that this lead already has a live scope visit in a
+  // scoper's GHL calendar, possibly someone else's (backend lead-owner rule):
+  // case.scope_appointment = { start_iso, end_iso?, owner_name?,
+  // owner_resource_id?, status? }. Read only when the server sends it; the
+  // screen never infers a booking elsewhere from names, stages or threads.
+  function scopeAppointment(c) {
+    var a = c && c.scope_appointment;
+    if (!a || typeof a !== 'object' || !a.start_iso || isNaN(Date.parse(a.start_iso))) return null;
+    if (/cancel|no.?show|invalid|deleted/i.test(String(a.status || ''))) return null;
+    return a;
+  }
+
+  function bookedElsewhere(c) {
+    var a = scopeAppointment(c);
+    return !!(a && a.owner_resource_id && a.owner_resource_id !== state.resourceId) ? a : null;
+  }
+
+  function scopeAppointmentWords(c) {
+    var a = scopeAppointment(c);
+    if (!a) return '';
+    var who = bookedElsewhere(c) ? a.owner_name || 'another scoper' : '';
+    return 'Booked' + (who ? ' with ' + who : '') + ', ' + shortDate(a.start_iso) + ' ' + clockLabel(hourFromIso(a.start_iso), true);
+  }
+
   function isBooked(c) {
     if (!c || isNonScopeDiaryMirror(c)) return false;
+    if (scopeAppointment(c)) return true;
     if (stageBucket(c) === 'booked') return true;
     return c.status === 'booked' || c.status === 'confirmed';
   }
@@ -2199,6 +2224,7 @@
   function statusPill(c) {
     if (isArchived(c)) return ['', 'Archived'];
     if (quoteOutstanding(c)) return ['', 'Quote to send'];
+    if (scopeAppointment(c)) return ['ok', scopeAppointmentWords(c)];
     if (isBooked(c)) return ['ok', 'Booked'];
     if (unansweredSince(c) != null) return ['hot', 'No answer yet'];
     if (needsDecision(c)) return ['', 'Needs a person'];
@@ -2593,7 +2619,8 @@
     var bits = [c.address || caseSuburb(c) || 'Address not given yet', jobTypeLabel(c) === 'not given' ? 'job not given' : jobTypeLabel(c)];
     return '<section class="bk-card" aria-label="Selected lead">' +
       '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
-      '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
+      '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p>' +
+      (scopeAppointment(c) ? '<p class="bookednote">' + esc(scopeAppointmentWords(c)) + '</p>' : '') + '</header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
       '<section class="compose"><label for="bk-draft"><h3>Text to send</h3></label>' +
       '<textarea id="bk-draft" data-booking-draft data-focus-key="draft-' + esc(c.id) + '" rows="5" spellcheck="true" placeholder="' + (writable || m ? 'Write the text to send' : 'No proposed text yet') + '"' + (composeBusy(c) ? ' disabled' : (writable ? '' : ' readonly')) + '>' + esc(text) + '</textarea>' +
@@ -2630,6 +2657,7 @@
     cases().forEach(function (c) {
       var p = c.proposal;
       if (!p || !p.start_iso || dayIndexFromIso(p.start_iso, state.weekStart) !== d) return;
+      if (bookedElsewhere(c)) return;
       var kind = caseLayer(c);
       if (kind === 'confirmed' && c.event_id) return;
       list.push({ block: { id: c.id, contact_id: c.contact_id, start_iso: p.start_iso, end_iso: p.end_iso || addHourIso(p.start_iso), display_name: c.display_name, suburb: caseSuburb(c), proposal: true, not_in_this_read: !!c.not_in_this_read }, kind: kind });

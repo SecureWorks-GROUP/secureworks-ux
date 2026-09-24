@@ -1914,7 +1914,8 @@
     if (!m || !m.proposal_id || m.revision == null || !c.contact_id || m.contact_id !== c.contact_id) return 'No checked proposal for this lead yet, so nothing can be ' + verb + ' from here.';
     if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This list belongs to another person or week. Press Refresh.';
     if (packOpportunityId(m.proposal_id) !== packOpportunityId(c.opportunity_id || c.id) || cases().filter(function (row) { return row.contact_id === c.contact_id; }).length !== 1) return 'This GHL contact appears more than once. Sort it out in GHL first.';
-    if (m.profile !== 'fencing-stratco-marnin' || state.resourceId !== 'marnin') return 'Only Marnin\'s Stratco leads can be approved here for now.';
+    if (m.profile !== PERSON_PROFILES[state.resourceId]) return 'This proposal was made for someone else\'s leads, so it cannot be approved here.';
+    if (stepsFor(c).indexOf(kind) < 0) return kind === 'calendar' ? STRATCO_ONLY : 'Texts for ' + resource().name + '\'s leads cannot be approved here yet.';
     var snap = approvalSnapshot(c, kind);
     if (!snap || !snap.content_hash) return 'The exact ' + (kind === 'calendar' ? 'booking' : 'text') + ' could not be pinned down. Press Refresh.';
     if (!steady && state.approvalPending[approvalKey(c, kind)]) return 'Recording your approval…';
@@ -3156,7 +3157,30 @@
 
   function ownerCanPick(c) {
     var ob = ownerBooking(c);
-    return !!(ownerFlow() && ob && ob.eligible === true && ownerRulebook(c));
+    return !!(ownerFlow() && ob && ob.eligible === true && ownerRulebook(c) && canBookHere(c));
+  }
+
+  // Each person's texts go from their own line (backend PR 924,
+  // sales_booking_sender.ts: Marnin 776, Nithin 774, Khairo 772). What a lead
+  // can take here is the read's owner_booking.steps: a text for everyone's own
+  // leads, a visit only on Marnin's Stratco leads. A read without steps is an
+  // older server that approves Marnin's Stratco leads only.
+  var PERSON_PROFILES = { marnin: 'fencing-stratco-marnin', nithin: 'patio-nithin', khairo: 'fencing-khairo' };
+  var STRATCO_ONLY = 'Booking a visit from here is for Marnin\'s Stratco leads only for now. Book this visit in GHL.';
+
+  function stepsFor(c) {
+    var ob = ownerBooking(c);
+    if (ob && Array.isArray(ob.steps)) return ob.steps;
+    return state.resourceId === 'marnin' ? ['message', 'calendar'] : [];
+  }
+
+  function canBookHere(c) {
+    return stepsFor(c).indexOf('calendar') >= 0;
+  }
+
+  // The line this person's texts go from, by the one table the server uses.
+  function ownLine() {
+    return resource().sender;
   }
 
   // A proposed time stays the default shown first, on the engine path exactly
@@ -3387,7 +3411,7 @@
   }
 
   function ownerInput(c, kind) {
-    var input = { step: kind, case_id: c.id, contact_id: c.contact_id, week_start: state.weekStart, resource: 'marnin' };
+    var input = { step: kind, case_id: c.id, contact_id: c.contact_id, week_start: state.weekStart, resource: state.resourceId };
     if (kind === 'message') {
       input.text = composeText(c);
       var offer = ownerVisit(c);
@@ -3415,7 +3439,7 @@
     var ob = ownerBooking(c);
     if (!ownerFlow() || !ob) return kind === 'calendar' ? 'Booking a time you pick is not connected yet, so nothing can be booked from here.' : 'Sending your own text is not connected yet, so nothing can be sent from here.';
     if (!state.data.resource || state.data.resource.id !== state.resourceId || state.data.week_start !== state.weekStart) return 'This list belongs to another person or week. Press Refresh.';
-    if (state.resourceId !== 'marnin' || ob.reason === 'stratco_profile_required') return 'Only Marnin\'s Stratco leads can be approved here for now.';
+    if (stepsFor(c).indexOf(kind) < 0 || (kind === 'calendar' && ob.reason === 'stratco_profile_required')) return kind === 'calendar' ? STRATCO_ONLY : 'Texts for ' + resource().name + '\'s leads cannot be approved here yet.';
     if (!c.contact_id) return 'This lead has no GHL contact, so nothing can be ' + verb + ' from here.';
     if (ob.eligible !== true) return 'This GHL contact appears more than once. Sort it out in GHL first.';
     if (kind === 'message') {
@@ -3516,6 +3540,7 @@
       : (state.stale || state.error) ? 'This list may be out of date. Press Refresh first.'
       : !sameContent(ownerInput(c, kind), preview.input) ? 'This changed after it was checked. Check it again.'
       : !(Date.now() - Date.parse(preview.snapshot.prepared_at) < OWNER_PREVIEW_MS) ? 'That check is more than 15 minutes old. Check it again.'
+      : kind === 'message' && (preview.snapshot.content || {}).sender !== ownLine() ? 'The server would send this from another line. Nothing was sent.'
       : '';
     if (stop) {
       if (!state.loading && !state.stale && !state.error) delete state.ownerPreviews[key];
@@ -3696,6 +3721,10 @@
     var key = approvalKey(c, kind), ct = preview.snapshot.content || {};
     var approving = !!state.approvalPending[key], pressing = !!state.pressPending[key];
     var head, body, label;
+    if (kind === 'message' && ct.sender !== ownLine()) {
+      return '<div class="ownercheck is-bad" data-owner-preview="message"><p class="oc-head"><strong>Not approvable.</strong> The server would send this from ' + esc(senderShort(ct.sender)) + ', not ' + esc(resource().name) + '\'s own line ending ' + esc(phoneEnding(ownLine())) + '. Nothing was sent.</p>' +
+        '<div class="actions"><button type="button" class="quiet" data-owner-cancel="message" data-case-id="' + esc(c.id) + '">Change it</button></div></div>';
+    }
     if (kind === 'message') {
       head = 'This exact text goes from ' + senderShort(ct.sender) + ' to the phone ending ' + phoneEnding(ct.recipient) + '.';
       body = '<blockquote class="oc-text">' + esc(ct.text) + '</blockquote>' +
@@ -3719,7 +3748,9 @@
     var key = approvalKey(c, 'message');
     var preview = state.ownerPreviews[key];
     var rb = ownerRulebook(c);
-    var sender = (rb && rb.sender) || resolveSender().number;
+    // The rulebook is Stratco's (776) for everyone; the text goes from this
+    // person's own line.
+    var sender = ownLine() || (rb && rb.sender) || resolveSender().number;
     var recipient = m && m.message && m.message.recipient;
     var block = ownerPressBlock(c, 'message');
     var last = state.pressResults[key];
@@ -3752,6 +3783,7 @@
     var head = '<h3>' + icon('calendar') + 'Pick a visit</h3>';
     var rb = ownerRulebook(c);
     if (!ownerFlow() || !ownerBooking(c)) return '<section class="visit is-pick">' + head + '<p class="why">Booking a time you pick is not connected yet, so nothing can be booked from here.</p></section>';
+    if (!canBookHere(c)) return '<section class="visit"><h3>' + icon('calendar') + 'Visit</h3><div class="actions"><button type="button" class="secondary" disabled aria-describedby="why-calendar">' + icon('calendar') + 'Book it</button></div><p class="why" id="why-calendar">' + esc(STRATCO_ONLY) + '</p></section>';
     if (!rb) return '<section class="visit is-pick">' + head + '<p class="why">The booking rules did not come with this list. Press Refresh.</p></section>';
     var key = approvalKey(c, 'calendar');
     var pick = ownerPick(c);
@@ -3812,6 +3844,11 @@
       prior_offer_conflict: 'that time is already offered to someone else.',
       slot_taken: 'that time is no longer free.',
       send_hold: 'sending is switched off on the server.',
+      sender_not_scoper_line: 'the text would not go from the visit person\'s own line.',
+      lead_assigned_to_someone_else: 'this lead is assigned to someone else in GHL now.',
+      opportunity_assignment_unreadable: 'GHL did not say who this lead is assigned to just now.',
+      booking_profile_required: 'this person is not set up for booking texts here.',
+      stratco_profile_required: 'booking a visit from here is for Marnin\'s Stratco leads only.',
       calendar_write_disabled: 'calendar writing is switched off on the server.',
       // Owner-authored checks (owner-authored-v1) and the executor's press checks.
       owner_visit_not_future: 'that time has already passed.',

@@ -709,6 +709,54 @@ test('the proposed time keeps its one-press Book it, evidence and checks', async
   assert.equal(backend.writes[1].action, 'sales_booking_book');
 });
 
+// ---- Approve the exact words, send from their own line (step 7) ----
+test('a Nithin lead\'s text is Nithin\'s, from 774; visits stay Stratco only; a wrong line is never approvable', async () => {
+  const backend = ownerSetup('sent');
+  api.state.resourceId = 'nithin';
+  data.resource.id = 'nithin';
+  data.cases.forEach((c) => { if (c.owner_booking) c.owner_booking.steps = ['message']; });
+  const row = caseById('lead-priya');
+  api.state.selectedId = row.id;
+  const d = api.draftFor(row); d.text = 'Hi Priya, it is Nithin from SecureWorks Patios. Would Friday suit for a measure up?'; d.humanEdited = true;
+  assert.equal(api.ownerInput(row, 'message').resource, 'nithin');
+  let html = api.renderCard();
+  assert.match(html, /From <b>SecureWorks Patios 774<\/b>/);
+  assert.match(html, /<button type="button" class="secondary" disabled aria-describedby="why-calendar">[\s\S]*?Book it<\/button><\/div><p class="why" id="why-calendar">Booking a visit from here is for Marnin's Stratco leads only for now\. Book this visit in GHL\.<\/p>/);
+  assert.doesNotMatch(html, /aria-label="Visit day"|Pick a different time/);
+  assert.equal(api.ownerBlock(row, 'calendar'), "Booking a visit from here is for Marnin's Stratco leads only for now. Book this visit in GHL.");
+  // The offline server still answers with the Stratco line: never approvable.
+  let r = await api.press(row.id, 'message');
+  assert.equal(r.ok, true);
+  assert.equal(backend.writes[0].body.owner_input.resource, 'nithin');
+  html = api.renderCard();
+  assert.match(html, /Not approvable\.<\/strong> The server would send this from line 776, not Nithin's own line ending 774\. Nothing was sent\./);
+  assert.doesNotMatch(html, /data-owner-approve="message"/);
+  r = await api.ownerApprove(row.id, 'message');
+  assert.equal(r.ok, false);
+  assert.equal(backend.writes.filter((w) => w.action === 'sales_booking_send').length, 0);
+  // A server that binds Nithin's own line: the exact words go, from 774.
+  data.booking_flow.owner_rulebook.sender = '+61489267774';
+  api.state.ownerPreviews = {}; api.state.approvalErrors = {};
+  r = await api.press(row.id, 'message');
+  assert.equal(r.ok, true);
+  assert.match(api.renderCard(), /This exact text goes from SecureWorks Patios 774 to the phone ending/);
+  r = await api.ownerApprove(row.id, 'message');
+  assert.equal(r.ok, true);
+  assert.match(api.renderCard(), /Text sent at \d{1,2}:\d{2}[ap]m from SecureWorks Patios 774 to the phone ending \d+\./);
+  api.state.resourceId = 'marnin';
+});
+
+test('Marnin keeps both presses from 776 when the read names his steps', () => {
+  ownerSetup('sent');
+  const row = caseById('lead-priya');
+  api.state.selectedId = row.id;
+  row.owner_booking.steps = ['message', 'calendar'];
+  assert.equal(api.ownerInput(row, 'message').resource, 'marnin');
+  const html = api.renderCard();
+  assert.match(html, /From <b>SecureWorks Group Ops 776<\/b>/);
+  assert.match(html, /aria-label="Visit day"/);
+});
+
 // ---- Free times on every day (step 2) ----
 test('every server arrival window is drawn on its day and none is made up', () => {
   ownerSetup('sent');

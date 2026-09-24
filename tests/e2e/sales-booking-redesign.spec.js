@@ -171,6 +171,24 @@ for (const vp of viewports) {
       await expect(page.locator('.bk-card')).not.toContainText('Sent to');
     });
 
+    test('the thread keeps its newest message in view after a repaint, unless the owner scrolled up', async ({ page }) => {
+      await open(page);
+      await page.addStyleTag({ content: '#salesBookingRoot .thread{max-height:120px}' });
+      await choose(page, 'Basil L');
+      const thread = page.locator('.bk-card .thread');
+      const gap = () => thread.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+      await expect.poll(gap).toBeLessThanOrEqual(2);
+      await page.getByRole('button', { name: 'Pick a different time' }).click();
+      await expect(page.getByRole('combobox', { name: 'Visit day' })).toBeVisible();
+      await expect.poll(gap).toBeLessThanOrEqual(2);
+      await thread.hover();
+      await page.mouse.wheel(0, -2000);
+      await expect.poll(() => thread.evaluate((el) => el.scrollTop)).toBe(0);
+      await page.getByRole('combobox', { name: 'Arrive from' }).selectOption({ index: 1 });
+      await expect.poll(() => thread.evaluate((el) => el.scrollTop)).toBe(0);
+      expect(await gap()).toBeGreaterThan(2);
+    });
+
     test('a lead with no proposed time is booked from a picked day and window', async ({ page }) => {
       await open(page);
       await page.evaluate(() => { window.fixtureActionMode = 'sent'; });

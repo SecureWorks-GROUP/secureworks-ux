@@ -2565,7 +2565,7 @@
     if (!msgs.length) return '<p class="thread-note">No messages with this person yet.</p>';
     // ghl-proxy get_conversation returns the latest 30 messages, oldest first.
     var capped = msgs.length >= THREAD_READ_LIMIT;
-    return '<p class="thread-count">' + plural(msgs.length, 'message') + (capped ? ', the latest ' + THREAD_READ_LIMIT + '. Older ones are in GHL.' : '') + '</p>' +
+    return '<p class="thread-count">' + (capped ? 'Showing the latest ' + THREAD_READ_LIMIT + ', there may be older messages in GHL.' : plural(msgs.length, 'message')) + '</p>' +
       '<ol class="thread" data-thread-scroll>' + threadItems(msgs).map(function (item) {
         if (item.calls) return '<li class="callline">' + esc(callLineWords(item.calls, c)) + '</li>';
         var msg = item.msg;
@@ -2905,6 +2905,23 @@
     return words ? '<span class="ev-words" title="' + esc(words) + '">“' + esc(words) + '”</span>' : '';
   }
 
+  // The offer is a text out, so the thread shown proves "no reply" only when
+  // nothing came in after its first text out (or after anything, when the read
+  // may be missing older messages).
+  function noReplySinceOffer(contactId) {
+    var msgs = contactId && state.threads[contactId];
+    if (!msgs || !msgs.length) return false;
+    var from = 0;
+    if (msgs.length < THREAD_READ_LIMIT) {
+      from = -1;
+      for (var i = 0; i < msgs.length; i++) {
+        if (msgs[i].direction === 'outbound' && !isCall(msgs[i])) { from = i; break; }
+      }
+      if (from < 0) return false;
+    }
+    return !msgs.slice(from).some(function (msg) { return msg.direction !== 'outbound'; });
+  }
+
   function dayEventTitle(b) {
     if (b.proposal) return b.display_name || 'Proposed visit';
     if (b.reservation_state) {
@@ -2916,7 +2933,8 @@
 
   function kindWords(kind, block) {
     // A hold from a text lives only in the conversation, never in a calendar.
-    if (block.reservation_state) return block.reservation_state === 'agreed' ? 'Agreed by text, not in a calendar' : 'Offered by text, no reply yet';
+    if (block.reservation_state === 'agreed') return 'Agreed by text, not in a calendar';
+    if (block.reservation_state) return noReplySinceOffer(block.contact_id) ? 'Offered by text, no reply yet' : 'Offered by text, not agreed';
     return ({ confirmed: 'Booked visit', blocked: 'Cancelled, still in calendar', offer: block.proposal ? 'Offer out' : 'Offer out', personal: 'Personal', busy: 'Busy', leave: 'Leave', proposal: 'Proposed' })[kind] || 'Busy';
   }
 
@@ -3196,18 +3214,20 @@
     var el = root();
     if (!el) return;
     var keep = captureFocus(el);
+    var conv = state.conversation;
+    var mark = conv.contactId + '|' + (conv.messages || []).length;
+    var before = typeof el.querySelector === 'function' ? el.querySelector('[data-thread-scroll]') : null;
+    var kept = before && state.threadScrolled === mark && before.scrollHeight - before.scrollTop - before.clientHeight > 2 ? before.scrollTop : null;
     try {
       el.innerHTML = renderHTML();
     } catch (err) {
       el.innerHTML = '<p class="bk-alert" role="alert">The booking screen could not be drawn: ' + esc(err && err.message ? err.message : err) + '</p>';
     }
     restoreFocus(el, keep);
-    // Newest at the bottom: open the thread scrolled to its latest message,
-    // once per thread, so a repaint never yanks a scroll the owner made.
+    // Newest at the bottom after every repaint, unless the owner scrolled this
+    // same thread up themselves.
     var list = typeof el.querySelector === 'function' ? el.querySelector('[data-thread-scroll]') : null;
-    var conv = state.conversation;
-    var mark = conv.contactId + '|' + (conv.messages || []).length;
-    if (list && state.threadScrolled !== mark) { list.scrollTop = list.scrollHeight; state.threadScrolled = mark; }
+    if (list) { list.scrollTop = kept != null ? kept : list.scrollHeight; state.threadScrolled = mark; }
     var view = global.document.getElementById('viewSales');
     if (view) {
       view.classList.toggle('sales-sub-booking', state.subtab === 'booking');
@@ -4866,6 +4886,7 @@
     changeOwnerPick: changeOwnerPick,
     pickedVisitText: pickedVisitText,
     renderThread: renderThread,
+    kindWords: kindWords,
     waitWords: waitWords,
     renderCard: renderCard,
     timeRange: timeRange

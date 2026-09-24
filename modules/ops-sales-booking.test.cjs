@@ -848,8 +848,37 @@ test('the thread shows every message it read, newest last, calls as one line, an
   assert.ok(html.lastIndexOf('Done by 8:30') > html.lastIndexOf('Thursday 8:00 works.'), 'newest at the bottom');
   api.state.conversation.messages = Array.from({ length: 30 }, (_, i) => ({ direction: 'inbound', body: 'm' + i, timestamp: at(10 + Math.floor(i / 10), '09:0' + (i % 10)) }));
   html = api.renderThread(c);
-  assert.match(html, /30 messages, the latest 30\. Older ones are in GHL\./);
+  assert.match(html, /<p class="thread-count">Showing the latest 30, there may be older messages in GHL\.<\/p>/);
+  api.state.conversation.messages = api.state.conversation.messages.slice(1);
+  html = api.renderThread(c);
+  assert.match(html, /<p class="thread-count">29 messages<\/p>/);
+  assert.doesNotMatch(html, /older/i);
   api.state.conversation = { contactId: null, messages: [], generation: 0 };
+});
+
+test('an offer by text says no reply yet only when the thread shown has nothing in after the offer', () => {
+  const at = (h) => '2026-09-22T' + h + ':00+08:00';
+  const hold = { reservation_state: 'offered', contact_id: 'ct-o' };
+  const words = () => api.kindWords('reservation', hold);
+  api.state.threads = {};
+  assert.equal(words(), 'Offered by text, not agreed', 'no thread shown proves nothing');
+  api.state.threads['ct-o'] = [
+    { direction: 'inbound', body: 'Can you come?', timestamp: at('08:00') },
+    { direction: 'outbound', body: 'Thursday 8:00?', timestamp: at('09:00') }
+  ];
+  assert.equal(words(), 'Offered by text, no reply yet');
+  api.state.threads['ct-o'].push({ direction: 'outbound', type: 'TYPE_CALL', timestamp: at('09:30') });
+  assert.equal(words(), 'Offered by text, no reply yet');
+  api.state.threads['ct-o'].push({ direction: 'inbound', body: 'What time would you finish?', timestamp: at('10:00') });
+  assert.equal(words(), 'Offered by text, not agreed', 'a reply that does not agree');
+  api.state.threads['ct-o'] = [{ direction: 'inbound', body: 'Hello?', timestamp: at('08:00') }];
+  assert.equal(words(), 'Offered by text, not agreed', 'the offer is not in the thread shown');
+  api.state.threads['ct-o'] = Array.from({ length: 30 }, (_, i) => ({ direction: i === 0 ? 'inbound' : 'outbound', body: 'm' + i, timestamp: at('0' + (i % 10) + ':00') }));
+  assert.equal(words(), 'Offered by text, not agreed', 'a capped read may start after the offer');
+  api.state.threads['ct-o'][0].direction = 'outbound';
+  assert.equal(words(), 'Offered by text, no reply yet');
+  assert.equal(api.kindWords('reservation', { reservation_state: 'agreed', contact_id: 'ct-o' }), 'Agreed by text, not in a calendar');
+  api.state.threads = {};
 });
 
 test('days waiting count from the customer\'s last unanswered message, else from the enquiry', () => {

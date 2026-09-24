@@ -2693,8 +2693,21 @@
     var badge = b.proposal || b.reservation_state ? '' : '<span class="src src-' + sourceLabel(b).toLowerCase() + '">' + sourceLabel(b) + '</span>';
     var selected = b.id && b.id === state.selectedId;
     var place = b.suburb && !b.reservation_state ? ', ' + b.suburb : '';
-    return '<button type="button" class="ev is-' + kind + (b.proposal ? ' is-proposal' : '') + (b.clash ? ' is-clash' : '') + (selected ? ' is-sel' : '') + '" data-booking-case="' + esc(b.id || '') + '"' +
-      ' style="grid-row:' + (from + 1) + ' / ' + (to + 1) + ';grid-column:' + colStart + ' / ' + colEnd + '">' +
+    var cls = 'ev is-' + kind + (b.proposal && kind !== 'proposal' ? ' is-proposal' : '') + (b.clash ? ' is-clash' : '') + (selected ? ' is-sel' : '');
+    var at = ' style="grid-row:' + (from + 1) + ' / ' + (to + 1) + ';grid-column:' + colStart + ' / ' + colEnd + '"';
+    if (b.proposal) {
+      // A lead's proposed visit, as on the 17 Sep week: its stage on a small
+      // chip, then who and where, then when. A clash is red and names the
+      // booking it runs into.
+      return '<button type="button" class="' + cls + '" data-booking-case="' + esc(b.id || '') + '"' + at + (selected ? ' aria-pressed="true"' : '') + '>' +
+        '<span class="ev-chip">' + esc(kindWords(kind, b)) + '</span>' +
+        '<span class="ev-title">' + esc(title || 'Proposed visit') + '</span>' +
+        (b.suburb ? '<span class="ev-place">' + esc(b.suburb) + '</span>' : '') +
+        '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
+        (b.not_in_this_read ? '<span class="ev-kind">Not in the GHL list</span>' : '') +
+        (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
+    }
+    return '<button type="button" class="' + cls + '" data-booking-case="' + esc(b.id || '') + '"' + at + '>' +
       '<span class="ev-top"><span class="ev-title">' + esc(title || 'Busy') + esc(place) + '</span>' + badge + '</span>' +
       '<span class="ev-time">' + esc(timeRange(b.start_iso, b.end_iso)) + '</span>' +
       '<span class="ev-kind">' + esc(kindWords(kind, b)) + (b.not_in_this_read ? ' · not in GHL list' : '') + '</span>' +

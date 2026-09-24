@@ -101,6 +101,10 @@ for (const vp of viewports) {
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
       const slot = page.locator('.bk-week .ev.is-clash', { hasText: 'Kerry P' });
       await expect(slot.locator('.ev-clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am');
+      // The chosen lead's proposed card lights up, and a clash is drawn red.
+      await expect(slot).toHaveAttribute('aria-pressed', 'true');
+      await expect(slot.locator('.ev-chip')).toHaveText('Proposed');
+      expect(await slot.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe('rgb(163, 49, 42)');
       // Overlapping entries show their whole name and time, never cut off.
       for (const ev of await page.locator('.bk-week .ev').all()) {
         for (const part of await ev.locator('.ev-title, .ev-time, .ev-clash').all()) {

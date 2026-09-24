@@ -719,6 +719,31 @@ test('the week is Monday to Friday in the middle and paints every calendar entry
   api.state.resourceId = 'nithin';
 });
 
+test('each proposed visit is one dashed card on the week, a clash is red and names the booking', () => {
+  api.state.resourceId = 'nithin';
+  api.state.selectedId = 'case-b';
+  api.state.dayIndex = null;
+  api.state.data = sampleRead();
+  api.state.data.cases.push({
+    id: 'case-b', contact_id: 'contact-b', display_name: 'Clash B', suburb: 'Balga', status: 'ready',
+    proposal: { start_iso: '2026-09-15T12:00:00', end_iso: '2026-09-15T13:00:00', offer_id: 'off-b' }
+  }, {
+    id: 'case-c', contact_id: 'contact-c', display_name: 'No time C', suburb: 'Wembley', status: 'ready', proposal: null
+  });
+  const html = api.renderHTML();
+  const week = html.slice(html.indexOf('class="bk-week"'), html.indexOf('class="bk-card'));
+  const cards = (id) => (week.match(new RegExp('class="ev [^"]*is-proposal[^"]*" data-booking-case="' + id + '"', 'g')) || []).length;
+  assert.equal(cards('case-a'), 1);
+  assert.equal(cards('case-b'), 1);
+  assert.equal(cards('case-c'), 0);
+  // Case B runs into the booked visit at 11:30 on Tuesday: red, and says which.
+  assert.match(week, /class="ev [^"]*is-proposal is-clash is-sel" data-booking-case="case-b"[^>]*>(?:(?!<\/button>).)*Clashes with Scope visit at 11:30am/);
+  assert.match(week, /data-booking-case="case-b"[^>]*aria-pressed="true"><span class="ev-chip">Proposed<\/span><span class="ev-title">Clash B<\/span><span class="ev-place">Balga<\/span>/);
+  // Case A has no clash and is not the chosen lead.
+  assert.match(week, /class="ev [^"]*is-proposal" data-booking-case="case-a"/);
+  api.state.selectedId = null;
+});
+
 test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();

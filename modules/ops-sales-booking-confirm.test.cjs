@@ -605,7 +605,7 @@ test('a proposed slot on the day names the booking it clashes with, in full', ()
   const p = row.booking_read_model.calendar_write.preview;
   data.diary.push({event_id:'mel',start:p.start.replace('09:00','10:00'),end:p.end,title:'Scope: Melanie N, Piara Waters',kind:'busy',source:'outlook',blocks_capacity:true});
   const html = api.renderWeek();
-  assert.match(html, /class="ev is-proposal is-proposal is-clash[^"]*"[^>]*data-booking-case="lead-a"[\s\S]*?<span class="ev-clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am<\/span>/);
+  assert.match(html, /class="ev is-proposal is-clash[^"]*"[^>]*data-booking-case="lead-a"[\s\S]*?<span class="ev-clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am<\/span>/);
   assert.match(html, /<span class="ev-title">Scope: Melanie N, Piara Waters<\/span>/);
 });
 

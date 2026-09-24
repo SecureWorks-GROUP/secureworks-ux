@@ -2264,7 +2264,10 @@
   }
 
   function renderList() {
+    var g = state.data ? weekListGroups() : null;
+    var people = g ? g.contact.length + g.waiting.length + g.booked.length + g.unsorted.length : 0;
     return '<section class="bk-list" aria-label="People to contact">' +
+      '<div class="listhead"><h2>To book</h2>' + (g ? '<span class="count">' + plural(people, 'person', 'people') + '</span>' : '') + '</div>' +
       '<label class="search">' + icon('search') + '<span class="sr">Search</span>' +
       '<input type="search" data-booking-search data-focus-key="search" placeholder="Search name or suburb" autocomplete="off" value="' + esc(state.search) + '"></label>' +
       '<div class="listbody" data-booking-list-body>' + renderListBody() + '</div>' + renderVisitsDue() + '</section>';
@@ -2588,7 +2591,7 @@
     var text = composeText(c);
     var writable = (m && m.message && m.message.template_locked) || (messagePath(c) === 'owner' && ownerFlow() && ownerBooking(c));
     var bits = [c.address || caseSuburb(c) || 'Address not given yet', jobTypeLabel(c) === 'not given' ? 'job not given' : jobTypeLabel(c)];
-    return '<section class="bk-card" aria-label="Selected lead"><button type="button" class="back" data-booking-back>' + icon('left') + 'All leads</button>' +
+    return '<section class="bk-card" aria-label="Selected lead">' +
       '<header class="cardhead"><h2>' + esc(c.display_name || 'Enquiry') + '</h2><p>' + esc(bits.join(' · ')) + '</p>' +
       '<p class="fine">' + esc(enquiryLine(c)) + (stage ? ' · GHL stage: ' + esc(String(stage.name).replace(/^\s+/, '')) : '') + '</p></header>' +
       '<section class="msgs"><h3>Latest messages</h3>' + renderThread(c) + '</section>' +
@@ -2675,7 +2678,7 @@
     return Math.max(0, Math.min((DAY_END - DAY_START) * SLOTS_PER_HOUR, slot));
   }
 
-  function renderDayEvent(card, columns) {
+  function renderDayEvent(card, columns, firstCol) {
     var b = card.block, kind = card.kind;
     var from = slotOf(b.start_iso, false);
     if (from == null) return '';
@@ -2684,7 +2687,7 @@
     if (to <= from) { from = Math.max(0, to - 3); }
     var lanes = Math.max(1, b.lanes || 1), lane = b.lane || 0;
     var per = Math.max(1, Math.floor(columns / lanes));
-    var colStart = 2 + lane * per;
+    var colStart = (firstCol == null ? 2 : firstCol) + lane * per;
     var colEnd = lane === lanes - 1 ? -1 : colStart + per;
     var title = dayEventTitle(b);
     var badge = b.proposal || b.reservation_state ? '' : '<span class="src src-' + sourceLabel(b).toLowerCase() + '">' + sourceLabel(b) + '</span>';
@@ -2698,55 +2701,94 @@
       (b.clash ? '<span class="ev-clash">' + esc(b.clash) + '</span>' : '') + '</button>';
   }
 
-  function renderDay() {
-    if (!state.data) return '<section class="bk-day" aria-label="The day"><div class="dayhead"><h2>The day</h2></div><div class="day-sk" aria-hidden="true"></div></section>';
-    var res = resource();
-    var d = dayIndex();
-    var lane = deskDays(res);
-    var iso = addDays(state.weekStart, d);
-    var picker = '<div class="daypick" role="group" aria-label="Choose a day">' + DAYS.map(function (name, i) {
-      var off = lane.indexOf(i) < 0;
-      return '<button type="button" data-booking-day="' + i + '" aria-pressed="' + (i === d) + '"' + (off ? ' class="is-off" title="Not a ' + esc(res.name) + ' day"' : '') + '>' + name.slice(0, 3) + '<b>' + Number(addDays(state.weekStart, i).slice(8, 10)) + '</b></button>';
-    }).join('') + '</div>';
-    var head = '<div class="dayhead"><h2>' + esc(longDate(iso)) + '</h2>' + picker + '</div>';
-    if (calendarUnread(state.data)) {
-      var read = calendarReadState(state.data);
-      return '<section class="bk-day" aria-label="The day">' + head + '<div class="dayunread"><h3>' + (read.state === 'not_configured' ? 'Calendar not set up' : 'Could not read calendar') + '</h3><p>' + esc(read.reason || '') + '</p><p>Free times are unknown. A calendar that could not be read is never shown as free.</p></div></section>';
-    }
-    var notes = '';
-    if (lane.indexOf(d) < 0) notes += '<p class="daynote">Not a ' + esc(res.name) + ' day. ' + esc(res.desk_rules.lane_note || 'No new scopes are offered on this day.') + '</p>';
-    var slots = (DAY_END - DAY_START) * SLOTS_PER_HOUR;
-    var cards = dayCards(d);
+  // Enough grid columns that every lane count on this day divides evenly.
+  function dayColumns(cards) {
     var columns = 1;
     cards.forEach(function (card) { columns = Math.max(columns, card.block.lanes || 1); });
     if (columns > 1) {
-      // Enough columns that every lane count on this day divides evenly.
       var want = columns;
       cards.forEach(function (card) { var l = card.block.lanes || 1; while (want % l) want += columns; });
       columns = want;
     }
-    var fixed = '';
+    return columns;
+  }
+
+  function perthTodayIso() {
+    return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  }
+
+  // One day of the week: its own lanes, on the week's shared 15-minute rows
+  // (a CSS subgrid), so a row that grows for one day's words grows for all
+  // five and the hours stay level across the week.
+  function renderWeekDay(res, i, selected, lane, cards) {
+    var columns = dayColumns(cards);
     var span = function (fromHour, toHour) {
-      return 'grid-row:' + (Math.round((fromHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ' / ' + (Math.round((toHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ';grid-column:2 / -1';
+      return 'grid-row:' + (Math.round((fromHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ' / ' + (Math.round((toHour - DAY_START) * SLOTS_PER_HOUR) + 1) + ';grid-column:1 / -1';
     };
-    if (d === 0 && res.desk_rules.monday_from > DAY_START) {
+    var fixed = '';
+    if (lane.indexOf(i) < 0) {
+      fixed += '<div class="fixed is-off" style="grid-row:1 / -1;grid-column:1 / -1" title="' + esc(res.desk_rules.lane_note || 'No new scopes are offered on this day.') + '"><span>Not a ' + esc(res.name) + ' day</span></div>';
+    }
+    if (i === 0 && res.desk_rules.monday_from > DAY_START) {
       fixed += '<div class="fixed" style="' + span(DAY_START, res.desk_rules.monday_from) + '"><span>Not available before ' + res.desk_rules.monday_from + ':00</span></div>';
     }
     var band = res.desk_rules.protected_band;
-    if (band && band.day === d) {
+    if (band && band.day === i) {
       fixed += '<div class="fixed is-band" style="' + span(band.from, band.to) + '"><span>' + esc(band.label) + ' · ' + esc(band.note) + '</span></div>';
     }
+    return '<div class="wkcol' + (i === selected ? ' is-day' : '') + '" data-week-day="' + i + '" role="group" aria-label="' + esc(longDate(addDays(state.weekStart, i))) + '"' +
+      ' style="grid-column:' + (i + 2) + ';grid-template-columns:repeat(' + columns + ',minmax(0,1fr))">' +
+      fixed + cards.map(function (card) { return renderDayEvent(card, columns, 1); }).join('') + '</div>';
+  }
+
+  // The week sits in the middle, Monday to Friday. On a phone it is one day at
+  // a time, chosen from the day strip.
+  function renderWeek() {
+    if (!state.data) return '<section class="bk-week" aria-label="The week"><div class="weekhead"><h2>The week</h2></div><div class="day-sk" aria-hidden="true"></div></section>';
+    var res = resource();
+    var d = dayIndex();
+    var lane = deskDays(res);
+    var today = perthTodayIso();
+    var picker = '<div class="daypick" role="group" aria-label="Choose a day">' + DAYS.map(function (name, i) {
+      var off = lane.indexOf(i) < 0;
+      return '<button type="button" data-booking-day="' + i + '" aria-pressed="' + (i === d) + '"' + (off ? ' class="is-off" title="Not a ' + esc(res.name) + ' day"' : '') + '>' + name.slice(0, 3) + '<b>' + Number(addDays(state.weekStart, i).slice(8, 10)) + '</b></button>';
+    }).join('') + '</div>';
+    var head = '<div class="weekhead"><h2>Week of ' + esc(shortDate(state.weekStart).replace(/^\w+ /, '')) + '</h2>' +
+      '<p class="fine">' + esc(res.name) + ' · ' + esc(res.desk_rules.hours) + '</p>' + picker +
+      '<h3 class="dayname">' + esc(longDate(addDays(state.weekStart, d))) + '</h3></div>';
+    if (calendarUnread(state.data)) {
+      var read = calendarReadState(state.data);
+      return '<section class="bk-week" aria-label="The week">' + head + '<div class="dayunread"><h3>' + (read.state === 'not_configured' ? 'Calendar not set up' : 'Could not read calendar') + '</h3><p>' + esc(read.reason || '') + '</p><p>Free times are unknown. A calendar that could not be read is never shown as free.</p></div></section>';
+    }
+    var slots = (DAY_END - DAY_START) * SLOTS_PER_HOUR;
+    var headers = DAYS.map(function (name, i) {
+      var iso = addDays(state.weekStart, i);
+      var off = lane.indexOf(i) < 0;
+      var isToday = iso === today;
+      return '<div class="wkday' + (off ? ' is-off' : '') + (isToday ? ' is-today' : '') + '" style="grid-column:' + (i + 2) + '">' +
+        '<span>' + name.slice(0, 3) + (isToday ? ' · today' : '') + '</span><b>' + Number(iso.slice(8, 10)) + '</b></div>';
+    }).join('');
     var hours = '';
     for (var h = DAY_START; h < DAY_END; h++) {
-      var row = (h - DAY_START) * SLOTS_PER_HOUR + 1;
+      var row = (h - DAY_START) * SLOTS_PER_HOUR + 2;
       hours += '<div class="hourline" style="grid-row:' + row + ' / ' + (row + SLOTS_PER_HOUR) + '"></div>' +
         '<div class="hour" style="grid-row:' + row + ' / ' + (row + SLOTS_PER_HOUR) + '"><span>' + clockLabel(h).replace(':00', '') + '</span></div>';
     }
-    var events = cards.map(function (card) { return renderDayEvent(card, columns); }).join('');
-    var empty = cards.length ? '' : '<p class="dayempty">Nothing in the calendar this day. Leave is not read, so empty is not the same as free.</p>';
-    return '<section class="bk-day" aria-label="The day">' + head + notes +
-      '<div class="daygrid" style="grid-template-columns:42px repeat(' + columns + ',minmax(0,1fr));grid-template-rows:repeat(' + slots + ',minmax(15px,auto))">' + hours + fixed + events + empty + '</div>' +
-      '<p class="daykey"><span class="src src-ghl">GHL</span><span class="src src-outlook">Outlook</span> shows where each entry lives. Dashed means proposed, not booked.</p></section>';
+    var perDay = DAYS.map(function (name, i) { return dayCards(i); });
+    var days = perDay.map(function (cards, i) { return renderWeekDay(res, i, d, lane, cards); }).join('');
+    var empty = perDay.every(function (cards) { return !cards.length; })
+      ? '<p class="weekempty">Nothing in the calendar this week.</p>' : '';
+    // A day with overlapping entries gets more width so side-by-side entries
+    // keep whole words; an empty day that is not a working day gets less.
+    var widths = perDay.map(function (cards, i) {
+      var lanes = 1;
+      cards.forEach(function (card) { lanes = Math.max(lanes, card.block.lanes || 1); });
+      var w = (!cards.length && lane.indexOf(i) < 0 ? 0.6 : 1) + 0.6 * (lanes - 1);
+      return 'minmax(0,' + Math.min(2.8, w).toFixed(1) + 'fr)';
+    });
+    return '<section class="bk-week" aria-label="The week">' + head + empty +
+      '<div class="weekgrid" style="grid-template-columns:42px ' + widths.join(' ') + ';grid-template-rows:auto repeat(' + slots + ',minmax(15px,auto))">' + headers + hours + days + '</div>' +
+      '<p class="daykey"><span class="src src-ghl">GHL</span><span class="src src-outlook">Outlook</span> shows where each entry lives. Dashed means proposed, not booked. Leave is not read, so empty is not the same as free.</p></section>';
   }
 
   // ---- page --------------------------------------------------------------------
@@ -2758,7 +2800,7 @@
     }).join('');
     var atStart = state.weekStart <= currentPerthWeek();
     var refreshed = state.loading ? 'Refreshing…' : state.lastFreshAt ? 'Updated ' + whenWords(state.lastFreshAt).split(', ')[1] : '';
-    return '<header class="bk-head"><div class="bk-title"><h1>Booking</h1>' +
+    return '<header class="bk-head"><div class="bk-title"><h1>Build the week</h1>' +
       '<p>' + esc(res.name) + ' · ' + esc(res.lane === 'patio' ? 'patios' : 'fencing') + (res.desk_rules.days ? ' · ' + esc(res.desk_rules.days.map(function (i) { return DAYS[i].slice(0, 3); }).join(' and ')) : '') +
       ' · texts from ' + esc(route.resolved ? phoneEnding(route.number) : 'an unresolved line') + '</p></div>' +
       '<div class="bk-controls"><div class="seg" role="group" aria-label="Whose bookings">' + scopers + '</div>' +
@@ -2779,7 +2821,8 @@
       : state.loading && state.stale ? '<p class="bk-loading" role="status">Refreshing. The last good read stays on screen until the new one lands.</p>' : '';
     return '<div class="bk' + (state.selectedId ? ' is-open' : '') + '">' + renderHead() + renderCounts() +
       (problem ? '<p class="bk-alert" role="alert">' + esc(problem) + '</p>' : '') + loadingLine + renderDetails() +
-      '<div class="bk-main">' + renderList() + renderCard() + renderDay() + '</div></div>';
+      '<div class="bk-main">' + (state.selectedId ? '<button type="button" class="back" data-booking-back>' + icon('left') + 'All leads</button>' : '') +
+      renderList() + renderWeek() + renderCard() + '</div></div>';
   }
 
   function captureFocus(el) {
@@ -4180,7 +4223,7 @@
     sourceLabel: sourceLabel,
     bookTargets: bookTargets,
     renderVisitOutcomes: renderVisitOutcomes,
-    renderDay: renderDay,
+    renderWeek: renderWeek,
     renderCard: renderCard,
     timeRange: timeRange
   };

@@ -1,4 +1,5 @@
-/* Sales Booking: a dispatcher's work list, phone first.
+/* Sales Booking: Build the week. People to book on the left, the week in the
+   middle, the conversation and the text on the right (the 17 Sep layout).
    Look carried from the owner-approved end-state prototype
    (data/booking-endstate-prototype-20260916, signed off 17 Sep): warm canvas,
    SecureWorks dark #293C46, one orange accent #F15A29 for the action and the
@@ -72,8 +73,8 @@
 @keyframes bk-spin{to{transform:rotate(360deg)}}
 
 /* ---- the one line of counts ---- */
-#salesBookingRoot .bk-counts{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
-#salesBookingRoot .counts{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:14.5px;color:var(--ink-2)}
+#salesBookingRoot .bk-counts{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:0 2px}
+#salesBookingRoot .counts{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:13.5px;color:var(--ink-2)}
 #salesBookingRoot .counts b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
 #salesBookingRoot .counts i{font-style:normal;color:#AEB9BF}
 #salesBookingRoot .counts .is-bad{color:var(--bad)}
@@ -99,23 +100,27 @@
 #salesBookingRoot .pcard.is-off{background:var(--accent-wash);border-color:#F5C8B6}
 #salesBookingRoot .pcard .drift{color:var(--accent-ink)}
 
-/* ---- three columns: list, card, day ---- */
-#salesBookingRoot .bk-main{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr) minmax(280px,330px);gap:16px;align-items:start}
-#salesBookingRoot .bk-list,#salesBookingRoot .bk-card,#salesBookingRoot .bk-day{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+/* ---- three panes: people to book, the week, the conversation ---- */
+#salesBookingRoot .bk-main{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr) minmax(320px,380px);gap:16px;align-items:start}
+#salesBookingRoot .bk-list,#salesBookingRoot .bk-card,#salesBookingRoot .bk-week{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+#salesBookingRoot .bk-main > .back{display:none}
 
 /* ---- the list ---- */
 #salesBookingRoot .bk-list{overflow:hidden}
+#salesBookingRoot .listhead{display:flex;align-items:center;gap:4px;padding:16px 16px 4px}
+#salesBookingRoot .listhead h2{font-size:16px;font-weight:650;letter-spacing:-.01em}
 #salesBookingRoot .search{display:flex;align-items:center;gap:8px;margin:12px 12px 4px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--muted);transition:border-color .15s ease-out,background-color .15s ease-out}
 #salesBookingRoot .search:focus-within{border-color:var(--brand-2);background:var(--surface)}
 #salesBookingRoot .search input{flex:1;border:0;background:none;padding:10px 0;outline:none;font-size:14px;color:var(--ink)}
 #salesBookingRoot .search input::placeholder{color:#7C8990}
-#salesBookingRoot .grouphead{display:flex;align-items:center;padding:14px 16px 6px;font-size:13px;font-weight:650;color:var(--ink)}
+#salesBookingRoot .grouphead{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:8px 16px;background:#EEF1F3;font-size:11.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+#salesBookingRoot .grouphead .count{background:none;padding:0}
 #salesBookingRoot .empty{padding:6px 16px 14px;color:var(--muted)}
-#salesBookingRoot .lead{display:grid;gap:3px;width:100%;text-align:left;border:0;border-top:1px solid var(--line-2);border-radius:0;background:var(--surface);padding:12px 16px}
+#salesBookingRoot .lead{display:grid;gap:3px;width:100%;text-align:left;border:0;border-top:1px solid var(--line-2);border-left:3px solid transparent;border-radius:0;background:var(--surface);padding:12px 16px 12px 13px}
 #salesBookingRoot .lead:hover:not(:disabled){background:var(--surface-2);border-color:var(--line-2)}
-#salesBookingRoot .lead.is-on,#salesBookingRoot .lead.is-on:hover{background:var(--accent-wash)}
+#salesBookingRoot .lead.is-on,#salesBookingRoot .lead.is-on:hover{background:var(--accent-wash);border-left-color:var(--accent)}
 #salesBookingRoot .lead-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-#salesBookingRoot .lead-name{font-size:15px;font-weight:650;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#salesBookingRoot .lead-name{font-size:14.5px;font-weight:650;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #salesBookingRoot .lead.is-on .lead-name{color:var(--accent-ink)}
 #salesBookingRoot .lead-wait{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 #salesBookingRoot .lead-place{font-size:13px;color:var(--muted)}
@@ -164,24 +169,25 @@
 #salesBookingRoot .cardhead .fine{color:var(--muted)}
 #salesBookingRoot .bk-card h3{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--ink);margin-bottom:8px}
 #salesBookingRoot .bk-card h3 .ico{width:16px;height:16px;color:var(--brand-2)}
-#salesBookingRoot .msgs{display:grid}
+#salesBookingRoot .msgs{display:grid;margin:0 -22px;padding:14px 22px 16px;background:#F1F3F4;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}
 #salesBookingRoot .threadmore{justify-self:start;margin-bottom:8px;font-size:13px}
 #salesBookingRoot .thread{list-style:none;padding:0;display:grid;gap:8px}
 #salesBookingRoot .bubble{display:grid;gap:3px;max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45}
 #salesBookingRoot .bubble small{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 #salesBookingRoot .bubble .body{white-space:pre-wrap;overflow-wrap:anywhere}
-#salesBookingRoot .bubble.is-in{justify-self:start;background:var(--surface-2);border:1px solid var(--line);border-bottom-left-radius:4px}
+#salesBookingRoot .bubble.is-in{justify-self:start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px}
 #salesBookingRoot .bubble.is-out{justify-self:end;background:var(--brand-wash);border:1px solid #D2DEE5;border-bottom-right-radius:4px}
 #salesBookingRoot .thread-note{color:var(--muted);font-size:13.5px}
 #salesBookingRoot .thread-note.is-bad{color:var(--bad)}
 #salesBookingRoot .thread-sk{display:grid;gap:8px}
 #salesBookingRoot .thread-sk i{height:38px;border-radius:14px;width:70%}
 #salesBookingRoot .thread-sk i:nth-child(2){justify-self:end;width:60%}
-#salesBookingRoot .compose,#salesBookingRoot .visit{display:grid;gap:8px;padding-top:18px;border-top:1px solid var(--line-2)}
+#salesBookingRoot .compose{display:grid;gap:8px}
+#salesBookingRoot .visit{display:grid;gap:8px;padding-top:18px;border-top:1px solid var(--line-2)}
 #salesBookingRoot .compose label h3{margin:0}
-#salesBookingRoot .compose textarea{width:100%;min-height:128px;max-height:60vh;field-sizing:content;resize:vertical;padding:12px 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);font-size:15px;line-height:1.5;transition:border-color .15s ease-out,box-shadow .15s ease-out}
+#salesBookingRoot .compose textarea{width:100%;min-height:128px;max-height:60vh;field-sizing:content;resize:vertical;padding:12px 14px;border:1.5px solid #F5B89F;border-radius:10px;background:var(--surface);font-size:15px;line-height:1.5;transition:border-color .15s ease-out,box-shadow .15s ease-out}
 #salesBookingRoot .compose textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,90,41,.16)}
-#salesBookingRoot .compose textarea[readonly],#salesBookingRoot .compose textarea:disabled{background:var(--surface-2);color:var(--ink-2)}
+#salesBookingRoot .compose textarea[readonly],#salesBookingRoot .compose textarea:disabled{background:var(--surface-2);color:var(--ink-2);border-color:var(--line)}
 #salesBookingRoot .route{font-size:13.5px;color:var(--ink-2)}
 #salesBookingRoot .route b,#salesBookingRoot .targets b{color:var(--ink);font-weight:650}
 #salesBookingRoot .edited{font-size:13px;color:var(--accent-ink);display:flex;gap:4px 10px;flex-wrap:wrap;align-items:baseline}
@@ -241,25 +247,32 @@
 #salesBookingRoot .actions button.quiet{background:var(--surface);border-color:var(--line);color:var(--ink-2)}
 #salesBookingRoot .actions button.quiet:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
 
-/* ---- the day ---- */
-#salesBookingRoot .bk-day{padding:16px 14px 14px;display:grid;gap:10px}
-#salesBookingRoot .dayhead{display:grid;gap:10px}
-#salesBookingRoot .dayhead h2{font-size:16px;font-weight:650}
-#salesBookingRoot .daypick{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+/* ---- the week ---- */
+#salesBookingRoot .bk-week{padding:16px 16px 14px;display:grid;gap:10px}
+#salesBookingRoot .weekhead{display:grid;gap:2px}
+#salesBookingRoot .weekhead h2{font-size:16px;font-weight:650;letter-spacing:-.01em}
+#salesBookingRoot .dayname{display:none;font-size:15px;font-weight:650;margin-top:8px}
+#salesBookingRoot .daypick{display:none;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px}
 #salesBookingRoot .daypick button{display:grid;justify-items:center;gap:0;padding:5px 0;font-size:11.5px;color:var(--muted);border-color:var(--line-2)}
 #salesBookingRoot .daypick button b{font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
 #salesBookingRoot .daypick button.is-off{background:var(--surface-2);color:#8B979E}
 #salesBookingRoot .daypick button.is-off b{color:#8B979E;font-weight:500}
 #salesBookingRoot .daypick button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#D7E1E6}
 #salesBookingRoot .daypick button[aria-pressed="true"] b{color:#fff}
-#salesBookingRoot .daynote{font-size:13px;color:var(--ink-2);padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)}
-#salesBookingRoot .daygrid{display:grid;column-gap:4px;margin-top:6px;position:relative}
+#salesBookingRoot .weekempty{font-size:13px;color:var(--muted);padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)}
+#salesBookingRoot .weekgrid{display:grid;grid-template-columns:42px repeat(5,minmax(0,1fr));column-gap:4px;margin-top:4px;position:relative}
+#salesBookingRoot .wkday{grid-row:1;display:grid;justify-items:center;padding:4px 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+#salesBookingRoot .wkday b{font-size:20px;line-height:1.2;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+#salesBookingRoot .wkday.is-off b{color:#8B979E;font-weight:500}
+#salesBookingRoot .wkday.is-today,#salesBookingRoot .wkday.is-today b{color:var(--accent-ink)}
+#salesBookingRoot .wkcol{grid-row:2 / -1;display:grid;grid-template-rows:subgrid;column-gap:3px;position:relative}
 #salesBookingRoot .hourline{grid-column:1 / -1;border-top:1px solid var(--line-2);z-index:0}
 #salesBookingRoot .hour{grid-column:1;position:relative;z-index:1}
 #salesBookingRoot .hour span{position:absolute;left:0;top:-8px;width:38px;padding-right:6px;text-align:right;font-size:11px;color:var(--muted);background:var(--surface);font-variant-numeric:tabular-nums}
 #salesBookingRoot .fixed{z-index:1;background:var(--surface-2);border-radius:6px;padding:4px 8px;font-size:11.5px;color:var(--muted)}
 #salesBookingRoot .fixed.is-band{background:#F3EFE8;color:var(--ink-2)}
-#salesBookingRoot .ev{z-index:2;display:grid;align-content:start;gap:1px;margin:2px 0;text-align:left;padding:5px 8px;border-radius:8px;font-size:12.5px;line-height:1.3;background:var(--surface-2);border:1px solid var(--line);overflow-wrap:anywhere}
+#salesBookingRoot .fixed.is-off{z-index:0;border-radius:0;background:rgba(236,239,241,.7);padding:10px 8px;text-align:center}
+#salesBookingRoot .ev{z-index:2;display:grid;align-content:start;gap:1px;margin:2px 0;text-align:left;padding:5px 7px;border-radius:7px;font-size:12px;line-height:1.3;background:var(--surface-2);border:1px solid var(--line);overflow-wrap:anywhere}
 #salesBookingRoot .ev-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:2px 6px}
 #salesBookingRoot .ev-title{font-weight:650;color:var(--ink);flex:1 1 7em}
 #salesBookingRoot .ev-time{font-variant-numeric:tabular-nums;color:var(--ink-2)}
@@ -275,19 +288,20 @@
 #salesBookingRoot .src{display:inline-flex;align-items:center;padding:0 6px;height:17px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.02em;flex:none}
 #salesBookingRoot .src-ghl{background:var(--brand);color:#fff}
 #salesBookingRoot .src-outlook{background:var(--surface);color:var(--brand);border:1px solid var(--brand-2)}
-#salesBookingRoot .dayempty{grid-column:2 / -1;grid-row:14 / 20;align-self:center;z-index:1;text-align:center;color:var(--muted);font-size:13px}
 #salesBookingRoot .daykey{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted);padding-top:4px;border-top:1px solid var(--line-2)}
 #salesBookingRoot .dayunread{padding:14px;border-radius:var(--r-sm);background:var(--bad-wash);color:var(--bad);display:grid;gap:4px}
 #salesBookingRoot .dayunread h3{font-size:14px}
 #salesBookingRoot .day-sk{height:420px;border-radius:var(--r-sm)}
 
-/* ---- tablet: day moves under the card ---- */
+/* ---- tablet: the conversation beside the list, the week under both ---- */
 @media (max-width:1239px){
-  #salesBookingRoot .bk-main{grid-template-columns:minmax(280px,340px) minmax(0,1fr)}
-  #salesBookingRoot .bk-day{grid-column:2}
+  #salesBookingRoot .bk-main{grid-template-columns:minmax(250px,300px) minmax(0,1fr)}
+  #salesBookingRoot .bk-list{grid-column:1;grid-row:1}
+  #salesBookingRoot .bk-card{grid-column:2;grid-row:1}
+  #salesBookingRoot .bk-week{grid-column:1 / -1;grid-row:2}
 }
 
-/* ---- phone: list, or the chosen card; the day follows ---- */
+/* ---- phone: the list, or the day strip, the day, then the conversation ---- */
 @media (max-width:899px){
   #salesBookingRoot .bk{padding:14px 16px 40px;gap:12px}
   #salesBookingRoot .bk-head{align-items:stretch}
@@ -295,17 +309,23 @@
   #salesBookingRoot .seg{flex:1 1 100%}
   #salesBookingRoot .seg button{flex:1}
   #salesBookingRoot .bk-main{grid-template-columns:minmax(0,1fr)}
-  #salesBookingRoot .bk-day{grid-column:auto}
+  #salesBookingRoot .bk-list,#salesBookingRoot .bk-card,#salesBookingRoot .bk-week{grid-column:auto;grid-row:auto}
   #salesBookingRoot .bk.is-open .bk-list{display:none}
   #salesBookingRoot .bk:not(.is-open) .bk-card{display:none}
-  #salesBookingRoot .back{display:inline-flex}
+  #salesBookingRoot .bk-main > .back{display:inline-flex;justify-self:start}
+  #salesBookingRoot .daypick{display:grid}
+  #salesBookingRoot .dayname{display:block}
+  #salesBookingRoot .weekgrid{grid-template-columns:42px minmax(0,1fr) !important}
+  #salesBookingRoot .wkday{display:none}
+  #salesBookingRoot .wkcol{display:none}
+  #salesBookingRoot .wkcol.is-day{display:grid;grid-column:2 !important}
   #salesBookingRoot .bk-card{padding:16px 16px 20px;gap:18px}
+  #salesBookingRoot .msgs{margin:0 -16px;padding:14px 16px 16px}
   #salesBookingRoot .compose textarea{font-size:16px}
   #salesBookingRoot .actions button{flex:1 1 100%}
   #salesBookingRoot .pick{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   #salesBookingRoot .pick label:first-child{grid-column:1 / -1}
   #salesBookingRoot .pick select{font-size:16px}
-  #salesBookingRoot .bk-counts{padding:10px 14px}
   #salesBookingRoot .counts{font-size:14px;gap:4px 14px}
   #salesBookingRoot .counts i{display:none}
   #salesBookingRoot .fresh{display:none}

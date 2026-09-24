@@ -47,8 +47,9 @@ for (const vp of viewports) {
       await expect(page.locator('.targets')).toHaveText("Book it writes: GHL Stratco Fencing calendar and Marnin's Outlook");
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
       await expect(page.getByRole('button', { name: 'Book it' })).toBeEnabled();
-      const day = page.locator('.bk-day');
-      await expect(day.locator('h2')).toContainText('Friday');
+      // The week sits in the middle; Basil's proposed Friday is the day a phone opens on.
+      const day = page.locator('.bk-week [data-week-day="4"]');
+      if (vp.name === 'phone') await expect(page.locator('.bk-week .dayname')).toContainText('Friday');
       await expect(day.locator('.src-outlook').first()).toBeVisible();
       await expect(day.locator('.ev', { hasText: 'Scope: Jordan W' }).locator('.src')).toHaveText('GHL');
       await expect(day.locator('.ev', { hasText: 'Scope: Melanie N' }).locator('.src')).toHaveText('Outlook');
@@ -59,6 +60,37 @@ for (const vp of viewports) {
       }
     });
 
+    test('the week is in the middle: people left, Monday to Friday, conversation right', async ({ page }) => {
+      await open(page);
+      await expect(page.locator('.bk-title h1')).toHaveText('Build the week');
+      await choose(page, 'Basil L');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      if (vp.name === 'desktop') {
+        const box = async (sel) => page.locator(sel).boundingBox();
+        const [list, week, card] = [await box('.bk-list'), await box('.bk-week'), await box('.bk-card')];
+        expect(list.x + list.width).toBeLessThanOrEqual(week.x);
+        expect(week.x + week.width).toBeLessThanOrEqual(card.x);
+        const days = page.locator('.bk-week .wkday');
+        await expect(days).toHaveCount(5);
+        await expect(days.first()).toContainText('Mon');
+        await expect(days.last()).toContainText('Fri');
+        for (let i = 0; i < 5; i++) await expect(page.locator(`.bk-week [data-week-day="${i}"]`)).toBeVisible();
+        await expect(page.locator('.bk-week .daypick')).toBeHidden();
+      } else {
+        // A phone: the day strip, the one day, then the conversation under it.
+        await expect(page.locator('.bk-week .daypick')).toBeVisible();
+        await expect(page.locator('.bk-week .wkcol:visible')).toHaveCount(1);
+        const week = await page.locator('.bk-week').boundingBox();
+        const card = await page.locator('.bk-card').boundingBox();
+        expect(week.y + week.height).toBeLessThanOrEqual(card.y);
+      }
+      // Every press is still on the card.
+      await expect(page.getByRole('button', { name: 'Send this text' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Book it' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
+      await expect(page.locator('.bk-card .sayno summary', { hasText: 'Say no' }).first()).toBeVisible();
+    });
+
     test('a clash names the other booking and blocks booking, not the text', async ({ page }) => {
       await open(page);
       await choose(page, 'Kerry P');
@@ -67,10 +99,10 @@ for (const vp of viewports) {
       await expect(page.getByRole('button', { name: 'Pick a different time' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Send this text' })).toBeEnabled();
-      const slot = page.locator('.bk-day .ev.is-clash', { hasText: 'Kerry P' });
+      const slot = page.locator('.bk-week .ev.is-clash', { hasText: 'Kerry P' });
       await expect(slot.locator('.ev-clash')).toHaveText('Clashes with Scope: Melanie N, Piara Waters at 10:45am');
       // Overlapping entries show their whole name and time, never cut off.
-      for (const ev of await page.locator('.bk-day .ev').all()) {
+      for (const ev of await page.locator('.bk-week .ev').all()) {
         for (const part of await ev.locator('.ev-title, .ev-time, .ev-clash').all()) {
           expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
         }
@@ -176,9 +208,12 @@ for (const vp of viewports) {
       // The column defaults to a day that already has a proposal (Tuesday in
       // this fixture). Open Friday, the day that was just booked, before
       // asserting the new occupancy is painted.
-      await page.locator('[data-booking-day="4"]').click();
-      await expect(page.locator('.bk-day h2')).toContainText('Friday');
-      await expect(page.locator('.bk-day .ev.is-confirmed', { hasText: 'Priya S' })).toBeVisible();
+      // A desktop sees the whole week; a phone opens Friday from the day strip.
+      if (vp.name === 'phone') {
+        await page.locator('[data-booking-day="4"]').click();
+        await expect(page.locator('.bk-week .dayname')).toContainText('Friday');
+      }
+      await expect(page.locator('.bk-week [data-week-day="4"] .ev.is-confirmed', { hasText: 'Priya S' })).toBeVisible();
       if (vp.name === 'phone') await page.getByRole('button', { name: 'All leads' }).click();
       await choose(page, 'Basil L');
       // Basil's proposed Friday 12:00 now runs into Priya's booking.

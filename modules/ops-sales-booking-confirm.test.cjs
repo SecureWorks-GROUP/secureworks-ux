@@ -604,7 +604,7 @@ test('an edited text the server will not take is said plainly, and nothing is se
 test('a proposed slot on the day names the booking it clashes with, in full', () => {
   const p = row.booking_read_model.calendar_write.preview;
   data.diary.push({event_id:'mel',start:p.start.replace('09:00','10:00'),end:p.end,title:'Scope: Melanie N, Piara Waters',kind:'busy',source:'outlook',blocks_capacity:true});
-  const html = api.renderDay();
+  const html = api.renderWeek();
   assert.match(html, /class="ev is-proposal is-proposal is-clash[^"]*"[^>]*data-booking-case="lead-a"[\s\S]*?<span class="ev-clash">Clashes with Scope: Melanie N, Piara Waters at 10:00am<\/span>/);
   assert.match(html, /<span class="ev-title">Scope: Melanie N, Piara Waters<\/span>/);
 });
@@ -760,8 +760,8 @@ test('an owner book occupies the day so the next lead must pick another time', a
   pickVisit(priya, '12:30', 60, thisFri);
   assert.equal((await api.press(priya.id, 'calendar')).ok, true);
   assert.equal((await api.ownerApprove(priya.id, 'calendar')).ok, true);
-  assert.match(api.renderDay(), /Priya S/);
-  assert.match(api.renderDay(), /12:30/);
+  assert.match(api.renderWeek(), /Priya S/);
+  assert.match(api.renderWeek(), /12:30/);
   assert.match(api.clashFor(basil).label, /Priya/);
   api.state.selectedId = basil.id;
   assert.equal(api.calendarPath(basil), 'engine');
@@ -891,7 +891,7 @@ test('a quiet re-read after a book keeps the booked visit on the day until the r
   assert.notEqual(api.state.data, data);
   assert.equal(api.state.loading, false);
   assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya' && ev.start === thisFri + 'T12:30:00+08:00'));
-  assert.match(api.renderDay(), /Priya S/);
+  assert.match(api.renderWeek(), /Priya S/);
   await api.load('marnin', api.state.weekStart);
   assert.ok(api.state.data.diary.some((ev) => ev.contact_id === 'ghl-priya'));
 });

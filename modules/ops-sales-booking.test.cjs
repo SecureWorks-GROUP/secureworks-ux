@@ -775,6 +775,59 @@ test('a lead the server says is booked in another scoper\'s calendar leaves to-c
   api.state.resourceId = 'nithin';
 });
 
+function liveWeek(resource, opts) {
+  const days = ['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18'];
+  const events = opts.events || [];
+  return {
+    ok: true, fixture: false, week_start: '2026-09-14',
+    resource: { id: resource, name: resource[0].toUpperCase() + resource.slice(1), calendar: { ok: true } },
+    coverage: { gaps: [] }, events, diary: [], cases: [],
+    booking_flow: {
+      calendar_read: { state: 'read', source: 'server_live_read', provider: 'ghl', reason: null, ghl_events: events.length, ghl_blocked_slots: 0, outlook: opts.outlook || { state: 'not_applicable', events: 0, unverified_correspondence: 0 }, caveats: [] },
+      commitments: [], commitments_read: { state: 'read', reason: null },
+      free_times: { version: 'live-availability-v1', rule: { on_site_minutes: 30 }, days: days.map((date) => {
+        const booked = events.filter((e) => e.start_iso.slice(0, 10) === date).length;
+        const full = booked >= 6;
+        return { date, state: full ? 'full' : 'open', booked, max_per_day: 6, busy: [], arrival_windows: full ? [] : [{ from_iso: date + 'T15:00:00+08:00', to_iso: date + 'T16:00:00+08:00', end_iso: date + 'T16:30:00+08:00', minutes: 60 }] };
+      }) }
+    }
+  };
+}
+
+test('a week for each person: Khairo\'s own visits with a full Thursday', () => {
+  const at = (d, h) => '2026-09-' + d + 'T' + String(h).padStart(2, '0') + ':00:00+08:00';
+  const spread = [[14, 1], [15, 5], [16, 1], [17, 6], [18, 2]];
+  const events = [];
+  spread.forEach(([d, n]) => { for (let i = 0; i < n; i++) events.push({ event_id: 'k' + d + i, subject: 'Scope: Lead ' + d + i, display_name: 'Lead ' + d + i, start_iso: at(d, 8 + i), end_iso: at(d, 9 + i), layer: 'confirmed', source: 'ghl_calendar' }); });
+  api.state.resourceId = 'khairo';
+  api.state.selectedId = null;
+  api.state.data = liveWeek('khairo', { events });
+  const html = api.renderHTML();
+  assert.match(html, /<h1>Build the week<\/h1><p>Khairo · fencing · texts from 772<\/p>/);
+  const cards = (html.match(/class="ev is-confirmed/g) || []).length;
+  assert.equal(cards, 15);
+  assert.match(html, /<em class="wkstate is-full">Full · 6 of 6<\/em>/);
+  assert.match(html, /Read live from GHL: 15 bookings in GHL, all counted as busy\./);
+  assert.doesNotMatch(html, /Not a Khairo day/, 'Khairo books Monday to Friday');
+  api.state.resourceId = 'nithin';
+});
+
+test('an empty week is said plainly and never painted as free', () => {
+  api.state.resourceId = 'nithin';
+  api.state.selectedId = null;
+  api.state.data = liveWeek('nithin', { events: [] });
+  let html = api.renderHTML();
+  assert.match(html, /Nithin's calendars are empty this week: nothing in GHL, and Nithin's Outlook is not read here\. Empty is not the same as free, so no free times are shown\. Check where Nithin's visits are kept before offering a time\./);
+  assert.doesNotMatch(html, /class="ev-free/);
+  assert.doesNotMatch(html, /wkstate is-open/);
+  assert.match(html, /<em class="wkstate is-empty">Calendar empty<\/em>/);
+  // One booking is enough for the week to read as a real calendar again.
+  api.state.data = liveWeek('nithin', { events: [{ event_id: 'n1', subject: 'Scope: Paul, Dawesville', start_iso: '2026-09-18T10:30:00+08:00', end_iso: '2026-09-18T11:30:00+08:00', layer: 'confirmed', source: 'ghl_calendar' }] });
+  html = api.renderHTML();
+  assert.doesNotMatch(html, /calendars are empty this week/);
+  assert.match(html, /class="ev-free is-static"/);
+});
+
 test('the day labels each entry: proposed, booked visit and personal, with its calendar', () => {
   api.state.resourceId = 'nithin';
   api.state.data = doorRead();

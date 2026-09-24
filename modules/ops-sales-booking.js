@@ -1002,6 +1002,21 @@
     return ft ? ft.days.filter(function (d) { return d && d.date === date; })[0] || null : null;
   }
 
+  // Nothing at all in this person's calendars this week: no GHL booking, no
+  // GHL time off, no Outlook entry (or no Outlook read) and no offer held.
+  // An empty calendar is stated, never painted as free: it can mean the
+  // visits are kept somewhere this screen does not read.
+  function liveCalendarsEmpty() {
+    var flow = state.data && state.data.booking_flow;
+    var read = flow && flow.calendar_read;
+    if (!read || read.state !== 'read' || read.source !== 'server_live_read') return null;
+    var ol = read.outlook || {};
+    var outlookRead = ol.state === 'read';
+    if (Number(read.ghl_events) > 0 || Number(read.ghl_blocked_slots) > 0 || (outlookRead && Number(ol.events) > 0)) return null;
+    if (Array.isArray(flow.commitments) && flow.commitments.length) return null;
+    return { outlookRead: outlookRead };
+  }
+
   function liveBusy(source) {
     var ft = liveFreeTimes(), out = [];
     (ft ? ft.days : []).forEach(function (d) {
@@ -1016,6 +1031,7 @@
   function dayStateWords(date) {
     var person = liveDay(date);
     if (!person) return null;
+    if (liveCalendarsEmpty() && person.state === 'open') return { state: 'empty', words: 'Calendar empty', count: '' };
     var c = selectedCase();
     var lead = c && c.free_times && Array.isArray(c.free_times.days) ? c.free_times.days.filter(function (d) { return d && d.date === date; })[0] : null;
     var st = String((lead || person).state || '');
@@ -2888,6 +2904,7 @@
   }
 
   function renderFreeBands(date) {
+    if (liveCalendarsEmpty()) return '';
     var c = selectedCase();
     if (c && bookedElsewhere(c)) return '';
     if (!(c && c.free_times && Array.isArray(c.free_times.days))) {
@@ -2930,6 +2947,11 @@
     var line = '<p class="fine liveline">Read live from GHL: ' + esc(parts.join(', ')) + ', all counted as busy.' +
       (ft ? ' Free times allow ' + esc(String(rule.on_site_minutes || 30)) + ' minutes on site plus travel between visits.' : '') + '</p>';
     var notes = liveReadNotes();
+    var empty = liveCalendarsEmpty();
+    if (empty) {
+      notes.unshift(name + '\'s calendars are empty this week: nothing in GHL' + (empty.outlookRead ? ' and nothing in Outlook' : ', and ' + name + '\'s Outlook is not read here') +
+        '. Empty is not the same as free, so no free times are shown. Check where ' + name + '\'s visits are kept before offering a time.');
+    }
     if (!ft && !notes.length) notes.push('Free times did not come with this read, so none are shown.');
     var unverified = Number(ol.unverified_correspondence) || 0;
     var out = line + notes.map(function (n) { return '<p class="ft-warn">' + esc(n) + '</p>'; }).join('');

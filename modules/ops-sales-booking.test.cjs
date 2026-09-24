@@ -1241,7 +1241,7 @@ test('a 20s live shape with failed calendar still paints the queue and tiles', (
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'quote-0'))[1], 'Act today');
   assert.equal(api.urgency(cases.find((c) => c.id === 'pres-0'))[1], 'Waiting');
   assert.notEqual(api.urgency(cases.find((c) => c.id === 'pres-20'))[1], 'Waiting');
-  assert.match(html, /Could not read Marnin's calendar \(calendar_http_403\), so free times are unknown/);
+  assert.match(html, /Could not read Marnin's calendar \(calendar_http_403\)\. Free times are unknown/);
   assert.match(html, /never shown as free/);
   assert.match(html, /Booked: calendar not read/);
   assert.match(html, /To contact<span class="count">[1-9][0-9]*<\/span>/);

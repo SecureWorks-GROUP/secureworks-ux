@@ -788,6 +788,66 @@ test('a pick never overwrites words the owner typed; it offers the rewrite inste
   assert.match(api.renderCard(), /Rewritten for the time you picked\./);
 });
 
+test('a pick changed after the text was typed keeps the words but holds Send until the text names the new time', () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const w = tapFree(c, thisFriday(), 0, 0);
+  const d = api.draftFor(c);
+  d.text = d.text.replace('Does that suit?', 'Does that work for you?');
+  const typed = d.text;
+  // Move to a later window on the same band: the owner's words stay, Send is held.
+  const w2 = tapFree(c, thisFriday(), 0, 1);
+  assert.notEqual(w.from_iso, w2.from_iso);
+  assert.equal(api.composeText(c), typed);
+  assert.match(api.ownerPressBlock(c, 'message'), /does not name the time you picked/);
+  assert.match(api.renderCard(), /data-booking-press="message" data-case-id="lead-kerry" disabled/);
+  assert.match(api.renderCard(), /data-owner-rewrite data-case-id="lead-kerry">Rewrite it for /);
+  assert.ok(api.draftFor(c).rewrite.includes(arrivalWords(w2)));
+});
+
+test('a text the owner edits to name the new time is sendable without a rewrite', () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  tapFree(c, thisFriday(), 0, 0);
+  const d = api.draftFor(c);
+  d.text = 'Kerry, my own words.';
+  const w2 = tapFree(c, thisFriday(), 0, 1);
+  assert.match(api.ownerPressBlock(c, 'message'), /does not name the time you picked/);
+  d.text = 'Kerry, my own words: ' + api.longDate(w2.from_iso) + ', ' + arrivalWords(w2) + '.';
+  assert.equal(api.ownerPressBlock(c, 'message'), '');
+});
+
+test('a dropdown change that leaves the pick unfinished never keeps sendable text naming the old time', () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const engine = api.composeText(c);
+  const w = tapFree(c, thisFriday(), 0, 0);
+  assert.equal(w.from_iso.slice(11, 16), '12:15');
+  assert.ok(api.composeText(c).includes(arrivalWords(w)));
+  // 12:15 is not on the 90-minute grid: the start clears and nothing is held.
+  api.changeOwnerPick(c, 'minutes', '90');
+  assert.equal(api.ownerVisit(c), null);
+  assert.ok(!api.composeText(c).includes(arrivalWords(w)), api.composeText(c));
+  assert.equal(api.composeText(c), engine);
+  assert.equal(api.ownerInput(c, 'message').offer, undefined);
+});
+
+test('an unfinished pick holds Send when the owner had edited the screen\'s text', () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const w = tapFree(c, thisFriday(), 0, 0);
+  const d = api.draftFor(c);
+  d.text = d.text.replace('Does that suit?', 'Does that work?');
+  api.changeOwnerPick(c, 'minutes', '90');
+  assert.equal(api.ownerVisit(c), null);
+  assert.ok(api.composeText(c).includes(arrivalWords(w)));
+  assert.match(api.ownerPressBlock(c, 'message'), /written for an earlier pick/);
+  // Finishing the pick offers the rewrite; the dropdown start then fills.
+  api.changeOwnerPick(c, 'start', '12:30');
+  assert.ok(api.ownerVisit(c));
+  assert.match(api.ownerPressBlock(c, 'message'), /does not name the time you picked/);
+});
+
 test('the chosen lead\'s free times are green bands on the week, and only theirs', () => {
   ownerSetup('sent');
   const fri = thisFriday();

@@ -3143,6 +3143,19 @@
     rewriteTextForPick(c);
   }
 
+  function changeOwnerPick(c, field, value) {
+    var pick = ownerPick(c);
+    if (field === 'minutes') pick.minutes = Number(value);
+    else if (field) pick[field] = value;
+    // A changed pick is no longer the tapped server window.
+    if (pick.free && !freePickWindow(pick)) delete pick.free;
+    // A start the new day or window no longer allows is cleared, never kept.
+    if (pick.start && !pick.free && ownerStarts(ownerRulebook(c), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
+    delete state.approvalErrors[approvalKey(c, 'calendar')];
+    delete state.approvalErrors[approvalKey(c, 'message')];
+    rewriteTextForPick(c);
+  }
+
   // The text for a picked visit: the day and the arrival window, in words.
   function pickedVisitText(c, v) {
     var res = resource();
@@ -3151,21 +3164,17 @@
     var line = String(res.sender_label || '').replace(/\s+\d+$/, '').replace(/\s+(Ops|Sales)$/, '');
     var lane = /^SecureWorks /.test(line) ? line : res.lane === 'patio' ? 'SecureWorks Patios' : 'SecureWorks Fencing';
     var first = String(c.display_name || '').trim().split(/\s+/)[0] || 'there';
-    var s = hourFromIso(v.window_start_iso), e = hourFromIso(v.window_end_iso);
-    var sameHalf = (s >= 12) === (e >= 12);
     return 'Hi ' + first + ', it is ' + res.name + ' from ' + lane + '. I can come out to ' + (caseSuburb(c) || 'your place') +
-      ' on ' + longDate(v.window_start_iso) + ', arriving between ' + clockLabel(s, !sameHalf) + ' and ' + clockLabel(e) + ', to measure and quote. Does that suit?';
+      ' on ' + visitPhrase(v) + ', to measure and quote. Does that suit?';
   }
 
-  // Picking a visit rewrites the text's day and time to match. Words the owner
-  // typed himself are never overwritten: he is offered the rewrite instead.
-  function rewriteTextForPick(c) {
-    var v = ownerVisit(c);
-    if (!v) return;
-    var d = draftFor(c);
-    var next = pickedVisitText(c, v);
-    var typed = d.humanEdited && typeof d.text === 'string' && d.text !== d.autoText;
-    if (typed && d.text !== next) { d.rewrite = next; return; }
+  function visitPhrase(v) {
+    var s = hourFromIso(v.window_start_iso), e = hourFromIso(v.window_end_iso);
+    var sameHalf = (s >= 12) === (e >= 12);
+    return longDate(v.window_start_iso) + ', arriving between ' + clockLabel(s, !sameHalf) + ' and ' + clockLabel(e);
+  }
+
+  function applyPickedText(d, next) {
     d.text = next;
     d.autoText = next;
     d.rewrite = null;
@@ -3174,11 +3183,38 @@
     d.sender = resolveSender().number;
   }
 
+  // Picking a visit rewrites the text's day and time to match. Words the owner
+  // typed himself are never overwritten: he is offered the rewrite instead.
+  // A pick left unfinished drops the text the screen wrote for the last one.
+  function rewriteTextForPick(c) {
+    var key = draftKey(c);
+    var v = ownerVisit(c);
+    if (!v) {
+      var old = state.drafts[key];
+      if (old && old.autoText && old.text === old.autoText) delete state.drafts[key];
+      else if (old) old.rewrite = null;
+      return;
+    }
+    var d = draftFor(c);
+    var typed = d.humanEdited && typeof d.text === 'string' && d.text !== d.autoText;
+    if (typed && d.text.indexOf(visitPhrase(v)) >= 0) { d.rewrite = null; return; }
+    if (typed) { d.rewrite = pickedVisitText(c, v); return; }
+    applyPickedText(d, pickedVisitText(c, v));
+  }
+
   function pendingRewrite(c) {
     var d = c && state.drafts[draftKey(c)];
     var v = ownerVisit(c);
-    if (!d || !d.rewrite || !v || d.rewrite !== pickedVisitText(c, v) || d.text === d.rewrite) return null;
+    if (!d || !d.rewrite || !v || d.rewrite !== pickedVisitText(c, v) || String(d.text || '').indexOf(visitPhrase(v)) >= 0) return null;
     return d.rewrite;
+  }
+
+  // Words the screen once wrote for a pick that is now unfinished name a time
+  // nothing holds.
+  function unheldPickText(c) {
+    var key = draftKey(c);
+    var d = state.drafts[key];
+    return !!(d && d.autoText && d.humanEdited && state.ownerPickOpen[key] && !ownerVisit(c));
   }
 
   function ownerInput(c, kind) {
@@ -3218,6 +3254,8 @@
       if (!String(text || '').trim()) return 'Write the text first.';
       if (/[\u2013\u2014]/.test(text)) return 'Take out the long dash. Texts to clients never use one.';
       if (text.length > OWNER_TEXT_MAX) return 'The text is too long. Keep it to ' + OWNER_TEXT_MAX + ' characters.';
+      if (pendingRewrite(c)) return 'The text does not name the time you picked. Rewrite it for that time, or edit it to name that time.';
+      if (unheldPickText(c)) return 'The text was written for an earlier pick. Finish picking the day and time, or use the proposed text.';
       return '';
     }
     if (!ownerRulebook(c)) return 'The booking rules did not come with this list. Press Refresh.';
@@ -4197,12 +4235,7 @@
         var rc = selectedCase();
         if (!rc || rewriteBtn.disabled || composeBusy(rc) || !pendingRewrite(rc)) return;
         var rd = draftFor(rc);
-        rd.text = rd.rewrite;
-        rd.autoText = rd.rewrite;
-        rd.rewrite = null;
-        rd.humanEdited = true;
-        rd.revision = (rd.revision || 0) + 1;
-        rd.sender = resolveSender().number;
+        applyPickedText(rd, rd.rewrite);
         render();
         return;
       }
@@ -4289,18 +4322,7 @@
       }
       if (e.target.matches && e.target.matches('[data-owner-visit]')) {
         var pc = selectedCase();
-        if (!pc || pickerBusy(pc) || !ownerRulebook(pc)) return render();
-        var pick = ownerPick(pc);
-        var field = e.target.getAttribute('data-owner-visit');
-        if (field === 'minutes') pick.minutes = Number(e.target.value);
-        else if (field) pick[field] = e.target.value;
-        // A changed pick is no longer the tapped server window.
-        if (pick.free && !freePickWindow(pick)) delete pick.free;
-        // A start the new day or window no longer allows is cleared, never kept.
-        if (pick.start && !pick.free && ownerStarts(ownerRulebook(pc), pick.date, Number(pick.minutes)).indexOf(pick.start) < 0) pick.start = '';
-        delete state.approvalErrors[approvalKey(pc, 'calendar')];
-        delete state.approvalErrors[approvalKey(pc, 'message')];
-        rewriteTextForPick(pc);
+        if (pc && !pickerBusy(pc) && ownerRulebook(pc)) changeOwnerPick(pc, e.target.getAttribute('data-owner-visit'), e.target.value);
         render();
       }
     });
@@ -4433,6 +4455,7 @@
     ownerPick: ownerPick,
     ownerStarts: ownerStarts,
     ownerBlock: ownerBlock,
+    ownerPressBlock: ownerPressBlock,
     messagePath: messagePath,
     calendarPath: calendarPath,
     quietReload: quietReload,
@@ -4453,6 +4476,7 @@
     freeBands: freeBands,
     freeWindowAt: freeWindowAt,
     pickFreeWindow: pickFreeWindow,
+    changeOwnerPick: changeOwnerPick,
     pickedVisitText: pickedVisitText,
     renderCard: renderCard,
     timeRange: timeRange

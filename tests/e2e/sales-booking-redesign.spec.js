@@ -168,7 +168,28 @@ for (const vp of viewports) {
       await expect(page.locator('.visit .result')).toContainText(/Booked Friday \d+ \w+, arrive 12:30 to 1:30pm in GHL Stratco Fencing calendar and Marnin's Outlook/);
       const writes = await page.evaluate(() => window.fakeWrites);
       expect(writes.map((w) => w.action)).toEqual(['sales_booking_approval_write', 'sales_booking_approval_write', 'sales_booking_book']);
-      expect(writes[0].body.owner_input.visit).toEqual({ window_start_iso: friday + 'T12:30:00+08:00', window_end_iso: friday + 'T13:30:00+08:00', end_iso: friday + 'T14:30:00+08:00' });
+      expect(writes[0].body.owner_input.visit).toEqual({ window_start_iso: friday + 'T12:30:00+08:00', window_end_iso: friday + 'T13:30:00+08:00', end_iso: friday + 'T14:00:00+08:00' });
+    });
+
+    test('a tap on a free time picks that window, rewrites the text, and the server checks it', async ({ page }) => {
+      await open(page);
+      await page.evaluate(() => { window.fixtureActionMode = 'sent'; });
+      await choose(page, 'Kerry P');
+      const fri = await page.evaluate(() => SalesBooking.addDays(SalesBooking.state.data.week_start, 4));
+      const band = page.locator('.bk-week [data-week-day="4"] .ev-free');
+      await expect(band).toHaveCount(1);
+      await expect(band).toContainText('Free, arrive from 12:15pm to 1:00pm');
+      // A real tap near the top of the band picks its first window.
+      await band.click({ position: { x: 12, y: 3 } });
+      await expect(band.locator('.ev-freepick')).toHaveText('Picked: arrive 12:15 to 1:15pm');
+      await expect(page.locator('#bk-draft')).toHaveValue(/on Friday \d+ \w+, arriving between 12:15 and 1:15pm, to measure and quote/);
+      await expect(page.locator('.compose .edited')).toHaveText('Rewritten for the time you picked. Your approval will cover these exact words.');
+      await expect(page.locator('.visit .when').first()).toContainText('arrive 12:15 to 1:15pm');
+      await page.getByRole('button', { name: 'Book it' }).click();
+      await expect(page.locator('[data-owner-preview="calendar"] .oc-head')).toContainText('Checked.');
+      const writes = await page.evaluate(() => window.fakeWrites);
+      expect(writes[0].body.dry_run).toBe(true);
+      expect(writes[0].body.owner_input.visit).toEqual({ window_start_iso: fri + 'T12:15:00+08:00', window_end_iso: fri + 'T13:15:00+08:00', end_iso: fri + 'T13:45:00+08:00' });
     });
 
     test('a server refusal on a picked time is one plain sentence and nothing is booked', async ({ page }) => {

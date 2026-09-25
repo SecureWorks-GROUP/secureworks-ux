@@ -292,7 +292,14 @@
 #salesBookingRoot .ev-place{color:var(--ink-2)}
 #salesBookingRoot .ev.is-proposal.is-clash{background:var(--bad-wash);border-color:var(--bad)}
 #salesBookingRoot .ev.is-proposal.is-clash .ev-chip{background:var(--bad)}
+#salesBookingRoot .ev-free{z-index:4;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:1px 0;padding:4px 7px;border:1px solid #BFDCCB;border-radius:7px;background:rgba(233,243,238,.92);color:var(--ok);font-size:11.5px;font-weight:600;text-align:left;cursor:pointer}
+#salesBookingRoot .ev-free:hover:not(:disabled){background:#DDEEE4;border-color:#9FCBB2}
+#salesBookingRoot .ev-free.is-on{border-color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+#salesBookingRoot .ev-freepick{padding:1px 6px;border-radius:4px;background:var(--ok);color:#fff;font-size:11px}
 #salesBookingRoot .ev.is-sel{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--accent);z-index:3}
+/* Free bands (z 4) sit over the chosen lead's own proposal, which the pick
+   replaces, and under other leads' proposals, which must stay readable. */
+#salesBookingRoot .ev.is-proposal:not(.is-sel){z-index:5}
 #salesBookingRoot .src{display:inline-flex;align-items:center;padding:0 6px;height:17px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.02em;flex:none}
 #salesBookingRoot .src-ghl{background:var(--brand);color:#fff}
 #salesBookingRoot .src-outlook{background:var(--surface);color:var(--brand);border:1px solid var(--brand-2)}

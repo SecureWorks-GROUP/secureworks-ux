@@ -171,6 +171,27 @@ for (const vp of viewports) {
       expect(writes[0].body.owner_input.visit).toEqual({ window_start_iso: friday + 'T12:30:00+08:00', window_end_iso: friday + 'T13:30:00+08:00', end_iso: friday + 'T14:00:00+08:00' });
     });
 
+    test('free times from the live read paint on every day with each day\'s state', async ({ page }) => {
+      await open(page);
+      await expect(page.locator('.bk-week .liveline')).toHaveText("Read live from GHL: 1 booking in GHL, 2 entries in Marnin's Outlook, 1 block of time off in GHL, all counted as busy. Free times allow 30 minutes on site plus travel between visits.");
+      await expect(page.locator('.bk-week .ft-note summary')).toHaveText('2 Outlook entries are not confirmed in GHL. They still count as busy here.');
+      const fri = page.locator('.bk-week [data-week-day="4"]');
+      if (vp.name === 'phone') {
+        await page.locator('[data-booking-day="4"]').click();
+        await expect(page.locator('.bk-week .dayname .wkstate')).toHaveText('Open, 2 of 6 booked');
+      } else {
+        await expect(page.locator('.bk-week .wkday').nth(4).locator('.wkstate')).toHaveText('Open · 2 of 6');
+        await expect(page.locator('.bk-week .wkday').nth(1).locator('.wkstate')).toHaveText('Open · 1 of 6');
+      }
+      // Nobody chosen: the person's own free times, to read.
+      await expect(fri.locator('.ev-free.is-static')).toHaveText('Free, arrive from 12:15pm to 1:30pm');
+      await expect(page.locator('.bk-week .ev.is-busy', { hasText: 'Blocked off in GHL: Admin' })).toHaveCount(1);
+      // Choosing a lead swaps to their own times, which can be tapped.
+      await choose(page, 'Kerry P');
+      await expect(fri.locator('.ev-free.is-static')).toHaveCount(0);
+      await expect(fri.locator('button.ev-free')).toHaveText('Free, arrive from 12:15pm to 1:00pm');
+    });
+
     test('a tap on a free time picks that window, rewrites the text, and the server checks it', async ({ page }) => {
       await open(page);
       await page.evaluate(() => { window.fixtureActionMode = 'sent'; });

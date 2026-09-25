@@ -266,6 +266,16 @@
 #salesBookingRoot .wkday b{font-size:20px;line-height:1.2;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
 #salesBookingRoot .wkday.is-off b{color:#8B979E;font-weight:500}
 #salesBookingRoot .wkday.is-today,#salesBookingRoot .wkday.is-today b{color:var(--accent-ink)}
+#salesBookingRoot .wkstate{font-style:normal;font-size:11px;font-weight:600;color:var(--muted);margin-top:2px}
+#salesBookingRoot .wkstate.is-open{color:var(--ok)}
+#salesBookingRoot .wkstate.is-full,#salesBookingRoot .wkstate.is-already_booked{color:var(--accent-ink)}
+#salesBookingRoot .dayname .wkstate{margin-left:8px;font-size:13px}
+#salesBookingRoot .liveline{margin-top:6px}
+#salesBookingRoot .ft-warn{font-size:13px;color:var(--accent-ink)}
+#salesBookingRoot .ft-note{font-size:13px;color:var(--ink-2)}
+#salesBookingRoot .ft-note summary{cursor:pointer;color:var(--accent-ink);font-weight:600}
+#salesBookingRoot .ft-note p{margin-top:6px}
+#salesBookingRoot .ev-free.is-static{cursor:default;background:rgba(233,243,238,.7);border-style:dashed;z-index:1}
 #salesBookingRoot .wkcol{grid-row:2 / -1;display:grid;grid-template-rows:subgrid;column-gap:3px;position:relative}
 #salesBookingRoot .hourline{grid-column:1 / -1;border-top:1px solid var(--line-2);z-index:0}
 #salesBookingRoot .hour{grid-column:1;position:relative;z-index:1}

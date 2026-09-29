@@ -1,0 +1,38 @@
+# Replaces pr-check.yml and playwright-e2e.yml. Optional masked variables:
+# E2E_TRADE_INSTALLER_EMAIL, E2E_TRADE_INSTALLER_PASSWORD, E2E_TRADE_ALLOCATOR_EMAIL, E2E_TRADE_ALLOCATOR_PASSWORD
+sanity-check:
+  image: node:22
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+  variables: { GIT_DEPTH: "0" }
+  script:
+    - apt-get update -qq && apt-get install -y -qq tidy >/dev/null
+    - bash scripts/check-ops-api-boundary.sh
+    - BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - |
+      for f in $(git diff --name-only --diff-filter=ACM "$BASE" HEAD -- '*.html'); do
+        rc=0; tidy -q --show-warnings no "$f" >/dev/null 2>&1 || rc=$?
+        [ "$rc" -lt 2 ] || { echo "$f has HTML syntax errors"; exit 1; }
+      done
+    - for f in $(git diff --name-only --diff-filter=ACM "$BASE" HEAD -- '*.js'); do node --check "$f"; done
+    - node scripts/test-makesafe-trade-v5.js
+    - node scripts/test-trade-makesafe-feed-truth.js
+    - node scripts/test-fencing-manager-visibility.js
+    - node scripts/test-fencing-board-ghost-rows.js
+    - node scripts/test-trade-wo-labour-lines.js
+    - node scripts/test-trade-scope-media.js
+    - node scripts/test-trade-invoice-pdf-flow.js
+
+trade-e2e:
+  image: mcr.microsoft.com/playwright:v1.61.1-noble
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+  timeout: 15 minutes
+  variables: { CI: "true" }
+  script:
+    - npm ci
+    - npm run test:e2e
+  artifacts:
+    when: on_failure
+    expire_in: 14 days
+    paths: [test-results/, playwright-report/]

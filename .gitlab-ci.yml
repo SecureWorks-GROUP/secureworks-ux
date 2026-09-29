@@ -24,7 +24,7 @@ sanity-check:
     - node scripts/test-trade-invoice-pdf-flow.js
 
 trade-e2e:
-  image: mcr.microsoft.com/playwright:v1.55.0-noble
+  image: mcr.microsoft.com/playwright:v1.61.1-noble
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
   timeout: 15 minutes

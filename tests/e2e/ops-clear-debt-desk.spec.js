@@ -14,7 +14,8 @@
 //  - Outcome buttons and the promise box post debt_log_outcome; a promise needs $ and date.
 //    Only a call or Jan visit card logs its schedule_step; a text card and the Debt book payer
 //    record log none, so an outcome never marks an unsent text as done.
-//  - Deposits leave the morning list's not_chased invoices out of the total, shown apart.
+//  - Deposits leave the morning list's not_chased invoices out of the total, shown apart; without
+//    the morning list the tab says they cannot be set apart and shows no 60-day pill.
 //  - An undeployed action is a plain "not live yet", never a guessed number.
 //  - The Today overdue card opens Clear Debt.
 // Screenshots: CLEAR_DEBT_EVIDENCE_DIR=docs/evidence/<folder> npx playwright test tests/e2e/ops-clear-debt-desk.spec.js
@@ -251,6 +252,8 @@ test('Promises, Jan and Deposits tabs', async ({ page }) => {
   await expect(apart).toContainText('Deposit invoice made late to match a bank transfer already received');
   await expect(apart.locator('.cd-pill')).toHaveCount(0);
   await expect(page.locator('[data-cdd-tab="deposits"] em')).toHaveText('3');
+  await expect(page.locator('#cddDepositsUnsorted')).toHaveCount(0);
+  await expect(page.locator('#cddDeposits .cd-pill')).toHaveCount(1);
   await shotDesk(page, '05-deposits.png');
 });
 
@@ -285,6 +288,17 @@ test('before the backend steps deploy: plain "not live yet", no guessed number, 
   await page.locator('.cd-row', { hasText: 'Harper Nguyen' }).click();
   await page.locator('#cd-rec').getByRole('button', { name: 'Spoke' }).click();
   await expect(page.locator('#cd-rec .cdd-out [data-cdd-said]')).toHaveText('Outcome logging is not live yet. Nothing was saved; use Add note for now.');
+});
+
+test('Deposits without the morning list: says not-chased invoices cannot be set apart, and shows no 60-day pill', async ({ page }) => {
+  await openDesk(page, { drop: ['debt_morning_list'] });
+  await page.locator('[data-cdd-tab="deposits"]').click();
+  await expect(page.locator('#cddDepositsUnsorted')).toContainText('cannot be set apart yet');
+  await expect(page.locator('#cddDepositsUnsorted')).toContainText('This total may include them');
+  await expect(page.locator('#cddDeposits tbody tr')).toHaveCount(4);
+  await expect(page.locator('#cddDeposits')).toContainText('Eli Moreau');
+  await expect(page.locator('#cddDeposits .cd-pill')).toHaveCount(0);
+  await expect(page.locator('#cddDepositsApart')).toHaveCount(0);
 });
 
 test('phone width keeps the header and list readable', async ({ page }) => {

@@ -533,12 +533,13 @@ function cddJanHtml() {
 function cddDepositsHtml() {
   var C = ClearDebtDeskCore;
   if (!CDD.book) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Reading deposits from Xero…</div>' : '<div style="margin-top:16px">' + cddFail('The live Xero read (debt_book)', CDD.bookErr) + '</div>';
-  var dep = C.depositsFromBook(CDD.book.invoices, cddToday(), CDD.morning && CDD.morning.not_chased), rows = dep.rows;
+  var dep = C.depositsFromBook(CDD.book.invoices, cddToday(), CDD.morning && CDD.morning.not_chased), rows = dep.rows, known = !!CDD.morning;
   var sum = rows.reduce(function (a, r) { return a + Math.round(Number(r.amount_due || 0) * 100); }, 0) / 100;
   var h = '<div class="cdd-bar"><span class="t" id="cddDepositsTotal">Unpaid deposits and before-work invoices: <b>' + C.money(sum) + '</b> on ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '. Not debt.</span></div>';
+  if (!known) h += '<div class="cdd-held" id="cddDepositsUnsorted" style="color:#B8741C">The morning list is not read, so the invoices it never chases (late-made deposits, duplicates, leftover cents) cannot be set apart yet. This total may include them, and the 60-day marks are hidden until it is read.</div>';
   h += rows.length ? '<table class="cdd-tbl" id="cddDeposits"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Invoiced</th><th class="r">Days</th><th>Why it is not debt</th></tr></thead><tbody>' + rows.map(function (r) {
     var d = r.days_since_invoice;
-    return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(cddDateWords(r.invoice_date)) + '</td><td class="r">' + (d === null ? '–' : d >= 60 ? '<span class="cd-pill w">' + d + '</span>' : d) + '</td><td>' + cddEsc(r.reason || '') + '</td></tr>';
+    return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(cddDateWords(r.invoice_date)) + '</td><td class="r">' + (d === null ? '–' : d >= 60 && known ? '<span class="cd-pill w">' + d + '</span>' : d) + '</td><td>' + cddEsc(r.reason || '') + '</td></tr>';
   }).join('') + '</tbody></table>' : cddPend('No unpaid deposits.', '');
   if (dep.apart.length) h += '<div class="cdd-sec">Never chased, left out of the total</div><table class="cdd-tbl" id="cddDepositsApart"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Why it is not chased</th></tr></thead><tbody>' + dep.apart.map(function (r) {
     return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(r.not_chased_reason) + '</td></tr>';

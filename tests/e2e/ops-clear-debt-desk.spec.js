@@ -226,6 +226,7 @@ test('step 2 as built: no drafts yet is said plainly, and an unstable Xero read 
   await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' })).toContainText('no drafts written yet');
   await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' }).locator('.v')).toHaveText('0');
   await expect(card(page, 'Harper Nguyen')).toContainText('No draft for this step yet.');
+  for (const name of ['Mia Laurent', 'AJ Building & Restoration']) await expect(card(page, name)).not.toContainText('No draft for this step yet.');
   await expect(page.locator('#cddReadWarning')).toContainText('Xero changed during the read, retrying next run');
 });
 
@@ -274,6 +275,18 @@ test('Jan tab lists held Jan-step payers below, with the reason and no draft', a
   await expect(held.locator('textarea')).toHaveCount(0);
   await expect(held.locator('input[type=checkbox]')).toHaveCount(0);
   await expect(page.locator('[data-cdd-tab="jan"] em')).toHaveText('1');
+});
+
+test('Jan tab and its count include a broken promise that lands on the Jan visit', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const nina = fixture.debt_morning_list.items.find((i) => i.payer_name === 'Nina Hollis');
+  fixture.debt_morning_list.items.push(Object.assign({}, nina, { id: nina.id.replace(':jan:jan_visit', ':broken_promise:jan_visit'), payer_key: 'broken-jan', payer_name: 'Broken Jan Payer', group: 'broken_promise', step: 'jan_visit',
+    step_label: 'Promise broken: Jan visits', promise: { amount: 500, date: nina.invoices[0].due_date, status: 'broken' } }));
+  await openDesk(page, { fixture });
+  await page.locator('[data-cdd-tab="jan"]').click();
+  const order = await page.locator('[data-cdd-item] .cdd-nm').allTextContents();
+  expect(order).toEqual(['Broken Jan Payer', 'Nina Hollis']);
+  await expect(page.locator('[data-cdd-tab="jan"] em')).toHaveText('2');
 });
 
 test('before the backend steps deploy: plain "not live yet", no guessed number, our copy still shown', async ({ page }) => {

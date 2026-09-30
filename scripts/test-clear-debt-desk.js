@@ -108,7 +108,7 @@ const items = [
   { id: 'b1', group: 'broken_promise', amount: 50, days_overdue: 20 },
   { id: 't2', group: 'text', amount: 400, days_overdue: 5, draft: { id: 'd3', status: 'pending' } },
   { id: 's1', group: 'statement', amount: 5000, days_overdue: 20 },
-  { id: 'j1', group: 'jan', amount: 10, days_overdue: 8 },
+  { id: 'j1', group: 'jan', step: 'jan_visit', amount: 10, days_overdue: 8 },
   { id: 'p1', group: 'deposit_reminder', amount: 800, days_overdue: 0, draft: { id: 'd4', status: 'skipped' } },
   { id: 't3', group: 'text', amount: 900, days_overdue: 1 },
 ];
@@ -128,8 +128,10 @@ check('held payers are listed apart, by amount then age', () => {
   assert.deepStrictEqual(C.heldItems(withHold).map((i) => i.id), ['x1', 'h1', 'x2', 'x3']);
 });
 check('waiting for Shaun counts pending drafts only', () => { assert.strictEqual(C.waitingCount(items), 2); });
-check('Jan tab takes the Jan group only; held payers whose held_step is the Jan visit are listed apart', () => {
+check('Jan tab takes every chased item at the Jan visit step; held payers whose held_step is the Jan visit are listed apart', () => {
   assert.deepStrictEqual(C.janFromMorning(withHold).map((i) => i.id), ['j1']);
+  const brokenJan = { id: 'bj', group: 'broken_promise', step: 'jan_visit', amount: 5, days_overdue: 10 };
+  assert.deepStrictEqual(C.janFromMorning(withHold.concat([brokenJan])).map((i) => i.id), ['bj', 'j1']);
   assert.deepStrictEqual(C.janHeldFromMorning(withHold).map((i) => i.id), ['x2']);
 });
 

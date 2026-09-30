@@ -135,7 +135,7 @@ var ClearDebtDeskCore = (function () {
   function chaseItems(items) { return (items || []).filter(function (i) { return !isHeld(i); }); }
   function heldItems(items) { return (items || []).filter(isHeld).sort(byAmountThenAge); }
   function waitingCount(items) { return chaseItems(items).filter(function (i) { return i.draft && i.draft.status === 'pending'; }).length; }
-  function janFromMorning(items) { return sortMorning(chaseItems(items).filter(function (i) { return i.group === 'jan'; })); }
+  function janFromMorning(items) { return sortMorning(chaseItems(items).filter(function (i) { return i.step === 'jan_visit'; })); }
   function janHeldFromMorning(items) { return heldItems(items).filter(function (i) { return i.held_step === 'jan_visit'; }); }
   function outcomeScheduleStep(step) { return OUTCOME_STEPS.indexOf(step) >= 0 ? step : null; }
 
@@ -189,7 +189,7 @@ var ClearDebtDeskCore = (function () {
   }
   function isNotDeployed(e) { return !!e && (/unknown action/i.test(String(e.message || '')) || e.status === 404); }
 
-  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
+  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, OUTCOME_STEPS: OUTCOME_STEPS, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
 })();
 // </clear-debt-desk-core>
 
@@ -399,7 +399,7 @@ function cddItemHtml(it) {
   if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + (it.promise.amount == null ? 'payment' : C.money(it.promise.amount)) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
   if (it.last_outcome) h += '<div class="cdd-foot">Last outcome: ' + cddEsc(cddOutcomeLabel(it.last_outcome.code)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
   if (d && !held) h += cddDraftHtml(d);
-  else if (!held && it.step !== 'call' && it.step !== 'jan_visit') h += '<div class="cdd-foot">No draft for this step yet.</div>';
+  else if (!held && C.OUTCOME_STEPS.indexOf(it.step) < 0) h += '<div class="cdd-foot">No draft for this step yet.</div>';
   h += cddOutcomeHtml({ payer_key: it.payer_key, ids: (it.invoices || []).map(function (x) { return x.xero_invoice_id; }).filter(Boolean), step: it.step, key: 'i-' + it.id });
   return h + '</div>';
 }

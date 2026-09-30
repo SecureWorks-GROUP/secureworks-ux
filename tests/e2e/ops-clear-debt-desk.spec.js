@@ -7,9 +7,10 @@
 //  - OVERDUE is the big number and includes held invoices, so it matches Xero; check first
 //    and fix first are their own figures beside it; "Texts waiting for Marnin" is gone.
 //  - Tabs: Today | Debt book | Promises | Jan | Deposits, Today first and the default.
-//  - Today leaves held payers off, orders broken promises, Jan, calls, texts, statements,
-//    deposit reminders, and every send button is disabled, reads "Sending off until Shaun
-//    says go" and carries no handler.
+//  - Today orders broken promises, Jan, calls, texts, statements, deposit reminders, then
+//    held payers in "On hold, no draft" with their reason and nothing to draft or tick; every
+//    send button (desk drafts and the Debt book payer record) is disabled, reads "Sending off
+//    until Shaun says go" and carries no handler.
 //  - Outcome buttons and the promise box post debt_log_outcome; a promise needs $ and date.
 //  - An undeployed action is a plain "not live yet", never a guessed number.
 //  - The Today overdue card opens Clear Debt.
@@ -103,12 +104,18 @@ test('tabs are Today, Debt book, Promises, Jan, Deposits with Today first and op
   await expect(page.locator('[data-cdd-tab="today"]')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Today: held payers left off, groups in chase order, send is off everywhere', async ({ page }) => {
+test('Today: groups in chase order, held payers last with no draft, send is off everywhere', async ({ page }) => {
   await openDesk(page);
   const groups = await page.locator('[data-cdd-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-group')));
-  expect(groups).toEqual(['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder']);
-  await expect(page.locator('[data-cdd-item="m-ruby"]')).toHaveCount(0);
-  await expect(page.locator('#clearDebtCards')).toContainText('1 payer is on hold');
+  expect(groups).toEqual(['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder', 'hold']);
+  await expect(page.locator('[data-cdd-group="hold"]')).toContainText('On hold, no draft');
+  const ruby = page.locator('[data-cdd-item="m-ruby"]');
+  await expect(ruby).toContainText('Fix first.');
+  await expect(ruby).toContainText('Job in rectification: gate latch to refit');
+  await expect(ruby.locator('textarea')).toHaveCount(0);
+  await expect(ruby.locator('input[type=checkbox]')).toHaveCount(0);
+  const order = await page.locator('[data-cdd-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-item')));
+  expect(order[order.length - 1]).toBe('m-ruby');
   const sends = page.locator('button.send');
   expect(await sends.count()).toBeGreaterThan(0);
   for (const b of await sends.all()) {
@@ -162,6 +169,15 @@ test('Debt book tab: live split by payer and age, the bar from our copy, and the
   await page.locator('.cd-row', { hasText: 'Harper Nguyen' }).click();
   await expect(page.locator('#cd-rec .cdd-out')).toBeVisible();
   await expect(page.locator('#cd-rec .cdd-out')).toContainText('Says paid');
+  await expect(page.locator('#cd-rec').getByRole('button', { name: 'Send text' })).toHaveCount(0);
+  await expect(page.locator('#cd-rec').getByRole('button', { name: 'Send invoice email' })).toHaveCount(0);
+  const off = page.locator('#cd-rec .cd-reach button', { hasText: 'Sending off until Shaun says go' });
+  await expect(off).toHaveCount(2);
+  for (const b of await off.all()) {
+    await expect(b).toBeDisabled();
+    expect(await b.getAttribute('onclick')).toBeNull();
+  }
+  await expect(page.locator('#cd-rec').getByRole('button', { name: 'Add note' })).toBeEnabled();
 });
 
 test('Promises, Jan and Deposits tabs', async ({ page }) => {
@@ -173,11 +189,30 @@ test('Promises, Jan and Deposits tabs', async ({ page }) => {
   await page.locator('[data-cdd-tab="jan"]').click();
   await expect(page.locator('[data-cdd-item]')).toHaveCount(1);
   await expect(page.locator('[data-cdd-item="m-nina"]')).toBeVisible();
+  await expect(page.locator('[data-cdd-group="hold"]')).toHaveCount(0);
   await shotDesk(page, '04-jan.png');
   await page.locator('[data-cdd-tab="deposits"]').click();
   await expect(page.locator('#clearDebtCards .cdd-tbl tbody tr')).toHaveCount(3);
   await expect(page.locator('#clearDebtCards')).toContainText('Not debt');
   await shotDesk(page, '05-deposits.png');
+});
+
+test('Jan tab lists held Jan-step payers below, with the reason and no draft', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const nina = fixture.debt_morning_list.items.find((i) => i.id === 'm-nina');
+  fixture.debt_morning_list.items.push(Object.assign({}, nina, { id: 'm-nina-held', payer_name: 'Held Jan Payer', hold: 'check_first', hold_reason: 'Says paid, checking the bank',
+    draft: { id: 'draft-nina-held', channel: 'sms', status: 'pending', text: 'Hi' } }));
+  await openDesk(page, { fixture });
+  await page.locator('[data-cdd-tab="jan"]').click();
+  const order = await page.locator('[data-cdd-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-item')));
+  expect(order).toEqual(['m-nina', 'm-nina-held']);
+  const held = page.locator('[data-cdd-item="m-nina-held"]');
+  await expect(page.locator('[data-cdd-group="hold"]')).toContainText('On hold, no draft');
+  await expect(held).toContainText('Check first.');
+  await expect(held).toContainText('Says paid, checking the bank');
+  await expect(held.locator('textarea')).toHaveCount(0);
+  await expect(held.locator('input[type=checkbox]')).toHaveCount(0);
+  await expect(page.locator('[data-cdd-tab="jan"] em')).toHaveText('1');
 });
 
 test('before the backend steps deploy: plain "not live yet", no guessed number, our copy still shown', async ({ page }) => {

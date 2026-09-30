@@ -8,10 +8,11 @@ Ops > Financials > Clear Debt. `modules/ops-clear-debt-desk.js` owns the header,
 
 **Tabs.** Today (first, the default) | Debt book | Promises | Jan | Deposits. The last tab picked is kept per browser in `localStorage.sw_cd_tab`.
 
-- **Today** is the morning list in this order: broken promises, Jan visits, calls, texts, builder statements, deposit reminders. Inside a group, bigger amounts come first, then older. Held invoices (check first, fix first) are left off, even if the backend sends them; one line says how many. Each draft can be edited, approved or skipped, singly or as a ticked batch. The send button is always disabled and reads **Sending off until Shaun says go**. The screen has no send path at all; sending switches on in a later PR, only after the old automatic texts are off and Shaun says start sending.
+- **Today** is the morning list in this order: broken promises, Jan visits, calls, texts, builder statements, deposit reminders. Inside a group, bigger amounts come first, then older. Held payers (check first, fix first) come last in their own **On hold, no draft** section with their reason: never drafted (even if the backend sends a draft), never tickable, never counted in waiting for Shaun, never approved. Each chaseable draft can be edited, approved or skipped, singly or as a ticked batch. Ticks and edits are cleared whenever the list is read again, and only a draft still pending on the list on screen can be approved or skipped.
+- **Sending is off everywhere on this screen** until the old automatic money texts are switched off and Shaun says start sending. The desk drafts' send button and the Debt book payer record's Send text and Send invoice email buttons are all disabled, carry no handler and read **Sending off until Shaun says go**; the payer record's send functions refuse too. One switch, `ClearDebtDeskCore.SENDING_ON`, turns them on in a later reviewed PR. Add note and the outcome buttons still work.
 - **Debt book** holds the existing bar and payer groups (our copy, `list_debt_picture`) and, when the live book is read, the debt split by payer and by age.
 - **Promises** lists promises to pay: broken first, then open, then kept.
-- **Jan** lists the payers at the day-7 Jan visit step.
+- **Jan** lists the payers at the day-7 Jan visit step, then any held Jan-step payers below, with their reason and no draft.
 - **Deposits** lists unpaid deposits and other before-work invoices from the live book. They are not debt.
 
 **Payer card.** Every Today item and the Debt book payer record carry the outcome buttons (No answer, Spoke, Promised, Disputed, Says paid) and a promise box ($ amount and a date). Promised needs both.

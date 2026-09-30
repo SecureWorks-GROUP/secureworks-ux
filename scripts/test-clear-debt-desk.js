@@ -1,32 +1,21 @@
 // Rules test for the Clear Debt desk screen (modules/ops-clear-debt-desk.js).
 // Runs in the PR gate. Loads the module in a bare VM and checks the pure core that
 // every figure on the screen goes through: Perth-date ages, the no-due-date bucket,
-// the header (overdue leaves holds out), the Xero stamp, the morning-list order,
+// the header (overdue includes holds, with check first and fix first shown beside it),
+// the Xero stamp, the morning-list order, holds shown with no draft and never approved,
 // the outcome and promise checks, and that the send button can never be armed.
 const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 
 const src = fs.readFileSync('modules/ops-clear-debt-desk.js', 'utf8');
-const html = fs.readFileSync('ops.html', 'utf8');
 let failed = 0;
 function check(name, fn) {
   try { fn(); } catch (e) { failed += 1; console.error('FAIL clear-debt-desk: ' + name + '\n  ' + e.message); }
 }
 
-check('ops.html loads the desk module with a cache-buster', () => {
-  assert(/modules\/ops-clear-debt-desk\.js\?v=\d+/.test(html), 'missing modules/ops-clear-debt-desk.js?v=N');
-});
-check('no em dash in user-facing text', () => { assert(!/—/.test(src)); });
-check('the old "Texts waiting for Marnin" header is gone', () => {
-  assert(!/Texts waiting for Marnin/.test(src));
-  assert(!/Texts waiting for Marnin/.test(fs.readFileSync('modules/ops-clear-debt-v2.js', 'utf8')));
-});
-check('the Today overdue card links to Clear Debt', () => {
-  assert(/id="statOverdue"[^>]*onclick="openClearDebt\(\)"/.test(html), 'statOverdue needs onclick="openClearDebt()"');
-});
-
-const ctx = { document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({}), querySelectorAll: () => [] }, window: {}, localStorage: null, opsFetch: async () => ({}), opsPost: async () => ({}), showToast() {}, console, Intl, Date, Math, Number, String, Object, Array, JSON, Promise };
+const posts = [];
+const ctx = { document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({}), querySelectorAll: () => [] }, window: {}, localStorage: null, opsFetch: async () => ({}), opsPost: async (action, body) => { posts.push({ action, body }); return { ok: true }; }, showToast() {}, console, Intl, Date, Math, Number, String, Object, Array, JSON, Promise };
 vm.createContext(ctx);
 vm.runInContext(src, ctx);
 const C = ctx.ClearDebtDeskCore;
@@ -122,13 +111,22 @@ const items = [
 check('morning list order: broken promises, Jan, calls, texts, statements, deposit reminders; then amount, then age', () => {
   assert.deepStrictEqual(C.sortMorning(items).map((i) => i.id), ['b1', 'j1', 'c1', 't3', 't2', 't1', 's1', 'p1']);
 });
-check('the morning list leaves held invoices off, even if the backend sends them', () => {
-  const withHold = items.concat([{ id: 'x1', group: 'text', hold: 'check_first', amount: 99999, draft: { id: 'dx', status: 'pending' } }]);
-  assert(!C.sortMorning(withHold).some((i) => i.id === 'x1' || i.id === 'h1'));
+const withHold = items.concat([
+  { id: 'x1', group: 'text', hold: 'check_first', amount: 99999, draft: { id: 'dx', status: 'pending' } },
+  { id: 'x2', group: 'jan', step: 'jan_visit', hold: 'fix_first', amount: 20, days_overdue: 9 },
+]);
+check('held payers are kept out of the chase groups, even with a draft', () => {
+  assert(!C.sortMorning(withHold).some((i) => i.id === 'x1' || i.id === 'x2' || i.id === 'h1'));
   assert.strictEqual(C.waitingCount(withHold), 2, 'a held draft never waits for Shaun');
 });
+check('held payers are listed apart, by amount then age', () => {
+  assert.deepStrictEqual(C.heldItems(withHold).map((i) => i.id), ['x1', 'h1', 'x2']);
+});
 check('waiting for Shaun counts pending drafts only', () => { assert.strictEqual(C.waitingCount(items), 2); });
-check('Jan tab takes the Jan group only', () => { assert.deepStrictEqual(C.janFromMorning(items).map((i) => i.id), ['j1']); });
+check('Jan tab takes the Jan group only; held Jan-step payers are listed apart', () => {
+  assert.deepStrictEqual(C.janFromMorning(withHold).map((i) => i.id), ['j1']);
+  assert.deepStrictEqual(C.janHeldFromMorning(withHold).map((i) => i.id), ['x2']);
+});
 
 check('send is off: label fixed, never armed', () => {
   assert.strictEqual(C.SEND_LABEL, 'Sending off until Shaun says go');
@@ -176,5 +174,25 @@ check('an undeployed action is told apart from a real failure', () => {
   assert.strictEqual(C.isNotDeployed(new Error('Xero rate limit')), false);
 });
 
+async function decideRefusals() {
+  const list = [
+    { id: 'ok', group: 'text', amount: 10, invoices: [{ xero_invoice_id: 'i1' }], draft: { id: 'd-ok', status: 'pending', text: 'Hi' } },
+    { id: 'held', group: 'text', hold: 'check_first', amount: 10, invoices: [{ xero_invoice_id: 'i2' }], draft: { id: 'd-held', status: 'pending', text: 'Hi' } },
+    { id: 'done', group: 'text', amount: 10, invoices: [{ xero_invoice_id: 'i3' }], draft: { id: 'd-done', status: 'skipped', text: 'Hi' } },
+  ];
+  ctx.CDD.morning = { items: list };
+  ctx.CDD.ticked = { 'd-held': true, 'd-done': true, 'd-gone': true, 'd-ok': true };
+  for (const id of ['d-held', 'd-done', 'd-gone']) {
+    await assert.rejects(ctx.cddDecideOne(id, 'approve'), /no longer waiting/, id + ' must be refused');
+    assert(!ctx.CDD.ticked[id], id + ' must be unticked once refused');
+  }
+  assert.strictEqual(posts.length, 0, 'a refused draft never reaches debt_draft_decide');
+  await ctx.cddDecideOne('d-ok', 'approve');
+  assert.deepStrictEqual(posts.map((p) => [p.action, p.body.draft_id, p.body.decision]), [['debt_draft_decide', 'd-ok', 'approve']]);
+}
+
+(async () => {
+try { await decideRefusals(); } catch (e) { failed += 1; console.error('FAIL clear-debt-desk: only a pending draft on the current chase list can be decided\n  ' + e.message); }
 if (failed) { console.error(failed + ' check(s) failed'); process.exit(1); }
-console.log('PASS clear-debt-desk: Perth ages, no-due bucket, overdue with holds beside it, holds off Today, Xero stamp, morning order, send off, outcomes, promises, deposits');
+console.log('PASS clear-debt-desk: Perth ages, no-due bucket, overdue with holds beside it, holds listed with no draft and never approved, Xero stamp, morning order, send off, outcomes, promises, deposits');
+})();

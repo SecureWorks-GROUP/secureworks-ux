@@ -53,8 +53,9 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     item({ id: 'm-mlb', payer_key: uuid(110), payer_name: 'Major Loss Builders', payer: 'mlb', group: 'statement', step: 'statement', step_label: 'Monday statement', days_overdue: 18, invoices: ref('INV-9010') }),
     item({ id: 'm-ivy', payer_key: uuid(107), payer_name: 'Ivy Okafor', payer: 'client', group: 'deposit_reminder', step: 'deposit_reminder', step_label: 'One friendly deposit reminder', days_overdue: 63, invoices: ref('INV-9007'),
       draft: { id: 'draft-ivy', channel: 'sms', status: 'skipped', text: 'Hi Ivy, just checking in about your patio. The deposit invoice INV-9007 is still open; let us know if you would like to go ahead. Thanks, SecureWorks WA' } }),
-    // A held payer the backend might still send: the screen must leave it off Today.
-    item({ id: 'm-ruby', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit' }),
+    // A held payer the backend might still send with a draft: the screen shows it on hold, with no draft and nothing to tick.
+    item({ id: 'm-ruby', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit',
+      draft: { id: 'draft-ruby', channel: 'sms', status: 'pending', text: 'Hi Ruby, a friendly reminder that invoice INV-9005 is overdue. Thanks, SecureWorks WA' } }),
   ];
 
   const promises = [

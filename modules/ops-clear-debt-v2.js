@@ -5,6 +5,7 @@
 // Reads: ops-api list_debt_picture (classification rows), debt_context_coverage
 //   (picture flags), invoice_context (one record), debt_notes (thread).
 // Writes: debt_note, debt_proposal_mark, send_chase_sms (GHL text), send_invoice_email.
+// Both sends stay off until the desk's go switch (ClearDebtDeskCore.SENDING_ON) is on.
 // Never voids, never touches Xero, never tags GHL. Every field's origin is in the design page.
 // Since the debt desk (docs/clear-debt-desk.md) this module draws only the Debt book tab:
 // ops-clear-debt-desk.js owns the header, the tabs and loadClearDebt().
@@ -15,6 +16,8 @@ var CD = {
   seg: null, open: null, ctx: {}, notes: {}, loading: false,
   ACTIONS: { text: 'send_chase_sms', email: 'send_invoice_email', call: null, note: 'add_debt_note', mark: 'debt_proposal_mark' },
 };
+function cdSendingOn() { return typeof ClearDebtDeskCore !== 'undefined' && ClearDebtDeskCore.SENDING_ON === true; }
+function cdSendOffHtml() { return '<button class="cd-btn" type="button" disabled aria-disabled="true" title="Sending off until Shaun says go">Sending off until Shaun says go</button>'; }
 var CD_KINDS = [
   { key: 'chase',    label: 'Chase now',                  color: '#F15A29' },
   { key: 'due',      label: 'Not yet due',                color: '#8FA4B2' },
@@ -217,9 +220,12 @@ function cdRecordHtml(P, S, K, ctx, err) {
   var ghl = job && job.ghl_contact_id, phone = (job && job.client_phone) || '', email = (job && job.client_email) || '';
   var draft = lead.debt_proposal_status === 'pending' && lead.debt_proposal_kind === 'sms' ? lead.debt_proposal_text : '';
   var thread = (CD.notes[lead.xero_invoice_id] || []).map(function (n) { return '<div class="cd-note"><div class="who">' + cdEsc(cdWhen(n.at)) + ' · ' + cdEsc(n.who || n.source) + (n.tag ? ' <span class="tag">' + cdEsc(n.tag) + '</span>' : '') + '</div><div>' + cdEsc(n.text) + '</div></div>'; }).join('') || '<div class="cd-quiet">No notes yet.</div>';
+  var sendOn = cdSendingOn();
+  var textBtn = sendOn ? '<button class="cd-btn o" ' + (ghl ? '' : 'disabled title="No GHL contact on the job"') + ' onclick="cdSendText(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(ghl || '') + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.msg + 'Send text</button>' : cdSendOffHtml();
+  var emailBtn = sendOn ? '<button class="cd-btn" ' + (email && job ? '' : 'disabled title="No email on the job"') + ' onclick="cdSendEmail(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(email) + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.mail + 'Send invoice email</button>' : cdSendOffHtml();
   var reach = '<div class="cd-reach">' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.msg + 'Text</div><textarea id="cd-sms" rows="' + (draft ? 4 : 2) + '" placeholder="Write a text…">' + cdEsc(draft) + '</textarea><div class="cd-acts"><button class="cd-btn o" ' + (ghl ? '' : 'disabled title="No GHL contact on the job"') + ' onclick="cdSendText(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(ghl || '') + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.msg + 'Send text</button><span class="st">' + (draft ? 'Drafted by the desk. Sending is your approval.' : (ghl ? 'From 771 via GoHighLevel' : 'No GHL contact on the job')) + '</span></div></div>' +
-    '<div class="cd-rc"><div class="cd-k">' + CD_IC.mail + 'Email</div><textarea id="cd-email-subject" rows="1" placeholder="Subject (the invoice PDF is attached)"></textarea><div class="cd-acts"><button class="cd-btn" ' + (email && job ? '' : 'disabled title="No email on the job"') + ' onclick="cdSendEmail(\'' + lead.xero_invoice_id + '\',\'' + cdEsc(email) + '\',\'' + cdEsc(job && job.id || '') + '\')">' + CD_IC.mail + 'Send invoice email</button><span class="st">' + (email ? 'to ' + cdEsc(email) + ' by Outlook' : 'no email on the job') + '</span></div></div>' +
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.msg + 'Text</div><textarea id="cd-sms" rows="' + (draft ? 4 : 2) + '" placeholder="Write a text…">' + cdEsc(draft) + '</textarea><div class="cd-acts">' + textBtn + '<span class="st">' + (draft ? (sendOn ? 'Drafted by the desk. Sending is your approval.' : 'Drafted by the desk.') : (ghl ? 'From 771 via GoHighLevel' : 'No GHL contact on the job')) + '</span></div></div>' +
+    '<div class="cd-rc"><div class="cd-k">' + CD_IC.mail + 'Email</div><textarea id="cd-email-subject" rows="1" placeholder="Subject (the invoice PDF is attached)"></textarea><div class="cd-acts">' + emailBtn + '<span class="st">' + (email ? 'to ' + cdEsc(email) + ' by Outlook' : 'no email on the job') + '</span></div></div>' +
     '<div class="cd-rc"><div class="cd-k">' + CD_IC.phone + 'Call</div><div class="cd-tel">' + (phone ? '<a href="tel:' + cdEsc(phone) + '">' + cdEsc(phone) + '</a>' : '<span class="cd-quiet">no phone on the job</span>') + '</div><div class="cd-acts">' + (ghl ? '<a class="cd-btn l" target="_blank" rel="noopener" href="https://app.gohighlevel.com/v2/location/' + cdEsc(window.GHL_LOCATION_ID || '') + '/conversations/conversations/' + cdEsc(ghl) + '">' + CD_IC.phone + 'Open GHL conversation</a>' : '') + '</div><span class="cd-via">Click to call through GoHighLevel arrives with the CIO action.</span></div>' +
     '<div class="cd-rc"><div class="cd-k">' + CD_IC.note + 'Note</div><textarea id="cd-note" rows="2" placeholder="For whoever opens this next…"></textarea><div class="cd-tags" id="cd-tags">' + ['promised', 'call back', 'waiting on client', 'park until', 'propose void', 'dispute'].map(function (t) { return '<button onclick="cdTag(this)">' + t + '</button>'; }).join('') + '</div><div class="cd-acts"><button class="cd-btn" onclick="cdAddNote(\'' + lead.xero_invoice_id + '\')">' + CD_IC.note + 'Add note</button></div><div class="cd-nthread" id="cd-nthread">' + thread + '</div></div></div>';
   var invs = P.invoices.map(function (i) { return '<div class="r"><span><a class="cd-lnk" target="_blank" rel="noopener" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + cdEsc(i.xero_invoice_id) + '" onclick="event.stopPropagation()" title="Open in Xero">' + cdEsc(i.invoice_number) + '</a> ' + cdAge(cdDaysOf(i)) + ' <button class="cd-peek" onclick="event.stopPropagation();cdPreview(\'' + cdEsc(i.xero_invoice_id) + '\',this)">preview</button></span><span class="cd-num">' + cdMoney(i.amount_due) + '</span></div><div class="cd-prev" id="cd-prev-' + cdEsc(i.xero_invoice_id) + '" hidden></div>'; }).join('');
@@ -255,6 +261,7 @@ async function cdAddNote(xid) {
   try { var res = await opsPost(CD.ACTIONS.note, { xero_invoice_id: xid, note: note, tag: tagEl ? tagEl.textContent : null }); CD.notes[xid] = res.thread || []; ta.value = ''; showToast('Note added', 'success'); cdRender(); } catch (e) { showToast('Note failed: ' + e.message, 'warning'); }
 }
 async function cdSendText(xid, ghl, jobId) {
+  if (!cdSendingOn()) { showToast('Sending off until Shaun says go', 'warning'); return; }
   var ta = document.getElementById('cd-sms'), msg = ta && ta.value.trim(); if (!msg) { showToast('Write the text first', 'warning'); return; }
   if (/—/.test(msg)) { showToast('Remove the em dash before sending', 'warning'); return; }
   if (!confirm('Send this text from 771 now?\n\n' + msg)) return;
@@ -265,6 +272,7 @@ async function cdSendText(xid, ghl, jobId) {
   } catch (e) { showToast('Text failed: ' + e.message, 'warning'); }
 }
 async function cdSendEmail(xid, to, jobId) {
+  if (!cdSendingOn()) { showToast('Sending off until Shaun says go', 'warning'); return; }
   var subj = document.getElementById('cd-email-subject'), subject = subj && subj.value.trim();
   if (!confirm('Email the invoice PDF to ' + to + ' now?')) return;
   try { await opsPost(CD.ACTIONS.email, { xero_invoice_id: xid, to_email: to, job_id: jobId || null, subject_override: subject || undefined }); showToast('Invoice emailed', 'success'); await loadClearDebt(); } catch (e) { showToast('Email failed: ' + e.message, 'warning'); }

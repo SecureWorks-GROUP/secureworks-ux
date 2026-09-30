@@ -41,4 +41,14 @@ if (ctx.cdDaysOf({ due_date: '2026-10-01' }) !== 0) fail('the due date itself is
 if (!/no due date/.test(ctx.cdAge(null))) fail('no due date must say so, not "not due"');
 const total = Object.values(k).reduce((a, K) => a + K.amount, 0);
 if (Math.abs(total - 290) > 0.001) fail('totals must add up, got ' + total);
-console.log('PASS clear-debt-v2: module parses, mount correct, 9 kinds grouped, Perth ages, no-due bucket, sub-groups by type and blocker, payers keyed by contact id');
+(async () => {
+  const sent = [];
+  ctx.opsPost = async (action) => { sent.push(action); return {}; };
+  ctx.confirm = () => true;
+  ctx.document.getElementById = () => ({ value: 'Hi, a reminder about your invoice' });
+  ctx.ClearDebtDeskCore = { SENDING_ON: false };
+  await ctx.cdSendText('x', 'ghl', 'job');
+  await ctx.cdSendEmail('x', 'a@b.c', 'job');
+  if (sent.length) fail('payer record sends must refuse while sending is off, posted ' + sent.join(', '));
+  console.log('PASS clear-debt-v2: module parses, mount correct, 9 kinds grouped, Perth ages, no-due bucket, sub-groups by type and blocker, payers keyed by contact id, sends refuse while off');
+})();

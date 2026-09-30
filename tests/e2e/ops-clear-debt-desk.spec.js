@@ -27,7 +27,7 @@ const EVIDENCE_DIR = process.env.CLEAR_DEBT_EVIDENCE_DIR
 function shot(name) { fs.mkdirSync(EVIDENCE_DIR, { recursive: true }); return path.join(EVIDENCE_DIR, name); }
 // Evidence shots only: the page's own fixed chrome (top bar, Jarvis bar, SMS panel, toasts)
 // floats over an element screenshot, so hide everything fixed or sticky outside Clear Debt.
-async function shotDesk(page, name) {
+async function shotDesk(page, name, selector = '#subCleardebt') {
   await page.evaluate(() => {
     const desk = document.getElementById('subCleardebt');
     document.querySelectorAll('body *').forEach((el) => {
@@ -36,7 +36,7 @@ async function shotDesk(page, name) {
     });
     document.body.style.paddingTop = '0';
   });
-  await page.locator('#subCleardebt').screenshot({ path: shot(name) });
+  await page.locator(selector).screenshot({ path: shot(name) });
 }
 
 test.use({ viewport: { width: 1360, height: 1000 } });
@@ -178,6 +178,7 @@ test('Debt book tab: live split by payer and age, the bar from our copy, and the
     expect(await b.getAttribute('onclick')).toBeNull();
   }
   await expect(page.locator('#cd-rec').getByRole('button', { name: 'Add note' })).toBeEnabled();
+  await shotDesk(page, '08-payer-record-send-off.png', '#cd-rec');
 });
 
 test('Promises, Jan and Deposits tabs', async ({ page }) => {

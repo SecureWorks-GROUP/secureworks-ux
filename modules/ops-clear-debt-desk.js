@@ -365,7 +365,7 @@ function cddItemHtml(it) {
     '<div><div class="cdd-nm">' + cddEsc(it.payer_name || 'Unknown payer') + '</div><div class="cdd-sub">' + sub + '</div></div>' +
     '<div class="cdd-amt">' + C.money(it.amount) + '<small>' + (it.invoices || []).length + ' invoice' + ((it.invoices || []).length === 1 ? '' : 's') + '</small></div></div>' +
     (invs ? '<div class="cdd-invs">' + invs + '</div>' : '');
-  if (held) h += '<div class="cdd-why"><b>' + (it.hold === 'fix_first' ? 'Fix first.' : it.hold === 'check_first' ? 'Check first.' : 'On hold.') + '</b> ' + cddEsc(it.hold_reason || 'No reason given.') + ' No draft until this is cleared.</div>';
+  if (held) h += '<div class="cdd-why"><b>' + (it.hold === 'fix_first' ? 'Fix first.' : it.hold === 'check_first' ? 'Check first.' : 'On hold.') + '</b> ' + cddEsc(String(it.hold_reason || 'No reason given').replace(/[.\s]*$/, '.')) + ' No draft until this is cleared.</div>';
   if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + C.money(it.promise.amount) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
   if (it.last_outcome) h += '<div class="cdd-foot">Last outcome: ' + cddEsc(cddOutcomeLabel(it.last_outcome.code)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
   if (d && !held) h += cddDraftHtml(d);

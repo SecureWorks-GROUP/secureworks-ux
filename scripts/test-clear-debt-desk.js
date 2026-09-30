@@ -91,6 +91,10 @@ check('Xero stamp wording', () => {
   assert.strictEqual(C.stampText({ matches: false, differs_by: 3583.48, invoice_count: 6 }, '2026-09-30T23:02:11Z'), 'Differs by $3,583.48 on 6 invoices');
   assert.strictEqual(C.stampText({ matches: false, differs_by: 12, invoice_count: 1 }, null), 'Differs by $12.00 on 1 invoice');
   assert.strictEqual(C.stampText(null, '2026-09-30T23:02:11Z'), 'Read from Xero 07:02, not yet checked against our copy');
+  // debt_book (backend fm/debt-reader-1) sends its own stamp and a +08:00 read_at: its words win.
+  assert.strictEqual(C.stampText({ matches: true, differs_by: 0, invoice_count: 0, stamp: 'Matches Xero, read 07:02' }, '2026-10-01T07:02:11+08:00'), 'Matches Xero, read 07:02');
+  assert.strictEqual(C.stampText({ matches: false, differs_by: 5, invoice_count: 1, stamp: 'Differs by $5.00 on 1 invoice' }, null), 'Differs by $5.00 on 1 invoice');
+  assert.strictEqual(C.stampText({ matches: true }, '2026-10-01T07:02:11+08:00'), 'Matches Xero, read 07:02');
 });
 check('newest refresh stamp, not the oldest', () => {
   assert.strictEqual(C.newestStamp([{ debt_as_of: '2026-09-20T01:00:00Z' }, { debt_as_of: '2026-09-29T01:00:00Z' }, { debt_as_of: null }], 'debt_as_of'), '2026-09-29T01:00:00Z');
@@ -158,6 +162,31 @@ check('promises: from the list, broken first, then open, then kept', () => {
   assert.deepStrictEqual(ps.map((p) => p.payer_name), ['Y', 'X', 'K']);
   assert.deepStrictEqual(Array.from(ps[1].invoice_numbers), ['INV-1']);
 });
+check('promises from the real morning list: broken ones on items, open ones in paused[]', () => {
+  const ps = C.promisesFromMorning({
+    items: [
+      { id: 'b', payer_key: 'c-b', payer_name: 'Broken B', group: 'broken_promise', promise: { amount: 20, date: '2026-09-29', status: 'broken' }, invoices: [{ invoice_number: 'INV-2' }] },
+      { id: 'n', payer_key: 'c-n', payer_name: 'No promise', group: 'text', promise: null, invoices: [] },
+    ],
+    paused: [
+      { payer_key: 'c-o', payer_name: 'Open O', payer: 'client', amount: 300, invoices: [{ invoice_number: 'INV-3' }], promise: { amount: null, date: '2026-10-03', status: 'open' }, resumes_on: '2026-10-04' },
+    ],
+  });
+  assert.deepStrictEqual(ps.map((p) => [p.payer_name, p.status]), [['Broken B', 'broken'], ['Open O', 'open']]);
+  assert.strictEqual(ps[1].resumes_on, '2026-10-04');
+  assert.strictEqual(ps[1].promised_amount, null, 'a promise with no amount stays without one');
+  assert.deepStrictEqual(Array.from(ps[1].invoice_numbers), ['INV-3']);
+});
+check('real hold items (group hold, step null) are held, never chased, and keep no step chip', () => {
+  const hold = { id: '2026-10-01:mlb:hold:check_first:INV-1', group: 'hold', step: null, step_label: 'Check first: In dispute', hold: 'check_first', hold_reason: 'In dispute', amount: 5, invoices: [], draft: null };
+  assert.strictEqual(C.isHeld(hold), true);
+  assert.strictEqual(C.sortMorning([hold]).length, 0);
+  assert.strictEqual(C.heldItems([hold]).length, 1);
+});
+check('drafts: none written yet is told apart from none waiting', () => {
+  assert.strictEqual(C.anyDrafts([{ draft: null }, { draft: null }]), false);
+  assert.strictEqual(C.anyDrafts([{ draft: null }, { draft: { id: 'd', status: 'skipped' } }]), true);
+});
 check('deposits come from the live book: not debt, deposit kind, oldest first', () => {
   const d = C.depositsFromBook([
     { xero_invoice_id: 'g', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 2000 },
@@ -167,6 +196,13 @@ check('deposits come from the live book: not debt, deposit kind, oldest first', 
   ], today);
   assert.deepStrictEqual(d.map((x) => x.xero_invoice_id), ['r', 'q', 'g'], 'before-work progress claims sit with deposits');
   assert.strictEqual(d[1].days_since_invoice, 92);
+  // Real debt_book: materials/progress claims before a first payment carry not_debt_reason, and not-chased contacts never count.
+  const real = C.depositsFromBook([
+    { xero_invoice_id: 'm', payer: 'client', is_debt: false, kind: 'materials', not_debt_reason: 'before_first_payment', invoice_date: '2026-09-20', amount_due: 1 },
+    { xero_invoice_id: 'x', payer: 'not_chased', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 1 },
+    { xero_invoice_id: 'p', payer: 'client', is_debt: false, kind: 'plan_fee', not_debt_reason: 'plan_fee', invoice_date: '2026-09-01', amount_due: 1 },
+  ], today);
+  assert.deepStrictEqual(real.map((x) => x.xero_invoice_id), ['m']);
 });
 check('an undeployed action is told apart from a real failure', () => {
   assert.strictEqual(C.isNotDeployed(new Error('Unknown action')), true);

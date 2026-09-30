@@ -1,4 +1,8 @@
 // Offline fixture for the Clear Debt desk screen (docs/clear-debt-desk.md).
+// Shapes follow the backend as built: debt_book (fm/debt-reader-1) and debt_morning_list
+// (fm/debt-morning-list-2): item ids are date:payer_key:group:step, builders key as mlb / aj /
+// other_builder:<label>, holds are group 'hold' with step null, open promises sit in paused[].
+// The drafts on items are a preview of plan step 3; step 2 sends draft: null.
 // Every name is made up. Dates are derived from today's Perth date at run time,
 // so ages and "overdue" never rot as the real calendar moves on.
 const { perthDate, addIsoDays } = require('../helpers/feed-stub');
@@ -29,40 +33,49 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     inv(14, { contact_name: 'AJ Building & Restoration', payer: 'aj', kind: 'builder', reference: 'AJBR-90014', job_number: 'SWMS-90014', due_date: d(-95), amount_due: 1006.5, reason: 'Builder invoice, make-safe' }),
     inv(15, { contact_name: 'Builderwest', payer: 'other_builder', kind: 'builder', reference: 'BW-90015', job_number: 'SWMS-90015', due_date: d(-120), amount_due: 2386.72, hold: 'check_first', hold_reason: 'Builder rejected the invoice', reason: 'Builder invoice, make-safe' }),
     inv(16, { contact_name: 'ML Builders', payer: 'not_chased', kind: 'builder', reference: 'MLB-90016', job_number: 'SWMS-90016', is_debt: false, due_date: d(-80), amount_due: 305.25, reason: 'Old ML Builders contact: only Major Loss Builders counts' }),
+    inv(18, { contact_name: 'Grace Tan', payer: 'client', kind: 'final', reference: 'SWF-90018-FINBAL', job_number: 'SWF-90018', due_date: d(-9), amount_due: 2150, reason: 'Final invoice on a complete job' }),
     inv(17, { contact_name: 'Nina Hollis', payer: 'client', kind: 'final', reference: 'SWP-90017-FINBAL', job_number: 'SWP-90017', due_date: d(-8), amount_due: 1573.68, reason: 'Final invoice on a complete job' }),
   ];
   const byNo = Object.fromEntries(invoices.map((i) => [i.invoice_number, i]));
   const ref = (...nos) => nos.map((no) => ({ xero_invoice_id: byNo[no].xero_invoice_id, invoice_number: no, amount_due: byNo[no].amount_due, due_date: byNo[no].due_date }));
   const item = (o) => Object.assign({ hold: null, hold_reason: null, promise: null, last_outcome: null, draft: null }, o, { amount: o.invoices.reduce((a, x) => a + Math.round(x.amount_due * 100), 0) / 100 });
+  const mid = (key, group, step) => today + ':' + key + ':' + group + ':' + step;
   const at = (days, hhmm) => addIsoDays(today, days) + 'T' + hhmm + ':00+08:00';
   const words = (iso) => { const [y, m, dd] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString('en-AU', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }); };
 
   const items = [
-    item({ id: 'm-harper', payer_key: uuid(101), payer_name: 'Harper Nguyen', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 2, invoices: ref('INV-9001'),
+    item({ id: mid(uuid(101), 'text', 'friendly_text'), payer_key: uuid(101), payer_name: 'Harper Nguyen', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 2, invoices: ref('INV-9001'),
       draft: { id: 'draft-harper', channel: 'sms', status: 'pending', text: 'Hi Harper, a friendly reminder that invoice INV-9001 for $6,480.00 was due ' + words(d(-2)) + '. You can pay it here: https://in.xero.com/example. Thanks, SecureWorks WA' } }),
-    item({ id: 'm-oscar', payer_key: uuid(102), payer_name: 'Oscar Patel', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 2, invoices: ref('INV-9002'),
+    item({ id: mid(uuid(102), 'text', 'friendly_text'), payer_key: uuid(102), payer_name: 'Oscar Patel', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 2, invoices: ref('INV-9002'),
       draft: { id: 'draft-oscar', channel: 'sms', status: 'approved', approved_by: 'Shaun', text: 'Hi Oscar, a friendly reminder that invoice INV-9002 for $4,215.50 was due ' + words(d(-2)) + '. You can pay it here: https://in.xero.com/example. Thanks, SecureWorks WA' } }),
-    item({ id: 'm-mia', payer_key: uuid(103), payer_name: 'Mia Laurent', payer: 'client', group: 'call', step: 'call', step_label: 'Day 3: Shaun calls', days_overdue: 5, invoices: ref('INV-9003'),
+    item({ id: mid(uuid(103), 'call', 'call'), payer_key: uuid(103), payer_name: 'Mia Laurent', payer: 'client', group: 'call', step: 'call', step_label: 'Day 3: Shaun calls', days_overdue: 5, invoices: ref('INV-9003'),
       last_outcome: { code: 'no_answer', at: at(-1, '09:12'), by: 'Shaun' },
       draft: { id: 'draft-mia', channel: 'call_script', status: 'pending', text: 'Calling about the variation invoice INV-9003, $1,320.00, due ' + words(d(-5)) + '. Ask when it will be paid; offer the pay link by text.' } }),
-    item({ id: 'm-theo', payer_key: uuid(104), payer_name: 'Theo Brennan', payer: 'client', group: 'broken_promise', step: 'firm_text', step_label: 'Promise broken: firm text', days_overdue: 45, invoices: ref('INV-9004'),
+    item({ id: mid(uuid(104), 'broken_promise', 'firm_text'), payer_key: uuid(104), payer_name: 'Theo Brennan', payer: 'client', group: 'broken_promise', step: 'firm_text', step_label: 'Promise broken: firm text', days_overdue: 45, invoices: ref('INV-9004'),
       promise: { amount: 1000, date: d(-2), status: 'broken' },
       draft: { id: 'draft-theo', channel: 'sms', status: 'pending', text: 'Hi Theo, we had $1,000.00 promised by ' + words(d(-2)) + ' on invoice INV-9004 and have not seen it. Please pay today here: https://in.xero.com/example. Thanks, SecureWorks WA' } }),
-    item({ id: 'm-nina', payer_key: uuid(117), payer_name: 'Nina Hollis', payer: 'client', group: 'jan', step: 'jan_visit', step_label: 'Day 7: Jan visits', days_overdue: 8, invoices: ref('INV-9017') }),
-    item({ id: 'm-aj', payer_key: uuid(114), payer_name: 'AJ Building & Restoration', payer: 'aj', group: 'call', step: 'builder_call', step_label: 'Builder 30+ days: Shaun calls', days_overdue: 95, invoices: ref('INV-9014') }),
-    item({ id: 'm-mlb', payer_key: uuid(110), payer_name: 'Major Loss Builders', payer: 'mlb', group: 'statement', step: 'statement', step_label: 'Monday statement', days_overdue: 18, invoices: ref('INV-9010') }),
-    item({ id: 'm-ivy', payer_key: uuid(107), payer_name: 'Ivy Okafor', payer: 'client', group: 'deposit_reminder', step: 'deposit_reminder', step_label: 'One friendly deposit reminder', days_overdue: 63, invoices: ref('INV-9007'),
+    item({ id: mid(uuid(117), 'jan', 'jan_visit'), payer_key: uuid(117), payer_name: 'Nina Hollis', payer: 'client', group: 'jan', step: 'jan_visit', step_label: 'Day 7: Jan visits', days_overdue: 8, invoices: ref('INV-9017') }),
+    item({ id: mid('aj', 'call', 'builder_call'), payer_key: 'aj', payer_name: 'AJ Building & Restoration', payer: 'aj', group: 'call', step: 'builder_call', step_label: '30 days overdue: Shaun calls', days_overdue: 95, invoices: ref('INV-9014') }),
+    item({ id: mid('mlb', 'statement', 'statement'), payer_key: 'mlb', payer_name: 'Major Loss Builders', payer: 'mlb', group: 'statement', step: 'statement', step_label: 'Monday statement', days_overdue: 18, invoices: ref('INV-9010') }),
+    item({ id: mid(uuid(107), 'deposit_reminder', 'deposit_reminder'), payer_key: uuid(107), payer_name: 'Ivy Okafor', payer: 'client', group: 'deposit_reminder', step: 'deposit_reminder', step_label: 'One friendly deposit reminder', days_overdue: 63, invoices: ref('INV-9007'),
       draft: { id: 'draft-ivy', channel: 'sms', status: 'skipped', text: 'Hi Ivy, just checking in about your patio. The deposit invoice INV-9007 is still open; let us know if you would like to go ahead. Thanks, SecureWorks WA' } }),
-    // A held payer the backend might still send with a draft: the screen shows it on hold, with no draft and nothing to tick.
-    item({ id: 'm-ruby', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'text', step: 'friendly_text', step_label: 'Day 1: friendly text', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit',
-      draft: { id: 'draft-ruby', channel: 'sms', status: 'pending', text: 'Hi Ruby, a friendly reminder that invoice INV-9005 is overdue. Thanks, SecureWorks WA' } }),
+    // Book holds, as the backend sends them: one item per payer and hold kind, group 'hold', step null, no draft.
+    item({ id: mid(uuid(105), 'hold', 'fix_first') + ':INV-9005', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'hold', step: null, step_label: 'Fix first: Job in rectification: gate latch to refit', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit' }),
+    item({ id: mid('other_builder:Builderwest', 'hold', 'check_first') + ':INV-9015', payer_key: 'other_builder:Builderwest', payer_name: 'Builderwest', payer: 'other_builder', group: 'hold', step: null, step_label: 'Check first: Builder rejected the invoice', days_overdue: 120, invoices: ref('INV-9015'), hold: 'check_first', hold_reason: 'Builder rejected the invoice' }),
+    item({ id: mid('mlb', 'hold', 'check_first') + ':INV-9012', payer_key: 'mlb', payer_name: 'Major Loss Builders', payer: 'mlb', group: 'hold', step: null, step_label: 'Check first: In dispute with the builder', days_overdue: 40, invoices: ref('INV-9012'), hold: 'check_first', hold_reason: 'In dispute with the builder' }),
   ];
 
-  const promises = [
-    { payer_key: uuid(104), payer_name: 'Theo Brennan', invoice_numbers: ['INV-9004'], promised_amount: 1000, promised_date: d(-2), status: 'broken', logged_at: at(-9, '10:05'), logged_by: 'Shaun' },
-    { payer_key: uuid(102), payer_name: 'Oscar Patel', invoice_numbers: ['INV-9002'], promised_amount: 4215.5, promised_date: d(3), status: 'open', logged_at: at(-1, '14:30'), logged_by: 'Shaun' },
-    { payer_key: uuid(120), payer_name: 'Priya Shah', invoice_numbers: ['INV-8990'], promised_amount: 900, promised_date: d(-6), status: 'kept', logged_at: at(-12, '11:00'), logged_by: 'Shaun' },
+  // Open promises pause chasing: they come in paused[], not items.
+  const paused = [
+    { payer_key: uuid(118), payer_name: 'Grace Tan', payer: 'client', invoices: ref('INV-9018'), amount: byNo['INV-9018'].amount_due, promise: { amount: 2150, date: d(3), status: 'open' }, resumes_on: d(4) },
   ];
+  const waiting = [
+    { payer_key: uuid(106), payer_name: 'Leo Fraser', invoice_numbers: ['INV-9006'], reason: 'not_due', next_step: 'friendly_text', next_date: d(7) },
+    { payer_key: 'mlb', payer_name: 'Major Loss Builders', invoice_numbers: ['INV-9013'], reason: 'no_due_date', next_step: null, next_date: null },
+  ];
+  const notChased = [{ invoice_number: 'INV-9016', payer_name: 'ML Builders', reason: 'Old ML Builders contact: only Major Loss Builders counts' }];
+  const dow = new Date(today + 'T00:00:00Z').getUTCDay();
+  const nextMonday = d(((8 - dow) % 7) || 7);
 
   // Our copy (list_debt_picture): what the Debt book tab's bar and payer groups read today.
   const classOf = (i) => (i.hold === 'check_first' ? (i.payer === 'other_builder' ? ['blocked_by_us', 'invoice_wrong'] : ['in_dispute', null]) : i.hold === 'fix_first' ? ['blocked_by_us', 'rectification'] : !i.is_debt ? ['not_owed', null] : ['genuine_debt', null]);
@@ -78,9 +91,14 @@ function buildClearDebtDeskFixture(today = perthDate()) {
   });
 
   return {
-    debt_book: { version: 'debt-book/v1', read_at: at(0, '07:02'), copy_check: { matches: true, differs_by: 0, invoice_count: 0 }, invoices },
-    debt_morning_list: { version: 'debt-morning/v1', generated_at: at(0, '07:05'), items },
-    debt_promises: { promises },
+    debt_book: { ok: true, version: 'debt-book/v1', read_at: at(0, '07:02'), perth_date: today, read_stable: true, read_warning: null, copy_check: { matches: true, differs_by: 0, invoice_count: 0, stamp: 'Matches Xero, read 07:02' }, invoices },
+    debt_morning_list: {
+      ok: true, version: 'debt-morning/v1', generated_at: at(0, '07:05'), perth_date: today, is_statement_day: dow === 1, next_statement_date: dow === 1 ? today : nextMonday,
+      items, paused, waiting, not_chased: notChased,
+      summary: { items: items.filter((i) => !i.hold).length, held: items.filter((i) => i.hold).length, paused: paused.length, groups: {} },
+      book: { version: 'debt-book/v1', read_at: at(0, '07:02'), read_stable: true, read_warning: null, copy_check: { matches: true, differs_by: 0, invoice_count: 0, stamp: 'Matches Xero, read 07:02' } },
+      schedule: {},
+    },
     list_debt_picture: { version: 'debt-picture/v1', as_of: at(0, '07:00'), rows: pictureRows, newest_as_of: at(-1, '06:30') },
     debt_context_coverage: { as_of: at(0, '07:00'), rows: [], totals: {} },
   };

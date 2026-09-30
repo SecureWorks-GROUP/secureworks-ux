@@ -67,6 +67,11 @@ async function openDesk(page, { fixture = buildClearDebtDeskFixture(), drop = []
   await expect(page.locator('#subCleardebt')).toBeVisible();
 }
 
+// Item ids are the backend's (date:payer_key:group:step), so cards are found by payer name.
+function card(page, name, nth = 0) {
+  return page.locator('[data-cdd-item]').filter({ has: page.locator('.cdd-nm', { hasText: new RegExp('^' + name + '$') }) }).nth(nth);
+}
+
 function expectedOverdue(fixture) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth' }).format(new Date());
   let cents = 0, n = 0;
@@ -109,13 +114,17 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
   const groups = await page.locator('[data-cdd-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-group')));
   expect(groups).toEqual(['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder', 'hold']);
   await expect(page.locator('[data-cdd-group="hold"]')).toContainText('On hold, no draft');
-  const ruby = page.locator('[data-cdd-item="m-ruby"]');
+  const ruby = card(page, 'Ruby Castillo');
   await expect(ruby).toContainText('Fix first.');
+  await expect(ruby.locator('.cdd-chip.step')).toHaveCount(0); // the backend's "Fix first: ..." label is not repeated as a chip
   await expect(ruby).toContainText('Job in rectification: gate latch to refit');
   await expect(ruby.locator('textarea')).toHaveCount(0);
   await expect(ruby.locator('input[type=checkbox]')).toHaveCount(0);
-  const order = await page.locator('[data-cdd-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-item')));
-  expect(order[order.length - 1]).toBe('m-ruby');
+  const heldNames = await page.locator('.cdd-item.hold .cdd-nm').allTextContents();
+  expect(heldNames).toEqual(['Ruby Castillo', 'Builderwest', 'Major Loss Builders']);
+  await expect(page.locator('#cddAlso')).toContainText('1 payer is paused on a promise (see Promises)');
+  await expect(page.locator('#cddAlso')).toContainText('2 waiting for a later step or a due date');
+  await expect(page.locator('#cddAlso')).toContainText('1 invoice is never chased');
   const sends = page.locator('button.send');
   expect(await sends.count()).toBeGreaterThan(0);
   for (const b of await sends.all()) {
@@ -127,14 +136,14 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
 
 test('approve a draft, then approve ticked in one go', async ({ page }) => {
   await openDesk(page);
-  const harper = page.locator('[data-cdd-item="m-harper"]');
+  const harper = card(page, 'Harper Nguyen');
   await harper.locator('textarea').fill('Hi Harper, a friendly reminder about INV-9001. Thanks, SecureWorks WA');
   await harper.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(harper).toContainText('Approved by ops-e2e');
-  await page.locator('[data-cdd-item="m-theo"] input[type=checkbox]').check();
-  await page.locator('[data-cdd-item="m-mia"] input[type=checkbox]').check();
+  await card(page, 'Theo Brennan').locator('input[type=checkbox]').check();
+  await card(page, 'Mia Laurent').locator('input[type=checkbox]').check();
   await page.locator('#cddApproveTicked').click();
-  await expect(page.locator('[data-cdd-item="m-theo"]')).toContainText('Approved');
+  await expect(card(page, 'Theo Brennan')).toContainText('Approved');
   const posts = await page.evaluate(() => window.__cddPosts);
   expect(posts.map((p) => p.action)).toEqual(['debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide']);
   expect(posts[0].body).toMatchObject({ draft_id: 'draft-harper', decision: 'approve', text: 'Hi Harper, a friendly reminder about INV-9001. Thanks, SecureWorks WA' });
@@ -143,7 +152,7 @@ test('approve a draft, then approve ticked in one go', async ({ page }) => {
 test('outcome buttons and the promise box log against the payer\'s invoices', async ({ page }) => {
   const fixture = buildClearDebtDeskFixture();
   await openDesk(page, { fixture });
-  const mia = page.locator('[data-cdd-item="m-mia"]');
+  const mia = card(page, 'Mia Laurent');
   await mia.getByRole('button', { name: 'Save promise' }).click();
   await expect(mia.locator('.cdd-out [data-cdd-said]')).toHaveText('Put the promised amount in first');
   await mia.getByLabel('Promised amount').fill('500');
@@ -153,6 +162,7 @@ test('outcome buttons and the promise box log against the payer\'s invoices', as
   await expect(mia.locator('.cdd-out [data-cdd-said]')).toContainText('Logged: Promised $500.00');
   await mia.getByRole('button', { name: 'No answer' }).click();
   const posts = await page.evaluate(() => window.__cddPosts.filter((p) => p.action === 'debt_log_outcome'));
+  expect(posts[0].body.payer_key).toBe(fixture.debt_morning_list.items.find((i) => i.payer_name === 'Mia Laurent').payer_key);
   expect(posts[0].body).toMatchObject({ outcome_code: 'promised', promised_amount: 500, promised_date: today, channel: 'call', schedule_step: 'call', xero_invoice_ids: [fixture.debt_book.invoices[2].xero_invoice_id] });
   expect(posts[1].body.outcome_code).toBe('no_answer');
 });
@@ -181,15 +191,40 @@ test('Debt book tab: live split by payer and age, the bar from our copy, and the
   await shotDesk(page, '08-payer-record-send-off.png', '#cd-rec');
 });
 
+test('an outcome logged from the Debt book payer record uses the morning list payer key (mlb, not a contact id)', async ({ page }) => {
+  await openDesk(page);
+  await page.locator('[data-cdd-tab="book"]').click();
+  await page.locator('#clearDebtBookHead .cd-legend button', { hasText: 'Chase now' }).click();
+  await page.locator('.cd-row', { hasText: 'Major Loss Builders' }).first().click();
+  await page.locator('#cd-rec').getByRole('button', { name: 'No answer' }).click();
+  await expect(page.locator('#cd-rec .cdd-out [data-cdd-said]')).toContainText('Logged: No answer');
+  const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_log_outcome'));
+  expect(post.body.payer_key).toBe('mlb');
+});
+
+test('step 2 as built: no drafts yet is said plainly, and an unstable Xero read is flagged', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  fixture.debt_morning_list.items.forEach((i) => { i.draft = null; });
+  fixture.debt_book.read_stable = false;
+  fixture.debt_book.read_warning = 'Xero changed during the read, retrying next run';
+  await openDesk(page, { fixture });
+  await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' })).toContainText('no drafts written yet');
+  await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' }).locator('.v')).toHaveText('0');
+  await expect(card(page, 'Harper Nguyen')).toContainText('No draft for this step yet.');
+  await expect(page.locator('#cddReadWarning')).toContainText('Xero changed during the read, retrying next run');
+});
+
 test('Promises, Jan and Deposits tabs', async ({ page }) => {
   await openDesk(page);
   await page.locator('[data-cdd-tab="promises"]').click();
   const status = await page.locator('[data-cdd-promise]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-promise')));
-  expect(status).toEqual(['broken', 'open', 'kept']);
+  expect(status).toEqual(['broken', 'open']); // Theo's broken promise rides on his item; Grace's open one is in paused[]
+  await expect(page.locator('[data-cdd-promise="open"]')).toContainText('Grace Tan');
+  await expect(page.locator('[data-cdd-promise="open"]')).toContainText('chasing resumes');
   await shotDesk(page, '03-promises.png');
   await page.locator('[data-cdd-tab="jan"]').click();
   await expect(page.locator('[data-cdd-item]')).toHaveCount(1);
-  await expect(page.locator('[data-cdd-item="m-nina"]')).toBeVisible();
+  await expect(card(page, 'Nina Hollis')).toBeVisible();
   await expect(page.locator('[data-cdd-group="hold"]')).toHaveCount(0);
   await shotDesk(page, '04-jan.png');
   await page.locator('[data-cdd-tab="deposits"]').click();
@@ -200,14 +235,14 @@ test('Promises, Jan and Deposits tabs', async ({ page }) => {
 
 test('Jan tab lists held Jan-step payers below, with the reason and no draft', async ({ page }) => {
   const fixture = buildClearDebtDeskFixture();
-  const nina = fixture.debt_morning_list.items.find((i) => i.id === 'm-nina');
-  fixture.debt_morning_list.items.push(Object.assign({}, nina, { id: 'm-nina-held', payer_name: 'Held Jan Payer', hold: 'check_first', hold_reason: 'Says paid, checking the bank',
+  const nina = fixture.debt_morning_list.items.find((i) => i.payer_name === 'Nina Hollis');
+  fixture.debt_morning_list.items.push(Object.assign({}, nina, { id: nina.id + ':held', payer_name: 'Held Jan Payer', hold: 'check_first', hold_reason: 'Says paid, checking the bank',
     draft: { id: 'draft-nina-held', channel: 'sms', status: 'pending', text: 'Hi' } }));
   await openDesk(page, { fixture });
   await page.locator('[data-cdd-tab="jan"]').click();
-  const order = await page.locator('[data-cdd-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-item')));
-  expect(order).toEqual(['m-nina', 'm-nina-held']);
-  const held = page.locator('[data-cdd-item="m-nina-held"]');
+  const order = await page.locator('[data-cdd-item] .cdd-nm').allTextContents();
+  expect(order).toEqual(['Nina Hollis', 'Held Jan Payer']);
+  const held = card(page, 'Held Jan Payer');
   await expect(page.locator('[data-cdd-group="hold"]')).toContainText('On hold, no draft');
   await expect(held).toContainText('Check first.');
   await expect(held).toContainText('Says paid, checking the bank');
@@ -217,7 +252,7 @@ test('Jan tab lists held Jan-step payers below, with the reason and no draft', a
 });
 
 test('before the backend steps deploy: plain "not live yet", no guessed number, our copy still shown', async ({ page }) => {
-  await openDesk(page, { drop: ['debt_book', 'debt_morning_list', 'debt_promises', 'debt_log_outcome'] });
+  await openDesk(page, { drop: ['debt_book', 'debt_morning_list', 'debt_log_outcome'] });
   await expect(page.locator('#clearDebtStats')).toContainText('The live Xero read (debt_book) is not live yet.');
   await expect(page.locator('#cddOverdue')).toHaveCount(0);
   await expect(page.locator('#clearDebtCards')).toContainText('The morning list (debt_morning_list) is not live yet.');

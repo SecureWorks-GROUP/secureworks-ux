@@ -2,8 +2,8 @@
 // CLEAR DEBT DESK: the header, the tabs and the morning list.
 // Plan: secureworks-backend docs/debt-book/PLAN.md sections 5 and 6 step 4,
 //   captain's rulings in DECISIONS.md beside it. Screen contract: docs/clear-debt-desk.md.
-// Reads: debt_book (live Xero read with the captain's rules), debt_morning_list
-//   (today's step per payer, holds, drafts), debt_promises.
+// Reads: debt_book (live Xero read with the captain's rules) and debt_morning_list
+//   (today's step per payer, holds, paused promises, waiting payers; drafts from step 3).
 // Writes: debt_draft_decide (approve or skip a draft), debt_log_outcome (call outcome,
 //   promise). Nothing here sends: the send button is fixed off until Shaun says go.
 // The Debt book tab is still ops-clear-debt-v2.js (bar, payer groups, payer record).
@@ -107,6 +107,7 @@ var ClearDebtDeskCore = (function () {
     return o.hour + ':' + o.minute;
   }
   function stampText(check, readAt) {
+    if (check && check.stamp) return String(check.stamp); // debt_book words its own stamp
     if (!check) return readAt ? 'Read from Xero ' + perthTime(readAt) + ', not yet checked against our copy' : 'Not yet read from Xero';
     if (check.matches) return 'Matches Xero' + (readAt ? ', read ' + perthTime(readAt) : '');
     var n = Number(check.invoice_count || 0);
@@ -153,17 +154,26 @@ var ClearDebtDeskCore = (function () {
   }
 
   var PROMISE_RANK = { broken: 0, open: 1, kept: 2 };
-  function promisesFromMorning(items) {
-    return (items || []).filter(function (i) { return i.promise; }).map(function (i) {
-      return { payer_key: i.payer_key, payer_name: i.payer_name, invoice_numbers: (i.invoices || []).map(function (x) { return x.invoice_number; }), promised_amount: i.promise.amount, promised_date: i.promise.date, status: i.promise.status || 'open', logged_at: i.promise.logged_at || null, logged_by: i.promise.logged_by || null };
-    }).sort(sortPromises);
+  // Promises live in two places on debt_morning_list: a broken (or kept) one rides on its item,
+  // an open one pauses chasing and sits in the top-level paused[] list instead.
+  function promiseRow(i, resumesOn) {
+    return { payer_key: i.payer_key, payer_name: i.payer_name, invoice_numbers: (i.invoices || []).map(function (x) { return x.invoice_number; }), promised_amount: i.promise.amount == null ? null : i.promise.amount, promised_date: i.promise.date, status: i.promise.status || 'open', resumes_on: resumesOn || null };
   }
+  function promisesFromMorning(morning) {
+    var items = Array.isArray(morning) ? morning : (morning && morning.items) || [];
+    var paused = Array.isArray(morning) ? [] : (morning && morning.paused) || [];
+    var rows = items.filter(function (i) { return i.promise; }).map(function (i) { return promiseRow(i); })
+      .concat(paused.filter(function (p) { return p.promise; }).map(function (p) { return promiseRow(p, p.resumes_on); }));
+    return rows.sort(sortPromises);
+  }
+  function anyDrafts(items) { return (items || []).some(function (i) { return !!i.draft; }); }
   function sortPromises(a, b) {
     var r = (PROMISE_RANK[a.status] === undefined ? 1 : PROMISE_RANK[a.status]) - (PROMISE_RANK[b.status] === undefined ? 1 : PROMISE_RANK[b.status]);
     return r || String(a.promised_date || '').localeCompare(String(b.promised_date || ''));
   }
   function depositsFromBook(invoices, today) {
-    return (invoices || []).filter(function (i) { return !i.is_debt && BEFORE_WORK.indexOf(i.kind) >= 0; }).map(function (i) {
+    // Same set the morning list reminds: deposits, and progress/materials invoices before the job's first payment.
+    return (invoices || []).filter(function (i) { return !i.is_debt && i.payer !== 'not_chased' && (i.kind === 'deposit' || i.not_debt_reason === 'before_first_payment' || (!i.not_debt_reason && BEFORE_WORK.indexOf(i.kind) >= 0)); }).map(function (i) {
       var copy = {}; Object.keys(i).forEach(function (k) { copy[k] = i[k]; });
       copy.days_since_invoice = daysPast(i.invoice_date, today);
       return copy;
@@ -171,11 +181,11 @@ var ClearDebtDeskCore = (function () {
   }
   function isNotDeployed(e) { return !!e && (/unknown action/i.test(String(e.message || '')) || e.status === 404); }
 
-  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
+  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
 })();
 // </clear-debt-desk-core>
 
-var CDD = { tab: null, gen: 0, today: null, book: null, bookErr: null, morning: null, morningErr: null, promises: null, promisesErr: null, edits: {}, ticked: {}, logged: {} };
+var CDD = { tab: null, gen: 0, today: null, book: null, bookErr: null, morning: null, morningErr: null, edits: {}, ticked: {}, logged: {} };
 var CDD_TABS = [
   { key: 'today', label: 'Today' },
   { key: 'book', label: 'Debt book' },
@@ -186,7 +196,8 @@ var CDD_TABS = [
 var CDD_PAYER_LABEL = { client: 'Client', mlb: 'MLB', aj: 'AJ', other_builder: 'Builder', not_chased: 'Not chased' };
 
 function cddEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function cddToday() { return CDD.today || ClearDebtDeskCore.perthDate(new Date()); }
+// The backend's Perth date wins, so the screen and the rules it applied count the same day.
+function cddToday() { return CDD.today || (CDD.book && CDD.book.perth_date) || (CDD.morning && CDD.morning.perth_date) || ClearDebtDeskCore.perthDate(new Date()); }
 function cddDateWords(iso) {
   var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); if (!m) return '';
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('en-AU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
@@ -257,12 +268,11 @@ async function loadClearDebt() {
   var jobs = [
     opsFetch('debt_book').then(function (r) { return { book: r }; }, function (e) { return { bookErr: e }; }),
     opsFetch('debt_morning_list').then(function (r) { return { morning: r }; }, function (e) { return { morningErr: e }; }),
-    opsFetch('debt_promises').then(function (r) { return { promises: r }; }, function (e) { return { promisesErr: e }; }),
   ];
   var picture = typeof cdLoadPicture === 'function' ? cdLoadPicture() : null;
   var res = await Promise.all(jobs);
   if (gen !== CDD.gen) return; // a newer read superseded this one
-  CDD.book = null; CDD.bookErr = null; CDD.morning = null; CDD.morningErr = null; CDD.promises = null; CDD.promisesErr = null;
+  CDD.book = null; CDD.bookErr = null; CDD.morning = null; CDD.morningErr = null;
   CDD.ticked = {}; CDD.edits = {};
   res.forEach(function (r) { Object.keys(r).forEach(function (k) { CDD[k] = r[k]; }); });
   CDD.loading = false;
@@ -288,7 +298,8 @@ function cddRender() {
 function cddHeaderHtml() {
   var C = ClearDebtDeskCore, today = cddToday();
   var dateLine = '<div class="cdd-h1">Clear Debt <span style="font-weight:400;letter-spacing:0;text-transform:none">' + cddEsc(cddDateWords(today)) + ', Perth</span> <button class="cdd-link" onclick="loadClearDebt()" style="font-size:12px;letter-spacing:0;text-transform:none;font-weight:400">Read again</button></div>';
-  var waiting = CDD.morning ? String(C.waitingCount(CDD.morning.items)) : '–', waitingSub = CDD.morning ? 'drafts to approve or skip' : (CDD.loading ? 'reading' : 'morning list not live');
+  var waiting = CDD.morning ? String(C.waitingCount(CDD.morning.items)) : '–';
+  var waitingSub = CDD.morning ? (C.anyDrafts(CDD.morning.items) ? 'drafts to approve or skip' : 'no drafts written yet') : (CDD.loading ? 'reading' : 'morning list not live');
   if (!CDD.book) {
     var why = CDD.loading ? '<div class="cd-quiet">Reading the debt book from Xero…</div>' : cddFail('The live Xero read (debt_book)', CDD.bookErr);
     return '<div class="cdd-head"><div>' + dateLine + '<div class="cdd-h1" style="margin-top:14px">Overdue</div>' + why + '</div><div class="cdd-figs">' + cddFig('Waiting for Shaun', waiting, waitingSub, true) + '</div></div>';
@@ -298,7 +309,8 @@ function cddHeaderHtml() {
   var held = t.overdueHeld.n ? '<div class="cdd-held">Of this, ' + C.money0(t.overdueHeld.amount) + ' on ' + t.overdueHeld.n + ' invoice' + (t.overdueHeld.n === 1 ? ' is' : 's is') + ' on hold (check first or fix first) and is not chased yet.</div>' : '<div class="cdd-held">Nothing overdue is on hold.</div>';
   return '<div class="cdd-head"><div>' + dateLine +
     '<div class="cdd-h1" style="margin-top:14px">Overdue</div><div class="cdd-big" id="cddOverdue">' + C.money0(t.overdue.amount) + '<small>' + t.overdue.n + ' invoice' + (t.overdue.n === 1 ? '' : 's') + '</small></div>' + held +
-    '<div class="cdd-stamp ' + stampCls + '" id="cddStamp">' + (chk && chk.matches ? '&#10003; ' : '') + cddEsc(C.stampText(chk, readAt)) + '</div></div>' +
+    '<div class="cdd-stamp ' + stampCls + '" id="cddStamp">' + (chk && chk.matches ? '&#10003; ' : '') + cddEsc(C.stampText(chk, readAt)) + '</div>' +
+    (CDD.book.read_warning ? '<div class="cdd-held" id="cddReadWarning" style="color:#B8741C"><b>' + cddEsc(CDD.book.read_warning) + '.</b> Figures may be a few invoices out.</div>' : '') + '</div>' +
     '<div class="cdd-figs">' +
       cddFig('Debt, by your definition', C.money0(t.debt.amount), t.debt.n + ' invoices' + (t.noDue.n ? ', ' + t.noDue.n + ' with no due date' : '')) +
       cddFig('Open in Xero', C.money0(t.open.amount), t.open.n + ' invoices') +
@@ -314,7 +326,7 @@ function cddTabsHtml() {
   var C = ClearDebtDeskCore, items = CDD.morning ? CDD.morning.items || [] : null;
   var counts = {
     today: items ? C.chaseItems(items).length : null,
-    promises: cddPromiseRows() ? cddPromiseRows().length : null,
+    promises: CDD.morning ? C.promisesFromMorning(CDD.morning).length : null,
     jan: items ? C.janFromMorning(items).length : null,
     deposits: CDD.book ? C.depositsFromBook(CDD.book.invoices, cddToday()).length : null,
   };
@@ -335,7 +347,7 @@ function cddBodyHtml() {
 function cddTodayHtml() {
   var C = ClearDebtDeskCore;
   if (!CDD.morning) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Building the morning list…</div>' : '<div style="margin-top:16px">' + cddFail('The morning list (debt_morning_list)', CDD.morningErr) + '</div>';
-  var items = C.sortMorning(CDD.morning.items || []), heldHtml = cddHeldHtml(C.heldItems(CDD.morning.items));
+  var items = C.sortMorning(CDD.morning.items || []), heldHtml = cddHeldHtml(C.heldItems(CDD.morning.items)) + cddAlsoHtml(CDD.morning);
   if (!items.length) return '<div style="margin-top:16px">' + cddPend('Nobody to chase today.', 'Every payer is paid, promised, on hold or not due yet.') + '</div>' + heldHtml;
   var ticked = Object.keys(CDD.ticked).filter(function (k) { return CDD.ticked[k]; }).length;
   var h = '<div class="cdd-bar"><span class="t">Morning list for <b>' + cddEsc(cddDateWords(cddToday())) + '</b>' + (CDD.morning.generated_at ? ', built ' + cddEsc(C.perthTime(CDD.morning.generated_at)) : '') + '. Nothing is sent from this screen yet.</span>' +
@@ -351,6 +363,16 @@ function cddTodayHtml() {
   });
   return h + heldHtml;
 }
+// What the list is not showing today, in one line: promises that pause chasing, payers waiting
+// for a later step, invoices never chased, and the next builder statement day.
+function cddAlsoHtml(m) {
+  var bits = [], n;
+  if ((n = (m.paused || []).length)) bits.push(n + ' payer' + (n === 1 ? ' is' : 's are') + ' paused on a promise (see Promises)');
+  if ((n = (m.waiting || []).length)) bits.push(n + ' waiting for a later step or a due date');
+  if ((n = (m.not_chased || []).length)) bits.push(n + ' invoice' + (n === 1 ? ' is' : 's are') + ' never chased (test, set aside or old contact)');
+  if (m.next_statement_date) bits.push((m.is_statement_day ? 'builder statements are due today' : 'next builder statements ' + cddDateWords(m.next_statement_date)));
+  return bits.length ? '<div class="cdd-foot" id="cddAlso">Not on today\'s list: ' + cddEsc(bits.join('; ')) + '.</div>' : '';
+}
 function cddGroupHead(key, label, list) {
   var sum = list.reduce(function (a, x) { return a + Math.round(Number(x.amount || 0) * 100); }, 0) / 100;
   return '<div class="cdd-grp" data-cdd-group="' + cddEsc(key) + '"><b>' + cddEsc(label) + '</b><span>' + list.length + ' payer' + (list.length === 1 ? '' : 's') + ' · ' + ClearDebtDeskCore.money0(sum) + '</span></div>';
@@ -359,14 +381,14 @@ function cddHeldHtml(held) { return held.length ? cddGroupHead('hold', 'On hold,
 function cddItemHtml(it) {
   var C = ClearDebtDeskCore, d = it.draft, held = C.isHeld(it), pendingDraft = d && d.status === 'pending' && !held;
   var invs = (it.invoices || []).map(function (x) { return x.xero_invoice_id ? cddXero(x.xero_invoice_id, x.invoice_number) + ' <span class="cd-num">' + C.money(x.amount_due) + '</span>' : cddEsc(x.invoice_number); }).join(' · ');
-  var sub = '<span class="cdd-chip dark">' + cddEsc(CDD_PAYER_LABEL[it.payer] || it.payer || 'Payer') + '</span>' + (it.step_label ? '<span class="cdd-chip step">' + cddEsc(it.step_label) + '</span>' : '') + cddAgePill(it.days_overdue === undefined ? null : it.days_overdue);
+  var sub = '<span class="cdd-chip dark">' + cddEsc(CDD_PAYER_LABEL[it.payer] || it.payer || 'Payer') + '</span>' + (it.step_label && !C.isHeld(it) ? '<span class="cdd-chip step">' + cddEsc(it.step_label) + '</span>' : '') + cddAgePill(it.days_overdue === undefined ? null : it.days_overdue);
   var h = '<div class="cdd-item' + (held ? ' hold' : '') + '" data-cdd-item="' + cddEsc(it.id) + '"><div class="cdd-top">' +
     (pendingDraft ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[d.id] ? 'checked' : '') + ' data-draft="' + cddEsc(d.id) + '" onchange="cddTick(this)">' : '<span></span>') +
     '<div><div class="cdd-nm">' + cddEsc(it.payer_name || 'Unknown payer') + '</div><div class="cdd-sub">' + sub + '</div></div>' +
     '<div class="cdd-amt">' + C.money(it.amount) + '<small>' + (it.invoices || []).length + ' invoice' + ((it.invoices || []).length === 1 ? '' : 's') + '</small></div></div>' +
     (invs ? '<div class="cdd-invs">' + invs + '</div>' : '');
   if (held) h += '<div class="cdd-why"><b>' + (it.hold === 'fix_first' ? 'Fix first.' : it.hold === 'check_first' ? 'Check first.' : 'On hold.') + '</b> ' + cddEsc(String(it.hold_reason || 'No reason given').replace(/[.\s]*$/, '.')) + ' No draft until this is cleared.</div>';
-  if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + C.money(it.promise.amount) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
+  if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + (it.promise.amount == null ? 'payment' : C.money(it.promise.amount)) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
   if (it.last_outcome) h += '<div class="cdd-foot">Last outcome: ' + cddEsc(cddOutcomeLabel(it.last_outcome.code)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
   if (d && !held) h += cddDraftHtml(d);
   else if (!held && it.step !== 'call' && it.step !== 'jan_visit') h += '<div class="cdd-foot">No draft for this step yet.</div>';
@@ -379,6 +401,18 @@ function cddDraftHtml(d) {
   var channel = { sms: 'Text', email: 'Email', call_script: 'What to say on the call' }[d.channel] || 'Draft';
   return '<div class="cdd-draft" data-draft="' + cddEsc(d.id) + '"><div class="cd-k" style="margin-bottom:6px">' + cddEsc(channel) + '</div><textarea rows="3" ' + (pending ? 'oninput="cddEdit(this)"' : 'readonly') + ' aria-label="' + cddEsc(channel) + ' draft">' + cddEsc(text) + '</textarea>' +
     '<div class="cdd-acts">' + (pending ? '<button class="cdd-btn o" onclick="cddDecide(this,\'approve\')">Approve</button><button class="cdd-btn l" onclick="cddDecide(this,\'skip\')">Skip</button>' : '') + C.sendButtonHtml(d) + '<span class="st" data-cdd-said>' + cddEsc(status) + '</span></div></div>';
+}
+// The morning list's own payer key for these invoices (clients: Xero contact id; builders: mlb,
+// aj, other_builder:<label>), so an outcome logged from the Debt book matches the Today card's.
+function cddPayerKeyFor(ids) {
+  var m = CDD.morning; if (!m) return null;
+  var want = {}; (ids || []).forEach(function (id) { want[String(id).toLowerCase()] = true; });
+  var rows = (m.items || []).concat(m.paused || []);
+  for (var i = 0; i < rows.length; i++) {
+    var invs = rows[i].invoices || [];
+    for (var j = 0; j < invs.length; j++) if (want[String(invs[j].xero_invoice_id || '').toLowerCase()]) return rows[i].payer_key || null;
+  }
+  return null;
 }
 function cddOutcomeLabel(code) { var o = ClearDebtDeskCore.OUTCOMES.filter(function (x) { return x.code === code; })[0]; return o ? o.label : String(code || ''); }
 
@@ -464,21 +498,17 @@ function cddBookHtml() {
   return h + '<div class="cdd-sec">Our copy, by kind (Clear Debt picture)</div><div id="clearDebtBookHead"></div><div id="clearDebtBookBody" style="display:flex;flex-direction:column;gap:12px"></div>';
 }
 
-// ── Promises ──
-function cddPromiseRows() {
-  if (CDD.promises && Array.isArray(CDD.promises.promises)) return CDD.promises.promises.slice().sort(ClearDebtDeskCore.sortPromises);
-  if (CDD.morning) return ClearDebtDeskCore.promisesFromMorning(CDD.morning.items);
-  return null;
-}
+// ── Promises: broken ones from the list's items, open ones from its paused[] ──
 function cddPromisesHtml() {
-  var C = ClearDebtDeskCore, rows = cddPromiseRows();
-  if (!rows) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Reading promises…</div>' : '<div style="margin-top:16px">' + cddFail('Promises (debt_promises)', CDD.promisesErr) + '</div>';
-  var note = CDD.promises ? '' : '<div class="cdd-foot">Taken from the morning list; the promises read is not live yet.</div>';
-  if (!rows.length) return '<div style="margin-top:16px">' + cddPend('No promises to pay on record.', 'Log one with Save promise on a payer card.') + '</div>' + note;
-  return '<div style="margin-top:16px"><table class="cdd-tbl"><thead><tr><th>Payer</th><th>Invoices</th><th class="r">Promised</th><th>By</th><th>Status</th><th>Logged</th></tr></thead><tbody>' + rows.map(function (p) {
+  var C = ClearDebtDeskCore;
+  if (!CDD.morning) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Reading promises…</div>' : '<div style="margin-top:16px">' + cddFail('Promises, from the morning list (debt_morning_list)', CDD.morningErr) + '</div>';
+  var rows = C.promisesFromMorning(CDD.morning);
+  if (!rows.length) return '<div style="margin-top:16px">' + cddPend('No promises to pay on record.', 'Log one with Save promise on a payer card.') + '</div>';
+  return '<div style="margin-top:16px"><table class="cdd-tbl"><thead><tr><th>Payer</th><th>Invoices</th><th class="r">Promised</th><th>By</th><th>Status</th></tr></thead><tbody>' + rows.map(function (p) {
     var cls = p.status === 'broken' ? 'b' : p.status === 'kept' ? 'ok' : 'n';
-    return '<tr data-cdd-promise="' + cddEsc(p.status) + '"><td><b>' + cddEsc(p.payer_name) + '</b></td><td>' + cddEsc((p.invoice_numbers || []).join(', ')) + '</td><td class="r">' + C.money(p.promised_amount) + '</td><td>' + cddEsc(cddDateWords(p.promised_date)) + '</td><td><span class="cd-pill ' + cls + '">' + cddEsc(p.status === 'broken' ? 'broken, back on top' : p.status) + '</span></td><td>' + cddEsc(p.logged_by || '') + (p.logged_at ? ' ' + cddEsc(cddDateWords(p.logged_at)) : '') + '</td></tr>';
-  }).join('') + '</tbody></table></div>' + note;
+    var st = p.status === 'broken' ? 'broken, back on top' : p.status === 'open' && p.resumes_on ? 'open, chasing resumes ' + cddDateWords(p.resumes_on) : p.status;
+    return '<tr data-cdd-promise="' + cddEsc(p.status) + '"><td><b>' + cddEsc(p.payer_name) + '</b></td><td>' + cddEsc((p.invoice_numbers || []).join(', ')) + '</td><td class="r">' + (p.promised_amount == null ? '<span class="cd-quiet">no amount</span>' : C.money(p.promised_amount)) + '</td><td>' + cddEsc(cddDateWords(p.promised_date)) + '</td><td><span class="cd-pill ' + cls + '">' + cddEsc(st) + '</span></td></tr>';
+  }).join('') + '</tbody></table></div>';
 }
 
 // ── Jan ──

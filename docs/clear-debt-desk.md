@@ -4,11 +4,11 @@ Ops > Financials > Clear Debt. `modules/ops-clear-debt-desk.js` owns the header,
 
 ## What the screen shows
 
-**Header.** The big number is **Overdue**. It counts debt whose due date is before today's Perth date and which is not on hold. Right under it, a smaller line gives what is overdue but on hold (check first, fix first), so overdue with and without holds can both be read. Beside it sit: debt by the captain's definition, open in Xero, not debt, check first (fix first is counted with it and named), and waiting for Shaun (drafts not yet approved or skipped). A stamp says **Matches Xero, read HH:MM** or **Differs by $X on N invoices**, from the backend's copy-versus-Xero check. "Texts waiting for Marnin" is gone.
+**Header.** The big number is **Overdue**: all debt whose due date is before today's Perth date, holds included, so it always matches Xero. A smaller line under it says how much of that is on hold. Beside it sit: debt by the captain's definition, open in Xero, not debt, **check first** and **fix first** as separate figures, and waiting for Shaun (drafts not yet approved or skipped). A stamp says **Matches Xero, read HH:MM** or **Differs by $X on N invoices**, from the backend's copy-versus-Xero check. "Texts waiting for Marnin" is gone.
 
 **Tabs.** Today (first, the default) | Debt book | Promises | Jan | Deposits. The last tab picked is kept per browser in `localStorage.sw_cd_tab`.
 
-- **Today** is the morning list in this order: broken promises, Jan visits, calls, texts, builder statements, deposit reminders. Inside a group, bigger amounts come first, then older. Holds come last with their reason and no draft. Each draft can be edited, approved or skipped, singly or as a ticked batch. The send button is always disabled and reads **Sending off until Shaun says go**. The screen has no send path at all; sending switches on in a later PR, only after the old automatic texts are off and Shaun says start sending.
+- **Today** is the morning list in this order: broken promises, Jan visits, calls, texts, builder statements, deposit reminders. Inside a group, bigger amounts come first, then older. Held invoices (check first, fix first) are left off, even if the backend sends them; one line says how many. Each draft can be edited, approved or skipped, singly or as a ticked batch. The send button is always disabled and reads **Sending off until Shaun says go**. The screen has no send path at all; sending switches on in a later PR, only after the old automatic texts are off and Shaun says start sending.
 - **Debt book** holds the existing bar and payer groups (our copy, `list_debt_picture`) and, when the live book is read, the debt split by payer and by age.
 - **Promises** lists promises to pay: broken first, then open, then kept.
 - **Jan** lists the payers at the day-7 Jan visit step.
@@ -16,7 +16,7 @@ Ops > Financials > Clear Debt. `modules/ops-clear-debt-desk.js` owns the header,
 
 **Payer card.** Every Today item and the Debt book payer record carry the outcome buttons (No answer, Spoke, Promised, Disputed, Says paid) and a promise box ($ amount and a date). Promised needs both.
 
-**Display rules (B17).** Ages count Perth calendar days, never UTC. An invoice with no due date sits in its own **No due date** bucket, never "not due" and never 90+. "Refreshed" shows the newest stamp. The header's overdue leaves holds out.
+**Display rules (B17).** Ages count Perth calendar days, never UTC. An invoice with no due date sits in its own **No due date** bucket, never "not due" and never 90+. "Refreshed" shows the newest stamp. Overdue counts debt only: deposits, not owed and set-aside invoices never inflate it.
 
 ## Backend actions the screen reads
 
@@ -54,7 +54,7 @@ The header is summed from `invoices[]` by the screen, so every figure follows th
   "generated_at": "2026-10-01T07:05:00+08:00",
   "items": [{
     "id": "stable item key", "payer_key": "contact id", "payer_name": "Name", "payer": "client",
-    "group": "broken_promise | jan | call | text | statement | deposit_reminder | hold",
+    "group": "broken_promise | jan | call | text | statement | deposit_reminder",
     "step": "friendly_text | firm_text | call | jan_visit | statement | builder_call | deposit_reminder",
     "step_label": "Day 2: firm text with the pay link",
     "amount": 4200.0, "days_overdue": 2,

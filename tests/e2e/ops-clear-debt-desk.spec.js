@@ -1,0 +1,204 @@
+// Clear Debt desk screen (docs/clear-debt-desk.md; backend plan docs/debt-book/PLAN.md step 4).
+// Offline: ops-api is replaced by the fixture in tests/fixtures/clear-debt-desk.js (made-up
+// names, dates derived from today's Perth date). An action missing from the fixture answers
+// "Unknown action", exactly as ops-api does before that backend step deploys.
+//
+// Contract under guard:
+//  - OVERDUE is the big number and includes held invoices, so it matches Xero; check first
+//    and fix first are their own figures beside it; "Texts waiting for Marnin" is gone.
+//  - Tabs: Today | Debt book | Promises | Jan | Deposits, Today first and the default.
+//  - Today leaves held payers off, orders broken promises, Jan, calls, texts, statements,
+//    deposit reminders, and every send button is disabled, reads "Sending off until Shaun
+//    says go" and carries no handler.
+//  - Outcome buttons and the promise box post debt_log_outcome; a promise needs $ and date.
+//  - An undeployed action is a plain "not live yet", never a guessed number.
+//  - The Today overdue card opens Clear Debt.
+// Screenshots: CLEAR_DEBT_EVIDENCE_DIR=docs/evidence/<folder> npx playwright test tests/e2e/ops-clear-debt-desk.spec.js
+const { test, expect } = require('@playwright/test');
+const fs = require('node:fs');
+const path = require('node:path');
+const { revealOpsStaticFixture } = require('../helpers/ops-auth');
+const { buildClearDebtDeskFixture } = require('../fixtures/clear-debt-desk');
+
+const EVIDENCE_DIR = process.env.CLEAR_DEBT_EVIDENCE_DIR
+  ? path.resolve(process.cwd(), process.env.CLEAR_DEBT_EVIDENCE_DIR)
+  : path.resolve(__dirname, '../../test-results/ops-clear-debt-desk');
+function shot(name) { fs.mkdirSync(EVIDENCE_DIR, { recursive: true }); return path.join(EVIDENCE_DIR, name); }
+// Evidence shots only: the page's own fixed chrome (top bar, Jarvis bar, SMS panel, toasts)
+// floats over an element screenshot, so hide everything fixed or sticky outside Clear Debt.
+async function shotDesk(page, name) {
+  await page.evaluate(() => {
+    const desk = document.getElementById('subCleardebt');
+    document.querySelectorAll('body *').forEach((el) => {
+      const pos = getComputedStyle(el).position;
+      if ((pos === 'fixed' || pos === 'sticky') && !el.contains(desk) && !desk.contains(el)) el.style.visibility = 'hidden';
+    });
+    document.body.style.paddingTop = '0';
+  });
+  await page.locator('#subCleardebt').screenshot({ path: shot(name) });
+}
+
+test.use({ viewport: { width: 1360, height: 1000 } });
+
+async function openDesk(page, { fixture = buildClearDebtDeskFixture(), drop = [] } = {}) {
+  await page.goto('/ops.html');
+  await revealOpsStaticFixture(page);
+  await page.evaluate(({ fixture, drop }) => {
+    try { localStorage.removeItem('sw_cd_tab'); } catch (e) {}
+    const main = document.getElementById('mainApp');
+    if (main) main.style.display = '';
+    window.__cddPosts = [];
+    const answer = (action) => {
+      if (Object.prototype.hasOwnProperty.call(fixture, action) && drop.indexOf(action) < 0) return Promise.resolve(JSON.parse(JSON.stringify(fixture[action])));
+      const e = new Error('Unknown action'); e.status = 400; return Promise.reject(e);
+    };
+    window.opsFetch = (action) => answer(action);
+    window.opsPost = (action, body) => {
+      window.__cddPosts.push({ action, body });
+      if (drop.indexOf(action) >= 0) { const e = new Error('Unknown action'); e.status = 400; return Promise.reject(e); }
+      if (action === 'debt_draft_decide') return Promise.resolve({ ok: true, draft: { id: body.draft_id, status: body.decision === 'approve' ? 'approved' : 'skipped', text: body.text, approved_by: 'ops-e2e' } });
+      if (action === 'debt_log_outcome') return Promise.resolve({ ok: true, logged: body.xero_invoice_ids.length });
+      return Promise.reject(new Error('Unknown action'));
+    };
+    // The Today overdue card is the way in.
+    document.getElementById('statOverdue').click();
+  }, { fixture, drop });
+  await expect(page.locator('#subCleardebt')).toBeVisible();
+}
+
+function expectedOverdue(fixture) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth' }).format(new Date());
+  let cents = 0, n = 0;
+  for (const i of fixture.debt_book.invoices) if (i.is_debt && i.due_date && i.due_date < today) { cents += Math.round(i.amount_due * 100); n += 1; }
+  return { text: '$' + Math.round(cents / 100).toLocaleString('en-AU'), n };
+}
+
+test('header: overdue is the big number with holds included, check first and fix first beside it, stamp matches Xero', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  await openDesk(page, { fixture });
+  const want = expectedOverdue(fixture);
+  await expect(page.locator('#cddOverdue')).toContainText(want.text);
+  await expect(page.locator('#cddOverdue')).toContainText(want.n + ' invoices');
+  await expect(page.locator('#cddStamp')).toContainText('Matches Xero, read 07:02');
+  const labels = await page.locator('.cdd-fig .l').allTextContents();
+  expect(labels).toEqual(['Debt, by your definition', 'Open in Xero', 'Not debt', 'Check first', 'Fix first', 'Waiting for Shaun']);
+  await expect(page.locator('.cdd-fig', { hasText: 'Check first' }).locator('.v')).toHaveText('$3,225');
+  await expect(page.locator('.cdd-fig', { hasText: 'Fix first' }).locator('.v')).toHaveText('$2,860');
+  await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' }).locator('.v')).toHaveText('3');
+  await expect(page.locator('#subCleardebt')).not.toContainText('Texts waiting for Marnin');
+  await shotDesk(page, '01-today.png');
+});
+
+test('a copy that differs from Xero says by how much', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  fixture.debt_book.copy_check = { matches: false, differs_by: 3583.48, invoice_count: 6 };
+  await openDesk(page, { fixture });
+  await expect(page.locator('#cddStamp')).toHaveText('Differs by $3,583.48 on 6 invoices');
+});
+
+test('tabs are Today, Debt book, Promises, Jan, Deposits with Today first and open', async ({ page }) => {
+  await openDesk(page);
+  const tabs = await page.locator('[data-cdd-tab]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-tab')));
+  expect(tabs).toEqual(['today', 'book', 'promises', 'jan', 'deposits']);
+  await expect(page.locator('[data-cdd-tab="today"]')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Today: held payers left off, groups in chase order, send is off everywhere', async ({ page }) => {
+  await openDesk(page);
+  const groups = await page.locator('[data-cdd-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-group')));
+  expect(groups).toEqual(['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder']);
+  await expect(page.locator('[data-cdd-item="m-ruby"]')).toHaveCount(0);
+  await expect(page.locator('#clearDebtCards')).toContainText('1 payer is on hold');
+  const sends = page.locator('button.send');
+  expect(await sends.count()).toBeGreaterThan(0);
+  for (const b of await sends.all()) {
+    await expect(b).toBeDisabled();
+    await expect(b).toHaveText('Sending off until Shaun says go');
+    expect(await b.getAttribute('onclick')).toBeNull();
+  }
+});
+
+test('approve a draft, then approve ticked in one go', async ({ page }) => {
+  await openDesk(page);
+  const harper = page.locator('[data-cdd-item="m-harper"]');
+  await harper.locator('textarea').fill('Hi Harper, a friendly reminder about INV-9001. Thanks, SecureWorks WA');
+  await harper.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(harper).toContainText('Approved by ops-e2e');
+  await page.locator('[data-cdd-item="m-theo"] input[type=checkbox]').check();
+  await page.locator('[data-cdd-item="m-mia"] input[type=checkbox]').check();
+  await page.locator('#cddApproveTicked').click();
+  await expect(page.locator('[data-cdd-item="m-theo"]')).toContainText('Approved');
+  const posts = await page.evaluate(() => window.__cddPosts);
+  expect(posts.map((p) => p.action)).toEqual(['debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide']);
+  expect(posts[0].body).toMatchObject({ draft_id: 'draft-harper', decision: 'approve', text: 'Hi Harper, a friendly reminder about INV-9001. Thanks, SecureWorks WA' });
+});
+
+test('outcome buttons and the promise box log against the payer\'s invoices', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  await openDesk(page, { fixture });
+  const mia = page.locator('[data-cdd-item="m-mia"]');
+  await mia.getByRole('button', { name: 'Save promise' }).click();
+  await expect(mia.locator('.cdd-out [data-cdd-said]')).toHaveText('Put the promised amount in first');
+  await mia.getByLabel('Promised amount').fill('500');
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth' }).format(new Date());
+  await mia.getByLabel('Promised date').fill(today);
+  await mia.getByRole('button', { name: 'Save promise' }).click();
+  await expect(mia.locator('.cdd-out [data-cdd-said]')).toContainText('Logged: Promised $500.00');
+  await mia.getByRole('button', { name: 'No answer' }).click();
+  const posts = await page.evaluate(() => window.__cddPosts.filter((p) => p.action === 'debt_log_outcome'));
+  expect(posts[0].body).toMatchObject({ outcome_code: 'promised', promised_amount: 500, promised_date: today, channel: 'call', schedule_step: 'call', xero_invoice_ids: [fixture.debt_book.invoices[2].xero_invoice_id] });
+  expect(posts[1].body.outcome_code).toBe('no_answer');
+});
+
+test('Debt book tab: live split by payer and age, the bar from our copy, and the payer card outcome box', async ({ page }) => {
+  await openDesk(page);
+  await page.locator('[data-cdd-tab="book"]').click();
+  await expect(page.locator('.cdd-tbl').first()).toContainText('MLB');
+  await expect(page.locator('.cdd-tbl').nth(1)).toContainText('No due date');
+  await expect(page.locator('#clearDebtBookHead .cd-legend')).toContainText('No due date');
+  await expect(page.locator('#clearDebtBookHead')).not.toContainText('Texts waiting for Marnin');
+  await shotDesk(page, '02-debt-book.png');
+  await page.locator('#clearDebtBookHead .cd-legend button', { hasText: 'Chase now' }).click();
+  await page.locator('.cd-row', { hasText: 'Harper Nguyen' }).click();
+  await expect(page.locator('#cd-rec .cdd-out')).toBeVisible();
+  await expect(page.locator('#cd-rec .cdd-out')).toContainText('Says paid');
+});
+
+test('Promises, Jan and Deposits tabs', async ({ page }) => {
+  await openDesk(page);
+  await page.locator('[data-cdd-tab="promises"]').click();
+  const status = await page.locator('[data-cdd-promise]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-promise')));
+  expect(status).toEqual(['broken', 'open', 'kept']);
+  await shotDesk(page, '03-promises.png');
+  await page.locator('[data-cdd-tab="jan"]').click();
+  await expect(page.locator('[data-cdd-item]')).toHaveCount(1);
+  await expect(page.locator('[data-cdd-item="m-nina"]')).toBeVisible();
+  await shotDesk(page, '04-jan.png');
+  await page.locator('[data-cdd-tab="deposits"]').click();
+  await expect(page.locator('#clearDebtCards .cdd-tbl tbody tr')).toHaveCount(3);
+  await expect(page.locator('#clearDebtCards')).toContainText('Not debt');
+  await shotDesk(page, '05-deposits.png');
+});
+
+test('before the backend steps deploy: plain "not live yet", no guessed number, our copy still shown', async ({ page }) => {
+  await openDesk(page, { drop: ['debt_book', 'debt_morning_list', 'debt_promises', 'debt_log_outcome'] });
+  await expect(page.locator('#clearDebtStats')).toContainText('The live Xero read (debt_book) is not live yet.');
+  await expect(page.locator('#cddOverdue')).toHaveCount(0);
+  await expect(page.locator('#clearDebtCards')).toContainText('The morning list (debt_morning_list) is not live yet.');
+  await shotDesk(page, '06-not-live-yet.png');
+  await page.locator('[data-cdd-tab="book"]').click();
+  await expect(page.locator('#clearDebtBookHead .cd-legend')).toBeVisible();
+  await page.locator('#clearDebtBookHead .cd-legend button', { hasText: 'Chase now' }).click();
+  await page.locator('.cd-row', { hasText: 'Harper Nguyen' }).click();
+  await page.locator('#cd-rec').getByRole('button', { name: 'Spoke' }).click();
+  await expect(page.locator('#cd-rec .cdd-out [data-cdd-said]')).toHaveText('Outcome logging is not live yet. Nothing was saved; use Add note for now.');
+});
+
+test('phone width keeps the header and list readable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await openDesk(page);
+  await expect(page.locator('#cddOverdue')).toBeVisible();
+  const overflow = await page.evaluate(() => document.getElementById('subCleardebt').scrollWidth - document.getElementById('subCleardebt').clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await shotDesk(page, '07-phone.png');
+});

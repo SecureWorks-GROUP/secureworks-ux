@@ -68,7 +68,7 @@ The header is summed from `invoices[]` by the screen, so every figure follows th
 }
 ```
 
-`debt_draft_decide` (POST, step 3): `{ draft_id, decision: "approve" | "skip", text }`, answered `{ ok, draft }`. The approval records the signed-in user.
+`debt_draft_decide` (POST, step 3): `{ draft_id, decision: "approve" | "skip", text, xero_invoice_ids }`, answered `{ ok, draft }`. The approval records the signed-in user.
 
 `debt_log_outcome` (POST, steps 3 and 5): `{ payer_key, xero_invoice_ids, outcome_code: "no_answer" | "spoke" | "promised" | "disputed" | "says_paid", promised_amount, promised_date, note, channel: "call", schedule_step }`, answered `{ ok, logged }`.
 

@@ -12,10 +12,10 @@ Ops > Financials > Clear Debt. `modules/ops-clear-debt-desk.js` owns the header,
 - **Sending is off everywhere on this screen** until the old automatic money texts are switched off and Shaun says start sending. The desk drafts' send button and the Debt book payer record's Send text and Send invoice email buttons are all disabled, carry no handler and read **Sending off until Shaun says go**; the payer record's send functions refuse too. One switch, `ClearDebtDeskCore.SENDING_ON`, turns them on in a later reviewed PR. Add note and the outcome buttons still work.
 - **Debt book** holds the existing bar and payer groups (our copy, `list_debt_picture`) and, when the live book is read, the debt split by payer and by age.
 - **Promises** lists promises to pay from the morning list: broken ones ride on their item, open ones come from `paused[]` with the day chasing resumes. Broken first, then open, then kept. A promise with no amount says so.
-- **Jan** lists the payers at the day-7 Jan visit step, then any held Jan-step payers below, with their reason and no draft.
-- **Deposits** lists unpaid deposits and other before-work invoices from the live book (`kind: "deposit"`, or `not_debt_reason: "before_first_payment"`; never a `not_chased` contact), the same set the morning list reminds. They are not debt.
+- **Jan** lists the payers at the day-7 Jan visit step, then below them any held payer whose `held_step` is `jan_visit`, with their reason and no draft.
+- **Deposits** lists a client's unpaid deposits and other before-work invoices from the live book: `payer: "client"`, not debt, and `kind: "deposit"` or `not_debt_reason: "before_first_payment"` (the backend's own deposit rule). Those the morning list names in `not_chased` (matched by invoice number: late-made deposits matching a transfer already received, a likely duplicate, leftover cents) are left out of the total and the 60-day pill and shown apart below the table with the list's reason. When the morning list is not read, nothing can be set apart. They are not debt.
 
-**Payer card.** Every Today item and the Debt book payer record carry the outcome buttons (No answer, Spoke, Promised, Disputed, Says paid) and a promise box ($ amount and a date). Promised needs both. An outcome is logged against the card's Xero invoice ids with the morning list's `payer_key`; the Debt book payer record looks that key up from the list by invoice id, so MLB logs as `mlb`, not a contact id.
+**Payer card.** Every Today item and the Debt book payer record carry the outcome buttons (No answer, Spoke, Promised, Disputed, Says paid) and a promise box ($ amount and a date). Promised needs both. An outcome carries a `schedule_step` only when the card's step is one a person carries out when pressing it: `call`, `builder_call` or `jan_visit`. Text, statement and deposit-reminder cards, and the Debt book payer record, log the outcome with `schedule_step: null`, so a call outcome never marks an unsent text or statement as done; the send itself stamps those steps. An outcome is logged against the card's Xero invoice ids with the morning list's `payer_key`; the Debt book payer record looks that key up from the list by invoice id, so MLB logs as `mlb`, not a contact id.
 
 **Display rules (B17).** Ages count Perth calendar days, never UTC. An invoice with no due date sits in its own **No due date** bucket, never "not due" and never 90+. "Refreshed" shows the newest stamp. Overdue counts debt only: deposits, not owed and set-aside invoices never inflate it.
 
@@ -61,6 +61,7 @@ The header is summed from `invoices[]` by the screen, so every figure follows th
     "payer_name": "Name", "payer": "client",
     "group": "broken_promise | jan | call | text | statement | deposit_reminder | hold",
     "step": "friendly_text | firm_text | call | jan_visit | statement | builder_call | deposit_reminder | null (holds)",
+    "held_step": "holds only: the step the payer would be on (jan_visit puts the hold on the Jan tab too)",
     "step_label": "Day 2: firm text with the pay link  (holds: 'Check first: <reason>')",
     "amount": 4200.0, "days_overdue": 2,
     "invoices": [{ "xero_invoice_id": "uuid", "invoice_number": "INV-1578", "amount_due": 4200.0, "due_date": "2026-09-29", "invoice_date": "2026-09-15", "days_overdue": 2 }],
@@ -78,7 +79,7 @@ The header is summed from `invoices[]` by the screen, so every figure follows th
 
 `debt_draft_decide` (POST, step 3, not built yet): `{ draft_id, decision: "approve" | "skip", text, xero_invoice_ids }`, answered `{ ok, draft }`. The approval records the signed-in user.
 
-`debt_log_outcome` (POST, steps 3 and 5, not built yet): `{ payer_key, xero_invoice_ids, outcome_code: "no_answer" | "spoke" | "promised" | "disputed" | "says_paid", promised_amount, promised_date, note, channel: "call", schedule_step }`, answered `{ ok, logged }`. The outcome codes match the backend's `DEBT_CHASE_OUTCOMES`, and the morning list reads them back from `payment_chase_logs` (`outcome_code`, `schedule_step`, `promised_amount`, `promised_date`).
+`debt_log_outcome` (POST, steps 3 and 5, not built yet): `{ payer_key, xero_invoice_ids, outcome_code: "no_answer" | "spoke" | "promised" | "disputed" | "says_paid", promised_amount, promised_date, note, channel: "call", schedule_step: "call | builder_call | jan_visit | null" }`, answered `{ ok, logged }`. The outcome codes match the backend's `DEBT_CHASE_OUTCOMES`, and the morning list reads them back from `payment_chase_logs` (`outcome_code`, `schedule_step`, `promised_amount`, `promised_date`).
 
 There is no separate promises read: the Promises tab is built from the morning list.
 

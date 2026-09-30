@@ -1,7 +1,7 @@
 // Offline fixture for the Clear Debt desk screen (docs/clear-debt-desk.md).
 // Shapes follow the backend as built: debt_book (fm/debt-reader-1) and debt_morning_list
 // (fm/debt-morning-list-2): item ids are date:payer_key:group:step, builders key as mlb / aj /
-// other_builder:<label>, holds are group 'hold' with step null, open promises sit in paused[].
+// other_builder:<label>, holds are group 'hold' with step null and held_step (the step the payer would be on), open promises sit in paused[].
 // The drafts on items are a preview of plan step 3; step 2 sends draft: null.
 // Every name is made up. Dates are derived from today's Perth date at run time,
 // so ages and "overdue" never rot as the real calendar moves on.
@@ -24,8 +24,9 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     inv(5, { contact_name: 'Ruby Castillo', payer: 'client', kind: 'final', reference: 'SWF-90005-FINBAL', job_number: 'SWF-90005', job_status: 'rectification', due_date: d(-12), amount_due: 2860, hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit', reason: 'Final invoice, job in rectification' }),
     inv(6, { contact_name: 'Leo Fraser', payer: 'client', kind: 'final', reference: 'SWP-90006-FINBAL', job_number: 'SWP-90006', due_date: d(6), amount_due: 5900, reason: 'Final invoice on a complete job' }),
     inv(7, { contact_name: 'Ivy Okafor', payer: 'client', kind: 'deposit', reference: 'SWP-90007-DEP', job_number: 'SWP-90007', job_status: 'accepted', is_debt: false, invoice_date: d(-70), due_date: d(-63), amount_due: 3120, reason: 'Deposit: not debt' }),
-    inv(8, { contact_name: 'Sam Whitlock', payer: 'client', kind: 'progress_claim', reference: 'SWP-90008-PROG', job_number: 'SWP-90008', job_status: 'scheduled', is_debt: false, invoice_date: d(-20), due_date: d(-6), amount_due: 8750.01, reason: 'Progress claim, job has had no first payment yet' }),
+    inv(8, { contact_name: 'Sam Whitlock', payer: 'client', kind: 'progress_claim', reference: 'SWP-90008-PROG', job_number: 'SWP-90008', job_status: 'scheduled', is_debt: false, not_debt_reason: 'before_first_payment', invoice_date: d(-20), due_date: d(-6), amount_due: 8750.01, reason: 'Progress claim, job has had no first payment yet' }),
     inv(9, { contact_name: 'Ada Kowalski', payer: 'client', kind: 'deposit', reference: 'SWF-90009-DEP', job_number: 'SWF-90009', job_status: 'accepted', is_debt: false, invoice_date: d(-10), due_date: d(-3), amount_due: 2400, reason: 'Deposit: not debt' }),
+    inv(19, { contact_name: 'Eli Moreau', payer: 'client', kind: 'deposit', reference: 'SWP-90019-DEP', job_number: 'SWP-90019', job_status: 'in_progress', is_debt: false, invoice_date: d(-90), due_date: d(-83), amount_due: 1850, reason: 'Deposit: not debt' }),
     inv(10, { contact_name: 'Major Loss Builders', payer: 'mlb', kind: 'builder', reference: 'MLB-90010 PO-5510', job_number: 'SWMS-90010', due_date: d(-18), amount_due: 1332.1, reason: 'Builder invoice, make-safe' }),
     inv(11, { contact_name: 'Major Loss Builders', payer: 'mlb', kind: 'builder', reference: 'MLB-90011 PO-5511', job_number: 'SWMS-90011', due_date: d(-3), amount_due: 561, reason: 'Builder invoice, roof report' }),
     inv(12, { contact_name: 'Major Loss Builders', payer: 'mlb', kind: 'builder', reference: 'MLB-90012 PO-5512', job_number: 'SWMS-90012', due_date: d(-40), amount_due: 838.2, hold: 'check_first', hold_reason: 'In dispute with the builder', reason: 'Builder invoice, make-safe' }),
@@ -60,9 +61,9 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     item({ id: mid(uuid(107), 'deposit_reminder', 'deposit_reminder'), payer_key: uuid(107), payer_name: 'Ivy Okafor', payer: 'client', group: 'deposit_reminder', step: 'deposit_reminder', step_label: 'One friendly deposit reminder', days_overdue: 63, invoices: ref('INV-9007'),
       draft: { id: 'draft-ivy', channel: 'sms', status: 'skipped', text: 'Hi Ivy, just checking in about your patio. The deposit invoice INV-9007 is still open; let us know if you would like to go ahead. Thanks, SecureWorks WA' } }),
     // Book holds, as the backend sends them: one item per payer and hold kind, group 'hold', step null, no draft.
-    item({ id: mid(uuid(105), 'hold', 'fix_first') + ':INV-9005', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'hold', step: null, step_label: 'Fix first: Job in rectification: gate latch to refit', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit' }),
-    item({ id: mid('other_builder:Builderwest', 'hold', 'check_first') + ':INV-9015', payer_key: 'other_builder:Builderwest', payer_name: 'Builderwest', payer: 'other_builder', group: 'hold', step: null, step_label: 'Check first: Builder rejected the invoice', days_overdue: 120, invoices: ref('INV-9015'), hold: 'check_first', hold_reason: 'Builder rejected the invoice' }),
-    item({ id: mid('mlb', 'hold', 'check_first') + ':INV-9012', payer_key: 'mlb', payer_name: 'Major Loss Builders', payer: 'mlb', group: 'hold', step: null, step_label: 'Check first: In dispute with the builder', days_overdue: 40, invoices: ref('INV-9012'), hold: 'check_first', hold_reason: 'In dispute with the builder' }),
+    item({ id: mid(uuid(105), 'hold', 'fix_first') + ':INV-9005', payer_key: uuid(105), payer_name: 'Ruby Castillo', payer: 'client', group: 'hold', step: null, held_step: 'friendly_text', step_label: 'Fix first: Job in rectification: gate latch to refit', days_overdue: 12, invoices: ref('INV-9005'), hold: 'fix_first', hold_reason: 'Job in rectification: gate latch to refit' }),
+    item({ id: mid('other_builder:Builderwest', 'hold', 'check_first') + ':INV-9015', payer_key: 'other_builder:Builderwest', payer_name: 'Builderwest', payer: 'other_builder', group: 'hold', step: null, held_step: 'builder_call', step_label: 'Check first: Builder rejected the invoice', days_overdue: 120, invoices: ref('INV-9015'), hold: 'check_first', hold_reason: 'Builder rejected the invoice' }),
+    item({ id: mid('mlb', 'hold', 'check_first') + ':INV-9012', payer_key: 'mlb', payer_name: 'Major Loss Builders', payer: 'mlb', group: 'hold', step: null, held_step: 'statement', step_label: 'Check first: In dispute with the builder', days_overdue: 40, invoices: ref('INV-9012'), hold: 'check_first', hold_reason: 'In dispute with the builder' }),
   ];
 
   // Open promises pause chasing: they come in paused[], not items.
@@ -73,7 +74,10 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     { payer_key: uuid(106), payer_name: 'Leo Fraser', invoice_numbers: ['INV-9006'], reason: 'not_due', next_step: 'friendly_text', next_date: d(7) },
     { payer_key: 'mlb', payer_name: 'Major Loss Builders', invoice_numbers: ['INV-9013'], reason: 'no_due_date', next_step: null, next_date: null },
   ];
-  const notChased = [{ invoice_number: 'INV-9016', payer_name: 'ML Builders', reason: 'Old ML Builders contact: only Major Loss Builders counts' }];
+  const notChased = [
+    { invoice_number: 'INV-9016', payer_name: 'ML Builders', reason: 'Old ML Builders contact: only Major Loss Builders counts' },
+    { invoice_number: 'INV-9019', payer_name: 'Eli Moreau', reason: 'Deposit invoice made late to match a bank transfer already received' },
+  ];
   const dow = new Date(today + 'T00:00:00Z').getUTCDay();
   const nextMonday = d(((8 - dow) % 7) || 7);
 

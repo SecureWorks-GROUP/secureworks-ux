@@ -42,7 +42,8 @@ var ClearDebtDeskCore = (function () {
     { key: '90_plus', label: '90+' },
     { key: 'no_due', label: 'No due date' },
   ];
-  var BEFORE_WORK = ['deposit', 'progress_claim', 'materials'];
+  // Steps a person carries out when the outcome is pressed; texts, statements and reminders are stamped by their send.
+  var OUTCOME_STEPS = ['call', 'builder_call', 'jan_visit'];
 
   function perthDate(now) {
     var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now || new Date());
@@ -135,7 +136,8 @@ var ClearDebtDeskCore = (function () {
   function heldItems(items) { return (items || []).filter(isHeld).sort(byAmountThenAge); }
   function waitingCount(items) { return chaseItems(items).filter(function (i) { return i.draft && i.draft.status === 'pending'; }).length; }
   function janFromMorning(items) { return sortMorning(chaseItems(items).filter(function (i) { return i.group === 'jan'; })); }
-  function janHeldFromMorning(items) { return heldItems(items).filter(function (i) { return i.group === 'jan' || i.step === 'jan_visit'; }); }
+  function janHeldFromMorning(items) { return heldItems(items).filter(function (i) { return i.held_step === 'jan_visit'; }); }
+  function outcomeScheduleStep(step) { return OUTCOME_STEPS.indexOf(step) >= 0 ? step : null; }
 
   function sendButtonHtml() {
     // No handler, no id: a disabled stamp with a handler is a send path waiting to be switched on by accident.
@@ -160,8 +162,8 @@ var ClearDebtDeskCore = (function () {
     return { payer_key: i.payer_key, payer_name: i.payer_name, invoice_numbers: (i.invoices || []).map(function (x) { return x.invoice_number; }), promised_amount: i.promise.amount == null ? null : i.promise.amount, promised_date: i.promise.date, status: i.promise.status || 'open', resumes_on: resumesOn || null };
   }
   function promisesFromMorning(morning) {
-    var items = Array.isArray(morning) ? morning : (morning && morning.items) || [];
-    var paused = Array.isArray(morning) ? [] : (morning && morning.paused) || [];
+    var items = (morning && morning.items) || [];
+    var paused = (morning && morning.paused) || [];
     var rows = items.filter(function (i) { return i.promise; }).map(function (i) { return promiseRow(i); })
       .concat(paused.filter(function (p) { return p.promise; }).map(function (p) { return promiseRow(p, p.resumes_on); }));
     return rows.sort(sortPromises);
@@ -171,17 +173,23 @@ var ClearDebtDeskCore = (function () {
     var r = (PROMISE_RANK[a.status] === undefined ? 1 : PROMISE_RANK[a.status]) - (PROMISE_RANK[b.status] === undefined ? 1 : PROMISE_RANK[b.status]);
     return r || String(a.promised_date || '').localeCompare(String(b.promised_date || ''));
   }
-  function depositsFromBook(invoices, today) {
-    // Same set the morning list reminds: deposits, and progress/materials invoices before the job's first payment.
-    return (invoices || []).filter(function (i) { return !i.is_debt && i.payer !== 'not_chased' && (i.kind === 'deposit' || i.not_debt_reason === 'before_first_payment' || (!i.not_debt_reason && BEFORE_WORK.indexOf(i.kind) >= 0)); }).map(function (i) {
+  // The backend's deposit set: a client's deposits and invoices before the job's first payment.
+  // Those the morning list never chases (its not_chased[]) are set apart with its reason, outside the total.
+  function depositsFromBook(invoices, today, notChased) {
+    var why = {}; (notChased || []).forEach(function (n) { why[n.invoice_number] = n.reason || 'Not chased'; });
+    var res = { rows: [], apart: [] };
+    (invoices || []).filter(function (i) { return i.payer === 'client' && !i.is_debt && (i.kind === 'deposit' || i.not_debt_reason === 'before_first_payment'); }).map(function (i) {
       var copy = {}; Object.keys(i).forEach(function (k) { copy[k] = i[k]; });
       copy.days_since_invoice = daysPast(i.invoice_date, today);
       return copy;
-    }).sort(function (a, b) { return String(a.invoice_date || '').localeCompare(String(b.invoice_date || '')); });
+    }).sort(function (a, b) { return String(a.invoice_date || '').localeCompare(String(b.invoice_date || '')); }).forEach(function (r) {
+      if (Object.prototype.hasOwnProperty.call(why, r.invoice_number)) { r.not_chased_reason = why[r.invoice_number]; res.apart.push(r); } else res.rows.push(r);
+    });
+    return res;
   }
   function isNotDeployed(e) { return !!e && (/unknown action/i.test(String(e.message || '')) || e.status === 404); }
 
-  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
+  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
 })();
 // </clear-debt-desk-core>
 
@@ -328,7 +336,7 @@ function cddTabsHtml() {
     today: items ? C.chaseItems(items).length : null,
     promises: CDD.morning ? C.promisesFromMorning(CDD.morning).length : null,
     jan: items ? C.janFromMorning(items).length : null,
-    deposits: CDD.book ? C.depositsFromBook(CDD.book.invoices, cddToday()).length : null,
+    deposits: CDD.book ? C.depositsFromBook(CDD.book.invoices, cddToday(), CDD.morning && CDD.morning.not_chased).rows.length : null,
   };
   return '<div class="cdd-tabs" role="tablist">' + CDD_TABS.map(function (t) {
     return '<button role="tab" data-cdd-tab="' + t.key + '" aria-selected="' + (CDD.tab === t.key) + '" class="' + (CDD.tab === t.key ? 'on' : '') + '" onclick="cddTab(\'' + t.key + '\')">' + t.label + (counts[t.key] != null ? '<em>' + counts[t.key] + '</em>' : '') + '</button>';
@@ -464,7 +472,7 @@ async function cddOutcome(btn, code) {
   if (problem) { said.className = 'cdd-said bad'; said.textContent = problem; return; }
   var ids = (box.getAttribute('data-ids') || '').split(',').filter(Boolean);
   if (!ids.length) { said.className = 'cdd-said bad'; said.textContent = 'No invoice to log this against'; return; }
-  var body = { payer_key: box.getAttribute('data-payer') || null, xero_invoice_ids: ids, outcome_code: code, channel: 'call', schedule_step: box.getAttribute('data-step') || null, note: ((box.querySelector('[data-out-note]') || {}).value || '').trim() || null };
+  var body = { payer_key: box.getAttribute('data-payer') || null, xero_invoice_ids: ids, outcome_code: code, channel: 'call', schedule_step: ClearDebtDeskCore.outcomeScheduleStep(box.getAttribute('data-step')), note: ((box.querySelector('[data-out-note]') || {}).value || '').trim() || null };
   if (code === 'promised') { body.promised_amount = Number(o.amount); body.promised_date = o.date; }
   box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
   try {
@@ -525,12 +533,18 @@ function cddJanHtml() {
 function cddDepositsHtml() {
   var C = ClearDebtDeskCore;
   if (!CDD.book) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Reading deposits from Xero…</div>' : '<div style="margin-top:16px">' + cddFail('The live Xero read (debt_book)', CDD.bookErr) + '</div>';
-  var rows = C.depositsFromBook(CDD.book.invoices, cddToday());
+  var dep = C.depositsFromBook(CDD.book.invoices, cddToday(), CDD.morning && CDD.morning.not_chased), rows = dep.rows;
   var sum = rows.reduce(function (a, r) { return a + Math.round(Number(r.amount_due || 0) * 100); }, 0) / 100;
-  var h = '<div class="cdd-bar"><span class="t">Unpaid deposits and before-work invoices: <b>' + C.money(sum) + '</b> on ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '. Not debt.</span></div>';
-  if (!rows.length) return h + cddPend('No unpaid deposits.', '');
-  return h + '<table class="cdd-tbl"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Invoiced</th><th class="r">Days</th><th>Why it is not debt</th></tr></thead><tbody>' + rows.map(function (r) {
+  var h = '<div class="cdd-bar"><span class="t" id="cddDepositsTotal">Unpaid deposits and before-work invoices: <b>' + C.money(sum) + '</b> on ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '. Not debt.</span></div>';
+  h += rows.length ? '<table class="cdd-tbl" id="cddDeposits"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Invoiced</th><th class="r">Days</th><th>Why it is not debt</th></tr></thead><tbody>' + rows.map(function (r) {
     var d = r.days_since_invoice;
-    return '<tr><td><b>' + cddEsc(r.contact_name) + '</b>' + (r.job_number ? '<div class="cdd-foot" style="margin:0">' + cddEsc(r.job_number) + '</div>' : '') + '</td><td>' + (r.xero_invoice_id ? cddXero(r.xero_invoice_id, r.invoice_number) : cddEsc(r.invoice_number)) + '</td><td class="r">' + C.money(r.amount_due) + '</td><td>' + cddEsc(cddDateWords(r.invoice_date)) + '</td><td class="r">' + (d === null ? '–' : d >= 60 ? '<span class="cd-pill w">' + d + '</span>' : d) + '</td><td>' + cddEsc(r.reason || '') + '</td></tr>';
-  }).join('') + '</tbody></table><div class="cdd-foot">The one friendly reminder and the weekly 60-day cancel list come in a later step. Nothing here is chased or cancelled from this screen.</div>';
+    return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(cddDateWords(r.invoice_date)) + '</td><td class="r">' + (d === null ? '–' : d >= 60 ? '<span class="cd-pill w">' + d + '</span>' : d) + '</td><td>' + cddEsc(r.reason || '') + '</td></tr>';
+  }).join('') + '</tbody></table>' : cddPend('No unpaid deposits.', '');
+  if (dep.apart.length) h += '<div class="cdd-sec">Never chased, left out of the total</div><table class="cdd-tbl" id="cddDepositsApart"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Why it is not chased</th></tr></thead><tbody>' + dep.apart.map(function (r) {
+    return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(r.not_chased_reason) + '</td></tr>';
+  }).join('') + '</tbody></table>';
+  return h + '<div class="cdd-foot">The one friendly reminder and the weekly 60-day cancel list come in a later step. Nothing here is chased or cancelled from this screen.</div>';
+}
+function cddDepositCells(r) {
+  return '<td><b>' + cddEsc(r.contact_name) + '</b>' + (r.job_number ? '<div class="cdd-foot" style="margin:0">' + cddEsc(r.job_number) + '</div>' : '') + '</td><td>' + (r.xero_invoice_id ? cddXero(r.xero_invoice_id, r.invoice_number) : cddEsc(r.invoice_number)) + '</td><td class="r">' + ClearDebtDeskCore.money(r.amount_due) + '</td>';
 }

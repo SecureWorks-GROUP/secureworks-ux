@@ -3,7 +3,7 @@
 // every figure on the screen goes through: Perth-date ages, the no-due-date bucket,
 // the header (overdue includes holds, with check first and fix first shown beside it),
 // the Xero stamp, the morning-list order, holds shown with no draft and never approved,
-// the outcome and promise checks, and that the send button can never be armed.
+// the outcome and promise checks, which steps an outcome stamps, deposits apart from not-chased ones, and that the send button can never be armed.
 const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
@@ -117,17 +117,18 @@ check('morning list order: broken promises, Jan, calls, texts, statements, depos
 });
 const withHold = items.concat([
   { id: 'x1', group: 'text', hold: 'check_first', amount: 99999, draft: { id: 'dx', status: 'pending' } },
-  { id: 'x2', group: 'jan', step: 'jan_visit', hold: 'fix_first', amount: 20, days_overdue: 9 },
+  { id: 'x2', group: 'hold', step: null, held_step: 'jan_visit', hold: 'fix_first', amount: 20, days_overdue: 9 },
+  { id: 'x3', group: 'hold', step: null, held_step: 'friendly_text', hold: 'check_first', amount: 15, days_overdue: 9 },
 ]);
 check('held payers are kept out of the chase groups, even with a draft', () => {
   assert(!C.sortMorning(withHold).some((i) => i.id === 'x1' || i.id === 'x2' || i.id === 'h1'));
   assert.strictEqual(C.waitingCount(withHold), 2, 'a held draft never waits for Shaun');
 });
 check('held payers are listed apart, by amount then age', () => {
-  assert.deepStrictEqual(C.heldItems(withHold).map((i) => i.id), ['x1', 'h1', 'x2']);
+  assert.deepStrictEqual(C.heldItems(withHold).map((i) => i.id), ['x1', 'h1', 'x2', 'x3']);
 });
 check('waiting for Shaun counts pending drafts only', () => { assert.strictEqual(C.waitingCount(items), 2); });
-check('Jan tab takes the Jan group only; held Jan-step payers are listed apart', () => {
+check('Jan tab takes the Jan group only; held payers whose held_step is the Jan visit are listed apart', () => {
   assert.deepStrictEqual(C.janFromMorning(withHold).map((i) => i.id), ['j1']);
   assert.deepStrictEqual(C.janHeldFromMorning(withHold).map((i) => i.id), ['x2']);
 });
@@ -153,12 +154,12 @@ check('outcome checks: promised needs a positive amount and a date not in the pa
 });
 
 check('promises: from the list, broken first, then open, then kept', () => {
-  const ps = C.promisesFromMorning([
+  const ps = C.promisesFromMorning({ items: [
     { id: 'x', payer_name: 'X', promise: { amount: 10, date: '2026-10-02', status: 'open' }, invoices: [{ invoice_number: 'INV-1' }] },
     { id: 'y', payer_name: 'Y', promise: { amount: 20, date: '2026-09-29', status: 'broken' }, invoices: [] },
     { id: 'z', payer_name: 'Z' },
     { id: 'k', payer_name: 'K', promise: { amount: 5, date: '2026-09-20', status: 'kept' } },
-  ]);
+  ] });
   assert.deepStrictEqual(ps.map((p) => p.payer_name), ['Y', 'X', 'K']);
   assert.deepStrictEqual(Array.from(ps[1].invoice_numbers), ['INV-1']);
 });
@@ -187,22 +188,32 @@ check('drafts: none written yet is told apart from none waiting', () => {
   assert.strictEqual(C.anyDrafts([{ draft: null }, { draft: null }]), false);
   assert.strictEqual(C.anyDrafts([{ draft: null }, { draft: { id: 'd', status: 'skipped' } }]), true);
 });
-check('deposits come from the live book: not debt, deposit kind, oldest first', () => {
+check('deposits: the backend set (client, not debt, deposit or before first payment), oldest first', () => {
   const d = C.depositsFromBook([
-    { xero_invoice_id: 'g', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 2000 },
-    { xero_invoice_id: 'q', is_debt: false, kind: 'deposit', invoice_date: '2026-07-01', amount_due: 100 },
-    { xero_invoice_id: 'r', is_debt: false, kind: 'progress_claim', invoice_date: '2026-06-01', amount_due: 100 },
-    { xero_invoice_id: 's', is_debt: true, kind: 'part_payment', invoice_date: '2026-06-01', amount_due: 100 },
+    { xero_invoice_id: 'g', invoice_number: 'INV-G', payer: 'client', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 2000 },
+    { xero_invoice_id: 'q', invoice_number: 'INV-Q', payer: 'client', is_debt: false, kind: 'deposit', invoice_date: '2026-07-01', amount_due: 100 },
+    { xero_invoice_id: 'r', invoice_number: 'INV-R', payer: 'client', is_debt: false, kind: 'progress_claim', not_debt_reason: 'before_first_payment', invoice_date: '2026-06-01', amount_due: 100 },
+    { xero_invoice_id: 'm', invoice_number: 'INV-M', payer: 'client', is_debt: false, kind: 'materials', not_debt_reason: 'before_first_payment', invoice_date: '2026-09-20', amount_due: 1 },
+    { xero_invoice_id: 'u', invoice_number: 'INV-U', payer: 'client', is_debt: false, kind: 'progress_claim', not_debt_reason: 'plan_fee', invoice_date: '2026-06-01', amount_due: 1 },
+    { xero_invoice_id: 's', invoice_number: 'INV-S', payer: 'client', is_debt: true, kind: 'part_payment', invoice_date: '2026-06-01', amount_due: 100 },
+    { xero_invoice_id: 'x', invoice_number: 'INV-X', payer: 'not_chased', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 1 },
+    { xero_invoice_id: 'b', invoice_number: 'INV-B', payer: 'mlb', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 1 },
   ], today);
-  assert.deepStrictEqual(d.map((x) => x.xero_invoice_id), ['r', 'q', 'g'], 'before-work progress claims sit with deposits');
-  assert.strictEqual(d[1].days_since_invoice, 92);
-  // Real debt_book: materials/progress claims before a first payment carry not_debt_reason, and not-chased contacts never count.
-  const real = C.depositsFromBook([
-    { xero_invoice_id: 'm', payer: 'client', is_debt: false, kind: 'materials', not_debt_reason: 'before_first_payment', invoice_date: '2026-09-20', amount_due: 1 },
-    { xero_invoice_id: 'x', payer: 'not_chased', is_debt: false, kind: 'deposit', invoice_date: '2026-09-01', amount_due: 1 },
-    { xero_invoice_id: 'p', payer: 'client', is_debt: false, kind: 'plan_fee', not_debt_reason: 'plan_fee', invoice_date: '2026-09-01', amount_due: 1 },
-  ], today);
-  assert.deepStrictEqual(real.map((x) => x.xero_invoice_id), ['m']);
+  assert.deepStrictEqual(Array.from(d.rows.map((x) => x.xero_invoice_id)), ['r', 'q', 'g', 'm'], 'a progress claim counts only with before_first_payment; builders and not-chased contacts never');
+  assert.strictEqual(d.rows[1].days_since_invoice, 92);
+  assert.strictEqual(d.apart.length, 0);
+});
+check('deposits the morning list never chases are set apart with its reason, outside the total', () => {
+  const d = C.depositsFromBook([
+    { xero_invoice_id: 'a', invoice_number: 'INV-1601', payer: 'client', is_debt: false, kind: 'deposit', invoice_date: '2026-06-01', amount_due: 900 },
+    { xero_invoice_id: 'k', invoice_number: 'INV-1700', payer: 'client', is_debt: false, kind: 'deposit', invoice_date: '2026-06-01', amount_due: 50 },
+  ], today, [{ invoice_number: 'INV-1601', payer_name: 'P', reason: 'Made late to match a bank transfer' }, { invoice_number: 'INV-1050', reason: 'Old contact' }]);
+  assert.deepStrictEqual(Array.from(d.rows.map((x) => x.invoice_number)), ['INV-1700']);
+  assert.deepStrictEqual(Array.from(d.apart.map((x) => [x.invoice_number, x.not_chased_reason]), (p) => Array.from(p)), [['INV-1601', 'Made late to match a bank transfer']]);
+});
+check('an outcome stamps schedule_step only for steps a person carries out: calls and the Jan visit', () => {
+  for (const s of ['call', 'builder_call', 'jan_visit']) assert.strictEqual(C.outcomeScheduleStep(s), s);
+  for (const s of ['friendly_text', 'firm_text', 'statement', 'deposit_reminder', '', null, undefined]) assert.strictEqual(C.outcomeScheduleStep(s), null, String(s));
 });
 check('an undeployed action is told apart from a real failure', () => {
   assert.strictEqual(C.isNotDeployed(new Error('Unknown action')), true);

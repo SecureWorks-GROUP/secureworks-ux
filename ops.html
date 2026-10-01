@@ -4625,7 +4625,7 @@ __swOpsStampAssets([
             <div class="stat-sub">Active POs</div>
           </div>
         </div>
-        <div class="stat-card" id="statOverdue">
+        <div class="stat-card" id="statOverdue" onclick="openClearDebt()" role="link" tabindex="0" onkeydown="if(event.key==='Enter')openClearDebt()" title="Open Clear Debt" style="cursor:pointer;">
           <div class="stat-icon"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
           <div class="stat-body">
             <div class="stat-label">Overdue Invoices</div>
@@ -28224,7 +28224,8 @@ if (document.readyState === 'loading') {
 <!-- Clear Debt: payment chase & collection -->
 <script>
 __swOpsStampAssets([
-  {t:'js', u:'modules/ops-clear-debt-v2.js?v=1'}
+  {t:'js', u:'modules/ops-clear-debt-v2.js?v=2'},
+  {t:'js', u:'modules/ops-clear-debt-desk.js?v=1'}
 ]);
 </script>
 </body>

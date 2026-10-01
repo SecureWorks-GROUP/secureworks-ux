@@ -273,6 +273,9 @@ check('the Today menu: sections in chase order, Jan\'s text first in Jan visits,
   for (let n = 0; n < 5; n += 1) { const r = C.nextTodo(rows, at, jt, {}); order.push(r.id); at = r.id; }
   assert.deepStrictEqual(order, ['jan_text', 'c1', 't1', 'pp', 'jan_text']);
   assert.strictEqual(C.nextTodo(rows, 'jan_text', jt, { c1: true }).id, 't1', 'a call logged on screen is done');
+  const lone = C.todaySections({ items: [{ id: 'c1', group: 'call', step: 'call', amount: 5 }, { id: 't2', group: 'text', step: 'friendly_text', amount: 50, draft: { id: 'd2', status: 'approved' } }] });
+  assert.strictEqual(C.nextTodo(lone, 'c1', null, {}), null, 'the open row is the only one left: nothing next');
+  assert.strictEqual(C.nextTodo(lone, null, null, {}).id, 'c1', 'nothing open: the first unfinished row');
   assert.strictEqual(C.rowUnfinished({ id: 'jan_text', type: 'jan_text', jt: janText({ approvable: false }) }, null, {}), false, 'Jan\'s text that cannot be approved is not waiting on a press');
   const quiet = C.todaySections({ items: [{ id: 'h1', group: 'hold', step: null, hold: 'check_first' }] });
   assert.strictEqual(C.nextTodo(quiet, null, null, {}), null);

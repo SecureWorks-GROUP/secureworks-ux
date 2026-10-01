@@ -263,7 +263,7 @@ var ClearDebtDeskCore = (function () {
   function nextTodo(rows, currentId, janText, done) {
     var all = workRows(rows), at = -1;
     for (var i = 0; i < all.length; i++) if (all[i].id === currentId) at = i;
-    for (var j = 1; j <= all.length; j++) { var r = all[(at + j) % all.length]; if (rowUnfinished(r, janText, done)) return r; }
+    for (var j = 1; j <= all.length; j++) { var r = all[(at + j) % all.length]; if (r.id !== currentId && rowUnfinished(r, janText, done)) return r; }
     return null;
   }
 
@@ -625,7 +625,7 @@ function cddSecTableHtml(key, list, sel) {
 }
 function cddRowAmount(r) {
   if (r.type === 'jan_text') return (r.jt.visits || []).reduce(function (a, v) { return a + Math.round(Number(v.amount || 0) * 100); }, 0) / 100;
-  return r.item ? r.item.amount : 0;
+  return r.item ? Number(r.item.amount || 0) : 0;
 }
 // The draft a row's tick approves: a pending draft that needs a decision, or Jan's text while approvable.
 function cddRowTickId(r) {

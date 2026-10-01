@@ -159,6 +159,24 @@ test('Next to do walks the unfinished rows in menu order, skipping decided ones,
   await expect(page.locator('#cddDetail .cdd-nm')).toHaveText('AJ Building & Restoration');
 });
 
+test('Next to do reads All done for now when the open row is the only one left; a row with no amount does not blank the section total', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const m = fixture.debt_morning_list;
+  m.items = m.items.filter((i) => i.payer_name === 'Mia Laurent' || i.payer_name === 'Oscar Patel' || i.payer_name === 'Harper Nguyen');
+  m.items.find((i) => i.payer_name === 'Harper Nguyen').draft.status = 'approved';
+  delete m.items.find((i) => i.payer_name === 'Oscar Patel').amount;
+  m.jan_text = null;
+  await openDesk(page, { fixture });
+  await expect(page.locator('#cddDetail .cdd-nm')).toHaveText('Mia Laurent');
+  await expect(page.locator('#cddNext')).toHaveText('All done for now');
+  await expect(page.locator('#cddNext')).toBeDisabled();
+  await page.locator('.cdd-side [data-cdd-sec="text"]').click();
+  await expect(page.locator('.cdd-tbar .cdd-tsum')).toHaveText('$6,480');
+  await expect(page.locator('#cddNext')).toHaveText('Next to do →');
+  await page.locator('#cddNext').click();
+  await expect(page.locator('#cddDetail .cdd-nm')).toHaveText('Mia Laurent');
+});
+
 test('the table is one line per payer and the keyboard walks it', async ({ page }) => {
   await openDesk(page);
   await page.locator('.cdd-side [data-cdd-sec="text"]').click();

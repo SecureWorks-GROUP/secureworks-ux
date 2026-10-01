@@ -84,7 +84,7 @@ The header is summed from `invoices[]` by the screen, so every figure follows th
     "last_outcome": { "code": "no_answer", "label": "No answer (Jan's words on a Jan visit)", "at": "iso", "by": "Shaun" },
     "draft": "null in step 2 and on Jan visits (step 5); step 3: { id, channel: sms | email | call_script, text, status: pending | approved | skipped | sending | sent, approved_by, last_send }"
   }],
-  "jan_text": "null when no Jan visits; else { id, to: 'jan', to_phone: '+614... or null', visits: [{ item_id, payer_name, site, invoice_numbers, xero_invoice_ids, amount, days_overdue, broken_promise }], xero_invoice_ids, text, status, approved_by, decided_at, last_send, approvable, problem }",
+  "jan_text": "null when no Jan visits; else { id, to: 'jan', to_phone: '+614... or null', visits: [{ item_id, payer_name, site, invoice_numbers, xero_invoice_ids, amount, days_overdue, broken_promise }], xero_invoice_ids, text, template_text, status, approved_by, decided_at, last_send, approvable, problem }",
   "sent_today": [{ "draft_id": "...", "to": "client | jan", "payer_name": "Name (Jan for Jan's text)", "invoice_numbers": ["INV-1"], "step": "friendly_text | jan_text | ...", "text": "...", "at": "iso", "by": "Shaun" }],
   "paused": [{ "payer_key": "...", "payer_name": "Name", "payer": "client", "invoices": [], "amount": 2150.0, "promise": { "amount": null, "date": "2026-10-03", "status": "open" }, "resumes_on": "2026-10-04" }],
   "waiting": [{ "payer_key": "...", "payer_name": "Name", "invoice_numbers": ["INV-1"], "reason": "not_due | no_due_date | done_today | next_step_later | statement_not_due | reminder_sent", "next_step": null, "next_date": null }],

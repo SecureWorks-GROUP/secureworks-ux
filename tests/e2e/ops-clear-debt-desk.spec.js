@@ -57,10 +57,12 @@ async function shotDesk(page, name, selector = '#subCleardebt') {
 
 test.use({ viewport: { width: 1360, height: 1000 } });
 
-async function openDesk(page, { fixture = buildClearDebtDeskFixture(), drop = [] } = {}) {
+async function openDesk(page, { fixture = buildClearDebtDeskFixture(), drop = [], layoutB = false } = {}) {
   await page.goto('/ops.html');
   await revealOpsStaticFixture(page);
-  await page.evaluate(({ fixture, drop }) => {
+  await page.evaluate(({ fixture, drop, layoutB }) => {
+    // Layout B is live. These checks still guard the older morning list, kept until it is removed.
+    window.CDD_LAYOUT_B_LIVE = layoutB;
     try { localStorage.removeItem('sw_cd_tab'); } catch (e) {}
     const main = document.getElementById('mainApp');
     if (main) main.style.display = '';
@@ -79,7 +81,7 @@ async function openDesk(page, { fixture = buildClearDebtDeskFixture(), drop = []
     };
     // The Today overdue card is the way in.
     document.getElementById('statOverdue').click();
-  }, { fixture, drop });
+  }, { fixture, drop, layoutB });
   await expect(page.locator('#subCleardebt')).toBeVisible();
 }
 
@@ -151,12 +153,12 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
   }
 });
 
-test('the live tab is the morning list: no preview banner and no layout B (that lives at ?view=clear-debt-preview)', async ({ page }) => {
-  await openDesk(page);
+test('the live tab is layout B with no preview banner', async ({ page }) => {
+  await openDesk(page, { layoutB: true });
   await expect(page.locator('#cddPreviewBanner')).toHaveCount(0);
-  await expect(page.locator('#cddDesk')).toHaveCount(0);
-  await expect(page.locator('.cdd-side')).toHaveCount(0);
-  await expect(page.locator('[data-cdd-group="broken_promise"]')).toBeVisible();
+  await expect(page.locator('#cddDesk')).toBeVisible();
+  await expect(page.locator('.cdd-side')).toBeVisible();
+  await expect(page.locator('[data-cdd-group="broken_promise"]')).toHaveCount(0);
 });
 
 test('Today opens with one line of what to do, and says sending is off so approving only queues', async ({ page }) => {

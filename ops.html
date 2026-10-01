@@ -6269,8 +6269,8 @@ if (window.__SW_CAL_DRAGV2_ENABLED) {
 
 // ── Clear Debt preview page (layout B, the captain's pick) ──
 // ops.html?view=clear-debt-preview opens Financials > Clear Debt in the new Today layout under a
-// PREVIEW banner: same login, real data. Without it staff see the live tab, unchanged. Making it
-// live is CDD_LAYOUT_B_LIVE in modules/ops-clear-debt-desk.js (docs/clear-debt-desk.md).
+// PREVIEW banner: same login, real data. Layout B is now live (CDD_LAYOUT_B_LIVE in
+// modules/ops-clear-debt-desk.js), so the banner no longer shows (docs/clear-debt-desk.md).
 window.__SW_CLEAR_DEBT_PREVIEW = /[?&]view=clear-debt-preview(?:&|$)/.test(window.location.search || '');
 
 // Council modal alias — called from quick view

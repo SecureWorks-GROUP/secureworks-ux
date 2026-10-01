@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════
-// CLEAR DEBT DESK: the header, the tabs and the morning list. Layout B for Today (the To do today bar,
-//   a left menu of sections, a table of the one picked and a detail panel) is preview-only, at
-//   ops.html?view=clear-debt-preview, until CDD_LAYOUT_B_LIVE is switched on.
+// CLEAR DEBT DESK: the header, the tabs and the morning list. Today shows layout B (the To do today
+//   bar, a left menu of sections, a table of the one picked and a detail panel) now that
+//   CDD_LAYOUT_B_LIVE is on; the older Today code and the preview route stay until removed.
 // Plan: secureworks-backend docs/debt-book/PLAN.md sections 5 and 6 steps 4 and 5,
 //   captain's rulings in DECISIONS.md beside it. Screen contract: docs/clear-debt-desk.md.
 // Reads: debt_book (live Xero read with the captain's rules) and debt_morning_list
@@ -329,9 +329,9 @@ var CDD_TABS = [
   { key: 'jan', label: 'Jan' },
   { key: 'deposits', label: 'Deposits' },
 ];
-// Layout B for Today, the captain's pick, is preview-only: ops.html?view=clear-debt-preview sets
-// window.__SW_CLEAR_DEBT_PREVIEW. To make it what staff see, set CDD_LAYOUT_B_LIVE = true (one line).
-var CDD_LAYOUT_B_LIVE = false;
+// Layout B for Today, the captain's pick, is live: CDD_LAYOUT_B_LIVE is on, so staff see it and the
+// preview banner (ops.html?view=clear-debt-preview sets window.__SW_CLEAR_DEBT_PREVIEW) is gone.
+var CDD_LAYOUT_B_LIVE = true;
 function cddPreview() { return typeof window !== 'undefined' && !!window.__SW_CLEAR_DEBT_PREVIEW; }
 function cddLayoutB() { return CDD_LAYOUT_B_LIVE || cddPreview(); }
 function cddPreviewBannerHtml() {
@@ -559,9 +559,9 @@ function cddJanTextBlock(jt) {
   var n = (jt.visits || []).length;
   return '<div class="cdd-grp" data-cdd-group="jan_text"><b>Jan\'s morning text</b><span>one text to Jan · ' + n + ' visit' + (n === 1 ? '' : 's') + '</span></div>' + cddJanTextHtml(jt);
 }
-// ── Today, layout B (preview): the to-do bar, the section menu, the table and the detail panel ──
-// The captain's pick. Shown only on the preview page (ops.html?view=clear-debt-preview) until
-// CDD_LAYOUT_B_LIVE is switched on; the live Today tab is the morning list above, unchanged.
+// ── Today, layout B: the to-do bar, the section menu, the table and the detail panel ──
+// The captain's pick, live now that CDD_LAYOUT_B_LIVE is on; the older morning list above is kept
+// until it is removed.
 // The left menu picks a section, the table lists it one line per payer, and the panel on the right
 // holds everything for the row picked: the message, its one button, what happened, the history.
 function cddTodayDeskHtml() {

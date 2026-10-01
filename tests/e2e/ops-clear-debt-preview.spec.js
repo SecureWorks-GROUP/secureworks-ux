@@ -1,11 +1,11 @@
-// Clear Debt preview page: the Today tab in layout B, the captain's pick (docs/clear-debt-desk.md).
-// Reached only at ops.html?view=clear-debt-preview, under a "PREVIEW - not what staff see" banner;
-// the live Clear Debt tab is guarded unchanged by ops-clear-debt-desk.spec.js. Offline: ops-api is
+// Clear Debt Today tab in layout B, the captain's pick (docs/clear-debt-desk.md). Layout B is live
+// (CDD_LAYOUT_B_LIVE); this spec still opens it at ops.html?view=clear-debt-preview, which now shows
+// no banner. ops-clear-debt-desk.spec.js guards the older morning list, kept until it is removed. Offline: ops-api is
 // replaced by tests/fixtures/clear-debt-desk.js (made-up names, dates from today's Perth date).
 //
 // Contract under guard:
-//  - The preview link opens Financials > Clear Debt in layout B with the banner; without it the
-//    live tab renders the morning list as before, with no banner and no layout B.
+//  - The preview link opens Financials > Clear Debt in layout B with no banner; the plain tab is
+//    layout B too.
 //  - A dark "To do today" bar with a chip per kind of work and Next to do (the next unfinished row,
 //    in menu order, wrapping); a left menu of sections in chase order with counts (broken
 //    promises, Jan visits, calls, texts, builder statements, deposit reminders, then On hold and
@@ -81,16 +81,15 @@ async function pick(page, sec, name) {
 }
 function rowNames(page) { return page.locator('tr[data-cdd-row] .cdd-rn').allTextContents(); }
 
-test('the preview link opens Clear Debt in layout B under a PREVIEW banner; the live tab has neither', async ({ page }) => {
+test('layout B is live: the preview link still opens Clear Debt in layout B, now with no PREVIEW banner, and so does the plain tab', async ({ page }) => {
   await openDesk(page);
   await expect(page.locator('#subCleardebt')).toHaveClass(/active/);
-  await expect(page.locator('#cddPreviewBanner')).toContainText('PREVIEW - not what staff see.');
-  await expect(page.locator('#cddPreviewBanner')).toContainText('The live Clear Debt tab is unchanged until Shaun says make it live.');
+  await expect(page.locator('#cddPreviewBanner')).toHaveCount(0);
   await expect(page.locator('#cddDesk')).toBeVisible();
   await page.evaluate(() => { window.__SW_CLEAR_DEBT_PREVIEW = false; cddRender(); });
   await expect(page.locator('#cddPreviewBanner')).toHaveCount(0);
-  await expect(page.locator('#cddDesk')).toHaveCount(0);
-  await expect(page.locator('[data-cdd-group="broken_promise"]')).toBeVisible(); // the live morning list
+  await expect(page.locator('#cddDesk')).toBeVisible();
+  await expect(page.locator('[data-cdd-group="broken_promise"]')).toHaveCount(0); // not the older morning list
 });
 
 test('Today: the left menu lists the sections in chase order with counts, opens on the first with work, holds have nothing to press, send is off everywhere', async ({ page }) => {

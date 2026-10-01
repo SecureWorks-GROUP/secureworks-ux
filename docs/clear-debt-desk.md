@@ -33,11 +33,11 @@ Ops > Financials > Clear Debt. `modules/ops-clear-debt-desk.js` owns the header,
 
 **Display rules (B17).** Ages count Perth calendar days, never UTC. An invoice with no due date sits in its own **No due date** bucket, never "not due" and never 90+. "Refreshed" shows the newest stamp. Overdue counts debt only: deposits, not owed and set-aside invoices never inflate it.
 
-## Preview page: layout B for Today
+## Layout B for Today (live)
 
-The captain picked layout B for the Today tab. It is not what staff see yet: it opens only at **`ops.html?view=clear-debt-preview`** (same login, real data), which goes straight to Financials > Clear Debt with a banner reading **PREVIEW - not what staff see.** The banner also says the buttons there are real: approving queues the text and logging saves it, exactly as on the live tab. Without that link (`window.__SW_CLEAR_DEBT_PREVIEW`, set at the top of `ops.html` and routed in `restoreTab`), the live tab renders exactly as described above. Only Today changes; the header, the tabs and the other tabs are the same.
+The captain picked layout B for the Today tab, and it is now what staff see: `CDD_LAYOUT_B_LIVE = true` in `modules/ops-clear-debt-desk.js`, so the normal Clear Debt tab shows it and the preview banner no longer appears. Before that it opened only at **`ops.html?view=clear-debt-preview`** (same login, real data), which goes straight to Financials > Clear Debt with a banner reading **PREVIEW - not what staff see.** The banner also says the buttons there are real: approving queues the text and logging saves it, exactly as on the live tab. That link (`window.__SW_CLEAR_DEBT_PREVIEW`, set at the top of `ops.html` and routed in `restoreTab`) still works and now opens layout B with no banner. The older Today morning list described above is no longer shown, but its code stays until removed. Only Today changes; the header, the tabs and the other tabs are the same.
 
-**Making it live** is one line: set `CDD_LAYOUT_B_LIVE = true` in `modules/ops-clear-debt-desk.js`. The banner then disappears from the preview link too. Then remove the live-only Today code (`cddTodayHtml`, `cddTodoHtml`, `cddSentTodayHtml`, `cddJanTextBlock`), the preview flag and route, and fold this section into "What the screen shows".
+**Still to do** now it is live: remove the older Today code (`cddTodayHtml`, `cddTodoHtml`, `cddSentTodayHtml`, `cddJanTextBlock`), the preview flag and route, and fold this section into "What the screen shows".
 
 In layout B, Today has four parts:
 

@@ -151,6 +151,14 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
   }
 });
 
+test('the live tab is the morning list: no preview banner and no layout B (that lives at ?view=clear-debt-preview)', async ({ page }) => {
+  await openDesk(page);
+  await expect(page.locator('#cddPreviewBanner')).toHaveCount(0);
+  await expect(page.locator('#cddDesk')).toHaveCount(0);
+  await expect(page.locator('.cdd-side')).toHaveCount(0);
+  await expect(page.locator('[data-cdd-group="broken_promise"]')).toBeVisible();
+});
+
 test('Today opens with one line of what to do, and says sending is off so approving only queues', async ({ page }) => {
   await openDesk(page);
   await expect(page.locator('#cddTodo')).toHaveText("2 texts to approve, 2 calls to make, Jan's text to approve (1 visit), 1 builder statement to approve. 3 on hold, just so you know.");

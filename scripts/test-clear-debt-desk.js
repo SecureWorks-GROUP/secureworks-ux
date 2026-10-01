@@ -6,6 +6,7 @@
 // the outcome and promise checks, which steps an outcome stamps, deposits apart from not-chased ones, and that the send button can never be armed.
 // Step 5: Jan's one morning text is one decision (counted once, refused while not approvable), its visits say
 // "In Jan's text", and a Jan visit offers what Jan reports, logged as a visit.
+// Layout B: the To do today chips, the left menu's sections (nothing dropped) and Next to do.
 const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
@@ -233,6 +234,50 @@ check("Jan visits offer what Jan reports, from the list's schedule, logged as a 
   assert.strictEqual(C.outcomeChannel('jan_visit'), 'visit');
   assert.strictEqual(C.outcomeChannel('call'), 'call');
   assert.strictEqual(C.outcomeChannel(null), 'call');
+});
+
+check('the To do today bar: a chip per kind of work, Jan\'s text once, waiting and held counted apart', () => {
+  const pend = { id: 'd', status: 'pending', channel: 'sms' };
+  const two = [janItem, Object.assign({}, janItem, { id: 'jv2' }), { step: 'friendly_text', draft: pend }, { step: 'call' }, { step: 'statement', draft: null }, { group: 'hold', step: null, hold: 'check_first' }];
+  const t = C.todoChips(two, janText({ visits: [{ item_id: 'jv1' }, { item_id: 'jv2' }] }));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(t)), { chips: [{ kind: 'text', n: 1, words: 'text to approve' }, { kind: 'call', n: 1, words: 'call to make' }, { kind: 'jan_text', n: 1, words: "Jan's text to approve" }], wait: 1, held: 1 });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(C.todoChips([janItem], janText({ approvable: false })).chips)), [{ kind: 'jan_text', n: null, words: "Jan's text cannot be approved yet" }]);
+  assert.deepStrictEqual(Array.from(C.todoChips([]).chips), []);
+});
+check('the Today menu: sections in chase order, Jan\'s text first in Jan visits, held and sent apart, an unknown group under Other', () => {
+  const pend = (id) => ({ id, status: 'pending', channel: 'sms' });
+  const m = {
+    items: [
+      { id: 't1', group: 'text', step: 'friendly_text', amount: 10, draft: pend('d1') },
+      { id: 't2', group: 'text', step: 'friendly_text', amount: 50, draft: { id: 'd2', status: 'approved' } },
+      { id: 'c1', group: 'call', step: 'call', amount: 5 },
+      { id: 'jv1', group: 'jan', step: 'jan_visit', amount: 100, draft: null },
+      { id: 'pp', group: 'payment_plan', step: 'friendly_text', amount: 1, draft: pend('d3') },
+      { id: 'h1', group: 'hold', step: null, hold: 'fix_first', amount: 7 },
+    ],
+    jan_text: janText(),
+    sent_today: [{ draft_id: 'sx', to: 'client' }],
+  };
+  const rows = C.todaySections(m);
+  assert.deepStrictEqual(Array.from(C.SECTIONS.map((s) => s.key)), ['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder', 'other', 'hold', 'done']);
+  const ids = (k) => Array.from(rows[k].map((r) => r.id));
+  assert.deepStrictEqual(ids('jan'), ['jan_text', 'jv1']);
+  assert.deepStrictEqual(ids('text'), ['t2', 't1'], 'bigger amounts first');
+  assert.deepStrictEqual(ids('other'), ['pp'], 'a group the screen does not know is never dropped');
+  assert.deepStrictEqual(ids('hold'), ['h1']);
+  assert.deepStrictEqual(ids('done'), ['sent:sx']);
+  assert.strictEqual(C.firstWorkSection(rows, m.jan_text, {}), 'jan', "Jan's text is the first thing to do");
+  // Next to do: Jan's text, the call, the pending text (the approved one is skipped), Other, then round again.
+  const order = [], jt = m.jan_text;
+  let at = null;
+  for (let n = 0; n < 5; n += 1) { const r = C.nextTodo(rows, at, jt, {}); order.push(r.id); at = r.id; }
+  assert.deepStrictEqual(order, ['jan_text', 'c1', 't1', 'pp', 'jan_text']);
+  assert.strictEqual(C.nextTodo(rows, 'jan_text', jt, { c1: true }).id, 't1', 'a call logged on screen is done');
+  assert.strictEqual(C.rowUnfinished({ id: 'jan_text', type: 'jan_text', jt: janText({ approvable: false }) }, null, {}), false, 'Jan\'s text that cannot be approved is not waiting on a press');
+  const quiet = C.todaySections({ items: [{ id: 'h1', group: 'hold', step: null, hold: 'check_first' }] });
+  assert.strictEqual(C.nextTodo(quiet, null, null, {}), null);
+  assert.strictEqual(C.firstWorkSection(quiet, null, {}), 'hold', 'with no work, the first section with rows');
+  assert.strictEqual(C.firstWorkSection(C.todaySections({ items: [] }), null, {}), 'broken_promise');
 });
 
 check('send is off: label fixed, never armed', () => {

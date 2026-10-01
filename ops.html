@@ -6267,6 +6267,12 @@ if (window.__SW_CAL_DRAGV2_ENABLED) {
   console.info('[CP1] calendar drag v2 enabled — working-day drag/resize + reschedule prompt. Disable via ?dragv2=0 or localStorage.sw_cal_dragv2 = "0".');
 }
 
+// ── Clear Debt preview page (layout B, the captain's pick) ──
+// ops.html?view=clear-debt-preview opens Financials > Clear Debt in the new Today layout under a
+// PREVIEW banner: same login, real data. Without it staff see the live tab, unchanged. Making it
+// live is CDD_LAYOUT_B_LIVE in modules/ops-clear-debt-desk.js (docs/clear-debt-desk.md).
+window.__SW_CLEAR_DEBT_PREVIEW = /[?&]view=clear-debt-preview(?:&|$)/.test(window.location.search || '');
+
 // Council modal alias — called from quick view
 function openCouncilModal(jobId) {
   if (typeof openCouncilStartModal === 'function') openCouncilStartModal(jobId);
@@ -7341,6 +7347,7 @@ function scanMsIntakeCockpit() {
 }
 
 function restoreTab() {
+  if (window.__SW_CLEAR_DEBT_PREVIEW) { showView('financials'); showSubTab('cleardebt'); return; }
   var hash = window.location.hash.slice(1);
   // Handle #job/<jobNumber> deep links
   if (hash.startsWith('job/')) {

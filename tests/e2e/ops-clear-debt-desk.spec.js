@@ -460,6 +460,22 @@ test('a Jan visit card offers what Jan reports and logs it as a visit at the Jan
   expect(post.body).toMatchObject({ outcome_code: 'no_answer', channel: 'visit', schedule_step: 'jan_visit', xero_invoice_ids: [ninaItem.invoices[0].xero_invoice_id] });
 });
 
+test("a Jan visit today's sent Jan text does not cover goes on tomorrow's; an unlabelled last outcome reads as the call words", async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const m = fixture.debt_morning_list, jt = m.jan_text;
+  const ninaItem = m.items.find((i) => i.payer_name === 'Nina Hollis');
+  ninaItem.last_outcome = { code: 'no_answer', at: ninaItem.invoices[0].due_date + 'T10:15:00+08:00', by: 'Shaun' };
+  Object.assign(jt, { status: 'sent', approvable: false, decided_at: m.perth_date + 'T07:40:00+08:00', visits: jt.visits.filter((v) => v.item_id !== ninaItem.id) });
+  await openDesk(page, { fixture });
+  const nina = card(page, 'Nina Hollis');
+  await expect(nina).toHaveAttribute('data-cdd-kind', 'not_in_jan_text');
+  await expect(nina.locator('.cdd-wait')).toHaveText("Not in today's text to Jan - goes on tomorrow's");
+  await expect(nina.locator('[data-cdd-primary]')).toHaveCount(0);
+  await expect(nina.locator('input[type=checkbox]')).toHaveCount(0);
+  await expect(nina.locator('.cdd-foot')).toHaveText(/^Last time: No answer, /);
+  await expect(page.locator('#cddTodo')).not.toContainText('Jan visit');
+});
+
 test("sent today lists what went out, Jan's as Jan's morning text; a sent Jan text offers no button", async ({ page }) => {
   const fixture = buildClearDebtDeskFixture();
   const m = fixture.debt_morning_list, jt = m.jan_text;

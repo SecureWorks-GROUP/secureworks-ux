@@ -158,6 +158,8 @@ var ClearDebtDeskCore = (function () {
     var o = outcomesFor(step, schedule).filter(function (x) { return x.code === code; })[0] || OUTCOMES.filter(function (x) { return x.code === code; })[0];
     return o ? o.label : String(code || '');
   }
+  // The backend labels an outcome by the step it was logged at; with no label that step is unknown, so the plain call words.
+  function lastOutcomeLabel(lo) { return lo.label || outcomeLabel(lo.code, null); }
   function outcomeChannel(step) { return step === 'jan_visit' ? 'visit' : 'call'; }
   // A Jan visit listed in Jan's one morning text: the text is the decision, not the card.
   function inJanText(i, janText) { return !!janText && (janText.visits || []).some(function (v) { return v.item_id === i.id; }); }
@@ -166,18 +168,21 @@ var ClearDebtDeskCore = (function () {
   // What one card asks of Shaun: one obvious button for its step, or nothing.
   //   text, email, jan, reminder, statement: approve the drafted message (a text step drafted as an email is an email);
   //   call: ring, then say what happened; wait: no draft yet; done: already decided; held: information only;
-  //   in_jan_text: a Jan visit listed in Jan's one morning text, which is approved once on its own card.
+  //   in_jan_text: a Jan visit listed in Jan's one morning text, which is approved once on its own card;
+  //   not_in_jan_text: a Jan visit today's Jan text does not list, which goes on tomorrow's.
   // A call script is help for the call, never approved, so calls are never waiting for a decision.
   var STEP_KIND = { friendly_text: 'text', firm_text: 'text', call: 'call', builder_call: 'call', jan_visit: 'jan', deposit_reminder: 'reminder', statement: 'statement' };
   var GROUP_KIND = { text: 'text', call: 'call', jan: 'jan', deposit_reminder: 'reminder', statement: 'statement' };
   var APPROVE_LABEL = { text: 'Approve text', email: 'Approve email', jan: 'Approve Jan\'s visit', reminder: 'Approve reminder', statement: 'Approve statement' };
   var WAIT_WORDS = 'Draft coming - nothing to do yet';
   var IN_JAN_WORDS = 'In Jan\'s text';
+  var NOT_IN_JAN_WORDS = 'Not in today\'s text to Jan - goes on tomorrow\'s';
   function cardAction(i, janText) {
     if (isHeld(i)) return { kind: 'held' };
     var d = i.draft, k = STEP_KIND[i.step] || GROUP_KIND[i.group] || (d && d.channel === 'call_script' ? 'call' : 'text');
     if (k === 'call') return { kind: 'call', label: 'Call now' };
     if (k === 'jan' && inJanText(i, janText)) return { kind: 'in_jan_text', words: IN_JAN_WORDS };
+    if (k === 'jan' && janText) return { kind: 'not_in_jan_text', words: NOT_IN_JAN_WORDS };
     if (!d) return { kind: 'wait', words: WAIT_WORDS };
     if (d.status !== 'pending') return { kind: 'done' };
     if (k === 'text' && d.channel === 'email') k = 'email';
@@ -253,7 +258,7 @@ var ClearDebtDeskCore = (function () {
   }
   function isNotDeployed(e) { return !!e && (/unknown action/i.test(String(e.message || '')) || e.status === 404); }
 
-  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, JAN_OUTCOMES: JAN_OUTCOMES, OUTCOME_STEPS: OUTCOME_STEPS, outcomesFor: outcomesFor, outcomeLabel: outcomeLabel, outcomeChannel: outcomeChannel, inJanText: inJanText, janTextWaiting: janTextWaiting, IN_JAN_WORDS: IN_JAN_WORDS, groupRank: groupRank, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, cardAction: cardAction, needsDecision: needsDecision, todaySummary: todaySummary, WAIT_WORDS: WAIT_WORDS, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
+  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, JAN_OUTCOMES: JAN_OUTCOMES, OUTCOME_STEPS: OUTCOME_STEPS, outcomesFor: outcomesFor, outcomeLabel: outcomeLabel, lastOutcomeLabel: lastOutcomeLabel, outcomeChannel: outcomeChannel, inJanText: inJanText, janTextWaiting: janTextWaiting, IN_JAN_WORDS: IN_JAN_WORDS, NOT_IN_JAN_WORDS: NOT_IN_JAN_WORDS, groupRank: groupRank, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, cardAction: cardAction, needsDecision: needsDecision, todaySummary: todaySummary, WAIT_WORDS: WAIT_WORDS, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
 })();
 // </clear-debt-desk-core>
 
@@ -512,7 +517,7 @@ function cddItemHtml(it) {
   // Held cards are information only: the reason, and nothing to press.
   if (held) return h + '<div class="cdd-why"><b>' + (it.hold === 'fix_first' ? 'Fix first.' : it.hold === 'check_first' ? 'Check first.' : 'On hold.') + '</b> ' + cddEsc(String(it.hold_reason || 'No reason given').replace(/[.\s]*$/, '.')) + ' No draft until this is cleared.</div></div>';
   if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + (it.promise.amount == null ? 'payment' : C.money(it.promise.amount)) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
-  if (it.last_outcome) h += '<div class="cdd-foot">Last time: ' + cddEsc(it.last_outcome.label || C.outcomeLabel(it.last_outcome.code, it.step)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
+  if (it.last_outcome) h += '<div class="cdd-foot">Last time: ' + cddEsc(C.lastOutcomeLabel(it.last_outcome)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
   h += cddActionHtml(it, act);
   h += cddOutcomeHtml({ payer_key: it.payer_key, ids: (it.invoices || []).map(function (x) { return x.xero_invoice_id; }).filter(Boolean), step: it.step, key: 'i-' + it.id, call: act.kind === 'call' });
   return h + '</div>';
@@ -522,7 +527,7 @@ function cddMsgHtml(text) { return '<div class="cdd-msg">' + cddEsc(text) + '</d
 // The card's one obvious button for its step, with the drafted message above it.
 function cddActionHtml(it, act) {
   var d = it.draft;
-  if (act.kind === 'wait') return '<div class="cdd-wait">' + cddEsc(act.words) + '</div>';
+  if (act.kind === 'wait' || act.kind === 'not_in_jan_text') return '<div class="cdd-wait">' + cddEsc(act.words) + '</div>';
   if (act.kind === 'in_jan_text') {
     var st = (cddJanText() || {}).status, more = { pending: 'waiting for your approval', approved: 'approved, queued until sending is switched on', skipped: 'skipped for today', sending: 'sending not confirmed', sent: 'sent to Jan' }[st];
     return '<div class="cdd-wait" data-cdd-injan>' + cddEsc(act.words + (more ? ', ' + more : '') + '.') + ' Log what Jan reports below.</div>';

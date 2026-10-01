@@ -194,7 +194,22 @@ check("a Jan visit in Jan's text says so: no button, not waiting, not 'Draft com
   assert.deepStrictEqual([a.kind, a.label, a.words], ['in_jan_text', undefined, "In Jan's text"]);
   assert.strictEqual(C.needsDecision(janItem, janText()), false);
   assert.strictEqual(C.cardAction(janItem, null).kind, 'wait', 'with no Jan text the card still says the draft is coming');
-  assert.strictEqual(C.cardAction(janItem, janText({ visits: [{ item_id: 'other' }] })).kind, 'wait', 'only a visit the text lists');
+});
+check("a Jan visit today's Jan text does not list goes on tomorrow's: no button, not waiting for a draft", () => {
+  const jt = janText({ status: 'sent', visits: [{ item_id: 'other' }] });
+  const a = C.cardAction(janItem, jt);
+  assert.deepStrictEqual([a.kind, a.label, a.words], ['not_in_jan_text', undefined, "Not in today's text to Jan - goes on tomorrow's"]);
+  assert.strictEqual(C.needsDecision(janItem, jt), false);
+  assert.strictEqual(C.waitingCount([janItem], jt), 0);
+  assert.strictEqual(C.todaySummary([janItem], jt), 'Nothing to do right now.');
+  const pend = { id: 'd', status: 'pending', channel: 'sms' };
+  assert.strictEqual(C.todaySummary([janItem, { step: 'statement', draft: null }, { step: 'friendly_text', draft: pend }], jt), '1 text to approve. 1 waiting for a draft, nothing to do yet.');
+  assert.strictEqual(C.cardAction(Object.assign({}, janItem, { hold: 'check_first' }), jt).kind, 'held');
+});
+check('Last time uses the backend label, else the plain call words, never the current step', () => {
+  assert.strictEqual(C.lastOutcomeLabel({ code: 'no_answer', label: 'No one home' }), 'No one home');
+  assert.strictEqual(C.lastOutcomeLabel({ code: 'no_answer' }), 'No answer');
+  assert.strictEqual(C.lastOutcomeLabel({ code: 'says_paid' }), 'Says paid');
 });
 check("Jan's text counts once in the line at the top of Today and in waiting for Shaun", () => {
   const pend = { id: 'd', status: 'pending', channel: 'sms' };

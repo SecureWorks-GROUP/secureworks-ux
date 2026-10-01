@@ -2,7 +2,9 @@
 // Shapes follow the backend as built: debt_book (fm/debt-reader-1) and debt_morning_list
 // (fm/debt-morning-list-2): item ids are date:payer_key:group:step, builders key as mlb / aj /
 // other_builder:<label>, holds are group 'hold' with step null and held_step (the step the payer would be on), open promises sit in paused[].
-// The drafts on items are a preview of plan step 3; step 2 sends draft: null.
+// The drafts on items follow plan step 3; step 2 sends draft: null. Plan step 5 (backend
+// fm/debt-promises-jan-5, docs/debt-book/DESK-API.md): Jan visits carry draft: null and are listed
+// in the one jan_text draft to Jan's mobile; schedule.jan_visit_outcomes are Jan's four buttons.
 // Every name is made up. Dates are derived from today's Perth date at run time,
 // so ages and "overdue" never rot as the real calendar moves on.
 const { perthDate, addIsoDays } = require('../helpers/feed-stub');
@@ -55,8 +57,7 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     item({ id: mid(uuid(104), 'broken_promise', 'firm_text'), payer_key: uuid(104), payer_name: 'Theo Brennan', payer: 'client', group: 'broken_promise', step: 'firm_text', step_label: 'Promise broken: firm text', days_overdue: 45, invoices: ref('INV-9004'),
       promise: { amount: 1000, date: d(-2), status: 'broken' },
       draft: { id: 'draft-theo', channel: 'sms', status: 'pending', text: 'Hi Theo, we had $1,000.00 promised by ' + words(d(-2)) + ' on invoice INV-9004 and have not seen it. Please pay today here: https://in.xero.com/example. Thanks, SecureWorks WA' } }),
-    item({ id: mid(uuid(117), 'jan', 'jan_visit'), payer_key: uuid(117), payer_name: 'Nina Hollis', payer: 'client', group: 'jan', step: 'jan_visit', step_label: 'Day 7: Jan visits', days_overdue: 8, invoices: ref('INV-9017'),
-      draft: { id: 'draft-nina', channel: 'sms', status: 'pending', text: 'Morning Jan. Please call in on Nina Hollis today about invoice INV-9017, $1,573.68, 8 days overdue. Let Shaun know how it goes.' } }),
+    item({ id: mid(uuid(117), 'jan', 'jan_visit'), payer_key: uuid(117), payer_name: 'Nina Hollis', payer: 'client', group: 'jan', step: 'jan_visit', step_label: 'Day 7: Jan visits', days_overdue: 8, invoices: ref('INV-9017') }),
     item({ id: mid('aj', 'call', 'builder_call'), payer_key: 'aj', payer_name: 'AJ Building & Restoration', payer: 'aj', group: 'call', step: 'builder_call', step_label: '30 days overdue: Shaun calls', days_overdue: 95, invoices: ref('INV-9014') }),
     item({ id: mid('mlb', 'statement', 'statement'), payer_key: 'mlb', payer_name: 'Major Loss Builders', payer: 'mlb', group: 'statement', step: 'statement', step_label: 'Monday statement', days_overdue: 18, invoices: ref('INV-9010'),
       draft: { id: 'draft-mlb-statement', channel: 'email', status: 'pending', text: 'Statement for Major Loss Builders: INV-9010, MLB-90010 PO-5510, $1,332.10, due ' + words(d(-18)) + '. Please pay or tell us what is holding it up. Thanks, SecureWorks WA' } }),
@@ -80,6 +81,18 @@ function buildClearDebtDeskFixture(today = perthDate()) {
     { invoice_number: 'INV-9016', payer_name: 'ML Builders', reason: 'Old ML Builders contact: only Major Loss Builders counts' },
     { invoice_number: 'INV-9019', payer_name: 'Eli Moreau', reason: 'Deposit invoice made late to match a bank transfer already received' },
   ];
+  // Jan's one morning text: every Jan-step item not held, to Jan's own mobile.
+  const janItems = items.filter((i) => i.step === 'jan_visit' && !i.hold);
+  const janInvoices = janItems.flatMap((i) => i.invoices);
+  const sites = { 'Nina Hollis': '12 Example Street, Exampleton' };
+  const janVisits = janItems.map((i) => ({ item_id: i.id, payer_key: i.payer_key, payer_name: i.payer_name, site: sites[i.payer_name] || null, invoice_numbers: i.invoices.map((x) => x.invoice_number), xero_invoice_ids: i.invoices.map((x) => x.xero_invoice_id), amount: i.amount, days_overdue: i.days_overdue, broken_promise: i.group === 'broken_promise' }));
+  const janText = {
+    id: today + ':jan-0f3a9c:jan:jan_text|' + janInvoices.map((x) => Math.round(x.amount_due * 100)).join(','), channel: 'sms', to: 'jan', step: 'jan_text',
+    to_phone: '+61411222333', mobile_source: 'staff', visits: janVisits, xero_invoice_ids: janInvoices.map((x) => x.xero_invoice_id),
+    text: 'Hi Jan, your visits for ' + words(today) + ':\n' + janVisits.map((v, k) => (k + 1) + '. ' + v.payer_name + (v.site ? ', ' + v.site : '') + ': ' + v.invoice_numbers.join(', ') + ', $' + v.amount.toLocaleString('en-AU', { minimumFractionDigits: 2 }) + ' owing, ' + v.days_overdue + ' days overdue.').join('\n') + '\nPlease tell Shaun how each visit goes. Thanks',
+    status: 'pending', edited: false, approved_by: null, approved_by_user_id: null, decided_at: null, last_send: null, approvable: true, problem: null,
+  };
+  janText.template_text = janText.text;
   const dow = new Date(today + 'T00:00:00Z').getUTCDay();
   const nextMonday = d(((8 - dow) % 7) || 7);
 
@@ -103,7 +116,12 @@ function buildClearDebtDeskFixture(today = perthDate()) {
       items, paused, waiting, not_chased: notChased,
       summary: { items: items.filter((i) => !i.hold).length, held: items.filter((i) => i.hold).length, paused: paused.length, groups: {} },
       book: { version: 'debt-book/v1', read_at: at(0, '07:02'), read_stable: true, read_warning: null, copy_check: { matches: true, differs_by: 0, invoice_count: 0, stamp: 'Matches Xero, read 07:02' } },
-      schedule: {},
+      jan_text: janText,
+      sent_today: [],
+      schedule: {
+        outcomes: { no_answer: 'No answer', spoke: 'Spoke', promised: 'Promised', disputed: 'Disputed', says_paid: 'Says paid' },
+        jan_visit_outcomes: [{ code: 'says_paid', label: 'Visited: paid' }, { code: 'promised', label: 'Visited: promised' }, { code: 'no_answer', label: 'No one home' }, { code: 'disputed', label: 'Visited: disputed' }],
+      },
     },
     list_debt_picture: { version: 'debt-picture/v1', as_of: at(0, '07:00'), rows: pictureRows, newest_as_of: at(-1, '06:30') },
     debt_context_coverage: { as_of: at(0, '07:00'), rows: [], totals: {} },

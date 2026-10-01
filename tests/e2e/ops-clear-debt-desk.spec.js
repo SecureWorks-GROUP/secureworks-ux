@@ -11,10 +11,16 @@
 //    held payers in "On hold, no draft" with their reason and nothing to draft or tick; every
 //    send button (desk drafts and the Debt book payer record) is disabled, reads "Sending off
 //    until Shaun says go" and carries no handler.
-//  - Each card has ONE obvious button for its step (Approve text, Call now, Approve Jan's visit,
-//    Approve reminder, Approve statement); no draft yet reads "Draft coming - nothing to do yet"
-//    with no button; held cards have nothing to press. A line at the top of Today counts the
-//    work and says sending is off, so approving only queues.
+//  - Each card has ONE obvious button for its step (Approve text, Call now, Approve reminder,
+//    Approve statement); no draft yet reads "Draft coming - nothing to do yet" with no button;
+//    held cards have nothing to press. A line at the top of Today counts the work and says
+//    sending is off, so approving only queues.
+//  - Jan (plan step 5): ONE morning text to Jan's own mobile (jan_text) shows the number and the
+//    visits it lists, with one "Approve Jan's text" button posting jan_text.xero_invoice_ids; when
+//    not approvable it shows the reason and a disabled button with no handler, only Skip. Each
+//    Jan visit card reads "In Jan's text" and offers what Jan reports (No one home, Visited: ...),
+//    logged as a visit at the jan_visit step. Jan's text counts once. sent_today lists what went
+//    out today, Jan's as "Jan's morning text".
 //  - Outcome buttons, the promise box and the note sit behind "Log what happened" ("What
 //    happened?" on a call card); the promise box opens only on Promised. They post
 //    debt_log_outcome; a promise needs $ and date.
@@ -100,7 +106,7 @@ test('header: overdue is the big number with holds included, check first and fix
   expect(labels).toEqual(['Debt, by your definition', 'Open in Xero', 'Not debt', 'Check first', 'Fix first', 'Waiting for Shaun']);
   await expect(page.locator('.cdd-fig', { hasText: 'Check first' }).locator('.v')).toHaveText('$3,225');
   await expect(page.locator('.cdd-fig', { hasText: 'Fix first' }).locator('.v')).toHaveText('$2,860');
-  await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' }).locator('.v')).toHaveText('4'); // Harper, Theo, Nina's Jan visit, the MLB statement; Mia's call script is not a decision
+  await expect(page.locator('.cdd-fig', { hasText: 'Waiting for Shaun' }).locator('.v')).toHaveText('4'); // Harper, Theo, Jan's text, the MLB statement; Mia's call script is not a decision
   await expect(page.locator('#subCleardebt')).not.toContainText('Texts waiting for Marnin');
   await shotDesk(page, '01-today.png');
 });
@@ -122,7 +128,7 @@ test('tabs are Today, Debt book, Promises, Jan, Deposits with Today first and op
 test('Today: groups in chase order, held payers last with no draft, send is off everywhere', async ({ page }) => {
   await openDesk(page);
   const groups = await page.locator('[data-cdd-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-cdd-group')));
-  expect(groups).toEqual(['broken_promise', 'jan', 'call', 'text', 'statement', 'deposit_reminder', 'hold']);
+  expect(groups).toEqual(['broken_promise', 'jan_text', 'jan', 'call', 'text', 'statement', 'deposit_reminder', 'hold']);
   await expect(page.locator('[data-cdd-group="hold"]')).toContainText('On hold, no draft');
   const ruby = card(page, 'Ruby Castillo');
   await expect(ruby).toContainText('Fix first.');
@@ -147,7 +153,7 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
 
 test('Today opens with one line of what to do, and says sending is off so approving only queues', async ({ page }) => {
   await openDesk(page);
-  await expect(page.locator('#cddTodo')).toHaveText('2 texts to approve, 2 calls to make, 1 Jan visit to approve, 1 builder statement to approve. 3 on hold, just so you know.');
+  await expect(page.locator('#cddTodo')).toHaveText("2 texts to approve, 2 calls to make, Jan's text to approve (1 visit), 1 builder statement to approve. 3 on hold, just so you know.");
   await expect(page.locator('#cddSendingOff')).toHaveText('Sending is off until Shaun says go - approving now just queues them.');
 });
 
@@ -157,7 +163,8 @@ test('each card shows one obvious button for its step, with everything else fold
   expect(await primary('Harper Nguyen')).toEqual(['Approve text']);
   expect(await primary('Theo Brennan')).toEqual(['Approve text']);
   expect(await primary('Mia Laurent')).toEqual(['Call now']);
-  expect(await primary('Nina Hollis')).toEqual(["Approve Jan's visit"]);
+  expect(await primary('Nina Hollis')).toEqual([]); // listed in Jan's text, approved once there
+  expect(await page.locator('[data-cdd-jantext] [data-cdd-primary]').allTextContents()).toEqual(["Approve Jan's text"]);
   expect(await primary('Major Loss Builders')).toEqual(['Approve statement']);
   expect(await primary('Oscar Patel')).toEqual([]); // already approved
   expect(await primary('Ivy Okafor')).toEqual([]); // already skipped
@@ -199,11 +206,12 @@ test('approve a draft, then approve ticked in one go', async ({ page }) => {
   await expect(harper).toContainText('Approved by ops-e2e');
   await expect(card(page, 'Mia Laurent').locator('input[type=checkbox]')).toHaveCount(0); // a call is not ticked
   await card(page, 'Theo Brennan').locator('input[type=checkbox]').check();
-  await card(page, 'Nina Hollis').locator('input[type=checkbox]').check();
+  await expect(card(page, 'Nina Hollis').locator('input[type=checkbox]')).toHaveCount(0); // Jan's text is ticked, not the visit
+  await page.locator('[data-cdd-jantext] input[type=checkbox]').check();
   await card(page, 'Major Loss Builders').locator('input[type=checkbox]').check();
   await page.locator('#cddApproveTicked').click();
   await expect(card(page, 'Theo Brennan')).toContainText('Approved');
-  await expect(card(page, 'Nina Hollis')).toContainText('Approved');
+  await expect(page.locator('[data-cdd-jantext]')).toContainText('Approved');
   await expect(card(page, 'Major Loss Builders')).toContainText('Approved');
   const posts = await page.evaluate(() => window.__cddPosts);
   expect(posts.map((p) => p.action)).toEqual(['debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide']);
@@ -310,6 +318,7 @@ test('an outcome logged from the Debt book payer record uses the morning list pa
 test('step 2 as built: no drafts yet is said plainly with no button, and an unstable Xero read is flagged', async ({ page }) => {
   const fixture = buildClearDebtDeskFixture();
   fixture.debt_morning_list.items.forEach((i) => { i.draft = null; });
+  fixture.debt_morning_list.jan_text = null;
   fixture.debt_book.read_stable = false;
   fixture.debt_book.read_warning = 'Xero changed during the read, retrying next run';
   await openDesk(page, { fixture });
@@ -339,6 +348,8 @@ test('Promises, Jan and Deposits tabs', async ({ page }) => {
   await page.locator('[data-cdd-tab="jan"]').click();
   await expect(page.locator('[data-cdd-item]')).toHaveCount(1);
   await expect(card(page, 'Nina Hollis')).toBeVisible();
+  await expect(page.locator('[data-cdd-jantext]')).toBeVisible(); // Jan's text first, then the visits it lists
+  await expect(page.locator('#clearDebtCards')).not.toContainText('comes later');
   await expect(page.locator('[data-cdd-group="hold"]')).toHaveCount(0);
   await shotDesk(page, '04-jan.png');
   await page.locator('[data-cdd-tab="deposits"]').click();
@@ -385,6 +396,92 @@ test('Jan tab and its count include a broken promise that lands on the Jan visit
   const order = await page.locator('[data-cdd-item] .cdd-nm').allTextContents();
   expect(order).toEqual(['Broken Jan Payer', 'Nina Hollis']);
   await expect(page.locator('[data-cdd-tab="jan"] em')).toHaveText('2');
+});
+
+test("Jan's morning text: one card to Jan's mobile listing the visits, approved once with its own invoice ids", async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const jt = fixture.debt_morning_list.jan_text;
+  await openDesk(page, { fixture });
+  const card0 = page.locator('[data-cdd-jantext]');
+  await expect(card0.locator('.cdd-nm')).toHaveText("Jan's morning text");
+  await expect(card0.locator('[data-cdd-jan-phone]')).toHaveText('0411 222 333');
+  await expect(card0.locator('[data-cdd-visits] li')).toHaveText(['Nina Hollis, 12 Example Street, Exampleton INV-9017 · $1,573.68 · 8 days overdue']);
+  await expect(card0.locator('.cdd-msg')).toContainText('Please tell Shaun how each visit goes.');
+  await expect(card0.locator('button.cdd-link.sm')).toHaveText(['Edit', 'Skip']);
+  const nina = card(page, 'Nina Hollis');
+  await expect(nina.locator('[data-cdd-injan]')).toHaveText("In Jan's text, waiting for your approval. Log what Jan reports below.");
+  await expect(nina).not.toContainText('Draft coming');
+  await shotDesk(page, '12-jan-text.png', '#clearDebtCards');
+  await card0.getByRole('button', { name: "Approve Jan's text" }).click();
+  await expect(card0).toContainText('Approved by ops-e2e. Queued until sending is switched on.');
+  await expect(nina.locator('[data-cdd-injan]')).toContainText("In Jan's text, approved, queued until sending is switched on.");
+  await expect(page.locator('#cddTodo')).toHaveText('2 texts to approve, 2 calls to make, 1 builder statement to approve. 3 on hold, just so you know.');
+  const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_draft_decide'));
+  expect(post.body).toEqual({ draft_id: jt.id, decision: 'approve', text: jt.text, xero_invoice_ids: jt.xero_invoice_ids });
+  await page.locator('[data-cdd-tab="jan"]').click();
+  await shotDesk(page, '13-jan-tab.png');
+});
+
+test("Jan's text that cannot be approved shows the reason, a disabled button with no handler, and only Skip", async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  Object.assign(fixture.debt_morning_list.jan_text, { to_phone: null, mobile_source: null, approvable: false, problem: "Jan's mobile not set: no staff record named Jan has a mobile. Add the mobile to Jan's staff record, or set JAN_MOBILE" });
+  await openDesk(page, { fixture });
+  const card0 = page.locator('[data-cdd-jantext]');
+  await expect(card0.locator('[data-cdd-jan-phone]')).toHaveText("Jan's mobile not set");
+  await expect(card0.locator('[data-cdd-jan-problem]')).toContainText("Cannot approve yet. Jan's mobile not set: no staff record named Jan has a mobile.");
+  const approve = card0.getByRole('button', { name: "Approve Jan's text" });
+  await expect(approve).toBeDisabled();
+  expect(await approve.getAttribute('onclick')).toBeNull();
+  await expect(card0.locator('[data-cdd-primary]')).toHaveCount(0);
+  await expect(card0.locator('input[type=checkbox]')).toHaveCount(0);
+  await expect(card0.locator('button.cdd-link.sm')).toHaveText(['Skip']);
+  await expect(page.locator('#cddTodo')).toContainText("Jan's text cannot be approved yet");
+  await shotDesk(page, '14-jan-text-no-mobile.png', '[data-cdd-jantext]');
+  await card0.getByRole('button', { name: 'Skip' }).click();
+  await expect(card0).toContainText('Skipped for today.');
+  const posts = await page.evaluate(() => window.__cddPosts.filter((p) => p.action === 'debt_draft_decide'));
+  expect(posts.map((p) => p.body.decision)).toEqual(['skip']);
+});
+
+test('a Jan visit card offers what Jan reports and logs it as a visit at the Jan step', async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const ninaItem = fixture.debt_morning_list.items.find((i) => i.payer_name === 'Nina Hollis');
+  ninaItem.last_outcome = { code: 'no_answer', label: 'No one home', at: ninaItem.invoices[0].due_date + 'T10:15:00+08:00', by: 'Shaun' };
+  await openDesk(page, { fixture });
+  const nina = card(page, 'Nina Hollis');
+  await expect(nina).toContainText('Last time: No one home');
+  await nina.getByText('Log what happened').click();
+  await expect(nina.locator('.cdd-obtns').first().locator('button')).toHaveText(['Visited: paid', 'Visited: promised', 'No one home', 'Visited: disputed']);
+  await expect(nina.getByRole('button', { name: 'Spoke', exact: true })).toHaveCount(0);
+  await shotDesk(page, '15-jan-visit-outcomes.png', '[data-cdd-item]:has(.cdd-nm:text-is("Nina Hollis"))');
+  await nina.getByRole('button', { name: 'No one home' }).click();
+  await expect(nina.locator('.cdd-out [data-cdd-said]')).toContainText('Logged: No one home');
+  const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_log_outcome'));
+  expect(post.body).toMatchObject({ outcome_code: 'no_answer', channel: 'visit', schedule_step: 'jan_visit', xero_invoice_ids: [ninaItem.invoices[0].xero_invoice_id] });
+});
+
+test("sent today lists what went out, Jan's as Jan's morning text; a sent Jan text offers no button", async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const m = fixture.debt_morning_list, jt = m.jan_text;
+  const sentAt = m.perth_date + 'T07:40:00+08:00';
+  Object.assign(jt, { status: 'sent', approvable: false, decided_at: sentAt, approved_by: 'Shaun', template_text: null, edited: null });
+  m.sent_today = [
+    { draft_id: jt.id, to: 'jan', payer_name: 'Jan', invoice_numbers: ['INV-9017'], step: 'jan_text', text: jt.text, at: sentAt, by: 'Shaun', provider_message_id: 'msg-1' },
+    { draft_id: 'draft-zoe', to: 'client', payer_name: 'Zoe Archer', invoice_numbers: ['INV-9020'], step: 'friendly_text', text: 'Hi Zoe, a friendly reminder.', at: m.perth_date + 'T07:41:00+08:00', by: 'Shaun', provider_message_id: 'msg-2' },
+  ];
+  await openDesk(page, { fixture });
+  const rows = page.locator('#cddSentToday tbody tr');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveAttribute('data-cdd-sent', 'jan');
+  await expect(rows.nth(0).locator('b')).toHaveText("Jan's morning text");
+  await expect(rows.nth(0)).toContainText('07:40');
+  await expect(rows.nth(1).locator('b')).toHaveText('Zoe Archer');
+  const card0 = page.locator('[data-cdd-jantext]');
+  await expect(card0).toContainText('Sent 07:40.');
+  await expect(card0.locator('button')).toHaveCount(0);
+  await expect(card(page, 'Nina Hollis').locator('[data-cdd-injan]')).toContainText("In Jan's text, sent to Jan.");
+  await expect(page.locator('#cddTodo')).not.toContainText("Jan's text");
+  await shotDesk(page, '16-sent-today.png', '#cddSentToday');
 });
 
 test('before the backend steps deploy: plain "not live yet", no guessed number, our copy still shown', async ({ page }) => {

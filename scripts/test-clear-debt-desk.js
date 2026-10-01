@@ -4,6 +4,8 @@
 // the header (overdue includes holds, with check first and fix first shown beside it),
 // the Xero stamp, the morning-list order, holds shown with no draft and never approved,
 // the outcome and promise checks, which steps an outcome stamps, deposits apart from not-chased ones, and that the send button can never be armed.
+// Step 5: Jan's one morning text is one decision (counted once, refused while not approvable), its visits say
+// "In Jan's text", and a Jan visit offers what Jan reports, logged as a visit.
 const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
@@ -185,6 +187,39 @@ check('Jan tab takes every chased item at the Jan visit step; held payers whose 
   assert.deepStrictEqual(C.janHeldFromMorning(withHold).map((i) => i.id), ['x2']);
 });
 
+const janItem = { id: 'jv1', group: 'jan', step: 'jan_visit', amount: 100, days_overdue: 8, draft: null };
+const janText = (o) => Object.assign({ id: 'jt', status: 'pending', approvable: true, problem: null, visits: [{ item_id: 'jv1' }], xero_invoice_ids: ['i1'] }, o);
+check("a Jan visit in Jan's text says so: no button, not waiting, not 'Draft coming'", () => {
+  const a = C.cardAction(janItem, janText());
+  assert.deepStrictEqual([a.kind, a.label, a.words], ['in_jan_text', undefined, "In Jan's text"]);
+  assert.strictEqual(C.needsDecision(janItem, janText()), false);
+  assert.strictEqual(C.cardAction(janItem, null).kind, 'wait', 'with no Jan text the card still says the draft is coming');
+  assert.strictEqual(C.cardAction(janItem, janText({ visits: [{ item_id: 'other' }] })).kind, 'wait', 'only a visit the text lists');
+});
+check("Jan's text counts once in the line at the top of Today and in waiting for Shaun", () => {
+  const pend = { id: 'd', status: 'pending', channel: 'sms' };
+  const two = [janItem, Object.assign({}, janItem, { id: 'jv2' }), { step: 'friendly_text', draft: pend }];
+  const jt = janText({ visits: [{ item_id: 'jv1' }, { item_id: 'jv2' }] });
+  assert.strictEqual(C.todaySummary(two, jt), "1 text to approve, Jan's text to approve (2 visits).");
+  assert.strictEqual(C.waitingCount(two, jt), 2, 'the text and Jan\'s one text');
+  assert.strictEqual(C.todaySummary([janItem], janText({ approvable: false, problem: "Jan's mobile not set: no staff record" })), "Jan's text cannot be approved yet.");
+  assert.strictEqual(C.todaySummary([janItem], janText({ status: 'approved' })), 'Nothing to do right now.');
+  assert.strictEqual(C.waitingCount([janItem], janText({ status: 'sent' })), 0);
+  assert.strictEqual(C.anyDrafts([{ draft: null }], janText()), true, "Jan's text is a draft");
+});
+check("Jan visits offer what Jan reports, from the list's schedule, logged as a visit", () => {
+  const sched = { jan_visit_outcomes: [{ code: 'says_paid', label: 'Visited: paid' }, { code: 'promised', label: 'Visited: promised' }, { code: 'no_answer', label: 'No one home' }, { code: 'disputed', label: 'Visited: disputed' }, { code: 'shouted', label: 'Shouted' }] };
+  assert.deepStrictEqual(Array.from(C.outcomesFor('jan_visit', sched).map((o) => o.label)), ['Visited: paid', 'Visited: promised', 'No one home', 'Visited: disputed'], 'an unknown code is never offered');
+  assert.deepStrictEqual(Array.from(C.outcomesFor('jan_visit', {}).map((o) => o.code)), ['says_paid', 'promised', 'no_answer', 'disputed'], 'the same four when the schedule is not sent');
+  assert.deepStrictEqual(Array.from(C.outcomesFor('call', sched).map((o) => o.code)), ['no_answer', 'spoke', 'promised', 'disputed', 'says_paid']);
+  assert.strictEqual(C.outcomeLabel('no_answer', 'jan_visit', sched), 'No one home');
+  assert.strictEqual(C.outcomeLabel('no_answer', 'call'), 'No answer');
+  assert.strictEqual(C.outcomeLabel('spoke', 'jan_visit'), 'Spoke');
+  assert.strictEqual(C.outcomeChannel('jan_visit'), 'visit');
+  assert.strictEqual(C.outcomeChannel('call'), 'call');
+  assert.strictEqual(C.outcomeChannel(null), 'call');
+});
+
 check('send is off: label fixed, never armed', () => {
   assert.strictEqual(C.SEND_LABEL, 'Sending off until Shaun says go');
   assert.strictEqual(C.SENDING_ON, false);
@@ -288,10 +323,19 @@ async function decideRefusals() {
   assert.strictEqual(posts.length, 0, 'a refused draft never reaches debt_draft_decide');
   await ctx.cddDecideOne('d-ok', 'approve');
   assert.deepStrictEqual(posts.map((p) => [p.action, p.body.draft_id, p.body.decision]), [['debt_draft_decide', 'd-ok', 'approve']]);
+  // Jan's text: refused while not approvable (it can still be skipped), approved with its own invoice ids in its order.
+  posts.length = 0;
+  ctx.CDD.morning = { items: list, jan_text: { id: 'jt-1', status: 'pending', approvable: false, problem: "Jan's mobile not set: no staff record", text: 'Hi Jan', visits: [], xero_invoice_ids: ['b', 'a'] } };
+  await assert.rejects(ctx.cddDecideOne('jt-1', 'approve'), /Jan's mobile not set/);
+  assert.strictEqual(posts.length, 0, 'an unapprovable Jan text never reaches debt_draft_decide');
+  await ctx.cddDecideOne('jt-1', 'skip');
+  assert.deepStrictEqual(posts.map((p) => [p.body.draft_id, p.body.decision, Array.from(p.body.xero_invoice_ids)]), [['jt-1', 'skip', ['b', 'a']]]);
+  assert.strictEqual(ctx.CDD.morning.jan_text.status, 'skipped');
+  assert.deepStrictEqual(Array.from(ctx.CDD.morning.jan_text.xero_invoice_ids), ['b', 'a'], 'the rest of the text is kept');
 }
 
 (async () => {
 try { await decideRefusals(); } catch (e) { failed += 1; console.error('FAIL clear-debt-desk: only a pending draft on the current chase list can be decided\n  ' + e.message); }
 if (failed) { console.error(failed + ' check(s) failed'); process.exit(1); }
-console.log('PASS clear-debt-desk: Perth ages, no-due bucket, overdue with holds beside it, holds listed with no draft and never approved, Xero stamp, morning order, send off, outcomes, promises, deposits');
+console.log('PASS clear-debt-desk: Perth ages, no-due bucket, overdue with holds beside it, holds listed with no draft and never approved, Xero stamp, morning order, Jan\'s text counted once, send off, outcomes and Jan\'s reports, promises, deposits');
 })();

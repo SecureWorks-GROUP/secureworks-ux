@@ -1,5 +1,7 @@
 // ════════════════════════════════════════════════════════════
-// CLEAR DEBT DESK: the header, the tabs and the morning list.
+// CLEAR DEBT DESK: the header, the tabs and the morning list. Layout B for Today (the To do today bar,
+//   a left menu of sections, a table of the one picked and a detail panel) is preview-only, at
+//   ops.html?view=clear-debt-preview, until CDD_LAYOUT_B_LIVE is switched on.
 // Plan: secureworks-backend docs/debt-book/PLAN.md sections 5 and 6 steps 4 and 5,
 //   captain's rulings in DECISIONS.md beside it. Screen contract: docs/clear-debt-desk.md.
 // Reads: debt_book (live Xero read with the captain's rules) and debt_morning_list
@@ -190,10 +192,28 @@ var ClearDebtDeskCore = (function () {
   }
   function needsDecision(i, janText) { var k = cardAction(i, janText).kind; return k === 'text' || k === 'email' || k === 'jan' || k === 'reminder' || k === 'statement'; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
-  // The one line at the top of Today: what there is to do, counted from the list. Jan's text counts once.
-  function todaySummary(items, janText) {
+  function todoCounts(items, janText) {
     var n = { text: 0, email: 0, call: 0, jan: 0, reminder: 0, statement: 0, wait: 0, held: 0 };
     (items || []).forEach(function (i) { var k = cardAction(i, janText).kind; if (n[k] !== undefined) n[k] += 1; });
+    return n;
+  }
+  // The chips on the dark "To do today" bar: one per kind of work, each naming its card kind
+  // so a press can open the first such row. Jan's text counts once, however many visits it lists.
+  function todoChips(items, janText) {
+    var n = todoCounts(items, janText), chips = [];
+    var push = function (kind, count, one, many) { if (count) chips.push({ kind: kind, n: count, words: count === 1 ? one : many }); };
+    push('text', n.text, 'text to approve', 'texts to approve');
+    push('email', n.email, 'email to approve', 'emails to approve');
+    push('call', n.call, 'call to make', 'calls to make');
+    if (janTextWaiting(janText)) chips.push(janText.approvable === false ? { kind: 'jan_text', n: null, words: 'Jan\'s text cannot be approved yet' } : { kind: 'jan_text', n: 1, words: 'Jan\'s text to approve' });
+    push('jan', n.jan, 'Jan visit to approve', 'Jan visits to approve');
+    push('statement', n.statement, 'builder statement to approve', 'builder statements to approve');
+    push('reminder', n.reminder, 'deposit reminder to approve', 'deposit reminders to approve');
+    return { chips: chips, wait: n.wait, held: n.held };
+  }
+  // The one line at the top of Today: what there is to do, counted from the list. Jan's text counts once.
+  function todaySummary(items, janText) {
+    var n = todoCounts(items, janText);
     var todo = [];
     if (n.text) todo.push(plural(n.text, 'text', 'texts') + ' to approve');
     if (n.email) todo.push(plural(n.email, 'email', 'emails') + ' to approve');
@@ -206,6 +226,45 @@ var ClearDebtDeskCore = (function () {
     if (n.wait) line += ' ' + n.wait + ' waiting for a draft, nothing to do yet.';
     if (n.held) line += ' ' + n.held + ' on hold, just so you know.';
     return line;
+  }
+
+  // The Today tab's left menu: the chase groups in chase order, then On hold and Done today.
+  // Each section lists one row per payer: { id, section, type: item | jan_text | held | sent }.
+  // Jan's morning text is the first row of Jan visits; Done today is what went out today (sent_today).
+  // A group the screen does not know lands in Other (shown only when it has rows), never dropped.
+  var WORK = GROUPS.concat([{ key: 'other', label: 'Other', hideEmpty: true }]);
+  var SECTIONS = WORK.concat([{ key: 'hold', label: 'On hold', quiet: true }, { key: 'done', label: 'Done today', quiet: true }]);
+  function todaySections(morning) {
+    var m = morning || {}, items = sortMorning(m.items || []), jt = m.jan_text || null, rows = {};
+    SECTIONS.forEach(function (s) { rows[s.key] = []; });
+    if (jt) rows.jan.push({ id: 'jan_text', section: 'jan', type: 'jan_text', jt: jt });
+    items.forEach(function (i) { var g = groupRank(i.group) < GROUPS.length ? i.group : 'other'; rows[g].push({ id: i.id, section: g, type: 'item', item: i }); });
+    heldItems(m.items).forEach(function (i) { rows.hold.push({ id: i.id, section: 'hold', type: 'held', item: i }); });
+    (m.sent_today || []).forEach(function (s, k) { rows.done.push({ id: 'sent:' + (s.draft_id || k), section: 'done', type: 'sent', sent: s }); });
+    return rows;
+  }
+  function rowKind(r, janText) { return r.type === 'item' ? cardAction(r.item, janText).kind : r.type; }
+  // Still something to press: a pending draft (Jan's text only when approvable), or a call not yet logged.
+  // done is { item id: true } for outcomes logged on this screen since the list was read.
+  function rowUnfinished(r, janText, done) {
+    if (r.type === 'jan_text') return r.jt.status === 'pending' && r.jt.approvable !== false;
+    if (r.type !== 'item') return false;
+    var k = rowKind(r, janText);
+    return k === 'call' ? !(done && done[r.id]) : needsDecision(r.item, janText);
+  }
+  function workRows(rows) { return WORK.reduce(function (a, g) { return a.concat(rows[g.key] || []); }, []); }
+  function firstWorkSection(rows, janText, done) {
+    var r = workRows(rows).filter(function (x) { return rowUnfinished(x, janText, done); })[0];
+    if (r) return r.section;
+    var any = SECTIONS.filter(function (s) { return (rows[s.key] || []).length; })[0];
+    return any ? any.key : WORK[0].key;
+  }
+  // Next to do: the next unfinished row after the one selected, in menu order, wrapping round.
+  function nextTodo(rows, currentId, janText, done) {
+    var all = workRows(rows), at = -1;
+    for (var i = 0; i < all.length; i++) if (all[i].id === currentId) at = i;
+    for (var j = 1; j <= all.length; j++) { var r = all[(at + j) % all.length]; if (r.id !== currentId && rowUnfinished(r, janText, done)) return r; }
+    return null;
   }
 
   function sendButtonHtml() {
@@ -258,11 +317,11 @@ var ClearDebtDeskCore = (function () {
   }
   function isNotDeployed(e) { return !!e && (/unknown action/i.test(String(e.message || '')) || e.status === 404); }
 
-  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, JAN_OUTCOMES: JAN_OUTCOMES, OUTCOME_STEPS: OUTCOME_STEPS, outcomesFor: outcomesFor, outcomeLabel: outcomeLabel, lastOutcomeLabel: lastOutcomeLabel, outcomeChannel: outcomeChannel, inJanText: inJanText, janTextWaiting: janTextWaiting, IN_JAN_WORDS: IN_JAN_WORDS, NOT_IN_JAN_WORDS: NOT_IN_JAN_WORDS, groupRank: groupRank, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, cardAction: cardAction, needsDecision: needsDecision, todaySummary: todaySummary, WAIT_WORDS: WAIT_WORDS, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
+  return { SENDING_ON: SENDING_ON, SEND_LABEL: SEND_LABEL, GROUPS: GROUPS, OUTCOMES: OUTCOMES, JAN_OUTCOMES: JAN_OUTCOMES, OUTCOME_STEPS: OUTCOME_STEPS, outcomesFor: outcomesFor, outcomeLabel: outcomeLabel, lastOutcomeLabel: lastOutcomeLabel, outcomeChannel: outcomeChannel, inJanText: inJanText, janTextWaiting: janTextWaiting, IN_JAN_WORDS: IN_JAN_WORDS, NOT_IN_JAN_WORDS: NOT_IN_JAN_WORDS, groupRank: groupRank, PAYERS: PAYERS, AGES: AGES, perthDate: perthDate, daysPast: daysPast, ageBucket: ageBucket, bookTotals: bookTotals, money: money, money0: money0, perthTime: perthTime, stampText: stampText, newestStamp: newestStamp, sortMorning: sortMorning, isHeld: isHeld, chaseItems: chaseItems, heldItems: heldItems, waitingCount: waitingCount, janFromMorning: janFromMorning, janHeldFromMorning: janHeldFromMorning, outcomeScheduleStep: outcomeScheduleStep, cardAction: cardAction, needsDecision: needsDecision, todaySummary: todaySummary, todoChips: todoChips, SECTIONS: SECTIONS, todaySections: todaySections, rowKind: rowKind, rowUnfinished: rowUnfinished, firstWorkSection: firstWorkSection, nextTodo: nextTodo, WORK_KEYS: WORK.map(function (g) { return g.key; }), WAIT_WORDS: WAIT_WORDS, sendButtonHtml: sendButtonHtml, outcomeProblem: outcomeProblem, promisesFromMorning: promisesFromMorning, anyDrafts: anyDrafts, sortPromises: sortPromises, depositsFromBook: depositsFromBook, isNotDeployed: isNotDeployed };
 })();
 // </clear-debt-desk-core>
 
-var CDD = { tab: null, gen: 0, today: null, book: null, bookErr: null, morning: null, morningErr: null, edits: {}, ticked: {}, logged: {}, editing: {}, open: {}, promOpen: {}, outIn: {} };
+var CDD = { tab: null, sec: null, sel: null, gen: 0, today: null, book: null, bookErr: null, morning: null, morningErr: null, edits: {}, ticked: {}, logged: {}, editing: {}, open: {}, promOpen: {}, outIn: {} };
 var CDD_TABS = [
   { key: 'today', label: 'Today' },
   { key: 'book', label: 'Debt book' },
@@ -270,6 +329,15 @@ var CDD_TABS = [
   { key: 'jan', label: 'Jan' },
   { key: 'deposits', label: 'Deposits' },
 ];
+// Layout B for Today, the captain's pick, is preview-only: ops.html?view=clear-debt-preview sets
+// window.__SW_CLEAR_DEBT_PREVIEW. To make it what staff see, set CDD_LAYOUT_B_LIVE = true (one line).
+var CDD_LAYOUT_B_LIVE = false;
+function cddPreview() { return typeof window !== 'undefined' && !!window.__SW_CLEAR_DEBT_PREVIEW; }
+function cddLayoutB() { return CDD_LAYOUT_B_LIVE || cddPreview(); }
+function cddPreviewBannerHtml() {
+  if (!cddPreview() || CDD_LAYOUT_B_LIVE) return '';
+  return '<div class="cdd-preview" id="cddPreviewBanner" role="note"><b>PREVIEW - not what staff see.</b> This is the new Clear Debt layout on real data. The live Clear Debt tab is unchanged until Shaun says make it live. Buttons here are real: approving queues the text and logging saves it, just as on the live tab.</div>';
+}
 var CDD_PAYER_LABEL = { client: 'Client', mlb: 'MLB', aj: 'AJ', other_builder: 'Builder', not_chased: 'Not chased' };
 
 function cddEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -323,6 +391,21 @@ function cddCss() {
 .cdd-btn.big{padding:10px 20px;font-size:15px;text-decoration:none;display:inline-block}a.cdd-btn.o.big:hover,button.cdd-btn.o.big:hover:not(:disabled){background:var(--cddord);border-color:var(--cddord)}\
 #subCleardebt .cdd-btn{color:#fff;font-weight:600;font-size:13px}#subCleardebt .cdd-btn.l{color:var(--cdddark)}#subCleardebt .cdd-btn.send{color:var(--cddmid)}#subCleardebt .cdd-btn.big{font-size:15px}#subCleardebt .cdd-link.sm{font-size:13px;color:var(--cddmid)}#subCleardebt .cdd-link.sm:hover{color:var(--cddord)}#subCleardebt .cdd-obtns button{color:var(--cdddark);font-size:12.5px;font-weight:600}\
 .cdd-todo{margin:18px 0 0;font-size:17px;font-weight:700;color:var(--cdddeep);line-height:1.35}.cdd-off{margin-top:4px;font-size:13px;color:var(--cddmid)}\
+.cdd-preview{margin:0 0 14px;padding:10px 14px;background:#FBEEDB;border:2px solid #B8741C;color:#7A4A0E;font-size:13.5px;line-height:1.45;border-radius:var(--sw-radius-sm,3px)}.cdd-preview b{font-size:14px;letter-spacing:.04em}\
+.cdd-todobar{margin:2px 0 0;padding:12px 16px;background:var(--cdddeep);color:#fff;display:flex;gap:8px 10px;align-items:center;flex-wrap:wrap;border-radius:var(--sw-radius-sm,3px)}.cdd-todobar>b{font-size:15px;margin-right:4px}.cdd-offb{margin-top:6px;font-size:13px;color:var(--cddmid)}\
+#subCleardebt .cdd-tchip{background:rgba(255,255,255,.12);border:0;color:#fff;border-radius:8px;padding:6px 11px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit}#subCleardebt .cdd-tchip:hover{background:rgba(255,255,255,.22)}.cdd-tchip strong{color:#FFB599;font-size:17px;margin-right:5px;font-variant-numeric:tabular-nums}.cdd-tnone{font-size:14px;color:#DCE4EA}.cdd-tnote{font-size:12.5px;color:#9FB3C0}\
+#subCleardebt .cdd-go{margin-left:auto;background:var(--cddor);border:0;color:#fff;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer;border-radius:var(--sw-radius-sm,3px);font-family:inherit}#subCleardebt .cdd-go:hover:not(:disabled){background:var(--cddord)}#subCleardebt .cdd-go:disabled{background:rgba(255,255,255,.12);color:#9FB3C0;cursor:default}\
+.cdd-desk{display:grid;grid-template-columns:200px minmax(0,1fr) 340px;margin-top:14px;background:var(--cddcard);border:1px solid var(--cddline);box-shadow:var(--sw-shadow);min-height:340px}\
+.cdd-side{border-right:1px solid var(--cddline);padding:8px 0}#subCleardebt .cdd-side button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;background:none;border:0;border-left:3px solid transparent;padding:9px 14px;font:inherit;font-size:14px;color:var(--cdddark);text-align:left;cursor:pointer}#subCleardebt .cdd-side button:hover{background:var(--cddwarm)}#subCleardebt .cdd-side button.on{background:var(--cddort);border-left-color:var(--cddor);font-weight:700;color:var(--cdddeep)}#subCleardebt .cdd-side button.quiet{color:var(--cddmidl)}#subCleardebt .cdd-side button.quiet.on{color:var(--cdddeep)}\
+.cdd-cnt{background:var(--cddwarm);border-radius:100px;padding:0 8px;font-size:12px;font-weight:700;color:var(--cdddark);font-variant-numeric:tabular-nums}.cdd-side .on .cdd-cnt{background:var(--cddor);color:#fff}.cdd-sep{border-top:1px solid var(--cddline);margin:6px 0}\
+.cdd-secsel{display:none;width:100%;padding:9px 10px;font:inherit;font-size:14px;border:0;border-bottom:1px solid var(--cddline);background:var(--cddort);color:var(--cdddeep);font-weight:700}\
+.cdd-main{min-width:0;border-right:1px solid var(--cddline)}.cdd-tbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--cddline)}.cdd-tbar b{font-size:16px;color:var(--cdddeep)}.cdd-tsum{color:var(--cddmid);font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}.cdd-empty{padding:12px}\
+.cdd-twrap{overflow-x:auto}.cdd-rows{width:100%;border-collapse:collapse;font-size:13.5px}.cdd-rows th{text-align:left;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--cddmid);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--cddline);background:var(--cddwarm);white-space:nowrap}.cdd-rows td{padding:9px 10px;border-bottom:1px solid var(--cddwarm);vertical-align:top;font-variant-numeric:tabular-nums}.cdd-rows th.r,.cdd-rows td.r{text-align:right}.cdd-rows td.amt{font-weight:700;color:var(--cdddeep);white-space:nowrap}.cdd-rows th.tk,.cdd-rows td.tk{width:28px;padding-right:0}.cdd-rows td.tk input{width:16px;height:16px;margin:2px 0 0}\
+.cdd-rows tr[data-cdd-row]{cursor:pointer}.cdd-rows tr[data-cdd-row]:hover td{background:#FBF8F5}.cdd-rows tr.sel td,.cdd-rows tr.sel:hover td{background:var(--cddort)}.cdd-rows tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--cddor)}.cdd-rows tr[data-cdd-row]:focus{outline:2px solid var(--cddor);outline-offset:-2px}\
+.cdd-rows td.inv{white-space:nowrap}.cdd-rn{color:var(--cdddeep);white-space:nowrap}.cdd-rs{font-size:12px;color:var(--cddmid);margin-top:2px}.cdd-rst{font-weight:600;color:var(--cddsage)}.cdd-rows td.lc{font-size:12.5px;color:var(--cddmid)}.cdd-rows td.msgp{font-size:12.5px;color:var(--cddmid);min-width:160px}.cdd-rows td.msgp span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\
+.cdd-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}\
+.cdd-detail{padding:14px 16px;min-width:0}.cdd-pane .cdd-top.p{grid-template-columns:minmax(0,1fr) auto}.cdd-pane .cdd-nm{font-size:17px}.cdd-pane.hold .cdd-why{background:#FBFAF8;border:1px dashed var(--cddline)}\
+.cdd-out.inline{display:block;margin-top:14px}.cdd-wh{font-weight:700;color:var(--cdddark);font-size:14px}.cdd-out.inline .cdd-outin{margin-top:6px;padding-top:0;border-top:0}.cdd-out.inline .cdd-said{display:block;margin-top:6px}.cdd-hist{margin-top:14px;padding-top:10px;border-top:1px solid var(--cddline);font-size:12.5px;color:var(--cddmid)}\
 .cdd-msg{padding:10px 12px;background:#fff;border:1px solid var(--cddline);border-left:3px solid var(--cddor);font-size:14px;line-height:1.45;color:var(--cdddark);white-space:pre-wrap;border-radius:var(--sw-radius-sm,3px)}\
 .cdd-wait{margin-top:12px;font-size:13.5px;color:var(--cddmid);font-style:italic}\
 .cdd-out{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}.cdd-out details{flex:1 1 100%}.cdd-out summary{list-style:none;cursor:pointer;display:inline-block}.cdd-out summary::-webkit-details-marker{display:none}\
@@ -337,6 +420,8 @@ function cddCss() {
 .cdd-two{display:grid;grid-template-columns:1fr 1.4fr;gap:16px;margin-top:14px}.cdd-sec{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cddmid);font-weight:600;margin:22px 0 8px}\
 .cdd-foot{margin-top:14px;font-size:12.5px;color:var(--cddmidl)}\
 .cdd-visits{margin:10px 0 0;padding-left:22px;font-size:13.5px;color:var(--cdddark);line-height:1.5}.cdd-visits li{margin-bottom:3px}.cdd-visits .m{color:var(--cddmid);font-variant-numeric:tabular-nums}\
+@media(max-width:1180px){.cdd-desk{grid-template-columns:190px minmax(0,1fr)}.cdd-main{border-right:0}.cdd-detail{grid-column:2;border-top:1px solid var(--cddline)}}\
+@media(max-width:760px){.cdd-desk{grid-template-columns:minmax(0,1fr)}.cdd-side{display:none}.cdd-secsel{display:block}.cdd-detail{grid-column:1}.cdd-rows .hn{display:none}.cdd-tbar b{font-size:15px}#subCleardebt .cdd-go{margin-left:0}}\
 @media(max-width:900px){.cdd-head,.cdd-two{grid-template-columns:1fr}.cdd-figs{grid-template-columns:repeat(2,minmax(0,1fr))}.cdd-big{font-size:40px}.cdd-top{grid-template-columns:auto minmax(0,1fr)}.cdd-top .cdd-amt{grid-column:2;text-align:left}.cdd-tbl{font-size:12.5px}.cdd-tbl th,.cdd-tbl td{padding:7px 8px}}';
   document.head.appendChild(s);
 }
@@ -378,7 +463,7 @@ function cddRender() {
   var stats = document.getElementById('clearDebtStats'), tabs = document.getElementById('clearDebtFilters'), body = document.getElementById('clearDebtCards');
   if (!stats) return;
   stats.style.display = 'block'; tabs.style.display = 'block';
-  stats.innerHTML = cddHeaderHtml();
+  stats.innerHTML = cddPreviewBannerHtml() + cddHeaderHtml();
   tabs.innerHTML = cddTabsHtml();
   body.innerHTML = cddBodyHtml();
   if (CDD.tab === 'book' && typeof cdRender === 'function') cdRender();
@@ -429,7 +514,7 @@ function cddBodyHtml() {
   if (CDD.tab === 'promises') return cddPromisesHtml();
   if (CDD.tab === 'jan') return cddJanHtml();
   if (CDD.tab === 'deposits') return cddDepositsHtml();
-  return cddTodayHtml();
+  return cddLayoutB() ? cddTodayDeskHtml() : cddTodayHtml();
 }
 
 // ── Today: the morning list ──
@@ -462,16 +547,6 @@ function cddTodoHtml(items) {
   return '<div class="cdd-todo" id="cddTodo">' + cddEsc(C.todaySummary(items, cddJanText())) + '</div>' +
     (C.SENDING_ON ? '' : '<div class="cdd-off" id="cddSendingOff">Sending is off until Shaun says go - approving now just queues them.</div>');
 }
-// What the list is not showing today, in one line: promises that pause chasing, payers waiting
-// for a later step, invoices never chased, and the next builder statement day.
-function cddAlsoHtml(m) {
-  var bits = [], n;
-  if ((n = (m.paused || []).length)) bits.push(n + (n === 1 ? ' is' : ' are') + ' paused on a promise to pay (see Promises)');
-  if ((n = (m.waiting || []).length)) bits.push(n + ' waiting for a later chase or a due date');
-  if ((n = (m.not_chased || []).length)) bits.push(n + ' invoice' + (n === 1 ? ' is' : 's are') + ' never chased (test, set aside or old contact)');
-  if (m.next_statement_date) bits.push((m.is_statement_day ? 'builder statements are due today' : 'next builder statements ' + cddDateWords(m.next_statement_date)));
-  return bits.length ? '<div class="cdd-foot" id="cddAlso">Not on today\'s list: ' + cddEsc(bits.join('; ')) + '.</div>' : '';
-}
 // What went out today. Once sent, a payer leaves today's list, so this is the only place it shows.
 function cddSentTodayHtml(rows) {
   if (!rows || !rows.length) return '';
@@ -484,13 +559,167 @@ function cddJanTextBlock(jt) {
   var n = (jt.visits || []).length;
   return '<div class="cdd-grp" data-cdd-group="jan_text"><b>Jan\'s morning text</b><span>one text to Jan · ' + n + ' visit' + (n === 1 ? '' : 's') + '</span></div>' + cddJanTextHtml(jt);
 }
+// ── Today, layout B (preview): the to-do bar, the section menu, the table and the detail panel ──
+// The captain's pick. Shown only on the preview page (ops.html?view=clear-debt-preview) until
+// CDD_LAYOUT_B_LIVE is switched on; the live Today tab is the morning list above, unchanged.
+// The left menu picks a section, the table lists it one line per payer, and the panel on the right
+// holds everything for the row picked: the message, its one button, what happened, the history.
+function cddTodayDeskHtml() {
+  var C = ClearDebtDeskCore;
+  if (!CDD.morning) return CDD.loading ? '<div class="cd-quiet" style="margin-top:16px">Building the morning list…</div>' : '<div style="margin-top:16px">' + cddFail('The morning list (debt_morning_list)', CDD.morningErr) + '</div>';
+  var rows = C.todaySections(CDD.morning), jt = cddJanText(), done = cddDoneIds();
+  if (!CDD.sec || !rows[CDD.sec] || (CDD.sec === 'other' && !rows.other.length)) CDD.sec = C.firstWorkSection(rows, jt, done);
+  var list = rows[CDD.sec], sel = list.filter(function (r) { return r.id === CDD.sel; })[0] || list[0] || null;
+  CDD.sel = sel ? sel.id : null;
+  return cddTodoBarHtml(CDD.morning.items, rows) +
+    '<div class="cdd-desk" id="cddDesk">' + cddSideHtml(rows) +
+      '<div class="cdd-main">' + cddSecTableHtml(CDD.sec, list, sel) + '</div>' +
+      '<div class="cdd-detail" id="cddDetail">' + cddDetailHtml(sel) + '</div>' +
+    '</div>' + cddAlsoHtml(CDD.morning);
+}
+// Calls logged on this screen since the list was read: they no longer count as still to do.
+function cddDoneIds() { var d = {}; Object.keys(CDD.logged).forEach(function (k) { if (k.indexOf('i-') === 0) d[k.slice(2)] = true; }); return d; }
+// The dark "To do today" bar: a chip per kind of work (press one to open its first row), Next to do,
+// and the line that says approving only queues while sending is off.
+function cddTodoBarHtml(items, rows) {
+  var C = ClearDebtDeskCore, jt = cddJanText(), t = C.todoChips(items, jt), next = C.nextTodo(rows, CDD.sel, jt, cddDoneIds());
+  var tail = [];
+  if (t.wait) tail.push(t.wait + ' waiting for a draft');
+  if (t.held) tail.push(t.held + ' on hold');
+  return '<div class="cdd-todobar" id="cddTodo" role="region" aria-label="' + cddEsc(C.todaySummary(items, jt)) + '"><b>To do today:</b>' +
+    (t.chips.length ? t.chips.map(function (c) { return '<button type="button" class="cdd-tchip" data-cdd-chip="' + c.kind + '" onclick="cddChip(this)">' + (c.n != null ? '<strong>' + c.n + '</strong>' : '') + cddEsc(c.words) + '</button>'; }).join('') : '<span class="cdd-tnone">Nothing to do right now.</span>') +
+    (tail.length ? '<span class="cdd-tnote">' + cddEsc(tail.join(' · ')) + '</span>' : '') +
+    '<button type="button" class="cdd-go" id="cddNext" ' + (next ? 'onclick="cddNextTodo()">Next to do &#8594;' : 'disabled>All done for now') + '</button></div>' +
+    '<div class="cdd-offb"><span id="cddBuilt">Morning list for ' + cddEsc(cddDateWords(cddToday())) + (CDD.morning.generated_at ? ', built ' + cddEsc(C.perthTime(CDD.morning.generated_at)) : '') + '.</span>' +
+    (C.SENDING_ON ? '' : ' <span id="cddSendingOff">Sending is off until Shaun says go - approving now just queues them.</span>') + '</div>';
+}
+function cddSecLabel(key) { return (ClearDebtDeskCore.SECTIONS.filter(function (s) { return s.key === key; })[0] || { label: key }).label; }
+// The menu: a list on a wide screen, a select on a narrow one (CSS picks which shows).
+function cddSideHtml(rows) {
+  var secs = ClearDebtDeskCore.SECTIONS.filter(function (s) { return !s.hideEmpty || rows[s.key].length; });
+  var btn = function (s) { return '<button type="button" role="tab" data-cdd-sec="' + s.key + '" aria-selected="' + (CDD.sec === s.key) + '" class="' + (CDD.sec === s.key ? 'on' : '') + (s.quiet ? ' quiet' : '') + '" onclick="cddPickSec(this.getAttribute(\'data-cdd-sec\'))"><span>' + cddEsc(s.label) + '</span><span class="cdd-cnt">' + rows[s.key].length + '</span></button>'; };
+  return '<div class="cdd-side" role="tablist" aria-orientation="vertical" aria-label="Sections">' + secs.filter(function (s) { return !s.quiet; }).map(btn).join('') + '<div class="cdd-sep"></div>' + secs.filter(function (s) { return s.quiet; }).map(btn).join('') + '</div>' +
+    '<select class="cdd-secsel" id="cddSecSelect" aria-label="Section" onchange="cddPickSec(this.value)">' + secs.map(function (s) { return '<option value="' + s.key + '"' + (CDD.sec === s.key ? ' selected' : '') + '>' + cddEsc(s.label) + ' (' + rows[s.key].length + ')</option>'; }).join('') + '</select>';
+}
+var CDD_MSG_SECTIONS = { broken_promise: 1, text: 1, statement: 1, deposit_reminder: 1, other: 1 };
+var CDD_DRAFT_WORDS = { approved: 'Approved, queued', skipped: 'Skipped', sending: 'Sending not confirmed', sent: 'Sent' };
+// One line per payer for the section picked. Texts and statements also show the start of the message.
+function cddSecTableHtml(key, list, sel) {
+  var C = ClearDebtDeskCore, jt = cddJanText(), done = cddDoneIds();
+  var sum = list.reduce(function (a, r) { return a + Math.round(Number(cddRowAmount(r)) * 100); }, 0) / 100;
+  var left = list.filter(function (r) { return C.rowUnfinished(r, jt, done); }).length;
+  var ticked = Object.keys(CDD.ticked).filter(function (k) { return CDD.ticked[k]; }).length;
+  var title = key === 'done' ? list.length + ' sent' : key === 'hold' ? list.length + ' held, no draft' : !list.length ? 'nobody today' : left ? left + ' to do' : 'nothing left to do';
+  var h = '<div class="cdd-tbar"><span><b data-cdd-sec-title>' + cddEsc(cddSecLabel(key)) + ' - ' + cddEsc(title) + '</b>' + (key !== 'done' && list.length ? ' <span class="cdd-tsum">' + C.money0(sum) + '</span>' : '') + '</span>' +
+    '<span class="cdd-acts" style="margin:0"><button class="cdd-btn l" id="cddApproveTicked" ' + (ticked ? '' : 'disabled') + ' onclick="cddApproveTicked()">Approve ticked (' + ticked + ')</button>' + C.sendButtonHtml() + '</span></div>';
+  if (!list.length) return h + '<div class="cdd-empty">' + cddPend(key === 'done' ? 'Nothing sent yet today.' : key === 'hold' ? 'Nobody on hold.' : 'Nobody here today.', key === 'done' || key === 'hold' ? '' : 'Everyone is paid, promised, on hold or not due yet.') + '</div>';
+  if (key === 'done') {
+    return h + '<div class="cdd-twrap"><table class="cdd-rows" id="cddSentToday"><thead><tr><th>Time</th><th>To</th><th class="hn">Invoices</th><th>By</th></tr></thead><tbody>' + list.map(function (r) {
+      var s = r.sent;
+      return cddRowOpen(r, sel) + ' data-cdd-sent="' + cddEsc(s.to || '') + '"><td>' + cddEsc(C.perthTime(s.at)) + '</td><td><b>' + cddEsc(s.to === 'jan' ? 'Jan\'s morning text' : (s.payer_name || 'No name')) + '</b></td><td class="hn">' + cddEsc((s.invoice_numbers || []).join(', ')) + '</td><td>' + cddEsc(s.by || '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  }
+  var tick = list.some(function (r) { return cddRowTickId(r); }), msg = !!CDD_MSG_SECTIONS[key];
+  return h + '<div class="cdd-twrap"><table class="cdd-rows" data-cdd-table="' + cddEsc(key) + '"><thead><tr>' + (tick ? '<th class="tk"><span class="cdd-sr">Tick</span></th>' : '') + '<th>Customer</th><th class="hn">Invoice</th><th>Overdue</th>' + (msg ? '<th class="hn">Message</th>' : '') + '<th class="hn">' + (key === 'hold' ? 'Why' : 'Last contact') + '</th><th class="r">Owing</th></tr></thead><tbody>' +
+    list.map(function (r) { return cddRowHtml(r, sel, tick, msg); }).join('') + '</tbody></table></div>';
+}
+function cddRowAmount(r) {
+  if (r.type === 'jan_text') return (r.jt.visits || []).reduce(function (a, v) { return a + Math.round(Number(v.amount || 0) * 100); }, 0) / 100;
+  return r.item ? Number(r.item.amount || 0) : 0;
+}
+// The draft a row's tick approves: a pending draft that needs a decision, or Jan's text while approvable.
+function cddRowTickId(r) {
+  var jt = cddJanText();
+  if (r.type === 'jan_text') return r.jt.status === 'pending' && r.jt.approvable !== false ? r.jt.id : null;
+  return r.type === 'item' && ClearDebtDeskCore.needsDecision(r.item, jt) ? r.item.draft.id : null;
+}
+function cddRowOpen(r, sel) {
+  var on = sel && sel.id === r.id;
+  return '<tr data-cdd-row="' + cddEsc(r.id) + '" data-cdd-kind="' + cddEsc(ClearDebtDeskCore.rowKind(r, cddJanText())) + '" tabindex="0" aria-selected="' + !!on + '"' + (on ? ' class="sel"' : '') + ' onclick="cddPickRow(this)" onkeydown="cddRowKey(event,this)"';
+}
+// What a row is waiting on, in a word, under the payer's name.
+function cddRowStatus(r) {
+  var C = ClearDebtDeskCore, jt = cddJanText();
+  if (r.type === 'jan_text') return r.jt.status === 'pending' ? (r.jt.approvable === false ? 'Cannot approve yet' : '') : (CDD_DRAFT_WORDS[r.jt.status] || r.jt.status);
+  if (r.type === 'held') return r.item.hold === 'fix_first' ? 'Fix first' : r.item.hold === 'check_first' ? 'Check first' : 'On hold';
+  var act = C.cardAction(r.item, jt), logged = CDD.logged['i-' + r.id];
+  if (logged && !logged.bad) return logged.text;
+  if (act.kind === 'done') return CDD_DRAFT_WORDS[r.item.draft.status] || r.item.draft.status;
+  if (act.kind === 'wait') return 'Draft coming';
+  if (act.kind === 'in_jan_text') return 'In Jan\'s text';
+  if (act.kind === 'not_in_jan_text') return 'On tomorrow\'s Jan text';
+  return '';
+}
+function cddRowHtml(r, sel, tick, msg) {
+  var C = ClearDebtDeskCore, it = r.item, tid = cddRowTickId(r), st = cddRowStatus(r);
+  var name = r.type === 'jan_text' ? 'Jan\'s morning text' : (it.payer_name || 'No name');
+  var sub = r.type === 'jan_text' ? 'To Jan · ' + (r.jt.visits || []).length + ' visit' + ((r.jt.visits || []).length === 1 ? '' : 's') : r.type === 'held' ? '' : (it.step_label || '');
+  var invs = r.type === 'jan_text' ? [].concat.apply([], (r.jt.visits || []).map(function (v) { return v.invoice_numbers || []; })) : (it.invoices || []).map(function (x) { return x.invoice_number; });
+  var invWords = invs.slice(0, 2).join(', ') + (invs.length > 2 ? ' +' + (invs.length - 2) : '');
+  var days = r.type === 'jan_text' ? null : (it.days_overdue === undefined ? null : it.days_overdue);
+  var last = r.type === 'held' ? String(it.hold_reason || 'No reason given') : r.type === 'item' && it.last_outcome ? C.lastOutcomeLabel(it.last_outcome) + (it.last_outcome.at ? ', ' + cddDateWords(it.last_outcome.at) : '') : '–';
+  var draft = r.type === 'jan_text' ? r.jt : it && it.draft, text = draft ? (CDD.edits[draft.id] != null ? CDD.edits[draft.id] : draft.text || '') : '';
+  return cddRowOpen(r, sel) + '>' +
+    (tick ? '<td class="tk">' + (tid ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[tid] ? 'checked' : '') + ' data-draft="' + cddEsc(tid) + '" onclick="event.stopPropagation()" onchange="cddTick(this)">' : '') + '</td>' : '') +
+    '<td class="cu"><b class="cdd-rn">' + cddEsc(name) + '</b>' + (sub || st ? '<div class="cdd-rs">' + cddEsc(sub) + (st ? (sub ? ' · ' : '') + '<span class="cdd-rst">' + cddEsc(st) + '</span>' : '') + '</div>' : '') + '</td>' +
+    '<td class="hn inv">' + cddEsc(invWords) + '</td>' +
+    '<td>' + (r.type === 'jan_text' ? '–' : cddAgePill(days)) + '</td>' +
+    (msg ? '<td class="hn msgp"><span>' + cddEsc(text || '–') + '</span></td>' : '') +
+    '<td class="hn lc">' + cddEsc(last) + '</td>' +
+    '<td class="r amt">' + C.money(cddRowAmount(r)) + '</td></tr>';
+}
+// The panel for the row picked: the payer's card in full, with what happened laid open.
+function cddDetailHtml(r) {
+  if (!r) return '<div class="cdd-wait">Pick a row to see the message and what to do.</div>';
+  if (r.type === 'jan_text') return cddJanTextHtml(r.jt, { panel: true });
+  if (r.type === 'sent') {
+    var s = r.sent;
+    return '<div data-cdd-item="' + cddEsc(r.id) + '" data-cdd-kind="sent"><div class="cdd-nm">' + cddEsc(s.to === 'jan' ? 'Jan\'s morning text' : (s.payer_name || 'No name')) + '</div><div class="cdd-sub">Sent ' + cddEsc(ClearDebtDeskCore.perthTime(s.at)) + (s.by ? ' by ' + cddEsc(s.by) : '') + ((s.invoice_numbers || []).length ? ' · ' + cddEsc(s.invoice_numbers.join(', ')) : '') + '</div>' + (s.text ? '<div class="cdd-draft">' + cddMsgHtml(s.text) + '</div>' : '') + '</div>';
+  }
+  return cddItemHtml(r.item, { panel: true });
+}
+// The history line: what was last logged, as the list sends it (the promise has its own box above).
+function cddHistoryHtml(it) {
+  var C = ClearDebtDeskCore, lo = it.last_outcome;
+  return '<div class="cdd-hist" data-cdd-history>History: ' + cddEsc(lo ? 'last time ' + C.lastOutcomeLabel(lo) + (lo.at ? ', ' + cddDateWords(lo.at) + ' ' + C.perthTime(lo.at) : '') + (lo.by ? ', ' + lo.by : '') : 'nothing logged yet') + '.</div>';
+}
+// What the list is not showing today, in one line: promises that pause chasing, payers waiting
+// for a later step, invoices never chased, and the next builder statement day.
+function cddAlsoHtml(m) {
+  var bits = [], n;
+  if ((n = (m.paused || []).length)) bits.push(n + (n === 1 ? ' is' : ' are') + ' paused on a promise to pay (see Promises)');
+  if ((n = (m.waiting || []).length)) bits.push(n + ' waiting for a later chase or a due date');
+  if ((n = (m.not_chased || []).length)) bits.push(n + ' invoice' + (n === 1 ? ' is' : 's are') + ' never chased (test, set aside or old contact)');
+  if (m.next_statement_date) bits.push((m.is_statement_day ? 'builder statements are due today' : 'next builder statements ' + cddDateWords(m.next_statement_date)));
+  return bits.length ? '<div class="cdd-foot" id="cddAlso">Not on today\'s list: ' + cddEsc(bits.join('; ')) + '.</div>' : '';
+}
+// ── Today: picking a section and a row ──
+function cddPickSec(key) { CDD.sec = key; CDD.sel = null; cddRender(); }
+function cddRowFocus() { var all = document.querySelectorAll('[data-cdd-row]'); for (var i = 0; i < all.length; i++) if (all[i].getAttribute('data-cdd-row') === CDD.sel) { all[i].focus(); return; } }
+function cddPickRow(tr, focus) { CDD.sel = tr.getAttribute('data-cdd-row'); cddRender(); if (focus) cddRowFocus(); }
+// Up and down walk the table, Enter or Space picks the row in focus.
+function cddRowKey(e, tr) {
+  if (e.target !== tr) return;
+  var to = e.key === 'ArrowDown' ? tr.nextElementSibling : e.key === 'ArrowUp' ? tr.previousElementSibling : (e.key === 'Enter' || e.key === ' ') ? tr : null;
+  if (!to) return;
+  e.preventDefault(); cddPickRow(to, true);
+}
+function cddGoTo(r) { if (!r) return; CDD.sec = r.section; CDD.sel = r.id; cddRender(); cddRowFocus(); }
+function cddNextTodo() { var C = ClearDebtDeskCore; cddGoTo(C.nextTodo(C.todaySections(CDD.morning), CDD.sel, cddJanText(), cddDoneIds())); }
+// A chip opens the first row of its kind still to do (or the first of its kind when all are done).
+function cddChip(btn) {
+  var C = ClearDebtDeskCore, kind = btn.getAttribute('data-cdd-chip'), jt = cddJanText(), done = cddDoneIds(), rows = C.todaySections(CDD.morning);
+  var all = C.WORK_KEYS.reduce(function (a, k) { return a.concat(rows[k]); }, []).filter(function (r) { return C.rowKind(r, jt) === kind; });
+  cddGoTo(all.filter(function (r) { return C.rowUnfinished(r, jt, done); })[0] || all[0]);
+}
 // Jan's one morning text: who it goes to, the visits it lists, the words, and one Approve button.
 // Not approvable (Jan's mobile not set, or too long for one text): the reason, and only Skip.
-function cddJanTextHtml(jt) {
-  var C = ClearDebtDeskCore, visits = jt.visits || [], pending = jt.status === 'pending', ok = jt.approvable !== false;
+// opts.panel: drawn in the Today detail panel, where the tick lives on the table row instead.
+function cddJanTextHtml(jt, opts) {
+  var C = ClearDebtDeskCore, visits = jt.visits || [], pending = jt.status === 'pending', ok = jt.approvable !== false, panel = !!(opts && opts.panel);
   var total = visits.reduce(function (a, v) { return a + Math.round(Number(v.amount || 0) * 100); }, 0) / 100;
-  var h = '<div class="cdd-item" data-cdd-jantext data-cdd-kind="jan_text"><div class="cdd-top">' +
-    (pending && ok ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[jt.id] ? 'checked' : '') + ' data-draft="' + cddEsc(jt.id) + '" onchange="cddTick(this)">' : '<span></span>') +
+  var h = '<div class="' + (panel ? 'cdd-pane' : 'cdd-item') + '" data-cdd-jantext data-cdd-kind="jan_text"><div class="cdd-top' + (panel ? ' p' : '') + '">' +
+    (panel ? '' : pending && ok ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[jt.id] ? 'checked' : '') + ' data-draft="' + cddEsc(jt.id) + '" onchange="cddTick(this)">' : '<span></span>') +
     '<div><div class="cdd-nm">Jan\'s morning text</div><div class="cdd-sub"><span class="cdd-chip dark">To Jan</span><span data-cdd-jan-phone>' + cddEsc(jt.to_phone ? cddPhoneWords(jt.to_phone) : 'Jan\'s mobile not set') + '</span></div></div>' +
     '<div class="cdd-amt">' + C.money(total) + '<small>' + visits.length + ' visit' + (visits.length === 1 ? '' : 's') + '</small></div></div>';
   h += '<ol class="cdd-visits" data-cdd-visits>' + visits.map(function (v) {
@@ -504,23 +733,25 @@ function cddGroupHead(key, label, list) {
   var sum = list.reduce(function (a, x) { return a + Math.round(Number(x.amount || 0) * 100); }, 0) / 100;
   return '<div class="cdd-grp" data-cdd-group="' + cddEsc(key) + '"><b>' + cddEsc(label) + '</b><span>' + list.length + (key === 'hold' ? ' held' : ' to chase') + ' · ' + ClearDebtDeskCore.money0(sum) + '</span></div>';
 }
-function cddHeldHtml(held) { return held.length ? cddGroupHead('hold', 'On hold, no draft', held) + held.map(cddItemHtml).join('') : ''; }
-function cddItemHtml(it) {
-  var C = ClearDebtDeskCore, d = it.draft, jt = cddJanText(), held = C.isHeld(it), act = C.cardAction(it, jt), tickable = C.needsDecision(it, jt);
+function cddHeldHtml(held) { return held.length ? cddGroupHead('hold', 'On hold, no draft', held) + held.map(function (i) { return cddItemHtml(i); }).join('') : ''; }
+// A payer's card: a Jan tab card, or (opts.panel) the Today detail panel, where the tick lives on the
+// table row, What happened is laid open and the history line replaces Last time.
+function cddItemHtml(it, opts) {
+  var C = ClearDebtDeskCore, d = it.draft, jt = cddJanText(), held = C.isHeld(it), act = C.cardAction(it, jt), panel = !!(opts && opts.panel), tickable = !panel && C.needsDecision(it, jt);
   var invs = (it.invoices || []).map(function (x) { return x.xero_invoice_id ? cddXero(x.xero_invoice_id, x.invoice_number) + ' <span class="cd-num">' + C.money(x.amount_due) + '</span>' : cddEsc(x.invoice_number); }).join(' · ');
   var sub = '<span class="cdd-chip dark">' + cddEsc(CDD_PAYER_LABEL[it.payer] || it.payer || 'Other') + '</span>' + (it.step_label && !held ? '<span class="cdd-chip step">' + cddEsc(it.step_label) + '</span>' : '') + cddAgePill(it.days_overdue === undefined ? null : it.days_overdue);
-  var h = '<div class="cdd-item' + (held ? ' hold' : '') + '" data-cdd-item="' + cddEsc(it.id) + '" data-cdd-kind="' + act.kind + '"><div class="cdd-top">' +
-    (tickable ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[d.id] ? 'checked' : '') + ' data-draft="' + cddEsc(d.id) + '" onchange="cddTick(this)">' : '<span></span>') +
+  var h = '<div class="' + (panel ? 'cdd-pane' : 'cdd-item') + (held ? ' hold' : '') + '" data-cdd-item="' + cddEsc(it.id) + '" data-cdd-kind="' + act.kind + '"><div class="cdd-top' + (panel ? ' p' : '') + '">' +
+    (panel ? '' : tickable ? '<input type="checkbox" aria-label="Tick to approve" ' + (CDD.ticked[d.id] ? 'checked' : '') + ' data-draft="' + cddEsc(d.id) + '" onchange="cddTick(this)">' : '<span></span>') +
     '<div><div class="cdd-nm">' + cddEsc(it.payer_name || 'No name') + '</div><div class="cdd-sub">' + sub + '</div></div>' +
     '<div class="cdd-amt">' + C.money(it.amount) + '<small>' + (it.invoices || []).length + ' invoice' + ((it.invoices || []).length === 1 ? '' : 's') + '</small></div></div>' +
     (invs ? '<div class="cdd-invs">' + invs + '</div>' : '');
   // Held cards are information only: the reason, and nothing to press.
   if (held) return h + '<div class="cdd-why"><b>' + (it.hold === 'fix_first' ? 'Fix first.' : it.hold === 'check_first' ? 'Check first.' : 'On hold.') + '</b> ' + cddEsc(String(it.hold_reason || 'No reason given').replace(/[.\s]*$/, '.')) + ' No draft until this is cleared.</div></div>';
   if (it.promise) h += '<div class="cdd-why"><b>Promise ' + cddEsc(it.promise.status || 'open') + ':</b> ' + (it.promise.amount == null ? 'payment' : C.money(it.promise.amount)) + ' by ' + cddEsc(cddDateWords(it.promise.date)) + '</div>';
-  if (it.last_outcome) h += '<div class="cdd-foot">Last time: ' + cddEsc(C.lastOutcomeLabel(it.last_outcome)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
+  if (it.last_outcome && !panel) h += '<div class="cdd-foot">Last time: ' + cddEsc(C.lastOutcomeLabel(it.last_outcome)) + (it.last_outcome.at ? ', ' + cddEsc(cddDateWords(it.last_outcome.at)) + ' ' + cddEsc(C.perthTime(it.last_outcome.at)) : '') + (it.last_outcome.by ? ', ' + cddEsc(it.last_outcome.by) : '') + '</div>';
   h += cddActionHtml(it, act);
-  h += cddOutcomeHtml({ payer_key: it.payer_key, ids: (it.invoices || []).map(function (x) { return x.xero_invoice_id; }).filter(Boolean), step: it.step, key: 'i-' + it.id, call: act.kind === 'call' });
-  return h + '</div>';
+  h += cddOutcomeHtml({ payer_key: it.payer_key, ids: (it.invoices || []).map(function (x) { return x.xero_invoice_id; }).filter(Boolean), step: it.step, key: 'i-' + it.id, call: act.kind === 'call', inline: panel });
+  return h + (panel ? cddHistoryHtml(it) : '') + '</div>';
 }
 var CDD_CHANNEL = { sms: 'Text', email: 'Email', call_script: 'What to say on the call' };
 function cddMsgHtml(text) { return '<div class="cdd-msg">' + cddEsc(text) + '</div>'; }
@@ -576,6 +807,7 @@ function cddPayerKeyFor(ids) {
 // What happened: the outcome buttons, the promise box and a note, folded away behind one small
 // link ("What happened?" as a button on a call card). The promise box opens only on Promised.
 // A Jan visit offers what Jan reports (the list's schedule.jan_visit_outcomes). Shared with the Debt book payer record.
+// o.inline (the Today detail panel): laid open under a "What happened?" heading, nothing folded.
 function cddOutcomeHtml(o) {
   var k = o.key || 'x', key = cddEsc(k), said = CDD.logged[k], prom = !!CDD.promOpen[k], typed = CDD.outIn[k] || {};
   var btns = ClearDebtDeskCore.outcomesFor(o.step, CDD.morning && CDD.morning.schedule).map(function (x) {
@@ -583,11 +815,12 @@ function cddOutcomeHtml(o) {
       ? '<button type="button" data-cdd-promised aria-expanded="' + prom + '" onclick="cddPromiseOpen(this)">' + cddEsc(x.label) + '</button>'
       : '<button type="button" data-outcome="' + cddEsc(x.code) + '" onclick="cddOutcome(this,\'' + cddEsc(x.code) + '\')">' + cddEsc(x.label) + '</button>';
   }).join('');
-  return '<div class="cdd-out" data-cdd-out="' + key + '" data-payer="' + cddEsc(o.payer_key || '') + '" data-ids="' + cddEsc((o.ids || []).join(',')) + '" data-step="' + cddEsc(o.step || '') + '">' +
-    '<details' + (CDD.open[k] ? ' open' : '') + ' ontoggle="cddLogToggle(this)"><summary class="' + (o.call ? 'cdd-btn l' : 'cdd-logl') + '">' + (o.call ? 'What happened?' : 'Log what happened') + '</summary>' +
-    '<div class="cdd-outin"><span class="cdd-obtns">' + btns + '</span>' +
+  var inner = '<div class="cdd-outin"><span class="cdd-obtns">' + btns + '</span>' +
     '<span class="cdd-prom"' + (prom ? '' : ' hidden') + '>Promised $<input type="number" min="0" step="0.01" inputmode="decimal" aria-label="Promised amount" data-prom-amount value="' + cddEsc(typed.amount || '') + '" oninput="cddOutIn(this)"> by <input type="date" aria-label="Promised date" data-prom-date value="' + cddEsc(typed.date || '') + '" oninput="cddOutIn(this)"><span class="cdd-obtns"><button type="button" data-outcome="promised" onclick="cddOutcome(this,\'promised\')">Save promise</button></span></span>' +
-    '<input class="cdd-note" type="text" placeholder="Note (optional)" aria-label="Note" data-out-note value="' + cddEsc(typed.note || '') + '" oninput="cddOutIn(this)"></div></details>' +
+    '<input class="cdd-note" type="text" placeholder="Note (optional)" aria-label="Note" data-out-note value="' + cddEsc(typed.note || '') + '" oninput="cddOutIn(this)"></div>';
+  return '<div class="cdd-out' + (o.inline ? ' inline' : '') + '" data-cdd-out="' + key + '" data-payer="' + cddEsc(o.payer_key || '') + '" data-ids="' + cddEsc((o.ids || []).join(',')) + '" data-step="' + cddEsc(o.step || '') + '">' +
+    (o.inline ? '<div class="cdd-wh">' + (o.step === 'jan_visit' ? 'What did Jan report?' : 'What happened?') + '</div>' + inner
+      : '<details' + (CDD.open[k] ? ' open' : '') + ' ontoggle="cddLogToggle(this)"><summary class="' + (o.call ? 'cdd-btn l' : 'cdd-logl') + '">' + (o.call ? 'What happened?' : 'Log what happened') + '</summary>' + inner + '</details>') +
     '<span class="cdd-said' + (said && said.bad ? ' bad' : '') + '" data-cdd-said>' + cddEsc(said ? said.text : '') + '</span></div>';
 }
 
@@ -666,6 +899,7 @@ async function cddOutcome(btn, code) {
     said.className = 'cdd-said'; said.textContent = CDD.logged[key].text;
     delete CDD.outIn[key];
     box.querySelectorAll('[data-prom-amount], [data-prom-date], [data-out-note]').forEach(function (el) { el.value = ''; });
+    if (box.closest('#cddDetail')) { cddRender(); return; } // the row and Next to do now count this call as done
   } catch (e) {
     said.className = 'cdd-said bad';
     said.textContent = ClearDebtDeskCore.isNotDeployed(e) ? 'Logging what happened is not live yet. Nothing was saved; use Add note for now.' : 'Not saved: ' + e.message;
@@ -712,7 +946,7 @@ function cddJanHtml() {
   var rows = C.janFromMorning(CDD.morning.items || []), jt = cddJanText(), heldHtml = cddHeldHtml(C.janHeldFromMorning(CDD.morning.items));
   var intro = '<div class="cdd-bar"><span class="t">Day 7: Jan knocks on the door. <b>' + rows.length + '</b> visit' + (rows.length === 1 ? '' : 's') + ' for ' + cddEsc(cddDateWords(cddToday())) + '.</span></div>';
   if (!rows.length && !jt) return intro + cddPend('Nobody for Jan today.', '') + heldHtml;
-  return intro + (jt ? cddJanTextHtml(jt) : '') + rows.map(cddItemHtml).join('') + heldHtml;
+  return intro + (jt ? cddJanTextHtml(jt) : '') + rows.map(function (i) { return cddItemHtml(i); }).join('') + heldHtml;
 }
 
 // ── Deposits ──

@@ -12,7 +12,7 @@
 //    send button (desk drafts and the Debt book payer record) is disabled, reads "Sending off
 //    until Shaun says go" and carries no handler.
 //  - Each card has ONE obvious button for its step (Approve text, Call now, Approve Jan's visit,
-//    Approve reminder, Review statement); no draft yet reads "Draft coming - nothing to do yet"
+//    Approve reminder, Approve statement); no draft yet reads "Draft coming - nothing to do yet"
 //    with no button; held cards have nothing to press. A line at the top of Today counts the
 //    work and says sending is off, so approving only queues.
 //  - Outcome buttons, the promise box and the note sit behind "Log what happened" ("What
@@ -147,7 +147,7 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
 
 test('Today opens with one line of what to do, and says sending is off so approving only queues', async ({ page }) => {
   await openDesk(page);
-  await expect(page.locator('#cddTodo')).toHaveText('2 texts to approve, 2 calls to make, 1 Jan visit to approve, 1 builder statement to review. 3 on hold, just so you know.');
+  await expect(page.locator('#cddTodo')).toHaveText('2 texts to approve, 2 calls to make, 1 Jan visit to approve, 1 builder statement to approve. 3 on hold, just so you know.');
   await expect(page.locator('#cddSendingOff')).toHaveText('Sending is off until Shaun says go - approving now just queues them.');
 });
 
@@ -158,7 +158,7 @@ test('each card shows one obvious button for its step, with everything else fold
   expect(await primary('Theo Brennan')).toEqual(['Approve text']);
   expect(await primary('Mia Laurent')).toEqual(['Call now']);
   expect(await primary('Nina Hollis')).toEqual(["Approve Jan's visit"]);
-  expect(await primary('Major Loss Builders')).toEqual(['Review statement']);
+  expect(await primary('Major Loss Builders')).toEqual(['Approve statement']);
   expect(await primary('Oscar Patel')).toEqual([]); // already approved
   expect(await primary('Ivy Okafor')).toEqual([]); // already skipped
   await expect(card(page, 'Mia Laurent').locator('a[data-cdd-primary]')).toHaveAttribute('href', 'tel:0400000103');
@@ -179,12 +179,11 @@ test('each card shows one obvious button for its step, with everything else fold
   await shotDesk(page, '09-one-button-cards.png', '#clearDebtCards');
 });
 
-test('a builder statement is reviewed before it can be approved', async ({ page }) => {
+test('a builder statement shows its text above one Approve statement button', async ({ page }) => {
   await openDesk(page);
   const mlb = card(page, 'Major Loss Builders');
-  await expect(mlb.locator('.cdd-msg')).toHaveCount(0);
-  await mlb.getByRole('button', { name: 'Review statement' }).click();
   await expect(mlb.locator('.cdd-msg')).toContainText('Statement for Major Loss Builders');
+  await expect(mlb.locator('button.cdd-link.sm')).toHaveText(['Edit', 'Skip']);
   await mlb.getByRole('button', { name: 'Approve statement' }).click();
   await expect(mlb).toContainText('Approved by ops-e2e');
   const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_draft_decide'));
@@ -199,14 +198,15 @@ test('approve a draft, then approve ticked in one go', async ({ page }) => {
   await harper.getByRole('button', { name: 'Approve text', exact: true }).click();
   await expect(harper).toContainText('Approved by ops-e2e');
   await expect(card(page, 'Mia Laurent').locator('input[type=checkbox]')).toHaveCount(0); // a call is not ticked
-  await expect(card(page, 'Major Loss Builders').locator('input[type=checkbox]')).toHaveCount(0); // a statement is reviewed first
   await card(page, 'Theo Brennan').locator('input[type=checkbox]').check();
   await card(page, 'Nina Hollis').locator('input[type=checkbox]').check();
+  await card(page, 'Major Loss Builders').locator('input[type=checkbox]').check();
   await page.locator('#cddApproveTicked').click();
   await expect(card(page, 'Theo Brennan')).toContainText('Approved');
   await expect(card(page, 'Nina Hollis')).toContainText('Approved');
+  await expect(card(page, 'Major Loss Builders')).toContainText('Approved');
   const posts = await page.evaluate(() => window.__cddPosts);
-  expect(posts.map((p) => p.action)).toEqual(['debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide']);
+  expect(posts.map((p) => p.action)).toEqual(['debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide', 'debt_draft_decide']);
   expect(posts[0].body).toMatchObject({ draft_id: 'draft-harper', decision: 'approve', text: 'Hi Harper, a friendly reminder about INV-9001. Thanks, SecureWorks WA' });
 });
 
@@ -232,6 +232,30 @@ test('outcome buttons and the promise box log against the payer\'s invoices', as
   expect(posts[0].body).toMatchObject({ outcome_code: 'promised', promised_amount: 500, promised_date: today, channel: 'call', schedule_step: 'call', xero_invoice_ids: [fixture.debt_book.invoices[2].xero_invoice_id] });
   expect(posts[1].body.outcome_code).toBe('no_answer');
   expect(posts[1].body.schedule_step).toBe('call');
+});
+
+test('a typed note and promise survive another card repainting the list, and clear once logged', async ({ page }) => {
+  await openDesk(page);
+  const harper = card(page, 'Harper Nguyen');
+  await harper.getByText('Log what happened').click();
+  await harper.getByRole('button', { name: 'Promised', exact: true }).click();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Perth' }).format(new Date());
+  await harper.getByLabel('Promised amount').fill('250');
+  await harper.getByLabel('Promised date').fill(today);
+  await harper.getByLabel('Note').fill('Paying Friday');
+  await card(page, 'Theo Brennan').getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(card(page, 'Theo Brennan').locator('textarea')).toBeVisible();
+  await expect(harper.getByLabel('Note')).toHaveValue('Paying Friday');
+  await expect(harper.getByLabel('Promised amount')).toHaveValue('250');
+  await expect(harper.getByLabel('Promised date')).toHaveValue(today);
+  await harper.getByRole('button', { name: 'Save promise' }).click();
+  await expect(harper.locator('.cdd-out [data-cdd-said]')).toContainText('Logged: Promised $250.00');
+  const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_log_outcome'));
+  expect(post.body).toMatchObject({ outcome_code: 'promised', promised_amount: 250, promised_date: today, note: 'Paying Friday' });
+  await card(page, 'Theo Brennan').getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(card(page, 'Theo Brennan')).toContainText('Skipped for today.');
+  await expect(harper.getByLabel('Note')).toHaveValue('');
+  await expect(harper.getByLabel('Promised amount')).toHaveValue('');
 });
 
 test('an outcome on a text card logs no schedule_step, so the unsent text is not marked done', async ({ page }) => {

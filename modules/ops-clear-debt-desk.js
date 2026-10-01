@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 // CLEAR DEBT DESK: the header, the tabs and the morning list.
-// Plan: secureworks-backend docs/debt-book/PLAN.md sections 5 and 6 step 4,
+// Plan: secureworks-backend docs/debt-book/PLAN.md sections 5 and 6 steps 4 and 5,
 //   captain's rulings in DECISIONS.md beside it. Screen contract: docs/clear-debt-desk.md.
 // Reads: debt_book (live Xero read with the captain's rules) and debt_morning_list
 //   (today's step per payer, holds, paused promises, waiting payers; drafts from step 3;

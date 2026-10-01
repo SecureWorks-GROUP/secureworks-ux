@@ -427,7 +427,7 @@ function cddTodoHtml(items) {
 function cddAlsoHtml(m) {
   var bits = [], n;
   if ((n = (m.paused || []).length)) bits.push(n + (n === 1 ? ' is' : ' are') + ' paused on a promise to pay (see Promises)');
-  if ((n = (m.waiting || []).length)) bits.push(n + ' waiting for a later step or a due date');
+  if ((n = (m.waiting || []).length)) bits.push(n + ' waiting for a later chase or a due date');
   if ((n = (m.not_chased || []).length)) bits.push(n + ' invoice' + (n === 1 ? ' is' : 's are') + ' never chased (test, set aside or old contact)');
   if (m.next_statement_date) bits.push((m.is_statement_day ? 'builder statements are due today' : 'next builder statements ' + cddDateWords(m.next_statement_date)));
   return bits.length ? '<div class="cdd-foot" id="cddAlso">Not on today\'s list: ' + cddEsc(bits.join('; ')) + '.</div>' : '';
@@ -623,7 +623,7 @@ function cddJanHtml() {
   var rows = C.janFromMorning(CDD.morning.items || []), heldHtml = cddHeldHtml(C.janHeldFromMorning(CDD.morning.items));
   var intro = '<div class="cdd-bar"><span class="t">Day 7: Jan knocks on the door. <b>' + rows.length + '</b> visit' + (rows.length === 1 ? '' : 's') + ' for ' + cddEsc(cddDateWords(cddToday())) + '.</span></div>';
   if (!rows.length) return intro + cddPend('Nobody for Jan today.', '') + heldHtml;
-  return intro + rows.map(cddItemHtml).join('') + heldHtml + '<div class="cdd-foot">Jan\'s morning text to his own phone comes in a later step, approved by you first. Record what he reports with Log what happened.</div>';
+  return intro + rows.map(cddItemHtml).join('') + heldHtml + '<div class="cdd-foot">Jan\'s morning text to his own phone comes later, approved by you first. Record what he reports with Log what happened.</div>';
 }
 
 // ── Deposits ──
@@ -641,7 +641,7 @@ function cddDepositsHtml() {
   if (dep.apart.length) h += '<div class="cdd-sec">Never chased, left out of the total</div><table class="cdd-tbl" id="cddDepositsApart"><thead><tr><th>Client</th><th>Invoice</th><th class="r">Owing</th><th>Why it is not chased</th></tr></thead><tbody>' + dep.apart.map(function (r) {
     return '<tr>' + cddDepositCells(r) + '<td>' + cddEsc(r.not_chased_reason) + '</td></tr>';
   }).join('') + '</tbody></table>';
-  return h + '<div class="cdd-foot">The one friendly reminder and the weekly 60-day cancel list come in a later step. Nothing here is chased or cancelled from this screen.</div>';
+  return h + '<div class="cdd-foot">The one friendly reminder and the weekly 60-day cancel list come later. Nothing here is chased or cancelled from this screen.</div>';
 }
 function cddDepositCells(r) {
   return '<td><b>' + cddEsc(r.contact_name) + '</b>' + (r.job_number ? '<div class="cdd-foot" style="margin:0">' + cddEsc(r.job_number) + '</div>' : '') + '</td><td>' + (r.xero_invoice_id ? cddXero(r.xero_invoice_id, r.invoice_number) : cddEsc(r.invoice_number)) + '</td><td class="r">' + ClearDebtDeskCore.money(r.amount_due) + '</td>';

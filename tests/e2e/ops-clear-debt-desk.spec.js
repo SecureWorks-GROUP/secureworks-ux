@@ -134,7 +134,7 @@ test('Today: groups in chase order, held payers last with no draft, send is off 
   const heldNames = await page.locator('.cdd-item.hold .cdd-nm').allTextContents();
   expect(heldNames).toEqual(['Ruby Castillo', 'Builderwest', 'Major Loss Builders']);
   await expect(page.locator('#cddAlso')).toContainText('1 is paused on a promise to pay (see Promises)');
-  await expect(page.locator('#cddAlso')).toContainText('2 waiting for a later step or a due date');
+  await expect(page.locator('#cddAlso')).toContainText('2 waiting for a later chase or a due date');
   await expect(page.locator('#cddAlso')).toContainText('2 invoices are never chased');
   const sends = page.locator('button.send');
   expect(await sends.count()).toBeGreaterThan(0);

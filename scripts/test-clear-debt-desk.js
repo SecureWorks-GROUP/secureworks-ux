@@ -128,6 +128,50 @@ check('held payers are listed apart, by amount then age', () => {
   assert.deepStrictEqual(C.heldItems(withHold).map((i) => i.id), ['x1', 'h1', 'x2', 'x3']);
 });
 check('waiting for Shaun counts pending drafts only', () => { assert.strictEqual(C.waitingCount(items), 2); });
+check('a call script is help for the call, never waiting for Shaun', () => {
+  assert.strictEqual(C.waitingCount([{ id: 'c', group: 'call', step: 'call', draft: { id: 'cs', channel: 'call_script', status: 'pending' } }]), 0);
+});
+check('each card has one obvious button for its step', () => {
+  const pend = (channel) => ({ id: 'd', channel: channel || 'sms', status: 'pending', text: 'Hi' });
+  const act = (o) => C.cardAction(o);
+  assert.deepStrictEqual([act({ step: 'friendly_text', draft: pend() }).kind, act({ step: 'friendly_text', draft: pend() }).label], ['text', 'Approve text']);
+  assert.strictEqual(act({ step: 'firm_text', draft: pend() }).label, 'Approve text');
+  assert.strictEqual(act({ step: 'call', draft: pend('call_script') }).label, 'Call now');
+  assert.strictEqual(act({ step: 'builder_call' }).label, 'Call now', 'a call needs no draft');
+  assert.strictEqual(act({ step: 'jan_visit', draft: pend() }).label, "Approve Jan's visit");
+  assert.strictEqual(act({ step: 'deposit_reminder', draft: pend() }).label, 'Approve reminder');
+  assert.deepStrictEqual([act({ step: 'statement', draft: pend('email') }).label, act({ step: 'statement', draft: pend('email') }).approve], ['Review statement', 'Approve statement']);
+  assert.strictEqual(act({ group: 'broken_promise', step: 'jan_visit', draft: pend() }).kind, 'jan', 'a broken promise follows its step');
+});
+check('no draft yet says so plainly and offers no button; a decided draft offers none; held cards are information only', () => {
+  for (const step of ['friendly_text', 'jan_visit', 'statement', 'deposit_reminder']) {
+    const a = C.cardAction({ step, draft: null });
+    assert.deepStrictEqual([a.kind, a.label, a.words], ['wait', undefined, 'Draft coming - nothing to do yet'], step);
+  }
+  assert.strictEqual(C.cardAction({ step: 'friendly_text', draft: { id: 'd', status: 'approved' } }).kind, 'done');
+  assert.strictEqual(C.cardAction({ group: 'hold', step: null, hold: 'check_first' }).kind, 'held');
+  assert.strictEqual(C.cardAction({ step: 'friendly_text', hold: 'fix_first', draft: { id: 'd', status: 'pending' } }).kind, 'held');
+});
+check('only drafts approvable without opening can be ticked: never a statement, a call or a hold', () => {
+  const pend = { id: 'd', status: 'pending', channel: 'sms' };
+  assert.strictEqual(C.isTickable({ step: 'friendly_text', draft: pend }), true);
+  assert.strictEqual(C.isTickable({ step: 'jan_visit', draft: pend }), true);
+  assert.strictEqual(C.isTickable({ step: 'statement', draft: pend }), false);
+  assert.strictEqual(C.isTickable({ step: 'call', draft: pend }), false);
+  assert.strictEqual(C.isTickable({ step: 'friendly_text', hold: 'check_first', draft: pend }), false);
+});
+check('the line at the top of Today counts what there is to do', () => {
+  const pend = { id: 'd', status: 'pending', channel: 'sms' };
+  const list = [
+    { step: 'friendly_text', draft: pend }, { step: 'firm_text', draft: pend }, { step: 'friendly_text', draft: pend }, { step: 'friendly_text', draft: pend },
+    { step: 'call' }, { step: 'builder_call' }, { step: 'jan_visit', draft: pend },
+    { step: 'friendly_text', draft: { id: 'x', status: 'approved' } }, { step: 'statement', draft: null },
+    { group: 'hold', step: null, hold: 'check_first' },
+  ];
+  assert.strictEqual(C.todaySummary(list), '4 texts to approve, 2 calls to make, 1 Jan visit to approve. 1 waiting for a draft, nothing to do yet. 1 on hold, just so you know.');
+  assert.strictEqual(C.todaySummary([{ step: 'deposit_reminder', draft: pend }, { step: 'statement', draft: pend }]), '1 deposit reminder to approve, 1 builder statement to review.');
+  assert.strictEqual(C.todaySummary([]), 'Nothing to do right now.');
+});
 check('Jan tab takes every chased item at the Jan visit step; held payers whose held_step is the Jan visit are listed apart', () => {
   assert.deepStrictEqual(C.janFromMorning(withHold).map((i) => i.id), ['j1']);
   const brokenJan = { id: 'bj', group: 'broken_promise', step: 'jan_visit', amount: 5, days_overdue: 10 };

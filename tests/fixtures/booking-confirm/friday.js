@@ -108,10 +108,32 @@
       return out;
     };
     const own = {
-      'lead-basil': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:20', '13:00', 30, 30) },
-      'lead-kerry': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:15', '13:00', 30, 30) },
-      'lead-priya': { tue: run(tue, '08:00', '09:30', 0, 30), fri: run(fri, '12:15', '12:55', 30, 30) }
+      'lead-basil': { tue: run(tue, '08:00', '08:30', 0, 30), fri: run(fri, '12:20', '13:00', 30, 30) },
+      'lead-kerry': { tue: run(tue, '08:00', '08:30', 0, 30), fri: run(fri, '12:15', '13:00', 30, 30) },
+      'lead-priya': { tue: run(tue, '08:00', '08:30', 0, 30), fri: run(fri, '12:15', '12:55', 30, 30) }
     };
+    // The person's own day (travel to and from an unknown place, 30 minutes):
+    // the live read's calendar_read and free_times for this synthetic week.
+    const busy = (day, from, to, source, label, location) => ({ start_iso: at(day, from), end_iso: at(day, to), source, label: label || null, location: location || null });
+    const personDays = [
+      { date: tue, weekday: 'Tue', state: 'open', day_start: '08:00', day_end: '16:30', booked: 1, max_per_day: 6,
+        busy: [busy(tue, '10:30', '11:00', 'ghl_blocked', 'Admin'), busy(tue, '12:00', '13:00', 'offer'), busy(tue, '12:30', '16:00', 'protected_band', 'Stratco / Canning Vale')],
+        arrival_windows: run(tue, '08:00', '08:30', 0, 30) },
+      { date: fri, weekday: 'Fri', state: 'open', day_start: '08:00', day_end: '16:30', booked: 2, max_per_day: 6,
+        busy: [busy(fri, '08:00', '08:45', 'outlook', 'School drop-off'), busy(fri, '09:00', '10:00', 'offer'), busy(fri, '10:45', '11:45', 'outlook', 'Scope: Melanie N, Piara Waters', 'Piara Waters'), busy(fri, '15:00', '16:00', 'ghl', 'Scope: Jordan W, Harrisdale', 'Harrisdale')],
+        arrival_windows: run(fri, '12:15', '13:30', 30, 30) }
+    ];
+    Object.assign(data.booking_flow, {
+      calendar_read: { provider: 'ghl', source: 'server_live_read', version: 'live-availability-v1', as_of: new Date().toISOString(), stale: false,
+        state: 'read', reason: null, person: 'Marnin', ghl_user_id: '3S20LGVTjsVYy9vTJ9wM', calendars: ['dEQKVKHthsjSYaen1fiE'],
+        occupied_intervals: personDays.flatMap(d => d.busy.filter(b => b.source !== 'protected_band')),
+        ghl_events: 1, ghl_blocked_slots: 1, outlook: { state: 'read', events: 2, unverified_correspondence: 2 }, caveats: [] },
+      commitments_read: Object.assign({}, data.booking_flow.commitments_read || {}, { state: 'read', reason: null }),
+      free_times: { version: 'live-availability-v1', as_of: new Date().toISOString(), person: 'Marnin',
+        rule: { on_site_minutes: 30, days: ['Tue', 'Fri'], day_start: '08:00', day_end: '16:30', weekday_start: {}, max_per_day: 6,
+          travel: { model: 'straight-line-v3', unknown_location_minutes: 30 } },
+        days: personDays }
+    });
     data.cases.forEach(c => {
       const w = own[c.id];
       if (!w) return;

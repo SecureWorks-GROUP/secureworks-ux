@@ -709,6 +709,77 @@ test('the proposed time keeps its one-press Book it, evidence and checks', async
   assert.equal(backend.writes[1].action, 'sales_booking_book');
 });
 
+// ---- Free times on every day (step 2) ----
+test('every server arrival window is drawn on its day and none is made up', () => {
+  ownerSetup('sent');
+  const ft = data.booking_flow.free_times;
+  const html = api.renderWeek();
+  for (const day of ft.days) {
+    const i = (Date.parse(day.date + 'T12:00:00Z') - Date.parse(data.week_start + 'T12:00:00Z')) / 86400000;
+    const col = html.slice(html.indexOf('data-week-day="' + i + '"'), html.indexOf('data-week-day="' + (i + 1) + '"') > 0 ? html.indexOf('data-week-day="' + (i + 1) + '"') : undefined);
+    const bands = col.match(/class="ev-free is-static"/g) || [];
+    assert.equal(bands.length, 1, day.date + ' has one run of windows, so one band');
+    const first = day.arrival_windows[0].from_iso, last = day.arrival_windows[day.arrival_windows.length - 1].from_iso;
+    const clock = (iso) => { const [h, m] = iso.slice(11, 16).split(':').map(Number); return (h % 12 || 12) + ':' + String(m).padStart(2, '0') + (h >= 12 ? 'pm' : 'am'); };
+    assert.match(col, new RegExp('Free, arrive from ' + clock(first) + ' to ' + clock(last)));
+  }
+  // Days the server sent no windows for (Mon, Wed, Thu) show none.
+  assert.equal((html.match(/class="ev-free[ "]/g) || []).length, ft.days.length);
+  // A day with no windows left shows no band, and says so.
+  ft.days[1].arrival_windows = [];
+  ft.days[1].state = 'no_time_left';
+  const after = api.renderWeek();
+  assert.equal((after.match(/class="ev-free[ "]/g) || []).length, 1);
+  assert.match(after, /<em class="wkstate is-no_time_left">No time left<\/em>/);
+  // No free times in the read: no bands at all, and a line says why.
+  data.booking_flow.free_times = null;
+  const none = api.renderWeek();
+  assert.doesNotMatch(none, /class="ev-free/);
+  assert.match(none, /Free times did not come with this read, so none are shown\./);
+});
+
+test('each day header says its state, a full day with the count, and a lead\'s own day wins', () => {
+  ownerSetup('sent');
+  const tue = api.addDays(data.week_start, 1), fri = thisFriday();
+  assert.deepEqual(api.dayStateWords(tue), { state: 'open', words: 'Open', count: '1 of 6' });
+  let html = api.renderWeek();
+  assert.match(html, /<em class="wkstate is-open">Open · 1 of 6<\/em>/);
+  assert.match(html, /<em class="wkstate is-open">Open · 2 of 6<\/em>/);
+  const day = data.booking_flow.free_times.days[1];
+  Object.assign(day, { state: 'full', booked: 6, arrival_windows: [] });
+  assert.match(api.renderWeek(), /<em class="wkstate is-full">Full · 6 of 6<\/em>/);
+  day.state = 'past';
+  assert.match(api.renderWeek(), /<em class="wkstate is-past">Past<\/em>/);
+  day.state = 'travel_unknown';
+  assert.match(api.renderWeek(), /<em class="wkstate is-travel_unknown">Travel unknown<\/em>/);
+  // With a lead chosen, their own state for the day is shown.
+  api.state.selectedId = 'lead-basil';
+  caseById('lead-basil').free_times.days[1] = { date: fri, state: 'already_booked', already_booked_that_day: true, arrival_windows: [] };
+  assert.match(api.renderWeek(), /<em class="wkstate is-already_booked">Booked that day<\/em>/);
+});
+
+test('the week says what the live read counted busy, paints GHL time off, and explains unconfirmed Outlook', () => {
+  ownerSetup('sent');
+  const html = api.renderWeek();
+  assert.match(html, /Read live from GHL: 1 booking in GHL, 2 entries in Marnin's Outlook, 1 block of time off in GHL, all counted as busy\. Free times allow 30 minutes on site plus travel between visits\./);
+  assert.match(html, /class="ev is-busy[^"]*"[^>]*>(?:(?!<\/button>).)*Blocked off in GHL: Admin/);
+  assert.match(html, /<summary>2 Outlook entries are not confirmed in GHL\. They still count as busy here\.<\/summary>/);
+  assert.match(html, /connect Microsoft 365 with marnin@secureworkswa\.com\.au; set it as the conflict calendar for STRATCO FENCING/);
+  data.booking_flow.calendar_read.caveats = ['outlook_malformed_dropped: 3'];
+  data.booking_flow.free_times = null;
+  assert.match(api.renderWeek(), /Marnin's Outlook had 3 entries with times that could not be read, so free times are not shown\. Booking still checks Outlook\./);
+});
+
+test('a calendar the live read could not read names why, in plain words, and shows no free time', () => {
+  ownerSetup('sent');
+  Object.assign(data.booking_flow, { calendar_read: { state: 'could_not_read', source: 'server_live_read', reason: 'ghl_events_unreadable: http_502' }, free_times: null });
+  const html = api.renderHTML();
+  assert.match(html, /GHL did not return Marnin's bookings for this week \(GHL said: http 502\)\. Free times are unknown, so nothing can be booked\./);
+  assert.doesNotMatch(html, /class="ev-free/);
+  assert.equal(api.calendarReasonWords({ state: 'not_configured', reason: 'person_has_no_ghl_calendar' }, 'Nithin'), 'Nithin is not on any GHL calendar yet. Add them to one in GHL, then press Refresh.');
+  assert.equal(api.calendarReasonWords({ state: 'could_not_read', reason: 'something_new' }, 'Nithin'), "Could not read Nithin's calendar (something_new).");
+});
+
 // ---- Tap a free time to pick the visit (step 4) ----
 function tapFree(c, date, bandIndex, fraction) {
   api.state.selectedId = c.id;
@@ -769,6 +840,28 @@ test('a tapped time goes to the server check, and a refusal is said in words wit
   assert.match(api.renderCard(), /class="result is-bad" role="alert">Not booked: /);
   assert.ok(backend.writes.every((x) => x.action === 'sales_booking_approval_write'));
   delete globalThis.fixtureOwnerRefusal;
+});
+
+test('while a check is showing the chosen lead keeps their own bands and the Picked mark, never the person\'s', async () => {
+  ownerSetup('sent');
+  const c = caseById('lead-kerry');
+  const w = tapFree(c, thisFriday(), 0, 0);
+  assert.match(api.renderWeek(), /Free, arrive from 12:15pm to 1:00pm/);
+  const r = await api.press(c.id, 'calendar');
+  assert.equal(r.ok, true);
+  const html = api.renderWeek();
+  assert.doesNotMatch(html, /data-free-band/);
+  assert.match(html, /Free, arrive from 12:15pm to 1:00pm/);
+  assert.doesNotMatch(html, /Free, arrive from 12:15pm to 1:30pm/);
+  assert.match(html, /class="ev-free is-static is-on"[^>]*>.*Picked: arrive /);
+  assert.ok(html.includes('Picked: arrive ' + api.timeRange(w.from_iso, w.to_iso)));
+  assert.doesNotMatch(html, /For a place not yet known/);
+  // A lead with no free times of their own: the person's times, said plainly.
+  delete c.free_times;
+  assert.match(api.renderWeek(), /title="For a place not yet known, with travel allowed both ways\. No free times came for this lead's place, so these cannot be picked\."/);
+  // A lead booked elsewhere shows no bands at all.
+  c.scope_appointment = { start_iso: thisFriday() + 'T09:00:00+08:00', owner_name: 'Khairo', owner_resource_id: 'khairo' };
+  assert.doesNotMatch(api.renderWeek(), /class="ev-free/);
 });
 
 test('a pick never overwrites words the owner typed; it offers the rewrite instead', () => {

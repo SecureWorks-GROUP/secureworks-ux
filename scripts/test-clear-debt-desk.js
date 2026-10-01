@@ -172,6 +172,11 @@ check('the line at the top of Today counts what there is to do', () => {
   assert.strictEqual(C.todaySummary(list), '4 texts to approve, 2 calls to make, 1 Jan visit to approve. 1 waiting for a draft, nothing to do yet. 1 on hold, just so you know.');
   assert.strictEqual(C.todaySummary([{ step: 'deposit_reminder', draft: pend }, { step: 'statement', draft: pend }]), '1 deposit reminder to approve, 1 builder statement to approve.');
   assert.strictEqual(C.todaySummary([]), 'Nothing to do right now.');
+  const mail = { id: 'e', status: 'pending', channel: 'email' };
+  assert.strictEqual(C.cardAction({ step: 'friendly_text', draft: mail }).label, 'Approve email');
+  assert.strictEqual(C.todaySummary([{ step: 'friendly_text', draft: pend }, { step: 'firm_text', draft: mail }]), '1 text to approve, 1 email to approve.');
+  assert.strictEqual(C.todaySummary([{ step: 'friendly_text', draft: mail }, { step: 'firm_text', draft: mail }]), '2 emails to approve.');
+  assert.strictEqual(C.waitingCount([{ id: 'e1', step: 'firm_text', draft: mail }]), 1, 'an email draft still waits for Shaun');
 });
 check('Jan tab takes every chased item at the Jan visit step; held payers whose held_step is the Jan visit are listed apart', () => {
   assert.deepStrictEqual(C.janFromMorning(withHold).map((i) => i.id), ['j1']);

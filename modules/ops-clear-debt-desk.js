@@ -140,12 +140,12 @@ var ClearDebtDeskCore = (function () {
   function outcomeScheduleStep(step) { return OUTCOME_STEPS.indexOf(step) >= 0 ? step : null; }
 
   // What one card asks of Shaun: one obvious button for its step, or nothing.
-  //   text, jan, reminder, statement: approve the drafted message;
+  //   text, email, jan, reminder, statement: approve the drafted message (a text step drafted as an email is an email);
   //   call: ring, then say what happened; wait: no draft yet; done: already decided; held: information only.
   // A call script is help for the call, never approved, so calls are never waiting for a decision.
   var STEP_KIND = { friendly_text: 'text', firm_text: 'text', call: 'call', builder_call: 'call', jan_visit: 'jan', deposit_reminder: 'reminder', statement: 'statement' };
   var GROUP_KIND = { text: 'text', call: 'call', jan: 'jan', deposit_reminder: 'reminder', statement: 'statement' };
-  var APPROVE_LABEL = { text: 'Approve text', jan: 'Approve Jan\'s visit', reminder: 'Approve reminder', statement: 'Approve statement' };
+  var APPROVE_LABEL = { text: 'Approve text', email: 'Approve email', jan: 'Approve Jan\'s visit', reminder: 'Approve reminder', statement: 'Approve statement' };
   var WAIT_WORDS = 'Draft coming - nothing to do yet';
   function cardAction(i) {
     if (isHeld(i)) return { kind: 'held' };
@@ -153,16 +153,18 @@ var ClearDebtDeskCore = (function () {
     if (k === 'call') return { kind: 'call', label: 'Call now' };
     if (!d) return { kind: 'wait', words: WAIT_WORDS };
     if (d.status !== 'pending') return { kind: 'done' };
-    return { kind: k, label: k === 'text' && d.channel === 'email' ? 'Approve email' : APPROVE_LABEL[k], approve: k === 'text' && d.channel === 'email' ? 'Approve email' : APPROVE_LABEL[k] };
+    if (k === 'text' && d.channel === 'email') k = 'email';
+    return { kind: k, label: APPROVE_LABEL[k], approve: APPROVE_LABEL[k] };
   }
-  function needsDecision(i) { var k = cardAction(i).kind; return k === 'text' || k === 'jan' || k === 'reminder' || k === 'statement'; }
+  function needsDecision(i) { var k = cardAction(i).kind; return k === 'text' || k === 'email' || k === 'jan' || k === 'reminder' || k === 'statement'; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   // The one line at the top of Today: what there is to do, counted from the list.
   function todaySummary(items) {
-    var n = { text: 0, call: 0, jan: 0, reminder: 0, statement: 0, wait: 0, held: 0 };
+    var n = { text: 0, email: 0, call: 0, jan: 0, reminder: 0, statement: 0, wait: 0, held: 0 };
     (items || []).forEach(function (i) { var k = cardAction(i).kind; if (n[k] !== undefined) n[k] += 1; });
     var todo = [];
     if (n.text) todo.push(plural(n.text, 'text', 'texts') + ' to approve');
+    if (n.email) todo.push(plural(n.email, 'email', 'emails') + ' to approve');
     if (n.call) todo.push(plural(n.call, 'call', 'calls') + ' to make');
     if (n.jan) todo.push(plural(n.jan, 'Jan visit', 'Jan visits') + ' to approve');
     if (n.reminder) todo.push(plural(n.reminder, 'deposit reminder', 'deposit reminders') + ' to approve');

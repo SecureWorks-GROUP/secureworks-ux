@@ -615,7 +615,7 @@ function cddTick(cb) { CDD.ticked[cb.getAttribute('data-draft')] = cb.checked; v
 // morning text (approved against its own invoice ids, in its order, and only when approvable).
 function cddPendingDraft(id) {
   var jt = cddJanText();
-  if (jt && jt.id === id && jt.status === 'pending') return { draft: jt, ids: jt.xero_invoice_ids || [], blocked: jt.approvable === false ? (jt.problem || 'this text cannot be approved') : null, keep: function (d) { CDD.morning.jan_text = Object.assign({}, jt, d); } };
+  if (jt && jt.id === id && jt.status === 'pending') return { draft: jt, jan: true, ids: jt.xero_invoice_ids || [], blocked: jt.approvable === false ? (jt.problem || 'this text cannot be approved') : null, keep: function (d) { CDD.morning.jan_text = Object.assign({}, jt, d); } };
   var it = ClearDebtDeskCore.chaseItems(CDD.morning && CDD.morning.items).filter(function (i) { return i.draft && i.draft.id === id && i.draft.status === 'pending'; })[0];
   return it ? { draft: it.draft, ids: (it.invoices || []).map(function (x) { return x.xero_invoice_id; }), blocked: null, keep: function (d) { it.draft = d; } } : null;
 }
@@ -625,7 +625,11 @@ async function cddDecideOne(id, decision) {
   if (decision === 'approve' && p.blocked) { delete CDD.ticked[id]; throw new Error(p.blocked); }
   var text = CDD.edits[id] != null ? CDD.edits[id] : p.draft.text;
   if (decision === 'approve' && /\u2014/.test(text || '')) throw new Error('remove the em dash first');
-  var res = await opsPost('debt_draft_decide', { draft_id: id, decision: decision, text: text, xero_invoice_ids: p.ids });
+  var body = { draft_id: id, decision: decision, text: text, xero_invoice_ids: p.ids };
+  // Approving Jan's text (an edit is an approval) also sends its standard wording from today's list:
+  // the draft id is tied to that wording. Only then: template_text on a skip or a client draft is not a field.
+  if (decision === 'approve' && p.jan) body.template_text = p.draft.template_text;
+  var res = await opsPost('debt_draft_decide', body);
   p.keep((res && res.draft) || Object.assign({}, p.draft, { status: decision === 'approve' ? 'approved' : 'skipped', text: text }));
   delete CDD.edits[id]; delete CDD.ticked[id]; delete CDD.editing[id];
 }

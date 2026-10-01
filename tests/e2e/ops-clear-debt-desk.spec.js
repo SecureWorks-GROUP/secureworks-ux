@@ -417,7 +417,8 @@ test("Jan's morning text: one card to Jan's mobile listing the visits, approved 
   await expect(nina.locator('[data-cdd-injan]')).toContainText("In Jan's text, approved, queued until sending is switched on.");
   await expect(page.locator('#cddTodo')).toHaveText('2 texts to approve, 2 calls to make, 1 builder statement to approve. 3 on hold, just so you know.');
   const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_draft_decide'));
-  expect(post.body).toEqual({ draft_id: jt.id, decision: 'approve', text: jt.text, xero_invoice_ids: jt.xero_invoice_ids });
+  // The exact body: an approval of Jan's text carries its standard wording, or ops-api refuses it.
+  expect(post.body).toEqual({ draft_id: jt.id, decision: 'approve', text: jt.text, xero_invoice_ids: jt.xero_invoice_ids, template_text: jt.template_text });
   await page.locator('[data-cdd-tab="jan"]').click();
   await shotDesk(page, '13-jan-tab.png');
 });
@@ -440,7 +441,21 @@ test("Jan's text that cannot be approved shows the reason, a disabled button wit
   await card0.getByRole('button', { name: 'Skip' }).click();
   await expect(card0).toContainText('Skipped for today.');
   const posts = await page.evaluate(() => window.__cddPosts.filter((p) => p.action === 'debt_draft_decide'));
-  expect(posts.map((p) => p.body.decision)).toEqual(['skip']);
+  expect(posts.map((p) => p.body)).toEqual([{ draft_id: fixture.debt_morning_list.jan_text.id, decision: 'skip', text: fixture.debt_morning_list.jan_text.text, xero_invoice_ids: fixture.debt_morning_list.jan_text.xero_invoice_ids }]);
+});
+
+test("an edited Jan's text is approved with the edited text and the list's own template_text", async ({ page }) => {
+  const fixture = buildClearDebtDeskFixture();
+  const jt = fixture.debt_morning_list.jan_text;
+  await openDesk(page, { fixture });
+  const card0 = page.locator('[data-cdd-jantext]');
+  await card0.getByRole('button', { name: 'Edit', exact: true }).click();
+  const edited = jt.text.replace('Please tell Shaun', 'Please text Shaun');
+  await card0.locator('textarea').fill(edited);
+  await card0.getByRole('button', { name: "Approve Jan's text" }).click();
+  await expect(card0).toContainText('Approved by ops-e2e');
+  const post = await page.evaluate(() => window.__cddPosts.find((p) => p.action === 'debt_draft_decide'));
+  expect(post.body).toEqual({ draft_id: jt.id, decision: 'approve', text: edited, xero_invoice_ids: jt.xero_invoice_ids, template_text: jt.template_text });
 });
 
 test('a Jan visit card offers what Jan reports and logs it as a visit at the Jan step', async ({ page }) => {

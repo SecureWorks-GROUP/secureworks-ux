@@ -22,6 +22,7 @@ sanity-check:
     - node scripts/test-trade-wo-labour-lines.js
     - node scripts/test-trade-scope-media.js
     - node scripts/test-trade-invoice-pdf-flow.js
+    - node scripts/test-trade-job-search-query.js
 
 trade-e2e:
   image: mcr.microsoft.com/playwright:v1.61.1-noble

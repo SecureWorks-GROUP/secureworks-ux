@@ -8000,11 +8000,29 @@
     _globalJobSearch.errorMsg = '';
   }
 
+  // <trade-job-search-query>
+  // ops-api search_all_jobs matches a typed query as ONE substring of
+  // job_number (ilike), so a trade typing a job number the way it is written on
+  // paper ("SWF - 26168", "SWF 26168", "swf26168") matched nothing and the
+  // invoice search said no job existed (2026-09-30, a trade could not invoice
+  // SWF-26168). A query shaped like a SecureWorks job number is sent in the
+  // stored PREFIX-DIGITS form; anything else (client, suburb, a bare number, a
+  // builder claim ref, which ops-api already matches by its digits) goes as typed.
+  function tradeJobSearchQuery(raw) {
+    var q = String(raw == null ? '' : raw)
+      .replace(/[\u2010-\u2015\u2212]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var m = q.match(/^(SW[A-Z]{0,4})\s*[-_.\/]?\s*(\d{3,})$/i);
+    return m ? m[1].toUpperCase() + '-' + m[2] : q;
+  }
+  // </trade-job-search-query>
+
   // One request path for both All-tab reads. offset > 0 asks for the next page;
   // page_size stays the server's call so the client never invents a cap.
   function fetchGlobalJobPage(q, offset) {
     var params = {};
-    if (q) params.q = q;
+    if (q) params.q = tradeJobSearchQuery(q);
     if (offset > 0) params.offset = offset;
     return api('search_all_jobs', params);
   }
@@ -23107,6 +23125,7 @@
   };
 
   function loadInvoiceJobOptions(q) {
+    q = tradeJobSearchQuery(q);
     api('search_all_jobs', q ? { q: q } : undefined).then(function(res) {
       var dl = document.getElementById('invJobList');
       if (!dl) return;
@@ -24378,16 +24397,18 @@
   }
 
   // ── Manual job search per day (Q15 ADD 1) ──────────────────────────────
-  // Search any active job (job number / client / suburb, all types) via the
-  // existing read-only ops-api action search_all_jobs, and pull it into a
-  // day's invoice as a normal card flagged manually_added.
-  var _jcSearch = { day: null, q: '', results: [], timer: null };
+  // Search a job (job number / claim ref / client / suburb, all types and
+  // every status, completed included) via the read-only ops-api action
+  // search_all_jobs, and pull it into a day's invoice as a normal card flagged
+  // manually_added. The query goes through tradeJobSearchQuery, and a failed
+  // read says so: it used to be swallowed and shown as "No active jobs match."
+  var _jcSearch = { day: null, q: '', results: [], timer: null, error: '' };
   var _jcDayKeys = [];
 
   function _jcSearchPanelHtml(dk, di) {
     if (_jcSearch.day !== dk) return '';
     var h = '<div style="border:1px dashed var(--sw-border);border-radius:10px;padding:10px;margin:6px 0 8px;background:var(--sw-card)">';
-    h += '<input type="search" id="jcSearchInput_' + di + '" value="' + esc(_jcSearch.q) + '" placeholder="Job number, client or suburb" inputmode="search" autocomplete="off" oninput="jcJobSearchInput(' + di + ')" style="width:100%;padding:9px 11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
+    h += '<input type="search" id="jcSearchInput_' + di + '" value="' + esc(_jcSearch.q) + '" placeholder="Job number, claim ref, client or suburb" inputmode="search" autocomplete="off" oninput="jcJobSearchInput(' + di + ')" style="width:100%;padding:9px 11px;border:1px solid var(--sw-border);border-radius:8px;font-size:14px;font-family:var(--sw-font);color:var(--sw-dark);box-sizing:border-box">';
     h += '<div id="jcSearchResults_' + di + '" style="margin-top:6px;max-height:240px;overflow-y:auto"></div>';
     h += '</div>';
     return h;
@@ -24400,6 +24421,7 @@
     _jcSearch.day = (_jcSearch.day === dk) ? null : dk;
     _jcSearch.q = '';
     _jcSearch.results = [];
+    _jcSearch.error = '';
     renderInvoiceBuilder();
     if (_jcSearch.day !== null) {
       var inp = document.getElementById('jcSearchInput_' + di);
@@ -24412,9 +24434,10 @@
     if (!inp) return;
     _jcSearch.q = inp.value || '';
     clearTimeout(_jcSearch.timer);
-    var q = _jcSearch.q.trim();
+    var q = tradeJobSearchQuery(_jcSearch.q);
     if (q.length < 2) {
       _jcSearch.results = [];
+      _jcSearch.error = '';
       _jcRenderSearchResults(di);
       return;
     }
@@ -24422,22 +24445,33 @@
   };
 
   function _jcRunJobSearch(di, q) {
+    var current = function() { return tradeJobSearchQuery(_jcSearch.q) === q; };
     api('search_all_jobs', { q: q }).then(function(res) {
-      if (_jcSearch.q.trim() !== q) return; // stale response — user kept typing
+      if (!current()) return; // stale response — user kept typing
+      _jcSearch.error = '';
       _jcSearch.results = (res.jobs || []).slice(0, 10);
       _jcRenderSearchResults(di);
-    }).catch(function() {});
+    }).catch(function(err) {
+      if (!current()) return;
+      _jcSearch.results = [];
+      _jcSearch.error = (err && err.message) || 'Search failed';
+      _jcRenderSearchResults(di);
+    });
   }
 
   function _jcRenderSearchResults(di) {
     var box = document.getElementById('jcSearchResults_' + di);
     if (!box) return;
     if (_jcSearch.q.trim().length < 2) {
-      box.innerHTML = '<div style="font-size:11px;color:var(--sw-text-sec);padding:4px 2px">Type at least 2 characters to search active jobs.</div>';
+      box.innerHTML = '<div style="font-size:11px;color:var(--sw-text-sec);padding:4px 2px">Type at least 2 characters of a job number, claim ref, client or suburb.</div>';
+      return;
+    }
+    if (_jcSearch.error) {
+      box.innerHTML = '<div data-jc-search-error style="font-size:11px;color:var(--sw-red);padding:4px 2px;line-height:1.4">Search did not load: ' + esc(_jcSearch.error) + '. <button type="button" onclick="jcJobSearchInput(' + di + ')" style="border:0;background:none;padding:0;color:var(--sw-orange);font-weight:700;font-size:11px;font-family:var(--sw-font);cursor:pointer">Try again</button></div>';
       return;
     }
     if (!_jcSearch.results.length) {
-      box.innerHTML = '<div style="font-size:11px;color:var(--sw-text-sec);padding:4px 2px">No active jobs match.</div>';
+      box.innerHTML = '<div data-jc-search-empty style="font-size:11px;color:var(--sw-text-sec);padding:4px 2px;line-height:1.4">No jobs match. Completed jobs show here too. If you worked on this job and it does not show, ask the office to add you to it.</div>';
       return;
     }
     var h = '';
@@ -24484,6 +24518,7 @@
     _jcSearch.day = null;
     _jcSearch.q = '';
     _jcSearch.results = [];
+    _jcSearch.error = '';
     renderInvoiceBuilder();
   };
 

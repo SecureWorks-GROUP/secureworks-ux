@@ -124,7 +124,11 @@ const test = base.extend({
     };
     const multiWeekJobs = [
       { id: 'e2e-admin-job-emma', job_number: 'SWP-261183', type: 'patio', status: 'scheduled', client_name: 'Emma Clarke', site_suburb: 'Kinross' },
-      { id: 'e2e-admin-job-graham', job_number: 'SWP-26339', type: 'patio', status: 'in_progress', client_name: 'Graham Rees', site_suburb: 'Duncraig' }
+      { id: 'e2e-admin-job-graham', job_number: 'SWP-26339', type: 'patio', status: 'in_progress', client_name: 'Graham Rees', site_suburb: 'Duncraig' },
+      // Invoice job search (2026-09-30): a completed job a trade worked, and a
+      // make-safe the trade knows only by its builder claim ref.
+      { id: 'e2e-admin-job-complete-fence', job_number: 'SWF-26168', type: 'fencing', status: 'complete', client_name: 'Complete Fence Client', site_suburb: 'South Perth' },
+      { id: 'e2e-admin-job-claim-makesafe', job_number: 'SWMS-261290', type: 'makesafe', status: 'complete', client_name: 'Claim Ref Client', site_suburb: 'Morley', external_ref: 'MLB-40398' }
     ];
     const labourExplainerHours = {
       week_start: weekStart,
@@ -773,9 +777,14 @@ const test = base.extend({
         },
         search_all_jobs: ({ url }) => {
           if (feedScenario === 'trade-invoice-multi-week') {
+            // Mirrors ops-api: one ilike substring over job_number/client/suburb
+            // (so "swf - 26168" matches nothing), plus the make-safe external_ref
+            // match on the query's longest digit run (resolveJobsByExternalRef).
             const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+            const digits = (q.match(/\d+/g) || []).reduce((a, b) => (a.length >= b.length ? a : b), '');
             const jobs = q.length >= 2
-              ? multiWeekJobs.filter((job) => [job.job_number, job.client_name, job.site_suburb].join(' ').toLowerCase().includes(q))
+              ? multiWeekJobs.filter((job) => [job.job_number, job.client_name, job.site_suburb].join(' ').toLowerCase().includes(q) ||
+                (digits.length >= 3 && String(job.external_ref || '').includes(digits)))
               : [];
             return { jobs, lens: q ? 'search' : 'assigned', total: jobs.length };
           }

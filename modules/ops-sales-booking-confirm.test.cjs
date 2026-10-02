@@ -623,8 +623,11 @@ function ownerSetup(actionMode) {
   Object.assign(api.state, { data, weekStart: data.week_start, cache: {}, loading: false, stale: false, error: null, ownerPickOpen: {}, ownerOccupancy: [], drafts: {}, ownerVisits: {}, ownerPreviews: {}, approvalIds: {}, pressResults: {}, pressPending: {}, approvalPending: {}, approvalErrors: {}, dayIndex: null, selectedId: null });
   return backend;
 }
+// The read's own Friday, where the fixture puts its Outlook and GHL entries. The
+// last bookable Friday is a different week on a weekend, so it is never used.
 function fridayOf(d) {
-  return d.booking_flow.owner_rulebook.bookable_dates.filter((x) => new Date(x + 'T12:00:00Z').getUTCDay() === 5).pop();
+  const fri = api.addDays(d.week_start, 4);
+  return d.booking_flow.owner_rulebook.bookable_dates.includes(fri) ? fri : undefined;
 }
 function thisFriday() {
   return api.addDays(data.week_start, 4);

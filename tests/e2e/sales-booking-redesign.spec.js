@@ -153,7 +153,7 @@ for (const vp of viewports) {
       await choose(page, 'Priya S');
       await expect(page.getByRole('button', { name: 'Book it' })).toBeDisabled();
       await expect(page.locator('#why-calendar')).toHaveText('Pick a day and an arrival time first.');
-      const friday = await page.evaluate(() => SalesBooking.state.data.booking_flow.owner_rulebook.bookable_dates.filter((d) => new Date(d + 'T12:00:00Z').getUTCDay() === 5).pop());
+      const friday = await page.evaluate(() => SalesBooking.addDays(SalesBooking.state.data.week_start, 4));
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(friday);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:30');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');
@@ -196,7 +196,7 @@ for (const vp of viewports) {
       await open(page);
       await page.evaluate(() => { window.fixtureActionMode = 'sent'; });
       await choose(page, 'Priya S');
-      const friday = await page.evaluate(() => SalesBooking.state.data.booking_flow.owner_rulebook.bookable_dates.filter((d) => new Date(d + 'T12:00:00Z').getUTCDay() === 5).pop());
+      const friday = await page.evaluate(() => SalesBooking.addDays(SalesBooking.state.data.week_start, 4));
       await page.getByRole('combobox', { name: 'Visit day' }).selectOption(friday);
       await page.getByRole('combobox', { name: 'Arrive from' }).selectOption('12:00');
       await page.getByRole('combobox', { name: 'Arrival window' }).selectOption('60');

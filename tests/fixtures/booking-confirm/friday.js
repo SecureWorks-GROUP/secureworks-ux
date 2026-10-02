@@ -72,8 +72,10 @@
     };
     // Owner-authored approvals (owner-authored-v1): the read offers the owner's
     // own words and his own picked visit, with the Stratco rulebook.
+    // 21 days: on a Friday after 15:30 Perth, 14 days held only the read's own
+    // Friday, and specs that move a visit to another Friday had none.
     const bookable = [];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 21; i++) {
       const date = new Date(Date.now() + 8 * 3600000 + i * 86400000).toISOString().slice(0, 10);
       const weekday = new Date(date + 'T12:00:00Z').getUTCDay();
       if ((weekday === 2 || weekday === 5) && Date.parse(date + 'T15:30:00+08:00') > Date.now()) bookable.push(date);

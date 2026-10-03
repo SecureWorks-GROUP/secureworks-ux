@@ -4625,7 +4625,7 @@ __swOpsStampAssets([
             <div class="stat-sub">Active POs</div>
           </div>
         </div>
-        <div class="stat-card" id="statOverdue">
+        <div class="stat-card" id="statOverdue" onclick="openClearDebt()" role="link" tabindex="0" onkeydown="if(event.key==='Enter')openClearDebt()" title="Open Clear Debt" style="cursor:pointer;">
           <div class="stat-icon"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
           <div class="stat-body">
             <div class="stat-label">Overdue Invoices</div>
@@ -6267,6 +6267,12 @@ if (window.__SW_CAL_DRAGV2_ENABLED) {
   console.info('[CP1] calendar drag v2 enabled — working-day drag/resize + reschedule prompt. Disable via ?dragv2=0 or localStorage.sw_cal_dragv2 = "0".');
 }
 
+// ── Clear Debt preview page (layout B, the captain's pick) ──
+// ops.html?view=clear-debt-preview opens Financials > Clear Debt in the new Today layout under a
+// PREVIEW banner: same login, real data. Layout B is now live (CDD_LAYOUT_B_LIVE in
+// modules/ops-clear-debt-desk.js), so the banner no longer shows (docs/clear-debt-desk.md).
+window.__SW_CLEAR_DEBT_PREVIEW = /[?&]view=clear-debt-preview(?:&|$)/.test(window.location.search || '');
+
 // Council modal alias — called from quick view
 function openCouncilModal(jobId) {
   if (typeof openCouncilStartModal === 'function') openCouncilStartModal(jobId);
@@ -7341,6 +7347,7 @@ function scanMsIntakeCockpit() {
 }
 
 function restoreTab() {
+  if (window.__SW_CLEAR_DEBT_PREVIEW) { showView('financials'); showSubTab('cleardebt'); return; }
   var hash = window.location.hash.slice(1);
   // Handle #job/<jobNumber> deep links
   if (hash.startsWith('job/')) {
@@ -28224,7 +28231,8 @@ if (document.readyState === 'loading') {
 <!-- Clear Debt: payment chase & collection -->
 <script>
 __swOpsStampAssets([
-  {t:'js', u:'modules/ops-clear-debt-v2.js?v=1'}
+  {t:'js', u:'modules/ops-clear-debt-v2.js?v=2'},
+  {t:'js', u:'modules/ops-clear-debt-desk.js?v=1'}
 ]);
 </script>
 </body>

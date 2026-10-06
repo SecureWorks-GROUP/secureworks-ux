@@ -268,6 +268,7 @@ function hostElement(id, attrs) {
 function salesHost() {
   const viewSales = hostElement('viewSales');
   const viewToday = hostElement('viewToday');
+  const viewJobs = hostElement('viewJobs');
   const viewApprovals = hostElement('viewApprovals');
   viewApprovals.style.display = 'flex';
   const bookingRoot = hostElement('salesBookingRoot');
@@ -281,6 +282,7 @@ function salesHost() {
   const byId = {
     viewSales,
     viewToday,
+    viewJobs,
     viewApprovals,
     salesBookingRoot: bookingRoot,
     salesPerformanceRoot: performanceRoot,
@@ -290,6 +292,7 @@ function salesHost() {
   return {
     viewSales,
     viewToday,
+    viewJobs,
     viewApprovals,
     bookingRoot,
     performanceRoot,
@@ -303,7 +306,7 @@ function salesHost() {
       body,
       getElementById: (id) => byId[id] || null,
       querySelectorAll: (sel) => {
-        if (sel === '.view') return [viewSales, viewToday, viewApprovals];
+        if (sel === '.view') return [viewSales, viewToday, viewJobs, viewApprovals];
         if (sel === '.header-nav button') return [desktopSales, desktopApprovals];
         if (sel === '.mobile-nav button') return [mobileSales];
         if (sel === '[data-view="sales"]') return [desktopSales, mobileSales];
@@ -328,7 +331,8 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
   const host = salesHost();
   const store = {};
   const source = fs.readFileSync(require.resolve('../ops.html'), 'utf8');
-  const start = source.indexOf('function showView(view)');
+  // Start at the tab-set block so OPS_HIDDEN_VIEWS / opsVisibleView come along.
+  const start = source.indexOf('// <ops-tab-set>');
   const end = source.indexOf('\nvar _approvalsActiveTab', start);
   assert.ok(end > start, 'showView slice must include the Sales host');
   const prevDoc = global.document;
@@ -378,11 +382,14 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
     assert.equal(host.viewApprovals.style.display, '');
     assert.ok(host.body.classList.contains('sales-booking-view-active'));
 
+    // Approvals is off the front end (Captain 2026-10-06): a stale call lands on Jobs.
     ctx.showView('approvals');
-    assert.ok(host.viewApprovals.classList.contains('active'));
+    assert.equal(host.viewApprovals.classList.contains('active'), false);
+    assert.ok(host.viewJobs.classList.contains('active'));
     assert.equal(host.viewSales.classList.contains('active'), false);
-    assert.ok(host.body.classList.contains('approvals-view-active'));
+    assert.equal(host.body.classList.contains('approvals-view-active'), false);
     assert.equal(host.body.classList.contains('sales-booking-view-active'), false);
+    assert.equal(store.sw_ops_tab, 'jobs');
 
     ctx.showView('performance');
     await waitUntil(() => performance.state.data && !performance.state.loading);
@@ -393,8 +400,10 @@ test('showView loads Booking beside Performance and restores the last Sales tab'
     assert.ok(host.body.classList.contains('performance-view-active'));
     assert.equal(store.sw_ops_sales_tab, 'performance');
 
+    // Today is off the front end too: it also lands on Jobs.
     ctx.showView('today');
-    assert.ok(host.viewToday.classList.contains('active'));
+    assert.equal(host.viewToday.classList.contains('active'), false);
+    assert.ok(host.viewJobs.classList.contains('active'));
     assert.equal(host.viewSales.classList.contains('active'), false);
 
     ctx.showView('sales');

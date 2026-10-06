@@ -4544,7 +4544,8 @@
 <script>
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
-  {t:'css', u:'modules/ops-sales-booking.css?v=3'}
+  {t:'css', u:'modules/ops-sales-booking.css?v=3'},
+  {t:'css', u:'modules/ops-dispatch-concept.css?v=1'}
 ]);
 </script>
 </head>
@@ -4556,16 +4557,15 @@ __swOpsStampAssets([
   <!-- Header -->
   <div class="header">
     <div class="header-left">
-      <div class="header-brand" onclick="showView('today')" style="cursor:pointer;">SecureWorks <span>Ops</span></div>
+      <div class="header-brand" onclick="showView('jobs')" style="cursor:pointer;">SecureWorks <span>Ops</span></div>
+      <!-- <ops-tab-set> Jobs, Calendar, Financials, Dispatch, Sales. Today, Inbox and
+           Approvals are off the front end (Captain 2026-10-06); see OPS_HIDDEN_VIEWS. -->
       <div class="header-nav">
-        <button class="active" onclick="showView('today')" data-view="today">Today</button>
+        <button class="active" onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
-        <button onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
-        <button onclick="showView('materials')" data-view="materials">Materials</button>
+        <button onclick="showView('dispatch')" data-view="dispatch">Dispatch</button>
         <button onclick="showView('sales')" data-view="sales">Sales</button>
-        <button onclick="showView('inbox')" data-view="inbox">Inbox <span id="inboxBadge" class="nav-badge" style="display:none;"></span></button>
-        <button onclick="showView('approvals')" data-view="approvals">Approvals</button>
       </div>
       <!-- Persistent search bar -->
       <div style="margin-left:16px;position:relative;flex-shrink:0">
@@ -4584,7 +4584,7 @@ __swOpsStampAssets([
   <div class="container">
 
     <!-- ═══════════ TODAY TAB ═══════════ -->
-    <div id="viewToday" class="view active">
+    <div id="viewToday" class="view">
 
       <!-- Morning Brief (Feature 2) — AI-generated, cached 30min -->
       <div id="morningBrief" class="morning-brief" style="display:none;">
@@ -4674,7 +4674,7 @@ __swOpsStampAssets([
           <div style="display:flex; flex-direction:column; gap:6px;">
             <button class="btn btn-primary btn-sm" onclick="showView('calendar'); openAssignmentModal();">+ Schedule Job</button>
             <button class="btn btn-secondary btn-sm" onclick="openQuickQuote();">+ Quick Quote</button>
-            <button class="btn btn-secondary btn-sm" onclick="showView('materials'); openPOModal();">+ New PO</button>
+            <button class="btn btn-secondary btn-sm" onclick="showView('financials'); showSubTab('pos'); openPOModal();">+ New PO</button>
           </div>
         </div>
       </div>
@@ -4775,6 +4775,9 @@ __swOpsStampAssets([
     </div>
 
     <!-- ═══════════ JOBS TAB ═══════════ -->
+    <!-- Not active in markup: restoreTab() opens Jobs once the operator is signed
+         in. #viewJobs.active is a fixed full-screen layer, so a pre-boot active
+         class would sit over every static renderer fixture. -->
     <div id="viewJobs" class="view">
       <div class="filter-bar">
         <button class="pipeline-tab active" onclick="setPipelineTab('fencing')" data-pipeline="fencing">Fencing</button>
@@ -4810,8 +4813,8 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
-        <button class="sub-tab" onclick="showSubTab('financehealth')" data-sub="financehealth" title="Read-only invoice-data-quality holes">Finance Health</button>
-        <button class="sub-tab" onclick="showSubTab('jobpnl')" data-sub="jobpnl" title="Per-job P&amp;L — revenue, labour cost, margin (make-safe v1)">Job P&amp;L</button>
+        <!-- Finance Health and Job P&L sub-tabs are hidden (Captain 2026-10-06). Their
+             panels, loaders and ops-api actions stay; see OPS_HIDDEN_SUBTABS. -->
       </div>
 
       <!-- Invoices -->
@@ -5067,6 +5070,13 @@ __swOpsStampAssets([
       <div class="materials-kanban" id="materialsKanban"></div>
     </div>
 
+    <!-- ═══════════ DISPATCH TAB (concept) ═══════════
+         Replaced Materials in the nav (Captain 2026-10-06). Sample data only, no
+         network calls: see <ops-dispatch-concept> in modules/ops-dispatch-concept.js. -->
+    <div id="viewDispatch" class="view">
+      <div id="dispatchConceptRoot"></div>
+    </div>
+
     <!-- ═══════════ INBOX TAB ═══════════ -->
     <div id="viewInbox" class="view">
       <div style="margin-bottom:16px;">
@@ -5149,14 +5159,11 @@ __swOpsStampAssets([
 
   <!-- Mobile Nav -->
   <div class="mobile-nav">
-    <button class="active" onclick="showView('today')" data-view="today"><span class="nav-icon">&#9776;</span>Today</button>
+    <button class="active" onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
-    <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
-    <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
+    <button onclick="showView('dispatch')" data-view="dispatch"><span class="nav-icon">&#128666;</span>Dispatch</button>
     <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
-    <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
-    <button onclick="showView('approvals')" data-view="approvals"><span class="nav-icon">&#127963;</span>Approvals</button>
   </div>
 
   <!-- ══════════ FULL JOB DETAIL VIEW ══════════ -->
@@ -6217,7 +6224,8 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-intake-cockpit.js?v=1'},
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
-  {t:'js', u:'modules/ops-modals.js?v=4'}
+  {t:'js', u:'modules/ops-modals.js?v=4'},
+  {t:'js', u:'modules/ops-dispatch-concept.js?v=1'}
 ]);
 </script>
 
@@ -7255,7 +7263,20 @@ function jobDetailIsOpen() {
   return !!(detail && detail.classList.contains('active'));
 }
 
+// <ops-tab-set> Captain 2026-10-06: the Ops tabs are Jobs (the page Ops opens
+// on), Calendar, Financials, Dispatch, then Sales. Today, Inbox (AI
+// annotations) and Approvals are off the front end only, and the Materials tab
+// became the Dispatch concept. Their views, loaders and ops-api actions all
+// stay, so bringing one back is its nav button plus its key here. Any route
+// into a hidden view (an old #today link, a saved sw_ops_tab, a stale button)
+// lands on Jobs instead of an empty screen.
+var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
+function opsVisibleView(view) {
+  return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;
+}
+
 function showView(view) {
+  view = opsVisibleView(view);
   var salesTab = null;
   if (view === 'performance' || view === 'booking' || view === 'sales') {
     salesTab = (view === 'sales')
@@ -7302,6 +7323,7 @@ function showView(view) {
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
   if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
+  if (view === 'dispatch' && typeof OpsDispatchConcept !== 'undefined') OpsDispatchConcept.show();
   if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);
   if (view === 'inbox') loadInbox();
   if (view === 'approvals' && typeof loadApprovals === 'function') loadApprovals();
@@ -7357,11 +7379,15 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'performance', 'booking', 'sales', 'inbox'];
-  if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
+  // A hidden tab (#today, #inbox, #approvals, #materials) is still accepted
+  // here so showView can send it to Jobs, rather than falling through to an
+  // older saved tab.
+  var validTabs = ['jobs', 'calendar', 'financials', 'dispatch', 'performance', 'booking', 'sales'];
+  function knownTab(t) { return !!t && (validTabs.indexOf(t) >= 0 || OPS_HIDDEN_VIEWS[t] === true); }
+  if (knownTab(hash)) { showView(hash); return; }
   var saved = localStorage.getItem('sw_ops_tab');
-  if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }
-  showView('today');
+  if (knownTab(saved)) { showView(saved); return; }
+  showView('jobs');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -7954,7 +7980,7 @@ function renderActionableItems(pipelineData, summaryData) {
           jobId: j.id,
           btnLabel: 'Create PO',
           btnClass: 'red',
-          btnAction: 'showView(\'materials\'); openPOModal(\'' + j.id + '\')',
+          btnAction: 'showView(\'financials\'); showSubTab(\'pos\'); openPOModal(\'' + j.id + '\')',
         });
       }
     }
@@ -7989,7 +8015,7 @@ function renderActionableItems(pipelineData, summaryData) {
         jobId: (item.job_ids && item.job_ids[0]) || null,
         btnLabel: 'View POs',
         btnClass: 'outline',
-        btnAction: 'showView(\'materials\')',
+        btnAction: 'showView(\'financials\'); showSubTab(\'pos\')',
       });
     }
   });
@@ -8098,7 +8124,7 @@ function renderAttention(items) {
       actionFn = 'onclick="openJobPeek(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#128269;';
     } else if (type === 'material_conflict' && item.job_ids && item.job_ids.length) {
-      actionFn = 'onclick="showView(\'materials\'); openJobPeek(\'' + item.job_ids[0] + '\')"';
+      actionFn = 'onclick="showView(\'financials\'); showSubTab(\'pos\'); openJobPeek(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#128230;';
     } else if (type === 'scope_pending') {
       actionFn = 'onclick="showView(\'jobs\')"';
@@ -8113,7 +8139,7 @@ function renderAttention(items) {
       actionFn = 'onclick="openCascadeModal(\'' + item.job_ids[0] + '\')"';
       actionIcon = '&#9989;';
     } else if (type === 'overdue_delivery' || type === 'stuck_draft_po' || type === 'unconfirmed_delivery' || type.indexOf('po') !== -1) {
-      actionFn = 'onclick="showView(\'materials\')"';
+      actionFn = 'onclick="showView(\'financials\'); showSubTab(\'pos\')"';
       actionIcon = '&#128230;';
     } else if (type === 'unsent_wo') {
       actionFn = 'onclick="showView(\'financials\'); showSubTab(\'workorders\')"';
@@ -12540,7 +12566,7 @@ function openMakesafeReviewOverlay(overlayId, panelId, title) {
   var rect = container.getBoundingClientRect();
   overlay.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:' + rect.height + 'px;z-index:120;background:#fff;display:flex;flex-direction:column;';
   var closeFn = (overlayId === 'makesafeIntakeOverlay') ? 'closeMakesafeIntakeOverlay()' : 'closeMakesafeReportingOverlay()';
-  overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board — approve here moves the card to the next stage. The Approvals tab remains available as a fallback.', closeFn)
+  overlay.innerHTML = makesafeCommandHeader(title, 'Reviewing on the board: approve here moves the card to the next stage.', closeFn)
     + '<div id="' + panelId + '" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:#fff;"></div>';
   container.appendChild(overlay);
 }
@@ -14789,7 +14815,7 @@ function renderMakesafeCard(j, status) {
   // opens the EXISTING reporting review overlay through openMakesafeJob. This is
   // intentionally independent of family-specific substatus wording.
   if (showReviewAffordance) {
-    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the same approval/reporting pack used by the Approvals tab" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
+    html += '<button class="ms-btn-alloc" style="background:#0E7C7B;" title="Open the approval and reporting pack for this job" onclick="event.stopPropagation();openMakesafeJob(\'' + j.id + '\')">Review job pack</button>';
   }
   // M-F W2-C — cancelled card: reason/who/date + admin-only Reopen. The cancel_*
   // fields ride on the make-safe payload; absent fields render nothing.
@@ -16808,7 +16834,11 @@ function renderJobList(container, columns) {
 // FINANCIALS TAB
 // ════════════════════════════════════════════════════════════
 
+// Financials sub-tabs hidden from the front end (Captain 2026-10-06). Panels,
+// loaders and ops-api actions stay; a stale call opens Invoices instead.
+var OPS_HIDDEN_SUBTABS = { financehealth: true, jobpnl: true };
 function showSubTab(tab) {
+  if (OPS_HIDDEN_SUBTABS[tab] === true) tab = 'invoices';
   document.querySelectorAll('.sub-tab').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.sub-view').forEach(function(el) { el.classList.remove('active'); });
   var btn = document.querySelector('[data-sub="' + tab + '"]');
@@ -25891,7 +25921,7 @@ function updateJarvisSummary() {
   var badges = document.getElementById('jarvisBadges');
   if (!summary) return;
 
-  var view = localStorage.getItem('sw_ops_tab') || 'today';
+  var view = localStorage.getItem('sw_ops_tab') || 'jobs';
   var text = '';
 
   if (view === 'today' && _digestCache) {
@@ -25915,6 +25945,8 @@ function updateJarvisSummary() {
     } else {
       text = _allInvoices.length > 0 ? _allInvoices.length + ' invoices' : 'Financials loading...';
     }
+  } else if (view === 'dispatch') {
+    text = 'Dispatch concept, sample data only';
   } else if (view === 'materials') {
     var poCount = _allPOs ? _allPOs.length : 0;
     text = poCount > 0 ? poCount + ' purchase orders tracked' : 'Materials loading...';
@@ -25965,7 +25997,7 @@ setInterval(function() { if (_opsAppStarted) updateJarvisSummary(); }, 30000);
 // Auto-refresh active tab data every 5 minutes (keeps dashboard live all day)
 setInterval(function() {
   if (!_opsAppStarted) return;
-  var view = localStorage.getItem('sw_ops_tab') || 'today';
+  var view = localStorage.getItem('sw_ops_tab') || 'jobs';
   if (view === 'today') { loadToday(); }
   else if (view === 'calendar') loadCalendar();
   // Nobody pressed this: it stands down under an open review overlay and

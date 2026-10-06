@@ -33,6 +33,19 @@ Trade App and Ops Dash changes are guarded by a Playwright E2E suite that runs o
 
 Any fixture whose app logic compares a date against "now"/"this week" (e.g. trade.html's weekly-invoice week matching) will date-rot if the fixture's dates are hard-coded absolute strings — it passes until the real week moves past them, then fails identically on every branch with no code change. Derive such dates at test-run time from `perthDate()`/`perthWeekMonday()`/`addIsoDays()` in `tests/helpers/feed-stub.js` (already used this way throughout `tests/fixtures/test.js`), not literals. This bit `tests/e2e/trade-complete-to-invoice.spec.js`'s per-metre scenario in 2026-09: its hard-coded work-order week no longer matched the dynamically-dated `weeklyInvoiceWorkOrders` fixture in `tests/fixtures/test.js` once the real week moved on.
 
+## Ops Dash tab set (`ops.html`)
+
+Captain 2026-10-06: the nav is Jobs (Ops opens on it), Calendar, Financials,
+Dispatch, Sales. Today, Inbox (AI annotations) and Approvals are hidden on the
+front end only, and Materials became Dispatch; their views, loaders and ops-api
+actions stay. `OPS_HIDDEN_VIEWS` / `opsVisibleView` (search `// <ops-tab-set>`)
+send every route into a hidden view to Jobs; Finance Health and Job P&L are
+hidden the same way through `OPS_HIDDEN_SUBTABS`. Approvals is still the hidden
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
+concept on sample data in `modules/ops-dispatch-concept.js` with no network
+call; do not wire it to live data without a Captain ruling. Guard:
+`tests/e2e/ops-tab-set.spec.js`.
+
 ## Ops Dash calendar drag (`ops.html`)
 
 CP1 drag-to-reschedule is behind a feature flag that is now DEFAULT ON. Kill

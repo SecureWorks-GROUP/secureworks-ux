@@ -2,8 +2,8 @@
 //  - the nav is Jobs, Calendar, Financials, Dispatch, Sales, and Ops opens on Jobs;
 //  - Today, Inbox and Approvals are off the front end, and any old deep link or
 //    saved tab pointing at them (or at Materials) lands on Jobs;
-//  - Financials keeps Purchase Orders and Work Orders, with Finance Health and
-//    Job P&L hidden;
+//  - Financials keeps Purchase Orders, Work Orders and Bill Reconciliation, with
+//    Finance Health and Job P&L hidden;
 //  - Dispatch is a labelled concept on sample data that makes no network call.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -64,16 +64,20 @@ for (const hidden of ['today', 'inbox', 'approvals', 'materials']) {
   });
 }
 
-test('Financials keeps POs and Work Orders and hides Finance Health and Job P&L', async ({ page }) => {
-  await bootOps(page);
+test('Financials keeps POs, Work Orders and Bill Reconciliation and hides Finance Health and Job P&L', async ({ page }) => {
+  const { apiCalls } = await bootOps(page);
   await page.locator('.header-nav button[data-view="financials"]').click();
   const subTabs = page.locator('#viewFinancials .sub-tab');
-  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Trade Bills', 'Clear Debt']);
+  await expect(subTabs).toHaveText(['Invoices', 'Quotes', 'Purchase Orders', 'Work Orders', 'Bill Reconciliation', 'Trade Bills', 'Clear Debt']);
   await page.evaluate(() => showSubTab('jobpnl'));
   await expect(page.locator('#subInvoices')).toHaveClass(/active/);
   await expect(page.locator('#subJobpnl')).not.toHaveClass(/active/);
   await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
   await expect(page.locator('#subPos')).toHaveClass(/active/);
+  // Bill Reconciliation lost its Materials home; it now lives here and loads its queue.
+  await page.locator('#viewFinancials .sub-tab[data-sub="billrecon"]').click();
+  await expect(page.locator('#subBillrecon #matReconPanel')).toBeVisible();
+  await expect.poll(() => apiCalls.includes('materials_recon_queue')).toBe(true);
 });
 
 test('Dispatch is a labelled concept on sample data and makes no network call', async ({ page }) => {

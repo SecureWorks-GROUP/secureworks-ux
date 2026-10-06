@@ -4811,6 +4811,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('quotes')" data-sub="quotes">Quotes</button>
         <button class="sub-tab" onclick="showSubTab('pos')" data-sub="pos">Purchase Orders</button>
         <button class="sub-tab" onclick="showSubTab('workorders')" data-sub="workorders">Work Orders</button>
+        <button class="sub-tab" onclick="showSubTab('billrecon')" data-sub="billrecon">Bill Reconciliation</button>
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
         <!-- Finance Health and Job P&L sub-tabs are hidden (Captain 2026-10-06). Their
@@ -4916,6 +4917,42 @@ __swOpsStampAssets([
         </div>
       </div>
 
+      <!-- Bill Reconciliation: moved here from the retired Materials tab so finance
+           can still reach it (Firstmate 2026-10-06). Panel unchanged. -->
+      <div id="subBillrecon" class="sub-view">
+      <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
+           Ops worklist that drains U3's materials_reconciliation_queue by hand.
+           accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
+           closes the row with no fact. Every action is auditable (who + when + manual marker). -->
+      <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
+          <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
+          <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
+          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
+          <div style="flex:1;"></div>
+          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
+          <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
+        </div>
+        <div class="data-table-wrap" style="overflow-x:auto;">
+          <table class="pnl-table" style="width:100%; font-size:12px;">
+            <thead>
+              <tr>
+                <th>Supplier</th>
+                <th>Invoice #</th>
+                <th style="text-align:right;">Amount (inc)</th>
+                <th>Date</th>
+                <th>Suggested job</th>
+                <th style="min-width:280px;">Assign to job</th>
+              </tr>
+            </thead>
+            <tbody id="matReconTableBody">
+              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+
       <!-- Trade Bills -->
       <div id="subTradebills" class="sub-view">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -4980,38 +5017,7 @@ __swOpsStampAssets([
 
     <!-- ═══════════ MATERIALS TAB ═══════════ -->
     <div id="viewMaterials" class="view">
-
-      <!-- ═══ M2/U4: Bill Reconciliation queue (unmatched non-mirror ACCPAY bills) ═══
-           Ops worklist that drains U3's materials_reconciliation_queue by hand.
-           accept-suggestion / assign-to-job land a MANUAL materials fact; not-job-related
-           closes the row with no fact. Every action is auditable (who + when + manual marker). -->
-      <div id="matReconPanel" style="margin-bottom:22px; border:1px solid var(--sw-border,#e2e8f0); border-radius:8px; overflow:hidden;">
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
-          <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
-          <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
-          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
-          <div style="flex:1;"></div>
-          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
-          <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
-        </div>
-        <div class="data-table-wrap" style="overflow-x:auto;">
-          <table class="pnl-table" style="width:100%; font-size:12px;">
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>Invoice #</th>
-                <th style="text-align:right;">Amount (inc)</th>
-                <th>Date</th>
-                <th>Suggested job</th>
-                <th style="min-width:280px;">Assign to job</th>
-              </tr>
-            </thead>
-            <tbody id="matReconTableBody">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <!-- Bill Reconciliation moved to Financials > Bill Reconciliation (#subBillrecon). -->
 
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         Materials Pipeline <span class="badge" id="materialsCount">0</span>
@@ -16853,6 +16859,7 @@ function showSubTab(tab) {
   if (tab === 'invoices') loadInvoices();
   if (tab === 'pos') loadPOs();
   if (tab === 'workorders') loadWOs();
+  if (tab === 'billrecon') loadMaterialsRecon();
   if (tab === 'quotes') loadQuotes();
   if (tab === 'tradebills') loadTradeBills();
   if (tab === 'cleardebt') loadClearDebt();

@@ -163,6 +163,7 @@ check('refusals: known codes in plain words, otherwise the backend reason, never
   assert.strictEqual(C.refusalText({ ok: false, code: 'possible_payment', reason: 'x' }), C.REFUSALS.possible_payment);
   const r = new Error('Sending is off'); r.refusal = { code: 'sending_off', fact: 'off' };
   assert.strictEqual(C.refusalText(r), C.REFUSALS.sending_off);
+  assert.strictEqual(C.refusalText({ ok: false, code: 'not_open' }), C.REFUSALS.not_open);
   const b = new Error('API error: 409'); b.body = { ok: false, code: 'already_sent' };
   assert.strictEqual(C.refusalText(b), C.REFUSALS.already_sent);
   assert.strictEqual(C.refusalText({ ok: false, code: 'weird_thing', reason: 'The bank feed could not be read.' }), 'The bank feed could not be read.');
@@ -172,13 +173,42 @@ check('refusals: known codes in plain words, otherwise the backend reason, never
   assert.strictEqual(C.answerRefused({ ok: false }), true);
   assert.strictEqual(C.answerRefused({ ok: true, sent: false }), true);
 });
-check('not deployed: unknown action, 400 or 404', () => {
+check('not deployed: only an unknown action, never any other 400 or 404', () => {
   const e = new Error('Unknown action'); e.status = 400;
   assert(C.isNotDeployed(e));
-  const n = new Error('x'); n.status = 404;
-  assert(C.isNotDeployed(n));
+  const c = new Error('x'); c.status = 400; c.code = 'unknown_action';
+  assert(C.isNotDeployed(c));
+  const n = new Error('That invoice is not in the debt book'); n.status = 404; n.code = 'not_in_book';
+  assert(!C.isNotDeployed(n), 'a real 404 is an answer');
+  const b = new Error('Unsupported field: x'); b.status = 400; b.code = 'debt_ws_bad_request';
+  assert(!C.isNotDeployed(b), 'a real 400 is an answer');
   const s = new Error('boom'); s.status = 500;
   assert(!C.isNotDeployed(s));
+});
+check('the amount a draft was written for goes with the send', () => {
+  assert.strictEqual(C.draftAmount({ amount: 1420.37 }, { amount_due: 900 }), 1420.37);
+  assert.strictEqual(C.draftAmount({ amount: 0 }, { amount_due: 900 }), 900, 'falls back to the amount owing');
+  assert.strictEqual(C.draftAmount({}, {}), null);
+});
+check('a promise pauses only while its date is still ahead (pausedUntil > today)', () => {
+  assert.strictEqual(C.isPaused({ paused_until: '2026-10-09' }, '2026-10-08'), true);
+  assert.strictEqual(C.isPaused({ paused_until: '2026-10-08' }, '2026-10-08'), false, 'the promised day itself is not paused');
+  assert.strictEqual(C.isPaused({ paused_until: null }, '2026-10-08'), false);
+  assert.notStrictEqual(C.nextStep({ paused_until: '2026-10-08', next_step: { step: 'd3', date: '2026-10-08' } }, '2026-10-08').text, 'Paused until Thu 8 Oct');
+});
+check('reply steps have their own labels', () => {
+  assert.strictEqual(C.stepLabel('reply_says_paid'), 'Reply: says paid');
+  assert.strictEqual(C.stepLabel('reply_promise'), 'Reply: promise to pay');
+  assert.strictEqual(C.stepLabel('reply_problem'), 'Reply: problem raised');
+});
+check('a statement refused for possible payments lists the invoices', () => {
+  // The backend shape: one entry per invoice, each with its possible payments.
+  const a = C.statementPossible({ code: 'possible_payment', possible_payments: [
+    { xero_invoice_id: 'x1', invoice_number: 'INV-9301', possible_payments: [{ amount: 1332.1, date: '2026-10-06', payer_text: 'HARBOUR RESTO' }] },
+    { xero_invoice_id: 'x2', invoice_number: 'INV-9302', possible_payments: [{ amount: 561, date: null, payer_text: '' }] },
+  ] });
+  assert.deepStrictEqual(a, [{ invoice: 'INV-9301', words: '$1,332.10 on Tue 6 Oct from HARBOUR RESTO' }, { invoice: 'INV-9302', words: '$561.00' }]);
+  assert.deepStrictEqual(C.statementPossible(null), []);
 });
 check('the tab shows with ?debt=1, the browser flag, or tab_visible', () => {
   assert.strictEqual(C.tabVisible('', null, null), false);
@@ -203,6 +233,10 @@ check('notes: a person\'s note reads normally, the screen\'s own records are mut
   const t = C.noteView({ kind: 'text_sent', step: 'd3', body: 'Hi...' });
   assert.deepStrictEqual([t.auto, t.text], [true, 'Day 3 text sent']);
   assert.strictEqual(C.noteView({ kind: 'promise', meta: { promise_date: '2026-10-17' } }).text, 'Promised to pay by Sat 17 Oct');
+  assert.strictEqual(C.noteView({ kind: 'promise', body: 'Promised to pay by Friday the 17th of October', meta: { promise_date: '2026-10-17' } }).text, 'Promised to pay by Friday the 17th of October', 'the backend line, not doubled');
+  assert.strictEqual(C.noteView({ kind: 'jan_list', meta: { removed: true } }).text, 'Removed from Jan\'s visit list');
+  assert.strictEqual(C.noteView({ kind: 'jan_list', meta: {} }).text, 'Put on Jan\'s visit list');
+  assert.strictEqual(C.noteView({ kind: 'category_change', body: 'Moved to Says paid' }).text, 'Moved to Says paid');
   assert.strictEqual(C.noteView({ kind: 'skip', step: 'd1' }).text, 'Day 1 text skipped');
 });
 check('ladder: the invoice first, then the steps with their state', () => {
@@ -224,5 +258,153 @@ check('story and money: a few plain lines, invoices paid or owing', () => {
   assert.strictEqual(C.fileKind('', 'photo.JPG'), 'IMG');
 });
 
-if (failed) { console.error(failed + ' debt-workshop check(s) failed'); process.exit(1); }
-console.log('PASS debt-workshop: core rules, gates, refusals, thread, notes, ladder; no long dash or emoji in the module');
+// ════════════════════════════════════════════════════════════
+// CONTRACT WITH THE BACKEND
+// The screen must only word codes ops-api really throws, and only post fields ops-api accepts
+// (each debt_ws_ POST refuses any field outside its onlyKeys list with a 400).
+//
+// BACKEND_CODES and BACKEND_ONLY_KEYS are a hand copy of secureworks-backend
+// supabase/functions/ops-api/debt_ws_actions.ts (and the read/write codes in debt_ws_store.ts).
+// CI has only this repo, so the checks always run against this copy. When the backend sits next
+// to this worktree (../backend-debt-workshop, or DEBT_WS_BACKEND_DIR), the copy is also checked
+// against the real files: if that check fails, the backend changed, so UPDATE THE COPY BELOW.
+// ════════════════════════════════════════════════════════════
+const path = require('path');
+const BACKEND_CODES = [
+  'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
+  'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
+  'jan_list_closed', 'job_not_found', 'no_contact', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
+  'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',
+  'part_paid', 'possible_payment', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
+  'server_key_required', 'step_not_due', 'suggestion_mismatch', 'suggestion_not_pending', 'text_not_allowed',
+  'unknown_action', 'user_required', 'xero_rate_limited', 'xero_unavailable',
+];
+const BACKEND_ONLY_KEYS = {
+  debt_ws_note: ['xero_invoice_id', 'company_key', 'share_key', 'job_id', 'body', 'note', 'text', 'promise_date'],
+  debt_ws_decide: ['xero_invoice_id', 'step', 'suggestion_id', 'action', 'text', 'override_possible_payment', 'amount', 'channel'],
+  debt_ws_set_category: ['xero_invoice_id', 'category', 'suggestion_id'],
+  debt_ws_link_contact: ['job_id', 'ghl_contact_id', 'xero_invoice_id', 'replace'],
+  debt_ws_statement_send: ['company_key', 'override_possible_payment'],
+  debt_ws_jan_list_remove: ['share_key', 'visit_date'],
+  debt_ws_agent_submit: ['xero_invoice_id', 'xero_invoice_ids', 'step', 'kind', 'channel', 'text', 'why', 'proposed_category', 'agent_version'],
+};
+// Fields every dashboard POST carries (opsPost adds operator_email); the backend's ENVELOPE.
+const ENVELOPE = ['action', 'operator_email'];
+// Codes or fields the screen handles ahead of a backend change that adds them. Keep this empty
+// unless a backend PR is pending; once it lands, the drift check below fails until they move
+// into BACKEND_CODES / BACKEND_ONLY_KEYS.
+const AHEAD = { codes: [], keys: {} };
+
+// Reads the backend's codes and onlyKeys lists out of its source text.
+function readBackend(dir) {
+  const actionsFile = path.join(dir, 'supabase', 'functions', 'ops-api', 'debt_ws_actions.ts');
+  const storeFile = path.join(dir, 'supabase', 'functions', 'ops-api', 'debt_ws_store.ts');
+  if (!fs.existsSync(actionsFile)) return null;
+  const text = fs.readFileSync(actionsFile, 'utf8') + '\n' + (fs.existsSync(storeFile) ? fs.readFileSync(storeFile, 'utf8') : '');
+  const codes = new Set();
+  const add = (re) => { for (const m of text.matchAll(re)) m.slice(1).forEach((c) => { if (c) codes.add(c); }); };
+  add(/new DebtWsError\(\s*(?:"[^"]*"|`[^`]*`|'[^']*'|[^,()]+(?:\([^()]*\))?)\s*,\s*\d{3}\s*,\s*"([A-Za-z_]+)"/g); // (message, status, "code")
+  add(/new DebtWsError\([\s\S]{0,400}?\n\s*\d{3},\n\s*"([A-Za-z_]+)"/g); // the same, spread over lines
+  add(/\bbad\(\s*(?:"[^"]*"|`[^`]*`)\s*,\s*"([a-z_]+)"\s*,?\s*\)/g); // bad(message, "code")
+  add(/\brefuse\(\s*deps,\s*input,\s*(?:\w+\s*\?\s*"([a-z_]+)"\s*:\s*)?"([a-z_]+)"/g); // refuse(deps, input, "code")
+  add(/\b(?:refuseStatement|release)\(\s*"([a-z_]+)"/g); // the statement and Jan list refusals
+  add(/\bconst code = \w+ \? "([a-z_]+)" : "([a-z_]+)"/g);
+  add(/\bcode: "([A-Za-z_]+)"/g);
+  add(/\bcode = "([A-Za-z_]+)"/g); // the default code
+  const keys = {};
+  for (const m of text.matchAll(/export async function (debtWs\w+)\([\s\S]*?\n}\n/g)) {
+    const ok = /onlyKeys\(body,\s*\[([\s\S]*?)\]\)/.exec(m[0]);
+    if (!ok) continue;
+    const action = m[1].replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
+    keys[action] = [...ok[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]);
+  }
+  return { file: actionsFile, codes: [...codes].sort(), keys };
+}
+
+// Drives every write on the screen with the fixture and records each POST body.
+async function uxPosts() {
+  const { buildDebtWorkshopFixture } = require('../tests/fixtures/debt-workshop');
+  const fx = buildDebtWorkshopFixture('2026-10-08', { settings: { sending_on: true, viewer_is_owner: true } });
+  const sent = [];
+  ctx.opsPost = async (action, body) => { sent.push({ action, body: JSON.parse(JSON.stringify(body || {})) }); return { ok: true }; };
+  ctx.opsFetch = () => new Promise(() => {}); // the re-reads after a write never land, so they cannot disturb the next step
+  const DW = ctx.DW;
+  const onJob = (id) => { DW.ov = JSON.parse(JSON.stringify(fx.overview)); DW.view = 'job'; DW.jobId = id; DW.job = JSON.parse(JSON.stringify(fx.jobs[id])); DW.busy = null; };
+  onJob(fx.ids.casey);
+  await ctx.dwSend(false);
+  onJob(fx.ids.casey); await ctx.dwSend(true);
+  onJob(fx.ids.casey); await ctx.dwSkip();
+  onJob(fx.ids.casey); await ctx.dwDismiss(fx.ids.caseyFlag);
+  onJob(fx.ids.casey); DW.noteText = 'Spoke to them'; DW.promise = '2026-10-17'; await ctx.dwSaveNote();
+  onJob(fx.ids.casey); await ctx.dwSetCategory('says_paid');
+  onJob(fx.ids.casey); await ctx.dwSetCategory('rectification');
+  onJob(fx.ids.jamie); await ctx.dwSetCategory('clear');
+  onJob(fx.ids.sasha); await ctx.dwMove();
+  onJob(fx.ids.sasha); await ctx.dwKeep();
+  onJob(fx.ids.avery); await ctx.dwLink(fx.ids.averyContact);
+  onJob(fx.ids.avery); await ctx.dwSend(false);
+  DW.view = 'list'; DW.ov = JSON.parse(JSON.stringify(fx.overview));
+  await ctx.dwApprove(fx.ids.harbour, false);
+  await ctx.dwApprove(fx.ids.harbour, true);
+  await ctx.dwJanRemove(fx.ids.drew);
+  return { sent, fx };
+}
+
+(async () => {
+  let posted = null;
+  try { posted = await uxPosts(); } catch (e) { failed += 1; console.error('FAIL debt-workshop: driving the screen writes\n  ' + (e && e.stack)); }
+  if (posted) {
+    const { sent, fx } = posted;
+    check('every write on the screen was driven', () => {
+      const seen = new Set(sent.map((p) => p.action));
+      ['debt_ws_decide', 'debt_ws_note', 'debt_ws_set_category', 'debt_ws_link_contact', 'debt_ws_statement_send', 'debt_ws_jan_list_remove'].forEach((a) => assert(seen.has(a), a + ' was not posted'));
+    });
+    check('every send carries the amount the draft was written for', () => {
+      const sends = sent.filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send');
+      assert.strictEqual(sends.length, 4, 'casey twice, the move reply, avery');
+      sends.forEach((p) => assert(Number(p.body.amount) > 0, 'no amount on a ' + p.body.step + ' send'));
+      assert.deepStrictEqual(sends.map((p) => p.body.amount), [1420.37, 1420.37, 2101, 1351.63]);
+      assert.strictEqual(sends[2].body.step, 'reply_problem', 'the move reply is sent on its reply step');
+    });
+    check('Change beside the pill posts set_category with no suggestion_id', () => {
+      const own = sent.filter((p) => p.action === 'debt_ws_set_category' && !('suggestion_id' in p.body));
+      assert.deepStrictEqual(own.map((p) => [p.body.category, p.body.xero_invoice_id]), [['says_paid', fx.ids.casey], ['rectification', fx.ids.casey], ['clear', fx.ids.jamie]]);
+    });
+    check('every POST field is one ops-api accepts for that action (onlyKeys)', () => {
+      sent.forEach((p) => {
+        const allowed = [].concat(ENVELOPE, BACKEND_ONLY_KEYS[p.action] || [], AHEAD.keys[p.action] || []);
+        assert(BACKEND_ONLY_KEYS[p.action], p.action + ' is not a backend write');
+        Object.keys(p.body).forEach((k) => assert(allowed.includes(k), p.action + ' sends "' + k + '", which the backend refuses'));
+      });
+    });
+  }
+  check('every refusal the screen words is a code the backend throws', () => {
+    const known = new Set([].concat(BACKEND_CODES, AHEAD.codes));
+    Object.keys(C0.REFUSALS).forEach((code) => assert(known.has(code), 'REFUSALS.' + code + ' is not a backend code'));
+  });
+
+  const dir = process.env.DEBT_WS_BACKEND_DIR || path.resolve(process.cwd(), '..', 'backend-debt-workshop');
+  const be = readBackend(dir);
+  if (!be) {
+    console.log('NOTE debt-workshop: backend source not found at ' + dir + '; the contract was checked against the copy in this test only.');
+  } else {
+    check('the backend copy in this test matches ' + path.relative(process.cwd(), be.file) + ' (if not, update BACKEND_CODES)', () => {
+      const missing = be.codes.filter((c) => !BACKEND_CODES.includes(c) && !AHEAD.codes.includes(c));
+      const gone = BACKEND_CODES.filter((c) => !be.codes.includes(c));
+      const landed = AHEAD.codes.filter((c) => be.codes.includes(c));
+      assert.deepStrictEqual({ missing, gone, landed }, { missing: [], gone: [], landed: [] });
+    });
+    check('the onlyKeys copy matches the backend (if not, update BACKEND_ONLY_KEYS)', () => {
+      Object.keys(BACKEND_ONLY_KEYS).forEach((a) => {
+        assert(be.keys[a], a + ' has no onlyKeys list in the backend');
+        const ahead = AHEAD.keys[a] || [];
+        assert.deepStrictEqual(be.keys[a].filter((k) => !ahead.includes(k)).sort(), BACKEND_ONLY_KEYS[a].slice().sort(), a);
+        ahead.forEach((k) => assert(!be.keys[a].includes(k), a + '.' + k + ' has landed in the backend: move it out of AHEAD'));
+      });
+    });
+    console.log('debt-workshop: contract checked against ' + be.file);
+  }
+
+  if (failed) { console.error(failed + ' debt-workshop check(s) failed'); process.exit(1); }
+  console.log('PASS debt-workshop: core rules, gates, refusals, thread, notes, ladder, backend contract; no long dash or emoji in the module');
+})();

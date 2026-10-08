@@ -190,9 +190,28 @@ test('Insurance: with sending on, Approve sends the statement', async ({ page })
   await harbour.locator('[data-dw="approve"]').click();
   await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_statement_send').map((p) => p.body.company_key)).toEqual([fixture.ids.harbour]);
   // A refusal reads in words on the row.
-  await page.evaluate(() => { window.__dwPostAnswers.debt_ws_statement_send = { reject: { message: 'API error: 409', status: 409, code: 'already_sent_this_week' } }; });
+  await page.evaluate(() => { window.__dwPostAnswers.debt_ws_statement_send = { reject: { message: 'This week\'s statement was already sent', status: 409, code: 'already_sent' } }; });
   await harbour.locator('[data-dw="approve"]').click();
-  await expect(harbour.locator('.dw-refuse')).toHaveText('This company\'s statement already went this week.');
+  await expect(harbour.locator('.dw-refuse')).toHaveText('This was already sent, so it was not sent again.');
+});
+
+test('Insurance: a statement refused for a possible payment lists the invoices and offers Send anyway', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true } });
+  const refusal = { message: 'There may already be a payment for INV-9301. Match it in Xero, or send anyway', status: 409, code: 'possible_payment',
+    body: { ok: false, code: 'possible_payment', possible_payments: [{ xero_invoice_id: fixture.ids.harbourInvoice, invoice_number: 'INV-9301', possible_payments: [{ bank_transaction_id: 'b1', date: fixture.overview.paid_this_week.items[0].paid_on, amount: 1332.1, payer_text: 'HARBOUR RESTO', reason: 'amount matches' }] }] } };
+  await openDebt(page, { fixture, posts: { debt_ws_statement_send: { reject: refusal } } });
+  await page.locator('.dw-chip', { hasText: 'Insurance' }).click();
+  const harbour = page.locator('.dw-co', { hasText: 'Harbour Restoration' });
+  await harbour.locator('[data-dw="approve"]').click();
+  const warn = harbour.locator('[data-stmt-possible]');
+  await expect(warn).toContainText('INV-9301: $1,332.10');
+  await expect(warn).toContainText('from HARBOUR RESTO');
+  await page.evaluate(() => { window.__dwPostAnswers.debt_ws_statement_send = { resolve: { ok: true, sent: true, to_email: 'accounts@harbour.example' } }; });
+  await warn.locator('[data-dw="approve-anyway"]').click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_statement_send').map((p) => p.body)).toEqual([
+    { company_key: fixture.ids.harbour }, { company_key: fixture.ids.harbour, override_possible_payment: true },
+  ]);
+  await expect(page.locator('[data-stmt-possible]')).toHaveCount(0);
 });
 
 test('Bad debt shows Jan\'s visit list with Remove', async ({ page }) => {
@@ -207,6 +226,24 @@ test('Bad debt shows Jan\'s visit list with Remove', async ({ page }) => {
   await page.locator('#dwJan .dw-jan-p', { hasText: 'Drew Ellis' }).locator('[data-dw="jan-remove"]').click();
   const fixture = buildDebtWorkshopFixture();
   await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_jan_list_remove').map((p) => p.body.share_key)).toEqual([fixture.ids.drew]);
+});
+
+test('Jan\'s list: Remove still works once locked, and stops once it is sending or sent', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  fixture.janList.status = 'locked';
+  await openDebt(page, { fixture });
+  await page.locator('#dwLegend .dw-lg', { hasText: 'Bad debt' }).click();
+  await expect(page.locator('#dwJan')).toContainText('Locked. Goes to Jan Sunday 7pm.');
+  const drew = page.locator('#dwJan .dw-jan-p', { hasText: 'Drew Ellis' }).locator('[data-dw="jan-remove"]');
+  await expect(drew).toBeEnabled();
+  await drew.click();
+  await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_jan_list_remove').length).toBe(1);
+  for (const [status, words] of [['sending', 'Sending to Jan now.'], ['sent', 'Sent to Jan']]) {
+    await page.evaluate((st) => { window.opsFetch = ((orig) => (a, p) => a === 'debt_ws_jan_list' ? orig(a, p).then((j) => Object.assign(j, { status: st })) : orig(a, p))(window.opsFetch); DW.janLoaded = false; DW.jan = null; dwRender(); }, status);
+    await expect(page.locator('#dwJan')).toContainText(words);
+    await expect(page.locator('#dwJan [data-dw="jan-remove"]').first()).toBeDisabled();
+    await expect(page.locator('#dwJan [data-dw="jan-remove"]').first()).toHaveAttribute('title', 'The list has gone to Jan');
+  }
 });
 
 test('W2: the job screen shows the strip, ladder, story, conversation, notice, suggestion and notes', async ({ page }) => {
@@ -265,12 +302,12 @@ test('W2: edit and send, a refusal in plain words, notice dismissed, a note with
   await page.locator('#dwSend').click();
   await expect.poll(async () => (await posts(page)).filter((p) => p.action === 'debt_ws_decide' && p.body.action === 'send').length).toBe(2);
   const sent = (await posts(page)).filter((p) => p.action === 'debt_ws_decide').pop().body;
-  expect(sent).toMatchObject({ xero_invoice_id: fixture.ids.casey, step: 'd12', suggestion_id: 'sug-casey-d12', action: 'send', channel: 'sms' });
+  expect(sent).toMatchObject({ xero_invoice_id: fixture.ids.casey, step: 'd12', suggestion_id: fixture.ids.caseySuggestion, action: 'send', channel: 'sms', amount: 1420.37 });
   expect(sent.text).toContain('a quick note');
   expect(sent.override_possible_payment).toBeUndefined();
   // Dismiss the agent notice.
   await page.locator('.dw-notice [data-dw="dismiss"]').click();
-  await expect.poll(async () => (await posts(page)).filter((p) => p.body.action === 'dismiss').map((p) => p.body)).toEqual([{ xero_invoice_id: fixture.ids.casey, suggestion_id: 'flag-casey-1', action: 'dismiss' }]);
+  await expect.poll(async () => (await posts(page)).filter((p) => p.body.action === 'dismiss').map((p) => p.body)).toEqual([{ xero_invoice_id: fixture.ids.casey, suggestion_id: fixture.ids.caseyFlag, action: 'dismiss' }]);
   // A note with a promise date.
   await page.locator('#dwNoteIn').fill('Spoke to Casey, paying Friday.');
   const promise = fixture.overview.jan_list.visit_date;
@@ -307,7 +344,7 @@ test('W2: a move suggestion is a purple card: Move + send reply, or Keep chasing
     ['debt_ws_set_category', 'clear'], ['debt_ws_set_category', 'rectification'], ['debt_ws_decide', 'send'],
   ]);
   const reply = (await posts(page)).pop().body;
-  expect(reply).toMatchObject({ suggestion_id: 'sug-sasha-move', action: 'send' });
+  expect(reply).toMatchObject({ suggestion_id: fixture.ids.sashaSuggestion, step: 'reply_problem', action: 'send', amount: 2101 });
   expect(reply.text).toContain('sort the gutter');
 });
 
@@ -319,7 +356,7 @@ test('W2: no GHL contact shows Link contact with candidates', async ({ page }) =
   await expect(page.locator('#dwSend')).toBeDisabled();
   await expect(page.locator('#dwSuggestion .dw-gate')).toContainText('Link a contact first');
   await page.locator('#dwLinkCard .dw-cand', { hasText: 'phone matches' }).locator('[data-dw="link"]').click();
-  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', 'ghl-avery-1']]);
+  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body.ghl_contact_id])).toEqual([['debt_ws_link_contact', fixture.ids.averyContact]]);
 });
 
 test('W2: documents and invoices open in a modal', async ({ page }) => {
@@ -337,6 +374,48 @@ test('W2: documents and invoices open in a modal', async ({ page }) => {
   expect(fetched).toEqual(['debt_ws_document', 'debt_ws_document', 'get_invoice_pdf']);
 });
 
+test('W2: Change beside the pill sets or clears a category by hand, Rectification asks first', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  await openDebt(page, { fixture, posts: { debt_ws_set_category: { resolve: { ok: true, category: 'says_paid', note: null } } } });
+  await openJob(page, 'Casey Morgan', 'Escalating');
+  await expect(page.locator('#dwCatMenu')).toHaveCount(0);
+  await page.locator('#dwCatChange').click();
+  await expect(page.locator('#dwCatMenu [role="menuitem"]')).toHaveText(['Says paid', 'Move to Rectification']);
+  await shot(page, '09-change-category.png', '#dwJob');
+  await page.locator('#dwCatMenu [data-k="says_paid"]').click();
+  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body])).toEqual([['debt_ws_set_category', { xero_invoice_id: fixture.ids.casey, category: 'says_paid' }]]);
+  // Rectification moves the job card, so it asks first; Cancel posts nothing.
+  await page.locator('#dwCatChange').click();
+  await page.locator('#dwCatMenu [data-k="rectification"]').click();
+  await expect(page.locator('#dwModal')).toContainText('This moves the job card to Rectification');
+  await page.locator('#dwModal [data-dw="modal-close"]').last().click();
+  await expect(page.locator('#dwModal')).toHaveCount(0);
+  await page.locator('#dwCatChange').click();
+  await page.locator('#dwCatMenu [data-k="rectification"]').click();
+  await page.locator('#dwCatConfirm').click();
+  await expect.poll(async () => (await posts(page)).map((p) => p.body.category)).toEqual(['says_paid', 'rectification']);
+  // A click elsewhere closes the menu.
+  await page.locator('#dwCatChange').click();
+  await page.locator('#dwOwing').click();
+  await expect(page.locator('#dwCatMenu')).toHaveCount(0);
+});
+
+test('W2: Says paid offers Clear says paid; a paid invoice reads Paid with nothing to change', async ({ page }) => {
+  const fixture = buildDebtWorkshopFixture();
+  fixture.jobs[fixture.ids.casey].row.open = false;
+  await openDebt(page, { fixture });
+  await openJob(page, 'Jamie Fox', 'Says paid');
+  await page.locator('#dwCatChange').click();
+  await expect(page.locator('#dwCatMenu [role="menuitem"]')).toHaveText(['Clear says paid', 'Move to Rectification']);
+  await page.locator('#dwCatMenu [data-k="clear"]').click();
+  await expect.poll(async () => (await posts(page)).map((p) => [p.action, p.body])).toEqual([['debt_ws_set_category', { xero_invoice_id: fixture.ids.jamie, category: 'clear' }]]);
+  await page.locator('#dwBack').click();
+  await openJob(page, 'Casey Morgan', 'Escalating');
+  await expect(page.locator('#dwStrip .dw-pill')).toHaveText('Paid');
+  await expect(page.locator('#dwStrip .dw-pill')).toHaveClass(/paid/);
+  await expect(page.locator('#dwCatChange')).toHaveCount(0);
+});
+
 test('staff who are not owners can read and add notes, not send or move', async ({ page }) => {
   const fixture = buildDebtWorkshopFixture(undefined, { settings: { sending_on: true, viewer_is_owner: false } });
   await openDebt(page, { fixture });
@@ -345,6 +424,7 @@ test('staff who are not owners can read and add notes, not send or move', async 
   await expect(page.locator('#dwSkip')).toBeDisabled();
   await expect(page.locator('.dw-notice [data-dw="dismiss"]')).toHaveCount(0);
   await expect(page.locator('#dwReadOnly')).toBeVisible();
+  await expect(page.locator('#dwCatChange')).toBeDisabled();
   await expect(page.locator('#dwNoteSave')).toBeEnabled();
 });
 

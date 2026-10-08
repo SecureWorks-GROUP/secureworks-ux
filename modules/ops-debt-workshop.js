@@ -13,9 +13,9 @@
 //
 // Reads:  debt_ws_overview, debt_ws_job, debt_ws_document, get_invoice_pdf,
 //         debt_ws_statement_preview, debt_ws_jan_list.
-// Writes: debt_ws_note (any staff), and owner only: debt_ws_decide (send or skip),
-//         debt_ws_set_category, debt_ws_link_contact, debt_ws_statement_send,
-//         debt_ws_jan_list_remove. The backend runs every guard again; the screen only
+// Writes: debt_ws_note (any staff), and owner only: debt_ws_decide (send, skip or dismiss),
+//         debt_ws_set_category (a move card, Keep chasing, or Change beside the pill),
+//         debt_ws_link_contact, debt_ws_statement_send, debt_ws_jan_list_remove. The backend runs every guard again; the screen only
 //         disables what it already knows will be refused, and always says why.
 //
 // The tab is hidden until it is switched on: ?debt=1, localStorage.sw_debt_ws === '1',
@@ -54,29 +54,45 @@ var DebtWorkshopCore = (function () {
     d12: { day: 12, label: 'Day 12 text' },
     d17: { day: 17, label: 'Day 17 final text' },
     d21: { day: 21, label: 'Jan\'s visit list' },
+    // Replies the agent writes to something the client said (not on the ladder).
+    reply_says_paid: { label: 'Reply: says paid' },
+    reply_promise: { label: 'Reply: promise to pay' },
+    reply_problem: { label: 'Reply: problem raised' },
   };
   // Job types that sit on the account (company) side: insurance work.
   var ACCOUNT_TYPES = ['makesafe', 'make_safe', 'repair', 'roof_report', 'roof', 'insurance'];
   var SENDING_OFF_WORDS = 'Sending is off until you switch it on';
-  // Refusals in plain words (spec section 1). The code itself is never shown.
+  // Refusals in plain words (spec section 1). The code itself is never shown. Every key is a
+  // code ops-api really throws (debt_ws_actions.ts); scripts/test-debt-workshop.js checks it.
   var REFUSALS = {
+    sending_off: SENDING_OFF_WORDS + '.',
+    not_owner: 'Only an owner can do this.',
     possible_payment: 'There may already be a payment for this in the bank feed. Match it in Xero first, or send anyway.',
     part_paid: 'This invoice has been part paid since the message was written. Read the job again before sending.',
     paid: 'Xero shows this invoice as paid now, so nothing was sent.',
-    not_authorised: 'Xero no longer shows this invoice as open, so nothing was sent.',
-    amount_changed: 'The amount owing has changed since the message was written. Read the job again before sending.',
-    sending_off: SENDING_OFF_WORDS + '.',
-    not_owner: 'Only an owner can do this.',
-    forbidden: 'Only an owner can do this.',
-    already_sent: 'This step was already sent, so it was not sent again.',
-    already_done: 'This step was already done.',
+    not_open: 'Xero no longer shows this invoice as open, so nothing was sent.',
+    amount_required: 'The message did not say which amount it was written for. Read the job again before sending.',
+    already_sent: 'This was already sent, so it was not sent again.',
+    step_not_due: 'That step is not due now. Read the job again.',
     no_contact: 'No GoHighLevel contact is linked to this job. Link one first.',
-    contact_mismatch: 'The linked contact does not match this job, so nothing was sent.',
+    send_refused_by_guard: 'The text was stopped before it went, so nothing was sent.',
+    send_not_confirmed: 'The send could not be confirmed. Check the GoHighLevel conversation before trying again; it will not send twice.',
+    not_chased_by_text: 'This invoice is not chased by text.',
+    xero_unavailable: 'Xero could not be read for the last check, so nothing was sent. Try again shortly.',
+    xero_rate_limited: 'Xero is busy right now, so nothing was sent. Try again shortly.',
+    bank_check_unavailable: 'The bank feed could not be read, so nothing was sent. Try again shortly.',
+    suggestion_not_pending: 'This suggestion has already been dealt with. Read the job again.',
+    suggestion_mismatch: 'This suggestion belongs to another invoice. Read the job again.',
+    text_not_allowed: 'Take out the long dash or emoji before sending.',
     no_email: 'No accounts email is set for this company.',
-    already_sent_this_week: 'This company\'s statement already went this week.',
     nothing_due: 'Nothing on this statement is past due any more.',
-    stale_suggestion: 'This suggestion is out of date. Read the job again.',
-    banned_text: 'Take out the long dash or emoji before sending.',
+    email_failed: 'The email was refused, so nothing was sent.',
+    jan_list_closed: 'This week\'s visit list has already gone to Jan, so it cannot change now.',
+    jan_list_changed: 'The visit list changed while you were looking. Read it again.',
+    contact_already_linked: 'This job already has a different contact linked.',
+    no_job: 'This invoice has no job, so there is no card to move.',
+    not_in_book: 'This invoice is not in the debt list any more. Read the list again.',
+    not_found: 'That could not be found any more. Read the job again.',
   };
 
   function num(n) { var v = Number(n); return isFinite(v) ? v : 0; }
@@ -145,6 +161,20 @@ var DebtWorkshopCore = (function () {
   }
   function badge(key) { return BADGES[key] || BADGES.other; }
 
+  function isReplyStep(step) { return /^reply_/.test(String(step || '')); }
+  // A promise to pay holds while its date is still ahead (the backend's pausedUntil > today).
+  function isPaused(row, today) {
+    var p = row ? dayNum(row.paused_until) : null, t = dayNum(today);
+    return p !== null && t !== null && p > t;
+  }
+  // The amount a draft was written for. It goes with every send so the backend can catch a part payment.
+  function draftAmount(sug, row) {
+    var a = num(sug && sug.amount);
+    if (a > 0) return a;
+    a = num(row && row.amount_due);
+    return a > 0 ? a : null;
+  }
+
   function stepLabel(step, kind) {
     if (step === 'd21' && kind === 'progress') return 'Hold, no more steps';
     return STEPS[step] ? STEPS[step].label : String(step || '');
@@ -172,7 +202,7 @@ var DebtWorkshopCore = (function () {
     if (row.suggestion && row.suggestion.status === 'pending') return { text: 'Suggestion ready', tone: 'ready' };
     if (row.on_jan_list) return { text: 'On Jan\'s visit list', tone: 'plain' };
     if (due && due.step === 'd21') return { text: stepLabel('d21', row.kind), tone: 'plain' };
-    if (row.paused_until && dayNum(row.paused_until) >= dayNum(today)) return { text: 'Paused until ' + dateWords(row.paused_until), tone: 'quiet' };
+    if (isPaused(row, today)) return { text: 'Paused until ' + dateWords(row.paused_until), tone: 'quiet' };
     if (row.next_step && row.next_step.step) return { text: stepLabel(row.next_step.step, row.kind) + ' ' + whenWords(row.next_step.date, today), tone: 'plain' };
     return { text: 'Nothing due', tone: 'quiet' };
   }
@@ -323,11 +353,27 @@ var DebtWorkshopCore = (function () {
   }
   // An answer that came back 200 but refused (ok:false, sent:false or refused).
   function answerRefused(res) { return !!res && (res.ok === false || res.sent === false || !!res.refused); }
-  // A read that ops-api does not know yet: the backend part has not been deployed.
+  // An action that ops-api does not know yet: the backend part has not been deployed.
+  // Only an unknown action counts; any other 400 or 404 is a real answer and is shown as one.
   function isNotDeployed(e) {
     if (!e) return false;
-    var m = String(e.message || '');
-    return /unknown action/i.test(m) || e.status === 404 || e.status === 400;
+    var b = e.body && typeof e.body === 'object' ? e.body : {};
+    if (e.code === 'unknown_action' || b.code === 'unknown_action') return true;
+    return /unknown action/i.test(String(e.message || '')) || /unknown action/i.test(typeof b.error === 'string' ? b.error : '');
+  }
+
+  // A statement refused for possible payments, as lines: { invoice: 'INV-9301', words: '$1,332.10 on Mon 6 Oct from ...' }.
+  // ops-api sends possible_payments: [{ xero_invoice_id, invoice_number, possible_payments: [...] }].
+  function statementPossible(body) {
+    body = body && typeof body === 'object' ? body : {};
+    var out = [];
+    (Array.isArray(body.possible_payments) ? body.possible_payments : []).forEach(function (i) {
+      if (!i || typeof i !== 'object') return;
+      var inv = String(i.invoice_number || i.number || '');
+      if (!Array.isArray(i.possible_payments)) { out.push({ invoice: inv, words: paymentWords(i) }); return; } // a bare payment
+      i.possible_payments.forEach(function (p) { out.push({ invoice: inv, words: paymentWords(p) }); });
+    });
+    return out;
   }
 
   // The tab is visible with ?debt=1, localStorage sw_debt_ws = '1', or tab_visible from the backend.
@@ -341,7 +387,7 @@ var DebtWorkshopCore = (function () {
   function paymentWords(p) {
     p = p || {};
     var amt = p.amount != null ? p.amount : p.total;
-    var who = p.payer || p.contact_name || p.reference || p.description || '';
+    var who = p.payer || p.payer_text || p.contact_name || p.reference || p.description || '';
     return [amt != null ? money(amt) : '', p.date ? 'on ' + dateWords(p.date) : '', who ? 'from ' + who : ''].filter(Boolean).join(' ');
   }
 
@@ -383,14 +429,14 @@ var DebtWorkshopCore = (function () {
     switch (k) {
       case 'note': text = body; break;
       case 'call': text = body ? 'Call: ' + body : 'Call'; break;
-      case 'promise': text = 'Promised to pay by ' + dateWords(meta.promise_date || n.promise_date || '') + (body ? '. ' + body : ''); break;
+      case 'promise': text = body || 'Promised to pay by ' + dateWords(meta.promise_date || n.promise_date || ''); break; // the backend writes the whole line
       case 'text_sent': text = (step ? step : 'Text') + ' sent'; break;
       case 'email_sent': text = (step ? step.replace(/ text/, ' email') : 'Email') + ' sent'; break;
-      case 'skip': text = (step ? step : 'Step') + ' skipped'; break;
+      case 'skip': text = step ? step + ' skipped' : body || 'Skipped'; break;
       case 'statement_sent': text = 'Statement sent'; break;
-      case 'jan_list': text = 'Put on Jan\'s visit list'; break;
+      case 'jan_list': text = meta.removed ? 'Removed from Jan\'s visit list' : 'Put on Jan\'s visit list'; break;
       case 'link_contact': text = 'Contact linked'; break;
-      case 'category_change': text = 'Category changed' + (body ? ': ' + body : ''); break;
+      case 'category_change': text = body || 'Category changed'; break; // e.g. "Moved to Says paid"
       case 'agent_flag': text = 'Agent flag' + (body ? ': ' + body : ''); break;
       case 'send_refused': text = 'Send refused' + (body ? ': ' + body : ''); break;
       default: text = body || k;
@@ -432,7 +478,7 @@ var DebtWorkshopCore = (function () {
     (invoices || []).forEach(function (i) {
       var due = num(i.amount_due), paid = String(i.status || '').toUpperCase() === 'PAID' || due <= 0;
       owing += paid ? 0 : cents(due);
-      rows.push({ label: kindWord(i.kind) + ' ' + String(i.invoice_number || i.number || ''), value: paid ? money(i.total) : money(due), paid: paid, owing: !paid });
+      rows.push({ label: kindWord(i.kind) + ' ' + String(i.number || i.invoice_number || ''), value: paid ? money(i.total) : money(due), paid: paid, owing: !paid });
     });
     return { rows: rows, owing: owing / 100 };
   }
@@ -455,7 +501,8 @@ var DebtWorkshopCore = (function () {
     hasBanned: hasBanned, refusalCode: refusalCode, refusalText: refusalText, answerRefused: answerRefused,
     isNotDeployed: isNotDeployed, tabVisible: tabVisible, paymentWords: paymentWords, thread: thread,
     channelWord: channelWord, duration: duration, callTitle: callTitle, noteView: noteView, ladder: ladder,
-    storyLines: storyLines, moneyRows: moneyRows, fileKind: fileKind,
+    storyLines: storyLines, moneyRows: moneyRows, fileKind: fileKind, isReplyStep: isReplyStep, isPaused: isPaused,
+    draftAmount: draftAmount, statementPossible: statementPossible,
   };
 })();
 // </debt-workshop-core>
@@ -474,7 +521,7 @@ var DW = {
   busy: null, refusal: null, rowMsg: {},
   editing: false, why: false, drafts: {}, open: {}, noteText: '', promise: '', scrollThread: false,
   modalUrl: null, modalGen: 0, modalCompany: null, bound: false, focus: null,
-  janLoaded: false, janMsg: null, noteMsg: null,
+  janLoaded: false, janMsg: null, noteMsg: null, catMenu: false, stmtPossible: {},
 };
 
 function dwEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -600,7 +647,14 @@ function dwCss() {
     '.dw-strip h2 small{font-size:14px;font-weight:400;color:var(--dw-mid);letter-spacing:0}',
     '.dw-strip .sub{font-size:13px;color:var(--dw-mid);margin-top:6px}',
     '.dw-pill{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:3px 11px;border-radius:100px;color:#fff;white-space:nowrap;letter-spacing:.01em}',
-    '.dw-pill.none{background:var(--dw-faint);color:var(--dw-mid)}',
+    '.dw-pill.none{background:var(--dw-faint);color:var(--dw-mid)}.dw-pill.paid{background:var(--dw-sage)}',
+    // The quiet "Change" menu beside the category pill
+    '.dw-catm{position:relative;display:inline-flex;align-items:center}',
+    '#viewDebt .dw-chg{font-weight:500;letter-spacing:0}',
+    '.dw-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:20;display:flex;flex-direction:column;min-width:200px;padding:4px 0;background:#fff;border:1px solid var(--dw-line);border-radius:var(--dw-r);box-shadow:0 8px 22px rgba(26,39,46,.13)}',
+    '#viewDebt .dw-menu button{background:none;border:0;text-align:left;padding:9px 14px;font-size:13px;font-weight:500;letter-spacing:0;color:var(--dw-deep);cursor:pointer;white-space:nowrap}',
+    '#viewDebt .dw-menu button:hover,#viewDebt .dw-menu button:focus-visible{background:var(--dw-faint);outline:0}',
+    '.dw-confirm{padding:18px;font-size:13.5px;line-height:1.5;color:var(--dw-deep)}',
     '.dw-owing{text-align:right}.dw-owing b{font-size:32px;font-weight:700;letter-spacing:-.02em;display:block;line-height:1;color:var(--dw-dark)}.dw-owing span{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--dw-midl)}',
     '.dw-paused{font-size:12.5px;color:var(--dw-mid);margin-top:6px}',
     '.dw-ladder{display:flex;align-items:flex-start;padding:10px 26px 22px;overflow-x:auto;border-bottom:1px solid var(--dw-soft)}',
@@ -803,7 +857,7 @@ function dwOpenJob(id) {
 }
 function dwShowJob(id) {
   DW.view = 'job'; DW.jobId = id; DW.job = null; DW.jobErr = null;
-  DW.editing = false; DW.why = false; DW.refusal = null; DW.noteText = ''; DW.promise = ''; DW.noteMsg = null; DW.open = {};
+  DW.editing = false; DW.why = false; DW.refusal = null; DW.noteText = ''; DW.promise = ''; DW.noteMsg = null; DW.open = {}; DW.catMenu = false;
   dwRender();
   try { window.scrollTo(0, 0); } catch (e) {}
   dwLoadJob(false);
@@ -956,7 +1010,7 @@ function dwCompanyActHtml(it, s) {
     '<button type="button" class="dw-btn g sm" data-dw="preview" data-k="' + dwEsc(key) + '">Preview</button>' +
     '<button type="button" class="dw-btn sm" data-dw="approve" data-k="' + dwEsc(key) + '"' + dwDis(!gate.ok || !!DW.busy) + (gate.ok ? '' : ' title="' + dwEsc(gate.reason) + '"') + '>' + (busy ? 'Sending...' : 'Approve') + '</button>' +
     '</div>' + (gate.ok || gate.reason === sw.text ? '' : '<span class="why">' + dwEsc(gate.reason) + '</span>') + '</div>' +
-    (msg ? '<div class="msg dw-refuse">' + dwEsc(msg) + '</div>' : '') + '</div>';
+    (DW.stmtPossible[key] ? '<div class="msg">' + dwStatementPossibleHtml(key) + '</div>' : msg ? '<div class="msg dw-refuse">' + dwEsc(msg) + '</div>' : '') + '</div>';
 }
 
 // Jan's visit list (Bad debt): who Jan visits this week, with Remove for the owner.
@@ -967,13 +1021,16 @@ function dwJanHtml() {
   var words = {
     open: 'Open. Locks Friday 9am, then goes to Jan Sunday 7pm.',
     locked: 'Locked. Goes to Jan Sunday 7pm.',
-    sent: 'Sent to Jan' + (J && J.sent_at ? ' ' + C.dateWords(C.perthDay(J.sent_at)) + ' ' + C.perthTime(J.sent_at) : '') + '.',
+    sending: 'Sending to Jan now.',
+    sent:'Sent to Jan' + (J && J.sent_at ? ' ' + C.dateWords(C.perthDay(J.sent_at)) + ' ' + C.perthTime(J.sent_at) : '') + '.',
     failed: 'Did not send' + (J && J.error ? ': ' + J.error : '') + '.',
     skipped: 'Not sent this week.',
   }[status] || '';
   var people = J && Array.isArray(J.items) ? J.items : null;
   var count = people ? people.length : Number(sum.count) || 0;
-  var frozen = status === 'locked' || status === 'sent';
+  // Remove works while the list is open or locked (locked is the snapshot Jan gets; a removal
+  // edits it). Once it is sending or sent, or did not go, it cannot change (jan_list_closed).
+  var frozen = ['sending', 'sent', 'failed', 'skipped'].indexOf(status) >= 0;
   var body;
   if (DW.janLoading && !J) body = '<div style="padding:10px 0">' + dwSk('60%', 12) + dwSk('40%', 10, 'margin-top:8px') + '</div>';
   else if (DW.janErr && !J) body = '<div class="dw-quiet">' + (C.isNotDeployed(DW.janErr) ? 'The visit list is not live yet.' : 'The visit list could not be read: ' + dwEsc(DW.janErr.message)) + '</div>';
@@ -982,7 +1039,7 @@ function dwJanHtml() {
     var key = String(p.share_key || p.xero_invoice_id || '');
     var where = [p.site_address || p.address, p.phone].filter(Boolean).join(' · ');
     var busy = DW.busy === 'jan:' + key;
-    var why = !s.viewer_is_owner ? 'Only an owner can remove' : frozen ? 'The list is locked' : '';
+    var why = !s.viewer_is_owner ? 'Only an owner can remove' : frozen ? (status === 'sending' || status === 'sent' ? 'The list has gone to Jan' : 'This week\'s list is closed') : '';
     return '<div class="dw-jan-p" data-jan="' + dwEsc(key) + '"><div><div class="who">' + dwEsc(p.name || p.payer_label || p.payer_name || 'Unknown') + '</div>' +
       (where ? '<div class="where">' + dwEsc(where) + '</div>' : '') + (p.history ? '<div class="hist">' + dwEsc(p.history) + '</div>' : '') + '</div>' +
       '<span class="dw-amt">' + dwEsc(C.money(p.amount != null ? p.amount : p.amount_due)) + '</span>' +
@@ -1051,11 +1108,15 @@ function dwJobHtml() {
   if (!DW.job) return '<div class="dw">' + crumb + '<div class="dw-card">' + dwFailHtml('This job', DW.jobErr, 'job-reload') + '</div></div>';
   var J = DW.job, row = J.row || {}, job = J.job || {}, today = dwToday();
   var cat = C.catByKey(row.category), tk = C.typeKey(row.lane || row.job_type ? row : { job_type: job.type });
-  var pill = cat ? '<span class="dw-pill" style="background:' + cat.color + '">' + dwEsc(cat.name + (Number(row.day) > 0 ? ' · day ' + row.day : '')) + '</span>' : '<span class="dw-pill none">Not due yet</span>';
+  var paid = row.open === false; // Xero shows it paid: nothing to chase or change
+  var pill = paid ? '<span class="dw-pill paid">Paid</span>'
+    : cat ? '<span class="dw-pill" style="background:' + cat.color + '">' + dwEsc(cat.name + (Number(row.day) > 0 ? ' · day ' + row.day : '')) + '</span>'
+    : '<span class="dw-pill none">Not due yet</span>';
+  if (!paid) pill += dwCatMenuHtml(row);
   var site = job.site_address ? String(job.site_address) + (job.site_suburb && String(job.site_address).indexOf(job.site_suburb) < 0 ? ', ' + job.site_suburb : '') : '';
   var inv = row.invoice_number ? C.kindWord(row.kind) + ' invoice ' + row.invoice_number + (row.invoice_date ? ' sent ' + C.dateWords(row.invoice_date) : '') : '';
   var sub = [site, job.job_number || row.job_number, inv].filter(Boolean).map(dwEsc).join(' · ');
-  var paused = row.paused_until && C.dayNum(row.paused_until) >= C.dayNum(today) ? '<div class="dw-paused">Follow-ups paused until ' + dwEsc(C.dateWords(row.paused_until)) + ', a promise to pay.</div>' : '';
+  var paused = C.isPaused(row, today) ? '<div class="dw-paused">Follow-ups paused until ' + dwEsc(C.dateWords(row.paused_until)) + ', a promise to pay.</div>' : '';
   var strip = '<div class="dw-strip" id="dwStrip"><div><h2>' + dwPayerHtml(row) + ' ' + dwBadgeHtml(tk) + ' ' + pill + '</h2><div class="sub">' + sub + '</div>' + paused + '</div>' +
     '<div class="dw-owing"><b id="dwOwing">' + dwEsc(C.money(row.amount_due)) + '</b><span>owing</span></div></div>';
   var nodes = Array.isArray(J.ladder) && J.ladder.length ? C.ladder(J.ladder, row.invoice_date) : [];
@@ -1067,6 +1128,22 @@ function dwJobHtml() {
     '<section id="dwLeft">' + dwLeftHtml(J) + '</section>' +
     '<section id="dwMiddle">' + dwMiddleHtml(J) + '</section>' +
     '<section id="dwRight">' + dwNotesHtml(J) + '</section></div></div></div>';
+}
+
+// "Change" beside the category pill: set or clear a category by hand, agent or not (owner only).
+// Each choice posts debt_ws_set_category {xero_invoice_id, category} with no suggestion_id.
+function dwCatMenuHtml(row) {
+  var s = dwSettings(), owner = !!s.viewer_is_owner;
+  var btn = '<button type="button" class="dw-link dw-chg" data-dw="cat-menu" id="dwCatChange" aria-haspopup="menu" aria-expanded="' + !!DW.catMenu + '"' +
+    dwDis(!owner || !!DW.busy) + (owner ? '' : ' title="Only an owner can change the category"') + '>' + (String(DW.busy || '').indexOf('cat:') === 0 ? 'Saving...' : 'Change') + '</button>';
+  if (!DW.catMenu || !owner) return '<span class="dw-catm">' + btn + '</span>';
+  var says = row.category === 'says_paid' || !!row.says_paid_since, items = [];
+  if (says) items.push(['clear', 'Clear says paid']);
+  else items.push(['says_paid', 'Says paid']);
+  if (row.category !== 'rectification') items.push(['rectification', 'Move to Rectification']);
+  return '<span class="dw-catm">' + btn + '<span class="dw-menu" role="menu" id="dwCatMenu">' + items.map(function (it) {
+    return '<button type="button" role="menuitem" data-dw="cat-set" data-k="' + it[0] + '">' + dwEsc(it[1]) + '</button>';
+  }).join('') + '</span></span>';
 }
 
 // Left: the job story in a few lines, the money, then the documents.
@@ -1090,12 +1167,13 @@ function dwLeftHtml(J) {
   money += '</div>';
   var docs = '';
   (J.invoices || []).forEach(function (i) {
-    var id = i.xero_invoice_id || i.id || (i.invoice_number && i.invoice_number === row.invoice_number ? row.xero_invoice_id : null);
+    var num = i.number || i.invoice_number; // ops-api sends number
+    var id = i.xero_invoice_id || i.id || (num && num === row.invoice_number ? row.xero_invoice_id : null);
     if (!id) return;
     var paid = String(i.status || '').toUpperCase() === 'PAID' || Number(i.amount_due) <= 0;
     var part = !paid && C.num(i.amount_due) !== C.num(i.total); // part paid: show both figures
     var meta = [paid || part ? C.money(i.total) : '', paid ? 'paid' : C.money(i.amount_due) + ' owing', i.date || i.invoice_date ? C.dateWords(i.date || i.invoice_date) : ''].filter(Boolean).join(' · ');
-    docs += '<button type="button" class="dw-doc" data-dw="inv" data-k="' + dwEsc(id) + '"><span class="ic">PDF</span><span><span class="n">' + dwEsc(C.kindWord(i.kind) + ' invoice ' + (i.invoice_number || i.number || '')) + '</span><span class="m">' + dwEsc(meta) + '</span></span></button>';
+    docs += '<button type="button" class="dw-doc" data-dw="inv" data-k="' + dwEsc(id) + '"><span class="ic">PDF</span><span><span class="n">' + dwEsc(C.kindWord(i.kind) + ' invoice ' + (num || '')) + '</span><span class="m">' + dwEsc(meta) + '</span></span></button>';
   });
   (J.documents || []).forEach(function (d) {
     var k = C.fileKind(d.mime, d.name);
@@ -1156,7 +1234,7 @@ function dwSuggestionHtml(J, s, linked) {
     var words;
     if (row.category === 'says_paid') words = 'They say they have paid. Follow-ups are paused while Xero catches up.';
     else if (row.category === 'rectification') words = 'In Rectification. Chasing stops until the fix is done.';
-    else if (row.paused_until && C.dayNum(row.paused_until) >= C.dayNum(today)) words = 'Follow-ups paused until ' + C.dateWords(row.paused_until) + ', a promise to pay.';
+    else if (C.isPaused(row, today)) words = 'Follow-ups paused until ' + C.dateWords(row.paused_until) + ', a promise to pay.';
     else if (row.on_jan_list) words = 'On Jan\'s visit list. No more texts.';
     else if (row.next_step && row.next_step.step) words = 'Nothing to send today. Next: ' + C.stepLabel(row.next_step.step, row.kind) + ' ' + C.whenWords(row.next_step.date, today) + '.';
     else words = 'Nothing to send today.';
@@ -1275,7 +1353,7 @@ async function dwOpenDoc(id) {
 }
 async function dwOpenInvoice(xid) {
   var inv = ((DW.job && DW.job.invoices) || []).filter(function (i) { return String(i.xero_invoice_id || i.id) === String(xid); })[0] || {};
-  var g = dwModal({ title: 'Invoice ' + (inv.invoice_number || (DW.job && DW.job.row && DW.job.row.invoice_number) || ''), body: DW_LOADING });
+  var g = dwModal({ title: 'Invoice ' + (inv.number || inv.invoice_number || (DW.job && DW.job.row && DW.job.row.invoice_number) || ''), body: DW_LOADING });
   try {
     var r = await opsFetch('get_invoice_pdf', { xero_invoice_id: xid });
     if (g !== DW.modalGen) return;
@@ -1284,9 +1362,19 @@ async function dwOpenInvoice(xid) {
   } catch (e) { if (g === DW.modalGen) dwModalSet('bd', dwFailHtml('The invoice PDF', e)); }
 }
 function dwCompany(key) { return ((DW.ov && DW.ov.companies) || []).filter(function (c) { return String(c.company_key) === String(key); })[0] || null; }
+// A statement refused for possible payments: the invoices it names, and Send anyway (owner only).
+function dwStatementPossibleHtml(key) {
+  var pp = DW.stmtPossible[key]; if (!pp) return '';
+  var owner = !!dwSettings().viewer_is_owner;
+  return '<div class="dw-warn" data-stmt-possible="' + dwEsc(key) + '"><b>Possible payment in the bank feed</b>' +
+    (pp.length ? pp.map(function (p) { return dwEsc([p.invoice, p.words].filter(Boolean).join(': ')); }).join('<br>') + '<br>' : '') +
+    'Match it in Xero first. If it is not theirs, you can send anyway.' +
+    '<div class="dw-acts" style="margin-top:8px"><button type="button" class="dw-btn g sm" data-dw="approve-anyway" data-k="' + dwEsc(key) + '"' + dwDis(!owner || !!DW.busy) + '>' + (DW.busy === 'approve:' + key ? 'Sending...' : 'Send anyway') + '</button></div></div>';
+}
 function dwStatementFoot(c) {
   var gate = DebtWorkshopCore.statementGate(c, dwSettings()), key = String(c.company_key || '');
   var msg = DW.rowMsg[key];
+  if (DW.stmtPossible[key]) return '<div style="flex:1 1 100%">' + dwStatementPossibleHtml(key) + '</div>';
   return (msg ? '<span class="why" style="color:#8E2B1E">' + dwEsc(msg) + '</span>' : gate.ok ? '' : '<span class="why">' + dwEsc(gate.reason) + '</span>') +
     '<button type="button" class="dw-btn" data-dw="approve" data-k="' + dwEsc(key) + '"' + dwDis(!gate.ok || !!DW.busy) + '>' + (DW.busy === 'approve:' + key ? 'Sending...' : 'Approve and send') + '</button>';
 }
@@ -1315,10 +1403,11 @@ async function dwSend(override) {
   var C = DebtWorkshopCore, J = DW.job; if (!J || !J.suggestion || DW.busy) return;
   var sug = J.suggestion, text = dwDraftText();
   if (!text.trim()) { DW.refusal = 'Write the message first.'; return dwRender(); }
-  if (C.hasBanned(text)) { DW.refusal = C.REFUSALS.banned_text; return dwRender(); }
+  if (C.hasBanned(text)) { DW.refusal = C.REFUSALS.text_not_allowed; return dwRender(); }
   DW.busy = 'send'; DW.refusal = null; dwRender();
   try {
-    var body = { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms' };
+    // amount: what the draft was written for, so the backend can refuse it after a part payment.
+    var body = { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms', amount: C.draftAmount(sug, J.row) };
     if (override) body.override_possible_payment = true; // logged by the backend; owner only
     await dwPost('debt_ws_decide', body);
     DW.busy = null; delete DW.drafts[dwDraftKey()]; DW.editing = false; DW.why = false;
@@ -1348,7 +1437,7 @@ async function dwMove() {
   var C = DebtWorkshopCore, J = DW.job; if (!J || !J.suggestion || DW.busy) return;
   var sug = J.suggestion, cat = C.catByKey(sug.proposed_category) || { name: 'Rectification' }, s = dwSettings();
   var text = dwDraftText();
-  if (text.trim() && C.hasBanned(text)) { DW.refusal = C.REFUSALS.banned_text; return dwRender(); }
+  if (text.trim() && C.hasBanned(text)) { DW.refusal = C.REFUSALS.text_not_allowed; return dwRender(); }
   DW.busy = 'move'; DW.refusal = null; dwRender();
   try {
     await dwPost('debt_ws_set_category', { xero_invoice_id: dwRowId(), category: sug.proposed_category || 'rectification', suggestion_id: sug.id || null });
@@ -1356,13 +1445,34 @@ async function dwMove() {
   var sent = false;
   if (text.trim() && s.sending_on && dwLinked(J)) {
     try {
-      await dwPost('debt_ws_decide', { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms' });
+      await dwPost('debt_ws_decide', { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms', amount: C.draftAmount(sug, J.row) });
       sent = true;
     } catch (e) { DW.refusal = 'Moved to ' + cat.name + '. The reply was not sent: ' + C.refusalText(e); }
   }
   DW.busy = null; DW.editing = false; delete DW.drafts[dwDraftKey()];
   dwToast('Moved to ' + cat.name + (sent ? ' and the reply was sent' : ''), 'success');
   dwRender(); dwAfterWrite();
+}
+// Change (beside the pill): set or clear a category by hand. Rectification moves the job card, so it asks first.
+function dwCatChoose(cat) {
+  DW.catMenu = false;
+  if (cat !== 'rectification') return dwSetCategory(cat);
+  dwRender();
+  dwModal({ title: 'Move to Rectification', size: 'sm', body: '<div class="dw-confirm">This moves the job card to Rectification.</div>',
+    foot: '<button type="button" class="dw-btn g" data-dw="modal-close">Cancel</button><button type="button" class="dw-btn p" data-dw="cat-confirm" data-k="rectification" id="dwCatConfirm">Move to Rectification</button>' });
+}
+async function dwSetCategory(cat) {
+  var C = DebtWorkshopCore, J = DW.job; if (!J || DW.busy) return;
+  dwCloseModal();
+  DW.catMenu = false; DW.busy = 'cat:' + cat; DW.refusal = null; dwRender();
+  try {
+    var r = await dwPost('debt_ws_set_category', { xero_invoice_id: dwRowId(), category: cat });
+    DW.busy = null;
+    var done = { says_paid: 'Moved to Says paid', rectification: 'Moved to Rectification', clear: 'Cleared says paid' }[cat] || 'Category changed';
+    dwToast(done + (r && typeof r.note === 'string' && r.note ? '. ' + r.note : ''), 'success');
+    dwAfterWrite();
+  } catch (e) { DW.busy = null; DW.refusal = C.refusalText(e); }
+  dwRender();
 }
 // Keep chasing: turn the move down. set_category "clear" with the suggestion marks it dismissed.
 async function dwKeep() {
@@ -1411,17 +1521,24 @@ async function dwSaveNote() {
   } catch (e) { DW.busy = null; DW.noteMsg = C.refusalText(e); }
   dwRender();
 }
-async function dwApprove(key) {
+// override: Send anyway after a possible_payment refusal (logged by the backend; owner only).
+async function dwApprove(key, override) {
   var C = DebtWorkshopCore, c = dwCompany(key); if (!c || DW.busy) return;
   if (!C.statementGate(c, dwSettings()).ok) return;
   DW.busy = 'approve:' + key; DW.rowMsg[key] = null; dwRender(); dwModalFootRefresh();
   try {
-    var r = await dwPost('debt_ws_statement_send', { company_key: key });
-    DW.busy = null;
+    var body = { company_key: key };
+    if (override) body.override_possible_payment = true;
+    var r = await dwPost('debt_ws_statement_send', body);
+    DW.busy = null; delete DW.stmtPossible[key];
     dwToast('Statement sent to ' + ((r && r.to_email) || c.name), 'success');
     if (DW.modalCompany === key) dwCloseModal();
     dwLoadOverview(true);
-  } catch (e) { DW.busy = null; DW.rowMsg[key] = C.refusalText(e); }
+  } catch (e) {
+    DW.busy = null;
+    if (C.refusalCode(e) === 'possible_payment' && !override) { DW.stmtPossible[key] = C.statementPossible(e && e.body); }
+    else { delete DW.stmtPossible[key]; DW.rowMsg[key] = C.refusalText(e); }
+  }
   dwRender(); dwModalFootRefresh();
 }
 function dwModalFootRefresh() { if (DW.modalCompany) { var c = dwCompany(DW.modalCompany); if (c) dwModalSet('ft', dwStatementFoot(c)); } }
@@ -1449,7 +1566,8 @@ function dwAct(a, k) {
     case 'cats-all': DW.cat = null; return dwRender();
     case 'open': return dwOpenJob(k);
     case 'company': case 'preview': return dwPreview(k);
-    case 'approve': return dwApprove(k);
+    case 'approve': return dwApprove(k, false);
+    case 'approve-anyway': return dwApprove(k, true);
     case 'jan-remove': return dwJanRemove(k);
     case 'foot': return dwFootModal(k);
     case 'reload': return dwLoadOverview(false);
@@ -1471,6 +1589,9 @@ function dwAct(a, k) {
     case 'dismiss': return dwDismiss(k);
     case 'link': return dwLink(k);
     case 'note-save': return dwSaveNote();
+    case 'cat-menu': DW.catMenu = !DW.catMenu; if (DW.catMenu) DW.focus = '#dwCatMenu button'; return dwRender();
+    case 'cat-set': return dwCatChoose(k);
+    case 'cat-confirm': return dwSetCategory(k);
     case 'transcript': case 'more': DW.open[k] = !DW.open[k]; return dwRender();
     case 'modal-close': return dwCloseModal();
   }
@@ -1481,6 +1602,7 @@ function dwBind() {
   document.addEventListener('click', function (e) {
     var t = e.target; if (!t || !t.closest) return;
     if (t.id === 'dwModal') { dwCloseModal(); return; } // a click on the dimmed backdrop
+    if (DW.catMenu && !t.closest('.dw-catm')) { DW.catMenu = false; dwRender(); } // a click anywhere else closes the Change menu
     var el = t.closest('[data-dw]'); if (!el) return;
     if (!el.closest('#viewDebt') && !el.closest('#dwModal')) return;
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') return;
@@ -1489,6 +1611,7 @@ function dwBind() {
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && document.getElementById('dwModal')) { dwCloseModal(); return; }
+    if (e.key === 'Escape' && DW.catMenu) { DW.catMenu = false; DW.focus = '#dwCatChange'; dwRender(); return; }
     var t = e.target;
     if ((e.key === 'Enter' || e.key === ' ') && t && t.getAttribute && t.getAttribute('role') === 'button' && t.hasAttribute('data-dw') && t.closest('#viewDebt')) {
       e.preventDefault(); dwAct(t.getAttribute('data-dw'), t.getAttribute('data-k'));

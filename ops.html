@@ -4562,6 +4562,7 @@ __swOpsStampAssets([
         <button onclick="showView('calendar')" data-view="calendar">Calendar</button>
         <button onclick="showView('jobs')" data-view="jobs">Jobs</button>
         <button onclick="showView('financials')" data-view="financials">Financials</button>
+        <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none">Debt</button>
         <button onclick="showView('materials')" data-view="materials">Materials</button>
         <button onclick="showView('sales')" data-view="sales">Sales</button>
         <button onclick="showView('inbox')" data-view="inbox">Inbox <span id="inboxBadge" class="nav-badge" style="display:none;"></span></button>
@@ -5134,6 +5135,9 @@ __swOpsStampAssets([
       </div>
     </div>
 
+    <!-- ═══════════ DEBT WORKSHOP (modules/ops-debt-workshop.js, docs/debt-workshop.md) ═══════════ -->
+    <div id="viewDebt" class="view"><div id="debtWorkshopRoot"></div></div>
+
     <div class="view" id="viewSales">
       <div id="salesWorkspaceSubnav" class="sales-workspace-subnav" aria-label="Sales views">
         <span class="sales-workspace-label">Sales</span>
@@ -5153,6 +5157,7 @@ __swOpsStampAssets([
     <button onclick="showView('calendar')" data-view="calendar"><span class="nav-icon">&#128197;</span>Calendar</button>
     <button onclick="showView('jobs')" data-view="jobs"><span class="nav-icon">&#128188;</span>Jobs</button>
     <button onclick="showView('financials')" data-view="financials"><span class="nav-icon">&#128176;</span>Money</button>
+    <button onclick="showView('debt')" data-view="debt" data-debt-nav style="display:none"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 3v7l5 5"/></svg></span>Debt</button>
     <button onclick="showView('materials')" data-view="materials"><span class="nav-icon">&#128230;</span>Materials</button>
     <button onclick="showView('sales')" data-view="sales"><span class="nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 16V9m7 7V3m7 13V6"/></svg></span>Sales</button>
     <button onclick="showView('inbox')" data-view="inbox"><span class="nav-icon">&#128172;</span>Inbox<span id="inboxBadgeMobile" class="nav-badge" style="display:none;"></span></button>
@@ -6601,6 +6606,9 @@ async function opsFetch(action, params, options) {
         var e = new Error(err.error || 'API error: ' + resp.status);
         e.status = resp.status;
         e.refusal = err.refusal || null;
+        // The machine code and the whole answer, for screens that word refusals themselves (Debt Workshop).
+        e.code = err.code || null;
+        e.body = err;
         throw e;
       });
     }
@@ -6628,6 +6636,9 @@ async function opsPost(action, body) {
         // Named refusals ({error, reason, detail}) say what is in the way, e.g.
         // the clashing calendar entry for a booking the owner picked.
         e.detail = err.detail || null;
+        // The machine code ({ok:false, code, error}) and the whole answer, for screens that word refusals themselves.
+        e.code = err.code || (err.error && typeof err.error === 'object' ? err.error.code : null) || null;
+        e.body = err;
         throw e;
       });
     }
@@ -7301,6 +7312,7 @@ function showView(view) {
   if (view === 'calendar') loadCalendar();
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
+  if (view === 'debt' && typeof loadDebtWorkshop === 'function') loadDebtWorkshop();
   if (view === 'materials') { loadMaterials(); if (typeof loadMaterialsRecon === 'function') loadMaterialsRecon(); }
   if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);
   if (view === 'inbox') loadInbox();
@@ -7357,7 +7369,7 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'materials', 'performance', 'booking', 'sales', 'inbox'];
+  var validTabs = ['today', 'calendar', 'jobs', 'financials', 'debt', 'materials', 'performance', 'booking', 'sales', 'inbox'];
   if (hash && validTabs.indexOf(hash) >= 0) { showView(hash); return; }
   var saved = localStorage.getItem('sw_ops_tab');
   if (saved && validTabs.indexOf(saved) >= 0) { showView(saved); return; }
@@ -28176,6 +28188,8 @@ function initApp() {
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
   loadCrewList(); // Pre-cache crew list for dropdowns
   restoreTab();
+  // Debt tab: hidden until switched on (?debt=1, localStorage sw_debt_ws, or the backend's tab_visible).
+  if (typeof debtWsProbeVisibility === 'function') debtWsProbeVisibility();
   // Initialize Jarvis bar summary after data loads
   setTimeout(updateJarvisSummary, 2000);
   // Supabase Realtime: subscribe to ai_alerts for proactive notifications
@@ -28232,7 +28246,8 @@ if (document.readyState === 'loading') {
 <script>
 __swOpsStampAssets([
   {t:'js', u:'modules/ops-clear-debt-v2.js?v=2'},
-  {t:'js', u:'modules/ops-clear-debt-desk.js?v=1'}
+  {t:'js', u:'modules/ops-clear-debt-desk.js?v=1'},
+  {t:'js', u:'modules/ops-debt-workshop.js?v=1'}
 ]);
 </script>
 </body>

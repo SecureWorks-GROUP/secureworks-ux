@@ -2124,10 +2124,6 @@ function renderMoneyView(data) {
       html += '</div>';
     });
 
-    // Link to Clear Debt
-    html += '<div style="margin-top:8px;text-align:right;">';
-    html += '<button class="btn btn-sm" style="font-size:11px;color:var(--sw-red);" onclick="closeJobDetail();showView(\'financials\');showSubTab(\'cleardebt\')">View in Clear Debt \u2192</button>';
-    html += '</div>';
     html += '</div>';
   }
 

@@ -4541,45 +4541,46 @@
     .msr-fb-btn.brand { background: var(--sw-orange); color: #fff; font-weight: 800; }
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
 
-    /* BILLS TO PLACE (Finance tab, job profit catch-net), class prefix btp- */
-    .btp-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-    .btp-summary { font-size: 12px; color: var(--sw-text-sec); }
-    .btp-summary b { color: var(--sw-dark); }
-    .btp-basis { font-size: 11px; color: var(--sw-text-sec); margin-bottom: 10px; max-width: 900px; line-height: 1.5; }
-    .btp-cap { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; background: rgba(230,126,34,0.08); color: var(--sw-dark); border: 1px solid rgba(230,126,34,0.3); }
-    .btp-done { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; background: rgba(39,174,96,0.07); border: 1px solid rgba(39,174,96,0.25); }
-    .btp-done div + div { margin-top: 3px; }
-    .btp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .btp-table th { text-align: left; font-weight: 600; color: var(--sw-text-sec); padding: 4px 10px; border-bottom: 2px solid var(--sw-border, #eee); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
-    .btp-table td { padding: 7px 10px; border-bottom: 1px solid var(--sw-border, #eee); vertical-align: top; }
-    .btp-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .btp-row { cursor: pointer; }
-    .btp-row:hover td { background: var(--sw-light, #f6f8fa); }
-    .btp-row.open td { background: var(--sw-light, #f6f8fa); font-weight: 600; }
-    .btp-muted { color: var(--sw-text-sec); font-size: 11px; }
-    .btp-detail > td { background: #fff; padding: 12px 14px 16px; border-bottom: 2px solid var(--sw-border, #eee); }
-    .btp-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 18px; }
-    @media (max-width: 860px) { .btp-grid { grid-template-columns: 1fr; } }
-    .btp-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); margin-bottom: 6px; }
-    .btp-lines { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .btp-lines td, .btp-lines th { padding: 4px 6px; border-bottom: 1px solid var(--sw-border, #eee); text-align: left; vertical-align: top; }
-    .btp-lines th { font-size: 10px; color: var(--sw-text-sec); font-weight: 600; text-transform: uppercase; }
-    .btp-lines .num { text-align: right; white-space: nowrap; }
-    .btp-facts { font-size: 11px; color: var(--sw-text-sec); margin-top: 6px; }
-    .btp-find { display: flex; gap: 6px; }
-    .btp-find input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
-    .btp-results { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-    .btp-pickbtn { text-align: left; background: #fff; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
-    .btp-pickbtn:hover { border-color: var(--sw-orange); }
-    .btp-job { margin-top: 8px; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
-    .btp-proj { margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
-    .btp-proj.costed { background: rgba(230,126,34,0.10); border: 1px solid rgba(230,126,34,0.35); }
-    .btp-proj.none { color: var(--sw-text-sec); }
-    .btp-ack { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; font-size: 12px; }
-    .btp-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .btp-err { color: var(--sw-red, #e74c3c); font-size: 12px; margin-top: 6px; }
-    .btp-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btp-job a { color: var(--sw-orange); }
+    /* MATERIALS BILL RECONCILIATION (Financials > Bill Reconciliation), class prefix mrq- */
+    .mrq-summary { font-size: 11px; color: var(--sw-text-sec); font-weight: 400; }
+    .mrq-summary b { color: var(--sw-dark); }
+    .mrq-basis { font-size: 11px; color: var(--sw-text-sec); padding: 8px 14px 0; max-width: 900px; line-height: 1.5; }
+    .mrq-note { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin: 8px 14px 0; }
+    .mrq-cap { background: rgba(230,126,34,0.08); color: var(--sw-dark); border: 1px solid rgba(230,126,34,0.3); }
+    .mrq-done { background: rgba(39,174,96,0.07); border: 1px solid rgba(39,174,96,0.25); }
+    .mrq-done div + div { margin-top: 3px; }
+    #matReconBody { padding: 8px 0 0; }
+    .mrq-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mrq-table th { text-align: left; font-weight: 600; color: var(--sw-text-sec); padding: 4px 10px; border-bottom: 2px solid var(--sw-border, #eee); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+    .mrq-table td { padding: 7px 10px; border-bottom: 1px solid var(--sw-border, #eee); vertical-align: top; }
+    .mrq-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .mrq-row { cursor: pointer; }
+    .mrq-row:hover td { background: var(--sw-light, #f6f8fa); }
+    .mrq-row.open td { background: var(--sw-light, #f6f8fa); font-weight: 600; }
+    .mrq-muted { color: var(--sw-text-sec); font-size: 11px; }
+    .mrq-detail > td { background: #fff; padding: 12px 14px 16px; border-bottom: 2px solid var(--sw-border, #eee); }
+    .mrq-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 18px; }
+    @media (max-width: 860px) { .mrq-grid { grid-template-columns: 1fr; } }
+    .mrq-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); margin-bottom: 6px; }
+    .mrq-lines { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mrq-lines td, .mrq-lines th { padding: 4px 6px; border-bottom: 1px solid var(--sw-border, #eee); text-align: left; vertical-align: top; }
+    .mrq-lines th { font-size: 10px; color: var(--sw-text-sec); font-weight: 600; text-transform: uppercase; }
+    .mrq-lines .num { text-align: right; white-space: nowrap; }
+    .mrq-facts { font-size: 11px; color: var(--sw-text-sec); margin-top: 6px; }
+    .mrq-find { display: flex; gap: 6px; }
+    .mrq-find input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
+    .mrq-results { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .mrq-pickbtn { text-align: left; background: #fff; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
+    .mrq-pickbtn:hover { border-color: var(--sw-orange); }
+    .mrq-job { margin-top: 8px; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+    .mrq-job a { color: var(--sw-orange); }
+    .mrq-proj { margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
+    .mrq-proj.warn { background: rgba(230,126,34,0.10); border: 1px solid rgba(230,126,34,0.35); }
+    .mrq-proj.calm { color: var(--sw-text-sec); }
+    .mrq-ack { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; font-size: 12px; }
+    .mrq-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .mrq-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .mrq-err { color: var(--sw-red, #e74c3c); font-size: 12px; margin-top: 6px; }
   </style>
 <script>
 __swOpsStampAssets([
@@ -4856,8 +4857,6 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
         <!-- Finance Health and Job P&L sub-tabs are hidden (Captain 2026-10-06). Their
              panels, loaders and ops-api actions stay. -->
-        <!-- Job profit: hidden unless the signed-in email is on JOB_PROFIT_VIEWERS (syncJobProfitAccess). -->
-        <button class="sub-tab" id="billsToPlaceTab" onclick="showSubTab('billstoplace')" data-sub="billstoplace" style="display:none;" title="Supplier bills on no job yet: place each on a job or mark it not job related">Bills to place</button>
       </div>
 
       <!-- Invoices -->
@@ -4976,28 +4975,15 @@ __swOpsStampAssets([
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 14px; background:var(--sw-light,#f6f8fa); border-bottom:1px solid var(--sw-border,#e2e8f0);">
           <span style="font-weight:700; color:var(--sw-dark,#293C46);">Bill Reconciliation</span>
           <span class="badge" id="matReconOpenCount" title="Open bills awaiting a job">0</span>
-          <span id="matReconDrain" style="font-size:11px; color:var(--sw-text-sec); font-weight:400;"></span>
+          <span id="matReconSummary" class="mrq-summary"></span>
           <div style="flex:1;"></div>
-          <span id="matReconStatus" style="font-size:11px; color:var(--sw-text-sec);"></span>
+          <input type="text" class="filter-search" id="matReconSearch" placeholder="Search supplier / bill #" oninput="matReconFilter(this.value)" style="width:200px;">
           <button class="btn btn-secondary btn-sm" onclick="loadMaterialsRecon()" title="Refresh queue" style="font-size:11px;">&#8635; Refresh</button>
         </div>
-        <div class="data-table-wrap" style="overflow-x:auto;">
-          <table class="pnl-table" style="width:100%; font-size:12px;">
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>Invoice #</th>
-                <th style="text-align:right;">Amount (inc)</th>
-                <th>Date</th>
-                <th>Suggested job</th>
-                <th style="min-width:280px;">Assign to job</th>
-              </tr>
-            </thead>
-            <tbody id="matReconTableBody">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">Loading reconciliation queue...</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="mrq-basis">Supplier bills that sit on no job yet, largest first. Amounts are ex GST. Xero Projects stays where the bookkeeper puts supplier bills against a job; this list only catches bills that are on no job at all. Placing a bill records it as a materials cost on that job.</div>
+        <div id="matReconCapNote" class="mrq-note mrq-cap" style="display:none;"></div>
+        <div id="matReconJustDone" class="mrq-note mrq-done" style="display:none;"></div>
+        <div id="matReconBody"><div class="mrq-muted" style="padding:20px;text-align:center;">Loading reconciliation queue...</div></div>
       </div>
       </div>
 
@@ -5060,21 +5046,6 @@ __swOpsStampAssets([
             <tbody id="pnlTableBody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--sw-text-sec);">Select the Job P&amp;L tab to load</td></tr></tbody>
           </table>
         </div>
-      </div>
-
-      <!-- Bills to place (job profit catch-net) — search // <bills-to-place> -->
-      <div id="subBillstoplace" class="sub-view">
-        <div class="btp-head">
-          <div class="section-heading" style="margin:0;">Bills to place</div>
-          <span id="btpSummary" class="btp-summary"></span>
-          <div style="flex:1;"></div>
-          <input type="text" class="filter-search" id="btpSearch" placeholder="Search supplier / bill #" oninput="btpFilter(this.value)" style="width:200px;">
-          <button class="btn btn-secondary btn-sm" onclick="loadBillsToPlace()" title="Read the list again">&#8635; Refresh</button>
-        </div>
-        <div class="btp-basis">Supplier bills that sit on no job yet, largest first. Amounts are ex GST. Xero Projects stays where the bookkeeper puts supplier bills against a job; this list only catches bills that are on no job at all. Placing a bill records it as a materials cost on that job.</div>
-        <div id="btpCapNote" class="btp-cap" style="display:none;"></div>
-        <div id="btpJustDone" class="btp-done" style="display:none;"></div>
-        <div id="btpBody"></div>
       </div>
     </div>
 
@@ -6632,26 +6603,6 @@ var _opsUserEmail = null;
 var MAKESAFE_CANCEL_ADMINS = ['marnin@secureworkswa.com.au', 'shaun@secureworkswa.com.au'];
 function _canAdminCancelMakesafe() {
   return !!(_opsUserEmail && MAKESAFE_CANCEL_ADMINS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
-}
-// Job profit (Finance tab) — who sees it. Same honest posture as the cancel
-// gate above: a UI hide, not server authorization. Marnin only for now.
-var JOB_PROFIT_VIEWERS = ['marnin@secureworkswa.com.au'];
-function _canSeeJobProfit() {
-  return !!(_opsUserEmail && JOB_PROFIT_VIEWERS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
-}
-// Shows or hides the job-profit sub-tabs once the operator email is known.
-// Leaving the allowlist while a hidden tab is open drops back to Invoices.
-function syncJobProfitAccess() {
-  var allowed = _canSeeJobProfit();
-  var btn = document.getElementById('billsToPlaceTab');
-  if (btn) btn.style.display = allowed ? '' : 'none';
-  var view = document.getElementById('subBillstoplace');
-  if (!allowed && view) {
-    var wasOpen = view.classList.contains('active');
-    var body = document.getElementById('btpBody');
-    if (body) body.innerHTML = '';
-    if (wasOpen) showSubTab('invoices');
-  }
 }
 // M-F — cancel reason set (codes = backend allow-list; labels = Marnin's copy).
 var MS_CANCEL_REASONS_OPS = [
@@ -16921,7 +16872,6 @@ function renderJobList(container, columns) {
 // ════════════════════════════════════════════════════════════
 
 function showSubTab(tab) {
-  if (tab === 'billstoplace' && !_canSeeJobProfit()) tab = 'invoices';
   document.querySelectorAll('.sub-tab').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.sub-view').forEach(function(el) { el.classList.remove('active'); });
   var btn = document.querySelector('[data-sub="' + tab + '"]');
@@ -16938,7 +16888,6 @@ function showSubTab(tab) {
   if (tab === 'cleardebt') loadClearDebt();
   if (tab === 'financehealth') loadFinanceHealth();
   if (tab === 'jobpnl') loadJobPnl();
-  if (tab === 'billstoplace') loadBillsToPlace();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -18214,21 +18163,35 @@ async function loadMaterials() {
 }
 
 // ════════════════════════════════════════════════════════════
-// M2/U4 — Bill Reconciliation queue (ops worklist)
+// M2/U4 — Bill Reconciliation queue (ops worklist) — search // <materials-recon>
 //
 // Surfaces U3's materials_reconciliation_queue (unmatched, non-mirror ACCPAY
-// bills, status=open) and drains it by hand. Three auditable actions, each via
-// opsPost (which injects operator_email = the logged-in user, recorded as the
-// manual assigner):
-//   accept-suggestion   → materials_recon_assign { use_suggestion:true }
-//   assign-to-job        → materials_recon_assign { job_number:<typed> }
-//   mark-not-job-related → materials_recon_not_job_related
+// bills, status=open) as a money list: largest ex-GST bill first, one bill open
+// at a time with its Xero lines and Business Unit, and in-panel presses (no
+// confirm() dialogs) to place it on a job or file it.
+// Reads:  materials_recon_queue (limit 1000, the action's cap; it returns the
+//         NEWEST rows by invoice date, so a capped list says what it left out),
+//         get_xero_invoice (read-only point-get of one bill's lines; never
+//         get_xero_bill, which also writes the local Xero cache), search_jobs
+//         (find a job), job_detail?slim=1 (the picked job's xero_project).
+// Three auditable actions, each via opsPost (which injects operator_email =
+// the logged-in user, recorded as the manual assigner):
+//   accept-suggestion    → materials_recon_assign { queue_id, use_suggestion:true }
+//   assign-to-job        → materials_recon_assign { queue_id, job_id }
+//   mark-not-job-related → materials_recon_not_job_related { queue_id }
 // accept/assign land a high_manual materials fact; not-job-related writes none.
+// The queue's stats come from one unranged read that the API's 1,000-row cap
+// can cut short, so once stats.total_rows reaches 1,000 every count is a lower
+// bound and is labelled "at least".
 // Depends on the U3 migration (job_materials_facts + materials_reconciliation_queue)
 // AND the ops-api materials_recon_* actions; until both ship, the panel shows a
 // wiring note instead of failing loudly.
 // ════════════════════════════════════════════════════════════
-var _matReconRows = [];
+var MAT_RECON_QUEUE_LIMIT = 1000;
+var MAT_RECON_STATS_CAP = 1000;
+var MAT_RECON_PAGE = 100;
+var MAT_RECON_UNCONFIRMED = 'Xero Projects not confirmed for this job: check Xero before placing';
+var _matRecon = { rows: [], stats: null, listFull: false, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: MAT_RECON_PAGE, done: [], seq: 0 };
 
 var MAT_RECON_REASON_LABELS = {
   no_ref_no_po:            'No reference, no matching PO',
@@ -18238,148 +18201,18 @@ var MAT_RECON_REASON_LABELS = {
   ambiguous_po:           'Ambiguous PO match'
 };
 
-async function loadMaterialsRecon() {
-  var tbody = document.getElementById('matReconTableBody');
-  var statusEl = document.getElementById('matReconStatus');
-  if (!tbody) return;
-  if (statusEl) statusEl.textContent = '';
-  try {
-    var data = await opsFetch('materials_recon_queue', { status: 'open' });
-    _matReconRows = data.rows || [];
-    renderMaterialsRecon(data);
-  } catch (e) {
-    console.error('loadMaterialsRecon error:', e);
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:18px;color:var(--sw-text-sec);font-size:11px;">'
-      + 'Reconciliation queue unavailable: ' + escapeHtml(e && e.message ? e.message : 'unknown error')
-      + '<br>Backend actions <code>materials_recon_*</code> + the U3 migration may not be applied yet (M2 gate).</td></tr>';
-    var cnt = document.getElementById('matReconOpenCount');
-    if (cnt) cnt.textContent = '—';
-  }
-}
-
-function renderMaterialsRecon(data) {
-  var tbody = document.getElementById('matReconTableBody');
-  var cntEl = document.getElementById('matReconOpenCount');
-  var drainEl = document.getElementById('matReconDrain');
-  if (!tbody) return;
-  var rows = (data && data.rows) || [];
-  var stats = (data && data.stats) || {};
-
-  if (cntEl) cntEl.textContent = (stats.open != null ? stats.open : rows.length);
-  if (drainEl) {
-    var bits = [];
-    if (stats.open_total_inc != null && stats.open > 0) bits.push(fmt$(stats.open_total_inc) + ' unmatched');
-    if (stats.assigned != null) bits.push(stats.assigned + ' assigned');
-    if (stats.not_job_related != null) bits.push(stats.not_job_related + ' filed');
-    drainEl.textContent = bits.length ? '· ' + bits.join(' · ') : '';
-  }
-
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--sw-text-sec);">'
-      + 'Queue clear — every supplier bill is matched to a job or filed as not-job-related.</td></tr>';
-    return;
-  }
-
-  var html = '';
-  rows.forEach(function(r) {
-    var reason = MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason || '';
-    var suggestCell;
-    if (r.suggested_job_number) {
-      suggestCell = '<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 9px;" '
-        + 'onclick="matReconAccept(\'' + r.id + '\', \'' + escapeHtml(r.suggested_job_number) + '\')">'
-        + 'Accept ' + escapeHtml(r.suggested_job_number) + '</button>'
-        + (reason ? '<div style="font-size:10px;color:var(--sw-text-sec);margin-top:3px;">' + escapeHtml(reason) + '</div>' : '');
-    } else {
-      suggestCell = '<span style="color:var(--sw-text-sec);font-size:11px;">'
-        + (reason ? escapeHtml(reason) : 'No suggestion') + '</span>';
-    }
-    var jobInputId = 'matReconJob_' + r.id;
-    var assignCell = '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">'
-      + '<input id="' + jobInputId + '" class="form-input" placeholder="e.g. SWF-25010" '
-      + 'style="width:120px;font-size:11px;padding:3px 6px;" onkeydown="if(event.key===\'Enter\')matReconAssignInput(\'' + r.id + '\')">'
-      + '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 9px;" onclick="matReconAssignInput(\'' + r.id + '\')">Assign</button>'
-      + '<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:3px 9px;color:var(--sw-text-sec);" '
-      + 'onclick="matReconNotJobRelated(\'' + r.id + '\')" title="File as not job-related (no materials fact)">Not job-related</button>'
-      + '</div>';
-
-    html += '<tr>'
-      + '<td>' + escapeHtml(r.contact_name || '(unknown supplier)') + '</td>'
-      + '<td style="font-size:11px;">' + escapeHtml(r.invoice_number || '—') + '</td>'
-      + '<td style="text-align:right;font-family:var(--sw-font-num,monospace);">' + fmt$(r.total != null ? r.total : (r.sub_total || 0)) + '</td>'
-      + '<td style="font-size:11px;white-space:nowrap;">' + escapeHtml(r.invoice_date || '—') + '</td>'
-      + '<td>' + suggestCell + '</td>'
-      + '<td>' + assignCell + '</td>'
-      + '</tr>';
-  });
-  tbody.innerHTML = html;
-}
-
-// accept-suggestion — land the advisory suggested job as a manual fact.
-function matReconAccept(queueId, jobNumber) {
-  if (!confirm('Assign this bill to ' + jobNumber + '?\nThis records a materials cost on that job (manual).')) return;
-  _matReconAction('materials_recon_assign', { queue_id: queueId, use_suggestion: true },
-    'Assigned to ' + jobNumber);
-}
-
-// assign-to-job — the operator typed an explicit job number.
-function matReconAssignInput(queueId) {
-  var input = document.getElementById('matReconJob_' + queueId);
-  var jobNumber = (input && input.value || '').trim();
-  if (!jobNumber) { showToast('Type a job number first (e.g. SWF-25010)', 'warning'); if (input) input.focus(); return; }
-  if (!confirm('Assign this bill to ' + jobNumber + '?\nThis records a materials cost on that job (manual).')) return;
-  _matReconAction('materials_recon_assign', { queue_id: queueId, job_number: jobNumber },
-    'Assigned to ' + jobNumber);
-}
-
-// mark-not-job-related — file the bill, write no fact.
-function matReconNotJobRelated(queueId) {
-  if (!confirm('File this bill as NOT job-related?\nNo materials cost is recorded. You can revisit it later.')) return;
-  _matReconAction('materials_recon_not_job_related', { queue_id: queueId }, 'Filed as not job-related');
-}
-
-function _matReconAction(action, body, okMsg) {
-  opsPost(action, body).then(function(res) {
-    showToast(okMsg, 'success');
-    loadMaterialsRecon();
-  }).catch(function(e) {
-    showToast('Failed: ' + (e && e.message ? e.message : 'unknown error'), 'error');
-  });
-}
-
-// ════════════════════════════════════════════════════════════
-// <bills-to-place> — Finance tab, job profit catch-net
-//
-// The same materials_reconciliation_queue as the Materials-tab panel above,
-// worked as a money list: largest bill first, ex GST, one bill open at a time
-// with its Xero lines and Business Unit, and one press to place it on a job or
-// mark it not job related. Hidden unless _canSeeJobProfit().
-//
-// Reads:  materials_recon_queue (limit 1000 — the action's cap; it returns the
-//         NEWEST rows by invoice date, so a capped list says how many and how
-//         much it left out), get_xero_invoice (read-only point-get of one bill's
-//         lines; never get_xero_bill, which also writes the local Xero cache),
-//         search_jobs (find a job), job_detail?slim=1 (the job's xero_project).
-// Writes: materials_recon_assign { queue_id, job_id } — or { queue_id,
-//         use_suggestion:true } when the picked job IS the queue's suggestion,
-//         so the audit reads accept-suggestion — and
-//         materials_recon_not_job_related { queue_id }.
-// A job whose Xero Project already carries expenses shows "already costed in
-// Xero Projects" and the place button stays shut until the operator ticks
-// that this bill is not in that project: summing a project total and a placed
-// bill for the same job counts the cost twice. A project read that fails is
-// treated the same way (unknown is not "no project").
-// ════════════════════════════════════════════════════════════
-var BTP_QUEUE_LIMIT = 1000;
-var BTP_PAGE = 100;
-var _btp = { rows: [], stats: null, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: BTP_PAGE, done: [], seq: 0 };
-
-function _btpEsc(v) {
+function _mrqEsc(v) {
   return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function _btpEx(r) { return Number(r && r.sub_total != null ? r.sub_total : 0) || 0; }
-function _btpErrText(e) { return (e && e.message) ? e.message : 'unknown error'; }
+function _mrqEx(r) { return Number(r && r.sub_total != null ? r.sub_total : 0) || 0; }
+function _mrqErrText(e) { return (e && e.message) ? e.message : 'unknown error'; }
+function _mrqSumEx(rows) { return rows.reduce(function(t, r) { return t + _mrqEx(r); }, 0); }
+function _mrqRow(id) {
+  for (var i = 0; i < _matRecon.rows.length; i++) if (_matRecon.rows[i].id === id) return _matRecon.rows[i];
+  return null;
+}
 // Business Unit options named on a bill's lines (Xero tracking), de-duplicated.
-function _btpBusinessUnits(inv) {
+function _mrqBusinessUnits(inv) {
   var seen = {}, out = [];
   ((inv && inv.line_items) || []).forEach(function(li) {
     (li.tracking || []).forEach(function(t) {
@@ -18390,152 +18223,181 @@ function _btpBusinessUnits(inv) {
   });
   return out;
 }
-function _btpLineTracking(li) {
+function _mrqLineTracking(li) {
   return (li.tracking || []).map(function(t) {
     var n = String(t.Name || t.name || ''), o = String(t.Option || t.option || '');
     return /business\s*unit/i.test(n) ? o : (n + ': ' + o);
   }).filter(Boolean).join(', ');
 }
-function _btpProjectCosted(p) { return !!(p && p.project && Number(p.project.total_expenses) > 0); }
-// Place needs a picked job, a finished project read, and — when the job is
-// already costed in Xero Projects or the read failed — the operator's tick.
-function _btpCanPlace(id) {
-  var p = _btp.pick[id];
-  if (!p || !p.job || p.projectLoading) return false;
-  if ((_btpProjectCosted(p) || p.projectErr) && !p.ack) return false;
-  return !_btp.busy[id];
+
+// What the picked job's Xero Project says: 'costed' (expenses already on it,
+// needs the operator's tick), 'empty' (a project with zero expenses, one
+// press), or 'unconfirmed' (null, unreadable or a failed read, two presses).
+// The authoritative double-count guard belongs to the job profit engine
+// (plan PR 1), built separately; this hint only stops a careless one-press
+// place while Xero Projects cannot be confirmed.
+function _mrqProjectState(project) {
+  var exp = project && project.total_expenses != null ? Number(project.total_expenses) : NaN;
+  if (exp > 0) return 'costed';
+  if (exp === 0) return 'empty';
+  return 'unconfirmed';
+}
+function _mrqCanPress(id) {
+  var p = _matRecon.pick[id];
+  if (!p || !p.job || p.projectLoading || _matRecon.busy[id]) return false;
+  return !(p.project === 'costed' && !p.ack);
 }
 
-async function loadBillsToPlace() {
-  var body = document.getElementById('btpBody');
+// Open count and dollars. Exact when the stats are whole; lower bounds when
+// the stats read hit the row cap (or are missing while the list itself is full).
+function _mrqCensus() {
+  var s = _matRecon.stats, loaded = _matRecon.rows.length, loadedEx = _mrqSumEx(_matRecon.rows);
+  if (!s || s.open == null) {
+    return { open: loaded, openEx: loadedEx, lowerBound: _matRecon.listFull, missing: 0, missingEx: null, s: {} };
+  }
+  var lowerBound = Number(s.total_rows) >= MAT_RECON_STATS_CAP;
+  var open = Math.max(Number(s.open) || 0, loaded);
+  var hasEx = s.open_total_ex != null;
+  var openEx = hasEx ? Math.max(Number(s.open_total_ex) || 0, loadedEx) : loadedEx;
+  var missing = lowerBound ? 0 : open - loaded;
+  var missingEx = hasEx && missing > 0 ? Math.max(0, Math.round((openEx - loadedEx) * 100) / 100) : null;
+  return { open: open, openEx: openEx, lowerBound: lowerBound, missing: missing, missingEx: missingEx, s: s };
+}
+
+async function loadMaterialsRecon() {
+  var body = document.getElementById('matReconBody');
   if (!body) return;
-  if (!_canSeeJobProfit()) { body.innerHTML = ''; return; }
-  var seq = ++_btp.seq;
-  body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">Loading bills…</div>';
+  var seq = ++_matRecon.seq;
   try {
-    var data = await opsFetch('materials_recon_queue', { status: 'open', limit: BTP_QUEUE_LIMIT });
-    if (seq !== _btp.seq) return;
-    var rows = ((data && data.rows) || []).filter(function(r) { return r && r.status === 'open'; });
-    rows.sort(function(a, b) { return _btpEx(b) - _btpEx(a) || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')); });
-    _btp.rows = rows;
-    _btp.stats = (data && data.stats) || null;
-    _btp.shown = BTP_PAGE;
-    if (_btp.openId && !rows.some(function(r) { return r.id === _btp.openId; })) _btp.openId = null;
-    renderBillsToPlace();
+    var data = await opsFetch('materials_recon_queue', { status: 'open', limit: MAT_RECON_QUEUE_LIMIT });
+    if (seq !== _matRecon.seq) return;
+    var all = (data && data.rows) || [];
+    var rows = all.filter(function(r) { return r && r.status === 'open'; });
+    rows.sort(function(a, b) { return _mrqEx(b) - _mrqEx(a) || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')); });
+    _matRecon.rows = rows;
+    _matRecon.stats = (data && data.stats) || null;
+    _matRecon.listFull = all.length >= MAT_RECON_QUEUE_LIMIT;
+    _matRecon.shown = MAT_RECON_PAGE;
+    if (_matRecon.openId && !_mrqRow(_matRecon.openId)) _matRecon.openId = null;
+    renderMaterialsRecon();
   } catch (e) {
-    if (seq !== _btp.seq) return;
-    console.error('loadBillsToPlace error:', e);
-    _btp.rows = []; _btp.stats = null;
-    document.getElementById('btpSummary').textContent = '';
-    document.getElementById('btpCapNote').style.display = 'none';
-    body.innerHTML = '<div class="btp-err" style="padding:16px;">Could not read the bills list: ' + _btpEsc(_btpErrText(e)) + '</div>';
+    if (seq !== _matRecon.seq) return;
+    console.error('loadMaterialsRecon error:', e);
+    _matRecon.rows = []; _matRecon.stats = null;
+    document.getElementById('matReconSummary').textContent = '';
+    document.getElementById('matReconCapNote').style.display = 'none';
+    var cnt = document.getElementById('matReconOpenCount');
+    if (cnt) cnt.textContent = '—';
+    body.innerHTML = '<div class="mrq-muted" style="padding:18px;text-align:center;">'
+      + 'Reconciliation queue unavailable: ' + _mrqEsc(_mrqErrText(e))
+      + '<br>Backend actions <code>materials_recon_*</code> + the U3 migration may not be applied yet (M2 gate).</div>';
   }
 }
 
-function btpFilter(q) {
-  _btp.search = String(q || '').trim().toLowerCase();
-  _btp.shown = BTP_PAGE;
-  renderBillsToPlace();
+function matReconFilter(q) {
+  _matRecon.search = String(q || '').trim().toLowerCase();
+  _matRecon.shown = MAT_RECON_PAGE;
+  renderMaterialsRecon();
 }
 
-function _btpVisibleRows() {
-  var q = _btp.search;
-  if (!q) return _btp.rows;
-  return _btp.rows.filter(function(r) {
+function _mrqVisibleRows() {
+  var q = _matRecon.search;
+  if (!q) return _matRecon.rows;
+  return _matRecon.rows.filter(function(r) {
     return String(r.contact_name || '').toLowerCase().indexOf(q) !== -1
       || String(r.invoice_number || '').toLowerCase().indexOf(q) !== -1;
   });
 }
 
-function renderBillsToPlace() {
-  var body = document.getElementById('btpBody');
+function renderMaterialsRecon() {
+  var body = document.getElementById('matReconBody');
   if (!body) return;
   // Keep what the operator typed in a job search box across repaints.
-  body.querySelectorAll('[data-btp-q]').forEach(function(inp) {
-    var qid = inp.getAttribute('data-btp-q');
-    if (!_btp.pick[qid]) _btp.pick[qid] = {};
-    _btp.pick[qid].query = inp.value;
+  body.querySelectorAll('[data-mrq-q]').forEach(function(inp) {
+    var qid = inp.getAttribute('data-mrq-q');
+    if (!_matRecon.pick[qid]) _matRecon.pick[qid] = {};
+    _matRecon.pick[qid].query = inp.value;
   });
-  var s = _btp.stats || {};
-  var open = s.open != null ? Number(s.open) : _btp.rows.length;
-  var openEx = s.open_total_ex != null ? Number(s.open_total_ex) : _btp.rows.reduce(function(t, r) { return t + _btpEx(r); }, 0);
-  var sum = document.getElementById('btpSummary');
+  var c = _mrqCensus(), lb = c.lowerBound ? 'at least ' : '';
+  var cnt = document.getElementById('matReconOpenCount');
+  if (cnt) cnt.textContent = c.open + (c.lowerBound ? '+' : '');
+  var sum = document.getElementById('matReconSummary');
   if (sum) {
-    sum.innerHTML = '<b>' + open + ' open bill' + (open === 1 ? '' : 's') + '</b> · <b>' + fmt$(openEx) + '</b> ex GST on no job'
-      + (s.assigned != null ? ' · ' + s.assigned + ' placed' : '')
-      + (s.not_job_related != null ? ' · ' + s.not_job_related + ' not job related' : '');
+    sum.innerHTML = '<b>' + lb + c.open + ' open bill' + (c.open === 1 ? '' : 's') + '</b> · <b>' + lb + fmt$(c.openEx) + '</b> ex GST on no job'
+      + (c.s.assigned != null ? ' · ' + lb + c.s.assigned + ' placed' : '')
+      + (c.s.not_job_related != null ? ' · ' + lb + c.s.not_job_related + ' not job related' : '');
   }
-  var cap = document.getElementById('btpCapNote');
+  var cap = document.getElementById('matReconCapNote');
   if (cap) {
-    var missing = open - _btp.rows.length;
-    if (missing > 0) {
-      var loadedEx = _btp.rows.reduce(function(t, r) { return t + _btpEx(r); }, 0);
-      var missingEx = Math.max(0, Math.round((openEx - loadedEx) * 100) / 100);
-      cap.innerHTML = 'Showing the <b>' + _btp.rows.length + '</b> newest of <b>' + open + '</b> open bills, largest first. '
-        + 'The oldest <b>' + missing + '</b> (' + fmt$(missingEx) + ' ex GST) are not in this list yet; they come in on Refresh once fewer than ' + BTP_QUEUE_LIMIT.toLocaleString('en-AU') + ' bills are open.';
-      cap.style.display = '';
-    } else {
-      cap.style.display = 'none';
+    var note = '';
+    if (c.lowerBound) {
+      note = 'These counts are lower bounds: the queue count stops at ' + MAT_RECON_STATS_CAP.toLocaleString('en-AU') + ' rows, so there may be more open bills than it shows.'
+        + (_matRecon.listFull ? ' This list holds the <b>' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + '</b> newest open bills, largest first; older ones come in on Refresh as these are placed.' : '');
+    } else if (c.missing > 0) {
+      note = 'Showing the <b>' + _matRecon.rows.length + '</b> newest of <b>' + c.open + '</b> open bills, largest first. '
+        + 'The oldest <b>' + c.missing + '</b>' + (c.missingEx != null ? ' (' + fmt$(c.missingEx) + ' ex GST)' : '') + ' are not in this list yet; they come in on Refresh once fewer than ' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + ' bills are open.';
     }
+    cap.innerHTML = note;
+    cap.style.display = note ? '' : 'none';
   }
-  var done = document.getElementById('btpJustDone');
+  var done = document.getElementById('matReconJustDone');
   if (done) {
-    done.style.display = _btp.done.length ? '' : 'none';
-    done.innerHTML = _btp.done.length ? '<div class="btp-sec-title" style="margin-bottom:4px;">Done this session</div>'
-      + _btp.done.map(function(d) { return '<div data-btp-done>' + _btpEsc(d) + '</div>'; }).join('') : '';
+    done.style.display = _matRecon.done.length ? '' : 'none';
+    done.innerHTML = _matRecon.done.length ? '<div class="mrq-sec-title" style="margin-bottom:4px;">Done this session</div>'
+      + _matRecon.done.map(function(d) { return '<div data-mrq-done>' + _mrqEsc(d) + '</div>'; }).join('') : '';
   }
 
-  var rows = _btpVisibleRows();
-  if (!_btp.rows.length) {
-    body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">No open bills. Every supplier bill is on a job or marked not job related.</div>';
+  var rows = _mrqVisibleRows();
+  if (!_matRecon.rows.length) {
+    body.innerHTML = '<div class="mrq-muted" style="padding:20px;text-align:center;">Queue clear — every supplier bill is matched to a job or filed as not-job-related.</div>';
     return;
   }
   if (!rows.length) {
-    body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">No open bill matches that search.</div>';
+    body.innerHTML = '<div class="mrq-muted" style="padding:20px;text-align:center;">No open bill matches that search.</div>';
     return;
   }
-  var html = '<div class="data-table-wrap"><table class="btp-table"><thead><tr>'
-    + '<th class="num">Amount ex GST</th><th>Supplier</th><th>Date</th><th>Bill #</th><th>Business Unit</th><th>Suggested job</th>'
+  var html = '<div class="data-table-wrap" style="overflow-x:auto;"><table class="mrq-table"><thead><tr>'
+    + '<th>Supplier</th><th>Date</th><th>Bill #</th><th class="num">Amount ex GST</th><th>Business Unit</th><th>Suggested job</th>'
     + '</tr></thead><tbody>';
-  rows.slice(0, _btp.shown).forEach(function(r) {
-    var isOpen = _btp.openId === r.id;
-    var L = _btp.lines[r.id];
-    var bu = L && L.invoice ? (_btpBusinessUnits(L.invoice).join(', ') || 'None on the lines')
-      : (L && L.error ? 'Could not read' : '<span class="btp-muted">Open to read</span>');
-    html += '<tr class="btp-row' + (isOpen ? ' open' : '') + '" data-btp-row="' + _btpEsc(r.id) + '" data-btp-act="toggle" data-btp-id="' + _btpEsc(r.id) + '">'
-      + '<td class="num">' + fmt$(_btpEx(r)) + '</td>'
-      + '<td>' + _btpEsc(r.contact_name || '(no supplier name)') + '</td>'
-      + '<td style="white-space:nowrap;">' + _btpEsc(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '-') + '</td>'
-      + '<td>' + _btpEsc(r.invoice_number || '-') + '</td>'
-      + '<td data-btp-bu>' + (L && L.invoice ? _btpEsc(bu) : bu) + '</td>'
-      + '<td>' + (r.suggested_job_number ? _btpEsc(r.suggested_job_number) : '<span class="btp-muted">None</span>') + '</td>'
+  rows.slice(0, _matRecon.shown).forEach(function(r) {
+    var isOpen = _matRecon.openId === r.id;
+    var L = _matRecon.lines[r.id];
+    var bu = L && L.invoice ? _mrqEsc(_mrqBusinessUnits(L.invoice).join(', ') || 'None on the lines')
+      : (L && L.error ? 'Could not read' : '<span class="mrq-muted">Open to read</span>');
+    html += '<tr class="mrq-row' + (isOpen ? ' open' : '') + '" data-mrq-row="' + _mrqEsc(r.id) + '" data-mrq-act="toggle" data-mrq-id="' + _mrqEsc(r.id) + '">'
+      + '<td>' + _mrqEsc(r.contact_name || '(unknown supplier)') + '</td>'
+      + '<td style="white-space:nowrap;">' + _mrqEsc(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '—') + '</td>'
+      + '<td>' + _mrqEsc(r.invoice_number || '—') + '</td>'
+      + '<td class="num">' + fmt$(_mrqEx(r)) + '</td>'
+      + '<td data-mrq-bu>' + bu + '</td>'
+      + '<td>' + (r.suggested_job_number ? _mrqEsc(r.suggested_job_number) : '<span class="mrq-muted">None</span>') + '</td>'
       + '</tr>';
-    if (isOpen) html += '<tr class="btp-detail" data-btp-detail="' + _btpEsc(r.id) + '"><td colspan="6">' + _btpDetailHtml(r) + '</td></tr>';
+    if (isOpen) html += '<tr class="mrq-detail" data-mrq-detail="' + _mrqEsc(r.id) + '"><td colspan="6">' + _mrqDetailHtml(r) + '</td></tr>';
   });
   html += '</tbody></table></div>';
-  if (rows.length > _btp.shown) {
-    html += '<div style="text-align:center;margin:12px 0;"><button class="btn btn-secondary btn-sm" data-btp-act="more">Show ' + Math.min(BTP_PAGE, rows.length - _btp.shown) + ' more of ' + (rows.length - _btp.shown) + '</button></div>';
+  if (rows.length > _matRecon.shown) {
+    html += '<div style="text-align:center;margin:12px 0;"><button class="btn btn-secondary btn-sm" data-mrq-act="more">Show ' + Math.min(MAT_RECON_PAGE, rows.length - _matRecon.shown) + ' more of ' + (rows.length - _matRecon.shown) + '</button></div>';
   }
   body.innerHTML = html;
 }
 
-function _btpDetailHtml(r) {
-  var id = r.id, L = _btp.lines[id] || {}, p = _btp.pick[id] || {};
-  var h = '<div class="btp-grid"><div>';
-  h += '<div class="btp-sec-title">The bill\'s lines (read from Xero)</div>';
+function _mrqDetailHtml(r) {
+  var id = r.id, L = _matRecon.lines[id] || {}, p = _matRecon.pick[id] || {};
+  var h = '<div class="mrq-grid"><div>';
+  h += '<div class="mrq-sec-title">The bill\'s lines (read from Xero)</div>';
   if (L.loading) {
-    h += '<div class="btp-muted">Reading the bill from Xero…</div>';
+    h += '<div class="mrq-muted">Reading the bill from Xero…</div>';
   } else if (L.error) {
-    h += '<div class="btp-err">Could not read the bill\'s lines: ' + _btpEsc(L.error) + '</div>'
-      + '<button class="btn btn-secondary btn-sm" style="margin-top:6px;" data-btp-act="lines" data-btp-id="' + _btpEsc(id) + '">Try again</button>';
+    h += '<div class="mrq-err">Could not read the bill\'s lines: ' + _mrqEsc(L.error) + '</div>'
+      + '<button class="btn btn-secondary btn-sm" style="margin-top:6px;" data-mrq-act="lines" data-mrq-id="' + _mrqEsc(id) + '">Try again</button>';
   } else if (L.invoice) {
     var inv = L.invoice, items = inv.line_items || [];
-    h += '<table class="btp-lines"><thead><tr><th>Description</th><th>Account</th><th>Business Unit</th><th class="num">Amount</th></tr></thead><tbody>';
-    if (!items.length) h += '<tr><td colspan="4" class="btp-muted">No lines on this bill.</td></tr>';
+    h += '<table class="mrq-lines"><thead><tr><th>Description</th><th>Account</th><th>Business Unit</th><th class="num">Amount</th></tr></thead><tbody>';
+    if (!items.length) h += '<tr><td colspan="4" class="mrq-muted">No lines on this bill.</td></tr>';
     items.forEach(function(li) {
       var amt = li.line_amount != null ? li.line_amount : (Number(li.quantity || 0) * Number(li.unit_amount || 0));
-      h += '<tr data-btp-line><td>' + _btpEsc(li.description || '-') + '</td><td>' + _btpEsc(li.account_code || '-') + '</td>'
-        + '<td>' + _btpEsc(_btpLineTracking(li) || '-') + '</td><td class="num">' + fmt$(amt) + '</td></tr>';
+      h += '<tr data-mrq-line><td>' + _mrqEsc(li.description || '—') + '</td><td>' + _mrqEsc(li.account_code || '—') + '</td>'
+        + '<td>' + _mrqEsc(_mrqLineTracking(li) || '—') + '</td><td class="num">' + fmt$(amt) + '</td></tr>';
     });
     h += '</tbody></table>';
     var facts = [];
@@ -18544,117 +18406,111 @@ function _btpDetailHtml(r) {
     if (String(inv.status || '').toUpperCase() === 'PAID') facts.push('Paid in Xero');
     else if (Number(inv.amount_due) > 0) facts.push(fmt$(inv.amount_due) + ' still owed');
     if (inv.line_amount_types) facts.push('Lines are ' + String(inv.line_amount_types).toLowerCase().replace('exclusive', 'ex GST').replace('inclusive', 'inc GST'));
-    if (facts.length) h += '<div class="btp-facts">' + _btpEsc(facts.join(' · ')) + '</div>';
+    if (facts.length) h += '<div class="mrq-facts">' + _mrqEsc(facts.join(' · ')) + '</div>';
   }
-  h += '<div class="btp-facts">Bill total ' + fmt$(_btpEx(r)) + ' ex GST' + (r.total != null ? ' (' + fmt$(r.total) + ' inc GST)' : '') + '.</div>';
+  h += '<div class="mrq-facts">Bill total ' + fmt$(_mrqEx(r)) + ' ex GST' + (r.total != null ? ' (' + fmt$(r.total) + ' inc GST)' : '') + '.</div>';
   h += '</div><div>';
 
-  h += '<div class="btp-sec-title">Place it on a job</div>';
+  h += '<div class="mrq-sec-title">Place it on a job</div>';
   if (r.suggested_job_id && !(p.job && p.job.id === r.suggested_job_id)) {
-    h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + _btpEsc(r.suggested_job_number || 'a job') + '</b>'
-      + (r.suggestion_reason ? ' <span class="btp-muted">(' + _btpEsc(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
-      + ' <button class="btn btn-secondary btn-sm" data-btp-act="usesuggest" data-btp-id="' + _btpEsc(id) + '">Use it</button></div>';
+    h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + _mrqEsc(r.suggested_job_number || 'a job') + '</b>'
+      + (r.suggestion_reason ? ' <span class="mrq-muted">(' + _mrqEsc(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
+      + ' <button class="btn btn-secondary btn-sm" data-mrq-act="usesuggest" data-mrq-id="' + _mrqEsc(id) + '">Use it</button></div>';
   }
-  h += '<div class="btp-find"><input class="form-input" data-btp-q="' + _btpEsc(id) + '" placeholder="Job #, client or address" value="' + _btpEsc(p.query || '') + '">'
-    + '<button class="btn btn-secondary btn-sm" data-btp-act="find" data-btp-id="' + _btpEsc(id) + '">Find</button></div>';
-  if (p.searching) h += '<div class="btp-muted" style="margin-top:6px;">Searching…</div>';
-  else if (p.searchHint) h += '<div class="btp-muted" style="margin-top:6px;">' + _btpEsc(p.searchHint) + '</div>';
-  else if (p.searchErr) h += '<div class="btp-err">Search failed: ' + _btpEsc(p.searchErr) + '</div>';
+  h += '<div class="mrq-find"><input class="form-input" data-mrq-q="' + _mrqEsc(id) + '" placeholder="Job #, client or address" value="' + _mrqEsc(p.query || '') + '">'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="find" data-mrq-id="' + _mrqEsc(id) + '">Find</button></div>';
+  if (p.searching) h += '<div class="mrq-muted" style="margin-top:6px;">Searching…</div>';
+  else if (p.searchHint) h += '<div class="mrq-muted" style="margin-top:6px;">' + _mrqEsc(p.searchHint) + '</div>';
+  else if (p.searchErr) h += '<div class="mrq-err">Search failed: ' + _mrqEsc(p.searchErr) + '</div>';
   else if (p.results && !p.job) {
-    if (!p.results.length) h += '<div class="btp-muted" style="margin-top:6px;">No job matches that.</div>';
+    if (!p.results.length) h += '<div class="mrq-muted" style="margin-top:6px;">No job matches that.</div>';
     else {
-      h += '<div class="btp-results">';
+      h += '<div class="mrq-results">';
       p.results.forEach(function(j) {
-        h += '<button class="btp-pickbtn" data-btp-act="pick" data-btp-id="' + _btpEsc(id) + '" data-btp-job="' + _btpEsc(j.id) + '">'
-          + '<b>' + _btpEsc(j.job_number || 'No number') + '</b> ' + _btpEsc(j.client_name || '')
-          + ' <span class="btp-muted">' + _btpEsc([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
+        h += '<button class="mrq-pickbtn" data-mrq-act="pick" data-mrq-id="' + _mrqEsc(id) + '" data-mrq-job="' + _mrqEsc(j.id) + '">'
+          + '<b>' + _mrqEsc(j.job_number || 'No number') + '</b> ' + _mrqEsc(j.client_name || '')
+          + ' <span class="mrq-muted">' + _mrqEsc([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
       });
       h += '</div>';
     }
   }
+  var jobLabel = p.job ? _mrqEsc(p.job.job_number || 'this job') : '';
   if (p.job) {
     var j = p.job;
-    h += '<div class="btp-job" data-btp-picked>'
-      + '<div><b>' + _btpEsc(j.job_number || 'No number') + '</b> ' + _btpEsc(j.client_name || '')
-      + ' <a href="#" data-btp-act="unpick" data-btp-id="' + _btpEsc(id) + '" style="font-size:11px;margin-left:6px;">change</a></div>'
-      + '<div class="btp-muted">' + _btpEsc([j.site_address || j.site_suburb, j.type, j.status].filter(Boolean).join(' · ')) + '</div>';
+    h += '<div class="mrq-job" data-mrq-picked>'
+      + '<div><b>' + _mrqEsc(j.job_number || 'No number') + '</b> ' + _mrqEsc(j.client_name || '')
+      + ' <a href="#" data-mrq-act="unpick" data-mrq-id="' + _mrqEsc(id) + '" style="font-size:11px;margin-left:6px;">change</a></div>'
+      + '<div class="mrq-muted">' + _mrqEsc([j.site_address || j.site_suburb, j.type, j.status].filter(Boolean).join(' · ')) + '</div>';
     if (p.projectLoading) {
-      h += '<div class="btp-proj none">Checking Xero Projects for this job…</div>';
-    } else if (p.projectErr) {
-      h += '<div class="btp-proj costed" data-btp-project="unknown">Could not check Xero Projects for this job (' + _btpEsc(p.projectErr) + '). Check the job in Xero before placing this bill.</div>';
-    } else if (_btpProjectCosted(p)) {
-      h += '<div class="btp-proj costed" data-btp-project="costed"><b>Already costed in Xero Projects</b>: ' + _btpEsc(p.project.project_name || 'project')
-        + ', ' + fmt$(p.project.total_expenses) + ' of expenses. If the bookkeeper already put this bill in that project, placing it here counts it twice.</div>';
-    } else if (p.project) {
-      h += '<div class="btp-proj none" data-btp-project="empty">Xero Project ' + _btpEsc(p.project.project_name || '') + ' has no expenses yet.</div>';
-    } else {
-      h += '<div class="btp-proj none" data-btp-project="none">No Xero Project found for this job.</div>';
-    }
-    if (!p.projectLoading && (_btpProjectCosted(p) || p.projectErr)) {
-      h += '<label class="btp-ack"><input type="checkbox" data-btp-ack="' + _btpEsc(id) + '"' + (p.ack ? ' checked' : '') + '>'
+      h += '<div class="mrq-proj calm">Checking Xero Projects for this job…</div>';
+    } else if (p.project === 'costed') {
+      h += '<div class="mrq-proj warn" data-mrq-project="costed"><b>Already costed in Xero Projects</b>: ' + _mrqEsc(p.projectInfo.project_name || 'project')
+        + ', ' + fmt$(p.projectInfo.total_expenses) + ' of expenses. If the bookkeeper already put this bill in that project, placing it here counts it twice.</div>'
+        + '<label class="mrq-ack"><input type="checkbox" data-mrq-ack="' + _mrqEsc(id) + '"' + (p.ack ? ' checked' : '') + '>'
         + '<span>I have checked this bill is not in that job\'s Xero Project</span></label>';
+    } else if (p.project === 'empty') {
+      h += '<div class="mrq-proj calm" data-mrq-project="empty">Xero Project ' + _mrqEsc(p.projectInfo.project_name || '') + ' has no expenses yet.</div>';
+    } else {
+      h += '<div class="mrq-proj warn" data-mrq-project="unconfirmed">' + _mrqEsc(MAT_RECON_UNCONFIRMED) + '</div>';
     }
     h += '</div>';
   }
-  h += '<div class="btp-actions">'
-    + '<button class="btn btn-primary btn-sm" data-btp-act="place" data-btp-id="' + _btpEsc(id) + '"' + (_btpCanPlace(id) ? '' : ' disabled') + '>'
-    + (p.job ? 'Place on ' + _btpEsc(p.job.job_number || 'this job') : 'Place on a job') + '</button>'
-    + '<button class="btn btn-secondary btn-sm" data-btp-act="notjob" data-btp-id="' + _btpEsc(id) + '"' + (_btp.busy[id] ? ' disabled' : '') + '>Not job related</button>'
+  var placeText = !p.job ? 'Place on a job'
+    : (p.project === 'unconfirmed' && p.armed ? 'Confirm: place on ' + jobLabel + ' without Xero Projects' : 'Place on ' + jobLabel);
+  h += '<div class="mrq-actions">'
+    + '<button class="btn btn-primary btn-sm" data-mrq-act="place" data-mrq-id="' + _mrqEsc(id) + '"' + (_mrqCanPress(id) ? '' : ' disabled') + '>' + placeText + '</button>'
+    + '<button class="btn btn-secondary btn-sm" data-mrq-act="notjob" data-mrq-id="' + _mrqEsc(id) + '"' + (_matRecon.busy[id] ? ' disabled' : '') + '>Not job related</button>'
     + '</div>';
-  if (_btp.busy[id]) h += '<div class="btp-muted" style="margin-top:6px;">Saving…</div>';
-  if (_btp.err[id]) h += '<div class="btp-err" data-btp-err>' + _btpEsc(_btp.err[id]) + '</div>';
+  if (_matRecon.busy[id]) h += '<div class="mrq-muted" style="margin-top:6px;">Saving…</div>';
+  if (_matRecon.err[id]) h += '<div class="mrq-err" data-mrq-err>' + _mrqEsc(_matRecon.err[id]) + '</div>';
   h += '</div></div>';
   return h;
 }
 
-function _btpRow(id) {
-  for (var i = 0; i < _btp.rows.length; i++) if (_btp.rows[i].id === id) return _btp.rows[i];
-  return null;
-}
-
-async function _btpLoadLines(id) {
-  var r = _btpRow(id);
+async function _mrqLoadLines(id) {
+  var r = _mrqRow(id);
   if (!r) return;
-  _btp.lines[id] = { loading: true };
-  renderBillsToPlace();
+  _matRecon.lines[id] = { loading: true };
+  renderMaterialsRecon();
   try {
     var res = await opsFetch('get_xero_invoice', { xero_invoice_id: r.xero_invoice_id });
-    _btp.lines[id] = { invoice: (res && (res.invoice || res.bill)) || { line_items: [] } };
+    _matRecon.lines[id] = { invoice: (res && (res.invoice || res.bill)) || { line_items: [] } };
   } catch (e) {
-    _btp.lines[id] = { error: _btpErrText(e) };
+    _matRecon.lines[id] = { error: _mrqErrText(e) };
   }
-  renderBillsToPlace();
+  renderMaterialsRecon();
 }
 
-async function _btpFind(id) {
-  var input = document.querySelector('[data-btp-q="' + id + '"]');
+async function _mrqFind(id) {
+  var input = document.querySelector('[data-mrq-q="' + id + '"]');
   var q = String(input ? input.value : '').trim();
-  var p = _btp.pick[id] = { query: q };
-  if (q.length < 2) { p.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderBillsToPlace(); return; }
+  var p = _matRecon.pick[id] = { query: q };
+  if (q.length < 2) { p.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderMaterialsRecon(); return; }
   p.searching = true;
-  renderBillsToPlace();
+  renderMaterialsRecon();
   try {
     var res = await opsFetch('search_jobs', { q: q });
-    if (_btp.pick[id] !== p) return;
+    if (_matRecon.pick[id] !== p) return;
     p.results = (res && res.results) || [];
   } catch (e) {
-    if (_btp.pick[id] !== p) return;
-    p.searchErr = _btpErrText(e);
+    if (_matRecon.pick[id] !== p) return;
+    p.searchErr = _mrqErrText(e);
   }
   p.searching = false;
-  renderBillsToPlace();
+  renderMaterialsRecon();
 }
 
 // Pick a job: take what search_jobs already said about it, then read its
-// xero_project from job_detail (slim) for the double-count check.
-async function _btpPick(id, jobId, known) {
-  var prev = _btp.pick[id] || {};
-  var p = _btp.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false };
-  delete _btp.err[id];
-  renderBillsToPlace();
+// xero_project from job_detail (slim) for the double-count hint.
+async function _mrqPick(id, jobId, known) {
+  var prev = _matRecon.pick[id] || {};
+  var p = _matRecon.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false, armed: false };
+  delete _matRecon.err[id];
+  renderMaterialsRecon();
+  var info = null;
   try {
     var d = await opsFetch('job_detail', { jobId: jobId, slim: '1' });
-    if (_btp.pick[id] !== p) return;
+    if (_matRecon.pick[id] !== p) return;
     var job = (d && d.job) || {};
     p.job = {
       id: job.id || jobId,
@@ -18665,112 +18521,115 @@ async function _btpPick(id, jobId, known) {
       type: job.type || p.job.type,
       status: job.status || p.job.status,
     };
-    p.project = (d && d.xero_project) || null;
+    info = (d && d.xero_project) || null;
   } catch (e) {
-    if (_btp.pick[id] !== p) return;
-    p.projectErr = _btpErrText(e);
+    if (_matRecon.pick[id] !== p) return;
+    console.warn('materials recon: job_detail read failed', e);
   }
+  p.projectInfo = info;
+  p.project = _mrqProjectState(info);
   p.projectLoading = false;
-  renderBillsToPlace();
+  renderMaterialsRecon();
 }
 
-function _btpSettle(id, line, statsDelta) {
-  var r = _btpRow(id);
-  _btp.rows = _btp.rows.filter(function(x) { return x.id !== id; });
-  if (_btp.stats) {
-    if (_btp.stats.open != null) _btp.stats.open = Math.max(0, Number(_btp.stats.open) - 1);
-    if (_btp.stats.open_total_ex != null) _btp.stats.open_total_ex = Math.round((Number(_btp.stats.open_total_ex) - _btpEx(r)) * 100) / 100;
-    Object.keys(statsDelta).forEach(function(k) { if (_btp.stats[k] != null) _btp.stats[k] = Number(_btp.stats[k]) + statsDelta[k]; });
+// The one writer for both presses. A refused write keeps the bill on the
+// list with the server's own words; a landed one leaves the list.
+async function _matReconAction(id, action, body, doneLabel, statsDelta, failPrefix) {
+  var r = _mrqRow(id);
+  if (!r || _matRecon.busy[id]) return;
+  _matRecon.busy[id] = true; delete _matRecon.err[id];
+  renderMaterialsRecon();
+  try {
+    await opsPost(action, body);
+  } catch (e) {
+    _matRecon.busy[id] = false;
+    _matRecon.err[id] = failPrefix + _mrqErrText(e);
+    renderMaterialsRecon();
+    return;
   }
-  _btp.done.unshift(line);
-  if (_btp.openId === id) _btp.openId = null;
-  delete _btp.pick[id]; delete _btp.busy[id]; delete _btp.err[id];
-  renderBillsToPlace();
+  showToast(doneLabel, 'success');
+  _matRecon.rows = _matRecon.rows.filter(function(x) { return x.id !== id; });
+  var s = _matRecon.stats;
+  if (s) {
+    if (s.open != null) s.open = Math.max(0, Number(s.open) - 1);
+    if (s.open_total_ex != null) s.open_total_ex = Math.round((Number(s.open_total_ex) - _mrqEx(r)) * 100) / 100;
+    Object.keys(statsDelta).forEach(function(k) { if (s[k] != null) s[k] = Number(s[k]) + statsDelta[k]; });
+  }
+  _matRecon.done.unshift(doneLabel);
+  if (_matRecon.openId === id) _matRecon.openId = null;
+  delete _matRecon.pick[id]; delete _matRecon.busy[id]; delete _matRecon.err[id];
+  renderMaterialsRecon();
 }
 
-async function _btpPlace(id) {
-  var r = _btpRow(id), p = _btp.pick[id];
-  if (!r || !_btpCanPlace(id)) return;
+function _mrqBillLabel(r) {
+  return fmt$(_mrqEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '');
+}
+
+// Place: one press for a costed-and-ticked or empty project; an unconfirmed
+// project arms on the first press and posts on the second.
+function _mrqPlace(id) {
+  var r = _mrqRow(id), p = _matRecon.pick[id];
+  if (!r || !_mrqCanPress(id)) return;
+  if (p.project === 'unconfirmed' && !p.armed) { p.armed = true; renderMaterialsRecon(); return; }
   var body = (r.suggested_job_id && p.job.id === r.suggested_job_id)
     ? { queue_id: r.id, use_suggestion: true }
     : { queue_id: r.id, job_id: p.job.id };
-  _btp.busy[id] = true; delete _btp.err[id];
-  renderBillsToPlace();
-  try {
-    await opsPost('materials_recon_assign', body);
-    var label = fmt$(_btpEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '') + ' placed on ' + (p.job.job_number || 'the job');
-    showToast(label, 'success');
-    _btpSettle(id, label, { assigned: 1 });
-  } catch (e) {
-    _btp.busy[id] = false;
-    _btp.err[id] = 'Not placed: ' + _btpErrText(e);
-    renderBillsToPlace();
-  }
+  _matReconAction(id, 'materials_recon_assign', body,
+    _mrqBillLabel(r) + ' placed on ' + (p.job.job_number || 'the job'), { assigned: 1 }, 'Not placed: ');
 }
 
-async function _btpNotJob(id) {
-  var r = _btpRow(id);
-  if (!r || _btp.busy[id]) return;
-  _btp.busy[id] = true; delete _btp.err[id];
-  renderBillsToPlace();
-  try {
-    await opsPost('materials_recon_not_job_related', { queue_id: r.id });
-    var label = fmt$(_btpEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '') + ' marked not job related';
-    showToast(label, 'success');
-    _btpSettle(id, label, { not_job_related: 1 });
-  } catch (e) {
-    _btp.busy[id] = false;
-    _btp.err[id] = 'Not saved: ' + _btpErrText(e);
-    renderBillsToPlace();
-  }
+function _mrqNotJob(id) {
+  var r = _mrqRow(id);
+  if (!r) return;
+  _matReconAction(id, 'materials_recon_not_job_related', { queue_id: r.id },
+    _mrqBillLabel(r) + ' marked not job related', { not_job_related: 1 }, 'Not saved: ');
 }
 
-(function wireBillsToPlace() {
+(function wireMaterialsRecon() {
   function onReady() {
-    var host = document.getElementById('subBillstoplace');
-    if (!host || host.__btpWired) return;
-    host.__btpWired = true;
+    var host = document.getElementById('matReconPanel');
+    if (!host || host.__mrqWired) return;
+    host.__mrqWired = true;
     host.addEventListener('click', function(ev) {
-      var el = ev.target.closest('[data-btp-act]');
+      var el = ev.target.closest('[data-mrq-act]');
       if (!el || !host.contains(el)) return;
       if (el.tagName === 'TR' && ev.target.closest('a, button, input, label')) return;
-      var act = el.getAttribute('data-btp-act'), id = el.getAttribute('data-btp-id');
+      var act = el.getAttribute('data-mrq-act'), id = el.getAttribute('data-mrq-id');
       if (el.tagName === 'A') ev.preventDefault();
       if (act === 'toggle') {
-        _btp.openId = _btp.openId === id ? null : id;
-        if (_btp.openId && !_btp.lines[id]) _btpLoadLines(id); else renderBillsToPlace();
-      } else if (act === 'more') { _btp.shown += BTP_PAGE; renderBillsToPlace(); }
-      else if (act === 'lines') _btpLoadLines(id);
-      else if (act === 'find') _btpFind(id);
+        _matRecon.openId = _matRecon.openId === id ? null : id;
+        if (_matRecon.openId && !_matRecon.lines[id]) _mrqLoadLines(id); else renderMaterialsRecon();
+      } else if (act === 'more') { _matRecon.shown += MAT_RECON_PAGE; renderMaterialsRecon(); }
+      else if (act === 'lines') _mrqLoadLines(id);
+      else if (act === 'find') _mrqFind(id);
       else if (act === 'pick') {
-        var jobId = el.getAttribute('data-btp-job');
-        var p = _btp.pick[id] || {};
-        var known = (p.results || []).filter(function(j) { return j.id === jobId; })[0];
-        _btpPick(id, jobId, known);
+        var jobId = el.getAttribute('data-mrq-job');
+        var known = ((_matRecon.pick[id] || {}).results || []).filter(function(j) { return j.id === jobId; })[0];
+        _mrqPick(id, jobId, known);
       } else if (act === 'usesuggest') {
-        var r = _btpRow(id);
-        if (r && r.suggested_job_id) _btpPick(id, r.suggested_job_id, { id: r.suggested_job_id, job_number: r.suggested_job_number });
+        var r = _mrqRow(id);
+        if (r && r.suggested_job_id) _mrqPick(id, r.suggested_job_id, { id: r.suggested_job_id, job_number: r.suggested_job_number });
       } else if (act === 'unpick') {
-        var q = (_btp.pick[id] || {});
-        _btp.pick[id] = { query: q.query, results: q.results };
-        renderBillsToPlace();
-      } else if (act === 'place') _btpPlace(id);
-      else if (act === 'notjob') _btpNotJob(id);
+        var q = _matRecon.pick[id] || {};
+        _matRecon.pick[id] = { query: q.query, results: q.results };
+        renderMaterialsRecon();
+      } else if (act === 'place') _mrqPlace(id);
+      else if (act === 'notjob') _mrqNotJob(id);
     });
     host.addEventListener('change', function(ev) {
-      var id = ev.target.getAttribute && ev.target.getAttribute('data-btp-ack');
-      if (!id || !_btp.pick[id]) return;
-      _btp.pick[id].ack = !!ev.target.checked;
-      renderBillsToPlace();
+      var id = ev.target.getAttribute && ev.target.getAttribute('data-mrq-ack');
+      if (!id || !_matRecon.pick[id]) return;
+      _matRecon.pick[id].ack = !!ev.target.checked;
+      renderMaterialsRecon();
     });
     host.addEventListener('keydown', function(ev) {
-      var id = ev.target.getAttribute && ev.target.getAttribute('data-btp-q');
-      if (id && ev.key === 'Enter') { ev.preventDefault(); _btpFind(id); }
+      var id = ev.target.getAttribute && ev.target.getAttribute('data-mrq-q');
+      if (id && ev.key === 'Enter') { ev.preventDefault(); _mrqFind(id); }
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady); else onReady();
 })();
-// </bills-to-place>
+// </materials-recon>
 
 async function loadPendingPrices() {
   try {
@@ -28724,12 +28583,10 @@ function initApp() {
     if (cloud && cloud.supabase && cloud.supabase.auth) {
       cloud.supabase.auth.getUser().then(function(res) {
         _opsUserEmail = (res && res.data && res.data.user && res.data.user.email) || _opsUserEmail;
-        syncJobProfitAccess();
         if (typeof rerenderJobDetailOverviewIfMakesafe === 'function') rerenderJobDetailOverviewIfMakesafe();
       }).catch(function() {});
       cloud.supabase.auth.onAuthStateChange(function(_event, session) {
         _opsUserEmail = (session && session.user && session.user.email) || _opsUserEmail;
-        syncJobProfitAccess();
       });
     }
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }

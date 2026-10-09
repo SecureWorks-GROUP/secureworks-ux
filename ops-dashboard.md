@@ -10,11 +10,11 @@
 A fresh open of the plain address lands on Jobs (Captain 2026-10-06). Every tab switch writes the tab into the address bar, so a refresh, a restored browser tab or a bookmark stays on the tab it names.
 1. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar. A first open lands on the job-based month (calendar v3, default on; after that the last view and range used stick): one thin line per job, business lines on top, deliveries in the day. Show (Everything, Labour, Materials, Business) and Type (All, Patios, Fencing, Insurance) are tick boxes, all ticked to start, where unticking an option hides it; Insurance is an umbrella over separate Repairs and Make Safes options, each with its own colour (guard: `tests/e2e/ops-calendar-tick-filters.spec.js`). 1 Week, 2 Weeks, Month and the Crew view are one press away. Off switch: `?calv3=0` for one page load or `localStorage.sw_cal_v3 = '0'`. Rules: `AGENTS.md` → "Ops Dash calendar v3 look".
-3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Xero push
+3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Job profit (owner-only sub-tab; contract in `ops.html` `// <job-profit>`), Xero push
 4. **Dispatch** — The Dispatch view of any job (job list with To do beside All jobs, search and work type buttons, make-safes by search only; job header with the six-stop stage rail and next-step line, which write only Dispatch's own stage record, never the job status; Scope and notes with Save note; a right panel of Sources, Context story and Messages that collapses to a floating tab, rules in `AGENTS.md` → "Ops Dash tab set"), with the live purchase order board (PO creation, delivery tracking, scope-to-PO extraction) below it
 5. **Sales** — Booking and Performance
 
-Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Health and Job P&L are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
+Today (morning brief, attention items, AI alerts), Inbox, Approvals and Finance Health are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
 
 **When a trade's hours were worked (Captain 2026-10-12).** Trades now give the date, start and finish for every line of hours they invoice (`trade-app.md` → "Pay tab: when the time was worked"). Ops shows them beside the hours on a trade invoice's lines, and shows nothing extra for an older line that carries no times: Trade Bills lists them in a "Times worked" fold under the trade's name (`swTradeInvoiceWhenHtml`), and the job P&L "Trade Line Detail" table shows the day and the span under the hours. The job's Labour Reconciliation panel does not show them: the `labour_reconciliation` read carries no lines today. One reader, `swTradeTimeEntry`, under `// <trade-time-entry-ops>` in `ops.html`. Guard: `tests/e2e/ops-trade-invoice-times.spec.js`.
 
@@ -60,6 +60,7 @@ See edge-functions.md for full list. Key ones:
 - `morning_brief` — AI-generated daily summary
 - `complete_and_invoice` — compound action (mark complete + Xero invoice)
 - `scope_to_po` — extract materials from scope_json into PO line items
+- `job_profit_list` (+ `view=rollup`), `job_profit` — read-only profit engine behind Financials > Job profit (owner/admin only)
 
 ## Data Quality Issues (audit 3 March 2026)
 - **site_suburb/site_address**: NULL on 100% of jobs — location features non-functional

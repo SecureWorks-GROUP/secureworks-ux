@@ -201,6 +201,13 @@ test('data rules on screen: drafts, deleted invoices, view counts, no machine ro
   await boot(page);
   await openJob(page);
   await expect(page.locator('#ov2Headline')).toHaveText('Deposit stage since today. 1 draft invoice not issued.');
+  await expect(page.locator('#ov2Story .ov2-story-head')).toContainText('Job story, built');
+  await expect(page.locator('#ov2Story .ov2-story-now')).toContainText("Where it's at");
+  await expect(page.locator('#ov2Story .ov2-story-moments li')).toHaveCount(4);
+  await expect(page.locator('#ov2Story .ov2-story-money>div').first()).toContainText('Not recorded');
+  await expect(page.locator('#ov2Story .ov2-story-money>div').nth(1)).toContainText('$0.00');
+  await expect(page.locator('#ov2Story .ov2-story-last')).toContainText('Customer said');
+  await expect(page.locator('#ov2Story .ov2-story-unknown')).toContainText('Nothing listed in the story card.');
   await expect(page.locator('#ov2Paid')).toHaveText('Invoiced $0.00 \u00b7 Paid $0.00 \u00b7 inc GST');
   await expect(page.locator('#ov2Cust')).toContainText('Draft INV-9002 $3,571.43, not issued');
   const files = page.locator('#ov2Files .ov2-file');
@@ -236,6 +243,7 @@ test('a written story shows its sections and when it was written', async ({ page
   await boot(page, { overviewOpts: { writtenStory: true } });
   await openJob(page);
   await expect(page.locator('#ov2Headline')).toHaveText('Avery has accepted the quote and wants to pay, but there is still no invoice they can pay.');
+  await page.locator('.ov2-story-more summary').click();
   await expect(page.locator('#ov2Story')).toContainText('Replace the 23m back and side fence, the old asbestos fence comes out');
   await expect(page.locator('#ov2Story [data-ov2-group="know"]')).toContainText('Good to know 2');
   await expect(page.locator('#ov2Stamp')).toContainText('Story as of');
@@ -294,6 +302,9 @@ test('the conversation filters, and the choice is remembered', async ({ page }) 
 test('Next: "Show the message" finds the cited text; Rewrite asks for a new story', async ({ page }) => {
   await boot(page);
   await openJob(page);
+  const reads = await overviewFetches(page);
+  await page.locator('#ov2Story .ov2-story-head').getByRole('button', { name: 'Refresh' }).click();
+  await expect.poll(() => overviewFetches(page)).toBe(reads + 1);
   await filterButton(page, 'Calls').click();
   await page.locator('#ov2Next').getByRole('button', { name: 'Show the message' }).click();
   await expect(page.locator(`#ov2Conv [data-ov2-msg="${IDS.msgAcceptAndPay}"]`)).toHaveClass(/flash/);

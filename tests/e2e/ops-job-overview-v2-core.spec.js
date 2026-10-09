@@ -262,6 +262,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(flat.state).toBe('stale');
     expect(flat.sections.headline).toBe('Waiting on the deposit.');
     expect(C.storyText({ status: 'fresh', sections: { headline: '' } }).state).toBe('none');
+    expect(C.storyText({ status: 'fresh', text: { sections: { headline: 'Waiting on a reply.' } }, writer: { on: true, open_request: { id: 'request-1' } } }))
+      .toMatchObject({ writer_on: true, request_open: true });
   });
 
   test('a long dash or an emoji blocks a text; a plain hyphen does not', () => {

@@ -10,11 +10,11 @@
 A fresh open of the plain address lands on Jobs (Captain 2026-10-06). Every tab switch writes the tab into the address bar, so a refresh, a restored browser tab or a bookmark stays on the tab it names.
 1. **Jobs** — Job list with filters, slide-out detail panel, status pipeline, scope data
 2. **Calendar** — Full calendar view, crew assignments, drag scheduling, crew utilisation sidebar
-3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Clear Debt, Xero push
+3. **Financials** — Invoices, Quotes, Purchase Orders (with Supplier Price Updates), Work Orders, Bill Reconciliation, Trade Bills, Clear Debt, Job profit (owner-only sub-tab; contract in `ops.html` `// <job-profit>`), Xero push
 4. **Dispatch** — Dispatch concept on sample data, with the live purchase order board (PO creation, delivery tracking, scope-to-PO extraction) below it
 5. **Sales** — Booking and Performance
 
-Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Health and Job P&L are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
+Today (morning brief, attention items, AI alerts), Inbox, Approvals and Finance Health are hidden on the front end; their back end stays. Rules for the hidden views: `AGENTS.md` → "Ops Dash tab set".
 
 ## Key Features
 - AI chat sidebar (Claude sonnet via ops-ai)
@@ -56,6 +56,7 @@ See edge-functions.md for full list. Key ones:
 - `morning_brief` — AI-generated daily summary
 - `complete_and_invoice` — compound action (mark complete + Xero invoice)
 - `scope_to_po` — extract materials from scope_json into PO line items
+- `job_profit_list` (+ `view=rollup`), `job_profit` — read-only profit engine behind Financials > Job profit (owner/admin only)
 
 ## Data Quality Issues (audit 3 March 2026)
 - **site_suburb/site_address**: NULL on 100% of jobs — location features non-functional

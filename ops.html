@@ -17728,7 +17728,8 @@ async function _jpFillTypeAverage(seq, workType) {
     var row = null;
     if (r && r.view === 'rollup' && Array.isArray(r.by_type)) r.by_type.forEach(function(t) { if (t && t.work_type === workType) row = t; });
     text = row && _jpNum(row.margin_pct) != null
-      ? 'vs ' + _jpEsc(workType) + ' ' + _jpNum(row.margin_pct).toFixed(1) + '% (all finished ' + _jpEsc(workType) + ' jobs)'
+      ? 'vs ' + _jpEsc(workType) + ' ' + _jpNum(row.margin_pct).toFixed(1) + '% pooled margin over all finished ' + _jpEsc(workType) + ' jobs with a publishable margin'
+        + (_jpNum(row.jobs_with_margin) != null && _jpNum(row.jobs) != null ? ' (' + _jpEsc(row.jobs_with_margin) + ' of ' + _jpEsc(row.jobs) + ')' : '')
       : _jpEsc(workType) + ' average unknown';
   } catch (e) {
     delete _jp.typeAvg[workType];
@@ -17805,7 +17806,7 @@ function _jpRenderDetail(data) {
   else {
     h += '<div class="jp-wrap"><table class="jp-table"><thead><tr><th>Trade</th><th class="num">Lines</th><th>First charge</th><th>Last charge</th><th class="num">Amount</th></tr></thead><tbody>';
     trades.forEach(function(t) {
-      h += '<tr data-trade-user="' + _jpEsc(t.user_id || '') + '"><td>' + _jpEsc(t.party || 'Unnamed trade') + '</td><td class="num">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td>' + _jpDate(t.first) + '</td><td>' + _jpDate(t.last) + '</td><td class="num">' + _jpMoney(t.amount_ex) + '</td></tr>';
+      h += '<tr data-trade-party="' + _jpEsc(t.party_id || '') + '"><td>' + _jpEsc(t.party || 'Unnamed trade') + '</td><td class="num">' + _jpEsc(t.lines != null ? t.lines : '') + '</td><td>' + _jpDate(t.first) + '</td><td>' + _jpDate(t.last) + '</td><td class="num">' + _jpMoney(t.amount_ex) + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }

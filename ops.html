@@ -17996,8 +17996,8 @@ async function loadQuotes() {
 // margin. Null evidence renders as Unknown, never $0, and a suppressed margin
 // stays suppressed. Company totals are never a sum of a loaded list page: until
 // the server answers view=rollup with totals, the Company view says so.
-// The tab is hidden unless the signed-in email is on the owner allow-list
-// (_canSeeJobProfit); ops-api independently refuses anyone but admin/owner.
+// The tab is hidden unless the signed-in email is on JOB_PROFIT_VIEWERS
+// (_canSeeJobProfit, owner only); ops-api independently refuses anyone but admin/owner.
 // ════════════════════════════════════════════════════════════
 
 var JP_PAGE = 100;
@@ -18030,7 +18030,11 @@ var JP_SOURCE_LABELS = {
 };
 var _jp = { mode: 'jobs', rows: [], offset: 0, more: false, total: null, labels: null, listSeq: 0, detailSeq: 0, rollupSeq: 0, rollup: null, open: null };
 
-function _canSeeJobProfit() { return _canAdminCancelMakesafe(); }
+// Owner only (approved MVP visibility). Client-side gate; ops-api enforces admin/owner.
+var JOB_PROFIT_VIEWERS = ['marnin@secureworkswa.com.au'];
+function _canSeeJobProfit() {
+  return !!(_opsUserEmail && JOB_PROFIT_VIEWERS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
+}
 
 function syncJobProfitTabVisibility() {
   var btn = document.querySelector('[data-sub="jobprofit"]');

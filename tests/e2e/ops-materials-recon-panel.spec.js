@@ -2,9 +2,10 @@
 // replaced in the page by the fixture below (made-up suppliers, jobs and amounts). No live write.
 //
 // Contract under guard:
-//  - The list is materials_recon_queue (limit 1000), largest ex-GST bill first, with the open count
-//    and dollars, and says how many open bills the capped read left out. Once the stats read hits
-//    the 1,000-row cap (stats.total_rows >= 1000) every count reads "at least".
+//  - The list is materials_recon_queue (limit 1000), largest ex-GST bill first. A list short of its
+//    limit holds every open bill, so the open count and dollars are exact and come from its rows. A
+//    full list reads "at least" for the open figures and says it is capped. The placed and
+//    not-job-related counts come from stats and read "at least" once stats.total_rows >= 1000.
 //  - Opening a bill reads its lines through get_xero_invoice (never get_xero_bill, which writes the
 //    local Xero cache) and shows each line's Business Unit.
 //  - Place posts materials_recon_assign { queue_id, job_id } for a searched job, or
@@ -42,7 +43,7 @@ function buildFixture() {
           suggested_job_id: 'job-sugg', suggested_job_number: 'SWF-25500', suggestion_confidence: 'medium', suggestion_reason: 'ref_no_job',
         }),
       ],
-      stats: { open: 5, assigned: 4, not_job_related: 2, total_rows: 11, open_total_inc: 13000, open_total_ex: 11822.5 },
+      stats: { open: 3, assigned: 4, not_job_related: 2, total_rows: 9, open_total_inc: 11684.75, open_total_ex: 10622.5 },
     },
     invoices: {
       'xinv-q-big': {
@@ -137,7 +138,11 @@ async function pickSearched(page, id, query, jobId) {
 
 test.use({ viewport: { width: 1360, height: 1000 } });
 
-test('the list is largest first, with the open count, the dollars and what the capped read left out', async ({ page }) => {
+function fillerRows(n) {
+  return Array.from({ length: n }, (_, i) => queueRow('q-fill-' + i, { sub_total: 50, total: 55, invoice_date: '2026-08-01' }));
+}
+
+test('the list is largest first, with the exact open count and dollars and no capped note', async ({ page }) => {
   await openMaterials(page);
   const reads = await actions(page, 'materials_recon_queue');
   expect(reads.map((r) => r.params)).toEqual([{ status: 'open', limit: 1000 }]);
@@ -148,20 +153,30 @@ test('the list is largest first, with the open count, the dollars and what the c
   await expect(row(page, 'q-big')).toContainText('WS-1001');
   await expect(row(page, 'q-big')).toContainText(/20 Sept? 2026/);
   await expect(row(page, 'q-mid')).toContainText('SWF-25500');
-  await expect(page.locator('#matReconOpenCount')).toHaveText('5');
-  await expect(page.locator('#matReconSummary')).toHaveText('5 open bills · $11,822.50 ex GST on no job · 4 placed · 2 not job related');
-  await expect(page.locator('#matReconCapNote')).toHaveText('Showing the 3 newest of 5 open bills, largest first. The oldest 2 ($1,200.00 ex GST) are not in this list yet; they come in on Refresh once fewer than 1,000 bills are open.');
+  await expect(page.locator('#matReconOpenCount')).toHaveText('3');
+  await expect(page.locator('#matReconSummary')).toHaveText('3 open bills · $10,622.50 ex GST on no job · 4 placed · 2 not job related');
+  await expect(page.locator('#matReconCapNote')).toBeHidden();
 });
 
-test('once the stats read hits the 1,000-row cap every count reads "at least" and no left-out count is shown', async ({ page }) => {
+test('a well-worked queue (300 open of 1,200 rows ever) reads its open bills exactly; only the stats counts read "at least"', async ({ page }) => {
   const fixture = buildFixture();
-  // A truncated census can undercount below the loaded list; it must never go negative.
-  fixture.queue.stats = { open: 2, assigned: 900, not_job_related: 98, total_rows: 1000, open_total_ex: 500 };
+  fixture.queue.rows = fixture.queue.rows.concat(fillerRows(297));
+  fixture.queue.stats = { open: 300, assigned: 850, not_job_related: 50, total_rows: 1200, open_total_ex: 25472.5 };
   await openMaterials(page, { fixture });
-  await expect(page.locator('#matReconOpenCount')).toHaveText('3+');
-  await expect(page.locator('#matReconSummary')).toHaveText('at least 3 open bills · at least $10,622.50 ex GST on no job · at least 900 placed · at least 98 not job related');
-  await expect(page.locator('#matReconCapNote')).toHaveText('These counts are lower bounds: the queue count stops at 1,000 rows, so there may be more open bills than it shows.');
-  await expect(page.locator('#matReconCapNote')).not.toContainText('-');
+  await expect(page.locator('#matReconOpenCount')).toHaveText('300');
+  await expect(page.locator('#matReconSummary')).toHaveText('300 open bills · $25,472.50 ex GST on no job · at least 850 placed · at least 50 not job related');
+  await expect(page.locator('#matReconCapNote')).toBeHidden();
+});
+
+test('a full 1,000-row list reads "at least" for the open figures and says the list is capped', async ({ page }) => {
+  const fixture = buildFixture();
+  fixture.queue.rows = fixture.queue.rows.concat(fillerRows(997));
+  // The stats read is cut at the cap too and can undercount below the loaded list.
+  fixture.queue.stats = { open: 940, assigned: 400, not_job_related: 60, total_rows: 1400, open_total_ex: 40000 };
+  await openMaterials(page, { fixture });
+  await expect(page.locator('#matReconOpenCount')).toHaveText('1000+');
+  await expect(page.locator('#matReconSummary')).toHaveText('at least 1000 open bills · at least $60,472.50 ex GST on no job · at least 400 placed · at least 60 not job related');
+  await expect(page.locator('#matReconCapNote')).toHaveText('This list holds the 1,000 newest open bills, largest first. There may be more open bills than it counts; older ones come in on Refresh as these are placed.');
 });
 
 test('missing stats fall back to the loaded rows', async ({ page }) => {
@@ -202,7 +217,7 @@ test('a job with a zero-expense Xero Project places in one press with { queue_id
   await d.locator('[data-mrq-act="place"]').click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_assign', body: { queue_id: 'q-big', job_id: 'job-empty' } }]);
   await expect(row(page, 'q-big')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('4 open bills · $3,372.50 ex GST on no job · 5 placed · 2 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $2,172.50 ex GST on no job · 5 placed · 2 not job related');
   await expect(page.locator('#matReconJustDone [data-mrq-done]')).toHaveText(['$8,450.00 Westside Steel WS-1001 placed on SWP-26050']);
 });
 
@@ -271,7 +286,7 @@ test('Not job related posts materials_recon_not_job_related with the queue id on
   await detail(page, 'q-small').locator('[data-mrq-act="notjob"]').click();
   expect(await posts(page)).toEqual([{ action: 'materials_recon_not_job_related', body: { queue_id: 'q-small' } }]);
   await expect(row(page, 'q-small')).toHaveCount(0);
-  await expect(page.locator('#matReconSummary')).toHaveText('4 open bills · $11,610.00 ex GST on no job · 4 placed · 3 not job related');
+  await expect(page.locator('#matReconSummary')).toHaveText('2 open bills · $10,410.00 ex GST on no job · 4 placed · 3 not job related');
 });
 
 test('a refused write keeps the bill on the list and shows the server message', async ({ page }) => {
@@ -282,5 +297,5 @@ test('a refused write keeps the bill on the list and shows the server message', 
   await d.locator('[data-mrq-act="place"]').click();
   await expect(d.locator('[data-mrq-err]')).toHaveText('Not placed: ' + refusal);
   await expect(row(page, 'q-big')).toHaveCount(1);
-  await expect(page.locator('#matReconSummary')).toContainText('5 open bills');
+  await expect(page.locator('#matReconSummary')).toContainText('3 open bills');
 });

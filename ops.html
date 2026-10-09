@@ -18140,9 +18140,9 @@ async function loadMaterials() {
 //   assign-to-job        → materials_recon_assign { queue_id, job_id }
 //   mark-not-job-related → materials_recon_not_job_related { queue_id }
 // accept/assign land a high_manual materials fact; not-job-related writes none.
-// The queue's stats come from one unranged read that the API's 1,000-row cap
-// can cut short, so once stats.total_rows reaches 1,000 every count is a lower
-// bound and is labelled "at least".
+// The queue's stats come from one unranged read over every row ever queued,
+// which the API's 1,000-row cap can cut short; once stats.total_rows reaches
+// 1,000 the counts that rely on them are labelled "at least" (see _mrqCensus).
 // Depends on the U3 migration (job_materials_facts + materials_reconciliation_queue)
 // AND the ops-api materials_recon_* actions; until both ship, the panel shows a
 // wiring note instead of failing loudly.
@@ -18208,20 +18208,22 @@ function _mrqCanPress(id) {
   return !(p.project === 'costed' && !p.ack);
 }
 
-// Open count and dollars. Exact when the stats are whole; lower bounds when
-// the stats read hit the row cap (or are missing while the list itself is full).
+// Open count and dollars, decided from the list read first. A list that came
+// back short of its limit holds every open bill, so its rows are the exact
+// open set. A full list means 1,000+ open rows, so the stats read behind it is
+// cut at the cap too and every open figure is a lower bound. The placed and
+// not-job-related counts come only from stats, so they are lower bounds once
+// stats.total_rows reaches the cap.
 function _mrqCensus() {
-  var s = _matRecon.stats, loaded = _matRecon.rows.length, loadedEx = _mrqSumEx(_matRecon.rows);
-  if (!s || s.open == null) {
-    return { open: loaded, openEx: loadedEx, lowerBound: _matRecon.listFull, missing: 0, missingEx: null, s: {} };
-  }
-  var lowerBound = Number(s.total_rows) >= MAT_RECON_STATS_CAP;
-  var open = Math.max(Number(s.open) || 0, loaded);
-  var hasEx = s.open_total_ex != null;
-  var openEx = hasEx ? Math.max(Number(s.open_total_ex) || 0, loadedEx) : loadedEx;
-  var missing = lowerBound ? 0 : open - loaded;
-  var missingEx = hasEx && missing > 0 ? Math.max(0, Math.round((openEx - loadedEx) * 100) / 100) : null;
-  return { open: open, openEx: openEx, lowerBound: lowerBound, missing: missing, missingEx: missingEx, s: s };
+  var s = _matRecon.stats || {}, loaded = _matRecon.rows.length, loadedEx = _mrqSumEx(_matRecon.rows);
+  var full = _matRecon.listFull;
+  return {
+    open: full ? Math.max(Number(s.open) || 0, loaded) : loaded,
+    openEx: full ? Math.max(Number(s.open_total_ex) || 0, loadedEx) : loadedEx,
+    openLowerBound: full,
+    statsLowerBound: Number(s.total_rows) >= MAT_RECON_STATS_CAP,
+    s: s
+  };
 }
 
 async function loadMaterialsRecon() {
@@ -18278,25 +18280,20 @@ function renderMaterialsRecon() {
     if (!_matRecon.pick[qid]) _matRecon.pick[qid] = {};
     _matRecon.pick[qid].query = inp.value;
   });
-  var c = _mrqCensus(), lb = c.lowerBound ? 'at least ' : '';
+  var c = _mrqCensus(), lb = c.openLowerBound ? 'at least ' : '', slb = c.statsLowerBound ? 'at least ' : '';
   var cnt = document.getElementById('matReconOpenCount');
-  if (cnt) cnt.textContent = c.open + (c.lowerBound ? '+' : '');
+  if (cnt) cnt.textContent = c.open + (c.openLowerBound ? '+' : '');
   var sum = document.getElementById('matReconSummary');
   if (sum) {
     sum.innerHTML = '<b>' + lb + c.open + ' open bill' + (c.open === 1 ? '' : 's') + '</b> · <b>' + lb + fmt$(c.openEx) + '</b> ex GST on no job'
-      + (c.s.assigned != null ? ' · ' + lb + c.s.assigned + ' placed' : '')
-      + (c.s.not_job_related != null ? ' · ' + lb + c.s.not_job_related + ' not job related' : '');
+      + (c.s.assigned != null ? ' · ' + slb + c.s.assigned + ' placed' : '')
+      + (c.s.not_job_related != null ? ' · ' + slb + c.s.not_job_related + ' not job related' : '');
   }
   var cap = document.getElementById('matReconCapNote');
   if (cap) {
-    var note = '';
-    if (c.lowerBound) {
-      note = 'These counts are lower bounds: the queue count stops at ' + MAT_RECON_STATS_CAP.toLocaleString('en-AU') + ' rows, so there may be more open bills than it shows.'
-        + (_matRecon.listFull ? ' This list holds the <b>' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + '</b> newest open bills, largest first; older ones come in on Refresh as these are placed.' : '');
-    } else if (c.missing > 0) {
-      note = 'Showing the <b>' + _matRecon.rows.length + '</b> newest of <b>' + c.open + '</b> open bills, largest first. '
-        + 'The oldest <b>' + c.missing + '</b>' + (c.missingEx != null ? ' (' + fmt$(c.missingEx) + ' ex GST)' : '') + ' are not in this list yet; they come in on Refresh once fewer than ' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + ' bills are open.';
-    }
+    var note = c.openLowerBound
+      ? 'This list holds the <b>' + MAT_RECON_QUEUE_LIMIT.toLocaleString('en-AU') + '</b> newest open bills, largest first. There may be more open bills than it counts; older ones come in on Refresh as these are placed.'
+      : '';
     cap.innerHTML = note;
     cap.style.display = note ? '' : 'none';
   }

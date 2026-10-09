@@ -6220,6 +6220,10 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-modals.js?v=4'}
 ]);
 </script>
+<!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
+<script>
+__swOpsStampAssets([{t:'js', u:'modules/ops-job-overview-v2.js?v=1'}]);
+</script>
 
 <!-- ══════════ JAVASCRIPT ══════════ -->
 <script>
@@ -21104,6 +21108,9 @@ function renderOverviewView(data) {
     document.getElementById('jdOverview').innerHTML = renderMakesafeOpsDetail(data);
     return;
   }
+  // <job-overview-v2-switch> modules/ops-job-overview-v2.js; render() returns false to fall back to the classic Overview below
+  if (window.JobOverviewV2 && JobOverviewV2.render(data)) return;
+  // </job-overview-v2-switch>
   var html = '';
   // Section 1: Client Card
   html += '<div style="background:var(--sw-card);padding:14px;margin-bottom:12px;box-shadow:var(--sw-shadow);">';
@@ -21346,6 +21353,7 @@ function renderOverviewView(data) {
   if (evts.length > 5) html += '<div style="margin-top:6px;"><a href="#" onclick="event.preventDefault();showJobSubView(\x27history\x27)" style="font-size:11px;color:var(--sw-mid);">View full history &#8594;</a></div>';
   html += '</div>';
   document.getElementById('jdOverview').innerHTML = html;
+  if (window.JobOverviewV2) JobOverviewV2.afterClassic(data); // staff only: a small "Try the new Overview" link
 
   // Load job actions async
   loadJobActions(j.id);

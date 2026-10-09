@@ -591,6 +591,23 @@ make-safe that still owes the trade's report remains visible even after the
 attendance assignment is complete. All and History keep their historical scope.
 Guard: `scripts/test-trade-today-run-list.js` (wired into `npm run test:e2e`).
 
+## Job page Overview v2 (`modules/ops-job-overview-v2.js`)
+
+The job page Overview rebuilt around the job context system (customer and money,
+files strip, timeline, story, conversation). Off by default: `?overview=v2` or
+`localStorage.sw_overview_v2 = '1'`, `?overview=classic` wins; staff get a
+Try / Back to classic link. `renderOverviewView` calls `JobOverviewV2.render(data)`
+after the make-safe branch (`// <job-overview-v2-switch>`) and paints the classic
+Overview whenever it returns false, so a throw there must keep returning false,
+never break the page. It reads `job_detail` plus ops-api `job_overview` (slow:
+cached per job for 3 minutes, one read at a time, stale answers dropped) and
+writes only `request_job_story` and the Comms tab's own `send_sms` request. Keep
+its ids `ov2`-prefixed and its CSS under `.ov2` (injected on first render); never
+reuse Comms ids, which the Comms poll writes into. Pure rules live between
+`// <job-overview-v2-core>` sentinels, run in node by
+`tests/e2e/ops-job-overview-v2-core.spec.js`. Contract, data rules and states:
+`docs/job-overview-v2.md`. Guard: `tests/e2e/ops-job-overview-v2.spec.js`.
+
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 
 The fence-designer scoping tool writes every internal note into

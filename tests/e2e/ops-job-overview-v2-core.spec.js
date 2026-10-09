@@ -207,6 +207,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     const fromNotes = C.openItems({ loops: [] }, detail().job, overview().notes, NOW);
     expect(fromNotes.waiting).toHaveLength(1);
     expect(fromNotes.waiting[0].tag.words).toBe('AVERY');
+    const known = C.openItems({ loops: [] }, detail().job, { items: [{ id: 'note-2', status: 'open', what: 'Timing is unconfirmed.', owner: 'us', group: 'good_to_know' }] }, NOW);
+    expect(known.know).toHaveLength(1);
   });
 
   test('whose move, in words', () => {

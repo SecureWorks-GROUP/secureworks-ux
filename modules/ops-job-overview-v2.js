@@ -364,6 +364,9 @@ var JobOverviewV2Core = (function () {
   // ── Open items: blocking, waiting on someone, good to know ──
 
   function loopGroup(l) {
+    var named = lower(l.group);
+    if (named === 'blocking' || named === 'waiting') return named;
+    if (named === 'good_to_know' || named === 'know') return 'know';
     var rule = lower(l.rule), st = lower(l.status), o = lower(l.owner);
     if (rule === 'constraint' || rule === 'claim' || st === 'closing_evidence' || st === 'not_due' || st === 'unconfirmed') return 'know';
     if (o === 'customer' || o === 'third_party') return 'waiting';
@@ -387,7 +390,8 @@ var JobOverviewV2Core = (function () {
       var role = lower(n.owner || (commit ? n.from_role : n.to_role));
       return {
         key: 'note:' + str(n.id || hash(n.what)), owner: ROLE_OWNER[role] || 'unknown',
-        owner_name: commit ? n.from_name : n.to_name, rule: n.item_type, status: n.status,
+        owner_name: n.owner_name || (commit ? n.from_name : n.to_name), group: n.group,
+        rule: n.item_type, status: n.status,
         what: n.what, why: n.quote, since: n.opened_at, blocks: n.blocks, source: 'ledger', closes_when: null
       };
     });

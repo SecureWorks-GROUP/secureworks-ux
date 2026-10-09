@@ -4540,6 +4540,46 @@
     .msr-fb-btn.dark:hover { background: var(--sw-dark-deep); }
     .msr-fb-btn.brand { background: var(--sw-orange); color: #fff; font-weight: 800; }
     .msr-fb-btn.brand:hover { background: var(--sw-orange-hover); }
+
+    /* BILLS TO PLACE (Finance tab, job profit catch-net), class prefix btp- */
+    .btp-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+    .btp-summary { font-size: 12px; color: var(--sw-text-sec); }
+    .btp-summary b { color: var(--sw-dark); }
+    .btp-basis { font-size: 11px; color: var(--sw-text-sec); margin-bottom: 10px; max-width: 900px; line-height: 1.5; }
+    .btp-cap { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; background: rgba(230,126,34,0.08); color: var(--sw-dark); border: 1px solid rgba(230,126,34,0.3); }
+    .btp-done { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; background: rgba(39,174,96,0.07); border: 1px solid rgba(39,174,96,0.25); }
+    .btp-done div + div { margin-top: 3px; }
+    .btp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .btp-table th { text-align: left; font-weight: 600; color: var(--sw-text-sec); padding: 4px 10px; border-bottom: 2px solid var(--sw-border, #eee); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+    .btp-table td { padding: 7px 10px; border-bottom: 1px solid var(--sw-border, #eee); vertical-align: top; }
+    .btp-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .btp-row { cursor: pointer; }
+    .btp-row:hover td { background: var(--sw-light, #f6f8fa); }
+    .btp-row.open td { background: var(--sw-light, #f6f8fa); font-weight: 600; }
+    .btp-muted { color: var(--sw-text-sec); font-size: 11px; }
+    .btp-detail > td { background: #fff; padding: 12px 14px 16px; border-bottom: 2px solid var(--sw-border, #eee); }
+    .btp-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr); gap: 18px; }
+    @media (max-width: 860px) { .btp-grid { grid-template-columns: 1fr; } }
+    .btp-sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: var(--sw-text-sec); margin-bottom: 6px; }
+    .btp-lines { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .btp-lines td, .btp-lines th { padding: 4px 6px; border-bottom: 1px solid var(--sw-border, #eee); text-align: left; vertical-align: top; }
+    .btp-lines th { font-size: 10px; color: var(--sw-text-sec); font-weight: 600; text-transform: uppercase; }
+    .btp-lines .num { text-align: right; white-space: nowrap; }
+    .btp-facts { font-size: 11px; color: var(--sw-text-sec); margin-top: 6px; }
+    .btp-find { display: flex; gap: 6px; }
+    .btp-find input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
+    .btp-results { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .btp-pickbtn { text-align: left; background: #fff; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
+    .btp-pickbtn:hover { border-color: var(--sw-orange); }
+    .btp-job { margin-top: 8px; border: 1px solid var(--sw-border, #e2e8f0); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+    .btp-proj { margin-top: 6px; font-size: 12px; padding: 6px 8px; border-radius: 6px; }
+    .btp-proj.costed { background: rgba(230,126,34,0.10); border: 1px solid rgba(230,126,34,0.35); }
+    .btp-proj.none { color: var(--sw-text-sec); }
+    .btp-ack { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; font-size: 12px; }
+    .btp-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .btp-err { color: var(--sw-red, #e74c3c); font-size: 12px; margin-top: 6px; }
+    .btp-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btp-job a { color: var(--sw-orange); }
   </style>
 <script>
 __swOpsStampAssets([
@@ -4812,6 +4852,8 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
         <button class="sub-tab" onclick="showSubTab('financehealth')" data-sub="financehealth" title="Read-only invoice-data-quality holes">Finance Health</button>
         <button class="sub-tab" onclick="showSubTab('jobpnl')" data-sub="jobpnl" title="Per-job P&amp;L — revenue, labour cost, margin (make-safe v1)">Job P&amp;L</button>
+        <!-- Job profit: hidden unless the signed-in email is on JOB_PROFIT_VIEWERS (syncJobProfitAccess). -->
+        <button class="sub-tab" id="billsToPlaceTab" onclick="showSubTab('billstoplace')" data-sub="billstoplace" style="display:none;" title="Supplier bills on no job yet: place each on a job or mark it not job related">Bills to place</button>
       </div>
 
       <!-- Invoices -->
@@ -4972,6 +5014,21 @@ __swOpsStampAssets([
             <tbody id="pnlTableBody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--sw-text-sec);">Select the Job P&amp;L tab to load</td></tr></tbody>
           </table>
         </div>
+      </div>
+
+      <!-- Bills to place (job profit catch-net) — search // <bills-to-place> -->
+      <div id="subBillstoplace" class="sub-view">
+        <div class="btp-head">
+          <div class="section-heading" style="margin:0;">Bills to place</div>
+          <span id="btpSummary" class="btp-summary"></span>
+          <div style="flex:1;"></div>
+          <input type="text" class="filter-search" id="btpSearch" placeholder="Search supplier / bill #" oninput="btpFilter(this.value)" style="width:200px;">
+          <button class="btn btn-secondary btn-sm" onclick="loadBillsToPlace()" title="Read the list again">&#8635; Refresh</button>
+        </div>
+        <div class="btp-basis">Supplier bills that sit on no job yet, largest first. Amounts are ex GST. Xero Projects stays where the bookkeeper puts supplier bills against a job; this list only catches bills that are on no job at all. Placing a bill records it as a materials cost on that job.</div>
+        <div id="btpCapNote" class="btp-cap" style="display:none;"></div>
+        <div id="btpJustDone" class="btp-done" style="display:none;"></div>
+        <div id="btpBody"></div>
       </div>
     </div>
 
@@ -6556,6 +6613,26 @@ var _opsUserEmail = null;
 var MAKESAFE_CANCEL_ADMINS = ['marnin@secureworkswa.com.au', 'shaun@secureworkswa.com.au'];
 function _canAdminCancelMakesafe() {
   return !!(_opsUserEmail && MAKESAFE_CANCEL_ADMINS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
+}
+// Job profit (Finance tab) — who sees it. Same honest posture as the cancel
+// gate above: a UI hide, not server authorization. Marnin only for now.
+var JOB_PROFIT_VIEWERS = ['marnin@secureworkswa.com.au'];
+function _canSeeJobProfit() {
+  return !!(_opsUserEmail && JOB_PROFIT_VIEWERS.indexOf(String(_opsUserEmail).toLowerCase()) !== -1);
+}
+// Shows or hides the job-profit sub-tabs once the operator email is known.
+// Leaving the allowlist while a hidden tab is open drops back to Invoices.
+function syncJobProfitAccess() {
+  var allowed = _canSeeJobProfit();
+  var btn = document.getElementById('billsToPlaceTab');
+  if (btn) btn.style.display = allowed ? '' : 'none';
+  var view = document.getElementById('subBillstoplace');
+  if (!allowed && view) {
+    var wasOpen = view.classList.contains('active');
+    var body = document.getElementById('btpBody');
+    if (body) body.innerHTML = '';
+    if (wasOpen) showSubTab('invoices');
+  }
 }
 // M-F — cancel reason set (codes = backend allow-list; labels = Marnin's copy).
 var MS_CANCEL_REASONS_OPS = [
@@ -16809,6 +16886,7 @@ function renderJobList(container, columns) {
 // ════════════════════════════════════════════════════════════
 
 function showSubTab(tab) {
+  if (tab === 'billstoplace' && !_canSeeJobProfit()) tab = 'invoices';
   document.querySelectorAll('.sub-tab').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.sub-view').forEach(function(el) { el.classList.remove('active'); });
   var btn = document.querySelector('[data-sub="' + tab + '"]');
@@ -16824,6 +16902,7 @@ function showSubTab(tab) {
   if (tab === 'cleardebt') loadClearDebt();
   if (tab === 'financehealth') loadFinanceHealth();
   if (tab === 'jobpnl') loadJobPnl();
+  if (tab === 'billstoplace') loadBillsToPlace();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -18226,6 +18305,432 @@ function _matReconAction(action, body, okMsg) {
     showToast('Failed: ' + (e && e.message ? e.message : 'unknown error'), 'error');
   });
 }
+
+// ════════════════════════════════════════════════════════════
+// <bills-to-place> — Finance tab, job profit catch-net
+//
+// The same materials_reconciliation_queue as the Materials-tab panel above,
+// worked as a money list: largest bill first, ex GST, one bill open at a time
+// with its Xero lines and Business Unit, and one press to place it on a job or
+// mark it not job related. Hidden unless _canSeeJobProfit().
+//
+// Reads:  materials_recon_queue (limit 1000 — the action's cap; it returns the
+//         NEWEST rows by invoice date, so a capped list says how many and how
+//         much it left out), get_xero_invoice (read-only point-get of one bill's
+//         lines; never get_xero_bill, which also writes the local Xero cache),
+//         search_jobs (find a job), job_detail?slim=1 (the job's xero_project).
+// Writes: materials_recon_assign { queue_id, job_id } — or { queue_id,
+//         use_suggestion:true } when the picked job IS the queue's suggestion,
+//         so the audit reads accept-suggestion — and
+//         materials_recon_not_job_related { queue_id }.
+// A job whose Xero Project already carries expenses shows "already costed in
+// Xero Projects" and the place button stays shut until the operator ticks
+// that this bill is not in that project: summing a project total and a placed
+// bill for the same job counts the cost twice. A project read that fails is
+// treated the same way (unknown is not "no project").
+// ════════════════════════════════════════════════════════════
+var BTP_QUEUE_LIMIT = 1000;
+var BTP_PAGE = 100;
+var _btp = { rows: [], stats: null, openId: null, lines: {}, pick: {}, busy: {}, err: {}, search: '', shown: BTP_PAGE, done: [], seq: 0 };
+
+function _btpEsc(v) {
+  return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function _btpEx(r) { return Number(r && r.sub_total != null ? r.sub_total : 0) || 0; }
+function _btpErrText(e) { return (e && e.message) ? e.message : 'unknown error'; }
+// Business Unit options named on a bill's lines (Xero tracking), de-duplicated.
+function _btpBusinessUnits(inv) {
+  var seen = {}, out = [];
+  ((inv && inv.line_items) || []).forEach(function(li) {
+    (li.tracking || []).forEach(function(t) {
+      if (!/business\s*unit/i.test(String(t.Name || t.name || ''))) return;
+      var opt = String(t.Option || t.option || '').trim();
+      if (opt && !seen[opt]) { seen[opt] = true; out.push(opt); }
+    });
+  });
+  return out;
+}
+function _btpLineTracking(li) {
+  return (li.tracking || []).map(function(t) {
+    var n = String(t.Name || t.name || ''), o = String(t.Option || t.option || '');
+    return /business\s*unit/i.test(n) ? o : (n + ': ' + o);
+  }).filter(Boolean).join(', ');
+}
+function _btpProjectCosted(p) { return !!(p && p.project && Number(p.project.total_expenses) > 0); }
+// Place needs a picked job, a finished project read, and — when the job is
+// already costed in Xero Projects or the read failed — the operator's tick.
+function _btpCanPlace(id) {
+  var p = _btp.pick[id];
+  if (!p || !p.job || p.projectLoading) return false;
+  if ((_btpProjectCosted(p) || p.projectErr) && !p.ack) return false;
+  return !_btp.busy[id];
+}
+
+async function loadBillsToPlace() {
+  var body = document.getElementById('btpBody');
+  if (!body) return;
+  if (!_canSeeJobProfit()) { body.innerHTML = ''; return; }
+  var seq = ++_btp.seq;
+  body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">Loading bills…</div>';
+  try {
+    var data = await opsFetch('materials_recon_queue', { status: 'open', limit: BTP_QUEUE_LIMIT });
+    if (seq !== _btp.seq) return;
+    var rows = ((data && data.rows) || []).filter(function(r) { return r && r.status === 'open'; });
+    rows.sort(function(a, b) { return _btpEx(b) - _btpEx(a) || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')); });
+    _btp.rows = rows;
+    _btp.stats = (data && data.stats) || null;
+    _btp.shown = BTP_PAGE;
+    if (_btp.openId && !rows.some(function(r) { return r.id === _btp.openId; })) _btp.openId = null;
+    renderBillsToPlace();
+  } catch (e) {
+    if (seq !== _btp.seq) return;
+    console.error('loadBillsToPlace error:', e);
+    _btp.rows = []; _btp.stats = null;
+    document.getElementById('btpSummary').textContent = '';
+    document.getElementById('btpCapNote').style.display = 'none';
+    body.innerHTML = '<div class="btp-err" style="padding:16px;">Could not read the bills list: ' + _btpEsc(_btpErrText(e)) + '</div>';
+  }
+}
+
+function btpFilter(q) {
+  _btp.search = String(q || '').trim().toLowerCase();
+  _btp.shown = BTP_PAGE;
+  renderBillsToPlace();
+}
+
+function _btpVisibleRows() {
+  var q = _btp.search;
+  if (!q) return _btp.rows;
+  return _btp.rows.filter(function(r) {
+    return String(r.contact_name || '').toLowerCase().indexOf(q) !== -1
+      || String(r.invoice_number || '').toLowerCase().indexOf(q) !== -1;
+  });
+}
+
+function renderBillsToPlace() {
+  var body = document.getElementById('btpBody');
+  if (!body) return;
+  // Keep what the operator typed in a job search box across repaints.
+  body.querySelectorAll('[data-btp-q]').forEach(function(inp) {
+    var qid = inp.getAttribute('data-btp-q');
+    if (!_btp.pick[qid]) _btp.pick[qid] = {};
+    _btp.pick[qid].query = inp.value;
+  });
+  var s = _btp.stats || {};
+  var open = s.open != null ? Number(s.open) : _btp.rows.length;
+  var openEx = s.open_total_ex != null ? Number(s.open_total_ex) : _btp.rows.reduce(function(t, r) { return t + _btpEx(r); }, 0);
+  var sum = document.getElementById('btpSummary');
+  if (sum) {
+    sum.innerHTML = '<b>' + open + ' open bill' + (open === 1 ? '' : 's') + '</b> · <b>' + fmt$(openEx) + '</b> ex GST on no job'
+      + (s.assigned != null ? ' · ' + s.assigned + ' placed' : '')
+      + (s.not_job_related != null ? ' · ' + s.not_job_related + ' not job related' : '');
+  }
+  var cap = document.getElementById('btpCapNote');
+  if (cap) {
+    var missing = open - _btp.rows.length;
+    if (missing > 0) {
+      var loadedEx = _btp.rows.reduce(function(t, r) { return t + _btpEx(r); }, 0);
+      var missingEx = Math.max(0, Math.round((openEx - loadedEx) * 100) / 100);
+      cap.innerHTML = 'Showing the <b>' + _btp.rows.length + '</b> newest of <b>' + open + '</b> open bills, largest first. '
+        + 'The oldest <b>' + missing + '</b> (' + fmt$(missingEx) + ' ex GST) are not in this list yet; they come in on Refresh once fewer than ' + BTP_QUEUE_LIMIT.toLocaleString('en-AU') + ' bills are open.';
+      cap.style.display = '';
+    } else {
+      cap.style.display = 'none';
+    }
+  }
+  var done = document.getElementById('btpJustDone');
+  if (done) {
+    done.style.display = _btp.done.length ? '' : 'none';
+    done.innerHTML = _btp.done.length ? '<div class="btp-sec-title" style="margin-bottom:4px;">Done this session</div>'
+      + _btp.done.map(function(d) { return '<div data-btp-done>' + _btpEsc(d) + '</div>'; }).join('') : '';
+  }
+
+  var rows = _btpVisibleRows();
+  if (!_btp.rows.length) {
+    body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">No open bills. Every supplier bill is on a job or marked not job related.</div>';
+    return;
+  }
+  if (!rows.length) {
+    body.innerHTML = '<div class="btp-muted" style="padding:24px;text-align:center;">No open bill matches that search.</div>';
+    return;
+  }
+  var html = '<div class="data-table-wrap"><table class="btp-table"><thead><tr>'
+    + '<th class="num">Amount ex GST</th><th>Supplier</th><th>Date</th><th>Bill #</th><th>Business Unit</th><th>Suggested job</th>'
+    + '</tr></thead><tbody>';
+  rows.slice(0, _btp.shown).forEach(function(r) {
+    var isOpen = _btp.openId === r.id;
+    var L = _btp.lines[r.id];
+    var bu = L && L.invoice ? (_btpBusinessUnits(L.invoice).join(', ') || 'None on the lines')
+      : (L && L.error ? 'Could not read' : '<span class="btp-muted">Open to read</span>');
+    html += '<tr class="btp-row' + (isOpen ? ' open' : '') + '" data-btp-row="' + _btpEsc(r.id) + '" data-btp-act="toggle" data-btp-id="' + _btpEsc(r.id) + '">'
+      + '<td class="num">' + fmt$(_btpEx(r)) + '</td>'
+      + '<td>' + _btpEsc(r.contact_name || '(no supplier name)') + '</td>'
+      + '<td style="white-space:nowrap;">' + _btpEsc(r.invoice_date ? fmtDate(r.invoice_date) + ' ' + String(r.invoice_date).slice(0, 4) : '-') + '</td>'
+      + '<td>' + _btpEsc(r.invoice_number || '-') + '</td>'
+      + '<td data-btp-bu>' + (L && L.invoice ? _btpEsc(bu) : bu) + '</td>'
+      + '<td>' + (r.suggested_job_number ? _btpEsc(r.suggested_job_number) : '<span class="btp-muted">None</span>') + '</td>'
+      + '</tr>';
+    if (isOpen) html += '<tr class="btp-detail" data-btp-detail="' + _btpEsc(r.id) + '"><td colspan="6">' + _btpDetailHtml(r) + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  if (rows.length > _btp.shown) {
+    html += '<div style="text-align:center;margin:12px 0;"><button class="btn btn-secondary btn-sm" data-btp-act="more">Show ' + Math.min(BTP_PAGE, rows.length - _btp.shown) + ' more of ' + (rows.length - _btp.shown) + '</button></div>';
+  }
+  body.innerHTML = html;
+}
+
+function _btpDetailHtml(r) {
+  var id = r.id, L = _btp.lines[id] || {}, p = _btp.pick[id] || {};
+  var h = '<div class="btp-grid"><div>';
+  h += '<div class="btp-sec-title">The bill\'s lines (read from Xero)</div>';
+  if (L.loading) {
+    h += '<div class="btp-muted">Reading the bill from Xero…</div>';
+  } else if (L.error) {
+    h += '<div class="btp-err">Could not read the bill\'s lines: ' + _btpEsc(L.error) + '</div>'
+      + '<button class="btn btn-secondary btn-sm" style="margin-top:6px;" data-btp-act="lines" data-btp-id="' + _btpEsc(id) + '">Try again</button>';
+  } else if (L.invoice) {
+    var inv = L.invoice, items = inv.line_items || [];
+    h += '<table class="btp-lines"><thead><tr><th>Description</th><th>Account</th><th>Business Unit</th><th class="num">Amount</th></tr></thead><tbody>';
+    if (!items.length) h += '<tr><td colspan="4" class="btp-muted">No lines on this bill.</td></tr>';
+    items.forEach(function(li) {
+      var amt = li.line_amount != null ? li.line_amount : (Number(li.quantity || 0) * Number(li.unit_amount || 0));
+      h += '<tr data-btp-line><td>' + _btpEsc(li.description || '-') + '</td><td>' + _btpEsc(li.account_code || '-') + '</td>'
+        + '<td>' + _btpEsc(_btpLineTracking(li) || '-') + '</td><td class="num">' + fmt$(amt) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    var facts = [];
+    if (inv.reference) facts.push('Reference: ' + inv.reference);
+    if (inv.status) facts.push('Xero status: ' + inv.status);
+    if (String(inv.status || '').toUpperCase() === 'PAID') facts.push('Paid in Xero');
+    else if (Number(inv.amount_due) > 0) facts.push(fmt$(inv.amount_due) + ' still owed');
+    if (inv.line_amount_types) facts.push('Lines are ' + String(inv.line_amount_types).toLowerCase().replace('exclusive', 'ex GST').replace('inclusive', 'inc GST'));
+    if (facts.length) h += '<div class="btp-facts">' + _btpEsc(facts.join(' · ')) + '</div>';
+  }
+  h += '<div class="btp-facts">Bill total ' + fmt$(_btpEx(r)) + ' ex GST' + (r.total != null ? ' (' + fmt$(r.total) + ' inc GST)' : '') + '.</div>';
+  h += '</div><div>';
+
+  h += '<div class="btp-sec-title">Place it on a job</div>';
+  if (r.suggested_job_id && !(p.job && p.job.id === r.suggested_job_id)) {
+    h += '<div style="margin-bottom:6px;font-size:12px;">Suggested: <b>' + _btpEsc(r.suggested_job_number || 'a job') + '</b>'
+      + (r.suggestion_reason ? ' <span class="btp-muted">(' + _btpEsc(MAT_RECON_REASON_LABELS[r.suggestion_reason] || r.suggestion_reason) + ')</span>' : '')
+      + ' <button class="btn btn-secondary btn-sm" data-btp-act="usesuggest" data-btp-id="' + _btpEsc(id) + '">Use it</button></div>';
+  }
+  h += '<div class="btp-find"><input class="form-input" data-btp-q="' + _btpEsc(id) + '" placeholder="Job #, client or address" value="' + _btpEsc(p.query || '') + '">'
+    + '<button class="btn btn-secondary btn-sm" data-btp-act="find" data-btp-id="' + _btpEsc(id) + '">Find</button></div>';
+  if (p.searching) h += '<div class="btp-muted" style="margin-top:6px;">Searching…</div>';
+  else if (p.searchHint) h += '<div class="btp-muted" style="margin-top:6px;">' + _btpEsc(p.searchHint) + '</div>';
+  else if (p.searchErr) h += '<div class="btp-err">Search failed: ' + _btpEsc(p.searchErr) + '</div>';
+  else if (p.results && !p.job) {
+    if (!p.results.length) h += '<div class="btp-muted" style="margin-top:6px;">No job matches that.</div>';
+    else {
+      h += '<div class="btp-results">';
+      p.results.forEach(function(j) {
+        h += '<button class="btp-pickbtn" data-btp-act="pick" data-btp-id="' + _btpEsc(id) + '" data-btp-job="' + _btpEsc(j.id) + '">'
+          + '<b>' + _btpEsc(j.job_number || 'No number') + '</b> ' + _btpEsc(j.client_name || '')
+          + ' <span class="btp-muted">' + _btpEsc([j.site_suburb || j.site_address, j.type, j.status].filter(Boolean).join(' · ')) + '</span></button>';
+      });
+      h += '</div>';
+    }
+  }
+  if (p.job) {
+    var j = p.job;
+    h += '<div class="btp-job" data-btp-picked>'
+      + '<div><b>' + _btpEsc(j.job_number || 'No number') + '</b> ' + _btpEsc(j.client_name || '')
+      + ' <a href="#" data-btp-act="unpick" data-btp-id="' + _btpEsc(id) + '" style="font-size:11px;margin-left:6px;">change</a></div>'
+      + '<div class="btp-muted">' + _btpEsc([j.site_address || j.site_suburb, j.type, j.status].filter(Boolean).join(' · ')) + '</div>';
+    if (p.projectLoading) {
+      h += '<div class="btp-proj none">Checking Xero Projects for this job…</div>';
+    } else if (p.projectErr) {
+      h += '<div class="btp-proj costed" data-btp-project="unknown">Could not check Xero Projects for this job (' + _btpEsc(p.projectErr) + '). Check the job in Xero before placing this bill.</div>';
+    } else if (_btpProjectCosted(p)) {
+      h += '<div class="btp-proj costed" data-btp-project="costed"><b>Already costed in Xero Projects</b>: ' + _btpEsc(p.project.project_name || 'project')
+        + ', ' + fmt$(p.project.total_expenses) + ' of expenses. If the bookkeeper already put this bill in that project, placing it here counts it twice.</div>';
+    } else if (p.project) {
+      h += '<div class="btp-proj none" data-btp-project="empty">Xero Project ' + _btpEsc(p.project.project_name || '') + ' has no expenses yet.</div>';
+    } else {
+      h += '<div class="btp-proj none" data-btp-project="none">No Xero Project found for this job.</div>';
+    }
+    if (!p.projectLoading && (_btpProjectCosted(p) || p.projectErr)) {
+      h += '<label class="btp-ack"><input type="checkbox" data-btp-ack="' + _btpEsc(id) + '"' + (p.ack ? ' checked' : '') + '>'
+        + '<span>I have checked this bill is not in that job\'s Xero Project</span></label>';
+    }
+    h += '</div>';
+  }
+  h += '<div class="btp-actions">'
+    + '<button class="btn btn-primary btn-sm" data-btp-act="place" data-btp-id="' + _btpEsc(id) + '"' + (_btpCanPlace(id) ? '' : ' disabled') + '>'
+    + (p.job ? 'Place on ' + _btpEsc(p.job.job_number || 'this job') : 'Place on a job') + '</button>'
+    + '<button class="btn btn-secondary btn-sm" data-btp-act="notjob" data-btp-id="' + _btpEsc(id) + '"' + (_btp.busy[id] ? ' disabled' : '') + '>Not job related</button>'
+    + '</div>';
+  if (_btp.busy[id]) h += '<div class="btp-muted" style="margin-top:6px;">Saving…</div>';
+  if (_btp.err[id]) h += '<div class="btp-err" data-btp-err>' + _btpEsc(_btp.err[id]) + '</div>';
+  h += '</div></div>';
+  return h;
+}
+
+function _btpRow(id) {
+  for (var i = 0; i < _btp.rows.length; i++) if (_btp.rows[i].id === id) return _btp.rows[i];
+  return null;
+}
+
+async function _btpLoadLines(id) {
+  var r = _btpRow(id);
+  if (!r) return;
+  _btp.lines[id] = { loading: true };
+  renderBillsToPlace();
+  try {
+    var res = await opsFetch('get_xero_invoice', { xero_invoice_id: r.xero_invoice_id });
+    _btp.lines[id] = { invoice: (res && (res.invoice || res.bill)) || { line_items: [] } };
+  } catch (e) {
+    _btp.lines[id] = { error: _btpErrText(e) };
+  }
+  renderBillsToPlace();
+}
+
+async function _btpFind(id) {
+  var input = document.querySelector('[data-btp-q="' + id + '"]');
+  var q = String(input ? input.value : '').trim();
+  var p = _btp.pick[id] = { query: q };
+  if (q.length < 2) { p.searchHint = 'Type at least 2 letters of a job number, client or address.'; renderBillsToPlace(); return; }
+  p.searching = true;
+  renderBillsToPlace();
+  try {
+    var res = await opsFetch('search_jobs', { q: q });
+    if (_btp.pick[id] !== p) return;
+    p.results = (res && res.results) || [];
+  } catch (e) {
+    if (_btp.pick[id] !== p) return;
+    p.searchErr = _btpErrText(e);
+  }
+  p.searching = false;
+  renderBillsToPlace();
+}
+
+// Pick a job: take what search_jobs already said about it, then read its
+// xero_project from job_detail (slim) for the double-count check.
+async function _btpPick(id, jobId, known) {
+  var prev = _btp.pick[id] || {};
+  var p = _btp.pick[id] = { query: prev.query, results: prev.results, job: known || { id: jobId }, projectLoading: true, ack: false };
+  delete _btp.err[id];
+  renderBillsToPlace();
+  try {
+    var d = await opsFetch('job_detail', { jobId: jobId, slim: '1' });
+    if (_btp.pick[id] !== p) return;
+    var job = (d && d.job) || {};
+    p.job = {
+      id: job.id || jobId,
+      job_number: job.job_number || p.job.job_number,
+      client_name: job.client_name || p.job.client_name,
+      site_address: job.site_address || p.job.site_address,
+      site_suburb: job.site_suburb || p.job.site_suburb,
+      type: job.type || p.job.type,
+      status: job.status || p.job.status,
+    };
+    p.project = (d && d.xero_project) || null;
+  } catch (e) {
+    if (_btp.pick[id] !== p) return;
+    p.projectErr = _btpErrText(e);
+  }
+  p.projectLoading = false;
+  renderBillsToPlace();
+}
+
+function _btpSettle(id, line, statsDelta) {
+  var r = _btpRow(id);
+  _btp.rows = _btp.rows.filter(function(x) { return x.id !== id; });
+  if (_btp.stats) {
+    if (_btp.stats.open != null) _btp.stats.open = Math.max(0, Number(_btp.stats.open) - 1);
+    if (_btp.stats.open_total_ex != null) _btp.stats.open_total_ex = Math.round((Number(_btp.stats.open_total_ex) - _btpEx(r)) * 100) / 100;
+    Object.keys(statsDelta).forEach(function(k) { if (_btp.stats[k] != null) _btp.stats[k] = Number(_btp.stats[k]) + statsDelta[k]; });
+  }
+  _btp.done.unshift(line);
+  if (_btp.openId === id) _btp.openId = null;
+  delete _btp.pick[id]; delete _btp.busy[id]; delete _btp.err[id];
+  renderBillsToPlace();
+}
+
+async function _btpPlace(id) {
+  var r = _btpRow(id), p = _btp.pick[id];
+  if (!r || !_btpCanPlace(id)) return;
+  var body = (r.suggested_job_id && p.job.id === r.suggested_job_id)
+    ? { queue_id: r.id, use_suggestion: true }
+    : { queue_id: r.id, job_id: p.job.id };
+  _btp.busy[id] = true; delete _btp.err[id];
+  renderBillsToPlace();
+  try {
+    await opsPost('materials_recon_assign', body);
+    var label = fmt$(_btpEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '') + ' placed on ' + (p.job.job_number || 'the job');
+    showToast(label, 'success');
+    _btpSettle(id, label, { assigned: 1 });
+  } catch (e) {
+    _btp.busy[id] = false;
+    _btp.err[id] = 'Not placed: ' + _btpErrText(e);
+    renderBillsToPlace();
+  }
+}
+
+async function _btpNotJob(id) {
+  var r = _btpRow(id);
+  if (!r || _btp.busy[id]) return;
+  _btp.busy[id] = true; delete _btp.err[id];
+  renderBillsToPlace();
+  try {
+    await opsPost('materials_recon_not_job_related', { queue_id: r.id });
+    var label = fmt$(_btpEx(r)) + ' ' + (r.contact_name || 'bill') + (r.invoice_number ? ' ' + r.invoice_number : '') + ' marked not job related';
+    showToast(label, 'success');
+    _btpSettle(id, label, { not_job_related: 1 });
+  } catch (e) {
+    _btp.busy[id] = false;
+    _btp.err[id] = 'Not saved: ' + _btpErrText(e);
+    renderBillsToPlace();
+  }
+}
+
+(function wireBillsToPlace() {
+  function onReady() {
+    var host = document.getElementById('subBillstoplace');
+    if (!host || host.__btpWired) return;
+    host.__btpWired = true;
+    host.addEventListener('click', function(ev) {
+      var el = ev.target.closest('[data-btp-act]');
+      if (!el || !host.contains(el)) return;
+      if (el.tagName === 'TR' && ev.target.closest('a, button, input, label')) return;
+      var act = el.getAttribute('data-btp-act'), id = el.getAttribute('data-btp-id');
+      if (el.tagName === 'A') ev.preventDefault();
+      if (act === 'toggle') {
+        _btp.openId = _btp.openId === id ? null : id;
+        if (_btp.openId && !_btp.lines[id]) _btpLoadLines(id); else renderBillsToPlace();
+      } else if (act === 'more') { _btp.shown += BTP_PAGE; renderBillsToPlace(); }
+      else if (act === 'lines') _btpLoadLines(id);
+      else if (act === 'find') _btpFind(id);
+      else if (act === 'pick') {
+        var jobId = el.getAttribute('data-btp-job');
+        var p = _btp.pick[id] || {};
+        var known = (p.results || []).filter(function(j) { return j.id === jobId; })[0];
+        _btpPick(id, jobId, known);
+      } else if (act === 'usesuggest') {
+        var r = _btpRow(id);
+        if (r && r.suggested_job_id) _btpPick(id, r.suggested_job_id, { id: r.suggested_job_id, job_number: r.suggested_job_number });
+      } else if (act === 'unpick') {
+        var q = (_btp.pick[id] || {});
+        _btp.pick[id] = { query: q.query, results: q.results };
+        renderBillsToPlace();
+      } else if (act === 'place') _btpPlace(id);
+      else if (act === 'notjob') _btpNotJob(id);
+    });
+    host.addEventListener('change', function(ev) {
+      var id = ev.target.getAttribute && ev.target.getAttribute('data-btp-ack');
+      if (!id || !_btp.pick[id]) return;
+      _btp.pick[id].ack = !!ev.target.checked;
+      renderBillsToPlace();
+    });
+    host.addEventListener('keydown', function(ev) {
+      var id = ev.target.getAttribute && ev.target.getAttribute('data-btp-q');
+      if (id && ev.key === 'Enter') { ev.preventDefault(); _btpFind(id); }
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady); else onReady();
+})();
+// </bills-to-place>
 
 async function loadPendingPrices() {
   try {
@@ -28167,10 +28672,12 @@ function initApp() {
     if (cloud && cloud.supabase && cloud.supabase.auth) {
       cloud.supabase.auth.getUser().then(function(res) {
         _opsUserEmail = (res && res.data && res.data.user && res.data.user.email) || _opsUserEmail;
+        syncJobProfitAccess();
         if (typeof rerenderJobDetailOverviewIfMakesafe === 'function') rerenderJobDetailOverviewIfMakesafe();
       }).catch(function() {});
       cloud.supabase.auth.onAuthStateChange(function(_event, session) {
         _opsUserEmail = (session && session.user && session.user.email) || _opsUserEmail;
+        syncJobProfitAccess();
       });
     }
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }

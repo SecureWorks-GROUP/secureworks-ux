@@ -17596,7 +17596,7 @@ function _jpConfidence(j) {
   if (_jpNum(j.profit_ex) == null) html += '<span class="jp-tag bad">Incomplete</span>';
   else if (j.cost_basis === 'xero_project_inferred' || j.materials_inferred) html += '<span class="jp-tag inf">Inferred</span>';
   else html += '<span class="jp-tag ok">Line level</span>';
-  html += j.revenue_verified_paid ? '<span class="jp-tag ok">Rev paid</span>' : '<span class="jp-tag mute">Rev not paid</span>';
+  html += j.revenue_verified_paid ? '<span class="jp-tag ok">Rev paid</span>' : '<span class="jp-tag mute">Rev not verified paid</span>';
   html += j.costs_verified_paid ? '<span class="jp-tag ok">Costs paid</span>' : '<span class="jp-tag mute">Costs not verified</span>';
   var flags = _jpFlags(j);
   if (flags.length) html += '<div class="jp-sub" title="' + _jpEsc(flags.map(_jpFlagText).join('; ')) + '">' + _jpEsc(_jpFlagText(flags[0])) + (flags.length > 1 ? ' +' + (flags.length - 1) : '') + '</div>';
@@ -17946,7 +17946,7 @@ function _jpRenderRollup(d) {
   h += '<div class="jp-sub" style="margin-top:6px;">Profit and margin cover only the jobs with a publishable margin'
     + (t.published_revenue_ex != null ? ' (revenue ' + _jpEsc(fmt$(t.published_revenue_ex)) + ', cost ' + (_jpNum(t.published_cost_ex) != null ? _jpEsc(fmt$(t.published_cost_ex)) : 'Unknown') + ')' : '')
     + (t.inferred_jobs ? '; ' + _jpEsc(t.inferred_jobs) + ' of them rest on inferred materials' : '') + '.'
-    + (d.as_of ? ' As of ' + _jpEsc(new Date(d.as_of).toLocaleString('en-AU')) + '.' : '') + '</div>';
+    + (d.as_of ? ' As of ' + _jpEsc(new Date(d.as_of).toLocaleString('en-AU', { timeZone: 'Australia/Perth' })) + '.' : '') + '</div>';
 
   var head = '<th class="num">Jobs</th><th class="num">With margin</th><th class="num">Invoiced</th><th class="num">Collected</th><th class="num">Actual cost</th><th class="num">Gross profit</th><th class="num">Margin</th>';
   var types = Array.isArray(d.by_type) ? d.by_type : [];

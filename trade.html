@@ -20691,6 +20691,7 @@
       var carried = _jobCards.filter(function(c) { return c && c.manually_added; }).map(function(c) {
         var moved = Object.assign({}, c);
         moved.scheduled_date = c.scheduled_date ? (_weeklyDatePlusDays(String(c.scheduled_date).slice(0, 10), shift) || c.scheduled_date) : c.scheduled_date;
+        moved.work_date = '';
         delete moved._idx;
         return moved;
       });
@@ -24121,9 +24122,11 @@
     _jobCardSyncHours(c);
   }
   // The date worked on a card. A job the office assigned stays under its
-  // scheduled day; a line the trade added sits under the day it was worked.
-  // One line is one job on one day, so a line the trade added cannot land on
-  // a day that job already has a line for.
+  // scheduled day; a line the trade added sits under the day it was worked
+  // once that date is given. A week change carries such a line to the same
+  // weekday with its date worked cleared, so no card sits under a heading
+  // its date contradicts. One line is one job on one day, so a line the
+  // trade added cannot land on a day that job already has a line for.
   function _setJobCardWorkDate(c, value) {
     var day = TradeTimeEntryCore.isDate(value) ? value : '';
     if (day && !c.assignment_id && c.job_id) {

@@ -149,11 +149,13 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     const card = page.locator('.jc-card').filter({ hasText: 'SWP-261183' });
     await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await expect(card.locator('input[type="text"]')).toHaveValue('Material order');
-    // The date worked is the trade's own statement: changing the invoice week
-    // never rewrites it, so it still names the day in the week that was left.
-    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(thisMonday, 2));
+    // The date worked was given for the week that was left. It is cleared,
+    // never shifted, so the trade gives it again for this week; the times stay.
+    await expect(card.locator('[data-carddate]')).toHaveValue('');
+    await expect(card.locator('[data-cardstart]')).toHaveValue('07:00');
+    await expect(card.locator('[data-cardfinish]')).toHaveValue('10:00');
     await page.locator('#invSubmitBtn').click();
-    await expect(page.locator('#toast')).toContainText('SWP-261183: the date worked is after this invoice week');
+    await expect(page.locator('#toast')).toContainText('SWP-261183: Add the date you worked.');
     await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
 
     // Submitting on a done week is stopped before any confirm or POST.
@@ -166,7 +168,10 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     await expect(bar.locator('[data-invoice-week-label]')).toHaveText(weekLabel(thisMonday));
     await expect(page.locator('[data-invoice-week-taken]')).toHaveCount(0);
     await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
-    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(lastMonday, 2));
+    await expect(card.locator('[data-carddate]')).toHaveValue('');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('SWP-261183: Add the date you worked.');
+    await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
     await card.locator('[data-carddate]').fill(addIsoDays(thisMonday, 2));
 
     await page.locator('#invSubmitBtn').click();

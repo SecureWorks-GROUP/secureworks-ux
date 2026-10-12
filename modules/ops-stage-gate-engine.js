@@ -26,7 +26,9 @@
    Inputs:
    - packet: T1 release packet shape per release-packet-contract-v1.md §9
    - supplemental: { assignments[], job_context[], deposit, business_events[] }
-   - options: { now?, install_window_business_days? (default 5) }
+   - options: { now?, install_window_business_days? (default 5),
+       po_column_of? (ops.html poBoardColumnOf: a purchase order status ->
+       its board column) }
 
    Authority:
    - secureworks-docs/operations/cap-1-stage-gate-contract.md
@@ -535,6 +537,15 @@
       'Confirm deposit via Xero OR capture payment_agreement/gate_override', true);
   }
 
+  // A purchase order is sent once it sits in the board's Sent, Confirmed or
+  // Delivered column. With no po_column_of the status is read as its own column.
+  var SENT_PO_COLUMNS = ['submitted', 'authorised', 'billed'];
+  function poIsSent(ctx, p) {
+    if (p.status === 'sent' || p.status === 'acked') return true;
+    var col = ctx.poColumnOf ? ctx.poColumnOf(p.status) : p.status;
+    return SENT_PO_COLUMNS.indexOf(col) >= 0;
+  }
+
   // Gate 12 — materials ordered.
   function gate_materials_ordered(ctx) {
     var applies = ctx.currentStage && isStageAtOrAfter(ctx.currentStage, 'order_materials', ctx.type) &&
@@ -548,18 +559,14 @@
         'Create + send material PO via sw_create_po + sw_send_po_email', false);
     }
     var sentMaterial = pos.filter(function (p) {
-      var typed = (p.po_type === 'material');
-      var sent = (p.status === 'submitted' || p.status === 'authorised' || p.status === 'sent' || p.status === 'acked');
-      return typed && sent;
+      return p.po_type === 'material' && poIsSent(ctx, p);
     });
     if (sentMaterial.length > 0) {
       return gateResult('materials_ordered', 'pass', 'blocker', 'materials', 'office',
         { source: 'packet.purchase_orders', ref: null, value: { sent_material_count: sentMaterial.length, total: pos.length } },
         sentMaterial.length + ' material PO(s) sent', null, false);
     }
-    var anySent = pos.filter(function (p) {
-      return p.status === 'submitted' || p.status === 'authorised' || p.status === 'sent' || p.status === 'acked';
-    });
+    var anySent = pos.filter(function (p) { return poIsSent(ctx, p); });
     if (anySent.length > 0) {
       return gateResult('materials_ordered', 'pass', 'blocker', 'materials', 'office',
         { source: 'packet.purchase_orders', ref: null, value: { any_sent: anySent.length, total: pos.length, fallback: 'po_type_not_bound' } },
@@ -801,6 +808,7 @@
       currentStage: currentStage,
       packet: packet,
       supplemental: supplemental,
+      poColumnOf: typeof options.po_column_of === 'function' ? options.po_column_of : null,
       install_in_window: installInWindow,
       install_window_days: installWindowDays,
       now: now

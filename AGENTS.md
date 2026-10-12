@@ -45,13 +45,33 @@ send every route into a hidden view to Jobs; Finance Health and Job P&L only
 lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
-inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
-concept on sample data in `modules/ops-dispatch-concept.js` with no network
-call; do not wire it to live data without a Captain ruling. Below the concept,
-`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slice 1
+of the approved design: job list, job header, Scope and notes). It reads
+`pipeline&dispatch=1`, `job_detail` (once per job open) and `job_notes`, and its
+only write is `add_note`, always `visibility: 'internal_only'`; a failed read
+never renders as empty, and a later slice is not drawn until it is real. Below
+it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.
+
+EVERY LIVE PURCHASE ORDER IS SHOWN (Captain 2026-10-12). The board's column for
+an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` /
+`confirmed` / `delivered` share the Sent / Confirmed / Delivered columns of the
+older `submitted` / `authorised` / `billed`, and any status the page does not
+know lands in a visible Other column. Cancelled orders stay off the board and
+the Calendar row on purpose (`poBoardColumnOf` answers `''` for them). Never
+match a column on the raw status again; that hid 6 of 22 orders. Every other
+read of an order's status in `ops.html` goes through the same function (the
+Financials > Purchase Orders chips, the job's material ordering cards, its
+"Delivery tomorrow" alert, the awaiting-invoice alerts), and every status badge
+is `poStatusBadge`. The stage gate module's "materials ordered" gate takes it as
+`options.po_column_of`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
+is built from `list_pos`, because the `calendar` feed's own `deliveries` carries
+only draft / submitted / authorised orders; it repaints every time that read
+lands, and a failed read falls back to the feed's fresh rows.
+Guard: `tests/e2e/ops-po-all-statuses.spec.js`.
 
 ## Ops Dash calendar drag (`ops.html`)
 
@@ -651,8 +671,10 @@ for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 The fence-designer scoping tool writes every internal note into
 `jobs.scope_json.job` (`siteNotes`, `checklist.finalNotes`, `removal.notes`,
 `supplierNotes`) — `job_detail`/`trade_job_detail` already deliver that blob to
-both apps. `renderFenceScopingNotes(scope_json)` (`ops.html`, next to
-`renderScopeSummary`) is the ONE reader for all four fields; it is called from
+both apps. `fenceScopingNoteFields(scope_json)` (`ops.html`, next to
+`renderScopeSummary`) is the ONE list of those four fields: add a field there,
+never in a caller. Dispatch's scoper lines (`modules/ops-dispatch.js`) read it,
+and so does `renderFenceScopingNotes(scope_json)`, which is called from
 the job detail drawer's Overview tab (default tab, does not go through
 `renderScopeSummary`), the pinned read-only header of the Notes rail
 (`buildNotesHTML` — distinct from the deletable two-way `job_events` notes

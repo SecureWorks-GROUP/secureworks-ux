@@ -906,9 +906,8 @@ function scanSupplierQuote(poId) {
           if (alerts.length > 0) {
             msg += ' ' + alerts.length + ' price difference(s) found >5%.';
           }
-          msg += ' Check Pending Prices in Materials tab.';
+          msg += ' Check Supplier Price Updates in Financials > Purchase Orders.';
           showToast(msg, 'success');
-          // Refresh materials tab if we're on it
           if (typeof loadPendingPrices === 'function') loadPendingPrices();
         } else {
           showToast('Failed to analyse: ' + (result.error || 'unknown'), 'error');

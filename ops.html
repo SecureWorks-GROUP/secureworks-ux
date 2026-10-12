@@ -19191,6 +19191,8 @@ function renderFenceScopingNotes(scope_json) {
   return html;
 }
 
+// The one list of the scoping tool's note fields, shared by renderFenceScopingNotes and
+// Dispatch (modules/ops-dispatch.js). Add a field here, never in a caller.
 function fenceScopingNoteFields(scope_json) {
   var scope = typeof scope_json === 'string' ? JSON.parse(scope_json) : scope_json;
   if (!scope || !scope.job) return [];

@@ -432,6 +432,10 @@ function refreshMsIntakeBadge(count) {
 }
 
 // SMOKE TEST (manual, run in browser console):
+// The Approvals tab is hidden (ops.html <ops-tab-set>): showView('approvals')
+// now lands on Jobs, so steps 1-3 no longer reach the inline host from the nav.
+// Start at step 4 from an INTAKE column card on the make-safe board, which
+// opens the same detail in the board overlay.
 // 1. showView('approvals') -- approvals view loads
 // 2. Click "MakeSafe" tab -- intake cockpit renders, shows loading state
 // 3. loadMakesafeIntakeCockpit() returns a count (0 or N)

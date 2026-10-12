@@ -149,6 +149,13 @@ async function openRepairsBoard(page, options = {}) {
     }),
   }));
 
+  // The alert digest ops.html reads on boot for the Jarvis bar badges.
+  await page.route(`${SUPABASE_ORIGIN}/functions/v1/daily-digest**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ alerts: [] }),
+  }));
+
   // The three CDN scripts ops.html loads. Stubbed rather than blocked so the
   // external guard's ledger stays empty and a genuine leak still stands out.
   for (const pattern of [

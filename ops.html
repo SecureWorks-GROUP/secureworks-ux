@@ -4815,7 +4815,7 @@ __swOpsStampAssets([
         <button class="sub-tab" onclick="showSubTab('tradebills')" data-sub="tradebills">Trade Bills</button>
         <button class="sub-tab" onclick="showSubTab('cleardebt')" data-sub="cleardebt" style="color:var(--sw-red,#e74c3c);">Clear Debt</button>
         <!-- Finance Health and Job P&L sub-tabs are hidden (Captain 2026-10-06). Their
-             panels, loaders and ops-api actions stay; see OPS_HIDDEN_SUBTABS. -->
+             panels, loaders and ops-api actions stay. -->
       </div>
 
       <!-- Invoices -->
@@ -4882,6 +4882,12 @@ __swOpsStampAssets([
 
       <!-- Purchase Orders -->
       <div id="subPos" class="sub-view">
+        <!-- Supplier Price Updates: moved here from the retired Materials tab
+             (Captain 2026-10-06). Panel unchanged. -->
+        <div id="pendingPricesPanel" style="display:none; margin-bottom:20px;">
+          <div class="section-heading">Supplier Price Updates <span class="badge" id="pendingPriceCount">0</span></div>
+          <div id="pendingPricesList"></div>
+        </div>
         <div class="filter-bar">
           <button class="filter-chip active" onclick="filterPOStatus('all')" data-po-status="all">All</button>
           <button class="filter-chip" onclick="filterPOStatus('draft')" data-po-status="draft">Draft</button>
@@ -5017,19 +5023,14 @@ __swOpsStampAssets([
 
     <!-- ═══════════ MATERIALS TAB ═══════════ -->
     <div id="viewMaterials" class="view">
-      <!-- Bill Reconciliation moved to Financials > Bill Reconciliation (#subBillrecon). -->
+      <!-- Bill Reconciliation moved to Financials > Bill Reconciliation (#subBillrecon);
+           Supplier Price Updates moved to Financials > Purchase Orders (#subPos). -->
 
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         Materials Pipeline <span class="badge" id="materialsCount">0</span>
         <div style="flex:1;"></div>
         <button class="btn btn-secondary btn-sm" id="matFilterToggle" onclick="toggleMatFilters()" style="font-size:11px;">Filters <span id="matFilterBadge"></span></button>
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
-      </div>
-
-      <!-- Pending Price Reviews -->
-      <div id="pendingPricesPanel" style="display:none; margin-bottom:20px;">
-        <div class="section-heading">Supplier Price Updates <span class="badge" id="pendingPriceCount">0</span></div>
-        <div id="pendingPricesList"></div>
       </div>
 
       <!-- Threshold alerts -->
@@ -16840,11 +16841,7 @@ function renderJobList(container, columns) {
 // FINANCIALS TAB
 // ════════════════════════════════════════════════════════════
 
-// Financials sub-tabs hidden from the front end (Captain 2026-10-06). Panels,
-// loaders and ops-api actions stay; a stale call opens Invoices instead.
-var OPS_HIDDEN_SUBTABS = { financehealth: true, jobpnl: true };
 function showSubTab(tab) {
-  if (OPS_HIDDEN_SUBTABS[tab] === true) tab = 'invoices';
   document.querySelectorAll('.sub-tab').forEach(function(el) { el.classList.remove('active'); });
   document.querySelectorAll('.sub-view').forEach(function(el) { el.classList.remove('active'); });
   var btn = document.querySelector('[data-sub="' + tab + '"]');
@@ -16853,7 +16850,7 @@ function showSubTab(tab) {
   if (view) view.classList.add('active');
 
   if (tab === 'invoices') loadInvoices();
-  if (tab === 'pos') loadPOs();
+  if (tab === 'pos') { loadPOs(); loadPendingPrices(); }
   if (tab === 'workorders') loadWOs();
   if (tab === 'billrecon') loadMaterialsRecon();
   if (tab === 'quotes') loadQuotes();
@@ -25506,9 +25503,8 @@ function scanSupplierQuote(poId) {
           if (alerts.length > 0) {
             msg += ' ' + alerts.length + ' price difference(s) found >5%.';
           }
-          msg += ' Check Pending Prices in Materials tab.';
+          msg += ' Check Supplier Price Updates in Financials > Purchase Orders.';
           showToast(msg, 'success');
-          // Refresh materials tab if we're on it
           if (typeof loadPendingPrices === 'function') loadPendingPrices();
         } else {
           showToast('Failed to analyse: ' + (result.error || 'unknown'), 'error');

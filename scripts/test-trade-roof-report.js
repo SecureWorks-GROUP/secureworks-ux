@@ -123,7 +123,7 @@ check('hours row opens on the given date and start, capped at today', hrs.indexO
 check('hours are shown read-only and saved through rrLogHours', /id="rrHoursCalc"[^>]*>0 hrs</.test(hrs) && hrs.indexOf("rrLogHours('j1')") !== -1);
 const hrs2 = R.hoursHTML('j1', 2, { week: 'w/e Sun 13 Sep', when: 'Tue 8 Sep, 07:00 to 09:00', hoursText: '2 hrs', entry: { work_date: '2026-09-08', start_time: '07:00', finish_time: '09:00', break_minutes: 0 } });
 check('logged hours name the week and when they were worked', hrs2.indexOf('data-rr-hours-current="2"') !== -1 && hrs2.indexOf('<strong>2 hrs</strong> on your week (w/e Sun 13 Sep). Tue 8 Sep, 07:00 to 09:00.') !== -1);
-check('logged hours with no times on this device ask for them', R.hoursHTML('j1', 2.5, {}).indexOf('<strong>2.5 hrs</strong> on your week. Add the times you worked.') !== -1);
+check('logged hours with no times to show say how to change them', R.hoursHTML('j1', 2.5, {}).indexOf('<strong>2.5 hrs</strong> on your week. Save new times to change it.') !== -1);
 check('hoursLabel singular/plural', R.hoursLabel(1) === '1 hr' && R.hoursLabel(2) === '2 hrs' && R.hoursLabel(1.25) === '1.25 hrs');
 check('weekLabel names the Sunday', /^w\/e Sun/.test(R.weekLabel('2026-09-13')) && R.weekLabel('nope') === '');
 

@@ -58,14 +58,21 @@ const PERSONAS = {
 const test = base.extend({
   persona: ['installer', { option: true }],
   feedScenario: ['normal', { option: true }],
+  // Days after this Perth week's Monday that the app's clock starts on; null
+  // is the real clock. A date worked cannot be after today, so a spec that
+  // enters times on the week's jobs runs the app at the end of that week (6).
+  appWeekDay: [null, { option: true }],
   feedRequests: async ({}, use) => {
     const requests = [];
     await use(requests);
   },
 
-  appPage: async ({ page, persona, feedScenario, feedRequests }, use) => {
+  appPage: async ({ page, persona, feedScenario, feedRequests, appWeekDay }, use) => {
     const selected = PERSONAS[persona];
     if (!selected) throw new Error(`Unknown E2E persona: ${persona}`);
+    if (appWeekDay != null) {
+      await page.clock.install({ time: new Date(addIsoDays(perthWeekMonday(), appWeekDay) + 'T12:00:00+08:00') });
+    }
 
     const guard = await installExternalRequestGuard(page, { allowedOrigins: [APP_ORIGIN] });
 

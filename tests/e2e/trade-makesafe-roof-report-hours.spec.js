@@ -194,7 +194,7 @@ test.describe('Trade app: roof report in the app + one-tap hours', () => {
     await expect(content).toContainText('Report Submitted');
     await expect(content.locator('#rrHours')).toHaveAttribute('data-rr-hours-current', '3');
     // Hours logged before times were asked for: the row says so and asks.
-    await expect(content.locator('#rrHours')).toContainText('3 hrs on your week. Add the times you worked.');
+    await expect(content.locator('#rrHours')).toContainText('3 hrs on your week. Save new times to change it.');
     await expect(content.locator('#rrOption [data-rr-open]')).toHaveText('Continue roof report');
 
     // A finish before the start is refused; a shift past midnight is two lines.

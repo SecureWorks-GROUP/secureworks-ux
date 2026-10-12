@@ -16,6 +16,7 @@ const { signIn } = require('../helpers/auth');
 
 test.use({
   persona: 'installer',
+  appWeekDay: 6,
   viewport: { width: 390, height: 844 },
   hasTouch: true,
   isMobile: true

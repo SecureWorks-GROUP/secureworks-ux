@@ -326,7 +326,7 @@
     if (!root) return;
     var job = selectedJob();
     var html = '<div class="dpc">';
-    html += '<div class="dpc-banner" role="note"><strong>Concept preview.</strong> Sample jobs only. This page does not read live jobs and cannot order, save or send anything.</div>';
+    html += '<div class="dpc-banner" role="note"><strong>Concept preview.</strong> Sample jobs only. This concept section does not read live jobs and cannot order, save or send anything. The Purchase orders board below it is live.</div>';
     html += '<div class="dpc-header"><h1>Dispatch</h1><p>Accepted work, what each job needs, and how the materials get to site.</p></div>';
     html += '<div class="dpc-layout">' + renderQueue() + renderWorkspace(job) + renderContext(job) + '</div>';
     html += renderWeek();

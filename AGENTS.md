@@ -45,10 +45,13 @@ send every route into a hidden view to Jobs; Finance Health and Job P&L only
 lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
-inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a
-concept on sample data in `modules/ops-dispatch-concept.js` with no network
-call; do not wire it to live data without a Captain ruling. Below the concept,
-`#dispatchPurchaseOrders` is the LIVE purchase order board that was the
+inline host of the make-safe review cockpit, so keep its DOM. Dispatch's top
+section is the real Dispatch view of any job (`modules/ops-dispatch.js`, slice 1
+of the approved design: job list, job header, Scope and notes). It reads
+`pipeline&dispatch=1`, `job_detail` (once per job open) and `job_notes`, and its
+only write is `add_note`, always `visibility: 'internal_only'`; a failed read
+never renders as empty, and a later slice is not drawn until it is real. Below
+it, `#dispatchPurchaseOrders` is the LIVE purchase order board that was the
 Materials view (`loadMaterials`, the only front end for Delete PO, Invoice
 Rcvd and Mark Paid), loaded when Dispatch opens. Guard:
 `tests/e2e/ops-tab-set.spec.js`.
@@ -654,8 +657,10 @@ for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 The fence-designer scoping tool writes every internal note into
 `jobs.scope_json.job` (`siteNotes`, `checklist.finalNotes`, `removal.notes`,
 `supplierNotes`) — `job_detail`/`trade_job_detail` already deliver that blob to
-both apps. `renderFenceScopingNotes(scope_json)` (`ops.html`, next to
-`renderScopeSummary`) is the ONE reader for all four fields; it is called from
+both apps. `fenceScopingNoteFields(scope_json)` (`ops.html`, next to
+`renderScopeSummary`) is the ONE list of those four fields: add a field there,
+never in a caller. Dispatch's scoper lines (`modules/ops-dispatch.js`) read it,
+and so does `renderFenceScopingNotes(scope_json)`, which is called from
 the job detail drawer's Overview tab (default tab, does not go through
 `renderScopeSummary`), the pinned read-only header of the Notes rail
 (`buildNotesHTML` — distinct from the deletable two-way `job_events` notes

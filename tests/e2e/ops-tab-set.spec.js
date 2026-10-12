@@ -829,6 +829,114 @@ test('Dispatch: coming back to the tab keeps the note being typed, the list plac
   expect(of('job_detail').length).toBe(1);
 });
 
+test('Dispatch: coming back to the tab refreshes the Council line without reading the job again', async ({ page }) => {
+  let council = { council_status: 'in_progress', council_step: '1/7', value: 16329.58 };
+  const { root, of } = await bootDispatch(page, {
+    pipeline: () => {
+      const list = D_LIST();
+      list.columns.processing = [D_JOBS.p2, Object.assign({}, D_JOBS.p1, council)];
+      return list;
+    },
+  });
+  await root.locator('.dpc-job', { hasText: 'SWP-900201' }).click();
+  const councilLine = root.locator('.dpc-scope-line', { hasText: 'Council:' });
+  await expect(councilLine).toHaveText('Council: in progress, step 1/7');
+  await expect(root.locator('.dpc-facts > div')).toHaveCount(5);
+  await root.locator('.dpc-facts').evaluate((el) => { el.dataset.e2eKept = '1'; });
+
+  council = { council_status: 'complete', council_step: '7/7', value: 17000 };
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  await expect(root.locator('.dpc-price')).toHaveText('$17,000 inc GST');
+  await expect(councilLine).toHaveText('Council: approved');
+  // The scope facts were not redrawn, and the job was not read a second time.
+  await expect(root.locator('.dpc-facts')).toHaveAttribute('data-e2e-kept', '1');
+  await expect(root.locator('.dpc-scope-line')).toHaveText(['Scoper notes (internal): Check the fascia height', 'Council: approved']);
+
+  // A job that no longer needs council loses the line.
+  council = { council_status: null, council_step: null, council_required: false, value: 17500 };
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  await expect(root.locator('.dpc-price')).toHaveText('$17,500 inc GST');
+  await expect(councilLine).toHaveCount(0);
+  expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-f1', 'job-p1']);
+});
+
+test('Dispatch: a job card keeps the keyboard focus when a list read lands', async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const { root } = await bootDispatch(page, {
+    pipeline: async (url) => {
+      const q = url.searchParams.get('search');
+      if (q) return D_FOUND(/^yokine$/i.test(q) ? [D_JOBS.p1] : []);
+      await held;
+      return D_LIST();
+    },
+  });
+  // Search while the first list read is in flight, then tab from the box onto the result.
+  const box = root.locator('[data-dpc-search]');
+  await box.click();
+  await page.keyboard.type('Yokine');
+  const card = root.locator('.dpc-job', { hasText: 'SWP-900201' });
+  await expect(card).toHaveCount(1);
+  await page.keyboard.press('Tab');
+  await expect(card).toBeFocused();
+  release();
+  // The read lands and opens the first job; the keyboard is still on the searched card.
+  await expect(root.locator('[data-dpc-reset]')).toHaveText('All jobs 5');
+  await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWF-900101 · Gwelup');
+  await expect(card).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWP-900201 · Yokine');
+});
+
+test('Dispatch: a job found by search opens while the job list itself failed to load', async ({ page }) => {
+  let down = true;
+  const { root, of } = await bootDispatch(page, {
+    pipeline: (url) => {
+      const q = url.searchParams.get('search');
+      if (q) return D_FOUND(/^yokine$/i.test(q) ? [D_JOBS.p1] : []);
+      return down ? { status: 500, body: { error: 'e2e failure' } } : D_LIST();
+    },
+  });
+  const head = root.locator('.dpc-jobhead');
+  const box = root.locator('[data-dpc-search]');
+  const found = root.locator('.dpc-job', { hasText: 'SWP-900201' });
+  const expectOpen = async () => {
+    await expect(head.locator('h2')).toHaveText('SWP-900201 · Yokine');
+    await expect(head).not.toContainText('Could not load this job.');
+    await expect(root.locator('.dpc-facts > div')).toHaveCount(5);
+  };
+  await expect(head).toContainText('Could not load this job.');
+  expect(of('job_detail').length).toBe(0);
+
+  await box.fill('Yokine');
+  await found.click();
+  await expectOpen();
+  // It stays open once the search is cleared and the section is folded and unfolded.
+  await box.fill('');
+  await expect(root.locator('.dpc-job-list [role="alert"]')).toContainText('Could not load jobs.');
+  await root.locator('[data-dpc-toggle]').click();
+  await root.locator('[data-dpc-toggle]').click();
+  await expectOpen();
+  down = false;
+  await root.locator('.dpc-job-list [data-dpc-retry="list"]').click();
+  await expect(root.locator('.dpc-job')).toHaveCount(5);
+  await expectOpen();
+
+  // A re-read that fails takes the open job down; searching for it brings it back.
+  down = true;
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  await expect(head).toContainText('Could not load this job.');
+  await expect(root.locator('.dpc-sec')).toHaveCount(0);
+  await box.fill('Yokine');
+  await found.click();
+  await expectOpen();
+  // One open, one read of the job, however it was brought back.
+  expect(of('job_detail').map((c) => c.jobId)).toEqual(['job-p1']);
+});
+
 test('Dispatch: the sidebar collapses to a strip and the section folds, and both are remembered', async ({ page }) => {
   const { root } = await bootDispatch(page);
   await expect(root.locator('.dpc-job')).toHaveCount(5);

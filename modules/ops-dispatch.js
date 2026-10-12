@@ -14,8 +14,7 @@
  * dispatch=1 answers with rows missing description / value_inc_gst, and one
  * that does not know job_notes answers Unknown action: both are failed reads.
  *
- * Pure rules live in `core` (exposed as OpsDispatch.core) so the guard,
- * tests/e2e/ops-tab-set.spec.js, can check them without a network.
+ * Guard: tests/e2e/ops-tab-set.spec.js.
  * Contract: secureworks-backend docs/dispatch-slice-1-read-contract.md.
  */
 (function (global) {
@@ -324,13 +323,6 @@
     return words + (step && status !== 'complete' ? ', step ' + step : '');
   }
 
-  var core = {
-    installText: installText, stampText: stampText, priceText: priceText, typeKey: typeKey, typeLabel: typeLabel,
-    jobTitle: jobTitle, rowsFromPipeline: rowsFromPipeline, filterByType: filterByType, railLabels: railLabels,
-    scopeFacts: scopeFacts, scoperNotes: scoperNotes, scopePhotos: scopePhotos, pickQuote: pickQuote,
-    councilText: councilText, safeUrl: safeUrl
-  };
-
   // ───────────────────────── state ─────────────────────────
 
   function readStore(store, key) { try { return global[store].getItem(key); } catch (e) { return null; } }
@@ -345,6 +337,7 @@
     found: { status: 'idle', rows: [], degraded: false, q: '' },
     jobId: null,
     row: null,
+    rowStale: false,
     detail: { jobId: null, status: 'idle', data: null },
     notes: { jobId: null, status: 'idle', items: [] },
     drafts: {},
@@ -376,6 +369,7 @@
     }).catch(function () {
       if (token !== tokens.base) return;
       state.base = { status: 'error', rows: [], total: null, degraded: false };
+      state.rowStale = true;
       paintList();
       paintWorkspace();
     });
@@ -384,14 +378,16 @@
   // After a list read: keep the open job if it is still known, else open the
   // one remembered for this session, else the first job in the list. An open
   // job (one reached by search included) keeps its section as drawn: only the
-  // list and the header are redrawn, so typing and the list's place are kept.
+  // list, the header and the Council line (the facts the list carries) are
+  // redrawn, so typing and the list's place are kept.
   function adoptSelection() {
+    state.rowStale = false;
     var rows = state.base.rows;
     var byId = function (id) { for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]; return null; };
     var current = state.jobId ? byId(state.jobId) : null;
     if (current) state.row = current;
     paintList(true);
-    if (state.jobId && state.row) { paintHead(); return; }
+    if (state.jobId && state.row) { paintHead(); paintCouncil(); return; }
     var pick = byId(readStore('sessionStorage', SS_JOB)) || rows[0] || null;
     if (pick) selectJob(pick); else paintWorkspace();
   }
@@ -452,11 +448,16 @@
   function selectJob(row) {
     if (!row || !row.id) return;
     var same = state.jobId === row.id;
+    var stale = state.rowStale;
     state.jobId = row.id;
     state.row = row;
+    state.rowStale = false;
     writeStore('sessionStorage', SS_JOB, row.id);
     markSelected();
-    if (same && state.detail.jobId === row.id) return; // already open: no second read
+    if (same && state.detail.jobId === row.id) { // already open: no second read
+      if (stale) paintWorkspace();
+      return;
+    }
     state.detail = { jobId: row.id, status: 'loading', data: null };
     state.notes = { jobId: row.id, status: 'loading', items: [] };
     paintWorkspace();
@@ -581,6 +582,7 @@
     tokens.fill++;
     var drawn = keepPlace ? list.querySelectorAll('[data-dpc-job]').length : 0;
     var top = list.scrollTop;
+    var focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('data-dpc-job') : null;
     // Updated in place so a pressed button keeps the keyboard focus.
     var mode = region('mode');
     if (mode && mode.innerHTML !== modeHtml()) {
@@ -605,12 +607,23 @@
       }
       list.innerHTML = '';
       if (rows.length) { var labels = railLabels(rows); fill(list, rows, function (row) { return railHtml(row, labels); }, drawn); }
+      refocusJob(list, focused);
       if (keepPlace) list.scrollTop = top;
       return;
     }
     list.innerHTML = stateHtml || (degradedNow() ? failLine('Some job details did not load.', searching() ? 'search' : 'list') : '');
     if (rows.length) fill(list, rows, cardHtml, drawn);
+    refocusJob(list, focused);
     if (keepPlace) list.scrollTop = top;
+  }
+
+  // The list was rebuilt: put the keyboard focus back on the job it was on.
+  function refocusJob(list, jobId) {
+    if (!jobId) return;
+    var cards = list.querySelectorAll('[data-dpc-job]');
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute('data-dpc-job') === jobId) { cards[i].focus({ preventScroll: true }); return; }
+    }
   }
 
   function paintQueue() {
@@ -699,9 +712,12 @@
         h += '<p class="dpc-scope-line"><strong>Scoper notes' + (n[0] ? ' (' + esc(n[0]) + ')' : '') + ':</strong> ' + esc(n[1]) + '</p>';
       });
     }
-    var council = councilText(row);
-    if (council) h += '<p class="dpc-scope-line"><strong>Council:</strong> ' + esc(council) + '</p>';
     return h;
+  }
+
+  function councilHtml() {
+    var council = councilText(state.row);
+    return council ? '<p class="dpc-scope-line"><strong>Council:</strong> ' + esc(council) + '</p>' : '';
   }
 
   function notesHtml() {
@@ -735,6 +751,7 @@
     h += '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
     if (open) {
       h += '<div class="dpc-sec-body"><div data-dpc-region="scope">' + scopeHtml() + '</div>';
+      h += '<div data-dpc-region="council">' + councilHtml() + '</div>';
       h += '<div data-dpc-region="notes">' + notesHtml() + '</div>';
       h += '<div data-dpc-region="composer">' + composerHtml() + '</div></div>';
     }
@@ -743,8 +760,9 @@
 
   function workspaceHtml() {
     var h = '<section class="dpc-workspace" data-dpc-region="workspace" aria-label="Job">';
-    if (state.base.status === 'error') {
-      // No stale job: the header facts come from the list read that failed.
+    if (state.base.status === 'error' && state.rowStale) {
+      // No stale job: the header facts come from the list read that failed. A
+      // job opened since, from a search that did load, is shown.
       h += '<div class="dpc-jobhead">' + failLine('Could not load this job.', 'list', true) + '</div>';
     } else if (!state.row) {
       h += '<div class="dpc-jobhead"><div class="dpc-empty dpc-empty-tight">' + (state.base.status === 'ok' ? 'No job to show.' : 'Loading jobs...') + '</div></div>';
@@ -759,6 +777,7 @@
     if (w) w.outerHTML = workspaceHtml();
   }
   function paintHead() { var el = region('head'); if (el) el.outerHTML = headHtml(state.row); }
+  function paintCouncil() { var el = region('council'); if (el) el.innerHTML = councilHtml(); }
   function paintScope() { var el = region('scope'); if (el) el.innerHTML = scopeHtml(); }
   function paintNotes() { var el = region('notes'); if (el) el.innerHTML = notesHtml(); }
   function paintComposer() {
@@ -877,5 +896,5 @@
     loadBase();
   }
 
-  global.OpsDispatch = { show: show, core: core };
+  global.OpsDispatch = { show: show };
 })(window);

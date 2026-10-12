@@ -35,8 +35,9 @@ Any fixture whose app logic compares a date against "now"/"this week" (e.g. trad
 
 ## Ops Dash tab set (`ops.html`)
 
-Captain 2026-10-06: the nav is Jobs (Ops opens on it), Calendar, Financials,
-Dispatch, Sales. Today, Inbox (AI annotations) and Approvals are hidden on the
+Captain 2026-10-06: the nav is Jobs, Calendar, Financials, Dispatch, Sales. Ops
+always opens on Jobs: only a URL hash link opens another tab, the last-used tab
+is never restored. Today, Inbox (AI annotations) and Approvals are hidden on the
 front end only, and Materials became Dispatch; their views, loaders and ops-api
 actions stay. `OPS_HIDDEN_VIEWS` / `opsVisibleView` (search `// <ops-tab-set>`)
 send every route into a hidden view to Jobs; Finance Health and Job P&L only

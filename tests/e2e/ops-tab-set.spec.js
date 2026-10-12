@@ -1,5 +1,6 @@
 // Guard for the Ops tab set (Captain 2026-10-06, `<ops-tab-set>` in ops.html):
-//  - the nav is Jobs, Calendar, Financials, Dispatch, Sales, and Ops opens on Jobs;
+//  - the nav is Jobs, Calendar, Financials, Dispatch, Sales, and Ops always opens
+//    on Jobs (the last-used tab is not restored; a URL hash link still opens its tab);
 //  - Today, Inbox and Approvals are off the front end, and any old deep link or
 //    saved tab pointing at them (or at Materials) lands on Jobs;
 //  - Financials keeps Purchase Orders, Work Orders and Bill Reconciliation, with
@@ -13,7 +14,7 @@ const { installOpsSessionStub } = require('../helpers/ops-auth');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
-async function bootOps(page, { hash = '', savedTab = null, responses = {}, delays = {}, digest = {} } = {}) {
+async function bootOps(page, { hash = '', savedTab = null, responses = {}, delays = {}, failures = {}, digest = {} } = {}) {
   const apiCalls = [];
   const requests = [];
   const bodies = Object.assign({ pipeline: { columns: {} } }, responses);
@@ -29,6 +30,9 @@ async function bootOps(page, { hash = '', savedTab = null, responses = {}, delay
     if (match) apiCalls.push(match[1]);
     const body = match && bodies[match[1]] ? bodies[match[1]] : {};
     if (match && delays[match[1]]) await new Promise((resolve) => setTimeout(resolve, delays[match[1]]));
+    if (match && failures[match[1]]) {
+      return route.fulfill({ status: failures[match[1]], contentType: 'application/json', body: JSON.stringify({ error: 'e2e failure' }) });
+    }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   if (savedTab) {
@@ -55,6 +59,27 @@ test('the nav is Jobs, Calendar, Financials, Dispatch, Sales and Ops opens on Jo
     await expect(page.locator(`[data-view="${hidden}"]`)).toHaveCount(0);
   }
   expect(await page.evaluate(() => localStorage.getItem('sw_ops_tab'))).toBe('jobs');
+});
+
+test('Ops opens on Jobs after Financials was the last tab used, and a hash link still opens its tab', async ({ page }) => {
+  await bootOps(page);
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials')).toHaveClass(/active/);
+  expect(await page.evaluate(() => localStorage.getItem('sw_ops_tab'))).toBe('financials');
+
+  // Leave the page first so the next open is a full load, as a new visit is.
+  await page.goto('about:blank');
+  await page.goto(OPS_FILE);
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  expect(await page.locator('.view.active').evaluateAll((els) => els.map((el) => el.id))).toEqual(['viewJobs']);
+  await expect(page.locator('.header-nav button.active')).toHaveText(['Jobs']);
+
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials')).toHaveClass(/active/);
+  await page.goto('about:blank');
+  await page.goto(OPS_FILE + '#calendar');
+  await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
+  expect(await page.locator('.view.active').evaluateAll((els) => els.map((el) => el.id))).toEqual(['viewCalendar']);
 });
 
 for (const hidden of ['today', 'inbox', 'approvals', 'materials']) {
@@ -167,11 +192,23 @@ test('the Jarvis bar counts purchase orders as soon as a slow list arrives on Di
     },
     // Longer than the 500ms repaint showView schedules, so only the list's
     // own arrival can correct the bar before the 30 second tick.
-    delays: { list_pos: 1500 },
+    delays: { list_pos: 3000 },
   });
   await page.locator('.header-nav button[data-view="dispatch"]').click();
+  // While the list is still in flight the bar must not claim there are none.
+  await expect(page.locator('#jarvisSummary')).toHaveText('Purchase orders loading...');
   await expect(page.locator('#viewDispatch #materialsKanban .kanban-card', { hasText: 'Demo Supplier' })).toBeVisible();
   await expect(page.locator('#jarvisSummary')).toHaveText('1 purchase orders tracked');
+});
+
+test('the Jarvis bar never says "No purchase orders" on Dispatch when the list failed to load', async ({ page }) => {
+  await bootOps(page, { failures: { list_pos: 500 } });
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  await expect(page.locator('#toastContainer .toast', { hasText: 'Failed to load purchase orders' })).toBeVisible();
+  await expect(page.locator('#jarvisSummary')).toHaveText('Purchase orders loading...');
+  // Past the repaint showView schedules, the failed read still is not an empty one.
+  await page.waitForTimeout(700);
+  await expect(page.locator('#jarvisSummary')).toHaveText('Purchase orders loading...');
 });
 
 test('the Jarvis bar alert badges fill in when Ops opens on Jobs', async ({ page }) => {

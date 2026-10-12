@@ -7280,8 +7280,9 @@ function jobDetailIsOpen() {
 // became Dispatch: the concept on top, the live purchase order board that was
 // the Materials view below it. The hidden views, loaders and ops-api actions
 // all stay, so bringing one back is its nav button plus its key here. Any route
-// into a hidden view (an old #today link, a saved sw_ops_tab, a stale button)
-// lands on Jobs instead of an empty screen.
+// into a hidden view (an old #today link, a stale button) lands on Jobs instead
+// of an empty screen. Ops always opens on Jobs: only a URL hash deep link opens
+// another tab, the last-used tab is never restored.
 var OPS_HIDDEN_VIEWS = { today: true, inbox: true, approvals: true, materials: true };
 function opsVisibleView(view) {
   return (!view || OPS_HIDDEN_VIEWS[view] === true) ? 'jobs' : view;
@@ -7393,15 +7394,8 @@ function restoreTab() {
     setTimeout(function() { openJobDetailByRef(jobRef); }, 500);
     return;
   }
-  // A hidden tab (#today, #inbox, #approvals, #materials) is still accepted
-  // here so showView can send it to Jobs, rather than falling through to an
-  // older saved tab.
   var validTabs = ['jobs', 'calendar', 'financials', 'dispatch', 'performance', 'booking', 'sales'];
-  function knownTab(t) { return !!t && (validTabs.indexOf(t) >= 0 || OPS_HIDDEN_VIEWS[t] === true); }
-  if (knownTab(hash)) { showView(hash); return; }
-  var saved = localStorage.getItem('sw_ops_tab');
-  if (knownTab(saved)) { showView(saved); return; }
-  showView('jobs');
+  showView(validTabs.indexOf(hash) >= 0 ? hash : 'jobs');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -17372,10 +17366,12 @@ async function sendInvoice(xeroId, invNumber) {
 }
 
 var _allPOs = [];
+var _allPOsLoaded = false;
 async function loadPOs() {
   try {
     var data = await opsFetch('list_pos');
     _allPOs = data.purchase_orders || [];
+    _allPOsLoaded = true;
     renderPOTable(_allPOs);
   } catch (e) {
     console.error('loadPOs error:', e);
@@ -18125,6 +18121,7 @@ async function loadMaterials() {
   try {
     var data = await opsFetch('list_pos');
     _allPOs = data.purchase_orders || [];
+    _allPOsLoaded = true;
     updateJarvisSummary();
     renderMaterialsKanban();
     loadPendingPrices();
@@ -25967,7 +25964,8 @@ function updateJarvisSummary() {
     }
   } else if (view === 'dispatch') {
     var poCount = _allPOs ? _allPOs.length : 0;
-    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
+    if (!_allPOsLoaded) text = 'Purchase orders loading...';
+    else text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
   } else if (view === 'inbox') {
     var inboxData = _annotationCache['global'];
     if (inboxData && inboxData.data) {

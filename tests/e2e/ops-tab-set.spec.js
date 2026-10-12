@@ -13,7 +13,7 @@ const { installOpsSessionStub } = require('../helpers/ops-auth');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
-async function bootOps(page, { hash = '', savedTab = null, responses = {} } = {}) {
+async function bootOps(page, { hash = '', savedTab = null, responses = {}, delays = {} } = {}) {
   const apiCalls = [];
   const requests = [];
   const bodies = Object.assign({ pipeline: { columns: {} } }, responses);
@@ -25,6 +25,7 @@ async function bootOps(page, { hash = '', savedTab = null, responses = {} } = {}
     const match = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
     if (match) apiCalls.push(match[1]);
     const body = match && bodies[match[1]] ? bodies[match[1]] : {};
+    if (match && delays[match[1]]) await new Promise((resolve) => setTimeout(resolve, delays[match[1]]));
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   if (savedTab) {
@@ -150,4 +151,22 @@ test('Dispatch carries the live Purchase orders board below the concept', async 
     return Boolean(concept.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING);
   });
   expect(below).toBe(true);
+});
+
+test('the Jarvis bar counts purchase orders as soon as a slow list arrives on Dispatch', async ({ page }) => {
+  await bootOps(page, {
+    responses: {
+      list_pos: {
+        purchase_orders: [
+          { id: 'po-e2e-1', po_number: 'PO-E2E-0001', supplier_name: 'Demo Supplier', status: 'draft', total: 120, job_number: 'SWF-E2E-1', client_name: 'Test Client', job_type: 'fencing' },
+        ],
+      },
+    },
+    // Longer than the 500ms repaint showView schedules, so only the list's
+    // own arrival can correct the bar before the 30 second tick.
+    delays: { list_pos: 1500 },
+  });
+  await page.locator('.header-nav button[data-view="dispatch"]').click();
+  await expect(page.locator('#viewDispatch #materialsKanban .kanban-card', { hasText: 'Demo Supplier' })).toBeVisible();
+  await expect(page.locator('#jarvisSummary')).toHaveText('1 purchase orders tracked');
 });

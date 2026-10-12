@@ -18125,6 +18125,7 @@ async function loadMaterials() {
   try {
     var data = await opsFetch('list_pos');
     _allPOs = data.purchase_orders || [];
+    updateJarvisSummary();
     renderMaterialsKanban();
     loadPendingPrices();
   } catch (e) {

@@ -99,7 +99,9 @@ test('Dispatch is a labelled concept on sample data and makes no network call', 
   await page.locator('.header-nav button[data-view="dispatch"]').click();
   const root = page.locator('#dispatchConceptRoot');
   await expect(root.locator('.dpc-banner')).toContainText('Concept preview');
-  await expect(root.locator('.dpc-banner')).toContainText('cannot order, save or send anything');
+  await expect(root.locator('.dpc-banner')).toContainText('This concept section does not read live jobs and cannot order, save or send anything');
+  await expect(root.locator('.dpc-banner')).toContainText('The Purchase orders board below it is live');
+  await expect(page.locator('#jarvisSummary')).toHaveText('No purchase orders');
   // The live PO board below the concept loads when the tab opens; let it settle
   // so only the concept's own interactions are measured.
   await expect.poll(() => apiCalls.includes('list_pos')).toBe(true);

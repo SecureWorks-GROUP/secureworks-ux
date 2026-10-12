@@ -25953,7 +25953,7 @@ function updateJarvisSummary() {
     }
   } else if (view === 'dispatch') {
     var poCount = _allPOs ? _allPOs.length : 0;
-    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'Dispatch concept, sample data only';
+    text = poCount > 0 ? poCount + ' purchase orders tracked' : 'No purchase orders';
   } else if (view === 'inbox') {
     var inboxData = _annotationCache['global'];
     if (inboxData && inboxData.data) {

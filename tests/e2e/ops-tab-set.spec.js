@@ -465,12 +465,56 @@ test('Dispatch: Scope and notes shows the scope facts, scope photos, quote, scop
   await expect(sec).toContainText('No scope saved on this job.');
   await expect(sec.locator('.dpc-facts')).toHaveCount(0);
   await expect(lines).toHaveText(['Quote sent: Q-900202 v1, sent']);
-  await expect(lines.first().locator('a')).toHaveAttribute('href', /\/functions\/v1\/send-quote\/view\?token=tok-e2e$/);
+  await expect(lines.first().locator('a')).toHaveCount(0);
 
   // A scope saved in a layout these picks do not read is not called "no scope".
   await root.locator('.dpc-job', { hasText: 'SWF-900301' }).click();
   await expect(sec).toContainText('A scope is saved on this job, but it holds none of the facts this view reads.');
   await expect(lines).toHaveCount(0);
+});
+
+test('Dispatch: a quote with no PDF is named without a link, never the customer share page', async ({ page }) => {
+  const shared = (over) => Object.assign({ type: 'quote', quote_number: 'Q-900101', sent_to_client: true, share_token: 'tok-e2e', created_at: '2026-10-01T01:00:00+00:00' }, over);
+  const { root } = await bootDispatch(page, {
+    job_detail: (url) => {
+      const id = url.searchParams.get('jobId');
+      if (id === 'job-f1') return Object.assign({}, D_DETAIL[id], { documents: [shared({ id: 'd1', version: 2, accepted_at: `${PERTH_YEAR}-10-03T02:00:00+00:00` })] });
+      if (id === 'job-p1') return Object.assign({}, D_DETAIL[id], { documents: [shared({ id: 'd2', version: 1, sent_at: `${PERTH_YEAR}-09-01T02:00:00+00:00` })] });
+      return D_DETAIL[id];
+    },
+  });
+  const quoteLine = root.locator('.dpc-scope-line', { hasText: 'Q-900101' });
+  const shareLinks = page.locator('#viewDispatch a[href*="send-quote"], #viewDispatch a[href*="tok-e2e"]');
+  await expect(quoteLine).toHaveText('Signed quote: Q-900101 v2, accepted 3/10');
+  await expect(quoteLine.locator('a')).toHaveCount(0);
+  await expect(shareLinks).toHaveCount(0);
+
+  await root.locator('.dpc-job', { hasText: 'SWP-900201' }).click();
+  await expect(quoteLine).toHaveText('Quote sent: Q-900101 v1, sent 1/9');
+  await expect(quoteLine.locator('a')).toHaveCount(0);
+  await expect(shareLinks).toHaveCount(0);
+});
+
+test('Dispatch: a scope picture the office attached as an image counts as a scope photo, a video does not', async ({ page }) => {
+  const { root } = await bootDispatch(page, {
+    job_detail: (url) => {
+      const id = url.searchParams.get('jobId');
+      if (id === 'job-f1') return Object.assign({}, D_DETAIL[id], { media: [photo(1, { type: 'image', label: 'Office picture' }), photo(2, { type: 'video' })] });
+      if (id === 'job-p1') return Object.assign({}, D_DETAIL[id], { media: [photo(1), photo(2, { type: 'image' }), photo(3, { type: 'image', phase: 'completion' })] });
+      return D_DETAIL[id];
+    },
+  });
+  const sec = root.locator('.dpc-sec');
+  const photos = sec.locator('.dpc-photo');
+  await expect(photos).toHaveCount(1);
+  await expect(photos.first().locator('span')).toHaveText('Office picture');
+  await expect(sec).not.toContainText('No scope photos on this job.');
+  await photos.first().click();
+  await expect(page.locator('.ops-lightbox img')).toHaveAttribute('src', 'https://media.example.test/full-1.jpg');
+  await page.locator('.ops-lightbox').click();
+
+  await root.locator('.dpc-job', { hasText: 'SWP-900201' }).click();
+  await expect(photos).toHaveCount(2);
 });
 
 test('Dispatch: one scope photo is drawn at its own size, and two photos share a row', async ({ page }) => {

@@ -284,7 +284,7 @@
   function scopePhotos(media) {
     if (!Array.isArray(media)) return [];
     return media.filter(function (m) {
-      return m && m.phase === 'scope' && m.type === 'photo' && safeUrl(m.storage_url || m.thumbnail_url);
+      return m && m.phase === 'scope' && m.type !== 'video' && safeUrl(m.storage_url || m.thumbnail_url);
     });
   }
 
@@ -306,16 +306,11 @@
     var name = plain(doc.quote_number) || 'Quote';
     if (plain(doc.version)) name += ' v' + plain(doc.version);
     var when = parseStamp(accepted ? doc.accepted_at : doc.sent_at);
-    var url = safeUrl(doc.storage_url) || safeUrl(doc.pdf_url);
-    if (!url && plain(doc.share_token) && doc.sent_to_client === true) {
-      var base = safeUrl(global.SUPABASE_URL);
-      if (base) url = base.replace(/\/+$/, '') + '/functions/v1/send-quote/view?token=' + encodeURIComponent(plain(doc.share_token));
-    }
     return {
       label: accepted ? 'Signed quote' : 'Quote sent',
       name: name,
       detail: (accepted ? 'accepted' : 'sent') + (when ? ' ' + dayMonth(when, yearNow) : ''),
-      url: url
+      url: safeUrl(doc.storage_url) || safeUrl(doc.pdf_url)
     };
   }
 

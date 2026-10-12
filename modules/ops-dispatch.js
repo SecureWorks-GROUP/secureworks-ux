@@ -11,8 +11,9 @@
  * is copied to the customer's contact notes. Add no other write here.
  *
  * A failed read never renders as empty. An ops-api that does not know
- * dispatch=1 answers with rows missing description / value_inc_gst, and one
- * that does not know job_notes answers Unknown action: both are failed reads.
+ * dispatch=1 answers with rows missing description / value_inc_gst /
+ * work_type, and one that does not know job_notes answers Unknown action:
+ * both are failed reads.
  *
  * Guard: tests/e2e/ops-tab-set.spec.js.
  * Contract: secureworks-backend docs/dispatch-slice-1-read-contract.md.
@@ -104,11 +105,17 @@
     return '$' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
-  // A list row names its work type beside the stored type: a repair-family job
-  // stored as make-safe arrives as work_type 'repair'. job_detail's job carries
-  // only type.
+  // A list row's work type is the server's work_type, never its stored type: a
+  // repair-family job stored as make-safe arrives as work_type 'repair'. A row
+  // without one is a failed read (rowsFromPipeline), so there is no fallback.
   function typeKey(row) {
-    var t = text(row && (row.work_type || row.type)).toLowerCase();
+    var t = text(row && row.work_type).toLowerCase();
+    return /^[a-z0-9_-]+$/.test(t) ? t : '';
+  }
+
+  // job_detail's job carries only the stored type.
+  function storedTypeKey(job) {
+    var t = text(job && job.type).toLowerCase();
     return /^[a-z0-9_-]+$/.test(t) ? t : '';
   }
 
@@ -136,7 +143,7 @@
       if (Array.isArray(list)) list.forEach(function (r) { if (r && typeof r === 'object') rows.push(r); });
     });
     rows.forEach(function (r) {
-      if (typeof r.value_inc_gst !== 'boolean' || !('description' in r)) {
+      if (typeof r.value_inc_gst !== 'boolean' || !('description' in r) || typeof r.work_type !== 'string' || !r.work_type.trim()) {
         throw new Error('Job list answer is missing the Dispatch fields');
       }
     });
@@ -671,7 +678,7 @@
     } else {
       var job = d.data.job;
       var scope = parseScope(job.scope_json);
-      var facts = scopeFacts(scope, typeKey(job) || typeKey(row));
+      var facts = scopeFacts(scope, storedTypeKey(job) || typeKey(row));
       if (facts.length) {
         h += '<div class="dpc-facts">';
         facts.forEach(function (f) { h += '<div><span>' + esc(f[0]) + '</span><strong>' + esc(f[1]) + '</strong></div>'; });

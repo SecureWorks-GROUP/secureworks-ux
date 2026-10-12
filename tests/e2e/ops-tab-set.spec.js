@@ -640,10 +640,16 @@ test('Dispatch: a failed list read is an error, never an empty list, and Retry r
   const { root } = await bootDispatch(page, {
     pipeline: () => {
       if (mode === 'down') return { status: 500, body: { error: 'e2e failure' } };
-      // An ops-api that does not know dispatch=1 yet: rows without the two new fields.
+      // An ops-api that does not know dispatch=1 yet: rows without the new fields.
       if (mode === 'old') {
-        const { description, value_inc_gst, ...oldRow } = D_JOBS.f1;
+        const { description, value_inc_gst, work_type, ...oldRow } = D_JOBS.f1;
         return { columns: { accepted: [oldRow] }, total: 1 };
+      }
+      // A row with no work_type is a failed read too: the stored type is never
+      // used in its place, even beside rows that are whole.
+      if (mode === 'no-work-type') {
+        const { work_type, ...noWorkType } = D_JOBS.p1;
+        return { columns: { accepted: [D_JOBS.f1], processing: [noWorkType] }, total: 2 };
       }
       return D_LIST();
     },
@@ -661,6 +667,10 @@ test('Dispatch: a failed list read is an error, never an empty list, and Retry r
   mode = 'old';
   await list.locator('[data-dpc-retry="list"]').click();
   await expectFailed();
+  mode = 'no-work-type';
+  await list.locator('[data-dpc-retry="list"]').click();
+  await expectFailed();
+  await expect(root.locator('.dpc-type')).toHaveCount(0);
   mode = 'up';
   await root.locator('.dpc-jobhead [data-dpc-retry="list"]').click();
   await expect(root.locator('.dpc-job')).toHaveCount(5);

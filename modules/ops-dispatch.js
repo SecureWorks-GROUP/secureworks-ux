@@ -281,6 +281,8 @@
     return out;
   }
 
+  // The Jobs tab's rule for a scope photo: any scope-phase picture. A picture
+  // the office attached is stored as type 'image', so only a video is left out.
   function scopePhotos(media) {
     if (!Array.isArray(media)) return [];
     return media.filter(function (m) {
@@ -289,7 +291,9 @@
   }
 
   // The quote the customer signed, else the newest one sent to them. The line
-  // is called "Signed quote" only when an acceptance is on record.
+  // is called "Signed quote" only when an acceptance is on record. It links to
+  // its PDF only, never the customer's share page (send-quote/view): opening
+  // that page records a customer view, which is a write. No PDF, no link.
   function pickQuote(documents, yearNow) {
     if (!Array.isArray(documents)) return null;
     var quotes = documents.filter(function (d) { return d && d.type === 'quote'; });

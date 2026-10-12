@@ -598,6 +598,20 @@ step. Contract and copy: `docs/sales-booking-ui.md`,
 `test:e2e`) and `tests/e2e/sales-booking-redesign.spec.js` against
 `tests/fixtures/booking-confirm/friday.html`.
 
+## Debt Workshop: the Debt tab (`modules/ops-debt-workshop.js`)
+
+Live module behind a hidden tab: the Debt nav buttons (`data-debt-nav`) show only with
+`?debt=1`, `localStorage.sw_debt_ws === '1'` or the overview's `settings.tab_visible`
+(`debtWsProbeVisibility()` runs once after login and fails silent). Screen, actions and
+shapes: [docs/debt-workshop.md](docs/debt-workshop.md); contract: secureworks-wiki
+`coding/capabilities/debt-follow-up/debt-workshop-spec.md` section 9. Every rule the
+screen applies lives in the pure `DebtWorkshopCore` between `// <debt-workshop-core>`
+sentinels. Send stays disabled while `settings.sending_on` is false; owner-only
+controls follow `settings.viewer_is_owner`; refusals are shown in words, never as codes.
+Keep the module free of long dashes and emojis. Guards: `npm run test:debt-workshop`
+(in `test:e2e`, fails on either character) and `tests/e2e/ops-debt-workshop.spec.js`.
+Do not touch the old Clear Debt modules from here; stage 6 removes them in its own PR.
+
 ## Trade App job cards (`trade.html`)
 
 All job types (make-safe, fencing, patio, decking, reno, repair) render through ONE card

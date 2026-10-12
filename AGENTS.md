@@ -607,6 +607,10 @@ reuse Comms ids, which the Comms poll writes into. Pure rules live between
 `// <job-overview-v2-core>` sentinels, run in node by
 `tests/e2e/ops-job-overview-v2-core.spec.js`. Contract, data rules and states:
 `docs/job-overview-v2.md`. Guard: `tests/e2e/ops-job-overview-v2.spec.js`.
+The middle Job Story card reads the live card's `now`, timeline, money and loops;
+the Quoted band uses only a recorded current-quote value. Backend `notes` is an
+object with `items[]`, and its invoice rows need the matching `job_detail` row
+for the Xero link id. Refresh re-reads the card; Rewrite asks for new prose.
 
 ## Fencing scoping-tool notes (`ops.html`, `trade.html`)
 

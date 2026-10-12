@@ -207,6 +207,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     const fromNotes = C.openItems({ loops: [] }, detail().job, overview().notes, NOW);
     expect(fromNotes.waiting).toHaveLength(1);
     expect(fromNotes.waiting[0].tag.words).toBe('AVERY');
+    const known = C.openItems({ loops: [] }, detail().job, { items: [{ id: 'note-2', status: 'open', what: 'Timing is unconfirmed.', owner: 'us', group: 'good_to_know' }] }, NOW);
+    expect(known.know).toHaveLength(1);
   });
 
   test('whose move, in words', () => {
@@ -262,6 +264,8 @@ test.describe('Job Overview v2 core (extracted from modules/ops-job-overview-v2.
     expect(flat.state).toBe('stale');
     expect(flat.sections.headline).toBe('Waiting on the deposit.');
     expect(C.storyText({ status: 'fresh', sections: { headline: '' } }).state).toBe('none');
+    expect(C.storyText({ status: 'fresh', text: { sections: { headline: 'Waiting on a reply.' } }, writer: { on: true, open_request: { id: 'request-1' } } }))
+      .toMatchObject({ writer_on: true, request_open: true });
   });
 
   test('a long dash or an emoji blocks a text; a plain hyphen does not', () => {

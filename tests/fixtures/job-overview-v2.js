@@ -221,9 +221,9 @@ function buildJobOverview(opts = {}) {
         evidence_rows: 40,
       },
     },
-    notes: [
+    notes: { status: 'live', items: [
       { id: 'note-1', item_type: 'request', status: 'open', from_role: 'us', from_name: 'Sam', to_role: 'customer', to_name: 'Avery Lin', what: 'We asked Avery to let us know once the deposit is paid.', due_date: null, blocks: 'booking', opened_at: at(7, 9, 4), closed_at: null, quote: 'let me know when it is paid' },
-    ],
+    ] },
     messages: [
       { id: '2c9e0000-0000-4000-8000-000000000001', at: at(2, 10, 17), channel: 'sms', direction: 'inbound', who: 'Avery Lin', text: 'Morning Sam, the neighbour wants to go ahead but would like the asbestos metres on their part corrected first.', kind: 'message' },
       { id: '2c9e0000-0000-4000-8000-000000000002', at: at(2, 10, 24), channel: 'sms', direction: 'outbound', who: 'Sam', text: 'Hi Avery, I will review it this evening and send it back to you.', kind: 'message' },
@@ -247,9 +247,9 @@ function buildJobOverview(opts = {}) {
         { id: IDS.q1, quote_number: 'Q-9001', version: 1, sent_at: at(35, 13, 48, 1), first_viewed_at: at(35, 13, 51), accepted_at: null, superseded_at: at(21, 17, 11, 30), view_count: 6, value_inc_gst: 8296.75 },
       ],
       invoices: [
-        { id: IDS.inv2, xero_invoice_id: IDS.xero2, invoice_number: 'INV-9002', invoice_type: 'ACCREC', reference: 'SWF-990101-DEP50', status: 'DRAFT', total: 3571.43, amount_paid: 0, amount_due: 3571.43, invoice_date: perthDate(7, now), due_date: perthDate(-7, now) },
+        { id: IDS.inv2, invoice_number: 'INV-9002', invoice_type: 'ACCREC', reference: 'SWF-990101-DEP50', status: 'DRAFT', total: 3571.43, amount_paid: 0, amount_due: 3571.43, invoice_date: perthDate(7, now), due_date: perthDate(-7, now) },
         // Deleted in Xero; a false "paid" event once claimed it was paid. It never counts.
-        { id: IDS.inv1, xero_invoice_id: IDS.xero1, invoice_number: 'INV-9001', invoice_type: 'ACCREC', reference: 'SWF-990101-DEP50', status: 'DELETED', total: 3571.43, amount_paid: 3571.43, amount_due: 0, invoice_date: perthDate(7, now), due_date: perthDate(-7, now) },
+        { id: IDS.inv1, invoice_number: 'INV-9001', invoice_type: 'ACCREC', reference: 'SWF-990101-DEP50', status: 'DELETED', total: 3571.43, amount_paid: 3571.43, amount_due: 0, invoice_date: perthDate(7, now), due_date: perthDate(-7, now) },
       ],
       attachments: [
         { file_name: 'Quote_Avery_Lin_Rear_Fence.pdf', at: at(7, 7, 57), page_count: 6 },
@@ -259,7 +259,7 @@ function buildJobOverview(opts = {}) {
       media_count: 10,
       scope: true,
     },
-    story_text: { status: 'none' },
+    story_text: { status: 'none', writer: { on: true, open_request: null } },
   };
   if (opts.writtenStory) {
     overview.story_text = {

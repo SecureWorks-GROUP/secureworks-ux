@@ -303,14 +303,15 @@ var JobOverviewV2Core = (function () {
       if (!any) sections = null;
     }
     var req = obj(r.request) || {};
+    var writer = obj(r.writer) || {};
     return {
       state: !sections ? 'none' : (fresh === 'stale' ? 'stale' : 'fresh'),
       sections: sections,
       written_at: src.written_at || r.written_at || null,
       evidence_until: src.evidence_until || r.evidence_until || null,
-      request_open: !!(r.request_open || src.request_open || (req.requested_at && !req.done_at)),
+      request_open: !!(r.request_open || src.request_open || writer.open_request || (req.requested_at && !req.done_at)),
       requested_at: r.requested_at || req.requested_at || null,
-      writer_on: r.writer_on == null ? null : !!r.writer_on
+      writer_on: writer.on == null ? (r.writer_on == null ? null : !!r.writer_on) : !!writer.on
     };
   }
   // Paragraphs of a section: blank lines split them.
@@ -363,6 +364,9 @@ var JobOverviewV2Core = (function () {
   // ── Open items: blocking, waiting on someone, good to know ──
 
   function loopGroup(l) {
+    var named = lower(l.group);
+    if (named === 'blocking' || named === 'waiting') return named;
+    if (named === 'good_to_know' || named === 'know') return 'know';
     var rule = lower(l.rule), st = lower(l.status), o = lower(l.owner);
     if (rule === 'constraint' || rule === 'claim' || st === 'closing_evidence' || st === 'not_due' || st === 'unconfirmed') return 'know';
     if (o === 'customer' || o === 'third_party') return 'waiting';
@@ -383,10 +387,11 @@ var JobOverviewV2Core = (function () {
   function loopsFromNotes(notes) {
     return arr(notes).filter(function (n) { return n && n.what && lower(n.status) === 'open'; }).map(function (n) {
       var commit = lower(n.item_type) === 'commitment';
-      var role = lower(commit ? n.from_role : n.to_role);
+      var role = lower(n.owner || (commit ? n.from_role : n.to_role));
       return {
         key: 'note:' + str(n.id || hash(n.what)), owner: ROLE_OWNER[role] || 'unknown',
-        owner_name: commit ? n.from_name : n.to_name, rule: n.item_type, status: n.status,
+        owner_name: n.owner_name || (commit ? n.from_name : n.to_name), group: n.group,
+        rule: n.item_type, status: n.status,
         what: n.what, why: n.quote, since: n.opened_at, blocks: n.blocks, source: 'ledger', closes_when: null
       };
     });
@@ -395,7 +400,7 @@ var JobOverviewV2Core = (function () {
     var loops = arr(story && story.loops).filter(function (l) {
       return l && l.what && ['closed', 'superseded', 'done', 'resolved'].indexOf(lower(l.status)) < 0;
     });
-    if (!loops.length) loops = loopsFromNotes(notes);
+    if (!loops.length) loops = loopsFromNotes(Array.isArray(notes) ? notes : (obj(notes) && notes.items));
     var groups = { blocking: [], waiting: [], know: [] };
     loops.forEach(function (l, i) {
       var g = loopGroup(l);
@@ -466,7 +471,12 @@ var JobOverviewV2Core = (function () {
     var job = (detail && detail.job) || {};
     var fx = obj(overview && overview.files);
     var src = fx && Array.isArray(fx.invoices) ? fx.invoices : arr(detail && detail.invoices);
-    return src.map(function (r) { return invoiceRow(r, job.id); }).filter(function (i) { return !/ACCPAY|BILL/.test(i.type); });
+    var records = arr(detail && detail.invoices);
+    return src.map(function (r) {
+      // job_overview owns the amount and status; job_detail still carries the Xero link id.
+      var match = fx && records.filter(function (d) { return d && r && r.id && String(d.id) === String(r.id); })[0];
+      return invoiceRow(match ? Object.assign({}, match, r, { xero_invoice_id: r.xero_invoice_id || match.xero_invoice_id }) : r, job.id);
+    }).filter(function (i) { return !/ACCPAY|BILL/.test(i.type); });
   }
   function jobValue(detail, overview) {
     var job = (detail && detail.job) || {};
@@ -1148,6 +1158,9 @@ var JobOverviewV2 = (function () {
       state: !e ? 'loading' : (ov ? 'ok' : e.status) };
     m.first = C.firstName(C.customerName(job, story)) || 'the customer';
     m.money = C.moneySummary(detail, ov);
+    var currentQuote = C.quoteRows(detail, ov).filter(function (q) { return !q.superseded && q.value != null; })
+      .sort(function (a, b) { return C.toMs(b.sentAt || b.createdAt) - C.toMs(a.sentAt || a.createdAt); })[0];
+    m.quoted = currentQuote ? currentQuote.value : null;
     m.text = C.storyText(ov && ov.story_text);
     m.wm = story && C.obj(story.now) ? C.whoseMove(story.now.whose_move, job, story) : null;
     m.items = C.openItems(story, job, ov && ov.notes, now);
@@ -1171,6 +1184,11 @@ var JobOverviewV2 = (function () {
     });
     u.sent.forEach(function (s) { list.push({ at: new Date(s.ms).toISOString(), channel: 'sms', direction: 'outbound', who: 'You', text: s.text, pending: true }); });
     m.conv = C.conversation(list, m.filter, now);
+    var words = C.conversation(list, 'all', now).items.filter(function (x) {
+      return x.type === 'msg' && (x.m.channel === 'sms' || x.m.channel === 'email') && x.m.text;
+    }).map(function (x) { return x.m; });
+    m.lastCustomer = words.filter(function (x) { return x.direction === 'inbound'; }).slice(-1)[0] || null;
+    m.lastUs = words.filter(function (x) { return x.direction === 'outbound'; }).slice(-1)[0] || null;
     m.files = C.files(detail, ov, now).map(function (f) { return decorateFile(f, m); });
     u.files = {};
     m.files.forEach(function (f) { u.files[f.key] = f; });
@@ -1303,27 +1321,62 @@ var JobOverviewV2 = (function () {
   function storyHtml(m) {
     var st = m.story;
     var asOf = st ? ((C.obj(st.meta) && st.meta.built_at) || st.as_of) : null;
+    var age = m.now - C.toMs(asOf);
+    var built = asOf ? (age >= 0 && age < 5 * 60000 ? 'just now' : C.stamp(asOf, m.now)) : '';
     var h = '<section class="ov2-card ov2-col ov2-mid ov2-story" id="ov2Story" aria-label="The story">' +
-      '<div class="ov2-ch"><span class="ov2-lbl">The story</span><span class="ov2-hint">' + esc(asOf ? 'as of ' + C.stamp(asOf, m.now) : '') + '</span></div>';
+      '<div class="ov2-ch ov2-story-head"><h2>Job story' + esc(built ? ', built ' + built : '') + '</h2>' +
+      '<button type="button" class="ov2-linkbtn" data-ov2-act="refresh"' + (m.entry && m.entry.promise ? ' disabled' : '') + '>Refresh</button></div>';
     if (!st) return h + stateHtml(m) + '</section>';
     var nw = C.obj(st.now) || {};
     var sec = m.text && m.text.sections;
     var hl = C.headlineFrom(nw.line);
     var headline = (sec && sec.headline) || hl.headline || 'Where this job is at';
-    h += '<div class="ov2-lede" id="ov2Headline">' + esc(headline) + '</div>';
+    h += '<div class="ov2-story-now"><div class="ov2-story-row"><h3>Where it\'s at</h3>' +
+      (m.wm ? '<span class="ov2-chip' + (m.wm.key === 'us' ? ' us' : '') + '">' + esc(m.wm.words) + '</span>' : '') +
+      '</div><div class="ov2-lede" id="ov2Headline">' + esc(headline) + '</div>' +
+      (sec && sec.where_it_is_at ? '<p class="ov2-p">' + esc(sec.where_it_is_at) + '</p>' : (hl.rest ? '<p class="ov2-p">' + esc(hl.rest) + '</p>' : '')) + '</div>';
     h += nextHtml(m);
+    h += storyMomentsHtml(m) + storyMoneyHtml(m);
+    h += openItemsHtml(m, true);
+    h += lastWordHtml(m) + unknownHtml(m);
     if (sec) {
-      [['the_job', 'The job'], ['how_we_got_here', 'How we got here'], ['where_it_is_at', 'Where it is at'], ['watch_out', 'Watch out']].forEach(function (p) {
-        if (sec[p[0]]) h += '<h3 class="ov2-lbl ov2-h">' + p[1] + '</h3>' + C.paragraphs(sec[p[0]]).map(function (x) { return '<p class="ov2-p">' + esc(x) + '</p>'; }).join('');
-      });
-    } else {
-      if (hl.rest) h += '<h3 class="ov2-lbl ov2-h">Where it is at</h3><p class="ov2-p">' + esc(hl.rest) + '</p>';
-      if (m.items.know.length) h += '<h3 class="ov2-lbl ov2-h">Watch out</h3><ul class="ov2-open">' + m.items.know.map(function (it) { return itemHtml(m, it); }).join('') + '</ul>';
-      h += '<p class="ov2-none" id="ov2NoText">No written story yet. The story above comes straight from the records.</p>';
-    }
-    h += openItemsHtml(m, !!sec);
+      var more = [['the_job', 'The job'], ['how_we_got_here', 'How we got here'], ['watch_out', 'Watch out']]
+        .filter(function (p) { return !!sec[p[0]]; });
+      if (more.length) {
+        h += '<details class="ov2-story-more"><summary>More story</summary>';
+        more.forEach(function (p) { h += '<h3 class="ov2-lbl ov2-h">' + p[1] + '</h3>' + C.paragraphs(sec[p[0]]).map(function (x) { return '<p class="ov2-p">' + esc(x) + '</p>'; }).join(''); });
+        h += '</details>';
+      }
+    } else h += '<p class="ov2-none" id="ov2NoText">No written story yet. This card comes from the job records.</p>';
     h += stampHtml(m);
     return h + '</section>';
+  }
+  function storyMomentsHtml(m) {
+    var moments = m.timeline.filter(function (it) { return it.now || it.cls === 'ms' || it.cls === 'wn'; }).slice(-4);
+    if (!moments.length) return '';
+    return '<div class="ov2-story-block"><h3>Key moments</h3><ol class="ov2-story-moments">' + moments.map(function (it) {
+      return '<li class="' + esc(it.cls || '') + '"><span class="ov2-story-dot" aria-hidden="true"></span><span>' +
+        '<small>' + esc(it.now ? 'Now' : C.when(it.at, m.now)) + '</small><strong>' + esc(it.title) + '</strong></span></li>';
+    }).join('') + '</ol></div>';
+  }
+  function storyMoneyHtml(m) {
+    var cells = [['Quoted', m.quoted], ['Invoiced', m.money.invoiced], ['Paid', m.money.paid]];
+    return '<div class="ov2-story-money" aria-label="Job money">' + cells.map(function (c) {
+      return '<div><span>' + c[0] + '</span><strong>' + esc(c[1] == null ? 'Not recorded' : C.money(c[1])) + '</strong></div>';
+    }).join('') + '</div>';
+  }
+  function lastWordHtml(m) {
+    function row(label, n) {
+      return '<div><span class="ov2-lbl">' + label + '</span><p>' + esc(n ? C.cut(n.text, 160) : 'No message on record.') + '</p></div>';
+    }
+    return '<div class="ov2-story-block ov2-story-last"><h3>Last word</h3>' + row('Customer said', m.lastCustomer) + row('We told them', m.lastUs) + '</div>';
+  }
+  function unknownHtml(m) {
+    var gaps = C.arr(m.story && m.story.not_known).map(function (x) {
+      return C.clean(typeof x === 'string' ? x : (x && (x.what || x.line || x.text)));
+    }).filter(Boolean);
+    return '<div class="ov2-story-block ov2-story-unknown"><h3>What we don\'t know</h3>' +
+      (gaps.length ? '<ul>' + gaps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '<p>Nothing listed in the story card.</p>') + '</div>';
   }
   function stateHtml(m) {
     var e = m.entry || {};
@@ -1361,7 +1414,7 @@ var JobOverviewV2 = (function () {
     if (btns.length < 2 && (m.job.ghl_contact_id || m.job.client_phone)) btns.push('<button type="button" class="ov2-btn" data-ov2-act="text">Text ' + esc(m.first) + '</button>');
     if (btns.length < 2) { var call = callHtml(m, ''); if (call) btns.push(call); }
     var move = moveHtml(m);
-    return '<div class="ov2-next" id="ov2Next"><span class="ov2-lbl">Next' + DOT + esc(wm.words) + '</span><p>' + esc(what + whenTxt) + '</p>' +
+    return '<div class="ov2-next" id="ov2Next"><span class="ov2-lbl">Next step</span><p>' + esc(what + whenTxt) + '</p>' +
       (btns.length ? '<div class="ov2-nacts">' + btns.slice(0, 2).join('') + '</div>' : '') + move + '</div>';
   }
   // The classic Overview's "Mark as" moves, kept in one quiet row.
@@ -1379,7 +1432,7 @@ var JobOverviewV2 = (function () {
     var g0 = m.items;
     var parts = [['blocking', 'Blocking'], ['waiting', 'Waiting on someone']];
     if (withKnow) parts.push(['know', 'Good to know']);
-    var h = '<h3 class="ov2-lbl ov2-h">Open items</h3>';
+    var h = '<h3 class="ov2-lbl ov2-h">Open loops</h3>';
     var any = false;
     parts.forEach(function (p) {
       var list = g0[p[0]];
@@ -1396,7 +1449,8 @@ var JobOverviewV2 = (function () {
     var more = [];
     if (it.why) more.push(it.whyLabel + it.why);
     if (it.closes) more.push('Closes when: ' + it.closes);
-    return '<li' + (open ? ' class="open"' : '') + '><span class="ov2-own o-' + esc(it.tag.cls) + '">' + esc(it.tag.words) + '</span><div class="ov2-it">' +
+    var owner = it.group === 'waiting' ? 'Waiting on ' + it.tag.words : it.tag.words;
+    return '<li' + (open ? ' class="open"' : '') + '><span class="ov2-own o-' + esc(it.tag.cls) + '">' + esc(owner) + '</span><div class="ov2-it">' +
       (more.length ? '<button type="button" class="ov2-itb" data-ov2-act="item" data-ov2-key="' + esc(it.key) + '" aria-expanded="' + open + '">' + esc(it.what) + '</button>' : '<span>' + esc(it.what) + '</span>') +
       (meta ? '<div class="ov2-im">' + esc(meta) + '</div>' : '') +
       (more.length ? '<div class="ov2-imore">' + more.map(function (x) { return '<p>' + esc(x) + '</p>'; }).join('') + '</div>' : '') + '</div></li>';
@@ -1701,7 +1755,7 @@ var JobOverviewV2 = (function () {
         if (!f || !f.open) return;
         if (f.open.type === 'photos') { var sv2 = fn('showJobSubView'); if (sv2) sv2('files'); }
         if (f.open.type === 'invoice') { var pv = fn('showGlobalInvoicePreview'); if (pv) pv(f.previewRow); }
-      } else if (act === 'retry') {
+      } else if (act === 'retry' || act === 'refresh') {
         if (cache[k] && !cache[k].data) delete cache[k];
         load(k, true);
         repaint(k);
@@ -1843,6 +1897,35 @@ var JobOverviewV2 = (function () {
     '@media (max-width:1150px){.ov2-cols{grid-template-columns:minmax(0,1fr)}.ov2-mid{order:-1}}',
     '.ov2-col{padding:14px 16px 12px}',
     '.ov2-ch{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}',
+    '.ov2-story-head{align-items:center;border-bottom:1px solid var(--sw-border,#D4DEE4);padding-bottom:10px;margin-bottom:14px}',
+    '.ov2-story-head h2{font-size:17px;line-height:1.3;margin:0;color:var(--sw-dark-deep,#1A272E)}',
+    '.ov2-story-head .ov2-linkbtn[disabled]{opacity:.5;cursor:wait}',
+    '.ov2-story-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:5px}',
+    '.ov2-story-row h3,.ov2-story-block h3{font-size:12px;font-weight:700;color:var(--sw-dark,#293C46);margin:0}',
+    '.ov2-story-now{margin-bottom:12px}',
+    '.ov2-story-now .ov2-lede{margin:0 0 5px}',
+    '.ov2-story-now .ov2-p{margin:0}',
+    '.ov2-story-block{border-top:1px solid var(--sw-light,#EDF1F4);padding-top:12px;margin-top:12px}',
+    '.ov2-story-moments{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;list-style:none;margin:10px 0 0;padding:0}',
+    '.ov2-story-moments li{min-width:0;border-top:2px solid var(--sw-border,#D4DEE4);padding:8px 2px 0;position:relative}',
+    '.ov2-story-dot{width:9px;height:9px;border:2px solid var(--sw-mid-light,#8FA4B2);background:#fff;border-radius:50%;position:absolute;top:-6px;left:0}',
+    '.ov2-story-moments li.ms .ov2-story-dot{background:var(--sw-orange,#F15A29);border-color:var(--sw-orange,#F15A29)}',
+    '.ov2-story-moments li.wn .ov2-story-dot{background:var(--sw-red,#E74C3C);border-color:var(--sw-red,#E74C3C)}',
+    '.ov2-story-moments li.now .ov2-story-dot{background:#F39C12;border-color:#F39C12}',
+    '.ov2-story-moments small{display:block;font-size:10px;color:var(--sw-mid,#4C6A7C);margin-bottom:3px}',
+    '.ov2-story-moments strong{display:block;font-size:11px;line-height:1.35;overflow-wrap:anywhere}',
+    '.ov2-story-money{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--sw-border,#D4DEE4);margin:14px 0 4px;border:1px solid var(--sw-border,#D4DEE4);font-variant-numeric:tabular-nums}',
+    '.ov2-story-money>div{background:var(--sw-bg,#F8F6F3);padding:9px 10px;min-width:0}',
+    '.ov2-story-money span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--sw-mid,#4C6A7C)}',
+    '.ov2-story-money strong{display:block;font-size:15px;line-height:1.3;color:var(--sw-dark-deep,#1A272E);overflow-wrap:anywhere}',
+    '.ov2-story-last{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}',
+    '.ov2-story-last h3{grid-column:1/-1}',
+    '.ov2-story-last>div{min-width:0;background:var(--sw-bg,#F8F6F3);padding:8px 10px}',
+    '.ov2-story-last p,.ov2-story-unknown p{margin:4px 0 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere}',
+    '.ov2-story-unknown ul{margin:6px 0 0;padding-left:18px;font-size:12px}',
+    '.ov2-story-more{margin-top:14px;font-size:12px}',
+    '.ov2-story-more summary{cursor:pointer;color:var(--sw-mid,#4C6A7C);font-weight:700}',
+    '@media (max-width:540px){.ov2-story-moments{grid-template-columns:repeat(2,minmax(0,1fr))}.ov2-story-last{grid-template-columns:minmax(0,1fr)}.ov2-story-money strong{font-size:12px}}',
     '.ov2-tl{list-style:none;margin:0;padding:0 0 0 20px;max-height:780px;overflow:auto}',
     '.ov2-tl li{position:relative}',
     '.ov2-tl li:after{content:"";position:absolute;left:-12px;top:0;bottom:0;width:2px;background:var(--sw-border,#D4DEE4)}',
@@ -1859,15 +1942,15 @@ var JobOverviewV2 = (function () {
     '.ov2-t{font-weight:700;font-size:13px;line-height:1.35;color:var(--sw-dark-deep,#1A272E)}',
     '.ov2-tl li.wn .ov2-t{color:#C0392B}',
     '.ov2-s{font-size:11px;color:var(--sw-mid-light,#8FA4B2)}',
-    '.ov2-more{display:none;margin:0 6px 6px 10px;padding:6px 8px;background:var(--sw-bg,#F8F6F3);border-left:3px solid var(--sw-orange-light,#FADDD2);color:var(--sw-mid,#4C6A7C);font-size:12px}',
+    '.ov2-more{display:none;margin:0 6px 6px 10px;padding:6px 8px;background:var(--sw-bg,#F8F6F3);border-top:1px solid var(--sw-orange-light,#FADDD2);color:var(--sw-mid,#4C6A7C);font-size:12px}',
     '.ov2-more p{margin:0 0 4px}.ov2-more p:last-child{margin:0}',
     '.ov2-tl li.open .ov2-more{display:block}',
     '.ov2-tlall{display:none;margin:6px 0 0 20px}',
     '.ov2-lede{font-size:17px;font-weight:700;line-height:1.35;margin:2px 0 12px;color:var(--sw-dark-deep,#1A272E)}',
-    '.ov2-next{border-left:4px solid var(--sw-orange,#F15A29);background:var(--sw-orange-tint,#FDF2EE);padding:10px 12px;margin:0 0 14px}',
+    '.ov2-next{border:1px solid var(--sw-orange-light,#FADDD2);background:var(--sw-orange-tint,#FDF2EE);padding:10px 12px;margin:0 0 14px}',
     '.ov2-next .ov2-lbl{color:var(--sw-orange-hover,#C4481F)}',
     '.ov2-next p{margin:4px 0 10px;font-weight:600;max-width:70ch}',
-    '.ov2-next.ov2-quiet{border-left-color:var(--sw-border,#D4DEE4);background:var(--sw-bg,#F8F6F3);margin-top:12px}',
+    '.ov2-next.ov2-quiet{border-color:var(--sw-border,#D4DEE4);background:var(--sw-bg,#F8F6F3);margin-top:12px}',
     '.ov2-nacts{display:flex;gap:6px;flex-wrap:wrap}',
     '.ov2-move{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--sw-mid,#4C6A7C)}',
     '.ov2-quiet .ov2-move{margin-top:0}',
@@ -1891,7 +1974,7 @@ var JobOverviewV2 = (function () {
     '.ov2-itb{background:none;border:0;padding:0;margin:0;text-align:left;cursor:pointer;font-size:13px;line-height:1.5;color:var(--sw-text,#1A272E)}',
     '.ov2-itb:hover{color:var(--sw-orange-hover,#C4481F)}',
     '.ov2-im{font-size:11px;color:var(--sw-mid,#4C6A7C);margin-top:1px}',
-    '.ov2-imore{display:none;margin-top:4px;padding:6px 8px;background:var(--sw-bg,#F8F6F3);border-left:3px solid var(--sw-orange-light,#FADDD2);font-size:12px;color:var(--sw-mid,#4C6A7C)}',
+    '.ov2-imore{display:none;margin-top:4px;padding:6px 8px;background:var(--sw-bg,#F8F6F3);border-top:1px solid var(--sw-orange-light,#FADDD2);font-size:12px;color:var(--sw-mid,#4C6A7C)}',
     '.ov2-imore p{margin:0 0 4px}.ov2-imore p:last-child{margin:0}',
     '.ov2-open li.open .ov2-imore{display:block}',
     '.ov2-stamp{font-size:11px;color:var(--sw-mid,#4C6A7C);border-top:1px dashed var(--sw-border,#D4DEE4);padding-top:8px;margin-top:14px}',

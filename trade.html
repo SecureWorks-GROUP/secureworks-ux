@@ -21805,11 +21805,6 @@
     if (!opts.expenseOnly) {
       autoPopulateFromHours();
     }
-    if (_invRows.length === 0) {
-      // Start with one blank row
-      var defRate = (_hoursData && _hoursData.rate) || _tradeRate || 0;
-      _invRows.push({ date: new Date().toISOString().slice(0, 10), job_id: null, job_text: '', description: '', division: '', hours: 0, rate: defRate, amount: 0, _source: 'manual' });
-    }
     _invoiceBuilderOpen = true;
     renderInvoiceBuilder();
   };
@@ -21844,7 +21839,7 @@
       // Restore all lines into _invRows
       (inv.lines || []).forEach(function(l) {
         _invRows.push(_invRowSyncHours({
-          date: l.line_date || l.scheduled_date || '',
+          date: String(l.work_date || l.line_date || l.scheduled_date || '').slice(0, 10),
           job_id: l.job_id || null,
           job_text: l.job_number || '',
           description: l.description || l.client_name || '',
@@ -23377,9 +23372,10 @@
     var end = _hoursWeekEnd || (start ? _weeklyDatePlusDays(start, 6) : '');
     // A job the office assigned was worked in the week it was scheduled. A
     // line the trade added may be an older job claimed late, so only the
-    // week's last day caps it. No date is ever after today.
+    // week's last day caps it. No date is ever after today, or more than a
+    // year before it.
     var today = clockPerthDay(new Date());
-    return { min: c && c.assignment_id ? start : '', max: end && end < today ? end : today };
+    return { min: c && c.assignment_id ? start : TradeTimeEntryCore.earliest(today), max: end && end < today ? end : today };
   }
   function _jobCardTimeHint(c) {
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
@@ -24066,7 +24062,7 @@
     h += '<label class="jct-f jct-date"><span>Date worked</span>'
       + '<input type="date" data-carddate="' + i + '" value="' + esc(c.work_date || '') + '"'
       + (bounds.min ? ' min="' + esc(bounds.min) + '"' : '') + (bounds.max ? ' max="' + esc(bounds.max) + '"' : '')
-      + ' onchange="setJobCardTime(' + i + ',\'work_date\',this.value)"></label>';
+      + ' onkeydown="jobCardDateTyping(' + i + ')" onchange="setJobCardTime(' + i + ',\'work_date\',this.value)" onblur="commitJobCardWorkDate(' + i + ',event)"></label>';
     h += '<label class="jct-f"><span>Start</span>'
       + '<input type="time" data-cardstart="' + i + '" value="' + esc(c.start_time || '') + '"'
       + ' oninput="setJobCardTime(' + i + ',\'start_time\',this.value)" onchange="setJobCardTime(' + i + ',\'start_time\',this.value)"></label>';
@@ -24147,13 +24143,50 @@
     if (day && !c.assignment_id) c.scheduled_date = day;
     return true;
   }
+  // A date typed on a keyboard changes on every keystroke that makes a valid
+  // date, so it is the trade's date only once they leave the field. A date
+  // picked from the picker is whole when it arrives.
+  var _jobCardDateTyping = -1;
+  window.jobCardDateTyping = function(idx) { _jobCardDateTyping = idx; };
+  // The same field after a repaint, found by its id or its data- marker.
+  function _invoiceFieldAfterRepaint(el) {
+    if (!el || !el.attributes) return null;
+    if (el.id) return document.getElementById(el.id);
+    for (var i = 0; i < el.attributes.length; i++) {
+      var a = el.attributes[i];
+      if (a.name.indexOf('data-') === 0) return document.querySelector('[' + a.name + '="' + a.value + '"]');
+    }
+    return null;
+  }
+  window.commitJobCardWorkDate = function(idx, ev) {
+    if (_jobCardDateTyping !== idx) return;
+    _jobCardDateTyping = -1;
+    var c = _jobCards[idx]; if (!c || c.assignment_id) return;
+    var was = String(c.scheduled_date || '');
+    if (_setJobCardWorkDate(c, c.work_date) && String(c.scheduled_date || '') === was) return;
+    var next = ev && ev.relatedTarget;
+    function regroup() {
+      _syncJobCardsFromDOM(true);
+      renderInvoiceBuilder();
+      var again = _invoiceFieldAfterRepaint(next);
+      if (again && again.focus) again.focus();
+    }
+    // A press on a button is let through first: repainting under it would
+    // swallow the press.
+    if (next && next.tagName === 'BUTTON') next.addEventListener('click', regroup, { once: true });
+    else regroup();
+  };
   window.setJobCardTime = function(idx, field, value) {
     var c = _jobCards[idx]; if (!c) return;
     if (field === 'work_date') {
-      var ok = _setJobCardWorkDate(c, value);
       _markJobCardHoursEdited(c);
-      // A line the trade added moves under the day it was worked.
-      if (!ok || !c.assignment_id) { _syncJobCardsFromDOM(true); renderInvoiceBuilder(); return; }
+      if (_jobCardDateTyping === idx) {
+        c.work_date = TradeTimeEntryCore.isDate(value) ? value : '';
+      } else {
+        var ok = _setJobCardWorkDate(c, value);
+        // A line the trade added moves under the day it was worked.
+        if (!ok || !c.assignment_id) { _syncJobCardsFromDOM(true); renderInvoiceBuilder(); return; }
+      }
     } else if (field === 'start_time') {
       c.start_time = TradeTimeEntryCore.normTime(value);
       _markJobCardHoursEdited(c);
@@ -25098,6 +25131,12 @@
       return { day: d.getUTCDay(), date: +m[3], month: +m[2] - 1 };
     }
     function isDate(v) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v == null ? '' : v)) && !!dateParts(v); }
+    // The oldest date worked a line may carry: a year before `today`. Older
+    // than that is a mistyped year, not a job claimed late.
+    function earliest(today) {
+      var m = /^(\d{4})(-\d{2}-\d{2})$/.exec(String(today == null ? '' : today));
+      return m ? ('000' + (+m[1] - 1)).slice(-4) + m[2] : '';
+    }
     // Minutes since midnight for HH:MM (a stored HH:MM:SS reads the same).
     function minutesOf(v) {
       var m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(String(v == null ? '' : v).trim());
@@ -25131,13 +25170,15 @@
       return !!(entry && (entry.start_time || entry.finish_time || Number(entry.break_minutes) > 0));
     }
     // First thing wrong with an entry, in plain words, or ok with its hours.
-    // `today` is the Perth day (YYYY-MM-DD): the date worked cannot be after it.
+    // `today` is the Perth day (YYYY-MM-DD): the date worked cannot be after
+    // it, or more than a year before it.
     function check(entry, today) {
       entry = entry || {};
       var s = minutesOf(entry.start_time), f = minutesOf(entry.finish_time), b = breakOf(entry.break_minutes);
       function bad(field, error) { return { ok: false, hours: null, field: field, error: error }; }
       if (!isDate(entry.work_date)) return bad('work_date', 'Add the date you worked.');
       if (today && String(entry.work_date) > String(today)) return bad('work_date', 'The date worked cannot be after today.');
+      if (today && String(entry.work_date) < earliest(today)) return bad('work_date', 'The date worked is more than a year ago. Check the year.');
       if (s == null) return bad('start_time', 'Add your start time.');
       if (f == null) return bad('finish_time', 'Add your finish time.');
       if (f <= s) return bad('finish_time', 'Finish time must be after start time. If you worked past midnight, add the next day as its own line.');
@@ -25193,7 +25234,7 @@
     }
     return {
       REFUSAL_CODE: REFUSAL_CODE, REFUSAL_MSG: REFUSAL_MSG,
-      isDate: isDate, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
+      isDate: isDate, earliest: earliest, minutesOf: minutesOf, normTime: normTime, breakOf: breakOf, breakInput: breakInput, hoursFor: hoursFor,
       touched: touched, check: check, liveError: liveError, fields: fields, hoursText: hoursText, has: has, dayText: dayText, label: label, refused: refused
     };
   })();

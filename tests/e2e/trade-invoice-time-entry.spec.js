@@ -226,3 +226,36 @@ test.describe('weekly invoice: a job with hours on record and a clock on and off
     ]);
   });
 });
+
+test.describe('weekly invoice: a saved draft reopens on the date worked it was saved with', () => {
+  test.use({ persona: 'installer', timezoneId: 'Australia/Perth', appWeekDay: 6, ...PHONE });
+
+  test('an Extras row shows the stored date worked, not the line date', async ({ appPage: page }) => {
+    const monday = perthWeekMonday();
+    const worked = addIsoDays(monday, 2);
+    await page.route(`${OPS_API}**`, async (route) => {
+      if (new URL(route.request().url()).searchParams.get('action') !== 'get_trade_invoice') return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          invoice: {
+            id: 'e2e-draft-times', status: 'draft', week_start: monday, week_end: addIsoDays(monday, 6),
+            lines: [{
+              line_type: 'extra', job_number: 'SWF-26767', description: 'Second day on the job', division: 'Fencing',
+              quantity: 4, unit_rate: 50, line_total_ex: 200,
+              line_date: addIsoDays(monday, 6), work_date: worked, start_time: '08:00:00', finish_time: '12:00:00', break_minutes: 0
+            }]
+          }
+        })
+      });
+    });
+    await signIn(page, PERSONAS.installer);
+    await page.locator('[data-view="hours"]').click();
+    await page.evaluate(() => window.openInvoiceDraft('e2e-draft-times'));
+    await page.locator('button[onclick="expandInvRow(0)"]').first().click();
+    await expect(page.locator('#ir_date_0')).toHaveValue(worked);
+    await expect(page.locator('#ir_start_0')).toHaveValue('08:00');
+    await expect(page.locator('#ir_fin_0')).toHaveValue('12:00');
+  });
+});

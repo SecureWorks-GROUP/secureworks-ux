@@ -9,6 +9,14 @@ function fixtureJobDay() {
   return addIsoDays(perthWeekMonday(), 1);
 }
 
+// "Wed 7 Oct", as the app words a date worked.
+function dayText(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${days[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${months[m - 1]}`;
+}
+
 function workedTimes(hours, start = '07:00') {
   const [h, m] = start.split(':').map(Number);
   const finish = h * 60 + m + Math.round(Number(hours) * 60);
@@ -36,4 +44,4 @@ async function expectCardHours(card, hours) {
   await expect(card.locator('[data-cardhours]')).toHaveText(hoursText(hours));
 }
 
-module.exports = { workedTimes, hoursText, fixtureJobDay, fillCardTime, expectCardHours };
+module.exports = { workedTimes, hoursText, dayText, fixtureJobDay, fillCardTime, expectCardHours };

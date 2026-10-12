@@ -68,6 +68,15 @@ assert.deepStrictEqual(
   [false, 'work_date', 'The date worked cannot be after today.'])
 assert.strictEqual(Core.check(good, '2026-10-07').ok, true, 'today itself is a day worked')
 assert.strictEqual(Core.check(good, '2026-10-08').ok, true)
+// Nor more than a year before it: that is a mistyped year, not a late claim.
+assert.strictEqual(Core.check(good, '2027-10-07').ok, true, 'a year back to the day is still a day worked')
+assert.deepStrictEqual(
+  [Core.check(good, '2027-10-08').ok, Core.check(good, '2027-10-08').field, Core.check(good, '2027-10-08').error],
+  [false, 'work_date', 'The date worked is more than a year ago. Check the year.'])
+assert.strictEqual(refusal({ work_date: '2006-10-07' }).ok, true, 'with no today given, no date is too old')
+assert.strictEqual(Core.check(Object.assign({}, good, { work_date: '2006-10-07' }), '2026-10-07').field, 'work_date')
+assert.strictEqual(Core.check(Object.assign({}, good, { work_date: '0002-10-07' }), '2026-10-07').field, 'work_date')
+assert.strictEqual(Core.earliest('2026-10-07'), '2025-10-07')
 
 // A line bills time once it has a start, a finish or a break.
 assert.strictEqual(Core.touched({ work_date: '2026-10-07', start_time: '', finish_time: '', break_minutes: 0 }), false)

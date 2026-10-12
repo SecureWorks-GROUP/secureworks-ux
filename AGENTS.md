@@ -782,8 +782,8 @@ and optional `break_minutes`; hours are worked out and NEVER typed, so do not
 add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
 (`time_entry_required`). One line is one job on one day: a second day is its
-own Extras row. The date worked cannot be after today (Perth) anywhere a trade
-gives it, and the app never invents, remembers or carries a date or a time
+own Extras row. The date worked cannot be after today (Perth), or more than a year
+before it, anywhere a trade gives it, and the app never invents, remembers or carries a date or a time
 onto a line: no default date or start, no device memory, no prefill from the
 schedule or clock on and off. A card, an Extras row and the job-view row open
 blank; a card shows hours on record only as a reminder. The job-view row

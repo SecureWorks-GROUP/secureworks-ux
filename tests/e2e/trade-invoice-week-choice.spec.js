@@ -200,4 +200,65 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     expect(post.body.week_start).toBe(twoWeeksAgo);
     expect(post.body.extra_items[0].date).toBe(addIsoDays(twoWeeksAgo, 4));
   });
+
+  test('the older builder opens with no line the trade did not add', async ({ appPage: page }) => {
+    await signIn(page, PERSONAS.installer);
+    await page.evaluate(() => localStorage.setItem('sw_jobcentric', '0'));
+    await openWeeklyInvoicePicker(page);
+    await page.locator('#invoiceWeekContinue').click();
+    await expect(page.locator('#hoursContent')).toContainText('Add at least one row to create an invoice');
+    await expect(page.locator('[id^="ir_job_"]')).toHaveCount(0);
+    await expect(page.locator('#invSubmitBtn')).toHaveCount(0);
+  });
+});
+
+test.describe('a date worked typed on a keyboard, on a job the trade searched in', () => {
+  // Day, month, year: the order the date field takes keys in for this locale.
+  test.use({ feedScenario: 'trade-invoice-multi-week', locale: 'en-AU' });
+
+  const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  function dayHeading(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return `${LONG_DAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${MONTHS[m - 1]}`;
+  }
+
+  test('the card stays put while the date is typed and moves to its day once the field is left', async ({ appPage: page }) => {
+    const addedOn = addIsoDays(thisMonday, 1);
+    const worked = addIsoDays(thisMonday, 3);
+    await signIn(page, PERSONAS.installer);
+    await openWeeklyInvoicePicker(page);
+    await page.locator('#invoiceWeekContinue').click();
+    await page.locator('button[onclick="jcOpenJobSearch(1)"]').click();
+    await page.locator('#jcSearchInput_1').fill('Graham');
+    await page.locator('.jc-job-search-hit').filter({ hasText: 'SWP-26339' }).click();
+    const card = page.locator('.jc-card').filter({ hasText: 'SWP-26339' });
+    const heading = card.locator('xpath=preceding-sibling::div[contains(@class,"hours-day-header")][1]');
+    await expect(heading).toContainText(dayHeading(addedOn));
+
+    const [year, month, day] = worked.split('-');
+    await card.locator('[data-carddate]').focus();
+    await page.keyboard.type(day + month + year);
+    // Every key landed in the one field: it was never repainted mid-date.
+    await expect(card.locator('[data-carddate]')).toBeFocused();
+    await expect(card.locator('[data-carddate]')).toHaveValue(worked);
+    await expect(heading).toContainText(dayHeading(addedOn));
+
+    await card.locator('[data-cardstart]').focus();
+    await expect(heading).toContainText(dayHeading(worked));
+    await expect(card.locator('[data-carddate]')).toHaveValue(worked);
+    await expect(card.locator('[data-cardstart]')).toBeFocused();
+  });
+
+  test('a year typed wrong is refused in words and nothing is sent', async ({ appPage: page, feedRequests }) => {
+    await signIn(page, PERSONAS.installer);
+    await openWeeklyInvoicePicker(page);
+    await page.locator('#invoiceWeekContinue').click();
+    const card = await addSearchedJob(page, 1, 'Graham', 'SWP-26339', 2, 'Council approval');
+    const wrongYear = `${Number(thisMonday.slice(0, 4)) - 20}${addIsoDays(thisMonday, 1).slice(4)}`;
+    await card.locator('[data-carddate]').fill(wrongYear);
+    await expect(page.locator('.jc-card').filter({ hasText: 'SWP-26339' }).locator('[data-cardtimeerr]')).toHaveText('The date worked is more than a year ago. Check the year.');
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('SWP-26339: The date worked is more than a year ago. Check the year.');
+    expect(feedRequests.some((entry) => entry.method === 'POST' && entry.action === 'generate_trade_invoice')).toBe(false);
+  });
 });

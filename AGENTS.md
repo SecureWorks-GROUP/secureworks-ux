@@ -41,8 +41,9 @@ into the address bar, so a refresh, a restored browser tab or a bookmark stays o
 the tab it names. Today, Inbox (AI annotations) and Approvals are hidden on the
 front end only, and Materials became Dispatch; their views, loaders and ops-api
 actions stay. `OPS_HIDDEN_VIEWS` / `opsVisibleView` (search `// <ops-tab-set>`)
-send every route into a hidden view to Jobs; Finance Health and Job P&L only
-lost their sub-tab buttons. Bill Reconciliation (the `materials_recon_*` queue)
+send every route into a hidden view to Jobs; Finance Health only lost its
+sub-tab button, and the old Job P&L panel is replaced by the owner-only Job
+profit sub-tab (`// <job-profit>`). Bill Reconciliation (the `materials_recon_*` queue)
 moved from Materials to its own Financials sub-tab, and Supplier Price Updates
 (`pending_prices`) to the top of Financials > Purchase Orders. Approvals is still the hidden
 inline host of the make-safe review cockpit, so keep its DOM. Dispatch is a

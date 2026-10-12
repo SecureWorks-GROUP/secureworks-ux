@@ -25931,11 +25931,16 @@ function updateJarvisSummary() {
   var view = localStorage.getItem('sw_ops_tab') || 'jobs';
   var text = '';
 
-  if (view === 'today' && _digestCache) {
+  var red = 0;
+  var amber = 0;
+  if (_digestCache) {
     var alerts = (_digestCache.alerts || []);
-    var red = alerts.filter(function(a) { return a.severity === 'red'; }).length;
-    var amber = alerts.filter(function(a) { return a.severity === 'amber'; }).length;
+    red = alerts.filter(function(a) { return a.severity === 'red'; }).length;
+    amber = alerts.filter(function(a) { return a.severity === 'amber'; }).length;
     _jarvisAlertCount = { red: red, amber: amber };
+  }
+
+  if (view === 'today' && _digestCache) {
     text = (red + amber) > 0 ? (red + ' critical, ' + amber + ' warnings') : 'All clear — no issues';
   } else if (view === 'jobs' && _jobsCache && _jobsCache.length > 0) {
     var active = _jobsCache.filter(function(j) { return j.status !== 'cancelled' && j.status !== 'complete'; }).length;
@@ -28213,6 +28218,7 @@ function initApp() {
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
   loadCrewList(); // Pre-cache crew list for dropdowns
   restoreTab();
+  loadAiAlerts();
   // Initialize Jarvis bar summary after data loads
   setTimeout(updateJarvisSummary, 2000);
   // Supabase Realtime: subscribe to ai_alerts for proactive notifications

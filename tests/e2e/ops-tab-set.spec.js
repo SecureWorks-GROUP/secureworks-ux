@@ -13,7 +13,7 @@ const { installOpsSessionStub } = require('../helpers/ops-auth');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
-async function bootOps(page, { hash = '', savedTab = null, responses = {}, delays = {} } = {}) {
+async function bootOps(page, { hash = '', savedTab = null, responses = {}, delays = {}, digest = {} } = {}) {
   const apiCalls = [];
   const requests = [];
   const bodies = Object.assign({ pipeline: { columns: {} } }, responses);
@@ -22,6 +22,9 @@ async function bootOps(page, { hash = '', savedTab = null, responses = {}, delay
     const url = route.request().url();
     if (url.startsWith('file://')) return route.continue();
     requests.push(url);
+    if (/\/functions\/v1\/daily-digest/.test(url)) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(digest) });
+    }
     const match = url.match(/\/functions\/v1\/ops-api\?action=([a-z_]+)/);
     if (match) apiCalls.push(match[1]);
     const body = match && bodies[match[1]] ? bodies[match[1]] : {};
@@ -169,4 +172,22 @@ test('the Jarvis bar counts purchase orders as soon as a slow list arrives on Di
   await page.locator('.header-nav button[data-view="dispatch"]').click();
   await expect(page.locator('#viewDispatch #materialsKanban .kanban-card', { hasText: 'Demo Supplier' })).toBeVisible();
   await expect(page.locator('#jarvisSummary')).toHaveText('1 purchase orders tracked');
+});
+
+test('the Jarvis bar alert badges fill in when Ops opens on Jobs', async ({ page }) => {
+  await bootOps(page, {
+    digest: {
+      alerts: [
+        { severity: 'red', title: 'Deposit overdue', description: 'Sample alert' },
+        { severity: 'amber', title: 'Materials not ordered', description: 'Sample alert' },
+        { severity: 'amber', title: 'Crew not confirmed', description: 'Sample alert' },
+      ],
+    },
+  });
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  const badges = page.locator('#jarvisBadges .jarvis-badge');
+  await expect(badges).toHaveText(['1 urgent', '2 warnings']);
+  await page.locator('.header-nav button[data-view="calendar"]').click();
+  await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
+  await expect(badges).toHaveText(['1 urgent', '2 warnings']);
 });

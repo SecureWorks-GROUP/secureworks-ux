@@ -26024,6 +26024,8 @@ setInterval(function() {
   else if (view === 'financials') loadFinancials();
   else if (view === 'dispatch') loadMaterials();
   else if (view === 'inbox') loadInbox();
+  // Today is hidden, so this is the only refresh of the Jarvis bar alert
+  // badges. loadAiAlerts caches for 30 minutes.
   loadAiAlerts();
   _jarvisLastUpdate = Date.now();
 }, 300000); // 5 minutes
@@ -28227,6 +28229,8 @@ function initApp() {
   } catch (e) { console.log('[ops] operator email cache failed:', e && e.message); }
   loadCrewList(); // Pre-cache crew list for dropdowns
   restoreTab();
+  // Today is hidden and no longer loads the alert digest, so fetch it here
+  // for the Jarvis bar badges on every tab.
   loadAiAlerts();
   // Initialize Jarvis bar summary after data loads
   setTimeout(updateJarvisSummary, 2000);

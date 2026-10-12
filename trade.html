@@ -15171,9 +15171,9 @@
       _reportDoneCtx = { jobId: _rdModel.jobId, model: _rdModel };
       _reportDoneGuard = { busy: false };
       h += ReportDoneCore.panelHTML(_rdModel);
-      // 2026-09-08: once the report is done (portal or in-app), one tap puts
-      // the hours on the trade's week. The in-app SecureWorks roof report is
-      // always offered as the alternative to the builder portal.
+      // 2026-09-08: once the report is done (portal or in-app), the hours row
+      // records the times against the job. The in-app SecureWorks roof report
+      // is always offered as the alternative to the builder portal.
       if (_rdModel.done) h += rrHoursRowHTML(_rdModel.jobId, data, 'Hours for this report');
       h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;
@@ -15269,8 +15269,9 @@
         var extra = cl.extra_notes || cl.access_issues || cl.invoice_notes || '';
         if (extra) h += '<div style="margin-bottom:8px;"><strong>Extra notes:</strong> ' + esc(extra) + '</div>';
       }
-      // 2026-09-08: report done, hours on the week with one tap; roof report
-      // still offered in case the builder needs one on top of the make-safe.
+      // 2026-09-08: report done, the hours row records the times against the
+      // job; roof report still offered in case the builder needs one on top
+      // of the make-safe.
       h += rrHoursRowHTML(job.id, data, 'Hours for this job');
       h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;

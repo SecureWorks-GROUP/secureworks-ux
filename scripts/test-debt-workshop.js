@@ -151,11 +151,34 @@ check('send gate: sending off first, then owner, then contact, then a possible p
   const s = { sending_on: true, viewer_is_owner: true };
   assert.strictEqual(C.sendGate({ settings: { sending_on: false, viewer_is_owner: true }, linked: true }).reason, 'Sending is off until you switch it on');
   assert.strictEqual(C.sendGate({ settings: { sending_on: true, viewer_is_owner: false }, linked: true }).code, 'not_owner');
-  assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'sms' }).code, 'no_contact');
+  assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'sms' }).code, 'payer_not_linked');
+  assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'sms', who: 'Peter' }).reason, 'Link Peter\'s contact first', 'names the payer');
   assert.strictEqual(C.sendGate({ settings: s, linked: false, channel: 'email' }).ok, true, 'an email needs no GHL contact');
+  const nb = C.sendGate({ settings: s, linked: true, channel: 'sms', who: 'Peter' });
+  assert.deepStrictEqual([nb.ok, nb.code], [true, ''], 'a linked neighbour is texted at their own contact');
   const pp = C.sendGate({ settings: s, linked: true, possible: [{ amount: 1 }] });
   assert.deepStrictEqual([pp.ok, pp.code, pp.override], [false, 'possible_payment', true]);
   assert.strictEqual(C.sendGate({ settings: s, linked: true, possible: [] }).ok, true);
+});
+check('the payer: payer_contact wins over the job; an older backend reads as the job\'s client', () => {
+  const J = { row: { payer_name: 'Riley Shaw', neighbour_of: 'Taylor Brooks' }, job: { client_name: 'Taylor Brooks', client_phone: '0400 000 111', ghl_contact_id: 'Ct7Qw000000111xRz' },
+    payer_contact: { name: 'Riley Shaw', phone: '0400 000 222', email: 'riley@example.test', ghl_contact_id: null, label: 'B', is_primary: false } };
+  const p = C.payerOf(J);
+  assert.deepStrictEqual([p.name, p.phone, p.ghl_contact_id, p.is_primary, p.known], ['Riley Shaw', '0400 000 222', null, false, true], 'never the job\'s phone or contact');
+  const old = C.payerOf({ row: { payer_name: 'Casey Morgan' }, job: { client_phone: '0400 000 003', ghl_contact_id: 'Ct7Qw000000003xRz' } });
+  assert.deepStrictEqual([old.phone, old.ghl_contact_id, old.known], ['0400 000 003', 'Ct7Qw000000003xRz', false]);
+  assert.strictEqual(C.firstName('Peter  Johnson'), 'Peter');
+});
+check('shared fence line: the payer\'s share first, paid or owing, nothing for a single share', () => {
+  const shares = [
+    { label: 'A', payer_name: 'Taylor Brooks', owing: 0, paid: true },
+    { label: 'B', payer_name: 'Riley Shaw', owing: 1025.06, paid: false },
+  ];
+  assert.strictEqual(C.shareSummary(shares, 'B'), 'Shared fence: Riley (B) owes $1,025.06 · Taylor (A) paid');
+  assert.strictEqual(C.shareSummary([{ label: 'main', payer_name: 'Casey Morgan', owing: 10, paid: false }], 'main'), '');
+  assert.strictEqual(C.shareSummary(null, 'B'), '');
+  assert.strictEqual(C.partyWords({ is_payer: false, party_name: 'Taylor Brooks' }), 'Taylor Brooks');
+  assert.strictEqual(C.partyWords({ is_payer: true, party_name: 'Riley Shaw' }), '', 'the payer\'s own messages need no name');
 });
 check('refusals: known codes in plain words, otherwise the backend reason, never a bare code', () => {
   const e = new Error('part_paid'); e.status = 409;
@@ -272,10 +295,11 @@ check('story and money: a few plain lines, invoices paid or owing', () => {
 const path = require('path');
 const BACKEND_CODES = [
   'DEBT_WS_FAILED', 'METHOD_NOT_ALLOWED', 'already_sent', 'amount_required', 'bank_check_unavailable', 'contact_already_linked',
+  'contact_belongs_to_other_payer', 'contact_row_not_found',
   'debt_ws_bad_request', 'debt_ws_read_failed', 'debt_ws_write_failed', 'email_failed', 'jan_list_changed',
-  'jan_list_closed', 'job_not_found', 'no_contact', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
+  'jan_list_closed', 'job_mismatch', 'job_not_found', 'no_email', 'no_job', 'not_chased_by_text', 'not_found',
   'not_in_book', 'not_open', 'not_owner', 'nothing_due', 'operator_access_required', 'owner_not_set', 'paid',
-  'part_paid', 'possible_payment', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
+  'part_paid', 'payer_not_linked', 'payer_not_on_job', 'possible_payment', 'send_not_confirmed', 'send_refused_by_guard', 'sending_off',
   'server_key_required', 'step_not_due', 'suggestion_mismatch', 'suggestion_not_pending', 'text_not_allowed',
   'unknown_action', 'user_required', 'xero_rate_limited', 'xero_unavailable',
 ];
@@ -342,6 +366,7 @@ async function uxPosts() {
   onJob(fx.ids.sasha); await ctx.dwMove();
   onJob(fx.ids.sasha); await ctx.dwKeep();
   onJob(fx.ids.avery); await ctx.dwLink(fx.ids.averyContact);
+  onJob(fx.ids.riley); await ctx.dwLink(fx.ids.rileyContact);
   onJob(fx.ids.avery); await ctx.dwSend(false);
   DW.view = 'list'; DW.ov = JSON.parse(JSON.stringify(fx.overview));
   await ctx.dwApprove(fx.ids.harbour, false);
@@ -365,6 +390,10 @@ async function uxPosts() {
       sends.forEach((p) => assert(Number(p.body.amount) > 0, 'no amount on a ' + p.body.step + ' send'));
       assert.deepStrictEqual(sends.map((p) => p.body.amount), [1420.37, 1420.37, 2101, 1351.63]);
       assert.strictEqual(sends[2].body.step, 'reply_problem', 'the move reply is sent on its reply step');
+    });
+    check('Link contact posts the invoice, so the backend links its PAYER (a neighbour\'s own row on a shared fence)', () => {
+      const links = sent.filter((p) => p.action === 'debt_ws_link_contact');
+      assert.deepStrictEqual(links.map((p) => [p.body.xero_invoice_id, p.body.ghl_contact_id]), [[fx.ids.avery, fx.ids.averyContact], [fx.ids.riley, fx.ids.rileyContact]]);
     });
     check('Change beside the pill posts set_category with no suggestion_id', () => {
       const own = sent.filter((p) => p.action === 'debt_ws_set_category' && !('suggestion_id' in p.body));

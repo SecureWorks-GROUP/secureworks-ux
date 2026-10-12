@@ -74,7 +74,10 @@ var DebtWorkshopCore = (function () {
     amount_required: 'The message did not say which amount it was written for. Read the job again before sending.',
     already_sent: 'This was already sent, so it was not sent again.',
     step_not_due: 'That step is not due now. Read the job again.',
-    no_contact: 'No GoHighLevel contact is linked to this job. Link one first.',
+    payer_not_linked: 'The person who owes this has no GoHighLevel contact linked. Link theirs first.',
+    contact_belongs_to_other_payer: 'That GoHighLevel contact belongs to someone else on this job. Pick the contact of the person who owes this.',
+    payer_not_on_job: 'This person has no contact row on the job, so there is nowhere to link them. Add them to the job\'s contacts first.',
+    job_mismatch: 'That invoice is not on this job. Read the job again.',
     send_refused_by_guard: 'The text was stopped before it went, so nothing was sent.',
     send_not_confirmed: 'The send could not be confirmed. Check the GoHighLevel conversation before trying again; it will not send twice.',
     not_chased_by_text: 'This invoice is not chased by text.',
@@ -89,7 +92,7 @@ var DebtWorkshopCore = (function () {
     email_failed: 'The email was refused, so nothing was sent.',
     jan_list_closed: 'This week\'s visit list has already gone to Jan, so it cannot change now.',
     jan_list_changed: 'The visit list changed while you were looking. Read it again.',
-    contact_already_linked: 'This job already has a different contact linked.',
+    contact_already_linked: 'This person already has a different contact linked.',
     no_job: 'This invoice has no job, so there is no card to move.',
     not_in_book: 'This invoice is not in the debt list any more. Read the list again.',
     not_found: 'That could not be found any more. Read the job again.',
@@ -314,14 +317,48 @@ var DebtWorkshopCore = (function () {
   }
 
   // Can the suggested message be sent from here? Checked in the order the backend refuses.
+  // ctx.who: the payer's first name. A linked neighbour on a shared fence is texted at their own contact.
   function sendGate(ctx) {
     ctx = ctx || {};
     var s = ctx.settings || {};
+    var who = ctx.who ? ctx.who + '\'s' : 'their';
     if (!s.sending_on) return { ok: false, reason: SENDING_OFF_WORDS, code: 'sending_off' };
     if (!s.viewer_is_owner) return { ok: false, reason: 'Only an owner can send', code: 'not_owner' };
-    if (ctx.channel !== 'email' && !ctx.linked) return { ok: false, reason: 'Link a contact first', code: 'no_contact' };
+    if (ctx.channel !== 'email' && !ctx.linked) return { ok: false, reason: 'Link ' + who + ' contact first', code: 'payer_not_linked' };
     if (ctx.possible && ctx.possible.length) return { ok: false, reason: 'Possible payment found', code: 'possible_payment', override: true };
     return { ok: true, reason: '', code: '' };
+  }
+
+  // ── The payer: the person who owes THIS invoice (a neighbour on a shared fence) ──
+  function firstName(name) { var n = String(name || '').trim().split(/\s+/)[0]; return n || ''; }
+  // The payer from debt_ws_job's payer_contact; an older backend without it reads as the job's client.
+  function payerOf(J) {
+    J = J || {};
+    var p = J.payer_contact, row = J.row || {}, job = J.job || {};
+    if (p && typeof p === 'object') {
+      return { name: String(p.name || row.payer_name || 'Unknown payer'), phone: p.phone || null, email: p.email || null, ghl_contact_id: p.ghl_contact_id || null, label: p.label || '', is_primary: p.is_primary !== false, known: true };
+    }
+    var cid = job.ghl_contact_id || (J.contact && J.contact.ghl_contact_id) || null;
+    return { name: String(row.payer_name || job.client_name || 'Unknown payer'), phone: job.client_phone || null, email: null, ghl_contact_id: cid, label: '', is_primary: !row.neighbour_of, known: false };
+  }
+  // "Shared fence: Peter (B) owes $1,420.37 · Ashlea (A) paid", the payer's share first. Empty
+  // when the job has one share only.
+  function shareSummary(shares, payerLabel) {
+    var list = Array.isArray(shares) ? shares.filter(function (s) { return s && typeof s === 'object'; }) : [];
+    if (list.length < 2) return '';
+    var mine = String(payerLabel || '');
+    list = list.slice().sort(function (a, b) { return (String(a.label) === mine ? 0 : 1) - (String(b.label) === mine ? 0 : 1) || String(a.label).localeCompare(String(b.label)); });
+    return 'Shared fence: ' + list.map(function (s) {
+      var who = firstName(s.payer_name) || 'Unknown';
+      var lab = s.label && s.label !== 'main' ? ' (' + s.label + ')' : '';
+      var state = s.paid ? 'paid' : num(s.owing) > 0 ? 'owes ' + money(s.owing) : 'nothing owing';
+      return who + lab + ' ' + state;
+    }).join(' · ');
+  }
+  // How a message names the other person it is with, on the whole job's thread.
+  function partyWords(m) {
+    if (!m || m.is_payer !== false || !m.party_name) return '';
+    return String(m.party_name);
   }
 
   // A long dash, an en dash or an emoji has no place in a client message (spec rule 7).
@@ -503,6 +540,7 @@ var DebtWorkshopCore = (function () {
     channelWord: channelWord, duration: duration, callTitle: callTitle, noteView: noteView, ladder: ladder,
     storyLines: storyLines, moneyRows: moneyRows, fileKind: fileKind, isReplyStep: isReplyStep, isPaused: isPaused,
     draftAmount: draftAmount, statementPossible: statementPossible,
+    firstName: firstName, payerOf: payerOf, shareSummary: shareSummary, partyWords: partyWords,
   };
 })();
 // </debt-workshop-core>
@@ -522,6 +560,7 @@ var DW = {
   editing: false, why: false, drafts: {}, open: {}, noteText: '', promise: '', scrollThread: false,
   modalUrl: null, modalGen: 0, modalCompany: null, bound: false, focus: null,
   janLoaded: false, janMsg: null, noteMsg: null, catMenu: false, stmtPossible: {},
+  convAll: false, // the job screen shows the payer's own messages; true: the whole job's thread
 };
 
 function dwEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -696,6 +735,10 @@ function dwCss() {
     '.dw-msg .subj{font-weight:700;display:block;white-space:normal}',
     '.dw-msg .dw-link{font-size:11.5px;margin-top:4px;display:inline-block}',
     '.dw-quiet{font-size:13px;color:var(--dw-midl);padding:8px 0}',
+    // Shared fences: the share line under the header, the whole-thread toggle, other people's messages
+    '.dw-shares{font-size:12.5px;color:var(--dw-mid);margin-top:5px}',
+    '#viewDebt .dw-convt{font-size:12px;margin-top:6px;display:inline-block}',
+    '.dw-msg.other{opacity:.72}.dw-msg.in.other{background:#F6F7F8}.dw-msg.out.other{background:#FBF4F1}',
     // W2: agent notices, the suggestion, the move card, the link card
     '.dw-notice{margin-top:12px;border:1px solid #EBD9BC;background:#FFF9EF;border-radius:10px;padding:11px 14px;font-size:13px;line-height:1.45;color:#4F3A16}',
     '.dw-notice .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}',
@@ -857,7 +900,7 @@ function dwOpenJob(id) {
 }
 function dwShowJob(id) {
   DW.view = 'job'; DW.jobId = id; DW.job = null; DW.jobErr = null;
-  DW.editing = false; DW.why = false; DW.refusal = null; DW.noteText = ''; DW.promise = ''; DW.noteMsg = null; DW.open = {}; DW.catMenu = false;
+  DW.editing = false; DW.why = false; DW.refusal = null; DW.noteText = ''; DW.promise = ''; DW.noteMsg = null; DW.open = {}; DW.catMenu = false; DW.convAll = false;
   dwRender();
   try { window.scrollTo(0, 0); } catch (e) {}
   dwLoadJob(false);
@@ -865,7 +908,9 @@ function dwShowJob(id) {
 async function dwLoadJob(quiet) {
   var g = ++DW.jobGen, id = DW.jobId;
   try {
-    var r = await opsFetch('debt_ws_job', { xero_invoice_id: id });
+    var q = { xero_invoice_id: id };
+    if (DW.convAll) q.conversation = 'all'; // the whole job's thread, each message marked by whose it is
+    var r = await opsFetch('debt_ws_job', q);
     if (g !== DW.jobGen || id !== DW.jobId) return;
     DW.job = r || {}; DW.jobErr = null; DW.scrollThread = true;
   } catch (e) {
@@ -1098,9 +1143,16 @@ function dwCrumbHtml() {
     '<span>' + (n > 1 && i >= 0 ? '<span class="pos">' + (i + 1) + ' of ' + n + '</span>' : '') +
     '<button type="button" class="dw-nav" data-dw="next" id="dwNext"' + dwDis(!(i >= 0 && i < n - 1)) + '>Next ' + DW_IC.right + '</button></span></div>';
 }
+// The PAYER is linked in GoHighLevel (on a shared fence, the neighbour's own contact, not the job's).
 function dwLinked(J) {
   var job = J.job || {}, row = J.row || {};
+  if (J.payer_contact) return !!J.payer_contact.ghl_contact_id;
   return !!(job.ghl_contact_id || (J.contact && J.contact.ghl_contact_id) || (row.ghl_linked && !('ghl_contact_id' in job)));
+}
+// The payer can be texted from here once linked: a neighbour on a shared fence is texted at
+// their own contact, and the backend checks it is on this job's contact list.
+function dwCanText(J) {
+  return dwLinked(J);
 }
 function dwJobHtml() {
   var C = DebtWorkshopCore, crumb = dwCrumbHtml();
@@ -1117,7 +1169,9 @@ function dwJobHtml() {
   var inv = row.invoice_number ? C.kindWord(row.kind) + ' invoice ' + row.invoice_number + (row.invoice_date ? ' sent ' + C.dateWords(row.invoice_date) : '') : '';
   var sub = [site, job.job_number || row.job_number, inv].filter(Boolean).map(dwEsc).join(' · ');
   var paused = C.isPaused(row, today) ? '<div class="dw-paused">Follow-ups paused until ' + dwEsc(C.dateWords(row.paused_until)) + ', a promise to pay.</div>' : '';
-  var strip = '<div class="dw-strip" id="dwStrip"><div><h2>' + dwPayerHtml(row) + ' ' + dwBadgeHtml(tk) + ' ' + pill + '</h2><div class="sub">' + sub + '</div>' + paused + '</div>' +
+  var shareLine = C.shareSummary(job.shares, C.payerOf(J).label);
+  var shares = shareLine ? '<div class="dw-shares" id="dwShares">' + dwEsc(shareLine) + '</div>' : '';
+  var strip = '<div class="dw-strip" id="dwStrip"><div><h2>' + dwPayerHtml(row) + ' ' + dwBadgeHtml(tk) + ' ' + pill + '</h2><div class="sub">' + sub + '</div>' + shares + paused + '</div>' +
     '<div class="dw-owing"><b id="dwOwing">' + dwEsc(C.money(row.amount_due)) + '</b><span>owing</span></div></div>';
   var nodes = Array.isArray(J.ladder) && J.ladder.length ? C.ladder(J.ladder, row.invoice_date) : [];
   var ladder = nodes.length ? '<div class="dw-ladder" id="dwLadder">' + nodes.map(function (n, i) {
@@ -1183,12 +1237,24 @@ function dwLeftHtml(J) {
 }
 
 // Middle: the conversation, newest at the bottom, then what to do next.
+// The conversation is the PAYER's own (a neighbour's on a shared fence), with a quiet toggle
+// to the whole job's thread, where other people's messages carry their name.
 function dwMiddleHtml(J) {
-  var C = DebtWorkshopCore, job = J.job || {}, s = dwSettings(), linked = dwLinked(J);
-  var items = C.thread(J.conversation, dwToday());
-  var phone = job.client_phone ? '<span>' + dwEsc(job.client_phone) + '</span>' : '';
+  var C = DebtWorkshopCore, s = dwSettings(), linked = dwLinked(J), payer = C.payerOf(J), who = C.firstName(payer.name) || 'them';
+  var conv = J.conversation && typeof J.conversation === 'object' ? J.conversation : {};
+  var all = conv.mode === 'all';
+  var items = C.thread(conv, dwToday());
+  var phone = payer.phone ? '<span id="dwPayerPhone">' + dwEsc(payer.phone) + '</span>' : '';
+  var empty = all ? 'No messages on this job yet.'
+    : conv.reason === 'payer_not_linked' ? 'No conversation with ' + who + ' yet. Link ' + who + '\'s GoHighLevel contact to see it and text them.'
+    : linked ? 'No messages with ' + who + ' yet.' : 'No GoHighLevel contact is linked, so there is no conversation to show.';
   var thread = items.length ? '<div class="dw-thread" id="dwThread">' + items.map(function (x) { return x.type === 'day' ? '<div class="dw-dayl">' + dwEsc(x.label) + '</div>' : dwMsgHtml(x.m); }).join('') + '</div>'
-    : '<div class="dw-quiet" id="dwThreadEmpty">' + (linked ? 'No messages on this job yet.' : 'No GoHighLevel contact is linked, so there is no conversation to show.') + '</div>';
+    : '<div class="dw-quiet" id="dwThreadEmpty">' + dwEsc(empty) + '</div>';
+  // The toggle shows only when the job's thread holds more than the payer's own messages.
+  var total = Number(conv.all_job_messages_count), mine = Array.isArray(conv.messages) ? conv.messages.length : 0;
+  var toggle = all
+    ? '<button type="button" class="dw-link dw-convt" data-dw="conv-payer" id="dwConvToggle">Show only ' + dwEsc(who) + '\'s messages</button>'
+    : isFinite(total) && total > mine ? '<button type="button" class="dw-link dw-convt" data-dw="conv-all" id="dwConvToggle">Show the whole job\'s conversation (' + total + ' ' + (total === 1 ? 'message' : 'messages') + ')</button>' : '';
   var flags = (Array.isArray(J.flags) ? J.flags : []).map(function (f) {
     return '<div class="dw-notice" data-flag="' + dwEsc(f.id) + '"><div class="top"><div><b>' + dwEsc(f.text) + '</b>' + (f.why ? '<div class="w">' + dwEsc(f.why) + '</div>' : '') +
       '<div class="d">Agent notice' + (f.created_at ? ' · ' + dwEsc(C.dateWords(C.perthDay(f.created_at))) : '') + '</div></div>' +
@@ -1197,7 +1263,7 @@ function dwMiddleHtml(J) {
   var link = linked ? '' : dwLinkCardHtml(J, s);
   var owner = s.viewer_is_owner ? '' : '<div class="dw-gate" id="dwReadOnly">Only an owner can send, skip, move or link. You can still add notes.</div>';
   var refusal = DW.refusal ? '<div class="dw-refuse" id="dwRefusal" role="alert">' + dwEsc(DW.refusal) + '</div>' : '';
-  return '<div class="dw-h">Conversation ' + phone + '</div>' + thread + flags + link + dwSuggestionHtml(J, s, linked) + refusal + owner;
+  return '<div class="dw-h">Conversation ' + phone + '</div>' + thread + toggle + flags + link + dwSuggestionHtml(J, s, linked) + refusal + owner;
 }
 function dwMsgHtml(m) {
   var C = DebtWorkshopCore, id = String(m.id || ''), time = C.perthTime(m.occurred_at || m.at), body = String(m.body || m.preview || '');
@@ -1209,15 +1275,21 @@ function dwMsgHtml(m) {
   }
   if (m.channel === 'note') return '<div class="dw-msg note" data-msg="' + dwEsc(id) + '"><span class="meta">Staff note' + (author ? ' · ' + dwEsc(author) : '') + (time ? ' · ' + dwEsc(time) : '') + '</span>' + dwEsc(body) + '</div>';
   var out = m.direction === 'outbound';
-  var who = out ? (author || 'Us') : (author || 'Client');
+  // On the whole job's thread, a message with someone other than the payer says who.
+  var party = C.partyWords(m);
+  var who = out ? (author || 'Us') + (party ? ' to ' + party : '') : (party || author || 'Client');
   var long = body.length > 600 && !DW.open[id];
-  return '<div class="dw-msg ' + (out ? 'out' : 'in') + '" data-msg="' + dwEsc(id) + '"><span class="meta">' + dwEsc(who + ' · ' + C.channelWord(m.channel) + (time ? ' · ' + time : '')) + '</span>' +
+  return '<div class="dw-msg ' + (out ? 'out' : 'in') + (m.is_payer === false ? ' other' : '') + '" data-msg="' + dwEsc(id) + '"><span class="meta">' + dwEsc(who + ' · ' + C.channelWord(m.channel) + (time ? ' · ' + time : '')) + '</span>' +
     (m.subject ? '<span class="subj">' + dwEsc(m.subject) + '</span>' : '') + dwEsc(long ? body.slice(0, 600).replace(/\s+\S*$/, '') + '...' : body) +
     (body.length > 600 ? '<br><button type="button" class="dw-link" data-dw="more" data-k="' + dwEsc(id) + '">' + (long ? 'Show all' : 'Show less') + '</button>' : '') + '</div>';
 }
+// The payer's Link contact card: candidates are searched by the payer's own phone and email.
 function dwLinkCardHtml(J, s) {
+  var payer = DebtWorkshopCore.payerOf(J), who = DebtWorkshopCore.firstName(payer.name) || 'This person';
   var cands = (J.contact && Array.isArray(J.contact.candidates)) ? J.contact.candidates : [];
-  var html = '<div class="dw-linkc" id="dwLinkCard"><div class="dw-lab">Link contact</div><p>This job has no GoHighLevel contact, so texts cannot be sent from here.' + (cands.length ? ' Pick the right one:' : '') + '</p>';
+  var lead = payer.known ? who + ' has no GoHighLevel contact linked, so texts cannot be sent from here.' : 'This job has no GoHighLevel contact, so texts cannot be sent from here.';
+  var html = '<div class="dw-linkc" id="dwLinkCard"><div class="dw-lab">Link contact</div><p>' + dwEsc(lead) + (cands.length ? ' Pick the right one:' : '') + '</p>';
+  if (J.contact && J.contact.linkable === false) return html + '<p>' + dwEsc(who) + ' has no contact row on this job, so there is nowhere to link them. Add them to the job\'s contacts first.</p></div>';
   if (!cands.length) html += '<p>No likely match was found in GoHighLevel. Add the contact there, then read the job again.</p>';
   cands.forEach(function (c) {
     var d = [c.phone, c.email, c.match].filter(Boolean).join(' · ');
@@ -1248,7 +1320,8 @@ function dwSuggestionHtml(J, s, linked) {
 
   if (sug.kind === 'move') {
     var cat = C.catByKey(sug.proposed_category) || { name: 'Rectification', color: '#7B5EA7' };
-    var replyOk = !!text.trim() && s.sending_on && linked;
+    var canText = dwCanText(J);
+    var replyOk = !!text.trim() && s.sending_on && canText;
     var label = 'Move to ' + cat.name + (replyOk ? ' + send reply' : '');
     var lab = sug.proposed_category === 'says_paid' ? 'Looks like they have paid' : 'Looks like something to fix';
     var gate = !s.viewer_is_owner ? '' : (text.trim() && !s.sending_on ? 'Sending is off until you switch it on, so only the move happens.' : text.trim() && !linked ? 'No contact is linked, so only the move happens.' : '');
@@ -1269,7 +1342,7 @@ function dwSuggestionHtml(J, s, linked) {
   if (email) stepWords = stepWords.replace(/ text/, ' email');
   var title = stepWords ? 'Suggested ' + stepWords.charAt(0).toLowerCase() + stepWords.slice(1) : 'Suggested reply';
   var possible = Array.isArray(J.possible_payments) ? J.possible_payments : [];
-  var g = C.sendGate({ settings: s, channel: sug.channel, linked: linked, possible: possible });
+  var g = C.sendGate({ settings: s, channel: sug.channel, linked: linked, possible: possible, who: C.firstName(C.payerOf(J).name) });
   var warn = possible.length ? '<div class="dw-warn" id="dwPossible"><b>Possible payment in the bank feed</b>' + possible.map(function (p) { return dwEsc(C.paymentWords(p)) + (p.reason ? ' (' + dwEsc(p.reason) + ')' : ''); }).join('<br>') + '<br>Match it in Xero before chasing. If it is not theirs, you can send anyway.</div>' : '';
   var sendBtn;
   if (g.code === 'possible_payment') {
@@ -1443,7 +1516,7 @@ async function dwMove() {
     await dwPost('debt_ws_set_category', { xero_invoice_id: dwRowId(), category: sug.proposed_category || 'rectification', suggestion_id: sug.id || null });
   } catch (e) { DW.busy = null; DW.refusal = C.refusalText(e); return dwRender(); }
   var sent = false;
-  if (text.trim() && s.sending_on && dwLinked(J)) {
+  if (text.trim() && s.sending_on && dwCanText(J)) {
     try {
       await dwPost('debt_ws_decide', { xero_invoice_id: dwRowId(), step: sug.step || null, suggestion_id: sug.id || null, action: 'send', text: text, channel: sug.channel || 'sms', amount: C.draftAmount(sug, J.row) });
       sent = true;
@@ -1499,7 +1572,8 @@ async function dwLink(cid) {
   var C = DebtWorkshopCore, J = DW.job; if (!J || DW.busy) return;
   DW.busy = 'link:' + cid; DW.refusal = null; dwRender();
   try {
-    await dwPost('debt_ws_link_contact', { job_id: (J.job && J.job.id) || (J.row && J.row.job_id), ghl_contact_id: cid });
+    // The invoice decides whose contact this is: a neighbour's goes on their own row, never the job.
+    await dwPost('debt_ws_link_contact', { xero_invoice_id: dwRowId(), job_id: (J.job && J.job.id) || (J.row && J.row.job_id) || undefined, ghl_contact_id: cid });
     DW.busy = null; dwToast('Contact linked', 'success'); dwAfterWrite();
   } catch (e) { DW.busy = null; DW.refusal = C.refusalText(e); }
   dwRender();
@@ -1593,6 +1667,8 @@ function dwAct(a, k) {
     case 'cat-set': return dwCatChoose(k);
     case 'cat-confirm': return dwSetCategory(k);
     case 'transcript': case 'more': DW.open[k] = !DW.open[k]; return dwRender();
+    case 'conv-all': DW.convAll = true; return dwLoadJob(true);
+    case 'conv-payer': DW.convAll = false; return dwLoadJob(true);
     case 'modal-close': return dwCloseModal();
   }
 }

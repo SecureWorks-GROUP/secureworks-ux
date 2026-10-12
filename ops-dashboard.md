@@ -18,8 +18,7 @@ Today (morning brief, attention items, AI alerts), Inbox, Approvals, Finance Hea
 
 ## Key Features
 - AI chat sidebar (Claude sonnet via ops-ai)
-- Morning brief (auto-generated, 30-min cache)
-- Actionable attention items (click to schedule/invoice/create PO)
+- Morning brief (auto-generated, 30-min cache) and actionable attention items (click to schedule/invoice/create PO): on the hidden Today view, so not on screen
 - Complete + Invoice cascade (mark job complete → auto-create Xero invoice)
 - Scope-to-PO material extraction (auto-populates PO from scope_json)
 - Assignment completion cascade (complete buttons, prompt when all done)

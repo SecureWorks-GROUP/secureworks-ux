@@ -22,7 +22,9 @@
 //  - Financials > Purchase Orders files a sent, confirmed or delivered order
 //    under its own chip, and the job's material ordering cards read its state;
 //  - the job page's "Delivery tomorrow, not confirmed" alert leaves a confirmed
-//    or delivered order alone.
+//    or delivered order alone;
+//  - the Gate Ledger (Cap 1B preview) counts a sent, confirmed or delivered
+//    order as materials ordered.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
@@ -396,4 +398,33 @@ test('the job page flags a delivery tomorrow only when the order is not yet conf
     billed: false,
     delivered: false,
   });
+});
+
+test('the Gate Ledger counts a sent, confirmed or delivered order as materials ordered', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('sw_cap1b_enabled', '1'); });
+  const { bodies } = await bootOps(page);
+  const materialsRow = page.locator('#jdQvBody .cap1b-gate-ledger tr', { hasText: 'materials_ordered' });
+  const expected = {
+    draft: 'fail',
+    approved: 'fail',
+    quote_requested: 'fail',
+    submitted: 'pass',
+    sent: 'pass',
+    authorised: 'pass',
+    confirmed: 'pass',
+    billed: 'pass',
+    delivered: 'pass',
+  };
+  for (const [status, verdict] of Object.entries(expected)) {
+    bodies.job_detail = {
+      job: { id: 'job-' + status, type: 'fencing', status: 'scheduled', job_number: 'SWF-' + status, client_name: 'Fixture Client' },
+      purchase_orders: [po(status)],
+      assignments: [], work_orders: [], invoices: [], events: [], media: [], documents: [],
+    };
+    await page.evaluate((id) => openJobQuickView(id), 'job-' + status);
+    await expect(page.locator('#jdQvTitle')).toContainText('SWF-' + status);
+    await expect(materialsRow.locator('td').nth(1), `${status} order`).toHaveText(verdict);
+    if (verdict === 'pass') await expect(materialsRow).not.toContainText('none sent yet');
+    else await expect(materialsRow).toContainText('none sent yet');
+  }
 });

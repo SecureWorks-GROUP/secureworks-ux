@@ -63,7 +63,8 @@ match a column on the raw status again; that hid 6 of 22 orders. Every other
 read of an order's status in `ops.html` goes through the same function (the
 Financials > Purchase Orders chips, the job's material ordering cards, its
 "Delivery tomorrow" alert, the awaiting-invoice alerts), and every status badge
-is `poStatusBadge`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
+is `poStatusBadge`. The stage gate module's "materials ordered" gate takes it as
+`options.po_column_of`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
 is built from `list_pos`, because the `calendar` feed's own `deliveries` carries
 only draft / submitted / authorised orders; it repaints every time that read
 lands, and a failed read falls back to the feed's fresh rows.

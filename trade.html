@@ -2630,13 +2630,10 @@
     .rr-hours { background: var(--sw-card); border: 1px solid var(--sw-border); border-radius: var(--sw-radius); padding: 14px; margin: 0 0 14px; }
     .rr-hours-t { font-size: 15px; font-weight: 800; color: var(--sw-dark); }
     .rr-hours-s { font-size: 12px; color: var(--sw-text-sec); line-height: 1.45; margin: 4px 0 10px; }
-    .rr-chips { display: flex; gap: 8px; flex-wrap: wrap; }
     .rr-chip { flex: 1 1 60px; min-height: 44px; padding: 0 10px; border: 1.5px solid var(--sw-border); border-radius: 22px; background: #fff; color: var(--sw-dark); font-family: var(--sw-font); font-size: 15px; font-weight: 800; cursor: pointer; white-space: nowrap; }
     .rr-chip.on { border-color: var(--sw-orange); background: var(--sw-orange); color: #fff; }
     .rr-chip:disabled { opacity: .6; }
-    .rr-hours-other { display: flex; gap: 8px; margin-top: 10px; }
-    .rr-hours-other input { flex: 1; min-height: 44px; padding: 0 12px; border: 1px solid var(--sw-border); border-radius: 10px; font-size: 16px; font-family: var(--sw-font); }
-    .rr-hours-other .rr-chip { flex: 0 0 auto; }
+    .rr-hours-save { display: block; width: 100%; margin-top: 10px; }
     /* ── Accept gate + job stepper (2026-09-08) ── */
     .accept-gate { margin: 0 0 16px; }
     .accept-gate-body { background: var(--sw-card); border-radius: var(--sw-radius); box-shadow: var(--sw-shadow); padding: 20px 16px; margin-top: 12px; text-align: center; }
@@ -14759,7 +14756,6 @@
   var RoofReportCore = (function () {
     'use strict';
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
-    var HOUR_CHIPS = [1, 2, 3, 4];
     var INPUT_STYLE = 'width:100%;padding:11px;border:1px solid var(--sw-border);border-radius:8px;font-size:15px;box-sizing:border-box;background:#fff;font-family:var(--sw-font);';
     // Server payload {template, job, draft} -> a small state object the panels read.
     function stateOf(tpl) {
@@ -14893,23 +14889,32 @@
       var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return 'w/e ' + days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
     }
-    // One-tap hours row. current = hours already on the trade's assignment.
+    // Hours row on the job view. current = hours already on the trade's
+    // assignment. Hours are never typed here: the trade gives the date worked,
+    // a start and a finish (ctx.entry holds what the fields open on) and the
+    // figure is worked out. [trade-time-entry]
     function hoursHTML(jobId, current, ctx) {
       ctx = ctx || {};
+      var e = ctx.entry || {};
       var cur = (current == null || current === '') ? null : Number(current);
-      var custom = cur != null && HOUR_CHIPS.indexOf(cur) < 0;
-      var h = '<div class="rr-hours" id="rrHours" data-rr-hours' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
+      var brk = Number(e.break_minutes) > 0 ? String(e.break_minutes) : '';
+      var h = '<div class="rr-hours" id="rrHours" data-rr-hours data-rr-job="' + esc(jobId) + '"' + (cur != null ? ' data-rr-hours-current="' + cur + '"' : '') + '>';
       h += '<div class="rr-hours-t">' + esc(ctx.title || 'Hours for this job') + '</div>';
-      if (cur != null) h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '. Tap to change.</div>';
-      else h += '<div class="rr-hours-s">One tap puts it on this week\'s invoice. You can still change it under Hours.</div>';
-      h += '<div class="rr-chips">';
-      HOUR_CHIPS.forEach(function (n) {
-        h += '<button type="button" class="rr-chip' + (cur === n ? ' on' : '') + '" data-rr-hour="' + n + '" onclick="rrLogHours(\'' + esc(jobId) + '\',' + n + ')">' + n + (n === 1 ? ' hr' : ' hrs') + '</button>';
-      });
-      h += '<button type="button" class="rr-chip other' + (custom ? ' on' : '') + '" data-rr-hour="other" onclick="rrHoursOther()">' + (custom ? esc(hoursLabel(cur)) : 'Other') + '</button>';
+      if (cur != null) {
+        h += '<div class="rr-hours-s"><strong>' + esc(hoursLabel(cur)) + '</strong> on your week' + (ctx.week ? ' (' + esc(ctx.week) + ')' : '') + '.'
+          + (ctx.when ? ' ' + esc(ctx.when) + '. Change the times and save to change it.' : ' Add the times you worked.') + '</div>';
+      } else {
+        h += '<div class="rr-hours-s">Give the date you worked and your start and finish time. It goes on this week\'s invoice.</div>';
+      }
+      h += '<div class="jct">';
+      h += '<label class="jct-f jct-date"><span>Date worked</span><input type="date" id="rrHoursDate" value="' + esc(e.work_date || '') + '"' + (ctx.maxDate ? ' max="' + esc(ctx.maxDate) + '"' : '') + ' onchange="rrHoursChanged()"></label>';
+      h += '<label class="jct-f"><span>Start</span><input type="time" id="rrHoursStart" value="' + esc(e.start_time || '') + '" oninput="rrHoursChanged()" onchange="rrHoursChanged()"></label>';
+      h += '<label class="jct-f"><span>Finish</span><input type="time" id="rrHoursFinish" value="' + esc(e.finish_time || '') + '" oninput="rrHoursChanged()" onchange="rrHoursChanged()"></label>';
+      h += '<label class="jct-f jct-break"><span>Break (min)</span><input type="number" id="rrHoursBreak" min="0" step="5" inputmode="numeric" placeholder="0" value="' + esc(brk) + '" oninput="rrHoursChanged()" onchange="rrHoursChanged()"></label>';
+      h += '<div class="jct-f"><span>Hours</span><div class="jct-fixed" id="rrHoursCalc" data-rr-hours-calc>' + esc(ctx.hoursText || '0 hrs') + '</div></div>';
       h += '</div>';
-      h += '<div class="rr-hours-other" id="rrHoursOther" style="display:none"><input type="number" id="rrHoursInput" min="0.25" max="24" step="0.25" placeholder="Hours" inputmode="decimal">';
-      h += '<button type="button" class="rr-chip on" data-rr-hour-add onclick="rrLogHoursCustom(\'' + esc(jobId) + '\')">Add</button></div>';
+      h += '<div class="jct-err" id="rrHoursErr" role="alert" hidden></div>';
+      h += '<button type="button" class="rr-chip on rr-hours-save" id="rrHoursSave" data-rr-hours-save onclick="rrLogHours(\'' + esc(jobId) + '\')">' + (cur != null ? 'Save times' : 'Add to my week') + '</button>';
       h += '</div>';
       return h;
     }
@@ -14917,7 +14922,7 @@
     return {
       stateOf: stateOf, fieldsOf: fieldsOf, sectionsOf: sectionsOf, toggleValue: toggleValue,
       formHTML: formHTML, collect: collect, validate: validate, optionHTML: optionHTML,
-      hoursHTML: hoursHTML, hoursLabel: hoursLabel, weekLabel: weekLabel, isOk: isOk, HOUR_CHIPS: HOUR_CHIPS
+      hoursHTML: hoursHTML, hoursLabel: hoursLabel, weekLabel: weekLabel, isOk: isOk
     };
   })();
   // </trade-roof-report>
@@ -15028,7 +15033,7 @@
       var panel = document.getElementById('rrPanel');
       if (panel) {
         panel.innerHTML = RoofReportCore.optionHTML(_rrCtx.state, jobId, { when: 'just now' }) +
-          (document.getElementById('rrHours') ? '' : RoofReportCore.hoursHTML(jobId, rrMyHours(_currentJob || {}), { title: 'Hours for this report' }));
+          (document.getElementById('rrHours') ? '' : rrHoursRowHTML(jobId, _currentJob || {}, 'Hours for this report'));
       }
       // Pull the fresh document list so the PDF link and Files tab are real.
       api('trade_job_detail', { jobId: jobId }).then(function (data) {
@@ -15085,38 +15090,130 @@
       input.value = '';
     });
   };
-  window.rrLogHours = function (jobId, hours) {
-    var chips = document.querySelectorAll('#rrHours .rr-chip');
-    Array.prototype.forEach.call(chips, function (b) { b.disabled = true; });
+  // ── Hours on the job view: date, start, finish [trade-time-entry] ──
+  // What the trade said here is kept on this device, per account and job, so
+  // the weekly invoice card for that job opens on the same times and they
+  // are not asked twice. The server holds the hours; this holds the when.
+  function _jobTimeMemoryKey() {
+    var id = _invDraftOwnerId();
+    return id ? 'sw_time_job_' + encodeURIComponent(id) : '';
+  }
+  function _jobTimeMemory() {
+    try {
+      var key = _jobTimeMemoryKey();
+      var map = key ? JSON.parse(localStorage.getItem(key) || '{}') : {};
+      return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    } catch (e) { return {}; }
+  }
+  function _jobTimeRecall(jobId) {
+    var hit = jobId ? _jobTimeMemory()[String(jobId)] : null;
+    if (!hit || !TradeTimeEntryCore.check(hit).ok) return null;
+    var entry = TradeTimeEntryCore.fields(hit);
+    entry.hours = Number(hit.hours);
+    return entry;
+  }
+  function _jobTimeRemember(jobId, entry, hours) {
+    try {
+      var key = _jobTimeMemoryKey();
+      if (!key || !jobId) return;
+      var map = _jobTimeMemory();
+      var row = TradeTimeEntryCore.fields(entry);
+      row.hours = Number(hours);
+      row.at = Date.now();
+      map[String(jobId)] = row;
+      // Keep the newest 60 jobs: a phone is not a filing cabinet.
+      var ids = Object.keys(map).sort(function (x, y) { return (map[y].at || 0) - (map[x].at || 0); });
+      ids.slice(60).forEach(function (id) { delete map[id]; });
+      localStorage.setItem(key, JSON.stringify(map));
+    } catch (e) {}
+  }
+  // The hours row for a job: the fields open on what the trade last said for
+  // this job, else the day it was scheduled (never a day still to come) and
+  // their usual start. Finish is always theirs to give.
+  function rrHoursRowHTML(jobId, data, title, week) {
+    var cur = data ? rrMyHours(data) : null;
+    var today = clockPerthDay(new Date());
+    var said = _jobTimeRecall(jobId);
+    // What was said here only counts while it is still what is on the week.
+    if (said && cur != null && Math.abs(said.hours - cur) > 0.01) said = null;
+    if (said && cur == null) said = null;
+    var mine = data ? getMyAssignment(data) : null;
+    var sched = String((mine && mine.scheduled_date) || '').slice(0, 10);
+    var entry = said || {
+      work_date: (TradeTimeEntryCore.isDate(sched) && sched <= today) ? sched : today,
+      start_time: _timeLastStart(), finish_time: '', break_minutes: 0
+    };
+    return RoofReportCore.hoursHTML(jobId, cur, {
+      title: title, week: week, entry: entry, maxDate: today,
+      when: said ? TradeTimeEntryCore.label(said) : '',
+      hoursText: TradeTimeEntryCore.hoursText(TradeTimeEntryCore.hoursFor(entry.start_time, entry.finish_time, entry.break_minutes)) || '0 hrs'
+    });
+  }
+  function _rrHoursEntryFromDOM() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    var brk = String(val('rrHoursBreak') || '').trim();
+    return {
+      work_date: val('rrHoursDate'),
+      start_time: TradeTimeEntryCore.normTime(val('rrHoursStart')),
+      finish_time: TradeTimeEntryCore.normTime(val('rrHoursFinish')),
+      break_minutes: brk === '' ? 0 : (TradeTimeEntryCore.breakOf(brk) == null ? brk : Number(brk))
+    };
+  }
+  function _rrHoursShowError(msg) {
+    var el = document.getElementById('rrHoursErr');
+    if (el) { el.textContent = msg || ''; el.hidden = !msg; }
+  }
+  window.rrHoursChanged = function () {
+    var entry = _rrHoursEntryFromDOM();
+    var chk = TradeTimeEntryCore.check(entry);
+    var calc = document.getElementById('rrHoursCalc');
+    if (calc) calc.textContent = (chk.ok && TradeTimeEntryCore.hoursText(chk.hours)) || '0 hrs';
+    // While typing, only say what is wrong with what is there. A field not
+    // reached yet is named when they press save.
+    var blank = (chk.field === 'work_date' && !entry.work_date) || chk.field === 'start_time' || (chk.field === 'finish_time' && !entry.finish_time);
+    _rrHoursShowError(chk.ok || blank ? '' : chk.error);
+  };
+  window.rrLogHours = function (jobId) {
+    var entry = _rrHoursEntryFromDOM();
+    var chk = TradeTimeEntryCore.check(entry);
+    if (chk.ok && entry.work_date > clockPerthDay(new Date())) chk = { ok: false, error: 'The date worked cannot be after today.' };
+    if (!chk.ok) { _rrHoursShowError(chk.error); toast(chk.error, true); return Promise.resolve(); }
+    _rrHoursShowError('');
+    var controls = document.querySelectorAll('#rrHours input, #rrHours button');
+    Array.prototype.forEach.call(controls, function (b) { b.disabled = true; });
     var titleEl = document.querySelector('#rrHours .rr-hours-t');
     var title = titleEl ? titleEl.textContent : undefined;
-    return api('log_my_job_hours', null, { job_id: jobId, hours: hours, source: 'job_view' }).then(function (res) {
-      if (!res || res.ok !== true) throw new Error((res && (res.error || res.message)) || 'Could not log hours');
-      var mine = getMyAssignment(_currentJob || {});
-      if (mine) { mine.hours_worked = res.hours; if (res.assignment && res.assignment.status) mine.status = res.assignment.status; }
-      else if (_currentJob && res.assignment && _user) {
-        _currentJob.crew = (_currentJob.crew || []).concat([{ id: res.assignment.id, user_id: _user.id, status: res.assignment.status, hours_worked: res.hours, scheduled_date: res.assignment.scheduled_date }]);
+    var sent = TradeTimeEntryCore.fields(entry);
+    return api('log_my_job_hours', null, {
+      job_id: jobId, hours: chk.hours,
+      work_date: sent.work_date, start_time: sent.start_time, finish_time: sent.finish_time, break_minutes: sent.break_minutes,
+      source: 'job_view'
+    }).then(function (res) {
+      if (!res || res.ok !== true) {
+        if (TradeTimeEntryCore.refused(res)) throw new Error(TradeTimeEntryCore.REFUSAL_MSG);
+        throw new Error((res && (res.error || res.message)) || 'Could not log hours');
       }
+      var hours = res.hours != null ? Number(res.hours) : chk.hours;
+      var mine = getMyAssignment(_currentJob || {});
+      if (mine) { mine.hours_worked = hours; if (res.assignment && res.assignment.status) mine.status = res.assignment.status; }
+      else if (_currentJob && res.assignment && _user) {
+        _currentJob.crew = (_currentJob.crew || []).concat([{ id: res.assignment.id, user_id: _user.id, status: res.assignment.status, hours_worked: hours, scheduled_date: res.assignment.scheduled_date }]);
+      }
+      _timeRememberStart(sent.start_time);
+      _jobTimeRemember(jobId, sent, hours);
       var week = RoofReportCore.weekLabel(res.week_ending);
       var cur = document.getElementById('rrHours');
-      if (cur) cur.outerHTML = RoofReportCore.hoursHTML(jobId, res.hours, { week: week, title: title });
-      toast(RoofReportCore.hoursLabel(res.hours) + ' added to your week' + (week ? ' (' + week + ')' : ''));
+      if (cur) {
+        cur.outerHTML = RoofReportCore.hoursHTML(jobId, hours, {
+          title: title, week: week, entry: sent, maxDate: clockPerthDay(new Date()),
+          when: TradeTimeEntryCore.label(sent), hoursText: TradeTimeEntryCore.hoursText(hours) || '0 hrs'
+        });
+      }
+      toast(RoofReportCore.hoursLabel(hours) + ' added to your week' + (week ? ' (' + week + ')' : ''));
     }).catch(function (err) {
-      Array.prototype.forEach.call(document.querySelectorAll('#rrHours .rr-chip'), function (b) { b.disabled = false; });
+      Array.prototype.forEach.call(document.querySelectorAll('#rrHours input, #rrHours button'), function (b) { b.disabled = false; });
       toast('Could not log hours: ' + friendlyError(err), true);
     });
-  };
-  window.rrHoursOther = function () {
-    var row = document.getElementById('rrHoursOther'); if (!row) return;
-    var open = row.style.display === 'none';
-    row.style.display = open ? 'flex' : 'none';
-    var inp = document.getElementById('rrHoursInput'); if (inp && open) inp.focus();
-  };
-  window.rrLogHoursCustom = function (jobId) {
-    var inp = document.getElementById('rrHoursInput');
-    var v = inp ? Number(inp.value) : NaN;
-    if (!isFinite(v) || v <= 0) { toast('Enter the hours first', true); return; }
-    return rrLogHours(jobId, v);
   };
 
   function renderJobTab_makesafeReport(data, phase, container) {
@@ -15137,7 +15234,7 @@
       // 2026-09-08: once the report is done (portal or in-app), one tap puts
       // the hours on the trade's week. The in-app SecureWorks roof report is
       // always offered as the alternative to the builder portal.
-      if (_rdModel.done) h += RoofReportCore.hoursHTML(_rdModel.jobId, rrMyHours(data), { title: 'Hours for this report' });
+      if (_rdModel.done) h += rrHoursRowHTML(_rdModel.jobId, data, 'Hours for this report');
       h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;
       rrLoadState(_rdModel.jobId, {
@@ -15234,7 +15331,7 @@
       }
       // 2026-09-08: report done, hours on the week with one tap; roof report
       // still offered in case the builder needs one on top of the make-safe.
-      h += RoofReportCore.hoursHTML(job.id, rrMyHours(data), { title: 'Hours for this job' });
+      h += rrHoursRowHTML(job.id, data, 'Hours for this job');
       h += '<div id="rrOption" class="rr-option rr-loading">Checking roof report...</div><div id="rrPanel"></div>';
       container.innerHTML = h;
       rrLoadState(job.id, {});
@@ -23338,17 +23435,11 @@
 
   // ════════════════════════════════════════════════════════════════════════════
   // JOB-CENTRIC INVOICE (cutover path) — one card per whitelisted assignment.
-  // Hours and description stay editable. Assigned-card rates are office-only
+  // Times worked and description stay editable; hours are worked out from the
+  // times. Assigned-card rates are office-only
   // (read-only). Only a searched-in (manually_added) card or extra line keeps a
   // typed rate, which ops-api flags for office verification.
   // ════════════════════════════════════════════════════════════════════════════
-
-  // Typical-hours hint per job type (placeholder only — never auto-applied).
-  function _typicalHoursHint(jobType) {
-    var t = (jobType || '').toLowerCase();
-    if (t.indexOf('make') >= 0 || t.indexOf('safe') >= 0) return '2'; // make-safe ~2h
-    return '';
-  }
 
   function _defaultJobCardWoMode() {
     return false;
@@ -23397,6 +23488,24 @@
     var entry = { work_date: on.day, start_time: on.time, finish_time: off.time, break_minutes: brk == null ? 0 : brk };
     return TradeTimeEntryCore.check(entry).ok ? entry : null;
   }
+  // Times the trade gave on the job view (kept on this device) for the job
+  // this assignment is on. Used only while they are still what the server
+  // holds for it, and only for the day they were given for: the scheduled day,
+  // or another day of this invoice week when the job has one visit in it.
+  function _jobCardTimeFromJobView(a, all) {
+    if (!a || a.hours_worked == null) return null;
+    var jobId = a.job_id || (a.jobs && a.jobs.id) || '';
+    var said = _jobTimeRecall(jobId);
+    if (!said || Math.abs(said.hours - Number(a.hours_worked)) > 0.01) return null;
+    var sched = String(a.scheduled_date || '').slice(0, 10);
+    if (said.work_date !== sched) {
+      var visits = (all || []).filter(function(x) { return x && (x.job_id || (x.jobs && x.jobs.id) || '') === jobId; }).length;
+      var start = _hoursWeekStart || '';
+      var end = _hoursWeekEnd || (start ? _weeklyDatePlusDays(start, 6) : '');
+      if (visits !== 1 || !start || said.work_date < start || said.work_date > end) return null;
+    }
+    return { work_date: said.work_date, start_time: said.start_time, finish_time: said.finish_time, break_minutes: said.break_minutes };
+  }
   // Hours on a card are whatever its start, finish and break work out to.
   function _jobCardSyncHours(c) {
     if (c) c.hours = TradeTimeEntryCore.hoursFor(c.start_time, c.finish_time, c.break_minutes);
@@ -23412,7 +23521,9 @@
     return { min: c && c.assignment_id ? start : '', max: end };
   }
   function _jobCardTimeHint(c) {
-    if (c.hours_prefilled && !c.hours_user_edited) return 'From your clock on and off. Change it if it is wrong.';
+    if (c.hours_prefilled && !c.hours_user_edited) {
+      return (c.time_source === 'job_view' ? 'From the times you gave on the job.' : 'From your clock on and off.') + ' Change it if it is wrong.';
+    }
     if (c.logged_hours != null && Number(c.logged_hours) > 0 && !c.finish_time) {
       return TradeTimeEntryCore.hoursText(c.logged_hours) + ' on record for this job. Add the times you worked.';
     }
@@ -24069,7 +24180,10 @@
       var job = a.jobs || {};
       // Clocked on and off that day: the card opens on those times. Otherwise
       // the times are blank and required. [trade-time-entry]
-      var clockTime = _jobCardTimeFromClock(a);
+      // Times the trade already gave on the job view win over the clock:
+      // they are what put the hours on this assignment.
+      var saidTime = _jobCardTimeFromJobView(a, data.assignments);
+      var clockTime = saidTime || _jobCardTimeFromClock(a);
       // FIX4: assignments for jobs with no job_number AND no client_name are
       // phantom/unlinked — auto-include silently blocks submit. Render them
       // unchecked so the trade cannot accidentally submit a blank card.
@@ -24087,7 +24201,7 @@
         // FIX5: store external_ref from assignment or joined job when present.
         external_ref: a.external_ref || job.external_ref || '',
         scheduled_date: a.scheduled_date || '',
-        work_date: String(a.scheduled_date || '').slice(0, 10),
+        work_date: clockTime ? clockTime.work_date : String(a.scheduled_date || '').slice(0, 10),
         start_time: clockTime ? clockTime.start_time : '',
         finish_time: clockTime ? clockTime.finish_time : '',
         break_minutes: clockTime ? clockTime.break_minutes : 0,
@@ -24096,6 +24210,7 @@
         rate_source: 'server_resolved',
         description: '',
         hours_prefilled: !!clockTime,
+        time_source: saidTime ? 'job_view' : (clockTime ? 'clock' : ''),
         included: !isBlankJob,
         _blank_job: isBlankJob
       }));
@@ -31249,7 +31364,7 @@
       plan.workOrders.forEach(function (wo) { h += CompleteInvoiceCore.weeklyCardHTML(wo, 'adding'); });
     } else if (plan.kind === 'hours') {
       h += CompleteInvoiceCore.hoursIntroHTML(plan.hoursLogged);
-      if (plan.hoursLogged == null) h += RoofReportCore.hoursHTML(job.id, null, { title: 'Hours for this job' });
+      if (plan.hoursLogged == null) h += rrHoursRowHTML(job.id, null, 'Hours for this job');
     }
     (plan.unpriced || []).forEach(function (wo) {
       h += '<div class="wiz-inv"><div class="wiz-inv-t">Work order ' + esc(wo.wo_number || '') + ' complete</div><div class="wiz-inv-s">The office prices this one.</div></div>';

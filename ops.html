@@ -4545,7 +4545,7 @@
 __swOpsStampAssets([
   {t:'css', u:'modules/ops-sales-performance.css?v=2'},
   {t:'css', u:'modules/ops-sales-booking.css?v=3'},
-  {t:'css', u:'modules/ops-dispatch-concept.css?v=1'}
+  {t:'css', u:'modules/ops-dispatch.css?v=1'}
 ]);
 </script>
 </head>
@@ -5022,13 +5022,13 @@ __swOpsStampAssets([
     </div>
 
     <!-- ═══════════ DISPATCH TAB ═══════════
-         Replaced Materials in the nav (Captain 2026-10-06). The concept is sample
-         data only with no network calls: see <ops-dispatch-concept> in
-         modules/ops-dispatch-concept.js. Below it sits the LIVE purchase order
-         board that used to be the Materials view (Captain ruling); it reads and
-         writes real POs through loadMaterials(). -->
+         Replaced Materials in the nav (Captain 2026-10-06). On top is the real
+         Dispatch view of any job (slice 1: job list, job header, Scope and
+         notes): see <ops-dispatch> in modules/ops-dispatch.js. Below it sits the
+         LIVE purchase order board that used to be the Materials view (Captain
+         ruling); it reads and writes real POs through loadMaterials(). -->
     <div id="viewDispatch" class="view">
-      <div id="dispatchConceptRoot"></div>
+      <div id="dispatchRoot"></div>
 
       <div id="dispatchPurchaseOrders" style="margin-top:28px;">
       <div class="section-heading" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -5037,7 +5037,7 @@ __swOpsStampAssets([
         <button class="btn btn-secondary btn-sm" id="matFilterToggle" onclick="toggleMatFilters()" style="font-size:11px;">Filters <span id="matFilterBadge"></span></button>
         <button class="btn btn-primary btn-sm" onclick="openPOModal()">+ New PO</button>
       </div>
-      <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Unlike the concept above, changes made here are real.</div>
+      <div style="font-size:12px; color:var(--sw-text-sec); margin:-6px 0 12px;">Live purchase orders. Changes made here are real.</div>
 
       <!-- Threshold alerts -->
       <div id="matAlerts" style="margin-bottom:8px;"></div>
@@ -6232,7 +6232,7 @@ __swOpsStampAssets([
   {t:'js', u:'modules/ops-makesafe-reporting-cockpit.js?v=9'},
   {t:'js', u:'modules/ops-makesafe-feedback-notes.js?v=1'},
   {t:'js', u:'modules/ops-modals.js?v=4'},
-  {t:'js', u:'modules/ops-dispatch-concept.js?v=1'}
+  {t:'js', u:'modules/ops-dispatch.js?v=1'}
 ]);
 </script>
 <!-- Job page Overview v2 (docs/job-overview-v2.md): off unless ?overview=v2 or localStorage sw_overview_v2 = '1'. -->
@@ -7279,8 +7279,8 @@ function jobDetailIsOpen() {
 // <ops-tab-set> Captain 2026-10-06: the Ops tabs are Jobs (the page Ops opens
 // on), Calendar, Financials, Dispatch, then Sales. Today, Inbox (AI
 // annotations) and Approvals are off the front end only. The Materials tab
-// became Dispatch: the concept on top, the live purchase order board that was
-// the Materials view below it. The hidden views, loaders and ops-api actions
+// became Dispatch: the Dispatch view of any job on top (modules/ops-dispatch.js),
+// the live purchase order board that was the Materials view below it. The hidden views, loaders and ops-api actions
 // all stay, so bringing one back is its nav button plus its key here. Any route
 // into a hidden view (an old #today link, a stale button) lands on Jobs instead
 // of an empty screen. A fresh open of the plain address lands on Jobs. showView
@@ -7339,7 +7339,7 @@ function showView(view) {
   if (view === 'jobs') loadJobs();
   if (view === 'financials') loadFinancials();
   if (view === 'dispatch') {
-    if (typeof OpsDispatchConcept !== 'undefined') OpsDispatchConcept.show();
+    if (typeof OpsDispatch !== 'undefined') OpsDispatch.show();
     loadMaterials();
   }
   if (view === 'sales' && typeof SalesWorkspace !== 'undefined') SalesWorkspace.show(salesTab);

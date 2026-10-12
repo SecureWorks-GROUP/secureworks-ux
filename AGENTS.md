@@ -59,12 +59,14 @@ an order is decided only by `poBoardColumnOf` (`// <po-board-columns>`): `sent` 
 older `submitted` / `authorised` / `billed`, and any status the page does not
 know lands in a visible Other column. Cancelled orders stay off the board and
 the Calendar row on purpose (`poBoardColumnOf` answers `''` for them). Never
-match a column on the raw status again; that hid 6 of 22 orders. The Financials
-> Purchase Orders chips and the job's material ordering cards
-(`matchMaterialStatus`) go through the same function. The Calendar's Deliveries
-row (`// <calendar-delivery-row>`) is built from `list_pos`, because the
-`calendar` feed's own `deliveries` carries only draft / submitted / authorised
-orders, and repaints every time that read lands.
+match a column on the raw status again; that hid 6 of 22 orders. Every other
+read of an order's status in `ops.html` goes through the same function (the
+Financials > Purchase Orders chips, the job's material ordering cards, its
+"Delivery tomorrow" alert, the awaiting-invoice alerts), and every status badge
+is `poStatusBadge`. The Calendar's Deliveries row (`// <calendar-delivery-row>`)
+is built from `list_pos`, because the `calendar` feed's own `deliveries` carries
+only draft / submitted / authorised orders; it repaints every time that read
+lands, and a failed read falls back to the feed's fresh rows.
 Guard: `tests/e2e/ops-po-all-statuses.spec.js`.
 
 ## Ops Dash calendar drag (`ops.html`)

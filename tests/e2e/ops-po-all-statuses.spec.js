@@ -17,8 +17,12 @@
 //  - an order in every live status with a delivery day is on the Calendar's
 //    Deliveries row, the row still shows the feed's own rows if the order list
 //    fails, and it drops an order that has left the order list;
+//  - a failed order list read falls back to the calendar feed's fresh rows, not
+//    to the list remembered from an earlier load;
 //  - Financials > Purchase Orders files a sent, confirmed or delivered order
-//    under its own chip, and the job's material ordering cards read its state.
+//    under its own chip, and the job's material ordering cards read its state;
+//  - the job page's "Delivery tomorrow, not confirmed" alert leaves a confirmed
+//    or delivered order alone.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
@@ -252,6 +256,26 @@ test('the Deliveries row drops an order that has left the order list', async ({ 
   await expect(page.locator('#calendarBody .cal-delivery-block')).toHaveCount(0);
 });
 
+test('a failed order list read falls back to the fresh calendar feed, not the remembered list', async ({ page }) => {
+  const failures = {};
+  const { bodies } = await bootOps(page, { failures });
+  const [day0] = await calendarDays(page);
+  const order = po('draft', { delivery_date: day0 });
+  bodies.list_pos = { purchase_orders: [order] };
+  bodies.calendar = { events: [], deliveries: [order] };
+  await openCalendarCrewView(page);
+  await expect(deliveryBlock(page, 'draft')).toBeVisible();
+
+  // The order is cancelled, so the feed drops it, and the order list read fails.
+  bodies.calendar = { events: [], deliveries: [] };
+  failures.list_pos = 500;
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  await page.locator('.header-nav button[data-view="calendar"]').click();
+  await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
+  await expect(page.locator('#calendarBody .cal-delivery-block')).toHaveCount(0);
+});
+
 async function openFinancialsPurchaseOrders(page) {
   await page.locator('.header-nav button[data-view="financials"]').click();
   await expect(page.locator('#viewFinancials')).toHaveClass(/active/);
@@ -319,6 +343,17 @@ test('a job material ordering card reads the state of a sent, confirmed or deliv
     billed: 'delivered',
     delivered: 'delivered',
   };
+  const wordOf = {
+    draft: 'Draft',
+    approved: 'Approved',
+    quote_requested: 'Quoted',
+    submitted: 'Sent',
+    sent: 'Sent',
+    authorised: 'Confirmed',
+    confirmed: 'Confirmed',
+    billed: 'Delivered',
+    delivered: 'Delivered',
+  };
   const gateCard = page.locator('#jdBuild .mat-order-card', { hasText: 'Gate Kits' });
   for (const [status, state] of Object.entries(stateOf)) {
     await page.evaluate(({ job, order }) => {
@@ -326,7 +361,39 @@ test('a job material ordering card reads the state of a sent, confirmed or deliv
     }, { job, order: po(status, { line_items: [{ description: 'Gate kit' }] }) });
     await expect(gateCard, `${status} order`).toHaveAttribute('data-mat-state', state);
     await expect(gateCard).toContainText('PO-' + status);
+    await expect(gateCard.locator('.status-badge'), `${status} badge`).toHaveText(wordOf[status]);
   }
   // A category with no order still reads as not ordered.
   await expect(page.locator('#jdBuild .mat-order-card', { hasText: 'Fixings' })).toHaveAttribute('data-mat-state', 'missing');
+});
+
+test('the job page flags a delivery tomorrow only when the order is not yet confirmed', async ({ page }) => {
+  await bootOps(page);
+  const flagged = await page.evaluate((statuses) => {
+    // The alert's own "tomorrow", so the fixture cannot date-rot.
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const day = tomorrow.toISOString().slice(0, 10);
+    const out = {};
+    statuses.forEach((status) => {
+      const alerts = evaluateJobAlerts({
+        job: { id: 'job-1', type: 'fencing', status: 'scheduled' },
+        purchase_orders: [{ id: 'po-' + status, status, delivery_date: day, total: 0 }],
+      });
+      out[status] = alerts.some((a) => /Delivery tomorrow/.test(a.message));
+    });
+    return out;
+  }, KNOWN_STATUSES);
+
+  expect(flagged).toEqual({
+    quote_requested: true,
+    draft: true,
+    approved: true,
+    submitted: true,
+    sent: true,
+    authorised: false,
+    confirmed: false,
+    billed: false,
+    delivered: false,
+  });
 });

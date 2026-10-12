@@ -8581,10 +8581,13 @@ async function loadCalendar() {
     // Delivery row top-up: the calendar feed only sends draft / submitted /
     // authorised orders, so the row reads the full order list too.
     // See <calendar-delivery-row>.
-    opsFetch('list_pos').then(function(p) {
-      _calPOs = (p && p.purchase_orders) || [];
+    opsFetch('list_pos').catch(function(e) {
+      console.error('calendar deliveries enrich failed:', e);
+      return null;
+    }).then(function(p) {
+      _calPOs = p ? (p.purchase_orders || []) : null;
       renderCalendar();
-    }).catch(function(e) { console.error('calendar deliveries enrich failed:', e); });
+    });
 
     // Crew availability shading
     opsFetch('get_crew_availability', { from: range.from, to: range.to }).then(function(av) {
@@ -9415,10 +9418,10 @@ function renderSwimlaneView(container, range) {
       var dels = deliveryMap[dateStr] || [];
       dels.forEach(function(del) {
         var isWarning = del.job_id && jobStartDates[del.job_id] && dateStr > jobStartDates[del.job_id];
-        var delSupplier = poAttrText(del.supplier_name || 'No supplier');
+        var delSupplier = escapeAttr(del.supplier_name || 'No supplier');
         html += '<div class="cal-delivery-block' + (isWarning ? ' warning' : '') + '"' +
-          ' data-po-id="' + poAttrText(del.id) + '"' +
-          ' title="' + poAttrText(del.po_number) + ' — ' + delSupplier + ' — ' + poAttrText(poStatusLabel(del.status)) + '">';
+          ' data-po-id="' + escapeAttr(del.id) + '"' +
+          ' title="' + escapeAttr(del.po_number) + ' — ' + delSupplier + ' — ' + escapeAttr(poStatusLabel(del.status)) + '">';
         html += delSupplier;
         if (isWarning) html += ' &#9888;';
         html += '</div>';
@@ -17436,15 +17439,15 @@ function renderPOTable(pos) {
 
   var html = '';
   filtered.forEach(function(po) {
-    html += '<tr data-po-id="' + poAttrText(po.id) + '">';
+    html += '<tr data-po-id="' + escapeAttr(po.id) + '">';
     html += '<td><strong>' + po.po_number + '</strong></td>';
     html += '<td>' + (po.reference || '-') + '</td>';
     html += '<td>' + (po.supplier_name || '-') + '</td>';
     html += '<td style="font-family:var(--sw-font-num);">' + fmt$(po.total) + '</td>';
     html += '<td>' + fmtDate(po.delivery_date) + '</td>';
-    html += '<td><span class="status-badge ' + po.status + '">' + poAttrText(poStatusLabel(po.status)) + '</span></td>';
+    html += '<td>' + poStatusBadge(po.status) + '</td>';
     html += '<td>';
-    if (po.status === 'draft' && !po.xero_po_id) {
+    if (poBoardColumnOf(po.status) === 'draft' && !po.xero_po_id) {
       html += '<button class="btn btn-primary btn-sm" onclick="pushPOToXero(\'' + po.id + '\')">Push to Xero</button>';
     }
     if (po.job_id) {
@@ -18400,9 +18403,12 @@ function poStatusLabel(status) {
   }
   return status ? String(status).replace(/_/g, ' ') : 'No status';
 }
-// escapeHtml leaves quotes alone and throws on a non-string; this is safe in an attribute.
-function poAttrText(val) {
-  return escapeHtml(val == null ? '' : String(val)).replace(/"/g, '&quot;');
+// The one badge for a purchase order's status, wherever it is printed: the
+// column's word and the column's colour.
+function poStatusBadge(status) {
+  var key = poBoardColumnOf(status);
+  var cls = key && key !== 'other' ? key : status;
+  return '<span class="status-badge ' + escapeAttr(cls) + '">' + escapeAttr(poStatusLabel(status)) + '</span>';
 }
 // </po-board-columns>
 
@@ -18498,7 +18504,7 @@ function renderMatAlerts() {
   var alerts = [];
 
   _allPOs.forEach(function(po) {
-    if (['draft', 'quote_requested', 'cancelled', 'deleted'].indexOf(po.status) >= 0) return;
+    if (['', 'draft', 'quote_requested'].indexOf(poBoardColumnOf(po.status)) >= 0) return;
     if (po.invoice_received_at || po.paid_at) return;
     var sinceDate = po.confirmed_at || po.ordered_at || po.created_at;
     if (!sinceDate) return;
@@ -18596,10 +18602,10 @@ function renderMaterialsKanban() {
         jobRef = (po.job_number || '') + (po.job_number && surname ? ' — ' + surname : surname || '');
       }
 
-      html += '<div class="kanban-card" data-po-id="' + poAttrText(po.id) + '" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
+      html += '<div class="kanban-card" data-po-id="' + escapeAttr(po.id) + '" style="cursor:pointer; position:relative;' + (isStuck ? 'border-left:3px solid #E67E22;' : deliverySoon ? 'border-left:3px solid #E74C3C;' : '') + '" onclick="openPOEdit(\'' + po.id + '\')">';
 
       // BUG 2: Delete button (top-right)
-      var canDelete = po.status === 'draft' || po.status === 'quote_requested';
+      var canDelete = stage.key === 'draft' || stage.key === 'quote_requested';
       html += '<button onclick="event.stopPropagation();deletePO(\'' + po.id + '\',\'' + escapeHtml(po.po_number || '').replace(/'/g, "\\'") + '\',\'' + escapeHtml(po.supplier_name || '').replace(/'/g, "\\'") + '\',' + canDelete + ')" style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:13px;color:var(--sw-text-sec);padding:2px;" title="Delete PO">&#128465;</button>';
 
       // Header: supplier + total
@@ -18635,7 +18641,7 @@ function renderMaterialsKanban() {
         html += '</div>';
         html += '<div style="font-size:10px;color:' + wfColors[currentIdx] + ';font-weight:600;">' + wfLabels[currentIdx] + '</div>';
       } else {
-        html += '<div class="po-status-word" style="font-size:10px;color:var(--sw-text-sec);font-weight:600;margin:6px 0 4px;">Status: ' + poAttrText(poStatusLabel(po.status)) + '</div>';
+        html += '<div class="po-status-word" style="font-size:10px;color:var(--sw-text-sec);font-weight:600;margin:6px 0 4px;">Status: ' + escapeAttr(poStatusLabel(po.status)) + '</div>';
       }
 
       // Delivery/pickup date
@@ -18864,7 +18870,7 @@ function renderJobPeek(data) {
     data.purchase_orders.forEach(function(po) {
       html += '<div style="padding:8px 0; border-bottom:1px solid var(--sw-border); font-size:13px;">';
       html += '<strong>' + po.po_number + '</strong> — ' + po.supplier_name;
-      html += ' <span class="status-badge ' + po.status + '">' + po.status + '</span>';
+      html += ' ' + poStatusBadge(po.status);
       html += ' ' + fmt$(po.total);
       html += '</div>';
     });
@@ -20235,7 +20241,7 @@ function evaluateJobAlerts(data) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   var tomorrowStr = tomorrow.toISOString().slice(0, 10);
   (data.purchase_orders || []).forEach(function(po) {
-    if (po.delivery_date === tomorrowStr && ['authorised','billed'].indexOf(po.status) < 0) {
+    if (po.delivery_date === tomorrowStr && ['authorised','billed'].indexOf(poBoardColumnOf(po.status)) < 0) {
       alerts.push({ level: 'amber', icon: '&#9888;', message: 'Delivery tomorrow — not confirmed', target: 'build' });
     }
   });
@@ -21644,7 +21650,7 @@ function buildTimelineEvents(data) {
       date: (po.created_at || '').slice(0, 10),
       datetime: po.created_at,
       label: 'PO created — ' + (po.supplier_name || 'Unknown'),
-      detail: po.po_number + ' | ' + fmt$(po.total) + ' | ' + (po.status || ''),
+      detail: po.po_number + ' | ' + fmt$(po.total) + ' | ' + poStatusLabel(po.status),
       source: 'po'
     });
     // Future: delivery date
@@ -22061,7 +22067,7 @@ function renderMoneyView(data) {
       html += '<div class="jd-money-card"><div class="jd-money-card-head">';
       html += '<span>' + (po.po_number || '') + ' — ' + escapeHtml(po.supplier_name || '') + '</span>';
       html += '<strong>' + fmt$(po.total) + '</strong></div>';
-      html += '<div class="jd-money-card-sub"><span class="status-badge ' + po.status + '">' + (po.status || '') + '</span>';
+      html += '<div class="jd-money-card-sub">' + poStatusBadge(po.status);
       if (po.delivery_date) html += ' &middot; Delivery ' + fmtDate(po.delivery_date);
       html += '</div></div>';
     });
@@ -22158,7 +22164,7 @@ function renderBuildView(data) {
       html += '<div style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;display:flex;align-items:center;gap:6px;">';
       html += '<div style="flex:1;">';
       html += '<strong>' + (po.po_number || '') + '</strong> — ' + escapeHtml(po.supplier_name || '') + ' ';
-      html += '<span class="status-badge ' + (po.status || '') + '">' + (po.status || '') + '</span> ';
+      html += poStatusBadge(po.status) + ' ';
       html += '<span style="color:var(--sw-green);font-family:var(--sw-font-num);">' + fmt$(po.total) + '</span>';
       html += '</div>';
       html += '<button onclick="openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);">&#9993;</button>';
@@ -22753,7 +22759,7 @@ function renderDispatchCards(job, pos) {
       html += '<div style="font-size:11px;color:var(--sw-text-sec);">' + escapeHtml(ms.supplier || '') + ' &middot; ' + fmt$(ms.total) + '</div>';
       var details = [];
       if (ms.deliveryDate) details.push('&#128230; ' + new Date(ms.deliveryDate + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }));
-      details.push('<span class="status-badge ' + ms.poStatus + '">' + ms.poStatus + '</span>');
+      details.push(poStatusBadge(ms.poStatus));
       if (ms.emailCount > 0) details.push('&#128233; ' + ms.emailCount);
       html += '<div style="font-size:11px;margin-top:3px;">' + details.join(' &middot; ') + '</div>';
       html += '<div style="display:flex;gap:4px;margin-top:6px;">';
@@ -25437,7 +25443,7 @@ async function openPOEdit(poId) {
     if (notes) document.getElementById('poNotes').value = notes;
 
     // Show mode bar for quote_requested POs
-    if (po.status === 'quote_requested') {
+    if (poBoardColumnOf(po.status) === 'quote_requested') {
       var modeBar = document.getElementById('poModeBar');
       modeBar.style.display = 'block';
       modeBar.style.background = 'rgba(230,126,34,0.1)';
@@ -27420,7 +27426,7 @@ function renderCommsView(data) {
       html += '<div class="supplier-thread-body">';
       spos.forEach(function(po) {
         html += '<div style="padding:6px 0;border-bottom:1px solid var(--sw-border);font-size:12px;display:flex;align-items:center;gap:8px;">';
-        html += '<div style="flex:1;"><strong>' + (po.po_number || '') + '</strong> <span class="status-badge ' + (po.status || '') + '">' + (po.status || '') + '</span> ' + fmt$(po.total) + '</div>';
+        html += '<div style="flex:1;"><strong>' + (po.po_number || '') + '</strong> ' + poStatusBadge(po.status) + ' ' + fmt$(po.total) + '</div>';
         html += '<button onclick="openPOEmailCompose(\'' + po.id + '\')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sw-border);border-radius:3px;background:var(--sw-card);cursor:pointer;color:var(--sw-text-sec);white-space:nowrap;">&#9993; Email</button>';
         html += '</div>';
         html += '<div class="po-email-thread" id="poThreadComms_' + po.id + '"></div>';

@@ -105,8 +105,11 @@
     return '$' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
+  // A list row names its work type beside the stored type: a repair-family job
+  // stored as make-safe arrives as work_type 'repair'. job_detail's job carries
+  // only type.
   function typeKey(row) {
-    var t = text(row && row.type).toLowerCase();
+    var t = text(row && (row.work_type || row.type)).toLowerCase();
     return /^[a-z0-9_-]+$/.test(t) ? t : '';
   }
 

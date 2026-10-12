@@ -136,6 +136,8 @@ const D_ROW = (over) => Object.assign({
   client_name: 'Test Client', site_address: '1 Test Street', status: 'accepted', value: 0, value_inc_gst: false,
   description: null, next_scheduled_date: null, last_scheduled_date: null,
   council_status: null, council_step: null, council_required: false, po_count: 0,
+  // The dispatch read's own work type: the row's type, unless a case says otherwise.
+  work_type: over.type,
 }, over);
 
 const D_JOBS = {
@@ -342,6 +344,40 @@ test('Dispatch: make-safe is off the list until searched, and search states are 
   await expect(root.locator('.dpc-job', { hasText: 'SWMS-900901' })).toHaveCount(0);
   // The job reached by search stays open after the search is cleared.
   await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWMS-900901 · Dalyellup');
+});
+
+test('Dispatch: a repair-family job stored as make-safe is listed, filtered and badged as Repair', async ({ page }) => {
+  // The dispatch read keeps the stored type and names the work type beside it.
+  const repairFamily = D_ROW({ id: 'job-rf1', job_number: 'SWMS-900501', type: 'makesafe', work_type: 'repair', site_suburb: 'Bertram',
+    updated_at: '2026-10-12T06:00:00+00:00' });
+  const { root } = await bootDispatch(page, {
+    pipeline: (url) => {
+      const q = url.searchParams.get('search');
+      if (!q) return { columns: { accepted: [repairFamily, D_JOBS.f1], complete: [D_JOBS.r1] }, total: 3 };
+      return /^swms/i.test(q) ? D_FOUND([D_JOBS.m1, repairFamily]) : D_FOUND([]);
+    },
+    job_detail: (url) => (url.searchParams.get('jobId') === 'job-rf1'
+      ? { job: { id: 'job-rf1', job_number: 'SWMS-900501', type: 'makesafe', scope_json: null }, media: [], documents: [] }
+      : D_DETAIL[url.searchParams.get('jobId')]),
+  });
+  const cards = root.locator('.dpc-job');
+  await expect(cards.locator('strong')).toHaveText(['SWMS-900501 · Bertram', 'SWF-900101 · Gwelup', 'SWF-900301']);
+  // On the default list it reads Repair, on the card and in the open job's header.
+  await expect(cards.nth(0).locator('.dpc-type')).toHaveText('Repair');
+  await expect(root.locator('.dpc-type', { hasText: 'Make-safe' })).toHaveCount(0);
+  await expect(root.locator('.dpc-jobhead h2')).toHaveText('SWMS-900501 · Bertram');
+  await expect(root.locator('.dpc-jobhead .dpc-type')).toHaveText('Repair');
+
+  await root.locator('[data-dpc-type="repair"]').click();
+  await expect(cards.locator('strong')).toHaveText(['SWMS-900501 · Bertram', 'SWF-900301']);
+  await root.locator('[data-dpc-type="all"]').click();
+
+  // A true make-safe found by search still reads Make-safe, beside the repair one.
+  await root.locator('[data-dpc-search]').fill('SWMS');
+  await expect(cards.locator('strong')).toHaveText(['SWMS-900501 · Bertram', 'SWMS-900901 · Dalyellup']);
+  await expect(cards.locator('.dpc-type')).toHaveText(['Repair', 'Make-safe']);
+  await root.locator('[data-dpc-type="repair"]').click();
+  await expect(cards.locator('strong')).toHaveText(['SWMS-900501 · Bertram']);
 });
 
 test('Dispatch: the header prints the price, GST label, install day and work type by rule', async ({ page }) => {

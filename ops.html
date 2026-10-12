@@ -17883,11 +17883,15 @@ function renderJobPnlDetail(j) {
     html += '<th>Date</th><th>Lane</th><th>Type</th><th>Hrs</th><th>Rate</th><th style="text-align:right;">Amount (ex)</th>';
     html += '</tr></thead><tbody>';
     lines.forEach(function(ln) {
+      // When the trade says the hours were worked, beside the hours. An older
+      // line with no times shows exactly what it always did.
+      var lnWhen = swTradeTimeEntry(ln);
       html += '<tr>';
-      html += '<td style="white-space:nowrap;">' + (ln.line_date ? fmtDate(ln.line_date.slice(0,10)) : (ln.week_start ? fmtDate(ln.week_start.slice(0,10)) : '—')) + '</td>';
+      html += '<td style="white-space:nowrap;">' + (lnWhen ? escapeHtml(lnWhen.day) : (ln.line_date ? fmtDate(ln.line_date.slice(0,10)) : (ln.week_start ? fmtDate(ln.week_start.slice(0,10)) : '—'))) + '</td>';
       html += '<td><span style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--sw-mid);">' + (ln.cost_lane || '—') + '</span></td>';
       html += '<td style="color:var(--sw-text-sec);">' + (ln.line_type || '—') + '</td>';
-      html += '<td style="text-align:right;">' + (ln.total_hours != null ? parseFloat(ln.total_hours).toFixed(1) : '—') + '</td>';
+      html += '<td style="text-align:right;">' + (ln.total_hours != null ? parseFloat(ln.total_hours).toFixed(1) : '—')
+        + (lnWhen ? '<div data-line-when style="font-size:10px;color:var(--sw-text-sec);white-space:nowrap;">' + escapeHtml(lnWhen.span) + '</div>' : '') + '</td>';
       html += '<td style="text-align:right;">' + (ln.hourly_rate != null ? fmt$(ln.hourly_rate) : '—') + '</td>';
       html += '<td style="text-align:right;font-weight:600;">' + fmt$(ln.line_total_ex) + '</td>';
       html += '</tr>';
@@ -18020,6 +18024,48 @@ function renderSentQuotesPanel() {
 // TRADE BILLS
 // ════════════════════════════════════════════════════════════
 
+// <trade-time-entry-ops>
+// A trade's line of hours says when it was worked: work_date, start_time,
+// finish_time and break_minutes, as ops-api stores them on the invoice line
+// (the trade app sends them; see trade.html TradeTimeEntryCore). Returns null
+// for a line that carries no times, so older invoices show nothing extra.
+function swTradeTimeEntry(line) {
+  if (!line) return null;
+  var dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(line.work_date || ''));
+  var st = /^(\d{1,2}):(\d{2})/.exec(String(line.start_time || '').trim());
+  var fin = /^(\d{1,2}):(\d{2})/.exec(String(line.finish_time || '').trim());
+  if (!dm || !st || !fin) return null;
+  var d = new Date(Date.UTC(+dm[1], +dm[2] - 1, +dm[3]));
+  if (isNaN(d.getTime())) return null;
+  function hm(m) { return (m[1].length < 2 ? '0' : '') + m[1] + ':' + m[2]; }
+  var brk = Math.round(Number(line.break_minutes) || 0);
+  var day = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' '
+    + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+  var span = hm(st) + ' to ' + hm(fin) + (brk > 0 ? ', ' + brk + ' min break' : '');
+  return { day: day, span: span, text: day + ', ' + span };
+}
+// The lines of one trade invoice that say when they were worked, as a fold
+// under the trade's name. Nothing at all when no line carries times.
+function swTradeInvoiceWhenHtml(inv) {
+  var timed = (Array.isArray(inv && inv.lines) ? inv.lines : []).map(function(li) {
+    return { line: li, when: swTradeTimeEntry(li) };
+  }).filter(function(x) { return x.when; });
+  if (!timed.length) return '';
+  timed.sort(function(a, b) {
+    return (String(a.line.work_date) + String(a.line.start_time)).localeCompare(String(b.line.work_date) + String(b.line.start_time));
+  });
+  var h = '<details data-invoice-when style="margin-top:4px;font-size:11px;font-weight:400;color:var(--sw-text-sec)">';
+  h += '<summary style="cursor:pointer">Times worked (' + timed.length + ')</summary>';
+  timed.forEach(function(x) {
+    var hrs = x.line.total_hours != null ? x.line.total_hours : x.line.quantity;
+    h += '<div style="padding:2px 0;white-space:nowrap">' + escapeHtml(x.when.day) + ' · '
+      + escapeHtml(x.line.job_number || 'Job') + ' · ' + escapeHtml(x.when.span)
+      + (hrs != null && !isNaN(Number(hrs)) ? ' · ' + Number(hrs).toFixed(2).replace(/\.?0+$/, '') + 'h' : '') + '</div>';
+  });
+  return h + '</details>';
+}
+// </trade-time-entry-ops>
+
 async function loadTradeBills() {
   try {
     var data = await opsFetch('list_trade_invoices');
@@ -18060,7 +18106,7 @@ function renderTradeBillTable(invoices) {
       ? '<a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' + inv.xero_bill_id + '" target="_blank" style="color:var(--sw-blue);text-decoration:none">' + (inv.invoice_number || 'View') + ' &#8599;</a>'
       : (inv.invoice_number || '—');
     html += '<tr' + (isReview ? ' style="background:rgba(241,90,41,0.05)"' : '') + '>';
-    html += '<td>' + tradeName + '</td>';
+    html += '<td>' + tradeName + swTradeInvoiceWhenHtml(inv) + '</td>';
     html += '<td>' + we + badge + '</td>';
     html += '<td>' + hours.toFixed(1) + '</td>';
     html += '<td>$' + total.toFixed(2) + '</td>';

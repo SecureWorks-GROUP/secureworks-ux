@@ -783,15 +783,17 @@ add an hours input back to an invoice card, an extras row or the job-view hours
 row. ops-api recomputes the hours and refuses a time line without the fields
 (`time_entry_required`). One line is one job on one day: a second day is its
 own Extras row. The date worked cannot be after today (Perth) anywhere a trade
-gives it, and the app never invents, remembers or carries a time onto a line:
-no default start, no device memory, no prefill from clock on and off. A card
-opens blank and shows any hours on record only as a reminder. Lines that are not time carry none of the
-fields. Search
+gives it, and the app never invents, remembers or carries a date or a time
+onto a line: no default date or start, no device memory, no prefill from the
+schedule or clock on and off. A card, an Extras row and the job-view row open
+blank; a card shows hours on record only as a reminder. The job-view row
+records times against the job and never promises the week or the invoice.
+Lines that are not time carry none of the fields. Search
 `// <trade-time-entry>` (`TradeTimeEntryCore`) in `trade.html` and
 `// <trade-time-entry-ops>` in `ops.html` (ops shows the times beside the hours
 only when a line carries them). The full contract, the list of every place a
 trade enters time and the defaults live in `trade-app.md` → "Pay tab: when the
-time was worked". Specs fill times through `tests/helpers/invoice-time.js`, and
+time was worked". Specs fill the date and times through `tests/helpers/invoice-time.js`, and
 a spec that enters times on the fixture week's jobs needs
 `test.use({ appWeekDay: 6 })` or it fails early in the week.
 Guards: `scripts/test-trade-time-entry.js`,

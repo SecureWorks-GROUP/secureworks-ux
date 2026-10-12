@@ -30,7 +30,8 @@ check('added card says it is on the draft', /On your weekly invoice draft/.test(
 check('failed card gives the manual path', /Add it from My Work Orders/.test(C.weeklyCardHTML(wo, 'failed', 'not ready')) && /not ready/.test(C.weeklyCardHTML(wo, 'failed', 'not ready')));
 check('review button targets the WO and date', adding.indexOf("wizReviewWeeklyInvoice('wo-1','2026-09-08')") !== -1);
 check('escapes', C.weeklyCardHTML({ id: "a'b", wo_number: '<x>' }, 'added').indexOf('&lt;x&gt;') !== -1);
-check('hours intro when hours exist, nothing when not', /2 hrs on your week/.test(C.hoursIntroHTML(2)) && /1 hr on your week/.test(C.hoursIntroHTML(1)) && C.hoursIntroHTML(null) === '');
+check('hours intro when hours exist, nothing when not', /2 hrs recorded against this job/.test(C.hoursIntroHTML(2)) && /1 hr recorded against this job/.test(C.hoursIntroHTML(1)) && C.hoursIntroHTML(null) === '');
+check('hours intro does not promise the invoice', /Your Weekly Invoice will still ask for the times you worked\./.test(C.hoursIntroHTML(2)) && !/on your week|under Hours/.test(C.hoursIntroHTML(2)));
 check('weekLabel', C.weekLabel('2026-09-13') === 'w/e Sun 13 Sep' && C.weekLabel('') === '');
 check('no em dash, no old brand', [adding, C.weeklyCardHTML(wo, 'added')].join('').indexOf('—') === -1);
 console.log('trade-complete-invoice: ' + passed + ' checks passed');

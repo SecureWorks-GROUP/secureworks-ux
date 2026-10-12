@@ -50,14 +50,14 @@ async function openWeeklyInvoicePicker(page) {
   await page.getByRole('button', { name: /Weekly Invoice/ }).click();
 }
 
-async function addSearchedJob(page, dayIndex, query, jobNumber, hours, description) {
+async function addSearchedJob(page, dayIndex, query, jobNumber, hours, description, monday = thisMonday) {
   await page.locator(`button[onclick="jcOpenJobSearch(${dayIndex})"]`).click();
   await page.locator(`#jcSearchInput_${dayIndex}`).fill(query);
   await page.locator('.jc-job-search-hit').filter({ hasText: jobNumber }).click();
   const card = page.locator('.jc-card').filter({ hasText: jobNumber });
   await card.locator('input[type="text"]').fill(description);
   await card.locator('input[type="text"]').blur();
-  await fillCardTime(card, hours);
+  await fillCardTime(card, hours, { date: addIsoDays(monday, dayIndex) });
   return card;
 }
 
@@ -149,8 +149,15 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     const card = page.locator('.jc-card').filter({ hasText: 'SWP-261183' });
     await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
     await expect(card.locator('input[type="text"]')).toHaveValue('Material order');
+    // The date worked is the trade's own statement: changing the invoice week
+    // never rewrites it, so it still names the day in the week that was left.
+    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(thisMonday, 2));
+    await page.locator('#invSubmitBtn').click();
+    await expect(page.locator('#toast')).toContainText('SWP-261183: the date worked is after this invoice week');
+    await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
 
     // Submitting on a done week is stopped before any confirm or POST.
+    await card.locator('[data-carddate]').fill(addIsoDays(lastMonday, 2));
     await page.locator('#invSubmitBtn').click();
     await expect(page.locator('#toast')).toContainText('is already invoiced (SW-INV-N-260923-017)');
     await expect(page.locator('#confirmOverlay')).not.toHaveClass(/active/);
@@ -159,6 +166,8 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     await expect(bar.locator('[data-invoice-week-label]')).toHaveText(weekLabel(thisMonday));
     await expect(page.locator('[data-invoice-week-taken]')).toHaveCount(0);
     await expect(card.locator('[data-cardhours]')).toHaveText('3 hrs');
+    await expect(card.locator('[data-carddate]')).toHaveValue(addIsoDays(lastMonday, 2));
+    await card.locator('[data-carddate]').fill(addIsoDays(thisMonday, 2));
 
     await page.locator('#invSubmitBtn').click();
     await confirmOneInvoice(page, thisMonday);
@@ -178,7 +187,7 @@ test.describe('Nithin: one invoice per week, all searched-in admin jobs', () => 
     await expect(page.locator('#invoiceWeekLabel')).toHaveText(weekLabel(twoWeeksAgo));
     await expect(page.locator('[data-invoice-week-status]')).toContainText('Not invoiced yet');
     await page.locator('#invoiceWeekContinue').click();
-    await addSearchedJob(page, 4, 'Emma', 'SWP-261183', 2, 'Site check');
+    await addSearchedJob(page, 4, 'Emma', 'SWP-261183', 2, 'Site check', twoWeeksAgo);
     await page.locator('#invSubmitBtn').click();
     await confirmOneInvoice(page, twoWeeksAgo);
     await expect(page.getByText('Invoice Submitted')).toBeVisible();

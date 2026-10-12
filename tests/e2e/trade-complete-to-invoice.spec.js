@@ -92,6 +92,7 @@ test.describe('Complete-to-invoice: hourly trade', () => {
     await expect(hours).toBeVisible();
     // Hours are worked out from the times; there is no figure to type or tap.
     await expect(hours.locator('#rrHoursInput, [data-rr-hour]')).toHaveCount(0);
+    await expect(hours.locator('#rrHoursDate')).toHaveValue('');
     await hours.locator('#rrHoursDate').fill('2026-09-09');
     await hours.locator('#rrHoursStart').fill('07:00');
     await hours.locator('#rrHoursFinish').fill('09:00');
@@ -103,7 +104,7 @@ test.describe('Complete-to-invoice: hourly trade', () => {
       work_date: '2026-09-09', start_time: '07:00', finish_time: '09:00', break_minutes: 0,
       source: 'job_view'
     });
-    await expect(page.locator('#wizBody #rrHours')).toContainText('2 hrs on your week (w/e Sun 13 Sep). Wed 9 Sep, 07:00 to 09:00.');
+    await expect(page.locator('#wizBody #rrHours')).toContainText('2 hrs recorded against this job (w/e Sun 13 Sep). Wed 9 Sep, 07:00 to 09:00.');
   });
 
   test('hours already clocked are shown instead of the chips', async ({ appPage: page }) => {
@@ -113,7 +114,8 @@ test.describe('Complete-to-invoice: hourly trade', () => {
     await signIn(page, PERSONAS.installer);
     await page.evaluate(() => window.openJob('e2e-job-1'));
     await runWizardToComplete(page);
-    await expect(page.locator('#wizBody')).toContainText('6.5 hrs on your week for this job');
+    await expect(page.locator('#wizBody')).toContainText('6.5 hrs recorded against this job');
+    await expect(page.locator('#wizBody')).toContainText('Your Weekly Invoice will still ask for the times you worked.');
     await expect(page.locator('#wizBody #rrHours')).toHaveCount(0);
   });
 });

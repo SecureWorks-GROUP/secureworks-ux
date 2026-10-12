@@ -9,20 +9,25 @@
 //
 // These specs drive the real load paths (the list_pos and calendar reads are
 // stubbed at the network) and check that:
-//  - an order in every status the back end allows is on the board, in the column
-//    an ops person expects, and an unknown or blank status lands in "Other";
-//  - the six columns look as they did when no cancelled or unknown order exists;
+//  - an order in every live status the back end allows is on the board, in the
+//    column an ops person expects, and an unknown or blank status lands in "Other";
+//  - a cancelled order stays off the board and the Calendar row, as it always did;
+//  - the six columns look as they did when no unknown order exists;
 //  - the status tick boxes work by column and can never hide "Other";
-//  - an order in every status with a delivery day is on the Calendar's Deliveries
-//    row, and the row still shows the feed's own rows if the order list fails.
+//  - an order in every live status with a delivery day is on the Calendar's
+//    Deliveries row, the row still shows the feed's own rows if the order list
+//    fails, and it drops an order that has left the order list;
+//  - Financials > Purchase Orders files a sent, confirmed or delivered order
+//    under its own chip, and the job's material ordering cards read its state.
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { installOpsSessionStub } = require('../helpers/ops-auth');
 
 const OPS_FILE = 'file://' + path.resolve(__dirname, '..', '..', 'ops.html');
 
-// Every status purchase_orders_status_check allows, except the soft-delete
-// marker `deleted` (list_pos filters it out), and the board column each sits in.
+// Every status purchase_orders_status_check allows that the board shows, and the
+// column each sits in. `cancelled` is kept off on purpose and `deleted` is the
+// soft-delete marker list_pos filters out.
 const STATUS_COLUMN = {
   quote_requested: 'quote_requested',
   draft: 'draft',
@@ -33,7 +38,6 @@ const STATUS_COLUMN = {
   confirmed: 'authorised',
   billed: 'billed',
   delivered: 'billed',
-  cancelled: 'cancelled',
 };
 const KNOWN_STATUSES = Object.keys(STATUS_COLUMN);
 const LEGACY_STATUSES = ['draft', 'approved', 'submitted', 'quote_requested', 'authorised', 'billed'];
@@ -84,7 +88,7 @@ function boardCard(page, status) {
 }
 
 test('an order in every status is on the board, in the column an ops person expects', async ({ page }) => {
-  const orders = KNOWN_STATUSES.map((s) => po(s));
+  const orders = KNOWN_STATUSES.map((s) => po(s)).concat([po('cancelled')]);
   await bootOps(page, { responses: { list_pos: { purchase_orders: orders } } });
   await openDispatch(page);
 
@@ -98,15 +102,14 @@ test('an order in every status is on the board, in the column an ops person expe
 
   // The newer words share the column of the older word they replaced.
   await expect(page.locator('#materialsKanban .kanban-col-header')).toHaveText([
-    'Draft1', 'Approved1', 'Sent2', 'Quoted1', 'Confirmed2', 'Delivered2', 'Cancelled1',
+    'Draft1', 'Approved1', 'Sent2', 'Quoted1', 'Confirmed2', 'Delivered2',
   ]);
   // A sent order reads as Sent on its card, not as a draft.
   await expect(boardCard(page, 'sent')).toContainText('Sent');
   await expect(boardCard(page, 'confirmed')).toContainText('Confirmed');
   await expect(boardCard(page, 'delivered')).toContainText('Delivered');
-  // A cancelled order says so and is not chased for a supplier invoice.
-  await expect(boardCard(page, 'cancelled').locator('.po-status-word')).toHaveText('Status: Cancelled');
-  await expect(boardCard(page, 'cancelled')).not.toContainText('Awaiting invoice');
+  // A cancelled order is off the board and out of the badge, as before.
+  await expect(boardCard(page, 'cancelled')).toHaveCount(0);
 });
 
 test('an unknown or blank status lands in a visible Other column and names itself', async ({ page }) => {
@@ -123,13 +126,12 @@ test('an unknown or blank status lands in a visible Other column and names itsel
   await expect(page.locator('#materialsCount')).toHaveText('3');
 });
 
-test('with no cancelled or unknown order the board is the same six columns as before', async ({ page }) => {
+test('with no unknown order the board is the same six columns as before', async ({ page }) => {
   await bootOps(page, { responses: { list_pos: { purchase_orders: LEGACY_STATUSES.map((s) => po(s)) } } });
   await openDispatch(page);
   await expect(page.locator('#materialsKanban .kanban-col-header')).toHaveText([
     'Draft1', 'Approved1', 'Sent1', 'Quoted1', 'Confirmed1', 'Delivered1',
   ]);
-  await expect(page.locator('#materialsKanban [data-po-col="cancelled"]')).toHaveCount(0);
   await expect(page.locator('#materialsKanban [data-po-col="other"]')).toHaveCount(0);
 });
 
@@ -154,7 +156,6 @@ test('the status tick boxes hide a whole column and never hide Other', async ({ 
   await expect(boardCard(page, 'submitted')).toHaveCount(0);
   await expect(boardCard(page, 'confirmed')).toBeVisible();
   await expect(boardCard(page, 'back_ordered')).toBeVisible();
-  await expect(boardCard(page, 'cancelled')).toBeVisible();
   await expect(page.locator('#materialsCount')).toHaveText(String(orders.length - 2));
 
   await page.getByRole('button', { name: 'Clear' }).click();
@@ -191,6 +192,7 @@ test('an order in every status with a delivery day is on the Calendar Deliveries
     // No delivery day at all: nothing to put on the row.
     po('sent', { id: 'po-undated', delivery_date: null }),
     po('deleted', { delivery_date: day0 }),
+    po('cancelled', { delivery_date: day0 }),
   ]);
   bodies.list_pos = { purchase_orders: orders };
   // What the calendar feed sends today: only draft / submitted / authorised.
@@ -210,15 +212,14 @@ test('an order in every status with a delivery day is on the Calendar Deliveries
   await expect(page.locator('#calendarBody .cal-delivery-block[data-po-id="po-supplier-day"]')).toBeVisible();
   await expect(page.locator('#calendarBody .cal-delivery-block[data-po-id="po-undated"]')).toHaveCount(0);
   await expect(deliveryBlock(page, 'deleted')).toHaveCount(0);
+  await expect(deliveryBlock(page, 'cancelled')).toHaveCount(0);
   // One block per order: an order in both the feed and the order list is not doubled.
   await expect(page.locator('#calendarBody .cal-delivery-block')).toHaveCount(dated.length + 1);
 
-  // The tooltip names the status; a cancelled order is struck through.
+  // The tooltip names the status.
   await expect(deliveryBlock(page, 'sent')).toHaveAttribute('title', 'PO-sent — Supplier sent — Sent');
   await expect(deliveryBlock(page, 'confirmed')).toHaveAttribute('title', 'PO-confirmed — Supplier confirmed — Confirmed');
   await expect(deliveryBlock(page, 'back_ordered')).toHaveAttribute('title', 'PO-back_ordered — Supplier back_ordered — back ordered');
-  await expect(deliveryBlock(page, 'cancelled')).toHaveClass(/cancelled/);
-  await expect(deliveryBlock(page, 'sent')).not.toHaveClass(/cancelled/);
 });
 
 test('the Deliveries row keeps the calendar feed rows when the order list cannot be read', async ({ page }) => {
@@ -232,4 +233,100 @@ test('the Deliveries row keeps the calendar feed rows when the order list cannot
   await expect(deliveryBlock(page, 'draft')).toBeVisible();
   await expect.poll(() => apiCalls.includes('list_pos')).toBe(true);
   await expect(page.locator('#calendarBody .cal-delivery-block')).toHaveCount(1);
+});
+
+test('the Deliveries row drops an order that has left the order list', async ({ page }) => {
+  const { bodies } = await bootOps(page);
+  const [day0] = await calendarDays(page);
+  bodies.list_pos = { purchase_orders: [po('sent', { delivery_date: day0 })] };
+  bodies.calendar = { events: [], deliveries: [] };
+  await openCalendarCrewView(page);
+  await expect(deliveryBlock(page, 'sent')).toBeVisible();
+
+  // The only dated order goes; the next calendar load must not keep its block.
+  bodies.list_pos = { purchase_orders: [] };
+  await page.locator('.header-nav button[data-view="jobs"]').click();
+  await expect(page.locator('#viewJobs')).toHaveClass(/active/);
+  await page.locator('.header-nav button[data-view="calendar"]').click();
+  await expect(page.locator('#viewCalendar')).toHaveClass(/active/);
+  await expect(page.locator('#calendarBody .cal-delivery-block')).toHaveCount(0);
+});
+
+async function openFinancialsPurchaseOrders(page) {
+  await page.locator('.header-nav button[data-view="financials"]').click();
+  await expect(page.locator('#viewFinancials')).toHaveClass(/active/);
+  await page.locator('#viewFinancials .sub-tab[data-sub="pos"]').click();
+}
+
+function poChip(page, key) {
+  return page.locator(`#subPos .filter-chip[data-po-status="${key}"]`);
+}
+
+function poRow(page, status) {
+  return page.locator(`#poTableBody tr[data-po-id="po-${status}"]`);
+}
+
+test('Financials > Purchase Orders files a sent, confirmed or delivered order under its own chip', async ({ page }) => {
+  const orders = KNOWN_STATUSES.map((s) => po(s));
+  await bootOps(page, { responses: { list_pos: { purchase_orders: orders } } });
+  await openFinancialsPurchaseOrders(page);
+  await expect(page.locator('#poTableBody tr')).toHaveCount(orders.length);
+
+  const chips = { draft: ['draft'], submitted: ['submitted', 'sent'], authorised: ['authorised', 'confirmed'], billed: ['billed', 'delivered'] };
+  for (const [chip, statuses] of Object.entries(chips)) {
+    await poChip(page, chip).click();
+    await expect(page.locator('#poTableBody tr'), `${chip} chip`).toHaveCount(statuses.length);
+    for (const status of statuses) await expect(poRow(page, status), `${status} under ${chip}`).toBeVisible();
+  }
+
+  // Each order reads with its column's word, not the stored one.
+  await poChip(page, 'all').click();
+  await expect(page.locator('#poTableBody tr')).toHaveCount(orders.length);
+  await expect(poRow(page, 'sent').locator('.status-badge')).toHaveText('Sent');
+  await expect(poRow(page, 'confirmed').locator('.status-badge')).toHaveText('Confirmed');
+  await expect(poRow(page, 'delivered').locator('.status-badge')).toHaveText('Delivered');
+});
+
+test('a Financials chip marks only the chips, never a board card or a delivery block', async ({ page }) => {
+  const { bodies } = await bootOps(page);
+  const [day0] = await calendarDays(page);
+  bodies.list_pos = { purchase_orders: [po('draft', { delivery_date: day0 })] };
+  bodies.calendar = { events: [], deliveries: [] };
+  await openDispatch(page);
+  await expect(boardCard(page, 'draft')).toBeVisible();
+  await openCalendarCrewView(page);
+  await expect(deliveryBlock(page, 'draft')).toBeVisible();
+
+  await openFinancialsPurchaseOrders(page);
+  await poChip(page, 'draft').click();
+  await expect(poChip(page, 'draft')).toHaveClass(/active/);
+  await expect(poChip(page, 'all')).not.toHaveClass(/active/);
+  await expect(boardCard(page, 'draft')).not.toHaveClass(/active/);
+  await expect(deliveryBlock(page, 'draft')).not.toHaveClass(/active/);
+});
+
+test('a job material ordering card reads the state of a sent, confirmed or delivered order', async ({ page }) => {
+  await bootOps(page);
+  const job = { id: 'job-fence-1', type: 'fencing', scope_json: { gates: [{}] } };
+  const stateOf = {
+    draft: 'draft',
+    approved: 'draft',
+    quote_requested: 'quoted',
+    submitted: 'sent',
+    sent: 'sent',
+    authorised: 'confirmed',
+    confirmed: 'confirmed',
+    billed: 'delivered',
+    delivered: 'delivered',
+  };
+  const gateCard = page.locator('#jdBuild .mat-order-card', { hasText: 'Gate Kits' });
+  for (const [status, state] of Object.entries(stateOf)) {
+    await page.evaluate(({ job, order }) => {
+      document.getElementById('jdBuild').innerHTML = renderDispatchCards(job, [order]);
+    }, { job, order: po(status, { line_items: [{ description: 'Gate kit' }] }) });
+    await expect(gateCard, `${status} order`).toHaveAttribute('data-mat-state', state);
+    await expect(gateCard).toContainText('PO-' + status);
+  }
+  // A category with no order still reads as not ordered.
+  await expect(page.locator('#jdBuild .mat-order-card', { hasText: 'Fixings' })).toHaveAttribute('data-mat-state', 'missing');
 });
